@@ -1,6 +1,6 @@
 # ╔═══════════════════════════════════════════════════════════════════════════════╗
-# ║                        🌟 BOT PREMIUM v7.1 🌟                                 ║
-# ║         Stockage persistant + Nettoyage auto + Fix warnings                   ║
+# ║                        🌟 BOT PREMIUM v8.0 🌟                                 ║
+# ║      Timeout natif Discord + Commandes modération + Panel permissions         ║
 # ╚═══════════════════════════════════════════════════════════════════════════════╝
 
 try:
@@ -20,23 +20,19 @@ import re
 import json
 import asyncio
 from datetime import datetime, timedelta, timezone
-from collections import Counter
 from dotenv import load_dotenv
 
 load_dotenv()
 TOKEN = os.getenv('BOT_TOKEN')
 OWNER_ID = int(os.getenv('OWNER_ID', '0'))
 
-# 🆕 Chemin DB configurable - Railway utilisera /data/database.db avec un volume
 DB_PATH = os.getenv('DB_PATH', '/data/database.db')
-# Fallback si /data n'existe pas (local)
 if not os.path.exists('/data'):
     DB_PATH = 'database.db'
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# Sessions vocales en cours
 voice_sessions = {}
 
 class C:
@@ -52,11 +48,9 @@ class C:
     GOLD = 0xF1C40F
 
 def now():
-    """Retourne datetime UTC actuel (sans warning)"""
     return datetime.now(timezone.utc)
 
 def today():
-    """Retourne la date UTC actuelle"""
     return datetime.now(timezone.utc).date()
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -68,49 +62,68 @@ async def init_db():
         await db.executescript('''
             CREATE TABLE IF NOT EXISTS config (
                 guild_id INTEGER PRIMARY KEY, log_channel INTEGER, mod_log_channel INTEGER,
-                welcome_channel INTEGER, mute_role INTEGER, warns_mute INTEGER DEFAULT 0,
-                warns_kick INTEGER DEFAULT 0, warns_ban INTEGER DEFAULT 0, anti_link INTEGER DEFAULT 0,
-                anti_image INTEGER DEFAULT 0, anti_phishing INTEGER DEFAULT 1, anti_spam INTEGER DEFAULT 0,
-                welcome_on INTEGER DEFAULT 0, welcome_msg TEXT DEFAULT 'Bienvenue {member} !');
-            CREATE TABLE IF NOT EXISTS warns (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, user_id INTEGER,
-                mod_id INTEGER, reason TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP);
+                welcome_channel INTEGER, warns_kick INTEGER DEFAULT 0, warns_ban INTEGER DEFAULT 0,
+                anti_link INTEGER DEFAULT 0, anti_image INTEGER DEFAULT 0, anti_phishing INTEGER DEFAULT 1,
+                anti_spam INTEGER DEFAULT 0, welcome_on INTEGER DEFAULT 0,
+                welcome_msg TEXT DEFAULT 'Bienvenue {member} !');
+            
             CREATE TABLE IF NOT EXISTS immune_roles (guild_id INTEGER, role_id INTEGER, PRIMARY KEY (guild_id, role_id));
-            CREATE TABLE IF NOT EXISTS staff_roles (guild_id INTEGER, role_id INTEGER, PRIMARY KEY (guild_id, role_id));
+            
             CREATE TABLE IF NOT EXISTS activity (
                 guild_id INTEGER, user_id INTEGER, last_message DATETIME, last_voice DATETIME,
                 PRIMARY KEY (guild_id, user_id));
+            
             CREATE TABLE IF NOT EXISTS ticket_config (
                 guild_id INTEGER PRIMARY KEY, category_id INTEGER, staff_role_id INTEGER,
                 ticket_name TEXT DEFAULT 'ticket-{user}-{number}', panel_title TEXT DEFAULT '🎫 Support',
                 panel_description TEXT DEFAULT 'Cliquez pour créer un ticket', questions TEXT DEFAULT '[]');
+            
             CREATE TABLE IF NOT EXISTS tickets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, channel_id INTEGER,
                 user_id INTEGER, claimed_by INTEGER, status TEXT DEFAULT 'open', answers TEXT);
+            
             CREATE TABLE IF NOT EXISTS message_stats (
                 guild_id INTEGER, user_id INTEGER, channel_id INTEGER, date TEXT, count INTEGER DEFAULT 0,
                 PRIMARY KEY (guild_id, user_id, channel_id, date));
+            
             CREATE TABLE IF NOT EXISTS voice_stats (
                 guild_id INTEGER, user_id INTEGER, channel_id INTEGER, date TEXT, seconds INTEGER DEFAULT 0,
                 PRIMARY KEY (guild_id, user_id, channel_id, date));
             
-            -- Index pour les performances
+            -- 🆕 INFRACTIONS (warns + timeouts)
+            CREATE TABLE IF NOT EXISTS infractions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER,
+                user_id INTEGER,
+                mod_id INTEGER,
+                type TEXT,  -- 'warn' ou 'timeout'
+                reason TEXT,
+                duration INTEGER,  -- en secondes pour timeout, NULL pour warn
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            
+            -- 🆕 PERMISSIONS PAR RÔLE
+            CREATE TABLE IF NOT EXISTS role_permissions (
+                guild_id INTEGER,
+                role_id INTEGER,
+                permission TEXT,  -- 'warn', 'timeout', 'infractions'
+                PRIMARY KEY (guild_id, role_id, permission)
+            );
+            
             CREATE INDEX IF NOT EXISTS idx_msg_stats ON message_stats(guild_id, user_id);
             CREATE INDEX IF NOT EXISTS idx_voice_stats ON voice_stats(guild_id, user_id);
-            CREATE INDEX IF NOT EXISTS idx_activity ON activity(guild_id, user_id);
+            CREATE INDEX IF NOT EXISTS idx_infractions ON infractions(guild_id, user_id);
         ''')
         await db.commit()
     print(f"✅ DB OK ({DB_PATH})")
 
 async def cleanup_member_data(gid, uid):
-    """Supprime toutes les données d'un membre qui quitte"""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('DELETE FROM message_stats WHERE guild_id=? AND user_id=?', (gid, uid))
         await db.execute('DELETE FROM voice_stats WHERE guild_id=? AND user_id=?', (gid, uid))
         await db.execute('DELETE FROM activity WHERE guild_id=? AND user_id=?', (gid, uid))
-        await db.execute('DELETE FROM warns WHERE guild_id=? AND user_id=?', (gid, uid))
+        await db.execute('DELETE FROM infractions WHERE guild_id=? AND user_id=?', (gid, uid))
         await db.commit()
-    print(f"🧹 Données nettoyées pour user {uid} dans guild {gid}")
 
 async def gcfg(gid):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -121,9 +134,8 @@ async def gcfg(gid):
         await db.execute('INSERT OR IGNORE INTO config (guild_id) VALUES (?)', (gid,))
         await db.commit()
         return {'guild_id': gid, 'log_channel': None, 'mod_log_channel': None, 'welcome_channel': None,
-                'mute_role': None, 'warns_mute': 0, 'warns_kick': 0, 'warns_ban': 0,
-                'anti_link': 0, 'anti_image': 0, 'anti_phishing': 1, 'anti_spam': 0,
-                'welcome_on': 0, 'welcome_msg': 'Bienvenue {member} !'}
+                'warns_kick': 0, 'warns_ban': 0, 'anti_link': 0, 'anti_image': 0, 'anti_phishing': 1,
+                'anti_spam': 0, 'welcome_on': 0, 'welcome_msg': 'Bienvenue {member} !'}
 
 async def scfg(gid, **kw):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -148,6 +160,70 @@ async def stcfg(gid, **kw):
         for k, v in kw.items():
             await db.execute(f'UPDATE ticket_config SET {k}=? WHERE guild_id=?', (v, gid))
         await db.commit()
+
+# 🆕 PERMISSIONS
+async def has_permission(member, permission):
+    """Vérifie si un membre a une permission spécifique"""
+    if member.guild_permissions.administrator or member.id == member.guild.owner_id:
+        return True
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            'SELECT 1 FROM role_permissions WHERE guild_id=? AND role_id IN ({}) AND permission=?'.format(
+                ','.join(['?'] * len(member.roles))
+            ),
+            (member.guild.id, *[r.id for r in member.roles], permission)
+        )
+        return await cur.fetchone() is not None
+
+async def get_role_permissions(gid, rid):
+    """Récupère les permissions d'un rôle"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute('SELECT permission FROM role_permissions WHERE guild_id=? AND role_id=?', (gid, rid))
+        return [r[0] for r in await cur.fetchall()]
+
+async def set_role_permission(gid, rid, permission, enabled):
+    """Active/désactive une permission pour un rôle"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        if enabled:
+            await db.execute('INSERT OR IGNORE INTO role_permissions VALUES (?,?,?)', (gid, rid, permission))
+        else:
+            await db.execute('DELETE FROM role_permissions WHERE guild_id=? AND role_id=? AND permission=?', (gid, rid, permission))
+        await db.commit()
+
+# 🆕 INFRACTIONS
+async def add_infraction(gid, uid, mod_id, inf_type, reason, duration=None):
+    """Ajoute une infraction"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            'INSERT INTO infractions (guild_id, user_id, mod_id, type, reason, duration) VALUES (?,?,?,?,?,?)',
+            (gid, uid, mod_id, inf_type, reason, duration)
+        )
+        await db.commit()
+        cur = await db.execute('SELECT COUNT(*) FROM infractions WHERE guild_id=? AND user_id=?', (gid, uid))
+        return (await cur.fetchone())[0]
+
+async def get_infractions(gid, uid):
+    """Récupère les infractions d'un membre"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            'SELECT * FROM infractions WHERE guild_id=? AND user_id=? ORDER BY created_at DESC',
+            (gid, uid)
+        )
+        return [dict(r) for r in await cur.fetchall()]
+
+async def get_warn_count(gid, uid):
+    """Compte les warns d'un membre"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT COUNT(*) FROM infractions WHERE guild_id=? AND user_id=? AND type='warn'", (gid, uid))
+        return (await cur.fetchone())[0]
+
+async def is_immune(m):
+    if m.id == m.guild.owner_id: return True
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (m.guild.id,))
+        ids = [r[0] for r in await cur.fetchall()]
+    return any(r.id in ids for r in m.roles)
 
 async def track_message(gid, uid, cid):
     date_str = today().strftime('%Y-%m-%d')
@@ -180,27 +256,12 @@ async def track_voice_end(gid, uid):
         await db.execute('UPDATE voice_stats SET seconds = seconds + ? WHERE guild_id=? AND user_id=? AND channel_id=? AND date=?', (int(duration), gid, uid, cid, date_str))
         await db.commit()
 
-async def is_immune(m):
-    if m.id == m.guild.owner_id: return True
-    async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (m.guild.id,))
-        ids = [r[0] for r in await cur.fetchall()]
-    return any(r.id in ids for r in m.roles)
-
-async def is_staff(m):
-    if m.id == m.guild.owner_id or m.guild_permissions.administrator: return True
-    async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute('SELECT role_id FROM staff_roles WHERE guild_id=?', (m.guild.id,))
-        ids = [r[0] for r in await cur.fetchall()]
-    return any(r.id in ids for r in m.roles)
-
 # ═══════════════════════════════════════════════════════════════════════════════
-#                           📊 STATS AVANCÉES
+#                           📊 STATS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def get_advanced_stats(gid, uid, period='week'):
     td = today()
-    
     if period == 'day':
         start_date = td
         days = 1
@@ -268,6 +329,33 @@ def format_time(seconds):
         m = remainder // 60
         return f"{h}h {m}m"
 
+def format_duration(seconds):
+    """Formate une durée pour l'affichage"""
+    if seconds < 60:
+        return f"{seconds} seconde(s)"
+    elif seconds < 3600:
+        return f"{seconds // 60} minute(s)"
+    elif seconds < 86400:
+        return f"{seconds // 3600} heure(s)"
+    else:
+        return f"{seconds // 86400} jour(s)"
+
+def parse_duration(duration_str):
+    """Parse une durée (30s, 5m, 2h, 1d, 1w) en secondes. Max 1 semaine."""
+    match = re.match(r'^(\d+)([smhdw])$', duration_str.lower().strip())
+    if not match:
+        return None
+    
+    value = int(match.group(1))
+    unit = match.group(2)
+    
+    multipliers = {'s': 1, 'm': 60, 'h': 3600, 'd': 86400, 'w': 604800}
+    seconds = value * multipliers[unit]
+    
+    # Max 1 semaine (28 jours pour Discord timeout)
+    max_seconds = 604800 * 4  # 28 jours
+    return min(seconds, max_seconds)
+
 def get_day_labels(days):
     td = today()
     labels = []
@@ -280,19 +368,19 @@ def get_day_labels(days):
 def get_activity_rank(messages, voice_minutes):
     score = messages + voice_minutes
     if score >= 1000:
-        return "🏆 LÉGENDE", "Tu es une légende vivante !", C.GOLD
+        return "🏆 LÉGENDE", "Tu es une légende !", C.GOLD
     elif score >= 500:
-        return "💎 DIAMANT", "Activité exceptionnelle !", C.CYAN
+        return "💎 DIAMANT", "Exceptionnel !", C.CYAN
     elif score >= 200:
-        return "🥇 OR", "Très grande activité !", C.GOLD
+        return "🥇 OR", "Très actif !", C.GOLD
     elif score >= 100:
         return "🥈 ARGENT", "Belle activité !", C.BLUE
     elif score >= 50:
         return "🥉 BRONZE", "Bonne activité !", C.ORANGE
     elif score >= 20:
-        return "⭐ ACTIF", "Continue comme ça !", C.GREEN
+        return "⭐ ACTIF", "Continue !", C.GREEN
     elif score >= 5:
-        return "📊 RÉGULIER", "Présence correcte", C.PURPLE
+        return "📊 RÉGULIER", "Présent", C.PURPLE
     else:
         return "👻 FANTÔME", "On te voit peu...", C.RED
 
@@ -319,17 +407,21 @@ class MainPanel(View):
 ╚════════════════════════════════════════╝
 
 👥 Membres : {self.g.member_count}
-
-📂 Sélectionnez une catégorie ci-dessous
 ```"""
         if self.g.icon: e.set_thumbnail(url=self.g.icon.url)
         e.set_footer(text=f"👤 {self.u.display_name}", icon_url=self.u.display_avatar.url)
         return e
     
-    @discord.ui.button(label="Modération", emoji="⚔️", style=discord.ButtonStyle.danger, row=0)
+    @discord.ui.button(label="Permissions", emoji="🔐", style=discord.ButtonStyle.danger, row=0)
+    async def b0(self, i, b):
+        await i.response.defer()
+        v = PermPanel(self.u, self.g)
+        await i.edit_original_response(embed=v.embed(), view=v)
+    
+    @discord.ui.button(label="Sanctions Auto", emoji="⚖️", style=discord.ButtonStyle.danger, row=0)
     async def b1(self, i, b):
         await i.response.defer()
-        v = ModPanel(self.u, self.g)
+        v = SanctPanel(self.u, self.g)
         await i.edit_original_response(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="Logs", emoji="📜", style=discord.ButtonStyle.primary, row=0)
@@ -338,16 +430,16 @@ class MainPanel(View):
         v = LogsPanel(self.u, self.g)
         await i.edit_original_response(embed=await v.embed(), view=v)
     
-    @discord.ui.button(label="Protection", emoji="🛡️", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="Protection", emoji="🛡️", style=discord.ButtonStyle.primary, row=1)
     async def b3(self, i, b):
         await i.response.defer()
         v = ProtPanel(self.u, self.g)
         await i.edit_original_response(embed=await v.embed(), view=v)
     
-    @discord.ui.button(label="Rôles", emoji="👥", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Immunités", emoji="👑", style=discord.ButtonStyle.secondary, row=1)
     async def b4(self, i, b):
         await i.response.defer()
-        v = RolesPanel(self.u, self.g)
+        v = ImmunePanel(self.u, self.g)
         await i.edit_original_response(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="Bienvenue", emoji="👋", style=discord.ButtonStyle.success, row=1)
@@ -356,7 +448,7 @@ class MainPanel(View):
         v = WelcPanel(self.u, self.g)
         await i.edit_original_response(embed=await v.embed(), view=v)
     
-    @discord.ui.button(label="Activité", emoji="📊", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="Activité", emoji="📊", style=discord.ButtonStyle.secondary, row=2)
     async def b6(self, i, b):
         await i.response.defer()
         v = ActPanel(self.u, self.g)
@@ -373,170 +465,149 @@ class MainPanel(View):
         await i.message.delete()
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                           ⚔️ MODERATION
+#                           🔐 PERMISSIONS PANEL
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class ModPanel(View):
+class PermPanel(View):
     def __init__(self, u, g):
         super().__init__(timeout=900)
         self.u, self.g = u, g
-        members = [m for m in g.members if not m.bot][:25]
-        if members:
-            options = [discord.SelectOption(label=m.display_name[:25], value=str(m.id), description=f"@{m.name}") for m in members]
-            self.member_select = Select(placeholder="👤 Sélectionner un membre...", options=options, row=2)
-            self.member_select.callback = self.member_selected
-            self.add_item(self.member_select)
+        
+        roles = [r for r in g.roles[1:] if not r.is_bot_managed() and not r.is_premium_subscriber()][:25]
+        if roles:
+            options = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
+            sel = Select(placeholder="🔐 Sélectionner un rôle...", options=options)
+            sel.callback = self.role_selected
+            self.add_item(sel)
     
-    async def member_selected(self, i):
-        mid = int(i.data['values'][0])
-        member = self.g.get_member(mid)
-        if member:
-            v = MemberActionPanel(self.u, self.g, member)
-            await i.response.edit_message(embed=v.embed(), view=v)
+    async def role_selected(self, i):
+        rid = int(i.data['values'][0])
+        role = self.g.get_role(rid)
+        v = RolePermEditor(self.u, self.g, role)
+        await v.setup()
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
-    async def embed(self):
-        c = await gcfg(self.g.id)
-        mr = self.g.get_role(c['mute_role'])
-        e = discord.Embed(title="⚔️ Modération", color=C.PINK)
-        e.description = f"""```yml
-⚙️ Configuration actuelle
+    def embed(self):
+        e = discord.Embed(title="🔐 Gestion des Permissions", color=C.RED)
+        e.description = """```yml
+📋 Permissions disponibles
 ──────────────────────────────────────────
-🔇 Rôle Mute : {mr.name if mr else '❌ Non configuré'}
-
-⚖️ Sanctions automatiques
-──────────────────────────────────────────
-🔇 Mute après : {f'{c["warns_mute"]} warns' if c['warns_mute'] else 'Désactivé'}
-👢 Kick après : {f'{c["warns_kick"]} warns' if c['warns_kick'] else 'Désactivé'}
-🔨 Ban après  : {f'{c["warns_ban"]} warns' if c['warns_ban'] else 'Désactivé'}
+⚠️ warn        : Avertir un membre
+⏰ timeout     : Exclure temporairement
+📜 infractions : Voir les infractions
 ──────────────────────────────────────────
 
-👇 Sélectionnez un membre pour le sanctionner
+👇 Sélectionnez un rôle pour modifier
+   ses permissions de modération
 ```"""
         return e
-    
-    @discord.ui.button(label="Rôle Mute", emoji="🔇", style=discord.ButtonStyle.primary, row=0)
-    async def mute_role_btn(self, i, b):
-        v = SelectMuteRole(self.u, self.g)
-        await i.response.edit_message(embed=v.embed(), view=v)
-    
-    @discord.ui.button(label="Sanctions Auto", emoji="⚖️", style=discord.ButtonStyle.primary, row=0)
-    async def sanctions_btn(self, i, b):
-        await i.response.send_modal(SanctM(self.g))
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
 
-class SelectMuteRole(View):
-    def __init__(self, u, g):
-        super().__init__(timeout=300)
-        self.u, self.g = u, g
-        roles = [r for r in g.roles[1:] if not r.is_bot_managed() and not r.is_premium_subscriber()][:25]
-        if roles:
-            options = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id), emoji="🔇") for r in roles]
-            sel = Select(placeholder="🔇 Sélectionner le rôle mute...", options=options)
-            sel.callback = self.selected
-            self.add_item(sel)
-    
-    def embed(self):
-        return discord.Embed(title="🔇 Sélectionner le rôle Mute", description="Choisissez le rôle à attribuer aux membres mutés", color=C.PINK)
-    
-    async def selected(self, i):
-        rid = int(i.data['values'][0])
-        await scfg(self.g.id, mute_role=rid)
-        role = self.g.get_role(rid)
-        await i.response.send_message(f"✅ Rôle mute: **@{role.name}**", ephemeral=True)
-    
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
-    async def back(self, i, b):
-        await i.response.defer()
-        v = ModPanel(self.u, self.g)
-        await i.edit_original_response(embed=await v.embed(), view=v)
 
-class MemberActionPanel(View):
-    def __init__(self, u, g, target):
+class RolePermEditor(View):
+    def __init__(self, u, g, role):
         super().__init__(timeout=300)
-        self.u, self.g, self.target = u, g, target
+        self.u, self.g, self.role = u, g, role
+        self.perms = []
     
-    def embed(self):
-        e = discord.Embed(title=f"⚔️ Actions sur {self.target.display_name}", color=C.PINK)
-        e.set_thumbnail(url=self.target.display_avatar.url)
-        e.description = f"```yml\n👤 {self.target.name}\n🆔 {self.target.id}\n```\n**Choisissez une action:**"
+    async def setup(self):
+        self.perms = await get_role_permissions(self.g.id, self.role.id)
+    
+    async def embed(self):
+        def s(p): return "✅" if p in self.perms else "❌"
+        e = discord.Embed(title=f"🔐 Permissions de @{self.role.name}", color=self.role.color)
+        e.description = f"""```yml
+📋 Permissions actuelles
+──────────────────────────────────────────
+⚠️ warn        : {s('warn')}
+⏰ timeout     : {s('timeout')}
+📜 infractions : {s('infractions')}
+──────────────────────────────────────────
+```
+
+**Cliquez sur les boutons pour activer/désactiver**"""
         return e
     
-    @discord.ui.button(label="Warn", emoji="⚠️", style=discord.ButtonStyle.danger)
-    async def warn(self, i, b):
-        await i.response.send_modal(WarnReasonM(self.g, self.u, self.target))
+    @discord.ui.button(label="Warn", emoji="⚠️", style=discord.ButtonStyle.secondary, row=0)
+    async def toggle_warn(self, i, b):
+        enabled = 'warn' not in self.perms
+        await set_role_permission(self.g.id, self.role.id, 'warn', enabled)
+        if enabled:
+            self.perms.append('warn')
+        else:
+            self.perms.remove('warn')
+        await i.response.edit_message(embed=await self.embed(), view=self)
     
-    @discord.ui.button(label="Mute", emoji="🔇", style=discord.ButtonStyle.danger)
-    async def mute(self, i, b):
-        c = await gcfg(self.g.id)
-        rl = self.g.get_role(c['mute_role'])
-        if not rl: return await i.response.send_message("❌ Rôle mute non configuré", ephemeral=True)
-        await self.target.add_roles(rl)
-        await i.response.send_message(f"✅ **{self.target}** mute", ephemeral=True)
+    @discord.ui.button(label="Timeout", emoji="⏰", style=discord.ButtonStyle.secondary, row=0)
+    async def toggle_timeout(self, i, b):
+        enabled = 'timeout' not in self.perms
+        await set_role_permission(self.g.id, self.role.id, 'timeout', enabled)
+        if enabled:
+            self.perms.append('timeout')
+        else:
+            self.perms.remove('timeout')
+        await i.response.edit_message(embed=await self.embed(), view=self)
     
-    @discord.ui.button(label="Kick", emoji="👢", style=discord.ButtonStyle.danger)
-    async def kick(self, i, b):
-        await i.response.send_modal(KickReasonM(self.g, self.target))
-    
-    @discord.ui.button(label="Ban", emoji="🔨", style=discord.ButtonStyle.danger)
-    async def ban(self, i, b):
-        await i.response.send_modal(BanReasonM(self.g, self.target))
+    @discord.ui.button(label="Infractions", emoji="📜", style=discord.ButtonStyle.secondary, row=0)
+    async def toggle_infractions(self, i, b):
+        enabled = 'infractions' not in self.perms
+        await set_role_permission(self.g.id, self.role.id, 'infractions', enabled)
+        if enabled:
+            self.perms.append('infractions')
+        else:
+            self.perms.remove('infractions')
+        await i.response.edit_message(embed=await self.embed(), view=self)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        await i.response.defer()
-        v = ModPanel(self.u, self.g)
-        await i.edit_original_response(embed=await v.embed(), view=v)
+        v = PermPanel(self.u, self.g)
+        await i.response.edit_message(embed=v.embed(), view=v)
 
-class WarnReasonM(Modal, title="⚠️ Raison du warn"):
-    reason = TextInput(label="Raison", placeholder="Raison...", required=False, max_length=200)
-    def __init__(self, g, mod, target): super().__init__(); self.g, self.mod, self.target = g, mod, target
-    async def on_submit(self, i):
-        if await is_immune(self.target): return await i.response.send_message("❌ Immunisé", ephemeral=True)
-        r = self.reason.value or "Aucune raison"
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute('INSERT INTO warns (guild_id,user_id,mod_id,reason) VALUES (?,?,?,?)', (self.g.id,self.target.id,self.mod.id,r))
-            await db.commit()
-            cur = await db.execute('SELECT COUNT(*) FROM warns WHERE guild_id=? AND user_id=?', (self.g.id,self.target.id))
-            cnt = (await cur.fetchone())[0]
-        await i.response.send_message(f"✅ **{self.target}** warn #{cnt}", ephemeral=True)
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           ⚖️ SANCTIONS AUTO
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class SanctPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=900)
+        self.u, self.g = u, g
+    
+    async def embed(self):
         c = await gcfg(self.g.id)
-        if c['warns_ban'] and cnt >= c['warns_ban']: await self.target.ban(reason=f"Auto: {cnt} warns")
-        elif c['warns_kick'] and cnt >= c['warns_kick']: await self.target.kick(reason=f"Auto: {cnt} warns")
-        elif c['warns_mute'] and cnt >= c['warns_mute']:
-            rl = self.g.get_role(c['mute_role'])
-            if rl: await self.target.add_roles(rl)
+        e = discord.Embed(title="⚖️ Sanctions Automatiques", color=C.PINK)
+        e.description = f"""```yml
+📊 Sanctions après X warns
+──────────────────────────────────────────
+👢 Kick après : {f'{c["warns_kick"]} warns' if c['warns_kick'] else 'Désactivé'}
+🔨 Ban après  : {f'{c["warns_ban"]} warns' if c['warns_ban'] else 'Désactivé'}
+──────────────────────────────────────────
 
-class KickReasonM(Modal, title="👢 Kick"):
-    reason = TextInput(label="Raison", required=False)
-    def __init__(self, g, target): super().__init__(); self.g, self.target = g, target
-    async def on_submit(self, i):
-        if await is_immune(self.target): return await i.response.send_message("❌ Immunisé", ephemeral=True)
-        await self.target.kick(reason=self.reason.value or "Aucune")
-        await i.response.send_message(f"✅ **{self.target}** kick", ephemeral=True)
+💡 Mettez 0 pour désactiver
+```"""
+        return e
+    
+    @discord.ui.button(label="Configurer", emoji="⚙️", style=discord.ButtonStyle.primary, row=0)
+    async def config(self, i, b):
+        await i.response.send_modal(SanctConfigM(self.g))
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = MainPanel(self.u, self.g)
+        await i.response.edit_message(embed=v.embed(), view=v)
 
-class BanReasonM(Modal, title="🔨 Ban"):
-    reason = TextInput(label="Raison", required=False)
-    def __init__(self, g, target): super().__init__(); self.g, self.target = g, target
-    async def on_submit(self, i):
-        if await is_immune(self.target): return await i.response.send_message("❌ Immunisé", ephemeral=True)
-        await self.target.ban(reason=self.reason.value or "Aucune")
-        await i.response.send_message(f"✅ **{self.target}** ban", ephemeral=True)
-
-class SanctM(Modal, title="⚖️ Sanctions Auto"):
-    wm = TextInput(label="Warns pour Mute (0=off)", required=False, max_length=2)
+class SanctConfigM(Modal, title="⚖️ Sanctions Auto"):
     wk = TextInput(label="Warns pour Kick (0=off)", required=False, max_length=2)
     wb = TextInput(label="Warns pour Ban (0=off)", required=False, max_length=2)
     def __init__(self, g): super().__init__(); self.g = g
     async def on_submit(self, i):
-        m = int(self.wm.value) if self.wm.value.isdigit() else 0
         k = int(self.wk.value) if self.wk.value.isdigit() else 0
         b = int(self.wb.value) if self.wb.value.isdigit() else 0
-        await scfg(self.g.id, warns_mute=m, warns_kick=k, warns_ban=b)
-        await i.response.send_message(f"✅ Mute:{m} Kick:{k} Ban:{b}", ephemeral=True)
+        await scfg(self.g.id, warns_kick=k, warns_ban=b)
+        await i.response.send_message(f"✅ Kick: {k} warns | Ban: {b} warns", ephemeral=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           📜 LOGS
@@ -619,30 +690,19 @@ class ProtPanel(View):
         await i.response.edit_message(embed=v.embed(), view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                           👥 ROLES
+#                           👑 IMMUNITÉS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class RolesPanel(View):
+class ImmunePanel(View):
     def __init__(self, u, g):
         super().__init__(timeout=900)
         self.u, self.g = u, g
         roles = [r for r in g.roles[1:] if not r.is_bot_managed() and not r.is_premium_subscriber()][:25]
         if roles:
             options = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
-            sel1 = Select(placeholder="👮 Ajouter staff...", options=options, row=2)
-            sel1.callback = self.add_staff
-            self.add_item(sel1)
-            sel2 = Select(placeholder="👑 Ajouter immunisé...", options=options.copy(), row=3)
-            sel2.callback = self.add_immune
-            self.add_item(sel2)
-    
-    async def add_staff(self, i):
-        rid = int(i.data['values'][0])
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute('INSERT OR IGNORE INTO staff_roles VALUES (?,?)', (self.g.id, rid))
-            await db.commit()
-        role = self.g.get_role(rid)
-        await i.response.send_message(f"✅ **@{role.name}** staff", ephemeral=True)
+            sel = Select(placeholder="👑 Ajouter un rôle immunisé...", options=options, row=1)
+            sel.callback = self.add_immune
+            self.add_item(sel)
     
     async def add_immune(self, i):
         rid = int(i.data['values'][0])
@@ -654,58 +714,52 @@ class RolesPanel(View):
     
     async def embed(self):
         async with aiosqlite.connect(DB_PATH) as db:
-            cur = await db.execute('SELECT role_id FROM staff_roles WHERE guild_id=?', (self.g.id,))
-            sr = [self.g.get_role(r[0]) for r in await cur.fetchall() if self.g.get_role(r[0])]
             cur = await db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (self.g.id,))
             ir = [self.g.get_role(r[0]) for r in await cur.fetchall() if self.g.get_role(r[0])]
-        e = discord.Embed(title="👥 Rôles", color=C.ORANGE)
-        e.description = f"```yml\n👮 Staff    : {', '.join([r.name for r in sr]) or 'Aucun'}\n👑 Immunisés: {', '.join([r.name for r in ir]) or 'Aucun'}\n```"
+        e = discord.Embed(title="👑 Rôles Immunisés", color=C.GOLD)
+        e.description = f"```yml\nNe peuvent PAS être sanctionnés:\n──────────────────────────────────────────\n{', '.join([r.name for r in ir]) or 'Aucun'}\n```"
         return e
     
-    @discord.ui.button(label="Retirer Staff", emoji="👮", style=discord.ButtonStyle.danger, row=0)
-    async def rem_staff(self, i, b):
-        v = RemoveRolePanel(self.u, self.g, "staff_roles", "Staff")
+    @discord.ui.button(label="Retirer", emoji="🗑️", style=discord.ButtonStyle.danger, row=0)
+    async def rem(self, i, b):
+        v = RemImmunePanel(self.u, self.g)
         await v.setup()
         await i.response.edit_message(embed=await v.embed(), view=v)
-    @discord.ui.button(label="Retirer Immunisé", emoji="👑", style=discord.ButtonStyle.danger, row=0)
-    async def rem_immune(self, i, b):
-        v = RemoveRolePanel(self.u, self.g, "immune_roles", "Immunisé")
-        await v.setup()
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
 
-class RemoveRolePanel(View):
-    def __init__(self, u, g, table, typ):
+class RemImmunePanel(View):
+    def __init__(self, u, g):
         super().__init__(timeout=300)
-        self.u, self.g, self.table, self.typ = u, g, table, typ
+        self.u, self.g = u, g
     
     async def setup(self):
         async with aiosqlite.connect(DB_PATH) as db:
-            cur = await db.execute(f'SELECT role_id FROM {self.table} WHERE guild_id=?', (self.g.id,))
+            cur = await db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (self.g.id,))
             roles = [self.g.get_role(r[0]) for r in await cur.fetchall() if self.g.get_role(r[0])]
         if roles:
             options = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles[:25]]
-            sel = Select(placeholder=f"🗑️ Retirer {self.typ}...", options=options)
-            sel.callback = self.remove_role
+            sel = Select(placeholder="🗑️ Retirer...", options=options)
+            sel.callback = self.remove
             self.add_item(sel)
     
-    async def remove_role(self, i):
+    async def remove(self, i):
         rid = int(i.data['values'][0])
         async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute(f'DELETE FROM {self.table} WHERE guild_id=? AND role_id=?', (self.g.id, rid))
+            await db.execute('DELETE FROM immune_roles WHERE guild_id=? AND role_id=?', (self.g.id, rid))
             await db.commit()
         await i.response.send_message("✅ Retiré", ephemeral=True)
     
     async def embed(self):
-        return discord.Embed(title=f"🗑️ Retirer {self.typ}", color=C.RED)
+        return discord.Embed(title="🗑️ Retirer immunité", color=C.RED)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
         await i.response.defer()
-        v = RolesPanel(self.u, self.g)
+        v = ImmunePanel(self.u, self.g)
         await i.edit_original_response(embed=await v.embed(), view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -755,7 +809,7 @@ class WelcMsgM(Modal, title="✏️ Message"):
         await i.response.send_message("✅", ephemeral=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                           📊 ACTIVITÉ ADMIN
+#                           📊 ACTIVITÉ
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class ActPanel(View):
@@ -893,8 +947,6 @@ class TicketPanel(View):
     async def questions(self, i, b):
         v = QuestionsPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
-    @discord.ui.button(label="Personnaliser", emoji="🎨", style=discord.ButtonStyle.secondary, row=0)
-    async def custom(self, i, b): await i.response.send_modal(TkCustomM(self.g))
     @discord.ui.button(label="📤 Déployer", emoji="📤", style=discord.ButtonStyle.success, row=1)
     async def deploy(self, i, b):
         v = DeployPanel(self.u, self.g)
@@ -913,7 +965,7 @@ class QuestionsPanel(View):
         tc = await gtcfg(self.g.id)
         qs = json.loads(tc['questions']) if tc['questions'] else []
         e = discord.Embed(title="❓ Questions", color=C.PURPLE)
-        e.description = f"```yml\n{chr(10).join([f'{i+1}. {q}' for i,q in enumerate(qs)]) or 'Aucune'}\n```\nMax: 5"
+        e.description = f"```yml\n{chr(10).join([f'{i+1}. {q}' for i,q in enumerate(qs)]) or 'Aucune'}\n```"
         return e
     
     @discord.ui.button(label="➕ Ajouter", style=discord.ButtonStyle.success)
@@ -940,15 +992,6 @@ class AddQuestionM(Modal, title="➕ Question"):
         qs = json.loads(tc['questions']) if tc['questions'] else []
         qs.append(self.q.value)
         await stcfg(self.g.id, questions=json.dumps(qs))
-        await i.response.send_message("✅", ephemeral=True)
-
-class TkCustomM(Modal, title="🎨 Personnaliser"):
-    title_input = TextInput(label="Titre", default="🎫 Support", max_length=100)
-    desc_input = TextInput(label="Description", style=discord.TextStyle.paragraph, default="Cliquez pour créer un ticket", max_length=500)
-    name_input = TextInput(label="Format nom", default="ticket-{user}-{number}", max_length=50)
-    def __init__(self, g): super().__init__(); self.g = g
-    async def on_submit(self, i):
-        await stcfg(self.g.id, panel_title=self.title_input.value, panel_description=self.desc_input.value, ticket_name=self.name_input.value)
         await i.response.send_message("✅", ephemeral=True)
 
 class DeployPanel(View):
@@ -1069,7 +1112,7 @@ class TkActs(View):
         await i.channel.delete()
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                           📊 COMMANDE /STATS
+#                           📊 STATS VIEW
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class StatsView(View):
@@ -1084,7 +1127,7 @@ class StatsView(View):
         rank, rank_desc, rank_color = get_activity_rank(stats['messages'], voice_min)
         
         e = discord.Embed(color=rank_color)
-        e.set_author(name=f"📊 Statistiques de {self.target.display_name}", icon_url=self.target.display_avatar.url)
+        e.set_author(name=f"📊 Stats de {self.target.display_name}", icon_url=self.target.display_avatar.url)
         e.set_thumbnail(url=self.target.display_avatar.url)
         e.add_field(name="🏆 Rang", value=f"**{rank}**\n*{rank_desc}*", inline=False)
         e.add_field(name="📅 Période", value=f"**{period_names[self.period]}**", inline=False)
@@ -1093,11 +1136,11 @@ class StatsView(View):
         
         if stats['top_text_channel']:
             ch = self.guild.get_channel(stats['top_text_channel'])
-            e.add_field(name="💬 Salon préféré", value=f"```#{ch.name if ch else '?'}\n{stats['msg_by_channel'].get(stats['top_text_channel'], 0):,} msgs```", inline=True)
+            e.add_field(name="💬 Salon préféré", value=f"#{ch.name if ch else '?'}", inline=True)
         
         if stats['top_voice_channel']:
             ch = self.guild.get_channel(stats['top_voice_channel'])
-            e.add_field(name="🎙️ Vocal préféré", value=f"```🔊 {ch.name if ch else '?'}\n{format_time(stats['voice_by_channel'].get(stats['top_voice_channel'], 0))}```", inline=True)
+            e.add_field(name="🎙️ Vocal préféré", value=f"🔊 {ch.name if ch else '?'}", inline=True)
         
         if len(stats['msg_by_day']) > 1:
             days = len(stats['msg_by_day'])
@@ -1105,30 +1148,14 @@ class StatsView(View):
             max_msg = max(stats['msg_by_day']) if stats['msg_by_day'] else 1
             graph = "```\n"
             for i, count in enumerate(stats['msg_by_day'][-7:]):
-                bar_len = int((count / max_msg) * 12) if max_msg > 0 else 0
-                bar = "█" * bar_len + "░" * (12 - bar_len)
+                bar_len = int((count / max_msg) * 10) if max_msg > 0 else 0
+                bar = "█" * bar_len + "░" * (10 - bar_len)
                 label = labels[i] if i < len(labels) else "?"
                 graph += f"{label} {bar} {count:>3}\n"
             graph += "```"
             e.add_field(name="📈 Messages/jour", value=graph, inline=False)
         
-        if stats['msg_by_channel']:
-            top = ""
-            for idx, (cid, count) in enumerate(list(stats['msg_by_channel'].items())[:3]):
-                ch = self.guild.get_channel(cid)
-                medal = ["🥇", "🥈", "🥉"][idx]
-                top += f"{medal} #{ch.name if ch else '?'}: **{count:,}**\n"
-            e.add_field(name="🏅 Top salons", value=top, inline=True)
-        
-        if stats['voice_by_channel']:
-            top = ""
-            for idx, (cid, secs) in enumerate(list(stats['voice_by_channel'].items())[:3]):
-                ch = self.guild.get_channel(cid)
-                medal = ["🥇", "🥈", "🥉"][idx]
-                top += f"{medal} 🔊{ch.name if ch else '?'}: **{format_time(secs)}**\n"
-            e.add_field(name="🏅 Top vocal", value=top, inline=True)
-        
-        e.set_footer(text=self.guild.name, icon_url=self.guild.icon.url if self.guild.icon else None)
+        e.set_footer(text=self.guild.name)
         e.timestamp = now()
         return e
     
@@ -1201,21 +1228,173 @@ async def on_member_join(m):
 
 @bot.event
 async def on_member_remove(m):
-    """🆕 Nettoie les données quand un membre quitte"""
     if m.bot: return
     await cleanup_member_data(m.guild.id, m.id)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                        🎮 COMMANDES
+#                        🎮 COMMANDES MODÉRATION
 # ═══════════════════════════════════════════════════════════════════════════════
+
+@bot.tree.command(name="warn", description="⚠️ Avertir un membre")
+@app_commands.describe(membre="Membre à avertir", raison="Raison de l'avertissement")
+async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
+    # Vérifier permission
+    if not await has_permission(i.user, 'warn'):
+        return await i.response.send_message("❌ Vous n'avez pas la permission d'utiliser cette commande", ephemeral=True)
+    
+    # Vérifier immunité
+    if await is_immune(membre):
+        return await i.response.send_message("❌ Ce membre est immunisé", ephemeral=True)
+    
+    # Ajouter l'infraction
+    count = await add_infraction(i.guild.id, membre.id, i.user.id, 'warn', raison)
+    
+    # Créer l'embed
+    e = discord.Embed(title="⚠️ Avertissement", color=C.YELLOW)
+    e.add_field(name="👤 Membre", value=membre.mention, inline=True)
+    e.add_field(name="👮 Modérateur", value=i.user.mention, inline=True)
+    e.add_field(name="📝 Raison", value=raison, inline=False)
+    e.add_field(name="📊 Total warns", value=f"**{count}** avertissement(s)", inline=True)
+    e.timestamp = now()
+    
+    await i.response.send_message(embed=e)
+    
+    # Log modération
+    c = await gcfg(i.guild.id)
+    if c['mod_log_channel']:
+        log_ch = i.guild.get_channel(c['mod_log_channel'])
+        if log_ch:
+            await log_ch.send(embed=e)
+    
+    # Sanctions auto
+    warn_count = await get_warn_count(i.guild.id, membre.id)
+    if c['warns_ban'] and warn_count >= c['warns_ban']:
+        await membre.ban(reason=f"Auto-ban: {warn_count} avertissements")
+        await i.followup.send(f"🔨 **{membre}** a été automatiquement banni ({warn_count} warns)")
+    elif c['warns_kick'] and warn_count >= c['warns_kick']:
+        await membre.kick(reason=f"Auto-kick: {warn_count} avertissements")
+        await i.followup.send(f"👢 **{membre}** a été automatiquement expulsé ({warn_count} warns)")
+
+
+@bot.tree.command(name="timeout", description="⏰ Exclure temporairement un membre")
+@app_commands.describe(
+    membre="Membre à exclure",
+    duree="Durée (ex: 30s, 5m, 2h, 1d, 1w)",
+    raison="Raison du timeout"
+)
+async def timeout_cmd(i: discord.Interaction, membre: discord.Member, duree: str, raison: str):
+    # Vérifier permission
+    if not await has_permission(i.user, 'timeout'):
+        return await i.response.send_message("❌ Vous n'avez pas la permission d'utiliser cette commande", ephemeral=True)
+    
+    # Vérifier immunité
+    if await is_immune(membre):
+        return await i.response.send_message("❌ Ce membre est immunisé", ephemeral=True)
+    
+    # Parser la durée
+    seconds = parse_duration(duree)
+    if not seconds:
+        return await i.response.send_message("❌ Format de durée invalide. Utilisez: `30s`, `5m`, `2h`, `1d`, `1w`", ephemeral=True)
+    
+    # Appliquer le timeout Discord natif
+    try:
+        until = now() + timedelta(seconds=seconds)
+        await membre.timeout(until, reason=raison)
+    except discord.Forbidden:
+        return await i.response.send_message("❌ Je n'ai pas la permission de timeout ce membre", ephemeral=True)
+    except Exception as e:
+        return await i.response.send_message(f"❌ Erreur: {e}", ephemeral=True)
+    
+    # Enregistrer l'infraction
+    await add_infraction(i.guild.id, membre.id, i.user.id, 'timeout', raison, seconds)
+    
+    # Créer l'embed
+    e = discord.Embed(title="⏰ Timeout", color=C.ORANGE)
+    e.add_field(name="👤 Membre", value=membre.mention, inline=True)
+    e.add_field(name="👮 Modérateur", value=i.user.mention, inline=True)
+    e.add_field(name="⏱️ Durée", value=format_duration(seconds), inline=True)
+    e.add_field(name="📝 Raison", value=raison, inline=False)
+    e.timestamp = now()
+    
+    await i.response.send_message(embed=e)
+    
+    # Log modération
+    c = await gcfg(i.guild.id)
+    if c['mod_log_channel']:
+        log_ch = i.guild.get_channel(c['mod_log_channel'])
+        if log_ch:
+            await log_ch.send(embed=e)
+
+
+@bot.tree.command(name="untimeout", description="🔓 Retirer le timeout d'un membre")
+@app_commands.describe(membre="Membre à libérer")
+async def untimeout_cmd(i: discord.Interaction, membre: discord.Member):
+    # Vérifier permission
+    if not await has_permission(i.user, 'timeout'):
+        return await i.response.send_message("❌ Vous n'avez pas la permission", ephemeral=True)
+    
+    try:
+        await membre.timeout(None, reason=f"Retiré par {i.user}")
+        await i.response.send_message(f"✅ Timeout retiré pour **{membre.display_name}**", ephemeral=True)
+    except:
+        await i.response.send_message("❌ Erreur", ephemeral=True)
+
+
+@bot.tree.command(name="infractions", description="📜 Voir les infractions d'un membre")
+@app_commands.describe(membre="Membre dont voir les infractions")
+async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
+    # Vérifier permission
+    if not await has_permission(i.user, 'infractions'):
+        return await i.response.send_message("❌ Vous n'avez pas la permission", ephemeral=True)
+    
+    infractions = await get_infractions(i.guild.id, membre.id)
+    
+    e = discord.Embed(title=f"📜 Infractions de {membre.display_name}", color=C.RED)
+    e.set_thumbnail(url=membre.display_avatar.url)
+    
+    if not infractions:
+        e.description = "✅ Aucune infraction enregistrée"
+    else:
+        e.description = f"**{len(infractions)}** infraction(s) au total\n\n"
+        
+        for idx, inf in enumerate(infractions[:10]):  # Max 10 affichées
+            mod = i.guild.get_member(inf['mod_id'])
+            mod_name = mod.display_name if mod else f"ID: {inf['mod_id']}"
+            
+            # Format de la date
+            try:
+                date = datetime.fromisoformat(inf['created_at']).strftime('%d/%m/%Y %H:%M')
+            except:
+                date = inf['created_at']
+            
+            # Type d'infraction
+            if inf['type'] == 'warn':
+                emoji = "⚠️"
+                duration_str = ""
+            else:
+                emoji = "⏰"
+                duration_str = f" ({format_duration(inf['duration'])})" if inf['duration'] else ""
+            
+            e.add_field(
+                name=f"{emoji} #{idx+1} - {inf['type'].upper()}{duration_str}",
+                value=f"**Raison:** {inf['reason'][:100]}\n**Par:** {mod_name}\n**Date:** {date}",
+                inline=False
+            )
+        
+        if len(infractions) > 10:
+            e.set_footer(text=f"... et {len(infractions) - 10} autres infractions")
+    
+    await i.response.send_message(embed=e, ephemeral=True)
+
 
 @bot.tree.command(name="configure", description="⚙️ Panneau de configuration (Admin)")
 async def cfg_cmd(i: discord.Interaction):
     await i.response.defer(ephemeral=True)
     if not i.user.guild_permissions.administrator and i.user.id != i.guild.owner_id:
-        if not await is_staff(i.user): return await i.followup.send("❌ Accès refusé")
+        return await i.followup.send("❌ Accès refusé (Admin requis)")
     v = MainPanel(i.user, i.guild)
     await i.followup.send(embed=v.embed(), view=v)
+
 
 @bot.tree.command(name="stats", description="📊 Voir les statistiques d'activité")
 @app_commands.describe(membre="Membre (optionnel)")
