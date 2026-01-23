@@ -1060,9 +1060,9 @@ async def on_voice_state_update(member, before, after):
     elif before.channel and not after.channel:
         await track_voice_end(member.guild.id, member.id)
     
-    # Change de salon
+    # Change de salon - on garde la session active
     elif before.channel and after.channel and before.channel != after.channel:
-        # On garde la session active, pas besoin de reset
+        pass  # Rien à faire, la session continue
 
 @bot.event
 async def on_member_join(m):
