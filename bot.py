@@ -1,6 +1,6 @@
 # ╔═══════════════════════════════════════════════════════════════════════════════╗
-# ║                        🌟 BOT PREMIUM v5.2 🌟                                 ║
-# ║                    Ultra-optimisé (fix timeout)                               ║
+# ║                        🌟 BOT PREMIUM v6.0 🌟                                 ║
+# ║                    Avec système de statistiques                               ║
 # ╚═══════════════════════════════════════════════════════════════════════════════╝
 
 try:
@@ -30,6 +30,9 @@ intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
 DB = 'database.db'
 
+# Sessions vocales en cours (pour calculer le temps)
+voice_sessions = {}  # {(guild_id, user_id): datetime}
+
 class C:
     BLURPLE = 0x5865F2
     GREEN = 0x57F287
@@ -39,6 +42,8 @@ class C:
     PURPLE = 0x9B59B6
     BLUE = 0x3498DB
     ORANGE = 0xE67E22
+    CYAN = 0x1ABC9C
+    GOLD = 0xF1C40F
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              💾 DATABASE
@@ -68,6 +73,16 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS tickets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, channel_id INTEGER,
                 user_id INTEGER, claimed_by INTEGER, status TEXT DEFAULT 'open', answers TEXT);
+            
+            -- 🆕 STATS MESSAGES (par jour)
+            CREATE TABLE IF NOT EXISTS message_stats (
+                guild_id INTEGER, user_id INTEGER, date TEXT, count INTEGER DEFAULT 0,
+                PRIMARY KEY (guild_id, user_id, date));
+            
+            -- 🆕 STATS VOCAL (secondes par jour)
+            CREATE TABLE IF NOT EXISTS voice_stats (
+                guild_id INTEGER, user_id INTEGER, date TEXT, seconds INTEGER DEFAULT 0,
+                PRIMARY KEY (guild_id, user_id, date));
         ''')
         await db.commit()
     print("✅ DB OK")
@@ -109,13 +124,114 @@ async def stcfg(gid, **kw):
             await db.execute(f'UPDATE ticket_config SET {k}=? WHERE guild_id=?', (v, gid))
         await db.commit()
 
-async def track(gid, uid, msg=False, voice=False):
+# 🆕 Tracking messages
+async def track_message(gid, uid):
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    now = datetime.utcnow().isoformat()
+    async with aiosqlite.connect(DB) as db:
+        # Update activity
+        await db.execute('INSERT OR IGNORE INTO activity (guild_id, user_id) VALUES (?,?)', (gid, uid))
+        await db.execute('UPDATE activity SET last_message=? WHERE guild_id=? AND user_id=?', (now, gid, uid))
+        # Update message stats
+        await db.execute('INSERT OR IGNORE INTO message_stats (guild_id, user_id, date, count) VALUES (?,?,?,0)', (gid, uid, today))
+        await db.execute('UPDATE message_stats SET count = count + 1 WHERE guild_id=? AND user_id=? AND date=?', (gid, uid, today))
+        await db.commit()
+
+# 🆕 Tracking vocal
+async def track_voice_start(gid, uid):
+    voice_sessions[(gid, uid)] = datetime.utcnow()
     now = datetime.utcnow().isoformat()
     async with aiosqlite.connect(DB) as db:
         await db.execute('INSERT OR IGNORE INTO activity (guild_id, user_id) VALUES (?,?)', (gid, uid))
-        if msg: await db.execute('UPDATE activity SET last_message=? WHERE guild_id=? AND user_id=?', (now, gid, uid))
-        if voice: await db.execute('UPDATE activity SET last_voice=? WHERE guild_id=? AND user_id=?', (now, gid, uid))
+        await db.execute('UPDATE activity SET last_voice=? WHERE guild_id=? AND user_id=?', (now, gid, uid))
         await db.commit()
+
+async def track_voice_end(gid, uid):
+    key = (gid, uid)
+    if key not in voice_sessions:
+        return
+    start = voice_sessions.pop(key)
+    duration = (datetime.utcnow() - start).total_seconds()
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    async with aiosqlite.connect(DB) as db:
+        await db.execute('INSERT OR IGNORE INTO voice_stats (guild_id, user_id, date, seconds) VALUES (?,?,?,0)', (gid, uid, today))
+        await db.execute('UPDATE voice_stats SET seconds = seconds + ? WHERE guild_id=? AND user_id=? AND date=?', (int(duration), gid, uid, today))
+        await db.commit()
+
+# 🆕 Récupérer les stats
+async def get_user_stats(gid, uid):
+    today = datetime.utcnow().date()
+    week_start = today - timedelta(days=today.weekday())
+    month_start = today.replace(day=1)
+    
+    stats = {
+        'msg_today': 0, 'msg_week': 0, 'msg_month': 0, 'msg_total': 0,
+        'voice_today': 0, 'voice_week': 0, 'voice_month': 0, 'voice_total': 0,
+        'msg_by_day': [], 'voice_by_day': []
+    }
+    
+    async with aiosqlite.connect(DB) as db:
+        # Messages par jour (7 derniers jours)
+        for i in range(6, -1, -1):
+            d = (today - timedelta(days=i)).strftime('%Y-%m-%d')
+            cur = await db.execute('SELECT count FROM message_stats WHERE guild_id=? AND user_id=? AND date=?', (gid, uid, d))
+            r = await cur.fetchone()
+            stats['msg_by_day'].append(r[0] if r else 0)
+        
+        # Voice par jour (7 derniers jours)
+        for i in range(6, -1, -1):
+            d = (today - timedelta(days=i)).strftime('%Y-%m-%d')
+            cur = await db.execute('SELECT seconds FROM voice_stats WHERE guild_id=? AND user_id=? AND date=?', (gid, uid, d))
+            r = await cur.fetchone()
+            stats['voice_by_day'].append(r[0] if r else 0)
+        
+        # Messages aujourd'hui
+        cur = await db.execute('SELECT count FROM message_stats WHERE guild_id=? AND user_id=? AND date=?', 
+                              (gid, uid, today.strftime('%Y-%m-%d')))
+        r = await cur.fetchone()
+        stats['msg_today'] = r[0] if r else 0
+        
+        # Messages cette semaine
+        cur = await db.execute('SELECT SUM(count) FROM message_stats WHERE guild_id=? AND user_id=? AND date>=?',
+                              (gid, uid, week_start.strftime('%Y-%m-%d')))
+        r = await cur.fetchone()
+        stats['msg_week'] = r[0] or 0
+        
+        # Messages ce mois
+        cur = await db.execute('SELECT SUM(count) FROM message_stats WHERE guild_id=? AND user_id=? AND date>=?',
+                              (gid, uid, month_start.strftime('%Y-%m-%d')))
+        r = await cur.fetchone()
+        stats['msg_month'] = r[0] or 0
+        
+        # Messages total
+        cur = await db.execute('SELECT SUM(count) FROM message_stats WHERE guild_id=? AND user_id=?', (gid, uid))
+        r = await cur.fetchone()
+        stats['msg_total'] = r[0] or 0
+        
+        # Voice aujourd'hui
+        cur = await db.execute('SELECT seconds FROM voice_stats WHERE guild_id=? AND user_id=? AND date=?',
+                              (gid, uid, today.strftime('%Y-%m-%d')))
+        r = await cur.fetchone()
+        stats['voice_today'] = r[0] if r else 0
+        
+        # Voice cette semaine
+        cur = await db.execute('SELECT SUM(seconds) FROM voice_stats WHERE guild_id=? AND user_id=? AND date>=?',
+                              (gid, uid, week_start.strftime('%Y-%m-%d')))
+        r = await cur.fetchone()
+        stats['voice_week'] = r[0] or 0
+        
+        # Voice ce mois
+        cur = await db.execute('SELECT SUM(seconds) FROM voice_stats WHERE guild_id=? AND user_id=? AND date>=?',
+                              (gid, uid, month_start.strftime('%Y-%m-%d')))
+        r = await cur.fetchone()
+        stats['voice_month'] = r[0] or 0
+        
+        # Voice total
+        cur = await db.execute('SELECT SUM(seconds) FROM voice_stats WHERE guild_id=? AND user_id=?', (gid, uid))
+        r = await cur.fetchone()
+        stats['voice_total'] = r[0] or 0
+    
+    return stats
 
 async def is_immune(m):
     if m.id == m.guild.owner_id: return True
@@ -130,6 +246,84 @@ async def is_staff(m):
         cur = await db.execute('SELECT role_id FROM staff_roles WHERE guild_id=?', (m.guild.id,))
         ids = [r[0] for r in await cur.fetchall()]
     return any(r.id in ids for r in m.roles)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           📊 HELPERS STATS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def format_time(seconds):
+    """Convertit les secondes en format lisible"""
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    elif seconds < 3600:
+        return f"{int(seconds // 60)}m {int(seconds % 60)}s"
+    else:
+        h = int(seconds // 3600)
+        m = int((seconds % 3600) // 60)
+        return f"{h}h {m}m"
+
+def make_bar(value, max_value, length=10):
+    """Crée une barre de progression"""
+    if max_value == 0:
+        filled = 0
+    else:
+        filled = int((value / max_value) * length)
+    empty = length - filled
+    return "█" * filled + "░" * empty
+
+def make_graph(data, height=5):
+    """Crée un graphique ASCII des 7 derniers jours"""
+    if not data or max(data) == 0:
+        return "```\nPas de données\n```"
+    
+    max_val = max(data)
+    days = ['L', 'M', 'M', 'J', 'V', 'S', 'D']
+    today_idx = datetime.utcnow().weekday()
+    
+    # Ajuster les labels pour les 7 derniers jours
+    labels = []
+    for i in range(7):
+        day_idx = (today_idx - 6 + i) % 7
+        labels.append(days[day_idx])
+    
+    graph = "```\n"
+    
+    # Dessiner le graphique
+    for row in range(height, 0, -1):
+        threshold = (row / height) * max_val
+        line = ""
+        for val in data:
+            if val >= threshold:
+                line += " ▓▓"
+            else:
+                line += " ░░"
+        graph += f"{line}\n"
+    
+    # Ligne de base
+    graph += " ──" * len(data) + "\n"
+    
+    # Labels des jours
+    graph += " " + "  ".join(labels) + "\n"
+    graph += "```"
+    
+    return graph
+
+def get_activity_level(msg_week, voice_week):
+    """Détermine le niveau d'activité"""
+    score = msg_week + (voice_week / 60)  # 1 minute de vocal = 1 message
+    
+    if score >= 500:
+        return "🔥 Hyperactif", "Vous êtes partout !", C.RED
+    elif score >= 200:
+        return "⭐ Très actif", "Excellente participation !", C.GOLD
+    elif score >= 100:
+        return "✨ Actif", "Bonne activité !", C.GREEN
+    elif score >= 30:
+        return "📊 Modéré", "Activité correcte", C.BLUE
+    elif score >= 10:
+        return "💤 Peu actif", "Vous pouvez faire mieux !", C.ORANGE
+    else:
+        return "👻 Fantôme", "On vous voit peu...", C.PURPLE
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🏠 MAIN PANEL
@@ -245,12 +439,10 @@ Ban  : {f'{c["warns_ban"]} warns' if c['warns_ban'] else 'Off'}
     async def k(self, i, b): await i.response.send_modal(KickM(self.g, self.u))
     @discord.ui.button(label="Ban", emoji="🔨", style=discord.ButtonStyle.danger, row=0)
     async def ba(self, i, b): await i.response.send_modal(BanM(self.g, self.u))
-    
     @discord.ui.button(label="Sanctions Auto", emoji="⚖️", style=discord.ButtonStyle.primary, row=1)
     async def sa(self, i, b): await i.response.send_modal(SanctM(self.g))
     @discord.ui.button(label="Rôle Mute", emoji="🎭", style=discord.ButtonStyle.primary, row=1)
     async def rm(self, i, b): await i.response.send_modal(MuteRM(self.g))
-    
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
@@ -401,8 +593,6 @@ class ProtPanel(View):
 🖼️ Anti-Images   : {s(c['anti_image'])}
 🎣 Anti-Phishing : {s(c['anti_phishing'])}
 📨 Anti-Spam     : {s(c['anti_spam'])}
-
-Cliquez pour toggle
 ```"""
         return e
     
@@ -503,8 +693,6 @@ class WelcPanel(View):
 État  : {'✅' if c['welcome_on'] else '❌'}
 Salon : {ch.name if ch else '❌'}
 Message : {c['welcome_msg'][:50]}...
-
-Variables: {{member}} {{server}} {{count}}
 ```"""
         return e
     
@@ -537,10 +725,10 @@ class WelcMsgM(Modal, title="✏️ Message"):
     def __init__(self, g): super().__init__(); self.g = g
     async def on_submit(self, i):
         await scfg(self.g.id, welcome_msg=self.msg.value)
-        await i.response.send_message("✅ Message configuré", ephemeral=True)
+        await i.response.send_message("✅", ephemeral=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                           📊 ACTIVITÉ
+#                           📊 ACTIVITÉ (ADMIN)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class ActPanel(View):
@@ -562,34 +750,22 @@ class ActPanel(View):
         for m in self.g.members:
             if m.bot: continue
             a = act.get(m.id)
-            # Pas d'activité enregistrée = inactif
             if not a:
-                self.i7.append(m)
-                self.i30.append(m)
+                self.i7.append(m); self.i30.append(m)
                 continue
-            # Dernière activité = max entre message et vocal
             lm = datetime.fromisoformat(a['last_message']) if a['last_message'] else None
             lv = datetime.fromisoformat(a['last_voice']) if a['last_voice'] else None
             last = max(filter(None, [lm, lv]), default=None)
-            # Inactif si aucune activité ou activité trop ancienne
             if not last or last < d30:
-                self.i30.append(m)
-                self.i7.append(m)
+                self.i30.append(m); self.i7.append(m)
             elif last < d7:
                 self.i7.append(m)
         
-        e = discord.Embed(title="📊 Activité", color=C.ORANGE)
+        e = discord.Embed(title="📊 Activité (Admin)", color=C.ORANGE)
         e.description = f"""```yml
-📈 Statistiques
-──────────────────────────────────────────
 👥 Membres : {self.g.member_count}
-👤 Humains : {len([m for m in self.g.members if not m.bot])}
-──────────────────────────────────────────
-
-⚠️ Inactifs 7 jours  : {len(self.i7)}
-🔴 Inactifs 30 jours : {len(self.i30)}
-──────────────────────────────────────────
-Inactif = aucun message ET aucun vocal
+⚠️ Inactifs 7j  : {len(self.i7)}
+🔴 Inactifs 30j : {len(self.i30)}
 ```"""
         return e
     
@@ -597,17 +773,14 @@ Inactif = aucun message ET aucun vocal
     async def b7(self, i, b):
         v = InactList(self.u, self.g, 7, self.i7)
         await i.response.edit_message(embed=v.embed(), view=v)
-    
     @discord.ui.button(label="Inactifs 30j", emoji="🔴", style=discord.ButtonStyle.danger)
     async def b30(self, i, b):
         v = InactList(self.u, self.g, 30, self.i30)
         await i.response.edit_message(embed=v.embed(), view=v)
-    
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
-
 
 class InactList(View):
     def __init__(self, u, g, d, m):
@@ -616,35 +789,30 @@ class InactList(View):
     
     def embed(self):
         lst = "\n".join([f"• {x.name}" for x in self.m[:15]])
-        if len(self.m) > 15: lst += f"\n... +{len(self.m)-15} autres"
+        if len(self.m) > 15: lst += f"\n... +{len(self.m)-15}"
         e = discord.Embed(title=f"{'⚠️' if self.d==7 else '🔴'} Inactifs {self.d}j", color=C.ORANGE if self.d==7 else C.RED)
-        e.description = f"**{len(self.m)} membres**\nAucun message ni vocal depuis {self.d} jours\n```\n{lst or 'Aucun 🎉'}\n```"
+        e.description = f"**{len(self.m)} membres**\n```\n{lst or 'Aucun 🎉'}\n```"
         return e
     
     @discord.ui.button(label="📢 Mentionner", emoji="📢", style=discord.ButtonStyle.primary)
     async def ment(self, i, b):
-        if not self.m: return await i.response.send_message("❌ Aucun", ephemeral=True)
-        txt = " ".join([x.mention for x in self.m[:40]])
-        await i.response.send_message(f"📢 **Inactifs {self.d}j:**\n{txt}")
-    
+        if not self.m: return await i.response.send_message("❌", ephemeral=True)
+        await i.response.send_message(f"📢 **Inactifs {self.d}j:**\n{' '.join([x.mention for x in self.m[:40]])}")
     @discord.ui.button(label="👢 Expulser", emoji="👢", style=discord.ButtonStyle.danger)
     async def kick(self, i, b):
-        if not self.m: return await i.response.send_message("❌ Aucun", ephemeral=True)
+        if not self.m: return await i.response.send_message("❌", ephemeral=True)
         v = ConfKick(self.u, self.g, self.m, self.d)
         await i.response.edit_message(embed=discord.Embed(title="⚠️ Confirmer?", description=f"Expulser **{len(self.m)}** membres?", color=C.RED), view=v)
-    
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
         await i.response.defer()
         v = ActPanel(self.u, self.g)
         await i.edit_original_response(embed=await v.embed(), view=v)
 
-
 class ConfKick(View):
     def __init__(self, u, g, m, d):
         super().__init__(timeout=60)
         self.u, self.g, self.m, self.d = u, g, m, d
-    
     @discord.ui.button(label="✅ Confirmer", style=discord.ButtonStyle.danger)
     async def yes(self, i, b):
         await i.response.defer()
@@ -652,8 +820,7 @@ class ConfKick(View):
         for m in self.m:
             try: await m.kick(reason=f"Inactif {self.d}j"); ok += 1
             except: fail += 1
-        await i.edit_original_response(embed=discord.Embed(title="👢 Terminé", description=f"✅ {ok}\n❌ {fail}", color=C.GREEN), view=None)
-    
+        await i.edit_original_response(embed=discord.Embed(title="👢 Terminé", description=f"✅ {ok} | ❌ {fail}", color=C.GREEN), view=None)
     @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.secondary)
     async def no(self, i, b):
         await i.response.defer()
@@ -676,17 +843,12 @@ class TicketPanel(View):
         qs = json.loads(tc['questions']) if tc['questions'] else []
         e = discord.Embed(title="🎫 Tickets", color=C.PURPLE)
         e.description = f"""```yml
-⚙️ Configuration
-──────────────────────────────────────────
 📁 Catégorie  : {cat.name if cat else '❌'}
 👮 Rôle Staff : {rl.name if rl else '❌'}
-📝 Format nom : {tc['ticket_name']}
-──────────────────────────────────────────
+📝 Format     : {tc['ticket_name']}
 
 ❓ Questions ({len(qs)}/5)
-──────────────────────────────────────────
 {chr(10).join([f'{i+1}. {q}' for i,q in enumerate(qs)]) or 'Aucune'}
-──────────────────────────────────────────
 ```"""
         return e
     
@@ -696,14 +858,12 @@ class TicketPanel(View):
     async def rl(self, i, b): await i.response.send_modal(TkRoleM(self.g))
     @discord.ui.button(label="Format Nom", emoji="📝", style=discord.ButtonStyle.primary, row=0)
     async def nm(self, i, b): await i.response.send_modal(TkNameM(self.g))
-    
     @discord.ui.button(label="+ Question", emoji="❓", style=discord.ButtonStyle.secondary, row=1)
     async def aq(self, i, b): await i.response.send_modal(TkAddQM(self.g))
     @discord.ui.button(label="Clear Questions", emoji="🗑️", style=discord.ButtonStyle.danger, row=1)
     async def cq(self, i, b):
         await stcfg(self.g.id, questions='[]')
         await i.response.edit_message(embed=await self.embed(), view=self)
-    
     @discord.ui.button(label="📤 Déployer", emoji="📤", style=discord.ButtonStyle.success, row=2)
     async def dep(self, i, b): await i.response.send_modal(TkDeployM(self.g))
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
@@ -741,7 +901,7 @@ class TkNameM(Modal, title="📝 Format"):
         await i.response.send_message(f"✅ {self.nm.value}", ephemeral=True)
 
 class TkAddQM(Modal, title="❓ Question"):
-    q = TextInput(label="Question", placeholder="Pourquoi créez-vous ce ticket?", max_length=100)
+    q = TextInput(label="Question", max_length=100)
     def __init__(self, g): super().__init__(); self.g = g
     async def on_submit(self, i):
         tc = await gtcfg(self.g.id)
@@ -749,7 +909,7 @@ class TkAddQM(Modal, title="❓ Question"):
         if len(qs) >= 5: return await i.response.send_message("❌ Max 5", ephemeral=True)
         qs.append(self.q.value)
         await stcfg(self.g.id, questions=json.dumps(qs))
-        await i.response.send_message("✅ Ajoutée", ephemeral=True)
+        await i.response.send_message("✅", ephemeral=True)
 
 class TkDeployM(Modal, title="📤 Déployer"):
     cid = TextInput(label="ID salon", max_length=20)
@@ -760,19 +920,17 @@ class TkDeployM(Modal, title="📤 Déployer"):
             if not ch: return await i.response.send_message("❌", ephemeral=True)
             tc = await gtcfg(self.g.id)
             if not tc['category_id'] or not tc['staff_role_id']:
-                return await i.response.send_message("❌ Config catégorie et rôle d'abord", ephemeral=True)
+                return await i.response.send_message("❌ Config d'abord", ephemeral=True)
             e = discord.Embed(title=tc['panel_title'], description=tc['panel_description'], color=C.PURPLE)
             if self.g.icon: e.set_thumbnail(url=self.g.icon.url)
             await ch.send(embed=e, view=TkBtn(self.g.id))
             await i.response.send_message(f"✅ #{ch.name}", ephemeral=True)
         except: await i.response.send_message("❌", ephemeral=True)
 
-
 class TkBtn(View):
     def __init__(self, gid):
         super().__init__(timeout=None)
         self.gid = gid
-    
     @discord.ui.button(label="📩 Créer un ticket", emoji="📩", style=discord.ButtonStyle.success, custom_id="tk_create")
     async def cr(self, i, b):
         tc = await gtcfg(i.guild.id)
@@ -782,31 +940,25 @@ class TkBtn(View):
         else:
             await make_ticket(i, {})
 
-
 class TkFormM(Modal, title="📩 Ticket"):
     def __init__(self, g, qs):
         super().__init__()
         self.g, self.qs = g, qs
         for idx, q in enumerate(qs[:5]):
             self.add_item(TextInput(label=q[:45], style=discord.TextStyle.paragraph, max_length=500, custom_id=f"q{idx}"))
-    
     async def on_submit(self, i):
         ans = {self.qs[idx]: self.children[idx].value for idx in range(len(self.qs[:5]))}
         await make_ticket(i, ans)
 
-
 async def make_ticket(i, ans):
     tc = await gtcfg(i.guild.id)
     cat, rl = i.guild.get_channel(tc['category_id']), i.guild.get_role(tc['staff_role_id'])
-    if not cat or not rl: return await i.response.send_message("❌ Non configuré", ephemeral=True)
-    
+    if not cat or not rl: return await i.response.send_message("❌", ephemeral=True)
     async with aiosqlite.connect(DB) as db:
         cur = await db.execute('SELECT COUNT(*) FROM tickets WHERE guild_id=?', (i.guild.id,))
         n = (await cur.fetchone())[0] + 1
-    
     nm = tc['ticket_name'].format(user=i.user.name.lower()[:10], number=n)
     nm = re.sub(r'[^a-z0-9-]', '', nm)[:100]
-    
     ow = {
         i.guild.default_role: discord.PermissionOverwrite(view_channel=False),
         i.user: discord.PermissionOverwrite(view_channel=True, send_messages=True),
@@ -814,35 +966,28 @@ async def make_ticket(i, ans):
         i.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True)
     }
     ch = await cat.create_text_channel(name=nm, overwrites=ow)
-    
     async with aiosqlite.connect(DB) as db:
         await db.execute('INSERT INTO tickets (guild_id,channel_id,user_id,answers) VALUES (?,?,?,?)', (i.guild.id,ch.id,i.user.id,json.dumps(ans)))
         await db.commit()
-    
     e = discord.Embed(title="🎫 Ticket", description=f"👤 **{i.user}**", color=C.GREEN)
     if ans:
         for q, a in ans.items(): e.add_field(name=f"❓ {q}", value=f"```{a[:200]}```", inline=False)
-    
     await ch.send(content=f"{i.user.mention} {rl.mention}", embed=e, view=TkActs(i.guild.id, ch.id, i.user.id))
     await i.response.send_message(f"✅ {ch.mention}", ephemeral=True)
-
 
 class TkActs(View):
     def __init__(self, gid, cid, uid):
         super().__init__(timeout=None)
         self.gid, self.cid, self.uid = gid, cid, uid
-    
     @discord.ui.button(label="🙋 Prendre", emoji="🙋", style=discord.ButtonStyle.success, custom_id="tk_claim")
     async def cl(self, i, b):
         tc = await gtcfg(i.guild.id)
         rl = i.guild.get_role(tc['staff_role_id'])
         if not rl or (rl not in i.user.roles and not i.user.guild_permissions.administrator):
             return await i.response.send_message("❌", ephemeral=True)
-        
         async with aiosqlite.connect(DB) as db:
             await db.execute('UPDATE tickets SET claimed_by=? WHERE channel_id=?', (i.user.id, i.channel.id))
             await db.commit()
-        
         u = i.guild.get_member(self.uid)
         ow = {
             i.guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -854,11 +999,9 @@ class TkActs(View):
             if r.position > i.user.top_role.position and not r.is_bot_managed():
                 ow[r] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
         await i.channel.edit(overwrites=ow)
-        
         b.disabled, b.label, b.style = True, f"Pris par {i.user.name}", discord.ButtonStyle.secondary
         await i.response.edit_message(view=self)
         await i.channel.send(f"🙋 **{i.user}** a pris ce ticket")
-    
     @discord.ui.button(label="🔒 Fermer", emoji="🔒", style=discord.ButtonStyle.danger, custom_id="tk_close")
     async def close(self, i, b):
         tc = await gtcfg(i.guild.id)
@@ -883,12 +1026,15 @@ async def on_ready():
     bot.add_view(TkActs(0, 0, 0))
     await bot.tree.sync()
     print(f"✅ {bot.user.name} connecté")
-    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="/configure"))
+    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="/stats"))
 
 @bot.event
 async def on_message(msg):
     if msg.author.bot or not msg.guild: return
-    await track(msg.guild.id, msg.author.id, msg=True)
+    
+    # 🆕 Tracker le message
+    await track_message(msg.guild.id, msg.author.id)
+    
     if await is_immune(msg.author): return
     c = await gcfg(msg.guild.id)
     if c['anti_phishing']:
@@ -903,10 +1049,20 @@ async def on_message(msg):
                 await msg.delete(); return
 
 @bot.event
-async def on_voice_state_update(m, b, a):
-    if m.bot: return
-    if a.channel and not b.channel:
-        await track(m.guild.id, m.id, voice=True)
+async def on_voice_state_update(member, before, after):
+    if member.bot: return
+    
+    # Rejoint un vocal
+    if after.channel and not before.channel:
+        await track_voice_start(member.guild.id, member.id)
+    
+    # Quitte un vocal
+    elif before.channel and not after.channel:
+        await track_voice_end(member.guild.id, member.id)
+    
+    # Change de salon
+    elif before.channel and after.channel and before.channel != after.channel:
+        # On garde la session active, pas besoin de reset
 
 @bot.event
 async def on_member_join(m):
@@ -920,21 +1076,86 @@ async def on_member_join(m):
             await ch.send(embed=e)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                        🎮 COMMANDE
+#                        🎮 COMMANDES
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="configure", description="⚙️ Panneau de configuration")
+@bot.tree.command(name="configure", description="⚙️ Panneau de configuration (Admin)")
 async def cfg_cmd(i: discord.Interaction):
-    # DEFER IMMÉDIAT pour éviter timeout
     await i.response.defer(ephemeral=True)
-    
-    # Vérif permissions
     if not i.user.guild_permissions.administrator and i.user.id != i.guild.owner_id:
         if not await is_staff(i.user):
             return await i.followup.send("❌ Accès refusé")
-    
     v = MainPanel(i.user, i.guild)
     await i.followup.send(embed=v.embed(), view=v)
+
+@bot.tree.command(name="stats", description="📊 Voir vos statistiques d'activité")
+@app_commands.describe(membre="Membre dont vous voulez voir les stats (optionnel)")
+async def stats_cmd(i: discord.Interaction, membre: discord.Member = None):
+    await i.response.defer(ephemeral=True)
+    
+    target = membre or i.user
+    stats = await get_user_stats(i.guild.id, target.id)
+    
+    # Niveau d'activité
+    level, level_desc, level_color = get_activity_level(stats['msg_week'], stats['voice_week'])
+    
+    # Créer l'embed principal
+    e = discord.Embed(color=level_color)
+    e.set_author(name=f"📊 Statistiques de {target.display_name}", icon_url=target.display_avatar.url)
+    e.set_thumbnail(url=target.display_avatar.url)
+    
+    # Niveau d'activité
+    e.add_field(
+        name="🏆 Niveau d'activité",
+        value=f"**{level}**\n*{level_desc}*",
+        inline=False
+    )
+    
+    # Messages
+    max_msg = max(stats['msg_today'], stats['msg_week'], stats['msg_month'], 1)
+    msg_section = f"""```yml
+📅 Aujourd'hui : {stats['msg_today']:,} messages
+   {make_bar(stats['msg_today'], max_msg, 15)}
+
+📆 Cette semaine : {stats['msg_week']:,} messages
+   {make_bar(stats['msg_week'], max_msg, 15)}
+
+📅 Ce mois : {stats['msg_month']:,} messages
+   {make_bar(stats['msg_month'], max_msg, 15)}
+
+📊 Total : {stats['msg_total']:,} messages
+```"""
+    e.add_field(name="💬 Messages", value=msg_section, inline=False)
+    
+    # Temps vocal
+    max_voice = max(stats['voice_today'], stats['voice_week'], stats['voice_month'], 1)
+    voice_section = f"""```yml
+📅 Aujourd'hui : {format_time(stats['voice_today'])}
+   {make_bar(stats['voice_today'], max_voice, 15)}
+
+📆 Cette semaine : {format_time(stats['voice_week'])}
+   {make_bar(stats['voice_week'], max_voice, 15)}
+
+📅 Ce mois : {format_time(stats['voice_month'])}
+   {make_bar(stats['voice_month'], max_voice, 15)}
+
+📊 Total : {format_time(stats['voice_total'])}
+```"""
+    e.add_field(name="🎙️ Temps en vocal", value=voice_section, inline=False)
+    
+    # Graphique des 7 derniers jours (messages)
+    graph = make_graph(stats['msg_by_day'])
+    e.add_field(name="📈 Messages (7 derniers jours)", value=graph, inline=True)
+    
+    # Graphique des 7 derniers jours (vocal)
+    voice_graph = make_graph([s // 60 for s in stats['voice_by_day']])  # En minutes
+    e.add_field(name="📈 Vocal en minutes (7 derniers jours)", value=voice_graph, inline=True)
+    
+    # Footer
+    e.set_footer(text=f"Statistiques de {i.guild.name}", icon_url=i.guild.icon.url if i.guild.icon else None)
+    e.timestamp = datetime.utcnow()
+    
+    await i.followup.send(embed=e)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 
