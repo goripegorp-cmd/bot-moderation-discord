@@ -817,30 +817,87 @@ class ActPanel(View):
         super().__init__(timeout=900)
         self.u, self.g = u, g
         self.i7, self.i30 = [], []
+        self.total_humans = 0
     
     async def embed(self):
         n = now()
         d7, d30 = n - timedelta(days=7), n - timedelta(days=30)
+        
+        # Récupérer les données d'activité
         async with aiosqlite.connect(DB_PATH) as db:
             db.row_factory = aiosqlite.Row
             cur = await db.execute('SELECT * FROM activity WHERE guild_id=?', (self.g.id,))
             act = {r['user_id']: dict(r) for r in await cur.fetchall()}
+        
         self.i7, self.i30 = [], []
+        self.total_humans = 0
+        
+        # Parcourir TOUS les membres du serveur
         for m in self.g.members:
-            if m.bot: continue
-            a = act.get(m.id)
-            if not a:
-                self.i7.append(m); self.i30.append(m)
+            if m.bot:
                 continue
-            lm = datetime.fromisoformat(a['last_message']).replace(tzinfo=timezone.utc) if a['last_message'] else None
-            lv = datetime.fromisoformat(a['last_voice']).replace(tzinfo=timezone.utc) if a['last_voice'] else None
-            last = max(filter(None, [lm, lv]), default=None)
-            if not last or last < d30:
-                self.i30.append(m); self.i7.append(m)
+            
+            self.total_humans += 1
+            a = act.get(m.id)
+            
+            # Si aucune activité enregistrée = inactif
+            if not a or (not a['last_message'] and not a['last_voice']):
+                self.i7.append(m)
+                self.i30.append(m)
+                continue
+            
+            # Parser les dates d'activité
+            lm = None
+            lv = None
+            
+            if a['last_message']:
+                try:
+                    lm = datetime.fromisoformat(a['last_message'].replace('Z', '+00:00'))
+                    if lm.tzinfo is None:
+                        lm = lm.replace(tzinfo=timezone.utc)
+                except:
+                    lm = None
+            
+            if a['last_voice']:
+                try:
+                    lv = datetime.fromisoformat(a['last_voice'].replace('Z', '+00:00'))
+                    if lv.tzinfo is None:
+                        lv = lv.replace(tzinfo=timezone.utc)
+                except:
+                    lv = None
+            
+            # Dernière activité (message OU vocal)
+            activities = [x for x in [lm, lv] if x is not None]
+            last = max(activities) if activities else None
+            
+            # Vérifier l'inactivité
+            if not last:
+                self.i7.append(m)
+                self.i30.append(m)
+            elif last < d30:
+                self.i7.append(m)
+                self.i30.append(m)
             elif last < d7:
                 self.i7.append(m)
-        e = discord.Embed(title="📊 Activité", color=C.ORANGE)
-        e.description = f"```yml\n👥 Membres: {self.g.member_count}\n⚠️ Inactifs 7j : {len(self.i7)}\n🔴 Inactifs 30j: {len(self.i30)}\n```"
+        
+        e = discord.Embed(title="📊 Gestion de l'Activité", color=C.ORANGE)
+        e.description = f"""```yml
+📈 Statistiques du serveur
+──────────────────────────────────────────
+👥 Total membres   : {self.g.member_count}
+👤 Humains         : {self.total_humans}
+🤖 Bots            : {self.g.member_count - self.total_humans}
+──────────────────────────────────────────
+
+⚠️ Membres inactifs
+──────────────────────────────────────────
+📅 Inactifs 7 jours  : {len(self.i7)} / {self.total_humans}
+📅 Inactifs 30 jours : {len(self.i30)} / {self.total_humans}
+──────────────────────────────────────────
+
+💡 Inactif = aucun message ET aucun vocal
+   depuis la période indiquée
+```"""
         return e
     
     @discord.ui.button(label="Inactifs 7j", emoji="⚠️", style=discord.ButtonStyle.primary, row=0)
@@ -859,25 +916,107 @@ class ActPanel(View):
 class InactList(View):
     def __init__(self, u, g, d, m):
         super().__init__(timeout=900)
-        self.u, self.g, self.d, self.m = u, g, d, m[:100]
+        self.u, self.g, self.d = u, g, d
+        self.all_members = m  # Garder TOUS les membres
+        self.page = 0
+        self.per_page = 20
     
     def embed(self):
-        lst = "\n".join([f"• {x.display_name}" for x in self.m[:20]])
-        if len(self.m) > 20: lst += f"\n... +{len(self.m)-20}"
-        e = discord.Embed(title=f"{'⚠️' if self.d==7 else '🔴'} Inactifs {self.d}j", color=C.ORANGE if self.d==7 else C.RED)
-        e.description = f"**{len(self.m)} membres**\n```\n{lst or '🎉 Aucun'}\n```"
+        total = len(self.all_members)
+        max_pages = max(1, (total + self.per_page - 1) // self.per_page)
+        
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_members = self.all_members[start:end]
+        
+        lst = "\n".join([f"• {x.display_name}" for x in page_members])
+        
+        e = discord.Embed(
+            title=f"{'⚠️' if self.d==7 else '🔴'} Inactifs depuis {self.d} jours",
+            color=C.ORANGE if self.d==7 else C.RED
+        )
+        e.description = f"**{total} membres** inactifs au total\n\n```\n{lst or '🎉 Aucun membre inactif !'}\n```"
+        e.set_footer(text=f"Page {self.page + 1}/{max_pages} • Affichage {start+1}-{min(end, total)} sur {total}")
         return e
     
-    @discord.ui.button(label="📢 Mentionner", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="◀️", style=discord.ButtonStyle.secondary, row=0)
+    async def prev_page(self, i, b):
+        if self.page > 0:
+            self.page -= 1
+        await i.response.edit_message(embed=self.embed(), view=self)
+    
+    @discord.ui.button(label="▶️", style=discord.ButtonStyle.secondary, row=0)
+    async def next_page(self, i, b):
+        max_pages = max(1, (len(self.all_members) + self.per_page - 1) // self.per_page)
+        if self.page < max_pages - 1:
+            self.page += 1
+        await i.response.edit_message(embed=self.embed(), view=self)
+    
+    @discord.ui.button(label="📢 Mentionner", style=discord.ButtonStyle.primary, row=1)
     async def ment(self, i, b):
-        if not self.m: return await i.response.send_message("❌", ephemeral=True)
-        await i.response.send_message(f"📢 {' '.join([x.mention for x in self.m[:40]])}")
-    @discord.ui.button(label="👢 Expulser", style=discord.ButtonStyle.danger)
+        if not self.all_members:
+            return await i.response.send_message("❌ Aucun membre à mentionner", ephemeral=True)
+        
+        # Mentionner par lots de 40 (limite Discord)
+        members = self.all_members[:40]
+        mentions = ' '.join([x.mention for x in members])
+        
+        await i.response.send_message(f"📢 **Membres inactifs ({self.d}j):**\n{mentions}")
+        
+        # Si plus de 40 membres, envoyer des messages supplémentaires
+        remaining = self.all_members[40:]
+        for chunk_start in range(0, len(remaining), 40):
+            chunk = remaining[chunk_start:chunk_start + 40]
+            mentions = ' '.join([x.mention for x in chunk])
+            await i.channel.send(mentions)
+    
+    @discord.ui.button(label="📋 Liste complète", style=discord.ButtonStyle.secondary, row=1)
+    async def full_list(self, i, b):
+        if not self.all_members:
+            return await i.response.send_message("❌ Aucun membre", ephemeral=True)
+        
+        # Créer une liste texte complète
+        lines = [f"📋 **Liste complète des {len(self.all_members)} inactifs ({self.d}j):**\n"]
+        for idx, m in enumerate(self.all_members, 1):
+            lines.append(f"{idx}. {m.display_name} ({m.name})")
+        
+        # Envoyer en plusieurs messages si nécessaire
+        content = "\n".join(lines)
+        
+        if len(content) <= 2000:
+            await i.response.send_message(content, ephemeral=True)
+        else:
+            # Découper en chunks
+            chunks = []
+            current = ""
+            for line in lines:
+                if len(current) + len(line) + 1 > 1900:
+                    chunks.append(current)
+                    current = line
+                else:
+                    current += "\n" + line if current else line
+            if current:
+                chunks.append(current)
+            
+            await i.response.send_message(chunks[0], ephemeral=True)
+            for chunk in chunks[1:]:
+                await i.followup.send(chunk, ephemeral=True)
+    
+    @discord.ui.button(label="👢 Expulser TOUS", style=discord.ButtonStyle.danger, row=2)
     async def kick(self, i, b):
-        if not self.m: return await i.response.send_message("❌", ephemeral=True)
-        v = ConfKick(self.u, self.g, self.m, self.d)
-        await i.response.edit_message(embed=discord.Embed(title="⚠️ Confirmer?", description=f"Expulser **{len(self.m)}** membres?", color=C.RED), view=v)
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+        if not self.all_members:
+            return await i.response.send_message("❌ Aucun membre", ephemeral=True)
+        v = ConfKick(self.u, self.g, self.all_members, self.d)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="⚠️ ATTENTION - Confirmation requise",
+                description=f"Vous êtes sur le point d'expulser **{len(self.all_members)}** membres inactifs depuis {self.d} jours.\n\n⚠️ **Cette action est IRRÉVERSIBLE !**\n\nÊtes-vous sûr de vouloir continuer ?",
+                color=C.RED
+            ),
+            view=v
+        )
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
         await i.response.defer()
         v = ActPanel(self.u, self.g)
@@ -886,15 +1025,46 @@ class InactList(View):
 class ConfKick(View):
     def __init__(self, u, g, m, d):
         super().__init__(timeout=60)
-        self.u, self.g, self.m, self.d = u, g, m, d
-    @discord.ui.button(label="✅ Confirmer", style=discord.ButtonStyle.danger)
+        self.u, self.g, self.all_members, self.d = u, g, m, d
+    
+    @discord.ui.button(label="✅ OUI, Expulser tout le monde", style=discord.ButtonStyle.danger)
     async def yes(self, i, b):
         await i.response.defer()
+        
+        total = len(self.all_members)
         ok, fail = 0, 0
-        for m in self.m:
-            try: await m.kick(reason=f"Inactif {self.d}j"); ok += 1
-            except: fail += 1
-        await i.edit_original_response(embed=discord.Embed(title="👢 Terminé", description=f"✅ {ok} | ❌ {fail}", color=C.GREEN), view=None)
+        
+        # Envoyer un message de progression
+        progress_embed = discord.Embed(
+            title="👢 Expulsion en cours...",
+            description=f"0/{total} traités",
+            color=C.ORANGE
+        )
+        await i.edit_original_response(embed=progress_embed, view=None)
+        
+        for idx, m in enumerate(self.all_members):
+            try:
+                await m.kick(reason=f"Inactif depuis {self.d} jours")
+                ok += 1
+            except:
+                fail += 1
+            
+            # Mettre à jour la progression tous les 10 membres
+            if (idx + 1) % 10 == 0:
+                progress_embed.description = f"{idx + 1}/{total} traités\n✅ {ok} expulsés | ❌ {fail} échoués"
+                try:
+                    await i.edit_original_response(embed=progress_embed)
+                except:
+                    pass
+        
+        # Résultat final
+        final_embed = discord.Embed(
+            title="👢 Expulsion terminée",
+            description=f"**Résultat:**\n✅ Expulsés: {ok}\n❌ Échoués: {fail}\n\nTotal traité: {total}",
+            color=C.GREEN if fail == 0 else C.ORANGE
+        )
+        await i.edit_original_response(embed=final_embed, view=None)
+    
     @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.secondary)
     async def no(self, i, b):
         await i.response.defer()
@@ -1186,6 +1356,15 @@ async def on_ready():
     await init_db()
     bot.add_view(TkBtn(0))
     bot.add_view(TkActs(0, 0, 0))
+    
+    # Charger tous les membres de tous les serveurs en cache
+    for guild in bot.guilds:
+        try:
+            await guild.chunk()  # Force le chargement de TOUS les membres
+            print(f"📥 {guild.name}: {guild.member_count} membres chargés")
+        except Exception as e:
+            print(f"⚠️ Erreur chargement {guild.name}: {e}")
+    
     await bot.tree.sync()
     print(f"✅ {bot.user.name} connecté")
     await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="/stats"))
