@@ -3087,14 +3087,16 @@ class TradeCreateView(View):
             if not msg.attachments:
                 return await i.followup.send("❌ Aucune image détectée", ephemeral=True)
             
-            # Sauvegarder l'URL de l'image AVANT de supprimer
-            image_url = msg.attachments[0].url
+            # Télécharger l'image AVANT de supprimer le message
+            attachment = msg.attachments[0]
+            image_data = await attachment.read()
+            image_filename = attachment.filename
             
             # Supprimer le message de preuve
             try:
                 await msg.delete()
-            except:
-                pass
+            except Exception as ex:
+                print(f"Impossible de supprimer le message: {ex}")
             
         except asyncio.TimeoutError:
             return await i.followup.send("❌ Temps écoulé! Aucune preuve fournie (3 minutes max).", ephemeral=True)
@@ -3106,35 +3108,37 @@ class TradeCreateView(View):
         e = discord.Embed(color=C.GOLD, timestamp=now())
         e.set_author(name="🔄 OFFRE D'ÉCHANGE", icon_url=self.guild.icon.url if self.guild.icon else None)
         
-        # Section principale
-        e.add_field(name="━━━━━━━━━━━━━━━━━━━━", value="\u200b", inline=False)
+        # Section principale avec emojis visibles (pas de bloc de code!)
+        e.add_field(name="\u200b", value="**━━━━━━━━━━━━━━━━━━━━**", inline=False)
         
         e.add_field(
             name="📤 JE DONNE",
-            value=f"```\n{donne_items}\n```",
+            value=donne_items,
             inline=True
         )
         e.add_field(
             name="📥 JE VEUX",
-            value=f"```\n{veux_items}\n```",
+            value=veux_items,
             inline=True
         )
         
-        e.add_field(name="━━━━━━━━━━━━━━━━━━━━", value="\u200b", inline=False)
+        e.add_field(name="\u200b", value="**━━━━━━━━━━━━━━━━━━━━**", inline=False)
         
         # Infos du trader
         e.add_field(name="👤 Trader", value=f"{self.user.mention}", inline=True)
         e.add_field(name="🆔 ID", value=f"`{self.user.id}`", inline=True)
         e.add_field(name="📅 Date", value=f"<t:{int(now().timestamp())}:F>", inline=True)
         
-        # Image de preuve
-        e.set_image(url=image_url)
+        # Thumbnail du trader
         e.set_thumbnail(url=self.user.display_avatar.url)
-        
         e.set_footer(text="✅ Intéressé? Réagissez! | 💬 Contactez le trader en MP")
         
-        # Envoyer le trade
-        trade_msg = await self.trade_ch.send(embed=e)
+        # Créer le fichier image pour l'embed
+        image_file = discord.File(io.BytesIO(image_data), filename=image_filename)
+        e.set_image(url=f"attachment://{image_filename}")
+        
+        # Envoyer le trade avec l'image
+        trade_msg = await self.trade_ch.send(embed=e, file=image_file)
         
         # Ajouter réactions
         await trade_msg.add_reaction("✅")
