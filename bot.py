@@ -2048,11 +2048,39 @@ async def on_ready():
                             bot.add_view(TicketCreateView(pid))
                     except: pass
     except: pass
-    await bot.tree.sync()
+    
+    # Sync les commandes pour chaque serveur (plus rapide que global)
+    try:
+        for guild in bot.guilds:
+            await bot.tree.sync(guild=guild)
+            print(f"  ✅ Commandes sync pour: {guild.name}")
+        # Aussi sync global
+        synced = await bot.tree.sync()
+        print(f"✅ {len(synced)} commandes synchronisées globalement")
+    except Exception as ex:
+        print(f"❌ Erreur sync: {ex}")
+    
     # Lancer la tâche d'inactivité
     if not check_realsy_inactivity.is_running():
         check_realsy_inactivity.start()
-    print(f"✅ {bot.user.name} v12.3 prêt!")
+    
+    print(f"✅ {bot.user.name} v13 prêt!")
+    print(f"📋 Commandes disponibles: configure, warn, unwarn, mute, unmute, infractions, rellseas, suggestion")
+
+@bot.tree.command(name="sync", description="🔄 Synchroniser les commandes (Admin)")
+async def sync_cmd(i: discord.Interaction):
+    if not i.user.guild_permissions.administrator:
+        return await i.response.send_message("❌ Admin requis", ephemeral=True)
+    
+    await i.response.defer(ephemeral=True)
+    try:
+        # Sync pour ce serveur spécifiquement
+        await bot.tree.sync(guild=i.guild)
+        # Et global
+        synced = await bot.tree.sync()
+        await i.followup.send(f"✅ {len(synced)} commandes synchronisées!\n\n**Commandes disponibles:**\n`/configure` `/warn` `/unwarn` `/mute` `/unmute` `/infractions` `/rellseas` `/suggestion`", ephemeral=True)
+    except Exception as ex:
+        await i.followup.send(f"❌ Erreur: {ex}", ephemeral=True)
 
 @bot.event
 async def on_member_remove(m):
@@ -2808,5 +2836,5 @@ async def on_voice_state_update(member, before, after):
         await update_realsy_activity(member.guild.id, member.id)
 
 if __name__ == "__main__":
-    print("🚀 Bot v12.3 - Démarrage...")
+    print("🚀 Bot v13 - Démarrage...")
     bot.run(TOKEN)
