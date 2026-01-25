@@ -1,6 +1,6 @@
 # ╔═══════════════════════════════════════════════════════════════════════════════╗
-# ║                        🌟 BOT PREMIUM v9.2 🌟                                 ║
-# ║     Protection Configurable + Tickets + Network                               ║
+# ║                        🌟 BOT PREMIUM v9.3 🌟                                 ║
+# ║     Protection Épurée + Tickets + Network                                     ║
 # ╚═══════════════════════════════════════════════════════════════════════════════╝
 
 try:
@@ -20,22 +20,16 @@ import os
 import re
 import json
 import asyncio
-import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 
 load_dotenv()
 TOKEN = os.getenv('BOT_TOKEN')
-OWNER_ID = int(os.getenv('OWNER_ID', '0'))
-
 DB_PATH = os.getenv('DB_PATH', '/data/database.db')
-if not os.path.exists('/data'):
-    DB_PATH = 'database.db'
+if not os.path.exists('/data'): DB_PATH = 'database.db'
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
-
-voice_sessions = {}
 spam_tracker = {}
 
 class C:
@@ -59,36 +53,49 @@ async def init_db():
                 log_channel INTEGER, mod_log_channel INTEGER, ticket_log_channel INTEGER, welcome_channel INTEGER,
                 warns_kick INTEGER DEFAULT 0, warns_ban INTEGER DEFAULT 0,
                 -- Protection ON/OFF
-                anti_link INTEGER DEFAULT 0, anti_invite INTEGER DEFAULT 0, anti_image INTEGER DEFAULT 0,
-                anti_phishing INTEGER DEFAULT 1, anti_scam INTEGER DEFAULT 1, anti_spam INTEGER DEFAULT 0,
-                anti_mention INTEGER DEFAULT 0, anti_caps INTEGER DEFAULT 0, anti_newaccount INTEGER DEFAULT 0,
+                anti_link INTEGER DEFAULT 0,
+                anti_invite INTEGER DEFAULT 0,
+                anti_image INTEGER DEFAULT 0,
+                anti_phishing INTEGER DEFAULT 1,
+                anti_scam INTEGER DEFAULT 1,
+                anti_spam INTEGER DEFAULT 0,
+                anti_mention INTEGER DEFAULT 0,
+                anti_caps INTEGER DEFAULT 0,
+                anti_newaccount INTEGER DEFAULT 0,
                 -- Config Anti-Liens
-                link_action TEXT DEFAULT 'delete', link_timeout INTEGER DEFAULT 5, link_whitelist TEXT DEFAULT 'youtube.com,twitter.com,discord.com',
-                -- Config Anti-Invite
-                invite_action TEXT DEFAULT 'delete', invite_timeout INTEGER DEFAULT 5,
-                -- Config Anti-Image
-                image_action TEXT DEFAULT 'delete',
+                link_whitelist TEXT DEFAULT 'youtube.com,twitter.com,discord.com,twitch.tv,instagram.com',
+                -- Config Anti-Images (formats autorisés)
+                image_allowed TEXT DEFAULT '',
                 -- Config Anti-Phishing
-                phishing_action TEXT DEFAULT 'ban', phishing_timeout INTEGER DEFAULT 60,
+                phishing_action TEXT DEFAULT 'ban',
                 -- Config Anti-Scam
-                scam_action TEXT DEFAULT 'timeout', scam_timeout INTEGER DEFAULT 30,
+                scam_action TEXT DEFAULT 'mute',
+                scam_duration INTEGER DEFAULT 60,
                 -- Config Anti-Spam
-                spam_max_msg INTEGER DEFAULT 5, spam_interval INTEGER DEFAULT 5, spam_action TEXT DEFAULT 'timeout', spam_timeout INTEGER DEFAULT 5,
+                spam_max_msg INTEGER DEFAULT 5,
+                spam_interval INTEGER DEFAULT 5,
+                spam_action TEXT DEFAULT 'mute',
+                spam_duration INTEGER DEFAULT 10,
                 -- Config Anti-Mention
-                mention_max INTEGER DEFAULT 5, mention_action TEXT DEFAULT 'timeout', mention_timeout INTEGER DEFAULT 10,
+                mention_max INTEGER DEFAULT 5,
+                mention_action TEXT DEFAULT 'mute',
+                mention_duration INTEGER DEFAULT 10,
                 -- Config Anti-Caps
-                caps_percent INTEGER DEFAULT 70, caps_min_len INTEGER DEFAULT 10, caps_action TEXT DEFAULT 'delete',
+                caps_percent INTEGER DEFAULT 70,
+                caps_min_len INTEGER DEFAULT 10,
+                caps_action TEXT DEFAULT 'delete',
                 -- Config Anti-NewAccount
-                newaccount_days INTEGER DEFAULT 7, newaccount_action TEXT DEFAULT 'kick',
+                newaccount_value INTEGER DEFAULT 7,
+                newaccount_unit TEXT DEFAULT 'jours',
                 -- Welcome
-                welcome_on INTEGER DEFAULT 0, welcome_msg TEXT DEFAULT 'Bienvenue {member} !'
+                welcome_on INTEGER DEFAULT 0,
+                welcome_msg TEXT DEFAULT 'Bienvenue {member} !'
             );
             CREATE TABLE IF NOT EXISTS immune_roles (guild_id INTEGER, role_id INTEGER, PRIMARY KEY(guild_id,role_id));
             CREATE TABLE IF NOT EXISTS ticket_config (guild_id INTEGER PRIMARY KEY, category_id INTEGER, staff_role_id INTEGER, panel_title TEXT DEFAULT '🎫 Support', panel_description TEXT DEFAULT 'Cliquez pour créer un ticket');
-            CREATE TABLE IF NOT EXISTS tickets (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, channel_id INTEGER, user_id INTEGER, claimed_by INTEGER, status TEXT DEFAULT 'open', created_at DATETIME DEFAULT CURRENT_TIMESTAMP, closed_at DATETIME, closed_reason TEXT);
+            CREATE TABLE IF NOT EXISTS tickets (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, channel_id INTEGER, user_id INTEGER, claimed_by INTEGER, status TEXT DEFAULT 'open', created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
             CREATE TABLE IF NOT EXISTS infractions (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, user_id INTEGER, mod_id INTEGER, type TEXT, reason TEXT, duration INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
             CREATE TABLE IF NOT EXISTS role_permissions (guild_id INTEGER, role_id INTEGER, permission TEXT, PRIMARY KEY(guild_id,role_id,permission));
-            CREATE TABLE IF NOT EXISTS activity (guild_id INTEGER, user_id INTEGER, last_message DATETIME, last_voice DATETIME, PRIMARY KEY(guild_id,user_id));
             CREATE TABLE IF NOT EXISTS social_feeds (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, platform TEXT, account_id TEXT, account_name TEXT, channel_id INTEGER, last_post_id TEXT);
         ''')
         await db.commit()
@@ -110,7 +117,7 @@ async def scfg(gid, **kw):
     async with aiosqlite.connect(DB_PATH) as db:
         for k,v in kw.items():
             try: await db.execute(f'UPDATE config SET {k}=? WHERE guild_id=?', (v,gid))
-            except Exception as e: print(f"scfg error: {e}")
+            except: pass
         await db.commit()
 
 async def is_immune(m):
@@ -120,21 +127,16 @@ async def is_immune(m):
         ids = [r[0] for r in await cur.fetchall()]
     return any(r.id in ids for r in m.roles)
 
-async def apply_action(member, action, timeout_min, reason):
+async def apply_action(member, action, duration_min, reason):
     try:
         if action == 'delete': pass
-        elif action == 'timeout' and timeout_min > 0:
-            await member.timeout(timedelta(minutes=timeout_min), reason=reason)
+        elif action == 'mute' and duration_min > 0:
+            await member.timeout(timedelta(minutes=duration_min), reason=reason)
         elif action == 'kick':
             await member.kick(reason=reason)
         elif action == 'ban':
             await member.ban(reason=reason, delete_message_days=1)
     except Exception as e: print(f"Action error: {e}")
-
-async def add_infraction(gid, uid, mod_id, itype, reason, duration=None):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute('INSERT INTO infractions (guild_id,user_id,mod_id,type,reason,duration) VALUES (?,?,?,?,?,?)', (gid,uid,mod_id,itype,reason,duration))
-        await db.commit()
 
 async def has_permission(member, perm):
     if member.guild_permissions.administrator or member.id == member.guild.owner_id: return True
@@ -173,6 +175,13 @@ def check_caps(content, percent=70, min_len=10):
 
 def check_mentions(msg, max_m=5):
     return len(msg.mentions) >= max_m or msg.mention_everyone
+
+def check_image(attachment, allowed_formats=''):
+    ext = attachment.filename.lower().split('.')[-1]
+    if not allowed_formats:  # Si vide = tout bloqué
+        return ext in ['png','jpg','jpeg','gif','webp','bmp']
+    allowed = [f.strip().lower().replace('.','') for f in allowed_formats.split(',') if f.strip()]
+    return ext not in allowed and ext in ['png','jpg','jpeg','gif','webp','bmp']
 
 async def check_spam(msg, max_msg=5, interval=5):
     key = (msg.guild.id, msg.author.id)
@@ -243,13 +252,34 @@ class MainPanel(View):
         await i.message.delete()
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                           🛡️ PROTECTION PANEL
+#                           🛡️ PROTECTION PANEL (ÉPURÉ)
 # ═══════════════════════════════════════════════════════════════════════════════
+
+PROT_OPTIONS = [
+    {"key": "anti_link", "emoji": "🔗", "name": "Anti-Liens", "desc": "Bloque les liens non autorisés"},
+    {"key": "anti_invite", "emoji": "🎟️", "name": "Anti-Invite", "desc": "Bloque les invitations Discord"},
+    {"key": "anti_image", "emoji": "🖼️", "name": "Anti-Images", "desc": "Bloque certains formats d'images"},
+    {"key": "anti_phishing", "emoji": "🎣", "name": "Anti-Phishing", "desc": "Détecte les faux sites Discord/Steam"},
+    {"key": "anti_scam", "emoji": "🚨", "name": "Anti-Scam", "desc": "Détecte les arnaques nitro/crypto"},
+    {"key": "anti_spam", "emoji": "📨", "name": "Anti-Spam", "desc": "Limite les messages rapides"},
+    {"key": "anti_mention", "emoji": "📢", "name": "Anti-Mention", "desc": "Limite les mentions de masse"},
+    {"key": "anti_caps", "emoji": "🔠", "name": "Anti-Caps", "desc": "Bloque les MAJUSCULES excessives"},
+    {"key": "anti_newaccount", "emoji": "👶", "name": "Anti-NewAccount", "desc": "Bloque les comptes trop récents"},
+]
 
 class ProtPanel(View):
     def __init__(self, u, g):
         super().__init__(timeout=900)
         self.u, self.g = u, g
+        
+        # Menu déroulant pour sélectionner une protection
+        options = [
+            discord.SelectOption(label=p["name"], value=p["key"], emoji=p["emoji"], description=p["desc"][:50])
+            for p in PROT_OPTIONS
+        ]
+        select = Select(placeholder="🛡️ Sélectionner une protection à configurer...", options=options, row=0)
+        select.callback = self.select_protection
+        self.add_item(select)
 
     async def interaction_check(self, i):
         return i.user.id == self.u.id
@@ -257,137 +287,413 @@ class ProtPanel(View):
     async def embed(self):
         c = await gcfg(self.g.id)
         def s(k): return "✅" if c.get(k) else "❌"
+        
+        # Détails pour chaque protection
+        link_wl = c.get('link_whitelist', '')
+        link_count = len([x for x in link_wl.split(',') if x.strip()]) if link_wl else 0
+        
+        img_allowed = c.get('image_allowed', '')
+        img_text = img_allowed if img_allowed else "Tout bloqué"
+        
+        phish_act = c.get('phishing_action', 'ban')
+        scam_act = c.get('scam_action', 'mute')
+        scam_dur = c.get('scam_duration', 60)
+        
+        spam_msg = c.get('spam_max_msg', 5)
+        spam_int = c.get('spam_interval', 5)
+        spam_act = c.get('spam_action', 'mute')
+        
+        mention_max = c.get('mention_max', 5)
+        mention_act = c.get('mention_action', 'mute')
+        
+        caps_pct = c.get('caps_percent', 70)
+        caps_act = c.get('caps_action', 'delete')
+        
+        newaccount_val = c.get('newaccount_value', 7)
+        newaccount_unit = c.get('newaccount_unit', 'jours')
+        
         e = discord.Embed(title="🛡️ Protection", color=C.BLUE)
         e.description = f"""```yml
-🔗 Anti-Liens    : {s('anti_link')}  │ {c.get('link_action','delete')} ({c.get('link_timeout',5)}min)
-🎟️ Anti-Invite   : {s('anti_invite')}  │ {c.get('invite_action','delete')} ({c.get('invite_timeout',5)}min)
-🖼️ Anti-Images   : {s('anti_image')}  │ {c.get('image_action','delete')}
-🎣 Anti-Phishing : {s('anti_phishing')}  │ {c.get('phishing_action','ban')} ({c.get('phishing_timeout',60)}min)
-🚨 Anti-Scam     : {s('anti_scam')}  │ {c.get('scam_action','timeout')} ({c.get('scam_timeout',30)}min)
-📨 Anti-Spam     : {s('anti_spam')}  │ {c.get('spam_max_msg',5)}msg/{c.get('spam_interval',5)}s
-📢 Anti-Mention  : {s('anti_mention')}  │ max {c.get('mention_max',5)} mentions
-🔠 Anti-Caps     : {s('anti_caps')}  │ {c.get('caps_percent',70)}% (min {c.get('caps_min_len',10)} chars)
-👶 Anti-NewAcc   : {s('anti_newaccount')}  │ {c.get('newaccount_days',7)} jours → {c.get('newaccount_action','kick')}
+🔗 Anti-Liens     : {s('anti_link')}  │ {link_count} domaines en whitelist
+🎟️ Anti-Invite    : {s('anti_invite')}  │ Invitations Discord
+🖼️ Anti-Images    : {s('anti_image')}  │ {img_text[:20]}
+🎣 Anti-Phishing  : {s('anti_phishing')}  │ Sanction: {phish_act}
+🚨 Anti-Scam      : {s('anti_scam')}  │ {scam_act} ({scam_dur}min)
+📨 Anti-Spam      : {s('anti_spam')}  │ {spam_msg}msg/{spam_int}s → {spam_act}
+📢 Anti-Mention   : {s('anti_mention')}  │ Max {mention_max} → {mention_act}
+🔠 Anti-Caps      : {s('anti_caps')}  │ {caps_pct}% → {caps_act}
+👶 Anti-NewAccount: {s('anti_newaccount')}  │ Min {newaccount_val} {newaccount_unit}
 ```
-**Cliquez sur un bouton pour activer/désactiver**
-**⚙️ = Configurer les paramètres détaillés**"""
+**▼ Sélectionnez une protection pour la configurer**"""
         return e
 
-    async def toggle(self, i, key):
-        c = await gcfg(self.g.id)
-        new_val = 0 if c.get(key) else 1
-        await scfg(self.g.id, **{key: new_val})
-        await i.response.edit_message(embed=await self.embed(), view=self)
+    async def select_protection(self, i):
+        key = i.data['values'][0]
+        prot = next((p for p in PROT_OPTIONS if p["key"] == key), None)
+        if prot:
+            v = ProtDetailPanel(self.u, self.g, prot)
+            await i.response.edit_message(embed=await v.embed(), view=v)
 
-    @discord.ui.button(label="Liens", emoji="🔗", style=discord.ButtonStyle.primary, row=0)
-    async def b_link(self, i, b): await self.toggle(i, 'anti_link')
-
-    @discord.ui.button(label="Invite", emoji="🎟️", style=discord.ButtonStyle.primary, row=0)
-    async def b_invite(self, i, b): await self.toggle(i, 'anti_invite')
-
-    @discord.ui.button(label="Images", emoji="🖼️", style=discord.ButtonStyle.primary, row=0)
-    async def b_image(self, i, b): await self.toggle(i, 'anti_image')
-
-    @discord.ui.button(label="⚙️", style=discord.ButtonStyle.secondary, row=0)
-    async def cfg1(self, i, b): await i.response.send_modal(LinkConfigModal(self.g))
-
-    @discord.ui.button(label="Phishing", emoji="🎣", style=discord.ButtonStyle.danger, row=1)
-    async def b_phish(self, i, b): await self.toggle(i, 'anti_phishing')
-
-    @discord.ui.button(label="Scam", emoji="🚨", style=discord.ButtonStyle.danger, row=1)
-    async def b_scam(self, i, b): await self.toggle(i, 'anti_scam')
-
-    @discord.ui.button(label="⚙️", style=discord.ButtonStyle.secondary, row=1)
-    async def cfg2(self, i, b): await i.response.send_modal(PhishScamConfigModal(self.g))
-
-    @discord.ui.button(label="Spam", emoji="📨", style=discord.ButtonStyle.secondary, row=2)
-    async def b_spam(self, i, b): await self.toggle(i, 'anti_spam')
-
-    @discord.ui.button(label="Mention", emoji="📢", style=discord.ButtonStyle.secondary, row=2)
-    async def b_mention(self, i, b): await self.toggle(i, 'anti_mention')
-
-    @discord.ui.button(label="Caps", emoji="🔠", style=discord.ButtonStyle.secondary, row=2)
-    async def b_caps(self, i, b): await self.toggle(i, 'anti_caps')
-
-    @discord.ui.button(label="⚙️", style=discord.ButtonStyle.secondary, row=2)
-    async def cfg3(self, i, b): await i.response.send_modal(SpamMentionCapsConfigModal(self.g))
-
-    @discord.ui.button(label="NewAcc", emoji="👶", style=discord.ButtonStyle.danger, row=3)
-    async def b_new(self, i, b): await self.toggle(i, 'anti_newaccount')
-
-    @discord.ui.button(label="⚙️ NewAcc", style=discord.ButtonStyle.secondary, row=3)
-    async def cfg4(self, i, b): await i.response.send_modal(NewAccConfigModal(self.g))
-
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=3)
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#                        🛡️ PROTECTION DETAIL PANEL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ProtDetailPanel(View):
+    def __init__(self, u, g, prot):
+        super().__init__(timeout=900)
+        self.u, self.g, self.prot = u, g, prot
+        self.key = prot["key"]
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def embed(self):
+        c = await gcfg(self.g.id)
+        is_on = c.get(self.key, 0)
+        
+        e = discord.Embed(
+            title=f"{self.prot['emoji']} {self.prot['name']}",
+            color=C.GREEN if is_on else C.RED
+        )
+        
+        status = "✅ **ACTIVÉ**" if is_on else "❌ **DÉSACTIVÉ**"
+        e.add_field(name="État", value=status, inline=True)
+        
+        # Description spécifique selon la protection
+        if self.key == "anti_link":
+            wl = c.get('link_whitelist', '')
+            domains = [d.strip() for d in wl.split(',') if d.strip()]
+            domain_list = "\n".join([f"• {d}" for d in domains[:10]]) or "Aucun"
+            if len(domains) > 10: domain_list += f"\n... et {len(domains)-10} autres"
+            e.add_field(name="📝 Description", value="Bloque tous les liens **sauf** ceux en whitelist", inline=False)
+            e.add_field(name="✅ Domaines autorisés", value=f"```\n{domain_list}\n```", inline=False)
+            
+        elif self.key == "anti_invite":
+            e.add_field(name="📝 Description", value="Bloque toutes les invitations Discord\n`discord.gg/xxx` et `discord.com/invite/xxx`", inline=False)
+            
+        elif self.key == "anti_image":
+            allowed = c.get('image_allowed', '')
+            if allowed:
+                e.add_field(name="📝 Description", value=f"Bloque les images **sauf** les formats: `{allowed}`", inline=False)
+            else:
+                e.add_field(name="📝 Description", value="Bloque **toutes** les images\nConfigurez pour autoriser certains formats", inline=False)
+            e.add_field(name="💡 Formats possibles", value="`png, jpg, jpeg, gif, webp, bmp`", inline=False)
+            
+        elif self.key == "anti_phishing":
+            action = c.get('phishing_action', 'ban')
+            e.add_field(name="📝 Description", value="Détecte les liens de phishing Discord/Steam\n(faux sites nitro, faux steam, etc.)", inline=False)
+            e.add_field(name="⚡ Sanction", value=f"`{action}`", inline=True)
+            
+        elif self.key == "anti_scam":
+            action = c.get('scam_action', 'mute')
+            duration = c.get('scam_duration', 60)
+            e.add_field(name="📝 Description", value="Détecte les messages d'arnaque\n(free nitro, crypto giveaway, etc.)", inline=False)
+            e.add_field(name="⚡ Sanction", value=f"`{action}`", inline=True)
+            if action == 'mute':
+                e.add_field(name="⏱️ Durée", value=f"`{duration} min`", inline=True)
+            
+        elif self.key == "anti_spam":
+            max_msg = c.get('spam_max_msg', 5)
+            interval = c.get('spam_interval', 5)
+            action = c.get('spam_action', 'mute')
+            duration = c.get('spam_duration', 10)
+            e.add_field(name="📝 Description", value=f"Bloque si **{max_msg}+ messages** en **{interval} secondes**", inline=False)
+            e.add_field(name="⚡ Sanction", value=f"`{action}`", inline=True)
+            if action == 'mute':
+                e.add_field(name="⏱️ Durée", value=f"`{duration} min`", inline=True)
+            
+        elif self.key == "anti_mention":
+            max_m = c.get('mention_max', 5)
+            action = c.get('mention_action', 'mute')
+            duration = c.get('mention_duration', 10)
+            e.add_field(name="📝 Description", value=f"Bloque si **{max_m}+ mentions** dans un message\nInclut @everyone et @here", inline=False)
+            e.add_field(name="⚡ Sanction", value=f"`{action}`", inline=True)
+            if action == 'mute':
+                e.add_field(name="⏱️ Durée", value=f"`{duration} min`", inline=True)
+            
+        elif self.key == "anti_caps":
+            percent = c.get('caps_percent', 70)
+            min_len = c.get('caps_min_len', 10)
+            action = c.get('caps_action', 'delete')
+            e.add_field(name="📝 Description", value=f"Bloque si **{percent}%+ de MAJUSCULES**\nSur les messages de {min_len}+ caractères", inline=False)
+            e.add_field(name="⚡ Sanction", value=f"`{action}`", inline=True)
+            
+        elif self.key == "anti_newaccount":
+            val = c.get('newaccount_value', 7)
+            unit = c.get('newaccount_unit', 'jours')
+            e.add_field(name="📝 Description", value=f"Kick les comptes créés il y a moins de **{val} {unit}**", inline=False)
+            e.add_field(name="⚡ Sanction", value="`kick` (automatique)", inline=True)
+        
+        return e
+
+    @discord.ui.button(label="ON/OFF", emoji="🔄", style=discord.ButtonStyle.primary, row=0)
+    async def toggle(self, i, b):
+        c = await gcfg(self.g.id)
+        new_val = 0 if c.get(self.key) else 1
+        await scfg(self.g.id, **{self.key: new_val})
+        await i.response.edit_message(embed=await self.embed(), view=self)
+
+    @discord.ui.button(label="Configurer", emoji="⚙️", style=discord.ButtonStyle.secondary, row=0)
+    async def config(self, i, b):
+        # Modal différent selon la protection
+        if self.key == "anti_link":
+            await i.response.send_modal(LinkConfigModal(self.g))
+        elif self.key == "anti_image":
+            await i.response.send_modal(ImageConfigModal(self.g))
+        elif self.key == "anti_phishing":
+            await i.response.send_modal(PhishingConfigModal(self.g))
+        elif self.key == "anti_scam":
+            await i.response.send_modal(ScamConfigModal(self.g))
+        elif self.key == "anti_spam":
+            await i.response.send_modal(SpamConfigModal(self.g))
+        elif self.key == "anti_mention":
+            await i.response.send_modal(MentionConfigModal(self.g))
+        elif self.key == "anti_caps":
+            await i.response.send_modal(CapsConfigModal(self.g))
+        elif self.key == "anti_newaccount":
+            await i.response.send_modal(NewAccountConfigModal(self.g))
+        else:
+            await i.response.send_message("❌ Pas de configuration pour cette protection", ephemeral=True)
+
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = ProtPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #                           ⚙️ CONFIG MODALS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class LinkConfigModal(Modal, title="🔗 Config Liens/Invite/Images"):
-    link_action = TextInput(label="Action Liens (delete/timeout/kick/ban)", placeholder="delete", default="delete", max_length=10)
-    link_timeout = TextInput(label="Timeout Liens (minutes)", placeholder="5", default="5", max_length=5)
-    link_whitelist = TextInput(label="Domaines autorisés (séparés par ,)", placeholder="youtube.com, twitter.com", default="youtube.com,twitter.com,discord.com", style=discord.TextStyle.paragraph, max_length=500)
-    invite_action = TextInput(label="Action Invite (delete/timeout/kick/ban)", placeholder="delete", default="delete", max_length=10)
+class LinkConfigModal(Modal, title="🔗 Configuration Anti-Liens"):
+    whitelist = TextInput(
+        label="Domaines autorisés (séparés par des virgules)",
+        placeholder="youtube.com, twitter.com, twitch.tv",
+        style=discord.TextStyle.paragraph,
+        max_length=1000,
+        required=False
+    )
     
-    def __init__(self, g): super().__init__(); self.g = g
+    def __init__(self, g):
+        super().__init__()
+        self.g = g
     
     async def on_submit(self, i):
-        la = self.link_action.value.lower() if self.link_action.value.lower() in ['delete','timeout','kick','ban'] else 'delete'
-        lt = int(self.link_timeout.value) if self.link_timeout.value.isdigit() else 5
-        lw = self.link_whitelist.value
-        ia = self.invite_action.value.lower() if self.invite_action.value.lower() in ['delete','timeout','kick','ban'] else 'delete'
-        await scfg(self.g.id, link_action=la, link_timeout=lt, link_whitelist=lw, invite_action=ia)
-        await i.response.send_message(f"✅ **Configuré**\n🔗 Liens: `{la}` (timeout {lt}min)\n📝 Whitelist: `{lw}`\n🎟️ Invite: `{ia}`", ephemeral=True)
+        await scfg(self.g.id, link_whitelist=self.whitelist.value)
+        domains = [d.strip() for d in self.whitelist.value.split(',') if d.strip()]
+        await i.response.send_message(f"✅ **{len(domains)} domaines** en whitelist\nTous les autres liens seront bloqués", ephemeral=True)
 
-class PhishScamConfigModal(Modal, title="🎣 Config Phishing/Scam"):
-    phish_action = TextInput(label="Action Phishing (delete/timeout/kick/ban)", placeholder="ban", default="ban", max_length=10)
-    phish_timeout = TextInput(label="Timeout Phishing (minutes)", placeholder="60", default="60", max_length=5)
-    scam_action = TextInput(label="Action Scam (delete/timeout/kick/ban)", placeholder="timeout", default="timeout", max_length=10)
-    scam_timeout = TextInput(label="Timeout Scam (minutes)", placeholder="30", default="30", max_length=5)
-    
-    def __init__(self, g): super().__init__(); self.g = g
-    
-    async def on_submit(self, i):
-        pa = self.phish_action.value.lower() if self.phish_action.value.lower() in ['delete','timeout','kick','ban'] else 'ban'
-        pt = int(self.phish_timeout.value) if self.phish_timeout.value.isdigit() else 60
-        sa = self.scam_action.value.lower() if self.scam_action.value.lower() in ['delete','timeout','kick','ban'] else 'timeout'
-        st = int(self.scam_timeout.value) if self.scam_timeout.value.isdigit() else 30
-        await scfg(self.g.id, phishing_action=pa, phishing_timeout=pt, scam_action=sa, scam_timeout=st)
-        await i.response.send_message(f"✅ **Configuré**\n🎣 Phishing: `{pa}` ({pt}min)\n🚨 Scam: `{sa}` ({st}min)", ephemeral=True)
 
-class SpamMentionCapsConfigModal(Modal, title="📨 Config Spam/Mention/Caps"):
-    spam_max = TextInput(label="Spam: Max messages", placeholder="5", default="5", max_length=3)
-    spam_interval = TextInput(label="Spam: Intervalle (secondes)", placeholder="5", default="5", max_length=3)
-    mention_max = TextInput(label="Mention: Max mentions", placeholder="5", default="5", max_length=3)
-    caps_percent = TextInput(label="Caps: Pourcentage max (%)", placeholder="70", default="70", max_length=3)
-    caps_min = TextInput(label="Caps: Longueur min message", placeholder="10", default="10", max_length=3)
+class ImageConfigModal(Modal, title="🖼️ Configuration Anti-Images"):
+    allowed = TextInput(
+        label="Formats autorisés (vide = tout bloquer)",
+        placeholder="png, jpg, gif",
+        max_length=100,
+        required=False
+    )
     
-    def __init__(self, g): super().__init__(); self.g = g
+    def __init__(self, g):
+        super().__init__()
+        self.g = g
     
     async def on_submit(self, i):
-        sm = int(self.spam_max.value) if self.spam_max.value.isdigit() else 5
-        si = int(self.spam_interval.value) if self.spam_interval.value.isdigit() else 5
-        mm = int(self.mention_max.value) if self.mention_max.value.isdigit() else 5
-        cp = int(self.caps_percent.value) if self.caps_percent.value.isdigit() else 70
-        cm = int(self.caps_min.value) if self.caps_min.value.isdigit() else 10
-        await scfg(self.g.id, spam_max_msg=sm, spam_interval=si, mention_max=mm, caps_percent=cp, caps_min_len=cm)
-        await i.response.send_message(f"✅ **Configuré**\n📨 Spam: `{sm}msg/{si}s`\n📢 Mention: max `{mm}`\n🔠 Caps: `{cp}%` (min `{cm}` chars)", ephemeral=True)
+        await scfg(self.g.id, image_allowed=self.allowed.value)
+        if self.allowed.value:
+            await i.response.send_message(f"✅ Formats autorisés: `{self.allowed.value}`\nLes autres seront bloqués", ephemeral=True)
+        else:
+            await i.response.send_message("✅ **Toutes** les images seront bloquées", ephemeral=True)
 
-class NewAccConfigModal(Modal, title="👶 Config Nouveaux Comptes"):
-    days = TextInput(label="Âge minimum (jours)", placeholder="7", default="7", max_length=4)
-    action = TextInput(label="Action (kick/ban)", placeholder="kick", default="kick", max_length=10)
+
+class PhishingConfigModal(Modal, title="🎣 Configuration Anti-Phishing"):
+    action = TextInput(
+        label="Sanction (delete / mute / kick / ban)",
+        placeholder="ban",
+        default="ban",
+        max_length=10
+    )
     
-    def __init__(self, g): super().__init__(); self.g = g
+    def __init__(self, g):
+        super().__init__()
+        self.g = g
     
     async def on_submit(self, i):
-        d = int(self.days.value) if self.days.value.isdigit() else 7
-        a = self.action.value.lower() if self.action.value.lower() in ['kick','ban'] else 'kick'
-        await scfg(self.g.id, newaccount_days=d, newaccount_action=a)
-        await i.response.send_message(f"✅ Comptes < `{d}` jours → `{a}`", ephemeral=True)
+        action = self.action.value.lower().strip()
+        if action not in ['delete', 'mute', 'kick', 'ban']:
+            action = 'ban'
+        await scfg(self.g.id, phishing_action=action)
+        await i.response.send_message(f"✅ Phishing détecté → `{action}`", ephemeral=True)
+
+
+class ScamConfigModal(Modal, title="🚨 Configuration Anti-Scam"):
+    action = TextInput(
+        label="Sanction (delete / mute / kick / ban)",
+        placeholder="mute",
+        default="mute",
+        max_length=10
+    )
+    duration = TextInput(
+        label="Durée du mute (minutes)",
+        placeholder="60",
+        default="60",
+        max_length=5,
+        required=False
+    )
+    
+    def __init__(self, g):
+        super().__init__()
+        self.g = g
+    
+    async def on_submit(self, i):
+        action = self.action.value.lower().strip()
+        if action not in ['delete', 'mute', 'kick', 'ban']:
+            action = 'mute'
+        dur = int(self.duration.value) if self.duration.value.isdigit() else 60
+        await scfg(self.g.id, scam_action=action, scam_duration=dur)
+        msg = f"✅ Scam détecté → `{action}`"
+        if action == 'mute': msg += f" ({dur} min)"
+        await i.response.send_message(msg, ephemeral=True)
+
+
+class SpamConfigModal(Modal, title="📨 Configuration Anti-Spam"):
+    max_msg = TextInput(
+        label="Nombre max de messages",
+        placeholder="5",
+        default="5",
+        max_length=3
+    )
+    interval = TextInput(
+        label="En combien de secondes",
+        placeholder="5",
+        default="5",
+        max_length=3
+    )
+    action = TextInput(
+        label="Sanction (delete / mute / kick / ban)",
+        placeholder="mute",
+        default="mute",
+        max_length=10
+    )
+    duration = TextInput(
+        label="Durée du mute (minutes)",
+        placeholder="10",
+        default="10",
+        max_length=5,
+        required=False
+    )
+    
+    def __init__(self, g):
+        super().__init__()
+        self.g = g
+    
+    async def on_submit(self, i):
+        mm = int(self.max_msg.value) if self.max_msg.value.isdigit() else 5
+        itv = int(self.interval.value) if self.interval.value.isdigit() else 5
+        action = self.action.value.lower().strip()
+        if action not in ['delete', 'mute', 'kick', 'ban']:
+            action = 'mute'
+        dur = int(self.duration.value) if self.duration.value.isdigit() else 10
+        await scfg(self.g.id, spam_max_msg=mm, spam_interval=itv, spam_action=action, spam_duration=dur)
+        await i.response.send_message(f"✅ Spam: **{mm}+ msg** en **{itv}s** → `{action}`", ephemeral=True)
+
+
+class MentionConfigModal(Modal, title="📢 Configuration Anti-Mention"):
+    max_mentions = TextInput(
+        label="Nombre max de mentions",
+        placeholder="5",
+        default="5",
+        max_length=3
+    )
+    action = TextInput(
+        label="Sanction (delete / mute / kick / ban)",
+        placeholder="mute",
+        default="mute",
+        max_length=10
+    )
+    duration = TextInput(
+        label="Durée du mute (minutes)",
+        placeholder="10",
+        default="10",
+        max_length=5,
+        required=False
+    )
+    
+    def __init__(self, g):
+        super().__init__()
+        self.g = g
+    
+    async def on_submit(self, i):
+        mm = int(self.max_mentions.value) if self.max_mentions.value.isdigit() else 5
+        action = self.action.value.lower().strip()
+        if action not in ['delete', 'mute', 'kick', 'ban']:
+            action = 'mute'
+        dur = int(self.duration.value) if self.duration.value.isdigit() else 10
+        await scfg(self.g.id, mention_max=mm, mention_action=action, mention_duration=dur)
+        await i.response.send_message(f"✅ **{mm}+ mentions** → `{action}`", ephemeral=True)
+
+
+class CapsConfigModal(Modal, title="🔠 Configuration Anti-Caps"):
+    percent = TextInput(
+        label="Pourcentage max de majuscules",
+        placeholder="70",
+        default="70",
+        max_length=3
+    )
+    min_len = TextInput(
+        label="Longueur min du message",
+        placeholder="10",
+        default="10",
+        max_length=3
+    )
+    action = TextInput(
+        label="Sanction (delete / mute / kick / ban)",
+        placeholder="delete",
+        default="delete",
+        max_length=10
+    )
+    
+    def __init__(self, g):
+        super().__init__()
+        self.g = g
+    
+    async def on_submit(self, i):
+        pct = int(self.percent.value) if self.percent.value.isdigit() else 70
+        ml = int(self.min_len.value) if self.min_len.value.isdigit() else 10
+        action = self.action.value.lower().strip()
+        if action not in ['delete', 'mute', 'kick', 'ban']:
+            action = 'delete'
+        await scfg(self.g.id, caps_percent=pct, caps_min_len=ml, caps_action=action)
+        await i.response.send_message(f"✅ **{pct}%+ majuscules** (min {ml} chars) → `{action}`", ephemeral=True)
+
+
+class NewAccountConfigModal(Modal, title="👶 Configuration Anti-NewAccount"):
+    value = TextInput(
+        label="Âge minimum du compte",
+        placeholder="7",
+        default="7",
+        max_length=4
+    )
+    unit = TextInput(
+        label="Unité (jours / semaines / mois)",
+        placeholder="jours",
+        default="jours",
+        max_length=10
+    )
+    
+    def __init__(self, g):
+        super().__init__()
+        self.g = g
+    
+    async def on_submit(self, i):
+        val = int(self.value.value) if self.value.value.isdigit() else 7
+        unit = self.unit.value.lower().strip()
+        if unit not in ['jours', 'semaines', 'mois']:
+            unit = 'jours'
+        await scfg(self.g.id, newaccount_value=val, newaccount_unit=unit)
+        await i.response.send_message(f"✅ Compte créé il y a moins de **{val} {unit}** → `kick`", ephemeral=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           📜 LOGS + ⚖️ SANCTIONS + 👑 IMMUNITÉS
@@ -402,17 +708,15 @@ class LogsPanel(View):
             opts = [discord.SelectOption(label=f"#{c.name}"[:25], value=str(c.id)) for c in chs]
             s1=Select(placeholder="📝 Logs généraux...",options=opts,row=1);s1.callback=self.l1;self.add_item(s1)
             s2=Select(placeholder="⚔️ Logs modération...",options=opts.copy(),row=2);s2.callback=self.l2;self.add_item(s2)
-            s3=Select(placeholder="🎫 Logs tickets...",options=opts.copy(),row=3);s3.callback=self.l3;self.add_item(s3)
     async def l1(self,i): await scfg(self.g.id,log_channel=int(i.data['values'][0])); await i.response.send_message("✅",ephemeral=True)
     async def l2(self,i): await scfg(self.g.id,mod_log_channel=int(i.data['values'][0])); await i.response.send_message("✅",ephemeral=True)
-    async def l3(self,i): await scfg(self.g.id,ticket_log_channel=int(i.data['values'][0])); await i.response.send_message("✅",ephemeral=True)
     async def embed(self):
         c = await gcfg(self.g.id)
-        lc,mc,tc = self.g.get_channel(c.get('log_channel')), self.g.get_channel(c.get('mod_log_channel')), self.g.get_channel(c.get('ticket_log_channel'))
+        lc,mc = self.g.get_channel(c.get('log_channel')), self.g.get_channel(c.get('mod_log_channel'))
         e = discord.Embed(title="📜 Logs", color=C.PURPLE)
-        e.description = f"📝 Généraux: {lc.mention if lc else '❌'}\n⚔️ Modération: {mc.mention if mc else '❌'}\n🎫 Tickets: {tc.mention if tc else '❌'}"
+        e.description = f"📝 Généraux: {lc.mention if lc else '❌ Non configuré'}\n⚔️ Modération: {mc.mention if mc else '❌ Non configuré'}"
         return e
-    @discord.ui.button(label="◀️ Retour",style=discord.ButtonStyle.secondary,row=4)
+    @discord.ui.button(label="◀️ Retour",style=discord.ButtonStyle.secondary,row=3)
     async def back(self,i,b): v=MainPanel(self.u,self.g); await i.response.edit_message(embed=v.embed(),view=v)
 
 class SanctPanel(View):
@@ -421,7 +725,7 @@ class SanctPanel(View):
         c = await gcfg(self.g.id)
         e = discord.Embed(title="⚖️ Sanctions Auto", color=C.PINK)
         wk,wb = c.get('warns_kick',0), c.get('warns_ban',0)
-        e.description = f"👢 Kick après: **{wk} warns** {'(off)' if not wk else ''}\n🔨 Ban après: **{wb} warns** {'(off)' if not wb else ''}"
+        e.description = f"👢 Kick après: **{wk} warns** {'(désactivé)' if not wk else ''}\n🔨 Ban après: **{wb} warns** {'(désactivé)' if not wb else ''}"
         return e
     @discord.ui.button(label="Configurer",emoji="⚙️",style=discord.ButtonStyle.primary)
     async def cfg(self,i,b): await i.response.send_modal(SanctConfigModal(self.g))
@@ -429,14 +733,14 @@ class SanctPanel(View):
     async def back(self,i,b): v=MainPanel(self.u,self.g); await i.response.edit_message(embed=v.embed(),view=v)
 
 class SanctConfigModal(Modal, title="⚖️ Sanctions"):
-    wk = TextInput(label="Warns pour Kick (0=off)", placeholder="3", default="0", max_length=2)
-    wb = TextInput(label="Warns pour Ban (0=off)", placeholder="5", default="0", max_length=2)
+    wk = TextInput(label="Warns pour Kick (0=désactivé)", placeholder="3", default="0", max_length=2)
+    wb = TextInput(label="Warns pour Ban (0=désactivé)", placeholder="5", default="0", max_length=2)
     def __init__(self,g): super().__init__(); self.g=g
     async def on_submit(self,i):
         k = int(self.wk.value) if self.wk.value.isdigit() else 0
         b = int(self.wb.value) if self.wb.value.isdigit() else 0
         await scfg(self.g.id, warns_kick=k, warns_ban=b)
-        await i.response.send_message(f"✅ Kick: {k} warns | Ban: {b} warns", ephemeral=True)
+        await i.response.send_message(f"✅ Kick: **{k}** warns | Ban: **{b}** warns", ephemeral=True)
 
 class ImmunePanel(View):
     def __init__(self,u,g):
@@ -449,14 +753,15 @@ class ImmunePanel(View):
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('INSERT OR IGNORE INTO immune_roles VALUES (?,?)', (self.g.id,int(i.data['values'][0])))
             await db.commit()
-        await i.response.send_message("✅",ephemeral=True)
+        await i.response.send_message("✅ Rôle ajouté aux immunités",ephemeral=True)
     async def embed(self):
         async with aiosqlite.connect(DB_PATH) as db:
             cur = await db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (self.g.id,))
             ids = [r[0] for r in await cur.fetchall()]
         roles = [self.g.get_role(rid) for rid in ids if self.g.get_role(rid)]
         e = discord.Embed(title="👑 Rôles Immunisés", color=C.YELLOW)
-        e.description = ", ".join([r.mention for r in roles]) if roles else "Aucun rôle immunisé"
+        e.description = "Ces rôles ne sont **pas affectés** par la protection:\n\n"
+        e.description += ", ".join([r.mention for r in roles]) if roles else "*Aucun rôle immunisé*"
         return e
     @discord.ui.button(label="◀️ Retour",style=discord.ButtonStyle.secondary,row=2)
     async def back(self,i,b): v=MainPanel(self.u,self.g); await i.response.edit_message(embed=v.embed(),view=v)
@@ -473,11 +778,11 @@ class WelcPanel(View):
         c = await gcfg(self.g.id)
         ch = self.g.get_channel(c.get('welcome_channel'))
         e = discord.Embed(title="👋 Bienvenue", color=C.GREEN)
-        e.description = f"État: {'✅ Activé' if c.get('welcome_on') else '❌ Désactivé'}\nSalon: {ch.mention if ch else '❌'}\nMessage: `{c.get('welcome_msg','Bienvenue {member}!')[:50]}...`"
+        e.description = f"**État:** {'✅ Activé' if c.get('welcome_on') else '❌ Désactivé'}\n**Salon:** {ch.mention if ch else '❌ Non configuré'}\n**Message:** `{c.get('welcome_msg','Bienvenue {member}!')[:50]}...`"
         return e
     @discord.ui.button(label="ON/OFF",emoji="🔄",style=discord.ButtonStyle.primary,row=0)
     async def tog(self,i,b): c=await gcfg(self.g.id); await scfg(self.g.id,welcome_on=0 if c.get('welcome_on') else 1); await i.response.edit_message(embed=await self.embed(),view=self)
-    @discord.ui.button(label="Message",emoji="✏️",style=discord.ButtonStyle.primary,row=0)
+    @discord.ui.button(label="Message",emoji="✏️",style=discord.ButtonStyle.secondary,row=0)
     async def msg(self,i,b): await i.response.send_modal(WelcMsgModal(self.g))
     @discord.ui.button(label="◀️ Retour",style=discord.ButtonStyle.secondary,row=1)
     async def back(self,i,b): v=MainPanel(self.u,self.g); await i.response.edit_message(embed=v.embed(),view=v)
@@ -488,7 +793,7 @@ class WelcMsgModal(Modal, title="✏️ Message de bienvenue"):
     async def on_submit(self,i): await scfg(self.g.id,welcome_msg=self.msg.value); await i.response.send_message("✅",ephemeral=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                           🎫 TICKETS
+#                           🎫 TICKETS + 🌐 NETWORK (simplifié)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def gtcfg(gid):
@@ -499,7 +804,7 @@ async def gtcfg(gid):
         if r: return dict(r)
         await db.execute('INSERT OR IGNORE INTO ticket_config (guild_id) VALUES (?)', (gid,))
         await db.commit()
-        return {'guild_id':gid,'category_id':None,'staff_role_id':None,'panel_title':'🎫 Support','panel_description':'Cliquez pour créer un ticket'}
+        return {'guild_id':gid,'category_id':None,'staff_role_id':None}
 
 async def stcfg(gid, **kw):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -512,11 +817,11 @@ class TicketPanel(View):
         cats = [c for c in g.categories][:25]
         if cats:
             opts = [discord.SelectOption(label=c.name[:25],value=str(c.id)) for c in cats]
-            sel = Select(placeholder="📁 Catégorie...",options=opts,row=2); sel.callback=self.cat; self.add_item(sel)
+            sel = Select(placeholder="📁 Catégorie...",options=opts,row=1); sel.callback=self.cat; self.add_item(sel)
         roles = [r for r in g.roles[1:] if not r.is_bot_managed()][:25]
         if roles:
             opts = [discord.SelectOption(label=f"@{r.name}"[:25],value=str(r.id)) for r in roles]
-            sel = Select(placeholder="👮 Staff...",options=opts,row=3); sel.callback=self.rol; self.add_item(sel)
+            sel = Select(placeholder="👮 Staff...",options=opts,row=2); sel.callback=self.rol; self.add_item(sel)
     async def cat(self,i): await stcfg(self.g.id,category_id=int(i.data['values'][0])); await i.response.send_message("✅",ephemeral=True)
     async def rol(self,i): await stcfg(self.g.id,staff_role_id=int(i.data['values'][0])); await i.response.send_message("✅",ephemeral=True)
     async def embed(self):
@@ -527,7 +832,7 @@ class TicketPanel(View):
         return e
     @discord.ui.button(label="📤 Déployer",style=discord.ButtonStyle.success,row=0)
     async def deploy(self,i,b): v=DeployPanel(self.u,self.g); await i.response.edit_message(embed=v.embed(),view=v)
-    @discord.ui.button(label="◀️ Retour",style=discord.ButtonStyle.secondary,row=1)
+    @discord.ui.button(label="◀️ Retour",style=discord.ButtonStyle.secondary,row=0)
     async def back(self,i,b): v=MainPanel(self.u,self.g); await i.response.edit_message(embed=v.embed(),view=v)
 
 class DeployPanel(View):
@@ -542,7 +847,7 @@ class DeployPanel(View):
         tc = await gtcfg(self.g.id)
         if not tc.get('category_id') or not tc.get('staff_role_id'): return await i.response.send_message("❌ Config incomplète",ephemeral=True)
         ch = self.g.get_channel(int(i.data['values'][0]))
-        e = discord.Embed(title=tc.get('panel_title','🎫 Support'),description=tc.get('panel_description','Cliquez pour créer un ticket'),color=C.PURPLE)
+        e = discord.Embed(title="🎫 Support",description="Cliquez pour créer un ticket",color=C.PURPLE)
         await ch.send(embed=e,view=TkBtn(self.g.id))
         await i.response.send_message(f"✅ Déployé dans {ch.mention}",ephemeral=True)
     @discord.ui.button(label="◀️ Retour",style=discord.ButtonStyle.secondary,row=1)
@@ -577,10 +882,6 @@ class TkActs(View):
         try: await i.channel.delete()
         except: pass
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#                           🌐 NETWORK
-# ═══════════════════════════════════════════════════════════════════════════════
-
 PLATFORMS = {'youtube':{'emoji':'📺','color':0xFF0000},'twitter':{'emoji':'🐦','color':0x1DA1F2},'twitch':{'emoji':'🎮','color':0x9146FF},'tiktok':{'emoji':'🎵','color':0x010101},'instagram':{'emoji':'📸','color':0xE1306C}}
 
 class NetworkPanel(View):
@@ -602,18 +903,14 @@ class NetworkPanel(View):
     async def tw(self,i,b): await i.response.send_modal(AddFeedModal(self.g,'twitter'))
     @discord.ui.button(label="Twitch",emoji="🎮",style=discord.ButtonStyle.secondary,row=0)
     async def ttv(self,i,b): await i.response.send_modal(AddFeedModal(self.g,'twitch'))
-    @discord.ui.button(label="TikTok",emoji="🎵",style=discord.ButtonStyle.secondary,row=1)
-    async def tt(self,i,b): await i.response.send_modal(AddFeedModal(self.g,'tiktok'))
-    @discord.ui.button(label="Instagram",emoji="📸",style=discord.ButtonStyle.secondary,row=1)
-    async def ig(self,i,b): await i.response.send_modal(AddFeedModal(self.g,'instagram'))
-    @discord.ui.button(label="◀️ Retour",style=discord.ButtonStyle.secondary,row=2)
+    @discord.ui.button(label="◀️ Retour",style=discord.ButtonStyle.secondary,row=1)
     async def back(self,i,b): v=MainPanel(self.u,self.g); await i.response.edit_message(embed=v.embed(),view=v)
 
 class AddFeedModal(Modal):
     def __init__(self,g,platform):
         super().__init__(title=f"Ajouter {platform.title()}")
         self.g,self.platform = g,platform
-        self.account = TextInput(label="ID/Username/URL RSS",placeholder="UCxxxxx ou @username ou URL RSS",max_length=200)
+        self.account = TextInput(label="ID/Username/URL RSS",placeholder="UCxxxxx ou @username",max_length=200)
         self.add_item(self.account)
         self.channel = TextInput(label="ID du salon Discord",placeholder="Clic droit > Copier l'ID",max_length=20)
         self.add_item(self.channel)
@@ -648,70 +945,92 @@ async def on_message(msg):
     c = await gcfg(msg.guild.id)
     content = msg.content
     
-    # 🎣 Anti-Phishing (priorité max)
+    # 🎣 Anti-Phishing
     if c.get('anti_phishing') and check_phishing(content):
         await msg.delete()
-        await apply_action(msg.author, c.get('phishing_action','ban'), c.get('phishing_timeout',60), "Phishing")
+        action = c.get('phishing_action', 'ban')
+        await apply_action(msg.author, action, 60, "Phishing détecté")
         return
     
     # 🚨 Anti-Scam
     if c.get('anti_scam') and check_scam(content):
         await msg.delete()
-        await apply_action(msg.author, c.get('scam_action','timeout'), c.get('scam_timeout',30), "Scam")
+        action = c.get('scam_action', 'mute')
+        duration = c.get('scam_duration', 60)
+        await apply_action(msg.author, action, duration, "Scam détecté")
         return
     
     # 🎟️ Anti-Invite
     if c.get('anti_invite') and check_invite(content):
         await msg.delete()
-        await apply_action(msg.author, c.get('invite_action','delete'), c.get('invite_timeout',5), "Invitation Discord")
         return
     
     # 🔗 Anti-Liens
-    if c.get('anti_link') and check_link(content, c.get('link_whitelist','')):
+    if c.get('anti_link') and check_link(content, c.get('link_whitelist', '')):
         await msg.delete()
-        await apply_action(msg.author, c.get('link_action','delete'), c.get('link_timeout',5), "Lien interdit")
         return
     
     # 🖼️ Anti-Images
     if c.get('anti_image') and msg.attachments:
+        allowed = c.get('image_allowed', '')
         for a in msg.attachments:
-            if a.filename.lower().endswith(('.png','.jpg','.jpeg','.gif','.webp')):
+            if check_image(a, allowed):
                 await msg.delete()
                 return
     
     # 📨 Anti-Spam
-    if c.get('anti_spam') and await check_spam(msg, c.get('spam_max_msg',5), c.get('spam_interval',5)):
-        await msg.delete()
-        await apply_action(msg.author, c.get('spam_action','timeout'), c.get('spam_timeout',5), "Spam")
-        return
+    if c.get('anti_spam'):
+        max_msg = c.get('spam_max_msg', 5)
+        interval = c.get('spam_interval', 5)
+        if await check_spam(msg, max_msg, interval):
+            await msg.delete()
+            action = c.get('spam_action', 'mute')
+            duration = c.get('spam_duration', 10)
+            await apply_action(msg.author, action, duration, "Spam détecté")
+            return
     
     # 📢 Anti-Mention
-    if c.get('anti_mention') and check_mentions(msg, c.get('mention_max',5)):
-        await msg.delete()
-        await apply_action(msg.author, c.get('mention_action','timeout'), c.get('mention_timeout',10), "Mass mention")
-        return
+    if c.get('anti_mention'):
+        max_m = c.get('mention_max', 5)
+        if check_mentions(msg, max_m):
+            await msg.delete()
+            action = c.get('mention_action', 'mute')
+            duration = c.get('mention_duration', 10)
+            await apply_action(msg.author, action, duration, "Mass mention")
+            return
     
     # 🔠 Anti-Caps
-    if c.get('anti_caps') and check_caps(content, c.get('caps_percent',70), c.get('caps_min_len',10)):
-        await msg.delete()
-        return
+    if c.get('anti_caps'):
+        percent = c.get('caps_percent', 70)
+        min_len = c.get('caps_min_len', 10)
+        if check_caps(content, percent, min_len):
+            await msg.delete()
+            action = c.get('caps_action', 'delete')
+            if action != 'delete':
+                await apply_action(msg.author, action, 5, "Majuscules excessives")
+            return
 
 @bot.event
 async def on_member_join(m):
     c = await gcfg(m.guild.id)
+    
     # 👶 Anti-NewAccount
     if c.get('anti_newaccount'):
-        days = c.get('newaccount_days',7)
-        age = (now() - m.created_at.replace(tzinfo=timezone.utc)).days
-        if age < days:
-            action = c.get('newaccount_action','kick')
-            if action == 'ban':
-                try: await m.ban(reason=f"Compte trop récent ({age}j < {days}j)")
-                except: pass
-            else:
-                try: await m.kick(reason=f"Compte trop récent ({age}j < {days}j)")
-                except: pass
+        val = c.get('newaccount_value', 7)
+        unit = c.get('newaccount_unit', 'jours')
+        
+        # Convertir en jours
+        if unit == 'semaines': days_required = val * 7
+        elif unit == 'mois': days_required = val * 30
+        else: days_required = val
+        
+        account_age = (now() - m.created_at.replace(tzinfo=timezone.utc)).days
+        if account_age < days_required:
+            try:
+                await m.kick(reason=f"Compte trop récent ({account_age}j < {days_required}j requis)")
+            except: pass
             return
+    
     # 👋 Welcome
     if c.get('welcome_on') and c.get('welcome_channel'):
         ch = m.guild.get_channel(c['welcome_channel'])
@@ -737,8 +1056,9 @@ async def cfg_cmd(i: discord.Interaction):
 async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
     if not await has_permission(i.user,'warn'): return await i.response.send_message("❌",ephemeral=True)
     if await is_immune(membre): return await i.response.send_message("❌ Immunisé",ephemeral=True)
-    await add_infraction(i.guild.id,membre.id,i.user.id,'warn',raison)
     async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('INSERT INTO infractions (guild_id,user_id,mod_id,type,reason) VALUES (?,?,?,?,?)', (i.guild.id,membre.id,i.user.id,'warn',raison))
+        await db.commit()
         cur = await db.execute("SELECT COUNT(*) FROM infractions WHERE guild_id=? AND user_id=? AND type='warn'", (i.guild.id,membre.id))
         count = (await cur.fetchone())[0]
     e = discord.Embed(title="⚠️ Warn",color=C.YELLOW)
@@ -761,9 +1081,8 @@ async def timeout_cmd(i: discord.Interaction, membre: discord.Member, duree: str
     mult = {'s':1,'m':60,'h':3600,'d':86400}
     secs = val * mult[unit]
     await membre.timeout(timedelta(seconds=secs),reason=raison)
-    await add_infraction(i.guild.id,membre.id,i.user.id,'timeout',raison,secs)
-    await i.response.send_message(f"⏰ {membre.mention} timeout {duree} - {raison}")
+    await i.response.send_message(f"⏰ {membre.mention} timeout **{duree}** - {raison}")
 
 if __name__ == "__main__":
-    print("🚀 Démarrage v9.2...")
+    print("🚀 Démarrage v9.3...")
     bot.run(TOKEN)
