@@ -6,7 +6,7 @@ except ModuleNotFoundError:
     sys.modules['audioop'] = audioop
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 from discord.ui import View, Select, Modal, TextInput, Button
 import aiosqlite, os, re, json, asyncio, unicodedata, io, time
@@ -47,6 +47,23 @@ async def db_init():
             type TEXT,
             reason TEXT,
             duration TEXT DEFAULT "",
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        # Table pour tracker l'activité Realsy
+        await db.execute('''CREATE TABLE IF NOT EXISTS realsy_tracking(
+            guild_id INTEGER,
+            user_id INTEGER,
+            last_activity TEXT,
+            warn_count INTEGER DEFAULT 0,
+            PRIMARY KEY(guild_id, user_id)
+        )''')
+        # Table pour les suggestions
+        await db.execute('''CREATE TABLE IF NOT EXISTS suggestions(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            message_id INTEGER,
+            user_id INTEGER,
+            title TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )''')
         async with db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tickets'") as cur:
@@ -225,6 +242,11 @@ async def check_spam(msg, mx, intv):
 def check_channel_cfg(msg, conf):
     if not conf: return False, None
     ct = (msg.content or "").strip()
+    # Commands only - bloque tout sauf les commandes slash (qui n'apparaissent pas comme messages normaux)
+    if conf.get('commands_only', False):
+        # Si le message n'est pas vide, c'est pas une commande slash
+        if ct or msg.attachments:
+            return True, "commands_only"
     if not conf.get('messages', True):
         has_txt = bool(re.sub(r'<a?:\w+:\d+>|https?://\S+', '', ct).strip())
         if has_txt and not msg.attachments and not msg.embeds:
@@ -572,7 +594,12 @@ class MainPanel(View):
         v = ModerationPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
-    @discord.ui.button(label="Immunités", emoji="👑", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="Commandes", emoji="⚡", style=discord.ButtonStyle.primary, row=0)
+    async def commands(self, i, b):
+        v = CommandsPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="Immunités", emoji="👑", style=discord.ButtonStyle.secondary, row=1)
     async def immune(self, i, b):
         v = ImmunePanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
@@ -1290,7 +1317,270 @@ class AddImmuneUserModal(Modal, title="➕ Ajouter un utilisateur immunisé"):
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                           📺 CONFIG SALON (INTACT)
+#                           ⚡ COMMANDES PANEL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CommandsPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        e = discord.Embed(title="⚡ Commandes", color=C.PURPLE)
+        e.description = "Configurez les commandes personnalisées du serveur."
+        
+        # RellSeas
+        rellseas_user = self.g.get_member(c.get('rellseas_user', 0))
+        rellseas_role = self.g.get_role(c.get('rellseas_role', 0))
+        warn_ch = self.g.get_channel(c.get('rellseas_warn_channel', 0))
+        log_ch = self.g.get_channel(c.get('rellseas_log_channel', 0))
+        e.add_field(
+            name="🎭 RellSeas",
+            value=f"👤 User: {rellseas_user.mention if rellseas_user else '❌'}\n🎭 Rôle: {rellseas_role.mention if rellseas_role else '❌'}\n⚠️ Warn: {warn_ch.mention if warn_ch else '❌'}\n📜 Log: {log_ch.mention if log_ch else '❌'}",
+            inline=True
+        )
+        
+        # Suggestions
+        sugg_role = self.g.get_role(c.get('suggestion_role', 0))
+        sugg_ch = self.g.get_channel(c.get('suggestion_channel', 0))
+        sugg_cd = c.get('suggestion_cooldown', 1)
+        sugg_unit = c.get('suggestion_cooldown_unit', 'jours')
+        e.add_field(
+            name="💡 Suggestions",
+            value=f"🎭 Rôle: {sugg_role.mention if sugg_role else '❌'}\n📍 Salon: {sugg_ch.mention if sugg_ch else '❌'}\n⏱️ Cooldown: {sugg_cd} {sugg_unit}",
+            inline=True
+        )
+        
+        return e
+    
+    @discord.ui.button(label="🎭 RellSeas", style=discord.ButtonStyle.primary, row=0)
+    async def rellseas(self, i, b):
+        v = RellSeasPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="💡 Suggestions", style=discord.ButtonStyle.primary, row=0)
+    async def suggestions(self, i, b):
+        v = SuggestionPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = MainPanel(self.u, self.g)
+        await i.response.edit_message(embed=v.embed(), view=v)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           🎭 RELLSEAS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class RellSeasPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        e = discord.Embed(title="🎭 Configuration RellSeas", color=C.PURPLE)
+        
+        rellseas_user = self.g.get_member(c.get('rellseas_user', 0))
+        rellseas_role = self.g.get_role(c.get('rellseas_role', 0))
+        warn_ch = self.g.get_channel(c.get('rellseas_warn_channel', 0))
+        log_ch = self.g.get_channel(c.get('rellseas_log_channel', 0))
+        
+        e.add_field(name="👤 Utilisateur autorisé", value=rellseas_user.mention if rellseas_user else "❌ Non configuré", inline=False)
+        e.add_field(name="🎭 Rôle à donner (Realsy)", value=rellseas_role.mention if rellseas_role else "❌ Non configuré", inline=False)
+        e.add_field(name="⚠️ Salon warn inactivité", value=warn_ch.mention if warn_ch else "❌ Non configuré", inline=True)
+        e.add_field(name="📜 Salon logs", value=log_ch.mention if log_ch else "❌ Non configuré", inline=True)
+        
+        e.set_footer(text="Inactivité: 1 semaine = 1er warn | 2ème warn = rôle retiré")
+        return e
+    
+    @discord.ui.button(label="👤 Utilisateur", style=discord.ButtonStyle.primary, row=0)
+    async def set_user(self, i, b):
+        await i.response.send_modal(RellSeasUserModal(self.g, self.u))
+    
+    @discord.ui.button(label="🎭 Rôle Realsy", style=discord.ButtonStyle.primary, row=0)
+    async def set_role(self, i, b):
+        roles = [r for r in self.g.roles[1:] if not r.is_bot_managed()][:25]
+        opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
+        v = RellSeasRoleView(self.u, self.g, opts)
+        await i.response.edit_message(embed=discord.Embed(title="🎭 Choisir le rôle Realsy", color=C.PURPLE), view=v)
+    
+    @discord.ui.button(label="⚠️ Salon Warn", style=discord.ButtonStyle.secondary, row=1)
+    async def set_warn_ch(self, i, b):
+        chs = list(self.g.text_channels)[:25]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        v = RellSeasChanView(self.u, self.g, opts, 'rellseas_warn_channel')
+        await i.response.edit_message(embed=discord.Embed(title="⚠️ Salon des warns", color=C.PURPLE), view=v)
+    
+    @discord.ui.button(label="📜 Salon Logs", style=discord.ButtonStyle.secondary, row=1)
+    async def set_log_ch(self, i, b):
+        chs = list(self.g.text_channels)[:25]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        v = RellSeasChanView(self.u, self.g, opts, 'rellseas_log_channel')
+        await i.response.edit_message(embed=discord.Embed(title="📜 Salon des logs", color=C.PURPLE), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+    async def back(self, i, b):
+        v = CommandsPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class RellSeasUserModal(Modal, title="👤 Utilisateur RellSeas"):
+    uid = TextInput(label="ID de l'utilisateur", placeholder="123456789012345678")
+    
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+    
+    async def on_submit(self, i):
+        try:
+            user_id = int(self.uid.value)
+            await db_set(self.g.id, 'rellseas_user', user_id)
+        except: pass
+        v = RellSeasPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class RellSeasRoleView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.add_item(RellSeasRoleSelect(u, g, opts))
+
+class RellSeasRoleSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir un rôle...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        await db_set(i.guild.id, 'rellseas_role', int(self.values[0]))
+        v = RellSeasPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class RellSeasChanView(View):
+    def __init__(self, u, g, opts, key):
+        super().__init__(timeout=120)
+        self.add_item(RellSeasChanSelect(u, g, opts, key))
+
+class RellSeasChanSelect(Select):
+    def __init__(self, u, g, opts, key):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+        self.key = key
+    
+    async def callback(self, i):
+        await db_set(i.guild.id, self.key, int(self.values[0]))
+        v = RellSeasPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           💡 SUGGESTIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class SuggestionPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        e = discord.Embed(title="💡 Configuration Suggestions", color=C.PURPLE)
+        
+        sugg_role = self.g.get_role(c.get('suggestion_role', 0))
+        sugg_ch = self.g.get_channel(c.get('suggestion_channel', 0))
+        sugg_cd = c.get('suggestion_cooldown', 1)
+        sugg_unit = c.get('suggestion_cooldown_unit', 'jours')
+        
+        e.add_field(name="🎭 Rôle autorisé", value=sugg_role.mention if sugg_role else "❌ Non configuré (tout le monde)", inline=False)
+        e.add_field(name="📍 Salon des suggestions", value=sugg_ch.mention if sugg_ch else "❌ Non configuré", inline=False)
+        e.add_field(name="⏱️ Cooldown", value=f"{sugg_cd} {sugg_unit}", inline=False)
+        
+        e.set_footer(text="Commande: /suggestion")
+        return e
+    
+    @discord.ui.button(label="🎭 Rôle", style=discord.ButtonStyle.primary, row=0)
+    async def set_role(self, i, b):
+        roles = [r for r in self.g.roles[1:] if not r.is_bot_managed()][:25]
+        opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
+        opts.insert(0, discord.SelectOption(label="❌ Tout le monde", value="0"))
+        v = SuggRoleView(self.u, self.g, opts)
+        await i.response.edit_message(embed=discord.Embed(title="🎭 Rôle autorisé", color=C.PURPLE), view=v)
+    
+    @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
+    async def set_channel(self, i, b):
+        chs = list(self.g.text_channels)[:25]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        v = SuggChanView(self.u, self.g, opts)
+        await i.response.edit_message(embed=discord.Embed(title="📍 Salon des suggestions", color=C.PURPLE), view=v)
+    
+    @discord.ui.button(label="⏱️ Cooldown", style=discord.ButtonStyle.secondary, row=1)
+    async def set_cooldown(self, i, b):
+        await i.response.send_modal(SuggCooldownModal(self.g, self.u))
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+    async def back(self, i, b):
+        v = CommandsPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class SuggRoleView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.add_item(SuggRoleSelect(u, g, opts))
+
+class SuggRoleSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir un rôle...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        await db_set(i.guild.id, 'suggestion_role', int(self.values[0]))
+        v = SuggestionPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class SuggChanView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.add_item(SuggChanSelect(u, g, opts))
+
+class SuggChanSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        await db_set(i.guild.id, 'suggestion_channel', int(self.values[0]))
+        v = SuggestionPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class SuggCooldownModal(Modal, title="⏱️ Cooldown Suggestions"):
+    duree = TextInput(label="Durée (nombre)", placeholder="1", default="1", max_length=3)
+    unite = TextInput(label="Unité (jours ou semaines)", placeholder="jours", default="jours", max_length=10)
+    
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+    
+    async def on_submit(self, i):
+        try:
+            cd = max(1, int(self.duree.value))
+            unit = self.unite.value.lower()
+            if unit not in ['jours', 'semaines']:
+                unit = 'jours'
+            await db_set(self.g.id, 'suggestion_cooldown', cd)
+            await db_set(self.g.id, 'suggestion_cooldown_unit', unit)
+        except: pass
+        v = SuggestionPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           📺 CONFIG SALON
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class ChanPanel(View):
@@ -1314,6 +1604,7 @@ class ChanPanel(View):
                     if not conf.get('gifs', True): icons += "🎞️❌ "
                     if not conf.get('emojis', True): icons += "😀❌ "
                     if not conf.get('links', True): icons += "🔗❌ "
+                    if conf.get('commands_only', False): icons += "🤖✅ "
                     lines.append(f"{ch.mention}: {icons or '✅ Tout autorisé'}")
             e.description = "\n".join(lines)
         else:
@@ -1355,7 +1646,7 @@ class EditChanCfg(View):
     
     async def get_conf(self):
         c = await cfg(self.g.id)
-        return c.get('channel_configs', {}).get(str(self.ch_id), {'messages': True, 'images': True, 'gifs': True, 'emojis': True, 'links': True})
+        return c.get('channel_configs', {}).get(str(self.ch_id), {'messages': True, 'images': True, 'gifs': True, 'emojis': True, 'links': True, 'commands_only': False})
     
     async def save(self, conf):
         c = await cfg(self.g.id)
@@ -1367,13 +1658,14 @@ class EditChanCfg(View):
         ch = self.g.get_channel(int(self.ch_id))
         conf = await self.get_conf()
         s = lambda k: "✅ Autorisé" if conf.get(k, True) else "❌ Bloqué"
+        so = lambda k: "✅ Activé" if conf.get(k, False) else "❌ Désactivé"
         e = discord.Embed(title=f"📺 Configuration de #{ch.name if ch else '?'}", color=C.ORANGE)
-        e.description = f"💬 Messages: {s('messages')}\n🖼️ Images: {s('images')}\n🎞️ GIFs: {s('gifs')}\n😀 Emojis: {s('emojis')}\n🔗 Liens: {s('links')}"
+        e.description = f"💬 Messages: {s('messages')}\n🖼️ Images: {s('images')}\n🎞️ GIFs: {s('gifs')}\n😀 Emojis: {s('emojis')}\n🔗 Liens: {s('links')}\n\n🤖 **Commandes bot uniquement**: {so('commands_only')}"
         return e
     
-    async def toggle(self, i, key):
+    async def toggle(self, i, key, default=True):
         conf = await self.get_conf()
-        conf[key] = not conf.get(key, True)
+        conf[key] = not conf.get(key, default)
         await self.save(conf)
         await i.response.edit_message(embed=await self.embed(), view=self)
     
@@ -1391,6 +1683,9 @@ class EditChanCfg(View):
     
     @discord.ui.button(label="🔗 Liens", style=discord.ButtonStyle.primary, row=1)
     async def t5(self, i, b): await self.toggle(i, 'links')
+    
+    @discord.ui.button(label="🤖 Commandes uniquement", style=discord.ButtonStyle.success, row=1)
+    async def t6(self, i, b): await self.toggle(i, 'commands_only', False)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
@@ -1726,6 +2021,19 @@ class SendPanelSel(Select):
 #                              🎯 EVENTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+async def update_realsy_activity(guild_id, user_id):
+    """Met à jour la dernière activité d'un utilisateur avec le rôle Realsy"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('SELECT user_id FROM realsy_tracking WHERE guild_id=? AND user_id=?', 
+                (guild_id, user_id)) as c:
+                if await c.fetchone():
+                    await db.execute('UPDATE realsy_tracking SET last_activity=?, warn_count=0 WHERE guild_id=? AND user_id=?',
+                        (now().isoformat(), guild_id, user_id))
+                    await db.commit()
+    except:
+        pass
+
 @bot.event
 async def on_ready():
     await db_init()
@@ -1741,7 +2049,10 @@ async def on_ready():
                     except: pass
     except: pass
     await bot.tree.sync()
-    print(f"✅ {bot.user.name} v12 prêt!")
+    # Lancer la tâche d'inactivité
+    if not check_realsy_inactivity.is_running():
+        check_realsy_inactivity.start()
+    print(f"✅ {bot.user.name} v12.3 prêt!")
 
 @bot.event
 async def on_member_remove(m):
@@ -1775,6 +2086,10 @@ async def on_member_join(m):
 @bot.event
 async def on_message(msg):
     if msg.author.bot or not msg.guild: return
+    
+    # Mise à jour activité Realsy
+    await update_realsy_activity(msg.guild.id, msg.author.id)
+    
     try:
         c = await cfg(msg.guild.id)
         ct = msg.content or ""
@@ -2170,6 +2485,328 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
     # Log
     await send_mod_log(i.guild, 'infractions', i.user, membre, extra=f"Total: {len(rows)} infractions")
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#                              🎭 RELLSEAS COMMAND
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@bot.tree.command(name="rellseas", description="🎭 Donner ou retirer le rôle Realsy à un membre")
+@app_commands.describe(membre="Le membre", action="Donner ou retirer le rôle")
+@app_commands.choices(action=[
+    app_commands.Choice(name="Donner le rôle", value="add"),
+    app_commands.Choice(name="Retirer le rôle", value="remove")
+])
+async def rellseas_cmd(i: discord.Interaction, membre: discord.Member, action: str):
+    c = await cfg(i.guild.id)
+    
+    # Vérifier si l'utilisateur est autorisé
+    if i.user.id != c.get('rellseas_user', 0) and not i.user.guild_permissions.administrator:
+        return await i.response.send_message("❌ Vous n'êtes pas autorisé à utiliser cette commande", ephemeral=True)
+    
+    # Vérifier si le rôle est configuré
+    role = i.guild.get_role(c.get('rellseas_role', 0))
+    if not role:
+        return await i.response.send_message("❌ Le rôle Realsy n'est pas configuré", ephemeral=True)
+    
+    if action == "add":
+        if role in membre.roles:
+            return await i.response.send_message(f"❌ {membre.mention} a déjà le rôle {role.mention}", ephemeral=True)
+        
+        try:
+            await membre.add_roles(role, reason=f"RellSeas par {i.user.name}")
+            
+            # Enregistrer l'activité initiale
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute('''INSERT OR REPLACE INTO realsy_tracking 
+                    (guild_id, user_id, last_activity, warn_count) VALUES (?, ?, ?, 0)''',
+                    (i.guild.id, membre.id, now().isoformat()))
+                await db.commit()
+            
+            e = discord.Embed(title="🎭 Rôle Realsy donné", color=C.GREEN, timestamp=now())
+            e.add_field(name="👤 Membre", value=f"{membre.mention}", inline=True)
+            e.add_field(name="👮 Par", value=f"{i.user.mention}", inline=True)
+            e.set_thumbnail(url=membre.display_avatar.url)
+            await i.response.send_message(embed=e)
+            
+            # Log
+            log_ch = i.guild.get_channel(c.get('rellseas_log_channel', 0))
+            if log_ch:
+                await log_ch.send(embed=e)
+                
+        except discord.Forbidden:
+            return await i.response.send_message("❌ Je ne peux pas donner ce rôle", ephemeral=True)
+    
+    else:  # remove
+        if role not in membre.roles:
+            return await i.response.send_message(f"❌ {membre.mention} n'a pas le rôle {role.mention}", ephemeral=True)
+        
+        try:
+            await membre.remove_roles(role, reason=f"RellSeas retiré par {i.user.name}")
+            
+            # Supprimer du tracking
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute('DELETE FROM realsy_tracking WHERE guild_id=? AND user_id=?',
+                    (i.guild.id, membre.id))
+                await db.commit()
+            
+            e = discord.Embed(title="🎭 Rôle Realsy retiré", color=C.RED, timestamp=now())
+            e.add_field(name="👤 Membre", value=f"{membre.mention}", inline=True)
+            e.add_field(name="👮 Par", value=f"{i.user.mention}", inline=True)
+            e.set_thumbnail(url=membre.display_avatar.url)
+            await i.response.send_message(embed=e)
+            
+            # Log
+            log_ch = i.guild.get_channel(c.get('rellseas_log_channel', 0))
+            if log_ch:
+                await log_ch.send(embed=e)
+                
+        except discord.Forbidden:
+            return await i.response.send_message("❌ Je ne peux pas retirer ce rôle", ephemeral=True)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                              💡 SUGGESTION COMMAND
+# ═══════════════════════════════════════════════════════════════════════════════
+
+suggestion_cooldowns = {}
+
+@bot.tree.command(name="suggestion", description="💡 Proposer une suggestion")
+@app_commands.describe(titre="Titre de votre suggestion", proposition="Décrivez votre suggestion en détail")
+async def suggestion_cmd(i: discord.Interaction, titre: str, proposition: str):
+    c = await cfg(i.guild.id)
+    
+    # Vérifier le rôle
+    role_id = c.get('suggestion_role', 0)
+    if role_id:
+        role = i.guild.get_role(role_id)
+        if role and role not in i.user.roles:
+            return await i.response.send_message(f"❌ Vous devez avoir le rôle {role.mention} pour faire des suggestions", ephemeral=True)
+    
+    # Vérifier le salon
+    sugg_ch = i.guild.get_channel(c.get('suggestion_channel', 0))
+    if not sugg_ch:
+        return await i.response.send_message("❌ Le salon des suggestions n'est pas configuré", ephemeral=True)
+    
+    # Vérifier le cooldown
+    cooldown_key = (i.guild.id, i.user.id)
+    cd_duration = c.get('suggestion_cooldown', 1)
+    cd_unit = c.get('suggestion_cooldown_unit', 'jours')
+    
+    if cd_unit == 'semaines':
+        cd_seconds = cd_duration * 7 * 24 * 3600
+    else:
+        cd_seconds = cd_duration * 24 * 3600
+    
+    if cooldown_key in suggestion_cooldowns:
+        last_time = suggestion_cooldowns[cooldown_key]
+        elapsed = (now() - last_time).total_seconds()
+        if elapsed < cd_seconds:
+            remaining = cd_seconds - elapsed
+            days = int(remaining // 86400)
+            hours = int((remaining % 86400) // 3600)
+            return await i.response.send_message(
+                f"❌ Vous devez attendre encore **{days}j {hours}h** avant de faire une nouvelle suggestion",
+                ephemeral=True
+            )
+    
+    # Créer la suggestion
+    e = discord.Embed(title=f"💡 {titre[:100]}", description=proposition[:2000], color=C.BLURPLE, timestamp=now())
+    e.add_field(name="👤 Proposé par", value=f"{i.user.mention}\n`{i.user.id}`", inline=True)
+    e.set_thumbnail(url=i.user.display_avatar.url)
+    e.set_footer(text="Votez avec les réactions ci-dessous!")
+    
+    # Envoyer
+    msg = await sugg_ch.send(embed=e)
+    
+    # Ajouter les réactions
+    await msg.add_reaction("✅")  # Pour
+    await msg.add_reaction("🟠")  # Neutre
+    await msg.add_reaction("❌")  # Contre
+    
+    # Enregistrer le cooldown
+    suggestion_cooldowns[cooldown_key] = now()
+    
+    # Stocker l'ID du message pour le tracking des votes
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute('INSERT INTO suggestions (guild_id, message_id, user_id, title) VALUES (?, ?, ?, ?)',
+            (i.guild.id, msg.id, i.user.id, titre))
+        await db.commit()
+    
+    await i.response.send_message(f"✅ Votre suggestion a été publiée dans {sugg_ch.mention}!", ephemeral=True)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                              📊 SUGGESTION VOTE TRACKING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@bot.event
+async def on_raw_reaction_add(payload):
+    if payload.user_id == bot.user.id:
+        return
+    
+    # Vérifier si c'est une suggestion
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('SELECT id FROM suggestions WHERE message_id=?', (payload.message_id,)) as c:
+                if not await c.fetchone():
+                    return
+        
+        # Mettre à jour la couleur de l'embed
+        channel = bot.get_channel(payload.channel_id)
+        if not channel:
+            return
+        
+        msg = await channel.fetch_message(payload.message_id)
+        
+        # Compter les votes
+        votes = {"✅": 0, "🟠": 0, "❌": 0}
+        for reaction in msg.reactions:
+            if reaction.emoji in votes:
+                votes[reaction.emoji] = reaction.count - 1  # -1 pour le bot
+        
+        # Déterminer la couleur
+        total = sum(votes.values())
+        if total == 0:
+            color = C.BLURPLE
+        elif votes["✅"] > votes["❌"] and votes["✅"] > votes["🟠"]:
+            color = C.GREEN
+        elif votes["❌"] > votes["✅"] and votes["❌"] > votes["🟠"]:
+            color = C.RED
+        elif votes["🟠"] > votes["✅"] and votes["🟠"] > votes["❌"]:
+            color = C.ORANGE
+        else:
+            color = C.BLURPLE
+        
+        # Mettre à jour l'embed
+        if msg.embeds:
+            old_embed = msg.embeds[0]
+            new_embed = discord.Embed(
+                title=old_embed.title,
+                description=old_embed.description,
+                color=color,
+                timestamp=old_embed.timestamp
+            )
+            for field in old_embed.fields:
+                new_embed.add_field(name=field.name, value=field.value, inline=field.inline)
+            if old_embed.thumbnail:
+                new_embed.set_thumbnail(url=old_embed.thumbnail.url)
+            new_embed.set_footer(text=f"✅ {votes['✅']} | 🟠 {votes['🟠']} | ❌ {votes['❌']}")
+            
+            await msg.edit(embed=new_embed)
+    except:
+        pass
+
+@bot.event
+async def on_raw_reaction_remove(payload):
+    await on_raw_reaction_add(payload)  # Même logique
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                              🎭 REALSY INACTIVITY TRACKING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@tasks.loop(hours=24)
+async def check_realsy_inactivity():
+    """Vérifie l'inactivité des utilisateurs avec le rôle Realsy chaque jour"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('SELECT guild_id, user_id, last_activity, warn_count FROM realsy_tracking') as c:
+                rows = await c.fetchall()
+        
+        for guild_id, user_id, last_activity, warn_count in rows:
+            try:
+                guild = bot.get_guild(guild_id)
+                if not guild:
+                    continue
+                
+                c = await cfg(guild_id)
+                role = guild.get_role(c.get('rellseas_role', 0))
+                if not role:
+                    continue
+                
+                member = guild.get_member(user_id)
+                if not member or role not in member.roles:
+                    # L'utilisateur n'a plus le rôle, supprimer du tracking
+                    async with aiosqlite.connect(DB_PATH) as db:
+                        await db.execute('DELETE FROM realsy_tracking WHERE guild_id=? AND user_id=?',
+                            (guild_id, user_id))
+                        await db.commit()
+                    continue
+                
+                # Calculer l'inactivité
+                try:
+                    last_dt = datetime.fromisoformat(last_activity)
+                    if last_dt.tzinfo is None:
+                        last_dt = last_dt.replace(tzinfo=timezone.utc)
+                except:
+                    last_dt = now() - timedelta(days=8)  # Considérer comme inactif si erreur
+                
+                days_inactive = (now() - last_dt).days
+                
+                if days_inactive >= 7:
+                    warn_ch = guild.get_channel(c.get('rellseas_warn_channel', 0))
+                    log_ch = guild.get_channel(c.get('rellseas_log_channel', 0))
+                    
+                    if warn_count == 0:
+                        # Premier warn
+                        async with aiosqlite.connect(DB_PATH) as db:
+                            await db.execute('UPDATE realsy_tracking SET warn_count=1 WHERE guild_id=? AND user_id=?',
+                                (guild_id, user_id))
+                            await db.commit()
+                        
+                        if warn_ch:
+                            e = discord.Embed(title="⚠️ Avertissement Inactivité", color=C.YELLOW, timestamp=now())
+                            e.description = f"{member.mention}, vous êtes inactif depuis **{days_inactive} jours**.\n\n⚠️ Si vous restez inactif, votre rôle **{role.name}** sera retiré."
+                            e.set_thumbnail(url=member.display_avatar.url)
+                            await warn_ch.send(content=member.mention, embed=e)
+                        
+                        if log_ch:
+                            log_e = discord.Embed(title="⚠️ Warn Inactivité #1", color=C.YELLOW, timestamp=now())
+                            log_e.add_field(name="👤 Membre", value=f"{member.mention}\n`{member.id}`", inline=True)
+                            log_e.add_field(name="📅 Inactif depuis", value=f"{days_inactive} jours", inline=True)
+                            log_e.set_thumbnail(url=member.display_avatar.url)
+                            await log_ch.send(embed=log_e)
+                    
+                    elif warn_count >= 1 and days_inactive >= 14:
+                        # Deuxième warn - retirer le rôle
+                        try:
+                            await member.remove_roles(role, reason="Inactivité - 2ème avertissement")
+                            
+                            # Supprimer du tracking
+                            async with aiosqlite.connect(DB_PATH) as db:
+                                await db.execute('DELETE FROM realsy_tracking WHERE guild_id=? AND user_id=?',
+                                    (guild_id, user_id))
+                                await db.commit()
+                            
+                            if warn_ch:
+                                e = discord.Embed(title="🚫 Rôle Retiré - Inactivité", color=C.RED, timestamp=now())
+                                e.description = f"{member.mention}, votre rôle **{role.name}** a été retiré pour cause d'inactivité prolongée ({days_inactive} jours)."
+                                e.set_thumbnail(url=member.display_avatar.url)
+                                await warn_ch.send(content=member.mention, embed=e)
+                            
+                            if log_ch:
+                                log_e = discord.Embed(title="🚫 Rôle Retiré - AFK", color=C.RED, timestamp=now())
+                                log_e.add_field(name="👤 Membre", value=f"{member.mention}\n`{member.id}`", inline=True)
+                                log_e.add_field(name="🎭 Rôle retiré", value=role.mention, inline=True)
+                                log_e.add_field(name="📅 Inactif depuis", value=f"{days_inactive} jours", inline=True)
+                                log_e.set_thumbnail(url=member.display_avatar.url)
+                                await log_ch.send(embed=log_e)
+                        except:
+                            pass
+            except:
+                continue
+    except:
+        pass
+
+@check_realsy_inactivity.before_loop
+async def before_check():
+    await bot.wait_until_ready()
+
+# Mise à jour activité sur vocal
+@bot.event
+async def on_voice_state_update(member, before, after):
+    if member.bot:
+        return
+    # Si l'utilisateur rejoint un vocal
+    if after.channel and (not before.channel or before.channel != after.channel):
+        await update_realsy_activity(member.guild.id, member.id)
+
 if __name__ == "__main__":
-    print("🚀 Bot v12 - Démarrage...")
+    print("🚀 Bot v12.3 - Démarrage...")
     bot.run(TOKEN)
