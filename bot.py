@@ -59,11 +59,14 @@ async def db_init():
                     if cn not in cols:
                         try: await db.execute(f'ALTER TABLE tickets ADD COLUMN {cn} {ct}')
                         except: pass
-        # Migration infractions duration
+        # Migration infractions
         async with db.execute("PRAGMA table_info(infractions)") as cur:
             cols = [r[1] for r in await cur.fetchall()]
         if 'duration' not in cols:
             try: await db.execute('ALTER TABLE infractions ADD COLUMN duration TEXT DEFAULT ""')
+            except: pass
+        if 'created_at' not in cols:
+            try: await db.execute('ALTER TABLE infractions ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP')
             except: pass
         await db.commit()
     print("✅ DB OK")
@@ -1926,15 +1929,6 @@ async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
     
     # Log
     await send_mod_log(i.guild, 'warn', i.user, membre, raison, extra=f"Total warns: {warn_count}")
-    
-    # DM au membre
-    try:
-        dm_embed = discord.Embed(title="⚠️ Vous avez reçu un avertissement", color=C.YELLOW)
-        dm_embed.add_field(name="🏠 Serveur", value=i.guild.name, inline=True)
-        dm_embed.add_field(name="📊 Total warns", value=str(warn_count), inline=True)
-        dm_embed.add_field(name="📝 Raison", value=raison, inline=False)
-        await membre.send(embed=dm_embed)
-    except: pass
 
 @bot.tree.command(name="unwarn", description="✅ Supprimer un avertissement d'un membre")
 @app_commands.describe(membre="Le membre dont vous voulez supprimer un warn")
@@ -1942,10 +1936,10 @@ async def unwarn_cmd(i: discord.Interaction, membre: discord.Member):
     if not await check_mod_perm(i, 'mod_warn_role'):
         return await i.response.send_message("❌ Vous n'avez pas la permission", ephemeral=True)
     
-    # Récupérer les warns
+    # Récupérer les warns (sans created_at pour éviter l'erreur)
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            'SELECT id, reason, created_at FROM infractions WHERE guild_id=? AND user_id=? AND type="warn" ORDER BY created_at DESC LIMIT 25',
+            'SELECT id, reason FROM infractions WHERE guild_id=? AND user_id=? AND type="warn" ORDER BY id DESC LIMIT 25',
             (i.guild.id, membre.id)
         ) as c:
             warns = await c.fetchall()
@@ -1955,14 +1949,13 @@ async def unwarn_cmd(i: discord.Interaction, membre: discord.Member):
     
     # Créer les options
     opts = []
-    for warn_id, reason, created in warns:
-        date_str = created[:10] if created else "?"
-        label = f"#{warn_id} - {reason[:40]}{'...' if len(reason) > 40 else ''}"
-        opts.append(discord.SelectOption(label=label[:100], value=str(warn_id), description=f"Date: {date_str}"))
+    for warn_id, reason in warns:
+        label = f"#{warn_id} - {reason[:50]}{'...' if len(reason) > 50 else ''}"
+        opts.append(discord.SelectOption(label=label[:100], value=str(warn_id)))
     
     e = discord.Embed(
         title=f"✅ Supprimer un warn de {membre.display_name}",
-        description=f"Sélectionnez le warn à supprimer ({len(warns)} warn(s) trouvé(s))",
+        description=f"Sélectionnez le warn à supprimer ({len(warns)} warn(s))",
         color=C.GREEN
     )
     e.set_thumbnail(url=membre.display_avatar.url)
@@ -2042,14 +2035,13 @@ async def mute_cmd(i: discord.Interaction, membre: discord.Member, duree: int, u
         delta = timedelta(hours=duree)
         dur_txt = f"{duree} heure(s)"
     elif unite == "jours":
-        duree = min(duree, 7)  # Max 7 jours
+        duree = min(duree, 7)
         delta = timedelta(days=duree)
         dur_txt = f"{duree} jour(s)"
-    else:  # semaine
+    else:
         delta = timedelta(weeks=1)
         dur_txt = "1 semaine"
     
-    # Max Discord: 28 jours, mais on limite à 1 semaine
     if delta > timedelta(days=7):
         delta = timedelta(days=7)
         dur_txt = "7 jours (maximum)"
@@ -2082,35 +2074,23 @@ async def mute_cmd(i: discord.Interaction, membre: discord.Member, duree: int, u
     
     # Log
     await send_mod_log(i.guild, 'mute', i.user, membre, raison, duration=dur_txt)
-    
-    # DM au membre
-    try:
-        dm_embed = discord.Embed(title="🔇 Vous avez été mute", color=C.ORANGE)
-        dm_embed.add_field(name="🏠 Serveur", value=i.guild.name, inline=True)
-        dm_embed.add_field(name="⏱️ Durée", value=dur_txt, inline=True)
-        dm_embed.add_field(name="📝 Raison", value=raison, inline=False)
-        await membre.send(embed=dm_embed)
-    except: pass
 
 @bot.tree.command(name="unmute", description="🔊 Retirer le mute d'un membre")
 @app_commands.describe(membre="Le membre à unmute", raison="La raison du unmute (optionnel)")
-async def unmute_cmd(i: discord.Interaction, membre: discord.Member, raison: str = "Aucune raison spécifiée"):
+async def unmute_cmd(i: discord.Interaction, membre: discord.Member, raison: str = "Aucune raison"):
     if not await check_mod_perm(i, 'mod_mute_role'):
         return await i.response.send_message("❌ Vous n'avez pas la permission", ephemeral=True)
     
-    # Vérifier si le membre est mute
     if not membre.is_timed_out():
         return await i.response.send_message(f"❌ {membre.mention} n'est pas mute", ephemeral=True)
     
-    # Retirer le timeout
     try:
         await membre.timeout(None, reason=f"Unmute par {i.user.name}: {raison}")
     except discord.Forbidden:
-        return await i.response.send_message("❌ Je ne peux pas unmute ce membre (permissions)", ephemeral=True)
+        return await i.response.send_message("❌ Je ne peux pas unmute ce membre", ephemeral=True)
     except Exception as ex:
         return await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
     
-    # Créer l'embed
     e = discord.Embed(title="🔊 Membre unmute", color=C.GREEN, timestamp=now())
     e.add_field(name="👤 Membre", value=f"{membre.mention}\n`{membre.id}`", inline=True)
     e.add_field(name="👮 Modérateur", value=f"{i.user.mention}", inline=True)
@@ -2121,14 +2101,6 @@ async def unmute_cmd(i: discord.Interaction, membre: discord.Member, raison: str
     
     # Log
     await send_mod_log(i.guild, 'unmute', i.user, membre, raison)
-    
-    # DM au membre
-    try:
-        dm_embed = discord.Embed(title="🔊 Vous avez été unmute", color=C.GREEN)
-        dm_embed.add_field(name="🏠 Serveur", value=i.guild.name, inline=True)
-        dm_embed.add_field(name="📝 Raison", value=raison, inline=False)
-        await membre.send(embed=dm_embed)
-    except: pass
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              📋 INFRACTIONS
@@ -2140,70 +2112,63 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
     if not await check_mod_perm(i, 'mod_infractions_role'):
         return await i.response.send_message("❌ Vous n'avez pas la permission", ephemeral=True)
     
-    await i.response.defer()
+    # Récupérer les infractions (sans ORDER BY created_at pour éviter erreur si colonne n'existe pas)
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            'SELECT type, reason, duration, mod_id FROM infractions WHERE guild_id=? AND user_id=? ORDER BY id DESC',
+            (i.guild.id, membre.id)
+        ) as c:
+            rows = await c.fetchall()
     
-    try:
-        # Récupérer les infractions
-        async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute(
-                'SELECT type, reason, duration, mod_id, created_at FROM infractions WHERE guild_id=? AND user_id=? ORDER BY created_at DESC',
-                (i.guild.id, membre.id)
-            ) as c:
-                rows = await c.fetchall()
-        
-        # Calculer le temps sur le serveur
-        joined = membre.joined_at
-        if joined:
-            days_on_server = (now() - joined.replace(tzinfo=timezone.utc)).days
-            time_on_server = f"{days_on_server} jour(s)"
-        else:
-            time_on_server = "Inconnu"
-        
-        # Compter les types
-        warns = sum(1 for r in rows if r[0] == 'warn')
-        mutes = sum(1 for r in rows if r[0] == 'mute')
-        
-        # Créer l'embed
-        e = discord.Embed(title=f"📋 Infractions de {membre.display_name}", color=C.BLUE, timestamp=now())
-        e.set_thumbnail(url=membre.display_avatar.url)
-        
-        e.add_field(name="👤 Membre", value=f"{membre.mention}\n`{membre.id}`", inline=True)
-        e.add_field(name="📅 Sur le serveur", value=time_on_server, inline=True)
-        e.add_field(name="📊 Total", value=str(len(rows)), inline=True)
-        
-        e.add_field(name="⚠️ Warns", value=str(warns), inline=True)
-        e.add_field(name="🔇 Mutes", value=str(mutes), inline=True)
-        
-        # Statut mute actuel
-        if membre.is_timed_out():
-            timeout_until = membre.timed_out_until
-            if timeout_until:
-                e.add_field(name="🔇 Mute actif", value=f"Jusqu'à <t:{int(timeout_until.timestamp())}:R>", inline=True)
-            else:
-                e.add_field(name="\u200b", value="\u200b", inline=True)
+    # Calculer le temps sur le serveur
+    joined = membre.joined_at
+    if joined:
+        days_on_server = (now() - joined.replace(tzinfo=timezone.utc)).days
+        time_on_server = f"{days_on_server} jour(s)"
+    else:
+        time_on_server = "Inconnu"
+    
+    # Compter les types
+    warns = sum(1 for r in rows if r[0] == 'warn')
+    mutes = sum(1 for r in rows if r[0] == 'mute')
+    
+    # Créer l'embed
+    e = discord.Embed(title=f"📋 Infractions de {membre.display_name}", color=C.BLUE, timestamp=now())
+    e.set_thumbnail(url=membre.display_avatar.url)
+    
+    e.add_field(name="👤 Membre", value=f"{membre.mention}\n`{membre.id}`", inline=True)
+    e.add_field(name="📅 Sur le serveur", value=time_on_server, inline=True)
+    e.add_field(name="📊 Total", value=str(len(rows)), inline=True)
+    
+    e.add_field(name="⚠️ Warns", value=str(warns), inline=True)
+    e.add_field(name="🔇 Mutes", value=str(mutes), inline=True)
+    
+    # Statut mute actuel
+    if membre.is_timed_out():
+        timeout_until = membre.timed_out_until
+        if timeout_until:
+            e.add_field(name="🔇 Mute actif", value=f"Jusqu'à <t:{int(timeout_until.timestamp())}:R>", inline=True)
         else:
             e.add_field(name="\u200b", value="\u200b", inline=True)
+    else:
+        e.add_field(name="\u200b", value="\u200b", inline=True)
+    
+    if rows:
+        inf_lines = []
+        for j, (typ, reason, duration, mod_id) in enumerate(rows[:10], 1):
+            emoji = "⚠️" if typ == "warn" else "🔇"
+            dur_txt = f" ({duration})" if duration else ""
+            reason_short = reason[:40] + "..." if len(reason) > 40 else reason
+            inf_lines.append(f"`{j}.` {emoji} **{typ.upper()}**{dur_txt}\n└ {reason_short}")
         
-        if rows:
-            # Afficher les 10 dernières infractions
-            inf_lines = []
-            for j, (typ, reason, duration, mod_id, created) in enumerate(rows[:10], 1):
-                emoji = "⚠️" if typ == "warn" else "🔇"
-                dur_txt = f" ({duration})" if duration else ""
-                reason_short = reason[:45] + "..." if len(reason) > 45 else reason
-                inf_lines.append(f"`{j}.` {emoji} **{typ.upper()}**{dur_txt}\n└ {reason_short}")
-            
-            e.add_field(name="📜 Historique (10 dernières)", value="\n".join(inf_lines)[:1024], inline=False)
-        else:
-            e.add_field(name="📜 Historique", value="✅ Aucune infraction", inline=False)
-        
-        await i.followup.send(embed=e)
-        
-        # Log
-        await send_mod_log(i.guild, 'infractions', i.user, membre, extra=f"Total: {len(rows)} infractions")
-        
-    except Exception as ex:
-        await i.followup.send(f"❌ Erreur: {ex}", ephemeral=True)
+        e.add_field(name="📜 Historique (10 dernières)", value="\n".join(inf_lines)[:1024], inline=False)
+    else:
+        e.add_field(name="📜 Historique", value="✅ Aucune infraction", inline=False)
+    
+    await i.response.send_message(embed=e)
+    
+    # Log
+    await send_mod_log(i.guild, 'infractions', i.user, membre, extra=f"Total: {len(rows)} infractions")
 
 if __name__ == "__main__":
     print("🚀 Bot v12 - Démarrage...")
