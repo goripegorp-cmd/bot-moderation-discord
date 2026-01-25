@@ -1,6 +1,6 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-#                        🌟 BOT PREMIUM v11.3 🌟
-#       Tickets Multi-Panels + Migration DB automatique
+#                        🌟 BOT PREMIUM v11.4 🌟
+#       Tickets Multi-Panels + Migration DB COMPLÈTE
 # ═══════════════════════════════════════════════════════════════════════════════
 
 try:
@@ -45,7 +45,7 @@ LEET = {'a':['@','4'],'e':['3','€'],'i':['1','!'],'o':['0'],'s':['$','5'],'t':
 def now(): return datetime.now(timezone.utc)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                              💾 DATABASE + MIGRATION
+#                              💾 DATABASE + MIGRATION COMPLÈTE
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def db_init():
@@ -56,28 +56,44 @@ async def db_init():
         await db.execute('CREATE TABLE IF NOT EXISTS immune_users (guild_id INTEGER, user_id INTEGER, PRIMARY KEY(guild_id,user_id))')
         await db.execute('CREATE TABLE IF NOT EXISTS infractions (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, user_id INTEGER, mod_id INTEGER, type TEXT, reason TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)')
         
-        # Table tickets - création si n'existe pas
-        await db.execute('''CREATE TABLE IF NOT EXISTS tickets (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, 
-            guild_id INTEGER, 
-            channel_id INTEGER, 
-            user_id INTEGER, 
-            claimed_by INTEGER DEFAULT 0, 
-            status TEXT DEFAULT "open",
-            answers TEXT DEFAULT "{}",
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )''')
+        # Vérifier si la table tickets existe
+        async with db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tickets'") as cursor:
+            table_exists = await cursor.fetchone()
         
-        # MIGRATION: Ajouter panel_id si n'existe pas
-        try:
+        if not table_exists:
+            # Créer la table complète
+            await db.execute('''CREATE TABLE tickets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                guild_id INTEGER, 
+                channel_id INTEGER, 
+                user_id INTEGER, 
+                panel_id TEXT DEFAULT "",
+                claimed_by INTEGER DEFAULT 0, 
+                status TEXT DEFAULT "open",
+                answers TEXT DEFAULT "{}",
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )''')
+            print("✅ Table tickets créée")
+        else:
+            # MIGRATION: Vérifier et ajouter les colonnes manquantes
             async with db.execute("PRAGMA table_info(tickets)") as cursor:
                 columns = [row[1] for row in await cursor.fetchall()]
             
-            if 'panel_id' not in columns:
-                await db.execute('ALTER TABLE tickets ADD COLUMN panel_id TEXT DEFAULT ""')
-                print("✅ Migration: colonne panel_id ajoutée")
-        except Exception as e:
-            print(f"[MIGRATION] {e}")
+            migrations = [
+                ('panel_id', 'TEXT DEFAULT ""'),
+                ('claimed_by', 'INTEGER DEFAULT 0'),
+                ('status', 'TEXT DEFAULT "open"'),
+                ('answers', 'TEXT DEFAULT "{}"'),
+                ('created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP')
+            ]
+            
+            for col_name, col_type in migrations:
+                if col_name not in columns:
+                    try:
+                        await db.execute(f'ALTER TABLE tickets ADD COLUMN {col_name} {col_type}')
+                        print(f"✅ Migration: colonne {col_name} ajoutée")
+                    except Exception as e:
+                        print(f"[MIGRATION {col_name}] {e}")
         
         await db.commit()
     print("✅ DB OK")
@@ -232,17 +248,20 @@ async def check_spam(msg, max_msg, interval):
 async def get_ticket(ch_id):
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute('SELECT id,user_id,claimed_by,answers,panel_id FROM tickets WHERE channel_id=? AND status="open"', (ch_id,)) as c:
+            async with db.execute('SELECT id, user_id, claimed_by, answers, panel_id FROM tickets WHERE channel_id=? AND status="open"', (ch_id,)) as c:
                 r = await c.fetchone()
                 if r:
-                    return {'id':r[0],'user':r[1],'claimed':r[2],'answers':json.loads(r[3]) if r[3] else {},'panel_id':r[4] or ''}
+                    answers = {}
+                    try:
+                        answers = json.loads(r[3]) if r[3] else {}
+                    except: pass
+                    return {'id': r[0], 'user': r[1], 'claimed': r[2] or 0, 'answers': answers, 'panel_id': r[4] or ''}
                 return None
     except Exception as e:
         print(f"[GET_TICKET ERROR] {e}")
         return None
 
 async def count_user_open_tickets(guild, user_id, panel_id=None):
-    """Compte les tickets ouverts (vérifie que le channel existe)"""
     count = 0
     tickets_to_close = []
     
@@ -323,6 +342,7 @@ async def send_ticket_log(guild, log_type, user, ticket_info, extra_info=None, c
 
 async def create_ticket_channel(interaction, panel_id, answers=None):
     """Crée le channel du ticket"""
+    channel = None
     try:
         c = await cfg(interaction.guild.id)
         panels = c.get('ticket_panels', {})
@@ -359,11 +379,13 @@ async def create_ticket_channel(interaction, panel_id, answers=None):
             overwrites=overwrites
         )
         
-        # Sauvegarder en DB
+        # Sauvegarder en DB - INSERT simple sans les colonnes qui pourraient manquer
         answers_json = json.dumps(answers or {}, ensure_ascii=False)
         async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute('INSERT INTO tickets (guild_id,channel_id,user_id,panel_id,answers) VALUES (?,?,?,?,?)', 
-                (interaction.guild.id, channel.id, interaction.user.id, panel_id, answers_json))
+            await db.execute(
+                'INSERT INTO tickets (guild_id, channel_id, user_id, panel_id, claimed_by, status, answers) VALUES (?, ?, ?, ?, 0, "open", ?)', 
+                (interaction.guild.id, channel.id, interaction.user.id, panel_id, answers_json)
+            )
             await db.commit()
             async with db.execute('SELECT id FROM tickets WHERE channel_id=?', (channel.id,)) as cur:
                 row = await cur.fetchone()
@@ -394,8 +416,14 @@ async def create_ticket_channel(interaction, panel_id, answers=None):
         return channel, None
         
     except Exception as ex:
+        error_msg = f"❌ Erreur: {ex}"
         print(f"[CREATE TICKET ERROR] {ex}\n{traceback.format_exc()}")
-        return None, f"❌ Erreur: {ex}"
+        # Si le channel a été créé mais erreur après, on le supprime
+        if channel:
+            try:
+                await channel.delete()
+            except: pass
+        return None, error_msg
 
 
 class TicketQuestionnaireModal(Modal):
@@ -510,11 +538,9 @@ class TicketControlView(View):
             c = await cfg(interaction.guild.id)
             staff_role = interaction.guild.get_role(c.get('ticket_staff', 0))
             
-            # L'utilisateur ne peut pas claim son propre ticket
             if interaction.user.id == ticket['user']:
                 return await interaction.response.send_message("❌ Vous ne pouvez pas prendre votre propre ticket", ephemeral=True)
             
-            # Vérifier permissions
             is_staff = staff_role and staff_role in interaction.user.roles
             is_owner = interaction.user.id == interaction.guild.owner_id
             is_admin = interaction.user.guild_permissions.administrator
@@ -522,7 +548,6 @@ class TicketControlView(View):
             if not (is_staff or is_owner or is_admin):
                 return await interaction.response.send_message("❌ Réservé au staff", ephemeral=True)
             
-            # Mettre à jour les permissions
             ticket_user = interaction.guild.get_member(ticket['user'])
             
             overwrites = {
@@ -539,20 +564,17 @@ class TicketControlView(View):
             
             await interaction.channel.edit(overwrites=overwrites)
             
-            # Mettre à jour DB
             async with aiosqlite.connect(DB_PATH) as db:
                 await db.execute('UPDATE tickets SET claimed_by=? WHERE channel_id=?', (interaction.user.id, interaction.channel.id))
                 await db.commit()
             
             await interaction.response.send_message(f"✅ **{interaction.user.display_name}** prend ce ticket en charge\n\n*Les autres staffs ne peuvent plus voir ce ticket.*")
             
-            # Modifier le bouton
             button.disabled = True
             button.label = f"Pris par {interaction.user.display_name}"
             button.style = discord.ButtonStyle.secondary
             await interaction.message.edit(view=self)
             
-            # Log
             await send_ticket_log(interaction.guild, 'claim', ticket['user'], ticket, extra_info=interaction.user.id)
             
         except Exception as ex:
@@ -617,11 +639,9 @@ class TicketControlView(View):
                 if not (is_staff or is_owner or is_admin):
                     return await interaction.response.send_message("❌ Seul le staff peut fermer", ephemeral=True)
             
-            # Log
             ticket_user = interaction.guild.get_member(ticket['user'])
             await send_ticket_log(interaction.guild, 'close', ticket_user or ticket['user'], ticket, closer=interaction.user, channel=interaction.channel)
             
-            # Fermer
             async with aiosqlite.connect(DB_PATH) as db:
                 await db.execute("UPDATE tickets SET status='closed' WHERE channel_id=?", (interaction.channel.id,))
                 await db.commit()
@@ -1219,7 +1239,7 @@ async def on_ready():
     except: pass
     
     await bot.tree.sync()
-    print(f"✅ {bot.user.name} v11.3 prêt!")
+    print(f"✅ {bot.user.name} v11.4 prêt!")
 
 @bot.event
 async def on_member_remove(member):
@@ -1229,7 +1249,11 @@ async def on_member_remove(member):
                 tickets = await c.fetchall()
                 
         for ticket in tickets:
-            ticket_info = {'id': ticket[0], 'user': member.id, 'claimed': ticket[2], 'answers': json.loads(ticket[3]) if ticket[3] else {}}
+            answers = {}
+            try:
+                answers = json.loads(ticket[3]) if ticket[3] else {}
+            except: pass
+            ticket_info = {'id': ticket[0], 'user': member.id, 'claimed': ticket[2] or 0, 'answers': answers}
             channel = member.guild.get_channel(ticket[1])
             
             await send_ticket_log(member.guild, 'leave', member, ticket_info)
@@ -1269,5 +1293,5 @@ async def configure_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
 if __name__ == "__main__":
-    print("🚀 v11.3")
+    print("🚀 v11.4")
     bot.run(TOKEN)
