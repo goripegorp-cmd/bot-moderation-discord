@@ -1637,12 +1637,15 @@ class TradePanel(View):
         e.add_field(name="⏱️ Cooldown", value=f"{trade_cd} {trade_unit}", inline=True)
         
         if trade_items:
-            items_txt = " ".join(trade_items[:20])
-            e.add_field(name=f"📦 Items disponibles ({len(trade_items)})", value=items_txt or "Aucun", inline=False)
+            # Afficher les items sur plusieurs lignes si nécessaire
+            items_txt = " ".join(trade_items[:30])
+            if len(items_txt) > 1000:
+                items_txt = " ".join(trade_items[:15]) + f"\n*... et {len(trade_items) - 15} autres*"
+            e.add_field(name=f"📦 Items disponibles ({len(trade_items)})", value=items_txt, inline=False)
         else:
-            e.add_field(name="📦 Items disponibles", value="❌ Aucun item configuré\n*Ajoutez des emojis pour les échanges*", inline=False)
+            e.add_field(name="📦 Items disponibles", value="❌ Aucun item configuré\n*Utilisez les boutons ci-dessous pour ajouter des emojis*", inline=False)
         
-        e.set_footer(text="Commande: /trade")
+        e.set_footer(text="💡 Ajoutez des emojis standards ou custom du serveur!")
         return e
     
     @discord.ui.button(label="🎭 Rôle", style=discord.ButtonStyle.primary, row=0)
@@ -1664,18 +1667,102 @@ class TradePanel(View):
     async def set_cooldown(self, i, b):
         await i.response.send_modal(TradeCooldownModal(self.g, self.u))
     
-    @discord.ui.button(label="📦 Ajouter Items", style=discord.ButtonStyle.success, row=1)
-    async def add_items(self, i, b):
+    @discord.ui.button(label="✏️ Ajouter Manuellement", style=discord.ButtonStyle.success, row=1)
+    async def add_manual(self, i, b):
         await i.response.send_modal(TradeItemsModal(self.g, self.u))
     
-    @discord.ui.button(label="🗑️ Vider Items", style=discord.ButtonStyle.danger, row=1)
+    @discord.ui.button(label="😀 Emojis du Serveur", style=discord.ButtonStyle.success, row=1)
+    async def add_server_emojis(self, i, b):
+        emojis = list(self.g.emojis)[:25]
+        if not emojis:
+            return await i.response.send_message("❌ Aucun emoji custom sur ce serveur", ephemeral=True)
+        
+        opts = [discord.SelectOption(label=f":{e.name}:"[:25], value=str(e.id), emoji=e) for e in emojis]
+        v = TradeEmojiSelectView(self.u, self.g, opts)
+        e = discord.Embed(title="😀 Sélectionner des emojis", color=C.PURPLE)
+        e.description = "Choisissez les emojis custom à ajouter aux items de trade.\n*Vous pouvez en sélectionner plusieurs.*"
+        await i.response.edit_message(embed=e, view=v)
+    
+    @discord.ui.button(label="🗑️ Supprimer Item", style=discord.ButtonStyle.danger, row=2)
+    async def remove_item(self, i, b):
+        c = await cfg(self.g.id)
+        items = c.get('trade_items', [])
+        if not items:
+            return await i.response.send_message("❌ Aucun item à supprimer", ephemeral=True)
+        
+        # Créer les options (max 25)
+        opts = []
+        for idx, item in enumerate(items[:25]):
+            label = item if len(item) <= 25 else item[:22] + "..."
+            opts.append(discord.SelectOption(label=label, value=str(idx), emoji=item if len(item) <= 2 else None))
+        
+        v = TradeRemoveItemView(self.u, self.g, opts)
+        e = discord.Embed(title="🗑️ Supprimer un item", color=C.RED)
+        e.description = "Sélectionnez l'item à supprimer"
+        await i.response.edit_message(embed=e, view=v)
+    
+    @discord.ui.button(label="🗑️ Tout Vider", style=discord.ButtonStyle.danger, row=2)
     async def clear_items(self, i, b):
         await db_set(self.g.id, 'trade_items', [])
         await i.response.edit_message(embed=await self.embed(), view=self)
     
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=3)
     async def back(self, i, b):
         v = CommandsPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class TradeEmojiSelectView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+        self.add_item(TradeEmojiSelect(u, g, opts))
+
+class TradeEmojiSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Sélectionner des emojis...", options=opts, min_values=1, max_values=min(len(opts), 25))
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        c = await cfg(self.g.id)
+        current = c.get('trade_items', [])
+        
+        # Ajouter les emojis sélectionnés
+        for emoji_id in self.values:
+            emoji = discord.utils.get(self.g.emojis, id=int(emoji_id))
+            if emoji:
+                emoji_str = f"<{'a' if emoji.animated else ''}:{emoji.name}:{emoji.id}>"
+                if emoji_str not in current:
+                    current.append(emoji_str)
+        
+        await db_set(self.g.id, 'trade_items', current[:50])
+        v = TradePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class TradeRemoveItemView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+        self.add_item(TradeRemoveItemSelect(u, g, opts))
+
+class TradeRemoveItemSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Sélectionner l'item à supprimer...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        c = await cfg(self.g.id)
+        items = c.get('trade_items', [])
+        
+        idx = int(self.values[0])
+        if 0 <= idx < len(items):
+            items.pop(idx)
+            await db_set(self.g.id, 'trade_items', items)
+        
+        v = TradePanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 class TradeRoleView(View):
@@ -1733,8 +1820,8 @@ class TradeCooldownModal(Modal, title="⏱️ Cooldown Trade"):
 
 class TradeItemsModal(Modal, title="📦 Ajouter des Items"):
     items = TextInput(
-        label="Items/Emojis (séparés par des espaces)",
-        placeholder="🗡️ 🛡️ 💎 🔮 ⚔️ 🏹 ...",
+        label="Emojis (séparés par des espaces)",
+        placeholder="🗡️ 🛡️ 💎 ou collez des emojis custom <:nom:id>",
         style=discord.TextStyle.paragraph,
         max_length=2000
     )
@@ -1747,11 +1834,24 @@ class TradeItemsModal(Modal, title="📦 Ajouter des Items"):
     async def on_submit(self, i):
         c = await cfg(self.g.id)
         current = c.get('trade_items', [])
-        new_items = self.items.value.split()
-        for item in new_items:
+        
+        # Parser les items (emojis standards et custom)
+        text = self.items.value
+        
+        # Trouver les emojis custom <:nom:id> ou <a:nom:id>
+        custom_emojis = re.findall(r'<a?:\w+:\d+>', text)
+        for emoji in custom_emojis:
+            if emoji not in current:
+                current.append(emoji)
+            text = text.replace(emoji, ' ')
+        
+        # Ajouter les emojis standards restants
+        for item in text.split():
+            item = item.strip()
             if item and item not in current:
                 current.append(item)
-        await db_set(self.g.id, 'trade_items', current[:50])  # Max 50 items
+        
+        await db_set(self.g.id, 'trade_items', current[:50])
         v = TradePanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
