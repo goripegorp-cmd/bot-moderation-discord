@@ -1328,28 +1328,34 @@ class CommandsPanel(View):
     
     async def embed(self):
         c = await cfg(self.g.id)
-        e = discord.Embed(title="⚡ Commandes", color=C.PURPLE)
-        e.description = "Configurez les commandes personnalisées du serveur."
+        e = discord.Embed(title="⚡ Commandes Personnalisées", color=C.PURPLE)
+        e.description = "Configurez les commandes spéciales du serveur."
         
         # RellSeas
         rellseas_user = self.g.get_member(c.get('rellseas_user', 0))
         rellseas_role = self.g.get_role(c.get('rellseas_role', 0))
-        warn_ch = self.g.get_channel(c.get('rellseas_warn_channel', 0))
-        log_ch = self.g.get_channel(c.get('rellseas_log_channel', 0))
         e.add_field(
             name="🎭 RellSeas",
-            value=f"👤 User: {rellseas_user.mention if rellseas_user else '❌'}\n🎭 Rôle: {rellseas_role.mention if rellseas_role else '❌'}\n⚠️ Warn: {warn_ch.mention if warn_ch else '❌'}\n📜 Log: {log_ch.mention if log_ch else '❌'}",
+            value=f"👤 {rellseas_user.mention if rellseas_user else '❌'}\n🎭 {rellseas_role.mention if rellseas_role else '❌'}",
             inline=True
         )
         
         # Suggestions
         sugg_role = self.g.get_role(c.get('suggestion_role', 0))
         sugg_ch = self.g.get_channel(c.get('suggestion_channel', 0))
-        sugg_cd = c.get('suggestion_cooldown', 1)
-        sugg_unit = c.get('suggestion_cooldown_unit', 'jours')
         e.add_field(
             name="💡 Suggestions",
-            value=f"🎭 Rôle: {sugg_role.mention if sugg_role else '❌'}\n📍 Salon: {sugg_ch.mention if sugg_ch else '❌'}\n⏱️ Cooldown: {sugg_cd} {sugg_unit}",
+            value=f"🎭 {sugg_role.mention if sugg_role else 'Tous'}\n📍 {sugg_ch.mention if sugg_ch else '❌'}",
+            inline=True
+        )
+        
+        # Trade
+        trade_role = self.g.get_role(c.get('trade_role', 0))
+        trade_ch = self.g.get_channel(c.get('trade_channel', 0))
+        trade_items = c.get('trade_items', [])
+        e.add_field(
+            name="🔄 Trade",
+            value=f"🎭 {trade_role.mention if trade_role else 'Tous'}\n📍 {trade_ch.mention if trade_ch else '❌'}\n📦 {len(trade_items)} items",
             inline=True
         )
         
@@ -1363,6 +1369,11 @@ class CommandsPanel(View):
     @discord.ui.button(label="💡 Suggestions", style=discord.ButtonStyle.primary, row=0)
     async def suggestions(self, i, b):
         v = SuggestionPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="🔄 Trade", style=discord.ButtonStyle.primary, row=0)
+    async def trade(self, i, b):
+        v = TradePanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
@@ -1389,12 +1400,14 @@ class RellSeasPanel(View):
         warn_ch = self.g.get_channel(c.get('rellseas_warn_channel', 0))
         log_ch = self.g.get_channel(c.get('rellseas_log_channel', 0))
         
-        e.add_field(name="👤 Utilisateur autorisé", value=rellseas_user.mention if rellseas_user else "❌ Non configuré", inline=False)
-        e.add_field(name="🎭 Rôle à donner (Realsy)", value=rellseas_role.mention if rellseas_role else "❌ Non configuré", inline=False)
-        e.add_field(name="⚠️ Salon warn inactivité", value=warn_ch.mention if warn_ch else "❌ Non configuré", inline=True)
-        e.add_field(name="📜 Salon logs", value=log_ch.mention if log_ch else "❌ Non configuré", inline=True)
+        e.description = "L'utilisateur autorisé reçoit **automatiquement** le rôle Realsy et peut le donner à d'autres."
         
-        e.set_footer(text="Inactivité: 1 semaine = 1er warn | 2ème warn = rôle retiré")
+        e.add_field(name="👤 Utilisateur autorisé", value=rellseas_user.mention if rellseas_user else "❌ Non configuré", inline=False)
+        e.add_field(name="🎭 Rôle Realsy", value=rellseas_role.mention if rellseas_role else "❌ Non configuré", inline=False)
+        e.add_field(name="⚠️ Salon warn", value=warn_ch.mention if warn_ch else "❌", inline=True)
+        e.add_field(name="📜 Salon logs", value=log_ch.mention if log_ch else "❌", inline=True)
+        
+        e.set_footer(text="⏱️ 7 jours inactif = Warn | 14 jours = Rôle retiré")
         return e
     
     @discord.ui.button(label="👤 Utilisateur", style=discord.ButtonStyle.primary, row=0)
@@ -1439,7 +1452,25 @@ class RellSeasUserModal(Modal, title="👤 Utilisateur RellSeas"):
         try:
             user_id = int(self.uid.value)
             await db_set(self.g.id, 'rellseas_user', user_id)
-        except: pass
+            
+            # Donner automatiquement le rôle à l'utilisateur autorisé
+            c = await cfg(self.g.id)
+            role = self.g.get_role(c.get('rellseas_role', 0))
+            member = self.g.get_member(user_id)
+            
+            if role and member and role not in member.roles:
+                try:
+                    await member.add_roles(role, reason="RellSeas - Utilisateur autorisé")
+                    # Enregistrer dans le tracking
+                    async with aiosqlite.connect(DB_PATH) as db:
+                        await db.execute('''INSERT OR REPLACE INTO realsy_tracking 
+                            (guild_id, user_id, last_activity, warn_count) VALUES (?, ?, ?, 0)''',
+                            (self.g.id, user_id, now().isoformat()))
+                        await db.commit()
+                except:
+                    pass
+        except:
+            pass
         v = RellSeasPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
@@ -1577,6 +1608,151 @@ class SuggCooldownModal(Modal, title="⏱️ Cooldown Suggestions"):
             await db_set(self.g.id, 'suggestion_cooldown_unit', unit)
         except: pass
         v = SuggestionPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           🔄 TRADE PANEL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TradePanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        e = discord.Embed(title="🔄 Configuration Trade", color=C.PURPLE)
+        
+        trade_role = self.g.get_role(c.get('trade_role', 0))
+        trade_ch = self.g.get_channel(c.get('trade_channel', 0))
+        trade_cd = c.get('trade_cooldown', 1)
+        trade_unit = c.get('trade_cooldown_unit', 'heures')
+        trade_items = c.get('trade_items', [])
+        
+        e.description = "Configurez le système d'échange pour votre serveur."
+        
+        e.add_field(name="🎭 Rôle autorisé", value=trade_role.mention if trade_role else "Tout le monde", inline=True)
+        e.add_field(name="📍 Salon", value=trade_ch.mention if trade_ch else "❌ Non configuré", inline=True)
+        e.add_field(name="⏱️ Cooldown", value=f"{trade_cd} {trade_unit}", inline=True)
+        
+        if trade_items:
+            items_txt = " ".join(trade_items[:20])
+            e.add_field(name=f"📦 Items disponibles ({len(trade_items)})", value=items_txt or "Aucun", inline=False)
+        else:
+            e.add_field(name="📦 Items disponibles", value="❌ Aucun item configuré\n*Ajoutez des emojis pour les échanges*", inline=False)
+        
+        e.set_footer(text="Commande: /trade")
+        return e
+    
+    @discord.ui.button(label="🎭 Rôle", style=discord.ButtonStyle.primary, row=0)
+    async def set_role(self, i, b):
+        roles = [r for r in self.g.roles[1:] if not r.is_bot_managed()][:25]
+        opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
+        opts.insert(0, discord.SelectOption(label="❌ Tout le monde", value="0"))
+        v = TradeRoleView(self.u, self.g, opts)
+        await i.response.edit_message(embed=discord.Embed(title="🎭 Rôle autorisé", color=C.PURPLE), view=v)
+    
+    @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
+    async def set_channel(self, i, b):
+        chs = list(self.g.text_channels)[:25]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        v = TradeChanView(self.u, self.g, opts)
+        await i.response.edit_message(embed=discord.Embed(title="📍 Salon des trades", color=C.PURPLE), view=v)
+    
+    @discord.ui.button(label="⏱️ Cooldown", style=discord.ButtonStyle.primary, row=0)
+    async def set_cooldown(self, i, b):
+        await i.response.send_modal(TradeCooldownModal(self.g, self.u))
+    
+    @discord.ui.button(label="📦 Ajouter Items", style=discord.ButtonStyle.success, row=1)
+    async def add_items(self, i, b):
+        await i.response.send_modal(TradeItemsModal(self.g, self.u))
+    
+    @discord.ui.button(label="🗑️ Vider Items", style=discord.ButtonStyle.danger, row=1)
+    async def clear_items(self, i, b):
+        await db_set(self.g.id, 'trade_items', [])
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+    async def back(self, i, b):
+        v = CommandsPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class TradeRoleView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.add_item(TradeRoleSelect(u, g, opts))
+
+class TradeRoleSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir un rôle...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        await db_set(i.guild.id, 'trade_role', int(self.values[0]))
+        v = TradePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class TradeChanView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.add_item(TradeChanSelect(u, g, opts))
+
+class TradeChanSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        await db_set(i.guild.id, 'trade_channel', int(self.values[0]))
+        v = TradePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class TradeCooldownModal(Modal, title="⏱️ Cooldown Trade"):
+    duree = TextInput(label="Durée (nombre)", placeholder="1", default="1", max_length=3)
+    unite = TextInput(label="Unité (secondes/minutes/heures/jours/semaines)", placeholder="heures", default="heures", max_length=10)
+    
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+    
+    async def on_submit(self, i):
+        try:
+            cd = max(1, int(self.duree.value))
+            unit = self.unite.value.lower()
+            if unit not in ['secondes', 'minutes', 'heures', 'jours', 'semaines']:
+                unit = 'heures'
+            await db_set(self.g.id, 'trade_cooldown', cd)
+            await db_set(self.g.id, 'trade_cooldown_unit', unit)
+        except: pass
+        v = TradePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class TradeItemsModal(Modal, title="📦 Ajouter des Items"):
+    items = TextInput(
+        label="Items/Emojis (séparés par des espaces)",
+        placeholder="🗡️ 🛡️ 💎 🔮 ⚔️ 🏹 ...",
+        style=discord.TextStyle.paragraph,
+        max_length=2000
+    )
+    
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+    
+    async def on_submit(self, i):
+        c = await cfg(self.g.id)
+        current = c.get('trade_items', [])
+        new_items = self.items.value.split()
+        for item in new_items:
+            if item and item not in current:
+                current.append(item)
+        await db_set(self.g.id, 'trade_items', current[:50])  # Max 50 items
+        v = TradePanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2602,7 +2778,7 @@ async def suggestion_cmd(i: discord.Interaction, titre: str, proposition: str):
     if role_id:
         role = i.guild.get_role(role_id)
         if role and role not in i.user.roles:
-            return await i.response.send_message(f"❌ Vous devez avoir le rôle {role.mention} pour faire des suggestions", ephemeral=True)
+            return await i.response.send_message(f"❌ Vous devez avoir le rôle {role.mention}", ephemeral=True)
     
     # Vérifier le salon
     sugg_ch = i.guild.get_channel(c.get('suggestion_channel', 0))
@@ -2627,34 +2803,193 @@ async def suggestion_cmd(i: discord.Interaction, titre: str, proposition: str):
             days = int(remaining // 86400)
             hours = int((remaining % 86400) // 3600)
             return await i.response.send_message(
-                f"❌ Vous devez attendre encore **{days}j {hours}h** avant de faire une nouvelle suggestion",
+                f"⏱️ Attendez encore **{days}j {hours}h**",
                 ephemeral=True
             )
     
-    # Créer la suggestion
-    e = discord.Embed(title=f"💡 {titre[:100]}", description=proposition[:2000], color=C.BLURPLE, timestamp=now())
-    e.add_field(name="👤 Proposé par", value=f"{i.user.mention}\n`{i.user.id}`", inline=True)
+    # Créer un bel embed de suggestion
+    e = discord.Embed(color=C.BLURPLE, timestamp=now())
+    e.set_author(name="💡 Nouvelle Suggestion", icon_url=i.guild.icon.url if i.guild.icon else None)
+    
+    e.add_field(name="📋 Titre", value=f"```{titre[:100]}```", inline=False)
+    e.add_field(name="📝 Proposition", value=proposition[:1000], inline=False)
+    
+    e.add_field(name="👤 Auteur", value=f"{i.user.mention}", inline=True)
+    e.add_field(name="🆔 ID", value=f"`{i.user.id}`", inline=True)
+    e.add_field(name="📅 Date", value=f"<t:{int(now().timestamp())}:R>", inline=True)
+    
     e.set_thumbnail(url=i.user.display_avatar.url)
-    e.set_footer(text="Votez avec les réactions ci-dessous!")
+    e.set_footer(text="Votez ci-dessous! ✅ Pour | 🟠 Neutre | ❌ Contre")
     
     # Envoyer
     msg = await sugg_ch.send(embed=e)
     
     # Ajouter les réactions
-    await msg.add_reaction("✅")  # Pour
-    await msg.add_reaction("🟠")  # Neutre
-    await msg.add_reaction("❌")  # Contre
+    await msg.add_reaction("✅")
+    await msg.add_reaction("🟠")
+    await msg.add_reaction("❌")
     
     # Enregistrer le cooldown
     suggestion_cooldowns[cooldown_key] = now()
     
-    # Stocker l'ID du message pour le tracking des votes
+    # Stocker pour le tracking
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute('INSERT INTO suggestions (guild_id, message_id, user_id, title) VALUES (?, ?, ?, ?)',
             (i.guild.id, msg.id, i.user.id, titre))
         await db.commit()
     
-    await i.response.send_message(f"✅ Votre suggestion a été publiée dans {sugg_ch.mention}!", ephemeral=True)
+    # Confirmation
+    confirm = discord.Embed(title="✅ Suggestion envoyée!", color=C.GREEN)
+    confirm.description = f"Votre suggestion a été publiée dans {sugg_ch.mention}"
+    confirm.add_field(name="📋 Titre", value=titre[:100], inline=False)
+    await i.response.send_message(embed=confirm, ephemeral=True)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                              🔄 TRADE COMMAND
+# ═══════════════════════════════════════════════════════════════════════════════
+
+trade_cooldowns = {}
+
+@bot.tree.command(name="trade", description="🔄 Créer une annonce d'échange")
+async def trade_cmd(i: discord.Interaction):
+    c = await cfg(i.guild.id)
+    
+    # Vérifier le rôle
+    role_id = c.get('trade_role', 0)
+    if role_id:
+        role = i.guild.get_role(role_id)
+        if role and role not in i.user.roles:
+            return await i.response.send_message(f"❌ Vous devez avoir le rôle {role.mention}", ephemeral=True)
+    
+    # Vérifier le salon
+    trade_ch = i.guild.get_channel(c.get('trade_channel', 0))
+    if not trade_ch:
+        return await i.response.send_message("❌ Le salon des trades n'est pas configuré", ephemeral=True)
+    
+    # Vérifier les items
+    trade_items = c.get('trade_items', [])
+    if not trade_items:
+        return await i.response.send_message("❌ Aucun item configuré pour les trades", ephemeral=True)
+    
+    # Vérifier le cooldown
+    cooldown_key = (i.guild.id, i.user.id)
+    cd_duration = c.get('trade_cooldown', 1)
+    cd_unit = c.get('trade_cooldown_unit', 'heures')
+    
+    # Calculer le cooldown en secondes
+    if cd_unit == 'secondes':
+        cd_seconds = cd_duration
+    elif cd_unit == 'minutes':
+        cd_seconds = cd_duration * 60
+    elif cd_unit == 'heures':
+        cd_seconds = cd_duration * 3600
+    elif cd_unit == 'jours':
+        cd_seconds = cd_duration * 86400
+    elif cd_unit == 'semaines':
+        cd_seconds = cd_duration * 604800
+    else:
+        cd_seconds = cd_duration * 3600
+    
+    if cooldown_key in trade_cooldowns:
+        last_time = trade_cooldowns[cooldown_key]
+        elapsed = (now() - last_time).total_seconds()
+        if elapsed < cd_seconds:
+            remaining = cd_seconds - elapsed
+            if remaining >= 86400:
+                time_txt = f"{int(remaining // 86400)}j {int((remaining % 86400) // 3600)}h"
+            elif remaining >= 3600:
+                time_txt = f"{int(remaining // 3600)}h {int((remaining % 3600) // 60)}min"
+            elif remaining >= 60:
+                time_txt = f"{int(remaining // 60)}min {int(remaining % 60)}s"
+            else:
+                time_txt = f"{int(remaining)}s"
+            return await i.response.send_message(f"⏱️ Attendez encore **{time_txt}**", ephemeral=True)
+    
+    # Afficher le modal de trade
+    await i.response.send_modal(TradeModal(i.guild, trade_items))
+
+class TradeModal(Modal, title="🔄 Créer un Trade"):
+    titre = TextInput(label="Titre de l'échange", placeholder="Mon échange incroyable", max_length=100)
+    jeu = TextInput(label="Jeu concerné", placeholder="Nom du jeu", max_length=50)
+    description = TextInput(label="Description", placeholder="Détails de l'échange...", style=discord.TextStyle.paragraph, max_length=500)
+    je_donne = TextInput(label="Ce que je DONNE (utilisez les emojis)", placeholder="🗡️ x2, 💎 x5", max_length=200)
+    je_veux = TextInput(label="Ce que je VEUX (utilisez les emojis)", placeholder="🛡️ x1, 🔮 x3", max_length=200)
+    
+    def __init__(self, guild, items):
+        super().__init__()
+        self.guild = guild
+        self.items = items
+    
+    async def on_submit(self, i):
+        c = await cfg(self.guild.id)
+        trade_ch = self.guild.get_channel(c.get('trade_channel', 0))
+        
+        if not trade_ch:
+            return await i.response.send_message("❌ Erreur: salon non configuré", ephemeral=True)
+        
+        # Demander une preuve (image)
+        e = discord.Embed(title="📸 Preuve requise", color=C.ORANGE)
+        e.description = "**Envoyez une image** de preuve dans les 60 secondes.\n\n*La preuve doit montrer que vous possédez les items.*"
+        e.add_field(name="📋 Votre trade", value=f"**{self.titre.value}**\n{self.jeu.value}", inline=False)
+        
+        await i.response.send_message(embed=e, ephemeral=True)
+        
+        # Attendre l'image
+        def check(m):
+            return m.author.id == i.user.id and m.channel.id == i.channel.id and m.attachments
+        
+        try:
+            msg = await bot.wait_for('message', timeout=60.0, check=check)
+            image_url = msg.attachments[0].url if msg.attachments else None
+            
+            # Supprimer le message de preuve
+            try:
+                await msg.delete()
+            except:
+                pass
+            
+            if not image_url:
+                return await i.followup.send("❌ Aucune image détectée", ephemeral=True)
+            
+        except asyncio.TimeoutError:
+            return await i.followup.send("❌ Temps écoulé! Aucune preuve fournie.", ephemeral=True)
+        
+        # Créer l'embed du trade
+        e = discord.Embed(color=C.BLUE, timestamp=now())
+        e.set_author(name="🔄 Nouvelle Offre d'Échange", icon_url=self.guild.icon.url if self.guild.icon else None)
+        
+        e.add_field(name="📋 Titre", value=f"**{self.titre.value}**", inline=True)
+        e.add_field(name="🎮 Jeu", value=self.jeu.value, inline=True)
+        e.add_field(name="\u200b", value="\u200b", inline=True)
+        
+        e.add_field(name="📝 Description", value=self.description.value[:500], inline=False)
+        
+        e.add_field(name="📤 Je DONNE", value=f"```{self.je_donne.value}```", inline=True)
+        e.add_field(name="📥 Je VEUX", value=f"```{self.je_veux.value}```", inline=True)
+        
+        e.add_field(name="\u200b", value="\u200b", inline=False)
+        e.add_field(name="👤 Trader", value=f"{i.user.mention}", inline=True)
+        e.add_field(name="🆔 ID", value=f"`{i.user.id}`", inline=True)
+        e.add_field(name="📅 Posté", value=f"<t:{int(now().timestamp())}:R>", inline=True)
+        
+        e.set_image(url=image_url)
+        e.set_thumbnail(url=i.user.display_avatar.url)
+        e.set_footer(text=f"Items disponibles: {' '.join(self.items[:10])}")
+        
+        # Envoyer le trade
+        trade_msg = await trade_ch.send(embed=e)
+        
+        # Ajouter réactions
+        await trade_msg.add_reaction("✅")  # Intéressé
+        await trade_msg.add_reaction("💬")  # Contacter
+        
+        # Enregistrer le cooldown
+        trade_cooldowns[(self.guild.id, i.user.id)] = now()
+        
+        # Confirmation
+        confirm = discord.Embed(title="✅ Trade publié!", color=C.GREEN)
+        confirm.description = f"Votre offre d'échange a été publiée dans {trade_ch.mention}"
+        await i.followup.send(embed=confirm, ephemeral=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              📊 SUGGESTION VOTE TRACKING
