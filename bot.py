@@ -22,7 +22,7 @@ spam_tracker = {}
 
 class C:
     BLURPLE=0x5865F2; GREEN=0x57F287; RED=0xED4245; YELLOW=0xFEE75C
-    PURPLE=0x9B59B6; BLUE=0x3498DB; ORANGE=0xE67E22
+    PURPLE=0x9B59B6; BLUE=0x3498DB; ORANGE=0xE67E22; GOLD=0xFFD700
 
 PHISHING = ['discord-nitro.gift','discordgift.site','free-nitro.com','steampowered.ru','dlscord.com']
 SCAM_PATTERNS = [r'free\s*nitro', r'steam\s*gift', r'@everyone.*http']
@@ -3005,42 +3005,90 @@ async def trade_cmd(i: discord.Interaction):
                 time_txt = f"{int(remaining)}s"
             return await i.response.send_message(f"⏱️ Attendez encore **{time_txt}**", ephemeral=True)
     
-    # Afficher le modal de trade
-    await i.response.send_modal(TradeModal(i.guild, trade_items))
+    # Afficher le menu de sélection
+    v = TradeCreateView(i.user, i.guild, i.channel, trade_items, trade_ch)
+    e = discord.Embed(title="🔄 Créer un Trade", color=C.PURPLE)
+    e.description = "**Sélectionnez les items que vous souhaitez échanger.**\n\n1️⃣ Choisissez ce que vous **DONNEZ**\n2️⃣ Choisissez ce que vous **VOULEZ**\n3️⃣ Cliquez sur **Confirmer**"
+    e.add_field(name="📤 Je DONNE", value="*Aucun item sélectionné*", inline=True)
+    e.add_field(name="📥 Je VEUX", value="*Aucun item sélectionné*", inline=True)
+    e.set_footer(text="💡 Vous pouvez sélectionner plusieurs items")
+    await i.response.send_message(embed=e, view=v, ephemeral=True)
 
-class TradeModal(Modal, title="🔄 Créer un Trade"):
-    titre = TextInput(label="Titre de l'échange", placeholder="Mon échange incroyable", max_length=100)
-    jeu = TextInput(label="Jeu concerné", placeholder="Nom du jeu", max_length=50)
-    description = TextInput(label="Description", placeholder="Détails de l'échange...", style=discord.TextStyle.paragraph, max_length=500)
-    je_donne = TextInput(label="Ce que je DONNE (utilisez les emojis)", placeholder="🗡️ x2, 💎 x5", max_length=200)
-    je_veux = TextInput(label="Ce que je VEUX (utilisez les emojis)", placeholder="🛡️ x1, 🔮 x3", max_length=200)
-    
-    def __init__(self, guild, items):
-        super().__init__()
+class TradeCreateView(View):
+    def __init__(self, user, guild, channel, items, trade_ch):
+        super().__init__(timeout=300)
+        self.user = user
         self.guild = guild
+        self.channel = channel
         self.items = items
+        self.trade_ch = trade_ch
+        self.je_donne = []
+        self.je_veux = []
+        
+        # Créer les options pour les selects
+        self.item_options = []
+        for idx, item in enumerate(items[:25]):
+            # Extraire le nom pour le label
+            label = f"Item {idx + 1}"
+            if item.startswith('<') and ':' in item:
+                # Emoji custom <:name:id> ou <a:name:id>
+                parts = item.split(':')
+                if len(parts) >= 2:
+                    label = parts[1][:25]
+            else:
+                label = item[:25]
+            self.item_options.append(discord.SelectOption(label=label, value=str(idx), description=item[:50]))
+        
+        # Ajouter les selects
+        self.add_item(TradeGiveSelect(self))
+        self.add_item(TradeWantSelect(self))
     
-    async def on_submit(self, i):
-        c = await cfg(self.guild.id)
-        trade_ch = self.guild.get_channel(c.get('trade_channel', 0))
+    def get_embed(self):
+        e = discord.Embed(title="🔄 Créer un Trade", color=C.PURPLE)
+        e.description = "**Sélectionnez les items que vous souhaitez échanger.**"
         
-        if not trade_ch:
-            return await i.response.send_message("❌ Erreur: salon non configuré", ephemeral=True)
+        donne_txt = " ".join([self.items[int(x)] for x in self.je_donne]) if self.je_donne else "*Aucun item sélectionné*"
+        veux_txt = " ".join([self.items[int(x)] for x in self.je_veux]) if self.je_veux else "*Aucun item sélectionné*"
         
-        # Demander une preuve (image)
+        e.add_field(name="📤 Je DONNE", value=donne_txt, inline=True)
+        e.add_field(name="📥 Je VEUX", value=veux_txt, inline=True)
+        
+        if self.je_donne and self.je_veux:
+            e.set_footer(text="✅ Prêt! Cliquez sur Confirmer")
+            e.color = C.GREEN
+        else:
+            e.set_footer(text="💡 Sélectionnez des items dans les deux catégories")
+        
+        return e
+    
+    @discord.ui.button(label="✅ Confirmer le Trade", style=discord.ButtonStyle.success, row=2)
+    async def confirm(self, i, b):
+        if not self.je_donne or not self.je_veux:
+            return await i.response.send_message("❌ Sélectionnez des items dans les deux catégories!", ephemeral=True)
+        
+        # Demander la preuve
         e = discord.Embed(title="📸 Preuve requise", color=C.ORANGE)
-        e.description = "**Envoyez une image** de preuve dans les 60 secondes.\n\n*La preuve doit montrer que vous possédez les items.*"
-        e.add_field(name="📋 Votre trade", value=f"**{self.titre.value}**\n{self.jeu.value}", inline=False)
+        e.description = "**Envoyez une image** de preuve dans les **3 minutes**.\n\n📷 *La preuve doit montrer que vous possédez les items.*"
         
-        await i.response.send_message(embed=e, ephemeral=True)
+        donne_txt = " ".join([self.items[int(x)] for x in self.je_donne])
+        veux_txt = " ".join([self.items[int(x)] for x in self.je_veux])
+        e.add_field(name="📤 Vous donnez", value=donne_txt, inline=True)
+        e.add_field(name="📥 Vous voulez", value=veux_txt, inline=True)
         
-        # Attendre l'image
+        await i.response.edit_message(embed=e, view=None)
+        
+        # Attendre l'image (3 minutes)
         def check(m):
-            return m.author.id == i.user.id and m.channel.id == i.channel.id and m.attachments
+            return m.author.id == self.user.id and m.channel.id == self.channel.id and m.attachments
         
         try:
-            msg = await bot.wait_for('message', timeout=60.0, check=check)
-            image_url = msg.attachments[0].url if msg.attachments else None
+            msg = await bot.wait_for('message', timeout=180.0, check=check)
+            
+            if not msg.attachments:
+                return await i.followup.send("❌ Aucune image détectée", ephemeral=True)
+            
+            # Sauvegarder l'URL de l'image AVANT de supprimer
+            image_url = msg.attachments[0].url
             
             # Supprimer le message de preuve
             try:
@@ -3048,48 +3096,95 @@ class TradeModal(Modal, title="🔄 Créer un Trade"):
             except:
                 pass
             
-            if not image_url:
-                return await i.followup.send("❌ Aucune image détectée", ephemeral=True)
-            
         except asyncio.TimeoutError:
-            return await i.followup.send("❌ Temps écoulé! Aucune preuve fournie.", ephemeral=True)
+            return await i.followup.send("❌ Temps écoulé! Aucune preuve fournie (3 minutes max).", ephemeral=True)
         
-        # Créer l'embed du trade
-        e = discord.Embed(color=C.BLUE, timestamp=now())
-        e.set_author(name="🔄 Nouvelle Offre d'Échange", icon_url=self.guild.icon.url if self.guild.icon else None)
+        # Créer le magnifique post de trade
+        donne_items = " ".join([self.items[int(x)] for x in self.je_donne])
+        veux_items = " ".join([self.items[int(x)] for x in self.je_veux])
         
-        e.add_field(name="📋 Titre", value=f"**{self.titre.value}**", inline=True)
-        e.add_field(name="🎮 Jeu", value=self.jeu.value, inline=True)
-        e.add_field(name="\u200b", value="\u200b", inline=True)
+        e = discord.Embed(color=C.GOLD, timestamp=now())
+        e.set_author(name="🔄 OFFRE D'ÉCHANGE", icon_url=self.guild.icon.url if self.guild.icon else None)
         
-        e.add_field(name="📝 Description", value=self.description.value[:500], inline=False)
+        # Section principale
+        e.add_field(name="━━━━━━━━━━━━━━━━━━━━", value="\u200b", inline=False)
         
-        e.add_field(name="📤 Je DONNE", value=f"```{self.je_donne.value}```", inline=True)
-        e.add_field(name="📥 Je VEUX", value=f"```{self.je_veux.value}```", inline=True)
+        e.add_field(
+            name="📤 JE DONNE",
+            value=f"```\n{donne_items}\n```",
+            inline=True
+        )
+        e.add_field(
+            name="📥 JE VEUX",
+            value=f"```\n{veux_items}\n```",
+            inline=True
+        )
         
-        e.add_field(name="\u200b", value="\u200b", inline=False)
-        e.add_field(name="👤 Trader", value=f"{i.user.mention}", inline=True)
-        e.add_field(name="🆔 ID", value=f"`{i.user.id}`", inline=True)
-        e.add_field(name="📅 Posté", value=f"<t:{int(now().timestamp())}:R>", inline=True)
+        e.add_field(name="━━━━━━━━━━━━━━━━━━━━", value="\u200b", inline=False)
         
+        # Infos du trader
+        e.add_field(name="👤 Trader", value=f"{self.user.mention}", inline=True)
+        e.add_field(name="🆔 ID", value=f"`{self.user.id}`", inline=True)
+        e.add_field(name="📅 Date", value=f"<t:{int(now().timestamp())}:F>", inline=True)
+        
+        # Image de preuve
         e.set_image(url=image_url)
-        e.set_thumbnail(url=i.user.display_avatar.url)
-        e.set_footer(text=f"Items disponibles: {' '.join(self.items[:10])}")
+        e.set_thumbnail(url=self.user.display_avatar.url)
+        
+        e.set_footer(text="✅ Intéressé? Réagissez! | 💬 Contactez le trader en MP")
         
         # Envoyer le trade
-        trade_msg = await trade_ch.send(embed=e)
+        trade_msg = await self.trade_ch.send(embed=e)
         
         # Ajouter réactions
-        await trade_msg.add_reaction("✅")  # Intéressé
-        await trade_msg.add_reaction("💬")  # Contacter
+        await trade_msg.add_reaction("✅")
+        await trade_msg.add_reaction("💬")
         
         # Enregistrer le cooldown
-        trade_cooldowns[(self.guild.id, i.user.id)] = now()
+        trade_cooldowns[(self.guild.id, self.user.id)] = now()
         
         # Confirmation
-        confirm = discord.Embed(title="✅ Trade publié!", color=C.GREEN)
-        confirm.description = f"Votre offre d'échange a été publiée dans {trade_ch.mention}"
+        confirm = discord.Embed(title="✅ Trade publié avec succès!", color=C.GREEN)
+        confirm.description = f"Votre offre d'échange a été publiée dans {self.trade_ch.mention}"
+        confirm.add_field(name="📤 Vous donnez", value=donne_items, inline=True)
+        confirm.add_field(name="📥 Vous voulez", value=veux_items, inline=True)
         await i.followup.send(embed=confirm, ephemeral=True)
+    
+    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.danger, row=2)
+    async def cancel(self, i, b):
+        await i.response.edit_message(embed=discord.Embed(title="❌ Trade annulé", color=C.RED), view=None)
+
+class TradeGiveSelect(Select):
+    def __init__(self, parent):
+        self.parent = parent
+        options = parent.item_options.copy()
+        super().__init__(
+            placeholder="📤 Sélectionnez ce que vous DONNEZ...",
+            options=options,
+            min_values=1,
+            max_values=min(len(options), 10),
+            row=0
+        )
+    
+    async def callback(self, i):
+        self.parent.je_donne = self.values
+        await i.response.edit_message(embed=self.parent.get_embed(), view=self.parent)
+
+class TradeWantSelect(Select):
+    def __init__(self, parent):
+        self.parent = parent
+        options = parent.item_options.copy()
+        super().__init__(
+            placeholder="📥 Sélectionnez ce que vous VOULEZ...",
+            options=options,
+            min_values=1,
+            max_values=min(len(options), 10),
+            row=1
+        )
+    
+    async def callback(self, i):
+        self.parent.je_veux = self.values
+        await i.response.edit_message(embed=self.parent.get_embed(), view=self.parent)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              📊 SUGGESTION VOTE TRACKING
