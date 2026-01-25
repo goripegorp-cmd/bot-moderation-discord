@@ -100,7 +100,7 @@ async def cfg(gid):
         'log_anti_spam': 0, 'log_anti_caps': 0, 'log_anti_badwords': 0, 'log_anti_invite': 0, 'log_anti_newaccount': 0,
         'channel_configs': {},
         'ticket_staff': 0, 'ticket_log': 0, 'ticket_panels': {},
-        'mod_warn_role': 0, 'mod_mute_role': 0, 'mod_infractions_role': 0
+        'mod_warn_role': 0, 'mod_mute_role': 0, 'mod_infractions_role': 0, 'mod_log_channel': 0
     }
     for k, v in defaults.items():
         if k not in data: data[k] = v
@@ -1058,6 +1058,38 @@ class ActionConfigPanel(View):
 #                           🔨 MODÉRATION PANEL
 # ═══════════════════════════════════════════════════════════════════════════════
 
+async def send_mod_log(guild, action, mod, target, reason=None, duration=None, extra=None):
+    """Envoie un log de modération"""
+    try:
+        c = await cfg(guild.id)
+        log_ch = guild.get_channel(c.get('mod_log_channel', 0))
+        if not log_ch:
+            return
+        
+        colors = {'warn': C.YELLOW, 'unwarn': C.GREEN, 'mute': C.ORANGE, 'unmute': C.GREEN, 'infractions': C.BLUE}
+        emojis = {'warn': '⚠️', 'unwarn': '✅', 'mute': '🔇', 'unmute': '🔊', 'infractions': '📋'}
+        titles = {'warn': 'Avertissement', 'unwarn': 'Warn supprimé', 'mute': 'Mute', 'unmute': 'Unmute', 'infractions': 'Consultation infractions'}
+        
+        e = discord.Embed(
+            title=f"{emojis.get(action, '🔨')} {titles.get(action, action.upper())}",
+            color=colors.get(action, C.ORANGE),
+            timestamp=now()
+        )
+        e.add_field(name="👮 Modérateur", value=f"{mod.mention}\n`{mod.id}`", inline=True)
+        e.add_field(name="👤 Membre", value=f"{target.mention}\n`{target.id}`", inline=True)
+        
+        if duration:
+            e.add_field(name="⏱️ Durée", value=duration, inline=True)
+        if reason:
+            e.add_field(name="📝 Raison", value=reason[:1024], inline=False)
+        if extra:
+            e.add_field(name="ℹ️ Info", value=extra, inline=False)
+        
+        e.set_thumbnail(url=target.display_avatar.url)
+        await log_ch.send(embed=e)
+    except Exception as ex:
+        print(f"[MOD LOG ERROR] {ex}")
+
 class ModerationPanel(View):
     def __init__(self, u, g):
         super().__init__(timeout=600)
@@ -1067,22 +1099,30 @@ class ModerationPanel(View):
     async def embed(self):
         c = await cfg(self.g.id)
         e = discord.Embed(title="🔨 Modération", color=C.ORANGE)
-        e.description = "Configurez les rôles autorisés pour chaque commande de modération."
+        e.description = "Configurez les rôles et logs pour les commandes de modération."
+        
+        # Salon logs
+        log_ch = self.g.get_channel(c.get('mod_log_channel', 0))
+        e.add_field(
+            name="📜 Salon Logs",
+            value=log_ch.mention if log_ch else "❌ Non configuré",
+            inline=False
+        )
         
         # Warn
         warn_role = self.g.get_role(c.get('mod_warn_role', 0))
         e.add_field(
-            name="⚠️ /warn",
+            name="⚠️ /warn & /unwarn",
             value=f"Rôle: {warn_role.mention if warn_role else '❌ Non configuré'}",
-            inline=False
+            inline=True
         )
         
         # Mute
         mute_role = self.g.get_role(c.get('mod_mute_role', 0))
         e.add_field(
-            name="🔇 /mute",
+            name="🔇 /mute & /unmute",
             value=f"Rôle: {mute_role.mention if mute_role else '❌ Non configuré'}",
-            inline=False
+            inline=True
         )
         
         # Infractions
@@ -1090,27 +1130,35 @@ class ModerationPanel(View):
         e.add_field(
             name="📋 /infractions",
             value=f"Rôle: {inf_role.mention if inf_role else '❌ Non configuré'}",
-            inline=False
+            inline=True
         )
         
         e.set_footer(text="Les admins et le owner ont toujours accès à toutes les commandes")
         return e
     
-    @discord.ui.button(label="⚠️ Rôle /warn", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="📜 Salon Logs", style=discord.ButtonStyle.success, row=0)
+    async def set_logs(self, i, b):
+        chs = list(self.g.text_channels)[:25]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        opts.insert(0, discord.SelectOption(label="❌ Aucun log", value="0"))
+        v = ModLogSelectView(self.u, self.g, opts)
+        await i.response.edit_message(embed=discord.Embed(title="📜 Salon des logs modération", color=C.ORANGE), view=v)
+    
+    @discord.ui.button(label="⚠️ Rôle /warn", style=discord.ButtonStyle.primary, row=1)
     async def set_warn(self, i, b):
         roles = [r for r in self.g.roles[1:] if not r.is_bot_managed()][:25]
         opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
         opts.insert(0, discord.SelectOption(label="❌ Aucun rôle", value="0"))
         v = ModRoleSelectView(self.u, self.g, opts, 'mod_warn_role')
-        await i.response.edit_message(embed=discord.Embed(title="⚠️ Rôle pour /warn", color=C.ORANGE), view=v)
+        await i.response.edit_message(embed=discord.Embed(title="⚠️ Rôle pour /warn & /unwarn", color=C.ORANGE), view=v)
     
-    @discord.ui.button(label="🔇 Rôle /mute", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="🔇 Rôle /mute", style=discord.ButtonStyle.primary, row=1)
     async def set_mute(self, i, b):
         roles = [r for r in self.g.roles[1:] if not r.is_bot_managed()][:25]
         opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
         opts.insert(0, discord.SelectOption(label="❌ Aucun rôle", value="0"))
         v = ModRoleSelectView(self.u, self.g, opts, 'mod_mute_role')
-        await i.response.edit_message(embed=discord.Embed(title="🔇 Rôle pour /mute", color=C.ORANGE), view=v)
+        await i.response.edit_message(embed=discord.Embed(title="🔇 Rôle pour /mute & /unmute", color=C.ORANGE), view=v)
     
     @discord.ui.button(label="📋 Rôle /infractions", style=discord.ButtonStyle.primary, row=1)
     async def set_inf(self, i, b):
@@ -1124,6 +1172,22 @@ class ModerationPanel(View):
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+class ModLogSelectView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.add_item(ModLogSelect(u, g, opts))
+
+class ModLogSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        await db_set(i.guild.id, 'mod_log_channel', int(self.values[0]))
+        v = ModerationPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
 
 class ModRoleSelectView(View):
     def __init__(self, u, g, opts, key):
@@ -1820,40 +1884,133 @@ async def check_mod_perm(i, cmd_key):
     
     return False
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#                              ⚠️ WARN / UNWARN
+# ═══════════════════════════════════════════════════════════════════════════════
+
 @bot.tree.command(name="warn", description="⚠️ Avertir un membre")
 @app_commands.describe(membre="Le membre à avertir", raison="La raison de l'avertissement")
 async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
     if not await check_mod_perm(i, 'mod_warn_role'):
-        return await i.response.send_message("❌ Vous n'avez pas la permission d'utiliser cette commande", ephemeral=True)
+        return await i.response.send_message("❌ Vous n'avez pas la permission", ephemeral=True)
     
     if membre.id == i.user.id:
-        return await i.response.send_message("❌ Vous ne pouvez pas vous avertir vous-même", ephemeral=True)
+        return await i.response.send_message("❌ Vous ne pouvez pas vous warn vous-même", ephemeral=True)
+    
+    if membre.bot:
+        return await i.response.send_message("❌ Vous ne pouvez pas warn un bot", ephemeral=True)
     
     if membre.top_role >= i.user.top_role and i.user.id != i.guild.owner_id:
-        return await i.response.send_message("❌ Vous ne pouvez pas avertir ce membre", ephemeral=True)
+        return await i.response.send_message("❌ Vous ne pouvez pas warn ce membre", ephemeral=True)
     
     # Enregistrer l'infraction
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute('INSERT INTO infractions(guild_id, user_id, mod_id, type, reason, duration) VALUES(?,?,?,?,?,?)',
-            (i.guild.id, membre.id, i.user.id, 'warn', raison, ''))
+        await db.execute(
+            'INSERT INTO infractions(guild_id, user_id, mod_id, type, reason, duration) VALUES(?,?,?,?,?,?)',
+            (i.guild.id, membre.id, i.user.id, 'warn', raison, '')
+        )
         await db.commit()
+        # Compter les warns
+        async with db.execute('SELECT COUNT(*) FROM infractions WHERE guild_id=? AND user_id=? AND type="warn"', (i.guild.id, membre.id)) as c:
+            warn_count = (await c.fetchone())[0]
     
     # Créer l'embed
     e = discord.Embed(title="⚠️ Avertissement", color=C.YELLOW, timestamp=now())
     e.add_field(name="👤 Membre", value=f"{membre.mention}\n`{membre.id}`", inline=True)
     e.add_field(name="👮 Modérateur", value=f"{i.user.mention}", inline=True)
+    e.add_field(name="📊 Total warns", value=str(warn_count), inline=True)
     e.add_field(name="📝 Raison", value=raison, inline=False)
     e.set_thumbnail(url=membre.display_avatar.url)
     
     await i.response.send_message(embed=e)
     
+    # Log
+    await send_mod_log(i.guild, 'warn', i.user, membre, raison, extra=f"Total warns: {warn_count}")
+    
     # DM au membre
     try:
         dm_embed = discord.Embed(title="⚠️ Vous avez reçu un avertissement", color=C.YELLOW)
         dm_embed.add_field(name="🏠 Serveur", value=i.guild.name, inline=True)
+        dm_embed.add_field(name="📊 Total warns", value=str(warn_count), inline=True)
         dm_embed.add_field(name="📝 Raison", value=raison, inline=False)
         await membre.send(embed=dm_embed)
     except: pass
+
+@bot.tree.command(name="unwarn", description="✅ Supprimer un avertissement d'un membre")
+@app_commands.describe(membre="Le membre dont vous voulez supprimer un warn")
+async def unwarn_cmd(i: discord.Interaction, membre: discord.Member):
+    if not await check_mod_perm(i, 'mod_warn_role'):
+        return await i.response.send_message("❌ Vous n'avez pas la permission", ephemeral=True)
+    
+    # Récupérer les warns
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            'SELECT id, reason, created_at FROM infractions WHERE guild_id=? AND user_id=? AND type="warn" ORDER BY created_at DESC LIMIT 25',
+            (i.guild.id, membre.id)
+        ) as c:
+            warns = await c.fetchall()
+    
+    if not warns:
+        return await i.response.send_message(f"❌ {membre.mention} n'a aucun warn", ephemeral=True)
+    
+    # Créer les options
+    opts = []
+    for warn_id, reason, created in warns:
+        date_str = created[:10] if created else "?"
+        label = f"#{warn_id} - {reason[:40]}{'...' if len(reason) > 40 else ''}"
+        opts.append(discord.SelectOption(label=label[:100], value=str(warn_id), description=f"Date: {date_str}"))
+    
+    e = discord.Embed(
+        title=f"✅ Supprimer un warn de {membre.display_name}",
+        description=f"Sélectionnez le warn à supprimer ({len(warns)} warn(s) trouvé(s))",
+        color=C.GREEN
+    )
+    e.set_thumbnail(url=membre.display_avatar.url)
+    
+    v = UnwarnSelectView(membre, opts)
+    await i.response.send_message(embed=e, view=v, ephemeral=True)
+
+class UnwarnSelectView(View):
+    def __init__(self, membre, opts):
+        super().__init__(timeout=120)
+        self.add_item(UnwarnSelect(membre, opts))
+
+class UnwarnSelect(Select):
+    def __init__(self, membre, opts):
+        super().__init__(placeholder="Sélectionner le warn à supprimer...", options=opts)
+        self.membre = membre
+    
+    async def callback(self, i):
+        warn_id = int(self.values[0])
+        
+        # Récupérer info du warn avant suppression
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('SELECT reason FROM infractions WHERE id=?', (warn_id,)) as c:
+                row = await c.fetchone()
+                reason = row[0] if row else "?"
+            
+            # Supprimer
+            await db.execute('DELETE FROM infractions WHERE id=?', (warn_id,))
+            await db.commit()
+            
+            # Compter les warns restants
+            async with db.execute('SELECT COUNT(*) FROM infractions WHERE guild_id=? AND user_id=? AND type="warn"', (i.guild.id, self.membre.id)) as c:
+                warn_count = (await c.fetchone())[0]
+        
+        e = discord.Embed(title="✅ Warn supprimé", color=C.GREEN, timestamp=now())
+        e.add_field(name="👤 Membre", value=f"{self.membre.mention}", inline=True)
+        e.add_field(name="👮 Par", value=f"{i.user.mention}", inline=True)
+        e.add_field(name="📊 Warns restants", value=str(warn_count), inline=True)
+        e.add_field(name="📝 Warn supprimé", value=reason[:1024], inline=False)
+        
+        await i.response.edit_message(embed=e, view=None)
+        
+        # Log
+        await send_mod_log(i.guild, 'unwarn', i.user, self.membre, reason, extra=f"Warns restants: {warn_count}")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                              🔇 MUTE / UNMUTE
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @bot.tree.command(name="mute", description="🔇 Timeout un membre")
 @app_commands.describe(membre="Le membre à mute", duree="La durée (nombre)", unite="L'unité de temps", raison="La raison du mute")
@@ -1861,19 +2018,23 @@ async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
     app_commands.Choice(name="Minutes", value="minutes"),
     app_commands.Choice(name="Heures", value="heures"),
     app_commands.Choice(name="Jours", value="jours"),
-    app_commands.Choice(name="Semaine", value="semaine")
+    app_commands.Choice(name="Semaine (max)", value="semaine")
 ])
 async def mute_cmd(i: discord.Interaction, membre: discord.Member, duree: int, unite: str, raison: str):
     if not await check_mod_perm(i, 'mod_mute_role'):
-        return await i.response.send_message("❌ Vous n'avez pas la permission d'utiliser cette commande", ephemeral=True)
+        return await i.response.send_message("❌ Vous n'avez pas la permission", ephemeral=True)
     
     if membre.id == i.user.id:
         return await i.response.send_message("❌ Vous ne pouvez pas vous mute vous-même", ephemeral=True)
+    
+    if membre.bot:
+        return await i.response.send_message("❌ Vous ne pouvez pas mute un bot", ephemeral=True)
     
     if membre.top_role >= i.user.top_role and i.user.id != i.guild.owner_id:
         return await i.response.send_message("❌ Vous ne pouvez pas mute ce membre", ephemeral=True)
     
     # Calculer la durée
+    duree = max(1, duree)
     if unite == "minutes":
         delta = timedelta(minutes=duree)
         dur_txt = f"{duree} minute(s)"
@@ -1881,30 +2042,32 @@ async def mute_cmd(i: discord.Interaction, membre: discord.Member, duree: int, u
         delta = timedelta(hours=duree)
         dur_txt = f"{duree} heure(s)"
     elif unite == "jours":
+        duree = min(duree, 7)  # Max 7 jours
         delta = timedelta(days=duree)
         dur_txt = f"{duree} jour(s)"
-    elif unite == "semaine":
-        duree = min(duree, 1)  # Max 1 semaine
-        delta = timedelta(weeks=duree)
-        dur_txt = f"{duree} semaine(s)"
+    else:  # semaine
+        delta = timedelta(weeks=1)
+        dur_txt = "1 semaine"
     
-    # Max Discord: 28 jours
-    if delta > timedelta(days=28):
-        delta = timedelta(days=28)
-        dur_txt = "28 jours (maximum)"
+    # Max Discord: 28 jours, mais on limite à 1 semaine
+    if delta > timedelta(days=7):
+        delta = timedelta(days=7)
+        dur_txt = "7 jours (maximum)"
     
     # Appliquer le timeout
     try:
         await membre.timeout(delta, reason=f"{raison} - Par {i.user.name}")
     except discord.Forbidden:
-        return await i.response.send_message("❌ Je ne peux pas mute ce membre (permissions insuffisantes)", ephemeral=True)
+        return await i.response.send_message("❌ Je ne peux pas mute ce membre (permissions)", ephemeral=True)
     except Exception as ex:
         return await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
     
     # Enregistrer l'infraction
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute('INSERT INTO infractions(guild_id, user_id, mod_id, type, reason, duration) VALUES(?,?,?,?,?,?)',
-            (i.guild.id, membre.id, i.user.id, 'mute', raison, dur_txt))
+        await db.execute(
+            'INSERT INTO infractions(guild_id, user_id, mod_id, type, reason, duration) VALUES(?,?,?,?,?,?)',
+            (i.guild.id, membre.id, i.user.id, 'mute', raison, dur_txt)
+        )
         await db.commit()
     
     # Créer l'embed
@@ -1917,6 +2080,9 @@ async def mute_cmd(i: discord.Interaction, membre: discord.Member, duree: int, u
     
     await i.response.send_message(embed=e)
     
+    # Log
+    await send_mod_log(i.guild, 'mute', i.user, membre, raison, duration=dur_txt)
+    
     # DM au membre
     try:
         dm_embed = discord.Embed(title="🔇 Vous avez été mute", color=C.ORANGE)
@@ -1926,54 +2092,118 @@ async def mute_cmd(i: discord.Interaction, membre: discord.Member, duree: int, u
         await membre.send(embed=dm_embed)
     except: pass
 
+@bot.tree.command(name="unmute", description="🔊 Retirer le mute d'un membre")
+@app_commands.describe(membre="Le membre à unmute", raison="La raison du unmute (optionnel)")
+async def unmute_cmd(i: discord.Interaction, membre: discord.Member, raison: str = "Aucune raison spécifiée"):
+    if not await check_mod_perm(i, 'mod_mute_role'):
+        return await i.response.send_message("❌ Vous n'avez pas la permission", ephemeral=True)
+    
+    # Vérifier si le membre est mute
+    if not membre.is_timed_out():
+        return await i.response.send_message(f"❌ {membre.mention} n'est pas mute", ephemeral=True)
+    
+    # Retirer le timeout
+    try:
+        await membre.timeout(None, reason=f"Unmute par {i.user.name}: {raison}")
+    except discord.Forbidden:
+        return await i.response.send_message("❌ Je ne peux pas unmute ce membre (permissions)", ephemeral=True)
+    except Exception as ex:
+        return await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+    
+    # Créer l'embed
+    e = discord.Embed(title="🔊 Membre unmute", color=C.GREEN, timestamp=now())
+    e.add_field(name="👤 Membre", value=f"{membre.mention}\n`{membre.id}`", inline=True)
+    e.add_field(name="👮 Modérateur", value=f"{i.user.mention}", inline=True)
+    e.add_field(name="📝 Raison", value=raison, inline=False)
+    e.set_thumbnail(url=membre.display_avatar.url)
+    
+    await i.response.send_message(embed=e)
+    
+    # Log
+    await send_mod_log(i.guild, 'unmute', i.user, membre, raison)
+    
+    # DM au membre
+    try:
+        dm_embed = discord.Embed(title="🔊 Vous avez été unmute", color=C.GREEN)
+        dm_embed.add_field(name="🏠 Serveur", value=i.guild.name, inline=True)
+        dm_embed.add_field(name="📝 Raison", value=raison, inline=False)
+        await membre.send(embed=dm_embed)
+    except: pass
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                              📋 INFRACTIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
 @bot.tree.command(name="infractions", description="📋 Voir les infractions d'un membre")
 @app_commands.describe(membre="Le membre dont vous voulez voir les infractions")
 async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
     if not await check_mod_perm(i, 'mod_infractions_role'):
-        return await i.response.send_message("❌ Vous n'avez pas la permission d'utiliser cette commande", ephemeral=True)
+        return await i.response.send_message("❌ Vous n'avez pas la permission", ephemeral=True)
     
-    # Récupérer les infractions
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute('SELECT type, reason, duration, mod_id, created_at FROM infractions WHERE guild_id=? AND user_id=? ORDER BY created_at DESC', (i.guild.id, membre.id)) as c:
-            rows = await c.fetchall()
+    await i.response.defer()
     
-    # Calculer le temps sur le serveur
-    joined = membre.joined_at
-    if joined:
-        days_on_server = (now() - joined.replace(tzinfo=timezone.utc)).days
-        time_on_server = f"{days_on_server} jour(s)"
-    else:
-        time_on_server = "Inconnu"
-    
-    # Compter les types
-    warns = sum(1 for r in rows if r[0] == 'warn')
-    mutes = sum(1 for r in rows if r[0] == 'mute')
-    
-    # Créer l'embed
-    e = discord.Embed(title=f"📋 Infractions de {membre.display_name}", color=C.BLUE, timestamp=now())
-    e.set_thumbnail(url=membre.display_avatar.url)
-    
-    e.add_field(name="👤 Membre", value=f"{membre.mention}\n`{membre.id}`", inline=True)
-    e.add_field(name="📅 Sur le serveur depuis", value=time_on_server, inline=True)
-    e.add_field(name="📊 Total infractions", value=str(len(rows)), inline=True)
-    
-    e.add_field(name="⚠️ Warns", value=str(warns), inline=True)
-    e.add_field(name="🔇 Mutes", value=str(mutes), inline=True)
-    e.add_field(name="\u200b", value="\u200b", inline=True)
-    
-    if rows:
-        # Afficher les 10 dernières infractions
-        inf_lines = []
-        for j, (typ, reason, duration, mod_id, created) in enumerate(rows[:10], 1):
-            emoji = "⚠️" if typ == "warn" else "🔇"
-            dur_txt = f" ({duration})" if duration else ""
-            inf_lines.append(f"`{j}.` {emoji} **{typ.upper()}**{dur_txt}\n   └ {reason[:50]}{'...' if len(reason) > 50 else ''}")
+    try:
+        # Récupérer les infractions
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                'SELECT type, reason, duration, mod_id, created_at FROM infractions WHERE guild_id=? AND user_id=? ORDER BY created_at DESC',
+                (i.guild.id, membre.id)
+            ) as c:
+                rows = await c.fetchall()
         
-        e.add_field(name="📜 Historique (10 dernières)", value="\n".join(inf_lines)[:1024], inline=False)
-    else:
-        e.add_field(name="📜 Historique", value="*Aucune infraction*", inline=False)
-    
-    await i.response.send_message(embed=e)
+        # Calculer le temps sur le serveur
+        joined = membre.joined_at
+        if joined:
+            days_on_server = (now() - joined.replace(tzinfo=timezone.utc)).days
+            time_on_server = f"{days_on_server} jour(s)"
+        else:
+            time_on_server = "Inconnu"
+        
+        # Compter les types
+        warns = sum(1 for r in rows if r[0] == 'warn')
+        mutes = sum(1 for r in rows if r[0] == 'mute')
+        
+        # Créer l'embed
+        e = discord.Embed(title=f"📋 Infractions de {membre.display_name}", color=C.BLUE, timestamp=now())
+        e.set_thumbnail(url=membre.display_avatar.url)
+        
+        e.add_field(name="👤 Membre", value=f"{membre.mention}\n`{membre.id}`", inline=True)
+        e.add_field(name="📅 Sur le serveur", value=time_on_server, inline=True)
+        e.add_field(name="📊 Total", value=str(len(rows)), inline=True)
+        
+        e.add_field(name="⚠️ Warns", value=str(warns), inline=True)
+        e.add_field(name="🔇 Mutes", value=str(mutes), inline=True)
+        
+        # Statut mute actuel
+        if membre.is_timed_out():
+            timeout_until = membre.timed_out_until
+            if timeout_until:
+                e.add_field(name="🔇 Mute actif", value=f"Jusqu'à <t:{int(timeout_until.timestamp())}:R>", inline=True)
+            else:
+                e.add_field(name="\u200b", value="\u200b", inline=True)
+        else:
+            e.add_field(name="\u200b", value="\u200b", inline=True)
+        
+        if rows:
+            # Afficher les 10 dernières infractions
+            inf_lines = []
+            for j, (typ, reason, duration, mod_id, created) in enumerate(rows[:10], 1):
+                emoji = "⚠️" if typ == "warn" else "🔇"
+                dur_txt = f" ({duration})" if duration else ""
+                reason_short = reason[:45] + "..." if len(reason) > 45 else reason
+                inf_lines.append(f"`{j}.` {emoji} **{typ.upper()}**{dur_txt}\n└ {reason_short}")
+            
+            e.add_field(name="📜 Historique (10 dernières)", value="\n".join(inf_lines)[:1024], inline=False)
+        else:
+            e.add_field(name="📜 Historique", value="✅ Aucune infraction", inline=False)
+        
+        await i.followup.send(embed=e)
+        
+        # Log
+        await send_mod_log(i.guild, 'infractions', i.user, membre, extra=f"Total: {len(rows)} infractions")
+        
+    except Exception as ex:
+        await i.followup.send(f"❌ Erreur: {ex}", ephemeral=True)
 
 if __name__ == "__main__":
     print("🚀 Bot v12 - Démarrage...")
