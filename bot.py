@@ -9,9 +9,10 @@ import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 from discord.ui import View, Select, Modal, TextInput, Button
-import aiosqlite, os, re, json, asyncio, unicodedata, io, time
+import aiosqlite, os, re, json, asyncio, unicodedata, io, time, aiohttp
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
+import xml.etree.ElementTree as ET
 
 load_dotenv()
 TOKEN = os.getenv('BOT_TOKEN')
@@ -612,6 +613,11 @@ class MainPanel(View):
     @discord.ui.button(label="Tickets", emoji="🎫", style=discord.ButtonStyle.success, row=1)
     async def tickets(self, i, b):
         v = TicketMainPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="Publicité", emoji="📢", style=discord.ButtonStyle.success, row=2)
+    async def ads(self, i, b):
+        v = AdsPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger, row=2)
@@ -1720,6 +1726,451 @@ class TradeCooldownModal(Modal, title="⏱️ Cooldown Trade"):
         await i.response.edit_message(embed=e, view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#                           📢 PUBLICITÉ / NOTIFICATIONS SOCIALES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Cache pour éviter de republier les mêmes posts
+posted_content = {}
+
+class AdsPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        e = discord.Embed(title="📢 Publicité & Notifications", color=C.PURPLE)
+        e.description = "Recevez les dernières publications de vos créateurs préférés!"
+        
+        # YouTube
+        yt_ch = self.g.get_channel(c.get('ads_youtube_channel', 0))
+        yt_feeds = c.get('ads_youtube_feeds', [])
+        e.add_field(
+            name="🔴 YouTube",
+            value=f"📍 {yt_ch.mention if yt_ch else '❌'}\n📺 {len(yt_feeds)} chaîne(s)",
+            inline=True
+        )
+        
+        # Twitch
+        tw_ch = self.g.get_channel(c.get('ads_twitch_channel', 0))
+        tw_feeds = c.get('ads_twitch_feeds', [])
+        e.add_field(
+            name="🟣 Twitch",
+            value=f"📍 {tw_ch.mention if tw_ch else '❌'}\n🎮 {len(tw_feeds)} streamer(s)",
+            inline=True
+        )
+        
+        # Twitter/X
+        x_ch = self.g.get_channel(c.get('ads_twitter_channel', 0))
+        x_feeds = c.get('ads_twitter_feeds', [])
+        e.add_field(
+            name="🐦 Twitter/X",
+            value=f"📍 {x_ch.mention if x_ch else '❌'}\n👤 {len(x_feeds)} compte(s)",
+            inline=True
+        )
+        
+        # Reddit
+        rd_ch = self.g.get_channel(c.get('ads_reddit_channel', 0))
+        rd_feeds = c.get('ads_reddit_feeds', [])
+        e.add_field(
+            name="🟠 Reddit",
+            value=f"📍 {rd_ch.mention if rd_ch else '❌'}\n📰 {len(rd_feeds)} subreddit(s)",
+            inline=True
+        )
+        
+        e.set_footer(text="💡 Les notifications sont vérifiées toutes les 5 minutes")
+        return e
+    
+    @discord.ui.button(label="🔴 YouTube", style=discord.ButtonStyle.danger, row=0)
+    async def youtube(self, i, b):
+        v = AdsYouTubePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="🟣 Twitch", style=discord.ButtonStyle.primary, row=0)
+    async def twitch(self, i, b):
+        v = AdsTwitchPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="🐦 Twitter/X", style=discord.ButtonStyle.secondary, row=0)
+    async def twitter(self, i, b):
+        v = AdsTwitterPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="🟠 Reddit", style=discord.ButtonStyle.secondary, row=1)
+    async def reddit(self, i, b):
+        v = AdsRedditPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = MainPanel(self.u, self.g)
+        await i.response.edit_message(embed=v.embed(), view=v)
+
+# ─────────────────────────────── YOUTUBE ───────────────────────────────
+
+class AdsYouTubePanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        e = discord.Embed(title="🔴 YouTube - Notifications", color=0xFF0000)
+        
+        yt_ch = self.g.get_channel(c.get('ads_youtube_channel', 0))
+        yt_feeds = c.get('ads_youtube_feeds', [])
+        
+        e.add_field(name="📍 Salon", value=yt_ch.mention if yt_ch else "❌ Non configuré", inline=False)
+        
+        if yt_feeds:
+            feeds_txt = "\n".join([f"• `{f['name']}` ({f['id'][:15]}...)" for f in yt_feeds[:10]])
+            e.add_field(name=f"📺 Chaînes suivies ({len(yt_feeds)})", value=feeds_txt, inline=False)
+        else:
+            e.add_field(name="📺 Chaînes suivies", value="*Aucune chaîne configurée*", inline=False)
+        
+        e.set_footer(text="💡 Utilisez l'ID de chaîne YouTube (ex: UCxxxx)")
+        return e
+    
+    @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
+    async def set_channel(self, i, b):
+        chs = list(self.g.text_channels)[:25]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        v = AdsChannelSelectView(self.u, self.g, opts, 'ads_youtube_channel', 'youtube')
+        await i.response.edit_message(embed=discord.Embed(title="📍 Salon YouTube", color=0xFF0000), view=v)
+    
+    @discord.ui.button(label="➕ Ajouter Chaîne", style=discord.ButtonStyle.success, row=0)
+    async def add_feed(self, i, b):
+        await i.response.send_modal(AdsYouTubeAddModal(self.g, self.u))
+    
+    @discord.ui.button(label="🗑️ Supprimer Chaîne", style=discord.ButtonStyle.danger, row=0)
+    async def remove_feed(self, i, b):
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_youtube_feeds', [])
+        if not feeds:
+            return await i.response.send_message("❌ Aucune chaîne à supprimer", ephemeral=True)
+        opts = [discord.SelectOption(label=f['name'][:25], value=str(idx)) for idx, f in enumerate(feeds[:25])]
+        v = AdsFeedRemoveView(self.u, self.g, opts, 'ads_youtube_feeds', 'youtube')
+        await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer une chaîne", color=C.RED), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = AdsPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class AdsYouTubeAddModal(Modal, title="➕ Ajouter une chaîne YouTube"):
+    name = TextInput(label="Nom de la chaîne", placeholder="Ex: MrBeast", max_length=50)
+    channel_id = TextInput(label="ID de la chaîne YouTube", placeholder="UCX6OQ3DkcsbYNE6H8uQQuVA", max_length=30)
+    
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+    
+    async def on_submit(self, i):
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_youtube_feeds', [])
+        
+        # Vérifier si déjà ajouté
+        if any(f['id'] == self.channel_id.value for f in feeds):
+            return await i.response.send_message("❌ Cette chaîne est déjà ajoutée!", ephemeral=True)
+        
+        feeds.append({'name': self.name.value, 'id': self.channel_id.value})
+        await db_set(self.g.id, 'ads_youtube_feeds', feeds)
+        
+        v = AdsYouTubePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+# ─────────────────────────────── TWITCH ───────────────────────────────
+
+class AdsTwitchPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        e = discord.Embed(title="🟣 Twitch - Notifications", color=0x9146FF)
+        
+        tw_ch = self.g.get_channel(c.get('ads_twitch_channel', 0))
+        tw_feeds = c.get('ads_twitch_feeds', [])
+        
+        e.add_field(name="📍 Salon", value=tw_ch.mention if tw_ch else "❌ Non configuré", inline=False)
+        
+        if tw_feeds:
+            feeds_txt = "\n".join([f"• `{f}`" for f in tw_feeds[:10]])
+            e.add_field(name=f"🎮 Streamers suivis ({len(tw_feeds)})", value=feeds_txt, inline=False)
+        else:
+            e.add_field(name="🎮 Streamers suivis", value="*Aucun streamer configuré*", inline=False)
+        
+        e.set_footer(text="💡 Utilisez le nom d'utilisateur Twitch (ex: ninja)")
+        return e
+    
+    @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
+    async def set_channel(self, i, b):
+        chs = list(self.g.text_channels)[:25]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        v = AdsChannelSelectView(self.u, self.g, opts, 'ads_twitch_channel', 'twitch')
+        await i.response.edit_message(embed=discord.Embed(title="📍 Salon Twitch", color=0x9146FF), view=v)
+    
+    @discord.ui.button(label="➕ Ajouter Streamer", style=discord.ButtonStyle.success, row=0)
+    async def add_feed(self, i, b):
+        await i.response.send_modal(AdsTwitchAddModal(self.g, self.u))
+    
+    @discord.ui.button(label="🗑️ Supprimer Streamer", style=discord.ButtonStyle.danger, row=0)
+    async def remove_feed(self, i, b):
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_twitch_feeds', [])
+        if not feeds:
+            return await i.response.send_message("❌ Aucun streamer à supprimer", ephemeral=True)
+        opts = [discord.SelectOption(label=f[:25], value=str(idx)) for idx, f in enumerate(feeds[:25])]
+        v = AdsFeedRemoveView(self.u, self.g, opts, 'ads_twitch_feeds', 'twitch')
+        await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer un streamer", color=C.RED), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = AdsPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class AdsTwitchAddModal(Modal, title="➕ Ajouter un streamer Twitch"):
+    username = TextInput(label="Nom d'utilisateur Twitch", placeholder="Ex: ninja", max_length=30)
+    
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+    
+    async def on_submit(self, i):
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_twitch_feeds', [])
+        
+        username = self.username.value.lower().strip()
+        if username in feeds:
+            return await i.response.send_message("❌ Ce streamer est déjà ajouté!", ephemeral=True)
+        
+        feeds.append(username)
+        await db_set(self.g.id, 'ads_twitch_feeds', feeds)
+        
+        v = AdsTwitchPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+# ─────────────────────────────── REDDIT ───────────────────────────────
+
+class AdsRedditPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        e = discord.Embed(title="🟠 Reddit - Notifications", color=0xFF4500)
+        
+        rd_ch = self.g.get_channel(c.get('ads_reddit_channel', 0))
+        rd_feeds = c.get('ads_reddit_feeds', [])
+        
+        e.add_field(name="📍 Salon", value=rd_ch.mention if rd_ch else "❌ Non configuré", inline=False)
+        
+        if rd_feeds:
+            feeds_txt = "\n".join([f"• r/{f}" for f in rd_feeds[:10]])
+            e.add_field(name=f"📰 Subreddits suivis ({len(rd_feeds)})", value=feeds_txt, inline=False)
+        else:
+            e.add_field(name="📰 Subreddits suivis", value="*Aucun subreddit configuré*", inline=False)
+        
+        e.set_footer(text="💡 Entrez le nom du subreddit sans 'r/' (ex: gaming)")
+        return e
+    
+    @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
+    async def set_channel(self, i, b):
+        chs = list(self.g.text_channels)[:25]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        v = AdsChannelSelectView(self.u, self.g, opts, 'ads_reddit_channel', 'reddit')
+        await i.response.edit_message(embed=discord.Embed(title="📍 Salon Reddit", color=0xFF4500), view=v)
+    
+    @discord.ui.button(label="➕ Ajouter Subreddit", style=discord.ButtonStyle.success, row=0)
+    async def add_feed(self, i, b):
+        await i.response.send_modal(AdsRedditAddModal(self.g, self.u))
+    
+    @discord.ui.button(label="🗑️ Supprimer Subreddit", style=discord.ButtonStyle.danger, row=0)
+    async def remove_feed(self, i, b):
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_reddit_feeds', [])
+        if not feeds:
+            return await i.response.send_message("❌ Aucun subreddit à supprimer", ephemeral=True)
+        opts = [discord.SelectOption(label=f"r/{f}"[:25], value=str(idx)) for idx, f in enumerate(feeds[:25])]
+        v = AdsFeedRemoveView(self.u, self.g, opts, 'ads_reddit_feeds', 'reddit')
+        await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer un subreddit", color=C.RED), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = AdsPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class AdsRedditAddModal(Modal, title="➕ Ajouter un subreddit"):
+    subreddit = TextInput(label="Nom du subreddit (sans r/)", placeholder="Ex: gaming", max_length=30)
+    
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+    
+    async def on_submit(self, i):
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_reddit_feeds', [])
+        
+        sub = self.subreddit.value.lower().strip().replace('r/', '')
+        if sub in feeds:
+            return await i.response.send_message("❌ Ce subreddit est déjà ajouté!", ephemeral=True)
+        
+        feeds.append(sub)
+        await db_set(self.g.id, 'ads_reddit_feeds', feeds)
+        
+        v = AdsRedditPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+# ─────────────────────────────── TWITTER/X ───────────────────────────────
+
+# Liste d'instances Nitter fonctionnelles (fallback)
+NITTER_INSTANCES = [
+    "nitter.poast.org",
+    "xcancel.com", 
+    "nitter.privacydev.net",
+    "nitter.woodland.cafe",
+]
+
+class AdsTwitterPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        e = discord.Embed(title="🐦 Twitter/X - Notifications", color=0x1DA1F2)
+        
+        x_ch = self.g.get_channel(c.get('ads_twitter_channel', 0))
+        x_feeds = c.get('ads_twitter_feeds', [])
+        
+        e.add_field(name="📍 Salon", value=x_ch.mention if x_ch else "❌ Non configuré", inline=False)
+        
+        if x_feeds:
+            feeds_txt = "\n".join([f"• @{f}" for f in x_feeds[:10]])
+            e.add_field(name=f"👤 Comptes suivis ({len(x_feeds)})", value=feeds_txt, inline=False)
+        else:
+            e.add_field(name="👤 Comptes suivis", value="*Aucun compte configuré*", inline=False)
+        
+        e.set_footer(text="💡 Entrez le nom d'utilisateur sans @ (ex: elonmusk)")
+        return e
+    
+    @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
+    async def set_channel(self, i, b):
+        chs = list(self.g.text_channels)[:25]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        v = AdsChannelSelectView(self.u, self.g, opts, 'ads_twitter_channel', 'twitter')
+        await i.response.edit_message(embed=discord.Embed(title="📍 Salon Twitter", color=0x1DA1F2), view=v)
+    
+    @discord.ui.button(label="➕ Ajouter Compte", style=discord.ButtonStyle.success, row=0)
+    async def add_feed(self, i, b):
+        await i.response.send_modal(AdsTwitterAddModal(self.g, self.u))
+    
+    @discord.ui.button(label="🗑️ Supprimer Compte", style=discord.ButtonStyle.danger, row=0)
+    async def remove_feed(self, i, b):
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_twitter_feeds', [])
+        if not feeds:
+            return await i.response.send_message("❌ Aucun compte à supprimer", ephemeral=True)
+        opts = [discord.SelectOption(label=f"@{f}"[:25], value=str(idx)) for idx, f in enumerate(feeds[:25])]
+        v = AdsFeedRemoveView(self.u, self.g, opts, 'ads_twitter_feeds', 'twitter')
+        await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer un compte", color=C.RED), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = AdsPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class AdsTwitterAddModal(Modal, title="➕ Ajouter un compte Twitter"):
+    username = TextInput(label="Nom d'utilisateur (sans @)", placeholder="Ex: elonmusk", max_length=30)
+    
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+    
+    async def on_submit(self, i):
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_twitter_feeds', [])
+        
+        username = self.username.value.lower().strip().replace('@', '')
+        if username in feeds:
+            return await i.response.send_message("❌ Ce compte est déjà ajouté!", ephemeral=True)
+        
+        feeds.append(username)
+        await db_set(self.g.id, 'ads_twitter_feeds', feeds)
+        
+        v = AdsTwitterPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+# ─────────────────────────────── COMMON VIEWS ───────────────────────────────
+
+class AdsChannelSelectView(View):
+    def __init__(self, u, g, opts, key, platform):
+        super().__init__(timeout=120)
+        self.add_item(AdsChannelSelect(u, g, opts, key, platform))
+
+class AdsChannelSelect(Select):
+    def __init__(self, u, g, opts, key, platform):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+        self.key = key
+        self.platform = platform
+    
+    async def callback(self, i):
+        await db_set(i.guild.id, self.key, int(self.values[0]))
+        if self.platform == 'youtube':
+            v = AdsYouTubePanel(self.u, self.g)
+        elif self.platform == 'twitch':
+            v = AdsTwitchPanel(self.u, self.g)
+        elif self.platform == 'twitter':
+            v = AdsTwitterPanel(self.u, self.g)
+        else:
+            v = AdsRedditPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class AdsFeedRemoveView(View):
+    def __init__(self, u, g, opts, key, platform):
+        super().__init__(timeout=120)
+        self.add_item(AdsFeedRemoveSelect(u, g, opts, key, platform))
+
+class AdsFeedRemoveSelect(Select):
+    def __init__(self, u, g, opts, key, platform):
+        super().__init__(placeholder="Sélectionner à supprimer...", options=opts)
+        self.u = u
+        self.g = g
+        self.key = key
+        self.platform = platform
+    
+    async def callback(self, i):
+        c = await cfg(self.g.id)
+        feeds = c.get(self.key, [])
+        idx = int(self.values[0])
+        if 0 <= idx < len(feeds):
+            feeds.pop(idx)
+            await db_set(self.g.id, self.key, feeds)
+        
+        if self.platform == 'youtube':
+            v = AdsYouTubePanel(self.u, self.g)
+        elif self.platform == 'twitch':
+            v = AdsTwitchPanel(self.u, self.g)
+        elif self.platform == 'twitter':
+            v = AdsTwitterPanel(self.u, self.g)
+        else:
+            v = AdsRedditPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #                           📺 CONFIG SALON
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -2202,8 +2653,13 @@ async def on_ready():
     if not check_realsy_inactivity.is_running():
         check_realsy_inactivity.start()
     
-    print(f"✅ {bot.user.name} v13 prêt!")
+    # Lancer la tâche des feeds sociaux
+    if not check_social_feeds.is_running():
+        check_social_feeds.start()
+    
+    print(f"✅ {bot.user.name} v14 prêt!")
     print(f"🌐 Serveurs: {len(bot.guilds)}")
+    print(f"📢 Vérification feeds sociaux toutes les 5 minutes")
 
 @bot.tree.command(name="sync", description="🔄 Synchroniser les commandes (Admin)")
 async def sync_cmd(i: discord.Interaction):
@@ -2985,9 +3441,9 @@ class TradeBuilderView(View):
             inline=False
         )
         
-        # Image en thumbnail (un peu plus grande avec set_image)
+        # Image en petit (thumbnail en haut à droite)
         image_file = discord.File(io.BytesIO(image_data), filename=image_filename)
-        e.set_image(url=f"attachment://{image_filename}")
+        e.set_thumbnail(url=f"attachment://{image_filename}")
         
         e.set_footer(text="✅ Intéressé? Réagissez! • 💬 MP pour négocier")
         
@@ -3029,7 +3485,11 @@ class TradeEmojiGiveSelect(Select):
         for emoji_id in self.values:
             emoji = discord.utils.get(self.parent.guild.emojis, id=int(emoji_id))
             if emoji:
-                self.parent.je_donne.append(str(emoji))
+                # Format explicite pour s'assurer que l'emoji s'affiche
+                if emoji.animated:
+                    self.parent.je_donne.append(f"<a:{emoji.name}:{emoji.id}>")
+                else:
+                    self.parent.je_donne.append(f"<:{emoji.name}:{emoji.id}>")
         await i.response.edit_message(embed=self.parent.get_embed(), view=self.parent)
 
 class TradeEmojiWantSelect(Select):
@@ -3055,7 +3515,11 @@ class TradeEmojiWantSelect(Select):
         for emoji_id in self.values:
             emoji = discord.utils.get(self.parent.guild.emojis, id=int(emoji_id))
             if emoji:
-                self.parent.je_veux.append(str(emoji))
+                # Format explicite pour s'assurer que l'emoji s'affiche
+                if emoji.animated:
+                    self.parent.je_veux.append(f"<a:{emoji.name}:{emoji.id}>")
+                else:
+                    self.parent.je_veux.append(f"<:{emoji.name}:{emoji.id}>")
         await i.response.edit_message(embed=self.parent.get_embed(), view=self.parent)
 
 class TradeGameModal(Modal, title="🎮 Définir le Jeu"):
@@ -3257,6 +3721,283 @@ async def check_realsy_inactivity():
 async def before_check():
     await bot.wait_until_ready()
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           📢 TÂCHE VÉRIFICATION FEEDS SOCIAUX
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@tasks.loop(minutes=5)
+async def check_social_feeds():
+    """Vérifie les nouveaux posts YouTube, Twitch, Twitter et Reddit"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute('SELECT guild_id, data FROM guild_config') as cursor:
+                    async for row in cursor:
+                        guild_id, data_str = row
+                        try:
+                            data = json.loads(data_str) if data_str else {}
+                            guild = bot.get_guild(guild_id)
+                            if not guild:
+                                continue
+                            
+                            # YouTube
+                            await check_youtube_feeds(session, guild, data)
+                            
+                            # Twitch
+                            await check_twitch_feeds(session, guild, data)
+                            
+                            # Twitter/X
+                            await check_twitter_feeds(session, guild, data)
+                            
+                            # Reddit
+                            await check_reddit_feeds(session, guild, data)
+                            
+                        except Exception as ex:
+                            print(f"Erreur feed {guild_id}: {ex}")
+                            continue
+    except Exception as ex:
+        print(f"Erreur check_social_feeds: {ex}")
+
+async def check_youtube_feeds(session, guild, data):
+    """Vérifie les nouvelles vidéos YouTube"""
+    channel = guild.get_channel(data.get('ads_youtube_channel', 0))
+    feeds = data.get('ads_youtube_feeds', [])
+    if not channel or not feeds:
+        return
+    
+    for feed in feeds:
+        try:
+            channel_id = feed['id']
+            channel_name = feed['name']
+            rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
+            
+            async with session.get(rss_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    continue
+                xml_text = await resp.text()
+            
+            root = ET.fromstring(xml_text)
+            ns = {'atom': 'http://www.w3.org/2005/Atom', 'yt': 'http://www.youtube.com/xml/schemas/2015'}
+            
+            entries = root.findall('atom:entry', ns)
+            if not entries:
+                continue
+            
+            entry = entries[0]  # Dernier post
+            video_id = entry.find('yt:videoId', ns)
+            title = entry.find('atom:title', ns)
+            
+            if video_id is None or title is None:
+                continue
+            
+            video_id = video_id.text
+            title = title.text
+            cache_key = f"yt_{guild.id}_{channel_id}"
+            
+            # Vérifier si déjà posté
+            if cache_key in posted_content and posted_content[cache_key] == video_id:
+                continue
+            
+            # Nouveau post !
+            posted_content[cache_key] = video_id
+            
+            e = discord.Embed(title=title, url=f"https://www.youtube.com/watch?v={video_id}", color=0xFF0000)
+            e.set_author(name=f"🔴 {channel_name} a publié une vidéo!", icon_url="https://www.youtube.com/favicon.ico")
+            e.set_image(url=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg")
+            e.set_footer(text="YouTube", icon_url="https://www.youtube.com/favicon.ico")
+            e.timestamp = now()
+            
+            await channel.send(embed=e)
+            await asyncio.sleep(1)
+            
+        except Exception as ex:
+            print(f"Erreur YouTube feed {feed}: {ex}")
+            continue
+
+async def check_twitch_feeds(session, guild, data):
+    """Vérifie si des streamers sont en live sur Twitch"""
+    channel = guild.get_channel(data.get('ads_twitch_channel', 0))
+    feeds = data.get('ads_twitch_feeds', [])
+    if not channel or not feeds:
+        return
+    
+    # Note: Sans Client ID Twitch, on utilise une méthode alternative
+    for username in feeds:
+        try:
+            # Vérification via la page Twitch (méthode basique)
+            url = f"https://www.twitch.tv/{username}"
+            cache_key = f"tw_{guild.id}_{username}"
+            
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    continue
+                html = await resp.text()
+            
+            # Détecter si le streamer est en live (méthode basique)
+            is_live = '"isLiveBroadcast":true' in html or 'isLiveBroadcast' in html
+            
+            was_live = posted_content.get(cache_key, False)
+            
+            if is_live and not was_live:
+                # Vient de passer en live !
+                posted_content[cache_key] = True
+                
+                e = discord.Embed(
+                    title=f"🔴 {username} est en LIVE!",
+                    url=f"https://www.twitch.tv/{username}",
+                    color=0x9146FF
+                )
+                e.set_author(name="Twitch", icon_url="https://www.twitch.tv/favicon.ico")
+                e.set_thumbnail(url=f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{username}-320x180.jpg")
+                e.set_footer(text="Twitch", icon_url="https://www.twitch.tv/favicon.ico")
+                e.timestamp = now()
+                
+                await channel.send(f"🟣 **{username}** est en live!", embed=e)
+                
+            elif not is_live and was_live:
+                # N'est plus en live
+                posted_content[cache_key] = False
+            
+            await asyncio.sleep(1)
+            
+        except Exception as ex:
+            print(f"Erreur Twitch feed {username}: {ex}")
+            continue
+
+async def check_reddit_feeds(session, guild, data):
+    """Vérifie les nouveaux posts Reddit"""
+    channel = guild.get_channel(data.get('ads_reddit_channel', 0))
+    feeds = data.get('ads_reddit_feeds', [])
+    if not channel or not feeds:
+        return
+    
+    headers = {'User-Agent': 'Discord Bot 1.0'}
+    
+    for subreddit in feeds:
+        try:
+            rss_url = f"https://www.reddit.com/r/{subreddit}/new.rss?limit=1"
+            
+            async with session.get(rss_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status != 200:
+                    continue
+                xml_text = await resp.text()
+            
+            root = ET.fromstring(xml_text)
+            ns = {'atom': 'http://www.w3.org/2005/Atom'}
+            
+            entries = root.findall('atom:entry', ns)
+            if not entries:
+                continue
+            
+            entry = entries[0]
+            post_id = entry.find('atom:id', ns)
+            title = entry.find('atom:title', ns)
+            link = entry.find('atom:link', ns)
+            author = entry.find('atom:author/atom:name', ns)
+            
+            if post_id is None or title is None:
+                continue
+            
+            post_id = post_id.text
+            title = title.text
+            link = link.get('href') if link is not None else f"https://reddit.com/r/{subreddit}"
+            author = author.text if author is not None else "Unknown"
+            
+            cache_key = f"rd_{guild.id}_{subreddit}"
+            
+            if cache_key in posted_content and posted_content[cache_key] == post_id:
+                continue
+            
+            posted_content[cache_key] = post_id
+            
+            e = discord.Embed(title=title[:256], url=link, color=0xFF4500)
+            e.set_author(name=f"📰 Nouveau post sur r/{subreddit}", icon_url="https://www.reddit.com/favicon.ico")
+            e.add_field(name="Auteur", value=f"u/{author}", inline=True)
+            e.set_footer(text="Reddit", icon_url="https://www.reddit.com/favicon.ico")
+            e.timestamp = now()
+            
+            await channel.send(embed=e)
+            await asyncio.sleep(1)
+            
+        except Exception as ex:
+            print(f"Erreur Reddit feed {subreddit}: {ex}")
+            continue
+
+async def check_twitter_feeds(session, guild, data):
+    """Vérifie les nouveaux tweets via Nitter"""
+    channel = guild.get_channel(data.get('ads_twitter_channel', 0))
+    feeds = data.get('ads_twitter_feeds', [])
+    if not channel or not feeds:
+        return
+    
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    
+    for username in feeds:
+        try:
+            # Essayer plusieurs instances Nitter
+            xml_text = None
+            for instance in NITTER_INSTANCES:
+                try:
+                    rss_url = f"https://{instance}/{username}/rss"
+                    async with session.get(rss_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                        if resp.status == 200:
+                            xml_text = await resp.text()
+                            break
+                except:
+                    continue
+            
+            if not xml_text:
+                continue
+            
+            # Parser le RSS
+            root = ET.fromstring(xml_text)
+            
+            # Chercher les items (format RSS standard)
+            items = root.findall('.//item')
+            if not items:
+                continue
+            
+            item = items[0]  # Dernier tweet
+            title = item.find('title')
+            link = item.find('link')
+            guid = item.find('guid')
+            pub_date = item.find('pubDate')
+            
+            if title is None or guid is None:
+                continue
+            
+            tweet_id = guid.text if guid is not None else ""
+            tweet_text = title.text if title is not None else ""
+            tweet_link = link.text if link is not None else f"https://twitter.com/{username}"
+            
+            cache_key = f"tw_{guild.id}_{username}"
+            
+            if cache_key in posted_content and posted_content[cache_key] == tweet_id:
+                continue
+            
+            posted_content[cache_key] = tweet_id
+            
+            # Créer l'embed
+            e = discord.Embed(description=tweet_text[:2000], color=0x1DA1F2)
+            e.set_author(
+                name=f"@{username} a tweeté",
+                url=tweet_link,
+                icon_url="https://abs.twimg.com/icons/apple-touch-icon-192x192.png"
+            )
+            e.set_footer(text="Twitter/X", icon_url="https://abs.twimg.com/icons/apple-touch-icon-192x192.png")
+            e.timestamp = now()
+            
+            await channel.send(embed=e)
+            await asyncio.sleep(1)
+            
+        except Exception as ex:
+            print(f"Erreur Twitter feed {username}: {ex}")
+            continue
+
+@check_social_feeds.before_loop
+async def before_social_check():
+    await bot.wait_until_ready()
+
 # Mise à jour activité sur vocal
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -3267,5 +4008,5 @@ async def on_voice_state_update(member, before, after):
         await update_realsy_activity(member.guild.id, member.id)
 
 if __name__ == "__main__":
-    print("🚀 Bot v13 - Démarrage...")
+    print("🚀 Bot v14 - Démarrage...")
     bot.run(TOKEN)
