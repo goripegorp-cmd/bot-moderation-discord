@@ -1,6 +1,6 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-#                        🌟 BOT PREMIUM v10.7 🌟
-#                    Fix bouton Tickets + Try/Except partout
+#                        🌟 BOT PREMIUM v10.8 🌟
+#                    Fix complet Tickets - Select fonctionnels
 # ═══════════════════════════════════════════════════════════════════════════════
 
 try:
@@ -54,7 +54,7 @@ async def db_init():
         await db.execute('CREATE TABLE IF NOT EXISTS immune_users (guild_id INTEGER, user_id INTEGER, PRIMARY KEY(guild_id,user_id))')
         await db.execute('CREATE TABLE IF NOT EXISTS infractions (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, user_id INTEGER, mod_id INTEGER, type TEXT, reason TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)')
         await db.execute('CREATE TABLE IF NOT EXISTS tickets (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, channel_id INTEGER, user_id INTEGER, claimed_by INTEGER DEFAULT 0, status TEXT DEFAULT "open", created_at DATETIME DEFAULT CURRENT_TIMESTAMP)')
-        await db.execute('CREATE TABLE IF NOT EXISTS ticket_config (guild_id INTEGER PRIMARY KEY, panel_channel INTEGER DEFAULT 0, category INTEGER DEFAULT 0, staff_role INTEGER DEFAULT 0, log_channel INTEGER DEFAULT 0)')
+        await db.execute('CREATE TABLE IF NOT EXISTS ticket_config (guild_id INTEGER PRIMARY KEY, panel_channel INTEGER DEFAULT 0, category_id INTEGER DEFAULT 0, staff_role INTEGER DEFAULT 0, log_channel INTEGER DEFAULT 0)')
         await db.commit()
     print("✅ DB OK")
 
@@ -228,28 +228,36 @@ def check_channel_cfg(msg, conf):
     return False, None
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                           🎫 TICKETS DATABASE
+#                           🎫 TICKETS - SYSTÈME SIMPLIFIÉ
 # ═══════════════════════════════════════════════════════════════════════════════
 
-async def get_tcfg(gid):
+async def ticket_cfg_get(gid):
+    """Récupère la config ticket d'un serveur"""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute('SELECT panel_channel,category,staff_role,log_channel FROM ticket_config WHERE guild_id=?', (gid,)) as c:
-                r = await c.fetchone()
-                return {'panel':r[0],'cat':r[1],'staff':r[2],'log':r[3]} if r else {'panel':0,'cat':0,'staff':0,'log':0}
-    except:
-        return {'panel':0,'cat':0,'staff':0,'log':0}
-
-async def set_tcfg(gid, **kw):
-    try:
-        cur = await get_tcfg(gid)
-        cur.update(kw)
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute('INSERT INTO ticket_config (guild_id,panel_channel,category,staff_role,log_channel) VALUES (?,?,?,?,?) ON CONFLICT(guild_id) DO UPDATE SET panel_channel=?,category=?,staff_role=?,log_channel=?',
-                (gid, cur['panel'], cur['cat'], cur['staff'], cur['log'], cur['panel'], cur['cat'], cur['staff'], cur['log']))
+            await db.execute('INSERT OR IGNORE INTO ticket_config (guild_id) VALUES (?)', (gid,))
             await db.commit()
+            async with db.execute('SELECT panel_channel, category_id, staff_role, log_channel FROM ticket_config WHERE guild_id=?', (gid,)) as c:
+                r = await c.fetchone()
+                if r:
+                    return {'panel': r[0] or 0, 'category': r[1] or 0, 'staff': r[2] or 0, 'log': r[3] or 0}
+        return {'panel': 0, 'category': 0, 'staff': 0, 'log': 0}
     except Exception as e:
-        print(f"[SET_TCFG ERROR] {e}")
+        print(f"[TICKET_CFG_GET ERROR] {e}")
+        return {'panel': 0, 'category': 0, 'staff': 0, 'log': 0}
+
+async def ticket_cfg_set(gid, field, value):
+    """Met à jour un champ de la config ticket"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('INSERT OR IGNORE INTO ticket_config (guild_id) VALUES (?)', (gid,))
+            await db.execute(f'UPDATE ticket_config SET {field}=? WHERE guild_id=?', (value, gid))
+            await db.commit()
+        print(f"[TICKET_CFG_SET] {gid} {field}={value} ✅")
+        return True
+    except Exception as e:
+        print(f"[TICKET_CFG_SET ERROR] {e}")
+        return False
 
 async def get_ticket(ch_id):
     try:
@@ -262,7 +270,7 @@ async def get_ticket(ch_id):
 
 async def send_ticket_log(guild, info, ch, closer):
     try:
-        tc = await get_tcfg(guild.id)
+        tc = await ticket_cfg_get(guild.id)
         log_ch = guild.get_channel(tc['log'])
         if not log_ch: return
         
@@ -271,7 +279,6 @@ async def send_ticket_log(guild, info, ch, closer):
         e.add_field(name="Créateur", value=f"<@{info['user']}>", inline=True)
         e.add_field(name="Fermé par", value=closer.mention, inline=True)
         
-        # Transcript simple
         lines = []
         async for m in ch.history(limit=100, oldest_first=True):
             lines.append(f"[{m.created_at.strftime('%H:%M')}] {m.author.name}: {m.content or '[média]'}")
@@ -294,20 +301,18 @@ class TicketCreateView(View):
         try:
             await interaction.response.defer(ephemeral=True)
             
-            tc = await get_tcfg(interaction.guild.id)
-            cat = interaction.guild.get_channel(tc['cat'])
+            tc = await ticket_cfg_get(interaction.guild.id)
+            cat = interaction.guild.get_channel(tc['category'])
             staff = interaction.guild.get_role(tc['staff'])
             
             if not cat:
                 return await interaction.followup.send("❌ Système non configuré", ephemeral=True)
             
-            # Vérifier ticket existant
             async with aiosqlite.connect(DB_PATH) as db:
                 async with db.execute("SELECT id FROM tickets WHERE guild_id=? AND user_id=? AND status='open'", (interaction.guild.id, interaction.user.id)) as c:
                     if await c.fetchone():
                         return await interaction.followup.send("❌ Vous avez déjà un ticket ouvert", ephemeral=True)
             
-            # Créer le salon
             overwrites = {
                 interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
                 interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, read_message_history=True),
@@ -318,12 +323,10 @@ class TicketCreateView(View):
             
             channel = await interaction.guild.create_text_channel(f"ticket-{interaction.user.name}"[:50], category=cat, overwrites=overwrites)
             
-            # Sauvegarder
             async with aiosqlite.connect(DB_PATH) as db:
                 await db.execute('INSERT INTO tickets (guild_id,channel_id,user_id) VALUES (?,?,?)', (interaction.guild.id, channel.id, interaction.user.id))
                 await db.commit()
             
-            # Message
             embed = discord.Embed(title="🎫 Nouveau Ticket", color=C.BLURPLE, timestamp=now())
             embed.add_field(name="👤 Créé par", value=f"{interaction.user.mention}", inline=True)
             embed.set_thumbnail(url=interaction.user.display_avatar.url)
@@ -348,7 +351,7 @@ class TicketControlView(View):
     @discord.ui.button(label="🙋 Prendre en charge", style=discord.ButtonStyle.success, custom_id="ticket_btn_claim")
     async def claim_ticket(self, interaction: discord.Interaction, button: Button):
         try:
-            tc = await get_tcfg(interaction.guild.id)
+            tc = await ticket_cfg_get(interaction.guild.id)
             staff = interaction.guild.get_role(tc['staff'])
             
             if staff and staff not in interaction.user.roles and not interaction.user.guild_permissions.administrator:
@@ -419,7 +422,6 @@ class MainPanel(View):
             await interaction.response.edit_message(embed=await v.embed(), view=v)
         except Exception as ex:
             print(f"[PROT BTN ERROR] {ex}")
-            await interaction.response.send_message("❌ Erreur", ephemeral=True)
 
     @discord.ui.button(label="Logs", emoji="📜", style=discord.ButtonStyle.secondary, row=0)
     async def btn_logs(self, interaction: discord.Interaction, button: Button):
@@ -431,7 +433,6 @@ class MainPanel(View):
             await interaction.response.edit_message(embed=e, view=BackView(self.u, self.g))
         except Exception as ex:
             print(f"[LOGS BTN ERROR] {ex}")
-            await interaction.response.send_message("❌ Erreur", ephemeral=True)
 
     @discord.ui.button(label="Immunités", emoji="👑", style=discord.ButtonStyle.secondary, row=0)
     async def btn_immune(self, interaction: discord.Interaction, button: Button):
@@ -440,7 +441,6 @@ class MainPanel(View):
             await interaction.response.edit_message(embed=await v.embed(), view=v)
         except Exception as ex:
             print(f"[IMMUNE BTN ERROR] {ex}")
-            await interaction.response.send_message("❌ Erreur", ephemeral=True)
 
     @discord.ui.button(label="Config Salon", emoji="📺", style=discord.ButtonStyle.primary, row=1)
     async def btn_chan(self, interaction: discord.Interaction, button: Button):
@@ -449,12 +449,11 @@ class MainPanel(View):
             await interaction.response.edit_message(embed=await v.embed(), view=v)
         except Exception as ex:
             print(f"[CHAN BTN ERROR] {ex}")
-            await interaction.response.send_message("❌ Erreur", ephemeral=True)
 
     @discord.ui.button(label="Tickets", emoji="🎫", style=discord.ButtonStyle.success, row=1)
     async def btn_tickets(self, interaction: discord.Interaction, button: Button):
         try:
-            v = TicketPanel(self.u, self.g)
+            v = TicketConfigPanel(self.u, self.g)
             e = await v.embed()
             await interaction.response.edit_message(embed=e, view=v)
         except Exception as ex:
@@ -466,7 +465,7 @@ class MainPanel(View):
         try:
             await interaction.message.delete()
         except:
-            await interaction.response.send_message("❌", ephemeral=True)
+            pass
 
 class BackView(View):
     def __init__(self, u, g):
@@ -475,11 +474,8 @@ class BackView(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary)
     async def back(self, interaction: discord.Interaction, button: Button):
-        try:
-            v = MainPanel(self.u, self.g)
-            await interaction.response.edit_message(embed=v.embed(), view=v)
-        except Exception as ex:
-            print(f"[BACK BTN ERROR] {ex}")
+        v = MainPanel(self.u, self.g)
+        await interaction.response.edit_message(embed=v.embed(), view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🛡️ PROTECTION PANEL
@@ -499,20 +495,14 @@ class ProtPanel(View):
 
     @discord.ui.select(placeholder="Sélectionner...", options=[discord.SelectOption(label=nm, value=k, emoji=em) for k,em,nm in PROTS])
     async def sel(self, interaction: discord.Interaction, select: Select):
-        try:
-            prot = next(p for p in PROTS if p[0]==select.values[0])
-            v = ProtDetail(self.u, self.g, prot)
-            await interaction.response.edit_message(embed=await v.embed(), view=v)
-        except Exception as ex:
-            print(f"[PROT SELECT ERROR] {ex}")
+        prot = next(p for p in PROTS if p[0]==select.values[0])
+        v = ProtDetail(self.u, self.g, prot)
+        await interaction.response.edit_message(embed=await v.embed(), view=v)
 
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, interaction: discord.Interaction, button: Button):
-        try:
-            v = MainPanel(self.u, self.g)
-            await interaction.response.edit_message(embed=v.embed(), view=v)
-        except Exception as ex:
-            print(f"[PROT BACK ERROR] {ex}")
+        v = MainPanel(self.u, self.g)
+        await interaction.response.edit_message(embed=v.embed(), view=v)
 
 class ProtDetail(View):
     def __init__(self, u, g, prot):
@@ -541,33 +531,24 @@ class ProtDetail(View):
 
     @discord.ui.button(label="ON/OFF", emoji="🔄", style=discord.ButtonStyle.primary, row=0)
     async def toggle(self, interaction: discord.Interaction, button: Button):
-        try:
-            c = await cfg(self.g.id)
-            await db_set(self.g.id, self.key, 0 if c.get(self.key) else 1)
-            await interaction.response.edit_message(embed=await self.embed(), view=self)
-        except Exception as ex:
-            print(f"[TOGGLE ERROR] {ex}")
+        c = await cfg(self.g.id)
+        await db_set(self.g.id, self.key, 0 if c.get(self.key) else 1)
+        await interaction.response.edit_message(embed=await self.embed(), view=self)
 
     @discord.ui.button(label="Config", emoji="⚙️", style=discord.ButtonStyle.secondary, row=0)
     async def config(self, interaction: discord.Interaction, button: Button):
-        try:
-            if self.key == "anti_image":
-                v = ImageCfgPanel(self.u, self.g)
-                await interaction.response.edit_message(embed=await v.embed(), view=v)
-            elif self.key == "anti_badwords":
-                await interaction.response.send_modal(AddWordsModal(self.g))
-            else:
-                await interaction.response.send_message("⚙️ Pas de config", ephemeral=True)
-        except Exception as ex:
-            print(f"[CONFIG ERROR] {ex}")
+        if self.key == "anti_image":
+            v = ImageCfgPanel(self.u, self.g)
+            await interaction.response.edit_message(embed=await v.embed(), view=v)
+        elif self.key == "anti_badwords":
+            await interaction.response.send_modal(AddWordsModal(self.g))
+        else:
+            await interaction.response.send_message("⚙️ Pas de config", ephemeral=True)
 
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, interaction: discord.Interaction, button: Button):
-        try:
-            v = ProtPanel(self.u, self.g)
-            await interaction.response.edit_message(embed=await v.embed(), view=v)
-        except Exception as ex:
-            print(f"[DETAIL BACK ERROR] {ex}")
+        v = ProtPanel(self.u, self.g)
+        await interaction.response.edit_message(embed=await v.embed(), view=v)
 
 class AddWordsModal(Modal, title="➕ Ajouter des mots"):
     words = TextInput(label="Mot(s) séparés par virgules", placeholder="mot1, mot2", style=discord.TextStyle.paragraph)
@@ -596,29 +577,23 @@ class ImageCfgPanel(View):
 
     @discord.ui.button(label="➕ Format", style=discord.ButtonStyle.success, row=0)
     async def add_fmt(self, interaction: discord.Interaction, button: Button):
-        try:
-            c = await cfg(self.g.id)
-            items = c.get('image_allowed', [])
-            fmts = ['png','jpg','jpeg','gif','webp','tenor','giphy']
-            avail = [f for f in fmts if f not in items]
-            if not avail:
-                return await interaction.response.send_message("✅ Tous autorisés", ephemeral=True)
-            v = FormatSelectView(self.u, self.g, avail, 'add')
-            await interaction.response.edit_message(view=v)
-        except Exception as ex:
-            print(f"[ADD FMT ERROR] {ex}")
+        c = await cfg(self.g.id)
+        items = c.get('image_allowed', [])
+        fmts = ['png','jpg','jpeg','gif','webp','tenor','giphy']
+        avail = [f for f in fmts if f not in items]
+        if not avail:
+            return await interaction.response.send_message("✅ Tous autorisés", ephemeral=True)
+        v = FormatSelectView(self.u, self.g, avail, 'add')
+        await interaction.response.edit_message(view=v)
 
     @discord.ui.button(label="➖ Format", style=discord.ButtonStyle.danger, row=0)
     async def rem_fmt(self, interaction: discord.Interaction, button: Button):
-        try:
-            c = await cfg(self.g.id)
-            items = c.get('image_allowed', [])
-            if not items:
-                return await interaction.response.send_message("❌ Vide", ephemeral=True)
-            v = FormatSelectView(self.u, self.g, items, 'rem')
-            await interaction.response.edit_message(view=v)
-        except Exception as ex:
-            print(f"[REM FMT ERROR] {ex}")
+        c = await cfg(self.g.id)
+        items = c.get('image_allowed', [])
+        if not items:
+            return await interaction.response.send_message("❌ Vide", ephemeral=True)
+        v = FormatSelectView(self.u, self.g, items, 'rem')
+        await interaction.response.edit_message(view=v)
 
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, interaction: discord.Interaction, button: Button):
@@ -666,13 +641,10 @@ class ImmunePanel(View):
 
     @discord.ui.button(label="➕ Rôle", style=discord.ButtonStyle.success, row=0)
     async def add_role(self, interaction: discord.Interaction, button: Button):
-        try:
-            roles = [r for r in self.g.roles[1:] if not r.is_bot_managed()][:25]
-            opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
-            v = ImmuneRoleView(self.u, self.g, opts)
-            await interaction.response.edit_message(view=v)
-        except Exception as ex:
-            print(f"[ADD ROLE ERROR] {ex}")
+        roles = [r for r in self.g.roles[1:] if not r.is_bot_managed()][:25]
+        opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
+        v = ImmuneRoleView(self.u, self.g, opts)
+        await interaction.response.edit_message(view=v)
 
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, interaction: discord.Interaction, button: Button):
@@ -682,17 +654,17 @@ class ImmunePanel(View):
 class ImmuneRoleView(View):
     def __init__(self, u, g, opts):
         super().__init__(timeout=120)
-        self.u, self.g = u, g
-        self.add_item(ImmuneRoleSelect(opts))
+        self.add_item(ImmuneRoleSelect(u, g, opts))
 
 class ImmuneRoleSelect(Select):
-    def __init__(self, opts):
+    def __init__(self, u, g, opts):
         super().__init__(placeholder="Rôle...", options=opts)
+        self.u, self.g = u, g
     async def callback(self, i):
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('INSERT OR IGNORE INTO immune_roles VALUES (?,?)', (i.guild.id, int(self.values[0])))
             await db.commit()
-        v = ImmunePanel(i.user, i.guild)
+        v = ImmunePanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -724,13 +696,10 @@ class ChanPanel(View):
 
     @discord.ui.button(label="➕ Config", style=discord.ButtonStyle.success, row=0)
     async def add(self, interaction: discord.Interaction, button: Button):
-        try:
-            chs = list(self.g.text_channels)[:25]
-            opts = [discord.SelectOption(label=f"#{c.name}"[:25], value=str(c.id)) for c in chs]
-            v = ChanSelectView(self.u, self.g, opts)
-            await interaction.response.edit_message(view=v)
-        except Exception as ex:
-            print(f"[ADD CHAN ERROR] {ex}")
+        chs = list(self.g.text_channels)[:25]
+        opts = [discord.SelectOption(label=f"#{c.name}"[:25], value=str(c.id)) for c in chs]
+        v = ChanSelectView(self.u, self.g, opts)
+        await interaction.response.edit_message(view=v)
 
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, interaction: discord.Interaction, button: Button):
@@ -740,14 +709,14 @@ class ChanPanel(View):
 class ChanSelectView(View):
     def __init__(self, u, g, opts):
         super().__init__(timeout=120)
-        self.u, self.g = u, g
-        self.add_item(ChanSelect(opts))
+        self.add_item(ChanSelect(u, g, opts))
 
 class ChanSelect(Select):
-    def __init__(self, opts):
+    def __init__(self, u, g, opts):
         super().__init__(placeholder="Salon...", options=opts)
+        self.u, self.g = u, g
     async def callback(self, i):
-        v = EditChanCfg(i.user, i.guild, self.values[0])
+        v = EditChanCfg(self.u, self.g, self.values[0])
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 class EditChanCfg(View):
@@ -796,72 +765,67 @@ class EditChanCfg(View):
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                           🎫 TICKETS PANEL
+#                    🎫 TICKET CONFIG PANEL - NOUVEAU
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class TicketPanel(View):
+class TicketConfigPanel(View):
     def __init__(self, u, g):
         super().__init__(timeout=600)
         self.u, self.g = u, g
 
     async def embed(self):
-        try:
-            tc = await get_tcfg(self.g.id)
-            e = discord.Embed(title="🎫 Tickets", color=C.PURPLE)
-            e.add_field(name="📍 Salon", value=f"<#{tc['panel']}>" if tc['panel'] else "❌", inline=True)
-            cat = self.g.get_channel(tc['cat'])
-            e.add_field(name="📁 Catégorie", value=cat.name if cat else "❌", inline=True)
-            e.add_field(name="👮 Staff", value=f"<@&{tc['staff']}>" if tc['staff'] else "❌", inline=True)
-            e.add_field(name="📜 Logs", value=f"<#{tc['log']}>" if tc['log'] else "❌", inline=True)
-            return e
-        except Exception as ex:
-            print(f"[TICKET EMBED ERROR] {ex}\n{traceback.format_exc()}")
-            e = discord.Embed(title="🎫 Tickets", description="Erreur chargement", color=C.RED)
-            return e
+        tc = await ticket_cfg_get(self.g.id)
+        e = discord.Embed(title="🎫 Configuration Tickets", color=C.PURPLE)
+        
+        # Salon panel
+        panel_ch = self.g.get_channel(tc['panel'])
+        e.add_field(name="📍 Salon Panel", value=panel_ch.mention if panel_ch else "❌ Non configuré", inline=True)
+        
+        # Catégorie
+        cat = self.g.get_channel(tc['category'])
+        e.add_field(name="📁 Catégorie", value=cat.name if cat else "❌ Non configuré", inline=True)
+        
+        # Staff
+        staff = self.g.get_role(tc['staff'])
+        e.add_field(name="👮 Rôle Staff", value=staff.mention if staff else "❌ Non configuré", inline=True)
+        
+        # Logs
+        log_ch = self.g.get_channel(tc['log'])
+        e.add_field(name="📜 Logs", value=log_ch.mention if log_ch else "❌ Non configuré", inline=True)
+        
+        return e
 
     @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
     async def set_panel(self, interaction: discord.Interaction, button: Button):
-        try:
-            chs = list(self.g.text_channels)[:25]
-            opts = [discord.SelectOption(label=f"#{c.name}"[:25], value=str(c.id)) for c in chs]
-            v = TkChanView(self.u, self.g, opts, 'panel')
-            await interaction.response.edit_message(view=v)
-        except Exception as ex:
-            print(f"[SET PANEL ERROR] {ex}")
-            await interaction.response.send_message("❌", ephemeral=True)
+        chs = list(self.g.text_channels)[:25]
+        opts = [discord.SelectOption(label=f"#{c.name}"[:25], value=str(c.id)) for c in chs]
+        v = TicketSelectView(self.u, self.g, opts, 'panel_channel')
+        await interaction.response.edit_message(embed=discord.Embed(title="📍 Choisir le salon", color=C.PURPLE), view=v)
 
     @discord.ui.button(label="📁 Catégorie", style=discord.ButtonStyle.primary, row=0)
     async def set_cat(self, interaction: discord.Interaction, button: Button):
-        try:
-            cats = list(self.g.categories)[:25]
-            opts = [discord.SelectOption(label=f"📁 {c.name}"[:25], value=str(c.id)) for c in cats]
-            v = TkCatView(self.u, self.g, opts)
-            await interaction.response.edit_message(view=v)
-        except Exception as ex:
-            print(f"[SET CAT ERROR] {ex}")
-            await interaction.response.send_message("❌", ephemeral=True)
+        cats = list(self.g.categories)[:25]
+        if not cats:
+            return await interaction.response.send_message("❌ Aucune catégorie", ephemeral=True)
+        opts = [discord.SelectOption(label=f"📁 {c.name}"[:25], value=str(c.id)) for c in cats]
+        v = TicketSelectView(self.u, self.g, opts, 'category_id')
+        await interaction.response.edit_message(embed=discord.Embed(title="📁 Choisir la catégorie", color=C.PURPLE), view=v)
 
     @discord.ui.button(label="👮 Staff", style=discord.ButtonStyle.primary, row=0)
     async def set_staff(self, interaction: discord.Interaction, button: Button):
-        try:
-            roles = [r for r in self.g.roles[1:] if not r.is_bot_managed()][:25]
-            opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
-            v = TkRoleView(self.u, self.g, opts)
-            await interaction.response.edit_message(view=v)
-        except Exception as ex:
-            print(f"[SET STAFF ERROR] {ex}")
-            await interaction.response.send_message("❌", ephemeral=True)
+        roles = [r for r in self.g.roles[1:] if not r.is_bot_managed()][:25]
+        if not roles:
+            return await interaction.response.send_message("❌ Aucun rôle", ephemeral=True)
+        opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
+        v = TicketSelectView(self.u, self.g, opts, 'staff_role')
+        await interaction.response.edit_message(embed=discord.Embed(title="👮 Choisir le rôle staff", color=C.PURPLE), view=v)
 
     @discord.ui.button(label="📜 Logs", style=discord.ButtonStyle.secondary, row=1)
     async def set_log(self, interaction: discord.Interaction, button: Button):
-        try:
-            chs = list(self.g.text_channels)[:25]
-            opts = [discord.SelectOption(label=f"#{c.name}"[:25], value=str(c.id)) for c in chs]
-            v = TkChanView(self.u, self.g, opts, 'log')
-            await interaction.response.edit_message(view=v)
-        except Exception as ex:
-            print(f"[SET LOG ERROR] {ex}")
-            await interaction.response.send_message("❌", ephemeral=True)
+        chs = list(self.g.text_channels)[:25]
+        opts = [discord.SelectOption(label=f"#{c.name}"[:25], value=str(c.id)) for c in chs]
+        v = TicketSelectView(self.u, self.g, opts, 'log_channel')
+        await interaction.response.edit_message(embed=discord.Embed(title="📜 Choisir le salon logs", color=C.PURPLE), view=v)
 
     @discord.ui.button(label="🔧 Créer auto", style=discord.ButtonStyle.secondary, row=1)
     async def auto_create(self, interaction: discord.Interaction, button: Button):
@@ -869,78 +833,80 @@ class TicketPanel(View):
             cat = await self.g.create_category("🎫 Tickets")
             panel_ch = await self.g.create_text_channel("📩-tickets", category=cat)
             log_ch = await self.g.create_text_channel("📜-logs", category=cat)
-            await set_tcfg(self.g.id, panel=panel_ch.id, cat=cat.id, log=log_ch.id)
-            await interaction.response.send_message(f"✅ Créé: {panel_ch.mention}", ephemeral=True)
+            
+            await ticket_cfg_set(self.g.id, 'panel_channel', panel_ch.id)
+            await ticket_cfg_set(self.g.id, 'category_id', cat.id)
+            await ticket_cfg_set(self.g.id, 'log_channel', log_ch.id)
+            
+            await interaction.response.send_message(f"✅ Créé!\n📁 {cat.name}\n📍 {panel_ch.mention}\n📜 {log_ch.mention}\n\n⚠️ N'oublie pas de configurer le **rôle Staff** !", ephemeral=True)
         except Exception as ex:
-            await interaction.response.send_message(f"❌ {ex}", ephemeral=True)
+            await interaction.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
 
     @discord.ui.button(label="📤 Envoyer Panel", style=discord.ButtonStyle.success, row=1)
     async def send_panel(self, interaction: discord.Interaction, button: Button):
-        try:
-            tc = await get_tcfg(self.g.id)
-            if not all([tc['panel'], tc['cat'], tc['staff']]):
-                return await interaction.response.send_message("❌ Configurez tout d'abord!", ephemeral=True)
-            
-            ch = self.g.get_channel(tc['panel'])
-            if not ch:
-                return await interaction.response.send_message("❌ Salon introuvable", ephemeral=True)
-            
-            embed = discord.Embed(title="🎫 Support", description="Cliquez pour créer un ticket", color=C.BLURPLE)
-            await ch.send(embed=embed, view=TicketCreateView())
-            await interaction.response.send_message(f"✅ Panel envoyé!", ephemeral=True)
-        except Exception as ex:
-            await interaction.response.send_message(f"❌ {ex}", ephemeral=True)
+        tc = await ticket_cfg_get(self.g.id)
+        
+        if not tc['panel']:
+            return await interaction.response.send_message("❌ Configure le **Salon** d'abord!", ephemeral=True)
+        if not tc['category']:
+            return await interaction.response.send_message("❌ Configure la **Catégorie** d'abord!", ephemeral=True)
+        if not tc['staff']:
+            return await interaction.response.send_message("❌ Configure le **Staff** d'abord!", ephemeral=True)
+        
+        ch = self.g.get_channel(tc['panel'])
+        if not ch:
+            return await interaction.response.send_message("❌ Salon introuvable", ephemeral=True)
+        
+        embed = discord.Embed(
+            title="🎫 Support - Créer un ticket",
+            description="Cliquez sur le bouton ci-dessous pour créer un ticket.\nUn membre du staff vous répondra rapidement.",
+            color=C.BLURPLE
+        )
+        await ch.send(embed=embed, view=TicketCreateView())
+        await interaction.response.send_message(f"✅ Panel envoyé dans {ch.mention}!", ephemeral=True)
+
+    @discord.ui.button(label="🔄 Rafraîchir", style=discord.ButtonStyle.secondary, row=2)
+    async def refresh(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.edit_message(embed=await self.embed(), view=self)
 
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, interaction: discord.Interaction, button: Button):
+        v = MainPanel(self.u, self.g)
+        await interaction.response.edit_message(embed=v.embed(), view=v)
+
+
+class TicketSelectView(View):
+    """Vue avec un Select pour configurer les tickets"""
+    def __init__(self, u, g, opts, field):
+        super().__init__(timeout=120)
+        self.u, self.g, self.field = u, g, field
+        self.add_item(TicketConfigSelect(u, g, opts, field))
+
+
+class TicketConfigSelect(Select):
+    """Select pour configurer un champ du ticket"""
+    def __init__(self, u, g, opts, field):
+        super().__init__(placeholder="Sélectionner...", options=opts, min_values=1, max_values=1)
+        self.u, self.g, self.field = u, g, field
+    
+    async def callback(self, interaction: discord.Interaction):
         try:
-            v = MainPanel(self.u, self.g)
-            await interaction.response.edit_message(embed=v.embed(), view=v)
+            value = int(self.values[0])
+            print(f"[TICKET SELECT] {self.field} = {value}")
+            
+            # Sauvegarder
+            success = await ticket_cfg_set(interaction.guild.id, self.field, value)
+            
+            if success:
+                # Retourner au panel
+                v = TicketConfigPanel(self.u, self.g)
+                await interaction.response.edit_message(embed=await v.embed(), view=v)
+            else:
+                await interaction.response.send_message("❌ Erreur de sauvegarde", ephemeral=True)
+                
         except Exception as ex:
-            print(f"[TICKET BACK ERROR] {ex}")
-
-class TkChanView(View):
-    def __init__(self, u, g, opts, key):
-        super().__init__(timeout=120)
-        self.u, self.g, self.key = u, g, key
-        self.add_item(TkChanSelect(opts, key))
-
-class TkChanSelect(Select):
-    def __init__(self, opts, key):
-        super().__init__(placeholder="Salon...", options=opts)
-        self.key = key
-    async def callback(self, i):
-        await set_tcfg(i.guild.id, **{self.key: int(self.values[0])})
-        v = TicketPanel(i.user, i.guild)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-
-class TkCatView(View):
-    def __init__(self, u, g, opts):
-        super().__init__(timeout=120)
-        self.u, self.g = u, g
-        self.add_item(TkCatSelect(opts))
-
-class TkCatSelect(Select):
-    def __init__(self, opts):
-        super().__init__(placeholder="Catégorie...", options=opts)
-    async def callback(self, i):
-        await set_tcfg(i.guild.id, cat=int(self.values[0]))
-        v = TicketPanel(i.user, i.guild)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-
-class TkRoleView(View):
-    def __init__(self, u, g, opts):
-        super().__init__(timeout=120)
-        self.u, self.g = u, g
-        self.add_item(TkRoleSelect(opts))
-
-class TkRoleSelect(Select):
-    def __init__(self, opts):
-        super().__init__(placeholder="Rôle...", options=opts)
-    async def callback(self, i):
-        await set_tcfg(i.guild.id, staff=int(self.values[0]))
-        v = TicketPanel(i.user, i.guild)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+            print(f"[TICKET SELECT ERROR] {ex}\n{traceback.format_exc()}")
+            await interaction.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              🎯 EVENTS
@@ -952,7 +918,7 @@ async def on_ready():
     bot.add_view(TicketCreateView())
     bot.add_view(TicketControlView())
     await bot.tree.sync()
-    print(f"✅ {bot.user.name} v10.7 prêt!")
+    print(f"✅ {bot.user.name} v10.8 prêt!")
 
 @bot.event
 async def on_message(msg):
@@ -1067,5 +1033,5 @@ async def warn_cmd(interaction: discord.Interaction, membre: discord.Member, rai
     await interaction.response.send_message(f"⚠️ {membre.mention}: {raison}")
 
 if __name__ == "__main__":
-    print("🚀 v10.7")
+    print("🚀 v10.8")
     bot.run(TOKEN)
