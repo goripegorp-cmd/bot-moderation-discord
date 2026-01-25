@@ -1,6 +1,6 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-#                        🌟 BOT PREMIUM v11.0 🌟
-#          Système Tickets Avancé : Questionnaire + Permissions + Logs
+#                        🌟 BOT PREMIUM v11.1 🌟
+#       Tickets: Vérification channel, limite configurable, boutons fix
 # ═══════════════════════════════════════════════════════════════════════════════
 
 try:
@@ -96,7 +96,8 @@ async def cfg(gid):
         'log_anti_link':0,'log_anti_image':0,'log_anti_phishing':0,'log_anti_scam':0,'log_anti_spam':0,'log_anti_caps':0,'log_anti_badwords':0,'log_anti_invite':0,'log_anti_newaccount':0,
         'channel_configs':{},
         'ticket_panel':0,'ticket_category':0,'ticket_staff':0,'ticket_log':0,
-        'ticket_questions':[]  # Liste de {"title": "...", "question": "..."}
+        'ticket_questions':[],
+        'ticket_max':1  # Limite de tickets par utilisateur
     }
     for k,v in defaults.items():
         if k not in data: data[k]=v
@@ -260,6 +261,38 @@ async def get_ticket(ch_id):
     except:
         return None
 
+async def count_user_open_tickets(guild, user_id):
+    """Compte les tickets VRAIMENT ouverts (channel existe encore)"""
+    count = 0
+    tickets_to_close = []
+    
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("SELECT id, channel_id FROM tickets WHERE guild_id=? AND user_id=? AND status='open'", (guild.id, user_id)) as c:
+                tickets = await c.fetchall()
+        
+        for ticket_id, channel_id in tickets:
+            channel = guild.get_channel(channel_id)
+            if channel:
+                # Le channel existe encore
+                count += 1
+            else:
+                # Le channel a été supprimé manuellement
+                tickets_to_close.append(ticket_id)
+        
+        # Fermer les tickets dont le channel n'existe plus
+        if tickets_to_close:
+            async with aiosqlite.connect(DB_PATH) as db:
+                for tid in tickets_to_close:
+                    await db.execute("UPDATE tickets SET status='closed' WHERE id=?", (tid,))
+                await db.commit()
+            print(f"[TICKETS] Auto-fermé {len(tickets_to_close)} ticket(s) orphelin(s)")
+        
+        return count
+    except Exception as e:
+        print(f"[COUNT TICKETS ERROR] {e}")
+        return 0
+
 async def send_ticket_log(guild, log_type, user, ticket_info, extra_info=None, closer=None, channel=None):
     """Envoie un log de ticket"""
     try:
@@ -281,7 +314,6 @@ async def send_ticket_log(guild, log_type, user, ticket_info, extra_info=None, c
         elif log_type == 'add_staff' and extra_info:
             e.add_field(name="➕ Staff ajouté", value=f"<@{extra_info}>", inline=True)
         
-        # Réponses au questionnaire
         if ticket_info.get('answers') and log_type in ['create', 'close']:
             answers_text = ""
             for q, a in ticket_info['answers'].items():
@@ -289,7 +321,6 @@ async def send_ticket_log(guild, log_type, user, ticket_info, extra_info=None, c
             if answers_text:
                 e.add_field(name="📝 Réponses", value=answers_text[:1024], inline=False)
         
-        # Transcript pour fermeture
         if log_type == 'close' and channel:
             lines = []
             try:
@@ -315,9 +346,7 @@ class TicketQuestionnaireModal(Modal):
         super().__init__(title="📝 Créer un ticket")
         self.guild_id = guild_id
         self.questions = questions
-        self.answers = {}
         
-        # Ajouter les champs (max 5 pour Discord)
         for i, q in enumerate(questions[:5]):
             field = TextInput(
                 label=q.get('title', f'Question {i+1}')[:45],
@@ -330,7 +359,6 @@ class TicketQuestionnaireModal(Modal):
     
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            # Récupérer les réponses
             answers = {}
             for i, child in enumerate(self.children):
                 if i < len(self.questions):
@@ -338,30 +366,26 @@ class TicketQuestionnaireModal(Modal):
             
             await interaction.response.defer(ephemeral=True)
             
-            # Créer le ticket
             c = await cfg(interaction.guild.id)
             cat = interaction.guild.get_channel(c.get('ticket_category', 0))
             staff = interaction.guild.get_role(c.get('ticket_staff', 0))
+            max_tickets = c.get('ticket_max', 1)
             
             if not cat:
                 return await interaction.followup.send("❌ Système non configuré", ephemeral=True)
             
-            # Vérifier ticket existant
-            async with aiosqlite.connect(DB_PATH) as db:
-                async with db.execute("SELECT id FROM tickets WHERE guild_id=? AND user_id=? AND status='open'", (interaction.guild.id, interaction.user.id)) as cursor:
-                    if await cursor.fetchone():
-                        return await interaction.followup.send("❌ Vous avez déjà un ticket ouvert", ephemeral=True)
+            # Vérifier nombre de tickets (avec vérification channel existe)
+            open_count = await count_user_open_tickets(interaction.guild, interaction.user.id)
+            if open_count >= max_tickets:
+                return await interaction.followup.send(f"❌ Vous avez déjà **{open_count}** ticket(s) ouvert(s) (max: {max_tickets})", ephemeral=True)
             
-            # Permissions initiales (avant claim)
             overwrites = {
                 interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
                 interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, read_message_history=True),
                 interaction.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True, manage_permissions=True)
             }
-            # Staff peut voir avant claim
             if staff:
                 overwrites[staff] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-            # Owner peut toujours voir
             if interaction.guild.owner:
                 overwrites[interaction.guild.owner] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
             
@@ -371,24 +395,19 @@ class TicketQuestionnaireModal(Modal):
                 overwrites=overwrites
             )
             
-            # Sauvegarder avec réponses
             async with aiosqlite.connect(DB_PATH) as db:
                 await db.execute('INSERT INTO tickets (guild_id,channel_id,user_id,answers) VALUES (?,?,?,?)', 
                     (interaction.guild.id, channel.id, interaction.user.id, json.dumps(answers, ensure_ascii=False)))
                 await db.commit()
-                
-                # Récupérer l'ID
-                async with db.execute('SELECT id FROM tickets WHERE channel_id=?', (channel.id,)) as c:
-                    ticket_row = await c.fetchone()
+                async with db.execute('SELECT id FROM tickets WHERE channel_id=?', (channel.id,)) as cur:
+                    ticket_row = await cur.fetchone()
                     ticket_id = ticket_row[0] if ticket_row else 0
             
-            # Embed avec réponses
             embed = discord.Embed(title="🎫 Nouveau Ticket", color=C.BLURPLE, timestamp=now())
             embed.add_field(name="👤 Créé par", value=f"{interaction.user.mention}\n`{interaction.user.id}`", inline=True)
             embed.add_field(name="🎫 ID", value=f"#{ticket_id}", inline=True)
             embed.set_thumbnail(url=interaction.user.display_avatar.url)
             
-            # Ajouter les réponses
             for title, answer in answers.items():
                 embed.add_field(name=f"📝 {title}", value=answer[:1024], inline=False)
             
@@ -400,7 +419,6 @@ class TicketQuestionnaireModal(Modal):
             await channel.send(content=mention, embed=embed, view=TicketControlView())
             await interaction.followup.send(f"✅ Ticket créé: {channel.mention}", ephemeral=True)
             
-            # Log création
             await send_ticket_log(interaction.guild, 'create', interaction.user, {'id': ticket_id, 'answers': answers})
             
         except Exception as ex:
@@ -419,13 +437,20 @@ class TicketCreateView(View):
         try:
             c = await cfg(interaction.guild.id)
             questions = c.get('ticket_questions', [])
+            max_tickets = c.get('ticket_max', 1)
             
-            # Si questionnaire configuré
+            # Vérifier nombre de tickets AVANT d'ouvrir le modal
+            open_count = await count_user_open_tickets(interaction.guild, interaction.user.id)
+            if open_count >= max_tickets:
+                return await interaction.response.send_message(
+                    f"❌ Vous avez déjà **{open_count}** ticket(s) ouvert(s) (max: {max_tickets})", 
+                    ephemeral=True
+                )
+            
             if questions:
                 modal = TicketQuestionnaireModal(interaction.guild.id, questions)
                 await interaction.response.send_modal(modal)
             else:
-                # Création directe sans questionnaire
                 await interaction.response.defer(ephemeral=True)
                 
                 cat = interaction.guild.get_channel(c.get('ticket_category', 0))
@@ -433,11 +458,6 @@ class TicketCreateView(View):
                 
                 if not cat:
                     return await interaction.followup.send("❌ Système non configuré", ephemeral=True)
-                
-                async with aiosqlite.connect(DB_PATH) as db:
-                    async with db.execute("SELECT id FROM tickets WHERE guild_id=? AND user_id=? AND status='open'", (interaction.guild.id, interaction.user.id)) as cursor:
-                        if await cursor.fetchone():
-                            return await interaction.followup.send("❌ Vous avez déjà un ticket ouvert", ephemeral=True)
                 
                 overwrites = {
                     interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -493,11 +513,9 @@ class TicketControlView(View):
             c = await cfg(interaction.guild.id)
             staff_role = interaction.guild.get_role(c.get('ticket_staff', 0))
             
-            # L'utilisateur ne peut pas claim son propre ticket
             if interaction.user.id == ticket['user']:
                 return await interaction.response.send_message("❌ Vous ne pouvez pas prendre votre propre ticket", ephemeral=True)
             
-            # Seul staff ou owner peut claim
             is_staff = staff_role and staff_role in interaction.user.roles
             is_owner = interaction.user.id == interaction.guild.owner_id
             is_admin = interaction.user.guild_permissions.administrator
@@ -505,39 +523,34 @@ class TicketControlView(View):
             if not (is_staff or is_owner or is_admin):
                 return await interaction.response.send_message("❌ Réservé au staff", ephemeral=True)
             
-            # Mettre à jour les permissions - Seuls user, staff qui claim, owner voient
             ticket_user = interaction.guild.get_member(ticket['user'])
             
             overwrites = {
                 interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
                 interaction.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True, manage_permissions=True),
-                interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)  # Staff qui claim
+                interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
             }
             if ticket_user:
                 overwrites[ticket_user] = discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, read_message_history=True)
             if interaction.guild.owner and interaction.guild.owner != interaction.user:
                 overwrites[interaction.guild.owner] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
             
-            # Retirer le rôle staff des permissions (ils ne voient plus)
             if staff_role:
                 overwrites[staff_role] = discord.PermissionOverwrite(view_channel=False)
             
             await interaction.channel.edit(overwrites=overwrites)
             
-            # Mettre à jour DB
             async with aiosqlite.connect(DB_PATH) as db:
                 await db.execute('UPDATE tickets SET claimed_by=? WHERE channel_id=?', (interaction.user.id, interaction.channel.id))
                 await db.commit()
             
             await interaction.response.send_message(f"✅ **{interaction.user.display_name}** prend ce ticket en charge\n\n*Les autres staffs ne peuvent plus voir ce ticket.*")
             
-            # Désactiver le bouton claim
             button.disabled = True
             button.label = f"Pris par {interaction.user.display_name}"
             button.style = discord.ButtonStyle.secondary
             await interaction.message.edit(view=self)
             
-            # Log
             ticket['claimed'] = interaction.user.id
             await send_ticket_log(interaction.guild, 'claim', ticket_user or ticket['user'], ticket, extra_info=interaction.user.id)
             
@@ -552,7 +565,6 @@ class TicketControlView(View):
             if not ticket:
                 return await interaction.response.send_message("❌ Ticket non trouvé", ephemeral=True)
             
-            # Seul le staff qui a claim ou owner peut ajouter
             is_owner = interaction.user.id == interaction.guild.owner_id
             is_claimer = interaction.user.id == ticket['claimed']
             
@@ -562,14 +574,12 @@ class TicketControlView(View):
             if not (is_claimer or is_owner):
                 return await interaction.response.send_message("❌ Seul le staff en charge ou le fondateur peut ajouter quelqu'un", ephemeral=True)
             
-            # Afficher select pour choisir un staff
             c = await cfg(interaction.guild.id)
             staff_role = interaction.guild.get_role(c.get('ticket_staff', 0))
             
             if not staff_role:
                 return await interaction.response.send_message("❌ Aucun rôle staff configuré", ephemeral=True)
             
-            # Liste des staffs (sauf celui qui a déjà claim)
             staffs = [m for m in staff_role.members if m.id != ticket['claimed'] and m.id != ticket['user']][:25]
             
             if not staffs:
@@ -590,26 +600,26 @@ class TicketControlView(View):
             if not ticket:
                 return await interaction.response.send_message("❌ Ticket non trouvé", ephemeral=True)
             
-            # Seul le staff qui a claim ou owner peut fermer
             is_owner = interaction.user.id == interaction.guild.owner_id
+            is_admin = interaction.user.guild_permissions.administrator
             is_claimer = interaction.user.id == ticket['claimed']
             
-            # Si pas encore claim, staff ou owner peut fermer
-            if ticket['claimed']:
-                if not (is_claimer or is_owner):
-                    return await interaction.response.send_message("❌ Seul le staff en charge ou le fondateur peut fermer ce ticket", ephemeral=True)
-            else:
-                c = await cfg(interaction.guild.id)
-                staff_role = interaction.guild.get_role(c.get('ticket_staff', 0))
-                is_staff = staff_role and staff_role in interaction.user.roles
-                if not (is_staff or is_owner):
-                    return await interaction.response.send_message("❌ Seul le staff ou le fondateur peut fermer", ephemeral=True)
+            c = await cfg(interaction.guild.id)
+            staff_role = interaction.guild.get_role(c.get('ticket_staff', 0))
+            is_staff = staff_role and staff_role in interaction.user.roles
             
-            # Log avant suppression
+            # Si claim: seul claimer ou owner/admin peut fermer
+            # Si pas claim: staff, owner ou admin peut fermer
+            if ticket['claimed']:
+                if not (is_claimer or is_owner or is_admin):
+                    return await interaction.response.send_message("❌ Seul le staff en charge ou un admin peut fermer ce ticket", ephemeral=True)
+            else:
+                if not (is_staff or is_owner or is_admin):
+                    return await interaction.response.send_message("❌ Seul le staff ou un admin peut fermer", ephemeral=True)
+            
             ticket_user = interaction.guild.get_member(ticket['user'])
             await send_ticket_log(interaction.guild, 'close', ticket_user or ticket['user'], ticket, closer=interaction.user, channel=interaction.channel)
             
-            # Fermer
             async with aiosqlite.connect(DB_PATH) as db:
                 await db.execute("UPDATE tickets SET status='closed' WHERE channel_id=?", (interaction.channel.id,))
                 await db.commit()
@@ -646,13 +656,11 @@ class AddStaffSelect(Select):
             if not staff or not channel:
                 return await interaction.response.send_message("❌ Erreur", ephemeral=True)
             
-            # Ajouter les permissions
             await channel.set_permissions(staff, view_channel=True, send_messages=True, read_message_history=True)
             
             await interaction.response.send_message(f"✅ {staff.mention} a été ajouté au ticket!", ephemeral=True)
             await channel.send(f"➕ **{staff.display_name}** a été ajouté au ticket par {interaction.user.mention}")
             
-            # Log
             ticket = await get_ticket(self.channel_id)
             if ticket:
                 await send_ticket_log(interaction.guild, 'add_staff', ticket['user'], ticket, extra_info=staff_id)
@@ -1033,13 +1041,17 @@ class TicketConfigPanel(View):
         log_ch = self.g.get_channel(c.get('ticket_log', 0))
         e.add_field(name="📜 Logs", value=log_ch.mention if log_ch else "❌", inline=True)
         
+        # Limite
+        max_tickets = c.get('ticket_max', 1)
+        e.add_field(name="🔢 Max tickets", value=f"**{max_tickets}** par utilisateur", inline=True)
+        
         # Questions
         questions = c.get('ticket_questions', [])
         if questions:
-            q_text = "\n".join([f"• **{q['title']}**: {q['question'][:50]}..." for q in questions[:5]])
+            q_text = "\n".join([f"• **{q['title']}**" for q in questions[:5]])
             e.add_field(name=f"📝 Questions ({len(questions)})", value=q_text, inline=False)
         else:
-            e.add_field(name="📝 Questions", value="*Aucune (création directe)*", inline=False)
+            e.add_field(name="📝 Questions", value="*Aucune*", inline=False)
         
         return e
 
@@ -1075,12 +1087,16 @@ class TicketConfigPanel(View):
         v = TicketSelectView(self.u, self.g, opts, 'ticket_log')
         await interaction.response.edit_message(embed=discord.Embed(title="📜 Choisir le salon logs", color=C.PURPLE), view=v)
 
+    @discord.ui.button(label="🔢 Max tickets", style=discord.ButtonStyle.secondary, row=1)
+    async def set_max(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(SetMaxTicketsModal(self.g, self.u))
+
     @discord.ui.button(label="📝 Questions", style=discord.ButtonStyle.secondary, row=1)
     async def set_questions(self, interaction: discord.Interaction, button: Button):
         v = QuestionConfigPanel(self.u, self.g)
         await interaction.response.edit_message(embed=await v.embed(), view=v)
 
-    @discord.ui.button(label="📤 Envoyer Panel", style=discord.ButtonStyle.success, row=1)
+    @discord.ui.button(label="📤 Envoyer Panel", style=discord.ButtonStyle.success, row=2)
     async def send_panel(self, interaction: discord.Interaction, button: Button):
         c = await cfg(self.g.id)
         
@@ -1096,9 +1112,11 @@ class TicketConfigPanel(View):
             return await interaction.response.send_message("❌ Salon introuvable", ephemeral=True)
         
         questions = c.get('ticket_questions', [])
+        max_tickets = c.get('ticket_max', 1)
         desc = "Cliquez sur le bouton ci-dessous pour créer un ticket."
         if questions:
             desc += f"\n\n📝 Vous devrez répondre à **{len(questions)}** question(s)."
+        desc += f"\n🔢 Maximum **{max_tickets}** ticket(s) simultané(s)."
         
         embed = discord.Embed(
             title="🎫 Support - Créer un ticket",
@@ -1116,6 +1134,25 @@ class TicketConfigPanel(View):
     async def back(self, interaction: discord.Interaction, button: Button):
         v = MainPanel(self.u, self.g)
         await interaction.response.edit_message(embed=v.embed(), view=v)
+
+
+class SetMaxTicketsModal(Modal, title="🔢 Limite de tickets"):
+    max_value = TextInput(label="Nombre maximum de tickets par utilisateur", placeholder="Ex: 2", default="1", max_length=2)
+    
+    def __init__(self, g, u):
+        super().__init__()
+        self.g, self.u = g, u
+    
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            val = int(self.max_value.value)
+            if val < 1: val = 1
+            if val > 10: val = 10
+            await db_set(self.g.id, 'ticket_max', val)
+            v = TicketConfigPanel(self.u, self.g)
+            await interaction.response.edit_message(embed=await v.embed(), view=v)
+        except:
+            await interaction.response.send_message("❌ Entrez un nombre valide (1-10)", ephemeral=True)
 
 
 class QuestionConfigPanel(View):
@@ -1143,7 +1180,7 @@ class QuestionConfigPanel(View):
         questions = c.get('ticket_questions', [])
         
         if len(questions) >= 5:
-            return await interaction.response.send_message("❌ Maximum 5 questions (limite Discord)", ephemeral=True)
+            return await interaction.response.send_message("❌ Maximum 5 questions", ephemeral=True)
         
         await interaction.response.send_modal(AddQuestionModal(self.g, self.u))
 
@@ -1159,8 +1196,8 @@ class QuestionConfigPanel(View):
 
 
 class AddQuestionModal(Modal, title="➕ Ajouter une question"):
-    q_title = TextInput(label="Titre (affiché comme label)", placeholder="Ex: Pseudo en jeu", max_length=45)
-    q_question = TextInput(label="Question / Description", placeholder="Ex: Quel est votre pseudo sur le serveur ?", style=discord.TextStyle.paragraph, max_length=100)
+    q_title = TextInput(label="Titre (label du champ)", placeholder="Ex: Pseudo en jeu", max_length=45)
+    q_question = TextInput(label="Question / Description", placeholder="Ex: Quel est votre pseudo ?", style=discord.TextStyle.paragraph, max_length=100)
     
     def __init__(self, g, u):
         super().__init__()
@@ -1208,7 +1245,7 @@ async def on_ready():
     bot.add_view(TicketCreateView())
     bot.add_view(TicketControlView())
     await bot.tree.sync()
-    print(f"✅ {bot.user.name} v11.0 prêt!")
+    print(f"✅ {bot.user.name} v11.1 prêt!")
 
 @bot.event
 async def on_member_remove(member):
@@ -1222,10 +1259,8 @@ async def on_member_remove(member):
             ticket_info = {'id': ticket[0], 'user': member.id, 'claimed': ticket[2], 'answers': json.loads(ticket[3]) if ticket[3] else {}}
             channel = member.guild.get_channel(ticket[1])
             
-            # Log que l'utilisateur est parti
             await send_ticket_log(member.guild, 'leave', member, ticket_info)
             
-            # Message dans le ticket
             if channel:
                 embed = discord.Embed(
                     title="🚪 Utilisateur parti",
@@ -1349,5 +1384,5 @@ async def warn_cmd(interaction: discord.Interaction, membre: discord.Member, rai
     await interaction.response.send_message(f"⚠️ {membre.mention}: {raison}")
 
 if __name__ == "__main__":
-    print("🚀 v11.0")
+    print("🚀 v11.1")
     bot.run(TOKEN)
