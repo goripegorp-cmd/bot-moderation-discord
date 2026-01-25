@@ -1637,15 +1637,14 @@ class TradePanel(View):
         e.add_field(name="⏱️ Cooldown", value=f"{trade_cd} {trade_unit}", inline=True)
         
         if trade_items:
-            # Afficher les items sur plusieurs lignes si nécessaire
             items_txt = " ".join(trade_items[:30])
             if len(items_txt) > 1000:
                 items_txt = " ".join(trade_items[:15]) + f"\n*... et {len(trade_items) - 15} autres*"
             e.add_field(name=f"📦 Items disponibles ({len(trade_items)})", value=items_txt, inline=False)
         else:
-            e.add_field(name="📦 Items disponibles", value="❌ Aucun item configuré\n*Utilisez les boutons ci-dessous pour ajouter des emojis*", inline=False)
+            e.add_field(name="📦 Items disponibles", value="❌ Aucun item configuré\n*Utilisez le bouton 😀 Emojis du Serveur*", inline=False)
         
-        e.set_footer(text="💡 Ajoutez des emojis standards ou custom du serveur!")
+        e.set_footer(text="💡 Utilisez 😀 Emojis du Serveur pour ajouter facilement!")
         return e
     
     @discord.ui.button(label="🎭 Rôle", style=discord.ButtonStyle.primary, row=0)
@@ -1667,10 +1666,6 @@ class TradePanel(View):
     async def set_cooldown(self, i, b):
         await i.response.send_modal(TradeCooldownModal(self.g, self.u))
     
-    @discord.ui.button(label="✏️ Ajouter Manuellement", style=discord.ButtonStyle.success, row=1)
-    async def add_manual(self, i, b):
-        await i.response.send_modal(TradeItemsModal(self.g, self.u))
-    
     @discord.ui.button(label="😀 Emojis du Serveur", style=discord.ButtonStyle.success, row=1)
     async def add_server_emojis(self, i, b):
         emojis = list(self.g.emojis)[:25]
@@ -1680,21 +1675,55 @@ class TradePanel(View):
         opts = [discord.SelectOption(label=f":{e.name}:"[:25], value=str(e.id), emoji=e) for e in emojis]
         v = TradeEmojiSelectView(self.u, self.g, opts)
         e = discord.Embed(title="😀 Sélectionner des emojis", color=C.PURPLE)
-        e.description = "Choisissez les emojis custom à ajouter aux items de trade.\n*Vous pouvez en sélectionner plusieurs.*"
+        e.description = "Choisissez les emojis custom à ajouter.\n*Vous pouvez en sélectionner plusieurs.*"
         await i.response.edit_message(embed=e, view=v)
     
-    @discord.ui.button(label="🗑️ Supprimer Item", style=discord.ButtonStyle.danger, row=2)
+    @discord.ui.button(label="✏️ Manuel", style=discord.ButtonStyle.secondary, row=1)
+    async def add_manual(self, i, b):
+        await i.response.send_modal(TradeItemsModal(self.g, self.u))
+    
+    @discord.ui.button(label="🔧 Réparer", style=discord.ButtonStyle.secondary, row=1)
+    async def repair_items(self, i, b):
+        c = await cfg(self.g.id)
+        items = c.get('trade_items', [])
+        repaired = []
+        
+        for item in items:
+            # Si déjà au bon format <:name:id> ou <a:name:id>
+            if re.match(r'<a?:\w+:\d+>', item):
+                repaired.append(item)
+            # Si format :name: sans < >
+            elif item.startswith(':') and item.endswith(':'):
+                name = item[1:-1]
+                emoji = discord.utils.get(self.g.emojis, name=name)
+                if emoji:
+                    emoji_str = f"<{'a' if emoji.animated else ''}:{emoji.name}:{emoji.id}>"
+                    if emoji_str not in repaired:
+                        repaired.append(emoji_str)
+            # Si juste le nom sans :
+            else:
+                emoji = discord.utils.get(self.g.emojis, name=item)
+                if emoji:
+                    emoji_str = f"<{'a' if emoji.animated else ''}:{emoji.name}:{emoji.id}>"
+                    if emoji_str not in repaired:
+                        repaired.append(emoji_str)
+                elif len(item) <= 4:  # Emoji Unicode
+                    repaired.append(item)
+        
+        await db_set(self.g.id, 'trade_items', repaired)
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, row=2)
     async def remove_item(self, i, b):
         c = await cfg(self.g.id)
         items = c.get('trade_items', [])
         if not items:
             return await i.response.send_message("❌ Aucun item à supprimer", ephemeral=True)
         
-        # Créer les options (max 25)
         opts = []
         for idx, item in enumerate(items[:25]):
             label = item if len(item) <= 25 else item[:22] + "..."
-            opts.append(discord.SelectOption(label=label, value=str(idx), emoji=item if len(item) <= 2 else None))
+            opts.append(discord.SelectOption(label=label, value=str(idx)))
         
         v = TradeRemoveItemView(self.u, self.g, opts)
         e = discord.Embed(title="🗑️ Supprimer un item", color=C.RED)
@@ -1821,7 +1850,7 @@ class TradeCooldownModal(Modal, title="⏱️ Cooldown Trade"):
 class TradeItemsModal(Modal, title="📦 Ajouter des Items"):
     items = TextInput(
         label="Emojis (séparés par des espaces)",
-        placeholder="🗡️ 🛡️ 💎 ou collez des emojis custom <:nom:id>",
+        placeholder="🗡️ 🛡️ 💎 ou utilisez le bouton Emojis du Serveur",
         style=discord.TextStyle.paragraph,
         max_length=2000
     )
@@ -1835,20 +1864,29 @@ class TradeItemsModal(Modal, title="📦 Ajouter des Items"):
         c = await cfg(self.g.id)
         current = c.get('trade_items', [])
         
-        # Parser les items (emojis standards et custom)
         text = self.items.value
         
-        # Trouver les emojis custom <:nom:id> ou <a:nom:id>
+        # 1. Trouver les emojis custom complets <:nom:id> ou <a:nom:id>
         custom_emojis = re.findall(r'<a?:\w+:\d+>', text)
         for emoji in custom_emojis:
             if emoji not in current:
                 current.append(emoji)
             text = text.replace(emoji, ' ')
         
-        # Ajouter les emojis standards restants
+        # 2. Chercher les emojis au format :nom: et les convertir
+        shortcode_pattern = re.findall(r':(\w+):', text)
+        for name in shortcode_pattern:
+            emoji = discord.utils.get(self.g.emojis, name=name)
+            if emoji:
+                emoji_str = f"<{'a' if emoji.animated else ''}:{emoji.name}:{emoji.id}>"
+                if emoji_str not in current:
+                    current.append(emoji_str)
+                text = text.replace(f':{name}:', ' ')
+        
+        # 3. Ajouter les emojis standards Unicode restants
         for item in text.split():
             item = item.strip()
-            if item and item not in current:
+            if item and item not in current and len(item) <= 4:  # Emojis Unicode uniquement
                 current.append(item)
         
         await db_set(self.g.id, 'trade_items', current[:50])
