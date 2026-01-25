@@ -1779,6 +1779,24 @@ class AdsPanel(View):
             inline=True
         )
         
+        # Discord
+        dc_ch = self.g.get_channel(c.get('ads_discord_channel', 0))
+        dc_feeds = c.get('ads_discord_feeds', [])
+        e.add_field(
+            name="📡 Discord",
+            value=f"📍 {dc_ch.mention if dc_ch else '❌'}\n💬 {len(dc_feeds)} salon(s)",
+            inline=True
+        )
+        
+        # RoSocial
+        rs_ch = self.g.get_channel(c.get('ads_rosocial_channel', 0))
+        rs_feeds = c.get('ads_rosocial_feeds', [])
+        e.add_field(
+            name="🎮 RoSocial",
+            value=f"📍 {rs_ch.mention if rs_ch else '❌'}\n👤 {len(rs_feeds)} profil(s)",
+            inline=True
+        )
+        
         e.set_footer(text="💡 Les notifications sont vérifiées toutes les 5 minutes")
         return e
     
@@ -1797,12 +1815,22 @@ class AdsPanel(View):
         v = AdsTwitterPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
-    @discord.ui.button(label="🟠 Reddit", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="🟠 Reddit", style=discord.ButtonStyle.secondary, row=0)
     async def reddit(self, i, b):
         v = AdsRedditPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="📡 Discord", style=discord.ButtonStyle.primary, row=1)
+    async def discord_btn(self, i, b):
+        v = AdsDiscordPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="🎮 RoSocial", style=discord.ButtonStyle.success, row=1)
+    async def rosocial(self, i, b):
+        v = AdsRoSocialPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
@@ -2112,6 +2140,174 @@ class AdsTwitterAddModal(Modal, title="➕ Ajouter un compte Twitter"):
         v = AdsTwitterPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
+# ─────────────────────────────── DISCORD CHANNELS ───────────────────────────────
+
+class AdsDiscordPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        e = discord.Embed(title="📡 Discord - Suivi de Salons", color=C.BLURPLE)
+        
+        dc_ch = self.g.get_channel(c.get('ads_discord_channel', 0))
+        dc_feeds = c.get('ads_discord_feeds', [])
+        
+        e.add_field(name="📍 Salon de destination", value=dc_ch.mention if dc_ch else "❌ Non configuré", inline=False)
+        
+        if dc_feeds:
+            feeds_txt = []
+            for f in dc_feeds[:10]:
+                ch = bot.get_channel(int(f['channel_id']))
+                if ch:
+                    feeds_txt.append(f"• #{ch.name} ({ch.guild.name[:15]})")
+                else:
+                    feeds_txt.append(f"• `{f['channel_id']}` (inaccessible)")
+            e.add_field(name=f"💬 Salons suivis ({len(dc_feeds)})", value="\n".join(feeds_txt), inline=False)
+        else:
+            e.add_field(name="💬 Salons suivis", value="*Aucun salon configuré*", inline=False)
+        
+        e.set_footer(text="⚠️ Le bot doit être présent sur le serveur du salon à suivre")
+        return e
+    
+    @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
+    async def set_channel(self, i, b):
+        chs = list(self.g.text_channels)[:25]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        v = AdsChannelSelectView(self.u, self.g, opts, 'ads_discord_channel', 'discord')
+        await i.response.edit_message(embed=discord.Embed(title="📍 Salon de destination", color=C.BLURPLE), view=v)
+    
+    @discord.ui.button(label="➕ Ajouter Salon", style=discord.ButtonStyle.success, row=0)
+    async def add_feed(self, i, b):
+        await i.response.send_modal(AdsDiscordAddModal(self.g, self.u))
+    
+    @discord.ui.button(label="🗑️ Supprimer Salon", style=discord.ButtonStyle.danger, row=0)
+    async def remove_feed(self, i, b):
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_discord_feeds', [])
+        if not feeds:
+            return await i.response.send_message("❌ Aucun salon à supprimer", ephemeral=True)
+        opts = []
+        for idx, f in enumerate(feeds[:25]):
+            ch = bot.get_channel(int(f['channel_id']))
+            label = f"#{ch.name}"[:25] if ch else f"ID: {f['channel_id']}"[:25]
+            opts.append(discord.SelectOption(label=label, value=str(idx)))
+        v = AdsFeedRemoveView(self.u, self.g, opts, 'ads_discord_feeds', 'discord')
+        await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer un salon", color=C.RED), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = AdsPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class AdsDiscordAddModal(Modal, title="➕ Suivre un salon Discord"):
+    channel_id = TextInput(label="ID du salon à suivre", placeholder="Ex: 1234567890123456789", max_length=25)
+    
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+    
+    async def on_submit(self, i):
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_discord_feeds', [])
+        
+        try:
+            ch_id = int(self.channel_id.value.strip())
+        except:
+            return await i.response.send_message("❌ ID invalide!", ephemeral=True)
+        
+        # Vérifier si le bot a accès au salon
+        ch = bot.get_channel(ch_id)
+        if not ch:
+            return await i.response.send_message("❌ Salon introuvable! Le bot doit être présent sur le serveur.", ephemeral=True)
+        
+        # Vérifier si déjà ajouté
+        if any(f['channel_id'] == str(ch_id) for f in feeds):
+            return await i.response.send_message("❌ Ce salon est déjà suivi!", ephemeral=True)
+        
+        feeds.append({'channel_id': str(ch_id), 'guild_name': ch.guild.name, 'channel_name': ch.name})
+        await db_set(self.g.id, 'ads_discord_feeds', feeds)
+        
+        v = AdsDiscordPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+# ─────────────────────────────── ROSOCIAL ───────────────────────────────
+
+class AdsRoSocialPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        e = discord.Embed(title="🎮 RoSocial - Notifications", color=0x00D4AA)
+        
+        rs_ch = self.g.get_channel(c.get('ads_rosocial_channel', 0))
+        rs_feeds = c.get('ads_rosocial_feeds', [])
+        
+        e.add_field(name="📍 Salon", value=rs_ch.mention if rs_ch else "❌ Non configuré", inline=False)
+        
+        if rs_feeds:
+            feeds_txt = "\n".join([f"• `{f}`" for f in rs_feeds[:10]])
+            e.add_field(name=f"👤 Profils suivis ({len(rs_feeds)})", value=feeds_txt, inline=False)
+        else:
+            e.add_field(name="👤 Profils suivis", value="*Aucun profil configuré*", inline=False)
+        
+        e.set_footer(text="💡 Entrez le nom d'utilisateur RoSocial (ex: GoRipe)")
+        return e
+    
+    @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
+    async def set_channel(self, i, b):
+        chs = list(self.g.text_channels)[:25]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        v = AdsChannelSelectView(self.u, self.g, opts, 'ads_rosocial_channel', 'rosocial')
+        await i.response.edit_message(embed=discord.Embed(title="📍 Salon RoSocial", color=0x00D4AA), view=v)
+    
+    @discord.ui.button(label="➕ Ajouter Profil", style=discord.ButtonStyle.success, row=0)
+    async def add_feed(self, i, b):
+        await i.response.send_modal(AdsRoSocialAddModal(self.g, self.u))
+    
+    @discord.ui.button(label="🗑️ Supprimer Profil", style=discord.ButtonStyle.danger, row=0)
+    async def remove_feed(self, i, b):
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_rosocial_feeds', [])
+        if not feeds:
+            return await i.response.send_message("❌ Aucun profil à supprimer", ephemeral=True)
+        opts = [discord.SelectOption(label=f[:25], value=str(idx)) for idx, f in enumerate(feeds[:25])]
+        v = AdsFeedRemoveView(self.u, self.g, opts, 'ads_rosocial_feeds', 'rosocial')
+        await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer un profil", color=C.RED), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = AdsPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class AdsRoSocialAddModal(Modal, title="➕ Ajouter un profil RoSocial"):
+    username = TextInput(label="Nom d'utilisateur RoSocial", placeholder="Ex: GoRipe", max_length=30)
+    
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+    
+    async def on_submit(self, i):
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_rosocial_feeds', [])
+        
+        username = self.username.value.strip()
+        if username.lower() in [f.lower() for f in feeds]:
+            return await i.response.send_message("❌ Ce profil est déjà ajouté!", ephemeral=True)
+        
+        feeds.append(username)
+        await db_set(self.g.id, 'ads_rosocial_feeds', feeds)
+        
+        v = AdsRoSocialPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
 # ─────────────────────────────── COMMON VIEWS ───────────────────────────────
 
 class AdsChannelSelectView(View):
@@ -2135,6 +2331,10 @@ class AdsChannelSelect(Select):
             v = AdsTwitchPanel(self.u, self.g)
         elif self.platform == 'twitter':
             v = AdsTwitterPanel(self.u, self.g)
+        elif self.platform == 'discord':
+            v = AdsDiscordPanel(self.u, self.g)
+        elif self.platform == 'rosocial':
+            v = AdsRoSocialPanel(self.u, self.g)
         else:
             v = AdsRedditPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
@@ -2166,6 +2366,10 @@ class AdsFeedRemoveSelect(Select):
             v = AdsTwitchPanel(self.u, self.g)
         elif self.platform == 'twitter':
             v = AdsTwitterPanel(self.u, self.g)
+        elif self.platform == 'discord':
+            v = AdsDiscordPanel(self.u, self.g)
+        elif self.platform == 'rosocial':
+            v = AdsRoSocialPanel(self.u, self.g)
         else:
             v = AdsRedditPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
@@ -2657,7 +2861,7 @@ async def on_ready():
     if not check_social_feeds.is_running():
         check_social_feeds.start()
     
-    print(f"✅ {bot.user.name} v14 prêt!")
+    print(f"✅ {bot.user.name} v15 prêt!")
     print(f"🌐 Serveurs: {len(bot.guilds)}")
     print(f"📢 Vérification feeds sociaux toutes les 5 minutes")
 
@@ -2703,9 +2907,71 @@ async def on_member_join(m):
                 await m.kick(reason=f"Compte trop récent ({age} jours)")
     except: pass
 
+async def relay_discord_message(msg):
+    """Relay un message vers les serveurs qui suivent ce salon"""
+    try:
+        channel_id = str(msg.channel.id)
+        
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('SELECT guild_id, data FROM guild_config') as cursor:
+                async for row in cursor:
+                    guild_id, data_str = row
+                    if guild_id == msg.guild.id:
+                        continue  # Ne pas relayer vers le même serveur
+                    
+                    try:
+                        data = json.loads(data_str) if data_str else {}
+                        feeds = data.get('ads_discord_feeds', [])
+                        dest_channel_id = data.get('ads_discord_channel', 0)
+                        
+                        # Vérifier si ce salon est suivi
+                        is_followed = any(f['channel_id'] == channel_id for f in feeds)
+                        if not is_followed or not dest_channel_id:
+                            continue
+                        
+                        # Trouver le salon de destination
+                        dest_guild = bot.get_guild(guild_id)
+                        if not dest_guild:
+                            continue
+                        dest_channel = dest_guild.get_channel(dest_channel_id)
+                        if not dest_channel:
+                            continue
+                        
+                        # Créer l'embed de relay
+                        e = discord.Embed(color=C.BLURPLE)
+                        e.set_author(
+                            name=f"{msg.author.display_name} dans #{msg.channel.name}",
+                            icon_url=msg.author.display_avatar.url if msg.author.display_avatar else None
+                        )
+                        
+                        # Contenu du message
+                        content = msg.content[:2000] if msg.content else ""
+                        if content:
+                            e.description = content
+                        
+                        # Images
+                        if msg.attachments:
+                            for att in msg.attachments[:1]:
+                                if att.content_type and att.content_type.startswith('image'):
+                                    e.set_image(url=att.url)
+                                    break
+                        
+                        e.set_footer(text=f"📡 {msg.guild.name} • #{msg.channel.name}")
+                        e.timestamp = msg.created_at
+                        
+                        await dest_channel.send(embed=e)
+                        
+                    except:
+                        continue
+    except:
+        pass
+
 @bot.event
 async def on_message(msg):
     if msg.author.bot or not msg.guild: return
+    
+    # Relay Discord - Vérifier si ce salon est suivi par d'autres serveurs
+    await relay_discord_message(msg)
     
     # Mise à jour activité Realsy
     await update_realsy_activity(msg.guild.id, msg.author.id)
@@ -3727,7 +3993,7 @@ async def before_check():
 
 @tasks.loop(minutes=5)
 async def check_social_feeds():
-    """Vérifie les nouveaux posts YouTube, Twitch, Twitter et Reddit"""
+    """Vérifie les nouveaux posts YouTube, Twitch, Twitter, Reddit, Discord et RoSocial"""
     try:
         async with aiohttp.ClientSession() as session:
             async with aiosqlite.connect(DB_PATH) as db:
@@ -3751,6 +4017,9 @@ async def check_social_feeds():
                             
                             # Reddit
                             await check_reddit_feeds(session, guild, data)
+                            
+                            # RoSocial
+                            await check_rosocial_feeds(session, guild, data)
                             
                         except Exception as ex:
                             print(f"Erreur feed {guild_id}: {ex}")
@@ -3994,6 +4263,69 @@ async def check_twitter_feeds(session, guild, data):
             print(f"Erreur Twitter feed {username}: {ex}")
             continue
 
+async def check_rosocial_feeds(session, guild, data):
+    """Vérifie les nouveaux posts RoSocial"""
+    channel = guild.get_channel(data.get('ads_rosocial_channel', 0))
+    feeds = data.get('ads_rosocial_feeds', [])
+    if not channel or not feeds:
+        return
+    
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    
+    for username in feeds:
+        try:
+            # Scraper la page du profil RoSocial
+            url = f"https://rosocial.net/{username}"
+            
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status != 200:
+                    continue
+                html = await resp.text()
+            
+            # Trouver le dernier post (format: /posts/12345)
+            import re
+            posts = re.findall(r'href="https://rosocial\.net/posts/(\d+)"', html)
+            if not posts:
+                # Essayer un autre pattern
+                posts = re.findall(r'/posts/(\d+)', html)
+            
+            if not posts:
+                continue
+            
+            # Prendre le premier post trouvé (le plus récent)
+            latest_post_id = posts[0]
+            cache_key = f"rs_{guild.id}_{username}"
+            
+            if cache_key in posted_content and posted_content[cache_key] == latest_post_id:
+                continue
+            
+            posted_content[cache_key] = latest_post_id
+            
+            # Extraire le contenu du post (simplifié)
+            post_url = f"https://rosocial.net/posts/{latest_post_id}"
+            
+            # Créer l'embed
+            e = discord.Embed(
+                title=f"📝 Nouveau post de {username}",
+                url=post_url,
+                color=0x00D4AA
+            )
+            e.set_author(
+                name=f"🎮 {username} sur RoSocial",
+                url=f"https://rosocial.net/{username}",
+                icon_url="https://rosocial.net/content/uploads/photos/2025/11/roso_597f00df39d1431f924ec9403430e921.png"
+            )
+            e.add_field(name="🔗 Voir le post", value=f"[Cliquez ici]({post_url})", inline=False)
+            e.set_footer(text="RoSocial", icon_url="https://rosocial.net/content/uploads/photos/2025/11/roso_597f00df39d1431f924ec9403430e921.png")
+            e.timestamp = now()
+            
+            await channel.send(embed=e)
+            await asyncio.sleep(1)
+            
+        except Exception as ex:
+            print(f"Erreur RoSocial feed {username}: {ex}")
+            continue
+
 @check_social_feeds.before_loop
 async def before_social_check():
     await bot.wait_until_ready()
@@ -4008,5 +4340,5 @@ async def on_voice_state_update(member, before, after):
         await update_realsy_activity(member.guild.id, member.id)
 
 if __name__ == "__main__":
-    print("🚀 Bot v14 - Démarrage...")
+    print("🚀 Bot v15 - Démarrage...")
     bot.run(TOKEN)
