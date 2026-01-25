@@ -1697,7 +1697,7 @@ class TradeChanSelect(Select):
 
 class TradeCooldownModal(Modal, title="⏱️ Cooldown Trade"):
     duree = TextInput(label="Durée (nombre)", placeholder="1", default="1", max_length=3)
-    unite = TextInput(label="Unité (secondes/minutes/heures/jours/semaines)", placeholder="heures", default="heures", max_length=10)
+    unite = TextInput(label="Unité (secondes/minutes/heures/jours)", placeholder="heures", default="heures", max_length=10)
     
     def __init__(self, g, u):
         super().__init__()
@@ -1712,9 +1712,12 @@ class TradeCooldownModal(Modal, title="⏱️ Cooldown Trade"):
                 unit = 'heures'
             await db_set(self.g.id, 'trade_cooldown', cd)
             await db_set(self.g.id, 'trade_cooldown_unit', unit)
-        except: pass
+        except:
+            pass
+        
         v = TradePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        e = await v.embed()
+        await i.response.edit_message(embed=e, view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           📺 CONFIG SALON
