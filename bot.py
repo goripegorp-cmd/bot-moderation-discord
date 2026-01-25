@@ -2049,23 +2049,21 @@ async def on_ready():
                     except: pass
     except: pass
     
-    # Sync les commandes pour chaque serveur (plus rapide que global)
+    # Sync global des commandes
     try:
-        for guild in bot.guilds:
-            await bot.tree.sync(guild=guild)
-            print(f"  ✅ Commandes sync pour: {guild.name}")
-        # Aussi sync global
         synced = await bot.tree.sync()
-        print(f"✅ {len(synced)} commandes synchronisées globalement")
+        print(f"✅ {len(synced)} commandes synchronisées:")
+        for cmd in synced:
+            print(f"   - /{cmd.name}")
     except Exception as ex:
-        print(f"❌ Erreur sync: {ex}")
+        print(f"❌ Erreur sync global: {ex}")
     
     # Lancer la tâche d'inactivité
     if not check_realsy_inactivity.is_running():
         check_realsy_inactivity.start()
     
     print(f"✅ {bot.user.name} v13 prêt!")
-    print(f"📋 Commandes disponibles: configure, warn, unwarn, mute, unmute, infractions, rellseas, suggestion")
+    print(f"🌐 Serveurs: {len(bot.guilds)}")
 
 @bot.tree.command(name="sync", description="🔄 Synchroniser les commandes (Admin)")
 async def sync_cmd(i: discord.Interaction):
@@ -2074,11 +2072,9 @@ async def sync_cmd(i: discord.Interaction):
     
     await i.response.defer(ephemeral=True)
     try:
-        # Sync pour ce serveur spécifiquement
-        await bot.tree.sync(guild=i.guild)
-        # Et global
         synced = await bot.tree.sync()
-        await i.followup.send(f"✅ {len(synced)} commandes synchronisées!\n\n**Commandes disponibles:**\n`/configure` `/warn` `/unwarn` `/mute` `/unmute` `/infractions` `/rellseas` `/suggestion`", ephemeral=True)
+        cmd_list = "\n".join([f"• `/{c.name}`" for c in synced])
+        await i.followup.send(f"✅ **{len(synced)} commandes synchronisées!**\n\n{cmd_list}", ephemeral=True)
     except Exception as ex:
         await i.followup.send(f"❌ Erreur: {ex}", ephemeral=True)
 
