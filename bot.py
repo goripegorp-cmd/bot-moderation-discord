@@ -1,6 +1,6 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-#                        🌟 BOT PREMIUM v11.1 🌟
-#       Tickets: Vérification channel, limite configurable, boutons fix
+#                        🌟 BOT PREMIUM v11.2 🌟
+#       Tickets Multi-Panels : Chaque panel a sa propre catégorie/config
 # ═══════════════════════════════════════════════════════════════════════════════
 
 try:
@@ -22,6 +22,7 @@ import asyncio
 import unicodedata
 import traceback
 import io
+import time
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 
@@ -58,6 +59,7 @@ async def db_init():
             guild_id INTEGER, 
             channel_id INTEGER, 
             user_id INTEGER, 
+            panel_id TEXT DEFAULT "",
             claimed_by INTEGER DEFAULT 0, 
             status TEXT DEFAULT "open",
             answers TEXT DEFAULT "{}",
@@ -95,9 +97,8 @@ async def cfg(gid):
         'phishing_action':'ban','scam_action':'mute','spam_action':'mute','spam_max':5,'spam_interval':5,'caps_percent':70,'newaccount_days':7,
         'log_anti_link':0,'log_anti_image':0,'log_anti_phishing':0,'log_anti_scam':0,'log_anti_spam':0,'log_anti_caps':0,'log_anti_badwords':0,'log_anti_invite':0,'log_anti_newaccount':0,
         'channel_configs':{},
-        'ticket_panel':0,'ticket_category':0,'ticket_staff':0,'ticket_log':0,
-        'ticket_questions':[],
-        'ticket_max':1  # Limite de tickets par utilisateur
+        'ticket_staff':0,'ticket_log':0,
+        'ticket_panels':{}  # {panel_id: {category, questions, max, name}}
     }
     for k,v in defaults.items():
         if k not in data: data[k]=v
@@ -138,33 +139,19 @@ async def send_log(guild, key, member, msg, reason, extra=None):
     except: pass
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                    🎞️ GIF DETECTION
+#                    🎞️ GIF DETECTION & PROTECTION CHECKS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def get_gif_type(msg):
     content = (msg.content or "").lower()
-    if 'tenor.com' in content or 'tenor' in content: return 'tenor'
-    if 'giphy.com' in content or 'giphy' in content: return 'giphy'
+    if 'tenor.com' in content: return 'tenor'
+    if 'giphy.com' in content: return 'giphy'
     for embed in msg.embeds:
-        urls = []
-        if embed.url: urls.append(embed.url.lower())
-        if embed.thumbnail and embed.thumbnail.url: urls.append(embed.thumbnail.url.lower())
-        if embed.video and embed.video.url: urls.append(embed.video.url.lower())
-        for url in urls:
-            if 'tenor' in url: return 'tenor'
-            if 'giphy' in url: return 'giphy'
-        if embed.provider and embed.provider.name:
-            pn = embed.provider.name.lower()
-            if 'tenor' in pn: return 'tenor'
-            if 'giphy' in pn: return 'giphy'
-        if embed.type == 'gifv': return 'gif'
+        if embed.url and 'tenor' in embed.url.lower(): return 'tenor'
+        if embed.url and 'giphy' in embed.url.lower(): return 'giphy'
     for att in msg.attachments:
         if att.filename.lower().endswith('.gif'): return 'gif'
     return None
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#                           🛡️ PROTECTION CHECKS
-# ═══════════════════════════════════════════════════════════════════════════════
 
 def normalize(text):
     text = text.lower()
@@ -177,31 +164,24 @@ def normalize(text):
 def check_badwords(content, words):
     if not words: return False, None
     norm = normalize(content)
-    nospace = re.sub(r'[^a-z]', '', norm)
     for w in words:
-        wn = normalize(w.strip())
-        if wn and (wn in norm or wn in nospace): return True, w
+        if normalize(w.strip()) in norm: return True, w
     return False, None
 
 def check_link(content, whitelist):
     urls = re.findall(r'https?://([^\s<>"]+)', content.lower())
-    if not urls: return False, None
     for url in urls:
         domain = url.split('/')[0]
-        allowed = any(w.lower() in domain for w in whitelist)
-        if not allowed: return True, url
+        if not any(w.lower() in domain for w in whitelist): return True, url
     return False, None
 
 def check_invite(content):
-    for p in [r'discord\.gg/\w+', r'discord\.com/invite/\w+']:
-        m = re.search(p, content, re.I)
-        if m: return True, m.group()
-    return False, None
+    m = re.search(r'discord\.gg/\w+|discord\.com/invite/\w+', content, re.I)
+    return (True, m.group()) if m else (False, None)
 
 def check_phishing(content):
-    cl = content.lower()
     for d in PHISHING:
-        if d in cl: return True, d
+        if d in content.lower(): return True, d
     return False, None
 
 def check_scam(content):
@@ -216,12 +196,11 @@ def check_caps(content, percent):
 
 def check_image(msg, allowed):
     blocked = []
-    al = [f.lower() for f in allowed]
     gif_type = get_gif_type(msg)
-    if gif_type and gif_type not in al: blocked.append(gif_type)
+    if gif_type and gif_type not in allowed: blocked.append(gif_type)
     for att in msg.attachments:
         ext = att.filename.lower().split('.')[-1]
-        if ext in ['png','jpg','jpeg','webp','bmp'] and ext not in al: blocked.append(ext)
+        if ext in ['png','jpg','jpeg','webp','bmp'] and ext not in allowed: blocked.append(ext)
     return blocked
 
 async def check_spam(msg, max_msg, interval):
@@ -232,61 +211,49 @@ async def check_spam(msg, max_msg, interval):
     spam_tracker[key].append(n)
     return len(spam_tracker[key]) > max_msg
 
-def check_channel_cfg(msg, conf):
-    if not conf: return False, None
-    content = (msg.content or "").strip()
-    if not conf.get('messages', True):
-        has_text = bool(re.sub(r'<a?:\w+:\d+>|https?://\S+', '', content).strip())
-        if has_text and not msg.attachments and not msg.embeds: return True, "messages"
-    if not conf.get('images', True):
-        for att in msg.attachments:
-            if att.filename.lower().split('.')[-1] in ['png','jpg','jpeg','webp','bmp']: return True, "images"
-    if not conf.get('gifs', True) and get_gif_type(msg): return True, "gifs"
-    if not conf.get('emojis', True) and re.search(r'<a?:\w+:\d+>', content): return True, "emojis"
-    if not conf.get('links', True) and re.search(r'https?://', content): return True, "links"
-    return False, None
-
 # ═══════════════════════════════════════════════════════════════════════════════
-#                           🎫 TICKETS - SYSTÈME AVANCÉ
+#                           🎫 TICKETS - SYSTÈME MULTI-PANELS
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def get_ticket(ch_id):
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute('SELECT id,user_id,claimed_by,answers FROM tickets WHERE channel_id=? AND status="open"', (ch_id,)) as c:
+            async with db.execute('SELECT id,user_id,claimed_by,answers,panel_id FROM tickets WHERE channel_id=? AND status="open"', (ch_id,)) as c:
                 r = await c.fetchone()
                 if r:
-                    return {'id':r[0],'user':r[1],'claimed':r[2],'answers':json.loads(r[3]) if r[3] else {}}
+                    return {'id':r[0],'user':r[1],'claimed':r[2],'answers':json.loads(r[3]) if r[3] else {},'panel_id':r[4]}
                 return None
     except:
         return None
 
-async def count_user_open_tickets(guild, user_id):
-    """Compte les tickets VRAIMENT ouverts (channel existe encore)"""
+async def count_user_open_tickets(guild, user_id, panel_id=None):
+    """Compte les tickets ouverts (vérifie que le channel existe)"""
     count = 0
     tickets_to_close = []
     
     try:
+        query = "SELECT id, channel_id FROM tickets WHERE guild_id=? AND user_id=? AND status='open'"
+        params = [guild.id, user_id]
+        if panel_id:
+            query += " AND panel_id=?"
+            params.append(panel_id)
+        
         async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute("SELECT id, channel_id FROM tickets WHERE guild_id=? AND user_id=? AND status='open'", (guild.id, user_id)) as c:
+            async with db.execute(query, params) as c:
                 tickets = await c.fetchall()
         
         for ticket_id, channel_id in tickets:
             channel = guild.get_channel(channel_id)
             if channel:
-                # Le channel existe encore
                 count += 1
             else:
-                # Le channel a été supprimé manuellement
                 tickets_to_close.append(ticket_id)
         
-        # Fermer les tickets dont le channel n'existe plus
         if tickets_to_close:
             async with aiosqlite.connect(DB_PATH) as db:
                 for tid in tickets_to_close:
                     await db.execute("UPDATE tickets SET status='closed' WHERE id=?", (tid,))
                 await db.commit()
-            print(f"[TICKETS] Auto-fermé {len(tickets_to_close)} ticket(s) orphelin(s)")
         
         return count
     except Exception as e:
@@ -294,7 +261,6 @@ async def count_user_open_tickets(guild, user_id):
         return 0
 
 async def send_ticket_log(guild, log_type, user, ticket_info, extra_info=None, closer=None, channel=None):
-    """Envoie un log de ticket"""
     try:
         c = await cfg(guild.id)
         log_ch = guild.get_channel(c.get('ticket_log', 0))
@@ -305,7 +271,9 @@ async def send_ticket_log(guild, log_type, user, ticket_info, extra_info=None, c
         
         e = discord.Embed(title=titles.get(log_type, '🎫 Ticket'), color=colors.get(log_type, C.BLURPLE), timestamp=now())
         e.add_field(name="🎫 Ticket", value=f"#{ticket_info.get('id', '?')}", inline=True)
-        e.add_field(name="👤 Utilisateur", value=f"<@{user.id}>" if hasattr(user, 'id') else f"<@{user}>", inline=True)
+        
+        user_id = user.id if hasattr(user, 'id') else user
+        e.add_field(name="👤 Utilisateur", value=f"<@{user_id}>", inline=True)
         
         if log_type == 'claim' and extra_info:
             e.add_field(name="🙋 Pris par", value=f"<@{extra_info}>", inline=True)
@@ -315,9 +283,7 @@ async def send_ticket_log(guild, log_type, user, ticket_info, extra_info=None, c
             e.add_field(name="➕ Staff ajouté", value=f"<@{extra_info}>", inline=True)
         
         if ticket_info.get('answers') and log_type in ['create', 'close']:
-            answers_text = ""
-            for q, a in ticket_info['answers'].items():
-                answers_text += f"**{q}**\n{a}\n\n"
+            answers_text = "\n".join([f"**{q}**: {a[:100]}" for q, a in list(ticket_info['answers'].items())[:5]])
             if answers_text:
                 e.add_field(name="📝 Réponses", value=answers_text[:1024], inline=False)
         
@@ -340,11 +306,88 @@ async def send_ticket_log(guild, log_type, user, ticket_info, extra_info=None, c
         print(f"[TICKET LOG ERROR] {ex}")
 
 
+async def create_ticket_channel(interaction, panel_id, answers=None):
+    """Crée le channel du ticket"""
+    try:
+        c = await cfg(interaction.guild.id)
+        panels = c.get('ticket_panels', {})
+        panel = panels.get(panel_id, {})
+        
+        cat_id = panel.get('category', 0)
+        cat = interaction.guild.get_channel(cat_id)
+        staff = interaction.guild.get_role(c.get('ticket_staff', 0))
+        max_tickets = panel.get('max', 1)
+        
+        if not cat:
+            return None, "❌ Catégorie non configurée pour ce panel"
+        
+        # Vérifier limite
+        open_count = await count_user_open_tickets(interaction.guild, interaction.user.id, panel_id)
+        if open_count >= max_tickets:
+            return None, f"❌ Vous avez déjà **{open_count}** ticket(s) ouvert(s) (max: {max_tickets})"
+        
+        # Permissions
+        overwrites = {
+            interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, read_message_history=True),
+            interaction.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True, manage_permissions=True)
+        }
+        if staff:
+            overwrites[staff] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+        if interaction.guild.owner:
+            overwrites[interaction.guild.owner] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
+        
+        # Créer le channel
+        channel = await interaction.guild.create_text_channel(
+            f"ticket-{interaction.user.name}"[:50], 
+            category=cat, 
+            overwrites=overwrites
+        )
+        
+        # Sauvegarder en DB
+        answers_json = json.dumps(answers or {}, ensure_ascii=False)
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('INSERT INTO tickets (guild_id,channel_id,user_id,panel_id,answers) VALUES (?,?,?,?,?)', 
+                (interaction.guild.id, channel.id, interaction.user.id, panel_id, answers_json))
+            await db.commit()
+            async with db.execute('SELECT id FROM tickets WHERE channel_id=?', (channel.id,)) as cur:
+                row = await cur.fetchone()
+                ticket_id = row[0] if row else 0
+        
+        # Créer l'embed
+        embed = discord.Embed(title="🎫 Nouveau Ticket", color=C.BLURPLE, timestamp=now())
+        embed.add_field(name="👤 Créé par", value=f"{interaction.user.mention}\n`{interaction.user.id}`", inline=True)
+        embed.add_field(name="🎫 ID", value=f"#{ticket_id}", inline=True)
+        embed.set_thumbnail(url=interaction.user.display_avatar.url)
+        
+        # Ajouter les réponses
+        if answers:
+            for title, answer in answers.items():
+                embed.add_field(name=f"📝 {title}", value=answer[:1024], inline=False)
+        
+        embed.set_footer(text="Un membre du staff va prendre votre ticket en charge")
+        
+        # Envoyer le message avec les boutons
+        mention = interaction.user.mention
+        if staff: mention += f" {staff.mention}"
+        
+        await channel.send(content=mention, embed=embed, view=TicketControlView())
+        
+        # Log
+        await send_ticket_log(interaction.guild, 'create', interaction.user, {'id': ticket_id, 'answers': answers or {}})
+        
+        return channel, None
+        
+    except Exception as ex:
+        print(f"[CREATE TICKET ERROR] {ex}\n{traceback.format_exc()}")
+        return None, f"❌ Erreur: {ex}"
+
+
 class TicketQuestionnaireModal(Modal):
     """Modal dynamique pour le questionnaire"""
-    def __init__(self, guild_id, questions):
+    def __init__(self, panel_id, questions):
         super().__init__(title="📝 Créer un ticket")
-        self.guild_id = guild_id
+        self.panel_id = panel_id
         self.questions = questions
         
         for i, q in enumerate(questions[:5]):
@@ -359,6 +402,7 @@ class TicketQuestionnaireModal(Modal):
     
     async def on_submit(self, interaction: discord.Interaction):
         try:
+            # Récupérer les réponses
             answers = {}
             for i, child in enumerate(self.children):
                 if i < len(self.questions):
@@ -366,81 +410,44 @@ class TicketQuestionnaireModal(Modal):
             
             await interaction.response.defer(ephemeral=True)
             
-            c = await cfg(interaction.guild.id)
-            cat = interaction.guild.get_channel(c.get('ticket_category', 0))
-            staff = interaction.guild.get_role(c.get('ticket_staff', 0))
-            max_tickets = c.get('ticket_max', 1)
+            channel, error = await create_ticket_channel(interaction, self.panel_id, answers)
             
-            if not cat:
-                return await interaction.followup.send("❌ Système non configuré", ephemeral=True)
-            
-            # Vérifier nombre de tickets (avec vérification channel existe)
-            open_count = await count_user_open_tickets(interaction.guild, interaction.user.id)
-            if open_count >= max_tickets:
-                return await interaction.followup.send(f"❌ Vous avez déjà **{open_count}** ticket(s) ouvert(s) (max: {max_tickets})", ephemeral=True)
-            
-            overwrites = {
-                interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, read_message_history=True),
-                interaction.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True, manage_permissions=True)
-            }
-            if staff:
-                overwrites[staff] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-            if interaction.guild.owner:
-                overwrites[interaction.guild.owner] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
-            
-            channel = await interaction.guild.create_text_channel(
-                f"ticket-{interaction.user.name}"[:50], 
-                category=cat, 
-                overwrites=overwrites
-            )
-            
-            async with aiosqlite.connect(DB_PATH) as db:
-                await db.execute('INSERT INTO tickets (guild_id,channel_id,user_id,answers) VALUES (?,?,?,?)', 
-                    (interaction.guild.id, channel.id, interaction.user.id, json.dumps(answers, ensure_ascii=False)))
-                await db.commit()
-                async with db.execute('SELECT id FROM tickets WHERE channel_id=?', (channel.id,)) as cur:
-                    ticket_row = await cur.fetchone()
-                    ticket_id = ticket_row[0] if ticket_row else 0
-            
-            embed = discord.Embed(title="🎫 Nouveau Ticket", color=C.BLURPLE, timestamp=now())
-            embed.add_field(name="👤 Créé par", value=f"{interaction.user.mention}\n`{interaction.user.id}`", inline=True)
-            embed.add_field(name="🎫 ID", value=f"#{ticket_id}", inline=True)
-            embed.set_thumbnail(url=interaction.user.display_avatar.url)
-            
-            for title, answer in answers.items():
-                embed.add_field(name=f"📝 {title}", value=answer[:1024], inline=False)
-            
-            embed.set_footer(text="Un membre du staff va prendre votre ticket en charge")
-            
-            mention = interaction.user.mention
-            if staff: mention += f" {staff.mention}"
-            
-            await channel.send(content=mention, embed=embed, view=TicketControlView())
-            await interaction.followup.send(f"✅ Ticket créé: {channel.mention}", ephemeral=True)
-            
-            await send_ticket_log(interaction.guild, 'create', interaction.user, {'id': ticket_id, 'answers': answers})
+            if error:
+                await interaction.followup.send(error, ephemeral=True)
+            else:
+                await interaction.followup.send(f"✅ Ticket créé: {channel.mention}", ephemeral=True)
             
         except Exception as ex:
-            print(f"[QUESTIONNAIRE ERROR] {ex}\n{traceback.format_exc()}")
+            print(f"[MODAL SUBMIT ERROR] {ex}\n{traceback.format_exc()}")
             try:
-                await interaction.followup.send("❌ Erreur lors de la création", ephemeral=True)
+                await interaction.followup.send(f"❌ Erreur: {ex}", ephemeral=True)
             except: pass
 
 
-class TicketCreateView(View):
-    def __init__(self):
-        super().__init__(timeout=None)
+class TicketCreateButton(Button):
+    """Bouton de création de ticket avec panel_id"""
+    def __init__(self, panel_id):
+        super().__init__(
+            label="📩 Créer un ticket",
+            style=discord.ButtonStyle.success,
+            custom_id=f"ticket_create_{panel_id}"
+        )
+        self.panel_id = panel_id
     
-    @discord.ui.button(label="📩 Créer un ticket", style=discord.ButtonStyle.success, custom_id="ticket_btn_create")
-    async def create_ticket(self, interaction: discord.Interaction, button: Button):
+    async def callback(self, interaction: discord.Interaction):
         try:
             c = await cfg(interaction.guild.id)
-            questions = c.get('ticket_questions', [])
-            max_tickets = c.get('ticket_max', 1)
+            panels = c.get('ticket_panels', {})
+            panel = panels.get(self.panel_id, {})
             
-            # Vérifier nombre de tickets AVANT d'ouvrir le modal
-            open_count = await count_user_open_tickets(interaction.guild, interaction.user.id)
+            if not panel:
+                return await interaction.response.send_message("❌ Panel non trouvé", ephemeral=True)
+            
+            questions = panel.get('questions', [])
+            max_tickets = panel.get('max', 1)
+            
+            # Vérifier limite AVANT d'ouvrir le modal
+            open_count = await count_user_open_tickets(interaction.guild, interaction.user.id, self.panel_id)
             if open_count >= max_tickets:
                 return await interaction.response.send_message(
                     f"❌ Vous avez déjà **{open_count}** ticket(s) ouvert(s) (max: {max_tickets})", 
@@ -448,62 +455,37 @@ class TicketCreateView(View):
                 )
             
             if questions:
-                modal = TicketQuestionnaireModal(interaction.guild.id, questions)
+                modal = TicketQuestionnaireModal(self.panel_id, questions)
                 await interaction.response.send_modal(modal)
             else:
+                # Création directe
                 await interaction.response.defer(ephemeral=True)
-                
-                cat = interaction.guild.get_channel(c.get('ticket_category', 0))
-                staff = interaction.guild.get_role(c.get('ticket_staff', 0))
-                
-                if not cat:
-                    return await interaction.followup.send("❌ Système non configuré", ephemeral=True)
-                
-                overwrites = {
-                    interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
-                    interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, read_message_history=True),
-                    interaction.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True, manage_permissions=True)
-                }
-                if staff:
-                    overwrites[staff] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-                if interaction.guild.owner:
-                    overwrites[interaction.guild.owner] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
-                
-                channel = await interaction.guild.create_text_channel(f"ticket-{interaction.user.name}"[:50], category=cat, overwrites=overwrites)
-                
-                async with aiosqlite.connect(DB_PATH) as db:
-                    await db.execute('INSERT INTO tickets (guild_id,channel_id,user_id) VALUES (?,?,?)', (interaction.guild.id, channel.id, interaction.user.id))
-                    await db.commit()
-                    async with db.execute('SELECT id FROM tickets WHERE channel_id=?', (channel.id,)) as cursor:
-                        ticket_row = await cursor.fetchone()
-                        ticket_id = ticket_row[0] if ticket_row else 0
-                
-                embed = discord.Embed(title="🎫 Nouveau Ticket", color=C.BLURPLE, timestamp=now())
-                embed.add_field(name="👤 Créé par", value=f"{interaction.user.mention}\n`{interaction.user.id}`", inline=True)
-                embed.add_field(name="🎫 ID", value=f"#{ticket_id}", inline=True)
-                embed.set_thumbnail(url=interaction.user.display_avatar.url)
-                embed.set_footer(text="Décrivez votre problème ci-dessous")
-                
-                mention = interaction.user.mention
-                if staff: mention += f" {staff.mention}"
-                
-                await channel.send(content=mention, embed=embed, view=TicketControlView())
-                await interaction.followup.send(f"✅ Ticket créé: {channel.mention}", ephemeral=True)
-                
-                await send_ticket_log(interaction.guild, 'create', interaction.user, {'id': ticket_id, 'answers': {}})
-                
+                channel, error = await create_ticket_channel(interaction, self.panel_id)
+                if error:
+                    await interaction.followup.send(error, ephemeral=True)
+                else:
+                    await interaction.followup.send(f"✅ Ticket créé: {channel.mention}", ephemeral=True)
+                    
         except Exception as ex:
-            print(f"[TICKET CREATE ERROR] {ex}\n{traceback.format_exc()}")
+            print(f"[TICKET BTN ERROR] {ex}\n{traceback.format_exc()}")
             try:
-                await interaction.followup.send("❌ Erreur", ephemeral=True)
+                await interaction.response.send_message(f"❌ Erreur", ephemeral=True)
             except: pass
 
 
+class TicketCreateView(View):
+    """Vue persistante pour créer un ticket"""
+    def __init__(self, panel_id):
+        super().__init__(timeout=None)
+        self.add_item(TicketCreateButton(panel_id))
+
+
 class TicketControlView(View):
+    """Boutons de contrôle dans le ticket"""
     def __init__(self):
         super().__init__(timeout=None)
     
-    @discord.ui.button(label="🙋 Prendre en charge", style=discord.ButtonStyle.success, custom_id="ticket_btn_claim")
+    @discord.ui.button(label="🙋 Prendre en charge", style=discord.ButtonStyle.success, custom_id="ticket_ctrl_claim")
     async def claim_ticket(self, interaction: discord.Interaction, button: Button):
         try:
             ticket = await get_ticket(interaction.channel.id)
@@ -513,9 +495,11 @@ class TicketControlView(View):
             c = await cfg(interaction.guild.id)
             staff_role = interaction.guild.get_role(c.get('ticket_staff', 0))
             
+            # L'utilisateur ne peut pas claim son propre ticket
             if interaction.user.id == ticket['user']:
                 return await interaction.response.send_message("❌ Vous ne pouvez pas prendre votre propre ticket", ephemeral=True)
             
+            # Vérifier permissions
             is_staff = staff_role and staff_role in interaction.user.roles
             is_owner = interaction.user.id == interaction.guild.owner_id
             is_admin = interaction.user.guild_permissions.administrator
@@ -523,6 +507,7 @@ class TicketControlView(View):
             if not (is_staff or is_owner or is_admin):
                 return await interaction.response.send_message("❌ Réservé au staff", ephemeral=True)
             
+            # Mettre à jour les permissions
             ticket_user = interaction.guild.get_member(ticket['user'])
             
             overwrites = {
@@ -534,31 +519,32 @@ class TicketControlView(View):
                 overwrites[ticket_user] = discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, read_message_history=True)
             if interaction.guild.owner and interaction.guild.owner != interaction.user:
                 overwrites[interaction.guild.owner] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
-            
             if staff_role:
                 overwrites[staff_role] = discord.PermissionOverwrite(view_channel=False)
             
             await interaction.channel.edit(overwrites=overwrites)
             
+            # Mettre à jour DB
             async with aiosqlite.connect(DB_PATH) as db:
                 await db.execute('UPDATE tickets SET claimed_by=? WHERE channel_id=?', (interaction.user.id, interaction.channel.id))
                 await db.commit()
             
             await interaction.response.send_message(f"✅ **{interaction.user.display_name}** prend ce ticket en charge\n\n*Les autres staffs ne peuvent plus voir ce ticket.*")
             
+            # Modifier le bouton
             button.disabled = True
             button.label = f"Pris par {interaction.user.display_name}"
             button.style = discord.ButtonStyle.secondary
             await interaction.message.edit(view=self)
             
-            ticket['claimed'] = interaction.user.id
-            await send_ticket_log(interaction.guild, 'claim', ticket_user or ticket['user'], ticket, extra_info=interaction.user.id)
+            # Log
+            await send_ticket_log(interaction.guild, 'claim', ticket['user'], ticket, extra_info=interaction.user.id)
             
         except Exception as ex:
-            print(f"[TICKET CLAIM ERROR] {ex}\n{traceback.format_exc()}")
+            print(f"[CLAIM ERROR] {ex}\n{traceback.format_exc()}")
             await interaction.response.send_message("❌ Erreur", ephemeral=True)
     
-    @discord.ui.button(label="➕ Ajouter Staff", style=discord.ButtonStyle.primary, custom_id="ticket_btn_addstaff")
+    @discord.ui.button(label="➕ Ajouter Staff", style=discord.ButtonStyle.primary, custom_id="ticket_ctrl_addstaff")
     async def add_staff(self, interaction: discord.Interaction, button: Button):
         try:
             ticket = await get_ticket(interaction.channel.id)
@@ -567,12 +553,13 @@ class TicketControlView(View):
             
             is_owner = interaction.user.id == interaction.guild.owner_id
             is_claimer = interaction.user.id == ticket['claimed']
+            is_admin = interaction.user.guild_permissions.administrator
             
             if not ticket['claimed']:
                 return await interaction.response.send_message("❌ Le ticket doit d'abord être pris en charge", ephemeral=True)
             
-            if not (is_claimer or is_owner):
-                return await interaction.response.send_message("❌ Seul le staff en charge ou le fondateur peut ajouter quelqu'un", ephemeral=True)
+            if not (is_claimer or is_owner or is_admin):
+                return await interaction.response.send_message("❌ Seul le staff en charge peut ajouter quelqu'un", ephemeral=True)
             
             c = await cfg(interaction.guild.id)
             staff_role = interaction.guild.get_role(c.get('ticket_staff', 0))
@@ -587,13 +574,13 @@ class TicketControlView(View):
             
             opts = [discord.SelectOption(label=f"@{m.display_name}"[:25], value=str(m.id)) for m in staffs]
             v = AddStaffSelectView(opts, interaction.channel.id)
-            await interaction.response.send_message("👥 Choisir un staff à ajouter:", view=v, ephemeral=True)
+            await interaction.response.send_message("👥 Choisir un staff:", view=v, ephemeral=True)
             
         except Exception as ex:
             print(f"[ADD STAFF ERROR] {ex}")
             await interaction.response.send_message("❌ Erreur", ephemeral=True)
     
-    @discord.ui.button(label="🔒 Fermer", style=discord.ButtonStyle.danger, custom_id="ticket_btn_close")
+    @discord.ui.button(label="🔒 Fermer", style=discord.ButtonStyle.danger, custom_id="ticket_ctrl_close")
     async def close_ticket(self, interaction: discord.Interaction, button: Button):
         try:
             ticket = await get_ticket(interaction.channel.id)
@@ -608,28 +595,28 @@ class TicketControlView(View):
             staff_role = interaction.guild.get_role(c.get('ticket_staff', 0))
             is_staff = staff_role and staff_role in interaction.user.roles
             
-            # Si claim: seul claimer ou owner/admin peut fermer
-            # Si pas claim: staff, owner ou admin peut fermer
             if ticket['claimed']:
                 if not (is_claimer or is_owner or is_admin):
-                    return await interaction.response.send_message("❌ Seul le staff en charge ou un admin peut fermer ce ticket", ephemeral=True)
+                    return await interaction.response.send_message("❌ Seul le staff en charge ou un admin peut fermer", ephemeral=True)
             else:
                 if not (is_staff or is_owner or is_admin):
-                    return await interaction.response.send_message("❌ Seul le staff ou un admin peut fermer", ephemeral=True)
+                    return await interaction.response.send_message("❌ Seul le staff peut fermer", ephemeral=True)
             
+            # Log
             ticket_user = interaction.guild.get_member(ticket['user'])
             await send_ticket_log(interaction.guild, 'close', ticket_user or ticket['user'], ticket, closer=interaction.user, channel=interaction.channel)
             
+            # Fermer
             async with aiosqlite.connect(DB_PATH) as db:
                 await db.execute("UPDATE tickets SET status='closed' WHERE channel_id=?", (interaction.channel.id,))
                 await db.commit()
             
-            await interaction.response.send_message("🔒 Fermeture du ticket dans 3 secondes...")
+            await interaction.response.send_message("🔒 Fermeture dans 3 secondes...")
             await asyncio.sleep(3)
             await interaction.channel.delete()
             
         except Exception as ex:
-            print(f"[TICKET CLOSE ERROR] {ex}\n{traceback.format_exc()}")
+            print(f"[CLOSE ERROR] {ex}\n{traceback.format_exc()}")
             try:
                 await interaction.response.send_message("❌ Erreur", ephemeral=True)
             except: pass
@@ -638,33 +625,29 @@ class TicketControlView(View):
 class AddStaffSelectView(View):
     def __init__(self, opts, channel_id):
         super().__init__(timeout=60)
-        self.channel_id = channel_id
         self.add_item(AddStaffSelect(opts, channel_id))
 
 
 class AddStaffSelect(Select):
     def __init__(self, opts, channel_id):
-        super().__init__(placeholder="Choisir un staff...", options=opts)
+        super().__init__(placeholder="Choisir...", options=opts)
         self.channel_id = channel_id
     
     async def callback(self, interaction: discord.Interaction):
         try:
-            staff_id = int(self.values[0])
-            staff = interaction.guild.get_member(staff_id)
+            staff = interaction.guild.get_member(int(self.values[0]))
             channel = interaction.guild.get_channel(self.channel_id)
             
-            if not staff or not channel:
-                return await interaction.response.send_message("❌ Erreur", ephemeral=True)
-            
-            await channel.set_permissions(staff, view_channel=True, send_messages=True, read_message_history=True)
-            
-            await interaction.response.send_message(f"✅ {staff.mention} a été ajouté au ticket!", ephemeral=True)
-            await channel.send(f"➕ **{staff.display_name}** a été ajouté au ticket par {interaction.user.mention}")
-            
-            ticket = await get_ticket(self.channel_id)
-            if ticket:
-                await send_ticket_log(interaction.guild, 'add_staff', ticket['user'], ticket, extra_info=staff_id)
-            
+            if staff and channel:
+                await channel.set_permissions(staff, view_channel=True, send_messages=True, read_message_history=True)
+                await interaction.response.send_message(f"✅ {staff.mention} ajouté!", ephemeral=True)
+                await channel.send(f"➕ **{staff.display_name}** a été ajouté par {interaction.user.mention}")
+                
+                ticket = await get_ticket(self.channel_id)
+                if ticket:
+                    await send_ticket_log(interaction.guild, 'add_staff', ticket['user'], ticket, extra_info=staff.id)
+            else:
+                await interaction.response.send_message("❌ Erreur", ephemeral=True)
         except Exception as ex:
             print(f"[ADD STAFF SELECT ERROR] {ex}")
             await interaction.response.send_message("❌ Erreur", ephemeral=True)
@@ -714,7 +697,7 @@ class MainPanel(View):
 
     @discord.ui.button(label="Tickets", emoji="🎫", style=discord.ButtonStyle.success, row=1)
     async def btn_tickets(self, interaction: discord.Interaction, button: Button):
-        v = TicketConfigPanel(self.u, self.g)
+        v = TicketMainPanel(self.u, self.g)
         await interaction.response.edit_message(embed=await v.embed(), view=v)
 
     @discord.ui.button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger, row=2)
@@ -732,7 +715,7 @@ class BackView(View):
         await interaction.response.edit_message(embed=v.embed(), view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                           🛡️ PROTECTION PANEL
+#                           🛡️ PROTECTION PANEL (simplifié)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class ProtPanel(View):
@@ -768,18 +751,6 @@ class ProtDetail(View):
         on = bool(c.get(self.key))
         e = discord.Embed(title=f"{self.prot[1]} {self.prot[2]}", color=C.GREEN if on else C.RED)
         e.add_field(name="État", value="✅ ACTIVÉ" if on else "❌ DÉSACTIVÉ", inline=False)
-        
-        if self.key == "anti_link":
-            e.add_field(name="Whitelist", value=", ".join([f"`{d}`" for d in c.get('link_whitelist',[])[:8]]) or "*Aucun*", inline=False)
-        elif self.key == "anti_image":
-            items = c.get('image_allowed',[])
-            fmts = ['png','jpg','jpeg','gif','webp','tenor','giphy']
-            e.add_field(name="Formats", value=" ".join([f"{'✅' if f in items else '❌'}`{f}`" for f in fmts]), inline=False)
-        elif self.key == "anti_badwords":
-            e.add_field(name="Mots", value=", ".join([f"`{w}`" for w in c.get('badwords_list',[])[:10]]) or "*Aucun*", inline=False)
-        
-        log_ch = self.g.get_channel(c.get(f'log_{self.key}',0))
-        e.add_field(name="📜 Log", value=log_ch.mention if log_ch else "❌", inline=False)
         return e
 
     @discord.ui.button(label="ON/OFF", emoji="🔄", style=discord.ButtonStyle.primary, row=0)
@@ -788,94 +759,13 @@ class ProtDetail(View):
         await db_set(self.g.id, self.key, 0 if c.get(self.key) else 1)
         await interaction.response.edit_message(embed=await self.embed(), view=self)
 
-    @discord.ui.button(label="Config", emoji="⚙️", style=discord.ButtonStyle.secondary, row=0)
-    async def config(self, interaction: discord.Interaction, button: Button):
-        if self.key == "anti_image":
-            v = ImageCfgPanel(self.u, self.g)
-            await interaction.response.edit_message(embed=await v.embed(), view=v)
-        elif self.key == "anti_badwords":
-            await interaction.response.send_modal(AddWordsModal(self.g))
-        else:
-            await interaction.response.send_message("⚙️ Pas de config", ephemeral=True)
-
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, interaction: discord.Interaction, button: Button):
         v = ProtPanel(self.u, self.g)
         await interaction.response.edit_message(embed=await v.embed(), view=v)
 
-class AddWordsModal(Modal, title="➕ Ajouter des mots"):
-    words = TextInput(label="Mot(s) séparés par virgules", placeholder="mot1, mot2", style=discord.TextStyle.paragraph)
-    def __init__(self, g): super().__init__(); self.g = g
-    async def on_submit(self, i):
-        c = await cfg(self.g.id)
-        items = c.get('badwords_list', [])
-        new = [x.strip().lower() for x in self.words.value.split(',') if x.strip()]
-        items.extend([x for x in new if x not in items])
-        await db_set(self.g.id, 'badwords_list', items)
-        await i.response.send_message(f"✅ Ajouté", ephemeral=True)
-
-class ImageCfgPanel(View):
-    def __init__(self, u, g):
-        super().__init__(timeout=600)
-        self.u, self.g = u, g
-
-    async def embed(self):
-        c = await cfg(self.g.id)
-        items = c.get('image_allowed', [])
-        fmts = ['png','jpg','jpeg','gif','webp','tenor','giphy']
-        e = discord.Embed(title="🖼️ Anti-Images", color=C.BLUE)
-        e.add_field(name="Formats", value=" ".join([f"{'✅' if f in items else '❌'} `{f}`" for f in fmts]), inline=False)
-        return e
-
-    @discord.ui.button(label="➕ Format", style=discord.ButtonStyle.success, row=0)
-    async def add_fmt(self, interaction: discord.Interaction, button: Button):
-        c = await cfg(self.g.id)
-        items = c.get('image_allowed', [])
-        fmts = ['png','jpg','jpeg','gif','webp','tenor','giphy']
-        avail = [f for f in fmts if f not in items]
-        if not avail:
-            return await interaction.response.send_message("✅ Tous autorisés", ephemeral=True)
-        v = FormatSelectView(self.u, self.g, avail, 'add')
-        await interaction.response.edit_message(view=v)
-
-    @discord.ui.button(label="➖ Format", style=discord.ButtonStyle.danger, row=0)
-    async def rem_fmt(self, interaction: discord.Interaction, button: Button):
-        c = await cfg(self.g.id)
-        items = c.get('image_allowed', [])
-        if not items:
-            return await interaction.response.send_message("❌ Vide", ephemeral=True)
-        v = FormatSelectView(self.u, self.g, items, 'rem')
-        await interaction.response.edit_message(view=v)
-
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
-    async def back(self, interaction: discord.Interaction, button: Button):
-        prot = next(p for p in PROTS if p[0]=="anti_image")
-        v = ProtDetail(self.u, self.g, prot)
-        await interaction.response.edit_message(embed=await v.embed(), view=v)
-
-class FormatSelectView(View):
-    def __init__(self, u, g, fmts, action):
-        super().__init__(timeout=120)
-        self.u, self.g, self.action = u, g, action
-        opts = [discord.SelectOption(label=f.upper(), value=f) for f in fmts]
-        self.add_item(FormatSelect(u, g, opts, action))
-
-class FormatSelect(Select):
-    def __init__(self, u, g, opts, action):
-        super().__init__(placeholder="Format...", options=opts)
-        self.u, self.g, self.action = u, g, action
-    async def callback(self, i):
-        c = await cfg(i.guild.id)
-        items = c.get('image_allowed', [])
-        f = self.values[0]
-        if self.action == 'add' and f not in items: items.append(f)
-        elif self.action == 'rem' and f in items: items.remove(f)
-        await db_set(i.guild.id, 'image_allowed', items)
-        v = ImageCfgPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-
 # ═══════════════════════════════════════════════════════════════════════════════
-#                           👑 IMMUNITÉS
+#                           👑 IMMUNITÉS & 📺 CONFIG SALON (simplifié)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class ImmunePanel(View):
@@ -919,10 +809,6 @@ class ImmuneRoleSelect(Select):
         v = ImmunePanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#                           📺 CONFIG SALON
-# ═══════════════════════════════════════════════════════════════════════════════
-
 class ChanPanel(View):
     def __init__(self, u, g):
         super().__init__(timeout=600)
@@ -932,95 +818,19 @@ class ChanPanel(View):
         c = await cfg(self.g.id)
         configs = c.get('channel_configs', {})
         e = discord.Embed(title="📺 Config Salon", color=C.ORANGE)
-        if configs:
-            lines = []
-            for ch_id, conf in list(configs.items())[:10]:
-                ch = self.g.get_channel(int(ch_id))
-                if ch:
-                    icons = "💬" if conf.get('messages', True) else ""
-                    icons += "🖼️" if conf.get('images', True) else ""
-                    icons += "🎞️" if conf.get('gifs', True) else ""
-                    lines.append(f"{ch.mention}: {icons or '🚫'}")
-            e.description = "\n".join(lines) or "*Aucun*"
-        else:
-            e.description = "*Aucun*"
+        e.description = f"{len(configs)} salon(s) configuré(s)" if configs else "*Aucun*"
         return e
-
-    @discord.ui.button(label="➕ Config", style=discord.ButtonStyle.success, row=0)
-    async def add(self, interaction: discord.Interaction, button: Button):
-        chs = list(self.g.text_channels)[:25]
-        opts = [discord.SelectOption(label=f"#{c.name}"[:25], value=str(c.id)) for c in chs]
-        v = ChanSelectView(self.u, self.g, opts)
-        await interaction.response.edit_message(view=v)
 
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, interaction: discord.Interaction, button: Button):
         v = MainPanel(self.u, self.g)
         await interaction.response.edit_message(embed=v.embed(), view=v)
 
-class ChanSelectView(View):
-    def __init__(self, u, g, opts):
-        super().__init__(timeout=120)
-        self.add_item(ChanSelect(u, g, opts))
-
-class ChanSelect(Select):
-    def __init__(self, u, g, opts):
-        super().__init__(placeholder="Salon...", options=opts)
-        self.u, self.g = u, g
-    async def callback(self, i):
-        v = EditChanCfg(self.u, self.g, self.values[0])
-        await i.response.edit_message(embed=await v.embed(), view=v)
-
-class EditChanCfg(View):
-    def __init__(self, u, g, ch_id):
-        super().__init__(timeout=600)
-        self.u, self.g, self.ch_id = u, g, ch_id
-
-    async def get_conf(self):
-        c = await cfg(self.g.id)
-        return c.get('channel_configs', {}).get(str(self.ch_id), {'messages':True,'images':True,'gifs':True,'emojis':True,'links':True})
-
-    async def save(self, conf):
-        c = await cfg(self.g.id)
-        configs = c.get('channel_configs', {})
-        configs[str(self.ch_id)] = conf
-        await db_set(self.g.id, 'channel_configs', configs)
-
-    async def embed(self):
-        ch = self.g.get_channel(int(self.ch_id))
-        conf = await self.get_conf()
-        s = lambda k: "✅" if conf.get(k, True) else "❌"
-        e = discord.Embed(title=f"📺 #{ch.name if ch else '?'}", color=C.ORANGE)
-        e.description = f"💬 Messages: {s('messages')}\n🖼️ Images: {s('images')}\n🎞️ GIFs: {s('gifs')}\n😀 Emojis: {s('emojis')}\n🔗 Liens: {s('links')}"
-        return e
-
-    async def toggle(self, i, key):
-        conf = await self.get_conf()
-        conf[key] = not conf.get(key, True)
-        await self.save(conf)
-        await i.response.edit_message(embed=await self.embed(), view=self)
-
-    @discord.ui.button(label="💬", style=discord.ButtonStyle.primary, row=0)
-    async def t1(self, i, b): await self.toggle(i, 'messages')
-    @discord.ui.button(label="🖼️", style=discord.ButtonStyle.primary, row=0)
-    async def t2(self, i, b): await self.toggle(i, 'images')
-    @discord.ui.button(label="🎞️", style=discord.ButtonStyle.primary, row=0)
-    async def t3(self, i, b): await self.toggle(i, 'gifs')
-    @discord.ui.button(label="😀", style=discord.ButtonStyle.primary, row=1)
-    async def t4(self, i, b): await self.toggle(i, 'emojis')
-    @discord.ui.button(label="🔗", style=discord.ButtonStyle.primary, row=1)
-    async def t5(self, i, b): await self.toggle(i, 'links')
-
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
-    async def back(self, i, b):
-        v = ChanPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-
 # ═══════════════════════════════════════════════════════════════════════════════
-#                    🎫 TICKET CONFIG PANEL
+#                    🎫 TICKET MAIN PANEL - Multi-panels
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class TicketConfigPanel(View):
+class TicketMainPanel(View):
     def __init__(self, u, g):
         super().__init__(timeout=600)
         self.u, self.g = u, g
@@ -1029,102 +839,54 @@ class TicketConfigPanel(View):
         c = await cfg(self.g.id)
         e = discord.Embed(title="🎫 Configuration Tickets", color=C.PURPLE)
         
-        panel_ch = self.g.get_channel(c.get('ticket_panel', 0))
-        e.add_field(name="📍 Salon", value=panel_ch.mention if panel_ch else "❌", inline=True)
-        
-        cat = self.g.get_channel(c.get('ticket_category', 0))
-        e.add_field(name="📁 Catégorie", value=cat.name if cat else "❌", inline=True)
-        
+        # Config globale
         staff = self.g.get_role(c.get('ticket_staff', 0))
-        e.add_field(name="👮 Staff", value=staff.mention if staff else "❌", inline=True)
-        
         log_ch = self.g.get_channel(c.get('ticket_log', 0))
+        e.add_field(name="👮 Staff", value=staff.mention if staff else "❌", inline=True)
         e.add_field(name="📜 Logs", value=log_ch.mention if log_ch else "❌", inline=True)
         
-        # Limite
-        max_tickets = c.get('ticket_max', 1)
-        e.add_field(name="🔢 Max tickets", value=f"**{max_tickets}** par utilisateur", inline=True)
-        
-        # Questions
-        questions = c.get('ticket_questions', [])
-        if questions:
-            q_text = "\n".join([f"• **{q['title']}**" for q in questions[:5]])
-            e.add_field(name=f"📝 Questions ({len(questions)})", value=q_text, inline=False)
+        # Panels
+        panels = c.get('ticket_panels', {})
+        if panels:
+            panel_list = []
+            for pid, pdata in list(panels.items())[:10]:
+                cat = self.g.get_channel(pdata.get('category', 0))
+                cat_name = cat.name if cat else "❌"
+                qcount = len(pdata.get('questions', []))
+                panel_list.append(f"• **{pdata.get('name', pid)[:20]}** → `{cat_name}` ({qcount} Q, max {pdata.get('max', 1)})")
+            e.add_field(name=f"📋 Panels ({len(panels)})", value="\n".join(panel_list), inline=False)
         else:
-            e.add_field(name="📝 Questions", value="*Aucune*", inline=False)
+            e.add_field(name="📋 Panels", value="*Aucun panel créé*", inline=False)
         
         return e
-
-    @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
-    async def set_panel(self, interaction: discord.Interaction, button: Button):
-        chs = list(self.g.text_channels)[:25]
-        opts = [discord.SelectOption(label=f"#{c.name}"[:25], value=str(c.id)) for c in chs]
-        v = TicketSelectView(self.u, self.g, opts, 'ticket_panel')
-        await interaction.response.edit_message(embed=discord.Embed(title="📍 Choisir le salon", color=C.PURPLE), view=v)
-
-    @discord.ui.button(label="📁 Catégorie", style=discord.ButtonStyle.primary, row=0)
-    async def set_cat(self, interaction: discord.Interaction, button: Button):
-        cats = list(self.g.categories)[:25]
-        if not cats:
-            return await interaction.response.send_message("❌ Aucune catégorie", ephemeral=True)
-        opts = [discord.SelectOption(label=f"📁 {c.name}"[:25], value=str(c.id)) for c in cats]
-        v = TicketSelectView(self.u, self.g, opts, 'ticket_category')
-        await interaction.response.edit_message(embed=discord.Embed(title="📁 Choisir la catégorie", color=C.PURPLE), view=v)
 
     @discord.ui.button(label="👮 Staff", style=discord.ButtonStyle.primary, row=0)
     async def set_staff(self, interaction: discord.Interaction, button: Button):
         roles = [r for r in self.g.roles[1:] if not r.is_bot_managed()][:25]
-        if not roles:
-            return await interaction.response.send_message("❌ Aucun rôle", ephemeral=True)
         opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
-        v = TicketSelectView(self.u, self.g, opts, 'ticket_staff')
-        await interaction.response.edit_message(embed=discord.Embed(title="👮 Choisir le rôle staff", color=C.PURPLE), view=v)
+        v = TicketStaffSelectView(self.u, self.g, opts)
+        await interaction.response.edit_message(embed=discord.Embed(title="👮 Rôle Staff", color=C.PURPLE), view=v)
 
-    @discord.ui.button(label="📜 Logs", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="📜 Logs", style=discord.ButtonStyle.primary, row=0)
     async def set_log(self, interaction: discord.Interaction, button: Button):
         chs = list(self.g.text_channels)[:25]
         opts = [discord.SelectOption(label=f"#{c.name}"[:25], value=str(c.id)) for c in chs]
-        v = TicketSelectView(self.u, self.g, opts, 'ticket_log')
-        await interaction.response.edit_message(embed=discord.Embed(title="📜 Choisir le salon logs", color=C.PURPLE), view=v)
+        v = TicketLogSelectView(self.u, self.g, opts)
+        await interaction.response.edit_message(embed=discord.Embed(title="📜 Salon Logs", color=C.PURPLE), view=v)
 
-    @discord.ui.button(label="🔢 Max tickets", style=discord.ButtonStyle.secondary, row=1)
-    async def set_max(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_modal(SetMaxTicketsModal(self.g, self.u))
+    @discord.ui.button(label="➕ Nouveau Panel", style=discord.ButtonStyle.success, row=1)
+    async def new_panel(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(NewPanelModal(self.u, self.g))
 
-    @discord.ui.button(label="📝 Questions", style=discord.ButtonStyle.secondary, row=1)
-    async def set_questions(self, interaction: discord.Interaction, button: Button):
-        v = QuestionConfigPanel(self.u, self.g)
-        await interaction.response.edit_message(embed=await v.embed(), view=v)
-
-    @discord.ui.button(label="📤 Envoyer Panel", style=discord.ButtonStyle.success, row=2)
-    async def send_panel(self, interaction: discord.Interaction, button: Button):
+    @discord.ui.button(label="📝 Modifier Panel", style=discord.ButtonStyle.secondary, row=1)
+    async def edit_panel(self, interaction: discord.Interaction, button: Button):
         c = await cfg(self.g.id)
-        
-        if not c.get('ticket_panel'):
-            return await interaction.response.send_message("❌ Configure le **Salon** d'abord!", ephemeral=True)
-        if not c.get('ticket_category'):
-            return await interaction.response.send_message("❌ Configure la **Catégorie** d'abord!", ephemeral=True)
-        if not c.get('ticket_staff'):
-            return await interaction.response.send_message("❌ Configure le **Staff** d'abord!", ephemeral=True)
-        
-        ch = self.g.get_channel(c['ticket_panel'])
-        if not ch:
-            return await interaction.response.send_message("❌ Salon introuvable", ephemeral=True)
-        
-        questions = c.get('ticket_questions', [])
-        max_tickets = c.get('ticket_max', 1)
-        desc = "Cliquez sur le bouton ci-dessous pour créer un ticket."
-        if questions:
-            desc += f"\n\n📝 Vous devrez répondre à **{len(questions)}** question(s)."
-        desc += f"\n🔢 Maximum **{max_tickets}** ticket(s) simultané(s)."
-        
-        embed = discord.Embed(
-            title="🎫 Support - Créer un ticket",
-            description=desc,
-            color=C.BLURPLE
-        )
-        await ch.send(embed=embed, view=TicketCreateView())
-        await interaction.response.send_message(f"✅ Panel envoyé dans {ch.mention}!", ephemeral=True)
+        panels = c.get('ticket_panels', {})
+        if not panels:
+            return await interaction.response.send_message("❌ Aucun panel", ephemeral=True)
+        opts = [discord.SelectOption(label=pdata.get('name', pid)[:25], value=pid) for pid, pdata in list(panels.items())[:25]]
+        v = EditPanelSelectView(self.u, self.g, opts)
+        await interaction.response.edit_message(embed=discord.Embed(title="📝 Choisir un panel", color=C.PURPLE), view=v)
 
     @discord.ui.button(label="🔄 Rafraîchir", style=discord.ButtonStyle.secondary, row=2)
     async def refresh(self, interaction: discord.Interaction, button: Button):
@@ -1136,104 +898,290 @@ class TicketConfigPanel(View):
         await interaction.response.edit_message(embed=v.embed(), view=v)
 
 
-class SetMaxTicketsModal(Modal, title="🔢 Limite de tickets"):
-    max_value = TextInput(label="Nombre maximum de tickets par utilisateur", placeholder="Ex: 2", default="1", max_length=2)
+class TicketStaffSelectView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.add_item(TicketStaffSelect(u, g, opts))
+
+class TicketStaffSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Rôle...", options=opts)
+        self.u, self.g = u, g
+    async def callback(self, i):
+        await db_set(i.guild.id, 'ticket_staff', int(self.values[0]))
+        v = TicketMainPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class TicketLogSelectView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.add_item(TicketLogSelect(u, g, opts))
+
+class TicketLogSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Salon...", options=opts)
+        self.u, self.g = u, g
+    async def callback(self, i):
+        await db_set(i.guild.id, 'ticket_log', int(self.values[0]))
+        v = TicketMainPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class NewPanelModal(Modal, title="➕ Nouveau Panel"):
+    name = TextInput(label="Nom du panel", placeholder="Ex: Support, Partenariat...", max_length=30)
+    max_tickets = TextInput(label="Max tickets par utilisateur", placeholder="1", default="1", max_length=2)
     
-    def __init__(self, g, u):
+    def __init__(self, u, g):
         super().__init__()
-        self.g, self.u = g, u
+        self.u, self.g = u, g
     
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            val = int(self.max_value.value)
-            if val < 1: val = 1
-            if val > 10: val = 10
-            await db_set(self.g.id, 'ticket_max', val)
-            v = TicketConfigPanel(self.u, self.g)
+            panel_id = str(int(time.time()))
+            max_t = int(self.max_tickets.value) if self.max_tickets.value.isdigit() else 1
+            if max_t < 1: max_t = 1
+            if max_t > 10: max_t = 10
+            
+            c = await cfg(self.g.id)
+            panels = c.get('ticket_panels', {})
+            panels[panel_id] = {
+                'name': self.name.value,
+                'category': 0,
+                'questions': [],
+                'max': max_t
+            }
+            await db_set(self.g.id, 'ticket_panels', panels)
+            
+            # Aller à l'édition du panel
+            v = PanelEditView(self.u, self.g, panel_id)
             await interaction.response.edit_message(embed=await v.embed(), view=v)
-        except:
-            await interaction.response.send_message("❌ Entrez un nombre valide (1-10)", ephemeral=True)
+        except Exception as ex:
+            await interaction.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
 
 
-class QuestionConfigPanel(View):
-    def __init__(self, u, g):
-        super().__init__(timeout=600)
+class EditPanelSelectView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.add_item(EditPanelSelect(u, g, opts))
+
+class EditPanelSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Panel...", options=opts)
         self.u, self.g = u, g
+    async def callback(self, i):
+        v = PanelEditView(self.u, self.g, self.values[0])
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class PanelEditView(View):
+    def __init__(self, u, g, panel_id):
+        super().__init__(timeout=600)
+        self.u, self.g, self.panel_id = u, g, panel_id
+
+    async def get_panel(self):
+        c = await cfg(self.g.id)
+        return c.get('ticket_panels', {}).get(self.panel_id, {})
+
+    async def embed(self):
+        panel = await self.get_panel()
+        e = discord.Embed(title=f"🎫 Panel: {panel.get('name', '?')}", color=C.PURPLE)
+        
+        cat = self.g.get_channel(panel.get('category', 0))
+        e.add_field(name="📁 Catégorie", value=cat.name if cat else "❌ Non configuré", inline=True)
+        e.add_field(name="🔢 Max tickets", value=str(panel.get('max', 1)), inline=True)
+        
+        questions = panel.get('questions', [])
+        if questions:
+            q_text = "\n".join([f"• {q['title']}" for q in questions[:5]])
+            e.add_field(name=f"📝 Questions ({len(questions)})", value=q_text, inline=False)
+        else:
+            e.add_field(name="📝 Questions", value="*Aucune*", inline=False)
+        
+        return e
+
+    @discord.ui.button(label="📁 Catégorie", style=discord.ButtonStyle.primary, row=0)
+    async def set_category(self, interaction: discord.Interaction, button: Button):
+        cats = list(self.g.categories)[:25]
+        if not cats:
+            return await interaction.response.send_message("❌ Aucune catégorie", ephemeral=True)
+        opts = [discord.SelectOption(label=f"📁 {c.name}"[:25], value=str(c.id)) for c in cats]
+        v = PanelCategorySelectView(self.u, self.g, self.panel_id, opts)
+        await interaction.response.edit_message(view=v)
+
+    @discord.ui.button(label="📝 Questions", style=discord.ButtonStyle.primary, row=0)
+    async def edit_questions(self, interaction: discord.Interaction, button: Button):
+        v = PanelQuestionsView(self.u, self.g, self.panel_id)
+        await interaction.response.edit_message(embed=await v.embed(), view=v)
+
+    @discord.ui.button(label="🔢 Max", style=discord.ButtonStyle.secondary, row=0)
+    async def set_max(self, interaction: discord.Interaction, button: Button):
+        await interaction.response.send_modal(SetMaxModal(self.u, self.g, self.panel_id))
+
+    @discord.ui.button(label="📤 Envoyer", style=discord.ButtonStyle.success, row=1)
+    async def send_panel(self, interaction: discord.Interaction, button: Button):
+        panel = await self.get_panel()
+        c = await cfg(self.g.id)
+        
+        if not panel.get('category'):
+            return await interaction.response.send_message("❌ Configure la **Catégorie** d'abord!", ephemeral=True)
+        if not c.get('ticket_staff'):
+            return await interaction.response.send_message("❌ Configure le **Staff** d'abord (menu principal)!", ephemeral=True)
+        
+        # Choisir où envoyer
+        chs = list(self.g.text_channels)[:25]
+        opts = [discord.SelectOption(label=f"#{ch.name}"[:25], value=str(ch.id)) for ch in chs]
+        v = SendPanelSelectView(self.u, self.g, self.panel_id, opts)
+        await interaction.response.edit_message(embed=discord.Embed(title="📤 Où envoyer le panel?", color=C.PURPLE), view=v)
+
+    @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, row=1)
+    async def delete_panel(self, interaction: discord.Interaction, button: Button):
+        c = await cfg(self.g.id)
+        panels = c.get('ticket_panels', {})
+        if self.panel_id in panels:
+            del panels[self.panel_id]
+            await db_set(self.g.id, 'ticket_panels', panels)
+        v = TicketMainPanel(self.u, self.g)
+        await interaction.response.edit_message(embed=await v.embed(), view=v)
+
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+    async def back(self, interaction: discord.Interaction, button: Button):
+        v = TicketMainPanel(self.u, self.g)
+        await interaction.response.edit_message(embed=await v.embed(), view=v)
+
+
+class PanelCategorySelectView(View):
+    def __init__(self, u, g, panel_id, opts):
+        super().__init__(timeout=120)
+        self.add_item(PanelCategorySelect(u, g, panel_id, opts))
+
+class PanelCategorySelect(Select):
+    def __init__(self, u, g, panel_id, opts):
+        super().__init__(placeholder="Catégorie...", options=opts)
+        self.u, self.g, self.panel_id = u, g, panel_id
+    async def callback(self, i):
+        c = await cfg(i.guild.id)
+        panels = c.get('ticket_panels', {})
+        if self.panel_id in panels:
+            panels[self.panel_id]['category'] = int(self.values[0])
+            await db_set(i.guild.id, 'ticket_panels', panels)
+        v = PanelEditView(self.u, self.g, self.panel_id)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class SetMaxModal(Modal, title="🔢 Max tickets"):
+    max_val = TextInput(label="Nombre max", placeholder="1-10", default="1", max_length=2)
+    def __init__(self, u, g, pid):
+        super().__init__()
+        self.u, self.g, self.pid = u, g, pid
+    async def on_submit(self, i):
+        val = int(self.max_val.value) if self.max_val.value.isdigit() else 1
+        val = max(1, min(10, val))
+        c = await cfg(self.g.id)
+        panels = c.get('ticket_panels', {})
+        if self.pid in panels:
+            panels[self.pid]['max'] = val
+            await db_set(self.g.id, 'ticket_panels', panels)
+        v = PanelEditView(self.u, self.g, self.pid)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class PanelQuestionsView(View):
+    def __init__(self, u, g, panel_id):
+        super().__init__(timeout=600)
+        self.u, self.g, self.panel_id = u, g, panel_id
 
     async def embed(self):
         c = await cfg(self.g.id)
-        questions = c.get('ticket_questions', [])
-        e = discord.Embed(title="📝 Configuration Questions", color=C.PURPLE)
+        panel = c.get('ticket_panels', {}).get(self.panel_id, {})
+        questions = panel.get('questions', [])
         
+        e = discord.Embed(title="📝 Questions", color=C.PURPLE)
         if questions:
             for i, q in enumerate(questions, 1):
                 e.add_field(name=f"{i}. {q['title']}", value=q['question'][:100], inline=False)
         else:
-            e.description = "*Aucune question configurée*\n\nSans questions, les tickets seront créés directement."
-        
-        e.set_footer(text="Maximum 5 questions (limite Discord)")
+            e.description = "*Aucune question*"
+        e.set_footer(text="Max 5 questions")
         return e
 
-    @discord.ui.button(label="➕ Ajouter Question", style=discord.ButtonStyle.success, row=0)
-    async def add_question(self, interaction: discord.Interaction, button: Button):
+    @discord.ui.button(label="➕ Ajouter", style=discord.ButtonStyle.success, row=0)
+    async def add_q(self, interaction: discord.Interaction, button: Button):
         c = await cfg(self.g.id)
-        questions = c.get('ticket_questions', [])
-        
-        if len(questions) >= 5:
-            return await interaction.response.send_message("❌ Maximum 5 questions", ephemeral=True)
-        
-        await interaction.response.send_modal(AddQuestionModal(self.g, self.u))
+        panel = c.get('ticket_panels', {}).get(self.panel_id, {})
+        if len(panel.get('questions', [])) >= 5:
+            return await interaction.response.send_message("❌ Max 5 questions", ephemeral=True)
+        await interaction.response.send_modal(AddQuestionModal(self.u, self.g, self.panel_id))
 
-    @discord.ui.button(label="🗑️ Supprimer Tout", style=discord.ButtonStyle.danger, row=0)
-    async def clear_questions(self, interaction: discord.Interaction, button: Button):
-        await db_set(self.g.id, 'ticket_questions', [])
+    @discord.ui.button(label="🗑️ Supprimer tout", style=discord.ButtonStyle.danger, row=0)
+    async def clear_q(self, interaction: discord.Interaction, button: Button):
+        c = await cfg(self.g.id)
+        panels = c.get('ticket_panels', {})
+        if self.panel_id in panels:
+            panels[self.panel_id]['questions'] = []
+            await db_set(self.g.id, 'ticket_panels', panels)
         await interaction.response.edit_message(embed=await self.embed(), view=self)
 
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, interaction: discord.Interaction, button: Button):
-        v = TicketConfigPanel(self.u, self.g)
+        v = PanelEditView(self.u, self.g, self.panel_id)
         await interaction.response.edit_message(embed=await v.embed(), view=v)
 
 
-class AddQuestionModal(Modal, title="➕ Ajouter une question"):
-    q_title = TextInput(label="Titre (label du champ)", placeholder="Ex: Pseudo en jeu", max_length=45)
-    q_question = TextInput(label="Question / Description", placeholder="Ex: Quel est votre pseudo ?", style=discord.TextStyle.paragraph, max_length=100)
+class AddQuestionModal(Modal, title="➕ Ajouter question"):
+    q_title = TextInput(label="Titre", placeholder="Ex: Pseudo", max_length=45)
+    q_question = TextInput(label="Question", placeholder="Ex: Quel est votre pseudo?", style=discord.TextStyle.paragraph, max_length=100)
     
-    def __init__(self, g, u):
+    def __init__(self, u, g, pid):
         super().__init__()
-        self.g, self.u = g, u
+        self.u, self.g, self.pid = u, g, pid
     
-    async def on_submit(self, interaction: discord.Interaction):
+    async def on_submit(self, i):
         c = await cfg(self.g.id)
-        questions = c.get('ticket_questions', [])
-        
-        questions.append({
-            'title': self.q_title.value,
-            'question': self.q_question.value
-        })
-        
-        await db_set(self.g.id, 'ticket_questions', questions)
-        
-        v = QuestionConfigPanel(self.u, self.g)
-        await interaction.response.edit_message(embed=await v.embed(), view=v)
+        panels = c.get('ticket_panels', {})
+        if self.pid in panels:
+            panels[self.pid].setdefault('questions', []).append({
+                'title': self.q_title.value,
+                'question': self.q_question.value
+            })
+            await db_set(self.g.id, 'ticket_panels', panels)
+        v = PanelQuestionsView(self.u, self.g, self.pid)
+        await i.response.edit_message(embed=await v.embed(), view=v)
 
 
-class TicketSelectView(View):
-    def __init__(self, u, g, opts, key):
+class SendPanelSelectView(View):
+    def __init__(self, u, g, panel_id, opts):
         super().__init__(timeout=120)
-        self.add_item(TicketConfigSelect(u, g, opts, key))
+        self.add_item(SendPanelSelect(u, g, panel_id, opts))
 
-
-class TicketConfigSelect(Select):
-    def __init__(self, u, g, opts, key):
-        super().__init__(placeholder="Sélectionner...", options=opts)
-        self.u, self.g, self.key = u, g, key
+class SendPanelSelect(Select):
+    def __init__(self, u, g, panel_id, opts):
+        super().__init__(placeholder="Salon...", options=opts)
+        self.u, self.g, self.panel_id = u, g, panel_id
     
-    async def callback(self, interaction: discord.Interaction):
-        value = int(self.values[0])
-        await db_set(interaction.guild.id, self.key, value)
-        v = TicketConfigPanel(self.u, self.g)
-        await interaction.response.edit_message(embed=await v.embed(), view=v)
+    async def callback(self, i):
+        ch = i.guild.get_channel(int(self.values[0]))
+        if not ch:
+            return await i.response.send_message("❌ Salon introuvable", ephemeral=True)
+        
+        c = await cfg(i.guild.id)
+        panel = c.get('ticket_panels', {}).get(self.panel_id, {})
+        
+        questions = panel.get('questions', [])
+        max_t = panel.get('max', 1)
+        
+        desc = "Cliquez sur le bouton ci-dessous pour créer un ticket."
+        if questions:
+            desc += f"\n\n📝 Vous devrez répondre à **{len(questions)}** question(s)."
+        desc += f"\n🔢 Maximum **{max_t}** ticket(s) simultané(s)."
+        
+        embed = discord.Embed(
+            title=f"🎫 {panel.get('name', 'Support')}",
+            description=desc,
+            color=C.BLURPLE
+        )
+        
+        await ch.send(embed=embed, view=TicketCreateView(self.panel_id))
+        await i.response.send_message(f"✅ Panel envoyé dans {ch.mention}!", ephemeral=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              🎯 EVENTS
@@ -1242,128 +1190,65 @@ class TicketConfigSelect(Select):
 @bot.event
 async def on_ready():
     await db_init()
-    bot.add_view(TicketCreateView())
+    
+    # Enregistrer les vues persistantes pour les tickets
     bot.add_view(TicketControlView())
+    
+    # Charger les panels existants
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('SELECT guild_id, data FROM guild_config') as c:
+                rows = await c.fetchall()
+        for guild_id, data_str in rows:
+            try:
+                data = json.loads(data_str) if data_str else {}
+                panels = data.get('ticket_panels', {})
+                for panel_id in panels:
+                    bot.add_view(TicketCreateView(panel_id))
+            except: pass
+    except: pass
+    
     await bot.tree.sync()
-    print(f"✅ {bot.user.name} v11.1 prêt!")
+    print(f"✅ {bot.user.name} v11.2 prêt!")
 
 @bot.event
 async def on_member_remove(member):
-    """Quand un membre quitte - vérifier s'il avait un ticket ouvert"""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute("SELECT id, channel_id, claimed_by, answers FROM tickets WHERE guild_id=? AND user_id=? AND status='open'", (member.guild.id, member.id)) as c:
-                ticket = await c.fetchone()
+                tickets = await c.fetchall()
                 
-        if ticket:
+        for ticket in tickets:
             ticket_info = {'id': ticket[0], 'user': member.id, 'claimed': ticket[2], 'answers': json.loads(ticket[3]) if ticket[3] else {}}
             channel = member.guild.get_channel(ticket[1])
             
             await send_ticket_log(member.guild, 'leave', member, ticket_info)
             
             if channel:
-                embed = discord.Embed(
-                    title="🚪 Utilisateur parti",
-                    description=f"**{member.display_name}** a quitté le serveur.\nLe ticket reste ouvert pour archivage.",
-                    color=C.ORANGE
-                )
+                embed = discord.Embed(title="🚪 Utilisateur parti", description=f"**{member.display_name}** a quitté.", color=C.ORANGE)
                 await channel.send(embed=embed)
-    except Exception as ex:
-        print(f"[MEMBER REMOVE TICKET] {ex}")
+    except: pass
 
 @bot.event
 async def on_message(msg):
     if msg.author.bot or not msg.guild: return
-
     try:
         c = await cfg(msg.guild.id)
         content = msg.content or ""
-        ch_id = msg.channel.id
-
-        gif_type = get_gif_type(msg)
-        allowed_gifs = c.get('image_allowed', [])
-        is_allowed_gif = gif_type is not None and gif_type in allowed_gifs
-
-        ch_conf = c.get('channel_configs', {}).get(str(ch_id))
-        if ch_conf:
-            if not (is_allowed_gif and ch_conf.get('gifs', True)):
-                violation, vtype = check_channel_cfg(msg, ch_conf)
-                if violation:
-                    await msg.delete()
-                    return
-
+        
         if c.get('anti_phishing'):
             found, domain = check_phishing(content)
             if found:
                 await msg.delete()
-                await send_log(msg.guild, 'anti_phishing', msg.author, msg, "Phishing", f"`{domain}`")
                 await sanction(msg.author, c.get('phishing_action', 'ban'), 60, "Phishing", msg.guild)
                 return
 
         if c.get('anti_scam') and not await is_immune(msg.author, 'anti_scam'):
-            found, pattern = check_scam(content)
+            found, _ = check_scam(content)
             if found:
                 await msg.delete()
-                await send_log(msg.guild, 'anti_scam', msg.author, msg, "Scam", f"`{pattern}`")
                 await sanction(msg.author, c.get('scam_action', 'mute'), 60, "Scam", msg.guild)
                 return
-
-        if c.get('anti_badwords') and not await is_immune(msg.author, 'anti_badwords'):
-            found, word = check_badwords(content, c.get('badwords_list', []))
-            if found:
-                await msg.delete()
-                await send_log(msg.guild, 'anti_badwords', msg.author, msg, "Mot interdit", f"`{word}`")
-                return
-
-        if c.get('anti_invite'):
-            found, invite = check_invite(content)
-            if found:
-                await msg.delete()
-                await send_log(msg.guild, 'anti_invite', msg.author, msg, "Invitation", f"`{invite}`")
-                return
-
-        if c.get('anti_link') and not is_allowed_gif:
-            if ch_id not in c.get('link_allowed_channels', []):
-                found, url = check_link(content, c.get('link_whitelist', []))
-                if found:
-                    await msg.delete()
-                    await send_log(msg.guild, 'anti_link', msg.author, msg, "Lien", f"`{url}`")
-                    return
-
-        if c.get('anti_image') and not await is_immune(msg.author, 'anti_image') and not is_allowed_gif:
-            if ch_id not in c.get('image_allowed_channels', []):
-                blocked = check_image(msg, c.get('image_allowed', []))
-                if blocked:
-                    await msg.delete()
-                    await send_log(msg.guild, 'anti_image', msg.author, msg, "Format", f"`{', '.join(blocked)}`")
-                    return
-
-        if c.get('anti_spam') and not await is_immune(msg.author, 'anti_spam'):
-            if await check_spam(msg, c.get('spam_max', 5), c.get('spam_interval', 5)):
-                await msg.delete()
-                await send_log(msg.guild, 'anti_spam', msg.author, msg, "Spam", None)
-                await sanction(msg.author, c.get('spam_action', 'mute'), 10, "Spam", msg.guild)
-                return
-
-        if c.get('anti_caps') and not await is_immune(msg.author, 'anti_caps'):
-            if check_caps(content, c.get('caps_percent', 70)):
-                await msg.delete()
-                await send_log(msg.guild, 'anti_caps', msg.author, msg, "Caps", None)
-                return
-
-    except Exception as e:
-        print(f"[MSG ERROR] {e}")
-
-@bot.event
-async def on_member_join(member):
-    try:
-        c = await cfg(member.guild.id)
-        if c.get('anti_newaccount'):
-            days = c.get('newaccount_days', 7)
-            age = (now() - member.created_at.replace(tzinfo=timezone.utc)).days
-            if age < days:
-                await send_log(member.guild, 'anti_newaccount', member, None, "Compte récent", f"{age}j")
-                await member.kick(reason=f"Compte récent ({age}j)")
     except: pass
 
 @bot.tree.command(name="configure", description="⚙️ Configuration")
@@ -1373,16 +1258,6 @@ async def configure_cmd(interaction: discord.Interaction):
     view = MainPanel(interaction.user, interaction.guild)
     await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
-@bot.tree.command(name="warn", description="⚠️ Avertir")
-@app_commands.describe(membre="Membre", raison="Raison")
-async def warn_cmd(interaction: discord.Interaction, membre: discord.Member, raison: str):
-    if not interaction.user.guild_permissions.moderate_members:
-        return await interaction.response.send_message("❌", ephemeral=True)
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute('INSERT INTO infractions (guild_id,user_id,mod_id,type,reason) VALUES (?,?,?,?,?)', (interaction.guild.id, membre.id, interaction.user.id, 'warn', raison))
-        await db.commit()
-    await interaction.response.send_message(f"⚠️ {membre.mention}: {raison}")
-
 if __name__ == "__main__":
-    print("🚀 v11.1")
+    print("🚀 v11.2")
     bot.run(TOKEN)
