@@ -1,6 +1,6 @@
 # ═══════════════════════════════════════════════════════════════════════════════
-#                        🌟 BOT PREMIUM v11.2 🌟
-#       Tickets Multi-Panels : Chaque panel a sa propre catégorie/config
+#                        🌟 BOT PREMIUM v11.3 🌟
+#       Tickets Multi-Panels + Migration DB automatique
 # ═══════════════════════════════════════════════════════════════════════════════
 
 try:
@@ -45,26 +45,40 @@ LEET = {'a':['@','4'],'e':['3','€'],'i':['1','!'],'o':['0'],'s':['$','5'],'t':
 def now(): return datetime.now(timezone.utc)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                              💾 DATABASE
+#                              💾 DATABASE + MIGRATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def db_init():
     async with aiosqlite.connect(DB_PATH) as db:
+        # Tables de base
         await db.execute('CREATE TABLE IF NOT EXISTS guild_config (guild_id INTEGER PRIMARY KEY, data TEXT DEFAULT "{}")')
         await db.execute('CREATE TABLE IF NOT EXISTS immune_roles (guild_id INTEGER, role_id INTEGER, PRIMARY KEY(guild_id,role_id))')
         await db.execute('CREATE TABLE IF NOT EXISTS immune_users (guild_id INTEGER, user_id INTEGER, PRIMARY KEY(guild_id,user_id))')
         await db.execute('CREATE TABLE IF NOT EXISTS infractions (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, user_id INTEGER, mod_id INTEGER, type TEXT, reason TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)')
+        
+        # Table tickets - création si n'existe pas
         await db.execute('''CREATE TABLE IF NOT EXISTS tickets (
             id INTEGER PRIMARY KEY AUTOINCREMENT, 
             guild_id INTEGER, 
             channel_id INTEGER, 
             user_id INTEGER, 
-            panel_id TEXT DEFAULT "",
             claimed_by INTEGER DEFAULT 0, 
             status TEXT DEFAULT "open",
             answers TEXT DEFAULT "{}",
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )''')
+        
+        # MIGRATION: Ajouter panel_id si n'existe pas
+        try:
+            async with db.execute("PRAGMA table_info(tickets)") as cursor:
+                columns = [row[1] for row in await cursor.fetchall()]
+            
+            if 'panel_id' not in columns:
+                await db.execute('ALTER TABLE tickets ADD COLUMN panel_id TEXT DEFAULT ""')
+                print("✅ Migration: colonne panel_id ajoutée")
+        except Exception as e:
+            print(f"[MIGRATION] {e}")
+        
         await db.commit()
     print("✅ DB OK")
 
@@ -98,7 +112,7 @@ async def cfg(gid):
         'log_anti_link':0,'log_anti_image':0,'log_anti_phishing':0,'log_anti_scam':0,'log_anti_spam':0,'log_anti_caps':0,'log_anti_badwords':0,'log_anti_invite':0,'log_anti_newaccount':0,
         'channel_configs':{},
         'ticket_staff':0,'ticket_log':0,
-        'ticket_panels':{}  # {panel_id: {category, questions, max, name}}
+        'ticket_panels':{}
     }
     for k,v in defaults.items():
         if k not in data: data[k]=v
@@ -221,9 +235,10 @@ async def get_ticket(ch_id):
             async with db.execute('SELECT id,user_id,claimed_by,answers,panel_id FROM tickets WHERE channel_id=? AND status="open"', (ch_id,)) as c:
                 r = await c.fetchone()
                 if r:
-                    return {'id':r[0],'user':r[1],'claimed':r[2],'answers':json.loads(r[3]) if r[3] else {},'panel_id':r[4]}
+                    return {'id':r[0],'user':r[1],'claimed':r[2],'answers':json.loads(r[3]) if r[3] else {},'panel_id':r[4] or ''}
                 return None
-    except:
+    except Exception as e:
+        print(f"[GET_TICKET ERROR] {e}")
         return None
 
 async def count_user_open_tickets(guild, user_id, panel_id=None):
@@ -715,7 +730,7 @@ class BackView(View):
         await interaction.response.edit_message(embed=v.embed(), view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                           🛡️ PROTECTION PANEL (simplifié)
+#                           🛡️ PROTECTION PANEL
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class ProtPanel(View):
@@ -765,7 +780,7 @@ class ProtDetail(View):
         await interaction.response.edit_message(embed=await v.embed(), view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                           👑 IMMUNITÉS & 📺 CONFIG SALON (simplifié)
+#                           👑 IMMUNITÉS & 📺 CONFIG SALON
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class ImmunePanel(View):
@@ -827,7 +842,7 @@ class ChanPanel(View):
         await interaction.response.edit_message(embed=v.embed(), view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                    🎫 TICKET MAIN PANEL - Multi-panels
+#                    🎫 TICKET MAIN PANEL
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TicketMainPanel(View):
@@ -839,13 +854,11 @@ class TicketMainPanel(View):
         c = await cfg(self.g.id)
         e = discord.Embed(title="🎫 Configuration Tickets", color=C.PURPLE)
         
-        # Config globale
         staff = self.g.get_role(c.get('ticket_staff', 0))
         log_ch = self.g.get_channel(c.get('ticket_log', 0))
         e.add_field(name="👮 Staff", value=staff.mention if staff else "❌", inline=True)
         e.add_field(name="📜 Logs", value=log_ch.mention if log_ch else "❌", inline=True)
         
-        # Panels
         panels = c.get('ticket_panels', {})
         if panels:
             panel_list = []
@@ -939,8 +952,7 @@ class NewPanelModal(Modal, title="➕ Nouveau Panel"):
         try:
             panel_id = str(int(time.time()))
             max_t = int(self.max_tickets.value) if self.max_tickets.value.isdigit() else 1
-            if max_t < 1: max_t = 1
-            if max_t > 10: max_t = 10
+            max_t = max(1, min(10, max_t))
             
             c = await cfg(self.g.id)
             panels = c.get('ticket_panels', {})
@@ -952,7 +964,6 @@ class NewPanelModal(Modal, title="➕ Nouveau Panel"):
             }
             await db_set(self.g.id, 'ticket_panels', panels)
             
-            # Aller à l'édition du panel
             v = PanelEditView(self.u, self.g, panel_id)
             await interaction.response.edit_message(embed=await v.embed(), view=v)
         except Exception as ex:
@@ -1027,7 +1038,6 @@ class PanelEditView(View):
         if not c.get('ticket_staff'):
             return await interaction.response.send_message("❌ Configure le **Staff** d'abord (menu principal)!", ephemeral=True)
         
-        # Choisir où envoyer
         chs = list(self.g.text_channels)[:25]
         opts = [discord.SelectOption(label=f"#{ch.name}"[:25], value=str(ch.id)) for ch in chs]
         v = SendPanelSelectView(self.u, self.g, self.panel_id, opts)
@@ -1191,7 +1201,7 @@ class SendPanelSelect(Select):
 async def on_ready():
     await db_init()
     
-    # Enregistrer les vues persistantes pour les tickets
+    # Enregistrer les vues persistantes
     bot.add_view(TicketControlView())
     
     # Charger les panels existants
@@ -1209,7 +1219,7 @@ async def on_ready():
     except: pass
     
     await bot.tree.sync()
-    print(f"✅ {bot.user.name} v11.2 prêt!")
+    print(f"✅ {bot.user.name} v11.3 prêt!")
 
 @bot.event
 async def on_member_remove(member):
@@ -1259,5 +1269,5 @@ async def configure_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True)
 
 if __name__ == "__main__":
-    print("🚀 v11.2")
+    print("🚀 v11.3")
     bot.run(TOKEN)
