@@ -2917,19 +2917,17 @@ async def relay_discord_message(msg):
                 async for row in cursor:
                     guild_id, data_str = row
                     if guild_id == msg.guild.id:
-                        continue  # Ne pas relayer vers le même serveur
+                        continue
                     
                     try:
                         data = json.loads(data_str) if data_str else {}
                         feeds = data.get('ads_discord_feeds', [])
                         dest_channel_id = data.get('ads_discord_channel', 0)
                         
-                        # Vérifier si ce salon est suivi
                         is_followed = any(f['channel_id'] == channel_id for f in feeds)
                         if not is_followed or not dest_channel_id:
                             continue
                         
-                        # Trouver le salon de destination
                         dest_guild = bot.get_guild(guild_id)
                         if not dest_guild:
                             continue
@@ -2937,17 +2935,39 @@ async def relay_discord_message(msg):
                         if not dest_channel:
                             continue
                         
-                        # Créer l'embed de relay
-                        e = discord.Embed(color=C.BLURPLE)
+                        # ═══════════════ EMBED DISCORD RELAY PROFESSIONNEL ═══════════════
+                        e = discord.Embed(color=0x5865F2)
+                        
+                        # Auteur avec le nom du serveur
                         e.set_author(
-                            name=f"{msg.author.display_name} dans #{msg.channel.name}",
-                            icon_url=msg.author.display_avatar.url if msg.author.display_avatar else None
+                            name=f"📡 DISCORD • {msg.guild.name}",
+                            icon_url=msg.guild.icon.url if msg.guild.icon else "https://discord.com/assets/847541504914fd33810e70a0ea73177e.ico"
+                        )
+                        
+                        # Thumbnail avec avatar de l'auteur
+                        if msg.author.display_avatar:
+                            e.set_thumbnail(url=msg.author.display_avatar.url)
+                        
+                        # Info du message
+                        e.add_field(
+                            name="👤 Auteur",
+                            value=f"**{msg.author.display_name}**",
+                            inline=True
+                        )
+                        e.add_field(
+                            name="📍 Salon",
+                            value=f"#{msg.channel.name}",
+                            inline=True
                         )
                         
                         # Contenu du message
-                        content = msg.content[:2000] if msg.content else ""
+                        content = msg.content[:1500] if msg.content else ""
                         if content:
-                            e.description = content
+                            e.add_field(
+                                name="💬 Message",
+                                value=content,
+                                inline=False
+                            )
                         
                         # Images
                         if msg.attachments:
@@ -2956,7 +2976,10 @@ async def relay_discord_message(msg):
                                     e.set_image(url=att.url)
                                     break
                         
-                        e.set_footer(text=f"📡 {msg.guild.name} • #{msg.channel.name}")
+                        e.set_footer(
+                            text=f"Discord • {msg.guild.name}",
+                            icon_url="https://discord.com/assets/847541504914fd33810e70a0ea73177e.ico"
+                        )
                         e.timestamp = msg.created_at
                         
                         await dest_channel.send(embed=e)
@@ -3731,8 +3754,14 @@ class TradeBuilderView(View):
 class TradeEmojiGiveSelect(Select):
     def __init__(self, parent, emojis):
         self.parent = parent
+        self.emoji_map = {}  # Stocker le mapping id -> format string
         options = []
         for e in emojis[:25]:
+            # Stocker le format complet de l'emoji
+            if e.animated:
+                self.emoji_map[str(e.id)] = f"<a:{e.name}:{e.id}>"
+            else:
+                self.emoji_map[str(e.id)] = f"<:{e.name}:{e.id}>"
             options.append(discord.SelectOption(
                 label=e.name[:25],
                 value=str(e.id),
@@ -3749,20 +3778,22 @@ class TradeEmojiGiveSelect(Select):
     async def callback(self, i):
         self.parent.je_donne = []
         for emoji_id in self.values:
-            emoji = discord.utils.get(self.parent.guild.emojis, id=int(emoji_id))
-            if emoji:
-                # Format explicite pour s'assurer que l'emoji s'affiche
-                if emoji.animated:
-                    self.parent.je_donne.append(f"<a:{emoji.name}:{emoji.id}>")
-                else:
-                    self.parent.je_donne.append(f"<:{emoji.name}:{emoji.id}>")
+            # Utiliser le format stocké directement
+            if emoji_id in self.emoji_map:
+                self.parent.je_donne.append(self.emoji_map[emoji_id])
         await i.response.edit_message(embed=self.parent.get_embed(), view=self.parent)
 
 class TradeEmojiWantSelect(Select):
     def __init__(self, parent, emojis):
         self.parent = parent
+        self.emoji_map = {}  # Stocker le mapping id -> format string
         options = []
         for e in emojis[:25]:
+            # Stocker le format complet de l'emoji
+            if e.animated:
+                self.emoji_map[str(e.id)] = f"<a:{e.name}:{e.id}>"
+            else:
+                self.emoji_map[str(e.id)] = f"<:{e.name}:{e.id}>"
             options.append(discord.SelectOption(
                 label=e.name[:25],
                 value=str(e.id),
@@ -3779,13 +3810,9 @@ class TradeEmojiWantSelect(Select):
     async def callback(self, i):
         self.parent.je_veux = []
         for emoji_id in self.values:
-            emoji = discord.utils.get(self.parent.guild.emojis, id=int(emoji_id))
-            if emoji:
-                # Format explicite pour s'assurer que l'emoji s'affiche
-                if emoji.animated:
-                    self.parent.je_veux.append(f"<a:{emoji.name}:{emoji.id}>")
-                else:
-                    self.parent.je_veux.append(f"<:{emoji.name}:{emoji.id}>")
+            # Utiliser le format stocké directement
+            if emoji_id in self.emoji_map:
+                self.parent.je_veux.append(self.emoji_map[emoji_id])
         await i.response.edit_message(embed=self.parent.get_embed(), view=self.parent)
 
 class TradeGameModal(Modal, title="🎮 Définir le Jeu"):
@@ -4046,34 +4073,70 @@ async def check_youtube_feeds(session, guild, data):
                 xml_text = await resp.text()
             
             root = ET.fromstring(xml_text)
-            ns = {'atom': 'http://www.w3.org/2005/Atom', 'yt': 'http://www.youtube.com/xml/schemas/2015'}
+            ns = {'atom': 'http://www.w3.org/2005/Atom', 'yt': 'http://www.youtube.com/xml/schemas/2015', 'media': 'http://search.yahoo.com/mrss/'}
             
             entries = root.findall('atom:entry', ns)
             if not entries:
                 continue
             
-            entry = entries[0]  # Dernier post
-            video_id = entry.find('yt:videoId', ns)
-            title = entry.find('atom:title', ns)
+            entry = entries[0]
+            video_id_elem = entry.find('yt:videoId', ns)
+            title_elem = entry.find('atom:title', ns)
+            published_elem = entry.find('atom:published', ns)
             
-            if video_id is None or title is None:
+            # Essayer de trouver la description
+            media_group = entry.find('media:group', ns)
+            description = ""
+            if media_group is not None:
+                desc_elem = media_group.find('media:description', ns)
+                if desc_elem is not None and desc_elem.text:
+                    description = desc_elem.text[:200] + "..." if len(desc_elem.text) > 200 else desc_elem.text
+            
+            if video_id_elem is None or title_elem is None:
                 continue
             
-            video_id = video_id.text
-            title = title.text
+            video_id = video_id_elem.text
+            title = title_elem.text
             cache_key = f"yt_{guild.id}_{channel_id}"
             
-            # Vérifier si déjà posté
             if cache_key in posted_content and posted_content[cache_key] == video_id:
                 continue
             
-            # Nouveau post !
             posted_content[cache_key] = video_id
             
-            e = discord.Embed(title=title, url=f"https://www.youtube.com/watch?v={video_id}", color=0xFF0000)
-            e.set_author(name=f"🔴 {channel_name} a publié une vidéo!", icon_url="https://www.youtube.com/favicon.ico")
+            # ═══════════════ EMBED YOUTUBE PROFESSIONNEL ═══════════════
+            e = discord.Embed(color=0xFF0000)
+            
+            # Titre avec bannière
+            e.title = f"▶️ {title}"
+            e.url = f"https://www.youtube.com/watch?v={video_id}"
+            
+            # Description du post
+            if description:
+                e.description = f"*{description}*"
+            
+            # Auteur avec logo YouTube
+            e.set_author(
+                name=f"🔴 YOUTUBE • {channel_name}",
+                url=f"https://www.youtube.com/channel/{channel_id}",
+                icon_url="https://www.gstatic.com/youtube/img/branding/youtubelogo/svg/youtubelogo.svg"
+            )
+            
+            # Miniature grande
             e.set_image(url=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg")
-            e.set_footer(text="YouTube", icon_url="https://www.youtube.com/favicon.ico")
+            
+            # Bouton "Regarder"
+            e.add_field(
+                name="",
+                value=f"[▶️ **Regarder la vidéo**](https://www.youtube.com/watch?v={video_id})",
+                inline=False
+            )
+            
+            # Footer avec icône
+            e.set_footer(
+                text=f"YouTube • {channel_name}",
+                icon_url="https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png"
+            )
             e.timestamp = now()
             
             await channel.send(embed=e)
@@ -4090,41 +4153,55 @@ async def check_twitch_feeds(session, guild, data):
     if not channel or not feeds:
         return
     
-    # Note: Sans Client ID Twitch, on utilise une méthode alternative
     for username in feeds:
         try:
-            # Vérification via la page Twitch (méthode basique)
             url = f"https://www.twitch.tv/{username}"
-            cache_key = f"tw_{guild.id}_{username}"
+            cache_key = f"twitch_{guild.id}_{username}"
             
             async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 if resp.status != 200:
                     continue
                 html = await resp.text()
             
-            # Détecter si le streamer est en live (méthode basique)
             is_live = '"isLiveBroadcast":true' in html or 'isLiveBroadcast' in html
             
             was_live = posted_content.get(cache_key, False)
             
             if is_live and not was_live:
-                # Vient de passer en live !
                 posted_content[cache_key] = True
                 
-                e = discord.Embed(
-                    title=f"🔴 {username} est en LIVE!",
+                # ═══════════════ EMBED TWITCH PROFESSIONNEL ═══════════════
+                e = discord.Embed(color=0x9146FF)
+                
+                e.title = f"🔴 {username} est en LIVE !"
+                e.url = f"https://www.twitch.tv/{username}"
+                
+                e.description = f"**{username}** vient de lancer un stream !\nRejoins le live maintenant !"
+                
+                e.set_author(
+                    name=f"🟣 TWITCH • {username}",
                     url=f"https://www.twitch.tv/{username}",
-                    color=0x9146FF
+                    icon_url="https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png"
                 )
-                e.set_author(name="Twitch", icon_url="https://www.twitch.tv/favicon.ico")
-                e.set_thumbnail(url=f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{username}-320x180.jpg")
-                e.set_footer(text="Twitch", icon_url="https://www.twitch.tv/favicon.ico")
+                
+                # Preview du stream (avec timestamp pour éviter le cache)
+                e.set_image(url=f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{username.lower()}-1280x720.jpg?t={int(now().timestamp())}")
+                
+                e.add_field(
+                    name="",
+                    value=f"[🟣 **Rejoindre le stream**](https://www.twitch.tv/{username})",
+                    inline=False
+                )
+                
+                e.set_footer(
+                    text=f"Twitch • {username}",
+                    icon_url="https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png"
+                )
                 e.timestamp = now()
                 
-                await channel.send(f"🟣 **{username}** est en live!", embed=e)
+                await channel.send(embed=e)
                 
             elif not is_live and was_live:
-                # N'est plus en live
                 posted_content[cache_key] = False
             
             await asyncio.sleep(1)
@@ -4163,6 +4240,7 @@ async def check_reddit_feeds(session, guild, data):
             title = entry.find('atom:title', ns)
             link = entry.find('atom:link', ns)
             author = entry.find('atom:author/atom:name', ns)
+            content = entry.find('atom:content', ns)
             
             if post_id is None or title is None:
                 continue
@@ -4172,6 +4250,14 @@ async def check_reddit_feeds(session, guild, data):
             link = link.get('href') if link is not None else f"https://reddit.com/r/{subreddit}"
             author = author.text if author is not None else "Unknown"
             
+            # Extraire image si présente dans le contenu HTML
+            image_url = None
+            if content is not None and content.text:
+                import re
+                img_match = re.search(r'<img[^>]+src="([^"]+)"', content.text)
+                if img_match:
+                    image_url = img_match.group(1)
+            
             cache_key = f"rd_{guild.id}_{subreddit}"
             
             if cache_key in posted_content and posted_content[cache_key] == post_id:
@@ -4179,10 +4265,34 @@ async def check_reddit_feeds(session, guild, data):
             
             posted_content[cache_key] = post_id
             
-            e = discord.Embed(title=title[:256], url=link, color=0xFF4500)
-            e.set_author(name=f"📰 Nouveau post sur r/{subreddit}", icon_url="https://www.reddit.com/favicon.ico")
-            e.add_field(name="Auteur", value=f"u/{author}", inline=True)
-            e.set_footer(text="Reddit", icon_url="https://www.reddit.com/favicon.ico")
+            # ═══════════════ EMBED REDDIT PROFESSIONNEL ═══════════════
+            e = discord.Embed(color=0xFF4500)
+            
+            e.title = f"📰 {title[:200]}"
+            e.url = link
+            
+            e.set_author(
+                name=f"🟠 REDDIT • r/{subreddit}",
+                url=f"https://www.reddit.com/r/{subreddit}",
+                icon_url="https://www.redditstatic.com/desktop2x/img/favicon/android-icon-192x192.png"
+            )
+            
+            e.add_field(name="👤 Auteur", value=f"u/{author}", inline=True)
+            e.add_field(name="📁 Subreddit", value=f"r/{subreddit}", inline=True)
+            
+            if image_url and ('i.redd.it' in image_url or 'preview.redd.it' in image_url):
+                e.set_image(url=image_url)
+            
+            e.add_field(
+                name="",
+                value=f"[🔗 **Voir le post complet**]({link})",
+                inline=False
+            )
+            
+            e.set_footer(
+                text=f"Reddit • r/{subreddit}",
+                icon_url="https://www.redditstatic.com/desktop2x/img/favicon/android-icon-192x192.png"
+            )
             e.timestamp = now()
             
             await channel.send(embed=e)
@@ -4203,14 +4313,15 @@ async def check_twitter_feeds(session, guild, data):
     
     for username in feeds:
         try:
-            # Essayer plusieurs instances Nitter
             xml_text = None
+            working_instance = None
             for instance in NITTER_INSTANCES:
                 try:
                     rss_url = f"https://{instance}/{username}/rss"
                     async with session.get(rss_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                         if resp.status == 200:
                             xml_text = await resp.text()
+                            working_instance = instance
                             break
                 except:
                     continue
@@ -4218,19 +4329,16 @@ async def check_twitter_feeds(session, guild, data):
             if not xml_text:
                 continue
             
-            # Parser le RSS
             root = ET.fromstring(xml_text)
-            
-            # Chercher les items (format RSS standard)
             items = root.findall('.//item')
             if not items:
                 continue
             
-            item = items[0]  # Dernier tweet
+            item = items[0]
             title = item.find('title')
             link = item.find('link')
             guid = item.find('guid')
-            pub_date = item.find('pubDate')
+            description = item.find('description')
             
             if title is None or guid is None:
                 continue
@@ -4239,21 +4347,51 @@ async def check_twitter_feeds(session, guild, data):
             tweet_text = title.text if title is not None else ""
             tweet_link = link.text if link is not None else f"https://twitter.com/{username}"
             
-            cache_key = f"tw_{guild.id}_{username}"
+            # Convertir lien Nitter en lien Twitter
+            tweet_link = tweet_link.replace(f"https://{working_instance}", "https://twitter.com") if working_instance else tweet_link
+            
+            # Extraire image si présente
+            image_url = None
+            if description is not None and description.text:
+                import re
+                img_match = re.search(r'<img[^>]+src="([^"]+)"', description.text)
+                if img_match:
+                    image_url = img_match.group(1)
+            
+            cache_key = f"twitter_{guild.id}_{username}"
             
             if cache_key in posted_content and posted_content[cache_key] == tweet_id:
                 continue
             
             posted_content[cache_key] = tweet_id
             
-            # Créer l'embed
-            e = discord.Embed(description=tweet_text[:2000], color=0x1DA1F2)
+            # ═══════════════ EMBED TWITTER PROFESSIONNEL ═══════════════
+            e = discord.Embed(color=0x1DA1F2)
+            
+            e.description = f"💬 {tweet_text[:1900]}"
+            
             e.set_author(
-                name=f"@{username} a tweeté",
-                url=tweet_link,
-                icon_url="https://abs.twimg.com/icons/apple-touch-icon-192x192.png"
+                name=f"🐦 TWITTER/X • @{username}",
+                url=f"https://twitter.com/{username}",
+                icon_url="https://abs.twimg.com/responsive-web/client-web/icon-ios.77d25eba.png"
             )
-            e.set_footer(text="Twitter/X", icon_url="https://abs.twimg.com/icons/apple-touch-icon-192x192.png")
+            
+            if image_url:
+                # Convertir URL Nitter en URL Twitter si nécessaire
+                if working_instance and working_instance in image_url:
+                    image_url = image_url.replace(f"https://{working_instance}", "https://pbs.twimg.com")
+                e.set_image(url=image_url)
+            
+            e.add_field(
+                name="",
+                value=f"[🐦 **Voir le tweet**]({tweet_link})",
+                inline=False
+            )
+            
+            e.set_footer(
+                text=f"Twitter/X • @{username}",
+                icon_url="https://abs.twimg.com/responsive-web/client-web/icon-ios.77d25eba.png"
+            )
             e.timestamp = now()
             
             await channel.send(embed=e)
@@ -4274,7 +4412,6 @@ async def check_rosocial_feeds(session, guild, data):
     
     for username in feeds:
         try:
-            # Scraper la page du profil RoSocial
             url = f"https://rosocial.net/{username}"
             
             async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
@@ -4282,17 +4419,16 @@ async def check_rosocial_feeds(session, guild, data):
                     continue
                 html = await resp.text()
             
-            # Trouver le dernier post (format: /posts/12345)
             import re
+            
+            # Trouver le dernier post
             posts = re.findall(r'href="https://rosocial\.net/posts/(\d+)"', html)
             if not posts:
-                # Essayer un autre pattern
                 posts = re.findall(r'/posts/(\d+)', html)
             
             if not posts:
                 continue
             
-            # Prendre le premier post trouvé (le plus récent)
             latest_post_id = posts[0]
             cache_key = f"rs_{guild.id}_{username}"
             
@@ -4301,22 +4437,59 @@ async def check_rosocial_feeds(session, guild, data):
             
             posted_content[cache_key] = latest_post_id
             
-            # Extraire le contenu du post (simplifié)
             post_url = f"https://rosocial.net/posts/{latest_post_id}"
+            profile_url = f"https://rosocial.net/{username}"
             
-            # Créer l'embed
-            e = discord.Embed(
-                title=f"📝 Nouveau post de {username}",
-                url=post_url,
-                color=0x00D4AA
-            )
+            # Extraire la photo de profil si possible
+            avatar_match = re.search(rf'{username}[^>]*<img[^>]+src="([^"]+)"', html)
+            avatar_url = "https://rosocial.net/content/uploads/photos/2025/11/roso_597f00df39d1431f924ec9403430e921.png"
+            if avatar_match:
+                avatar_url = avatar_match.group(1)
+            
+            # Extraire le contenu du post si possible
+            post_content = ""
+            content_match = re.search(rf'/posts/{latest_post_id}"[^>]*>.*?<p[^>]*>([^<]+)</p>', html, re.DOTALL)
+            if content_match:
+                post_content = content_match.group(1).strip()[:200]
+            
+            # Extraire une image du post si présente
+            image_url = None
+            img_match = re.search(rf'/posts/{latest_post_id}.*?<img[^>]+src="(https://rosocial\.net/content/uploads/photos/[^"]+)"', html, re.DOTALL)
+            if img_match:
+                image_url = img_match.group(1)
+            
+            # ═══════════════ EMBED ROSOCIAL PROFESSIONNEL ═══════════════
+            e = discord.Embed(color=0x00D4AA)
+            
+            e.title = f"📝 Nouveau post de {username}"
+            e.url = post_url
+            
+            if post_content:
+                e.description = f"*{post_content}...*"
+            
             e.set_author(
-                name=f"🎮 {username} sur RoSocial",
-                url=f"https://rosocial.net/{username}",
+                name=f"🎮 ROSOCIAL • {username}",
+                url=profile_url,
                 icon_url="https://rosocial.net/content/uploads/photos/2025/11/roso_597f00df39d1431f924ec9403430e921.png"
             )
-            e.add_field(name="🔗 Voir le post", value=f"[Cliquez ici]({post_url})", inline=False)
-            e.set_footer(text="RoSocial", icon_url="https://rosocial.net/content/uploads/photos/2025/11/roso_597f00df39d1431f924ec9403430e921.png")
+            
+            # Thumbnail avec avatar ou logo
+            e.set_thumbnail(url=avatar_url)
+            
+            # Image du post si disponible
+            if image_url:
+                e.set_image(url=image_url)
+            
+            e.add_field(
+                name="",
+                value=f"[🎮 **Voir le post**]({post_url}) • [👤 **Profil**]({profile_url})",
+                inline=False
+            )
+            
+            e.set_footer(
+                text=f"RoSocial • {username}",
+                icon_url="https://rosocial.net/content/uploads/photos/2025/11/roso_597f00df39d1431f924ec9403430e921.png"
+            )
             e.timestamp = now()
             
             await channel.send(embed=e)
