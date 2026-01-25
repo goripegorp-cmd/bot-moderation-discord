@@ -13,6 +13,11 @@ import aiosqlite, os, re, json, asyncio, unicodedata, io, time, aiohttp
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import xml.etree.ElementTree as ET
+import matplotlib
+matplotlib.use('Agg')  # Backend non-interactif
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+from collections import defaultdict
 
 load_dotenv()
 TOKEN = os.getenv('BOT_TOKEN')
@@ -20,6 +25,7 @@ DB_PATH = '/data/bot.db' if os.path.exists('/data') else 'bot.db'
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
 spam_tracker = {}
+voice_join_tracker = {}  # {(guild_id, user_id): datetime} - pour tracker le temps en vocal
 
 class C:
     BLURPLE=0x5865F2; GREEN=0x57F287; RED=0xED4245; YELLOW=0xFEE75C
@@ -66,6 +72,28 @@ async def db_init():
             user_id INTEGER,
             title TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        # Table pour tracker l'activité des membres
+        await db.execute('''CREATE TABLE IF NOT EXISTS member_activity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            user_id INTEGER,
+            activity_type TEXT,
+            channel_id INTEGER,
+            duration INTEGER DEFAULT 0,
+            message_id INTEGER DEFAULT 0,
+            reactions INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        # Table pour les stats d'inactivité
+        await db.execute('''CREATE TABLE IF NOT EXISTS activity_tracking (
+            guild_id INTEGER,
+            user_id INTEGER,
+            last_message DATETIME,
+            last_vocal DATETIME,
+            total_messages INTEGER DEFAULT 0,
+            total_vocal_time INTEGER DEFAULT 0,
+            PRIMARY KEY (guild_id, user_id)
         )''')
         async with db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tickets'") as cur:
             if not await cur.fetchone():
@@ -618,6 +646,11 @@ class MainPanel(View):
     @discord.ui.button(label="Publicité", emoji="📢", style=discord.ButtonStyle.success, row=2)
     async def ads(self, i, b):
         v = AdsPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="Statistiques", emoji="📊", style=discord.ButtonStyle.success, row=2)
+    async def stats(self, i, b):
+        v = StatPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger, row=2)
@@ -2375,6 +2408,477 @@ class AdsFeedRemoveSelect(Select):
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#                           📊 STATISTIQUES PANEL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class StatPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        e = discord.Embed(title="📊 Statistiques & Activité", color=C.PURPLE)
+        e.description = "Gérez l'activité des membres et visualisez les statistiques du serveur."
+        
+        # Config actuelle
+        stat_cfg = c.get('stat_config', {})
+        action_7d = stat_cfg.get('action_7d', 'none')
+        action_30d = stat_cfg.get('action_30d', 'none')
+        role_id = stat_cfg.get('activity_role', 0)
+        notif_ch = self.g.get_channel(stat_cfg.get('notif_channel', 0))
+        
+        role = self.g.get_role(role_id) if role_id else None
+        
+        action_labels = {'none': '❌ Aucune', 'ping': '🔔 Ping', 'remove_role': '🎭 Retirer rôle', 'kick': '👢 Kick'}
+        
+        e.add_field(
+            name="⚙️ Configuration",
+            value=f"**Action 7 jours:** {action_labels.get(action_7d, 'Aucune')}\n"
+                  f"**Action 30 jours:** {action_labels.get(action_30d, 'Aucune')}\n"
+                  f"**Rôle d'activité:** {role.mention if role else '❌ Non défini'}\n"
+                  f"**Salon notifications:** {notif_ch.mention if notif_ch else '❌ Non défini'}",
+            inline=False
+        )
+        
+        # Compter les membres AFK
+        afk_7d, afk_30d = await self.count_afk_members()
+        e.add_field(name="😴 AFK 7 jours", value=f"**{afk_7d}** membre(s)", inline=True)
+        e.add_field(name="💤 AFK 30 jours", value=f"**{afk_30d}** membre(s)", inline=True)
+        e.add_field(name="👥 Total membres", value=f"**{self.g.member_count}**", inline=True)
+        
+        return e
+    
+    async def count_afk_members(self):
+        """Compte les membres AFK sur 7j et 30j"""
+        afk_7d = 0
+        afk_30d = 0
+        now_dt = now()
+        seven_days_ago = now_dt - timedelta(days=7)
+        thirty_days_ago = now_dt - timedelta(days=30)
+        
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                # Membres trackés
+                async with db.execute(
+                    'SELECT user_id, last_message, last_vocal FROM activity_tracking WHERE guild_id=?',
+                    (self.g.id,)
+                ) as cursor:
+                    tracked_users = set()
+                    async for row in cursor:
+                        user_id, last_msg, last_vocal = row
+                        tracked_users.add(user_id)
+                        
+                        last_activity = None
+                        if last_msg:
+                            try:
+                                last_activity = datetime.fromisoformat(last_msg)
+                            except:
+                                pass
+                        if last_vocal:
+                            try:
+                                lv = datetime.fromisoformat(last_vocal)
+                                if not last_activity or lv > last_activity:
+                                    last_activity = lv
+                            except:
+                                pass
+                        
+                        if last_activity:
+                            if last_activity.replace(tzinfo=timezone.utc) < seven_days_ago.replace(tzinfo=timezone.utc):
+                                afk_7d += 1
+                            if last_activity.replace(tzinfo=timezone.utc) < thirty_days_ago.replace(tzinfo=timezone.utc):
+                                afk_30d += 1
+                
+                # Membres non trackés = considérés comme AFK
+                for member in self.g.members:
+                    if not member.bot and member.id not in tracked_users:
+                        afk_7d += 1
+                        afk_30d += 1
+        except:
+            pass
+        
+        return afk_7d, afk_30d
+    
+    @discord.ui.button(label="⚙️ Configurer Actions", style=discord.ButtonStyle.primary, row=0)
+    async def config_actions(self, i, b):
+        v = StatActionPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="📈 Voir Graphique", style=discord.ButtonStyle.success, row=0)
+    async def view_graph(self, i, b):
+        await i.response.defer()
+        
+        # Générer le graphique
+        img = await self.generate_afk_graph()
+        
+        if img:
+            file = discord.File(img, filename="afk_stats.png")
+            e = discord.Embed(title="📊 Statistiques d'Activité", color=C.PURPLE)
+            e.set_image(url="attachment://afk_stats.png")
+            e.set_footer(text=f"{self.g.name} • Statistiques d'activité")
+            await i.followup.send(embed=e, file=file, ephemeral=True)
+        else:
+            await i.followup.send("❌ Erreur lors de la génération du graphique", ephemeral=True)
+    
+    async def generate_afk_graph(self):
+        """Génère un graphique des membres AFK"""
+        try:
+            afk_7d, afk_30d = await self.count_afk_members()
+            active_members = self.g.member_count - afk_7d
+            
+            # Créer le graphique
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+            fig.patch.set_facecolor('#2f3136')
+            
+            # Graphique 1: Camembert AFK
+            colors1 = ['#57F287', '#FEE75C', '#ED4245']
+            sizes1 = [active_members, afk_7d - afk_30d, afk_30d]
+            labels1 = [f'Actifs\n({active_members})', f'AFK 7j\n({afk_7d - afk_30d})', f'AFK 30j\n({afk_30d})']
+            
+            # Filtrer les valeurs nulles
+            filtered = [(s, l, c) for s, l, c in zip(sizes1, labels1, colors1) if s > 0]
+            if filtered:
+                sizes1, labels1, colors1 = zip(*filtered)
+            
+            ax1.pie(sizes1, labels=labels1, colors=colors1, autopct='%1.1f%%', startangle=90,
+                   textprops={'color': 'white', 'fontsize': 11, 'fontweight': 'bold'})
+            ax1.set_title('📊 Répartition des Membres', color='white', fontsize=14, fontweight='bold', pad=20)
+            ax1.set_facecolor('#2f3136')
+            
+            # Graphique 2: Barres
+            categories = ['Actifs', 'AFK 7 jours', 'AFK 30 jours']
+            values = [active_members, afk_7d, afk_30d]
+            colors2 = ['#57F287', '#FEE75C', '#ED4245']
+            
+            bars = ax2.bar(categories, values, color=colors2, edgecolor='white', linewidth=2)
+            ax2.set_ylabel('Nombre de membres', color='white', fontsize=12)
+            ax2.set_title('📈 Statistiques d\'Activité', color='white', fontsize=14, fontweight='bold', pad=20)
+            ax2.set_facecolor('#36393f')
+            ax2.tick_params(colors='white')
+            ax2.spines['bottom'].set_color('white')
+            ax2.spines['left'].set_color('white')
+            ax2.spines['top'].set_visible(False)
+            ax2.spines['right'].set_visible(False)
+            
+            # Ajouter les valeurs sur les barres
+            for bar, val in zip(bars, values):
+                ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
+                        str(val), ha='center', color='white', fontweight='bold', fontsize=12)
+            
+            plt.tight_layout()
+            
+            # Sauvegarder en buffer
+            buf = io.BytesIO()
+            plt.savefig(buf, format='png', facecolor='#2f3136', edgecolor='none', dpi=100)
+            buf.seek(0)
+            plt.close(fig)
+            
+            return buf
+        except Exception as ex:
+            print(f"Erreur graphique: {ex}")
+            return None
+    
+    @discord.ui.button(label="🔄 Exécuter Actions", style=discord.ButtonStyle.danger, row=0)
+    async def execute_actions(self, i, b):
+        await i.response.send_message(
+            "⚠️ **Êtes-vous sûr de vouloir exécuter les actions configurées ?**\n"
+            "Cela affectera tous les membres AFK selon la configuration.",
+            view=StatExecuteConfirmView(self.u, self.g),
+            ephemeral=True
+        )
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = MainPanel(self.u, self.g)
+        await i.response.edit_message(embed=v.embed(), view=v)
+
+class StatActionPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        stat_cfg = c.get('stat_config', {})
+        
+        e = discord.Embed(title="⚙️ Configuration des Actions", color=C.ORANGE)
+        e.description = "Configurez les actions à effectuer sur les membres inactifs."
+        
+        action_labels = {'none': '❌ Aucune', 'ping': '🔔 Ping', 'remove_role': '🎭 Retirer rôle', 'kick': '👢 Kick'}
+        
+        action_7d = stat_cfg.get('action_7d', 'none')
+        action_30d = stat_cfg.get('action_30d', 'none')
+        role_id = stat_cfg.get('activity_role', 0)
+        notif_ch = self.g.get_channel(stat_cfg.get('notif_channel', 0))
+        role = self.g.get_role(role_id) if role_id else None
+        
+        e.add_field(
+            name="😴 Action après 7 jours d'inactivité",
+            value=action_labels.get(action_7d, 'Aucune'),
+            inline=True
+        )
+        e.add_field(
+            name="💤 Action après 30 jours d'inactivité",
+            value=action_labels.get(action_30d, 'Aucune'),
+            inline=True
+        )
+        e.add_field(name="\u200b", value="\u200b", inline=True)
+        
+        e.add_field(
+            name="🎭 Rôle d'activité",
+            value=role.mention if role else "❌ Non défini\n*Requis pour 'Retirer rôle'*",
+            inline=True
+        )
+        e.add_field(
+            name="📢 Salon de notifications",
+            value=notif_ch.mention if notif_ch else "❌ Non défini\n*Requis pour 'Ping'*",
+            inline=True
+        )
+        
+        e.set_footer(text="💡 Le rôle sera redonné automatiquement si le membre redevient actif")
+        return e
+    
+    @discord.ui.select(
+        placeholder="😴 Action 7 jours...",
+        options=[
+            discord.SelectOption(label="Aucune action", value="none", emoji="❌"),
+            discord.SelectOption(label="Ping le membre", value="ping", emoji="🔔"),
+            discord.SelectOption(label="Retirer le rôle", value="remove_role", emoji="🎭"),
+            discord.SelectOption(label="Kick le membre", value="kick", emoji="👢"),
+        ],
+        row=0
+    )
+    async def action_7d(self, i, s):
+        c = await cfg(self.g.id)
+        stat_cfg = c.get('stat_config', {})
+        stat_cfg['action_7d'] = s.values[0]
+        await db_set(self.g.id, 'stat_config', stat_cfg)
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.select(
+        placeholder="💤 Action 30 jours...",
+        options=[
+            discord.SelectOption(label="Aucune action", value="none", emoji="❌"),
+            discord.SelectOption(label="Ping le membre", value="ping", emoji="🔔"),
+            discord.SelectOption(label="Retirer le rôle", value="remove_role", emoji="🎭"),
+            discord.SelectOption(label="Kick le membre", value="kick", emoji="👢"),
+        ],
+        row=1
+    )
+    async def action_30d(self, i, s):
+        c = await cfg(self.g.id)
+        stat_cfg = c.get('stat_config', {})
+        stat_cfg['action_30d'] = s.values[0]
+        await db_set(self.g.id, 'stat_config', stat_cfg)
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="🎭 Définir Rôle", style=discord.ButtonStyle.primary, row=2)
+    async def set_role(self, i, b):
+        roles = [r for r in self.g.roles if not r.is_default() and not r.managed and r < self.g.me.top_role][:25]
+        if not roles:
+            return await i.response.send_message("❌ Aucun rôle disponible", ephemeral=True)
+        opts = [discord.SelectOption(label=r.name[:25], value=str(r.id)) for r in roles]
+        v = StatRoleSelectView(self.u, self.g, opts)
+        await i.response.edit_message(embed=discord.Embed(title="🎭 Sélectionner le rôle d'activité", color=C.PURPLE), view=v)
+    
+    @discord.ui.button(label="📢 Définir Salon", style=discord.ButtonStyle.primary, row=2)
+    async def set_channel(self, i, b):
+        chs = list(self.g.text_channels)[:25]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        v = StatChannelSelectView(self.u, self.g, opts)
+        await i.response.edit_message(embed=discord.Embed(title="📢 Sélectionner le salon de notifications", color=C.PURPLE), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+    async def back(self, i, b):
+        v = StatPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class StatRoleSelectView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.add_item(StatRoleSelect(u, g, opts))
+
+class StatRoleSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir un rôle...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        c = await cfg(self.g.id)
+        stat_cfg = c.get('stat_config', {})
+        stat_cfg['activity_role'] = int(self.values[0])
+        await db_set(self.g.id, 'stat_config', stat_cfg)
+        v = StatActionPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class StatChannelSelectView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.add_item(StatChannelSelect(u, g, opts))
+
+class StatChannelSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        c = await cfg(self.g.id)
+        stat_cfg = c.get('stat_config', {})
+        stat_cfg['notif_channel'] = int(self.values[0])
+        await db_set(self.g.id, 'stat_config', stat_cfg)
+        v = StatActionPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class StatExecuteConfirmView(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=60)
+        self.u = u
+        self.g = g
+    
+    @discord.ui.button(label="✅ Confirmer", style=discord.ButtonStyle.danger)
+    async def confirm(self, i, b):
+        await i.response.defer()
+        result = await execute_afk_actions(self.g)
+        await i.followup.send(result, ephemeral=True)
+    
+    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, i, b):
+        await i.response.edit_message(content="❌ Action annulée", view=None)
+
+async def execute_afk_actions(guild):
+    """Exécute les actions sur les membres AFK"""
+    c = await cfg(guild.id)
+    stat_cfg = c.get('stat_config', {})
+    
+    action_7d = stat_cfg.get('action_7d', 'none')
+    action_30d = stat_cfg.get('action_30d', 'none')
+    role_id = stat_cfg.get('activity_role', 0)
+    notif_ch_id = stat_cfg.get('notif_channel', 0)
+    
+    role = guild.get_role(role_id) if role_id else None
+    notif_ch = guild.get_channel(notif_ch_id) if notif_ch_id else None
+    
+    now_dt = now()
+    seven_days_ago = now_dt - timedelta(days=7)
+    thirty_days_ago = now_dt - timedelta(days=30)
+    
+    results = {'ping_7d': 0, 'remove_role_7d': 0, 'kick_7d': 0, 'ping_30d': 0, 'remove_role_30d': 0, 'kick_30d': 0}
+    
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            # Récupérer les activités
+            async with db.execute(
+                'SELECT user_id, last_message, last_vocal FROM activity_tracking WHERE guild_id=?',
+                (guild.id,)
+            ) as cursor:
+                user_activities = {}
+                async for row in cursor:
+                    user_id, last_msg, last_vocal = row
+                    last_activity = None
+                    if last_msg:
+                        try: last_activity = datetime.fromisoformat(last_msg)
+                        except: pass
+                    if last_vocal:
+                        try:
+                            lv = datetime.fromisoformat(last_vocal)
+                            if not last_activity or lv > last_activity:
+                                last_activity = lv
+                        except: pass
+                    user_activities[user_id] = last_activity
+        
+        # Traiter chaque membre
+        ping_list_7d = []
+        ping_list_30d = []
+        
+        for member in guild.members:
+            if member.bot:
+                continue
+            
+            last_activity = user_activities.get(member.id)
+            
+            # Membres non trackés = considérés comme très inactifs
+            if not last_activity:
+                is_afk_7d = True
+                is_afk_30d = True
+            else:
+                la_utc = last_activity.replace(tzinfo=timezone.utc) if last_activity.tzinfo is None else last_activity
+                is_afk_7d = la_utc < seven_days_ago.replace(tzinfo=timezone.utc)
+                is_afk_30d = la_utc < thirty_days_ago.replace(tzinfo=timezone.utc)
+            
+            # Action 30 jours (prioritaire)
+            if is_afk_30d and action_30d != 'none':
+                if action_30d == 'ping':
+                    ping_list_30d.append(member.mention)
+                    results['ping_30d'] += 1
+                elif action_30d == 'remove_role' and role and role in member.roles:
+                    try:
+                        await member.remove_roles(role, reason="Inactivité 30 jours")
+                        results['remove_role_30d'] += 1
+                    except: pass
+                elif action_30d == 'kick':
+                    try:
+                        await member.kick(reason="Inactivité 30 jours")
+                        results['kick_30d'] += 1
+                    except: pass
+            
+            # Action 7 jours
+            elif is_afk_7d and action_7d != 'none':
+                if action_7d == 'ping':
+                    ping_list_7d.append(member.mention)
+                    results['ping_7d'] += 1
+                elif action_7d == 'remove_role' and role and role in member.roles:
+                    try:
+                        await member.remove_roles(role, reason="Inactivité 7 jours")
+                        results['remove_role_7d'] += 1
+                    except: pass
+                elif action_7d == 'kick':
+                    try:
+                        await member.kick(reason="Inactivité 7 jours")
+                        results['kick_7d'] += 1
+                    except: pass
+        
+        # Envoyer les pings
+        if notif_ch:
+            if ping_list_7d:
+                chunks = [ping_list_7d[i:i+20] for i in range(0, len(ping_list_7d), 20)]
+                for chunk in chunks:
+                    e = discord.Embed(title="😴 Membres inactifs (7 jours)", color=C.YELLOW)
+                    e.description = " ".join(chunk)
+                    e.set_footer(text="Envoyez un message ou rejoignez un vocal pour redevenir actif!")
+                    await notif_ch.send(embed=e)
+                    await asyncio.sleep(1)
+            
+            if ping_list_30d:
+                chunks = [ping_list_30d[i:i+20] for i in range(0, len(ping_list_30d), 20)]
+                for chunk in chunks:
+                    e = discord.Embed(title="💤 Membres très inactifs (30 jours)", color=C.RED)
+                    e.description = " ".join(chunk)
+                    e.set_footer(text="Envoyez un message ou rejoignez un vocal pour redevenir actif!")
+                    await notif_ch.send(embed=e)
+                    await asyncio.sleep(1)
+        
+        # Résumé
+        summary = "✅ **Actions exécutées:**\n"
+        if results['ping_7d']: summary += f"🔔 {results['ping_7d']} ping(s) 7j\n"
+        if results['remove_role_7d']: summary += f"🎭 {results['remove_role_7d']} rôle(s) retiré(s) 7j\n"
+        if results['kick_7d']: summary += f"👢 {results['kick_7d']} kick(s) 7j\n"
+        if results['ping_30d']: summary += f"🔔 {results['ping_30d']} ping(s) 30j\n"
+        if results['remove_role_30d']: summary += f"🎭 {results['remove_role_30d']} rôle(s) retiré(s) 30j\n"
+        if results['kick_30d']: summary += f"👢 {results['kick_30d']} kick(s) 30j\n"
+        
+        if sum(results.values()) == 0:
+            summary = "ℹ️ Aucune action effectuée (vérifiez la configuration)"
+        
+        return summary
+        
+    except Exception as ex:
+        return f"❌ Erreur: {ex}"
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #                           📺 CONFIG SALON
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -2998,6 +3502,9 @@ async def on_message(msg):
     
     # Mise à jour activité Realsy
     await update_realsy_activity(msg.guild.id, msg.author.id)
+    
+    # ═══════════════ TRACKING ACTIVITÉ MEMBRE ═══════════════
+    await track_member_message(msg)
     
     try:
         c = await cfg(msg.guild.id)
@@ -3849,6 +4356,468 @@ class TradeTextWantModal(Modal, title="📥 Ce que je VEUX (texte)"):
         await i.response.edit_message(embed=self.parent.get_embed(), view=self.parent)
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#                              📊 COMMANDE /STAT - STATISTIQUES MEMBRE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@bot.tree.command(name="stat", description="📊 Voir les statistiques d'activité d'un membre")
+@app_commands.describe(membre="Le membre dont vous voulez voir les stats (vous par défaut)")
+async def stat_cmd(i: discord.Interaction, membre: discord.Member = None):
+    target = membre or i.user
+    
+    if target.bot:
+        return await i.response.send_message("❌ Les bots n'ont pas de statistiques", ephemeral=True)
+    
+    await i.response.defer()
+    
+    # Générer les stats pour 7 jours par défaut
+    stats = await get_member_stats(i.guild, target, 7)
+    embed, file = await create_stat_embed(i.guild, target, stats, 7)
+    
+    v = StatMemberView(i.user, i.guild, target)
+    
+    if file:
+        await i.followup.send(embed=embed, file=file, view=v)
+    else:
+        await i.followup.send(embed=embed, view=v)
+
+class StatMemberView(View):
+    def __init__(self, user, guild, target):
+        super().__init__(timeout=300)
+        self.user = user
+        self.guild = guild
+        self.target = target
+        self.period = 7
+    
+    @discord.ui.button(label="📅 7 Jours", style=discord.ButtonStyle.primary, disabled=True)
+    async def btn_7d(self, i, b):
+        self.period = 7
+        self.btn_7d.disabled = True
+        self.btn_30d.disabled = False
+        await self.refresh(i)
+    
+    @discord.ui.button(label="📅 30 Jours", style=discord.ButtonStyle.secondary)
+    async def btn_30d(self, i, b):
+        self.period = 30
+        self.btn_7d.disabled = False
+        self.btn_30d.disabled = True
+        await self.refresh(i)
+    
+    @discord.ui.button(label="📈 Graphique Détaillé", style=discord.ButtonStyle.success, row=1)
+    async def btn_graph(self, i, b):
+        await i.response.defer()
+        img = await generate_detailed_stat_graph(self.guild, self.target, self.period)
+        if img:
+            file = discord.File(img, filename="stats_detailed.png")
+            e = discord.Embed(
+                title=f"📊 Statistiques Détaillées - {self.target.display_name}",
+                color=C.PURPLE
+            )
+            e.set_image(url="attachment://stats_detailed.png")
+            e.set_footer(text=f"Période: {self.period} jours • {self.guild.name}")
+            await i.followup.send(embed=e, file=file, ephemeral=True)
+        else:
+            await i.followup.send("❌ Pas assez de données pour générer un graphique", ephemeral=True)
+    
+    async def refresh(self, i):
+        await i.response.defer()
+        stats = await get_member_stats(self.guild, self.target, self.period)
+        embed, file = await create_stat_embed(self.guild, self.target, stats, self.period)
+        
+        if file:
+            await i.message.delete()
+            await i.followup.send(embed=embed, file=file, view=self)
+        else:
+            await i.message.edit(embed=embed, view=self)
+
+async def get_member_stats(guild, member, days):
+    """Récupère les statistiques d'un membre sur une période donnée"""
+    stats = {
+        'total_messages': 0,
+        'total_vocal_time': 0,
+        'channels_messages': {},  # {channel_id: count}
+        'channels_vocal': {},  # {channel_id: duration}
+        'messages_per_day': {},  # {date: count}
+        'vocal_per_day': {},  # {date: duration}
+        'most_popular_message': None,
+        'first_activity': None,
+        'last_activity': None
+    }
+    
+    try:
+        cutoff = now() - timedelta(days=days)
+        cutoff_str = cutoff.isoformat()
+        
+        async with aiosqlite.connect(DB_PATH) as db:
+            # Récupérer les messages
+            async with db.execute('''
+                SELECT channel_id, message_id, created_at FROM member_activity 
+                WHERE guild_id=? AND user_id=? AND activity_type='message' AND created_at >= ?
+                ORDER BY created_at ASC
+            ''', (guild.id, member.id, cutoff_str)) as cursor:
+                async for row in cursor:
+                    ch_id, msg_id, created_at = row
+                    stats['total_messages'] += 1
+                    
+                    # Par salon
+                    stats['channels_messages'][ch_id] = stats['channels_messages'].get(ch_id, 0) + 1
+                    
+                    # Par jour
+                    try:
+                        dt = datetime.fromisoformat(created_at)
+                        date_key = dt.strftime('%Y-%m-%d')
+                        stats['messages_per_day'][date_key] = stats['messages_per_day'].get(date_key, 0) + 1
+                        
+                        if not stats['first_activity'] or dt < stats['first_activity']:
+                            stats['first_activity'] = dt
+                        if not stats['last_activity'] or dt > stats['last_activity']:
+                            stats['last_activity'] = dt
+                    except:
+                        pass
+            
+            # Récupérer les sessions vocales
+            async with db.execute('''
+                SELECT channel_id, duration, created_at FROM member_activity 
+                WHERE guild_id=? AND user_id=? AND activity_type='vocal' AND created_at >= ?
+                ORDER BY created_at ASC
+            ''', (guild.id, member.id, cutoff_str)) as cursor:
+                async for row in cursor:
+                    ch_id, duration, created_at = row
+                    stats['total_vocal_time'] += duration or 0
+                    
+                    # Par salon
+                    stats['channels_vocal'][ch_id] = stats['channels_vocal'].get(ch_id, 0) + (duration or 0)
+                    
+                    # Par jour
+                    try:
+                        dt = datetime.fromisoformat(created_at)
+                        date_key = dt.strftime('%Y-%m-%d')
+                        stats['vocal_per_day'][date_key] = stats['vocal_per_day'].get(date_key, 0) + (duration or 0)
+                        
+                        if not stats['first_activity'] or dt < stats['first_activity']:
+                            stats['first_activity'] = dt
+                        if not stats['last_activity'] or dt > stats['last_activity']:
+                            stats['last_activity'] = dt
+                    except:
+                        pass
+        
+        # Trouver le message le plus populaire (avec le plus de réactions)
+        # On cherche dans les derniers messages du membre
+        if stats['channels_messages']:
+            top_channel_id = max(stats['channels_messages'], key=stats['channels_messages'].get)
+            channel = guild.get_channel(top_channel_id)
+            if channel:
+                try:
+                    async for msg in channel.history(limit=100):
+                        if msg.author.id == member.id:
+                            reaction_count = sum(r.count for r in msg.reactions) if msg.reactions else 0
+                            if reaction_count > 0:
+                                if not stats['most_popular_message'] or reaction_count > stats['most_popular_message']['reactions']:
+                                    stats['most_popular_message'] = {
+                                        'content': msg.content[:100] + "..." if len(msg.content) > 100 else msg.content,
+                                        'reactions': reaction_count,
+                                        'url': msg.jump_url
+                                    }
+                except:
+                    pass
+                    
+    except Exception as ex:
+        print(f"Erreur get_member_stats: {ex}")
+    
+    return stats
+
+async def create_stat_embed(guild, member, stats, days):
+    """Crée l'embed des statistiques avec graphique"""
+    e = discord.Embed(
+        title=f"📊 Statistiques de {member.display_name}",
+        color=C.PURPLE
+    )
+    e.set_thumbnail(url=member.display_avatar.url if member.display_avatar else None)
+    
+    # Période
+    e.description = f"**Période:** {days} derniers jours"
+    
+    # Messages
+    e.add_field(
+        name="💬 Messages",
+        value=f"**{stats['total_messages']}** messages envoyés",
+        inline=True
+    )
+    
+    # Temps vocal
+    vocal_time = stats['total_vocal_time']
+    if vocal_time >= 3600:
+        time_str = f"{vocal_time // 3600}h {(vocal_time % 3600) // 60}min"
+    elif vocal_time >= 60:
+        time_str = f"{vocal_time // 60}min {vocal_time % 60}s"
+    else:
+        time_str = f"{vocal_time}s"
+    
+    e.add_field(
+        name="🔊 Temps en vocal",
+        value=f"**{time_str}**",
+        inline=True
+    )
+    
+    # Moyenne par jour
+    avg_messages = stats['total_messages'] / days if days > 0 else 0
+    e.add_field(
+        name="📈 Moyenne/jour",
+        value=f"**{avg_messages:.1f}** msg/jour",
+        inline=True
+    )
+    
+    # Salon écrit le plus actif
+    if stats['channels_messages']:
+        top_ch_id = max(stats['channels_messages'], key=stats['channels_messages'].get)
+        top_ch = guild.get_channel(top_ch_id)
+        top_count = stats['channels_messages'][top_ch_id]
+        e.add_field(
+            name="📝 Salon écrit favoris",
+            value=f"{top_ch.mention if top_ch else 'Inconnu'}\n({top_count} messages)",
+            inline=True
+        )
+    else:
+        e.add_field(name="📝 Salon écrit favoris", value="*Aucune donnée*", inline=True)
+    
+    # Salon vocal le plus utilisé
+    if stats['channels_vocal']:
+        top_vc_id = max(stats['channels_vocal'], key=stats['channels_vocal'].get)
+        top_vc = guild.get_channel(top_vc_id)
+        top_duration = stats['channels_vocal'][top_vc_id]
+        if top_duration >= 3600:
+            dur_str = f"{top_duration // 3600}h {(top_duration % 3600) // 60}min"
+        elif top_duration >= 60:
+            dur_str = f"{top_duration // 60}min"
+        else:
+            dur_str = f"{top_duration}s"
+        e.add_field(
+            name="🎤 Salon vocal favoris",
+            value=f"{top_vc.name if top_vc else 'Inconnu'}\n({dur_str})",
+            inline=True
+        )
+    else:
+        e.add_field(name="🎤 Salon vocal favoris", value="*Aucune donnée*", inline=True)
+    
+    # Dernière activité
+    if stats['last_activity']:
+        e.add_field(
+            name="🕐 Dernière activité",
+            value=f"<t:{int(stats['last_activity'].timestamp())}:R>",
+            inline=True
+        )
+    else:
+        e.add_field(name="🕐 Dernière activité", value="*Inconnue*", inline=True)
+    
+    # Message le plus populaire
+    if stats['most_popular_message']:
+        mp = stats['most_popular_message']
+        e.add_field(
+            name=f"⭐ Message populaire ({mp['reactions']} réactions)",
+            value=f"*\"{mp['content']}\"*\n[Voir le message]({mp['url']})",
+            inline=False
+        )
+    
+    # Générer le graphique
+    img = await generate_stat_graph(stats, days, member.display_name)
+    file = None
+    if img:
+        file = discord.File(img, filename="stats.png")
+        e.set_image(url="attachment://stats.png")
+    
+    e.set_footer(text=f"{guild.name} • /stat", icon_url=guild.icon.url if guild.icon else None)
+    e.timestamp = now()
+    
+    return e, file
+
+async def generate_stat_graph(stats, days, username):
+    """Génère un graphique des statistiques"""
+    try:
+        if not stats['messages_per_day'] and not stats['vocal_per_day']:
+            return None
+        
+        # Préparer les données pour tous les jours de la période
+        dates = []
+        messages = []
+        vocal = []
+        
+        for i in range(days):
+            dt = now() - timedelta(days=days-1-i)
+            date_key = dt.strftime('%Y-%m-%d')
+            dates.append(dt.strftime('%d/%m'))
+            messages.append(stats['messages_per_day'].get(date_key, 0))
+            vocal.append(stats['vocal_per_day'].get(date_key, 0) / 60)  # Convertir en minutes
+        
+        # Créer le graphique
+        fig, ax1 = plt.subplots(figsize=(12, 5))
+        fig.patch.set_facecolor('#2f3136')
+        ax1.set_facecolor('#36393f')
+        
+        # Barres pour les messages
+        x = range(len(dates))
+        bars = ax1.bar([i - 0.2 for i in x], messages, 0.4, label='Messages', color='#5865F2', alpha=0.8)
+        ax1.set_xlabel('Date', color='white', fontsize=10)
+        ax1.set_ylabel('Messages', color='#5865F2', fontsize=10)
+        ax1.tick_params(axis='y', labelcolor='#5865F2')
+        ax1.tick_params(axis='x', colors='white')
+        
+        # Deuxième axe pour le vocal
+        ax2 = ax1.twinx()
+        bars2 = ax2.bar([i + 0.2 for i in x], vocal, 0.4, label='Vocal (min)', color='#57F287', alpha=0.8)
+        ax2.set_ylabel('Minutes en vocal', color='#57F287', fontsize=10)
+        ax2.tick_params(axis='y', labelcolor='#57F287')
+        
+        # Style
+        ax1.set_xticks(x)
+        ax1.set_xticklabels(dates, rotation=45, ha='right', fontsize=8)
+        ax1.spines['bottom'].set_color('white')
+        ax1.spines['left'].set_color('#5865F2')
+        ax1.spines['top'].set_visible(False)
+        ax2.spines['right'].set_color('#57F287')
+        ax2.spines['top'].set_visible(False)
+        
+        # Titre
+        plt.title(f'📊 Activité de {username}', color='white', fontsize=14, fontweight='bold', pad=15)
+        
+        # Légende
+        fig.legend(loc='upper right', bbox_to_anchor=(0.98, 0.98), facecolor='#36393f', edgecolor='white', labelcolor='white')
+        
+        plt.tight_layout()
+        
+        # Sauvegarder
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', facecolor='#2f3136', edgecolor='none', dpi=100)
+        buf.seek(0)
+        plt.close(fig)
+        
+        return buf
+        
+    except Exception as ex:
+        print(f"Erreur génération graphique: {ex}")
+        return None
+
+async def generate_detailed_stat_graph(guild, member, days):
+    """Génère un graphique détaillé avec plusieurs visualisations"""
+    try:
+        stats = await get_member_stats(guild, member, days)
+        
+        if not stats['total_messages'] and not stats['total_vocal_time']:
+            return None
+        
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        fig.patch.set_facecolor('#2f3136')
+        
+        # 1. Camembert des salons écrits (haut gauche)
+        ax1 = axes[0, 0]
+        ax1.set_facecolor('#2f3136')
+        
+        if stats['channels_messages']:
+            # Top 5 salons
+            sorted_channels = sorted(stats['channels_messages'].items(), key=lambda x: x[1], reverse=True)[:5]
+            labels = []
+            sizes = []
+            for ch_id, count in sorted_channels:
+                ch = guild.get_channel(ch_id)
+                labels.append(f"#{ch.name[:15]}" if ch else f"#{ch_id}")
+                sizes.append(count)
+            
+            colors = ['#5865F2', '#57F287', '#FEE75C', '#ED4245', '#9B59B6']
+            ax1.pie(sizes, labels=labels, colors=colors[:len(sizes)], autopct='%1.1f%%',
+                   textprops={'color': 'white', 'fontsize': 9})
+            ax1.set_title('📝 Top Salons Écrits', color='white', fontsize=12, fontweight='bold')
+        else:
+            ax1.text(0.5, 0.5, 'Aucune donnée', ha='center', va='center', color='white', fontsize=12)
+            ax1.set_title('📝 Top Salons Écrits', color='white', fontsize=12, fontweight='bold')
+        
+        # 2. Camembert des salons vocaux (haut droit)
+        ax2 = axes[0, 1]
+        ax2.set_facecolor('#2f3136')
+        
+        if stats['channels_vocal']:
+            sorted_vocal = sorted(stats['channels_vocal'].items(), key=lambda x: x[1], reverse=True)[:5]
+            labels = []
+            sizes = []
+            for ch_id, duration in sorted_vocal:
+                ch = guild.get_channel(ch_id)
+                labels.append(f"🔊 {ch.name[:15]}" if ch else f"🔊 {ch_id}")
+                sizes.append(duration)
+            
+            colors = ['#57F287', '#5865F2', '#FEE75C', '#ED4245', '#9B59B6']
+            ax2.pie(sizes, labels=labels, colors=colors[:len(sizes)], autopct='%1.1f%%',
+                   textprops={'color': 'white', 'fontsize': 9})
+            ax2.set_title('🎤 Top Salons Vocaux', color='white', fontsize=12, fontweight='bold')
+        else:
+            ax2.text(0.5, 0.5, 'Aucune donnée', ha='center', va='center', color='white', fontsize=12)
+            ax2.set_title('🎤 Top Salons Vocaux', color='white', fontsize=12, fontweight='bold')
+        
+        # 3. Courbe d'activité messages (bas gauche)
+        ax3 = axes[1, 0]
+        ax3.set_facecolor('#36393f')
+        
+        dates = []
+        messages = []
+        for i in range(days):
+            dt = now() - timedelta(days=days-1-i)
+            date_key = dt.strftime('%Y-%m-%d')
+            dates.append(dt.strftime('%d/%m'))
+            messages.append(stats['messages_per_day'].get(date_key, 0))
+        
+        ax3.fill_between(range(len(dates)), messages, alpha=0.3, color='#5865F2')
+        ax3.plot(range(len(dates)), messages, color='#5865F2', linewidth=2, marker='o', markersize=4)
+        ax3.set_xlabel('Date', color='white', fontsize=10)
+        ax3.set_ylabel('Messages', color='white', fontsize=10)
+        ax3.set_title('💬 Messages par jour', color='white', fontsize=12, fontweight='bold')
+        ax3.tick_params(colors='white')
+        ax3.set_xticks(range(0, len(dates), max(1, len(dates)//7)))
+        ax3.set_xticklabels([dates[i] for i in range(0, len(dates), max(1, len(dates)//7))], rotation=45, fontsize=8)
+        ax3.spines['bottom'].set_color('white')
+        ax3.spines['left'].set_color('white')
+        ax3.spines['top'].set_visible(False)
+        ax3.spines['right'].set_visible(False)
+        ax3.grid(True, alpha=0.2, color='white')
+        
+        # 4. Courbe d'activité vocale (bas droit)
+        ax4 = axes[1, 1]
+        ax4.set_facecolor('#36393f')
+        
+        vocal = []
+        for i in range(days):
+            dt = now() - timedelta(days=days-1-i)
+            date_key = dt.strftime('%Y-%m-%d')
+            vocal.append(stats['vocal_per_day'].get(date_key, 0) / 60)  # En minutes
+        
+        ax4.fill_between(range(len(dates)), vocal, alpha=0.3, color='#57F287')
+        ax4.plot(range(len(dates)), vocal, color='#57F287', linewidth=2, marker='o', markersize=4)
+        ax4.set_xlabel('Date', color='white', fontsize=10)
+        ax4.set_ylabel('Minutes', color='white', fontsize=10)
+        ax4.set_title('🎤 Temps vocal par jour', color='white', fontsize=12, fontweight='bold')
+        ax4.tick_params(colors='white')
+        ax4.set_xticks(range(0, len(dates), max(1, len(dates)//7)))
+        ax4.set_xticklabels([dates[i] for i in range(0, len(dates), max(1, len(dates)//7))], rotation=45, fontsize=8)
+        ax4.spines['bottom'].set_color('white')
+        ax4.spines['left'].set_color('white')
+        ax4.spines['top'].set_visible(False)
+        ax4.spines['right'].set_visible(False)
+        ax4.grid(True, alpha=0.2, color='white')
+        
+        # Titre principal
+        fig.suptitle(f'📊 Statistiques détaillées de {member.display_name}', 
+                    color='white', fontsize=16, fontweight='bold', y=0.98)
+        
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        
+        # Sauvegarder
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', facecolor='#2f3136', edgecolor='none', dpi=100)
+        buf.seek(0)
+        plt.close(fig)
+        
+        return buf
+        
+    except Exception as ex:
+        print(f"Erreur génération graphique détaillé: {ex}")
+        return None
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #                              📊 SUGGESTION VOTE TRACKING
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -4508,10 +5477,144 @@ async def before_social_check():
 async def on_voice_state_update(member, before, after):
     if member.bot:
         return
+    
+    guild_id = member.guild.id
+    user_id = member.id
+    key = (guild_id, user_id)
+    
     # Si l'utilisateur rejoint un vocal
     if after.channel and (not before.channel or before.channel != after.channel):
-        await update_realsy_activity(member.guild.id, member.id)
+        await update_realsy_activity(guild_id, user_id)
+        
+        # Enregistrer l'heure de connexion
+        voice_join_tracker[key] = now()
+        
+        # Tracker l'activité + redonner le rôle si configuré
+        await track_member_vocal_join(member, after.channel)
+    
+    # Si l'utilisateur quitte un vocal
+    if before.channel and (not after.channel or before.channel != after.channel):
+        # Calculer le temps passé
+        join_time = voice_join_tracker.pop(key, None)
+        if join_time:
+            duration = int((now() - join_time).total_seconds())
+            if duration > 0:
+                await track_member_vocal_leave(member, before.channel, duration)
+
+async def track_member_message(msg):
+    """Enregistre un message dans le tracking d'activité"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            now_str = now().isoformat()
+            
+            # Mettre à jour activity_tracking
+            await db.execute('''
+                INSERT INTO activity_tracking (guild_id, user_id, last_message, total_messages)
+                VALUES (?, ?, ?, 1)
+                ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                    last_message = ?,
+                    total_messages = total_messages + 1
+            ''', (msg.guild.id, msg.author.id, now_str, now_str))
+            
+            # Enregistrer dans member_activity pour les stats détaillées
+            await db.execute('''
+                INSERT INTO member_activity (guild_id, user_id, activity_type, channel_id, message_id, created_at)
+                VALUES (?, ?, 'message', ?, ?, ?)
+            ''', (msg.guild.id, msg.author.id, msg.channel.id, msg.id, now_str))
+            
+            await db.commit()
+        
+        # Redonner le rôle d'activité si configuré
+        await restore_activity_role(msg.author)
+        
+    except Exception as ex:
+        print(f"Erreur track message: {ex}")
+
+async def track_member_vocal_join(member, channel):
+    """Enregistre une connexion vocale"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            now_str = now().isoformat()
+            
+            # Mettre à jour last_vocal
+            await db.execute('''
+                INSERT INTO activity_tracking (guild_id, user_id, last_vocal)
+                VALUES (?, ?, ?)
+                ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                    last_vocal = ?
+            ''', (member.guild.id, member.id, now_str, now_str))
+            
+            await db.commit()
+        
+        # Redonner le rôle d'activité si configuré
+        await restore_activity_role(member)
+        
+    except Exception as ex:
+        print(f"Erreur track vocal join: {ex}")
+
+async def track_member_vocal_leave(member, channel, duration):
+    """Enregistre le temps passé en vocal"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            now_str = now().isoformat()
+            
+            # Mettre à jour le temps total en vocal
+            await db.execute('''
+                INSERT INTO activity_tracking (guild_id, user_id, total_vocal_time)
+                VALUES (?, ?, ?)
+                ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                    total_vocal_time = total_vocal_time + ?
+            ''', (member.guild.id, member.id, duration, duration))
+            
+            # Enregistrer la session vocale
+            await db.execute('''
+                INSERT INTO member_activity (guild_id, user_id, activity_type, channel_id, duration, created_at)
+                VALUES (?, ?, 'vocal', ?, ?, ?)
+            ''', (member.guild.id, member.id, channel.id, duration, now_str))
+            
+            await db.commit()
+            
+    except Exception as ex:
+        print(f"Erreur track vocal leave: {ex}")
+
+async def restore_activity_role(member):
+    """Redonne le rôle d'activité si le membre était marqué comme inactif"""
+    try:
+        c = await cfg(member.guild.id)
+        stat_cfg = c.get('stat_config', {})
+        role_id = stat_cfg.get('activity_role', 0)
+        
+        if not role_id:
+            return
+        
+        role = member.guild.get_role(role_id)
+        if not role:
+            return
+        
+        # Si le membre n'a pas le rôle, lui redonner
+        if role not in member.roles:
+            try:
+                await member.add_roles(role, reason="Retour d'activité")
+                
+                # Notifier dans le salon configuré
+                notif_ch_id = stat_cfg.get('notif_channel', 0)
+                notif_ch = member.guild.get_channel(notif_ch_id) if notif_ch_id else None
+                
+                if notif_ch:
+                    e = discord.Embed(
+                        title="✅ Retour d'activité",
+                        description=f"{member.mention} est de retour actif et a récupéré le rôle {role.mention}!",
+                        color=C.GREEN
+                    )
+                    e.set_thumbnail(url=member.display_avatar.url if member.display_avatar else None)
+                    e.timestamp = now()
+                    await notif_ch.send(embed=e)
+            except:
+                pass
+                
+    except Exception as ex:
+        print(f"Erreur restore role: {ex}")
 
 if __name__ == "__main__":
-    print("🚀 Bot v15 - Démarrage...")
+    print("🚀 Bot v18 - Démarrage...")
     bot.run(TOKEN)
