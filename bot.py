@@ -2860,107 +2860,233 @@ async def trade_cmd(i: discord.Interaction):
                 time_txt = f"{int(remaining)}s"
             return await i.response.send_message(f"⏱️ Attendez encore **{time_txt}**", ephemeral=True)
     
-    # Ouvrir le modal
-    await i.response.send_modal(TradeFormModal(i.guild, i.channel, trade_ch))
+    # Afficher le menu de création
+    v = TradeBuilderView(i.user, i.guild, i.channel, trade_ch)
+    e = v.get_embed()
+    await i.response.send_message(embed=e, view=v, ephemeral=True)
 
-class TradeFormModal(Modal, title="🔄 Créer un Trade"):
-    jeu = TextInput(
-        label="🎮 Jeu",
-        placeholder="Ex: Rocket League, Fortnite, GTA RP...",
-        max_length=50
-    )
-    je_donne = TextInput(
-        label="📤 Ce que je DONNE",
-        placeholder="Décrivez ce que vous donnez...",
-        style=discord.TextStyle.paragraph,
-        max_length=200
-    )
-    je_veux = TextInput(
-        label="📥 Ce que je VEUX",
-        placeholder="Décrivez ce que vous voulez en échange...",
-        style=discord.TextStyle.paragraph,
-        max_length=200
-    )
-    
-    def __init__(self, guild, channel, trade_ch):
-        super().__init__()
+class TradeBuilderView(View):
+    def __init__(self, user, guild, channel, trade_ch):
+        super().__init__(timeout=300)
+        self.user = user
         self.guild = guild
         self.channel = channel
         self.trade_ch = trade_ch
+        self.jeu = ""
+        self.je_donne = []
+        self.je_veux = []
+        self.texte_donne = ""
+        self.texte_veux = ""
+        
+        # Ajouter les selects d'emojis si le serveur en a
+        emojis = list(guild.emojis)[:25]
+        if emojis:
+            self.add_item(TradeEmojiGiveSelect(self, emojis))
+            self.add_item(TradeEmojiWantSelect(self, emojis))
     
-    async def on_submit(self, i):
+    def get_embed(self):
+        e = discord.Embed(title="🔄 Créer un Trade", color=C.PURPLE)
+        
+        # Construire l'affichage
+        donne_display = " ".join(self.je_donne) + (" " + self.texte_donne if self.texte_donne else "")
+        veux_display = " ".join(self.je_veux) + (" " + self.texte_veux if self.texte_veux else "")
+        
+        e.add_field(name="🎮 Jeu", value=self.jeu if self.jeu else "*Non défini*", inline=True)
+        e.add_field(name="\u200b", value="\u200b", inline=True)
+        e.add_field(name="\u200b", value="\u200b", inline=True)
+        
+        e.add_field(name="📤 Je DONNE", value=donne_display.strip() if donne_display.strip() else "*Rien sélectionné*", inline=True)
+        e.add_field(name="➡️", value="🔄", inline=True)
+        e.add_field(name="📥 Je VEUX", value=veux_display.strip() if veux_display.strip() else "*Rien sélectionné*", inline=True)
+        
+        # Instructions
+        if self.jeu and (donne_display.strip() or veux_display.strip()):
+            e.set_footer(text="✅ Cliquez sur Confirmer pour continuer")
+            e.color = C.GREEN
+        else:
+            e.set_footer(text="1️⃣ Définissez le jeu • 2️⃣ Sélectionnez/écrivez vos items • 3️⃣ Confirmez")
+        
+        return e
+    
+    @discord.ui.button(label="🎮 Définir le Jeu", style=discord.ButtonStyle.primary, row=2)
+    async def set_game(self, i, b):
+        await i.response.send_modal(TradeGameModal(self))
+    
+    @discord.ui.button(label="✏️ Texte Donne", style=discord.ButtonStyle.secondary, row=2)
+    async def set_text_give(self, i, b):
+        await i.response.send_modal(TradeTextGiveModal(self))
+    
+    @discord.ui.button(label="✏️ Texte Veux", style=discord.ButtonStyle.secondary, row=2)
+    async def set_text_want(self, i, b):
+        await i.response.send_modal(TradeTextWantModal(self))
+    
+    @discord.ui.button(label="✅ Confirmer", style=discord.ButtonStyle.success, row=3)
+    async def confirm(self, i, b):
+        donne_display = " ".join(self.je_donne) + (" " + self.texte_donne if self.texte_donne else "")
+        veux_display = " ".join(self.je_veux) + (" " + self.texte_veux if self.texte_veux else "")
+        
+        if not self.jeu:
+            return await i.response.send_message("❌ Définissez le jeu d'abord!", ephemeral=True)
+        if not donne_display.strip() and not veux_display.strip():
+            return await i.response.send_message("❌ Ajoutez au moins un item!", ephemeral=True)
+        
         # Demander la preuve
         e = discord.Embed(title="📸 Preuve requise", color=C.ORANGE)
-        e.description = "**Envoyez une image** de preuve dans les **3 minutes**.\n\n📷 *La preuve doit montrer que vous possédez les items.*"
-        e.add_field(name="🎮 Jeu", value=self.jeu.value, inline=True)
-        e.add_field(name="📤 Vous donnez", value=self.je_donne.value[:100], inline=True)
-        e.add_field(name="📥 Vous voulez", value=self.je_veux.value[:100], inline=True)
-        
-        await i.response.send_message(embed=e, ephemeral=True)
+        e.description = "**Envoyez une image** de preuve dans les **3 minutes**."
+        await i.response.edit_message(embed=e, view=None)
         
         # Attendre l'image
         def check(m):
-            return m.author.id == i.user.id and m.channel.id == self.channel.id and m.attachments
+            return m.author.id == self.user.id and m.channel.id == self.channel.id and m.attachments
         
         try:
             msg = await bot.wait_for('message', timeout=180.0, check=check)
             
-            if not msg.attachments:
-                return await i.followup.send("❌ Aucune image détectée", ephemeral=True)
-            
-            # Télécharger l'image
             attachment = msg.attachments[0]
             image_data = await attachment.read()
             image_filename = attachment.filename
             
-            # Supprimer le message
             try:
                 await msg.delete()
             except:
                 pass
             
         except asyncio.TimeoutError:
-            return await i.followup.send("❌ Temps écoulé! Aucune preuve fournie.", ephemeral=True)
+            return await i.followup.send("❌ Temps écoulé!", ephemeral=True)
         
-        # Créer le post de trade professionnel
+        # Créer le post professionnel
         e = discord.Embed(color=C.GOLD)
+        e.set_author(name=f"🔄 TRADE • {self.jeu.upper()}", icon_url=self.user.display_avatar.url)
         
-        # Header compact
-        e.set_author(
-            name=f"🔄 TRADE • {self.jeu.value.upper()}",
-            icon_url=i.user.display_avatar.url
+        # Affichage horizontal bien propre
+        e.add_field(
+            name="📤 DONNE",
+            value=donne_display.strip() if donne_display.strip() else "—",
+            inline=True
+        )
+        e.add_field(
+            name="⚡",
+            value="🔄",
+            inline=True
+        )
+        e.add_field(
+            name="📥 VEUT",
+            value=veux_display.strip() if veux_display.strip() else "—",
+            inline=True
         )
         
-        # Section principale du trade - BIEN VISIBLE
-        trade_display = f"```\n📤 {self.je_donne.value}\n\n       🔄\n\n📥 {self.je_veux.value}\n```"
-        e.description = trade_display
-        
-        # Infos compactes sur une ligne
+        # Infos trader compactes
         e.add_field(
-            name="ℹ️ Informations",
-            value=f"👤 {i.user.mention} • 🆔 `{i.user.id}` • 📅 <t:{int(now().timestamp())}:R>",
+            name="",
+            value=f"👤 {self.user.mention} • `{self.user.id}` • <t:{int(now().timestamp())}:R>",
             inline=False
         )
         
-        # Image en petit (thumbnail)
+        # Image en thumbnail (un peu plus grande avec set_image)
         image_file = discord.File(io.BytesIO(image_data), filename=image_filename)
-        e.set_thumbnail(url=f"attachment://{image_filename}")
+        e.set_image(url=f"attachment://{image_filename}")
         
-        e.set_footer(text="✅ Réagissez si intéressé • 💬 Contactez en MP")
+        e.set_footer(text="✅ Intéressé? Réagissez! • 💬 MP pour négocier")
         
         # Envoyer
         trade_msg = await self.trade_ch.send(embed=e, file=image_file)
-        
         await trade_msg.add_reaction("✅")
         await trade_msg.add_reaction("💬")
         
-        # Cooldown
-        trade_cooldowns[(self.guild.id, i.user.id)] = now()
+        trade_cooldowns[(self.guild.id, self.user.id)] = now()
         
-        # Confirmation
         confirm = discord.Embed(title="✅ Trade publié!", color=C.GREEN)
         confirm.description = f"Votre offre a été publiée dans {self.trade_ch.mention}"
         await i.followup.send(embed=confirm, ephemeral=True)
+    
+    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.danger, row=3)
+    async def cancel(self, i, b):
+        await i.response.edit_message(embed=discord.Embed(title="❌ Trade annulé", color=C.RED), view=None)
+
+class TradeEmojiGiveSelect(Select):
+    def __init__(self, parent, emojis):
+        self.parent = parent
+        options = []
+        for e in emojis[:25]:
+            options.append(discord.SelectOption(
+                label=e.name[:25],
+                value=str(e.id),
+                emoji=e
+            ))
+        super().__init__(
+            placeholder="📤 Emojis à DONNER...",
+            options=options,
+            min_values=0,
+            max_values=min(len(options), 10),
+            row=0
+        )
+    
+    async def callback(self, i):
+        self.parent.je_donne = []
+        for emoji_id in self.values:
+            emoji = discord.utils.get(self.parent.guild.emojis, id=int(emoji_id))
+            if emoji:
+                self.parent.je_donne.append(str(emoji))
+        await i.response.edit_message(embed=self.parent.get_embed(), view=self.parent)
+
+class TradeEmojiWantSelect(Select):
+    def __init__(self, parent, emojis):
+        self.parent = parent
+        options = []
+        for e in emojis[:25]:
+            options.append(discord.SelectOption(
+                label=e.name[:25],
+                value=str(e.id),
+                emoji=e
+            ))
+        super().__init__(
+            placeholder="📥 Emojis que je VEUX...",
+            options=options,
+            min_values=0,
+            max_values=min(len(options), 10),
+            row=1
+        )
+    
+    async def callback(self, i):
+        self.parent.je_veux = []
+        for emoji_id in self.values:
+            emoji = discord.utils.get(self.parent.guild.emojis, id=int(emoji_id))
+            if emoji:
+                self.parent.je_veux.append(str(emoji))
+        await i.response.edit_message(embed=self.parent.get_embed(), view=self.parent)
+
+class TradeGameModal(Modal, title="🎮 Définir le Jeu"):
+    jeu = TextInput(label="Nom du jeu", placeholder="Ex: Rocket League, Fortnite, GTA RP...", max_length=50)
+    
+    def __init__(self, parent):
+        super().__init__()
+        self.parent = parent
+    
+    async def on_submit(self, i):
+        self.parent.jeu = self.jeu.value
+        await i.response.edit_message(embed=self.parent.get_embed(), view=self.parent)
+
+class TradeTextGiveModal(Modal, title="📤 Ce que je DONNE (texte)"):
+    texte = TextInput(label="Description", placeholder="Ex: 500 crédits, Voiture TW...", style=discord.TextStyle.paragraph, max_length=150, required=False)
+    
+    def __init__(self, parent):
+        super().__init__()
+        self.parent = parent
+    
+    async def on_submit(self, i):
+        self.parent.texte_donne = self.texte.value
+        await i.response.edit_message(embed=self.parent.get_embed(), view=self.parent)
+
+class TradeTextWantModal(Modal, title="📥 Ce que je VEUX (texte)"):
+    texte = TextInput(label="Description", placeholder="Ex: Octane TW, 1000 crédits...", style=discord.TextStyle.paragraph, max_length=150, required=False)
+    
+    def __init__(self, parent):
+        super().__init__()
+        self.parent = parent
+    
+    async def on_submit(self, i):
+        self.parent.texte_veux = self.texte.value
+        await i.response.edit_message(embed=self.parent.get_embed(), view=self.parent)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              📊 SUGGESTION VOTE TRACKING
