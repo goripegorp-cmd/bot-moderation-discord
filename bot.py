@@ -3415,7 +3415,7 @@ class StatPanel(View):
         stat_cfg = c.get('stat_config', {})
         
         # Actions multiples
-        action_labels = {'ping': '📋 Liste', 'remove_role': '🎭 Rôle', 'kick': '👢 Kick'}
+        action_labels = {'ping': '📊 Rapport', 'remove_role': '🎭 Rôle', 'kick': '👢 Kick'}
         
         actions_7d = stat_cfg.get('actions_7d', [])
         actions_30d = stat_cfg.get('actions_30d', [])
@@ -3616,7 +3616,7 @@ class StatActionPanel(View):
         e = discord.Embed(title="⚙️ Configuration des Actions", color=C.ORANGE)
         e.description = "Configurez les actions automatiques sur les membres inactifs.\n**Vous pouvez sélectionner plusieurs actions !**\n\n*⚠️ Aucune mention automatique - Vous ferez le @here/@everyone vous-même*"
         
-        action_labels = {'ping': '📋 Lister', 'remove_role': '🎭 Retirer rôle', 'kick': '👢 Kick'}
+        action_labels = {'ping': '📊 Rapport', 'remove_role': '🎭 Retirer rôle', 'kick': '👢 Kick'}
         
         # Actions 7 jours (maintenant une liste)
         actions_7d = stat_cfg.get('actions_7d', [])
@@ -3671,7 +3671,7 @@ class StatActionPanel(View):
     @discord.ui.select(
         placeholder="😴 Actions 7 jours (multi-sélection)...",
         options=[
-            discord.SelectOption(label="Lister les membres", value="ping", emoji="📋", description="Afficher la liste dans le salon de notifications"),
+            discord.SelectOption(label="Envoyer le rapport", value="ping", emoji="📊", description="Afficher le rapport dans le salon de notifications"),
             discord.SelectOption(label="Retirer le rôle", value="remove_role", emoji="🎭", description="Enlever le rôle d'activité"),
             discord.SelectOption(label="Kick les membres", value="kick", emoji="👢", description="Expulser du serveur"),
         ],
@@ -3689,7 +3689,7 @@ class StatActionPanel(View):
     @discord.ui.select(
         placeholder="💤 Actions 30 jours (multi-sélection)...",
         options=[
-            discord.SelectOption(label="Lister les membres", value="ping", emoji="📋", description="Afficher la liste dans le salon de notifications"),
+            discord.SelectOption(label="Envoyer le rapport", value="ping", emoji="📊", description="Afficher le rapport dans le salon de notifications"),
             discord.SelectOption(label="Retirer le rôle", value="remove_role", emoji="🎭", description="Enlever le rôle d'activité"),
             discord.SelectOption(label="Kick les membres", value="kick", emoji="👢", description="Expulser du serveur"),
         ],
@@ -4116,11 +4116,11 @@ async def execute_afk_actions(guild):
         # Résumé
         summary = "✅ **Actions exécutées:**\n\n"
         
-        if results['ping_7d']: summary += f"📋 **{results['ping_7d']}** membre(s) listé(s) (7j)\n"
+        if results['ping_7d']: summary += f"📊 **Rapport 7j** envoyé ({results['ping_7d']} membre(s) inactifs)\n"
         if results['remove_role_7d']: summary += f"🎭 **{results['remove_role_7d']}** rôle(s) retiré(s) (7j)\n"
         if results['kick_7d']: summary += f"👢 **{results['kick_7d']}** membre(s) expulsé(s) (7j)\n"
         
-        if results['ping_30d']: summary += f"📋 **{results['ping_30d']}** membre(s) listé(s) (30j)\n"
+        if results['ping_30d']: summary += f"📊 **Rapport 30j** envoyé ({results['ping_30d']} membre(s) inactifs)\n"
         if results['remove_role_30d']: summary += f"🎭 **{results['remove_role_30d']}** rôle(s) retiré(s) (30j)\n"
         if results['kick_30d']: summary += f"👢 **{results['kick_30d']}** membre(s) expulsé(s) (30j)\n"
         
@@ -4141,7 +4141,7 @@ async def execute_afk_actions(guild):
         return f"❌ Erreur: {ex}"
 
 async def send_compact_afk_notification(channel, members, days, recovery_mention, role):
-    """Envoie un beau tableau des membres AFK SANS aucune mention"""
+    """Envoie uniquement le rapport d'inactivité - SANS liste de membres"""
     if not members:
         return
     
@@ -4159,7 +4159,7 @@ async def send_compact_afk_notification(channel, members, days, recovery_mention
     
     role_txt = f"**{role.name}**" if role else "d'activité"
     
-    # ═══════════════ EMBED PRINCIPAL ═══════════════
+    # ═══════════════ EMBED PRINCIPAL (UNIQUE) ═══════════════
     e = discord.Embed(title=title, color=color)
     
     e.description = (
@@ -4181,8 +4181,9 @@ async def send_compact_afk_notification(channel, members, days, recovery_mention
     # Actions effectuées
     actions_txt = ""
     if role:
-        actions_txt += f"🎭 Le rôle {role_txt} a été **retiré**\n"
-    actions_txt += f"📋 Les membres sont listés ci-dessous"
+        actions_txt += f"🎭 Le rôle {role_txt} a été **retiré** aux membres inactifs"
+    else:
+        actions_txt += f"📋 {len(members)} membre(s) détecté(s) comme inactif(s)"
     
     e.add_field(
         name="⚡ Actions effectuées",
@@ -4207,39 +4208,6 @@ async def send_compact_afk_notification(channel, members, days, recovery_mention
     e.timestamp = now()
     
     await channel.send(embed=e)
-    
-    # ═══════════════ TABLEAU DES MEMBRES ═══════════════
-    # Créer des embeds avec la liste des membres (sans mentions !)
-    
-    # Trier par nom pour plus de lisibilité
-    sorted_members = sorted(members, key=lambda m: m.display_name.lower())
-    
-    # Grouper par 20 membres par embed
-    chunk_size = 20
-    total_chunks = (len(sorted_members) + chunk_size - 1) // chunk_size
-    
-    for i in range(0, len(sorted_members), chunk_size):
-        chunk = sorted_members[i:i + chunk_size]
-        chunk_num = (i // chunk_size) + 1
-        
-        table_embed = discord.Embed(color=color)
-        
-        if total_chunks > 1:
-            table_embed.title = f"📋 Liste des membres inactifs ({chunk_num}/{total_chunks})"
-        else:
-            table_embed.title = "📋 Liste des membres inactifs"
-        
-        # Créer un tableau formaté
-        table_lines = []
-        for idx, member in enumerate(chunk, start=i+1):
-            # Format: numéro | nom | ID
-            name = member.display_name[:20]
-            table_lines.append(f"`{idx:3d}.` **{name}** • `{member.id}`")
-        
-        table_embed.description = "\n".join(table_lines)
-        
-        await channel.send(embed=table_embed)
-        await asyncio.sleep(0.3)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🔄 TÂCHE AUTOMATIQUE INACTIVITÉ
@@ -7100,20 +7068,12 @@ async def handle_recovery_message(msg, stat_cfg):
     """Gère un message dans le salon de récupération - supprime le message et redonne le rôle"""
     try:
         role_id = stat_cfg.get('activity_role', 0)
-        notif_ch_id = stat_cfg.get('notif_channel', 0)
         
         role = msg.guild.get_role(role_id) if role_id else None
-        notif_ch = msg.guild.get_channel(notif_ch_id) if notif_ch_id else None
         
-        # Supprimer le message immédiatement
-        try:
-            await msg.delete()
-        except:
-            pass
-        
-        # Mettre à jour l'activité du membre
+        # ═══════════════ ÉTAPE 1: METTRE À JOUR L'ACTIVITÉ EN PREMIER ═══════════════
+        now_str = now().isoformat()
         async with aiosqlite.connect(DB_PATH) as db:
-            now_str = now().isoformat()
             await db.execute('''
                 INSERT INTO activity_tracking (guild_id, user_id, last_message, total_messages)
                 VALUES (?, ?, ?, 1)
@@ -7123,26 +7083,20 @@ async def handle_recovery_message(msg, stat_cfg):
             ''', (msg.guild.id, msg.author.id, now_str, now_str))
             await db.commit()
         
-        # Redonner le rôle SEULEMENT si le membre ne l'a pas
+        # ═══════════════ ÉTAPE 2: REDONNER LE RÔLE ═══════════════
         if role and role not in msg.author.roles:
             try:
                 await msg.author.add_roles(role, reason="Récupération d'activité via salon dédié")
-                
-                # Notification discrète (sans mention) seulement si rôle redonné
-                if notif_ch:
-                    e = discord.Embed(
-                        title="✅ Activité Récupérée",
-                        color=C.GREEN
-                    )
-                    e.description = f"**{msg.author.display_name}** a récupéré le rôle **{role.name}**"
-                    e.set_thumbnail(url=msg.author.display_avatar.url if msg.author.display_avatar else None)
-                    e.set_footer(text=f"ID: {msg.author.id}")
-                    e.timestamp = now()
-                    await notif_ch.send(embed=e)
             except:
                 pass
         
-        # Si le membre a déjà le rôle, ne rien faire (évite le spam)
+        # ═══════════════ ÉTAPE 3: SUPPRIMER LE MESSAGE ═══════════════
+        try:
+            await msg.delete()
+        except:
+            pass
+        
+        # Pas de notification - silencieux
         
     except Exception as ex:
         print(f"Erreur handle_recovery_message: {ex}")
@@ -7200,7 +7154,6 @@ async def restore_activity_role(member):
         c = await cfg(member.guild.id)
         stat_cfg = c.get('stat_config', {})
         role_id = stat_cfg.get('activity_role', 0)
-        notif_ch_id = stat_cfg.get('notif_channel', 0)
         
         if not role_id:
             return
@@ -7209,24 +7162,21 @@ async def restore_activity_role(member):
         if not role:
             return
         
-        # Si le membre n'a pas le rôle, lui redonner
+        # ═══════════════ ENREGISTRER L'ACTIVITÉ ═══════════════
+        now_str = now().isoformat()
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('''
+                INSERT INTO activity_tracking (guild_id, user_id, last_vocal)
+                VALUES (?, ?, ?)
+                ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                    last_vocal = ?
+            ''', (member.guild.id, member.id, now_str, now_str))
+            await db.commit()
+        
+        # Redonner le rôle silencieusement
         if role not in member.roles:
             try:
                 await member.add_roles(role, reason="Retour d'activité via vocal")
-                
-                # Notification discrète (sans mention)
-                notif_ch = member.guild.get_channel(notif_ch_id) if notif_ch_id else None
-                
-                if notif_ch:
-                    e = discord.Embed(
-                        title="✅ Activité Récupérée",
-                        color=C.GREEN
-                    )
-                    e.description = f"**{member.display_name}** a récupéré le rôle **{role.name}** en rejoignant un vocal"
-                    e.set_thumbnail(url=member.display_avatar.url if member.display_avatar else None)
-                    e.set_footer(text=f"ID: {member.id}")
-                    e.timestamp = now()
-                    await notif_ch.send(embed=e)
             except:
                 pass
                 
