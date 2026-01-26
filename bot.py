@@ -395,6 +395,153 @@ async def is_channel_immune(guild_id, channel_id):
     except:
         return False
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           📺 SÉLECTEUR DE SALON PAGINÉ
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class PaginatedChannelSelect(View):
+    """Sélecteur de salon avec pagination pour supporter plus de 25 salons"""
+    def __init__(self, u, g, callback_key, return_panel_class, page=0, multi=False, current_channels=None):
+        super().__init__(timeout=180)
+        self.u = u
+        self.g = g
+        self.callback_key = callback_key  # Clé de config à modifier
+        self.return_panel_class = return_panel_class  # Classe du panel de retour
+        self.page = page
+        self.multi = multi  # Si True, permet plusieurs salons
+        self.current_channels = current_channels or []  # Salons déjà sélectionnés
+        self.channels = list(g.text_channels)
+        self.max_page = (len(self.channels) - 1) // 23  # 23 pour laisser place à "Aucun"
+        
+        self._build_select()
+        self._build_buttons()
+    
+    def _build_select(self):
+        # Calculer les salons de cette page
+        start = self.page * 23
+        end = start + 23
+        page_channels = self.channels[start:end]
+        
+        opts = []
+        if not self.multi and self.page == 0:
+            opts.append(discord.SelectOption(label="❌ Aucun / Désactiver", value="0", emoji="❌"))
+        
+        for ch in page_channels:
+            is_selected = ch.id in self.current_channels
+            label = f"{'✅ ' if is_selected else ''}# {ch.name}"[:25]
+            desc = ch.category.name[:50] if ch.category else "Sans catégorie"
+            opts.append(discord.SelectOption(
+                label=label, 
+                value=str(ch.id),
+                description=desc,
+                default=is_selected if self.multi else False
+            ))
+        
+        if opts:
+            select = PaginatedChannelSelectMenu(
+                self, opts, 
+                multi=self.multi,
+                placeholder=f"Page {self.page + 1}/{self.max_page + 1} - Sélectionner..."
+            )
+            self.add_item(select)
+    
+    def _build_buttons(self):
+        # Bouton page précédente
+        prev_btn = discord.ui.Button(
+            label="◀️", 
+            style=discord.ButtonStyle.secondary, 
+            disabled=(self.page == 0),
+            row=1
+        )
+        prev_btn.callback = self.prev_page
+        self.add_item(prev_btn)
+        
+        # Bouton page suivante
+        next_btn = discord.ui.Button(
+            label="▶️", 
+            style=discord.ButtonStyle.secondary, 
+            disabled=(self.page >= self.max_page),
+            row=1
+        )
+        next_btn.callback = self.next_page
+        self.add_item(next_btn)
+        
+        # Bouton retour
+        back_btn = discord.ui.Button(
+            label="◀️ Retour", 
+            style=discord.ButtonStyle.danger,
+            row=1
+        )
+        back_btn.callback = self.go_back
+        self.add_item(back_btn)
+        
+        # Si multi-sélection, ajouter bouton "Valider"
+        if self.multi and self.current_channels:
+            validate_btn = discord.ui.Button(
+                label=f"✅ Valider ({len(self.current_channels)})", 
+                style=discord.ButtonStyle.success,
+                row=1
+            )
+            validate_btn.callback = self.validate
+            self.add_item(validate_btn)
+    
+    async def prev_page(self, i):
+        v = PaginatedChannelSelect(
+            self.u, self.g, self.callback_key, self.return_panel_class,
+            page=self.page - 1, multi=self.multi, current_channels=self.current_channels
+        )
+        await i.response.edit_message(view=v)
+    
+    async def next_page(self, i):
+        v = PaginatedChannelSelect(
+            self.u, self.g, self.callback_key, self.return_panel_class,
+            page=self.page + 1, multi=self.multi, current_channels=self.current_channels
+        )
+        await i.response.edit_message(view=v)
+    
+    async def go_back(self, i):
+        v = self.return_panel_class(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    async def validate(self, i):
+        # Sauvegarder les salons sélectionnés
+        await db_set(self.g.id, self.callback_key, self.current_channels)
+        v = self.return_panel_class(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class PaginatedChannelSelectMenu(Select):
+    def __init__(self, parent_view, opts, multi=False, placeholder="Sélectionner..."):
+        max_vals = min(len(opts), 10) if multi else 1
+        super().__init__(placeholder=placeholder, options=opts, max_values=max_vals if multi else 1)
+        self.parent_view = parent_view
+        self.multi = multi
+    
+    async def callback(self, i):
+        selected_ids = [int(v) for v in self.values if v != "0"]
+        
+        if self.multi:
+            # Mode multi : ajouter/retirer de la liste
+            for ch_id in selected_ids:
+                if ch_id in self.parent_view.current_channels:
+                    self.parent_view.current_channels.remove(ch_id)
+                else:
+                    self.parent_view.current_channels.append(ch_id)
+            
+            # Rafraîchir la vue
+            v = PaginatedChannelSelect(
+                self.parent_view.u, self.parent_view.g, 
+                self.parent_view.callback_key, self.parent_view.return_panel_class,
+                page=self.parent_view.page, multi=True, 
+                current_channels=self.parent_view.current_channels
+            )
+            await i.response.edit_message(view=v)
+        else:
+            # Mode simple : sauvegarder directement
+            value = int(self.values[0]) if self.values[0] != "0" else 0
+            await db_set(self.parent_view.g.id, self.parent_view.callback_key, value)
+            v = self.parent_view.return_panel_class(self.parent_view.u, self.parent_view.g)
+            await i.response.edit_message(embed=await v.embed(), view=v)
+
 async def is_fully_immune(member):
     """Vérifie si un membre est totalement immunisé (rôle ou utilisateur)"""
     if not member or not member.guild:
@@ -2049,27 +2196,48 @@ class SuggestionPanel(View):
         sugg_cd = c.get('suggestion_cooldown', 1)
         sugg_unit = c.get('suggestion_cooldown_unit', 'jours')
         
-        e.add_field(name="🎭 Rôle autorisé", value=sugg_role.mention if sugg_role else "❌ Non configuré (tout le monde)", inline=False)
-        e.add_field(name="📍 Salon des suggestions", value=sugg_ch.mention if sugg_ch else "❌ Non configuré", inline=False)
-        e.add_field(name="⏱️ Cooldown", value=f"{sugg_cd} {sugg_unit}", inline=False)
+        # Salons autorisés pour la commande
+        allowed_chs = c.get('suggestion_allowed_channels', [])
+        if allowed_chs:
+            ch_mentions = []
+            for ch_id in allowed_chs[:5]:
+                ch = self.g.get_channel(ch_id)
+                if ch:
+                    ch_mentions.append(ch.mention)
+            allowed_txt = ", ".join(ch_mentions)
+            if len(allowed_chs) > 5:
+                allowed_txt += f" +{len(allowed_chs) - 5} autres"
+        else:
+            allowed_txt = "*Partout*"
         
-        e.set_footer(text="Commande: /suggestion")
+        e.add_field(name="🎭 Rôle autorisé", value=sugg_role.mention if sugg_role else "*Tout le monde*", inline=True)
+        e.add_field(name="⏱️ Cooldown", value=f"{sugg_cd} {sugg_unit}", inline=True)
+        e.add_field(name="📍 Salon de publication", value=sugg_ch.mention if sugg_ch else "❌ Non configuré", inline=False)
+        e.add_field(name="📌 Salons autorisés", value=allowed_txt, inline=False)
+        
+        e.set_footer(text="💡 /suggestion • Salon publication ≠ Salons où utiliser la commande")
         return e
     
     @discord.ui.button(label="🎭 Rôle", style=discord.ButtonStyle.primary, row=0)
     async def set_role(self, i, b):
-        roles = [r for r in self.g.roles[1:] if not r.is_bot_managed()][:25]
-        opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
-        opts.insert(0, discord.SelectOption(label="❌ Tout le monde", value="0"))
-        v = SuggRoleView(self.u, self.g, opts)
-        await i.response.edit_message(embed=discord.Embed(title="🎭 Rôle autorisé", color=C.PURPLE), view=v)
+        v = PaginatedRoleSelect(self.u, self.g, 'suggestion_role', SuggestionPanel)
+        await i.response.edit_message(embed=discord.Embed(title="🎭 Rôle autorisé pour /suggestion", color=C.PURPLE), view=v)
     
-    @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="📍 Salon publication", style=discord.ButtonStyle.primary, row=0)
     async def set_channel(self, i, b):
-        chs = list(self.g.text_channels)[:25]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        v = SuggChanView(self.u, self.g, opts)
-        await i.response.edit_message(embed=discord.Embed(title="📍 Salon des suggestions", color=C.PURPLE), view=v)
+        v = PaginatedChannelSelect(self.u, self.g, 'suggestion_channel', SuggestionPanel)
+        await i.response.edit_message(embed=discord.Embed(title="📍 Salon de publication", description="Où les suggestions seront envoyées", color=C.PURPLE), view=v)
+    
+    @discord.ui.button(label="📌 Salons commande", style=discord.ButtonStyle.success, row=0)
+    async def set_allowed_channels(self, i, b):
+        c = await cfg(self.g.id)
+        current = c.get('suggestion_allowed_channels', [])
+        v = PaginatedChannelSelect(self.u, self.g, 'suggestion_allowed_channels', SuggestionPanel, multi=True, current_channels=current)
+        await i.response.edit_message(embed=discord.Embed(
+            title="📌 Salons autorisés pour /suggestion", 
+            description="Sélectionnez les salons où la commande peut être utilisée.\n*Vide = partout*",
+            color=C.PURPLE
+        ), view=v)
     
     @discord.ui.button(label="⏱️ Cooldown", style=discord.ButtonStyle.secondary, row=1)
     async def set_cooldown(self, i, b):
@@ -2080,36 +2248,70 @@ class SuggestionPanel(View):
         v = CommandsPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
-class SuggRoleView(View):
-    def __init__(self, u, g, opts):
-        super().__init__(timeout=120)
-        self.add_item(SuggRoleSelect(u, g, opts))
-
-class SuggRoleSelect(Select):
-    def __init__(self, u, g, opts):
-        super().__init__(placeholder="Choisir un rôle...", options=opts)
+# Sélecteur de rôle paginé
+class PaginatedRoleSelect(View):
+    def __init__(self, u, g, callback_key, return_panel_class, page=0):
+        super().__init__(timeout=180)
         self.u = u
         self.g = g
+        self.callback_key = callback_key
+        self.return_panel_class = return_panel_class
+        self.page = page
+        self.roles = [r for r in g.roles[1:] if not r.is_bot_managed()]
+        self.max_page = (len(self.roles) - 1) // 24
+        
+        self._build()
     
-    async def callback(self, i):
-        await db_set(i.guild.id, 'suggestion_role', int(self.values[0]))
-        v = SuggestionPanel(self.u, self.g)
+    def _build(self):
+        start = self.page * 24
+        end = start + 24
+        page_roles = self.roles[start:end]
+        
+        opts = []
+        if self.page == 0:
+            opts.append(discord.SelectOption(label="❌ Aucun / Tout le monde", value="0"))
+        
+        for r in page_roles:
+            opts.append(discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)))
+        
+        if opts:
+            self.add_item(PaginatedRoleSelectMenu(self, opts))
+        
+        # Boutons de pagination
+        if self.page > 0:
+            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.secondary, row=1)
+            prev_btn.callback = self.prev_page
+            self.add_item(prev_btn)
+        
+        if self.page < self.max_page:
+            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.secondary, row=1)
+            next_btn.callback = self.next_page
+            self.add_item(next_btn)
+        
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=1)
+        back_btn.callback = self.go_back
+        self.add_item(back_btn)
+    
+    async def prev_page(self, i):
+        v = PaginatedRoleSelect(self.u, self.g, self.callback_key, self.return_panel_class, page=self.page - 1)
+        await i.response.edit_message(view=v)
+    
+    async def next_page(self, i):
+        v = PaginatedRoleSelect(self.u, self.g, self.callback_key, self.return_panel_class, page=self.page + 1)
+        await i.response.edit_message(view=v)
+    
+    async def go_back(self, i):
+        v = self.return_panel_class(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
-class SuggChanView(View):
-    def __init__(self, u, g, opts):
-        super().__init__(timeout=120)
-        self.add_item(SuggChanSelect(u, g, opts))
-
-class SuggChanSelect(Select):
-    def __init__(self, u, g, opts):
-        super().__init__(placeholder="Choisir un salon...", options=opts)
-        self.u = u
-        self.g = g
+class PaginatedRoleSelectMenu(Select):
+    def __init__(self, parent, opts):
+        super().__init__(placeholder=f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un rôle...", options=opts)
+        self.parent = parent
     
     async def callback(self, i):
-        await db_set(i.guild.id, 'suggestion_channel', int(self.values[0]))
-        v = SuggestionPanel(self.u, self.g)
+        await db_set(self.parent.g.id, self.parent.callback_key, int(self.values[0]))
+        v = self.parent.return_panel_class(self.parent.u, self.parent.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 class SuggCooldownModal(Modal, title="⏱️ Cooldown Suggestions"):
@@ -2152,69 +2354,58 @@ class TradePanel(View):
         trade_cd = c.get('trade_cooldown', 1)
         trade_unit = c.get('trade_cooldown_unit', 'heures')
         
-        e.description = "Configurez le système d'échange pour votre serveur.\n\n*Les utilisateurs pourront créer des annonces de trade avec `/trade`*"
+        # Salons autorisés pour la commande
+        allowed_chs = c.get('trade_allowed_channels', [])
+        if allowed_chs:
+            ch_mentions = []
+            for ch_id in allowed_chs[:5]:
+                ch = self.g.get_channel(ch_id)
+                if ch:
+                    ch_mentions.append(ch.mention)
+            allowed_txt = ", ".join(ch_mentions)
+            if len(allowed_chs) > 5:
+                allowed_txt += f" +{len(allowed_chs) - 5} autres"
+        else:
+            allowed_txt = "*Partout*"
         
-        e.add_field(name="🎭 Rôle autorisé", value=trade_role.mention if trade_role else "Tout le monde", inline=True)
-        e.add_field(name="📍 Salon", value=trade_ch.mention if trade_ch else "❌ Non configuré", inline=True)
+        e.description = "Configurez le système d'échange pour votre serveur."
+        
+        e.add_field(name="🎭 Rôle autorisé", value=trade_role.mention if trade_role else "*Tout le monde*", inline=True)
         e.add_field(name="⏱️ Cooldown", value=f"{trade_cd} {trade_unit}", inline=True)
+        e.add_field(name="📍 Salon de publication", value=trade_ch.mention if trade_ch else "❌ Non configuré", inline=False)
+        e.add_field(name="📌 Salons autorisés", value=allowed_txt, inline=False)
         
-        e.set_footer(text="Commande: /trade")
+        e.set_footer(text="💡 /trade • Salon publication ≠ Salons où utiliser la commande")
         return e
     
     @discord.ui.button(label="🎭 Rôle", style=discord.ButtonStyle.primary, row=0)
     async def set_role(self, i, b):
-        roles = [r for r in self.g.roles[1:] if not r.is_bot_managed()][:25]
-        opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
-        opts.insert(0, discord.SelectOption(label="❌ Tout le monde", value="0"))
-        v = TradeRoleView(self.u, self.g, opts)
-        await i.response.edit_message(embed=discord.Embed(title="🎭 Rôle autorisé", color=C.PURPLE), view=v)
+        v = PaginatedRoleSelect(self.u, self.g, 'trade_role', TradePanel)
+        await i.response.edit_message(embed=discord.Embed(title="🎭 Rôle autorisé pour /trade", color=C.PURPLE), view=v)
     
-    @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="📍 Salon publication", style=discord.ButtonStyle.primary, row=0)
     async def set_channel(self, i, b):
-        chs = list(self.g.text_channels)[:25]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        v = TradeChanView(self.u, self.g, opts)
-        await i.response.edit_message(embed=discord.Embed(title="📍 Salon des trades", color=C.PURPLE), view=v)
+        v = PaginatedChannelSelect(self.u, self.g, 'trade_channel', TradePanel)
+        await i.response.edit_message(embed=discord.Embed(title="📍 Salon de publication", description="Où les trades seront envoyés", color=C.PURPLE), view=v)
     
-    @discord.ui.button(label="⏱️ Cooldown", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="📌 Salons commande", style=discord.ButtonStyle.success, row=0)
+    async def set_allowed_channels(self, i, b):
+        c = await cfg(self.g.id)
+        current = c.get('trade_allowed_channels', [])
+        v = PaginatedChannelSelect(self.u, self.g, 'trade_allowed_channels', TradePanel, multi=True, current_channels=current)
+        await i.response.edit_message(embed=discord.Embed(
+            title="📌 Salons autorisés pour /trade", 
+            description="Sélectionnez les salons où la commande peut être utilisée.\n*Vide = partout*",
+            color=C.PURPLE
+        ), view=v)
+    
+    @discord.ui.button(label="⏱️ Cooldown", style=discord.ButtonStyle.secondary, row=1)
     async def set_cooldown(self, i, b):
         await i.response.send_modal(TradeCooldownModal(self.g, self.u))
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
         v = CommandsPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-
-class TradeRoleView(View):
-    def __init__(self, u, g, opts):
-        super().__init__(timeout=120)
-        self.add_item(TradeRoleSelect(u, g, opts))
-
-class TradeRoleSelect(Select):
-    def __init__(self, u, g, opts):
-        super().__init__(placeholder="Choisir un rôle...", options=opts)
-        self.u = u
-        self.g = g
-    
-    async def callback(self, i):
-        await db_set(i.guild.id, 'trade_role', int(self.values[0]))
-        v = TradePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-
-class TradeChanView(View):
-    def __init__(self, u, g, opts):
-        super().__init__(timeout=120)
-        self.add_item(TradeChanSelect(u, g, opts))
-
-class TradeChanSelect(Select):
-    def __init__(self, u, g, opts):
-        super().__init__(placeholder="Choisir un salon...", options=opts)
-        self.u = u
-        self.g = g
-    
-    async def callback(self, i):
-        await db_set(i.guild.id, 'trade_channel', int(self.values[0]))
-        v = TradePanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 class TradeCooldownModal(Modal, title="⏱️ Cooldown Trade"):
@@ -2737,6 +2928,9 @@ NITTER_INSTANCES = [
     "xcancel.com", 
     "nitter.privacydev.net",
     "nitter.woodland.cafe",
+    "nitter.1d4.us",
+    "nitter.kavin.rocks",
+    "nitter.unixfox.eu",
 ]
 
 class AdsTwitterPanel(View):
@@ -4433,73 +4627,174 @@ class CommandChannelsPanel(View):
         cmd_channels = c.get('command_channels', {})
         
         e = discord.Embed(title="📍 Salons des Commandes", color=C.BLURPLE)
-        e.description = "Définissez dans quels salons chaque commande peut être utilisée.\n*Non configuré = partout*"
+        e.description = "Définissez dans quels salons chaque commande peut être utilisée.\n*Vide = partout*"
         
         commands = [
             ('stat', '📊 /stat'),
-            ('suggestion', '💡 /suggestion'),
-            ('trade', '🔄 /trade'),
             ('daily', '💵 /daily'),
             ('work', '💼 /work'),
             ('balance', '💰 /balance'),
-            ('slots', '🎰 /slots'),
-            ('games', '🎮 Tous les jeux'),
+            ('games', '🎮 Jeux'),
         ]
         
         for cmd_key, cmd_name in commands:
-            ch_id = cmd_channels.get(cmd_key, 0)
-            ch = self.g.get_channel(ch_id) if ch_id else None
-            e.add_field(name=cmd_name, value=ch.mention if ch else "*Partout*", inline=True)
+            allowed = cmd_channels.get(cmd_key, [])
+            if isinstance(allowed, int):
+                # Ancien format (un seul salon)
+                ch = self.g.get_channel(allowed) if allowed else None
+                value = ch.mention if ch else "*Partout*"
+            elif isinstance(allowed, list) and allowed:
+                mentions = []
+                for ch_id in allowed[:3]:
+                    ch = self.g.get_channel(ch_id)
+                    if ch:
+                        mentions.append(ch.mention)
+                value = ", ".join(mentions)
+                if len(allowed) > 3:
+                    value += f" +{len(allowed) - 3}"
+            else:
+                value = "*Partout*"
+            e.add_field(name=cmd_name, value=value, inline=True)
         
+        e.set_footer(text="💡 /suggestion et /trade se configurent dans Commandes")
         return e
     
     @discord.ui.select(
         placeholder="📍 Sélectionner une commande...",
         options=[
             discord.SelectOption(label="/stat", value="stat", emoji="📊"),
-            discord.SelectOption(label="/suggestion", value="suggestion", emoji="💡"),
-            discord.SelectOption(label="/trade", value="trade", emoji="🔄"),
             discord.SelectOption(label="/daily", value="daily", emoji="💵"),
             discord.SelectOption(label="/work", value="work", emoji="💼"),
             discord.SelectOption(label="/balance", value="balance", emoji="💰"),
-            discord.SelectOption(label="/slots & jeux", value="games", emoji="🎮"),
+            discord.SelectOption(label="Tous les jeux", value="games", emoji="🎮"),
         ],
         row=0
     )
     async def select_cmd(self, i, s):
         cmd_key = s.values[0]
-        chs = list(self.g.text_channels)[:24]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        opts.insert(0, discord.SelectOption(label="🌐 Partout", value="0"))
-        v = CommandChannelSelectView(self.u, self.g, opts, cmd_key)
-        await i.response.edit_message(embed=discord.Embed(title=f"📍 Salon pour /{cmd_key}", description="Sélectionnez le salon autorisé.", color=C.BLURPLE), view=v)
+        c = await cfg(self.g.id)
+        cmd_channels = c.get('command_channels', {})
+        current = cmd_channels.get(cmd_key, [])
+        # Convertir ancien format si nécessaire
+        if isinstance(current, int):
+            current = [current] if current else []
+        
+        v = PaginatedChannelSelectForCmd(self.u, self.g, cmd_key, current)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title=f"📍 Salons pour /{cmd_key}", 
+                description="Sélectionnez les salons autorisés.\nCliquez sur un salon pour l'ajouter/retirer.\n*Vide = partout*",
+                color=C.BLURPLE
+            ), 
+            view=v
+        )
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
         v = MiniGamesPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
-class CommandChannelSelectView(View):
-    def __init__(self, u, g, opts, cmd_key):
-        super().__init__(timeout=120)
-        self.u = u
-        self.g = g
-        self.add_item(CommandChannelSelect(u, g, opts, cmd_key))
-
-class CommandChannelSelect(Select):
-    def __init__(self, u, g, opts, cmd_key):
-        super().__init__(placeholder="Choisir un salon...", options=opts)
+class PaginatedChannelSelectForCmd(View):
+    """Sélecteur paginé multi-salons pour les commandes"""
+    def __init__(self, u, g, cmd_key, current_channels, page=0):
+        super().__init__(timeout=180)
         self.u = u
         self.g = g
         self.cmd_key = cmd_key
+        self.current_channels = current_channels or []
+        self.page = page
+        self.channels = list(g.text_channels)
+        self.max_page = max(0, (len(self.channels) - 1) // 23)
+        
+        self._build()
     
-    async def callback(self, i):
+    def _build(self):
+        start = self.page * 23
+        end = start + 23
+        page_channels = self.channels[start:end]
+        
+        opts = []
+        for ch in page_channels:
+            is_selected = ch.id in self.current_channels
+            label = f"{'✅ ' if is_selected else ''}# {ch.name}"[:25]
+            desc = ch.category.name[:50] if ch.category else "Sans catégorie"
+            opts.append(discord.SelectOption(
+                label=label, 
+                value=str(ch.id),
+                description=desc
+            ))
+        
+        if opts:
+            select = CmdChannelSelectMenu(self, opts)
+            self.add_item(select)
+        
+        # Boutons navigation
+        if self.page > 0:
+            btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.secondary, row=1)
+            btn.callback = self.prev_page
+            self.add_item(btn)
+        
+        if self.page < self.max_page:
+            btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.secondary, row=1)
+            btn.callback = self.next_page
+            self.add_item(btn)
+        
+        # Bouton valider
+        if self.current_channels:
+            btn = discord.ui.Button(label=f"✅ Valider ({len(self.current_channels)})", style=discord.ButtonStyle.success, row=1)
+        else:
+            btn = discord.ui.Button(label="✅ Partout", style=discord.ButtonStyle.success, row=1)
+        btn.callback = self.validate
+        self.add_item(btn)
+        
+        # Bouton retour
+        btn = discord.ui.Button(label="❌ Annuler", style=discord.ButtonStyle.danger, row=1)
+        btn.callback = self.cancel
+        self.add_item(btn)
+    
+    async def prev_page(self, i):
+        v = PaginatedChannelSelectForCmd(self.u, self.g, self.cmd_key, self.current_channels, self.page - 1)
+        await i.response.edit_message(view=v)
+    
+    async def next_page(self, i):
+        v = PaginatedChannelSelectForCmd(self.u, self.g, self.cmd_key, self.current_channels, self.page + 1)
+        await i.response.edit_message(view=v)
+    
+    async def validate(self, i):
         c = await cfg(self.g.id)
         cmd_channels = c.get('command_channels', {})
-        cmd_channels[self.cmd_key] = int(self.values[0])
+        cmd_channels[self.cmd_key] = self.current_channels
         await db_set(self.g.id, 'command_channels', cmd_channels)
         v = CommandChannelsPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    async def cancel(self, i):
+        v = CommandChannelsPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class CmdChannelSelectMenu(Select):
+    def __init__(self, parent, opts):
+        super().__init__(
+            placeholder=f"Page {parent.page + 1}/{parent.max_page + 1} - Cliquez pour ajouter/retirer",
+            options=opts,
+            max_values=min(len(opts), 10)
+        )
+        self.parent = parent
+    
+    async def callback(self, i):
+        for val in self.values:
+            ch_id = int(val)
+            if ch_id in self.parent.current_channels:
+                self.parent.current_channels.remove(ch_id)
+            else:
+                self.parent.current_channels.append(ch_id)
+        
+        v = PaginatedChannelSelectForCmd(
+            self.parent.u, self.parent.g, 
+            self.parent.cmd_key, self.parent.current_channels, 
+            self.parent.page
+        )
+        await i.response.edit_message(view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           💰 FONCTIONS ÉCONOMIE
@@ -4515,13 +4810,17 @@ async def get_user_economy(guild_id, user_id):
             row = await cursor.fetchone()
             if row:
                 return {
-                    'coins': row[0], 'bank': row[1], 'xp': row[2], 'level': row[3],
-                    'last_daily': row[4], 'last_work': row[5]
+                    'coins': row[0] or 0, 
+                    'bank': row[1] or 0, 
+                    'xp': row[2] or 0, 
+                    'level': row[3] or 1,
+                    'last_daily': row[4], 
+                    'last_work': row[5]
                 }
             else:
                 # Créer l'entrée
                 await db.execute(
-                    'INSERT INTO economy (guild_id, user_id) VALUES (?, ?)',
+                    'INSERT INTO economy (guild_id, user_id, coins, bank, xp, level) VALUES (?, ?, 0, 0, 0, 1)',
                     (guild_id, user_id)
                 )
                 await db.commit()
@@ -4532,7 +4831,7 @@ async def update_user_economy(guild_id, user_id, **kwargs):
     async with aiosqlite.connect(DB_PATH) as db:
         # S'assurer que l'utilisateur existe
         await db.execute(
-            'INSERT OR IGNORE INTO economy (guild_id, user_id) VALUES (?, ?)',
+            'INSERT OR IGNORE INTO economy (guild_id, user_id, coins, bank, xp, level) VALUES (?, ?, 0, 0, 0, 1)',
             (guild_id, user_id)
         )
         
@@ -4552,11 +4851,115 @@ async def update_user_economy(guild_id, user_id, **kwargs):
             await db.commit()
 
 async def add_coins(guild_id, user_id, amount):
-    """Ajoute des coins à un utilisateur"""
-    eco = await get_user_economy(guild_id, user_id)
-    new_coins = max(0, eco['coins'] + amount)
-    await update_user_economy(guild_id, user_id, coins=new_coins)
-    return new_coins
+    """Ajoute des coins à un utilisateur de manière atomique"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        # S'assurer que l'utilisateur existe
+        await db.execute(
+            'INSERT OR IGNORE INTO economy (guild_id, user_id, coins, bank, xp, level) VALUES (?, ?, 0, 0, 0, 1)',
+            (guild_id, user_id)
+        )
+        # Mise à jour atomique
+        await db.execute(
+            'UPDATE economy SET coins = MAX(0, coins + ?) WHERE guild_id=? AND user_id=?',
+            (amount, guild_id, user_id)
+        )
+        await db.commit()
+        
+        # Récupérer le nouveau solde
+        async with db.execute(
+            'SELECT coins FROM economy WHERE guild_id=? AND user_id=?',
+            (guild_id, user_id)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+async def claim_daily(guild_id, user_id, amount):
+    """Réclame le daily de manière atomique - retourne (success, new_coins, remaining_seconds)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        # S'assurer que l'utilisateur existe
+        await db.execute(
+            'INSERT OR IGNORE INTO economy (guild_id, user_id, coins, bank, xp, level) VALUES (?, ?, 0, 0, 0, 1)',
+            (guild_id, user_id)
+        )
+        await db.commit()
+        
+        # Vérifier le cooldown
+        async with db.execute(
+            'SELECT coins, last_daily FROM economy WHERE guild_id=? AND user_id=?',
+            (guild_id, user_id)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                return (False, 0, 0)
+            
+            current_coins, last_daily = row
+            current_coins = current_coins or 0
+            
+            # Vérifier si 24h sont passées
+            if last_daily:
+                try:
+                    last = datetime.fromisoformat(last_daily)
+                    if last.tzinfo:
+                        last = last.replace(tzinfo=None)
+                    elapsed = (now() - last).total_seconds()
+                    if elapsed < 86400:
+                        return (False, current_coins, 86400 - elapsed)
+                except:
+                    pass
+            
+            # Donner la récompense
+            new_coins = current_coins + amount
+            await db.execute(
+                'UPDATE economy SET coins=?, last_daily=? WHERE guild_id=? AND user_id=?',
+                (new_coins, now().isoformat(), guild_id, user_id)
+            )
+            await db.commit()
+            
+            return (True, new_coins, 0)
+
+async def claim_work(guild_id, user_id, amount, cooldown_seconds):
+    """Réclame le work de manière atomique - retourne (success, new_coins, remaining_seconds)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        # S'assurer que l'utilisateur existe
+        await db.execute(
+            'INSERT OR IGNORE INTO economy (guild_id, user_id, coins, bank, xp, level) VALUES (?, ?, 0, 0, 0, 1)',
+            (guild_id, user_id)
+        )
+        await db.commit()
+        
+        # Vérifier le cooldown
+        async with db.execute(
+            'SELECT coins, last_work FROM economy WHERE guild_id=? AND user_id=?',
+            (guild_id, user_id)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if not row:
+                return (False, 0, 0)
+            
+            current_coins, last_work = row
+            current_coins = current_coins or 0
+            
+            # Vérifier le cooldown
+            if last_work:
+                try:
+                    last = datetime.fromisoformat(last_work)
+                    if last.tzinfo:
+                        last = last.replace(tzinfo=None)
+                    elapsed = (now() - last).total_seconds()
+                    if elapsed < cooldown_seconds:
+                        return (False, current_coins, cooldown_seconds - elapsed)
+                except:
+                    pass
+            
+            # Donner la récompense
+            new_coins = current_coins + amount
+            await db.execute(
+                'UPDATE economy SET coins=?, last_work=? WHERE guild_id=? AND user_id=?',
+                (new_coins, now().isoformat(), guild_id, user_id)
+            )
+            await db.commit()
+            
+            return (True, new_coins, 0)
 
 async def add_xp(guild_id, user_id, amount, channel=None):
     """Ajoute de l'XP et vérifie le level up"""
@@ -4581,13 +4984,36 @@ async def add_xp(guild_id, user_id, amount, channel=None):
     return None
 
 async def check_command_channel(interaction, cmd_key):
-    """Vérifie si la commande peut être exécutée dans ce salon"""
+    """Vérifie si la commande peut être exécutée dans ce salon - supporte un salon ou une liste"""
     c = await cfg(interaction.guild.id)
     cmd_channels = c.get('command_channels', {})
-    allowed_ch = cmd_channels.get(cmd_key, 0)
+    allowed = cmd_channels.get(cmd_key, 0)
     
-    if allowed_ch and allowed_ch != interaction.channel.id:
-        ch = interaction.guild.get_channel(allowed_ch)
+    # Si pas de restriction
+    if not allowed:
+        return True
+    
+    # Si c'est une liste de salons
+    if isinstance(allowed, list):
+        if not allowed or interaction.channel.id in allowed:
+            return True
+        # Construire la liste des salons autorisés
+        mentions = []
+        for ch_id in allowed[:5]:  # Max 5 mentions
+            ch = interaction.guild.get_channel(ch_id)
+            if ch:
+                mentions.append(ch.mention)
+        if len(allowed) > 5:
+            mentions.append(f"et {len(allowed) - 5} autres...")
+        await interaction.response.send_message(
+            f"❌ Cette commande n'est utilisable que dans: {', '.join(mentions)}",
+            ephemeral=True
+        )
+        return False
+    
+    # Si c'est un seul salon (ancien format)
+    if allowed and allowed != interaction.channel.id:
+        ch = interaction.guild.get_channel(allowed)
         if ch:
             await interaction.response.send_message(
                 f"❌ Cette commande n'est utilisable que dans {ch.mention}",
@@ -7132,11 +7558,20 @@ suggestion_cooldowns = {}
 @bot.tree.command(name="suggestion", description="💡 Proposer une suggestion")
 @app_commands.describe(titre="Titre de votre suggestion", proposition="Décrivez votre suggestion en détail")
 async def suggestion_cmd(i: discord.Interaction, titre: str, proposition: str):
-    # Vérifier le salon autorisé pour la commande
-    if not await check_command_channel(i, 'suggestion'):
-        return
-    
     c = await cfg(i.guild.id)
+    
+    # Vérifier les salons autorisés pour la commande
+    allowed_channels = c.get('suggestion_allowed_channels', [])
+    if allowed_channels and i.channel.id not in allowed_channels:
+        mentions = []
+        for ch_id in allowed_channels[:3]:
+            ch = i.guild.get_channel(ch_id)
+            if ch:
+                mentions.append(ch.mention)
+        msg = f"❌ Cette commande n'est utilisable que dans: {', '.join(mentions)}"
+        if len(allowed_channels) > 3:
+            msg += f" +{len(allowed_channels) - 3} autres"
+        return await i.response.send_message(msg, ephemeral=True)
     
     # ⚠️ Les immunisés bypass les restrictions de rôle et cooldown
     is_immune = await is_fully_immune(i.user)
@@ -7149,7 +7584,7 @@ async def suggestion_cmd(i: discord.Interaction, titre: str, proposition: str):
             if role and role not in i.user.roles:
                 return await i.response.send_message(f"❌ Vous devez avoir le rôle {role.mention}", ephemeral=True)
     
-    # Vérifier le salon
+    # Vérifier le salon de publication
     sugg_ch = i.guild.get_channel(c.get('suggestion_channel', 0))
     if not sugg_ch:
         return await i.response.send_message("❌ Le salon des suggestions n'est pas configuré", ephemeral=True)
@@ -7228,11 +7663,20 @@ trade_cooldowns = {}
 
 @bot.tree.command(name="trade", description="🔄 Créer une annonce d'échange")
 async def trade_cmd(i: discord.Interaction):
-    # Vérifier le salon autorisé pour la commande
-    if not await check_command_channel(i, 'trade'):
-        return
-    
     c = await cfg(i.guild.id)
+    
+    # Vérifier les salons autorisés pour la commande
+    allowed_channels = c.get('trade_allowed_channels', [])
+    if allowed_channels and i.channel.id not in allowed_channels:
+        mentions = []
+        for ch_id in allowed_channels[:3]:
+            ch = i.guild.get_channel(ch_id)
+            if ch:
+                mentions.append(ch.mention)
+        msg = f"❌ Cette commande n'est utilisable que dans: {', '.join(mentions)}"
+        if len(allowed_channels) > 3:
+            msg += f" +{len(allowed_channels) - 3} autres"
+        return await i.response.send_message(msg, ephemeral=True)
     
     # ⚠️ Les immunisés bypass les restrictions de rôle et cooldown
     is_immune = await is_fully_immune(i.user)
@@ -7245,7 +7689,7 @@ async def trade_cmd(i: discord.Interaction):
             if role and role not in i.user.roles:
                 return await i.response.send_message(f"❌ Vous devez avoir le rôle {role.mention}", ephemeral=True)
     
-    # Vérifier le salon
+    # Vérifier le salon de publication
     trade_ch = i.guild.get_channel(c.get('trade_channel', 0))
     if not trade_ch:
         return await i.response.send_message("❌ Le salon des trades n'est pas configuré", ephemeral=True)
@@ -9071,30 +9515,17 @@ async def daily_cmd(i: discord.Interaction):
     if not games_cfg.get('economy_enabled', False):
         return await i.response.send_message("❌ L'économie n'est pas activée sur ce serveur", ephemeral=True)
     
-    eco = await get_user_economy(i.guild.id, i.user.id)
-    
-    # Vérifier le cooldown (24h)
-    if eco['last_daily']:
-        try:
-            last = datetime.fromisoformat(eco['last_daily'])
-            if last.tzinfo:
-                last = last.replace(tzinfo=None)
-            elapsed = (now() - last).total_seconds()
-            if elapsed < 86400:
-                remaining = 86400 - elapsed
-                hours = int(remaining // 3600)
-                mins = int((remaining % 3600) // 60)
-                return await i.response.send_message(
-                    f"⏱️ Revenez dans **{hours}h {mins}min** pour votre prochain daily !",
-                    ephemeral=True
-                )
-        except:
-            pass
-    
-    # Donner la récompense
+    # Réclamer le daily de manière atomique
     daily_amount = games_cfg.get('daily_amount', 100)
-    new_coins = await add_coins(i.guild.id, i.user.id, daily_amount)
-    await update_user_economy(i.guild.id, i.user.id, last_daily=now().isoformat())
+    success, new_coins, remaining = await claim_daily(i.guild.id, i.user.id, daily_amount)
+    
+    if not success:
+        hours = int(remaining // 3600)
+        mins = int((remaining % 3600) // 60)
+        return await i.response.send_message(
+            f"⏱️ Revenez dans **{hours}h {mins}min** pour votre prochain daily !",
+            ephemeral=True
+        )
     
     e = discord.Embed(title="💵 Récompense Quotidienne", color=0xF1C40F)
     e.description = f"Vous avez reçu **{daily_amount}** 🪙 coins !"
@@ -9116,34 +9547,22 @@ async def work_cmd(i: discord.Interaction):
     if not games_cfg.get('economy_enabled', False):
         return await i.response.send_message("❌ L'économie n'est pas activée sur ce serveur", ephemeral=True)
     
-    eco = await get_user_economy(i.guild.id, i.user.id)
-    
-    # Vérifier le cooldown
-    work_cooldown = games_cfg.get('work_cooldown', 3600)
-    if eco['last_work']:
-        try:
-            last = datetime.fromisoformat(eco['last_work'])
-            if last.tzinfo:
-                last = last.replace(tzinfo=None)
-            elapsed = (now() - last).total_seconds()
-            if elapsed < work_cooldown:
-                remaining = work_cooldown - elapsed
-                mins = int(remaining // 60)
-                secs = int(remaining % 60)
-                return await i.response.send_message(
-                    f"⏱️ Vous pouvez retravailler dans **{mins}min {secs}s**",
-                    ephemeral=True
-                )
-        except:
-            pass
-    
-    # Gagner des coins
+    # Calculer les gains
     work_min = games_cfg.get('work_min', 50)
     work_max = games_cfg.get('work_max', 150)
+    work_cooldown = games_cfg.get('work_cooldown', 3600)
     earnings = random.randint(work_min, work_max)
     
-    new_coins = await add_coins(i.guild.id, i.user.id, earnings)
-    await update_user_economy(i.guild.id, i.user.id, last_work=now().isoformat())
+    # Réclamer le work de manière atomique
+    success, new_coins, remaining = await claim_work(i.guild.id, i.user.id, earnings, work_cooldown)
+    
+    if not success:
+        mins = int(remaining // 60)
+        secs = int(remaining % 60)
+        return await i.response.send_message(
+            f"⏱️ Vous pouvez retravailler dans **{mins}min {secs}s**",
+            ephemeral=True
+        )
     
     # Messages aléatoires
     jobs = [
@@ -9484,7 +9903,7 @@ async def guess_cmd(i: discord.Interaction, nombre: int):
 
 # ─────────────────────────────── RÉACTION RAPIDE ───────────────────────────────
 
-react_games = {}  # {channel_id: {'user': None, 'time': None}}
+react_games = {}  # {channel_id: {'winner': None, 'start_time': None, 'message': None}}
 
 @bot.tree.command(name="react", description="⚡ Lancer un jeu de réaction rapide")
 async def react_cmd(i: discord.Interaction):
@@ -9495,53 +9914,91 @@ async def react_cmd(i: discord.Interaction):
     if i.channel.id in react_games:
         return await i.response.send_message("❌ Un jeu est déjà en cours dans ce salon", ephemeral=True)
     
+    # Marquer le jeu comme en cours
+    react_games[i.channel.id] = {'winner': None, 'start_time': None, 'preparing': True}
+    
     await i.response.send_message("⏳ **Préparez-vous...**\nCliquez sur le bouton dès qu'il apparaît !")
     
-    # Attendre un délai aléatoire
-    await asyncio.sleep(random.uniform(2, 6))
-    
-    # Créer le bouton
-    react_games[i.channel.id] = {'winner': None, 'start_time': now()}
-    
-    class ReactButton(View):
-        def __init__(self):
-            super().__init__(timeout=10)
+    try:
+        # Attendre un délai aléatoire
+        delay = random.uniform(2, 5)
+        await asyncio.sleep(delay)
         
-        @discord.ui.button(label="⚡ CLIQUEZ !", style=discord.ButtonStyle.success)
-        async def click(self, interaction, button):
-            if i.channel.id not in react_games:
-                return
+        # Vérifier que le jeu n'a pas été annulé
+        if i.channel.id not in react_games:
+            return
+        
+        # Définir le temps de départ
+        react_games[i.channel.id] = {'winner': None, 'start_time': now(), 'preparing': False}
+        
+        # Vue avec bouton
+        class ReactButtonView(View):
+            def __init__(self, channel_id, guild_id):
+                super().__init__(timeout=10)
+                self.channel_id = channel_id
+                self.guild_id = guild_id
+                self.clicked = False
             
-            game = react_games[i.channel.id]
-            if game['winner']:
-                return await interaction.response.send_message("❌ Quelqu'un a déjà cliqué !", ephemeral=True)
+            @discord.ui.button(label="⚡ CLIQUEZ !", style=discord.ButtonStyle.success, custom_id="react_click")
+            async def click_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+                # Vérifier si le jeu existe toujours
+                if self.channel_id not in react_games:
+                    return await interaction.response.send_message("❌ Ce jeu est terminé", ephemeral=True)
+                
+                game = react_games[self.channel_id]
+                
+                # Vérifier si quelqu'un a déjà gagné
+                if game['winner'] or self.clicked:
+                    return await interaction.response.send_message("❌ Quelqu'un a déjà cliqué !", ephemeral=True)
+                
+                self.clicked = True
+                game['winner'] = interaction.user.id
+                
+                # Calculer le temps de réaction
+                reaction_time = (now() - game['start_time']).total_seconds() * 1000
+                
+                # Bonus si économie activée
+                c = await cfg(self.guild_id)
+                bonus_text = ""
+                if c.get('minigames_config', {}).get('economy_enabled', False):
+                    bonus = max(10, 100 - int(reaction_time / 10))
+                    await add_coins(self.guild_id, interaction.user.id, bonus)
+                    bonus_text = f"\n🎁 +**{bonus}** coins !"
+                
+                # Supprimer le jeu
+                if self.channel_id in react_games:
+                    del react_games[self.channel_id]
+                
+                # Créer l'embed de victoire
+                e = discord.Embed(title="⚡ Réaction Rapide", color=0x2ECC71)
+                e.description = f"🎉 **{interaction.user.mention}** a gagné !\n⏱️ Temps de réaction: **{reaction_time:.0f}ms**{bonus_text}"
+                
+                # Désactiver le bouton
+                button.disabled = True
+                button.label = f"✅ {interaction.user.display_name} - {reaction_time:.0f}ms"
+                button.style = discord.ButtonStyle.secondary
+                
+                await interaction.response.edit_message(content=None, embed=e, view=self)
             
-            reaction_time = (now() - game['start_time']).total_seconds() * 1000
-            game['winner'] = interaction.user.id
-            
-            # Bonus si économie activée
-            c = await cfg(i.guild.id)
-            bonus_text = ""
-            if c.get('minigames_config', {}).get('economy_enabled', False):
-                bonus = max(10, 100 - int(reaction_time / 10))
-                await add_coins(i.guild.id, interaction.user.id, bonus)
-                bonus_text = f"\n🎁 +**{bonus}** coins !"
-            
+            async def on_timeout(self):
+                if self.channel_id in react_games:
+                    del react_games[self.channel_id]
+                # Essayer d'éditer le message pour indiquer le timeout
+                try:
+                    for item in self.children:
+                        item.disabled = True
+                        item.label = "⏱️ Temps écoulé !"
+                        item.style = discord.ButtonStyle.danger
+                except:
+                    pass
+        
+        view = ReactButtonView(i.channel.id, i.guild.id)
+        await i.channel.send("⚡ **MAINTENANT !**", view=view)
+        
+    except Exception as ex:
+        print(f"Erreur react: {ex}")
+        if i.channel.id in react_games:
             del react_games[i.channel.id]
-            
-            e = discord.Embed(title="⚡ Réaction Rapide", color=0x2ECC71)
-            e.description = f"🎉 **{interaction.user.mention}** a gagné !\n⏱️ Temps de réaction: **{reaction_time:.0f}ms**{bonus_text}"
-            
-            button.disabled = True
-            button.label = f"✅ {interaction.user.display_name} - {reaction_time:.0f}ms"
-            await interaction.response.edit_message(content=None, embed=e, view=self)
-        
-        async def on_timeout(self):
-            if i.channel.id in react_games:
-                del react_games[i.channel.id]
-    
-    view = ReactButton()
-    await i.channel.send("⚡ **MAINTENANT !**", view=view)
 
 if __name__ == "__main__":
     print("🚀 Bot v24 - Démarrage...")
