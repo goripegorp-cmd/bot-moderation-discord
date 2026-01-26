@@ -9,7 +9,7 @@ import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 from discord.ui import View, Select, Modal, TextInput, Button
-import aiosqlite, os, re, json, asyncio, unicodedata, io, time, aiohttp
+import aiosqlite, os, re, json, asyncio, unicodedata, io, time, aiohttp, hashlib, secrets
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 import xml.etree.ElementTree as ET
@@ -18,6 +18,7 @@ matplotlib.use('Agg')  # Backend non-interactif
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from collections import defaultdict
+from functools import wraps
 
 load_dotenv()
 TOKEN = os.getenv('BOT_TOKEN')
@@ -26,6 +27,144 @@ intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
 spam_tracker = {}
 voice_join_tracker = {}  # {(guild_id, user_id): datetime} - pour tracker le temps en vocal
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           🔒 SYSTÈME DE SÉCURITÉ
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class Security:
+    """Système de sécurité centralisé pour le bot"""
+    
+    # Rate limiting par utilisateur
+    _rate_limits = {}  # {user_id: {action: [timestamps]}}
+    _blocked_users = set()  # Utilisateurs temporairement bloqués
+    _security_logs = []  # Logs de sécurité
+    
+    # Configuration des limites
+    RATE_LIMITS = {
+        'command': (10, 60),      # 10 commandes par 60 secondes
+        'button': (20, 60),       # 20 clics par 60 secondes
+        'modal': (5, 60),         # 5 modals par 60 secondes
+        'api_call': (30, 60),     # 30 appels API par 60 secondes
+    }
+    
+    # Patterns dangereux à bloquer
+    DANGEROUS_PATTERNS = [
+        r'(?i)eval\s*\(',
+        r'(?i)exec\s*\(',
+        r'(?i)__import__',
+        r'(?i)subprocess',
+        r'(?i)os\.system',
+        r'(?i)import\s+os',
+        r'<script',
+        r'javascript:',
+        r'data:text/html',
+        r'(?i)on\w+\s*=',  # Event handlers HTML
+    ]
+    
+    @classmethod
+    def sanitize_input(cls, text: str, max_length: int = 2000) -> str:
+        """Nettoie et valide les entrées utilisateur"""
+        if not text:
+            return ""
+        
+        # Limiter la longueur
+        text = str(text)[:max_length]
+        
+        # Supprimer les caractères de contrôle (sauf newlines et tabs)
+        text = ''.join(c for c in text if c.isprintable() or c in '\n\t')
+        
+        # Échapper les mentions dangereuses
+        text = text.replace('@everyone', '@\u200beveryone')
+        text = text.replace('@here', '@\u200bhere')
+        
+        return text.strip()
+    
+    @classmethod
+    def validate_url(cls, url: str) -> bool:
+        """Valide une URL"""
+        if not url:
+            return True  # URL optionnelle
+        
+        # Pattern URL basique sécurisé
+        url_pattern = r'^https?://[a-zA-Z0-9\-._~:/?#\[\]@!$&\'()*+,;=%]+$'
+        if not re.match(url_pattern, url):
+            return False
+        
+        # Bloquer les schemes dangereux
+        dangerous = ['javascript:', 'data:', 'vbscript:', 'file:']
+        if any(url.lower().startswith(d) for d in dangerous):
+            return False
+        
+        return len(url) <= 2000
+    
+    @classmethod
+    def check_dangerous_content(cls, text: str) -> bool:
+        """Vérifie si le texte contient du contenu dangereux"""
+        if not text:
+            return False
+        
+        for pattern in cls.DANGEROUS_PATTERNS:
+            if re.search(pattern, text):
+                return True
+        return False
+    
+    @classmethod
+    async def check_rate_limit(cls, user_id: int, action: str = 'command') -> bool:
+        """Vérifie si l'utilisateur dépasse le rate limit. Retourne True si bloqué."""
+        if user_id in cls._blocked_users:
+            return True
+        
+        now_ts = time.time()
+        limit, window = cls.RATE_LIMITS.get(action, (10, 60))
+        
+        if user_id not in cls._rate_limits:
+            cls._rate_limits[user_id] = {}
+        
+        if action not in cls._rate_limits[user_id]:
+            cls._rate_limits[user_id][action] = []
+        
+        # Nettoyer les vieux timestamps
+        cls._rate_limits[user_id][action] = [
+            ts for ts in cls._rate_limits[user_id][action]
+            if now_ts - ts < window
+        ]
+        
+        # Vérifier la limite
+        if len(cls._rate_limits[user_id][action]) >= limit:
+            cls._log_security(f"RATE_LIMIT: User {user_id} exceeded {action} limit")
+            return True
+        
+        cls._rate_limits[user_id][action].append(now_ts)
+        return False
+    
+    @classmethod
+    def _log_security(cls, message: str):
+        """Log un événement de sécurité"""
+        timestamp = datetime.now(timezone.utc).isoformat()
+        log_entry = f"[{timestamp}] {message}"
+        cls._security_logs.append(log_entry)
+        
+        # Garder seulement les 1000 derniers logs
+        if len(cls._security_logs) > 1000:
+            cls._security_logs = cls._security_logs[-1000:]
+        
+        print(f"🔒 SECURITY: {message}")
+    
+    @classmethod
+    def validate_snowflake(cls, value) -> bool:
+        """Valide un Discord Snowflake ID"""
+        try:
+            snowflake = int(value)
+            # Discord Snowflakes sont >= 2^22 (environ 4194304)
+            return 4194304 <= snowflake <= 9223372036854775807
+        except (ValueError, TypeError):
+            return False
+    
+    @classmethod
+    def hash_sensitive_data(cls, data: str) -> str:
+        """Hash des données sensibles pour les logs"""
+        return hashlib.sha256(data.encode()).hexdigest()[:16]
 
 class C:
     BLURPLE=0x5865F2; GREEN=0x57F287; RED=0xED4245; YELLOW=0xFEE75C
@@ -46,6 +185,16 @@ async def db_init():
         await db.execute('CREATE TABLE IF NOT EXISTS guild_config(guild_id INTEGER PRIMARY KEY, data TEXT DEFAULT "{}")')
         await db.execute('CREATE TABLE IF NOT EXISTS immune_roles(guild_id INTEGER, role_id INTEGER, PRIMARY KEY(guild_id, role_id))')
         await db.execute('CREATE TABLE IF NOT EXISTS immune_users(guild_id INTEGER, user_id INTEGER, PRIMARY KEY(guild_id, user_id))')
+        # Table pour les logs de sécurité
+        await db.execute('''CREATE TABLE IF NOT EXISTS security_logs(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            user_id INTEGER,
+            action TEXT,
+            details TEXT,
+            ip_hash TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
         await db.execute('''CREATE TABLE IF NOT EXISTS infractions(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id INTEGER,
@@ -204,6 +353,38 @@ async def is_immune(m, key):
         if any(role.id in rids for role in m.roles) or m.id in uids:
             return True
     except: pass
+    return False
+
+async def is_fully_immune(member):
+    """Vérifie si un membre est totalement immunisé (rôle ou utilisateur)"""
+    if not member or not member.guild:
+        return False
+    
+    # Owner et admins sont toujours immunisés
+    if member.id == member.guild.owner_id or member.guild_permissions.administrator:
+        return True
+    
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            # Vérifier les rôles immunisés
+            async with db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (member.guild.id,)) as c:
+                immune_roles = {r[0] for r in await c.fetchall()}
+            
+            # Vérifier les utilisateurs immunisés
+            async with db.execute('SELECT user_id FROM immune_users WHERE guild_id=?', (member.guild.id,)) as c:
+                immune_users = {r[0] for r in await c.fetchall()}
+        
+        # Vérifier si le membre a un rôle immunisé
+        if any(role.id in immune_roles for role in member.roles):
+            return True
+        
+        # Vérifier si l'utilisateur est directement immunisé
+        if member.id in immune_users:
+            return True
+            
+    except Exception as ex:
+        print(f"Erreur vérification immunité: {ex}")
+    
     return False
 
 async def sanction(m, action, dur, reason, g):
@@ -512,13 +693,31 @@ class TicketControlView(View):
             if not tk: return await i.response.send_message("❌ Ticket non trouvé", ephemeral=True)
             c = await cfg(i.guild.id)
             sr = i.guild.get_role(c.get('ticket_staff', 0))
+            
             if i.user.id == tk['user']:
                 return await i.response.send_message("❌ Vous ne pouvez pas prendre votre propre ticket", ephemeral=True)
+            
+            # Vérifier si l'utilisateur est immunisé (peut tout faire sur les tickets)
+            is_immune = await is_fully_immune(i.user)
+            
             is_s = sr and sr in i.user.roles
             is_o = i.user.id == i.guild.owner_id
             is_a = i.user.guild_permissions.administrator
-            if not (is_s or is_o or is_a):
+            
+            if not (is_s or is_o or is_a or is_immune):
                 return await i.response.send_message("❌ Réservé au staff", ephemeral=True)
+            
+            # Si le ticket est déjà claim, vérifier si on peut sur-claim
+            if tk['claimed'] and tk['claimed'] != i.user.id:
+                if not (is_immune or is_o or is_a):
+                    return await i.response.send_message(
+                        f"❌ Ce ticket est déjà pris par <@{tk['claimed']}>.\n"
+                        "*Seuls les immunisés/admins peuvent sur-claim.*",
+                        ephemeral=True
+                    )
+                # Sur-claim autorisé
+                await i.channel.send(f"⚠️ **Sur-claim** : {i.user.mention} reprend ce ticket (anciennement <@{tk['claimed']}>)")
+            
             tu = i.guild.get_member(tk['user'])
             ow = {
                 i.guild.default_role: discord.PermissionOverwrite(view_channel=False),
@@ -548,12 +747,18 @@ class TicketControlView(View):
         try:
             tk = await get_ticket(i.channel.id)
             if not tk: return await i.response.send_message("❌ Ticket non trouvé", ephemeral=True)
-            if not tk['claimed']:
-                return await i.response.send_message("❌ Le ticket doit d'abord être pris en charge", ephemeral=True)
+            
+            # Vérifier l'immunité
+            is_immune = await is_fully_immune(i.user)
             is_o = i.user.id == i.guild.owner_id
             is_c = i.user.id == tk['claimed']
             is_a = i.user.guild_permissions.administrator
-            if not (is_c or is_o or is_a):
+            
+            # Les immunisés peuvent toujours ajouter du staff
+            if not tk['claimed'] and not is_immune:
+                return await i.response.send_message("❌ Le ticket doit d'abord être pris en charge", ephemeral=True)
+            
+            if not (is_c or is_o or is_a or is_immune):
                 return await i.response.send_message("❌ Seul le staff en charge peut ajouter quelqu'un", ephemeral=True)
             c = await cfg(i.guild.id)
             sr = i.guild.get_role(c.get('ticket_staff', 0))
@@ -571,18 +776,24 @@ class TicketControlView(View):
         try:
             tk = await get_ticket(i.channel.id)
             if not tk: return await i.response.send_message("❌ Ticket non trouvé", ephemeral=True)
+            
+            # Vérifier l'immunité
+            is_immune = await is_fully_immune(i.user)
             is_o = i.user.id == i.guild.owner_id
             is_a = i.user.guild_permissions.administrator
             is_c = i.user.id == tk['claimed']
             c = await cfg(i.guild.id)
             sr = i.guild.get_role(c.get('ticket_staff', 0))
             is_s = sr and sr in i.user.roles
+            
+            # Les immunisés peuvent toujours fermer
             if tk['claimed']:
-                if not (is_c or is_o or is_a):
+                if not (is_c or is_o or is_a or is_immune):
                     return await i.response.send_message("❌ Seul le staff en charge ou un admin peut fermer", ephemeral=True)
             else:
-                if not (is_s or is_o or is_a):
+                if not (is_s or is_o or is_a or is_immune):
                     return await i.response.send_message("❌ Seul le staff peut fermer", ephemeral=True)
+            
             tu = i.guild.get_member(tk['user'])
             await send_ticket_log(i.guild, 'close', tu or tk['user'], tk, closer=i.user, ch=i.channel)
             async with aiosqlite.connect(DB_PATH) as db:
@@ -2731,9 +2942,31 @@ class GiveawayParticipateView(View):
             await i.response.send_message("❌ Erreur lors de la participation", ephemeral=True)
 
 async def check_member_afk(guild_id, user_id, days=7):
-    """Vérifie si un membre est AFK depuis X jours"""
+    """Vérifie si un membre est AFK depuis X jours (les immunisés ne sont jamais AFK)"""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
+            # ⚠️ VÉRIFIER L'IMMUNITÉ D'ABORD
+            # Vérifier si l'utilisateur est immunisé directement
+            async with db.execute('SELECT user_id FROM immune_users WHERE guild_id=? AND user_id=?', (guild_id, user_id)) as cursor:
+                if await cursor.fetchone():
+                    return False  # Immunisé = jamais AFK
+            
+            # Vérifier les rôles immunisés (nécessite de récupérer le membre)
+            guild = bot.get_guild(guild_id)
+            if guild:
+                member = guild.get_member(user_id)
+                if member:
+                    # Admin = immunisé
+                    if member.guild_permissions.administrator or member.id == guild.owner_id:
+                        return False
+                    
+                    # Vérifier les rôles immunisés
+                    async with db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (guild_id,)) as cursor:
+                        immune_roles = {r[0] for r in await cursor.fetchall()}
+                        if any(r.id in immune_roles for r in member.roles):
+                            return False  # A un rôle immunisé = jamais AFK
+            
+            # Vérifier l'activité normale
             async with db.execute(
                 'SELECT last_message, last_vocal FROM activity_tracking WHERE guild_id=? AND user_id=?',
                 (guild_id, user_id)
@@ -3731,13 +3964,18 @@ async def execute_afk_actions(guild):
     
     results = {
         'ping_7d': 0, 'remove_role_7d': 0, 'kick_7d': 0,
-        'ping_30d': 0, 'remove_role_30d': 0, 'kick_30d': 0
+        'ping_30d': 0, 'remove_role_30d': 0, 'kick_30d': 0,
+        'immune_skipped': 0
     }
     
     try:
-        # ═══════════════ ÉTAPE 1: COLLECTE RAPIDE DES DONNÉES ═══════════════
+        # ═══════════════ ÉTAPE 1: COLLECTE DES DONNÉES ═══════════════
         user_activities = {}
+        immune_roles = set()
+        immune_users = set()
+        
         async with aiosqlite.connect(DB_PATH) as db:
+            # Activités
             async with db.execute(
                 'SELECT user_id, last_message, last_vocal FROM activity_tracking WHERE guild_id=?',
                 (guild.id,)
@@ -3755,8 +3993,18 @@ async def execute_afk_actions(guild):
                                 last_activity = lv
                         except: pass
                     user_activities[user_id] = last_activity
+            
+            # Rôles immunisés
+            async with db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (guild.id,)) as cursor:
+                async for row in cursor:
+                    immune_roles.add(row[0])
+            
+            # Utilisateurs immunisés
+            async with db.execute('SELECT user_id FROM immune_users WHERE guild_id=?', (guild.id,)) as cursor:
+                async for row in cursor:
+                    immune_users.add(row[0])
         
-        # ═══════════════ ÉTAPE 2: CLASSIFICATION RAPIDE ═══════════════
+        # ═══════════════ ÉTAPE 2: CLASSIFICATION (avec immunité) ═══════════════
         afk_members_7d = []
         afk_members_30d = []
         members_to_remove_role_7d = []
@@ -3766,6 +4014,16 @@ async def execute_afk_actions(guild):
         
         for member in guild.members:
             if member.bot or member.id == guild.owner_id:
+                continue
+            
+            # ⚠️ VÉRIFICATION IMMUNITÉ - Les immunisés sont ignorés !
+            if member.id in immune_users or any(r.id in immune_roles for r in member.roles):
+                results['immune_skipped'] += 1
+                continue
+            
+            # Admins sont aussi immunisés
+            if member.guild_permissions.administrator:
+                results['immune_skipped'] += 1
                 continue
             
             last_activity = user_activities.get(member.id)
@@ -3866,8 +4124,14 @@ async def execute_afk_actions(guild):
         if results['remove_role_30d']: summary += f"🎭 **{results['remove_role_30d']}** rôle(s) retiré(s) (30j)\n"
         if results['kick_30d']: summary += f"👢 **{results['kick_30d']}** membre(s) expulsé(s) (30j)\n"
         
-        if sum(results.values()) == 0:
+        if results['immune_skipped']: summary += f"\n👑 **{results['immune_skipped']}** membre(s) immunisé(s) ignoré(s)\n"
+        
+        total_actions = results['ping_7d'] + results['remove_role_7d'] + results['kick_7d'] + results['ping_30d'] + results['remove_role_30d'] + results['kick_30d']
+        
+        if total_actions == 0:
             summary = "ℹ️ Aucune action effectuée.\n\n**Vérifiez:**\n• Les actions sont-elles configurées ?\n• Y a-t-il des membres inactifs ?"
+            if results['immune_skipped']:
+                summary += f"\n\n👑 *{results['immune_skipped']} membre(s) immunisé(s) ont été ignorés*"
         else:
             summary += "\n💡 *Vous pouvez maintenant utiliser @here ou @everyone pour notifier les membres*"
         
@@ -4893,6 +5157,10 @@ async def check_mod_perm(i, cmd_key):
     if i.user.guild_permissions.administrator or i.user.id == i.guild.owner_id:
         return True
     
+    # ⚠️ Les immunisés ont accès à TOUTES les commandes de modération
+    if await is_fully_immune(i.user):
+        return True
+    
     # Vérifier si l'utilisateur a le rôle configuré
     if role_id:
         role = i.guild.get_role(role_id)
@@ -5272,39 +5540,48 @@ suggestion_cooldowns = {}
 async def suggestion_cmd(i: discord.Interaction, titre: str, proposition: str):
     c = await cfg(i.guild.id)
     
-    # Vérifier le rôle
-    role_id = c.get('suggestion_role', 0)
-    if role_id:
-        role = i.guild.get_role(role_id)
-        if role and role not in i.user.roles:
-            return await i.response.send_message(f"❌ Vous devez avoir le rôle {role.mention}", ephemeral=True)
+    # ⚠️ Les immunisés bypass les restrictions de rôle et cooldown
+    is_immune = await is_fully_immune(i.user)
+    
+    # Vérifier le rôle (sauf immunisés)
+    if not is_immune:
+        role_id = c.get('suggestion_role', 0)
+        if role_id:
+            role = i.guild.get_role(role_id)
+            if role and role not in i.user.roles:
+                return await i.response.send_message(f"❌ Vous devez avoir le rôle {role.mention}", ephemeral=True)
     
     # Vérifier le salon
     sugg_ch = i.guild.get_channel(c.get('suggestion_channel', 0))
     if not sugg_ch:
         return await i.response.send_message("❌ Le salon des suggestions n'est pas configuré", ephemeral=True)
     
-    # Vérifier le cooldown
-    cooldown_key = (i.guild.id, i.user.id)
-    cd_duration = c.get('suggestion_cooldown', 1)
-    cd_unit = c.get('suggestion_cooldown_unit', 'jours')
+    # Vérifier le cooldown (sauf immunisés)
+    if not is_immune:
+        cooldown_key = (i.guild.id, i.user.id)
+        cd_duration = c.get('suggestion_cooldown', 1)
+        cd_unit = c.get('suggestion_cooldown_unit', 'jours')
+        
+        if cd_unit == 'semaines':
+            cd_seconds = cd_duration * 7 * 24 * 3600
+        else:
+            cd_seconds = cd_duration * 24 * 3600
+        
+        if cooldown_key in suggestion_cooldowns:
+            last_time = suggestion_cooldowns[cooldown_key]
+            elapsed = (now() - last_time).total_seconds()
+            if elapsed < cd_seconds:
+                remaining = cd_seconds - elapsed
+                days = int(remaining // 86400)
+                hours = int((remaining % 86400) // 3600)
+                return await i.response.send_message(
+                    f"⏱️ Attendez encore **{days}j {hours}h**",
+                    ephemeral=True
+                )
     
-    if cd_unit == 'semaines':
-        cd_seconds = cd_duration * 7 * 24 * 3600
-    else:
-        cd_seconds = cd_duration * 24 * 3600
-    
-    if cooldown_key in suggestion_cooldowns:
-        last_time = suggestion_cooldowns[cooldown_key]
-        elapsed = (now() - last_time).total_seconds()
-        if elapsed < cd_seconds:
-            remaining = cd_seconds - elapsed
-            days = int(remaining // 86400)
-            hours = int((remaining % 86400) // 3600)
-            return await i.response.send_message(
-                f"⏱️ Attendez encore **{days}j {hours}h**",
-                ephemeral=True
-            )
+    # Sécurité: Sanitiser les entrées
+    titre = Security.sanitize_input(titre, 100)
+    proposition = Security.sanitize_input(proposition, 1000)
     
     # Créer un bel embed de suggestion
     e = discord.Embed(color=C.BLURPLE, timestamp=now())
@@ -5328,8 +5605,10 @@ async def suggestion_cmd(i: discord.Interaction, titre: str, proposition: str):
     await msg.add_reaction("🟠")
     await msg.add_reaction("❌")
     
-    # Enregistrer le cooldown
-    suggestion_cooldowns[cooldown_key] = now()
+    # Enregistrer le cooldown (sauf immunisés)
+    if not is_immune:
+        cooldown_key = (i.guild.id, i.user.id)
+        suggestion_cooldowns[cooldown_key] = now()
     
     # Stocker pour le tracking
     async with aiosqlite.connect(DB_PATH) as db:
@@ -5353,62 +5632,69 @@ trade_cooldowns = {}
 async def trade_cmd(i: discord.Interaction):
     c = await cfg(i.guild.id)
     
-    # Vérifier le rôle
-    role_id = c.get('trade_role', 0)
-    if role_id:
-        role = i.guild.get_role(role_id)
-        if role and role not in i.user.roles:
-            return await i.response.send_message(f"❌ Vous devez avoir le rôle {role.mention}", ephemeral=True)
+    # ⚠️ Les immunisés bypass les restrictions de rôle et cooldown
+    is_immune = await is_fully_immune(i.user)
+    
+    # Vérifier le rôle (sauf immunisés)
+    if not is_immune:
+        role_id = c.get('trade_role', 0)
+        if role_id:
+            role = i.guild.get_role(role_id)
+            if role and role not in i.user.roles:
+                return await i.response.send_message(f"❌ Vous devez avoir le rôle {role.mention}", ephemeral=True)
     
     # Vérifier le salon
     trade_ch = i.guild.get_channel(c.get('trade_channel', 0))
     if not trade_ch:
         return await i.response.send_message("❌ Le salon des trades n'est pas configuré", ephemeral=True)
     
-    # Vérifier le cooldown
-    cooldown_key = (i.guild.id, i.user.id)
-    cd_duration = c.get('trade_cooldown', 1)
-    cd_unit = c.get('trade_cooldown_unit', 'heures')
-    
-    if cd_unit == 'secondes':
-        cd_seconds = cd_duration
-    elif cd_unit == 'minutes':
-        cd_seconds = cd_duration * 60
-    elif cd_unit == 'heures':
-        cd_seconds = cd_duration * 3600
-    elif cd_unit == 'jours':
-        cd_seconds = cd_duration * 86400
-    elif cd_unit == 'semaines':
-        cd_seconds = cd_duration * 604800
-    else:
-        cd_seconds = cd_duration * 3600
-    
-    if cooldown_key in trade_cooldowns:
-        last_time = trade_cooldowns[cooldown_key]
-        elapsed = (now() - last_time).total_seconds()
-        if elapsed < cd_seconds:
-            remaining = cd_seconds - elapsed
-            if remaining >= 86400:
-                time_txt = f"{int(remaining // 86400)}j {int((remaining % 86400) // 3600)}h"
-            elif remaining >= 3600:
-                time_txt = f"{int(remaining // 3600)}h {int((remaining % 3600) // 60)}min"
-            elif remaining >= 60:
-                time_txt = f"{int(remaining // 60)}min {int(remaining % 60)}s"
-            else:
-                time_txt = f"{int(remaining)}s"
-            return await i.response.send_message(f"⏱️ Attendez encore **{time_txt}**", ephemeral=True)
+    # Vérifier le cooldown (sauf immunisés)
+    if not is_immune:
+        cooldown_key = (i.guild.id, i.user.id)
+        cd_duration = c.get('trade_cooldown', 1)
+        cd_unit = c.get('trade_cooldown_unit', 'heures')
+        
+        if cd_unit == 'secondes':
+            cd_seconds = cd_duration
+        elif cd_unit == 'minutes':
+            cd_seconds = cd_duration * 60
+        elif cd_unit == 'heures':
+            cd_seconds = cd_duration * 3600
+        elif cd_unit == 'jours':
+            cd_seconds = cd_duration * 86400
+        elif cd_unit == 'semaines':
+            cd_seconds = cd_duration * 604800
+        else:
+            cd_seconds = cd_duration * 3600
+        
+        if cooldown_key in trade_cooldowns:
+            last_time = trade_cooldowns[cooldown_key]
+            elapsed = (now() - last_time).total_seconds()
+            if elapsed < cd_seconds:
+                remaining = cd_seconds - elapsed
+                if remaining >= 86400:
+                    time_txt = f"{int(remaining // 86400)}j {int((remaining % 86400) // 3600)}h"
+                elif remaining >= 3600:
+                    time_txt = f"{int(remaining // 3600)}h {int((remaining % 3600) // 60)}min"
+                elif remaining >= 60:
+                    time_txt = f"{int(remaining // 60)}min {int(remaining % 60)}s"
+                else:
+                    time_txt = f"{int(remaining)}s"
+                return await i.response.send_message(f"⏱️ Attendez encore **{time_txt}**", ephemeral=True)
     
     # Afficher le menu de création
-    v = TradeBuilderView(i.user, i.guild, i.channel, trade_ch)
+    v = TradeBuilderView(i.user, i.guild, i.channel, trade_ch, is_immune)
     e = v.get_embed()
     await i.response.send_message(embed=e, view=v, ephemeral=True)
 
 class TradeBuilderView(View):
-    def __init__(self, user, guild, channel, trade_ch):
+    def __init__(self, user, guild, channel, trade_ch, is_immune=False):
         super().__init__(timeout=300)
         self.user = user
         self.guild = guild
         self.channel = channel
+        self.trade_ch = trade_ch
+        self.is_immune = is_immune  # Pour éviter le cooldown à l'envoi
         self.trade_ch = trade_ch
         self.jeu = ""
         self.je_donne = []
@@ -7122,5 +7408,7 @@ async def before_check_scheduled_messages():
     await bot.wait_until_ready()
 
 if __name__ == "__main__":
-    print("🚀 Bot v18 - Démarrage...")
+    print("🚀 Bot v19 - Démarrage...")
+    print("🔒 Système de sécurité activé")
+    print("👑 Système d'immunités complet")
     bot.run(TOKEN)
