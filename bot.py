@@ -2604,7 +2604,7 @@ class StatActionPanel(View):
         stat_cfg = c.get('stat_config', {})
         
         e = discord.Embed(title="⚙️ Configuration des Actions", color=C.ORANGE)
-        e.description = "Configurez les actions à effectuer sur les membres inactifs."
+        e.description = "Configurez les actions automatiques ou expulsez manuellement les membres inactifs."
         
         action_labels = {'none': '❌ Aucune', 'ping': '🔔 Ping', 'remove_role': '🎭 Retirer rôle', 'kick': '👢 Kick'}
         
@@ -2637,7 +2637,7 @@ class StatActionPanel(View):
             inline=True
         )
         
-        e.set_footer(text="💡 Le rôle sera redonné automatiquement si le membre redevient actif")
+        e.set_footer(text="💡 Le rôle sera redonné automatiquement si le membre redevient actif\n⚠️ Les boutons d'expulsion sont irréversibles!")
         return e
     
     @discord.ui.select(
@@ -2694,6 +2694,186 @@ class StatActionPanel(View):
     async def back(self, i, b):
         v = StatPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="👢 Expulser AFK 7j", style=discord.ButtonStyle.danger, row=3)
+    async def kick_7d(self, i, b):
+        # Compter d'abord
+        count = await count_afk_members_by_days(self.g, 7)
+        await i.response.send_message(
+            f"⚠️ **ATTENTION - Action irréversible !**\n\n"
+            f"Vous êtes sur le point d'expulser **{count}** membre(s) inactif(s) depuis **7 jours**.\n\n"
+            f"Cette action est **DÉFINITIVE** et ne peut pas être annulée.\n"
+            f"Les membres expulsés devront rejoindre à nouveau le serveur.",
+            view=KickConfirmView(self.u, self.g, 7, count),
+            ephemeral=True
+        )
+    
+    @discord.ui.button(label="👢 Expulser AFK 30j", style=discord.ButtonStyle.danger, row=3)
+    async def kick_30d(self, i, b):
+        # Compter d'abord
+        count = await count_afk_members_by_days(self.g, 30)
+        await i.response.send_message(
+            f"⚠️ **ATTENTION - Action irréversible !**\n\n"
+            f"Vous êtes sur le point d'expulser **{count}** membre(s) inactif(s) depuis **30 jours**.\n\n"
+            f"Cette action est **DÉFINITIVE** et ne peut pas être annulée.\n"
+            f"Les membres expulsés devront rejoindre à nouveau le serveur.",
+            view=KickConfirmView(self.u, self.g, 30, count),
+            ephemeral=True
+        )
+
+async def count_afk_members_by_days(guild, days):
+    """Compte les membres AFK depuis X jours"""
+    count = 0
+    now_dt = now()
+    cutoff = now_dt - timedelta(days=days)
+    
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                'SELECT user_id, last_message, last_vocal FROM activity_tracking WHERE guild_id=?',
+                (guild.id,)
+            ) as cursor:
+                tracked_users = set()
+                async for row in cursor:
+                    user_id, last_msg, last_vocal = row
+                    tracked_users.add(user_id)
+                    
+                    last_activity = None
+                    if last_msg:
+                        try:
+                            last_activity = datetime.fromisoformat(last_msg)
+                        except:
+                            pass
+                    if last_vocal:
+                        try:
+                            lv = datetime.fromisoformat(last_vocal)
+                            if not last_activity or lv > last_activity:
+                                last_activity = lv
+                        except:
+                            pass
+                    
+                    if last_activity:
+                        if last_activity.replace(tzinfo=timezone.utc) < cutoff.replace(tzinfo=timezone.utc):
+                            # Vérifier que le membre existe encore
+                            member = guild.get_member(user_id)
+                            if member and not member.bot and member.id != guild.owner_id:
+                                count += 1
+            
+            # Membres non trackés = considérés comme AFK
+            for member in guild.members:
+                if not member.bot and member.id not in tracked_users and member.id != guild.owner_id:
+                    count += 1
+    except:
+        pass
+    
+    return count
+
+class KickConfirmView(View):
+    def __init__(self, u, g, days, count):
+        super().__init__(timeout=60)
+        self.u = u
+        self.g = g
+        self.days = days
+        self.count = count
+    
+    @discord.ui.button(label="✅ Confirmer l'expulsion", style=discord.ButtonStyle.danger)
+    async def confirm(self, i, b):
+        await i.response.defer()
+        
+        # Désactiver les boutons
+        for item in self.children:
+            item.disabled = True
+        await i.message.edit(view=self)
+        
+        # Exécuter les kicks
+        result = await kick_afk_members(self.g, self.days)
+        await i.followup.send(result, ephemeral=True)
+    
+    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, i, b):
+        await i.response.edit_message(content="❌ Expulsion annulée.", view=None)
+
+async def kick_afk_members(guild, days):
+    """Expulse tous les membres AFK depuis X jours"""
+    now_dt = now()
+    cutoff = now_dt - timedelta(days=days)
+    
+    kicked = 0
+    failed = 0
+    skipped = 0
+    
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                'SELECT user_id, last_message, last_vocal FROM activity_tracking WHERE guild_id=?',
+                (guild.id,)
+            ) as cursor:
+                tracked_users = {}
+                async for row in cursor:
+                    user_id, last_msg, last_vocal = row
+                    
+                    last_activity = None
+                    if last_msg:
+                        try:
+                            last_activity = datetime.fromisoformat(last_msg)
+                        except:
+                            pass
+                    if last_vocal:
+                        try:
+                            lv = datetime.fromisoformat(last_vocal)
+                            if not last_activity or lv > last_activity:
+                                last_activity = lv
+                        except:
+                            pass
+                    
+                    tracked_users[user_id] = last_activity
+        
+        # Parcourir tous les membres
+        for member in list(guild.members):
+            if member.bot:
+                continue
+            
+            # Ne jamais kick le owner
+            if member.id == guild.owner_id:
+                skipped += 1
+                continue
+            
+            # Vérifier si le bot peut kick ce membre
+            if member.top_role >= guild.me.top_role:
+                skipped += 1
+                continue
+            
+            last_activity = tracked_users.get(member.id)
+            
+            # Membre non tracké = considéré comme très inactif
+            is_afk = False
+            if not last_activity:
+                is_afk = True
+            else:
+                la_utc = last_activity.replace(tzinfo=timezone.utc) if last_activity.tzinfo is None else last_activity
+                is_afk = la_utc < cutoff.replace(tzinfo=timezone.utc)
+            
+            if is_afk:
+                try:
+                    await member.kick(reason=f"Inactivité de plus de {days} jours")
+                    kicked += 1
+                    await asyncio.sleep(0.5)  # Rate limit
+                except:
+                    failed += 1
+        
+        # Résumé
+        result = f"✅ **Expulsion terminée !**\n\n"
+        result += f"👢 **{kicked}** membre(s) expulsé(s)\n"
+        if failed > 0:
+            result += f"❌ **{failed}** échec(s) (permissions insuffisantes)\n"
+        if skipped > 0:
+            result += f"⏭️ **{skipped}** ignoré(s) (owner ou rôle trop élevé)\n"
+        result += f"\n*Critère: inactif depuis plus de {days} jours*"
+        
+        return result
+        
+    except Exception as ex:
+        return f"❌ Erreur lors de l'expulsion: {ex}"
 
 class StatRoleSelectView(View):
     def __init__(self, u, g, opts):
