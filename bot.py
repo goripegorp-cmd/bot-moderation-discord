@@ -300,6 +300,29 @@ async def db_init():
         if 'created_at' not in cols:
             try: await db.execute('ALTER TABLE infractions ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP')
             except: pass
+        
+        # ═══════════════ TABLES ÉCONOMIE & MINI-JEUX ═══════════════
+        # Table économie des membres
+        await db.execute('''CREATE TABLE IF NOT EXISTS economy (
+            guild_id INTEGER,
+            user_id INTEGER,
+            coins INTEGER DEFAULT 0,
+            bank INTEGER DEFAULT 0,
+            xp INTEGER DEFAULT 0,
+            level INTEGER DEFAULT 1,
+            last_daily DATETIME,
+            last_work DATETIME,
+            PRIMARY KEY (guild_id, user_id)
+        )''')
+        
+        # Table des niveaux (pour récompenses automatiques)
+        await db.execute('''CREATE TABLE IF NOT EXISTS level_rewards (
+            guild_id INTEGER,
+            level INTEGER,
+            role_id INTEGER,
+            PRIMARY KEY (guild_id, level)
+        )''')
+        
         await db.commit()
     print("✅ DB OK")
 
@@ -921,7 +944,12 @@ class MainPanel(View):
         v = CentrePanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
     
-    @discord.ui.button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger, row=3)
+    @discord.ui.button(label="Mini-Jeux", emoji="🎮", style=discord.ButtonStyle.primary, row=3)
+    async def minigames(self, i, b):
+        v = MiniGamesPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger, row=4)
     async def close(self, i, b):
         await i.message.delete()
 
@@ -3747,107 +3775,159 @@ class GiveawayParticipateView(View):
     
     @discord.ui.button(label="🎉 Participer", style=discord.ButtonStyle.success, custom_id="giveaway_participate")
     async def participate(self, i, b):
-        # Récupérer le giveaway et ses conditions
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
-                async with db.execute(
-                    'SELECT id, participants, ended, conditions FROM giveaways WHERE message_id=?',
-                    (i.message.id,)
-                ) as cursor:
-                    row = await cursor.fetchone()
-                    
-                    if not row:
-                        return await i.response.send_message("❌ Cadeau introuvable", ephemeral=True)
-                    
-                    giveaway_id, participants_str, ended, conditions_str = row
-                    
-                    if ended:
-                        return await i.response.send_message("❌ Ce cadeau est terminé !", ephemeral=True)
-                    
-                    participants = json.loads(participants_str) if participants_str else []
-                    
-                    if i.user.id in participants:
-                        return await i.response.send_message("✅ Vous participez déjà !", ephemeral=True)
-                    
-                    # Charger les conditions
-                    conditions = json.loads(conditions_str) if conditions_str else {}
-                    
-                    # Vérifier toutes les conditions
-                    failed_conditions = []
-                    member = i.user
-                    
-                    # 1. Vérifier AFK
-                    if conditions.get('no_afk', True):
-                        afk_days = conditions.get('afk_days', 7)
-                        is_afk = await check_member_afk(i.guild.id, i.user.id, days=afk_days)
-                        if is_afk:
-                            failed_conditions.append(f"❌ Vous êtes **inactif** depuis plus de {afk_days} jours")
-                    
-                    # 2. Vérifier les messages minimum
-                    if conditions.get('min_messages', 0) > 0:
+            # Obtenir le membre complet
+            member = i.guild.get_member(i.user.id)
+            if not member:
+                return await i.response.send_message("❌ Erreur: membre introuvable", ephemeral=True)
+            
+            # ═══════════════ ÉTAPE 1: Récupérer le giveaway ═══════════════
+            giveaway_data = None
+            try:
+                async with aiosqlite.connect(DB_PATH) as db:
+                    async with db.execute(
+                        'SELECT id, participants, ended, conditions FROM giveaways WHERE message_id=?',
+                        (i.message.id,)
+                    ) as cursor:
+                        row = await cursor.fetchone()
+                        if row:
+                            giveaway_data = {
+                                'id': row[0],
+                                'participants': json.loads(row[1]) if row[1] else [],
+                                'ended': row[2],
+                                'conditions': json.loads(row[3]) if row[3] else {}
+                            }
+            except Exception as e:
+                print(f"Erreur lecture giveaway: {e}")
+                return await i.response.send_message("❌ Erreur de lecture du cadeau", ephemeral=True)
+            
+            if not giveaway_data:
+                return await i.response.send_message("❌ Cadeau introuvable", ephemeral=True)
+            
+            if giveaway_data['ended']:
+                return await i.response.send_message("❌ Ce cadeau est terminé !", ephemeral=True)
+            
+            if i.user.id in giveaway_data['participants']:
+                return await i.response.send_message("✅ Vous participez déjà !", ephemeral=True)
+            
+            # ═══════════════ ÉTAPE 2: Vérifier les conditions ═══════════════
+            conditions = giveaway_data['conditions']
+            failed_conditions = []
+            
+            # 1. Vérifier AFK (seulement si configuré)
+            afk_days = conditions.get('afk_days', 0)
+            if afk_days > 0:
+                try:
+                    is_afk = await check_member_afk(i.guild.id, i.user.id, days=afk_days)
+                    if is_afk:
+                        failed_conditions.append(f"❌ Vous êtes **inactif** depuis plus de {afk_days} jours")
+                except Exception as e:
+                    print(f"Erreur check AFK: {e}")
+            
+            # 2. Vérifier les messages minimum
+            min_messages = conditions.get('min_messages', 0)
+            if min_messages > 0:
+                try:
+                    user_msgs = 0
+                    async with aiosqlite.connect(DB_PATH) as db:
                         async with db.execute(
                             'SELECT total_messages FROM activity_tracking WHERE guild_id=? AND user_id=?',
                             (i.guild.id, i.user.id)
-                        ) as cursor2:
-                            msg_row = await cursor2.fetchone()
-                            user_msgs = msg_row[0] if msg_row else 0
-                            if user_msgs < conditions['min_messages']:
-                                failed_conditions.append(f"📝 Vous avez **{user_msgs}** messages (minimum: **{conditions['min_messages']}**)")
+                        ) as cursor:
+                            msg_row = await cursor.fetchone()
+                            user_msgs = msg_row[0] if msg_row and msg_row[0] else 0
                     
-                    # 3. Vérifier le temps vocal minimum
-                    if conditions.get('min_vocal_minutes', 0) > 0:
+                    if user_msgs < min_messages:
+                        failed_conditions.append(f"📝 Vous avez **{user_msgs}** messages (minimum: **{min_messages}**)")
+                except Exception as e:
+                    print(f"Erreur check messages: {e}")
+            
+            # 3. Vérifier le temps vocal minimum
+            min_vocal = conditions.get('min_vocal_minutes', 0)
+            if min_vocal > 0:
+                try:
+                    user_vocal_minutes = 0
+                    async with aiosqlite.connect(DB_PATH) as db:
                         async with db.execute(
                             'SELECT total_vocal_time FROM activity_tracking WHERE guild_id=? AND user_id=?',
                             (i.guild.id, i.user.id)
-                        ) as cursor2:
-                            vocal_row = await cursor2.fetchone()
-                            # total_vocal_time est en secondes, convertir en minutes
+                        ) as cursor:
+                            vocal_row = await cursor.fetchone()
                             user_vocal_seconds = vocal_row[0] if vocal_row and vocal_row[0] else 0
                             user_vocal_minutes = user_vocal_seconds // 60
-                            if user_vocal_minutes < conditions['min_vocal_minutes']:
-                                failed_conditions.append(f"🎤 Vous avez **{user_vocal_minutes}** min en vocal (minimum: **{conditions['min_vocal_minutes']}**)")
                     
-                    # 4. Vérifier le rôle requis
-                    if conditions.get('required_role', 0) > 0:
-                        role = i.guild.get_role(conditions['required_role'])
-                        if role and role not in member.roles:
+                    if user_vocal_minutes < min_vocal:
+                        failed_conditions.append(f"🎤 Vous avez **{user_vocal_minutes}** min en vocal (minimum: **{min_vocal}**)")
+                except Exception as e:
+                    print(f"Erreur check vocal: {e}")
+            
+            # 4. Vérifier le rôle requis
+            required_role_id = conditions.get('required_role', 0)
+            if required_role_id > 0:
+                try:
+                    role = i.guild.get_role(required_role_id)
+                    if role:
+                        member_role_ids = [r.id for r in member.roles]
+                        if role.id not in member_role_ids:
                             failed_conditions.append(f"🎭 Vous devez avoir le rôle **{role.name}**")
-                    
-                    # 5. Vérifier l'ancienneté du compte
-                    if conditions.get('min_account_days', 0) > 0:
-                        account_age = (now() - member.created_at.replace(tzinfo=None)).days
-                        if account_age < conditions['min_account_days']:
-                            failed_conditions.append(f"📅 Votre compte a **{account_age}** jours (minimum: **{conditions['min_account_days']}**)")
-                    
-                    # Si des conditions ne sont pas remplies
-                    if failed_conditions:
-                        error_msg = "❌ **Vous ne pouvez pas participer !**\n\n**Conditions non remplies:**\n"
-                        error_msg += "\n".join(failed_conditions)
-                        error_msg += "\n\n*Remplissez ces conditions pour pouvoir participer.*"
-                        return await i.response.send_message(error_msg, ephemeral=True)
-                    
-                    # Toutes les conditions sont remplies, ajouter le participant
-                    participants.append(i.user.id)
-                    
+                except Exception as e:
+                    print(f"Erreur check role: {e}")
+            
+            # 5. Vérifier l'ancienneté du compte
+            min_days = conditions.get('min_account_days', 0)
+            if min_days > 0:
+                try:
+                    created = member.created_at
+                    if created.tzinfo:
+                        created = created.replace(tzinfo=None)
+                    account_age = (now() - created).days
+                    if account_age < min_days:
+                        failed_conditions.append(f"📅 Votre compte a **{account_age}** jours (minimum: **{min_days}**)")
+                except Exception as e:
+                    print(f"Erreur check account age: {e}")
+            
+            # Si des conditions ne sont pas remplies
+            if failed_conditions:
+                error_msg = "❌ **Vous ne pouvez pas participer !**\n\n**Conditions non remplies:**\n"
+                error_msg += "\n".join(failed_conditions)
+                error_msg += "\n\n*Remplissez ces conditions pour pouvoir participer.*"
+                return await i.response.send_message(error_msg, ephemeral=True)
+            
+            # ═══════════════ ÉTAPE 3: Ajouter le participant ═══════════════
+            giveaway_data['participants'].append(i.user.id)
+            
+            try:
+                async with aiosqlite.connect(DB_PATH) as db:
                     await db.execute(
                         'UPDATE giveaways SET participants=? WHERE id=?',
-                        (json.dumps(participants), giveaway_id)
+                        (json.dumps(giveaway_data['participants']), giveaway_data['id'])
                     )
                     await db.commit()
+            except Exception as e:
+                print(f"Erreur update participants: {e}")
+                return await i.response.send_message("❌ Erreur lors de l'enregistrement", ephemeral=True)
             
-            # Mettre à jour l'embed
-            embed = i.message.embeds[0]
-            for idx, field in enumerate(embed.fields):
-                if "Participants" in field.name:
-                    embed.set_field_at(idx, name="👥 Participants", value=f"```{len(participants)}```", inline=True)
-                    break
+            # ═══════════════ ÉTAPE 4: Mettre à jour l'embed ═══════════════
+            try:
+                embed = i.message.embeds[0].copy()
+                for idx, field in enumerate(embed.fields):
+                    if "Participants" in field.name:
+                        embed.set_field_at(idx, name="👥 Participants", value=f"```{len(giveaway_data['participants'])}```", inline=True)
+                        break
+                await i.message.edit(embed=embed)
+            except Exception as e:
+                print(f"Erreur update embed: {e}")
             
-            await i.message.edit(embed=embed)
             await i.response.send_message(f"🎉 **Vous participez au cadeau !**\nBonne chance !", ephemeral=True)
             
         except Exception as ex:
-            print(f"Erreur participation: {ex}")
-            await i.response.send_message("❌ Erreur lors de la participation", ephemeral=True)
+            import traceback
+            print(f"Erreur participation giveaway: {ex}")
+            traceback.print_exc()
+            try:
+                await i.response.send_message("❌ Erreur lors de la participation. Réessayez.", ephemeral=True)
+            except:
+                pass
 
 async def check_member_afk(guild_id, user_id, days=7):
     """Vérifie si un membre est AFK depuis X jours (les immunisés ne sont jamais AFK)"""
@@ -3910,6 +3990,640 @@ async def check_member_afk(guild_id, user_id, days=7):
                 
     except:
         return False
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           🎮 MINI-JEUX PANEL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class MiniGamesPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        games_cfg = c.get('minigames_config', {})
+        
+        e = discord.Embed(title="🎮 Mini-Jeux & Économie", color=0x9B59B6)
+        e.description = "Configurez les systèmes de jeux et d'économie de votre serveur."
+        
+        # Économie
+        eco_enabled = games_cfg.get('economy_enabled', False)
+        e.add_field(
+            name="💰 Économie",
+            value=f"{'✅ Activée' if eco_enabled else '❌ Désactivée'}\n`/daily` `/work` `/balance`",
+            inline=True
+        )
+        
+        # Niveaux
+        lvl_enabled = games_cfg.get('levels_enabled', False)
+        e.add_field(
+            name="📈 Niveaux",
+            value=f"{'✅ Activés' if lvl_enabled else '❌ Désactivés'}\n`XP automatique` `Rôles auto`",
+            inline=True
+        )
+        
+        # Jeux
+        games_ch = self.g.get_channel(games_cfg.get('games_channel', 0))
+        e.add_field(
+            name="🎯 Jeux Rapides",
+            value=f"Salon: {games_ch.mention if games_ch else '❌ Non configuré'}",
+            inline=True
+        )
+        
+        e.set_footer(text="💡 Configurez chaque système individuellement")
+        return e
+    
+    @discord.ui.button(label="💰 Économie", style=discord.ButtonStyle.success, row=0)
+    async def economy(self, i, b):
+        v = EconomyConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="📈 Niveaux", style=discord.ButtonStyle.success, row=0)
+    async def levels(self, i, b):
+        v = LevelConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="🎯 Jeux", style=discord.ButtonStyle.success, row=0)
+    async def games(self, i, b):
+        v = GamesConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="📍 Salons Commandes", style=discord.ButtonStyle.primary, row=1)
+    async def cmd_channels(self, i, b):
+        v = CommandChannelsPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+    async def back(self, i, b):
+        v = MainPanel(self.u, self.g)
+        await i.response.edit_message(embed=v.embed(), view=v)
+
+# ─────────────────────────────── ÉCONOMIE CONFIG ───────────────────────────────
+
+class EconomyConfigPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        games_cfg = c.get('minigames_config', {})
+        
+        e = discord.Embed(title="💰 Configuration Économie", color=0xF1C40F)
+        
+        eco_enabled = games_cfg.get('economy_enabled', False)
+        e.add_field(name="État", value="✅ Activée" if eco_enabled else "❌ Désactivée", inline=True)
+        
+        daily_amount = games_cfg.get('daily_amount', 100)
+        e.add_field(name="💵 Daily", value=f"`{daily_amount}` coins", inline=True)
+        
+        work_min = games_cfg.get('work_min', 50)
+        work_max = games_cfg.get('work_max', 150)
+        e.add_field(name="💼 Work", value=f"`{work_min}-{work_max}` coins", inline=True)
+        
+        work_cooldown = games_cfg.get('work_cooldown', 3600)
+        e.add_field(name="⏱️ Cooldown Work", value=f"`{work_cooldown//60}` minutes", inline=True)
+        
+        xp_per_msg = games_cfg.get('xp_per_message', 15)
+        e.add_field(name="✨ XP/message", value=f"`{xp_per_msg}` XP", inline=True)
+        
+        coins_per_msg = games_cfg.get('coins_per_message', 1)
+        e.add_field(name="💰 Coins/message", value=f"`{coins_per_msg}` coins", inline=True)
+        
+        e.set_footer(text="💡 Les membres gagnent des coins en étant actifs")
+        return e
+    
+    @discord.ui.button(label="✅ Activer/Désactiver", style=discord.ButtonStyle.success, row=0)
+    async def toggle(self, i, b):
+        c = await cfg(self.g.id)
+        games_cfg = c.get('minigames_config', {})
+        games_cfg['economy_enabled'] = not games_cfg.get('economy_enabled', False)
+        await db_set(self.g.id, 'minigames_config', games_cfg)
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="💵 Daily", style=discord.ButtonStyle.primary, row=0)
+    async def set_daily(self, i, b):
+        await i.response.send_modal(EconomyValueModal(self.g, self.u, 'daily_amount', "Montant du Daily", "100"))
+    
+    @discord.ui.button(label="💼 Work Min/Max", style=discord.ButtonStyle.primary, row=0)
+    async def set_work(self, i, b):
+        await i.response.send_modal(EconomyWorkModal(self.g, self.u))
+    
+    @discord.ui.button(label="⏱️ Cooldown", style=discord.ButtonStyle.secondary, row=1)
+    async def set_cooldown(self, i, b):
+        await i.response.send_modal(EconomyValueModal(self.g, self.u, 'work_cooldown', "Cooldown Work (secondes)", "3600"))
+    
+    @discord.ui.button(label="✨ XP/msg", style=discord.ButtonStyle.secondary, row=1)
+    async def set_xp(self, i, b):
+        await i.response.send_modal(EconomyValueModal(self.g, self.u, 'xp_per_message', "XP par message", "15"))
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+    async def back(self, i, b):
+        v = MiniGamesPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class EconomyValueModal(Modal):
+    def __init__(self, g, u, key, label, placeholder):
+        super().__init__(title=f"⚙️ {label}")
+        self.g = g
+        self.u = u
+        self.key = key
+        self.value_input = TextInput(label=label, placeholder=placeholder)
+        self.add_item(self.value_input)
+    
+    async def on_submit(self, i):
+        try:
+            value = int(self.value_input.value)
+            c = await cfg(self.g.id)
+            games_cfg = c.get('minigames_config', {})
+            games_cfg[self.key] = value
+            await db_set(self.g.id, 'minigames_config', games_cfg)
+        except:
+            pass
+        v = EconomyConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class EconomyWorkModal(Modal):
+    def __init__(self, g, u):
+        super().__init__(title="💼 Configuration Work")
+        self.g = g
+        self.u = u
+        self.min_input = TextInput(label="Minimum", placeholder="50")
+        self.max_input = TextInput(label="Maximum", placeholder="150")
+        self.add_item(self.min_input)
+        self.add_item(self.max_input)
+    
+    async def on_submit(self, i):
+        try:
+            c = await cfg(self.g.id)
+            games_cfg = c.get('minigames_config', {})
+            games_cfg['work_min'] = int(self.min_input.value)
+            games_cfg['work_max'] = int(self.max_input.value)
+            await db_set(self.g.id, 'minigames_config', games_cfg)
+        except:
+            pass
+        v = EconomyConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+# ─────────────────────────────── NIVEAUX CONFIG ───────────────────────────────
+
+class LevelConfigPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        games_cfg = c.get('minigames_config', {})
+        
+        e = discord.Embed(title="📈 Configuration Niveaux", color=0x3498DB)
+        
+        lvl_enabled = games_cfg.get('levels_enabled', False)
+        e.add_field(name="État", value="✅ Activés" if lvl_enabled else "❌ Désactivés", inline=True)
+        
+        lvl_up_ch = self.g.get_channel(games_cfg.get('levelup_channel', 0))
+        e.add_field(name="📢 Salon Level-up", value=lvl_up_ch.mention if lvl_up_ch else "Dans le salon actif", inline=True)
+        
+        # Récupérer les récompenses de niveau
+        rewards_txt = ""
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('SELECT level, role_id FROM level_rewards WHERE guild_id=? ORDER BY level', (self.g.id,)) as cursor:
+                rewards = await cursor.fetchall()
+                for lvl, role_id in rewards[:5]:
+                    role = self.g.get_role(role_id)
+                    if role:
+                        rewards_txt += f"• Niveau {lvl} → {role.mention}\n"
+        
+        e.add_field(name="🎭 Rôles automatiques", value=rewards_txt or "*Aucun configuré*", inline=False)
+        
+        e.set_footer(text="💡 Les membres montent de niveau en envoyant des messages")
+        return e
+    
+    @discord.ui.button(label="✅ Activer/Désactiver", style=discord.ButtonStyle.success, row=0)
+    async def toggle(self, i, b):
+        c = await cfg(self.g.id)
+        games_cfg = c.get('minigames_config', {})
+        games_cfg['levels_enabled'] = not games_cfg.get('levels_enabled', False)
+        await db_set(self.g.id, 'minigames_config', games_cfg)
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="📢 Salon Level-up", style=discord.ButtonStyle.primary, row=0)
+    async def set_channel(self, i, b):
+        chs = list(self.g.text_channels)[:24]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        opts.insert(0, discord.SelectOption(label="📍 Dans le salon actif", value="0"))
+        v = LevelChannelSelectView(self.u, self.g, opts)
+        await i.response.edit_message(embed=discord.Embed(title="📢 Salon des annonces level-up", color=0x3498DB), view=v)
+    
+    @discord.ui.button(label="➕ Ajouter Récompense", style=discord.ButtonStyle.success, row=1)
+    async def add_reward(self, i, b):
+        await i.response.send_modal(LevelRewardModal(self.g, self.u))
+    
+    @discord.ui.button(label="🗑️ Supprimer Récompense", style=discord.ButtonStyle.danger, row=1)
+    async def remove_reward(self, i, b):
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('SELECT level, role_id FROM level_rewards WHERE guild_id=?', (self.g.id,)) as cursor:
+                rewards = await cursor.fetchall()
+        
+        if not rewards:
+            return await i.response.send_message("❌ Aucune récompense configurée", ephemeral=True)
+        
+        opts = []
+        for lvl, role_id in rewards[:25]:
+            role = self.g.get_role(role_id)
+            opts.append(discord.SelectOption(label=f"Niveau {lvl} - {role.name if role else 'Rôle supprimé'}"[:25], value=str(lvl)))
+        
+        v = LevelRewardRemoveView(self.u, self.g, opts)
+        await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer une récompense", color=C.RED), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+    async def back(self, i, b):
+        v = MiniGamesPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class LevelChannelSelectView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+        self.add_item(LevelChannelSelect(u, g, opts))
+
+class LevelChannelSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        c = await cfg(self.g.id)
+        games_cfg = c.get('minigames_config', {})
+        games_cfg['levelup_channel'] = int(self.values[0])
+        await db_set(self.g.id, 'minigames_config', games_cfg)
+        v = LevelConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class LevelRewardModal(Modal):
+    def __init__(self, g, u):
+        super().__init__(title="➕ Ajouter une récompense de niveau")
+        self.g = g
+        self.u = u
+        self.level_input = TextInput(label="Niveau requis", placeholder="Ex: 10")
+        self.add_item(self.level_input)
+    
+    async def on_submit(self, i):
+        try:
+            level = int(self.level_input.value)
+            # Demander le rôle
+            roles = [r for r in self.g.roles if not r.is_default() and not r.is_bot_managed()][:25]
+            opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
+            v = LevelRewardRoleView(self.u, self.g, opts, level)
+            await i.response.send_message(f"🎭 Sélectionnez le rôle à donner au niveau **{level}**:", view=v, ephemeral=True)
+        except:
+            await i.response.send_message("❌ Niveau invalide", ephemeral=True)
+
+class LevelRewardRoleView(View):
+    def __init__(self, u, g, opts, level):
+        super().__init__(timeout=120)
+        self.add_item(LevelRewardRoleSelect(u, g, opts, level))
+
+class LevelRewardRoleSelect(Select):
+    def __init__(self, u, g, opts, level):
+        super().__init__(placeholder="Choisir un rôle...", options=opts)
+        self.u = u
+        self.g = g
+        self.level = level
+    
+    async def callback(self, i):
+        role_id = int(self.values[0])
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('INSERT OR REPLACE INTO level_rewards VALUES(?,?,?)', (self.g.id, self.level, role_id))
+            await db.commit()
+        role = self.g.get_role(role_id)
+        await i.response.edit_message(content=f"✅ Récompense ajoutée: Niveau **{self.level}** → {role.mention if role else 'Rôle'}", view=None)
+
+class LevelRewardRemoveView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.add_item(LevelRewardRemoveSelect(u, g, opts))
+
+class LevelRewardRemoveSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir une récompense...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        level = int(self.values[0])
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('DELETE FROM level_rewards WHERE guild_id=? AND level=?', (self.g.id, level))
+            await db.commit()
+        v = LevelConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+# ─────────────────────────────── JEUX CONFIG ───────────────────────────────
+
+class GamesConfigPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        games_cfg = c.get('minigames_config', {})
+        
+        e = discord.Embed(title="🎯 Configuration Jeux", color=0xE74C3C)
+        
+        games_ch = self.g.get_channel(games_cfg.get('games_channel', 0))
+        e.add_field(name="📍 Salon des jeux", value=games_ch.mention if games_ch else "❌ Non configuré", inline=False)
+        
+        games_role = self.g.get_role(games_cfg.get('games_role', 0))
+        e.add_field(name="🎭 Rôle requis", value=games_role.mention if games_role else "*Tout le monde*", inline=True)
+        
+        # Liste des jeux
+        e.add_field(
+            name="🎮 Jeux disponibles",
+            value=(
+                "🎰 **Slots** - Machine à sous\n"
+                "🎲 **Dice** - Lancer de dés\n"
+                "✊ **RPS** - Pierre-Feuille-Ciseaux\n"
+                "🔢 **Guess** - Deviner le nombre\n"
+                "⚡ **React** - Réaction rapide\n"
+                "🔤 **Pendu** - Deviner le mot"
+            ),
+            inline=False
+        )
+        
+        e.set_footer(text="💡 Les jeux utilisent les coins de l'économie")
+        return e
+    
+    @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
+    async def set_channel(self, i, b):
+        chs = list(self.g.text_channels)[:24]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        opts.insert(0, discord.SelectOption(label="❌ Partout", value="0"))
+        v = GamesChannelSelectView(self.u, self.g, opts)
+        await i.response.edit_message(embed=discord.Embed(title="📍 Salon des jeux", description="Les commandes de jeux ne fonctionneront que dans ce salon.", color=0xE74C3C), view=v)
+    
+    @discord.ui.button(label="🎭 Rôle requis", style=discord.ButtonStyle.primary, row=0)
+    async def set_role(self, i, b):
+        roles = [r for r in self.g.roles if not r.is_default() and not r.is_bot_managed()][:24]
+        opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
+        opts.insert(0, discord.SelectOption(label="👥 Tout le monde", value="0"))
+        v = GamesRoleSelectView(self.u, self.g, opts)
+        await i.response.edit_message(embed=discord.Embed(title="🎭 Rôle requis", description="Seuls les membres avec ce rôle pourront jouer.", color=0xE74C3C), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = MiniGamesPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class GamesChannelSelectView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.add_item(GamesChannelSelect(u, g, opts))
+
+class GamesChannelSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        c = await cfg(self.g.id)
+        games_cfg = c.get('minigames_config', {})
+        games_cfg['games_channel'] = int(self.values[0])
+        await db_set(self.g.id, 'minigames_config', games_cfg)
+        v = GamesConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class GamesRoleSelectView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.add_item(GamesRoleSelect(u, g, opts))
+
+class GamesRoleSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir un rôle...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        c = await cfg(self.g.id)
+        games_cfg = c.get('minigames_config', {})
+        games_cfg['games_role'] = int(self.values[0])
+        await db_set(self.g.id, 'minigames_config', games_cfg)
+        v = GamesConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+# ─────────────────────────────── SALONS COMMANDES ───────────────────────────────
+
+class CommandChannelsPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        cmd_channels = c.get('command_channels', {})
+        
+        e = discord.Embed(title="📍 Salons des Commandes", color=C.BLURPLE)
+        e.description = "Définissez dans quels salons chaque commande peut être utilisée.\n*Non configuré = partout*"
+        
+        commands = [
+            ('stat', '📊 /stat'),
+            ('suggestion', '💡 /suggestion'),
+            ('trade', '🔄 /trade'),
+            ('daily', '💵 /daily'),
+            ('work', '💼 /work'),
+            ('balance', '💰 /balance'),
+            ('slots', '🎰 /slots'),
+            ('games', '🎮 Tous les jeux'),
+        ]
+        
+        for cmd_key, cmd_name in commands:
+            ch_id = cmd_channels.get(cmd_key, 0)
+            ch = self.g.get_channel(ch_id) if ch_id else None
+            e.add_field(name=cmd_name, value=ch.mention if ch else "*Partout*", inline=True)
+        
+        return e
+    
+    @discord.ui.select(
+        placeholder="📍 Sélectionner une commande...",
+        options=[
+            discord.SelectOption(label="/stat", value="stat", emoji="📊"),
+            discord.SelectOption(label="/suggestion", value="suggestion", emoji="💡"),
+            discord.SelectOption(label="/trade", value="trade", emoji="🔄"),
+            discord.SelectOption(label="/daily", value="daily", emoji="💵"),
+            discord.SelectOption(label="/work", value="work", emoji="💼"),
+            discord.SelectOption(label="/balance", value="balance", emoji="💰"),
+            discord.SelectOption(label="/slots & jeux", value="games", emoji="🎮"),
+        ],
+        row=0
+    )
+    async def select_cmd(self, i, s):
+        cmd_key = s.values[0]
+        chs = list(self.g.text_channels)[:24]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        opts.insert(0, discord.SelectOption(label="🌐 Partout", value="0"))
+        v = CommandChannelSelectView(self.u, self.g, opts, cmd_key)
+        await i.response.edit_message(embed=discord.Embed(title=f"📍 Salon pour /{cmd_key}", description="Sélectionnez le salon autorisé.", color=C.BLURPLE), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = MiniGamesPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class CommandChannelSelectView(View):
+    def __init__(self, u, g, opts, cmd_key):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+        self.add_item(CommandChannelSelect(u, g, opts, cmd_key))
+
+class CommandChannelSelect(Select):
+    def __init__(self, u, g, opts, cmd_key):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+        self.cmd_key = cmd_key
+    
+    async def callback(self, i):
+        c = await cfg(self.g.id)
+        cmd_channels = c.get('command_channels', {})
+        cmd_channels[self.cmd_key] = int(self.values[0])
+        await db_set(self.g.id, 'command_channels', cmd_channels)
+        v = CommandChannelsPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           💰 FONCTIONS ÉCONOMIE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def get_user_economy(guild_id, user_id):
+    """Récupère les données économiques d'un utilisateur"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            'SELECT coins, bank, xp, level, last_daily, last_work FROM economy WHERE guild_id=? AND user_id=?',
+            (guild_id, user_id)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return {
+                    'coins': row[0], 'bank': row[1], 'xp': row[2], 'level': row[3],
+                    'last_daily': row[4], 'last_work': row[5]
+                }
+            else:
+                # Créer l'entrée
+                await db.execute(
+                    'INSERT INTO economy (guild_id, user_id) VALUES (?, ?)',
+                    (guild_id, user_id)
+                )
+                await db.commit()
+                return {'coins': 0, 'bank': 0, 'xp': 0, 'level': 1, 'last_daily': None, 'last_work': None}
+
+async def update_user_economy(guild_id, user_id, **kwargs):
+    """Met à jour les données économiques d'un utilisateur"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        # S'assurer que l'utilisateur existe
+        await db.execute(
+            'INSERT OR IGNORE INTO economy (guild_id, user_id) VALUES (?, ?)',
+            (guild_id, user_id)
+        )
+        
+        # Construire la requête de mise à jour
+        updates = []
+        values = []
+        for key, value in kwargs.items():
+            updates.append(f"{key}=?")
+            values.append(value)
+        
+        if updates:
+            values.extend([guild_id, user_id])
+            await db.execute(
+                f'UPDATE economy SET {", ".join(updates)} WHERE guild_id=? AND user_id=?',
+                values
+            )
+            await db.commit()
+
+async def add_coins(guild_id, user_id, amount):
+    """Ajoute des coins à un utilisateur"""
+    eco = await get_user_economy(guild_id, user_id)
+    new_coins = max(0, eco['coins'] + amount)
+    await update_user_economy(guild_id, user_id, coins=new_coins)
+    return new_coins
+
+async def add_xp(guild_id, user_id, amount, channel=None):
+    """Ajoute de l'XP et vérifie le level up"""
+    eco = await get_user_economy(guild_id, user_id)
+    new_xp = eco['xp'] + amount
+    current_level = eco['level']
+    
+    # Calcul du niveau (formule: XP requis = niveau * 100)
+    xp_for_next = current_level * 100
+    new_level = current_level
+    
+    while new_xp >= xp_for_next:
+        new_xp -= xp_for_next
+        new_level += 1
+        xp_for_next = new_level * 100
+    
+    await update_user_economy(guild_id, user_id, xp=new_xp, level=new_level)
+    
+    # Vérifier si level up
+    if new_level > current_level:
+        return new_level  # Retourne le nouveau niveau si level up
+    return None
+
+async def check_command_channel(interaction, cmd_key):
+    """Vérifie si la commande peut être exécutée dans ce salon"""
+    c = await cfg(interaction.guild.id)
+    cmd_channels = c.get('command_channels', {})
+    allowed_ch = cmd_channels.get(cmd_key, 0)
+    
+    if allowed_ch and allowed_ch != interaction.channel.id:
+        ch = interaction.guild.get_channel(allowed_ch)
+        if ch:
+            await interaction.response.send_message(
+                f"❌ Cette commande n'est utilisable que dans {ch.mention}",
+                ephemeral=True
+            )
+            return False
+    return True
+
+async def check_games_permission(interaction):
+    """Vérifie si l'utilisateur peut jouer aux jeux"""
+    c = await cfg(interaction.guild.id)
+    games_cfg = c.get('minigames_config', {})
+    
+    # Vérifier le salon
+    games_ch = games_cfg.get('games_channel', 0)
+    if games_ch and games_ch != interaction.channel.id:
+        ch = interaction.guild.get_channel(games_ch)
+        if ch:
+            await interaction.response.send_message(
+                f"❌ Les jeux ne sont utilisables que dans {ch.mention}",
+                ephemeral=True
+            )
+            return False
+    
+    # Vérifier le rôle
+    games_role = games_cfg.get('games_role', 0)
+    if games_role:
+        role = interaction.guild.get_role(games_role)
+        if role and role not in interaction.user.roles:
+            await interaction.response.send_message(
+                f"❌ Vous devez avoir le rôle {role.mention} pour jouer",
+                ephemeral=True
+            )
+            return False
+    
+    return True
 
 class GiveawayListPanel(View):
     def __init__(self, u, g):
@@ -6418,6 +7132,10 @@ suggestion_cooldowns = {}
 @bot.tree.command(name="suggestion", description="💡 Proposer une suggestion")
 @app_commands.describe(titre="Titre de votre suggestion", proposition="Décrivez votre suggestion en détail")
 async def suggestion_cmd(i: discord.Interaction, titre: str, proposition: str):
+    # Vérifier le salon autorisé pour la commande
+    if not await check_command_channel(i, 'suggestion'):
+        return
+    
     c = await cfg(i.guild.id)
     
     # ⚠️ Les immunisés bypass les restrictions de rôle et cooldown
@@ -6510,6 +7228,10 @@ trade_cooldowns = {}
 
 @bot.tree.command(name="trade", description="🔄 Créer une annonce d'échange")
 async def trade_cmd(i: discord.Interaction):
+    # Vérifier le salon autorisé pour la commande
+    if not await check_command_channel(i, 'trade'):
+        return
+    
     c = await cfg(i.guild.id)
     
     # ⚠️ Les immunisés bypass les restrictions de rôle et cooldown
@@ -6811,6 +7533,10 @@ class TradeTextWantModal(Modal, title="📥 Ce que je VEUX (texte)"):
 @bot.tree.command(name="stat", description="📊 Voir les statistiques d'activité d'un membre")
 @app_commands.describe(membre="Le membre dont vous voulez voir les stats (vous par défaut)")
 async def stat_cmd(i: discord.Interaction, membre: discord.Member = None):
+    # Vérifier le salon autorisé
+    if not await check_command_channel(i, 'stat'):
+        return
+    
     target = membre or i.user
     
     if target.bot:
@@ -7984,6 +8710,55 @@ async def track_member_message(msg):
             
             await db.commit()
         
+        # ═══════════════ ÉCONOMIE & NIVEAUX ═══════════════
+        try:
+            c = await cfg(msg.guild.id)
+            games_cfg = c.get('minigames_config', {})
+            
+            # Ajouter des coins si économie activée
+            if games_cfg.get('economy_enabled', False):
+                coins_per_msg = games_cfg.get('coins_per_message', 1)
+                if coins_per_msg > 0:
+                    await add_coins(msg.guild.id, msg.author.id, coins_per_msg)
+            
+            # Ajouter de l'XP si niveaux activés
+            if games_cfg.get('levels_enabled', False):
+                xp_per_msg = games_cfg.get('xp_per_message', 15)
+                if xp_per_msg > 0:
+                    new_level = await add_xp(msg.guild.id, msg.author.id, xp_per_msg)
+                    
+                    # Si level up
+                    if new_level:
+                        # Annoncer le level up
+                        levelup_ch_id = games_cfg.get('levelup_channel', 0)
+                        levelup_ch = msg.guild.get_channel(levelup_ch_id) if levelup_ch_id else msg.channel
+                        
+                        e = discord.Embed(title="🎉 Level Up !", color=0xF1C40F)
+                        e.description = f"{msg.author.mention} est passé au **niveau {new_level}** !"
+                        e.set_thumbnail(url=msg.author.display_avatar.url if msg.author.display_avatar else None)
+                        
+                        try:
+                            await levelup_ch.send(embed=e, delete_after=30)
+                        except:
+                            pass
+                        
+                        # Vérifier les récompenses de niveau
+                        async with aiosqlite.connect(DB_PATH) as db:
+                            async with db.execute(
+                                'SELECT role_id FROM level_rewards WHERE guild_id=? AND level=?',
+                                (msg.guild.id, new_level)
+                            ) as cursor:
+                                reward = await cursor.fetchone()
+                                if reward:
+                                    role = msg.guild.get_role(reward[0])
+                                    if role and role not in msg.author.roles:
+                                        try:
+                                            await msg.author.add_roles(role, reason=f"Récompense niveau {new_level}")
+                                        except:
+                                            pass
+        except:
+            pass
+        
     except Exception as ex:
         print(f"Erreur track message: {ex}")
 
@@ -8280,8 +9055,497 @@ async def check_scheduled_messages():
 async def before_check_scheduled_messages():
     await bot.wait_until_ready()
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           💰 COMMANDES ÉCONOMIE & MINI-JEUX
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@bot.tree.command(name="daily", description="💵 Récupérer votre récompense quotidienne")
+async def daily_cmd(i: discord.Interaction):
+    # Vérifier le salon
+    if not await check_command_channel(i, 'daily'):
+        return
+    
+    # Vérifier si l'économie est activée
+    c = await cfg(i.guild.id)
+    games_cfg = c.get('minigames_config', {})
+    if not games_cfg.get('economy_enabled', False):
+        return await i.response.send_message("❌ L'économie n'est pas activée sur ce serveur", ephemeral=True)
+    
+    eco = await get_user_economy(i.guild.id, i.user.id)
+    
+    # Vérifier le cooldown (24h)
+    if eco['last_daily']:
+        try:
+            last = datetime.fromisoformat(eco['last_daily'])
+            if last.tzinfo:
+                last = last.replace(tzinfo=None)
+            elapsed = (now() - last).total_seconds()
+            if elapsed < 86400:
+                remaining = 86400 - elapsed
+                hours = int(remaining // 3600)
+                mins = int((remaining % 3600) // 60)
+                return await i.response.send_message(
+                    f"⏱️ Revenez dans **{hours}h {mins}min** pour votre prochain daily !",
+                    ephemeral=True
+                )
+        except:
+            pass
+    
+    # Donner la récompense
+    daily_amount = games_cfg.get('daily_amount', 100)
+    new_coins = await add_coins(i.guild.id, i.user.id, daily_amount)
+    await update_user_economy(i.guild.id, i.user.id, last_daily=now().isoformat())
+    
+    e = discord.Embed(title="💵 Récompense Quotidienne", color=0xF1C40F)
+    e.description = f"Vous avez reçu **{daily_amount}** 🪙 coins !"
+    e.add_field(name="💰 Total", value=f"**{new_coins}** coins", inline=True)
+    e.set_footer(text="Revenez demain pour une nouvelle récompense !")
+    e.set_thumbnail(url=i.user.display_avatar.url)
+    
+    await i.response.send_message(embed=e)
+
+@bot.tree.command(name="work", description="💼 Travailler pour gagner des coins")
+async def work_cmd(i: discord.Interaction):
+    # Vérifier le salon
+    if not await check_command_channel(i, 'work'):
+        return
+    
+    # Vérifier si l'économie est activée
+    c = await cfg(i.guild.id)
+    games_cfg = c.get('minigames_config', {})
+    if not games_cfg.get('economy_enabled', False):
+        return await i.response.send_message("❌ L'économie n'est pas activée sur ce serveur", ephemeral=True)
+    
+    eco = await get_user_economy(i.guild.id, i.user.id)
+    
+    # Vérifier le cooldown
+    work_cooldown = games_cfg.get('work_cooldown', 3600)
+    if eco['last_work']:
+        try:
+            last = datetime.fromisoformat(eco['last_work'])
+            if last.tzinfo:
+                last = last.replace(tzinfo=None)
+            elapsed = (now() - last).total_seconds()
+            if elapsed < work_cooldown:
+                remaining = work_cooldown - elapsed
+                mins = int(remaining // 60)
+                secs = int(remaining % 60)
+                return await i.response.send_message(
+                    f"⏱️ Vous pouvez retravailler dans **{mins}min {secs}s**",
+                    ephemeral=True
+                )
+        except:
+            pass
+    
+    # Gagner des coins
+    work_min = games_cfg.get('work_min', 50)
+    work_max = games_cfg.get('work_max', 150)
+    earnings = random.randint(work_min, work_max)
+    
+    new_coins = await add_coins(i.guild.id, i.user.id, earnings)
+    await update_user_economy(i.guild.id, i.user.id, last_work=now().isoformat())
+    
+    # Messages aléatoires
+    jobs = [
+        f"💻 Vous avez codé un site web et gagné **{earnings}** coins !",
+        f"🍕 Vous avez livré des pizzas et gagné **{earnings}** coins !",
+        f"🎨 Vous avez vendu une œuvre d'art et gagné **{earnings}** coins !",
+        f"🎮 Vous avez streamé et gagné **{earnings}** coins !",
+        f"📦 Vous avez trié des colis et gagné **{earnings}** coins !",
+        f"🎵 Vous avez joué de la guitare et gagné **{earnings}** coins !",
+        f"🔧 Vous avez réparé une voiture et gagné **{earnings}** coins !",
+    ]
+    
+    e = discord.Embed(title="💼 Travail", color=0x3498DB)
+    e.description = random.choice(jobs)
+    e.add_field(name="💰 Total", value=f"**{new_coins}** coins", inline=True)
+    e.set_thumbnail(url=i.user.display_avatar.url)
+    
+    await i.response.send_message(embed=e)
+
+@bot.tree.command(name="balance", description="💰 Voir votre solde")
+@app_commands.describe(membre="Le membre dont vous voulez voir le solde")
+async def balance_cmd(i: discord.Interaction, membre: discord.Member = None):
+    # Vérifier le salon
+    if not await check_command_channel(i, 'balance'):
+        return
+    
+    target = membre or i.user
+    
+    # Vérifier si l'économie est activée
+    c = await cfg(i.guild.id)
+    games_cfg = c.get('minigames_config', {})
+    if not games_cfg.get('economy_enabled', False):
+        return await i.response.send_message("❌ L'économie n'est pas activée sur ce serveur", ephemeral=True)
+    
+    eco = await get_user_economy(i.guild.id, target.id)
+    
+    e = discord.Embed(title=f"💰 Solde de {target.display_name}", color=0xF1C40F)
+    e.add_field(name="🪙 Coins", value=f"**{eco['coins']}**", inline=True)
+    e.add_field(name="🏦 Banque", value=f"**{eco['bank']}**", inline=True)
+    e.add_field(name="💎 Total", value=f"**{eco['coins'] + eco['bank']}**", inline=True)
+    e.add_field(name="📈 Niveau", value=f"**{eco['level']}**", inline=True)
+    e.add_field(name="✨ XP", value=f"**{eco['xp']}** / **{eco['level'] * 100}**", inline=True)
+    e.set_thumbnail(url=target.display_avatar.url)
+    
+    await i.response.send_message(embed=e)
+
+@bot.tree.command(name="leaderboard", description="🏆 Voir le classement des plus riches")
+async def leaderboard_cmd(i: discord.Interaction):
+    # Vérifier si l'économie est activée
+    c = await cfg(i.guild.id)
+    games_cfg = c.get('minigames_config', {})
+    if not games_cfg.get('economy_enabled', False):
+        return await i.response.send_message("❌ L'économie n'est pas activée sur ce serveur", ephemeral=True)
+    
+    # Récupérer le top 10
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            'SELECT user_id, coins, bank, level FROM economy WHERE guild_id=? ORDER BY (coins + bank) DESC LIMIT 10',
+            (i.guild.id,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+    
+    if not rows:
+        return await i.response.send_message("❌ Aucune donnée disponible", ephemeral=True)
+    
+    e = discord.Embed(title="🏆 Classement des plus riches", color=0xF1C40F)
+    
+    desc = ""
+    medals = ["🥇", "🥈", "🥉"]
+    for idx, (user_id, coins, bank, level) in enumerate(rows):
+        member = i.guild.get_member(user_id)
+        name = member.display_name if member else f"User {user_id}"
+        medal = medals[idx] if idx < 3 else f"**{idx + 1}.**"
+        total = coins + bank
+        desc += f"{medal} **{name}** - {total} 🪙 (Nv.{level})\n"
+    
+    e.description = desc
+    e.set_footer(text=f"Demandé par {i.user.display_name}")
+    
+    await i.response.send_message(embed=e)
+
+# ─────────────────────────────── MINI-JEUX ───────────────────────────────
+
+@bot.tree.command(name="slots", description="🎰 Jouer à la machine à sous")
+@app_commands.describe(mise="Montant à miser (défaut: 10)")
+async def slots_cmd(i: discord.Interaction, mise: int = 10):
+    # Vérifier les permissions
+    if not await check_games_permission(i):
+        return
+    
+    # Vérifier si l'économie est activée
+    c = await cfg(i.guild.id)
+    games_cfg = c.get('minigames_config', {})
+    if not games_cfg.get('economy_enabled', False):
+        return await i.response.send_message("❌ L'économie n'est pas activée sur ce serveur", ephemeral=True)
+    
+    if mise < 1:
+        return await i.response.send_message("❌ Mise minimum: 1 coin", ephemeral=True)
+    
+    eco = await get_user_economy(i.guild.id, i.user.id)
+    if eco['coins'] < mise:
+        return await i.response.send_message(f"❌ Vous n'avez que **{eco['coins']}** coins", ephemeral=True)
+    
+    # Symboles et leurs multiplicateurs
+    symbols = ["🍒", "🍋", "🍊", "🍇", "⭐", "💎", "7️⃣"]
+    weights = [30, 25, 20, 15, 7, 2, 1]  # Probabilités
+    
+    # Tirer 3 symboles
+    result = random.choices(symbols, weights=weights, k=3)
+    
+    # Calculer les gains
+    multiplier = 0
+    if result[0] == result[1] == result[2]:
+        # Trois identiques
+        if result[0] == "7️⃣":
+            multiplier = 100
+        elif result[0] == "💎":
+            multiplier = 50
+        elif result[0] == "⭐":
+            multiplier = 25
+        else:
+            multiplier = 10
+    elif result[0] == result[1] or result[1] == result[2] or result[0] == result[2]:
+        # Deux identiques
+        multiplier = 2
+    
+    # Appliquer les gains/pertes
+    if multiplier > 0:
+        gain = mise * multiplier
+        await add_coins(i.guild.id, i.user.id, gain - mise)
+        result_text = f"🎉 **GAGNÉ !** x{multiplier}\n+**{gain}** coins"
+        color = 0x2ECC71
+    else:
+        await add_coins(i.guild.id, i.user.id, -mise)
+        result_text = f"😢 **Perdu...**\n-**{mise}** coins"
+        color = 0xE74C3C
+    
+    eco = await get_user_economy(i.guild.id, i.user.id)
+    
+    e = discord.Embed(title="🎰 Machine à Sous", color=color)
+    e.description = f"╔════════════╗\n║  {result[0]}  {result[1]}  {result[2]}  ║\n╚════════════╝"
+    e.add_field(name="Résultat", value=result_text, inline=False)
+    e.add_field(name="💰 Solde", value=f"**{eco['coins']}** coins", inline=True)
+    e.set_footer(text=f"Mise: {mise} coins")
+    
+    await i.response.send_message(embed=e)
+
+@bot.tree.command(name="coinflip", description="🪙 Pile ou face")
+@app_commands.describe(choix="Votre choix", mise="Montant à miser")
+@app_commands.choices(choix=[
+    app_commands.Choice(name="Pile", value="pile"),
+    app_commands.Choice(name="Face", value="face")
+])
+async def coinflip_cmd(i: discord.Interaction, choix: str, mise: int = 10):
+    # Vérifier les permissions
+    if not await check_games_permission(i):
+        return
+    
+    # Vérifier si l'économie est activée
+    c = await cfg(i.guild.id)
+    games_cfg = c.get('minigames_config', {})
+    if not games_cfg.get('economy_enabled', False):
+        return await i.response.send_message("❌ L'économie n'est pas activée sur ce serveur", ephemeral=True)
+    
+    if mise < 1:
+        return await i.response.send_message("❌ Mise minimum: 1 coin", ephemeral=True)
+    
+    eco = await get_user_economy(i.guild.id, i.user.id)
+    if eco['coins'] < mise:
+        return await i.response.send_message(f"❌ Vous n'avez que **{eco['coins']}** coins", ephemeral=True)
+    
+    # Lancer la pièce
+    result = random.choice(["pile", "face"])
+    won = (result == choix)
+    
+    if won:
+        await add_coins(i.guild.id, i.user.id, mise)
+        e = discord.Embed(title="🪙 Pile ou Face", color=0x2ECC71)
+        e.description = f"**{result.upper()}** !\n\n🎉 Vous avez gagné **{mise}** coins !"
+    else:
+        await add_coins(i.guild.id, i.user.id, -mise)
+        e = discord.Embed(title="🪙 Pile ou Face", color=0xE74C3C)
+        e.description = f"**{result.upper()}** !\n\n😢 Vous avez perdu **{mise}** coins..."
+    
+    eco = await get_user_economy(i.guild.id, i.user.id)
+    e.add_field(name="💰 Solde", value=f"**{eco['coins']}** coins", inline=True)
+    
+    await i.response.send_message(embed=e)
+
+@bot.tree.command(name="dice", description="🎲 Lancer les dés")
+@app_commands.describe(mise="Montant à miser", nombre="Nombre sur lequel parier (1-6)")
+async def dice_cmd(i: discord.Interaction, nombre: int, mise: int = 10):
+    # Vérifier les permissions
+    if not await check_games_permission(i):
+        return
+    
+    # Vérifier si l'économie est activée
+    c = await cfg(i.guild.id)
+    games_cfg = c.get('minigames_config', {})
+    if not games_cfg.get('economy_enabled', False):
+        return await i.response.send_message("❌ L'économie n'est pas activée sur ce serveur", ephemeral=True)
+    
+    if nombre < 1 or nombre > 6:
+        return await i.response.send_message("❌ Choisissez un nombre entre 1 et 6", ephemeral=True)
+    
+    if mise < 1:
+        return await i.response.send_message("❌ Mise minimum: 1 coin", ephemeral=True)
+    
+    eco = await get_user_economy(i.guild.id, i.user.id)
+    if eco['coins'] < mise:
+        return await i.response.send_message(f"❌ Vous n'avez que **{eco['coins']}** coins", ephemeral=True)
+    
+    # Lancer le dé
+    result = random.randint(1, 6)
+    dice_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣"]
+    
+    won = (result == nombre)
+    
+    if won:
+        gain = mise * 5
+        await add_coins(i.guild.id, i.user.id, gain)
+        e = discord.Embed(title="🎲 Lancer de Dé", color=0x2ECC71)
+        e.description = f"Le dé affiche: {dice_emojis[result-1]}\n\n🎉 **Gagné !** +**{gain}** coins"
+    else:
+        await add_coins(i.guild.id, i.user.id, -mise)
+        e = discord.Embed(title="🎲 Lancer de Dé", color=0xE74C3C)
+        e.description = f"Le dé affiche: {dice_emojis[result-1]}\n\n😢 **Perdu...** -{mise} coins"
+    
+    eco = await get_user_economy(i.guild.id, i.user.id)
+    e.add_field(name="Votre pari", value=f"{dice_emojis[nombre-1]}", inline=True)
+    e.add_field(name="💰 Solde", value=f"**{eco['coins']}** coins", inline=True)
+    
+    await i.response.send_message(embed=e)
+
+@bot.tree.command(name="rps", description="✊ Pierre-Feuille-Ciseaux")
+@app_commands.describe(choix="Votre choix", mise="Montant à miser (optionnel)")
+@app_commands.choices(choix=[
+    app_commands.Choice(name="🪨 Pierre", value="pierre"),
+    app_commands.Choice(name="📄 Feuille", value="feuille"),
+    app_commands.Choice(name="✂️ Ciseaux", value="ciseaux")
+])
+async def rps_cmd(i: discord.Interaction, choix: str, mise: int = 0):
+    # Vérifier les permissions
+    if not await check_games_permission(i):
+        return
+    
+    c = await cfg(i.guild.id)
+    games_cfg = c.get('minigames_config', {})
+    
+    # Vérifier la mise si économie activée
+    if mise > 0:
+        if not games_cfg.get('economy_enabled', False):
+            return await i.response.send_message("❌ L'économie n'est pas activée", ephemeral=True)
+        
+        eco = await get_user_economy(i.guild.id, i.user.id)
+        if eco['coins'] < mise:
+            return await i.response.send_message(f"❌ Vous n'avez que **{eco['coins']}** coins", ephemeral=True)
+    
+    # Choix du bot
+    choices = ["pierre", "feuille", "ciseaux"]
+    bot_choice = random.choice(choices)
+    
+    emojis = {"pierre": "🪨", "feuille": "📄", "ciseaux": "✂️"}
+    
+    # Déterminer le gagnant
+    if choix == bot_choice:
+        result = "draw"
+        color = 0xF1C40F
+        text = "🤝 **Égalité !**"
+    elif (choix == "pierre" and bot_choice == "ciseaux") or \
+         (choix == "feuille" and bot_choice == "pierre") or \
+         (choix == "ciseaux" and bot_choice == "feuille"):
+        result = "win"
+        color = 0x2ECC71
+        text = "🎉 **Vous avez gagné !**"
+    else:
+        result = "lose"
+        color = 0xE74C3C
+        text = "😢 **Vous avez perdu...**"
+    
+    # Appliquer les gains/pertes
+    if mise > 0:
+        if result == "win":
+            await add_coins(i.guild.id, i.user.id, mise)
+            text += f"\n+**{mise}** coins"
+        elif result == "lose":
+            await add_coins(i.guild.id, i.user.id, -mise)
+            text += f"\n-**{mise}** coins"
+    
+    e = discord.Embed(title="✊ Pierre-Feuille-Ciseaux", color=color)
+    e.add_field(name="Vous", value=emojis[choix], inline=True)
+    e.add_field(name="VS", value="⚔️", inline=True)
+    e.add_field(name="Bot", value=emojis[bot_choice], inline=True)
+    e.add_field(name="Résultat", value=text, inline=False)
+    
+    if mise > 0:
+        eco = await get_user_economy(i.guild.id, i.user.id)
+        e.add_field(name="💰 Solde", value=f"**{eco['coins']}** coins", inline=True)
+    
+    await i.response.send_message(embed=e)
+
+@bot.tree.command(name="guess", description="🔢 Deviner le nombre mystère")
+@app_commands.describe(nombre="Votre supposition (1-100)")
+async def guess_cmd(i: discord.Interaction, nombre: int):
+    # Vérifier les permissions
+    if not await check_games_permission(i):
+        return
+    
+    if nombre < 1 or nombre > 100:
+        return await i.response.send_message("❌ Choisissez un nombre entre 1 et 100", ephemeral=True)
+    
+    # Générer le nombre mystère
+    secret = random.randint(1, 100)
+    diff = abs(secret - nombre)
+    
+    if diff == 0:
+        e = discord.Embed(title="🔢 Nombre Mystère", color=0x2ECC71)
+        e.description = f"🎉 **BRAVO !** Vous avez trouvé le nombre **{secret}** !"
+        
+        # Bonus si économie activée
+        c = await cfg(i.guild.id)
+        if c.get('minigames_config', {}).get('economy_enabled', False):
+            bonus = random.randint(50, 100)
+            await add_coins(i.guild.id, i.user.id, bonus)
+            e.add_field(name="🎁 Bonus", value=f"+**{bonus}** coins !", inline=True)
+    elif diff <= 5:
+        e = discord.Embed(title="🔢 Nombre Mystère", color=0xF1C40F)
+        e.description = f"🔥 **Très proche !** Le nombre était **{secret}** (vous: {nombre})"
+    elif diff <= 15:
+        e = discord.Embed(title="🔢 Nombre Mystère", color=0xE67E22)
+        e.description = f"👀 **Pas mal !** Le nombre était **{secret}** (vous: {nombre})"
+    else:
+        hint = "plus grand" if secret > nombre else "plus petit"
+        e = discord.Embed(title="🔢 Nombre Mystère", color=0xE74C3C)
+        e.description = f"❌ **Raté !** Le nombre était **{secret}**\nIndice: c'était {hint} que {nombre}"
+    
+    await i.response.send_message(embed=e)
+
+# ─────────────────────────────── RÉACTION RAPIDE ───────────────────────────────
+
+react_games = {}  # {channel_id: {'user': None, 'time': None}}
+
+@bot.tree.command(name="react", description="⚡ Lancer un jeu de réaction rapide")
+async def react_cmd(i: discord.Interaction):
+    # Vérifier les permissions
+    if not await check_games_permission(i):
+        return
+    
+    if i.channel.id in react_games:
+        return await i.response.send_message("❌ Un jeu est déjà en cours dans ce salon", ephemeral=True)
+    
+    await i.response.send_message("⏳ **Préparez-vous...**\nCliquez sur le bouton dès qu'il apparaît !")
+    
+    # Attendre un délai aléatoire
+    await asyncio.sleep(random.uniform(2, 6))
+    
+    # Créer le bouton
+    react_games[i.channel.id] = {'winner': None, 'start_time': now()}
+    
+    class ReactButton(View):
+        def __init__(self):
+            super().__init__(timeout=10)
+        
+        @discord.ui.button(label="⚡ CLIQUEZ !", style=discord.ButtonStyle.success)
+        async def click(self, interaction, button):
+            if i.channel.id not in react_games:
+                return
+            
+            game = react_games[i.channel.id]
+            if game['winner']:
+                return await interaction.response.send_message("❌ Quelqu'un a déjà cliqué !", ephemeral=True)
+            
+            reaction_time = (now() - game['start_time']).total_seconds() * 1000
+            game['winner'] = interaction.user.id
+            
+            # Bonus si économie activée
+            c = await cfg(i.guild.id)
+            bonus_text = ""
+            if c.get('minigames_config', {}).get('economy_enabled', False):
+                bonus = max(10, 100 - int(reaction_time / 10))
+                await add_coins(i.guild.id, interaction.user.id, bonus)
+                bonus_text = f"\n🎁 +**{bonus}** coins !"
+            
+            del react_games[i.channel.id]
+            
+            e = discord.Embed(title="⚡ Réaction Rapide", color=0x2ECC71)
+            e.description = f"🎉 **{interaction.user.mention}** a gagné !\n⏱️ Temps de réaction: **{reaction_time:.0f}ms**{bonus_text}"
+            
+            button.disabled = True
+            button.label = f"✅ {interaction.user.display_name} - {reaction_time:.0f}ms"
+            await interaction.response.edit_message(content=None, embed=e, view=self)
+        
+        async def on_timeout(self):
+            if i.channel.id in react_games:
+                del react_games[i.channel.id]
+    
+    view = ReactButton()
+    await i.channel.send("⚡ **MAINTENANT !**", view=view)
+
 if __name__ == "__main__":
-    print("🚀 Bot v19 - Démarrage...")
+    print("🚀 Bot v24 - Démarrage...")
     print("🔒 Système de sécurité activé")
     print("👑 Système d'immunités complet")
+    print("🎮 Mini-jeux et économie intégrés")
     bot.run(TOKEN)
