@@ -95,6 +95,41 @@ async def db_init():
             total_vocal_time INTEGER DEFAULT 0,
             PRIMARY KEY (guild_id, user_id)
         )''')
+        # Table pour les giveaways (cadeaux)
+        await db.execute('''CREATE TABLE IF NOT EXISTS giveaways (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            channel_id INTEGER,
+            message_id INTEGER,
+            title TEXT,
+            description TEXT,
+            prize TEXT,
+            image_url TEXT,
+            end_time DATETIME,
+            winner_count INTEGER DEFAULT 1,
+            participants TEXT DEFAULT "[]",
+            ended INTEGER DEFAULT 0,
+            created_by INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        # Table pour les messages automatiques
+        await db.execute('''CREATE TABLE IF NOT EXISTS scheduled_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            channel_id INTEGER,
+            title TEXT,
+            description TEXT,
+            color TEXT DEFAULT "#5865F2",
+            image_url TEXT,
+            footer TEXT,
+            frequency TEXT,
+            frequency_value INTEGER DEFAULT 1,
+            send_hour INTEGER DEFAULT 12,
+            send_minute INTEGER DEFAULT 0,
+            last_sent DATETIME,
+            enabled INTEGER DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
         async with db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='tickets'") as cur:
             if not await cur.fetchone():
                 await db.execute('CREATE TABLE tickets(id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, channel_id INTEGER, user_id INTEGER, panel_id TEXT DEFAULT "", claimed_by INTEGER DEFAULT 0, status TEXT DEFAULT "open", answers TEXT DEFAULT "{}", created_at DATETIME DEFAULT CURRENT_TIMESTAMP)')
@@ -653,7 +688,12 @@ class MainPanel(View):
         v = StatPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
-    @discord.ui.button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger, row=2)
+    @discord.ui.button(label="Centre", emoji="🎯", style=discord.ButtonStyle.success, row=2)
+    async def centre(self, i, b):
+        v = CentrePanel(self.u, self.g)
+        await i.response.edit_message(embed=v.embed(), view=v)
+    
+    @discord.ui.button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger, row=3)
     async def close(self, i, b):
         await i.message.delete()
 
@@ -2408,6 +2448,722 @@ class AdsFeedRemoveSelect(Select):
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#                           🎯 CENTRE PANEL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CentrePanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    def embed(self):
+        e = discord.Embed(title="🎯 Centre de Gestion", color=C.BLURPLE)
+        e.description = "Gérez les fonctionnalités avancées de votre serveur."
+        
+        e.add_field(
+            name="🎁 Cadeau (Giveaway)",
+            value="Créez et gérez des cadeaux pour votre communauté",
+            inline=False
+        )
+        e.add_field(
+            name="📨 Messages Automatiques",
+            value="Programmez des messages récurrents",
+            inline=False
+        )
+        
+        e.set_footer(text="Sélectionnez une option ci-dessous")
+        return e
+    
+    @discord.ui.button(label="🎁 Cadeau", style=discord.ButtonStyle.success, row=0)
+    async def giveaway(self, i, b):
+        v = GiveawayPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="📨 Messages", style=discord.ButtonStyle.primary, row=0)
+    async def messages(self, i, b):
+        v = MessagePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = MainPanel(self.u, self.g)
+        await i.response.edit_message(embed=v.embed(), view=v)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           🎁 GIVEAWAY (CADEAU) PANEL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class GiveawayPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        e = discord.Embed(title="🎁 Gestion des Cadeaux", color=C.GREEN)
+        e.description = "Créez des cadeaux pour récompenser votre communauté active !"
+        
+        # Compter les giveaways actifs
+        active_count = 0
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute(
+                    'SELECT COUNT(*) FROM giveaways WHERE guild_id=? AND ended=0',
+                    (self.g.id,)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    active_count = row[0] if row else 0
+        except:
+            pass
+        
+        e.add_field(
+            name="📊 Statistiques",
+            value=f"```\n🎁 Cadeaux actifs: {active_count}\n```",
+            inline=False
+        )
+        
+        e.add_field(
+            name="⚠️ Condition de participation",
+            value="Les membres **AFK depuis plus de 7 jours** ne peuvent pas participer !",
+            inline=False
+        )
+        
+        e.set_footer(text="💡 Créez un nouveau cadeau ou gérez les existants")
+        return e
+    
+    @discord.ui.button(label="➕ Créer un Cadeau", style=discord.ButtonStyle.success, row=0)
+    async def create(self, i, b):
+        modal = GiveawayCreateModal(self.u, self.g)
+        await i.response.send_modal(modal)
+    
+    @discord.ui.button(label="📋 Voir les Cadeaux", style=discord.ButtonStyle.primary, row=0)
+    async def view_list(self, i, b):
+        v = GiveawayListPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = CentrePanel(self.u, self.g)
+        await i.response.edit_message(embed=v.embed(), view=v)
+
+class GiveawayCreateModal(Modal):
+    def __init__(self, u, g):
+        super().__init__(title="🎁 Créer un Cadeau")
+        self.u = u
+        self.g = g
+        
+        self.title_input = TextInput(label="Titre du cadeau", placeholder="Ex: Nitro Discord", max_length=100)
+        self.description_input = TextInput(label="Description", placeholder="Décrivez le cadeau...", style=discord.TextStyle.paragraph, max_length=500)
+        self.prize_input = TextInput(label="Ce qu'il va gagner", placeholder="Ex: 1 mois de Nitro Discord", max_length=200)
+        self.duration_input = TextInput(label="Durée (ex: 1h, 2d, 1w)", placeholder="s=secondes, m=minutes, h=heures, d=jours, w=semaines", max_length=10)
+        self.image_input = TextInput(label="URL de l'image (optionnel)", placeholder="https://...", required=False, max_length=500)
+        
+        self.add_item(self.title_input)
+        self.add_item(self.description_input)
+        self.add_item(self.prize_input)
+        self.add_item(self.duration_input)
+        self.add_item(self.image_input)
+    
+    async def on_submit(self, i):
+        # Parser la durée
+        duration_str = self.duration_input.value.lower().strip()
+        seconds = parse_duration_to_seconds(duration_str)
+        
+        if seconds <= 0:
+            return await i.response.send_message("❌ Durée invalide ! Utilisez: 30s, 5m, 2h, 1d, 1w", ephemeral=True)
+        
+        # Sauvegarder temporairement et demander le salon
+        giveaway_data = {
+            'title': self.title_input.value,
+            'description': self.description_input.value,
+            'prize': self.prize_input.value,
+            'duration_seconds': seconds,
+            'image_url': self.image_input.value or None
+        }
+        
+        # Demander le salon
+        channels = list(self.g.text_channels)[:25]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in channels]
+        v = GiveawayChannelSelectView(self.u, self.g, opts, giveaway_data)
+        await i.response.send_message("📢 **Sélectionnez le salon** où publier le cadeau:", view=v, ephemeral=True)
+
+def parse_duration_to_seconds(duration_str):
+    """Convertit une durée (1h, 2d, etc.) en secondes"""
+    import re
+    total = 0
+    matches = re.findall(r'(\d+)([smhdw])', duration_str)
+    for value, unit in matches:
+        value = int(value)
+        if unit == 's':
+            total += value
+        elif unit == 'm':
+            total += value * 60
+        elif unit == 'h':
+            total += value * 3600
+        elif unit == 'd':
+            total += value * 86400
+        elif unit == 'w':
+            total += value * 604800
+    return total
+
+class GiveawayChannelSelectView(View):
+    def __init__(self, u, g, opts, data):
+        super().__init__(timeout=120)
+        self.add_item(GiveawayChannelSelect(u, g, opts, data))
+
+class GiveawayChannelSelect(Select):
+    def __init__(self, u, g, opts, data):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+        self.data = data
+    
+    async def callback(self, i):
+        channel_id = int(self.values[0])
+        channel = self.g.get_channel(channel_id)
+        
+        if not channel:
+            return await i.response.edit_message(content="❌ Salon introuvable", view=None)
+        
+        # Calculer la fin
+        end_time = now() + timedelta(seconds=self.data['duration_seconds'])
+        
+        # Créer l'embed du giveaway
+        e = discord.Embed(title=f"🎁 {self.data['title']}", color=C.GREEN)
+        e.description = f"{self.data['description']}\n\n━━━━━━━━━━━━━━━━━━━━━━"
+        
+        e.add_field(name="🏆 À Gagner", value=f"```{self.data['prize']}```", inline=False)
+        e.add_field(name="⏰ Fin", value=f"<t:{int(end_time.timestamp())}:R>", inline=True)
+        e.add_field(name="👥 Participants", value="```0```", inline=True)
+        e.add_field(
+            name="📋 Conditions",
+            value="• Ne pas être AFK depuis plus de 7 jours\n• Cliquez sur le bouton pour participer",
+            inline=False
+        )
+        
+        if self.data['image_url']:
+            e.set_image(url=self.data['image_url'])
+        
+        e.set_footer(text=f"Créé par {self.u.display_name}")
+        e.timestamp = now()
+        
+        # Envoyer le message
+        giveaway_view = GiveawayParticipateView()
+        msg = await channel.send(embed=e, view=giveaway_view)
+        
+        # Sauvegarder en BDD
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute('''
+                    INSERT INTO giveaways (guild_id, channel_id, message_id, title, description, prize, image_url, end_time, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    self.g.id, channel_id, msg.id,
+                    self.data['title'], self.data['description'], self.data['prize'],
+                    self.data['image_url'], end_time.isoformat(), self.u.id
+                ))
+                await db.commit()
+        except Exception as ex:
+            print(f"Erreur sauvegarde giveaway: {ex}")
+        
+        await i.response.edit_message(content=f"✅ **Cadeau créé !** Publié dans {channel.mention}", view=None)
+
+class GiveawayParticipateView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+    
+    @discord.ui.button(label="🎉 Participer", style=discord.ButtonStyle.success, custom_id="giveaway_participate")
+    async def participate(self, i, b):
+        # Vérifier si le membre n'est pas AFK
+        is_afk = await check_member_afk(i.guild.id, i.user.id, days=7)
+        
+        if is_afk:
+            return await i.response.send_message(
+                "❌ **Vous ne pouvez pas participer !**\n\n"
+                "Vous êtes considéré comme **inactif** depuis plus de 7 jours.\n"
+                "Envoyez des messages ou rejoignez un vocal pour redevenir actif.",
+                ephemeral=True
+            )
+        
+        # Récupérer le giveaway
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute(
+                    'SELECT id, participants, ended FROM giveaways WHERE message_id=?',
+                    (i.message.id,)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    
+                    if not row:
+                        return await i.response.send_message("❌ Cadeau introuvable", ephemeral=True)
+                    
+                    giveaway_id, participants_str, ended = row
+                    
+                    if ended:
+                        return await i.response.send_message("❌ Ce cadeau est terminé !", ephemeral=True)
+                    
+                    participants = json.loads(participants_str) if participants_str else []
+                    
+                    if i.user.id in participants:
+                        return await i.response.send_message("✅ Vous participez déjà !", ephemeral=True)
+                    
+                    participants.append(i.user.id)
+                    
+                    await db.execute(
+                        'UPDATE giveaways SET participants=? WHERE id=?',
+                        (json.dumps(participants), giveaway_id)
+                    )
+                    await db.commit()
+            
+            # Mettre à jour l'embed
+            embed = i.message.embeds[0]
+            for idx, field in enumerate(embed.fields):
+                if "Participants" in field.name:
+                    embed.set_field_at(idx, name="👥 Participants", value=f"```{len(participants)}```", inline=True)
+                    break
+            
+            await i.message.edit(embed=embed)
+            await i.response.send_message(f"🎉 **Vous participez au cadeau !**\nBonne chance !", ephemeral=True)
+            
+        except Exception as ex:
+            print(f"Erreur participation: {ex}")
+            await i.response.send_message("❌ Erreur lors de la participation", ephemeral=True)
+
+async def check_member_afk(guild_id, user_id, days=7):
+    """Vérifie si un membre est AFK depuis X jours"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                'SELECT last_message, last_vocal FROM activity_tracking WHERE guild_id=? AND user_id=?',
+                (guild_id, user_id)
+            ) as cursor:
+                row = await cursor.fetchone()
+                
+                if not row:
+                    return True  # Non tracké = considéré AFK
+                
+                last_msg, last_vocal = row
+                last_activity = None
+                
+                if last_msg:
+                    try:
+                        last_activity = datetime.fromisoformat(last_msg)
+                    except:
+                        pass
+                
+                if last_vocal:
+                    try:
+                        lv = datetime.fromisoformat(last_vocal)
+                        if not last_activity or lv > last_activity:
+                            last_activity = lv
+                    except:
+                        pass
+                
+                if not last_activity:
+                    return True
+                
+                cutoff = now() - timedelta(days=days)
+                la_utc = last_activity.replace(tzinfo=timezone.utc) if last_activity.tzinfo is None else last_activity
+                return la_utc < cutoff.replace(tzinfo=timezone.utc)
+                
+    except:
+        return False
+
+class GiveawayListPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        e = discord.Embed(title="📋 Cadeaux Actifs", color=C.GREEN)
+        
+        giveaways = []
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute(
+                    'SELECT id, title, end_time, participants FROM giveaways WHERE guild_id=? AND ended=0 ORDER BY end_time',
+                    (self.g.id,)
+                ) as cursor:
+                    async for row in cursor:
+                        giveaways.append(row)
+        except:
+            pass
+        
+        if not giveaways:
+            e.description = "❌ Aucun cadeau actif"
+        else:
+            desc = ""
+            for gw_id, title, end_time_str, participants_str in giveaways[:10]:
+                try:
+                    end_time = datetime.fromisoformat(end_time_str)
+                    participants = json.loads(participants_str) if participants_str else []
+                    desc += f"**#{gw_id}** • {title}\n"
+                    desc += f"└ ⏰ <t:{int(end_time.timestamp())}:R> • 👥 {len(participants)} participants\n\n"
+                except:
+                    pass
+            e.description = desc or "❌ Aucun cadeau"
+        
+        return e
+    
+    @discord.ui.button(label="🏁 Terminer un Cadeau", style=discord.ButtonStyle.danger, row=0)
+    async def end_giveaway(self, i, b):
+        # Récupérer les giveaways actifs
+        giveaways = []
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute(
+                    'SELECT id, title FROM giveaways WHERE guild_id=? AND ended=0',
+                    (self.g.id,)
+                ) as cursor:
+                    async for row in cursor:
+                        giveaways.append(row)
+        except:
+            pass
+        
+        if not giveaways:
+            return await i.response.send_message("❌ Aucun cadeau actif", ephemeral=True)
+        
+        opts = [discord.SelectOption(label=f"#{gw_id} - {title[:40]}", value=str(gw_id)) for gw_id, title in giveaways[:25]]
+        v = GiveawayEndSelectView(self.u, self.g, opts)
+        await i.response.send_message("🏁 Sélectionnez le cadeau à terminer:", view=v, ephemeral=True)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = GiveawayPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class GiveawayEndSelectView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.add_item(GiveawayEndSelect(u, g, opts))
+
+class GiveawayEndSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir un cadeau...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        giveaway_id = int(self.values[0])
+        result = await end_giveaway(self.g, giveaway_id)
+        await i.response.edit_message(content=result, view=None)
+
+async def end_giveaway(guild, giveaway_id):
+    """Termine un giveaway et tire un gagnant"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                'SELECT channel_id, message_id, title, prize, participants FROM giveaways WHERE id=? AND guild_id=?',
+                (giveaway_id, guild.id)
+            ) as cursor:
+                row = await cursor.fetchone()
+                
+                if not row:
+                    return "❌ Cadeau introuvable"
+                
+                channel_id, message_id, title, prize, participants_str = row
+                participants = json.loads(participants_str) if participants_str else []
+                
+                # Marquer comme terminé
+                await db.execute('UPDATE giveaways SET ended=1 WHERE id=?', (giveaway_id,))
+                await db.commit()
+        
+        channel = guild.get_channel(channel_id)
+        
+        if not participants:
+            # Pas de participants
+            if channel:
+                e = discord.Embed(title=f"🎁 {title} - Terminé", color=C.RED)
+                e.description = "❌ **Aucun participant !**\n\nLe cadeau n'a pas pu être attribué."
+                try:
+                    msg = await channel.fetch_message(message_id)
+                    await msg.edit(embed=e, view=None)
+                except:
+                    pass
+            return "❌ Aucun participant pour ce cadeau"
+        
+        # Tirer un gagnant au hasard
+        import random
+        winner_id = random.choice(participants)
+        winner = guild.get_member(winner_id)
+        
+        if channel:
+            e = discord.Embed(title=f"🎁 {title} - Terminé !", color=C.GOLD)
+            e.description = f"🎉 **FÉLICITATIONS !**\n\n🏆 Le gagnant est: **{winner.mention if winner else f'<@{winner_id}>'}**"
+            e.add_field(name="🎁 Prix", value=f"```{prize}```", inline=False)
+            e.add_field(name="👥 Participants", value=f"```{len(participants)}```", inline=True)
+            e.set_footer(text="Merci à tous les participants !")
+            e.timestamp = now()
+            
+            try:
+                msg = await channel.fetch_message(message_id)
+                await msg.edit(embed=e, view=None)
+                await channel.send(f"🎉 **{winner.mention if winner else f'<@{winner_id}>'}** a gagné **{title}** !")
+            except:
+                pass
+        
+        return f"✅ Cadeau terminé ! Gagnant: {winner.display_name if winner else winner_id}"
+        
+    except Exception as ex:
+        return f"❌ Erreur: {ex}"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           📨 MESSAGE PANEL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class MessagePanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        e = discord.Embed(title="📨 Messages Automatiques", color=C.BLURPLE)
+        e.description = "Programmez des messages récurrents pour votre serveur."
+        
+        # Compter les messages programmés
+        count = 0
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute(
+                    'SELECT COUNT(*) FROM scheduled_messages WHERE guild_id=? AND enabled=1',
+                    (self.g.id,)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    count = row[0] if row else 0
+        except:
+            pass
+        
+        e.add_field(
+            name="📊 Statistiques",
+            value=f"```\n📨 Messages actifs: {count}\n```",
+            inline=False
+        )
+        
+        e.add_field(
+            name="💡 Fonctionnalités",
+            value="• Messages récurrents (minutes, heures, jours, semaines)\n"
+                  "• Heure d'envoi personnalisable\n"
+                  "• Embeds personnalisés avec image",
+            inline=False
+        )
+        
+        return e
+    
+    @discord.ui.button(label="➕ Créer un Message", style=discord.ButtonStyle.success, row=0)
+    async def create(self, i, b):
+        modal = AutoMessageCreateModal(self.u, self.g)
+        await i.response.send_modal(modal)
+    
+    @discord.ui.button(label="📋 Voir les Messages", style=discord.ButtonStyle.primary, row=0)
+    async def view_list(self, i, b):
+        v = AutoMessageListPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = CentrePanel(self.u, self.g)
+        await i.response.edit_message(embed=v.embed(), view=v)
+
+class AutoMessageCreateModal(Modal):
+    def __init__(self, u, g):
+        super().__init__(title="📨 Créer un Message Auto")
+        self.u = u
+        self.g = g
+        
+        self.title_input = TextInput(label="Titre de l'embed", placeholder="Ex: Rappel quotidien", max_length=100)
+        self.description_input = TextInput(label="Description", placeholder="Le contenu du message...", style=discord.TextStyle.paragraph, max_length=2000)
+        self.frequency_input = TextInput(label="Fréquence (ex: 1h, 12h, 1d, 1w)", placeholder="m=minutes, h=heures, d=jours, w=semaines", max_length=10)
+        self.hour_input = TextInput(label="Heure d'envoi (0-23)", placeholder="Ex: 12 pour midi, 0 pour minuit", max_length=2)
+        self.image_input = TextInput(label="URL de l'image (optionnel)", placeholder="https://...", required=False, max_length=500)
+        
+        self.add_item(self.title_input)
+        self.add_item(self.description_input)
+        self.add_item(self.frequency_input)
+        self.add_item(self.hour_input)
+        self.add_item(self.image_input)
+    
+    async def on_submit(self, i):
+        # Parser la fréquence
+        freq_str = self.frequency_input.value.lower().strip()
+        freq_seconds = parse_duration_to_seconds(freq_str)
+        
+        if freq_seconds < 60:
+            return await i.response.send_message("❌ La fréquence minimum est de 1 minute (1m)", ephemeral=True)
+        
+        # Déterminer le type de fréquence
+        if 'w' in freq_str:
+            frequency_type = 'weekly'
+            frequency_value = freq_seconds // 604800
+        elif 'd' in freq_str:
+            frequency_type = 'daily'
+            frequency_value = freq_seconds // 86400
+        elif 'h' in freq_str:
+            frequency_type = 'hourly'
+            frequency_value = freq_seconds // 3600
+        else:
+            frequency_type = 'minutes'
+            frequency_value = freq_seconds // 60
+        
+        # Parser l'heure
+        try:
+            send_hour = int(self.hour_input.value)
+            if not 0 <= send_hour <= 23:
+                raise ValueError()
+        except:
+            return await i.response.send_message("❌ L'heure doit être entre 0 et 23", ephemeral=True)
+        
+        # Sauvegarder les données
+        msg_data = {
+            'title': self.title_input.value,
+            'description': self.description_input.value,
+            'frequency': frequency_type,
+            'frequency_value': frequency_value,
+            'send_hour': send_hour,
+            'image_url': self.image_input.value or None
+        }
+        
+        # Demander le salon
+        channels = list(self.g.text_channels)[:25]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in channels]
+        v = AutoMessageChannelSelectView(self.u, self.g, opts, msg_data)
+        await i.response.send_message("📢 **Sélectionnez le salon** où publier le message:", view=v, ephemeral=True)
+
+class AutoMessageChannelSelectView(View):
+    def __init__(self, u, g, opts, data):
+        super().__init__(timeout=120)
+        self.add_item(AutoMessageChannelSelect(u, g, opts, data))
+
+class AutoMessageChannelSelect(Select):
+    def __init__(self, u, g, opts, data):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+        self.data = data
+    
+    async def callback(self, i):
+        channel_id = int(self.values[0])
+        channel = self.g.get_channel(channel_id)
+        
+        if not channel:
+            return await i.response.edit_message(content="❌ Salon introuvable", view=None)
+        
+        # Sauvegarder en BDD
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute('''
+                    INSERT INTO scheduled_messages (guild_id, channel_id, title, description, image_url, frequency, frequency_value, send_hour)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    self.g.id, channel_id,
+                    self.data['title'], self.data['description'], self.data['image_url'],
+                    self.data['frequency'], self.data['frequency_value'], self.data['send_hour']
+                ))
+                await db.commit()
+        except Exception as ex:
+            print(f"Erreur sauvegarde message auto: {ex}")
+            return await i.response.edit_message(content=f"❌ Erreur: {ex}", view=None)
+        
+        freq_labels = {
+            'minutes': f"toutes les {self.data['frequency_value']} minute(s)",
+            'hourly': f"toutes les {self.data['frequency_value']} heure(s)",
+            'daily': f"tous les {self.data['frequency_value']} jour(s)",
+            'weekly': f"toutes les {self.data['frequency_value']} semaine(s)"
+        }
+        
+        await i.response.edit_message(
+            content=f"✅ **Message automatique créé !**\n\n"
+                    f"📢 Salon: {channel.mention}\n"
+                    f"🔄 Fréquence: {freq_labels.get(self.data['frequency'], self.data['frequency'])}\n"
+                    f"⏰ Heure d'envoi: {self.data['send_hour']}h00",
+            view=None
+        )
+
+class AutoMessageListPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        e = discord.Embed(title="📋 Messages Automatiques", color=C.BLURPLE)
+        
+        messages = []
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute(
+                    'SELECT id, channel_id, title, frequency, frequency_value, send_hour, enabled FROM scheduled_messages WHERE guild_id=? ORDER BY id',
+                    (self.g.id,)
+                ) as cursor:
+                    async for row in cursor:
+                        messages.append(row)
+        except:
+            pass
+        
+        if not messages:
+            e.description = "❌ Aucun message automatique configuré"
+        else:
+            freq_labels = {'minutes': 'min', 'hourly': 'h', 'daily': 'j', 'weekly': 'sem'}
+            desc = ""
+            for msg_id, channel_id, title, freq, freq_val, hour, enabled in messages[:10]:
+                channel = self.g.get_channel(channel_id)
+                status = "✅" if enabled else "❌"
+                desc += f"**#{msg_id}** {status} • {title[:30]}\n"
+                desc += f"└ {channel.mention if channel else 'Salon inconnu'} • {freq_val}{freq_labels.get(freq, freq)} • {hour}h00\n\n"
+            e.description = desc
+        
+        return e
+    
+    @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, row=0)
+    async def delete_msg(self, i, b):
+        messages = []
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute(
+                    'SELECT id, title FROM scheduled_messages WHERE guild_id=?',
+                    (self.g.id,)
+                ) as cursor:
+                    async for row in cursor:
+                        messages.append(row)
+        except:
+            pass
+        
+        if not messages:
+            return await i.response.send_message("❌ Aucun message à supprimer", ephemeral=True)
+        
+        opts = [discord.SelectOption(label=f"#{msg_id} - {title[:40]}", value=str(msg_id)) for msg_id, title in messages[:25]]
+        v = AutoMessageDeleteSelectView(self.u, self.g, opts)
+        await i.response.send_message("🗑️ Sélectionnez le message à supprimer:", view=v, ephemeral=True)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = MessagePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class AutoMessageDeleteSelectView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.add_item(AutoMessageDeleteSelect(u, g, opts))
+
+class AutoMessageDeleteSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir un message...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        msg_id = int(self.values[0])
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute('DELETE FROM scheduled_messages WHERE id=? AND guild_id=?', (msg_id, self.g.id))
+                await db.commit()
+            await i.response.edit_message(content="✅ Message automatique supprimé !", view=None)
+        except:
+            await i.response.edit_message(content="❌ Erreur lors de la suppression", view=None)
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #                           📊 STATISTIQUES PANEL
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -2955,11 +3711,10 @@ class StatExecuteConfirmView(View):
         await i.response.edit_message(content="❌ Action annulée", view=None)
 
 async def execute_afk_actions(guild):
-    """Exécute les actions sur les membres AFK - Version optimisée pour gros serveurs"""
+    """Exécute les actions sur les membres AFK - Version ULTRA optimisée"""
     c = await cfg(guild.id)
     stat_cfg = c.get('stat_config', {})
     
-    # Maintenant ce sont des listes d'actions
     actions_7d = stat_cfg.get('actions_7d', [])
     actions_30d = stat_cfg.get('actions_30d', [])
     role_id = stat_cfg.get('activity_role', 0)
@@ -2980,13 +3735,13 @@ async def execute_afk_actions(guild):
     }
     
     try:
-        # Récupérer les activités
+        # ═══════════════ ÉTAPE 1: COLLECTE RAPIDE DES DONNÉES ═══════════════
+        user_activities = {}
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
                 'SELECT user_id, last_message, last_vocal FROM activity_tracking WHERE guild_id=?',
                 (guild.id,)
             ) as cursor:
-                user_activities = {}
                 async for row in cursor:
                     user_id, last_msg, last_vocal = row
                     last_activity = None
@@ -3001,9 +3756,13 @@ async def execute_afk_actions(guild):
                         except: pass
                     user_activities[user_id] = last_activity
         
-        # Listes pour les membres AFK
-        afk_members_7d = []  # Inactifs 7j mais pas 30j
-        afk_members_30d = []  # Inactifs 30j+
+        # ═══════════════ ÉTAPE 2: CLASSIFICATION RAPIDE ═══════════════
+        afk_members_7d = []
+        afk_members_30d = []
+        members_to_remove_role_7d = []
+        members_to_remove_role_30d = []
+        members_to_kick_7d = []
+        members_to_kick_30d = []
         
         for member in guild.members:
             if member.bot or member.id == guild.owner_id:
@@ -3021,53 +3780,62 @@ async def execute_afk_actions(guild):
             
             if is_afk_30d:
                 afk_members_30d.append(member)
+                if role and role in member.roles and actions_30d:
+                    members_to_remove_role_30d.append(member)
+                if 'kick' in actions_30d and member.top_role < guild.me.top_role:
+                    members_to_kick_30d.append(member)
             elif is_afk_7d:
                 afk_members_7d.append(member)
+                if role and role in member.roles and actions_7d:
+                    members_to_remove_role_7d.append(member)
+                if 'kick' in actions_7d and member.top_role < guild.me.top_role:
+                    members_to_kick_7d.append(member)
         
-        # ═══════════════ ACTIONS 30 JOURS ═══════════════
-        for member in afk_members_30d:
-            # TOUJOURS retirer le rôle si une action est configurée (ping OU remove_role)
-            # Car un membre AFK mentionné doit perdre son rôle
-            if role and role in member.roles and actions_30d:
-                try:
-                    await member.remove_roles(role, reason="Inactivité 30 jours")
-                    results['remove_role_30d'] += 1
-                    await asyncio.sleep(0.1)
-                except:
-                    pass
+        # ═══════════════ ÉTAPE 3: RETRAIT DES RÔLES EN BATCH ═══════════════
+        async def remove_role_batch(members_list, reason):
+            """Retire les rôles par batch de 10 en parallèle"""
+            removed = 0
+            batch_size = 10
             
-            # Kick si configuré
-            if 'kick' in actions_30d:
-                try:
-                    if member.top_role < guild.me.top_role:
-                        await member.kick(reason="Inactivité 30 jours")
-                        results['kick_30d'] += 1
-                        await asyncio.sleep(0.3)
-                except:
-                    pass
-        
-        # ═══════════════ ACTIONS 7 JOURS ═══════════════
-        for member in afk_members_7d:
-            # TOUJOURS retirer le rôle si une action est configurée
-            if role and role in member.roles and actions_7d:
-                try:
-                    await member.remove_roles(role, reason="Inactivité 7 jours")
-                    results['remove_role_7d'] += 1
-                    await asyncio.sleep(0.1)
-                except:
-                    pass
+            for i in range(0, len(members_list), batch_size):
+                batch = members_list[i:i + batch_size]
+                tasks = []
+                for member in batch:
+                    tasks.append(member.remove_roles(role, reason=reason))
+                
+                results_batch = await asyncio.gather(*tasks, return_exceptions=True)
+                removed += sum(1 for r in results_batch if not isinstance(r, Exception))
+                
+                # Petit délai entre les batches pour éviter le rate limit
+                if i + batch_size < len(members_list):
+                    await asyncio.sleep(0.5)
             
-            # Kick si configuré
-            if 'kick' in actions_7d:
-                try:
-                    if member.top_role < guild.me.top_role:
-                        await member.kick(reason="Inactivité 7 jours")
-                        results['kick_7d'] += 1
-                        await asyncio.sleep(0.3)
-                except:
-                    pass
+            return removed
         
-        # ═══════════════ NOTIFICATIONS COMPACTES ═══════════════
+        # Retirer les rôles 30j
+        if members_to_remove_role_30d:
+            results['remove_role_30d'] = await remove_role_batch(members_to_remove_role_30d, "Inactivité 30 jours")
+        
+        # Retirer les rôles 7j
+        if members_to_remove_role_7d:
+            results['remove_role_7d'] = await remove_role_batch(members_to_remove_role_7d, "Inactivité 7 jours")
+        
+        # ═══════════════ ÉTAPE 4: KICKS (séquentiels car plus sensible) ═══════════════
+        for member in members_to_kick_30d:
+            try:
+                await member.kick(reason="Inactivité 30 jours")
+                results['kick_30d'] += 1
+            except:
+                pass
+        
+        for member in members_to_kick_7d:
+            try:
+                await member.kick(reason="Inactivité 7 jours")
+                results['kick_7d'] += 1
+            except:
+                pass
+        
+        # ═══════════════ ÉTAPE 5: NOTIFICATIONS ═══════════════
         if notif_ch:
             recovery_mention = recovery_ch.mention if recovery_ch else "un salon textuel ou vocal"
             
@@ -3824,6 +4592,7 @@ async def update_realsy_activity(guild_id, user_id):
 async def on_ready():
     await db_init()
     bot.add_view(TicketControlView())
+    bot.add_view(GiveawayParticipateView())  # Pour les boutons de participation aux giveaways
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute('SELECT data FROM guild_config') as c:
@@ -3856,9 +4625,19 @@ async def on_ready():
     if not check_afk_automatic.is_running():
         check_afk_automatic.start()
     
+    # Lancer la tâche des giveaways
+    if not check_giveaways.is_running():
+        check_giveaways.start()
+    
+    # Lancer la tâche des messages automatiques
+    if not check_scheduled_messages.is_running():
+        check_scheduled_messages.start()
+    
     print(f"✅ {bot.user.name} v18 prêt!")
     print(f"🌐 Serveurs: {len(bot.guilds)}")
     print(f"📢 Vérification feeds sociaux toutes les 5 minutes")
+    print(f"🎁 Vérification giveaways toutes les 30 secondes")
+    print(f"📨 Vérification messages auto toutes les minutes")
 
 @bot.tree.command(name="sync", description="🔄 Synchroniser les commandes (Admin)")
 async def sync_cmd(i: discord.Interaction):
@@ -6167,6 +6946,180 @@ async def restore_activity_role(member):
                 
     except Exception as ex:
         print(f"Erreur restore role: {ex}")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           🎁 TÂCHE AUTOMATIQUE GIVEAWAYS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@tasks.loop(seconds=30)
+async def check_giveaways():
+    """Vérifie et termine les giveaways expirés"""
+    try:
+        now_dt = now()
+        
+        async with aiosqlite.connect(DB_PATH) as db:
+            # Récupérer les giveaways à terminer
+            async with db.execute(
+                'SELECT id, guild_id, channel_id, message_id, title, prize, participants FROM giveaways WHERE ended=0 AND end_time <= ?',
+                (now_dt.isoformat(),)
+            ) as cursor:
+                giveaways_to_end = []
+                async for row in cursor:
+                    giveaways_to_end.append(row)
+            
+            # Terminer chaque giveaway
+            for gw_id, guild_id, channel_id, message_id, title, prize, participants_str in giveaways_to_end:
+                try:
+                    guild = bot.get_guild(guild_id)
+                    if not guild:
+                        continue
+                    
+                    channel = guild.get_channel(channel_id)
+                    if not channel:
+                        continue
+                    
+                    participants = json.loads(participants_str) if participants_str else []
+                    
+                    # Marquer comme terminé
+                    await db.execute('UPDATE giveaways SET ended=1 WHERE id=?', (gw_id,))
+                    
+                    if not participants:
+                        # Pas de participants
+                        e = discord.Embed(title=f"🎁 {title} - Terminé", color=C.RED)
+                        e.description = "❌ **Aucun participant !**\n\nLe cadeau n'a pas pu être attribué."
+                        e.timestamp = now()
+                        
+                        try:
+                            msg = await channel.fetch_message(message_id)
+                            await msg.edit(embed=e, view=None)
+                        except:
+                            pass
+                    else:
+                        # Tirer un gagnant
+                        import random
+                        winner_id = random.choice(participants)
+                        winner = guild.get_member(winner_id)
+                        
+                        e = discord.Embed(title=f"🎁 {title} - Terminé !", color=C.GOLD)
+                        e.description = f"🎉 **FÉLICITATIONS !**\n\n🏆 Le gagnant est: **{winner.mention if winner else f'<@{winner_id}>'}**"
+                        e.add_field(name="🎁 Prix", value=f"```{prize}```", inline=False)
+                        e.add_field(name="👥 Participants", value=f"```{len(participants)}```", inline=True)
+                        e.set_footer(text="Merci à tous les participants !")
+                        e.timestamp = now()
+                        
+                        try:
+                            msg = await channel.fetch_message(message_id)
+                            await msg.edit(embed=e, view=None)
+                            await channel.send(f"🎉 **{winner.mention if winner else f'<@{winner_id}>'}** a gagné **{title}** !")
+                        except:
+                            pass
+                    
+                except Exception as ex:
+                    print(f"Erreur fin giveaway {gw_id}: {ex}")
+            
+            await db.commit()
+            
+    except Exception as ex:
+        print(f"Erreur tâche giveaways: {ex}")
+
+@check_giveaways.before_loop
+async def before_check_giveaways():
+    await bot.wait_until_ready()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           📨 TÂCHE AUTOMATIQUE MESSAGES PROGRAMMÉS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@tasks.loop(minutes=1)
+async def check_scheduled_messages():
+    """Vérifie et envoie les messages programmés"""
+    try:
+        now_dt = now()
+        current_hour = now_dt.hour
+        current_minute = now_dt.minute
+        
+        async with aiosqlite.connect(DB_PATH) as db:
+            # Récupérer tous les messages actifs
+            async with db.execute(
+                'SELECT id, guild_id, channel_id, title, description, color, image_url, footer, frequency, frequency_value, send_hour, send_minute, last_sent FROM scheduled_messages WHERE enabled=1'
+            ) as cursor:
+                messages = []
+                async for row in cursor:
+                    messages.append(row)
+            
+            for msg_id, guild_id, channel_id, title, description, color, image_url, footer, frequency, freq_val, send_hour, send_minute, last_sent_str in messages:
+                try:
+                    # Vérifier si c'est l'heure d'envoyer
+                    if current_hour != send_hour:
+                        continue
+                    
+                    # Vérifier le dernier envoi
+                    if last_sent_str:
+                        try:
+                            last_sent = datetime.fromisoformat(last_sent_str)
+                            
+                            # Calculer l'intervalle minimum
+                            if frequency == 'minutes':
+                                min_interval = timedelta(minutes=freq_val)
+                            elif frequency == 'hourly':
+                                min_interval = timedelta(hours=freq_val)
+                            elif frequency == 'daily':
+                                min_interval = timedelta(days=freq_val)
+                            elif frequency == 'weekly':
+                                min_interval = timedelta(weeks=freq_val)
+                            else:
+                                continue
+                            
+                            # Si pas assez de temps écoulé, passer
+                            if now_dt - last_sent < min_interval:
+                                continue
+                        except:
+                            pass
+                    
+                    # Envoyer le message
+                    guild = bot.get_guild(guild_id)
+                    if not guild:
+                        continue
+                    
+                    channel = guild.get_channel(channel_id)
+                    if not channel:
+                        continue
+                    
+                    # Créer l'embed
+                    try:
+                        embed_color = int(color.replace('#', ''), 16) if color else C.BLURPLE
+                    except:
+                        embed_color = C.BLURPLE
+                    
+                    e = discord.Embed(title=title, description=description, color=embed_color)
+                    
+                    if image_url:
+                        e.set_image(url=image_url)
+                    
+                    if footer:
+                        e.set_footer(text=footer)
+                    
+                    e.timestamp = now()
+                    
+                    await channel.send(embed=e)
+                    
+                    # Mettre à jour last_sent
+                    await db.execute(
+                        'UPDATE scheduled_messages SET last_sent=? WHERE id=?',
+                        (now_dt.isoformat(), msg_id)
+                    )
+                    
+                except Exception as ex:
+                    print(f"Erreur message programmé {msg_id}: {ex}")
+            
+            await db.commit()
+            
+    except Exception as ex:
+        print(f"Erreur tâche messages programmés: {ex}")
+
+@check_scheduled_messages.before_loop
+async def before_check_scheduled_messages():
+    await bot.wait_until_ready()
 
 if __name__ == "__main__":
     print("🚀 Bot v18 - Démarrage...")
