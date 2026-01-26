@@ -185,6 +185,7 @@ async def db_init():
         await db.execute('CREATE TABLE IF NOT EXISTS guild_config(guild_id INTEGER PRIMARY KEY, data TEXT DEFAULT "{}")')
         await db.execute('CREATE TABLE IF NOT EXISTS immune_roles(guild_id INTEGER, role_id INTEGER, PRIMARY KEY(guild_id, role_id))')
         await db.execute('CREATE TABLE IF NOT EXISTS immune_users(guild_id INTEGER, user_id INTEGER, PRIMARY KEY(guild_id, user_id))')
+        await db.execute('CREATE TABLE IF NOT EXISTS immune_channels(guild_id INTEGER, channel_id INTEGER, PRIMARY KEY(guild_id, channel_id))')
         # Table pour les logs de sécurité
         await db.execute('''CREATE TABLE IF NOT EXISTS security_logs(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -257,6 +258,7 @@ async def db_init():
             end_time DATETIME,
             winner_count INTEGER DEFAULT 1,
             participants TEXT DEFAULT "[]",
+            conditions TEXT DEFAULT "{}",
             ended INTEGER DEFAULT 0,
             created_by INTEGER,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -339,7 +341,7 @@ async def cfg(gid):
         if k not in data: data[k] = v
     return data
 
-async def is_immune(m, key):
+async def is_immune(m, key, channel=None):
     if key != 'anti_phishing' and (m.guild_permissions.administrator or m.id == m.guild.owner_id):
         return True
     if key in ['anti_phishing', 'anti_link', 'anti_invite']:
@@ -350,10 +352,25 @@ async def is_immune(m, key):
                 rids = [r[0] for r in await c.fetchall()]
             async with db.execute('SELECT user_id FROM immune_users WHERE guild_id=?', (m.guild.id,)) as c:
                 uids = [r[0] for r in await c.fetchall()]
+            # Vérifier les salons immunisés
+            if channel:
+                async with db.execute('SELECT channel_id FROM immune_channels WHERE guild_id=?', (m.guild.id,)) as c:
+                    immune_chs = [r[0] for r in await c.fetchall()]
+                if channel.id in immune_chs:
+                    return True
         if any(role.id in rids for role in m.roles) or m.id in uids:
             return True
     except: pass
     return False
+
+async def is_channel_immune(guild_id, channel_id):
+    """Vérifie si un salon est immunisé"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('SELECT channel_id FROM immune_channels WHERE guild_id=? AND channel_id=?', (guild_id, channel_id)) as c:
+                return await c.fetchone() is not None
+    except:
+        return False
 
 async def is_fully_immune(member):
     """Vérifie si un membre est totalement immunisé (rôle ou utilisateur)"""
@@ -1456,37 +1473,53 @@ class ModerationPanel(View):
         e.set_footer(text="Les admins et le owner ont toujours accès à toutes les commandes")
         return e
     
+    def _get_role_options(self):
+        """Récupère les options de rôles de manière sécurisée"""
+        try:
+            roles = [r for r in self.g.roles if not r.is_default() and not r.is_bot_managed()][:24]
+            opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
+        except:
+            opts = []
+        opts.insert(0, discord.SelectOption(label="❌ Aucun rôle requis", value="0"))
+        return opts
+    
     @discord.ui.button(label="📜 Salon Logs", style=discord.ButtonStyle.success, row=0)
     async def set_logs(self, i, b):
-        chs = list(self.g.text_channels)[:25]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        opts.insert(0, discord.SelectOption(label="❌ Aucun log", value="0"))
-        v = ModLogSelectView(self.u, self.g, opts)
-        await i.response.edit_message(embed=discord.Embed(title="📜 Salon des logs modération", color=C.ORANGE), view=v)
+        try:
+            chs = list(self.g.text_channels)[:24]
+            opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+            opts.insert(0, discord.SelectOption(label="❌ Aucun log", value="0"))
+            v = ModLogSelectView(self.u, self.g, opts)
+            await i.response.edit_message(embed=discord.Embed(title="📜 Salon des logs modération", color=C.ORANGE), view=v)
+        except Exception as ex:
+            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
     
     @discord.ui.button(label="⚠️ Rôle /warn", style=discord.ButtonStyle.primary, row=1)
     async def set_warn(self, i, b):
-        roles = [r for r in self.g.roles[1:] if not r.is_bot_managed()][:25]
-        opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
-        opts.insert(0, discord.SelectOption(label="❌ Aucun rôle", value="0"))
-        v = ModRoleSelectView(self.u, self.g, opts, 'mod_warn_role')
-        await i.response.edit_message(embed=discord.Embed(title="⚠️ Rôle pour /warn & /unwarn", color=C.ORANGE), view=v)
+        try:
+            opts = self._get_role_options()
+            v = ModRoleSelectView(self.u, self.g, opts, 'mod_warn_role')
+            await i.response.edit_message(embed=discord.Embed(title="⚠️ Rôle pour /warn & /unwarn", description="Sélectionnez le rôle minimum requis pour utiliser ces commandes.", color=C.ORANGE), view=v)
+        except Exception as ex:
+            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
     
     @discord.ui.button(label="🔇 Rôle /mute", style=discord.ButtonStyle.primary, row=1)
     async def set_mute(self, i, b):
-        roles = [r for r in self.g.roles[1:] if not r.is_bot_managed()][:25]
-        opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
-        opts.insert(0, discord.SelectOption(label="❌ Aucun rôle", value="0"))
-        v = ModRoleSelectView(self.u, self.g, opts, 'mod_mute_role')
-        await i.response.edit_message(embed=discord.Embed(title="🔇 Rôle pour /mute & /unmute", color=C.ORANGE), view=v)
+        try:
+            opts = self._get_role_options()
+            v = ModRoleSelectView(self.u, self.g, opts, 'mod_mute_role')
+            await i.response.edit_message(embed=discord.Embed(title="🔇 Rôle pour /mute & /unmute", description="Sélectionnez le rôle minimum requis pour utiliser ces commandes.", color=C.ORANGE), view=v)
+        except Exception as ex:
+            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
     
     @discord.ui.button(label="📋 Rôle /infractions", style=discord.ButtonStyle.primary, row=1)
     async def set_inf(self, i, b):
-        roles = [r for r in self.g.roles[1:] if not r.is_bot_managed()][:25]
-        opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
-        opts.insert(0, discord.SelectOption(label="❌ Aucun rôle", value="0"))
-        v = ModRoleSelectView(self.u, self.g, opts, 'mod_infractions_role')
-        await i.response.edit_message(embed=discord.Embed(title="📋 Rôle pour /infractions", color=C.ORANGE), view=v)
+        try:
+            opts = self._get_role_options()
+            v = ModRoleSelectView(self.u, self.g, opts, 'mod_infractions_role')
+            await i.response.edit_message(embed=discord.Embed(title="📋 Rôle pour /infractions", description="Sélectionnez le rôle minimum requis pour utiliser cette commande.", color=C.ORANGE), view=v)
+        except Exception as ex:
+            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
@@ -1496,7 +1529,14 @@ class ModerationPanel(View):
 class ModLogSelectView(View):
     def __init__(self, u, g, opts):
         super().__init__(timeout=120)
+        self.u = u
+        self.g = g
         self.add_item(ModLogSelect(u, g, opts))
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = ModerationPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
 
 class ModLogSelect(Select):
     def __init__(self, u, g, opts):
@@ -1512,7 +1552,14 @@ class ModLogSelect(Select):
 class ModRoleSelectView(View):
     def __init__(self, u, g, opts, key):
         super().__init__(timeout=120)
+        self.u = u
+        self.g = g
         self.add_item(ModRoleSelect(u, g, opts, key))
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = ModerationPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
 
 class ModRoleSelect(Select):
     def __init__(self, u, g, opts, key):
@@ -1542,30 +1589,51 @@ class ImmunePanel(View):
                 rids = [r[0] for r in await c.fetchall()]
             async with db.execute('SELECT user_id FROM immune_users WHERE guild_id=?', (self.g.id,)) as c:
                 uids = [r[0] for r in await c.fetchall()]
+            async with db.execute('SELECT channel_id FROM immune_channels WHERE guild_id=?', (self.g.id,)) as c:
+                chids = [r[0] for r in await c.fetchall()]
+        
         e = discord.Embed(title="👑 Immunités", color=C.YELLOW)
-        e.add_field(name=f"🎭 Rôles immunisés ({len(rids)})", value=", ".join([f"<@&{r}>" for r in rids]) or "*Aucun*", inline=False)
-        e.add_field(name=f"👤 Utilisateurs immunisés ({len(uids)})", value=", ".join([f"<@{u}>" for u in uids]) or "*Aucun*", inline=False)
+        e.description = "Les éléments immunisés sont protégés contre toutes les restrictions."
+        
+        e.add_field(name=f"🎭 Rôles ({len(rids)})", value=", ".join([f"<@&{r}>" for r in rids[:10]]) or "*Aucun*", inline=False)
+        e.add_field(name=f"👤 Utilisateurs ({len(uids)})", value=", ".join([f"<@{u}>" for u in uids[:10]]) or "*Aucun*", inline=False)
+        e.add_field(name=f"📺 Salons ({len(chids)})", value=", ".join([f"<#{c}>" for c in chids[:10]]) or "*Aucun*", inline=False)
+        
+        e.set_footer(text="💡 Les salons immunisés ignorent toutes les protections (anti-link, anti-image, etc.)")
         return e
     
-    @discord.ui.button(label="➕ Ajouter rôle", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="➕ Rôle", style=discord.ButtonStyle.success, row=0)
     async def add_role(self, i, b):
         roles = [r for r in self.g.roles[1:] if not r.is_bot_managed()][:25]
         opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
         await i.response.edit_message(embed=discord.Embed(title="👑 Ajouter un rôle immunisé", color=C.YELLOW), view=ImmuneRoleView(self.u, self.g, opts))
     
-    @discord.ui.button(label="➕ Ajouter user", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="➕ Utilisateur", style=discord.ButtonStyle.success, row=0)
     async def add_user(self, i, b):
         await i.response.send_modal(AddImmuneUserModal(self.g, self.u))
     
-    @discord.ui.button(label="🗑️ Tout supprimer", style=discord.ButtonStyle.danger, row=0)
+    @discord.ui.button(label="➕ Salon", style=discord.ButtonStyle.success, row=0)
+    async def add_channel(self, i, b):
+        chs = list(self.g.text_channels)[:25]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        await i.response.edit_message(embed=discord.Embed(title="📺 Ajouter un salon immunisé", description="Ce salon ignorera toutes les protections.", color=C.YELLOW), view=ImmuneChannelView(self.u, self.g, opts))
+    
+    @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, row=1)
+    async def remove_item(self, i, b):
+        # Créer une vue avec les options de suppression
+        v = ImmuneRemoveView(self.u, self.g)
+        await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer une immunité", description="Choisissez le type d'élément à supprimer.", color=C.RED), view=v)
+    
+    @discord.ui.button(label="🗑️ Tout supprimer", style=discord.ButtonStyle.danger, row=1)
     async def clear(self, i, b):
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('DELETE FROM immune_roles WHERE guild_id=?', (self.g.id,))
             await db.execute('DELETE FROM immune_users WHERE guild_id=?', (self.g.id,))
+            await db.execute('DELETE FROM immune_channels WHERE guild_id=?', (self.g.id,))
             await db.commit()
         await i.response.edit_message(embed=await self.embed(), view=self)
     
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
@@ -1573,7 +1641,14 @@ class ImmunePanel(View):
 class ImmuneRoleView(View):
     def __init__(self, u, g, opts):
         super().__init__(timeout=120)
+        self.u = u
+        self.g = g
         self.add_item(ImmuneRoleSelect(u, g, opts))
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = ImmunePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
 
 class ImmuneRoleSelect(Select):
     def __init__(self, u, g, opts):
@@ -1584,6 +1659,135 @@ class ImmuneRoleSelect(Select):
     async def callback(self, i):
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('INSERT OR IGNORE INTO immune_roles VALUES(?,?)', (i.guild.id, int(self.values[0])))
+            await db.commit()
+        v = ImmunePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class ImmuneChannelView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+        self.add_item(ImmuneChannelSelect(u, g, opts))
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = ImmunePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class ImmuneChannelSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('INSERT OR IGNORE INTO immune_channels VALUES(?,?)', (i.guild.id, int(self.values[0])))
+            await db.commit()
+        v = ImmunePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class ImmuneRemoveView(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+    
+    @discord.ui.button(label="🎭 Rôle", style=discord.ButtonStyle.primary, row=0)
+    async def remove_role(self, i, b):
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (self.g.id,)) as c:
+                rids = [r[0] for r in await c.fetchall()]
+        if not rids:
+            return await i.response.send_message("❌ Aucun rôle immunisé", ephemeral=True)
+        opts = []
+        for rid in rids[:25]:
+            role = self.g.get_role(rid)
+            opts.append(discord.SelectOption(label=f"@{role.name if role else rid}"[:25], value=str(rid)))
+        await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer un rôle", color=C.RED), view=ImmuneRemoveRoleView(self.u, self.g, opts))
+    
+    @discord.ui.button(label="👤 Utilisateur", style=discord.ButtonStyle.primary, row=0)
+    async def remove_user(self, i, b):
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('SELECT user_id FROM immune_users WHERE guild_id=?', (self.g.id,)) as c:
+                uids = [r[0] for r in await c.fetchall()]
+        if not uids:
+            return await i.response.send_message("❌ Aucun utilisateur immunisé", ephemeral=True)
+        opts = []
+        for uid in uids[:25]:
+            member = self.g.get_member(uid)
+            opts.append(discord.SelectOption(label=f"@{member.display_name if member else uid}"[:25], value=str(uid)))
+        await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer un utilisateur", color=C.RED), view=ImmuneRemoveUserView(self.u, self.g, opts))
+    
+    @discord.ui.button(label="📺 Salon", style=discord.ButtonStyle.primary, row=0)
+    async def remove_channel(self, i, b):
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('SELECT channel_id FROM immune_channels WHERE guild_id=?', (self.g.id,)) as c:
+                chids = [r[0] for r in await c.fetchall()]
+        if not chids:
+            return await i.response.send_message("❌ Aucun salon immunisé", ephemeral=True)
+        opts = []
+        for chid in chids[:25]:
+            ch = self.g.get_channel(chid)
+            opts.append(discord.SelectOption(label=f"# {ch.name if ch else chid}"[:25], value=str(chid)))
+        await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer un salon", color=C.RED), view=ImmuneRemoveChannelView(self.u, self.g, opts))
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = ImmunePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class ImmuneRemoveRoleView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.add_item(ImmuneRemoveRoleSelect(u, g, opts))
+
+class ImmuneRemoveRoleSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir un rôle à supprimer...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('DELETE FROM immune_roles WHERE guild_id=? AND role_id=?', (i.guild.id, int(self.values[0])))
+            await db.commit()
+        v = ImmunePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class ImmuneRemoveUserView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.add_item(ImmuneRemoveUserSelect(u, g, opts))
+
+class ImmuneRemoveUserSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir un utilisateur à supprimer...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('DELETE FROM immune_users WHERE guild_id=? AND user_id=?', (i.guild.id, int(self.values[0])))
+            await db.commit()
+        v = ImmunePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class ImmuneRemoveChannelView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.add_item(ImmuneRemoveChannelSelect(u, g, opts))
+
+class ImmuneRemoveChannelSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir un salon à supprimer...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('DELETE FROM immune_channels WHERE guild_id=? AND channel_id=?', (i.guild.id, int(self.values[0])))
             await db.commit()
         v = ImmunePanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
@@ -2134,23 +2338,33 @@ class AdsYouTubePanel(View):
         yt_ch = self.g.get_channel(c.get('ads_youtube_channel', 0))
         yt_feeds = c.get('ads_youtube_feeds', [])
         
-        e.add_field(name="📍 Salon", value=yt_ch.mention if yt_ch else "❌ Non configuré", inline=False)
+        e.add_field(name="📍 Salon par défaut", value=yt_ch.mention if yt_ch else "❌ Non configuré", inline=False)
         
         if yt_feeds:
-            feeds_txt = "\n".join([f"• `{f['name']}` ({f['id'][:15]}...)" for f in yt_feeds[:10]])
+            feeds_txt = ""
+            for f in yt_feeds[:10]:
+                # Support ancien et nouveau format
+                if isinstance(f, dict):
+                    name = f.get('name', '?')
+                    feed_ch_id = f.get('channel_id', 0)
+                    feed_ch = self.g.get_channel(feed_ch_id) if feed_ch_id else None
+                    salon_txt = f" → {feed_ch.mention}" if feed_ch else ""
+                    feeds_txt += f"• `{name}`{salon_txt}\n"
+                else:
+                    feeds_txt += f"• `{f}`\n"
             e.add_field(name=f"📺 Chaînes suivies ({len(yt_feeds)})", value=feeds_txt, inline=False)
         else:
             e.add_field(name="📺 Chaînes suivies", value="*Aucune chaîne configurée*", inline=False)
         
-        e.set_footer(text="💡 Utilisez l'ID de chaîne YouTube (ex: UCxxxx)")
+        e.set_footer(text="💡 Chaque chaîne peut avoir son propre salon de publication")
         return e
     
-    @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="📍 Salon par défaut", style=discord.ButtonStyle.primary, row=0)
     async def set_channel(self, i, b):
         chs = list(self.g.text_channels)[:25]
         opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
         v = AdsChannelSelectView(self.u, self.g, opts, 'ads_youtube_channel', 'youtube')
-        await i.response.edit_message(embed=discord.Embed(title="📍 Salon YouTube", color=0xFF0000), view=v)
+        await i.response.edit_message(embed=discord.Embed(title="📍 Salon YouTube par défaut", color=0xFF0000), view=v)
     
     @discord.ui.button(label="➕ Ajouter Chaîne", style=discord.ButtonStyle.success, row=0)
     async def add_feed(self, i, b):
@@ -2162,7 +2376,7 @@ class AdsYouTubePanel(View):
         feeds = c.get('ads_youtube_feeds', [])
         if not feeds:
             return await i.response.send_message("❌ Aucune chaîne à supprimer", ephemeral=True)
-        opts = [discord.SelectOption(label=f['name'][:25], value=str(idx)) for idx, f in enumerate(feeds[:25])]
+        opts = [discord.SelectOption(label=f.get('name', str(idx))[:25] if isinstance(f, dict) else str(f)[:25], value=str(idx)) for idx, f in enumerate(feeds[:25])]
         v = AdsFeedRemoveView(self.u, self.g, opts, 'ads_youtube_feeds', 'youtube')
         await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer une chaîne", color=C.RED), view=v)
     
@@ -2185,14 +2399,51 @@ class AdsYouTubeAddModal(Modal, title="➕ Ajouter une chaîne YouTube"):
         feeds = c.get('ads_youtube_feeds', [])
         
         # Vérifier si déjà ajouté
-        if any(f['id'] == self.channel_id.value for f in feeds):
-            return await i.response.send_message("❌ Cette chaîne est déjà ajoutée!", ephemeral=True)
+        for f in feeds:
+            if isinstance(f, dict) and f.get('id') == self.channel_id.value:
+                return await i.response.send_message("❌ Cette chaîne est déjà ajoutée!", ephemeral=True)
         
-        feeds.append({'name': self.name.value, 'id': self.channel_id.value})
+        # Demander le salon
+        chs = list(self.g.text_channels)[:24]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        opts.insert(0, discord.SelectOption(label="📍 Salon par défaut", value="0", description="Utiliser le salon par défaut configuré"))
+        
+        new_feed = {'name': self.name.value, 'id': self.channel_id.value}
+        v = AdsYouTubeChannelSelectView(self.u, self.g, opts, new_feed)
+        await i.response.send_message("📍 Dans quel salon publier les vidéos de cette chaîne ?", view=v, ephemeral=True)
+
+class AdsYouTubeChannelSelectView(View):
+    def __init__(self, u, g, opts, feed_data):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+        self.feed_data = feed_data
+        self.add_item(AdsYouTubeChannelSelect(u, g, opts, feed_data))
+
+class AdsYouTubeChannelSelect(Select):
+    def __init__(self, u, g, opts, feed_data):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+        self.feed_data = feed_data
+    
+    async def callback(self, i):
+        channel_id = int(self.values[0])
+        
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_youtube_feeds', [])
+        
+        # Ajouter le salon si différent de 0
+        if channel_id > 0:
+            self.feed_data['channel_id'] = channel_id
+        
+        feeds.append(self.feed_data)
         await db_set(self.g.id, 'ads_youtube_feeds', feeds)
         
-        v = AdsYouTubePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        channel = self.g.get_channel(channel_id) if channel_id else None
+        salon_txt = channel.mention if channel else "salon par défaut"
+        
+        await i.response.edit_message(content=f"✅ Chaîne **{self.feed_data['name']}** ajoutée ! Publications dans {salon_txt}", view=None)
 
 # ─────────────────────────────── TWITCH ───────────────────────────────
 
@@ -2209,23 +2460,32 @@ class AdsTwitchPanel(View):
         tw_ch = self.g.get_channel(c.get('ads_twitch_channel', 0))
         tw_feeds = c.get('ads_twitch_feeds', [])
         
-        e.add_field(name="📍 Salon", value=tw_ch.mention if tw_ch else "❌ Non configuré", inline=False)
+        e.add_field(name="📍 Salon par défaut", value=tw_ch.mention if tw_ch else "❌ Non configuré", inline=False)
         
         if tw_feeds:
-            feeds_txt = "\n".join([f"• `{f}`" for f in tw_feeds[:10]])
+            feeds_txt = ""
+            for f in tw_feeds[:10]:
+                if isinstance(f, dict):
+                    name = f.get('username', '?')
+                    feed_ch_id = f.get('channel_id', 0)
+                    feed_ch = self.g.get_channel(feed_ch_id) if feed_ch_id else None
+                    salon_txt = f" → {feed_ch.mention}" if feed_ch else ""
+                    feeds_txt += f"• `{name}`{salon_txt}\n"
+                else:
+                    feeds_txt += f"• `{f}`\n"
             e.add_field(name=f"🎮 Streamers suivis ({len(tw_feeds)})", value=feeds_txt, inline=False)
         else:
             e.add_field(name="🎮 Streamers suivis", value="*Aucun streamer configuré*", inline=False)
         
-        e.set_footer(text="💡 Utilisez le nom d'utilisateur Twitch (ex: ninja)")
+        e.set_footer(text="💡 Chaque streamer peut avoir son propre salon de publication")
         return e
     
-    @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="📍 Salon par défaut", style=discord.ButtonStyle.primary, row=0)
     async def set_channel(self, i, b):
         chs = list(self.g.text_channels)[:25]
         opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
         v = AdsChannelSelectView(self.u, self.g, opts, 'ads_twitch_channel', 'twitch')
-        await i.response.edit_message(embed=discord.Embed(title="📍 Salon Twitch", color=0x9146FF), view=v)
+        await i.response.edit_message(embed=discord.Embed(title="📍 Salon Twitch par défaut", color=0x9146FF), view=v)
     
     @discord.ui.button(label="➕ Ajouter Streamer", style=discord.ButtonStyle.success, row=0)
     async def add_feed(self, i, b):
@@ -2237,7 +2497,12 @@ class AdsTwitchPanel(View):
         feeds = c.get('ads_twitch_feeds', [])
         if not feeds:
             return await i.response.send_message("❌ Aucun streamer à supprimer", ephemeral=True)
-        opts = [discord.SelectOption(label=f[:25], value=str(idx)) for idx, f in enumerate(feeds[:25])]
+        opts = []
+        for idx, f in enumerate(feeds[:25]):
+            if isinstance(f, dict):
+                opts.append(discord.SelectOption(label=f.get('username', str(idx))[:25], value=str(idx)))
+            else:
+                opts.append(discord.SelectOption(label=str(f)[:25], value=str(idx)))
         v = AdsFeedRemoveView(self.u, self.g, opts, 'ads_twitch_feeds', 'twitch')
         await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer un streamer", color=C.RED), view=v)
     
@@ -2259,14 +2524,54 @@ class AdsTwitchAddModal(Modal, title="➕ Ajouter un streamer Twitch"):
         feeds = c.get('ads_twitch_feeds', [])
         
         username = self.username.value.lower().strip()
-        if username in feeds:
-            return await i.response.send_message("❌ Ce streamer est déjà ajouté!", ephemeral=True)
         
-        feeds.append(username)
+        # Vérifier si déjà ajouté
+        for f in feeds:
+            if isinstance(f, dict) and f.get('username') == username:
+                return await i.response.send_message("❌ Ce streamer est déjà ajouté!", ephemeral=True)
+            elif isinstance(f, str) and f == username:
+                return await i.response.send_message("❌ Ce streamer est déjà ajouté!", ephemeral=True)
+        
+        # Demander le salon
+        chs = list(self.g.text_channels)[:24]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        opts.insert(0, discord.SelectOption(label="📍 Salon par défaut", value="0", description="Utiliser le salon par défaut configuré"))
+        
+        new_feed = {'username': username}
+        v = AdsTwitchChannelSelectView(self.u, self.g, opts, new_feed)
+        await i.response.send_message("📍 Dans quel salon publier les lives de ce streamer ?", view=v, ephemeral=True)
+
+class AdsTwitchChannelSelectView(View):
+    def __init__(self, u, g, opts, feed_data):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+        self.feed_data = feed_data
+        self.add_item(AdsTwitchChannelSelect(u, g, opts, feed_data))
+
+class AdsTwitchChannelSelect(Select):
+    def __init__(self, u, g, opts, feed_data):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+        self.feed_data = feed_data
+    
+    async def callback(self, i):
+        channel_id = int(self.values[0])
+        
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_twitch_feeds', [])
+        
+        if channel_id > 0:
+            self.feed_data['channel_id'] = channel_id
+        
+        feeds.append(self.feed_data)
         await db_set(self.g.id, 'ads_twitch_feeds', feeds)
         
-        v = AdsTwitchPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        channel = self.g.get_channel(channel_id) if channel_id else None
+        salon_txt = channel.mention if channel else "salon par défaut"
+        
+        await i.response.edit_message(content=f"✅ Streamer **{self.feed_data['username']}** ajouté ! Publications dans {salon_txt}", view=None)
 
 # ─────────────────────────────── REDDIT ───────────────────────────────
 
@@ -2283,23 +2588,32 @@ class AdsRedditPanel(View):
         rd_ch = self.g.get_channel(c.get('ads_reddit_channel', 0))
         rd_feeds = c.get('ads_reddit_feeds', [])
         
-        e.add_field(name="📍 Salon", value=rd_ch.mention if rd_ch else "❌ Non configuré", inline=False)
+        e.add_field(name="📍 Salon par défaut", value=rd_ch.mention if rd_ch else "❌ Non configuré", inline=False)
         
         if rd_feeds:
-            feeds_txt = "\n".join([f"• r/{f}" for f in rd_feeds[:10]])
+            feeds_txt = ""
+            for f in rd_feeds[:10]:
+                if isinstance(f, dict):
+                    name = f.get('subreddit', '?')
+                    feed_ch_id = f.get('channel_id', 0)
+                    feed_ch = self.g.get_channel(feed_ch_id) if feed_ch_id else None
+                    salon_txt = f" → {feed_ch.mention}" if feed_ch else ""
+                    feeds_txt += f"• r/{name}{salon_txt}\n"
+                else:
+                    feeds_txt += f"• r/{f}\n"
             e.add_field(name=f"📰 Subreddits suivis ({len(rd_feeds)})", value=feeds_txt, inline=False)
         else:
             e.add_field(name="📰 Subreddits suivis", value="*Aucun subreddit configuré*", inline=False)
         
-        e.set_footer(text="💡 Entrez le nom du subreddit sans 'r/' (ex: gaming)")
+        e.set_footer(text="💡 Chaque subreddit peut avoir son propre salon de publication")
         return e
     
-    @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="📍 Salon par défaut", style=discord.ButtonStyle.primary, row=0)
     async def set_channel(self, i, b):
         chs = list(self.g.text_channels)[:25]
         opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
         v = AdsChannelSelectView(self.u, self.g, opts, 'ads_reddit_channel', 'reddit')
-        await i.response.edit_message(embed=discord.Embed(title="📍 Salon Reddit", color=0xFF4500), view=v)
+        await i.response.edit_message(embed=discord.Embed(title="📍 Salon Reddit par défaut", color=0xFF4500), view=v)
     
     @discord.ui.button(label="➕ Ajouter Subreddit", style=discord.ButtonStyle.success, row=0)
     async def add_feed(self, i, b):
@@ -2311,7 +2625,12 @@ class AdsRedditPanel(View):
         feeds = c.get('ads_reddit_feeds', [])
         if not feeds:
             return await i.response.send_message("❌ Aucun subreddit à supprimer", ephemeral=True)
-        opts = [discord.SelectOption(label=f"r/{f}"[:25], value=str(idx)) for idx, f in enumerate(feeds[:25])]
+        opts = []
+        for idx, f in enumerate(feeds[:25]):
+            if isinstance(f, dict):
+                opts.append(discord.SelectOption(label=f"r/{f.get('subreddit', str(idx))}"[:25], value=str(idx)))
+            else:
+                opts.append(discord.SelectOption(label=f"r/{f}"[:25], value=str(idx)))
         v = AdsFeedRemoveView(self.u, self.g, opts, 'ads_reddit_feeds', 'reddit')
         await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer un subreddit", color=C.RED), view=v)
     
@@ -2333,14 +2652,54 @@ class AdsRedditAddModal(Modal, title="➕ Ajouter un subreddit"):
         feeds = c.get('ads_reddit_feeds', [])
         
         sub = self.subreddit.value.lower().strip().replace('r/', '')
-        if sub in feeds:
-            return await i.response.send_message("❌ Ce subreddit est déjà ajouté!", ephemeral=True)
         
-        feeds.append(sub)
+        # Vérifier si déjà ajouté
+        for f in feeds:
+            if isinstance(f, dict) and f.get('subreddit') == sub:
+                return await i.response.send_message("❌ Ce subreddit est déjà ajouté!", ephemeral=True)
+            elif isinstance(f, str) and f == sub:
+                return await i.response.send_message("❌ Ce subreddit est déjà ajouté!", ephemeral=True)
+        
+        # Demander le salon
+        chs = list(self.g.text_channels)[:24]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        opts.insert(0, discord.SelectOption(label="📍 Salon par défaut", value="0", description="Utiliser le salon par défaut configuré"))
+        
+        new_feed = {'subreddit': sub}
+        v = AdsRedditChannelSelectView(self.u, self.g, opts, new_feed)
+        await i.response.send_message("📍 Dans quel salon publier les posts de ce subreddit ?", view=v, ephemeral=True)
+
+class AdsRedditChannelSelectView(View):
+    def __init__(self, u, g, opts, feed_data):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+        self.feed_data = feed_data
+        self.add_item(AdsRedditChannelSelect(u, g, opts, feed_data))
+
+class AdsRedditChannelSelect(Select):
+    def __init__(self, u, g, opts, feed_data):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+        self.feed_data = feed_data
+    
+    async def callback(self, i):
+        channel_id = int(self.values[0])
+        
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_reddit_feeds', [])
+        
+        if channel_id > 0:
+            self.feed_data['channel_id'] = channel_id
+        
+        feeds.append(self.feed_data)
         await db_set(self.g.id, 'ads_reddit_feeds', feeds)
         
-        v = AdsRedditPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        channel = self.g.get_channel(channel_id) if channel_id else None
+        salon_txt = channel.mention if channel else "salon par défaut"
+        
+        await i.response.edit_message(content=f"✅ Subreddit **r/{self.feed_data['subreddit']}** ajouté ! Publications dans {salon_txt}", view=None)
 
 # ─────────────────────────────── TWITTER/X ───────────────────────────────
 
@@ -2365,23 +2724,32 @@ class AdsTwitterPanel(View):
         x_ch = self.g.get_channel(c.get('ads_twitter_channel', 0))
         x_feeds = c.get('ads_twitter_feeds', [])
         
-        e.add_field(name="📍 Salon", value=x_ch.mention if x_ch else "❌ Non configuré", inline=False)
+        e.add_field(name="📍 Salon par défaut", value=x_ch.mention if x_ch else "❌ Non configuré", inline=False)
         
         if x_feeds:
-            feeds_txt = "\n".join([f"• @{f}" for f in x_feeds[:10]])
+            feeds_txt = ""
+            for f in x_feeds[:10]:
+                if isinstance(f, dict):
+                    name = f.get('username', '?')
+                    feed_ch_id = f.get('channel_id', 0)
+                    feed_ch = self.g.get_channel(feed_ch_id) if feed_ch_id else None
+                    salon_txt = f" → {feed_ch.mention}" if feed_ch else ""
+                    feeds_txt += f"• @{name}{salon_txt}\n"
+                else:
+                    feeds_txt += f"• @{f}\n"
             e.add_field(name=f"👤 Comptes suivis ({len(x_feeds)})", value=feeds_txt, inline=False)
         else:
             e.add_field(name="👤 Comptes suivis", value="*Aucun compte configuré*", inline=False)
         
-        e.set_footer(text="💡 Entrez le nom d'utilisateur sans @ (ex: elonmusk)")
+        e.set_footer(text="💡 Chaque compte peut avoir son propre salon de publication")
         return e
     
-    @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="📍 Salon par défaut", style=discord.ButtonStyle.primary, row=0)
     async def set_channel(self, i, b):
         chs = list(self.g.text_channels)[:25]
         opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
         v = AdsChannelSelectView(self.u, self.g, opts, 'ads_twitter_channel', 'twitter')
-        await i.response.edit_message(embed=discord.Embed(title="📍 Salon Twitter", color=0x1DA1F2), view=v)
+        await i.response.edit_message(embed=discord.Embed(title="📍 Salon Twitter par défaut", color=0x1DA1F2), view=v)
     
     @discord.ui.button(label="➕ Ajouter Compte", style=discord.ButtonStyle.success, row=0)
     async def add_feed(self, i, b):
@@ -2393,7 +2761,12 @@ class AdsTwitterPanel(View):
         feeds = c.get('ads_twitter_feeds', [])
         if not feeds:
             return await i.response.send_message("❌ Aucun compte à supprimer", ephemeral=True)
-        opts = [discord.SelectOption(label=f"@{f}"[:25], value=str(idx)) for idx, f in enumerate(feeds[:25])]
+        opts = []
+        for idx, f in enumerate(feeds[:25]):
+            if isinstance(f, dict):
+                opts.append(discord.SelectOption(label=f"@{f.get('username', str(idx))}"[:25], value=str(idx)))
+            else:
+                opts.append(discord.SelectOption(label=f"@{f}"[:25], value=str(idx)))
         v = AdsFeedRemoveView(self.u, self.g, opts, 'ads_twitter_feeds', 'twitter')
         await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer un compte", color=C.RED), view=v)
     
@@ -2415,14 +2788,54 @@ class AdsTwitterAddModal(Modal, title="➕ Ajouter un compte Twitter"):
         feeds = c.get('ads_twitter_feeds', [])
         
         username = self.username.value.lower().strip().replace('@', '')
-        if username in feeds:
-            return await i.response.send_message("❌ Ce compte est déjà ajouté!", ephemeral=True)
         
-        feeds.append(username)
+        # Vérifier si déjà ajouté
+        for f in feeds:
+            if isinstance(f, dict) and f.get('username') == username:
+                return await i.response.send_message("❌ Ce compte est déjà ajouté!", ephemeral=True)
+            elif isinstance(f, str) and f == username:
+                return await i.response.send_message("❌ Ce compte est déjà ajouté!", ephemeral=True)
+        
+        # Demander le salon
+        chs = list(self.g.text_channels)[:24]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        opts.insert(0, discord.SelectOption(label="📍 Salon par défaut", value="0", description="Utiliser le salon par défaut configuré"))
+        
+        new_feed = {'username': username}
+        v = AdsTwitterChannelSelectView(self.u, self.g, opts, new_feed)
+        await i.response.send_message("📍 Dans quel salon publier les tweets de ce compte ?", view=v, ephemeral=True)
+
+class AdsTwitterChannelSelectView(View):
+    def __init__(self, u, g, opts, feed_data):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+        self.feed_data = feed_data
+        self.add_item(AdsTwitterChannelSelect(u, g, opts, feed_data))
+
+class AdsTwitterChannelSelect(Select):
+    def __init__(self, u, g, opts, feed_data):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+        self.feed_data = feed_data
+    
+    async def callback(self, i):
+        channel_id = int(self.values[0])
+        
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_twitter_feeds', [])
+        
+        if channel_id > 0:
+            self.feed_data['channel_id'] = channel_id
+        
+        feeds.append(self.feed_data)
         await db_set(self.g.id, 'ads_twitter_feeds', feeds)
         
-        v = AdsTwitterPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        channel = self.g.get_channel(channel_id) if channel_id else None
+        salon_txt = channel.mention if channel else "salon par défaut"
+        
+        await i.response.edit_message(content=f"✅ Compte **@{self.feed_data['username']}** ajouté ! Publications dans {salon_txt}", view=None)
 
 # ─────────────────────────────── DISCORD CHANNELS ───────────────────────────────
 
@@ -2439,29 +2852,32 @@ class AdsDiscordPanel(View):
         dc_ch = self.g.get_channel(c.get('ads_discord_channel', 0))
         dc_feeds = c.get('ads_discord_feeds', [])
         
-        e.add_field(name="📍 Salon de destination", value=dc_ch.mention if dc_ch else "❌ Non configuré", inline=False)
+        e.add_field(name="📍 Salon par défaut", value=dc_ch.mention if dc_ch else "❌ Non configuré", inline=False)
         
         if dc_feeds:
             feeds_txt = []
             for f in dc_feeds[:10]:
                 ch = bot.get_channel(int(f['channel_id']))
+                dest_ch_id = f.get('dest_channel_id', 0)
+                dest_ch = self.g.get_channel(dest_ch_id) if dest_ch_id else None
+                dest_txt = f" → {dest_ch.mention}" if dest_ch else ""
                 if ch:
-                    feeds_txt.append(f"• #{ch.name} ({ch.guild.name[:15]})")
+                    feeds_txt.append(f"• #{ch.name} ({ch.guild.name[:15]}){dest_txt}")
                 else:
-                    feeds_txt.append(f"• `{f['channel_id']}` (inaccessible)")
+                    feeds_txt.append(f"• `{f['channel_id']}` (inaccessible){dest_txt}")
             e.add_field(name=f"💬 Salons suivis ({len(dc_feeds)})", value="\n".join(feeds_txt), inline=False)
         else:
             e.add_field(name="💬 Salons suivis", value="*Aucun salon configuré*", inline=False)
         
-        e.set_footer(text="⚠️ Le bot doit être présent sur le serveur du salon à suivre")
+        e.set_footer(text="💡 Chaque source peut avoir son propre salon de destination")
         return e
     
-    @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="📍 Salon par défaut", style=discord.ButtonStyle.primary, row=0)
     async def set_channel(self, i, b):
         chs = list(self.g.text_channels)[:25]
         opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
         v = AdsChannelSelectView(self.u, self.g, opts, 'ads_discord_channel', 'discord')
-        await i.response.edit_message(embed=discord.Embed(title="📍 Salon de destination", color=C.BLURPLE), view=v)
+        await i.response.edit_message(embed=discord.Embed(title="📍 Salon de destination par défaut", color=C.BLURPLE), view=v)
     
     @discord.ui.button(label="➕ Ajouter Salon", style=discord.ButtonStyle.success, row=0)
     async def add_feed(self, i, b):
@@ -2512,11 +2928,46 @@ class AdsDiscordAddModal(Modal, title="➕ Suivre un salon Discord"):
         if any(f['channel_id'] == str(ch_id) for f in feeds):
             return await i.response.send_message("❌ Ce salon est déjà suivi!", ephemeral=True)
         
-        feeds.append({'channel_id': str(ch_id), 'guild_name': ch.guild.name, 'channel_name': ch.name})
+        # Demander le salon de destination
+        chs = list(self.g.text_channels)[:24]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        opts.insert(0, discord.SelectOption(label="📍 Salon par défaut", value="0", description="Utiliser le salon par défaut configuré"))
+        
+        new_feed = {'channel_id': str(ch_id), 'guild_name': ch.guild.name, 'channel_name': ch.name}
+        v = AdsDiscordDestSelectView(self.u, self.g, opts, new_feed)
+        await i.response.send_message(f"📍 Dans quel salon publier les messages de **#{ch.name}** ?", view=v, ephemeral=True)
+
+class AdsDiscordDestSelectView(View):
+    def __init__(self, u, g, opts, feed_data):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+        self.feed_data = feed_data
+        self.add_item(AdsDiscordDestSelect(u, g, opts, feed_data))
+
+class AdsDiscordDestSelect(Select):
+    def __init__(self, u, g, opts, feed_data):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+        self.feed_data = feed_data
+    
+    async def callback(self, i):
+        channel_id = int(self.values[0])
+        
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_discord_feeds', [])
+        
+        if channel_id > 0:
+            self.feed_data['dest_channel_id'] = channel_id
+        
+        feeds.append(self.feed_data)
         await db_set(self.g.id, 'ads_discord_feeds', feeds)
         
-        v = AdsDiscordPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        channel = self.g.get_channel(channel_id) if channel_id else None
+        salon_txt = channel.mention if channel else "salon par défaut"
+        
+        await i.response.edit_message(content=f"✅ Salon **#{self.feed_data['channel_name']}** suivi ! Publications dans {salon_txt}", view=None)
 
 # ─────────────────────────────── ROSOCIAL ───────────────────────────────
 
@@ -2533,23 +2984,32 @@ class AdsRoSocialPanel(View):
         rs_ch = self.g.get_channel(c.get('ads_rosocial_channel', 0))
         rs_feeds = c.get('ads_rosocial_feeds', [])
         
-        e.add_field(name="📍 Salon", value=rs_ch.mention if rs_ch else "❌ Non configuré", inline=False)
+        e.add_field(name="📍 Salon par défaut", value=rs_ch.mention if rs_ch else "❌ Non configuré", inline=False)
         
         if rs_feeds:
-            feeds_txt = "\n".join([f"• `{f}`" for f in rs_feeds[:10]])
+            feeds_txt = ""
+            for f in rs_feeds[:10]:
+                if isinstance(f, dict):
+                    name = f.get('username', '?')
+                    feed_ch_id = f.get('channel_id', 0)
+                    feed_ch = self.g.get_channel(feed_ch_id) if feed_ch_id else None
+                    salon_txt = f" → {feed_ch.mention}" if feed_ch else ""
+                    feeds_txt += f"• `{name}`{salon_txt}\n"
+                else:
+                    feeds_txt += f"• `{f}`\n"
             e.add_field(name=f"👤 Profils suivis ({len(rs_feeds)})", value=feeds_txt, inline=False)
         else:
             e.add_field(name="👤 Profils suivis", value="*Aucun profil configuré*", inline=False)
         
-        e.set_footer(text="💡 Entrez le nom d'utilisateur RoSocial (ex: GoRipe)")
+        e.set_footer(text="💡 Chaque profil peut avoir son propre salon de publication")
         return e
     
-    @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="📍 Salon par défaut", style=discord.ButtonStyle.primary, row=0)
     async def set_channel(self, i, b):
         chs = list(self.g.text_channels)[:25]
         opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
         v = AdsChannelSelectView(self.u, self.g, opts, 'ads_rosocial_channel', 'rosocial')
-        await i.response.edit_message(embed=discord.Embed(title="📍 Salon RoSocial", color=0x00D4AA), view=v)
+        await i.response.edit_message(embed=discord.Embed(title="📍 Salon RoSocial par défaut", color=0x00D4AA), view=v)
     
     @discord.ui.button(label="➕ Ajouter Profil", style=discord.ButtonStyle.success, row=0)
     async def add_feed(self, i, b):
@@ -2561,7 +3021,12 @@ class AdsRoSocialPanel(View):
         feeds = c.get('ads_rosocial_feeds', [])
         if not feeds:
             return await i.response.send_message("❌ Aucun profil à supprimer", ephemeral=True)
-        opts = [discord.SelectOption(label=f[:25], value=str(idx)) for idx, f in enumerate(feeds[:25])]
+        opts = []
+        for idx, f in enumerate(feeds[:25]):
+            if isinstance(f, dict):
+                opts.append(discord.SelectOption(label=f.get('username', str(idx))[:25], value=str(idx)))
+            else:
+                opts.append(discord.SelectOption(label=str(f)[:25], value=str(idx)))
         v = AdsFeedRemoveView(self.u, self.g, opts, 'ads_rosocial_feeds', 'rosocial')
         await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer un profil", color=C.RED), view=v)
     
@@ -2583,14 +3048,54 @@ class AdsRoSocialAddModal(Modal, title="➕ Ajouter un profil RoSocial"):
         feeds = c.get('ads_rosocial_feeds', [])
         
         username = self.username.value.strip()
-        if username.lower() in [f.lower() for f in feeds]:
-            return await i.response.send_message("❌ Ce profil est déjà ajouté!", ephemeral=True)
         
-        feeds.append(username)
+        # Vérifier si déjà ajouté
+        for f in feeds:
+            if isinstance(f, dict) and f.get('username', '').lower() == username.lower():
+                return await i.response.send_message("❌ Ce profil est déjà ajouté!", ephemeral=True)
+            elif isinstance(f, str) and f.lower() == username.lower():
+                return await i.response.send_message("❌ Ce profil est déjà ajouté!", ephemeral=True)
+        
+        # Demander le salon
+        chs = list(self.g.text_channels)[:24]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        opts.insert(0, discord.SelectOption(label="📍 Salon par défaut", value="0", description="Utiliser le salon par défaut configuré"))
+        
+        new_feed = {'username': username}
+        v = AdsRoSocialChannelSelectView(self.u, self.g, opts, new_feed)
+        await i.response.send_message("📍 Dans quel salon publier les posts de ce profil ?", view=v, ephemeral=True)
+
+class AdsRoSocialChannelSelectView(View):
+    def __init__(self, u, g, opts, feed_data):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+        self.feed_data = feed_data
+        self.add_item(AdsRoSocialChannelSelect(u, g, opts, feed_data))
+
+class AdsRoSocialChannelSelect(Select):
+    def __init__(self, u, g, opts, feed_data):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+        self.feed_data = feed_data
+    
+    async def callback(self, i):
+        channel_id = int(self.values[0])
+        
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_rosocial_feeds', [])
+        
+        if channel_id > 0:
+            self.feed_data['channel_id'] = channel_id
+        
+        feeds.append(self.feed_data)
         await db_set(self.g.id, 'ads_rosocial_feeds', feeds)
         
-        v = AdsRoSocialPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        channel = self.g.get_channel(channel_id) if channel_id else None
+        salon_txt = channel.mention if channel else "salon par défaut"
+        
+        await i.response.edit_message(content=f"✅ Profil **{self.feed_data['username']}** ajouté ! Publications dans {salon_txt}", view=None)
 
 # ─────────────────────────────── COMMON VIEWS ───────────────────────────────
 
@@ -2674,7 +3179,12 @@ class CentrePanel(View):
         
         e.add_field(
             name="🎁 Cadeau (Giveaway)",
-            value="Créez et gérez des cadeaux pour votre communauté",
+            value="Créez et gérez des cadeaux avec conditions personnalisées",
+            inline=False
+        )
+        e.add_field(
+            name="📢 Annonces",
+            value="Envoyez de belles annonces dans vos salons",
             inline=False
         )
         e.add_field(
@@ -2691,6 +3201,11 @@ class CentrePanel(View):
         v = GiveawayPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
+    @discord.ui.button(label="📢 Annonce", style=discord.ButtonStyle.primary, row=0)
+    async def announcement(self, i, b):
+        v = AnnouncementPanel(self.u, self.g)
+        await i.response.edit_message(embed=v.embed(), view=v)
+    
     @discord.ui.button(label="📨 Messages", style=discord.ButtonStyle.primary, row=0)
     async def messages(self, i, b):
         v = MessagePanel(self.u, self.g)
@@ -2700,6 +3215,187 @@ class CentrePanel(View):
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           📢 ANNONCE PANEL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class AnnouncementPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    def embed(self):
+        e = discord.Embed(title="📢 Système d'Annonces", color=C.YELLOW)
+        e.description = (
+            "Créez de belles annonces pour votre serveur.\n"
+            "Les annonces sont envoyées une seule fois et ne sont pas stockées."
+        )
+        
+        e.add_field(
+            name="✨ Fonctionnalités",
+            value=(
+                "• Titre personnalisé\n"
+                "• Description détaillée\n"
+                "• Couleur au choix\n"
+                "• Image optionnelle\n"
+                "• Mention optionnelle (@everyone, @here, rôle)"
+            ),
+            inline=False
+        )
+        
+        e.set_footer(text="💡 L'annonce sera envoyée immédiatement après création")
+        return e
+    
+    @discord.ui.button(label="📢 Créer une Annonce", style=discord.ButtonStyle.success, row=0)
+    async def create(self, i, b):
+        await i.response.send_modal(AnnouncementCreateModal(self.u, self.g))
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = CentrePanel(self.u, self.g)
+        await i.response.edit_message(embed=v.embed(), view=v)
+
+class AnnouncementCreateModal(Modal):
+    def __init__(self, u, g):
+        super().__init__(title="📢 Créer une Annonce")
+        self.u = u
+        self.g = g
+        
+        self.title_input = TextInput(
+            label="Titre de l'annonce",
+            placeholder="Ex: 🎉 Grande Mise à Jour !",
+            max_length=100
+        )
+        self.description_input = TextInput(
+            label="Description",
+            placeholder="Décrivez votre annonce en détail...",
+            style=discord.TextStyle.paragraph,
+            max_length=2000
+        )
+        self.color_input = TextInput(
+            label="Couleur (hex)",
+            placeholder="#FF5733 ou rouge, bleu, vert, jaune, violet",
+            required=False,
+            max_length=20,
+            default="#5865F2"
+        )
+        self.image_input = TextInput(
+            label="URL de l'image (optionnel)",
+            placeholder="https://...",
+            required=False,
+            max_length=500
+        )
+        self.mention_input = TextInput(
+            label="Mention (optionnel)",
+            placeholder="@everyone, @here, ou ID de rôle",
+            required=False,
+            max_length=50
+        )
+        
+        self.add_item(self.title_input)
+        self.add_item(self.description_input)
+        self.add_item(self.color_input)
+        self.add_item(self.image_input)
+        self.add_item(self.mention_input)
+    
+    async def on_submit(self, i):
+        # Parser la couleur
+        color_str = self.color_input.value.strip().lower() if self.color_input.value else "#5865F2"
+        color_map = {
+            'rouge': 0xFF0000, 'red': 0xFF0000,
+            'bleu': 0x0066FF, 'blue': 0x0066FF,
+            'vert': 0x00FF00, 'green': 0x00FF00,
+            'jaune': 0xFFFF00, 'yellow': 0xFFFF00,
+            'violet': 0x9B59B6, 'purple': 0x9B59B6,
+            'orange': 0xFF8C00,
+            'rose': 0xFF69B4, 'pink': 0xFF69B4,
+            'cyan': 0x00FFFF,
+            'blanc': 0xFFFFFF, 'white': 0xFFFFFF,
+            'noir': 0x000000, 'black': 0x000000,
+        }
+        
+        if color_str in color_map:
+            color = color_map[color_str]
+        else:
+            try:
+                color = int(color_str.replace('#', ''), 16)
+            except:
+                color = C.BLURPLE
+        
+        # Sauvegarder les données et demander le salon
+        announcement_data = {
+            'title': self.title_input.value,
+            'description': self.description_input.value,
+            'color': color,
+            'image_url': self.image_input.value or None,
+            'mention': self.mention_input.value or None
+        }
+        
+        channels = list(self.g.text_channels)[:25]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in channels]
+        v = AnnouncementChannelSelectView(self.u, self.g, opts, announcement_data)
+        await i.response.send_message("📍 **Sélectionnez le salon** où envoyer l'annonce:", view=v, ephemeral=True)
+
+class AnnouncementChannelSelectView(View):
+    def __init__(self, u, g, opts, data):
+        super().__init__(timeout=120)
+        self.add_item(AnnouncementChannelSelect(u, g, opts, data))
+
+class AnnouncementChannelSelect(Select):
+    def __init__(self, u, g, opts, data):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+        self.data = data
+    
+    async def callback(self, i):
+        channel_id = int(self.values[0])
+        channel = self.g.get_channel(channel_id)
+        
+        if not channel:
+            return await i.response.edit_message(content="❌ Salon introuvable", view=None)
+        
+        # Créer l'embed d'annonce
+        e = discord.Embed(color=self.data['color'])
+        
+        # Titre stylisé
+        e.title = self.data['title']
+        
+        # Description formatée
+        e.description = (
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"{self.data['description']}\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        )
+        
+        # Image
+        if self.data['image_url']:
+            e.set_image(url=self.data['image_url'])
+        
+        # Footer
+        e.set_footer(text=f"📢 Annonce par {self.u.display_name}", icon_url=self.u.display_avatar.url if self.u.display_avatar else None)
+        e.timestamp = now()
+        
+        # Préparer le contenu de mention
+        content = None
+        mention = self.data.get('mention', '')
+        if mention:
+            mention_lower = mention.lower().strip()
+            if mention_lower == '@everyone':
+                content = "@everyone"
+            elif mention_lower == '@here':
+                content = "@here"
+            elif mention.isdigit():
+                content = f"<@&{mention}>"
+        
+        # Envoyer l'annonce
+        try:
+            await channel.send(content=content, embed=e)
+            await i.response.edit_message(content=f"✅ **Annonce envoyée** dans {channel.mention} !", view=None)
+        except Exception as ex:
+            await i.response.edit_message(content=f"❌ Erreur: {ex}", view=None)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🎁 GIVEAWAY (CADEAU) PANEL
@@ -2713,7 +3409,7 @@ class GiveawayPanel(View):
     
     async def embed(self):
         e = discord.Embed(title="🎁 Gestion des Cadeaux", color=C.GREEN)
-        e.description = "Créez des cadeaux pour récompenser votre communauté active !"
+        e.description = "Créez des cadeaux pour récompenser votre communauté !"
         
         # Compter les giveaways actifs
         active_count = 0
@@ -2735,12 +3431,18 @@ class GiveawayPanel(View):
         )
         
         e.add_field(
-            name="⚠️ Condition de participation",
-            value="Les membres **AFK depuis plus de 7 jours** ne peuvent pas participer !",
+            name="✨ Conditions personnalisables",
+            value=(
+                "• 📝 Nombre minimum de messages\n"
+                "• 🎤 Temps minimum en vocal\n"
+                "• 🎭 Rôle obligatoire\n"
+                "• 📅 Ancienneté minimum\n"
+                "• ❌ Pas AFK (configurable)"
+            ),
             inline=False
         )
         
-        e.set_footer(text="💡 Créez un nouveau cadeau ou gérez les existants")
+        e.set_footer(text="💡 Créez un cadeau avec ou sans conditions")
         return e
     
     @discord.ui.button(label="➕ Créer un Cadeau", style=discord.ButtonStyle.success, row=0)
@@ -2784,20 +3486,153 @@ class GiveawayCreateModal(Modal):
         if seconds <= 0:
             return await i.response.send_message("❌ Durée invalide ! Utilisez: 30s, 5m, 2h, 1d, 1w", ephemeral=True)
         
-        # Sauvegarder temporairement et demander le salon
+        # Sauvegarder temporairement
         giveaway_data = {
             'title': self.title_input.value,
             'description': self.description_input.value,
             'prize': self.prize_input.value,
             'duration_seconds': seconds,
-            'image_url': self.image_input.value or None
+            'image_url': self.image_input.value or None,
+            'conditions': {}  # Conditions vides par défaut
         }
         
+        # Afficher le panneau de conditions
+        v = GiveawayConditionsPanel(self.u, self.g, giveaway_data)
+        await i.response.send_message(embed=v.embed(), view=v, ephemeral=True)
+
+class GiveawayConditionsPanel(View):
+    def __init__(self, u, g, data):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.data = data
+    
+    def embed(self):
+        e = discord.Embed(title="⚙️ Conditions de Participation", color=C.ORANGE)
+        e.description = "Configurez les conditions pour participer au cadeau.\n**Laissez vide = tout le monde peut participer**"
+        
+        conditions = self.data.get('conditions', {})
+        
+        # Messages minimum
+        min_msgs = conditions.get('min_messages', 0)
+        e.add_field(name="📝 Messages minimum", value=f"`{min_msgs}`" if min_msgs else "*Aucun*", inline=True)
+        
+        # Temps vocal minimum (en minutes)
+        min_vocal = conditions.get('min_vocal_minutes', 0)
+        e.add_field(name="🎤 Vocal minimum", value=f"`{min_vocal} min`" if min_vocal else "*Aucun*", inline=True)
+        
+        # Rôle requis
+        role_id = conditions.get('required_role', 0)
+        role = self.g.get_role(role_id) if role_id else None
+        e.add_field(name="🎭 Rôle requis", value=role.mention if role else "*Aucun*", inline=True)
+        
+        # Ancienneté minimum (en jours)
+        min_days = conditions.get('min_account_days', 0)
+        e.add_field(name="📅 Ancienneté", value=f"`{min_days} jours`" if min_days else "*Aucun*", inline=True)
+        
+        # AFK check
+        no_afk = conditions.get('no_afk', True)
+        afk_days = conditions.get('afk_days', 7)
+        e.add_field(name="❌ Pas AFK", value=f"`{afk_days} jours`" if no_afk else "*Désactivé*", inline=True)
+        
+        e.set_footer(text="💡 Cliquez sur Publier quand vous avez fini")
+        return e
+    
+    @discord.ui.button(label="📝 Messages min", style=discord.ButtonStyle.secondary, row=0)
+    async def set_messages(self, i, b):
+        await i.response.send_modal(GiveawayConditionModal(self, 'min_messages', "Nombre minimum de messages", "Ex: 100"))
+    
+    @discord.ui.button(label="🎤 Vocal min", style=discord.ButtonStyle.secondary, row=0)
+    async def set_vocal(self, i, b):
+        await i.response.send_modal(GiveawayConditionModal(self, 'min_vocal_minutes', "Minutes minimum en vocal", "Ex: 60"))
+    
+    @discord.ui.button(label="🎭 Rôle requis", style=discord.ButtonStyle.secondary, row=0)
+    async def set_role(self, i, b):
+        roles = [r for r in self.g.roles if not r.is_default() and not r.is_bot_managed()][:24]
+        opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
+        opts.insert(0, discord.SelectOption(label="❌ Aucun rôle requis", value="0"))
+        v = GiveawayRoleSelectView(self, opts)
+        await i.response.edit_message(embed=discord.Embed(title="🎭 Sélectionner le rôle requis", color=C.ORANGE), view=v)
+    
+    @discord.ui.button(label="📅 Ancienneté", style=discord.ButtonStyle.secondary, row=1)
+    async def set_account_age(self, i, b):
+        await i.response.send_modal(GiveawayConditionModal(self, 'min_account_days', "Jours d'ancienneté minimum", "Ex: 30"))
+    
+    @discord.ui.button(label="❌ AFK", style=discord.ButtonStyle.secondary, row=1)
+    async def set_afk(self, i, b):
+        await i.response.send_modal(GiveawayConditionModal(self, 'afk_days', "Jours AFK max (0 = désactivé)", "Ex: 7 (ou 0 pour désactiver)"))
+    
+    @discord.ui.button(label="✅ Publier le Cadeau", style=discord.ButtonStyle.success, row=2)
+    async def publish(self, i, b):
         # Demander le salon
         channels = list(self.g.text_channels)[:25]
         opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in channels]
-        v = GiveawayChannelSelectView(self.u, self.g, opts, giveaway_data)
-        await i.response.send_message("📢 **Sélectionnez le salon** où publier le cadeau:", view=v, ephemeral=True)
+        v = GiveawayChannelSelectView(self.u, self.g, opts, self.data)
+        await i.response.edit_message(content="📢 **Sélectionnez le salon** où publier le cadeau:", embed=None, view=v)
+    
+    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.danger, row=2)
+    async def cancel(self, i, b):
+        await i.response.edit_message(content="❌ Création annulée", embed=None, view=None)
+
+class GiveawayConditionModal(Modal):
+    def __init__(self, panel, condition_key, label, placeholder):
+        super().__init__(title=f"⚙️ {label}")
+        self.panel = panel
+        self.condition_key = condition_key
+        
+        current_val = self.panel.data.get('conditions', {}).get(condition_key, '')
+        self.value_input = TextInput(
+            label=label,
+            placeholder=placeholder,
+            required=False,
+            default=str(current_val) if current_val else ""
+        )
+        self.add_item(self.value_input)
+    
+    async def on_submit(self, i):
+        try:
+            value = int(self.value_input.value) if self.value_input.value else 0
+        except:
+            value = 0
+        
+        if 'conditions' not in self.panel.data:
+            self.panel.data['conditions'] = {}
+        
+        if value > 0:
+            self.panel.data['conditions'][self.condition_key] = value
+            # Gérer le cas spécial de no_afk
+            if self.condition_key == 'afk_days':
+                self.panel.data['conditions']['no_afk'] = True
+        else:
+            self.panel.data['conditions'].pop(self.condition_key, None)
+            if self.condition_key == 'afk_days':
+                self.panel.data['conditions']['no_afk'] = False
+        
+        await i.response.edit_message(embed=self.panel.embed(), view=self.panel)
+
+class GiveawayRoleSelectView(View):
+    def __init__(self, panel, opts):
+        super().__init__(timeout=120)
+        self.panel = panel
+        self.add_item(GiveawayRoleSelect(panel, opts))
+
+class GiveawayRoleSelect(Select):
+    def __init__(self, panel, opts):
+        super().__init__(placeholder="Choisir un rôle...", options=opts)
+        self.panel = panel
+    
+    async def callback(self, i):
+        role_id = int(self.values[0])
+        
+        if 'conditions' not in self.panel.data:
+            self.panel.data['conditions'] = {}
+        
+        if role_id > 0:
+            self.panel.data['conditions']['required_role'] = role_id
+        else:
+            self.panel.data['conditions'].pop('required_role', None)
+        
+        await i.response.edit_message(embed=self.panel.embed(), view=self.panel)
 
 def parse_duration_to_seconds(duration_str):
     """Convertit une durée (1h, 2d, etc.) en secondes"""
@@ -2847,11 +3682,35 @@ class GiveawayChannelSelect(Select):
         e.add_field(name="🏆 À Gagner", value=f"```{self.data['prize']}```", inline=False)
         e.add_field(name="⏰ Fin", value=f"<t:{int(end_time.timestamp())}:R>", inline=True)
         e.add_field(name="👥 Participants", value="```0```", inline=True)
-        e.add_field(
-            name="📋 Conditions",
-            value="• Ne pas être AFK depuis plus de 7 jours\n• Cliquez sur le bouton pour participer",
-            inline=False
-        )
+        
+        # Construire le texte des conditions
+        conditions = self.data.get('conditions', {})
+        conditions_txt = ""
+        
+        if conditions.get('min_messages', 0) > 0:
+            conditions_txt += f"• 📝 Minimum **{conditions['min_messages']}** messages\n"
+        
+        if conditions.get('min_vocal_minutes', 0) > 0:
+            conditions_txt += f"• 🎤 Minimum **{conditions['min_vocal_minutes']}** minutes en vocal\n"
+        
+        if conditions.get('required_role', 0) > 0:
+            role = self.g.get_role(conditions['required_role'])
+            if role:
+                conditions_txt += f"• 🎭 Rôle requis: {role.mention}\n"
+        
+        if conditions.get('min_account_days', 0) > 0:
+            conditions_txt += f"• 📅 Compte d'au moins **{conditions['min_account_days']}** jours\n"
+        
+        if conditions.get('no_afk', True):
+            afk_days = conditions.get('afk_days', 7)
+            conditions_txt += f"• ❌ Ne pas être AFK depuis **{afk_days}** jours\n"
+        
+        if not conditions_txt:
+            conditions_txt = "• ✅ Aucune condition - Tout le monde peut participer !"
+        
+        conditions_txt += "\n*Cliquez sur le bouton pour participer*"
+        
+        e.add_field(name="📋 Conditions", value=conditions_txt, inline=False)
         
         if self.data['image_url']:
             e.set_image(url=self.data['image_url'])
@@ -2863,16 +3722,18 @@ class GiveawayChannelSelect(Select):
         giveaway_view = GiveawayParticipateView()
         msg = await channel.send(embed=e, view=giveaway_view)
         
-        # Sauvegarder en BDD
+        # Sauvegarder en BDD avec les conditions
         try:
             async with aiosqlite.connect(DB_PATH) as db:
                 await db.execute('''
-                    INSERT INTO giveaways (guild_id, channel_id, message_id, title, description, prize, image_url, end_time, created_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO giveaways (guild_id, channel_id, message_id, title, description, prize, image_url, end_time, conditions, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     self.g.id, channel_id, msg.id,
                     self.data['title'], self.data['description'], self.data['prize'],
-                    self.data['image_url'], end_time.isoformat(), self.u.id
+                    self.data['image_url'], end_time.isoformat(), 
+                    json.dumps(conditions),
+                    self.u.id
                 ))
                 await db.commit()
         except Exception as ex:
@@ -2886,22 +3747,11 @@ class GiveawayParticipateView(View):
     
     @discord.ui.button(label="🎉 Participer", style=discord.ButtonStyle.success, custom_id="giveaway_participate")
     async def participate(self, i, b):
-        # Vérifier si le membre n'est pas AFK
-        is_afk = await check_member_afk(i.guild.id, i.user.id, days=7)
-        
-        if is_afk:
-            return await i.response.send_message(
-                "❌ **Vous ne pouvez pas participer !**\n\n"
-                "Vous êtes considéré comme **inactif** depuis plus de 7 jours.\n"
-                "Envoyez des messages ou rejoignez un vocal pour redevenir actif.",
-                ephemeral=True
-            )
-        
-        # Récupérer le giveaway
+        # Récupérer le giveaway et ses conditions
         try:
             async with aiosqlite.connect(DB_PATH) as db:
                 async with db.execute(
-                    'SELECT id, participants, ended FROM giveaways WHERE message_id=?',
+                    'SELECT id, participants, ended, conditions FROM giveaways WHERE message_id=?',
                     (i.message.id,)
                 ) as cursor:
                     row = await cursor.fetchone()
@@ -2909,7 +3759,7 @@ class GiveawayParticipateView(View):
                     if not row:
                         return await i.response.send_message("❌ Cadeau introuvable", ephemeral=True)
                     
-                    giveaway_id, participants_str, ended = row
+                    giveaway_id, participants_str, ended, conditions_str = row
                     
                     if ended:
                         return await i.response.send_message("❌ Ce cadeau est terminé !", ephemeral=True)
@@ -2919,6 +3769,64 @@ class GiveawayParticipateView(View):
                     if i.user.id in participants:
                         return await i.response.send_message("✅ Vous participez déjà !", ephemeral=True)
                     
+                    # Charger les conditions
+                    conditions = json.loads(conditions_str) if conditions_str else {}
+                    
+                    # Vérifier toutes les conditions
+                    failed_conditions = []
+                    member = i.user
+                    
+                    # 1. Vérifier AFK
+                    if conditions.get('no_afk', True):
+                        afk_days = conditions.get('afk_days', 7)
+                        is_afk = await check_member_afk(i.guild.id, i.user.id, days=afk_days)
+                        if is_afk:
+                            failed_conditions.append(f"❌ Vous êtes **inactif** depuis plus de {afk_days} jours")
+                    
+                    # 2. Vérifier les messages minimum
+                    if conditions.get('min_messages', 0) > 0:
+                        async with db.execute(
+                            'SELECT total_messages FROM activity_tracking WHERE guild_id=? AND user_id=?',
+                            (i.guild.id, i.user.id)
+                        ) as cursor2:
+                            msg_row = await cursor2.fetchone()
+                            user_msgs = msg_row[0] if msg_row else 0
+                            if user_msgs < conditions['min_messages']:
+                                failed_conditions.append(f"📝 Vous avez **{user_msgs}** messages (minimum: **{conditions['min_messages']}**)")
+                    
+                    # 3. Vérifier le temps vocal minimum
+                    if conditions.get('min_vocal_minutes', 0) > 0:
+                        async with db.execute(
+                            'SELECT total_vocal_time FROM activity_tracking WHERE guild_id=? AND user_id=?',
+                            (i.guild.id, i.user.id)
+                        ) as cursor2:
+                            vocal_row = await cursor2.fetchone()
+                            # total_vocal_time est en secondes, convertir en minutes
+                            user_vocal_seconds = vocal_row[0] if vocal_row and vocal_row[0] else 0
+                            user_vocal_minutes = user_vocal_seconds // 60
+                            if user_vocal_minutes < conditions['min_vocal_minutes']:
+                                failed_conditions.append(f"🎤 Vous avez **{user_vocal_minutes}** min en vocal (minimum: **{conditions['min_vocal_minutes']}**)")
+                    
+                    # 4. Vérifier le rôle requis
+                    if conditions.get('required_role', 0) > 0:
+                        role = i.guild.get_role(conditions['required_role'])
+                        if role and role not in member.roles:
+                            failed_conditions.append(f"🎭 Vous devez avoir le rôle **{role.name}**")
+                    
+                    # 5. Vérifier l'ancienneté du compte
+                    if conditions.get('min_account_days', 0) > 0:
+                        account_age = (now() - member.created_at.replace(tzinfo=None)).days
+                        if account_age < conditions['min_account_days']:
+                            failed_conditions.append(f"📅 Votre compte a **{account_age}** jours (minimum: **{conditions['min_account_days']}**)")
+                    
+                    # Si des conditions ne sont pas remplies
+                    if failed_conditions:
+                        error_msg = "❌ **Vous ne pouvez pas participer !**\n\n**Conditions non remplies:**\n"
+                        error_msg += "\n".join(failed_conditions)
+                        error_msg += "\n\n*Remplissez ces conditions pour pouvoir participer.*"
+                        return await i.response.send_message(error_msg, ephemeral=True)
+                    
+                    # Toutes les conditions sont remplies, ajouter le participant
                     participants.append(i.user.id)
                     
                     await db.execute(
@@ -5029,6 +5937,10 @@ async def on_message(msg):
         ag = c.get('image_allowed', [])
         iag = gt and gt in ag
         
+        # ⚠️ VÉRIFIER SI LE SALON EST IMMUNISÉ
+        if await is_channel_immune(msg.guild.id, chid):
+            return  # Salon immunisé = ignorer toute l'automodération
+        
         # Config salon spécifique
         chcf = c.get('channel_configs', {}).get(str(chid))
         if chcf and not (iag and chcf.get('gifs', True)):
@@ -6562,15 +7474,26 @@ async def check_social_feeds():
 
 async def check_youtube_feeds(session, guild, data):
     """Vérifie les nouvelles vidéos YouTube"""
-    channel = guild.get_channel(data.get('ads_youtube_channel', 0))
+    default_channel = guild.get_channel(data.get('ads_youtube_channel', 0))
     feeds = data.get('ads_youtube_feeds', [])
-    if not channel or not feeds:
+    if not feeds:
         return
     
     for feed in feeds:
         try:
-            channel_id = feed['id']
-            channel_name = feed['name']
+            # Support ancien et nouveau format
+            if isinstance(feed, dict):
+                channel_id = feed.get('id', '')
+                channel_name = feed.get('name', 'YouTube')
+                # Utiliser le salon spécifique ou le salon par défaut
+                feed_channel_id = feed.get('channel_id', 0)
+                target_channel = guild.get_channel(feed_channel_id) if feed_channel_id else default_channel
+            else:
+                continue
+            
+            if not target_channel:
+                continue
+            
             rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
             
             async with session.get(rss_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
@@ -6645,7 +7568,7 @@ async def check_youtube_feeds(session, guild, data):
             )
             e.timestamp = now()
             
-            await channel.send(embed=e)
+            await target_channel.send(embed=e)
             await asyncio.sleep(1)
             
         except Exception as ex:
