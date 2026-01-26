@@ -1,8 +1,14 @@
 [phases.setup]
-nixPkgs = ["python312"]
+nixPkgs = ["python311"]
 
 [phases.install]
-cmds = ["pip install -r requirements.txt"]
+cmds = ["pip install -r requirements.txt --no-cache-dir"]
+
+[phases.build]
+cmds = []
 
 [start]
-cmd = "python bot.py"
+cmd = "python3 bot.py"
+
+[caches]
+pip = "/root/.cache/pip"
