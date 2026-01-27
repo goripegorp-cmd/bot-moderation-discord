@@ -775,7 +775,11 @@ async def create_ticket(i, pid, ans=None):
         c = await cfg(i.guild.id)
         pnl = c.get('ticket_panels', {}).get(pid, {})
         cat = i.guild.get_channel(pnl.get('category', 0))
-        staff = i.guild.get_role(c.get('ticket_staff', 0))
+        
+        # Utiliser le rôle staff du panel, sinon le rôle staff global
+        staff_role_id = pnl.get('staff_role', 0) or c.get('ticket_staff', 0)
+        staff = i.guild.get_role(staff_role_id)
+        
         mx = pnl.get('max', 1)
         if not cat: return None, "❌ Catégorie non configurée"
         if await count_user_tickets(i.guild, i.user.id, pid) >= mx:
@@ -1094,6 +1098,11 @@ class MainPanel(View):
     @discord.ui.button(label="Mini-Jeux", emoji="🎮", style=discord.ButtonStyle.primary, row=3)
     async def minigames(self, i, b):
         v = MiniGamesPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="Aide Auto", emoji="💡", style=discord.ButtonStyle.primary, row=3)
+    async def auto_help(self, i, b):
+        v = AutoHelpPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger, row=4)
@@ -4797,8 +4806,344 @@ class CmdChannelSelectMenu(Select):
         await i.response.edit_message(view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#                           💡 SYSTÈME D'AIDE AUTOMATIQUE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Cache pour stocker les IDs des messages d'aide actuels
+auto_help_messages = {}  # {channel_id: message_id}
+
+class AutoHelpPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        auto_helps = c.get('auto_help_channels', {})
+        
+        e = discord.Embed(title="💡 Messages d'Aide Automatiques", color=0x3498DB)
+        e.description = "Configurez des messages d'aide qui restent toujours en bas du salon.\n\n*À chaque nouveau message, l'aide se repositionne en bas automatiquement.*"
+        
+        if auto_helps:
+            help_list = []
+            for ch_id, help_data in list(auto_helps.items())[:10]:
+                ch = self.g.get_channel(int(ch_id))
+                if ch:
+                    title = help_data.get('title', 'Aide')[:30]
+                    help_list.append(f"• {ch.mention} - **{title}**")
+            if help_list:
+                e.add_field(name=f"📋 Salons configurés ({len(auto_helps)})", value="\n".join(help_list), inline=False)
+        else:
+            e.add_field(name="📋 Salons configurés", value="*Aucun salon configuré*", inline=False)
+        
+        e.set_footer(text="💡 L'aide est renvoyée automatiquement après chaque message")
+        return e
+    
+    @discord.ui.button(label="➕ Ajouter un salon", style=discord.ButtonStyle.success, row=0)
+    async def add_channel(self, i, b):
+        v = AutoHelpChannelSelect(self.u, self.g)
+        await i.response.edit_message(
+            embed=discord.Embed(title="📍 Choisir le salon", description="Sélectionnez le salon où afficher l'aide automatique", color=0x3498DB),
+            view=v
+        )
+    
+    @discord.ui.button(label="📋 Gérer les aides", style=discord.ButtonStyle.primary, row=0)
+    async def manage_helps(self, i, b):
+        c = await cfg(self.g.id)
+        auto_helps = c.get('auto_help_channels', {})
+        if not auto_helps:
+            return await i.response.send_message("❌ Aucun salon configuré", ephemeral=True)
+        
+        v = AutoHelpManageView(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = MainPanel(self.u, self.g)
+        await i.response.edit_message(embed=v.embed(), view=v)
+
+class AutoHelpChannelSelect(View):
+    def __init__(self, u, g, page=0):
+        super().__init__(timeout=180)
+        self.u = u
+        self.g = g
+        self.page = page
+        self.channels = list(g.text_channels)
+        self.max_page = max(0, (len(self.channels) - 1) // 24)
+        self._build()
+    
+    def _build(self):
+        start = self.page * 24
+        end = start + 24
+        page_channels = self.channels[start:end]
+        
+        opts = []
+        for ch in page_channels:
+            desc = ch.category.name[:50] if ch.category else "Sans catégorie"
+            opts.append(discord.SelectOption(label=f"# {ch.name}"[:25], value=str(ch.id), description=desc))
+        
+        if opts:
+            self.add_item(AutoHelpChannelSelectMenu(self, opts))
+        
+        if self.page > 0:
+            btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.secondary, row=1)
+            btn.callback = self.prev_page
+            self.add_item(btn)
+        
+        if self.page < self.max_page:
+            btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.secondary, row=1)
+            btn.callback = self.next_page
+            self.add_item(btn)
+        
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=1)
+        back_btn.callback = self.go_back
+        self.add_item(back_btn)
+    
+    async def prev_page(self, i):
+        v = AutoHelpChannelSelect(self.u, self.g, self.page - 1)
+        await i.response.edit_message(view=v)
+    
+    async def next_page(self, i):
+        v = AutoHelpChannelSelect(self.u, self.g, self.page + 1)
+        await i.response.edit_message(view=v)
+    
+    async def go_back(self, i):
+        v = AutoHelpPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class AutoHelpChannelSelectMenu(Select):
+    def __init__(self, parent, opts):
+        super().__init__(placeholder=f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un salon...", options=opts)
+        self.parent = parent
+    
+    async def callback(self, i):
+        channel_id = self.values[0]
+        await i.response.send_modal(AutoHelpConfigModal(self.parent.u, self.parent.g, channel_id))
+
+class AutoHelpConfigModal(Modal, title="💡 Configurer l'aide automatique"):
+    help_title = TextInput(
+        label="Titre de l'aide",
+        placeholder="Ex: Comment faire une suggestion ?",
+        max_length=100
+    )
+    help_content = TextInput(
+        label="Contenu de l'aide",
+        placeholder="Ex: Utilisez la commande /suggestion pour proposer une idée !",
+        style=discord.TextStyle.paragraph,
+        max_length=1500
+    )
+    help_color = TextInput(
+        label="Couleur (hex sans #)",
+        placeholder="Ex: 3498DB",
+        default="3498DB",
+        max_length=6,
+        required=False
+    )
+    
+    def __init__(self, u, g, channel_id):
+        super().__init__()
+        self.u = u
+        self.g = g
+        self.channel_id = channel_id
+    
+    async def on_submit(self, i):
+        try:
+            # Valider la couleur
+            color_hex = self.help_color.value or "3498DB"
+            try:
+                color = int(color_hex, 16)
+            except:
+                color = 0x3498DB
+            
+            # Sauvegarder la configuration
+            c = await cfg(self.g.id)
+            auto_helps = c.get('auto_help_channels', {})
+            auto_helps[str(self.channel_id)] = {
+                'title': self.help_title.value,
+                'content': self.help_content.value,
+                'color': color,
+                'enabled': True
+            }
+            await db_set(self.g.id, 'auto_help_channels', auto_helps)
+            
+            # Envoyer le premier message d'aide
+            channel = self.g.get_channel(int(self.channel_id))
+            if channel:
+                e = discord.Embed(title=f"💡 {self.help_title.value}", color=color)
+                e.description = self.help_content.value
+                e.set_footer(text="Ce message se repositionne automatiquement")
+                msg = await channel.send(embed=e)
+                auto_help_messages[int(self.channel_id)] = msg.id
+            
+            v = AutoHelpPanel(self.u, self.g)
+            await i.response.edit_message(embed=await v.embed(), view=v)
+        except Exception as ex:
+            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+
+class AutoHelpManageView(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=180)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        auto_helps = c.get('auto_help_channels', {})
+        
+        e = discord.Embed(title="📋 Gérer les aides automatiques", color=0x3498DB)
+        
+        help_list = []
+        for ch_id, help_data in list(auto_helps.items())[:15]:
+            ch = self.g.get_channel(int(ch_id))
+            if ch:
+                status = "✅" if help_data.get('enabled', True) else "❌"
+                title = help_data.get('title', 'Aide')[:30]
+                help_list.append(f"{status} {ch.mention} - **{title}**")
+        
+        e.description = "\n".join(help_list) if help_list else "*Aucune aide configurée*"
+        return e
+    
+    @discord.ui.select(
+        placeholder="🗑️ Supprimer une aide...",
+        options=[discord.SelectOption(label="Chargement...", value="loading")],
+        row=0
+    )
+    async def delete_help(self, i, s):
+        if s.values[0] == "loading":
+            return
+        
+        channel_id = s.values[0]
+        c = await cfg(self.g.id)
+        auto_helps = c.get('auto_help_channels', {})
+        
+        if channel_id in auto_helps:
+            del auto_helps[channel_id]
+            await db_set(self.g.id, 'auto_help_channels', auto_helps)
+            
+            # Supprimer le message d'aide actuel
+            ch_id = int(channel_id)
+            if ch_id in auto_help_messages:
+                try:
+                    ch = self.g.get_channel(ch_id)
+                    if ch:
+                        msg = await ch.fetch_message(auto_help_messages[ch_id])
+                        await msg.delete()
+                except:
+                    pass
+                del auto_help_messages[ch_id]
+        
+        if auto_helps:
+            v = AutoHelpManageView(self.u, self.g)
+            await i.response.edit_message(embed=await v.embed(), view=await self._rebuild_view())
+        else:
+            v = AutoHelpPanel(self.u, self.g)
+            await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    async def _rebuild_view(self):
+        c = await cfg(self.g.id)
+        auto_helps = c.get('auto_help_channels', {})
+        
+        v = View(timeout=180)
+        
+        opts = []
+        for ch_id, help_data in list(auto_helps.items())[:25]:
+            ch = self.g.get_channel(int(ch_id))
+            if ch:
+                opts.append(discord.SelectOption(
+                    label=f"# {ch.name}"[:25],
+                    value=ch_id,
+                    description=help_data.get('title', 'Aide')[:50]
+                ))
+        
+        if opts:
+            select = Select(placeholder="🗑️ Supprimer une aide...", options=opts)
+            select.callback = self._delete_callback
+            v.add_item(select)
+        
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+        back_btn.callback = self._back_callback
+        v.add_item(back_btn)
+        
+        return v
+    
+    async def _delete_callback(self, i):
+        await self.delete_help(i, i.data)
+    
+    async def _back_callback(self, i):
+        v = AutoHelpPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = AutoHelpPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    async def interaction_check(self, interaction):
+        # Reconstruire les options du select
+        c = await cfg(self.g.id)
+        auto_helps = c.get('auto_help_channels', {})
+        
+        opts = []
+        for ch_id, help_data in list(auto_helps.items())[:25]:
+            ch = self.g.get_channel(int(ch_id))
+            if ch:
+                opts.append(discord.SelectOption(
+                    label=f"# {ch.name}"[:25],
+                    value=ch_id,
+                    description=help_data.get('title', 'Aide')[:50]
+                ))
+        
+        if opts:
+            self.delete_help.options = opts
+        
+        return True
+
+async def handle_auto_help(message):
+    """Gère le repositionnement automatique des messages d'aide"""
+    if message.author.bot:
+        return
+    
+    try:
+        c = await cfg(message.guild.id)
+        auto_helps = c.get('auto_help_channels', {})
+        
+        channel_id_str = str(message.channel.id)
+        if channel_id_str not in auto_helps:
+            return
+        
+        help_data = auto_helps[channel_id_str]
+        if not help_data.get('enabled', True):
+            return
+        
+        # Supprimer l'ancien message d'aide
+        if message.channel.id in auto_help_messages:
+            try:
+                old_msg = await message.channel.fetch_message(auto_help_messages[message.channel.id])
+                await old_msg.delete()
+            except:
+                pass
+        
+        # Petit délai pour que le message de l'utilisateur soit bien envoyé
+        await asyncio.sleep(0.5)
+        
+        # Créer et envoyer le nouveau message d'aide
+        e = discord.Embed(title=f"💡 {help_data.get('title', 'Aide')}", color=help_data.get('color', 0x3498DB))
+        e.description = help_data.get('content', '')
+        e.set_footer(text="Ce message se repositionne automatiquement")
+        
+        new_msg = await message.channel.send(embed=e)
+        auto_help_messages[message.channel.id] = new_msg.id
+        
+    except Exception as ex:
+        print(f"Erreur auto_help: {ex}")
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #                           💰 FONCTIONS ÉCONOMIE
 # ═══════════════════════════════════════════════════════════════════════════════
+
+# Verrous pour éviter les exploits de double-claim
+active_locks = set()
 
 async def get_user_economy(guild_id, user_id):
     """Récupère les données économiques d'un utilisateur"""
@@ -4874,92 +5219,121 @@ async def add_coins(guild_id, user_id, amount):
             return row[0] if row else 0
 
 async def claim_daily(guild_id, user_id, amount):
-    """Réclame le daily de manière atomique - retourne (success, new_coins, remaining_seconds)"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        # S'assurer que l'utilisateur existe
-        await db.execute(
-            'INSERT OR IGNORE INTO economy (guild_id, user_id, coins, bank, xp, level) VALUES (?, ?, 0, 0, 0, 1)',
-            (guild_id, user_id)
-        )
-        await db.commit()
-        
-        # Vérifier le cooldown
-        async with db.execute(
-            'SELECT coins, last_daily FROM economy WHERE guild_id=? AND user_id=?',
-            (guild_id, user_id)
-        ) as cursor:
-            row = await cursor.fetchone()
-            if not row:
-                return (False, 0, 0)
+    """Réclame le daily de manière atomique avec verrou"""
+    lock_key = f"daily_{guild_id}_{user_id}"
+    
+    # Verrou en mémoire pour éviter les double-claims
+    if lock_key in active_locks:
+        return (False, 0, 1)  # Déjà en cours
+    
+    active_locks.add(lock_key)
+    
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            # Activer le mode WAL pour de meilleures performances concurrentes
+            await db.execute('PRAGMA journal_mode=WAL')
             
-            current_coins, last_daily = row
-            current_coins = current_coins or 0
-            
-            # Vérifier si 24h sont passées
-            if last_daily:
-                try:
-                    last = datetime.fromisoformat(last_daily)
-                    if last.tzinfo:
-                        last = last.replace(tzinfo=None)
-                    elapsed = (now() - last).total_seconds()
-                    if elapsed < 86400:
-                        return (False, current_coins, 86400 - elapsed)
-                except:
-                    pass
-            
-            # Donner la récompense
-            new_coins = current_coins + amount
+            # S'assurer que l'utilisateur existe
             await db.execute(
-                'UPDATE economy SET coins=?, last_daily=? WHERE guild_id=? AND user_id=?',
-                (new_coins, now().isoformat(), guild_id, user_id)
+                'INSERT OR IGNORE INTO economy (guild_id, user_id, coins, bank, xp, level) VALUES (?, ?, 0, 0, 0, 1)',
+                (guild_id, user_id)
             )
-            await db.commit()
             
-            return (True, new_coins, 0)
+            # Vérifier et mettre à jour en une seule transaction
+            async with db.execute(
+                'SELECT coins, last_daily FROM economy WHERE guild_id=? AND user_id=?',
+                (guild_id, user_id)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if not row:
+                    return (False, 0, 0)
+                
+                current_coins, last_daily = row
+                current_coins = current_coins or 0
+                
+                # Vérifier si 24h sont passées
+                if last_daily:
+                    try:
+                        last = datetime.fromisoformat(str(last_daily))
+                        if last.tzinfo:
+                            last = last.replace(tzinfo=None)
+                        elapsed = (now() - last).total_seconds()
+                        if elapsed < 86400:
+                            return (False, current_coins, 86400 - elapsed)
+                    except Exception as ex:
+                        print(f"Erreur parsing date daily: {ex}")
+                
+                # Donner la récompense immédiatement
+                new_coins = current_coins + amount
+                current_time = now().isoformat()
+                
+                await db.execute(
+                    'UPDATE economy SET coins=?, last_daily=? WHERE guild_id=? AND user_id=?',
+                    (new_coins, current_time, guild_id, user_id)
+                )
+                await db.commit()
+                
+                return (True, new_coins, 0)
+    finally:
+        active_locks.discard(lock_key)
 
 async def claim_work(guild_id, user_id, amount, cooldown_seconds):
-    """Réclame le work de manière atomique - retourne (success, new_coins, remaining_seconds)"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        # S'assurer que l'utilisateur existe
-        await db.execute(
-            'INSERT OR IGNORE INTO economy (guild_id, user_id, coins, bank, xp, level) VALUES (?, ?, 0, 0, 0, 1)',
-            (guild_id, user_id)
-        )
-        await db.commit()
-        
-        # Vérifier le cooldown
-        async with db.execute(
-            'SELECT coins, last_work FROM economy WHERE guild_id=? AND user_id=?',
-            (guild_id, user_id)
-        ) as cursor:
-            row = await cursor.fetchone()
-            if not row:
-                return (False, 0, 0)
+    """Réclame le work de manière atomique avec verrou"""
+    lock_key = f"work_{guild_id}_{user_id}"
+    
+    # Verrou en mémoire pour éviter les double-claims
+    if lock_key in active_locks:
+        return (False, 0, 1)  # Déjà en cours
+    
+    active_locks.add(lock_key)
+    
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('PRAGMA journal_mode=WAL')
             
-            current_coins, last_work = row
-            current_coins = current_coins or 0
+            # S'assurer que l'utilisateur existe
+            await db.execute(
+                'INSERT OR IGNORE INTO economy (guild_id, user_id, coins, bank, xp, level) VALUES (?, ?, 0, 0, 0, 1)',
+                (guild_id, user_id)
+            )
             
             # Vérifier le cooldown
-            if last_work:
-                try:
-                    last = datetime.fromisoformat(last_work)
-                    if last.tzinfo:
-                        last = last.replace(tzinfo=None)
-                    elapsed = (now() - last).total_seconds()
-                    if elapsed < cooldown_seconds:
-                        return (False, current_coins, cooldown_seconds - elapsed)
-                except:
-                    pass
-            
-            # Donner la récompense
-            new_coins = current_coins + amount
-            await db.execute(
-                'UPDATE economy SET coins=?, last_work=? WHERE guild_id=? AND user_id=?',
-                (new_coins, now().isoformat(), guild_id, user_id)
-            )
-            await db.commit()
-            
-            return (True, new_coins, 0)
+            async with db.execute(
+                'SELECT coins, last_work FROM economy WHERE guild_id=? AND user_id=?',
+                (guild_id, user_id)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if not row:
+                    return (False, 0, 0)
+                
+                current_coins, last_work = row
+                current_coins = current_coins or 0
+                
+                # Vérifier le cooldown
+                if last_work:
+                    try:
+                        last = datetime.fromisoformat(str(last_work))
+                        if last.tzinfo:
+                            last = last.replace(tzinfo=None)
+                        elapsed = (now() - last).total_seconds()
+                        if elapsed < cooldown_seconds:
+                            return (False, current_coins, cooldown_seconds - elapsed)
+                    except Exception as ex:
+                        print(f"Erreur parsing date work: {ex}")
+                
+                # Donner la récompense
+                new_coins = current_coins + amount
+                current_time = now().isoformat()
+                
+                await db.execute(
+                    'UPDATE economy SET coins=?, last_work=? WHERE guild_id=? AND user_id=?',
+                    (new_coins, current_time, guild_id, user_id)
+                )
+                await db.commit()
+                
+                return (True, new_coins, 0)
+    finally:
+        active_locks.discard(lock_key)
 
 async def add_xp(guild_id, user_id, amount, channel=None):
     """Ajoute de l'XP et vérifie le level up"""
@@ -6667,10 +7041,23 @@ class PanelEditView(View):
     
     async def embed(self):
         pnl = await self.get_panel()
+        c = await cfg(self.g.id)
         e = discord.Embed(title=f"🎫 Panel: {pnl.get('name', '?')}", color=C.PURPLE)
         cat = self.g.get_channel(pnl.get('category', 0))
+        
+        # Rôle staff du panel ou global
+        staff_role_id = pnl.get('staff_role', 0)
+        if staff_role_id:
+            staff_role = self.g.get_role(staff_role_id)
+            staff_txt = staff_role.mention if staff_role else "❌ Rôle introuvable"
+        else:
+            global_staff = self.g.get_role(c.get('ticket_staff', 0))
+            staff_txt = f"{global_staff.mention} *(global)*" if global_staff else "❌ Non configuré"
+        
         e.add_field(name="📁 Catégorie", value=cat.name if cat else "❌ Non configuré", inline=True)
         e.add_field(name="🔢 Max tickets", value=str(pnl.get('max', 1)), inline=True)
+        e.add_field(name="👥 Rôle Staff", value=staff_txt, inline=True)
+        
         qs = pnl.get('questions', [])
         if qs:
             e.add_field(name=f"📝 Questions ({len(qs)})", value="\n".join([f"• {q['title']}" for q in qs[:5]]), inline=False)
@@ -6686,12 +7073,24 @@ class PanelEditView(View):
         opts = [discord.SelectOption(label=f"📁 {c.name}"[:25], value=str(c.id)) for c in cats]
         await i.response.edit_message(embed=discord.Embed(title="📁 Choisir la catégorie", color=C.PURPLE), view=PanelCatView(self.u, self.g, self.pid, opts))
     
+    @discord.ui.button(label="👥 Rôle Staff", style=discord.ButtonStyle.primary, row=0)
+    async def staff_role(self, i, b):
+        v = PaginatedRoleSelectForPanel(self.u, self.g, self.pid)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="👥 Rôle Staff du Panel", 
+                description="Choisissez le rôle qui gère ce panel.\n*Aucun = utilise le rôle staff global*",
+                color=C.PURPLE
+            ), 
+            view=v
+        )
+    
     @discord.ui.button(label="📝 Questions", style=discord.ButtonStyle.primary, row=0)
     async def qs(self, i, b):
         v = PanelQsView(self.u, self.g, self.pid)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
-    @discord.ui.button(label="🔢 Max tickets", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="🔢 Max tickets", style=discord.ButtonStyle.secondary, row=1)
     async def mx(self, i, b):
         await i.response.send_modal(SetMaxModal(self.u, self.g, self.pid))
     
@@ -6701,8 +7100,9 @@ class PanelEditView(View):
         c = await cfg(self.g.id)
         if not pnl.get('category'):
             return await i.response.send_message("❌ Configure la catégorie d'abord!", ephemeral=True)
-        if not c.get('ticket_staff'):
-            return await i.response.send_message("❌ Configure le rôle Staff d'abord!", ephemeral=True)
+        # Vérifier qu'un rôle staff est configuré (panel ou global)
+        if not pnl.get('staff_role') and not c.get('ticket_staff'):
+            return await i.response.send_message("❌ Configure le rôle Staff d'abord (panel ou global)!", ephemeral=True)
         chs = list(self.g.text_channels)[:25]
         opts = [discord.SelectOption(label=f"# {ch.name}"[:25], value=str(ch.id)) for ch in chs]
         await i.response.edit_message(embed=discord.Embed(title="📤 Où envoyer le panel?", color=C.PURPLE), view=SendPanelView(self.u, self.g, self.pid, opts))
@@ -6720,6 +7120,73 @@ class PanelEditView(View):
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
         v = TicketMainPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class PaginatedRoleSelectForPanel(View):
+    """Sélecteur de rôle pour le panel de ticket"""
+    def __init__(self, u, g, pid, page=0):
+        super().__init__(timeout=180)
+        self.u = u
+        self.g = g
+        self.pid = pid
+        self.page = page
+        self.roles = [r for r in g.roles[1:] if not r.is_bot_managed()]
+        self.max_page = max(0, (len(self.roles) - 1) // 24)
+        self._build()
+    
+    def _build(self):
+        start = self.page * 24
+        end = start + 24
+        page_roles = self.roles[start:end]
+        
+        opts = []
+        if self.page == 0:
+            opts.append(discord.SelectOption(label="❌ Aucun (utiliser global)", value="0"))
+        
+        for r in page_roles:
+            opts.append(discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)))
+        
+        if opts:
+            self.add_item(PanelStaffRoleSelect(self, opts))
+        
+        if self.page > 0:
+            btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.secondary, row=1)
+            btn.callback = self.prev_page
+            self.add_item(btn)
+        
+        if self.page < self.max_page:
+            btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.secondary, row=1)
+            btn.callback = self.next_page
+            self.add_item(btn)
+        
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=1)
+        back_btn.callback = self.go_back
+        self.add_item(back_btn)
+    
+    async def prev_page(self, i):
+        v = PaginatedRoleSelectForPanel(self.u, self.g, self.pid, self.page - 1)
+        await i.response.edit_message(view=v)
+    
+    async def next_page(self, i):
+        v = PaginatedRoleSelectForPanel(self.u, self.g, self.pid, self.page + 1)
+        await i.response.edit_message(view=v)
+    
+    async def go_back(self, i):
+        v = PanelEditView(self.u, self.g, self.pid)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class PanelStaffRoleSelect(Select):
+    def __init__(self, parent, opts):
+        super().__init__(placeholder=f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un rôle...", options=opts)
+        self.parent = parent
+    
+    async def callback(self, i):
+        c = await cfg(i.guild.id)
+        panels = c.get('ticket_panels', {})
+        if self.parent.pid in panels:
+            panels[self.parent.pid]['staff_role'] = int(self.values[0])
+            await db_set(i.guild.id, 'ticket_panels', panels)
+        v = PanelEditView(self.parent.u, self.parent.g, self.parent.pid)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 class PanelCatView(View):
@@ -6913,11 +7380,12 @@ async def on_ready():
     if not check_scheduled_messages.is_running():
         check_scheduled_messages.start()
     
-    print(f"✅ {bot.user.name} v18 prêt!")
+    print(f"✅ {bot.user.name} v25 prêt!")
     print(f"🌐 Serveurs: {len(bot.guilds)}")
     print(f"📢 Vérification feeds sociaux toutes les 5 minutes")
     print(f"🎁 Vérification giveaways toutes les 30 secondes")
     print(f"📨 Vérification messages auto toutes les minutes")
+    print(f"💡 Système d'aide automatique activé")
 
 @bot.tree.command(name="sync", description="🔄 Synchroniser les commandes (Admin)")
 async def sync_cmd(i: discord.Interaction):
@@ -7046,6 +7514,10 @@ async def relay_discord_message(msg):
 @bot.event
 async def on_message(msg):
     if msg.author.bot or not msg.guild: return
+    
+    # ═══════════════ MESSAGES D'AIDE AUTOMATIQUES ═══════════════
+    # Doit être appelé avant toute suppression potentielle
+    asyncio.create_task(handle_auto_help(msg))
     
     # Relay Discord - Vérifier si ce salon est suivi par d'autres serveurs
     await relay_discord_message(msg)
@@ -9903,105 +10375,116 @@ async def guess_cmd(i: discord.Interaction, nombre: int):
 
 # ─────────────────────────────── RÉACTION RAPIDE ───────────────────────────────
 
-react_games = {}  # {channel_id: {'winner': None, 'start_time': None, 'message': None}}
+react_games = {}  # {channel_id: {'winner': None, 'start_time': None}}
 
-@bot.tree.command(name="react", description="⚡ Lancer un jeu de réaction rapide")
-async def react_cmd(i: discord.Interaction):
-    # Vérifier les permissions
-    if not await check_games_permission(i):
-        return
+# Vue globale pour le bouton react (définie en dehors de la commande)
+class ReactGameView(View):
+    def __init__(self, channel_id, guild_id):
+        super().__init__(timeout=10)
+        self.channel_id = channel_id
+        self.guild_id = guild_id
+        self.clicked = False
     
-    if i.channel.id in react_games:
-        return await i.response.send_message("❌ Un jeu est déjà en cours dans ce salon", ephemeral=True)
-    
-    # Marquer le jeu comme en cours
-    react_games[i.channel.id] = {'winner': None, 'start_time': None, 'preparing': True}
-    
-    await i.response.send_message("⏳ **Préparez-vous...**\nCliquez sur le bouton dès qu'il apparaît !")
-    
-    try:
-        # Attendre un délai aléatoire
-        delay = random.uniform(2, 5)
-        await asyncio.sleep(delay)
-        
-        # Vérifier que le jeu n'a pas été annulé
-        if i.channel.id not in react_games:
-            return
-        
-        # Définir le temps de départ
-        react_games[i.channel.id] = {'winner': None, 'start_time': now(), 'preparing': False}
-        
-        # Vue avec bouton
-        class ReactButtonView(View):
-            def __init__(self, channel_id, guild_id):
-                super().__init__(timeout=10)
-                self.channel_id = channel_id
-                self.guild_id = guild_id
-                self.clicked = False
+    @discord.ui.button(label="⚡ CLIQUEZ !", style=discord.ButtonStyle.success)
+    async def click_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            # Vérifier si le jeu existe toujours
+            if self.channel_id not in react_games:
+                return await interaction.response.send_message("❌ Ce jeu est terminé", ephemeral=True)
             
-            @discord.ui.button(label="⚡ CLIQUEZ !", style=discord.ButtonStyle.success, custom_id="react_click")
-            async def click_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-                # Vérifier si le jeu existe toujours
-                if self.channel_id not in react_games:
-                    return await interaction.response.send_message("❌ Ce jeu est terminé", ephemeral=True)
-                
-                game = react_games[self.channel_id]
-                
-                # Vérifier si quelqu'un a déjà gagné
-                if game['winner'] or self.clicked:
-                    return await interaction.response.send_message("❌ Quelqu'un a déjà cliqué !", ephemeral=True)
-                
-                self.clicked = True
-                game['winner'] = interaction.user.id
-                
-                # Calculer le temps de réaction
-                reaction_time = (now() - game['start_time']).total_seconds() * 1000
-                
-                # Bonus si économie activée
+            game = react_games[self.channel_id]
+            
+            # Vérifier si quelqu'un a déjà gagné
+            if game.get('winner') or self.clicked:
+                return await interaction.response.send_message("❌ Quelqu'un a déjà cliqué !", ephemeral=True)
+            
+            self.clicked = True
+            game['winner'] = interaction.user.id
+            
+            # Calculer le temps de réaction
+            start_time = game.get('start_time')
+            if start_time:
+                reaction_time = (now() - start_time).total_seconds() * 1000
+            else:
+                reaction_time = 0
+            
+            # Bonus si économie activée
+            bonus_text = ""
+            try:
                 c = await cfg(self.guild_id)
-                bonus_text = ""
                 if c.get('minigames_config', {}).get('economy_enabled', False):
                     bonus = max(10, 100 - int(reaction_time / 10))
                     await add_coins(self.guild_id, interaction.user.id, bonus)
                     bonus_text = f"\n🎁 +**{bonus}** coins !"
-                
-                # Supprimer le jeu
-                if self.channel_id in react_games:
-                    del react_games[self.channel_id]
-                
-                # Créer l'embed de victoire
-                e = discord.Embed(title="⚡ Réaction Rapide", color=0x2ECC71)
-                e.description = f"🎉 **{interaction.user.mention}** a gagné !\n⏱️ Temps de réaction: **{reaction_time:.0f}ms**{bonus_text}"
-                
-                # Désactiver le bouton
-                button.disabled = True
-                button.label = f"✅ {interaction.user.display_name} - {reaction_time:.0f}ms"
-                button.style = discord.ButtonStyle.secondary
-                
-                await interaction.response.edit_message(content=None, embed=e, view=self)
+            except:
+                pass
             
-            async def on_timeout(self):
-                if self.channel_id in react_games:
-                    del react_games[self.channel_id]
-                # Essayer d'éditer le message pour indiquer le timeout
-                try:
-                    for item in self.children:
-                        item.disabled = True
-                        item.label = "⏱️ Temps écoulé !"
-                        item.style = discord.ButtonStyle.danger
-                except:
-                    pass
-        
-        view = ReactButtonView(i.channel.id, i.guild.id)
-        await i.channel.send("⚡ **MAINTENANT !**", view=view)
-        
-    except Exception as ex:
-        print(f"Erreur react: {ex}")
-        if i.channel.id in react_games:
-            del react_games[i.channel.id]
+            # Supprimer le jeu
+            if self.channel_id in react_games:
+                del react_games[self.channel_id]
+            
+            # Créer l'embed de victoire
+            e = discord.Embed(title="⚡ Réaction Rapide", color=0x2ECC71)
+            e.description = f"🎉 **{interaction.user.mention}** a gagné !\n⏱️ Temps de réaction: **{reaction_time:.0f}ms**{bonus_text}"
+            
+            # Désactiver le bouton
+            button.disabled = True
+            button.label = f"✅ {interaction.user.display_name} - {reaction_time:.0f}ms"
+            button.style = discord.ButtonStyle.secondary
+            
+            await interaction.response.edit_message(content=None, embed=e, view=self)
+        except Exception as ex:
+            print(f"Erreur react click: {ex}")
+            if self.channel_id in react_games:
+                del react_games[self.channel_id]
+    
+    async def on_timeout(self):
+        if self.channel_id in react_games:
+            del react_games[self.channel_id]
+
+@bot.tree.command(name="react", description="⚡ Lancer un jeu de réaction rapide")
+async def react_cmd(i: discord.Interaction):
+    # Vérifier les permissions de jeu
+    if not await check_games_permission(i):
+        return
+    
+    # Vérifier si un jeu est déjà en cours
+    if i.channel.id in react_games:
+        return await i.response.send_message("❌ Un jeu est déjà en cours dans ce salon", ephemeral=True)
+    
+    # Marquer le jeu comme en cours
+    react_games[i.channel.id] = {'winner': None, 'start_time': None}
+    
+    # Répondre immédiatement
+    await i.response.send_message("⏳ **Préparez-vous...**\nCliquez sur le bouton dès qu'il apparaît !")
+    
+    async def run_game():
+        try:
+            # Attendre un délai aléatoire
+            delay = random.uniform(2, 5)
+            await asyncio.sleep(delay)
+            
+            # Vérifier que le jeu n'a pas été annulé
+            if i.channel.id not in react_games:
+                return
+            
+            # Définir le temps de départ
+            react_games[i.channel.id]['start_time'] = now()
+            
+            # Créer la vue et envoyer le bouton
+            view = ReactGameView(i.channel.id, i.guild.id)
+            await i.channel.send("⚡ **MAINTENANT !**", view=view)
+            
+        except Exception as ex:
+            print(f"Erreur react game: {ex}")
+            if i.channel.id in react_games:
+                del react_games[i.channel.id]
+    
+    # Lancer le jeu en arrière-plan
+    asyncio.create_task(run_game())
 
 if __name__ == "__main__":
-    print("🚀 Bot v24 - Démarrage...")
+    print("🚀 Bot v25 - Démarrage...")
     print("🔒 Système de sécurité activé")
     print("👑 Système d'immunités complet")
     print("🎮 Mini-jeux et économie intégrés")
