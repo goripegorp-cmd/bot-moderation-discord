@@ -621,10 +621,47 @@ def normalize(t):
     return t
 
 def check_badwords(ct, words):
+    """Vérifie si le message contient des mots interdits (mots entiers uniquement)"""
     if not words: return False, None
-    norm = normalize(ct)
-    for w in words:
-        if normalize(w.strip()) in norm: return True, w
+    
+    # Normaliser le texte
+    text_lower = ct.lower()
+    
+    # Remplacer les caractères d'évasion courants
+    evasion_map = {
+        '@': 'a', '4': 'a', '0': 'o', '1': 'i', '!': 'i', '3': 'e',
+        '$': 's', '5': 's', '7': 't', '*': '', '.': '', '-': '', '_': '',
+        ' ': '', '|': 'i', '€': 'e', '£': 'l'
+    }
+    
+    for word in words:
+        word = word.strip().lower()
+        if not word:
+            continue
+        
+        # 1. Vérification mot entier exact (avec limites de mots)
+        # \b = limite de mot (début/fin de mot)
+        pattern = r'\b' + re.escape(word) + r'\b'
+        if re.search(pattern, text_lower, re.IGNORECASE):
+            return True, word
+        
+        # 2. Vérification avec évasion (ex: c.o.n, c-o-n, c0n)
+        # Nettoyer le texte des caractères d'évasion
+        cleaned_text = text_lower
+        for char, replacement in evasion_map.items():
+            cleaned_text = cleaned_text.replace(char, replacement)
+        
+        # Vérifier si le mot apparaît comme mot entier dans le texte nettoyé
+        # On construit un pattern qui cherche le mot avec des limites
+        if re.search(r'\b' + re.escape(word) + r'\b', cleaned_text):
+            return True, word
+        
+        # 3. Vérification du mot avec caractères séparateurs (c.o.n, c o n, c-o-n)
+        # Créer un pattern qui accepte des séparateurs entre chaque lettre
+        spaced_pattern = r'\b' + r'[\s.\-_*|]*'.join(re.escape(c) for c in word) + r'\b'
+        if re.search(spaced_pattern, text_lower, re.IGNORECASE):
+            return True, word
+    
     return False, None
 
 def check_link(ct, wl):
@@ -10482,72 +10519,7 @@ async def guess_cmd(i: discord.Interaction, nombre: int):
 
 # ─────────────────────────────── RÉACTION RAPIDE ───────────────────────────────
 
-react_games = {}  # {channel_id: {'winner': None, 'start_time': None}}
-
-# Vue globale pour le bouton react (définie en dehors de la commande)
-class ReactGameView(View):
-    def __init__(self, channel_id, guild_id):
-        super().__init__(timeout=10)
-        self.channel_id = channel_id
-        self.guild_id = guild_id
-        self.clicked = False
-    
-    @discord.ui.button(label="⚡ CLIQUEZ !", style=discord.ButtonStyle.success)
-    async def click_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        try:
-            # Vérifier si le jeu existe toujours
-            if self.channel_id not in react_games:
-                return await interaction.response.send_message("❌ Ce jeu est terminé", ephemeral=True)
-            
-            game = react_games[self.channel_id]
-            
-            # Vérifier si quelqu'un a déjà gagné
-            if game.get('winner') or self.clicked:
-                return await interaction.response.send_message("❌ Quelqu'un a déjà cliqué !", ephemeral=True)
-            
-            self.clicked = True
-            game['winner'] = interaction.user.id
-            
-            # Calculer le temps de réaction
-            start_time = game.get('start_time')
-            if start_time:
-                reaction_time = (now() - start_time).total_seconds() * 1000
-            else:
-                reaction_time = 0
-            
-            # Bonus si économie activée
-            bonus_text = ""
-            try:
-                c = await cfg(self.guild_id)
-                if c.get('minigames_config', {}).get('economy_enabled', False):
-                    bonus = max(10, 100 - int(reaction_time / 10))
-                    await add_coins(self.guild_id, interaction.user.id, bonus)
-                    bonus_text = f"\n🎁 +**{bonus}** coins !"
-            except:
-                pass
-            
-            # Supprimer le jeu
-            if self.channel_id in react_games:
-                del react_games[self.channel_id]
-            
-            # Créer l'embed de victoire
-            e = discord.Embed(title="⚡ Réaction Rapide", color=0x2ECC71)
-            e.description = f"🎉 **{interaction.user.mention}** a gagné !\n⏱️ Temps de réaction: **{reaction_time:.0f}ms**{bonus_text}"
-            
-            # Désactiver le bouton
-            button.disabled = True
-            button.label = f"✅ {interaction.user.display_name} - {reaction_time:.0f}ms"
-            button.style = discord.ButtonStyle.secondary
-            
-            await interaction.response.edit_message(content=None, embed=e, view=self)
-        except Exception as ex:
-            print(f"Erreur react click: {ex}")
-            if self.channel_id in react_games:
-                del react_games[self.channel_id]
-    
-    async def on_timeout(self):
-        if self.channel_id in react_games:
-            del react_games[self.channel_id]
+react_games = {}  # {channel_id: timestamp}
 
 @bot.tree.command(name="react", description="⚡ Lancer un jeu de réaction rapide")
 async def react_cmd(i: discord.Interaction):
@@ -10555,44 +10527,91 @@ async def react_cmd(i: discord.Interaction):
     if not await check_games_permission(i):
         return
     
-    # Vérifier si un jeu est déjà en cours
+    # Vérifier si un jeu est déjà en cours (avec timeout de 30s)
     if i.channel.id in react_games:
-        return await i.response.send_message("❌ Un jeu est déjà en cours dans ce salon", ephemeral=True)
+        elapsed = (now() - react_games[i.channel.id]).total_seconds()
+        if elapsed < 30:
+            return await i.response.send_message("❌ Un jeu est déjà en cours dans ce salon", ephemeral=True)
+        else:
+            del react_games[i.channel.id]
     
     # Marquer le jeu comme en cours
-    react_games[i.channel.id] = {'winner': None, 'start_time': None}
+    react_games[i.channel.id] = now()
     
     # Répondre immédiatement
     await i.response.send_message("⏳ **Préparez-vous...**\nCliquez sur le bouton dès qu'il apparaît !")
     
-    async def run_game():
-        try:
-            # Attendre un délai aléatoire
-            delay = random.uniform(2, 5)
-            await asyncio.sleep(delay)
+    # Attendre un délai aléatoire
+    delay = random.uniform(2, 5)
+    await asyncio.sleep(delay)
+    
+    # Vérifier que le jeu est toujours actif
+    if i.channel.id not in react_games:
+        return
+    
+    # Enregistrer le temps de départ
+    start_time = now()
+    game_data = {'start_time': start_time, 'winner': None, 'clicked': False}
+    
+    # Créer la vue avec le bouton
+    class QuickReactView(View):
+        def __init__(self):
+            super().__init__(timeout=10)
+        
+        @discord.ui.button(label="⚡ CLIQUEZ !", style=discord.ButtonStyle.success)
+        async def click_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+            # Vérifier si quelqu'un a déjà gagné
+            if game_data['clicked']:
+                return await interaction.response.send_message("❌ Trop tard !", ephemeral=True)
             
-            # Vérifier que le jeu n'a pas été annulé
-            if i.channel.id not in react_games:
-                return
+            game_data['clicked'] = True
+            game_data['winner'] = interaction.user.id
             
-            # Définir le temps de départ
-            react_games[i.channel.id]['start_time'] = now()
+            # Calculer le temps de réaction
+            reaction_time = (now() - game_data['start_time']).total_seconds() * 1000
             
-            # Créer la vue et envoyer le bouton
-            view = ReactGameView(i.channel.id, i.guild.id)
-            await i.channel.send("⚡ **MAINTENANT !**", view=view)
+            # Bonus si économie activée
+            bonus_text = ""
+            try:
+                c = await cfg(i.guild.id)
+                if c.get('minigames_config', {}).get('economy_enabled', False):
+                    bonus = max(10, 100 - int(reaction_time / 10))
+                    await add_coins(i.guild.id, interaction.user.id, bonus)
+                    bonus_text = f"\n🎁 +**{bonus}** coins !"
+            except:
+                pass
             
-        except Exception as ex:
-            print(f"Erreur react game: {ex}")
+            # Nettoyer
+            if i.channel.id in react_games:
+                del react_games[i.channel.id]
+            
+            # Afficher le résultat
+            e = discord.Embed(title="⚡ Réaction Rapide", color=0x2ECC71)
+            e.description = f"🎉 **{interaction.user.mention}** a gagné !\n⏱️ Temps: **{reaction_time:.0f}ms**{bonus_text}"
+            
+            button.disabled = True
+            button.label = f"✅ {interaction.user.display_name} - {reaction_time:.0f}ms"
+            button.style = discord.ButtonStyle.secondary
+            
+            await interaction.response.edit_message(content=None, embed=e, view=self)
+        
+        async def on_timeout(self):
             if i.channel.id in react_games:
                 del react_games[i.channel.id]
     
-    # Lancer le jeu en arrière-plan
-    asyncio.create_task(run_game())
+    # Envoyer le bouton
+    try:
+        view = QuickReactView()
+        await i.channel.send("⚡ **MAINTENANT !**", view=view)
+    except Exception as ex:
+        print(f"Erreur react send: {ex}")
+        if i.channel.id in react_games:
+            del react_games[i.channel.id]
 
 if __name__ == "__main__":
-    print("🚀 Bot v25 - Démarrage...")
+    print("🚀 Bot v25.2 - Démarrage...")
     print("🔒 Système de sécurité activé")
     print("👑 Système d'immunités complet")
     print("🎮 Mini-jeux et économie intégrés")
+    print("🛡️ Anti-badwords amélioré (mots entiers)")
     bot.run(TOKEN)
