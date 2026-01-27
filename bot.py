@@ -6930,9 +6930,17 @@ class TicketMainPanel(View):
     
     @discord.ui.button(label="👮 Définir Staff", style=discord.ButtonStyle.primary, row=0)
     async def staff(self, i, b):
-        roles = [r for r in self.g.roles[1:] if not r.is_bot_managed()][:25]
-        opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
-        await i.response.edit_message(embed=discord.Embed(title="👮 Choisir le rôle Staff", color=C.PURPLE), view=TkStaffView(self.u, self.g, opts))
+        v = PaginatedRoleSelectForStaffGlobal(self.u, self.g)
+        total_roles = len(v.roles)
+        total_pages = v.max_page + 1
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="👮 Choisir le rôle Staff", 
+                description=f"**{total_roles} rôles** disponibles • Page 1/{total_pages}\n\nCe rôle aura accès à **tous** les tickets.",
+                color=C.PURPLE
+            ), 
+            view=v
+        )
     
     @discord.ui.button(label="📜 Définir Logs", style=discord.ButtonStyle.primary, row=0)
     async def logs(self, i, b):
@@ -6966,6 +6974,83 @@ class TkStaffView(View):
     def __init__(self, u, g, opts):
         super().__init__(timeout=120)
         self.add_item(TkStaffSel(u, g, opts))
+
+class PaginatedRoleSelectForStaffGlobal(View):
+    """Sélecteur de rôle staff global avec pagination"""
+    def __init__(self, u, g, page=0):
+        super().__init__(timeout=180)
+        self.u = u
+        self.g = g
+        self.page = page
+        self.roles = [r for r in g.roles[1:] if not r.is_bot_managed()]
+        self.per_page = 24
+        self.max_page = max(0, (len(self.roles) - 1) // self.per_page)
+        self._build()
+    
+    def _build(self):
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_roles = self.roles[start:end]
+        
+        opts = []
+        for r in page_roles:
+            color_hex = f"#{r.color.value:06x}" if r.color.value else "Défaut"
+            opts.append(discord.SelectOption(
+                label=f"@{r.name}"[:25], 
+                value=str(r.id),
+                description=f"Couleur: {color_hex}"[:50]
+            ))
+        
+        if opts:
+            self.add_item(StaffGlobalRoleSelect(self, opts))
+        
+        # Boutons de pagination
+        if self.page > 0:
+            btn = discord.ui.Button(label="◀️ Page préc.", style=discord.ButtonStyle.secondary, row=1)
+            btn.callback = self.prev_page
+            self.add_item(btn)
+        
+        if self.page < self.max_page:
+            btn = discord.ui.Button(label="▶️ Page suiv.", style=discord.ButtonStyle.secondary, row=1)
+            btn.callback = self.next_page
+            self.add_item(btn)
+        
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=1)
+        back_btn.callback = self.go_back
+        self.add_item(back_btn)
+    
+    async def prev_page(self, i):
+        v = PaginatedRoleSelectForStaffGlobal(self.u, self.g, self.page - 1)
+        embed = discord.Embed(
+            title="👮 Choisir le rôle Staff", 
+            description=f"**{len(self.roles)} rôles** disponibles • Page {self.page}/{self.max_page + 1}\n\nCe rôle aura accès à **tous** les tickets.",
+            color=C.PURPLE
+        )
+        await i.response.edit_message(embed=embed, view=v)
+    
+    async def next_page(self, i):
+        v = PaginatedRoleSelectForStaffGlobal(self.u, self.g, self.page + 1)
+        embed = discord.Embed(
+            title="👮 Choisir le rôle Staff", 
+            description=f"**{len(self.roles)} rôles** disponibles • Page {self.page + 2}/{self.max_page + 1}\n\nCe rôle aura accès à **tous** les tickets.",
+            color=C.PURPLE
+        )
+        await i.response.edit_message(embed=embed, view=v)
+    
+    async def go_back(self, i):
+        v = TicketMainPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class StaffGlobalRoleSelect(Select):
+    def __init__(self, parent, opts):
+        placeholder = f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un rôle..."
+        super().__init__(placeholder=placeholder, options=opts)
+        self.parent = parent
+    
+    async def callback(self, i):
+        await db_set(i.guild.id, 'ticket_staff', int(self.values[0]))
+        v = TicketMainPanel(self.parent.u, self.parent.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
 
 class TkStaffSel(Select):
     def __init__(self, u, g, opts):
@@ -7076,10 +7161,12 @@ class PanelEditView(View):
     @discord.ui.button(label="👥 Rôle Staff", style=discord.ButtonStyle.primary, row=0)
     async def staff_role(self, i, b):
         v = PaginatedRoleSelectForPanel(self.u, self.g, self.pid)
+        total_roles = len(v.roles)
+        total_pages = v.max_page + 1
         await i.response.edit_message(
             embed=discord.Embed(
                 title="👥 Rôle Staff du Panel", 
-                description="Choisissez le rôle qui gère ce panel.\n*Aucun = utilise le rôle staff global*",
+                description=f"**{total_roles} rôles** disponibles • Page 1/{total_pages}\n\nChoisissez le rôle qui gère ce panel.\n*Aucun = utilise le rôle staff global*",
                 color=C.PURPLE
             ), 
             view=v
@@ -7123,7 +7210,7 @@ class PanelEditView(View):
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 class PaginatedRoleSelectForPanel(View):
-    """Sélecteur de rôle pour le panel de ticket"""
+    """Sélecteur de rôle pour le panel de ticket avec pagination"""
     def __init__(self, u, g, pid, page=0):
         super().__init__(timeout=180)
         self.u = u
@@ -7131,12 +7218,14 @@ class PaginatedRoleSelectForPanel(View):
         self.pid = pid
         self.page = page
         self.roles = [r for r in g.roles[1:] if not r.is_bot_managed()]
-        self.max_page = max(0, (len(self.roles) - 1) // 24)
+        # 23 rôles par page pour laisser place à "Aucun" sur la page 0
+        self.per_page = 23
+        self.max_page = max(0, (len(self.roles) - 1) // self.per_page)
         self._build()
     
     def _build(self):
-        start = self.page * 24
-        end = start + 24
+        start = self.page * self.per_page
+        end = start + self.per_page
         page_roles = self.roles[start:end]
         
         opts = []
@@ -7144,18 +7233,25 @@ class PaginatedRoleSelectForPanel(View):
             opts.append(discord.SelectOption(label="❌ Aucun (utiliser global)", value="0"))
         
         for r in page_roles:
-            opts.append(discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)))
+            # Ajouter une description avec la couleur du rôle
+            color_hex = f"#{r.color.value:06x}" if r.color.value else "Par défaut"
+            opts.append(discord.SelectOption(
+                label=f"@{r.name}"[:25], 
+                value=str(r.id),
+                description=f"Couleur: {color_hex}"[:50]
+            ))
         
         if opts:
             self.add_item(PanelStaffRoleSelect(self, opts))
         
+        # Boutons de pagination
         if self.page > 0:
-            btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.secondary, row=1)
+            btn = discord.ui.Button(label="◀️ Page préc.", style=discord.ButtonStyle.secondary, row=1)
             btn.callback = self.prev_page
             self.add_item(btn)
         
         if self.page < self.max_page:
-            btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.secondary, row=1)
+            btn = discord.ui.Button(label="▶️ Page suiv.", style=discord.ButtonStyle.secondary, row=1)
             btn.callback = self.next_page
             self.add_item(btn)
         
@@ -7165,11 +7261,21 @@ class PaginatedRoleSelectForPanel(View):
     
     async def prev_page(self, i):
         v = PaginatedRoleSelectForPanel(self.u, self.g, self.pid, self.page - 1)
-        await i.response.edit_message(view=v)
+        embed = discord.Embed(
+            title="👥 Rôle Staff du Panel", 
+            description=f"Page {self.page}/{self.max_page + 1} - {len(self.roles)} rôles disponibles\n*Aucun = utilise le rôle staff global*",
+            color=C.PURPLE
+        )
+        await i.response.edit_message(embed=embed, view=v)
     
     async def next_page(self, i):
         v = PaginatedRoleSelectForPanel(self.u, self.g, self.pid, self.page + 1)
-        await i.response.edit_message(view=v)
+        embed = discord.Embed(
+            title="👥 Rôle Staff du Panel", 
+            description=f"Page {self.page + 2}/{self.max_page + 1} - {len(self.roles)} rôles disponibles\n*Aucun = utilise le rôle staff global*",
+            color=C.PURPLE
+        )
+        await i.response.edit_message(embed=embed, view=v)
     
     async def go_back(self, i):
         v = PanelEditView(self.u, self.g, self.pid)
@@ -7177,7 +7283,8 @@ class PaginatedRoleSelectForPanel(View):
 
 class PanelStaffRoleSelect(Select):
     def __init__(self, parent, opts):
-        super().__init__(placeholder=f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un rôle...", options=opts)
+        placeholder = f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un rôle..."
+        super().__init__(placeholder=placeholder, options=opts)
         self.parent = parent
     
     async def callback(self, i):
