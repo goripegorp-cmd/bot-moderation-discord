@@ -4277,22 +4277,18 @@ class LevelSystemPanel(View):
         xp_per_msg = level_cfg.get('xp_per_message', 15)
         e.add_field(name="✨ XP/message", value=f"`{xp_per_msg}` XP", inline=True)
         
-        # Pièces
-        coins_msgs = level_cfg.get('coins_per_messages', 1)  # messages requis
-        coins_amount = level_cfg.get('coins_amount', 1)  # pièces gagnées
-        e.add_field(name="🪙 Pièces", value=f"`{coins_amount}` pièce(s) / `{coins_msgs}` message(s)", inline=True)
+        # XP par vocal (par minute)
+        xp_per_vocal = level_cfg.get('xp_per_vocal_minute', 5)
+        e.add_field(name="🎤 XP/vocal", value=f"`{xp_per_vocal}` XP/min", inline=True)
         
-        # Salon Level-up
-        lvl_ch = self.g.get_channel(level_cfg.get('levelup_channel', 0))
-        e.add_field(name="📢 Annonces", value=lvl_ch.mention if lvl_ch else "*Salon actif*", inline=True)
+        # Pièces par messages
+        coins_msgs = level_cfg.get('coins_per_messages', 1)
+        coins_amount = level_cfg.get('coins_amount', 1)
+        e.add_field(name="🪙 Pièces/msg", value=f"`{coins_amount}` / `{coins_msgs}` msg", inline=True)
         
-        # Salons autorisés
-        allowed_chs = level_cfg.get('allowed_channels', [])
-        if allowed_chs:
-            ch_list = ", ".join([self.g.get_channel(c).mention for c in allowed_chs[:3] if self.g.get_channel(c)])
-            e.add_field(name="📍 Salons /level /shop", value=ch_list or "*Partout*", inline=True)
-        else:
-            e.add_field(name="📍 Salons /level /shop", value="*Partout*", inline=True)
+        # Pièces par vocal (par minute)
+        coins_per_vocal = level_cfg.get('coins_per_vocal_minute', 1)
+        e.add_field(name="🎤 Pièces/vocal", value=f"`{coins_per_vocal}` /min", inline=True)
         
         # Boutique
         shop_items = level_cfg.get('shop_items', [])
@@ -4313,21 +4309,29 @@ class LevelSystemPanel(View):
     async def set_xp(self, i, b):
         await i.response.send_modal(LevelXPModal(self.g, self.u))
     
-    @discord.ui.button(label="🪙 Pièces", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="🪙 Pièces/msg", style=discord.ButtonStyle.primary, row=0)
     async def set_coins(self, i, b):
         await i.response.send_modal(LevelCoinsModal(self.g, self.u))
+    
+    @discord.ui.button(label="🎤 XP/vocal", style=discord.ButtonStyle.secondary, row=1)
+    async def set_xp_vocal(self, i, b):
+        await i.response.send_modal(LevelXPVocalModal(self.g, self.u))
+    
+    @discord.ui.button(label="🎤 Pièces/vocal", style=discord.ButtonStyle.secondary, row=1)
+    async def set_coins_vocal(self, i, b):
+        await i.response.send_modal(LevelCoinsVocalModal(self.g, self.u))
     
     @discord.ui.button(label="🎭 Rôles Niveau", style=discord.ButtonStyle.primary, row=1)
     async def level_roles(self, i, b):
         v = LevelRolesPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
-    @discord.ui.button(label="🛒 Boutique", style=discord.ButtonStyle.success, row=1)
+    @discord.ui.button(label="🛒 Boutique", style=discord.ButtonStyle.success, row=2)
     async def shop_config(self, i, b):
         v = ShopConfigPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
-    @discord.ui.button(label="📍 Salons Autorisés", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="📍 Salons", style=discord.ButtonStyle.secondary, row=2)
     async def allowed_channels(self, i, b):
         c = await cfg(self.g.id)
         level_cfg = c.get('level_config', {})
@@ -4340,7 +4344,7 @@ class LevelSystemPanel(View):
             view=v
         )
     
-    @discord.ui.button(label="📢 Salon Annonces", style=discord.ButtonStyle.secondary, row=2)
+    @discord.ui.button(label="📢 Annonces", style=discord.ButtonStyle.secondary, row=2)
     async def levelup_channel(self, i, b):
         v = LevelUpChannelSelect(self.u, self.g)
         await i.response.edit_message(
@@ -4348,7 +4352,7 @@ class LevelSystemPanel(View):
             view=v
         )
     
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=3)
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
@@ -4390,6 +4394,46 @@ class LevelCoinsModal(Modal, title="🪙 Configuration Pièces"):
             level_cfg = c.get('level_config', {})
             level_cfg['coins_per_messages'] = msgs
             level_cfg['coins_amount'] = coins
+            await db_set(self.g.id, 'level_config', level_cfg)
+        except:
+            pass
+        v = LevelSystemPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class LevelXPVocalModal(Modal, title="🎤 XP par minute en vocal"):
+    xp_input = TextInput(label="XP gagné par minute en vocal", placeholder="5", max_length=4)
+    
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+    
+    async def on_submit(self, i):
+        try:
+            xp = max(0, min(100, int(self.xp_input.value)))
+            c = await cfg(self.g.id)
+            level_cfg = c.get('level_config', {})
+            level_cfg['xp_per_vocal_minute'] = xp
+            await db_set(self.g.id, 'level_config', level_cfg)
+        except:
+            pass
+        v = LevelSystemPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class LevelCoinsVocalModal(Modal, title="🎤 Pièces par minute en vocal"):
+    coins_input = TextInput(label="Pièces gagnées par minute en vocal", placeholder="1", max_length=4)
+    
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+    
+    async def on_submit(self, i):
+        try:
+            coins = max(0, min(100, int(self.coins_input.value)))
+            c = await cfg(self.g.id)
+            level_cfg = c.get('level_config', {})
+            level_cfg['coins_per_vocal_minute'] = coins
             await db_set(self.g.id, 'level_config', level_cfg)
         except:
             pass
@@ -5314,7 +5358,7 @@ class AutoHelpPanel(View):
         if not auto_helps:
             return await i.response.send_message("❌ Aucun salon configuré", ephemeral=True)
         
-        v = AutoHelpManageView(self.u, self.g)
+        v = await AutoHelpManageView.create(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
@@ -5441,10 +5485,34 @@ class AutoHelpConfigModal(Modal, title="💡 Configurer l'aide automatique"):
             await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
 
 class AutoHelpManageView(View):
-    def __init__(self, u, g):
+    def __init__(self, u, g, opts=None):
         super().__init__(timeout=180)
         self.u = u
         self.g = g
+        
+        # Ajouter le sélecteur si des options sont fournies
+        if opts:
+            select = Select(placeholder="🗑️ Supprimer une aide...", options=opts, row=0)
+            select.callback = self.delete_callback
+            self.add_item(select)
+    
+    @classmethod
+    async def create(cls, u, g):
+        """Factory method pour créer la vue avec les options chargées"""
+        c = await cfg(g.id)
+        auto_helps = c.get('auto_help_channels', {})
+        
+        opts = []
+        for ch_id, help_data in list(auto_helps.items())[:25]:
+            ch = g.get_channel(int(ch_id))
+            if ch:
+                opts.append(discord.SelectOption(
+                    label=f"# {ch.name}"[:25],
+                    value=ch_id,
+                    description=help_data.get('title', 'Aide')[:50]
+                ))
+        
+        return cls(u, g, opts if opts else None)
     
     async def embed(self):
         c = await cfg(self.g.id)
@@ -5463,16 +5531,8 @@ class AutoHelpManageView(View):
         e.description = "\n".join(help_list) if help_list else "*Aucune aide configurée*"
         return e
     
-    @discord.ui.select(
-        placeholder="🗑️ Supprimer une aide...",
-        options=[discord.SelectOption(label="Chargement...", value="loading")],
-        row=0
-    )
-    async def delete_help(self, i, s):
-        if s.values[0] == "loading":
-            return
-        
-        channel_id = s.values[0]
+    async def delete_callback(self, i):
+        channel_id = i.data['values'][0]
         c = await cfg(self.g.id)
         auto_helps = c.get('auto_help_channels', {})
         
@@ -5493,70 +5553,16 @@ class AutoHelpManageView(View):
                 del auto_help_messages[ch_id]
         
         if auto_helps:
-            v = AutoHelpManageView(self.u, self.g)
-            await i.response.edit_message(embed=await v.embed(), view=await self._rebuild_view())
+            v = await AutoHelpManageView.create(self.u, self.g)
+            await i.response.edit_message(embed=await v.embed(), view=v)
         else:
             v = AutoHelpPanel(self.u, self.g)
             await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    async def _rebuild_view(self):
-        c = await cfg(self.g.id)
-        auto_helps = c.get('auto_help_channels', {})
-        
-        v = View(timeout=180)
-        
-        opts = []
-        for ch_id, help_data in list(auto_helps.items())[:25]:
-            ch = self.g.get_channel(int(ch_id))
-            if ch:
-                opts.append(discord.SelectOption(
-                    label=f"# {ch.name}"[:25],
-                    value=ch_id,
-                    description=help_data.get('title', 'Aide')[:50]
-                ))
-        
-        if opts:
-            select = Select(placeholder="🗑️ Supprimer une aide...", options=opts)
-            select.callback = self._delete_callback
-            v.add_item(select)
-        
-        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
-        back_btn.callback = self._back_callback
-        v.add_item(back_btn)
-        
-        return v
-    
-    async def _delete_callback(self, i):
-        await self.delete_help(i, i.data)
-    
-    async def _back_callback(self, i):
-        v = AutoHelpPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
         v = AutoHelpPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    async def interaction_check(self, interaction):
-        # Reconstruire les options du select
-        c = await cfg(self.g.id)
-        auto_helps = c.get('auto_help_channels', {})
-        
-        opts = []
-        for ch_id, help_data in list(auto_helps.items())[:25]:
-            ch = self.g.get_channel(int(ch_id))
-            if ch:
-                opts.append(discord.SelectOption(
-                    label=f"# {ch.name}"[:25],
-                    value=ch_id,
-                    description=help_data.get('title', 'Aide')[:50]
-                ))
-        
-        if opts:
-            self.delete_help.options = opts
-        
-        return True
 
 async def handle_auto_help(message):
     """Gère le repositionnement automatique des messages d'aide"""
@@ -10378,7 +10384,7 @@ async def track_member_vocal_join(member, channel):
         print(f"Erreur track vocal join: {ex}")
 
 async def track_member_vocal_leave(member, channel, duration):
-    """Enregistre le temps passé en vocal"""
+    """Enregistre le temps passé en vocal et donne XP/pièces"""
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             now_str = now().isoformat()
@@ -10388,7 +10394,7 @@ async def track_member_vocal_leave(member, channel, duration):
                 INSERT INTO activity_tracking (guild_id, user_id, total_vocal_time)
                 VALUES (?, ?, ?)
                 ON CONFLICT(guild_id, user_id) DO UPDATE SET
-                    total_vocal_time = total_vocal_time + ?
+                    total_vocal_time = COALESCE(total_vocal_time, 0) + ?
             ''', (member.guild.id, member.id, duration, duration))
             
             # Enregistrer la session vocale
@@ -10398,6 +10404,56 @@ async def track_member_vocal_leave(member, channel, duration):
             ''', (member.guild.id, member.id, channel.id, duration, now_str))
             
             await db.commit()
+        
+        # ═══════════════ XP ET PIÈCES VOCAUX ═══════════════
+        try:
+            c = await cfg(member.guild.id)
+            level_cfg = c.get('level_config', {})
+            
+            if level_cfg.get('enabled', False) and duration > 0:
+                # Calculer les minutes passées
+                minutes = duration // 60
+                
+                if minutes > 0:
+                    # Donner l'XP
+                    xp_per_minute = level_cfg.get('xp_per_vocal_minute', 5)
+                    if xp_per_minute > 0:
+                        total_xp = minutes * xp_per_minute
+                        new_level = await add_xp(member.guild.id, member.id, total_xp)
+                        
+                        # Si level up
+                        if new_level:
+                            levelup_ch_id = level_cfg.get('levelup_channel', 0)
+                            levelup_ch = member.guild.get_channel(levelup_ch_id) if levelup_ch_id else None
+                            
+                            if levelup_ch:
+                                e = discord.Embed(title="🎉 Level Up !", color=0xF1C40F)
+                                e.description = f"{member.mention} est passé au **niveau {new_level}** !"
+                                e.set_footer(text=f"🎤 Temps en vocal: {minutes} min")
+                                try:
+                                    await levelup_ch.send(embed=e, delete_after=30)
+                                except:
+                                    pass
+                            
+                            # Vérifier les récompenses de niveau
+                            async with aiosqlite.connect(DB_PATH) as db:
+                                async with db.execute('SELECT role_id FROM level_rewards WHERE guild_id=? AND level=?', (member.guild.id, new_level)) as cursor:
+                                    row = await cursor.fetchone()
+                                    if row:
+                                        role = member.guild.get_role(row[0])
+                                        if role:
+                                            try:
+                                                await member.add_roles(role, reason=f"Récompense niveau {new_level}")
+                                            except:
+                                                pass
+                    
+                    # Donner les pièces
+                    coins_per_minute = level_cfg.get('coins_per_vocal_minute', 1)
+                    if coins_per_minute > 0:
+                        total_coins = minutes * coins_per_minute
+                        await add_coins(member.guild.id, member.id, total_coins)
+        except Exception as ex:
+            print(f"Erreur XP/coins vocal: {ex}")
             
     except Exception as ex:
         print(f"Erreur track vocal leave: {ex}")
