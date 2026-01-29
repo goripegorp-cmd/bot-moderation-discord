@@ -235,6 +235,13 @@ async def db_init():
             reactions INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )''')
+        
+        # Index pour améliorer les performances des requêtes de stats
+        try:
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_member_activity_guild_user ON member_activity(guild_id, user_id, activity_type, created_at)')
+        except:
+            pass
+        
         # Table pour les stats d'inactivité
         await db.execute('''CREATE TABLE IF NOT EXISTS activity_tracking (
             guild_id INTEGER,
@@ -4277,18 +4284,21 @@ class LevelSystemPanel(View):
         xp_per_msg = level_cfg.get('xp_per_message', 15)
         e.add_field(name="✨ XP/message", value=f"`{xp_per_msg}` XP", inline=True)
         
-        # XP par vocal (par minute)
-        xp_per_vocal = level_cfg.get('xp_per_vocal_minute', 5)
-        e.add_field(name="🎤 XP/vocal", value=f"`{xp_per_vocal}` XP/min", inline=True)
+        # XP par vocal avec unité
+        xp_per_vocal = level_cfg.get('xp_per_vocal', 5)
+        xp_vocal_unit = level_cfg.get('xp_vocal_unit', 'minute')
+        unit_labels = {'minute': 'min', 'hour': 'h', 'day': 'jour'}
+        e.add_field(name="🎤 XP/vocal", value=f"`{xp_per_vocal}` XP/{unit_labels.get(xp_vocal_unit, 'min')}", inline=True)
         
         # Pièces par messages
         coins_msgs = level_cfg.get('coins_per_messages', 1)
         coins_amount = level_cfg.get('coins_amount', 1)
         e.add_field(name="🪙 Pièces/msg", value=f"`{coins_amount}` / `{coins_msgs}` msg", inline=True)
         
-        # Pièces par vocal (par minute)
-        coins_per_vocal = level_cfg.get('coins_per_vocal_minute', 1)
-        e.add_field(name="🎤 Pièces/vocal", value=f"`{coins_per_vocal}` /min", inline=True)
+        # Pièces par vocal avec unité
+        coins_per_vocal = level_cfg.get('coins_per_vocal', 1)
+        coins_vocal_unit = level_cfg.get('coins_vocal_unit', 'minute')
+        e.add_field(name="🎤 Pièces/vocal", value=f"`{coins_per_vocal}` /{unit_labels.get(coins_vocal_unit, 'min')}", inline=True)
         
         # Boutique
         shop_items = level_cfg.get('shop_items', [])
@@ -4400,8 +4410,9 @@ class LevelCoinsModal(Modal, title="🪙 Configuration Pièces"):
         v = LevelSystemPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
-class LevelXPVocalModal(Modal, title="🎤 XP par minute en vocal"):
-    xp_input = TextInput(label="XP gagné par minute en vocal", placeholder="5", max_length=4)
+class LevelXPVocalModal(Modal, title="🎤 XP en vocal"):
+    xp_input = TextInput(label="XP gagné", placeholder="5", max_length=4)
+    unit_input = TextInput(label="Unité (minute, hour, day)", placeholder="minute", max_length=10, default="minute")
     
     def __init__(self, g, u):
         super().__init__()
@@ -4410,18 +4421,24 @@ class LevelXPVocalModal(Modal, title="🎤 XP par minute en vocal"):
     
     async def on_submit(self, i):
         try:
-            xp = max(0, min(100, int(self.xp_input.value)))
+            xp = max(0, min(1000, int(self.xp_input.value)))
+            unit = self.unit_input.value.lower().strip()
+            if unit not in ['minute', 'hour', 'day']:
+                unit = 'minute'
+            
             c = await cfg(self.g.id)
             level_cfg = c.get('level_config', {})
-            level_cfg['xp_per_vocal_minute'] = xp
+            level_cfg['xp_per_vocal'] = xp
+            level_cfg['xp_vocal_unit'] = unit
             await db_set(self.g.id, 'level_config', level_cfg)
         except:
             pass
         v = LevelSystemPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
-class LevelCoinsVocalModal(Modal, title="🎤 Pièces par minute en vocal"):
-    coins_input = TextInput(label="Pièces gagnées par minute en vocal", placeholder="1", max_length=4)
+class LevelCoinsVocalModal(Modal, title="🎤 Pièces en vocal"):
+    coins_input = TextInput(label="Pièces gagnées", placeholder="1", max_length=4)
+    unit_input = TextInput(label="Unité (minute, hour, day)", placeholder="minute", max_length=10, default="minute")
     
     def __init__(self, g, u):
         super().__init__()
@@ -4430,10 +4447,15 @@ class LevelCoinsVocalModal(Modal, title="🎤 Pièces par minute en vocal"):
     
     async def on_submit(self, i):
         try:
-            coins = max(0, min(100, int(self.coins_input.value)))
+            coins = max(0, min(1000, int(self.coins_input.value)))
+            unit = self.unit_input.value.lower().strip()
+            if unit not in ['minute', 'hour', 'day']:
+                unit = 'minute'
+            
             c = await cfg(self.g.id)
             level_cfg = c.get('level_config', {})
-            level_cfg['coins_per_vocal_minute'] = coins
+            level_cfg['coins_per_vocal'] = coins
+            level_cfg['coins_vocal_unit'] = unit
             await db_set(self.g.id, 'level_config', level_cfg)
         except:
             pass
@@ -5566,8 +5588,7 @@ class AutoHelpManageView(View):
 
 async def handle_auto_help(message):
     """Gère le repositionnement automatique des messages d'aide"""
-    if message.author.bot:
-        return
+    # Note: Le filtre pour ignorer le bot lui-même est fait dans on_message
     
     try:
         c = await cfg(message.guild.id)
@@ -5581,6 +5602,11 @@ async def handle_auto_help(message):
         if not help_data.get('enabled', True):
             return
         
+        # Vérifier si le message n'est pas le message d'aide lui-même
+        if message.channel.id in auto_help_messages:
+            if message.id == auto_help_messages[message.channel.id]:
+                return  # C'est notre propre message d'aide, ne pas boucler
+        
         # Supprimer l'ancien message d'aide
         if message.channel.id in auto_help_messages:
             try:
@@ -5588,8 +5614,9 @@ async def handle_auto_help(message):
                 await old_msg.delete()
             except:
                 pass
+            del auto_help_messages[message.channel.id]
         
-        # Petit délai pour que le message de l'utilisateur soit bien envoyé
+        # Petit délai pour que le message soit bien envoyé
         await asyncio.sleep(0.5)
         
         # Créer et envoyer le nouveau message d'aide
@@ -8091,11 +8118,18 @@ async def relay_discord_message(msg):
 
 @bot.event
 async def on_message(msg):
-    if msg.author.bot or not msg.guild: return
+    if not msg.guild:
+        return
     
     # ═══════════════ MESSAGES D'AIDE AUTOMATIQUES ═══════════════
-    # Doit être appelé avant toute suppression potentielle
-    asyncio.create_task(handle_auto_help(msg))
+    # Doit être appelé AVANT le filtre bot pour repositionner après les messages de bots
+    # Mais on ignore le propre message du bot (éviter boucle infinie)
+    if msg.author.id != bot.user.id:
+        asyncio.create_task(handle_auto_help(msg))
+    
+    # Ignorer les bots pour le reste du traitement
+    if msg.author.bot:
+        return
     
     # Relay Discord - Vérifier si ce salon est suivi par d'autres serveurs
     await relay_discord_message(msg)
@@ -10219,25 +10253,34 @@ async def on_voice_state_update(member, before, after):
     except Exception as ex:
         print(f"Erreur temp voice: {ex}")
     
-    # ═══════════════ TRACKING ACTIVITÉ ═══════════════
-    # Si l'utilisateur rejoint un vocal
-    if after.channel and (not before.channel or before.channel != after.channel):
-        await update_realsy_activity(guild_id, user_id)
+    # ═══════════════ TRACKING ACTIVITÉ VOCALE ═══════════════
+    try:
+        # Cas 1: L'utilisateur REJOINT un vocal (était pas en vocal ou change de salon)
+        if after.channel and (before.channel is None or before.channel.id != after.channel.id):
+            print(f"[VOCAL] {member.display_name} rejoint {after.channel.name}")
+            
+            # Enregistrer l'heure de connexion
+            voice_join_tracker[key] = now()
+            
+            # Mettre à jour last_vocal et redonner le rôle si configuré
+            await track_member_vocal_join(member, after.channel)
+            await update_realsy_activity(guild_id, user_id)
         
-        # Enregistrer l'heure de connexion
-        voice_join_tracker[key] = now()
-        
-        # Tracker l'activité + redonner le rôle si configuré
-        await track_member_vocal_join(member, after.channel)
-    
-    # Si l'utilisateur quitte un vocal
-    if before.channel and (not after.channel or before.channel != after.channel):
-        # Calculer le temps passé
-        join_time = voice_join_tracker.pop(key, None)
-        if join_time:
-            duration = int((now() - join_time).total_seconds())
-            if duration > 0:
-                await track_member_vocal_leave(member, before.channel, duration)
+        # Cas 2: L'utilisateur QUITTE un vocal (quitte complètement ou change de salon)
+        if before.channel and (after.channel is None or before.channel.id != after.channel.id):
+            print(f"[VOCAL] {member.display_name} quitte {before.channel.name}")
+            
+            # Calculer le temps passé
+            join_time = voice_join_tracker.pop(key, None)
+            if join_time:
+                duration = int((now() - join_time).total_seconds())
+                print(f"[VOCAL] Durée: {duration} secondes")
+                if duration > 0:
+                    await track_member_vocal_leave(member, before.channel, duration)
+            else:
+                print(f"[VOCAL] Pas de join_time trouvé pour {member.display_name}")
+    except Exception as ex:
+        print(f"Erreur tracking vocal: {ex}")
 
 async def track_member_message(msg):
     """Enregistre un message dans le tracking d'activité"""
@@ -10404,6 +10447,7 @@ async def track_member_vocal_leave(member, channel, duration):
             ''', (member.guild.id, member.id, channel.id, duration, now_str))
             
             await db.commit()
+            print(f"[VOCAL DB] Enregistré {duration}s pour {member.display_name}")
         
         # ═══════════════ XP ET PIÈCES VOCAUX ═══════════════
         try:
@@ -10411,47 +10455,61 @@ async def track_member_vocal_leave(member, channel, duration):
             level_cfg = c.get('level_config', {})
             
             if level_cfg.get('enabled', False) and duration > 0:
-                # Calculer les minutes passées
-                minutes = duration // 60
+                # Fonction pour convertir la durée selon l'unité
+                def get_units(seconds, unit):
+                    if unit == 'minute':
+                        return seconds // 60
+                    elif unit == 'hour':
+                        return seconds // 3600
+                    elif unit == 'day':
+                        return seconds // 86400
+                    return seconds // 60  # Par défaut en minutes
                 
-                if minutes > 0:
-                    # Donner l'XP
-                    xp_per_minute = level_cfg.get('xp_per_vocal_minute', 5)
-                    if xp_per_minute > 0:
-                        total_xp = minutes * xp_per_minute
-                        new_level = await add_xp(member.guild.id, member.id, total_xp)
-                        
-                        # Si level up
-                        if new_level:
-                            levelup_ch_id = level_cfg.get('levelup_channel', 0)
-                            levelup_ch = member.guild.get_channel(levelup_ch_id) if levelup_ch_id else None
-                            
-                            if levelup_ch:
-                                e = discord.Embed(title="🎉 Level Up !", color=0xF1C40F)
-                                e.description = f"{member.mention} est passé au **niveau {new_level}** !"
-                                e.set_footer(text=f"🎤 Temps en vocal: {minutes} min")
-                                try:
-                                    await levelup_ch.send(embed=e, delete_after=30)
-                                except:
-                                    pass
-                            
-                            # Vérifier les récompenses de niveau
-                            async with aiosqlite.connect(DB_PATH) as db:
-                                async with db.execute('SELECT role_id FROM level_rewards WHERE guild_id=? AND level=?', (member.guild.id, new_level)) as cursor:
-                                    row = await cursor.fetchone()
-                                    if row:
-                                        role = member.guild.get_role(row[0])
-                                        if role:
-                                            try:
-                                                await member.add_roles(role, reason=f"Récompense niveau {new_level}")
-                                            except:
-                                                pass
+                # XP Vocal
+                xp_per_vocal = level_cfg.get('xp_per_vocal', level_cfg.get('xp_per_vocal_minute', 5))
+                xp_vocal_unit = level_cfg.get('xp_vocal_unit', 'minute')
+                xp_units = get_units(duration, xp_vocal_unit)
+                
+                if xp_units > 0 and xp_per_vocal > 0:
+                    total_xp = xp_units * xp_per_vocal
+                    print(f"[VOCAL XP] {member.display_name}: {xp_units} {xp_vocal_unit}s x {xp_per_vocal} = {total_xp} XP")
+                    new_level = await add_xp(member.guild.id, member.id, total_xp)
                     
-                    # Donner les pièces
-                    coins_per_minute = level_cfg.get('coins_per_vocal_minute', 1)
-                    if coins_per_minute > 0:
-                        total_coins = minutes * coins_per_minute
-                        await add_coins(member.guild.id, member.id, total_coins)
+                    # Si level up
+                    if new_level:
+                        levelup_ch_id = level_cfg.get('levelup_channel', 0)
+                        levelup_ch = member.guild.get_channel(levelup_ch_id) if levelup_ch_id else None
+                        
+                        if levelup_ch:
+                            e = discord.Embed(title="🎉 Level Up !", color=0xF1C40F)
+                            e.description = f"{member.mention} est passé au **niveau {new_level}** !"
+                            e.set_footer(text=f"🎤 Temps en vocal: {duration // 60} min")
+                            try:
+                                await levelup_ch.send(embed=e, delete_after=30)
+                            except:
+                                pass
+                        
+                        # Vérifier les récompenses de niveau
+                        async with aiosqlite.connect(DB_PATH) as db:
+                            async with db.execute('SELECT role_id FROM level_rewards WHERE guild_id=? AND level=?', (member.guild.id, new_level)) as cursor:
+                                row = await cursor.fetchone()
+                                if row:
+                                    role = member.guild.get_role(row[0])
+                                    if role:
+                                        try:
+                                            await member.add_roles(role, reason=f"Récompense niveau {new_level}")
+                                        except:
+                                            pass
+                
+                # Pièces Vocal
+                coins_per_vocal = level_cfg.get('coins_per_vocal', level_cfg.get('coins_per_vocal_minute', 1))
+                coins_vocal_unit = level_cfg.get('coins_vocal_unit', 'minute')
+                coins_units = get_units(duration, coins_vocal_unit)
+                
+                if coins_units > 0 and coins_per_vocal > 0:
+                    total_coins = coins_units * coins_per_vocal
+                    print(f"[VOCAL COINS] {member.display_name}: {coins_units} {coins_vocal_unit}s x {coins_per_vocal} = {total_coins} pièces")
+                    await add_coins(member.guild.id, member.id, total_coins)
         except Exception as ex:
             print(f"Erreur XP/coins vocal: {ex}")
             
