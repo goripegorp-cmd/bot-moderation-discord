@@ -582,20 +582,24 @@ async def cfg(gid):
 async def is_immune(m, key, channel=None):
     """
     Vérifie si un membre est immunisé contre une protection.
-    Les rôles/utilisateurs immunisés ont un accès total SAUF contre:
-    - anti_phishing (seulement si le compte semble compromis)
-    - anti_compromised (seulement pour les comportements très suspects)
+    Les rôles/utilisateurs immunisés ont un accès TOTAL sauf pour:
+    - anti_phishing (jamais ignoré - sécurité critique)
+    - anti_compromised (jamais ignoré - détection de hack)
     """
     
-    # Owner du serveur = toujours immunisé
+    # Protections CRITIQUES - JAMAIS ignorées même pour les immunisés
+    # Ces protections protègent contre les comptes hackés
+    critical_protections = ['anti_phishing', 'anti_compromised']
+    
+    if key in critical_protections:
+        return False  # Personne n'est immunisé contre le phishing
+    
+    # Owner du serveur = toujours immunisé pour tout le reste
     if m.id == m.guild.owner_id:
         return True
     
-    # Admins sont immunisés contre presque tout
+    # Admins sont immunisés contre tout (sauf critique)
     if m.guild_permissions.administrator:
-        # Sauf comportement de compte compromis évident
-        if key == 'anti_compromised':
-            return False  # Même les admins peuvent être hackés
         return True
     
     # Vérifier immunité personnalisée (rôles/utilisateurs/salons)
@@ -621,13 +625,10 @@ async def is_immune(m, key, channel=None):
         is_role_immune = any(role.id in immune_roles for role in m.roles)
         
         if is_user_immune or is_role_immune:
-            # Les immunisés peuvent TOUT faire sauf si comportement de hack évident
-            if key == 'anti_compromised':
-                return False  # Même les immunisés peuvent être hackés
-            return True
+            return True  # Immunisé = accès total (sauf protections critiques)
             
     except Exception as ex:
-        print(f"Erreur is_immune: {ex}")
+        print(f"[IMMUNE ERROR] {ex}")
     
     return False
 
@@ -653,6 +654,31 @@ async def is_channel_immune(guild_id, channel_id):
                 return await c.fetchone() is not None
     except:
         return False
+
+async def is_ticket_channel(channel):
+    """
+    Vérifie si un salon est un ticket.
+    Les tickets sont immunisés contre toutes les protections SAUF anti-phishing et anti-scam.
+    """
+    try:
+        # Vérifier dans la base de données des tickets
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                'SELECT id FROM tickets WHERE channel_id=? AND status="open"',
+                (channel.id,)
+            ) as c:
+                if await c.fetchone():
+                    return True
+        
+        # Vérifier aussi par le nom du salon (backup)
+        channel_name = channel.name.lower()
+        if channel_name.startswith('ticket-') or channel_name.startswith('🎫'):
+            return True
+            
+    except:
+        pass
+    
+    return False
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           📺 SÉLECTEUR DE SALON PAGINÉ
@@ -1007,10 +1033,56 @@ def check_badwords(ct, words):
     return False, None
 
 def check_link(ct, wl):
-    urls = re.findall(r'https?://([^\s<>"]+)', ct.lower())
+    """
+    Vérifie si un message contient des liens non autorisés.
+    Retourne (True, url) si un lien non autorisé est trouvé.
+    La whitelist contient des domaines autorisés (ex: trello.com, youtube.com)
+    """
+    # Extraire toutes les URLs du message
+    urls = re.findall(r'https?://([^\s<>"\']+)', ct, re.IGNORECASE)
+    
+    if not urls:
+        return False, None
+    
+    # Normaliser la whitelist
+    whitelist = []
+    for w in (wl or []):
+        w = str(w).lower().strip()
+        # Enlever http:// ou https:// si présent
+        w = re.sub(r'^https?://', '', w)
+        # Enlever le / final
+        w = w.rstrip('/')
+        if w:
+            whitelist.append(w)
+    
+    # Toujours autoriser certains domaines de base
+    default_whitelist = [
+        'discord.com', 'discordapp.com', 'cdn.discordapp.com',
+        'media.discordapp.net', 'images-ext-1.discordapp.net',
+        'tenor.com', 'giphy.com', 'imgur.com',
+    ]
+    whitelist.extend(default_whitelist)
+    
     for url in urls:
-        dom = url.split('/')[0]
-        if not any(w.lower() in dom for w in wl): return True, url
+        url_lower = url.lower()
+        # Extraire le domaine (avant le premier /)
+        domain = url_lower.split('/')[0].split('?')[0]
+        
+        # Vérifier si le domaine est dans la whitelist
+        is_allowed = False
+        for allowed in whitelist:
+            # Vérifier correspondance exacte ou sous-domaine
+            if domain == allowed or domain.endswith('.' + allowed):
+                is_allowed = True
+                break
+            # Vérifier si le domaine autorisé est contenu dans le domaine
+            if allowed in domain:
+                is_allowed = True
+                break
+        
+        if not is_allowed:
+            return True, url
+    
     return False, None
 
 def check_invite(ct):
@@ -2185,7 +2257,7 @@ class LinkConfigPanel(View):
 class AddDomainModal(Modal, title="➕ Ajouter des domaines"):
     doms = TextInput(
         label="Domaines (séparés par des virgules)",
-        placeholder="youtube.com, twitter.com, discord.com",
+        placeholder="youtube.com, twitter.com, trello.com",
         style=discord.TextStyle.paragraph,
         max_length=2000
     )
@@ -2198,15 +2270,38 @@ class AddDomainModal(Modal, title="➕ Ajouter des domaines"):
     async def on_submit(self, i):
         c = await cfg(self.g.id)
         items = c.get('link_whitelist', [])
-        new = [x.strip().lower() for x in self.doms.value.split(',') if x.strip()]
-        added = 0
-        for d in new:
-            if d and d not in items:
-                items.append(d)
-                added += 1
+        
+        # Nettoyer et normaliser les domaines
+        new_domains = []
+        for x in self.doms.value.split(','):
+            domain = x.strip().lower()
+            # Enlever http:// ou https:// si présent
+            domain = re.sub(r'^https?://', '', domain)
+            # Enlever les / finaux
+            domain = domain.rstrip('/')
+            # Enlever www. si présent
+            if domain.startswith('www.'):
+                domain = domain[4:]
+            if domain and domain not in items and domain not in new_domains:
+                new_domains.append(domain)
+        
+        # Ajouter les nouveaux domaines
+        items.extend(new_domains)
         await db_set(self.g.id, 'link_whitelist', items)
+        
         v = LinkConfigPanel(self.u, self.g)
-        await i.response.edit_message(content=f"✅ {added} domaine(s) ajouté(s)!", embed=await v.embed(), view=v)
+        if new_domains:
+            await i.response.edit_message(
+                content=f"✅ **{len(new_domains)} domaine(s) ajouté(s) !**\n`{', '.join(new_domains)}`",
+                embed=await v.embed(), 
+                view=v
+            )
+        else:
+            await i.response.edit_message(
+                content="⚠️ Aucun nouveau domaine ajouté (déjà présents ou invalides)",
+                embed=await v.embed(), 
+                view=v
+            )
 
 class LinkChanSelectView(View):
     def __init__(self, u, g, opts):
@@ -3043,13 +3138,22 @@ class ImmunePanel(View):
                 chids = [r[0] for r in await c.fetchall()]
         
         e = discord.Embed(title="👑 Immunités", color=C.YELLOW)
-        e.description = "Les éléments immunisés sont protégés contre toutes les restrictions."
+        e.description = (
+            "Les éléments immunisés peuvent :\n"
+            "✅ Envoyer des liens librement\n"
+            "✅ Envoyer des images/GIFs partout\n"
+            "✅ Envoyer des invitations Discord\n"
+            "✅ Utiliser les majuscules librement\n\n"
+            "⚠️ **Protection maintenue contre :**\n"
+            "🎣 Phishing (protection critique)\n"
+            "🚨 Scams (détection automatique)"
+        )
         
         e.add_field(name=f"🎭 Rôles ({len(rids)})", value=", ".join([f"<@&{r}>" for r in rids[:10]]) or "*Aucun*", inline=False)
         e.add_field(name=f"👤 Utilisateurs ({len(uids)})", value=", ".join([f"<@{u}>" for u in uids[:10]]) or "*Aucun*", inline=False)
         e.add_field(name=f"📺 Salons ({len(chids)})", value=", ".join([f"<#{c}>" for c in chids[:10]]) or "*Aucun*", inline=False)
         
-        e.set_footer(text="💡 Les salons immunisés ignorent toutes les protections (anti-link, anti-image, etc.)")
+        e.set_footer(text="💡 Les tickets sont automatiquement immunisés (sauf phishing/scam)")
         return e
     
     @discord.ui.button(label="➕ Rôle", style=discord.ButtonStyle.success, row=0)
@@ -9661,9 +9765,50 @@ async def on_message(msg):
         ag = c.get('image_allowed', [])
         iag = gt and gt in ag
         
-        # ⚠️ VÉRIFIER SI LE SALON EST IMMUNISÉ
+        # ═══════════════ VÉRIFICATIONS D'IMMUNITÉ ═══════════════
+        
+        # 1. Salon immunisé = ignorer TOUTE l'automodération
         if await is_channel_immune(msg.guild.id, chid):
-            return  # Salon immunisé = ignorer toute l'automodération
+            # SAUF anti-phishing qui reste actif partout
+            if c.get('anti_phishing'):
+                f, d = check_phishing(ct)
+                if f:
+                    await msg.delete()
+                    await send_log(msg.guild, 'anti_phishing', msg.author, msg, "Lien de phishing détecté", f"`{d}`")
+                    await sanction(msg.author, c.get('phishing_action', 'ban'), 60, "Phishing", msg.guild)
+            return
+        
+        # 2. Vérifier si c'est un ticket (immunité partielle)
+        is_ticket = await is_ticket_channel(msg.channel)
+        
+        # 3. Vérifier immunité de l'utilisateur
+        user_immune = await is_immune(msg.author, 'general', msg.channel)
+        
+        # ═══════════════ PROTECTIONS CRITIQUES (JAMAIS IGNORÉES) ═══════════════
+        
+        # Anti-phishing - TOUJOURS ACTIF pour TOUT LE MONDE
+        if c.get('anti_phishing'):
+            f, d = check_phishing(ct)
+            if f:
+                await msg.delete()
+                await send_log(msg.guild, 'anti_phishing', msg.author, msg, "Lien de phishing détecté", f"`{d}`")
+                await sanction(msg.author, c.get('phishing_action', 'ban'), 60, "Phishing", msg.guild)
+                return
+        
+        # Anti-scam - Actif même dans les tickets (protection contre les hacks)
+        if c.get('anti_scam'):
+            f, p = check_scam(ct)
+            if f:
+                await msg.delete()
+                await send_log(msg.guild, 'anti_scam', msg.author, msg, "Message de scam détecté", f"`{p}`")
+                await sanction(msg.author, c.get('scam_action', 'mute'), 60, "Scam", msg.guild)
+                return
+        
+        # Si utilisateur immunisé OU dans un ticket = ignorer les autres protections
+        if user_immune or is_ticket:
+            return  # Accès total (liens, images, etc.)
+        
+        # ═══════════════ PROTECTIONS STANDARD (IGNORÉES SI IMMUNISÉ) ═══════════════
         
         # Config salon spécifique
         chcf = c.get('channel_configs', {}).get(str(chid))
@@ -9673,26 +9818,8 @@ async def on_message(msg):
                 await msg.delete()
                 return
         
-        # Anti-phishing
-        if c.get('anti_phishing'):
-            f, d = check_phishing(ct)
-            if f:
-                await msg.delete()
-                await send_log(msg.guild, 'anti_phishing', msg.author, msg, "Lien de phishing détecté", f"`{d}`")
-                await sanction(msg.author, c.get('phishing_action', 'ban'), 60, "Phishing", msg.guild)
-                return
-        
-        # Anti-scam
-        if c.get('anti_scam') and not await is_immune(msg.author, 'anti_scam'):
-            f, p = check_scam(ct)
-            if f:
-                await msg.delete()
-                await send_log(msg.guild, 'anti_scam', msg.author, msg, "Message de scam détecté", f"`{p}`")
-                await sanction(msg.author, c.get('scam_action', 'mute'), 60, "Scam", msg.guild)
-                return
-        
         # Anti-badwords
-        if c.get('anti_badwords') and not await is_immune(msg.author, 'anti_badwords'):
+        if c.get('anti_badwords'):
             f, w = check_badwords(ct, c.get('badwords_list', []))
             if f:
                 await msg.delete()
@@ -9717,7 +9844,7 @@ async def on_message(msg):
                     return
         
         # Anti-image
-        if c.get('anti_image') and not await is_immune(msg.author, 'anti_image') and not iag:
+        if c.get('anti_image') and not iag:
             if chid not in c.get('image_allowed_channels', []):
                 bl = check_image(msg, c.get('image_allowed', []))
                 if bl:
@@ -9726,7 +9853,7 @@ async def on_message(msg):
                     return
         
         # Anti-spam
-        if c.get('anti_spam') and not await is_immune(msg.author, 'anti_spam'):
+        if c.get('anti_spam'):
             if await check_spam(msg, c.get('spam_max', 5), c.get('spam_interval', 5)):
                 await msg.delete()
                 await send_log(msg.guild, 'anti_spam', msg.author, msg, "Spam détecté", None)
@@ -9734,44 +9861,13 @@ async def on_message(msg):
                 return
         
         # Anti-caps
-        if c.get('anti_caps') and not await is_immune(msg.author, 'anti_caps'):
+        if c.get('anti_caps'):
             if check_caps(ct, c.get('caps_percent', 70)):
                 await msg.delete()
                 await send_log(msg.guild, 'anti_caps', msg.author, msg, "Trop de majuscules", None)
                 return
         
-        # ═══════════════ PROTECTIONS AVANCÉES 2026 ═══════════════
-        
-        # Anti-compromis (détection de comptes hackés)
-        if c.get('anti_compromised'):
-            has_everyone = msg.mention_everyone or '@everyone' in ct or '@here' in ct
-            is_compromised, reasons, score = check_compromised_behavior(
-                msg.author.id, msg.guild.id, ct, has_everyone
-            )
-            if is_compromised:
-                await msg.delete()
-                await send_log(msg.guild, 'anti_compromised', msg.author, msg, 
-                              "Comportement de compte compromis", 
-                              f"Raisons: {', '.join(reasons)} (Score: {score})")
-                await sanction(msg.author, c.get('compromised_action', 'mute'), 60, "Compte compromis", msg.guild)
-                
-                # Envoyer une alerte au propriétaire
-                try:
-                    log_ch = msg.guild.get_channel(c.get('log_anti_compromised', 0))
-                    if log_ch:
-                        e = discord.Embed(
-                            title="🔐 COMPTE COMPROMIS DÉTECTÉ",
-                            description=f"**Membre:** {msg.author.mention}\n**Raisons:** {', '.join(reasons)}\n**Score:** {score}",
-                            color=0xFF0000
-                        )
-                        e.add_field(name="💬 Message supprimé", value=ct[:500] if ct else "*Vide*", inline=False)
-                        e.set_footer(text="⚠️ Ce compte a peut-être été hacké - Contactez le membre en DM")
-                        await log_ch.send(embed=e)
-                except:
-                    pass
-                return
-        
-        # Anti-QRCode (détection de scams par QR code)
+        # Anti-QRCode (détection de scams par QR code) - Actif pour tous
         if c.get('anti_qrcode'):
             is_qr_scam, qr_pattern = check_qr_code_scam(ct)
             if is_qr_scam:
@@ -9781,7 +9877,7 @@ async def on_message(msg):
                 await sanction(msg.author, c.get('qrcode_action', 'mute'), 30, "Scam QR Code", msg.guild)
                 return
         
-        # Fichiers dangereux
+        # Fichiers dangereux - Actif pour tous
         if msg.attachments:
             for att in msg.attachments:
                 is_dangerous, ext = check_dangerous_file(att.filename)
