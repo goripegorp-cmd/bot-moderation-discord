@@ -8020,10 +8020,12 @@ class TempVoicePanel(View):
         e.description = (
             "Créez des salons hubs qui génèrent des vocaux personnalisés.\n\n"
             "**Configuration automatique :**\n"
-            "✅ Détection vocale activée (pas de push-to-talk)\n"
-            "✅ Stream autorisé pour tous\n"
-            "❌ Écriture bloquée pour tous\n"
-            "🗑️ Suppression auto si vide"
+            "✅ Détection vocale (pas de push-to-talk)\n"
+            "✅ Stream autorisé\n"
+            "❌ Écriture bloquée\n"
+            "🗑️ Suppression auto si vide\n\n"
+            "**Restriction par rôle :**\n"
+            "🔒 Si un hub a un rôle défini, le vocal créé sera **invisible** pour les membres sans ce rôle"
         )
         
         # État
@@ -8046,7 +8048,10 @@ class TempVoicePanel(View):
                 if hub_ch:
                     role_id = hub_data.get('required_role', 0)
                     role = self.g.get_role(role_id) if role_id else None
-                    role_txt = f"🔒 {role.name}" if role else "🔓 Tous"
+                    if role:
+                        role_txt = f"🔒 {role.name} (privé)"
+                    else:
+                        role_txt = "🔓 Public"
                     cat = self.g.get_channel(hub_data.get('category', 0))
                     cat_txt = cat.name if cat else "Non défini"
                     hub_list.append(f"🎤 **{hub_ch.name}**\n┗ {role_txt} • 📁 {cat_txt}")
@@ -8182,7 +8187,10 @@ class TempVoiceAddHubCategory(View):
                     f"**Étape 3/3** - Choisissez un rôle requis (optionnel).\n\n"
                     f"🎤 Hub: **{hub_ch.name}**\n"
                     f"📁 Catégorie: **{cat.name}**\n\n"
-                    f"🔒 Si un rôle est défini, seuls les membres avec ce rôle pourront créer un vocal."
+                    f"**🔒 Effet du rôle requis :**\n"
+                    f"• Seuls les membres avec ce rôle peuvent créer un vocal\n"
+                    f"• Le vocal créé sera **invisible** pour les autres membres\n"
+                    f"• Seuls les membres avec le rôle peuvent voir/rejoindre le vocal"
                 ),
                 color=0x9B59B6
             ),
@@ -8212,9 +8220,9 @@ class TempVoiceAddHubRole(View):
         
         # Filtrer les rôles (exclure @everyone et les rôles de bot)
         roles = [r for r in g.roles if not r.is_default() and not r.managed][:24]
-        opts = [discord.SelectOption(label="🔓 Aucun (tous peuvent créer)", value="0", emoji="✅")]
+        opts = [discord.SelectOption(label="🔓 Public (tous)", value="0", emoji="✅", description="Tout le monde peut voir et rejoindre")]
         for r in roles:
-            opts.append(discord.SelectOption(label=f"🔒 {r.name}"[:25], value=str(r.id)))
+            opts.append(discord.SelectOption(label=f"🔒 {r.name}"[:25], value=str(r.id), description="Privé - réservé à ce rôle"))
         
         if opts:
             select = Select(placeholder="Choisir un rôle requis...", options=opts[:25])
@@ -8243,9 +8251,14 @@ class TempVoiceAddHubRole(View):
         cat = self.g.get_channel(self.cat_id)
         role = self.g.get_role(role_id) if role_id else None
         
+        if role:
+            visibility_txt = f"🔒 **PRIVÉ** - Réservé à @{role.name}\n*Les vocaux créés seront invisibles pour les autres*"
+        else:
+            visibility_txt = "🔓 **PUBLIC** - Tout le monde peut voir et rejoindre"
+        
         v = TempVoicePanel(self.u, self.g)
         await i.response.edit_message(
-            content=f"✅ **Hub ajouté avec succès !**\n🎤 Hub: {hub_ch.name}\n📁 Catégorie: {cat.name}\n🔒 Rôle requis: {role.name if role else 'Aucun (tous)'}",
+            content=f"✅ **Hub ajouté avec succès !**\n\n🎤 Hub: **{hub_ch.name}**\n📁 Catégorie: **{cat.name}**\n{visibility_txt}",
             embed=await v.embed(),
             view=v
         )
@@ -8425,10 +8438,17 @@ class TempVoiceHubEditPanel(View):
         cat = self.g.get_channel(hub_data.get('category', 0))
         e.add_field(name="📁 Catégorie", value=cat.name if cat else "❌ Non définie", inline=True)
         
-        # Rôle requis
+        # Rôle requis / Mode
         role_id = hub_data.get('required_role', 0)
         role = self.g.get_role(role_id) if role_id else None
-        e.add_field(name="🔒 Rôle requis", value=role.mention if role else "🔓 Aucun (tous)", inline=True)
+        
+        if role:
+            mode_txt = f"🔒 **PRIVÉ**\n{role.mention}"
+            e.add_field(name="🔐 Mode", value=mode_txt, inline=True)
+            e.description = f"*Les vocaux créés seront invisibles pour les membres sans le rôle {role.name}*"
+        else:
+            e.add_field(name="🔐 Mode", value="🔓 **PUBLIC**\nTout le monde", inline=True)
+            e.description = "*Tout le monde peut voir et rejoindre les vocaux créés*"
         
         # Nom par défaut
         default_name = hub_data.get('default_name', '🔊 Vocal de {user}')
@@ -8444,11 +8464,15 @@ class TempVoiceHubEditPanel(View):
             view=v
         )
     
-    @discord.ui.button(label="🔒 Rôle requis", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="🔐 Mode/Rôle", style=discord.ButtonStyle.primary, row=0)
     async def change_role(self, i, b):
         v = TempVoiceHubEditRole(self.u, self.g, self.hub_id)
         await i.response.edit_message(
-            embed=discord.Embed(title="🔒 Changer le rôle requis", description="Sélectionnez le nouveau rôle requis.", color=0x9B59B6),
+            embed=discord.Embed(
+                title="🔐 Changer le mode",
+                description="**🔓 Public** = Tout le monde voit/rejoint les vocaux\n**🔒 Privé** = Seul le rôle choisi voit/rejoint les vocaux",
+                color=0x9B59B6
+            ),
             view=v
         )
     
@@ -8510,9 +8534,9 @@ class TempVoiceHubEditRole(View):
         self.hub_id = hub_id
         
         roles = [r for r in g.roles if not r.is_default() and not r.managed][:24]
-        opts = [discord.SelectOption(label="🔓 Aucun (tous peuvent créer)", value="0", emoji="✅")]
+        opts = [discord.SelectOption(label="🔓 Public (tous)", value="0", emoji="✅", description="Tout le monde peut voir et rejoindre")]
         for r in roles:
-            opts.append(discord.SelectOption(label=f"🔒 {r.name}"[:25], value=str(r.id)))
+            opts.append(discord.SelectOption(label=f"🔒 {r.name}"[:25], value=str(r.id), description="Privé - réservé à ce rôle"))
         
         if opts:
             select = Select(placeholder="Choisir un rôle...", options=opts[:25])
@@ -8532,9 +8556,15 @@ class TempVoiceHubEditRole(View):
             await db_set(self.g.id, 'temp_voice_config', voice_cfg)
         
         role = self.g.get_role(role_id) if role_id else None
+        
+        if role:
+            msg = f"✅ **Rôle changé: @{role.name}**\n🔒 Les vocaux seront invisibles pour les membres sans ce rôle"
+        else:
+            msg = f"✅ **Mode PUBLIC activé**\n🔓 Tout le monde peut voir et rejoindre les vocaux créés"
+        
         v = TempVoiceHubEditPanel(self.u, self.g, self.hub_id)
         await i.response.edit_message(
-            content=f"✅ Rôle requis changé: **{role.name if role else 'Aucun (tous)'}**",
+            content=msg,
             embed=await v.embed(),
             view=v
         )
@@ -14103,35 +14133,67 @@ async def on_voice_state_update(member, before, after):
                     if category:
                         channel_name = default_name.replace('{user}', member.display_name)[:50]
                         
-                        # Permissions pour TOUS les utilisateurs
-                        overwrites = {
-                            member.guild.default_role: discord.PermissionOverwrite(
+                        # Récupérer le rôle requis pour les permissions
+                        required_role = member.guild.get_role(required_role_id) if required_role_id else None
+                        
+                        # Permissions de base
+                        overwrites = {}
+                        
+                        if required_role:
+                            # ═══ VOCAL RESTREINT AU RÔLE ═══
+                            # @everyone ne peut PAS voir ni rejoindre le vocal
+                            overwrites[member.guild.default_role] = discord.PermissionOverwrite(
+                                view_channel=False,  # ❌ Invisible pour ceux sans le rôle
+                                connect=False,
+                                speak=False
+                            )
+                            
+                            # Le rôle requis PEUT voir et rejoindre le vocal
+                            overwrites[required_role] = discord.PermissionOverwrite(
+                                view_channel=True,   # ✅ Visible pour ceux avec le rôle
                                 connect=True,
                                 speak=True,
                                 use_voice_activation=True,
                                 stream=True,
                                 send_messages=False,
                                 read_messages=True
-                            ),
-                            member: discord.PermissionOverwrite(
+                            )
+                        else:
+                            # ═══ VOCAL PUBLIC ═══
+                            # @everyone peut voir et rejoindre
+                            overwrites[member.guild.default_role] = discord.PermissionOverwrite(
+                                view_channel=True,
                                 connect=True,
                                 speak=True,
                                 use_voice_activation=True,
                                 stream=True,
                                 send_messages=False,
-                                read_messages=True,
-                                mute_members=perms.get('can_mute', True),
-                                move_members=perms.get('can_kick', True),
-                                manage_channels=perms.get('can_rename', True) or perms.get('can_limit', True)
-                            ),
-                            member.guild.me: discord.PermissionOverwrite(
-                                connect=True,
-                                speak=True,
-                                manage_channels=True,
-                                move_members=True,
-                                send_messages=True
+                                read_messages=True
                             )
-                        }
+                        
+                        # Le propriétaire a toutes les permissions
+                        overwrites[member] = discord.PermissionOverwrite(
+                            view_channel=True,
+                            connect=True,
+                            speak=True,
+                            use_voice_activation=True,
+                            stream=True,
+                            send_messages=False,
+                            read_messages=True,
+                            mute_members=perms.get('can_mute', True),
+                            move_members=perms.get('can_kick', True),
+                            manage_channels=perms.get('can_rename', True) or perms.get('can_limit', True)
+                        )
+                        
+                        # Le bot a toutes les permissions
+                        overwrites[member.guild.me] = discord.PermissionOverwrite(
+                            view_channel=True,
+                            connect=True,
+                            speak=True,
+                            manage_channels=True,
+                            move_members=True,
+                            send_messages=True
+                        )
                         
                         new_channel = await member.guild.create_voice_channel(
                             name=channel_name,
