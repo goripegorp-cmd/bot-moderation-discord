@@ -724,9 +724,295 @@ async def is_ticket_channel(channel):
     return False
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                           📺 SÉLECTEUR DE SALON PAGINÉ
+#                           📺 SÉLECTEURS PAGINÉS UNIVERSELS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+class UniversalChannelSelect(View):
+    """
+    Sélecteur de salon universel avec pagination.
+    Supporte tous les types de salons et toutes les callbacks.
+    """
+    def __init__(self, u, g, callback_func, return_view_func, channel_type='text', page=0, 
+                 title="📺 Choisir un salon", allow_none=True, none_label="❌ Aucun", extra_data=None):
+        super().__init__(timeout=180)
+        self.u = u
+        self.g = g
+        self.callback_func = callback_func  # Fonction async à appeler avec (interaction, channel_id)
+        self.return_view_func = return_view_func  # Fonction qui retourne la view de retour
+        self.channel_type = channel_type
+        self.page = page
+        self.title = title
+        self.allow_none = allow_none
+        self.none_label = none_label
+        self.extra_data = extra_data or {}
+        
+        # Récupérer les salons selon le type
+        if channel_type == 'text':
+            self.channels = list(g.text_channels)
+        elif channel_type == 'voice':
+            self.channels = list(g.voice_channels)
+        elif channel_type == 'category':
+            self.channels = list(g.categories)
+        else:
+            self.channels = list(g.channels)
+        
+        self.per_page = 23 if allow_none else 24
+        self.max_page = max(0, (len(self.channels) - 1) // self.per_page)
+        self._build()
+    
+    def _build(self):
+        self.clear_items()
+        
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_channels = self.channels[start:end]
+        
+        opts = []
+        if self.allow_none and self.page == 0:
+            opts.append(discord.SelectOption(label=self.none_label, value="0", emoji="🚫"))
+        
+        for ch in page_channels:
+            if self.channel_type == 'voice':
+                label = f"🔊 {ch.name}"[:25]
+            elif self.channel_type == 'category':
+                label = f"📁 {ch.name}"[:25]
+            else:
+                label = f"# {ch.name}"[:25]
+            
+            desc = ch.category.name[:50] if hasattr(ch, 'category') and ch.category else "Sans catégorie"
+            opts.append(discord.SelectOption(label=label, value=str(ch.id), description=desc))
+        
+        if opts:
+            select = UniversalChannelSelectMenu(self, opts)
+            self.add_item(select)
+        
+        # Navigation si plusieurs pages
+        if self.max_page > 0:
+            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
+            prev_btn.callback = self.prev_page
+            self.add_item(prev_btn)
+            
+            page_btn = discord.ui.Button(label=f"{self.page + 1}/{self.max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
+            self.add_item(page_btn)
+            
+            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
+            next_btn.callback = self.next_page
+            self.add_item(next_btn)
+        
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=2)
+        back_btn.callback = self.go_back
+        self.add_item(back_btn)
+    
+    async def prev_page(self, i):
+        self.page -= 1
+        self._build()
+        await i.response.edit_message(view=self)
+    
+    async def next_page(self, i):
+        self.page += 1
+        self._build()
+        await i.response.edit_message(view=self)
+    
+    async def go_back(self, i):
+        v = self.return_view_func()
+        if hasattr(v, 'embed'):
+            embed = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
+            await i.response.edit_message(content=None, embed=embed, view=v)
+        else:
+            await i.response.edit_message(content=None, view=v)
+
+class UniversalChannelSelectMenu(Select):
+    def __init__(self, parent, opts):
+        placeholder = f"Page {parent.page + 1}/{parent.max_page + 1} - {parent.title}"[:100]
+        super().__init__(placeholder=placeholder, options=opts)
+        self.parent = parent
+    
+    async def callback(self, i):
+        channel_id = int(self.values[0])
+        await self.parent.callback_func(i, channel_id, self.parent.extra_data)
+
+
+class UniversalRoleSelect(View):
+    """
+    Sélecteur de rôle universel avec pagination.
+    """
+    def __init__(self, u, g, callback_func, return_view_func, page=0,
+                 title="🎭 Choisir un rôle", allow_none=True, none_label="❌ Aucun rôle", 
+                 exclude_bots=True, extra_data=None):
+        super().__init__(timeout=180)
+        self.u = u
+        self.g = g
+        self.callback_func = callback_func
+        self.return_view_func = return_view_func
+        self.page = page
+        self.title = title
+        self.allow_none = allow_none
+        self.none_label = none_label
+        self.extra_data = extra_data or {}
+        
+        # Récupérer les rôles (exclure @everyone et les rôles de bot si demandé)
+        if exclude_bots:
+            self.roles = [r for r in g.roles[1:] if not r.is_bot_managed()]
+        else:
+            self.roles = list(g.roles[1:])
+        
+        self.per_page = 23 if allow_none else 24
+        self.max_page = max(0, (len(self.roles) - 1) // self.per_page)
+        self._build()
+    
+    def _build(self):
+        self.clear_items()
+        
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_roles = self.roles[start:end]
+        
+        opts = []
+        if self.allow_none and self.page == 0:
+            opts.append(discord.SelectOption(label=self.none_label, value="0", emoji="🚫"))
+        
+        for r in page_roles:
+            desc = f"{len(r.members)} membres"[:50]
+            opts.append(discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id), description=desc))
+        
+        if opts:
+            select = UniversalRoleSelectMenu(self, opts)
+            self.add_item(select)
+        
+        # Navigation
+        if self.max_page > 0:
+            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
+            prev_btn.callback = self.prev_page
+            self.add_item(prev_btn)
+            
+            page_btn = discord.ui.Button(label=f"{self.page + 1}/{self.max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
+            self.add_item(page_btn)
+            
+            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
+            next_btn.callback = self.next_page
+            self.add_item(next_btn)
+        
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=2)
+        back_btn.callback = self.go_back
+        self.add_item(back_btn)
+    
+    async def prev_page(self, i):
+        self.page -= 1
+        self._build()
+        await i.response.edit_message(view=self)
+    
+    async def next_page(self, i):
+        self.page += 1
+        self._build()
+        await i.response.edit_message(view=self)
+    
+    async def go_back(self, i):
+        v = self.return_view_func()
+        if hasattr(v, 'embed'):
+            embed = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
+            await i.response.edit_message(content=None, embed=embed, view=v)
+        else:
+            await i.response.edit_message(content=None, view=v)
+
+class UniversalRoleSelectMenu(Select):
+    def __init__(self, parent, opts):
+        placeholder = f"Page {parent.page + 1}/{parent.max_page + 1} - {parent.title}"[:100]
+        super().__init__(placeholder=placeholder, options=opts)
+        self.parent = parent
+    
+    async def callback(self, i):
+        role_id = int(self.values[0])
+        await self.parent.callback_func(i, role_id, self.parent.extra_data)
+
+
+class UniversalCategorySelect(View):
+    """
+    Sélecteur de catégorie universel avec pagination.
+    """
+    def __init__(self, u, g, callback_func, return_view_func, page=0,
+                 title="📁 Choisir une catégorie", allow_none=True, none_label="❌ Aucune catégorie", extra_data=None):
+        super().__init__(timeout=180)
+        self.u = u
+        self.g = g
+        self.callback_func = callback_func
+        self.return_view_func = return_view_func
+        self.page = page
+        self.title = title
+        self.allow_none = allow_none
+        self.none_label = none_label
+        self.extra_data = extra_data or {}
+        
+        self.categories = list(g.categories)
+        self.per_page = 23 if allow_none else 24
+        self.max_page = max(0, (len(self.categories) - 1) // self.per_page)
+        self._build()
+    
+    def _build(self):
+        self.clear_items()
+        
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_cats = self.categories[start:end]
+        
+        opts = []
+        if self.allow_none and self.page == 0:
+            opts.append(discord.SelectOption(label=self.none_label, value="0", emoji="🚫"))
+        
+        for cat in page_cats:
+            desc = f"{len(cat.channels)} salons"[:50]
+            opts.append(discord.SelectOption(label=f"📁 {cat.name}"[:25], value=str(cat.id), description=desc))
+        
+        if opts:
+            select = UniversalCategorySelectMenu(self, opts)
+            self.add_item(select)
+        
+        # Navigation
+        if self.max_page > 0:
+            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
+            prev_btn.callback = self.prev_page
+            self.add_item(prev_btn)
+            
+            page_btn = discord.ui.Button(label=f"{self.page + 1}/{self.max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
+            self.add_item(page_btn)
+            
+            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
+            next_btn.callback = self.next_page
+            self.add_item(next_btn)
+        
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=2)
+        back_btn.callback = self.go_back
+        self.add_item(back_btn)
+    
+    async def prev_page(self, i):
+        self.page -= 1
+        self._build()
+        await i.response.edit_message(view=self)
+    
+    async def next_page(self, i):
+        self.page += 1
+        self._build()
+        await i.response.edit_message(view=self)
+    
+    async def go_back(self, i):
+        v = self.return_view_func()
+        if hasattr(v, 'embed'):
+            embed = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
+            await i.response.edit_message(content=None, embed=embed, view=v)
+        else:
+            await i.response.edit_message(content=None, view=v)
+
+class UniversalCategorySelectMenu(Select):
+    def __init__(self, parent, opts):
+        placeholder = f"Page {parent.page + 1}/{parent.max_page + 1} - {parent.title}"[:100]
+        super().__init__(placeholder=placeholder, options=opts)
+        self.parent = parent
+    
+    async def callback(self, i):
+        cat_id = int(self.values[0])
+        await self.parent.callback_func(i, cat_id, self.parent.extra_data)
+
+
+# Ancien système gardé pour compatibilité
 class PaginatedChannelSelect(View):
     """Sélecteur de salon avec pagination pour supporter plus de 25 salons"""
     def __init__(self, u, g, callback_key, return_panel_class, page=0, multi=False, current_channels=None):
@@ -2389,12 +2675,16 @@ class ProtDetail(View):
     @discord.ui.button(label="📜 Définir Log", style=discord.ButtonStyle.secondary, row=0)
     async def set_log(self, i, b):
         try:
-            chs = list(self.g.text_channels)[:24]  # 24 pour laisser place à "Aucun"
-            opts = [discord.SelectOption(label="❌ Aucun log", value="0", emoji="🚫")]
-            for c in chs:
-                opts.append(discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)))
-            v = LogSelectView(self.u, self.g, opts, self.key, self.prot)
-            await i.response.edit_message(embed=discord.Embed(title="📜 Choisir le salon de log", description=f"Pour la protection **{self.prot[2]}**", color=C.PURPLE), view=v)
+            total_channels = len(list(self.g.text_channels))
+            v = LogSelectView(self.u, self.g, self.key, self.prot)
+            await i.response.edit_message(
+                embed=discord.Embed(
+                    title="📜 Choisir le salon de log",
+                    description=f"Pour la protection **{self.prot[2]}**\n\n📊 {total_channels} salons disponibles",
+                    color=C.PURPLE
+                ),
+                view=v
+            )
         except Exception as ex:
             print(f"[LOG SELECT ERROR] {ex}")
             await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
@@ -2405,43 +2695,120 @@ class ProtDetail(View):
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 class LogSelectView(View):
-    def __init__(self, u, g, opts, key, prot):
-        super().__init__(timeout=120)
+    """Sélecteur de salon de log PAGINÉ pour supporter tous les salons"""
+    def __init__(self, u, g, key, prot, page=0):
+        super().__init__(timeout=180)
         self.u = u
         self.g = g
         self.key = key
         self.prot = prot
-        self.add_item(LogSelect(u, g, opts, key, prot))
+        self.page = page
+        self.channels = list(g.text_channels)
+        self.max_page = max(0, (len(self.channels) - 1) // 23)  # 23 salons par page + option "Aucun"
+        
+        self._build()
     
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
-    async def back(self, i, b):
+    def _build(self):
+        # Nettoyer les anciens items
+        self.clear_items()
+        
+        # Calculer les salons de cette page
+        start = self.page * 23
+        end = start + 23
+        page_channels = self.channels[start:end]
+        
+        # Construire les options
+        opts = []
+        if self.page == 0:
+            opts.append(discord.SelectOption(label="❌ Aucun log", value="0", emoji="🚫"))
+        
+        for ch in page_channels:
+            desc = ch.category.name[:50] if ch.category else "Sans catégorie"
+            opts.append(discord.SelectOption(
+                label=f"# {ch.name}"[:25],
+                value=str(ch.id),
+                description=desc
+            ))
+        
+        if opts:
+            select = LogChannelSelectMenu(self, opts)
+            self.add_item(select)
+        
+        # Boutons de navigation
+        if self.max_page > 0:
+            prev_btn = discord.ui.Button(
+                label="◀️ Préc.",
+                style=discord.ButtonStyle.primary,
+                disabled=(self.page == 0),
+                row=1
+            )
+            prev_btn.callback = self.prev_page
+            self.add_item(prev_btn)
+            
+            # Indicateur de page
+            page_btn = discord.ui.Button(
+                label=f"{self.page + 1}/{self.max_page + 1}",
+                style=discord.ButtonStyle.secondary,
+                disabled=True,
+                row=1
+            )
+            self.add_item(page_btn)
+            
+            next_btn = discord.ui.Button(
+                label="Suiv. ▶️",
+                style=discord.ButtonStyle.primary,
+                disabled=(self.page >= self.max_page),
+                row=1
+            )
+            next_btn.callback = self.next_page
+            self.add_item(next_btn)
+        
+        # Bouton retour
+        back_btn = discord.ui.Button(
+            label="◀️ Retour",
+            style=discord.ButtonStyle.danger,
+            row=2
+        )
+        back_btn.callback = self.go_back
+        self.add_item(back_btn)
+    
+    async def prev_page(self, i):
+        self.page -= 1
+        self._build()
+        await i.response.edit_message(view=self)
+    
+    async def next_page(self, i):
+        self.page += 1
+        self._build()
+        await i.response.edit_message(view=self)
+    
+    async def go_back(self, i):
         v = ProtDetail(self.u, self.g, self.prot)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        await i.response.edit_message(content=None, embed=await v.embed(), view=v)
 
-class LogSelect(Select):
-    def __init__(self, u, g, opts, key, prot):
-        super().__init__(placeholder="Choisir un salon...", options=opts)
-        self.u = u
-        self.g = g
-        self.key = key
-        self.prot = prot
+class LogChannelSelectMenu(Select):
+    def __init__(self, parent, opts):
+        super().__init__(
+            placeholder=f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un salon...",
+            options=opts
+        )
+        self.parent = parent
     
     async def callback(self, i):
         try:
             channel_id = int(self.values[0])
-            await db_set(i.guild.id, f'log_{self.key}', channel_id)
+            await db_set(i.guild.id, f'log_{self.parent.key}', channel_id)
             
-            # Message de confirmation
             if channel_id == 0:
-                msg = f"✅ Logs désactivés pour **{self.prot[2]}**"
+                msg = f"✅ Logs désactivés pour **{self.parent.prot[2]}**"
             else:
                 ch = i.guild.get_channel(channel_id)
-                msg = f"✅ Logs de **{self.prot[2]}** définis dans {ch.mention if ch else 'salon inconnu'}"
+                msg = f"✅ Logs de **{self.parent.prot[2]}** définis dans {ch.mention if ch else 'salon inconnu'}"
             
-            v = ProtDetail(self.u, self.g, self.prot)
+            v = ProtDetail(self.parent.u, self.parent.g, self.parent.prot)
             await i.response.edit_message(content=msg, embed=await v.embed(), view=v)
         except Exception as ex:
-            print(f"[LOG SELECT CALLBACK ERROR] {ex}")
+            print(f"[LOG SELECT ERROR] {ex}")
             await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2613,10 +2980,16 @@ class LinkConfigPanel(View):
     
     @discord.ui.button(label="➕ Ajouter salon", style=discord.ButtonStyle.primary, row=1)
     async def add_chan(self, i, b):
-        chs = list(self.g.text_channels)[:25]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        v = LinkChanSelectView(self.u, self.g, opts)
-        await i.response.edit_message(embed=discord.Embed(title="📍 Choisir un salon à autoriser", color=C.PURPLE), view=v)
+        total_channels = len(list(self.g.text_channels))
+        v = PaginatedLinkChanSelectView(self.u, self.g)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="📍 Choisir un salon à autoriser",
+                description=f"📊 {total_channels} salons disponibles",
+                color=C.PURPLE
+            ),
+            view=v
+        )
     
     @discord.ui.button(label="🗑️ Vider salons", style=discord.ButtonStyle.danger, row=1)
     async def clear_chs(self, i, b):
@@ -2678,6 +3051,89 @@ class AddDomainModal(Modal, title="➕ Ajouter des domaines"):
                 view=v
             )
 
+class PaginatedLinkChanSelectView(View):
+    """Sélecteur de salon paginé pour les liens autorisés"""
+    def __init__(self, u, g, page=0):
+        super().__init__(timeout=180)
+        self.u = u
+        self.g = g
+        self.page = page
+        self.channels = list(g.text_channels)
+        self.max_page = max(0, (len(self.channels) - 1) // 24)
+        self._build()
+    
+    def _build(self):
+        self.clear_items()
+        
+        start = self.page * 24
+        end = start + 24
+        page_channels = self.channels[start:end]
+        
+        opts = []
+        for ch in page_channels:
+            desc = ch.category.name[:50] if ch.category else "Sans catégorie"
+            opts.append(discord.SelectOption(
+                label=f"# {ch.name}"[:25],
+                value=str(ch.id),
+                description=desc
+            ))
+        
+        if opts:
+            select = LinkChanSelectMenu(self, opts)
+            self.add_item(select)
+        
+        # Navigation
+        if self.max_page > 0:
+            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
+            prev_btn.callback = self.prev_page
+            self.add_item(prev_btn)
+            
+            page_btn = discord.ui.Button(label=f"{self.page + 1}/{self.max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
+            self.add_item(page_btn)
+            
+            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
+            next_btn.callback = self.next_page
+            self.add_item(next_btn)
+        
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=2)
+        back_btn.callback = self.go_back
+        self.add_item(back_btn)
+    
+    async def prev_page(self, i):
+        self.page -= 1
+        self._build()
+        await i.response.edit_message(view=self)
+    
+    async def next_page(self, i):
+        self.page += 1
+        self._build()
+        await i.response.edit_message(view=self)
+    
+    async def go_back(self, i):
+        v = LinkConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class LinkChanSelectMenu(Select):
+    def __init__(self, parent, opts):
+        super().__init__(placeholder=f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un salon...", options=opts)
+        self.parent = parent
+    
+    async def callback(self, i):
+        c = await cfg(i.guild.id)
+        chs = c.get('link_allowed_channels', [])
+        chid = int(self.values[0])
+        ch = i.guild.get_channel(chid)
+        if chid not in chs:
+            chs.append(chid)
+            await db_set(i.guild.id, 'link_allowed_channels', chs)
+        v = LinkConfigPanel(self.parent.u, self.parent.g)
+        await i.response.edit_message(
+            content=f"✅ Salon **{ch.name if ch else 'inconnu'}** ajouté aux salons autorisés",
+            embed=await v.embed(),
+            view=v
+        )
+
+# Garder l'ancienne classe pour compatibilité
 class LinkChanSelectView(View):
     def __init__(self, u, g, opts):
         super().__init__(timeout=120)
@@ -3789,51 +4245,122 @@ class ModerationPanel(View):
         e.set_footer(text="Les admins et le owner ont toujours accès à toutes les commandes")
         return e
     
-    def _get_role_options(self):
-        """Récupère les options de rôles de manière sécurisée"""
-        try:
-            roles = [r for r in self.g.roles if not r.is_default() and not r.is_bot_managed()][:24]
-            opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
-        except:
-            opts = []
-        opts.insert(0, discord.SelectOption(label="❌ Aucun rôle requis", value="0"))
-        return opts
-    
     @discord.ui.button(label="📜 Salon Logs", style=discord.ButtonStyle.success, row=0)
     async def set_logs(self, i, b):
         try:
-            chs = list(self.g.text_channels)[:24]
-            opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-            opts.insert(0, discord.SelectOption(label="❌ Aucun log", value="0"))
-            v = ModLogSelectView(self.u, self.g, opts)
-            await i.response.edit_message(embed=discord.Embed(title="📜 Salon des logs modération", color=C.ORANGE), view=v)
+            async def callback(interaction, channel_id, extra):
+                await db_set(interaction.guild.id, 'mod_log_channel', channel_id)
+                v = ModerationPanel(self.u, self.g)
+                ch = interaction.guild.get_channel(channel_id)
+                await interaction.response.edit_message(
+                    content=f"✅ Salon logs défini: **{ch.mention if ch else 'Aucun'}**",
+                    embed=await v.embed(), view=v
+                )
+            
+            v = UniversalChannelSelect(
+                self.u, self.g,
+                callback_func=callback,
+                return_view_func=lambda: ModerationPanel(self.u, self.g),
+                title="Salon Logs"
+            )
+            await i.response.edit_message(
+                embed=discord.Embed(
+                    title="📜 Salon des logs modération",
+                    description=f"📊 {len(list(self.g.text_channels))} salons disponibles",
+                    color=C.ORANGE
+                ),
+                view=v
+            )
         except Exception as ex:
             await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
     
     @discord.ui.button(label="⚠️ Rôle /warn", style=discord.ButtonStyle.primary, row=1)
     async def set_warn(self, i, b):
         try:
-            opts = self._get_role_options()
-            v = ModRoleSelectView(self.u, self.g, opts, 'mod_warn_role')
-            await i.response.edit_message(embed=discord.Embed(title="⚠️ Rôle pour /warn & /unwarn", description="Sélectionnez le rôle minimum requis pour utiliser ces commandes.", color=C.ORANGE), view=v)
+            async def callback(interaction, role_id, extra):
+                await db_set(interaction.guild.id, 'mod_warn_role', role_id)
+                v = ModerationPanel(self.u, self.g)
+                role = interaction.guild.get_role(role_id)
+                await interaction.response.edit_message(
+                    content=f"✅ Rôle /warn défini: **{role.name if role else 'Aucun'}**",
+                    embed=await v.embed(), view=v
+                )
+            
+            v = UniversalRoleSelect(
+                self.u, self.g,
+                callback_func=callback,
+                return_view_func=lambda: ModerationPanel(self.u, self.g),
+                title="Rôle /warn",
+                none_label="❌ Aucun rôle requis"
+            )
+            await i.response.edit_message(
+                embed=discord.Embed(
+                    title="⚠️ Rôle pour /warn & /unwarn",
+                    description=f"Sélectionnez le rôle minimum requis.\n📊 {len([r for r in self.g.roles[1:] if not r.is_bot_managed()])} rôles disponibles",
+                    color=C.ORANGE
+                ),
+                view=v
+            )
         except Exception as ex:
             await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
     
     @discord.ui.button(label="🔇 Rôle /mute", style=discord.ButtonStyle.primary, row=1)
     async def set_mute(self, i, b):
         try:
-            opts = self._get_role_options()
-            v = ModRoleSelectView(self.u, self.g, opts, 'mod_mute_role')
-            await i.response.edit_message(embed=discord.Embed(title="🔇 Rôle pour /mute & /unmute", description="Sélectionnez le rôle minimum requis pour utiliser ces commandes.", color=C.ORANGE), view=v)
+            async def callback(interaction, role_id, extra):
+                await db_set(interaction.guild.id, 'mod_mute_role', role_id)
+                v = ModerationPanel(self.u, self.g)
+                role = interaction.guild.get_role(role_id)
+                await interaction.response.edit_message(
+                    content=f"✅ Rôle /mute défini: **{role.name if role else 'Aucun'}**",
+                    embed=await v.embed(), view=v
+                )
+            
+            v = UniversalRoleSelect(
+                self.u, self.g,
+                callback_func=callback,
+                return_view_func=lambda: ModerationPanel(self.u, self.g),
+                title="Rôle /mute",
+                none_label="❌ Aucun rôle requis"
+            )
+            await i.response.edit_message(
+                embed=discord.Embed(
+                    title="🔇 Rôle pour /mute & /unmute",
+                    description=f"Sélectionnez le rôle minimum requis.\n📊 {len([r for r in self.g.roles[1:] if not r.is_bot_managed()])} rôles disponibles",
+                    color=C.ORANGE
+                ),
+                view=v
+            )
         except Exception as ex:
             await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
     
     @discord.ui.button(label="📋 Rôle /infractions", style=discord.ButtonStyle.primary, row=1)
     async def set_inf(self, i, b):
         try:
-            opts = self._get_role_options()
-            v = ModRoleSelectView(self.u, self.g, opts, 'mod_infractions_role')
-            await i.response.edit_message(embed=discord.Embed(title="📋 Rôle pour /infractions", description="Sélectionnez le rôle minimum requis pour utiliser cette commande.", color=C.ORANGE), view=v)
+            async def callback(interaction, role_id, extra):
+                await db_set(interaction.guild.id, 'mod_infractions_role', role_id)
+                v = ModerationPanel(self.u, self.g)
+                role = interaction.guild.get_role(role_id)
+                await interaction.response.edit_message(
+                    content=f"✅ Rôle /infractions défini: **{role.name if role else 'Aucun'}**",
+                    embed=await v.embed(), view=v
+                )
+            
+            v = UniversalRoleSelect(
+                self.u, self.g,
+                callback_func=callback,
+                return_view_func=lambda: ModerationPanel(self.u, self.g),
+                title="Rôle /infractions",
+                none_label="❌ Aucun rôle requis"
+            )
+            await i.response.edit_message(
+                embed=discord.Embed(
+                    title="📋 Rôle pour /infractions",
+                    description=f"Sélectionnez le rôle minimum requis.\n📊 {len([r for r in self.g.roles[1:] if not r.is_bot_managed()])} rôles disponibles",
+                    color=C.ORANGE
+                ),
+                view=v
+            )
         except Exception as ex:
             await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
     
@@ -3842,6 +4369,7 @@ class ModerationPanel(View):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
 
+# Anciennes classes gardées pour compatibilité
 class ModLogSelectView(View):
     def __init__(self, u, g, opts):
         super().__init__(timeout=120)
@@ -3929,9 +4457,16 @@ class ImmunePanel(View):
     
     @discord.ui.button(label="➕ Rôle", style=discord.ButtonStyle.success, row=0)
     async def add_role(self, i, b):
-        roles = [r for r in self.g.roles[1:] if not r.is_bot_managed()][:25]
-        opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
-        await i.response.edit_message(embed=discord.Embed(title="👑 Ajouter un rôle immunisé", color=C.YELLOW), view=ImmuneRoleView(self.u, self.g, opts))
+        total_roles = len([r for r in self.g.roles[1:] if not r.is_bot_managed()])
+        v = PaginatedImmuneRoleView(self.u, self.g)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="👑 Ajouter un rôle immunisé",
+                description=f"📊 {total_roles} rôles disponibles",
+                color=C.YELLOW
+            ),
+            view=v
+        )
     
     @discord.ui.button(label="➕ Utilisateur", style=discord.ButtonStyle.success, row=0)
     async def add_user(self, i, b):
@@ -3939,9 +4474,16 @@ class ImmunePanel(View):
     
     @discord.ui.button(label="➕ Salon", style=discord.ButtonStyle.success, row=0)
     async def add_channel(self, i, b):
-        chs = list(self.g.text_channels)[:25]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        await i.response.edit_message(embed=discord.Embed(title="📺 Ajouter un salon immunisé", description="Ce salon ignorera toutes les protections.", color=C.YELLOW), view=ImmuneChannelView(self.u, self.g, opts))
+        total_channels = len(list(self.g.text_channels))
+        v = PaginatedImmuneChannelView(self.u, self.g)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="📺 Ajouter un salon immunisé",
+                description=f"Ce salon ignorera toutes les protections.\n\n📊 {total_channels} salons disponibles",
+                color=C.YELLOW
+            ),
+            view=v
+        )
     
     @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, row=1)
     async def remove_item(self, i, b):
@@ -3963,6 +4505,164 @@ class ImmunePanel(View):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
 
+class PaginatedImmuneRoleView(View):
+    """Sélecteur de rôle paginé pour les immunités"""
+    def __init__(self, u, g, page=0):
+        super().__init__(timeout=180)
+        self.u = u
+        self.g = g
+        self.page = page
+        self.roles = [r for r in g.roles[1:] if not r.is_bot_managed()]
+        self.max_page = max(0, (len(self.roles) - 1) // 24)
+        self._build()
+    
+    def _build(self):
+        self.clear_items()
+        
+        start = self.page * 24
+        end = start + 24
+        page_roles = self.roles[start:end]
+        
+        opts = []
+        for r in page_roles:
+            opts.append(discord.SelectOption(
+                label=f"@{r.name}"[:25],
+                value=str(r.id),
+                description=f"{len(r.members)} membres"[:50]
+            ))
+        
+        if opts:
+            select = ImmuneRoleSelectMenu(self, opts)
+            self.add_item(select)
+        
+        # Navigation
+        if self.max_page > 0:
+            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
+            prev_btn.callback = self.prev_page
+            self.add_item(prev_btn)
+            
+            page_btn = discord.ui.Button(label=f"{self.page + 1}/{self.max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
+            self.add_item(page_btn)
+            
+            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
+            next_btn.callback = self.next_page
+            self.add_item(next_btn)
+        
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=2)
+        back_btn.callback = self.go_back
+        self.add_item(back_btn)
+    
+    async def prev_page(self, i):
+        self.page -= 1
+        self._build()
+        await i.response.edit_message(view=self)
+    
+    async def next_page(self, i):
+        self.page += 1
+        self._build()
+        await i.response.edit_message(view=self)
+    
+    async def go_back(self, i):
+        v = ImmunePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class ImmuneRoleSelectMenu(Select):
+    def __init__(self, parent, opts):
+        super().__init__(placeholder=f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un rôle...", options=opts)
+        self.parent = parent
+    
+    async def callback(self, i):
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('INSERT OR IGNORE INTO immune_roles VALUES(?,?)', (i.guild.id, int(self.values[0])))
+            await db.commit()
+        role = i.guild.get_role(int(self.values[0]))
+        v = ImmunePanel(self.parent.u, self.parent.g)
+        await i.response.edit_message(
+            content=f"✅ Rôle **{role.name if role else 'inconnu'}** ajouté aux immunités",
+            embed=await v.embed(),
+            view=v
+        )
+
+class PaginatedImmuneChannelView(View):
+    """Sélecteur de salon paginé pour les immunités"""
+    def __init__(self, u, g, page=0):
+        super().__init__(timeout=180)
+        self.u = u
+        self.g = g
+        self.page = page
+        self.channels = list(g.text_channels)
+        self.max_page = max(0, (len(self.channels) - 1) // 24)
+        self._build()
+    
+    def _build(self):
+        self.clear_items()
+        
+        start = self.page * 24
+        end = start + 24
+        page_channels = self.channels[start:end]
+        
+        opts = []
+        for ch in page_channels:
+            desc = ch.category.name[:50] if ch.category else "Sans catégorie"
+            opts.append(discord.SelectOption(
+                label=f"# {ch.name}"[:25],
+                value=str(ch.id),
+                description=desc
+            ))
+        
+        if opts:
+            select = ImmuneChannelSelectMenu(self, opts)
+            self.add_item(select)
+        
+        # Navigation
+        if self.max_page > 0:
+            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
+            prev_btn.callback = self.prev_page
+            self.add_item(prev_btn)
+            
+            page_btn = discord.ui.Button(label=f"{self.page + 1}/{self.max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
+            self.add_item(page_btn)
+            
+            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
+            next_btn.callback = self.next_page
+            self.add_item(next_btn)
+        
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=2)
+        back_btn.callback = self.go_back
+        self.add_item(back_btn)
+    
+    async def prev_page(self, i):
+        self.page -= 1
+        self._build()
+        await i.response.edit_message(view=self)
+    
+    async def next_page(self, i):
+        self.page += 1
+        self._build()
+        await i.response.edit_message(view=self)
+    
+    async def go_back(self, i):
+        v = ImmunePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class ImmuneChannelSelectMenu(Select):
+    def __init__(self, parent, opts):
+        super().__init__(placeholder=f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un salon...", options=opts)
+        self.parent = parent
+    
+    async def callback(self, i):
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('INSERT OR IGNORE INTO immune_channels VALUES(?,?)', (i.guild.id, int(self.values[0])))
+            await db.commit()
+        ch = i.guild.get_channel(int(self.values[0]))
+        v = ImmunePanel(self.parent.u, self.parent.g)
+        await i.response.edit_message(
+            content=f"✅ Salon **{ch.name if ch else 'inconnu'}** ajouté aux immunités",
+            embed=await v.embed(),
+            view=v
+        )
+
+# Garder les anciennes classes pour compatibilité (mais elles ne seront plus utilisées)
 class ImmuneRoleView(View):
     def __init__(self, u, g, opts):
         super().__init__(timeout=120)
@@ -4236,24 +4936,69 @@ class RellSeasPanel(View):
     
     @discord.ui.button(label="🎭 Rôle Realsy", style=discord.ButtonStyle.primary, row=0)
     async def set_role(self, i, b):
-        roles = [r for r in self.g.roles[1:] if not r.is_bot_managed()][:25]
-        opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
-        v = RellSeasRoleView(self.u, self.g, opts)
-        await i.response.edit_message(embed=discord.Embed(title="🎭 Choisir le rôle Realsy", color=C.PURPLE), view=v)
+        async def callback(interaction, role_id, extra):
+            await db_set(interaction.guild.id, 'rellseas_role', role_id)
+            v = RellSeasPanel(self.u, self.g)
+            role = interaction.guild.get_role(role_id)
+            await interaction.response.edit_message(
+                content=f"✅ Rôle Realsy défini: **{role.name if role else 'Aucun'}**",
+                embed=await v.embed(), view=v
+            )
+        
+        v = UniversalRoleSelect(
+            self.u, self.g,
+            callback_func=callback,
+            return_view_func=lambda: RellSeasPanel(self.u, self.g),
+            title="Rôle Realsy"
+        )
+        await i.response.edit_message(
+            embed=discord.Embed(title="🎭 Choisir le rôle Realsy", description=f"📊 {len([r for r in self.g.roles[1:] if not r.is_bot_managed()])} rôles disponibles", color=C.PURPLE),
+            view=v
+        )
     
     @discord.ui.button(label="⚠️ Salon Warn", style=discord.ButtonStyle.secondary, row=1)
     async def set_warn_ch(self, i, b):
-        chs = list(self.g.text_channels)[:25]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        v = RellSeasChanView(self.u, self.g, opts, 'rellseas_warn_channel')
-        await i.response.edit_message(embed=discord.Embed(title="⚠️ Salon des warns", color=C.PURPLE), view=v)
+        async def callback(interaction, channel_id, extra):
+            await db_set(interaction.guild.id, 'rellseas_warn_channel', channel_id)
+            v = RellSeasPanel(self.u, self.g)
+            ch = interaction.guild.get_channel(channel_id)
+            await interaction.response.edit_message(
+                content=f"✅ Salon warn défini: **{ch.mention if ch else 'Aucun'}**",
+                embed=await v.embed(), view=v
+            )
+        
+        v = UniversalChannelSelect(
+            self.u, self.g,
+            callback_func=callback,
+            return_view_func=lambda: RellSeasPanel(self.u, self.g),
+            title="Salon Warn"
+        )
+        await i.response.edit_message(
+            embed=discord.Embed(title="⚠️ Salon des warns", description=f"📊 {len(list(self.g.text_channels))} salons disponibles", color=C.PURPLE),
+            view=v
+        )
     
     @discord.ui.button(label="📜 Salon Logs", style=discord.ButtonStyle.secondary, row=1)
     async def set_log_ch(self, i, b):
-        chs = list(self.g.text_channels)[:25]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        v = RellSeasChanView(self.u, self.g, opts, 'rellseas_log_channel')
-        await i.response.edit_message(embed=discord.Embed(title="📜 Salon des logs", color=C.PURPLE), view=v)
+        async def callback(interaction, channel_id, extra):
+            await db_set(interaction.guild.id, 'rellseas_log_channel', channel_id)
+            v = RellSeasPanel(self.u, self.g)
+            ch = interaction.guild.get_channel(channel_id)
+            await interaction.response.edit_message(
+                content=f"✅ Salon logs défini: **{ch.mention if ch else 'Aucun'}**",
+                embed=await v.embed(), view=v
+            )
+        
+        v = UniversalChannelSelect(
+            self.u, self.g,
+            callback_func=callback,
+            return_view_func=lambda: RellSeasPanel(self.u, self.g),
+            title="Salon Logs"
+        )
+        await i.response.edit_message(
+            embed=discord.Embed(title="📜 Salon des logs", description=f"📊 {len(list(self.g.text_channels))} salons disponibles", color=C.PURPLE),
+            view=v
+        )
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
@@ -4730,10 +5475,15 @@ class AdsYouTubePanel(View):
     
     @discord.ui.button(label="📍 Salon par défaut", style=discord.ButtonStyle.primary, row=0)
     async def set_channel(self, i, b):
-        chs = list(self.g.text_channels)[:25]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        v = AdsChannelSelectView(self.u, self.g, opts, 'ads_youtube_channel', 'youtube')
-        await i.response.edit_message(embed=discord.Embed(title="📍 Salon YouTube par défaut", color=0xFF0000), view=v)
+        v = PaginatedAdsChannelSelect(self.u, self.g, 'ads_youtube_channel', 'youtube')
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="📍 Salon YouTube par défaut",
+                description=f"📊 {len(list(self.g.text_channels))} salons disponibles",
+                color=0xFF0000
+            ),
+            view=v
+        )
     
     @discord.ui.button(label="➕ Ajouter Chaîne", style=discord.ButtonStyle.success, row=0)
     async def add_feed(self, i, b):
@@ -4851,10 +5601,15 @@ class AdsTwitchPanel(View):
     
     @discord.ui.button(label="📍 Salon par défaut", style=discord.ButtonStyle.primary, row=0)
     async def set_channel(self, i, b):
-        chs = list(self.g.text_channels)[:25]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        v = AdsChannelSelectView(self.u, self.g, opts, 'ads_twitch_channel', 'twitch')
-        await i.response.edit_message(embed=discord.Embed(title="📍 Salon Twitch par défaut", color=0x9146FF), view=v)
+        v = PaginatedAdsChannelSelect(self.u, self.g, 'ads_twitch_channel', 'twitch')
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="📍 Salon Twitch par défaut",
+                description=f"📊 {len(list(self.g.text_channels))} salons disponibles",
+                color=0x9146FF
+            ),
+            view=v
+        )
     
     @discord.ui.button(label="➕ Ajouter Streamer", style=discord.ButtonStyle.success, row=0)
     async def add_feed(self, i, b):
@@ -4979,10 +5734,15 @@ class AdsRedditPanel(View):
     
     @discord.ui.button(label="📍 Salon par défaut", style=discord.ButtonStyle.primary, row=0)
     async def set_channel(self, i, b):
-        chs = list(self.g.text_channels)[:25]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        v = AdsChannelSelectView(self.u, self.g, opts, 'ads_reddit_channel', 'reddit')
-        await i.response.edit_message(embed=discord.Embed(title="📍 Salon Reddit par défaut", color=0xFF4500), view=v)
+        v = PaginatedAdsChannelSelect(self.u, self.g, 'ads_reddit_channel', 'reddit')
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="📍 Salon Reddit par défaut",
+                description=f"📊 {len(list(self.g.text_channels))} salons disponibles",
+                color=0xFF4500
+            ),
+            view=v
+        )
     
     @discord.ui.button(label="➕ Ajouter Subreddit", style=discord.ButtonStyle.success, row=0)
     async def add_feed(self, i, b):
@@ -5118,10 +5878,15 @@ class AdsTwitterPanel(View):
     
     @discord.ui.button(label="📍 Salon par défaut", style=discord.ButtonStyle.primary, row=0)
     async def set_channel(self, i, b):
-        chs = list(self.g.text_channels)[:25]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        v = AdsChannelSelectView(self.u, self.g, opts, 'ads_twitter_channel', 'twitter')
-        await i.response.edit_message(embed=discord.Embed(title="📍 Salon Twitter par défaut", color=0x1DA1F2), view=v)
+        v = PaginatedAdsChannelSelect(self.u, self.g, 'ads_twitter_channel', 'twitter')
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="📍 Salon Twitter par défaut",
+                description=f"📊 {len(list(self.g.text_channels))} salons disponibles",
+                color=0x1DA1F2
+            ),
+            view=v
+        )
     
     @discord.ui.button(label="➕ Ajouter Compte", style=discord.ButtonStyle.success, row=0)
     async def add_feed(self, i, b):
@@ -5246,10 +6011,15 @@ class AdsDiscordPanel(View):
     
     @discord.ui.button(label="📍 Salon par défaut", style=discord.ButtonStyle.primary, row=0)
     async def set_channel(self, i, b):
-        chs = list(self.g.text_channels)[:25]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        v = AdsChannelSelectView(self.u, self.g, opts, 'ads_discord_channel', 'discord')
-        await i.response.edit_message(embed=discord.Embed(title="📍 Salon de destination par défaut", color=C.BLURPLE), view=v)
+        v = PaginatedAdsChannelSelect(self.u, self.g, 'ads_discord_channel', 'discord')
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="📍 Salon de destination par défaut",
+                description=f"📊 {len(list(self.g.text_channels))} salons disponibles",
+                color=C.BLURPLE
+            ),
+            view=v
+        )
     
     @discord.ui.button(label="➕ Ajouter Salon", style=discord.ButtonStyle.success, row=0)
     async def add_feed(self, i, b):
@@ -5378,10 +6148,15 @@ class AdsRoSocialPanel(View):
     
     @discord.ui.button(label="📍 Salon par défaut", style=discord.ButtonStyle.primary, row=0)
     async def set_channel(self, i, b):
-        chs = list(self.g.text_channels)[:25]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        v = AdsChannelSelectView(self.u, self.g, opts, 'ads_rosocial_channel', 'rosocial')
-        await i.response.edit_message(embed=discord.Embed(title="📍 Salon RoSocial par défaut", color=0x00D4AA), view=v)
+        v = PaginatedAdsChannelSelect(self.u, self.g, 'ads_rosocial_channel', 'rosocial')
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="📍 Salon RoSocial par défaut",
+                description=f"📊 {len(list(self.g.text_channels))} salons disponibles",
+                color=0x00D4AA
+            ),
+            view=v
+        )
     
     @discord.ui.button(label="➕ Ajouter Profil", style=discord.ButtonStyle.success, row=0)
     async def add_feed(self, i, b):
@@ -5471,6 +6246,99 @@ class AdsRoSocialChannelSelect(Select):
 
 # ─────────────────────────────── COMMON VIEWS ───────────────────────────────
 
+class PaginatedAdsChannelSelect(View):
+    """Sélecteur de salon paginé pour les Ads"""
+    def __init__(self, u, g, key, platform, page=0):
+        super().__init__(timeout=180)
+        self.u = u
+        self.g = g
+        self.key = key
+        self.platform = platform
+        self.page = page
+        self.channels = list(g.text_channels)
+        self.max_page = max(0, (len(self.channels) - 1) // 24)
+        self._build()
+    
+    def _get_return_panel(self):
+        if self.platform == 'youtube':
+            return AdsYouTubePanel(self.u, self.g)
+        elif self.platform == 'twitch':
+            return AdsTwitchPanel(self.u, self.g)
+        elif self.platform == 'twitter':
+            return AdsTwitterPanel(self.u, self.g)
+        elif self.platform == 'discord':
+            return AdsDiscordPanel(self.u, self.g)
+        elif self.platform == 'rosocial':
+            return AdsRoSocialPanel(self.u, self.g)
+        else:
+            return AdsRedditPanel(self.u, self.g)
+    
+    def _build(self):
+        self.clear_items()
+        
+        start = self.page * 24
+        end = start + 24
+        page_channels = self.channels[start:end]
+        
+        opts = []
+        for ch in page_channels:
+            desc = ch.category.name[:50] if ch.category else "Sans catégorie"
+            opts.append(discord.SelectOption(
+                label=f"# {ch.name}"[:25],
+                value=str(ch.id),
+                description=desc
+            ))
+        
+        if opts:
+            select = PaginatedAdsChannelMenu(self, opts)
+            self.add_item(select)
+        
+        # Navigation
+        if self.max_page > 0:
+            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
+            prev_btn.callback = self.prev_page
+            self.add_item(prev_btn)
+            
+            page_btn = discord.ui.Button(label=f"{self.page + 1}/{self.max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
+            self.add_item(page_btn)
+            
+            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
+            next_btn.callback = self.next_page
+            self.add_item(next_btn)
+        
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=2)
+        back_btn.callback = self.go_back
+        self.add_item(back_btn)
+    
+    async def prev_page(self, i):
+        self.page -= 1
+        self._build()
+        await i.response.edit_message(view=self)
+    
+    async def next_page(self, i):
+        self.page += 1
+        self._build()
+        await i.response.edit_message(view=self)
+    
+    async def go_back(self, i):
+        v = self._get_return_panel()
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class PaginatedAdsChannelMenu(Select):
+    def __init__(self, parent, opts):
+        super().__init__(placeholder=f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un salon...", options=opts)
+        self.parent = parent
+    
+    async def callback(self, i):
+        await db_set(i.guild.id, self.parent.key, int(self.values[0]))
+        ch = i.guild.get_channel(int(self.values[0]))
+        v = self.parent._get_return_panel()
+        await i.response.edit_message(
+            content=f"✅ Salon défini: **{ch.mention if ch else 'Aucun'}**",
+            embed=await v.embed(), view=v
+        )
+
+# Anciennes classes gardées pour compatibilité
 class AdsChannelSelectView(View):
     def __init__(self, u, g, opts, key, platform):
         super().__init__(timeout=120)
@@ -7146,14 +8014,15 @@ class TempVoicePanel(View):
     async def embed(self):
         c = await cfg(self.g.id)
         voice_cfg = c.get('temp_voice_config', {})
+        hubs = voice_cfg.get('hubs', {})  # Nouveau format multi-hubs
         
         e = discord.Embed(title="🔊 Vocaux Temporaires", color=0x9B59B6)
         e.description = (
-            "Créez un salon vocal qui génère des vocaux personnalisés.\n\n"
+            "Créez des salons hubs qui génèrent des vocaux personnalisés.\n\n"
             "**Configuration automatique :**\n"
             "✅ Détection vocale activée (pas de push-to-talk)\n"
             "✅ Stream autorisé pour tous\n"
-            "❌ Écriture bloquée (sauf propriétaire)\n"
+            "❌ Écriture bloquée pour tous\n"
             "🗑️ Suppression auto si vide"
         )
         
@@ -7161,19 +8030,33 @@ class TempVoicePanel(View):
         enabled = voice_cfg.get('enabled', False)
         e.add_field(name="État", value="✅ Activé" if enabled else "❌ Désactivé", inline=True)
         
-        # Salon hub
-        hub_id = voice_cfg.get('hub_channel', 0)
-        hub = self.g.get_channel(hub_id)
-        e.add_field(name="🎤 Salon Hub", value=hub.name if hub else "❌ Non configuré", inline=True)
+        # Nombre de hubs configurés
+        active_hubs = len([h for h_id, h in hubs.items() if self.g.get_channel(int(h_id))])
+        e.add_field(name="🎤 Hubs configurés", value=str(active_hubs), inline=True)
         
-        # Catégorie
-        cat_id = voice_cfg.get('category', 0)
-        cat = self.g.get_channel(cat_id)
-        e.add_field(name="📁 Catégorie", value=cat.name if cat else "❌ Non configuré", inline=True)
+        # Vocaux actifs
+        active_count = len([ch for ch in temp_voice_channels.keys() if self.g.get_channel(ch)])
+        e.add_field(name="📊 Vocaux actifs", value=str(active_count), inline=True)
         
-        # Nom par défaut
-        default_name = voice_cfg.get('default_name', "🔊 Vocal de {user}")
-        e.add_field(name="📝 Nom par défaut", value=f"`{default_name}`", inline=False)
+        # Liste des hubs
+        if hubs:
+            hub_list = []
+            for hub_id, hub_data in list(hubs.items())[:5]:  # Max 5 affichés
+                hub_ch = self.g.get_channel(int(hub_id))
+                if hub_ch:
+                    role_id = hub_data.get('required_role', 0)
+                    role = self.g.get_role(role_id) if role_id else None
+                    role_txt = f"🔒 {role.name}" if role else "🔓 Tous"
+                    cat = self.g.get_channel(hub_data.get('category', 0))
+                    cat_txt = cat.name if cat else "Non défini"
+                    hub_list.append(f"🎤 **{hub_ch.name}**\n┗ {role_txt} • 📁 {cat_txt}")
+            
+            if len(hubs) > 5:
+                hub_list.append(f"*... et {len(hubs) - 5} autres*")
+            
+            e.add_field(name="📋 Hubs configurés", value="\n".join(hub_list) if hub_list else "*Aucun*", inline=False)
+        else:
+            e.add_field(name="📋 Hubs configurés", value="*Aucun hub configuré*\nCliquez sur '➕ Ajouter Hub' pour commencer", inline=False)
         
         # Permissions du propriétaire
         perms = voice_cfg.get('owner_permissions', {})
@@ -7189,11 +8072,7 @@ class TempVoicePanel(View):
         
         e.add_field(name="👑 Permissions Propriétaire", value=" • ".join(perm_list) if perm_list else "*Aucune*", inline=False)
         
-        # Vocaux actifs
-        active_count = len([ch for ch in temp_voice_channels.keys() if self.g.get_channel(ch)])
-        e.add_field(name="📊 Vocaux actifs", value=str(active_count), inline=True)
-        
-        e.set_footer(text="💡 Les membres rejoignent le hub pour créer leur vocal")
+        e.set_footer(text="💡 Chaque hub peut avoir un rôle requis différent")
         return e
     
     @discord.ui.button(label="✅ Activer/Désactiver", style=discord.ButtonStyle.success, row=0)
@@ -7204,27 +8083,29 @@ class TempVoicePanel(View):
         await db_set(self.g.id, 'temp_voice_config', voice_cfg)
         await i.response.edit_message(embed=await self.embed(), view=self)
     
-    @discord.ui.button(label="🎤 Salon Hub", style=discord.ButtonStyle.primary, row=0)
-    async def set_hub(self, i, b):
-        v = TempVoiceHubSelect(self.u, self.g)
+    @discord.ui.button(label="➕ Ajouter Hub", style=discord.ButtonStyle.primary, row=0)
+    async def add_hub(self, i, b):
+        v = TempVoiceAddHubSelect(self.u, self.g)
         await i.response.edit_message(
-            embed=discord.Embed(title="🎤 Choisir le salon Hub", description="Les membres qui rejoignent ce vocal auront leur propre salon créé.", color=0x9B59B6),
+            embed=discord.Embed(
+                title="➕ Ajouter un Hub Vocal",
+                description="**Étape 1/3** - Choisissez le salon vocal qui servira de hub.\n\nQuand un membre rejoindra ce salon, un vocal personnel sera créé.",
+                color=0x9B59B6
+            ),
             view=v
         )
     
-    @discord.ui.button(label="📁 Catégorie", style=discord.ButtonStyle.primary, row=0)
-    async def set_category(self, i, b):
-        cats = list(self.g.categories)[:25]
-        if not cats:
-            return await i.response.send_message("❌ Aucune catégorie", ephemeral=True)
+    @discord.ui.button(label="📋 Gérer Hubs", style=discord.ButtonStyle.primary, row=0)
+    async def manage_hubs(self, i, b):
+        c = await cfg(self.g.id)
+        voice_cfg = c.get('temp_voice_config', {})
+        hubs = voice_cfg.get('hubs', {})
         
-        opts = [discord.SelectOption(label=f"📁 {c.name}"[:25], value=str(c.id)) for c in cats]
-        v = TempVoiceCategorySelect(self.u, self.g, opts)
-        await i.response.edit_message(embed=discord.Embed(title="📁 Catégorie des vocaux", color=0x9B59B6), view=v)
-    
-    @discord.ui.button(label="📝 Nom par défaut", style=discord.ButtonStyle.secondary, row=1)
-    async def set_name(self, i, b):
-        await i.response.send_modal(TempVoiceNameModal(self.g, self.u))
+        if not hubs:
+            return await i.response.send_message("❌ Aucun hub configuré. Ajoutez d'abord un hub.", ephemeral=True)
+        
+        v = TempVoiceHubsListPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="👑 Permissions", style=discord.ButtonStyle.secondary, row=1)
     async def set_permissions(self, i, b):
@@ -7236,11 +8117,14 @@ class TempVoicePanel(View):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
 
-class TempVoiceHubSelect(View):
+class TempVoiceAddHubSelect(View):
+    """Étape 1: Sélection du salon hub"""
     def __init__(self, u, g):
         super().__init__(timeout=120)
         self.u = u
         self.g = g
+        
+        # Récupérer les hubs déjà configurés
         voice_channels = [c for c in g.channels if isinstance(c, discord.VoiceChannel)][:25]
         
         opts = [discord.SelectOption(label=f"🔊 {c.name}"[:25], value=str(c.id)) for c in voice_channels]
@@ -7248,41 +8132,419 @@ class TempVoiceHubSelect(View):
             select = Select(placeholder="Choisir un salon vocal...", options=opts)
             select.callback = self.select_callback
             self.add_item(select)
-        
-        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=1)
-        back_btn.callback = self.go_back
-        self.add_item(back_btn)
     
     async def select_callback(self, i):
-        c = await cfg(self.g.id)
-        voice_cfg = c.get('temp_voice_config', {})
-        voice_cfg['hub_channel'] = int(i.data['values'][0])
-        await db_set(self.g.id, 'temp_voice_config', voice_cfg)
-        v = TempVoicePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        hub_id = int(i.data['values'][0])
+        hub_ch = self.g.get_channel(hub_id)
+        
+        # Passer à l'étape 2: choisir la catégorie
+        v = TempVoiceAddHubCategory(self.u, self.g, hub_id)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="➕ Ajouter un Hub Vocal",
+                description=f"**Étape 2/3** - Choisissez la catégorie où les vocaux seront créés.\n\n🎤 Hub sélectionné: **{hub_ch.name}**",
+                color=0x9B59B6
+            ),
+            view=v
+        )
     
-    async def go_back(self, i):
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
         v = TempVoicePanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
-class TempVoiceCategorySelect(View):
-    def __init__(self, u, g, opts):
+class TempVoiceAddHubCategory(View):
+    """Étape 2: Sélection de la catégorie"""
+    def __init__(self, u, g, hub_id):
         super().__init__(timeout=120)
         self.u = u
         self.g = g
-        select = Select(placeholder="Choisir une catégorie...", options=opts)
-        select.callback = self.select_callback
-        self.add_item(select)
+        self.hub_id = hub_id
+        
+        categories = list(g.categories)[:25]
+        opts = [discord.SelectOption(label=f"📁 {c.name}"[:25], value=str(c.id)) for c in categories]
+        if opts:
+            select = Select(placeholder="Choisir une catégorie...", options=opts)
+            select.callback = self.select_callback
+            self.add_item(select)
     
     async def select_callback(self, i):
+        cat_id = int(i.data['values'][0])
+        cat = self.g.get_channel(cat_id)
+        hub_ch = self.g.get_channel(self.hub_id)
+        
+        # Passer à l'étape 3: choisir le rôle requis (optionnel)
+        v = TempVoiceAddHubRole(self.u, self.g, self.hub_id, cat_id)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="➕ Ajouter un Hub Vocal",
+                description=(
+                    f"**Étape 3/3** - Choisissez un rôle requis (optionnel).\n\n"
+                    f"🎤 Hub: **{hub_ch.name}**\n"
+                    f"📁 Catégorie: **{cat.name}**\n\n"
+                    f"🔒 Si un rôle est défini, seuls les membres avec ce rôle pourront créer un vocal."
+                ),
+                color=0x9B59B6
+            ),
+            view=v
+        )
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = TempVoiceAddHubSelect(self.u, self.g)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="➕ Ajouter un Hub Vocal",
+                description="**Étape 1/3** - Choisissez le salon vocal qui servira de hub.",
+                color=0x9B59B6
+            ),
+            view=v
+        )
+
+class TempVoiceAddHubRole(View):
+    """Étape 3: Sélection du rôle requis (optionnel)"""
+    def __init__(self, u, g, hub_id, cat_id):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+        self.hub_id = hub_id
+        self.cat_id = cat_id
+        
+        # Filtrer les rôles (exclure @everyone et les rôles de bot)
+        roles = [r for r in g.roles if not r.is_default() and not r.managed][:24]
+        opts = [discord.SelectOption(label="🔓 Aucun (tous peuvent créer)", value="0", emoji="✅")]
+        for r in roles:
+            opts.append(discord.SelectOption(label=f"🔒 {r.name}"[:25], value=str(r.id)))
+        
+        if opts:
+            select = Select(placeholder="Choisir un rôle requis...", options=opts[:25])
+            select.callback = self.select_callback
+            self.add_item(select)
+    
+    async def select_callback(self, i):
+        role_id = int(i.data['values'][0])
+        
+        # Sauvegarder le hub
         c = await cfg(self.g.id)
         voice_cfg = c.get('temp_voice_config', {})
-        voice_cfg['category'] = int(i.data['values'][0])
+        hubs = voice_cfg.get('hubs', {})
+        
+        hubs[str(self.hub_id)] = {
+            'category': self.cat_id,
+            'required_role': role_id,
+            'default_name': '🔊 Vocal de {user}'
+        }
+        
+        voice_cfg['hubs'] = hubs
         await db_set(self.g.id, 'temp_voice_config', voice_cfg)
+        
+        # Confirmation
+        hub_ch = self.g.get_channel(self.hub_id)
+        cat = self.g.get_channel(self.cat_id)
+        role = self.g.get_role(role_id) if role_id else None
+        
+        v = TempVoicePanel(self.u, self.g)
+        await i.response.edit_message(
+            content=f"✅ **Hub ajouté avec succès !**\n🎤 Hub: {hub_ch.name}\n📁 Catégorie: {cat.name}\n🔒 Rôle requis: {role.name if role else 'Aucun (tous)'}",
+            embed=await v.embed(),
+            view=v
+        )
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = TempVoiceAddHubCategory(self.u, self.g, self.hub_id)
+        hub_ch = self.g.get_channel(self.hub_id)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="➕ Ajouter un Hub Vocal",
+                description=f"**Étape 2/3** - Choisissez la catégorie.\n\n🎤 Hub: **{hub_ch.name}**",
+                color=0x9B59B6
+            ),
+            view=v
+        )
+
+class TempVoiceHubsListPanel(View):
+    """Panel pour lister et gérer les hubs existants"""
+    def __init__(self, u, g, page=0):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.page = page
+        self.per_page = 5
+    
+    async def get_hubs(self):
+        c = await cfg(self.g.id)
+        voice_cfg = c.get('temp_voice_config', {})
+        return voice_cfg.get('hubs', {})
+    
+    async def embed(self):
+        hubs = await self.get_hubs()
+        
+        e = discord.Embed(title="📋 Liste des Hubs Vocaux", color=0x9B59B6)
+        
+        if not hubs:
+            e.description = "*Aucun hub configuré*"
+            return e
+        
+        # Pagination
+        hub_items = list(hubs.items())
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_hubs = hub_items[start:end]
+        
+        description_parts = []
+        for idx, (hub_id, hub_data) in enumerate(page_hubs, start=start+1):
+            hub_ch = self.g.get_channel(int(hub_id))
+            if not hub_ch:
+                description_parts.append(f"**{idx}.** ❌ *Salon supprimé* (ID: {hub_id})")
+                continue
+            
+            cat = self.g.get_channel(hub_data.get('category', 0))
+            role_id = hub_data.get('required_role', 0)
+            role = self.g.get_role(role_id) if role_id else None
+            default_name = hub_data.get('default_name', '🔊 Vocal de {user}')
+            
+            description_parts.append(
+                f"**{idx}. 🎤 {hub_ch.name}**\n"
+                f"┣ 📁 Catégorie: {cat.name if cat else '❌ Non définie'}\n"
+                f"┣ 🔒 Rôle: {role.mention if role else '🔓 Aucun (tous)'}\n"
+                f"┗ 📝 Nom: `{default_name}`"
+            )
+        
+        e.description = "\n\n".join(description_parts)
+        
+        total_pages = max(1, (len(hubs) - 1) // self.per_page + 1)
+        e.set_footer(text=f"Page {self.page + 1}/{total_pages} • {len(hubs)} hub(s) configuré(s)")
+        
+        return e
+    
+    @discord.ui.button(label="◀️", style=discord.ButtonStyle.secondary, row=0)
+    async def prev_page(self, i, b):
+        if self.page > 0:
+            self.page -= 1
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="▶️", style=discord.ButtonStyle.secondary, row=0)
+    async def next_page(self, i, b):
+        hubs = await self.get_hubs()
+        max_page = max(0, (len(hubs) - 1) // self.per_page)
+        if self.page < max_page:
+            self.page += 1
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="✏️ Modifier Hub", style=discord.ButtonStyle.primary, row=1)
+    async def edit_hub(self, i, b):
+        hubs = await self.get_hubs()
+        if not hubs:
+            return await i.response.send_message("❌ Aucun hub à modifier", ephemeral=True)
+        
+        v = TempVoiceHubEditSelect(self.u, self.g, hubs)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="✏️ Modifier un Hub",
+                description="Sélectionnez le hub à modifier.",
+                color=0x9B59B6
+            ),
+            view=v
+        )
+    
+    @discord.ui.button(label="🗑️ Supprimer Hub", style=discord.ButtonStyle.danger, row=1)
+    async def delete_hub(self, i, b):
+        hubs = await self.get_hubs()
+        if not hubs:
+            return await i.response.send_message("❌ Aucun hub à supprimer", ephemeral=True)
+        
+        v = TempVoiceHubDeleteSelect(self.u, self.g, hubs)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="🗑️ Supprimer un Hub",
+                description="Sélectionnez le hub à supprimer.",
+                color=0xE74C3C
+            ),
+            view=v
+        )
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+    async def back(self, i, b):
         v = TempVoicePanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
-class TempVoiceNameModal(Modal, title="📝 Nom par défaut"):
+class TempVoiceHubEditSelect(View):
+    """Sélection d'un hub à modifier"""
+    def __init__(self, u, g, hubs):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+        
+        opts = []
+        for hub_id, hub_data in list(hubs.items())[:25]:
+            hub_ch = g.get_channel(int(hub_id))
+            if hub_ch:
+                role_id = hub_data.get('required_role', 0)
+                role = g.get_role(role_id) if role_id else None
+                label = f"🎤 {hub_ch.name}"[:25]
+                desc = f"Rôle: {role.name if role else 'Aucun'}"[:50]
+                opts.append(discord.SelectOption(label=label, value=hub_id, description=desc))
+        
+        if opts:
+            select = Select(placeholder="Choisir un hub...", options=opts)
+            select.callback = self.select_callback
+            self.add_item(select)
+    
+    async def select_callback(self, i):
+        hub_id = i.data['values'][0]
+        v = TempVoiceHubEditPanel(self.u, self.g, hub_id)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = TempVoiceHubsListPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class TempVoiceHubEditPanel(View):
+    """Panel pour modifier un hub spécifique"""
+    def __init__(self, u, g, hub_id):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.hub_id = hub_id
+    
+    async def get_hub_data(self):
+        c = await cfg(self.g.id)
+        voice_cfg = c.get('temp_voice_config', {})
+        hubs = voice_cfg.get('hubs', {})
+        return hubs.get(str(self.hub_id), {})
+    
+    async def embed(self):
+        hub_data = await self.get_hub_data()
+        hub_ch = self.g.get_channel(int(self.hub_id))
+        
+        e = discord.Embed(title=f"✏️ Modifier: {hub_ch.name if hub_ch else 'Hub'}", color=0x9B59B6)
+        
+        # Catégorie
+        cat = self.g.get_channel(hub_data.get('category', 0))
+        e.add_field(name="📁 Catégorie", value=cat.name if cat else "❌ Non définie", inline=True)
+        
+        # Rôle requis
+        role_id = hub_data.get('required_role', 0)
+        role = self.g.get_role(role_id) if role_id else None
+        e.add_field(name="🔒 Rôle requis", value=role.mention if role else "🔓 Aucun (tous)", inline=True)
+        
+        # Nom par défaut
+        default_name = hub_data.get('default_name', '🔊 Vocal de {user}')
+        e.add_field(name="📝 Nom par défaut", value=f"`{default_name}`", inline=False)
+        
+        return e
+    
+    @discord.ui.button(label="📁 Catégorie", style=discord.ButtonStyle.primary, row=0)
+    async def change_category(self, i, b):
+        v = TempVoiceHubEditCategory(self.u, self.g, self.hub_id)
+        await i.response.edit_message(
+            embed=discord.Embed(title="📁 Changer la catégorie", description="Sélectionnez la nouvelle catégorie.", color=0x9B59B6),
+            view=v
+        )
+    
+    @discord.ui.button(label="🔒 Rôle requis", style=discord.ButtonStyle.primary, row=0)
+    async def change_role(self, i, b):
+        v = TempVoiceHubEditRole(self.u, self.g, self.hub_id)
+        await i.response.edit_message(
+            embed=discord.Embed(title="🔒 Changer le rôle requis", description="Sélectionnez le nouveau rôle requis.", color=0x9B59B6),
+            view=v
+        )
+    
+    @discord.ui.button(label="📝 Nom par défaut", style=discord.ButtonStyle.secondary, row=0)
+    async def change_name(self, i, b):
+        await i.response.send_modal(TempVoiceHubNameModal(self.g, self.u, self.hub_id))
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = TempVoiceHubsListPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class TempVoiceHubEditCategory(View):
+    """Modifier la catégorie d'un hub"""
+    def __init__(self, u, g, hub_id):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+        self.hub_id = hub_id
+        
+        categories = list(g.categories)[:25]
+        opts = [discord.SelectOption(label=f"📁 {c.name}"[:25], value=str(c.id)) for c in categories]
+        if opts:
+            select = Select(placeholder="Choisir une catégorie...", options=opts)
+            select.callback = self.select_callback
+            self.add_item(select)
+    
+    async def select_callback(self, i):
+        cat_id = int(i.data['values'][0])
+        
+        c = await cfg(self.g.id)
+        voice_cfg = c.get('temp_voice_config', {})
+        hubs = voice_cfg.get('hubs', {})
+        
+        if str(self.hub_id) in hubs:
+            hubs[str(self.hub_id)]['category'] = cat_id
+            voice_cfg['hubs'] = hubs
+            await db_set(self.g.id, 'temp_voice_config', voice_cfg)
+        
+        cat = self.g.get_channel(cat_id)
+        v = TempVoiceHubEditPanel(self.u, self.g, self.hub_id)
+        await i.response.edit_message(
+            content=f"✅ Catégorie changée: **{cat.name}**",
+            embed=await v.embed(),
+            view=v
+        )
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = TempVoiceHubEditPanel(self.u, self.g, self.hub_id)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class TempVoiceHubEditRole(View):
+    """Modifier le rôle requis d'un hub"""
+    def __init__(self, u, g, hub_id):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+        self.hub_id = hub_id
+        
+        roles = [r for r in g.roles if not r.is_default() and not r.managed][:24]
+        opts = [discord.SelectOption(label="🔓 Aucun (tous peuvent créer)", value="0", emoji="✅")]
+        for r in roles:
+            opts.append(discord.SelectOption(label=f"🔒 {r.name}"[:25], value=str(r.id)))
+        
+        if opts:
+            select = Select(placeholder="Choisir un rôle...", options=opts[:25])
+            select.callback = self.select_callback
+            self.add_item(select)
+    
+    async def select_callback(self, i):
+        role_id = int(i.data['values'][0])
+        
+        c = await cfg(self.g.id)
+        voice_cfg = c.get('temp_voice_config', {})
+        hubs = voice_cfg.get('hubs', {})
+        
+        if str(self.hub_id) in hubs:
+            hubs[str(self.hub_id)]['required_role'] = role_id
+            voice_cfg['hubs'] = hubs
+            await db_set(self.g.id, 'temp_voice_config', voice_cfg)
+        
+        role = self.g.get_role(role_id) if role_id else None
+        v = TempVoiceHubEditPanel(self.u, self.g, self.hub_id)
+        await i.response.edit_message(
+            content=f"✅ Rôle requis changé: **{role.name if role else 'Aucun (tous)'}**",
+            embed=await v.embed(),
+            view=v
+        )
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = TempVoiceHubEditPanel(self.u, self.g, self.hub_id)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class TempVoiceHubNameModal(Modal, title="📝 Nom par défaut"):
     name_input = TextInput(
         label="Nom du vocal (utilise {user} pour le pseudo)", 
         placeholder="🔊 Vocal de {user}", 
@@ -7290,17 +8552,74 @@ class TempVoiceNameModal(Modal, title="📝 Nom par défaut"):
         max_length=50
     )
     
-    def __init__(self, g, u):
+    def __init__(self, g, u, hub_id):
         super().__init__()
         self.g = g
         self.u = u
+        self.hub_id = hub_id
     
     async def on_submit(self, i):
         c = await cfg(self.g.id)
         voice_cfg = c.get('temp_voice_config', {})
-        voice_cfg['default_name'] = self.name_input.value
-        await db_set(self.g.id, 'temp_voice_config', voice_cfg)
+        hubs = voice_cfg.get('hubs', {})
+        
+        if str(self.hub_id) in hubs:
+            hubs[str(self.hub_id)]['default_name'] = self.name_input.value
+            voice_cfg['hubs'] = hubs
+            await db_set(self.g.id, 'temp_voice_config', voice_cfg)
+        
+        v = TempVoiceHubEditPanel(self.u, self.g, self.hub_id)
+        await i.response.edit_message(
+            content=f"✅ Nom par défaut changé: `{self.name_input.value}`",
+            embed=await v.embed(),
+            view=v
+        )
+
+class TempVoiceHubDeleteSelect(View):
+    """Sélection d'un hub à supprimer"""
+    def __init__(self, u, g, hubs):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+        
+        opts = []
+        for hub_id, hub_data in list(hubs.items())[:25]:
+            hub_ch = g.get_channel(int(hub_id))
+            if hub_ch:
+                opts.append(discord.SelectOption(label=f"🎤 {hub_ch.name}"[:25], value=hub_id))
+            else:
+                opts.append(discord.SelectOption(label=f"❌ Salon supprimé", value=hub_id, description=f"ID: {hub_id}"))
+        
+        if opts:
+            select = Select(placeholder="Choisir un hub à supprimer...", options=opts)
+            select.callback = self.select_callback
+            self.add_item(select)
+    
+    async def select_callback(self, i):
+        hub_id = i.data['values'][0]
+        
+        c = await cfg(self.g.id)
+        voice_cfg = c.get('temp_voice_config', {})
+        hubs = voice_cfg.get('hubs', {})
+        
+        hub_ch = self.g.get_channel(int(hub_id))
+        hub_name = hub_ch.name if hub_ch else f"ID: {hub_id}"
+        
+        if hub_id in hubs:
+            del hubs[hub_id]
+            voice_cfg['hubs'] = hubs
+            await db_set(self.g.id, 'temp_voice_config', voice_cfg)
+        
         v = TempVoicePanel(self.u, self.g)
+        await i.response.edit_message(
+            content=f"✅ Hub **{hub_name}** supprimé !",
+            embed=await v.embed(),
+            view=v
+        )
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = TempVoiceHubsListPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 class TempVoicePermissionsPanel(View):
@@ -12737,77 +14056,102 @@ async def on_voice_state_update(member, before, after):
     user_id = member.id
     key = (guild_id, user_id)
     
-    # ═══════════════ VOCAUX TEMPORAIRES ═══════════════
+    # ═══════════════ VOCAUX TEMPORAIRES (MULTI-HUBS) ═══════════════
     try:
         c = await cfg(guild_id)
         voice_cfg = c.get('temp_voice_config', {})
         
         if voice_cfg.get('enabled', False):
-            hub_id = voice_cfg.get('hub_channel', 0)
-            cat_id = voice_cfg.get('category', 0)
-            default_name = voice_cfg.get('default_name', '🔊 Vocal de {user}')
+            hubs = voice_cfg.get('hubs', {})
             perms = voice_cfg.get('owner_permissions', {
                 'can_rename': True, 'can_limit': True, 'can_mute': True, 'can_kick': True
             })
             
-            # Si l'utilisateur rejoint le hub → créer un vocal
-            if after.channel and after.channel.id == hub_id:
-                category = member.guild.get_channel(cat_id)
-                if category:
-                    channel_name = default_name.replace('{user}', member.display_name)[:50]
+            # Vérifier si l'utilisateur rejoint un des hubs configurés
+            if after.channel:
+                hub_data = hubs.get(str(after.channel.id))
+                
+                if hub_data:
+                    # C'est un hub configuré !
+                    cat_id = hub_data.get('category', 0)
+                    required_role_id = hub_data.get('required_role', 0)
+                    default_name = hub_data.get('default_name', '🔊 Vocal de {user}')
                     
-                    # Permissions pour TOUS les utilisateurs
-                    # use_voice_activation = True permet d'utiliser la détection vocale (pas push-to-talk)
-                    # send_messages = False bloque l'écriture pour TOUT LE MONDE
-                    overwrites = {
-                        member.guild.default_role: discord.PermissionOverwrite(
-                            connect=True,
-                            speak=True,
-                            use_voice_activation=True,  # ✅ Détection vocale activée (pas de push-to-talk obligatoire)
-                            stream=True,
-                            send_messages=False,  # ❌ Pas d'écriture dans le chat du vocal
-                            read_messages=True
-                        ),
-                        member: discord.PermissionOverwrite(
-                            connect=True,
-                            speak=True,
-                            use_voice_activation=True,  # ✅ Détection vocale
-                            stream=True,
-                            send_messages=False,  # ❌ Même le propriétaire ne peut pas écrire
-                            read_messages=True,
-                            mute_members=perms.get('can_mute', True),
-                            move_members=perms.get('can_kick', True),
-                            manage_channels=perms.get('can_rename', True) or perms.get('can_limit', True)
-                        ),
-                        member.guild.me: discord.PermissionOverwrite(
-                            connect=True,
-                            speak=True,
-                            manage_channels=True,
-                            move_members=True,
-                            send_messages=True  # Le bot peut envoyer des messages si besoin
+                    # Vérifier si le membre a le rôle requis (si défini)
+                    if required_role_id:
+                        required_role = member.guild.get_role(required_role_id)
+                        if required_role and required_role not in member.roles:
+                            # Le membre n'a pas le rôle requis → le déconnecter
+                            try:
+                                await member.move_to(None)
+                                # Envoyer un message privé expliquant pourquoi
+                                try:
+                                    await member.send(
+                                        f"❌ Vous ne pouvez pas créer de vocal dans ce hub.\n"
+                                        f"🔒 Rôle requis: **{required_role.name}**\n"
+                                        f"📍 Serveur: {member.guild.name}"
+                                    )
+                                except:
+                                    pass  # DM désactivés
+                                print(f"[TEMP VOICE] {member.display_name} expulsé du hub (rôle manquant: {required_role.name})")
+                            except:
+                                pass
+                            return
+                    
+                    # Le membre peut créer un vocal
+                    category = member.guild.get_channel(cat_id)
+                    if category:
+                        channel_name = default_name.replace('{user}', member.display_name)[:50]
+                        
+                        # Permissions pour TOUS les utilisateurs
+                        overwrites = {
+                            member.guild.default_role: discord.PermissionOverwrite(
+                                connect=True,
+                                speak=True,
+                                use_voice_activation=True,
+                                stream=True,
+                                send_messages=False,
+                                read_messages=True
+                            ),
+                            member: discord.PermissionOverwrite(
+                                connect=True,
+                                speak=True,
+                                use_voice_activation=True,
+                                stream=True,
+                                send_messages=False,
+                                read_messages=True,
+                                mute_members=perms.get('can_mute', True),
+                                move_members=perms.get('can_kick', True),
+                                manage_channels=perms.get('can_rename', True) or perms.get('can_limit', True)
+                            ),
+                            member.guild.me: discord.PermissionOverwrite(
+                                connect=True,
+                                speak=True,
+                                manage_channels=True,
+                                move_members=True,
+                                send_messages=True
+                            )
+                        }
+                        
+                        new_channel = await member.guild.create_voice_channel(
+                            name=channel_name,
+                            category=category,
+                            overwrites=overwrites
                         )
-                    }
-                    
-                    new_channel = await member.guild.create_voice_channel(
-                        name=channel_name,
-                        category=category,
-                        overwrites=overwrites
-                    )
-                    
-                    temp_voice_channels[new_channel.id] = {
-                        'owner': member.id,
-                        'created_at': now()
-                    }
-                    
-                    await member.move_to(new_channel)
-                    print(f"[TEMP VOICE] Créé vocal '{channel_name}' pour {member.display_name}")
+                        
+                        temp_voice_channels[new_channel.id] = {
+                            'owner': member.id,
+                            'hub_id': after.channel.id,
+                            'created_at': now()
+                        }
+                        
+                        await member.move_to(new_channel)
+                        print(f"[TEMP VOICE] Créé vocal '{channel_name}' pour {member.display_name} (hub: {after.channel.name})")
             
             # Si l'utilisateur quitte un vocal temporaire → vérifier si vide et supprimer
             if before.channel and before.channel.id in temp_voice_channels:
-                # Vérifier après un petit délai (pour éviter les bugs de timing)
                 await asyncio.sleep(1)
                 
-                # Re-récupérer le salon pour avoir le nombre de membres à jour
                 try:
                     channel = member.guild.get_channel(before.channel.id)
                     if channel and len(channel.members) == 0:
@@ -12815,7 +14159,6 @@ async def on_voice_state_update(member, before, after):
                         del temp_voice_channels[before.channel.id]
                         print(f"[TEMP VOICE] Supprimé vocal vide: {before.channel.name}")
                 except discord.NotFound:
-                    # Salon déjà supprimé
                     if before.channel.id in temp_voice_channels:
                         del temp_voice_channels[before.channel.id]
                 except Exception as ex:
