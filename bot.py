@@ -170,11 +170,162 @@ class C:
     BLURPLE=0x5865F2; GREEN=0x57F287; RED=0xED4245; YELLOW=0xFEE75C
     PURPLE=0x9B59B6; BLUE=0x3498DB; ORANGE=0xE67E22; GOLD=0xFFD700
 
-PHISHING = ['discord-nitro.gift','discordgift.site','free-nitro.com','steampowered.ru','dlscord.com']
-SCAM_PATTERNS = [r'free\s*nitro', r'steam\s*gift', r'@everyone.*http']
+# Références aux nouvelles bases de données (définies dans PROTS section)
+PHISHING = []  # Sera remplacé par PHISHING_DOMAINS après la définition
+SCAM_PATTERNS = []  # Sera remplacé après la définition
 LEET = {'a':['@','4'],'e':['3','€'],'i':['1','!'],'o':['0'],'s':['$','5'],'t':['7']}
 
 def now(): return datetime.now(timezone.utc)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                              🔒 SÉCURITÉ AVANCÉE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import hashlib
+import secrets
+
+# Rate limiting pour prévenir les abus
+rate_limits = {}  # {(guild_id, user_id, action): [timestamps]}
+RATE_LIMITS_CONFIG = {
+    'command': {'max': 10, 'window': 60},  # 10 commandes par minute
+    'message': {'max': 30, 'window': 60},  # 30 messages par minute
+    'button': {'max': 20, 'window': 60},   # 20 clics par minute
+    'api_call': {'max': 50, 'window': 60}, # 50 appels API par minute
+}
+
+# Blacklist temporaire des utilisateurs suspects
+security_blacklist = {}  # {user_id: {'until': datetime, 'reason': str}}
+
+# Cache des tentatives de sécurité
+security_attempts = {}  # {user_id: {'attempts': int, 'last': datetime}}
+
+def check_rate_limit(guild_id, user_id, action='command'):
+    """Vérifie si un utilisateur dépasse la limite de rate"""
+    key = (guild_id, user_id, action)
+    current = now()
+    config = RATE_LIMITS_CONFIG.get(action, {'max': 10, 'window': 60})
+    
+    if key not in rate_limits:
+        rate_limits[key] = []
+    
+    # Nettoyer les anciennes entrées
+    rate_limits[key] = [t for t in rate_limits[key] if (current - t).total_seconds() < config['window']]
+    
+    # Vérifier la limite
+    if len(rate_limits[key]) >= config['max']:
+        return False  # Limite atteinte
+    
+    # Ajouter cette action
+    rate_limits[key].append(current)
+    return True
+
+def is_blacklisted(user_id):
+    """Vérifie si un utilisateur est temporairement blacklisté"""
+    if user_id in security_blacklist:
+        if security_blacklist[user_id]['until'] > now():
+            return True, security_blacklist[user_id]['reason']
+        else:
+            del security_blacklist[user_id]
+    return False, None
+
+def blacklist_user(user_id, duration_minutes, reason):
+    """Blackliste temporairement un utilisateur"""
+    security_blacklist[user_id] = {
+        'until': now() + timedelta(minutes=duration_minutes),
+        'reason': reason
+    }
+
+def sanitize_input(text, max_length=2000):
+    """Nettoie et valide une entrée utilisateur"""
+    if text is None:
+        return ""
+    
+    # Convertir en string
+    text = str(text)
+    
+    # Limiter la longueur
+    if len(text) > max_length:
+        text = text[:max_length]
+    
+    # Supprimer les caractères de contrôle dangereux
+    dangerous_chars = ['\x00', '\x1a', '\x7f']
+    for char in dangerous_chars:
+        text = text.replace(char, '')
+    
+    return text
+
+def validate_id(value):
+    """Valide qu'une valeur est un ID Discord valide"""
+    try:
+        id_val = int(value)
+        # Les IDs Discord sont des snowflakes 64-bit
+        if id_val < 0 or id_val > 2**63:
+            return None
+        return id_val
+    except (ValueError, TypeError):
+        return None
+
+def hash_sensitive_data(data):
+    """Hash des données sensibles de manière sécurisée"""
+    if not data:
+        return None
+    salt = secrets.token_hex(16)
+    return hashlib.sha256(f"{salt}{data}".encode()).hexdigest()
+
+def detect_injection_attempt(text):
+    """Détecte les tentatives d'injection SQL/Code"""
+    if not text:
+        return False
+    
+    injection_patterns = [
+        r"(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER|CREATE|TRUNCATE)\b)",  # SQL
+        r"(--|;|/\*|\*/|@@|@)",  # SQL comments/special
+        r"(<script|javascript:|on\w+\s*=)",  # XSS
+        r"(\$\{|\{\{|<%|%>)",  # Template injection
+        r"(__import__|eval|exec|compile|open\s*\()",  # Python injection
+        r"(\.\.\/|\.\.\\)",  # Path traversal
+    ]
+    
+    text_lower = text.lower()
+    for pattern in injection_patterns:
+        if re.search(pattern, text_lower, re.IGNORECASE):
+            return True
+    return False
+
+async def log_security_event(guild_id, user_id, action, details):
+    """Enregistre un événement de sécurité dans la base de données"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                'INSERT INTO security_logs (guild_id, user_id, action, details) VALUES (?, ?, ?, ?)',
+                (guild_id, user_id, sanitize_input(action, 100), sanitize_input(details, 500))
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[SECURITY LOG ERROR] {ex}")
+
+def validate_config_value(key, value):
+    """Valide les valeurs de configuration"""
+    # Limites de valeurs
+    limits = {
+        'spam_max': (1, 50),
+        'spam_interval': (1, 300),
+        'caps_percent': (10, 100),
+        'newaccount_days': (0, 365),
+        'join_threshold': (3, 100),
+        'join_interval': (5, 300),
+        'min_account_age': (0, 365),
+    }
+    
+    if key in limits:
+        min_val, max_val = limits[key]
+        try:
+            val = int(value)
+            return max(min_val, min(max_val, val))
+        except:
+            return min_val
+    
+    return value
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              💾 DATABASE
@@ -350,35 +501,76 @@ async def db_init():
     print("✅ DB OK")
 
 async def db_get(gid):
+    """Récupère la configuration d'un serveur de manière sécurisée"""
     try:
+        # Valider l'ID
+        gid = validate_id(gid)
+        if gid is None:
+            return {}
+        
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute('SELECT data FROM guild_config WHERE guild_id=?', (gid,)) as c:
                 r = await c.fetchone()
-                return json.loads(r[0]) if r and r[0] else {}
-    except: return {}
+                if r and r[0]:
+                    try:
+                        return json.loads(r[0])
+                    except json.JSONDecodeError:
+                        print(f"[DB] JSON invalide pour guild {gid}")
+                        return {}
+                return {}
+    except Exception as ex:
+        print(f"[DB GET ERROR] {ex}")
+        return {}
 
 async def db_set(gid, key, val):
+    """Enregistre une valeur de configuration de manière sécurisée"""
     try:
+        # Valider l'ID
+        gid = validate_id(gid)
+        if gid is None:
+            return False
+        
+        # Valider la clé (pas d'injection)
+        key = sanitize_input(str(key), 100)
+        if detect_injection_attempt(key):
+            print(f"[SECURITY] Tentative d'injection détectée dans la clé: {key}")
+            return False
+        
+        # Valider certaines valeurs numériques
+        val = validate_config_value(key, val)
+        
         data = await db_get(gid)
         data[key] = val
+        
+        # Limiter la taille totale de la config
         jd = json.dumps(data, ensure_ascii=False)
+        if len(jd) > 100000:  # 100KB max
+            print(f"[DB] Config trop grande pour guild {gid}")
+            return False
+        
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('INSERT INTO guild_config(guild_id, data) VALUES(?,?) ON CONFLICT(guild_id) DO UPDATE SET data=?', (gid, jd, jd))
             await db.commit()
         return True
-    except: return False
+    except Exception as ex:
+        print(f"[DB SET ERROR] {ex}")
+        return False
 
 async def cfg(gid):
     data = await db_get(gid)
     defaults = {
         'anti_link': 0, 'anti_invite': 0, 'anti_image': 0, 'anti_phishing': 1, 'anti_scam': 1,
         'anti_spam': 0, 'anti_caps': 0, 'anti_newaccount': 0, 'anti_badwords': 0,
+        'anti_raid': 0, 'anti_compromised': 1, 'anti_qrcode': 1,  # Nouvelles protections
         'link_whitelist': [], 'image_allowed': [], 'badwords_list': [],
         'link_allowed_channels': [], 'image_allowed_channels': [],
         'phishing_action': 'ban', 'scam_action': 'mute', 'spam_action': 'mute',
+        'compromised_action': 'mute', 'qrcode_action': 'mute',  # Actions nouvelles protections
         'spam_max': 5, 'spam_interval': 5, 'caps_percent': 70, 'newaccount_days': 7,
         'log_anti_link': 0, 'log_anti_image': 0, 'log_anti_phishing': 0, 'log_anti_scam': 0,
-        'log_anti_spam': 0, 'log_anti_caps': 0, 'log_anti_badwords': 0, 'log_anti_invite': 0, 'log_anti_newaccount': 0,
+        'log_anti_spam': 0, 'log_anti_caps': 0, 'log_anti_badwords': 0, 'log_anti_invite': 0, 
+        'log_anti_newaccount': 0, 'log_anti_raid': 0, 'log_anti_compromised': 0, 'log_anti_qrcode': 0,
+        'raid_config': {'join_threshold': 10, 'join_interval': 10, 'min_account_age': 7, 'auto_mode': True, 'block_invites': True, 'action': 'kick'},
         'channel_configs': {},
         'ticket_staff': 0, 'ticket_log': 0, 'ticket_panels': {},
         'mod_warn_role': 0, 'mod_mute_role': 0, 'mod_infractions_role': 0, 'mod_log_channel': 0
@@ -388,26 +580,70 @@ async def cfg(gid):
     return data
 
 async def is_immune(m, key, channel=None):
-    if key != 'anti_phishing' and (m.guild_permissions.administrator or m.id == m.guild.owner_id):
+    """
+    Vérifie si un membre est immunisé contre une protection.
+    Les rôles/utilisateurs immunisés ont un accès total SAUF contre:
+    - anti_phishing (seulement si le compte semble compromis)
+    - anti_compromised (seulement pour les comportements très suspects)
+    """
+    
+    # Owner du serveur = toujours immunisé
+    if m.id == m.guild.owner_id:
         return True
-    if key in ['anti_phishing', 'anti_link', 'anti_invite']:
-        return False
+    
+    # Admins sont immunisés contre presque tout
+    if m.guild_permissions.administrator:
+        # Sauf comportement de compte compromis évident
+        if key == 'anti_compromised':
+            return False  # Même les admins peuvent être hackés
+        return True
+    
+    # Vérifier immunité personnalisée (rôles/utilisateurs/salons)
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (m.guild.id,)) as c:
-                rids = [r[0] for r in await c.fetchall()]
+            # Utilisateurs immunisés
             async with db.execute('SELECT user_id FROM immune_users WHERE guild_id=?', (m.guild.id,)) as c:
-                uids = [r[0] for r in await c.fetchall()]
-            # Vérifier les salons immunisés
+                immune_users = [r[0] for r in await c.fetchall()]
+            
+            # Rôles immunisés
+            async with db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (m.guild.id,)) as c:
+                immune_roles = [r[0] for r in await c.fetchall()]
+            
+            # Salons immunisés
             if channel:
                 async with db.execute('SELECT channel_id FROM immune_channels WHERE guild_id=?', (m.guild.id,)) as c:
-                    immune_chs = [r[0] for r in await c.fetchall()]
-                if channel.id in immune_chs:
+                    immune_channels = [r[0] for r in await c.fetchall()]
+                if channel.id in immune_channels:
                     return True
-        if any(role.id in rids for role in m.roles) or m.id in uids:
+        
+        # Vérifier si l'utilisateur est immunisé
+        is_user_immune = m.id in immune_users
+        is_role_immune = any(role.id in immune_roles for role in m.roles)
+        
+        if is_user_immune or is_role_immune:
+            # Les immunisés peuvent TOUT faire sauf si comportement de hack évident
+            if key == 'anti_compromised':
+                return False  # Même les immunisés peuvent être hackés
             return True
-    except: pass
+            
+    except Exception as ex:
+        print(f"Erreur is_immune: {ex}")
+    
     return False
+
+async def is_fully_immune(m):
+    """Vérifie si un membre a une immunité totale (pour les commandes)"""
+    if m.id == m.guild.owner_id or m.guild_permissions.administrator:
+        return True
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('SELECT user_id FROM immune_users WHERE guild_id=?', (m.guild.id,)) as c:
+                immune_users = [r[0] for r in await c.fetchall()]
+            async with db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (m.guild.id,)) as c:
+                immune_roles = [r[0] for r in await c.fetchall()]
+        return m.id in immune_users or any(role.id in immune_roles for role in m.roles)
+    except:
+        return False
 
 async def is_channel_immune(guild_id, channel_id):
     """Vérifie si un salon est immunisé"""
@@ -605,20 +841,103 @@ async def sanction(m, action, dur, reason, g):
     except: pass
 
 async def send_log(g, key, m, msg, reason, extra=None):
+    """Envoie un log détaillé dans le salon configuré"""
     try:
         c = await cfg(g.id)
         ch = g.get_channel(c.get(f'log_{key}', 0))
         if not ch: return
-        e = discord.Embed(title=f"🛡️ {key.replace('anti_', '').upper()}", color=C.RED, timestamp=now())
-        e.add_field(name="👤 Utilisateur", value=f"{m.mention} (`{m.id}`)", inline=True)
+        
+        # Couleurs par type de protection
+        colors = {
+            'anti_phishing': 0xFF0000,  # Rouge vif
+            'anti_scam': 0xE74C3C,
+            'anti_spam': 0xE67E22,
+            'anti_raid': 0x9B59B6,
+            'anti_compromised': 0xFF5733,
+            'anti_qrcode': 0xC70039,
+            'anti_link': 0x3498DB,
+            'anti_invite': 0x2ECC71,
+            'anti_badwords': 0xF39C12,
+            'anti_caps': 0x95A5A6,
+            'anti_image': 0x1ABC9C,
+            'anti_newaccount': 0x9B59B6,
+        }
+        
+        # Emojis par type
+        emojis = {
+            'anti_phishing': '🎣',
+            'anti_scam': '🚨',
+            'anti_spam': '📨',
+            'anti_raid': '⚔️',
+            'anti_compromised': '🔐',
+            'anti_qrcode': '📱',
+            'anti_link': '🔗',
+            'anti_invite': '🎟️',
+            'anti_badwords': '🤬',
+            'anti_caps': '🔠',
+            'anti_image': '🖼️',
+            'anti_newaccount': '👶',
+        }
+        
+        emoji = emojis.get(key, '🛡️')
+        color = colors.get(key, C.RED)
+        title = key.replace('anti_', '').upper()
+        
+        e = discord.Embed(
+            title=f"{emoji} PROTECTION {title}",
+            color=color,
+            timestamp=now()
+        )
+        
+        # Informations utilisateur détaillées
+        user_info = f"**Nom:** {m.display_name}\n**Tag:** {m.name}\n**ID:** `{m.id}`"
+        try:
+            account_age = (now() - m.created_at.replace(tzinfo=timezone.utc)).days
+            user_info += f"\n**Âge compte:** {account_age} jours"
+        except:
+            pass
+        e.add_field(name="👤 Utilisateur", value=user_info, inline=True)
+        
+        # Informations salon
         if msg and msg.channel:
-            e.add_field(name="📍 Salon", value=msg.channel.mention, inline=True)
-        e.add_field(name="⚠️ Raison", value=reason, inline=False)
+            channel_info = f"**Salon:** {msg.channel.mention}\n**ID:** `{msg.channel.id}`"
+            e.add_field(name="📍 Localisation", value=channel_info, inline=True)
+        
+        # Action prise
+        action_taken = c.get(f'{key.replace("anti_", "")}_action', 'mute')
+        if key == 'anti_phishing':
+            action_taken = c.get('phishing_action', 'ban')
+        elif key == 'anti_scam':
+            action_taken = c.get('scam_action', 'mute')
+        elif key == 'anti_compromised':
+            action_taken = c.get('compromised_action', 'mute')
+        
+        action_emoji = {'mute': '🔇', 'kick': '👢', 'ban': '🔨'}.get(action_taken, '⚡')
+        e.add_field(name="⚡ Action", value=f"{action_emoji} {action_taken.upper()}", inline=True)
+        
+        # Raison détaillée
+        e.add_field(name="⚠️ Raison", value=reason[:1024], inline=False)
+        
+        # Détails supplémentaires
         if extra:
-            e.add_field(name="ℹ️ Détails", value=extra, inline=False)
+            e.add_field(name="🔍 Détails", value=str(extra)[:1024], inline=False)
+        
+        # Contenu du message (censuré si trop long)
+        if msg and msg.content:
+            content = msg.content
+            if len(content) > 500:
+                content = content[:500] + "..."
+            # Censurer les liens
+            content = re.sub(r'https?://\S+', '[LIEN CENSURÉ]', content)
+            e.add_field(name="💬 Message (censuré)", value=f"```{content}```", inline=False)
+        
+        # Avatar et footer
         e.set_thumbnail(url=m.display_avatar.url)
+        e.set_footer(text=f"Protection {g.name} • ID: {m.id}", icon_url=g.icon.url if g.icon else None)
+        
         await ch.send(embed=e)
-    except: pass
+    except Exception as ex:
+        print(f"[LOG ERROR] {key}: {ex}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              🔍 CHECKS
@@ -695,17 +1014,34 @@ def check_link(ct, wl):
     return False, None
 
 def check_invite(ct):
-    m = re.search(r'discord\.gg/\w+|discord\.com/invite/\w+', ct, re.I)
+    m = re.search(r'discord\.gg/\w+|discord\.com/invite/\w+|discordapp\.com/invite/\w+', ct, re.I)
     return (True, m.group()) if m else (False, None)
 
 def check_phishing(ct):
-    for d in PHISHING:
-        if d in ct.lower(): return True, d
+    """Vérification de phishing améliorée"""
+    # Utiliser la fonction avancée
+    found, detail, ptype = advanced_phishing_check(ct)
+    if found:
+        return True, detail
+    
+    # Fallback sur les domaines basiques
+    ct_lower = ct.lower()
+    for d in PHISHING_DOMAINS:
+        if d in ct_lower:
+            return True, d
     return False, None
 
 def check_scam(ct):
+    """Vérification de scam améliorée"""
+    # Utiliser la fonction avancée
+    found, detail, score = advanced_scam_check(ct)
+    if found:
+        return True, detail
+    
+    # Patterns compilés
     for p in SCAM_PATTERNS:
-        if re.search(p, ct, re.I): return True, p
+        if p.search(ct):
+            return True, p.pattern
     return False, None
 
 def check_caps(ct, pct):
@@ -1092,11 +1428,299 @@ PROTS = [
     ("anti_caps", "🔠", "Anti-Caps"),
     ("anti_badwords", "🤬", "Anti-Insultes"),
     ("anti_newaccount", "👶", "Anti-NewAccount"),
-    ("anti_raid", "⚔️", "Anti-Raid")
+    ("anti_raid", "⚔️", "Anti-Raid"),
+    ("anti_compromised", "🔐", "Anti-Compromis"),
+    ("anti_qrcode", "📱", "Anti-QRCode")
 ]
 
 # Cache pour l'anti-raid : {guild_id: {'joins': [(user_id, timestamp), ...], 'lockdown': bool}}
 raid_tracker = {}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           🛡️ BASES DE DONNÉES DE PROTECTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Domaines de phishing connus (2026 - mise à jour)
+PHISHING_DOMAINS = [
+    # Faux Discord
+    'discord-gift.com', 'discord-nitro.gift', 'discordgift.site', 'discordnitro.com',
+    'dlscord.com', 'dlscord.gift', 'discorcl.com', 'discrod.com', 'discordc.com',
+    'discord-app.com', 'discordapp.gift', 'discord.gift', 'discord-airdrop.com',
+    'discordn.com', 'discordi.com', 'discord-claim.com', 'discordnitros.com',
+    'dlscord-nitro.com', 'discordd.gift', 'disc0rd.gift', 'disc0rd-nitro.com',
+    'discorid.gift', 'discordl.com', 'discord-free.com', 'discordgiveaway.com',
+    'steamcomminuty.com', 'steampowored.com', 'steamcommunlty.com', 'steancommunity.com',
+    'store-steampowered.com', 'steamcommunity.ru.com', 'steamcommunitv.com',
+    # Faux Steam
+    'steamcommunity-login.com', 'steam-guard.com', 'steamguard-code.com',
+    # Crypto scams
+    'free-ethereum.com', 'free-bitcoin.gift', 'crypto-airdrop.com', 'nft-free.com',
+    'opensea-drop.com', 'metamask-airdrop.com', 'eth-giveaway.com',
+    # Faux services
+    'paypal-verify.com', 'amazon-gift.com', 'netflix-free.com', 'spotify-premium.gift',
+    # IP grabbers
+    'grabify.link', 'iplogger.org', 'blasze.tk', '2no.co', 'iplogger.com',
+    'ps3cfw.com', 'urlz.fr', 'webresolver.nl', 'ezstat.ru',
+    # Raccourcisseurs suspects
+    'bit.do', 'adf.ly', 'bc.vc', 'j.gs', 'sh.st', 'ouo.io',
+]
+
+# Patterns de phishing dans les URLs
+PHISHING_URL_PATTERNS = [
+    r'discord.*gift', r'discord.*nitro', r'discord.*free', r'discord.*claim',
+    r'steam.*community.*login', r'steam.*guard', r'steam.*trade',
+    r'free.*nitro', r'nitro.*free', r'claim.*nitro', r'get.*nitro',
+    r'crypto.*airdrop', r'free.*eth', r'free.*btc', r'nft.*drop',
+    r'discord.*airdrop', r'discord.*giveaway',
+    r'paypal.*verify', r'amazon.*gift', r'netflix.*free',
+    r'@everyone.*http', r'@here.*http',  # Mention + lien
+    r'\.gift\/', r'\.ru\/.*discord', r'\.tk\/.*gift',
+]
+
+# Mots-clés de scam dans les messages
+SCAM_KEYWORDS = [
+    # Nitro scams
+    'free nitro', 'nitro gratuit', 'nitro free', 'claim nitro', 'get nitro',
+    'nitro gift', 'discord nitro free', '3 months free', '1 month free',
+    'steam gift', 'free steam', 'cs2 skins free', 'csgo skins free',
+    # Crypto scams
+    'crypto giveaway', 'eth giveaway', 'btc giveaway', 'free crypto',
+    'airdrop claim', 'nft drop', 'mint free', 'whitelist spot',
+    'send 0.1 eth', 'double your', 'x2 your crypto',
+    # Fake emergencies
+    'account will be deleted', 'verify your account', 'account suspended',
+    'unusual activity', 'confirm your identity', 'action required',
+    'your account has been', 'limited time only', 'expires in 24',
+    # Investment scams
+    'guaranteed profit', 'easy money', 'make money fast', 'passive income',
+    'forex signals', 'binary options', 'investment opportunity',
+    # Job scams
+    'work from home', 'easy job', '$500/day', '€500/jour', 'hiring now dm',
+    # Romance/Social scams
+    'im a girl', 'add me on', 'check my profile', 'link in bio',
+    'onlyfans free', 'leaked content', 'exclusive content',
+]
+
+# Patterns de messages de comptes compromis
+COMPROMISED_PATTERNS = [
+    r'@everyone.*http', r'@here.*http',  # Mention de masse + lien
+    r'check.*this.*http', r'look.*what.*found.*http',
+    r'bro.*check.*http', r'dude.*look.*http',
+    r'yo.*this.*real.*http', r'omg.*http',
+    r'free.*gift.*http', r'won.*http',
+    r'http.*\.(gift|ru|tk|ml|ga|cf|gq)(\s|$)',  # TLD suspects
+]
+
+# Extensions de fichiers dangereux
+DANGEROUS_EXTENSIONS = [
+    '.exe', '.bat', '.cmd', '.msi', '.scr', '.pif', '.com',
+    '.vbs', '.vbe', '.js', '.jse', '.ws', '.wsf', '.wsc', '.wsh',
+    '.ps1', '.psm1', '.psd1',  # PowerShell
+    '.hta', '.cpl', '.msc', '.jar',  # Autres exécutables
+    '.dll', '.sys', '.drv',  # Bibliothèques
+]
+
+# Cache pour détecter les comportements suspects
+compromised_cache = {}  # {user_id: {'messages': [], 'flags': 0}}
+
+# Initialiser les variables globales avec les nouvelles bases
+PHISHING = PHISHING_DOMAINS
+SCAM_PATTERNS = [re.compile(p, re.IGNORECASE) for p in COMPROMISED_PATTERNS]
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           🛡️ FONCTIONS DE PROTECTION AVANCÉES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def advanced_phishing_check(content):
+    """Vérifie le contenu pour détecter le phishing avec analyse avancée"""
+    content_lower = content.lower()
+    detected = []
+    
+    # 1. Vérifier les domaines de phishing connus
+    urls = re.findall(r'https?://([^\s<>"\']+)', content_lower)
+    for url in urls:
+        domain = url.split('/')[0].split('?')[0]
+        
+        # Domaines exacts
+        for phish_domain in PHISHING_DOMAINS:
+            if phish_domain in domain:
+                return True, f"Domaine phishing: {domain}", "domain"
+        
+        # Patterns d'URL suspects
+        for pattern in PHISHING_URL_PATTERNS:
+            if re.search(pattern, url):
+                return True, f"URL suspecte: {url[:50]}", "url_pattern"
+        
+        # Typosquatting Discord
+        if 'disc' in domain and 'discord.com' not in domain and 'discord.gg' not in domain:
+            if any(x in domain for x in ['gift', 'nitro', 'free', 'claim', 'app']):
+                return True, f"Typosquatting Discord: {domain}", "typosquatting"
+        
+        # Typosquatting Steam
+        if 'steam' in domain and 'steampowered.com' not in domain and 'steamcommunity.com' not in domain:
+            if any(x in domain for x in ['community', 'trade', 'gift', 'login']):
+                return True, f"Typosquatting Steam: {domain}", "typosquatting"
+        
+        # TLD suspects avec mots-clés
+        suspect_tlds = ['.ru', '.tk', '.ml', '.ga', '.cf', '.gq', '.xyz', '.top', '.buzz']
+        if any(domain.endswith(tld) for tld in suspect_tlds):
+            if any(kw in domain for kw in ['discord', 'nitro', 'steam', 'gift', 'free', 'crypto']):
+                return True, f"TLD suspect: {domain}", "suspect_tld"
+    
+    # 2. Vérifier les patterns de messages phishing
+    phishing_message_patterns = [
+        r'(click|cliquez).*link.*claim',
+        r'congratulations.*won',
+        r'félicitations.*gagné',
+        r'verify.*account.*http',
+        r'vérifier.*compte.*http',
+        r'@everyone.*free.*http',
+        r'@here.*free.*http',
+        r'limited.*time.*http',
+        r'expire.*24.*hour',
+    ]
+    
+    for pattern in phishing_message_patterns:
+        if re.search(pattern, content_lower):
+            return True, f"Pattern phishing: {pattern}", "message_pattern"
+    
+    return False, None, None
+
+def advanced_scam_check(content):
+    """Vérifie le contenu pour détecter les scams avec analyse avancée"""
+    content_lower = content.lower()
+    
+    # 1. Vérifier les mots-clés de scam
+    scam_score = 0
+    detected_keywords = []
+    
+    for keyword in SCAM_KEYWORDS:
+        if keyword in content_lower:
+            scam_score += 10
+            detected_keywords.append(keyword)
+    
+    # 2. Combinaisons dangereuses
+    dangerous_combos = [
+        (['free', 'nitro', 'http'], 30),
+        (['@everyone', 'http'], 25),
+        (['@here', 'http'], 25),
+        (['free', 'gift', 'http'], 25),
+        (['click', 'claim', 'http'], 20),
+        (['dm', 'me', 'money'], 15),
+        (['crypto', 'investment', 'profit'], 20),
+        (['send', 'eth', 'receive'], 30),
+        (['double', 'crypto'], 30),
+    ]
+    
+    for combo, score in dangerous_combos:
+        if all(word in content_lower for word in combo):
+            scam_score += score
+            detected_keywords.extend(combo)
+    
+    # 3. Urgence artificielle
+    urgency_patterns = [
+        r'(only|seulement)\s*\d+\s*(left|remaining|restant)',
+        r'(expire|end)s?\s*(in|dans)\s*\d+',
+        r'(hurry|vite|dépêche)',
+        r'(last|dernier)\s*(chance|opportunit)',
+        r'(act|agir)\s*(now|maintenant)',
+    ]
+    
+    for pattern in urgency_patterns:
+        if re.search(pattern, content_lower):
+            scam_score += 10
+    
+    # Seuil de détection
+    if scam_score >= 25:
+        return True, ", ".join(set(detected_keywords[:5])), scam_score
+    
+    return False, None, 0
+
+def check_compromised_behavior(user_id, guild_id, content, has_mentions_everyone=False):
+    """Détecte si un compte semble compromis basé sur son comportement"""
+    key = (guild_id, user_id)
+    current_time = now()
+    
+    # Initialiser le cache
+    if key not in compromised_cache:
+        compromised_cache[key] = {
+            'messages': [],
+            'flags': 0,
+            'last_flag': None
+        }
+    
+    cache = compromised_cache[key]
+    
+    # Nettoyer les anciens messages (garder 5 min)
+    cache['messages'] = [
+        m for m in cache['messages']
+        if (current_time - m['time']).total_seconds() < 300
+    ]
+    
+    # Ajouter ce message
+    cache['messages'].append({
+        'time': current_time,
+        'has_link': bool(re.search(r'https?://', content)),
+        'has_everyone': has_mentions_everyone,
+        'length': len(content)
+    })
+    
+    # Analyser le comportement
+    flags = 0
+    reasons = []
+    
+    recent_messages = cache['messages']
+    
+    # 1. Plusieurs @everyone avec liens en peu de temps
+    everyone_with_links = sum(1 for m in recent_messages if m['has_everyone'] and m['has_link'])
+    if everyone_with_links >= 2:
+        flags += 50
+        reasons.append("Spam @everyone + liens")
+    
+    # 2. Messages identiques répétés
+    if len(recent_messages) >= 3:
+        # Vérifier si c'est le même pattern
+        link_count = sum(1 for m in recent_messages if m['has_link'])
+        if link_count >= 3:
+            flags += 30
+            reasons.append("Spam de liens")
+    
+    # 3. Comportement anormal (premier message = @everyone + lien)
+    if len(recent_messages) == 1 and has_mentions_everyone and re.search(r'https?://', content):
+        flags += 40
+        reasons.append("Premier message suspect")
+    
+    cache['flags'] = flags
+    
+    return flags >= 40, reasons, flags
+
+def check_dangerous_file(filename):
+    """Vérifie si un fichier a une extension dangereuse"""
+    filename_lower = filename.lower()
+    for ext in DANGEROUS_EXTENSIONS:
+        if filename_lower.endswith(ext):
+            return True, ext
+    return False, None
+
+def check_qr_code_scam(content):
+    """Détecte les tentatives de scam par QR code"""
+    qr_patterns = [
+        r'scan.*qr.*code',
+        r'qr.*code.*scan',
+        r'scanner.*code',
+        r'discord.*token',
+        r'login.*qr',
+        r'authenticate.*qr',
+        r'qr.*gift',
+        r'qr.*nitro',
+    ]
+    
+    content_lower = content.lower()
+    for pattern in qr_patterns:
+        if re.search(pattern, content_lower):
+            return True, pattern
+    
+    return False, None
 
 class MainPanel(View):
     def __init__(self, u, g):
@@ -1285,6 +1909,29 @@ class ProtDetail(View):
             lockdown = raid_tracker.get(self.g.id, {}).get('lockdown', False)
             e.add_field(name="🚨 Lockdown actif", value="⚠️ **OUI**" if lockdown else "✅ Non", inline=True)
         
+        elif self.key == "anti_compromised":
+            e.description = "🔐 **Détection des comptes compromis/hackés**\n\nDétecte les comportements suspects indiquant qu'un compte a été compromis :\n• Spam de @everyone avec liens\n• Messages identiques répétés\n• Premier message = lien suspect"
+            action = c.get('compromised_action', 'mute')
+            e.add_field(name="⚡ Action", value=action.upper(), inline=True)
+            e.add_field(name="📊 Détections", value=f"`{len(PHISHING_DOMAINS)}` domaines\n`{len(SCAM_KEYWORDS)}` mots-clés\n`{len(COMPROMISED_PATTERNS)}` patterns", inline=True)
+        
+        elif self.key == "anti_qrcode":
+            e.description = "📱 **Protection contre les scams par QR Code**\n\nDétecte les tentatives de vol de compte via QR code Discord :\n• Messages demandant de scanner un QR code\n• Faux QR codes de 'cadeaux'\n• Tentatives de vol de token"
+            action = c.get('qrcode_action', 'mute')
+            e.add_field(name="⚡ Action", value=action.upper(), inline=True)
+        
+        elif self.key == "anti_phishing":
+            e.description = "🎣 **Protection Anti-Phishing Avancée 2026**\n\nProtège contre :\n• Faux sites Discord/Steam/Nitro\n• Typosquatting (dlscord, steampowored...)\n• IP grabbers et raccourcisseurs suspects\n• TLD dangereux (.ru, .tk, .xyz...)"
+            action = c.get('phishing_action', 'ban')
+            e.add_field(name="⚡ Action", value=action.upper(), inline=True)
+            e.add_field(name="📊 Base de données", value=f"`{len(PHISHING_DOMAINS)}` domaines blacklistés", inline=True)
+        
+        elif self.key == "anti_scam":
+            e.description = "🚨 **Protection Anti-Scam Avancée 2026**\n\nDétecte :\n• Free Nitro / Steam Gift scams\n• Crypto giveaway / Airdrop scams\n• Investment scams\n• Faux jobs / Romance scams\n• Urgence artificielle"
+            action = c.get('scam_action', 'mute')
+            e.add_field(name="⚡ Action", value=action.upper(), inline=True)
+            e.add_field(name="📊 Base de données", value=f"`{len(SCAM_KEYWORDS)}` mots-clés détectés", inline=True)
+        
         # Salon de log
         log_ch = self.g.get_channel(c.get(f'log_{self.key}', 0))
         e.add_field(name="📜 Salon de log", value=log_ch.mention if log_ch else "❌ Non configuré", inline=False)
@@ -1310,7 +1957,7 @@ class ProtDetail(View):
             await i.response.edit_message(embed=await v.embed(), view=v)
         elif self.key in ["anti_spam", "anti_caps", "anti_newaccount"]:
             await i.response.send_modal(NumberConfigModal(self.g, self.u, self.key))
-        elif self.key in ["anti_phishing", "anti_scam"]:
+        elif self.key in ["anti_phishing", "anti_scam", "anti_compromised", "anti_qrcode"]:
             v = ActionConfigPanel(self.u, self.g, self.key)
             await i.response.edit_message(embed=await v.embed(), view=v)
         elif self.key == "anti_raid":
@@ -1627,12 +2274,39 @@ class ActionConfigPanel(View):
         self.g = g
         self.key = key
     
+    def _get_action_key(self):
+        """Retourne la clé de configuration pour l'action"""
+        action_keys = {
+            'anti_phishing': 'phishing_action',
+            'anti_scam': 'scam_action',
+            'anti_compromised': 'compromised_action',
+            'anti_qrcode': 'qrcode_action',
+        }
+        return action_keys.get(self.key, f'{self.key.replace("anti_", "")}_action')
+    
+    def _get_default_action(self):
+        """Retourne l'action par défaut"""
+        defaults = {
+            'anti_phishing': 'ban',
+            'anti_scam': 'mute',
+            'anti_compromised': 'mute',
+            'anti_qrcode': 'mute',
+        }
+        return defaults.get(self.key, 'mute')
+    
     async def embed(self):
         c = await cfg(self.g.id)
-        ak = 'phishing_action' if self.key == "anti_phishing" else 'scam_action'
-        current = c.get(ak, 'ban' if 'phishing' in ak else 'mute')
-        e = discord.Embed(title=f"⚡ Action pour {self.key.replace('anti_', '').title()}", color=C.BLUE)
-        e.description = f"**Action actuelle:** `{current.upper()}`\n\nChoisissez l'action à effectuer:"
+        ak = self._get_action_key()
+        current = c.get(ak, self._get_default_action())
+        
+        name = self.key.replace('anti_', '').replace('_', ' ').title()
+        e = discord.Embed(title=f"⚡ Action pour {name}", color=C.BLUE)
+        e.description = f"**Action actuelle:** `{current.upper()}`\n\nChoisissez l'action à effectuer lorsqu'une violation est détectée:"
+        
+        e.add_field(name="🔇 Mute", value="Rend muet temporairement", inline=True)
+        e.add_field(name="👢 Kick", value="Expulse du serveur", inline=True)
+        e.add_field(name="🔨 Ban", value="Bannit définitivement", inline=True)
+        
         return e
     
     @discord.ui.button(label="🔇 Mute", style=discord.ButtonStyle.primary, row=0)
@@ -1648,7 +2322,7 @@ class ActionConfigPanel(View):
         await self._set(i, 'ban')
     
     async def _set(self, i, act):
-        ak = 'phishing_action' if self.key == "anti_phishing" else 'scam_action'
+        ak = self._get_action_key()
         await db_set(self.g.id, ak, act)
         prot = next(p for p in PROTS if p[0] == self.key)
         v = ProtDetail(self.u, self.g, prot)
@@ -1761,10 +2435,33 @@ class AntiRaidConfigPanel(View):
     
     @discord.ui.button(label="🔍 Scanner", style=discord.ButtonStyle.success, row=1)
     async def scan_suspects(self, i, b):
-        await i.response.defer()
-        v = SuspectScanPanel(self.u, self.g)
-        await v.scan_members()
-        await i.followup.send(embed=await v.embed(), view=v, ephemeral=True)
+        """Scanne le serveur pour détecter les comptes suspects"""
+        try:
+            # Répondre immédiatement avec un message de chargement
+            await i.response.send_message("🔍 **Scan en cours...**\n\nAnalyse des membres du serveur...", ephemeral=True)
+            
+            # Créer le scanner et lancer le scan
+            scanner = SuspectScanPanel(self.u, self.g)
+            await scanner.scan_members()
+            
+            # Éditer le message avec les résultats
+            await i.edit_original_response(
+                content=None,
+                embed=await scanner.embed(),
+                view=scanner
+            )
+        except Exception as ex:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"[SCANNER ERROR] {error_details}")
+            try:
+                await i.edit_original_response(
+                    content=f"❌ **Erreur lors du scan**\n```{str(ex)[:500]}```",
+                    embed=None,
+                    view=None
+                )
+            except:
+                pass
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
@@ -1781,84 +2478,141 @@ class SuspectScanPanel(View):
         self.suspects = []
         self.bots = []
         self.page = 0
-        self.per_page = 10
+        self.per_page = 8
+        self.scan_complete = False
     
     async def scan_members(self):
         """Scanne tous les membres pour détecter les comptes suspects"""
         self.suspects = []
         self.bots = []
+        self.scan_complete = False
         
-        for member in self.g.members:
-            if member.bot:
-                # Vérifier si c'est un bot non vérifié
-                if not member.public_flags.verified_bot:
-                    self.bots.append({
-                        'member': member,
-                        'reason': "Bot non vérifié",
-                        'severity': 'high'
-                    })
-                continue
+        try:
+            # Récupérer la liste des membres
+            members = list(self.g.members)
+            print(f"[SCANNER] Scan de {len(members)} membres sur {self.g.name}")
             
-            # Calculer le score de suspicion
-            suspicion_score = 0
-            reasons = []
+            for member in members:
+                try:
+                    # Ignorer le bot lui-même
+                    if member.id == bot.user.id:
+                        continue
+                    
+                    if member.bot:
+                        # Vérifier si c'est un bot non vérifié
+                        try:
+                            if not member.public_flags.verified_bot:
+                                self.bots.append({
+                                    'member': member,
+                                    'reason': "Bot non vérifié par Discord",
+                                    'severity': 'medium'
+                                })
+                        except:
+                            pass
+                        continue
+                    
+                    # Calculer le score de suspicion
+                    suspicion_score = 0
+                    reasons = []
+                    
+                    # 1. Âge du compte
+                    try:
+                        created = member.created_at
+                        if created.tzinfo is None:
+                            created = created.replace(tzinfo=timezone.utc)
+                        account_age = (now() - created).days
+                        
+                        if account_age < 1:
+                            suspicion_score += 50
+                            reasons.append(f"Créé aujourd'hui")
+                        elif account_age < 7:
+                            suspicion_score += 30
+                            reasons.append(f"Compte récent ({account_age}j)")
+                        elif account_age < 30:
+                            suspicion_score += 10
+                            reasons.append(f"Compte jeune ({account_age}j)")
+                    except Exception as e:
+                        print(f"[SCANNER] Erreur âge {member.id}: {e}")
+                    
+                    # 2. Pas d'avatar personnalisé
+                    try:
+                        if member.avatar is None:
+                            suspicion_score += 15
+                            reasons.append("Pas d'avatar")
+                    except:
+                        pass
+                    
+                    # 3. Nom suspect
+                    try:
+                        name = member.name.lower()
+                        # Finit par des chiffres
+                        if len(name) > 4 and name[-4:].isdigit():
+                            suspicion_score += 10
+                            reasons.append("Nom générique")
+                        # Pattern de bot (User1234)
+                        if re.match(r'^[a-z]+\d{4,}$', name):
+                            suspicion_score += 20
+                            reasons.append("Pattern bot")
+                    except:
+                        pass
+                    
+                    # 4. Flags Discord
+                    try:
+                        flags = member.public_flags
+                        if flags.spammer:
+                            suspicion_score += 100
+                            reasons.append("🚨 SPAMMER Discord")
+                    except:
+                        pass
+                    
+                    # 5. Pas de rôles
+                    try:
+                        if len(member.roles) <= 1:
+                            suspicion_score += 5
+                            reasons.append("Aucun rôle")
+                    except:
+                        pass
+                    
+                    # 6. Rejoint récemment
+                    try:
+                        if member.joined_at:
+                            joined = member.joined_at
+                            if joined.tzinfo is None:
+                                joined = joined.replace(tzinfo=timezone.utc)
+                            joined_hours = (now() - joined).total_seconds() / 3600
+                            if joined_hours < 1:
+                                suspicion_score += 15
+                                reasons.append("Rejoint < 1h")
+                            elif joined_hours < 24:
+                                suspicion_score += 5
+                                reasons.append("Rejoint aujourd'hui")
+                    except:
+                        pass
+                    
+                    # Ajouter si score suffisant
+                    if suspicion_score >= 15 and reasons:
+                        severity = 'critical' if suspicion_score >= 80 else 'high' if suspicion_score >= 50 else 'medium' if suspicion_score >= 30 else 'low'
+                        self.suspects.append({
+                            'member': member,
+                            'score': suspicion_score,
+                            'reasons': reasons,
+                            'severity': severity
+                        })
+                        
+                except Exception as ex:
+                    print(f"[SCANNER] Erreur membre {member.id}: {ex}")
+                    continue
             
-            # 1. Âge du compte
-            account_age = (now() - member.created_at.replace(tzinfo=timezone.utc)).days
-            if account_age < 1:
-                suspicion_score += 50
-                reasons.append(f"Compte créé il y a {account_age} jour(s)")
-            elif account_age < 7:
-                suspicion_score += 30
-                reasons.append(f"Compte récent ({account_age}j)")
-            elif account_age < 30:
-                suspicion_score += 10
-                reasons.append(f"Compte jeune ({account_age}j)")
+            # Trier par score décroissant
+            self.suspects.sort(key=lambda x: x['score'], reverse=True)
+            self.scan_complete = True
+            print(f"[SCANNER] Terminé: {len(self.suspects)} suspects, {len(self.bots)} bots non vérifiés")
             
-            # 2. Pas d'avatar
-            if member.avatar is None:
-                suspicion_score += 15
-                reasons.append("Pas d'avatar")
-            
-            # 3. Nom suspect (caractères spéciaux, nombres, etc.)
-            name = member.name.lower()
-            if any(c.isdigit() for c in name[-4:]):  # Finit par des chiffres
-                suspicion_score += 5
-                reasons.append("Nom avec chiffres")
-            
-            # 4. Flags publics Discord
-            flags = member.public_flags
-            if flags.spammer:
-                suspicion_score += 100
-                reasons.append("🚨 SPAMMER (signalé par Discord)")
-            if flags.quarantined_username:
-                suspicion_score += 50
-                reasons.append("⚠️ Pseudo en quarantaine")
-            
-            # 5. Pas de rôles (juste @everyone)
-            if len(member.roles) <= 1:
-                suspicion_score += 5
-                reasons.append("Aucun rôle")
-            
-            # 6. Rejoint récemment
-            if member.joined_at:
-                joined_days = (now() - member.joined_at.replace(tzinfo=timezone.utc)).days
-                if joined_days < 1:
-                    suspicion_score += 10
-                    reasons.append("Rejoint aujourd'hui")
-            
-            # Ajouter si score suffisant
-            if suspicion_score >= 20:
-                severity = 'critical' if suspicion_score >= 80 else 'high' if suspicion_score >= 50 else 'medium' if suspicion_score >= 30 else 'low'
-                self.suspects.append({
-                    'member': member,
-                    'score': suspicion_score,
-                    'reasons': reasons,
-                    'severity': severity
-                })
-        
-        # Trier par score décroissant
-        self.suspects.sort(key=lambda x: x['score'], reverse=True)
+        except Exception as ex:
+            print(f"[SCANNER] Erreur globale: {ex}")
+            import traceback
+            traceback.print_exc()
+            self.scan_complete = True
     
     async def embed(self):
         e = discord.Embed(title="🔍 Scan des Comptes Suspects", color=0xE74C3C)
@@ -6161,7 +6915,6 @@ class AutoHelpManageView(View):
 
 async def handle_auto_help(message):
     """Gère le repositionnement automatique des messages d'aide"""
-    # Note: Le filtre pour ignorer le bot lui-même est fait dans on_message
     
     try:
         c = await cfg(message.guild.id)
@@ -6175,22 +6928,41 @@ async def handle_auto_help(message):
         if not help_data.get('enabled', True):
             return
         
+        channel_id = message.channel.id
+        
         # Vérifier si le message n'est pas le message d'aide lui-même
-        if message.channel.id in auto_help_messages:
-            if message.id == auto_help_messages[message.channel.id]:
+        if channel_id in auto_help_messages:
+            if message.id == auto_help_messages[channel_id]:
                 return  # C'est notre propre message d'aide, ne pas boucler
         
-        # Supprimer l'ancien message d'aide
-        if message.channel.id in auto_help_messages:
+        # ═══════════════ SUPPRESSION ROBUSTE DE L'ANCIEN MESSAGE ═══════════════
+        old_msg_id = auto_help_messages.get(channel_id)
+        if old_msg_id:
+            # Supprimer du cache immédiatement pour éviter les doublons
+            del auto_help_messages[channel_id]
+            
+            # Essayer plusieurs méthodes de suppression
             try:
-                old_msg = await message.channel.fetch_message(auto_help_messages[message.channel.id])
+                old_msg = await message.channel.fetch_message(old_msg_id)
                 await old_msg.delete()
-            except:
-                pass
-            del auto_help_messages[message.channel.id]
+            except discord.NotFound:
+                pass  # Message déjà supprimé
+            except discord.Forbidden:
+                pass  # Pas les permissions
+            except Exception as ex:
+                print(f"[AUTO_HELP] Erreur suppression ancien message: {ex}")
+                # Essayer de supprimer via l'historique
+                try:
+                    async for msg in message.channel.history(limit=50):
+                        if msg.author.id == bot.user.id and msg.embeds:
+                            if msg.embeds[0].footer and "repositionne automatiquement" in str(msg.embeds[0].footer.text or ""):
+                                await msg.delete()
+                                break
+                except:
+                    pass
         
         # Petit délai pour que le message soit bien envoyé
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.3)
         
         # Créer et envoyer le nouveau message d'aide
         e = discord.Embed(title=f"💡 {help_data.get('title', 'Aide')}", color=help_data.get('color', 0x3498DB))
@@ -6198,7 +6970,7 @@ async def handle_auto_help(message):
         e.set_footer(text="Ce message se repositionne automatiquement")
         
         new_msg = await message.channel.send(embed=e)
-        auto_help_messages[message.channel.id] = new_msg.id
+        auto_help_messages[channel_id] = new_msg.id
         
     except Exception as ex:
         print(f"Erreur auto_help: {ex}")
@@ -8967,16 +9739,105 @@ async def on_message(msg):
                 await msg.delete()
                 await send_log(msg.guild, 'anti_caps', msg.author, msg, "Trop de majuscules", None)
                 return
+        
+        # ═══════════════ PROTECTIONS AVANCÉES 2026 ═══════════════
+        
+        # Anti-compromis (détection de comptes hackés)
+        if c.get('anti_compromised'):
+            has_everyone = msg.mention_everyone or '@everyone' in ct or '@here' in ct
+            is_compromised, reasons, score = check_compromised_behavior(
+                msg.author.id, msg.guild.id, ct, has_everyone
+            )
+            if is_compromised:
+                await msg.delete()
+                await send_log(msg.guild, 'anti_compromised', msg.author, msg, 
+                              "Comportement de compte compromis", 
+                              f"Raisons: {', '.join(reasons)} (Score: {score})")
+                await sanction(msg.author, c.get('compromised_action', 'mute'), 60, "Compte compromis", msg.guild)
+                
+                # Envoyer une alerte au propriétaire
+                try:
+                    log_ch = msg.guild.get_channel(c.get('log_anti_compromised', 0))
+                    if log_ch:
+                        e = discord.Embed(
+                            title="🔐 COMPTE COMPROMIS DÉTECTÉ",
+                            description=f"**Membre:** {msg.author.mention}\n**Raisons:** {', '.join(reasons)}\n**Score:** {score}",
+                            color=0xFF0000
+                        )
+                        e.add_field(name="💬 Message supprimé", value=ct[:500] if ct else "*Vide*", inline=False)
+                        e.set_footer(text="⚠️ Ce compte a peut-être été hacké - Contactez le membre en DM")
+                        await log_ch.send(embed=e)
+                except:
+                    pass
+                return
+        
+        # Anti-QRCode (détection de scams par QR code)
+        if c.get('anti_qrcode'):
+            is_qr_scam, qr_pattern = check_qr_code_scam(ct)
+            if is_qr_scam:
+                await msg.delete()
+                await send_log(msg.guild, 'anti_qrcode', msg.author, msg, 
+                              "Scam QR Code détecté", f"Pattern: {qr_pattern}")
+                await sanction(msg.author, c.get('qrcode_action', 'mute'), 30, "Scam QR Code", msg.guild)
+                return
+        
+        # Fichiers dangereux
+        if msg.attachments:
+            for att in msg.attachments:
+                is_dangerous, ext = check_dangerous_file(att.filename)
+                if is_dangerous:
+                    await msg.delete()
+                    await send_log(msg.guild, 'anti_phishing', msg.author, msg, 
+                                  "Fichier dangereux détecté", f"Extension: {ext}")
+                    await msg.channel.send(
+                        f"⚠️ {msg.author.mention} a envoyé un fichier potentiellement dangereux (`{ext}`). Le fichier a été supprimé.",
+                        delete_after=10
+                    )
+                    return
+        
     except: pass
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              📋 COMMANDES SLASH
 # ═══════════════════════════════════════════════════════════════════════════════
 
+async def security_check(i: discord.Interaction, command_name: str = "command"):
+    """Vérifie la sécurité avant d'exécuter une commande"""
+    user_id = i.user.id
+    guild_id = i.guild.id if i.guild else 0
+    
+    # Vérifier blacklist temporaire
+    is_blocked, reason = is_blacklisted(user_id)
+    if is_blocked:
+        return False, f"⛔ Vous êtes temporairement bloqué: {reason}"
+    
+    # Vérifier rate limit
+    if not check_rate_limit(guild_id, user_id, 'command'):
+        # Blacklister temporairement si abuse répété
+        if user_id in security_attempts:
+            security_attempts[user_id]['attempts'] += 1
+            if security_attempts[user_id]['attempts'] >= 5:
+                blacklist_user(user_id, 10, "Spam de commandes")
+                await log_security_event(guild_id, user_id, "RATE_LIMIT_BAN", f"Commande: {command_name}")
+        else:
+            security_attempts[user_id] = {'attempts': 1, 'last': now()}
+        return False, "⚠️ Trop de commandes ! Attendez un moment."
+    
+    return True, None
+
 @bot.tree.command(name="configure", description="⚙️ Ouvrir le panneau de configuration")
 async def configure_cmd(i: discord.Interaction):
+    # Vérification de sécurité
+    ok, msg = await security_check(i, "configure")
+    if not ok:
+        return await i.response.send_message(msg, ephemeral=True)
+    
     if not i.user.guild_permissions.administrator:
         return await i.response.send_message("❌ Vous devez être administrateur", ephemeral=True)
+    
+    # Log l'accès à la configuration
+    await log_security_event(i.guild.id, i.user.id, "CONFIG_ACCESS", "Ouverture du panneau de configuration")
+    
     v = MainPanel(i.user, i.guild)
     await i.response.send_message(embed=v.embed(), view=v, ephemeral=True)
 
