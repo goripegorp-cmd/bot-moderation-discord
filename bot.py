@@ -1091,8 +1091,12 @@ PROTS = [
     ("anti_spam", "📨", "Anti-Spam"),
     ("anti_caps", "🔠", "Anti-Caps"),
     ("anti_badwords", "🤬", "Anti-Insultes"),
-    ("anti_newaccount", "👶", "Anti-NewAccount")
+    ("anti_newaccount", "👶", "Anti-NewAccount"),
+    ("anti_raid", "⚔️", "Anti-Raid")
 ]
+
+# Cache pour l'anti-raid : {guild_id: {'joins': [(user_id, timestamp), ...], 'lockdown': bool}}
+raid_tracker = {}
 
 class MainPanel(View):
     def __init__(self, u, g):
@@ -1268,6 +1272,19 @@ class ProtDetail(View):
             ak = 'phishing_action' if self.key == "anti_phishing" else 'scam_action'
             e.add_field(name="⚡ Action", value=c.get(ak, 'ban' if 'phishing' in ak else 'mute').upper(), inline=True)
         
+        elif self.key == "anti_raid":
+            raid_cfg = c.get('raid_config', {})
+            e.add_field(name="👥 Seuil de détection", value=f"`{raid_cfg.get('join_threshold', 10)}` membres en `{raid_cfg.get('join_interval', 10)}` sec", inline=False)
+            e.add_field(name="📅 Âge compte min", value=f"`{raid_cfg.get('min_account_age', 7)}` jours", inline=True)
+            e.add_field(name="🤖 Mode auto", value="✅ Oui" if raid_cfg.get('auto_mode', True) else "❌ Non", inline=True)
+            e.add_field(name="🔒 Bloquer invitations", value="✅ Oui" if raid_cfg.get('block_invites', True) else "❌ Non", inline=True)
+            action = raid_cfg.get('action', 'kick')
+            e.add_field(name="⚡ Action", value=action.upper(), inline=True)
+            
+            # État du lockdown
+            lockdown = raid_tracker.get(self.g.id, {}).get('lockdown', False)
+            e.add_field(name="🚨 Lockdown actif", value="⚠️ **OUI**" if lockdown else "✅ Non", inline=True)
+        
         # Salon de log
         log_ch = self.g.get_channel(c.get(f'log_{self.key}', 0))
         e.add_field(name="📜 Salon de log", value=log_ch.mention if log_ch else "❌ Non configuré", inline=False)
@@ -1295,6 +1312,9 @@ class ProtDetail(View):
             await i.response.send_modal(NumberConfigModal(self.g, self.u, self.key))
         elif self.key in ["anti_phishing", "anti_scam"]:
             v = ActionConfigPanel(self.u, self.g, self.key)
+            await i.response.edit_message(embed=await v.embed(), view=v)
+        elif self.key == "anti_raid":
+            v = AntiRaidConfigPanel(self.u, self.g)
             await i.response.edit_message(embed=await v.embed(), view=v)
         else:
             await i.response.send_message("ℹ️ Pas de configuration supplémentaire", ephemeral=True)
@@ -1638,6 +1658,192 @@ class ActionConfigPanel(View):
     async def back(self, i, b):
         prot = next(p for p in PROTS if p[0] == self.key)
         v = ProtDetail(self.u, self.g, prot)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           ⚔️ ANTI-RAID CONFIG PANEL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class AntiRaidConfigPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        raid_cfg = c.get('raid_config', {})
+        
+        e = discord.Embed(title="⚔️ Configuration Anti-Raid", color=0xE74C3C)
+        e.description = "Protégez votre serveur contre les attaques massives."
+        
+        # Seuil de détection
+        e.add_field(
+            name="👥 Seuil de détection",
+            value=f"`{raid_cfg.get('join_threshold', 10)}` membres en `{raid_cfg.get('join_interval', 10)}` secondes",
+            inline=False
+        )
+        
+        # Âge minimum du compte
+        e.add_field(
+            name="📅 Âge minimum du compte",
+            value=f"`{raid_cfg.get('min_account_age', 7)}` jours",
+            inline=True
+        )
+        
+        # Mode automatique
+        auto_mode = raid_cfg.get('auto_mode', True)
+        e.add_field(
+            name="🤖 Mode automatique",
+            value="✅ Activé (action auto)" if auto_mode else "❌ Désactivé (alerte seulement)",
+            inline=True
+        )
+        
+        # Bloquer les invitations
+        block_invites = raid_cfg.get('block_invites', True)
+        e.add_field(
+            name="🔒 Bloquer invitations",
+            value="✅ Oui (pendant raid)" if block_invites else "❌ Non",
+            inline=True
+        )
+        
+        # Action
+        action = raid_cfg.get('action', 'kick')
+        actions_txt = {'kick': '👢 Kick', 'ban': '🔨 Ban', 'mute': '🔇 Mute'}
+        e.add_field(name="⚡ Action", value=actions_txt.get(action, action), inline=True)
+        
+        # État du lockdown
+        lockdown = raid_tracker.get(self.g.id, {}).get('lockdown', False)
+        if lockdown:
+            e.add_field(name="🚨 LOCKDOWN ACTIF", value="⚠️ Le serveur est en mode protection", inline=False)
+        
+        return e
+    
+    @discord.ui.button(label="👥 Seuil Détection", style=discord.ButtonStyle.primary, row=0)
+    async def set_threshold(self, i, b):
+        await i.response.send_modal(RaidThresholdModal(self.g, self.u))
+    
+    @discord.ui.button(label="📅 Âge Compte", style=discord.ButtonStyle.primary, row=0)
+    async def set_age(self, i, b):
+        await i.response.send_modal(RaidAgeModal(self.g, self.u))
+    
+    @discord.ui.button(label="🤖 Mode Auto", style=discord.ButtonStyle.secondary, row=0)
+    async def toggle_auto(self, i, b):
+        c = await cfg(self.g.id)
+        raid_cfg = c.get('raid_config', {})
+        raid_cfg['auto_mode'] = not raid_cfg.get('auto_mode', True)
+        await db_set(self.g.id, 'raid_config', raid_cfg)
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="🔒 Bloquer Invit.", style=discord.ButtonStyle.secondary, row=1)
+    async def toggle_block(self, i, b):
+        c = await cfg(self.g.id)
+        raid_cfg = c.get('raid_config', {})
+        raid_cfg['block_invites'] = not raid_cfg.get('block_invites', True)
+        await db_set(self.g.id, 'raid_config', raid_cfg)
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="⚡ Action", style=discord.ButtonStyle.secondary, row=1)
+    async def set_action(self, i, b):
+        v = RaidActionSelect(self.u, self.g)
+        await i.response.edit_message(embed=discord.Embed(title="⚡ Choisir l'action anti-raid", color=0xE74C3C), view=v)
+    
+    @discord.ui.button(label="🚨 Lockdown Manuel", style=discord.ButtonStyle.danger, row=2)
+    async def manual_lockdown(self, i, b):
+        guild_id = self.g.id
+        if guild_id not in raid_tracker:
+            raid_tracker[guild_id] = {'joins': [], 'lockdown': False}
+        
+        if raid_tracker[guild_id].get('lockdown', False):
+            # Désactiver le lockdown
+            raid_tracker[guild_id]['lockdown'] = False
+            await i.response.send_message("✅ **Lockdown désactivé !**\nLes nouvelles invitations sont de nouveau autorisées.", ephemeral=True)
+        else:
+            # Activer le lockdown
+            raid_tracker[guild_id]['lockdown'] = True
+            await i.response.send_message("🚨 **Lockdown activé !**\nLes nouvelles arrivées seront traitées selon la configuration.", ephemeral=True)
+        
+        # Rafraîchir l'affichage
+        await i.message.edit(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+    async def back(self, i, b):
+        prot = next(p for p in PROTS if p[0] == "anti_raid")
+        v = ProtDetail(self.u, self.g, prot)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class RaidThresholdModal(Modal, title="👥 Seuil de détection"):
+    threshold_input = TextInput(label="Nombre de membres", placeholder="10", max_length=3)
+    interval_input = TextInput(label="Intervalle (secondes)", placeholder="10", max_length=3)
+    
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+    
+    async def on_submit(self, i):
+        try:
+            threshold = max(3, min(50, int(self.threshold_input.value)))
+            interval = max(5, min(60, int(self.interval_input.value)))
+            c = await cfg(self.g.id)
+            raid_cfg = c.get('raid_config', {})
+            raid_cfg['join_threshold'] = threshold
+            raid_cfg['join_interval'] = interval
+            await db_set(self.g.id, 'raid_config', raid_cfg)
+        except:
+            pass
+        v = AntiRaidConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class RaidAgeModal(Modal, title="📅 Âge minimum du compte"):
+    age_input = TextInput(label="Jours minimum", placeholder="7", max_length=4)
+    
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+    
+    async def on_submit(self, i):
+        try:
+            age = max(0, min(365, int(self.age_input.value)))
+            c = await cfg(self.g.id)
+            raid_cfg = c.get('raid_config', {})
+            raid_cfg['min_account_age'] = age
+            await db_set(self.g.id, 'raid_config', raid_cfg)
+        except:
+            pass
+        v = AntiRaidConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class RaidActionSelect(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+    
+    @discord.ui.button(label="👢 Kick", style=discord.ButtonStyle.primary)
+    async def kick(self, i, b):
+        await self._set(i, 'kick')
+    
+    @discord.ui.button(label="🔨 Ban", style=discord.ButtonStyle.danger)
+    async def ban(self, i, b):
+        await self._set(i, 'ban')
+    
+    @discord.ui.button(label="🔇 Mute", style=discord.ButtonStyle.secondary)
+    async def mute(self, i, b):
+        await self._set(i, 'mute')
+    
+    async def _set(self, i, action):
+        c = await cfg(self.g.id)
+        raid_cfg = c.get('raid_config', {})
+        raid_cfg['action'] = action
+        await db_set(self.g.id, 'raid_config', raid_cfg)
+        v = AntiRaidConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = AntiRaidConfigPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -4304,10 +4510,26 @@ class LevelSystemPanel(View):
         shop_items = level_cfg.get('shop_items', [])
         e.add_field(name="🛒 Boutique", value=f"`{len(shop_items)}` article(s)", inline=True)
         
+        # Salons autorisés pour XP (texte)
+        xp_text_channels = level_cfg.get('xp_text_channels', [])
+        if xp_text_channels:
+            ch_list = ", ".join([f"<#{c}>" for c in xp_text_channels[:3]])
+            e.add_field(name="📝 Salons XP (msg)", value=ch_list + (f"... +{len(xp_text_channels)-3}" if len(xp_text_channels) > 3 else ""), inline=True)
+        else:
+            e.add_field(name="📝 Salons XP (msg)", value="*Tous*", inline=True)
+        
+        # Salons autorisés pour XP (vocal)
+        xp_voice_channels = level_cfg.get('xp_voice_channels', [])
+        if xp_voice_channels:
+            ch_list = ", ".join([f"`{self.g.get_channel(c).name if self.g.get_channel(c) else c}`" for c in xp_voice_channels[:3]])
+            e.add_field(name="🎤 Salons XP (voc)", value=ch_list + (f"... +{len(xp_voice_channels)-3}" if len(xp_voice_channels) > 3 else ""), inline=True)
+        else:
+            e.add_field(name="🎤 Salons XP (voc)", value="*Tous*", inline=True)
+        
         e.set_footer(text="💡 /level pour voir sa progression • /shop pour acheter")
         return e
     
-    @discord.ui.button(label="✅ Activer/Désactiver", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="✅ ON/OFF", style=discord.ButtonStyle.success, row=0)
     async def toggle(self, i, b):
         c = await cfg(self.g.id)
         level_cfg = c.get('level_config', {})
@@ -4315,7 +4537,7 @@ class LevelSystemPanel(View):
         await db_set(self.g.id, 'level_config', level_cfg)
         await i.response.edit_message(embed=await self.embed(), view=self)
     
-    @discord.ui.button(label="✨ XP/message", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="✨ XP/msg", style=discord.ButtonStyle.primary, row=0)
     async def set_xp(self, i, b):
         await i.response.send_modal(LevelXPModal(self.g, self.u))
     
@@ -4323,36 +4545,33 @@ class LevelSystemPanel(View):
     async def set_coins(self, i, b):
         await i.response.send_modal(LevelCoinsModal(self.g, self.u))
     
-    @discord.ui.button(label="🎤 XP/vocal", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="🎤 XP/voc", style=discord.ButtonStyle.primary, row=0)
     async def set_xp_vocal(self, i, b):
         await i.response.send_modal(LevelXPVocalModal(self.g, self.u))
     
-    @discord.ui.button(label="🎤 Pièces/vocal", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="🎤 Pièces/voc", style=discord.ButtonStyle.secondary, row=1)
     async def set_coins_vocal(self, i, b):
         await i.response.send_modal(LevelCoinsVocalModal(self.g, self.u))
     
-    @discord.ui.button(label="🎭 Rôles Niveau", style=discord.ButtonStyle.primary, row=1)
+    @discord.ui.button(label="🎭 Rôles", style=discord.ButtonStyle.secondary, row=1)
     async def level_roles(self, i, b):
         v = LevelRolesPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
-    @discord.ui.button(label="🛒 Boutique", style=discord.ButtonStyle.success, row=2)
+    @discord.ui.button(label="🛒 Boutique", style=discord.ButtonStyle.success, row=1)
     async def shop_config(self, i, b):
         v = ShopConfigPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
-    @discord.ui.button(label="📍 Salons", style=discord.ButtonStyle.secondary, row=2)
-    async def allowed_channels(self, i, b):
-        c = await cfg(self.g.id)
-        level_cfg = c.get('level_config', {})
-        current = level_cfg.get('allowed_channels', [])
-        v = PaginatedChannelSelectGeneric(
-            self.u, self.g, 'level_allowed_channels', current, LevelSystemPanel
-        )
-        await i.response.edit_message(
-            embed=discord.Embed(title="📍 Salons pour /level et /shop", description="Sélectionnez les salons autorisés\n*Vide = partout*", color=0x9B59B6),
-            view=v
-        )
+    @discord.ui.button(label="📝 Salons Msg", style=discord.ButtonStyle.secondary, row=2)
+    async def xp_text_channels(self, i, b):
+        v = XPChannelsSelectPanel(self.u, self.g, 'text')
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="🎤 Salons Voc", style=discord.ButtonStyle.secondary, row=2)
+    async def xp_voice_channels(self, i, b):
+        v = XPChannelsSelectPanel(self.u, self.g, 'voice')
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="📢 Annonces", style=discord.ButtonStyle.secondary, row=2)
     async def levelup_channel(self, i, b):
@@ -4366,6 +4585,119 @@ class LevelSystemPanel(View):
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+class XPChannelsSelectPanel(View):
+    """Panel pour sélectionner les salons où on gagne de l'XP/pièces"""
+    def __init__(self, u, g, channel_type='text', page=0):
+        super().__init__(timeout=180)
+        self.u = u
+        self.g = g
+        self.channel_type = channel_type  # 'text' ou 'voice'
+        self.page = page
+        self.per_page = 23
+        
+        if channel_type == 'text':
+            self.channels = list(g.text_channels)
+        else:
+            self.channels = list(g.voice_channels)
+        
+        self.max_page = max(0, (len(self.channels) - 1) // self.per_page)
+        self._build()
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        level_cfg = c.get('level_config', {})
+        key = 'xp_text_channels' if self.channel_type == 'text' else 'xp_voice_channels'
+        current = level_cfg.get(key, [])
+        
+        title = "📝 Salons pour XP/Pièces (Messages)" if self.channel_type == 'text' else "🎤 Salons pour XP/Pièces (Vocal)"
+        e = discord.Embed(title=title, color=0x9B59B6)
+        
+        if current:
+            ch_list = []
+            for ch_id in current[:15]:
+                ch = self.g.get_channel(ch_id)
+                if ch:
+                    ch_list.append(f"• {'#' if self.channel_type == 'text' else '🔊'} {ch.name}")
+            e.description = f"**Salons autorisés ({len(current)}):**\n" + "\n".join(ch_list)
+            if len(current) > 15:
+                e.description += f"\n*... et {len(current) - 15} autres*"
+        else:
+            e.description = "**Tous les salons sont autorisés**\n\nSélectionnez des salons pour restreindre."
+        
+        e.set_footer(text=f"Page {self.page + 1}/{self.max_page + 1}")
+        return e
+    
+    def _build(self):
+        self.clear_items()
+        
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_chs = self.channels[start:end]
+        
+        opts = []
+        if self.page == 0:
+            opts.append(discord.SelectOption(label="🔓 Tous les salons (reset)", value="all", emoji="🌐"))
+        
+        for ch in page_chs:
+            emoji = "📝" if self.channel_type == 'text' else "🔊"
+            opts.append(discord.SelectOption(label=f"{ch.name}"[:25], value=str(ch.id), emoji=emoji))
+        
+        if opts:
+            select = Select(placeholder=f"Ajouter/Retirer des salons...", options=opts, max_values=min(len(opts), 25))
+            select.callback = self.select_callback
+            self.add_item(select)
+        
+        # Boutons de navigation
+        if self.max_page > 0:
+            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.secondary, disabled=self.page == 0, row=1)
+            prev_btn.callback = self.prev_page
+            self.add_item(prev_btn)
+            
+            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.secondary, disabled=self.page >= self.max_page, row=1)
+            next_btn.callback = self.next_page
+            self.add_item(next_btn)
+        
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=2)
+        back_btn.callback = self.go_back
+        self.add_item(back_btn)
+    
+    async def select_callback(self, i):
+        c = await cfg(self.g.id)
+        level_cfg = c.get('level_config', {})
+        key = 'xp_text_channels' if self.channel_type == 'text' else 'xp_voice_channels'
+        current = set(level_cfg.get(key, []))
+        
+        for val in i.data['values']:
+            if val == 'all':
+                current = set()
+                break
+            else:
+                ch_id = int(val)
+                if ch_id in current:
+                    current.remove(ch_id)
+                else:
+                    current.add(ch_id)
+        
+        level_cfg[key] = list(current)
+        await db_set(self.g.id, 'level_config', level_cfg)
+        
+        self._build()
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    async def prev_page(self, i):
+        self.page = max(0, self.page - 1)
+        self._build()
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    async def next_page(self, i):
+        self.page = min(self.max_page, self.page + 1)
+        self._build()
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    async def go_back(self, i):
+        v = LevelSystemPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
 
 class LevelXPModal(Modal, title="✨ XP par message"):
     xp_input = TextInput(label="XP gagné par message", placeholder="15", max_length=4)
@@ -7960,6 +8292,19 @@ async def on_ready():
     except Exception as ex:
         print(f"❌ Erreur sync global: {ex}")
     
+    # ═══════════════ INITIALISER LE TRACKING VOCAL ═══════════════
+    # Tracker tous les membres déjà en vocal au démarrage
+    vocal_count = 0
+    for guild in bot.guilds:
+        for vc in guild.voice_channels:
+            for member in vc.members:
+                if not member.bot:
+                    key = (guild.id, member.id)
+                    voice_join_tracker[key] = now()
+                    vocal_count += 1
+    if vocal_count > 0:
+        print(f"🎤 {vocal_count} membres en vocal trackés au démarrage")
+    
     # Lancer la tâche d'inactivité
     if not check_realsy_inactivity.is_running():
         check_realsy_inactivity.start()
@@ -7984,13 +8329,77 @@ async def on_ready():
     if not check_expired_roles.is_running():
         check_expired_roles.start()
     
-    print(f"✅ {bot.user.name} v26 prêt!")
+    print(f"✅ {bot.user.name} v27 prêt!")
     print(f"🌐 Serveurs: {len(bot.guilds)}")
     print(f"📢 Vérification feeds sociaux toutes les 5 minutes")
     print(f"🎁 Vérification giveaways toutes les 30 secondes")
     print(f"📨 Vérification messages auto toutes les minutes")
     print(f"🛒 Vérification rôles boutique expirés toutes les minutes")
     print(f"🔊 Vocaux temporaires activés")
+    print(f"⚔️ Système anti-raid activé")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           📨 ON_INTERACTION POUR MESSAGES AUTO
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@bot.event
+async def on_interaction(interaction: discord.Interaction):
+    """Repositionne les messages d'aide après les interactions (commandes slash, boutons, etc.)"""
+    # Ignorer si pas de channel ou pas de guild
+    if not interaction.channel or not interaction.guild:
+        return
+    
+    # Ignorer si c'est une interaction sans réponse visible (ephemeral check)
+    # On ne peut pas toujours savoir si la réponse est ephemeral, donc on vérifie après un délai
+    
+    # Vérifier si ce salon a une aide automatique configurée
+    try:
+        c = await cfg(interaction.guild.id)
+        auto_helps = c.get('auto_help_channels', {})
+        channel_id_str = str(interaction.channel.id)
+        
+        if channel_id_str not in auto_helps:
+            return
+        
+        help_data = auto_helps[channel_id_str]
+        if not help_data.get('enabled', True):
+            return
+        
+        # Attendre que la réponse de l'interaction soit envoyée
+        await asyncio.sleep(1.5)
+        
+        # Vérifier si le dernier message n'est pas déjà notre message d'aide
+        try:
+            last_msg = [m async for m in interaction.channel.history(limit=1)]
+            if last_msg:
+                last_msg = last_msg[0]
+                # Si c'est déjà notre message d'aide, ne rien faire
+                if interaction.channel.id in auto_help_messages:
+                    if last_msg.id == auto_help_messages[interaction.channel.id]:
+                        return
+                
+                # Si le dernier message n'est pas de notre bot, repositionner
+                if last_msg.author.id != bot.user.id or last_msg.id != auto_help_messages.get(interaction.channel.id, 0):
+                    # Supprimer l'ancien message d'aide
+                    if interaction.channel.id in auto_help_messages:
+                        try:
+                            old_msg = await interaction.channel.fetch_message(auto_help_messages[interaction.channel.id])
+                            await old_msg.delete()
+                        except:
+                            pass
+                        del auto_help_messages[interaction.channel.id]
+                    
+                    # Créer et envoyer le nouveau message d'aide
+                    e = discord.Embed(title=f"💡 {help_data.get('title', 'Aide')}", color=help_data.get('color', 0x3498DB))
+                    e.description = help_data.get('content', '')
+                    e.set_footer(text="Ce message se repositionne automatiquement")
+                    
+                    new_msg = await interaction.channel.send(embed=e)
+                    auto_help_messages[interaction.channel.id] = new_msg.id
+        except:
+            pass
+    except Exception as ex:
+        print(f"Erreur on_interaction auto_help: {ex}")
 
 @bot.tree.command(name="sync", description="🔄 Synchroniser les commandes (Admin)")
 async def sync_cmd(i: discord.Interaction):
@@ -8026,13 +8435,91 @@ async def on_member_remove(m):
 async def on_member_join(m):
     try:
         c = await cfg(m.guild.id)
+        guild_id = m.guild.id
+        
+        # ═══════════════ ANTI-RAID SYSTÈME ═══════════════
+        if c.get('anti_raid'):
+            raid_cfg = c.get('raid_config', {})
+            join_threshold = raid_cfg.get('join_threshold', 10)
+            join_interval = raid_cfg.get('join_interval', 10)
+            min_account_age = raid_cfg.get('min_account_age', 7)
+            auto_mode = raid_cfg.get('auto_mode', True)
+            block_invites = raid_cfg.get('block_invites', True)
+            action = raid_cfg.get('action', 'kick')
+            
+            # Initialiser le tracker si nécessaire
+            if guild_id not in raid_tracker:
+                raid_tracker[guild_id] = {'joins': [], 'lockdown': False}
+            
+            current_time = now()
+            
+            # Nettoyer les anciennes entrées (hors intervalle)
+            cutoff = current_time - timedelta(seconds=join_interval)
+            raid_tracker[guild_id]['joins'] = [
+                (uid, ts) for uid, ts in raid_tracker[guild_id]['joins']
+                if ts > cutoff
+            ]
+            
+            # Ajouter cette arrivée
+            raid_tracker[guild_id]['joins'].append((m.id, current_time))
+            
+            # Vérifier l'âge du compte
+            account_age = (current_time - m.created_at.replace(tzinfo=timezone.utc)).days
+            is_suspicious = account_age < min_account_age
+            
+            # Vérifier si c'est un raid (trop de joins récents)
+            recent_joins = len(raid_tracker[guild_id]['joins'])
+            is_raid = recent_joins >= join_threshold
+            
+            # Si raid détecté
+            if is_raid and not raid_tracker[guild_id].get('lockdown', False):
+                raid_tracker[guild_id]['lockdown'] = True
+                
+                # Envoyer alerte
+                log_ch = m.guild.get_channel(c.get('log_anti_raid', 0))
+                if log_ch:
+                    e = discord.Embed(
+                        title="🚨 RAID DÉTECTÉ !",
+                        description=f"**{recent_joins} membres** ont rejoint en moins de **{join_interval} secondes**\n\n"
+                                    f"⚡ **Action automatique:** {'Activée' if auto_mode else 'Désactivée'}\n"
+                                    f"🔒 **Blocage invitations:** {'Activé' if block_invites else 'Désactivé'}",
+                        color=0xFF0000
+                    )
+                    e.set_footer(text="Utilisez /configure > Protection > Anti-Raid pour gérer")
+                    e.timestamp = current_time
+                    await log_ch.send(content="@here" if auto_mode else "", embed=e)
+            
+            # Appliquer l'action si nécessaire
+            should_act = (is_raid or is_suspicious) and (auto_mode or raid_tracker[guild_id].get('lockdown', False))
+            
+            if should_act:
+                reason = f"Anti-Raid: {'Raid détecté' if is_raid else 'Compte suspect'} (âge: {account_age}j)"
+                
+                try:
+                    if action == 'ban':
+                        await m.ban(reason=reason)
+                    elif action == 'kick':
+                        await m.kick(reason=reason)
+                    elif action == 'mute':
+                        # Mute avec timeout
+                        await m.timeout(timedelta(hours=24), reason=reason)
+                    
+                    # Log l'action
+                    await send_log(m.guild, 'anti_raid', m, None, reason, f"Action: {action.upper()}")
+                except:
+                    pass
+                
+                return  # Ne pas continuer le traitement
+        
+        # ═══════════════ ANTI-NEWACCOUNT (standalone) ═══════════════
         if c.get('anti_newaccount'):
             days = c.get('newaccount_days', 7)
             age = (now() - m.created_at.replace(tzinfo=timezone.utc)).days
             if age < days:
                 await send_log(m.guild, 'anti_newaccount', m, None, "Compte trop récent", f"Âge: {age} jour(s)")
                 await m.kick(reason=f"Compte trop récent ({age} jours)")
-    except: pass
+    except Exception as ex:
+        print(f"Erreur on_member_join: {ex}")
 
 async def relay_discord_message(msg):
     """Relay un message vers les serveurs qui suivent ce salon"""
@@ -10314,6 +10801,11 @@ async def track_member_message(msg):
             if not level_cfg.get('enabled', False):
                 return
             
+            # ═══════════════ VÉRIFIER SI LE SALON EST AUTORISÉ ═══════════════
+            xp_text_channels = level_cfg.get('xp_text_channels', [])
+            if xp_text_channels and msg.channel.id not in xp_text_channels:
+                return  # Salon non autorisé, pas de gains
+            
             # Ajouter de l'XP
             xp_per_msg = level_cfg.get('xp_per_message', 15)
             if xp_per_msg > 0:
@@ -10447,7 +10939,7 @@ async def track_member_vocal_leave(member, channel, duration):
             ''', (member.guild.id, member.id, channel.id, duration, now_str))
             
             await db.commit()
-            print(f"[VOCAL DB] Enregistré {duration}s pour {member.display_name}")
+            print(f"[VOCAL DB] Enregistré {duration}s pour {member.display_name} dans {channel.name}")
         
         # ═══════════════ XP ET PIÈCES VOCAUX ═══════════════
         try:
@@ -10455,6 +10947,12 @@ async def track_member_vocal_leave(member, channel, duration):
             level_cfg = c.get('level_config', {})
             
             if level_cfg.get('enabled', False) and duration > 0:
+                # ═══════════════ VÉRIFIER SI LE SALON EST AUTORISÉ ═══════════════
+                xp_voice_channels = level_cfg.get('xp_voice_channels', [])
+                if xp_voice_channels and channel.id not in xp_voice_channels:
+                    print(f"[VOCAL] Salon {channel.name} non autorisé pour XP/pièces")
+                    return  # Salon non autorisé, pas de gains
+                
                 # Fonction pour convertir la durée selon l'unité
                 def get_units(seconds, unit):
                     if unit == 'minute':
