@@ -497,6 +497,47 @@ async def db_init():
             try: await db.execute('ALTER TABLE economy ADD COLUMN message_count INTEGER DEFAULT 0')
             except: pass
         
+        # ═══════════════ TABLES DÉTECTION COMPTES SECONDAIRES ═══════════════
+        # Table pour stocker les relations de comptes secondaires détectés
+        await db.execute('''CREATE TABLE IF NOT EXISTS alt_accounts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            main_account_id INTEGER,
+            alt_account_id INTEGER,
+            confidence INTEGER DEFAULT 0,
+            reasons TEXT DEFAULT "[]",
+            status TEXT DEFAULT "suspected",
+            detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            action_taken TEXT DEFAULT "",
+            UNIQUE(guild_id, main_account_id, alt_account_id)
+        )''')
+        
+        # Table pour stocker les fingerprints des utilisateurs (pour détection)
+        await db.execute('''CREATE TABLE IF NOT EXISTS user_fingerprints (
+            guild_id INTEGER,
+            user_id INTEGER,
+            avatar_hash TEXT,
+            username_normalized TEXT,
+            created_at_ts INTEGER,
+            joined_at_ts INTEGER,
+            first_message_at DATETIME,
+            first_message_channel INTEGER,
+            behavior_hash TEXT,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (guild_id, user_id)
+        )''')
+        
+        # Table pour stocker les bans (pour détecter les contournements)
+        await db.execute('''CREATE TABLE IF NOT EXISTS ban_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            user_id INTEGER,
+            username TEXT,
+            avatar_hash TEXT,
+            reason TEXT,
+            banned_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        
         await db.commit()
     print("✅ DB OK")
 
@@ -561,16 +602,18 @@ async def cfg(gid):
     defaults = {
         'anti_link': 0, 'anti_invite': 0, 'anti_image': 0, 'anti_phishing': 1, 'anti_scam': 1,
         'anti_spam': 0, 'anti_caps': 0, 'anti_newaccount': 0, 'anti_badwords': 0,
-        'anti_raid': 0, 'anti_compromised': 1, 'anti_qrcode': 1,  # Nouvelles protections
+        'anti_raid': 0, 'anti_compromised': 1, 'anti_qrcode': 1, 'anti_alt': 0,
         'link_whitelist': [], 'image_allowed': [], 'badwords_list': [],
         'link_allowed_channels': [], 'image_allowed_channels': [],
         'phishing_action': 'ban', 'scam_action': 'mute', 'spam_action': 'mute',
-        'compromised_action': 'mute', 'qrcode_action': 'mute',  # Actions nouvelles protections
+        'compromised_action': 'mute', 'qrcode_action': 'mute', 'alt_action': 'kick',
         'spam_max': 5, 'spam_interval': 5, 'caps_percent': 70, 'newaccount_days': 7,
         'log_anti_link': 0, 'log_anti_image': 0, 'log_anti_phishing': 0, 'log_anti_scam': 0,
         'log_anti_spam': 0, 'log_anti_caps': 0, 'log_anti_badwords': 0, 'log_anti_invite': 0, 
         'log_anti_newaccount': 0, 'log_anti_raid': 0, 'log_anti_compromised': 0, 'log_anti_qrcode': 0,
+        'log_anti_alt': 0,
         'raid_config': {'join_threshold': 10, 'join_interval': 10, 'min_account_age': 7, 'auto_mode': True, 'block_invites': True, 'action': 'kick'},
+        'alt_config': {'auto_action': False, 'min_confidence': 70},  # Config anti-alt
         'channel_configs': {},
         'ticket_staff': 0, 'ticket_log': 0, 'ticket_panels': {},
         'mod_warn_role': 0, 'mod_mute_role': 0, 'mod_infractions_role': 0, 'mod_log_channel': 0
@@ -1502,11 +1545,15 @@ PROTS = [
     ("anti_newaccount", "👶", "Anti-NewAccount"),
     ("anti_raid", "⚔️", "Anti-Raid"),
     ("anti_compromised", "🔐", "Anti-Compromis"),
-    ("anti_qrcode", "📱", "Anti-QRCode")
+    ("anti_qrcode", "📱", "Anti-QRCode"),
+    ("anti_alt", "👥", "Anti-MultiCompte")
 ]
 
 # Cache pour l'anti-raid : {guild_id: {'joins': [(user_id, timestamp), ...], 'lockdown': bool}}
 raid_tracker = {}
+
+# Cache pour les détections de comptes secondaires
+alt_account_cache = {}  # {guild_id: {user_id: {'main_account': user_id, 'alts': [user_ids], 'reasons': []}}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🛡️ BASES DE DONNÉES DE PROTECTION
@@ -1794,6 +1841,279 @@ def check_qr_code_scam(content):
     
     return False, None
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           👥 DÉTECTION COMPTES SECONDAIRES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def normalize_username(name):
+    """Normalise un nom d'utilisateur pour comparaison"""
+    name = name.lower()
+    # Supprimer les chiffres à la fin
+    name = re.sub(r'\d+$', '', name)
+    # Supprimer les caractères spéciaux
+    name = re.sub(r'[^a-z0-9]', '', name)
+    # Remplacer les substitutions courantes
+    replacements = {
+        '0': 'o', '1': 'l', '3': 'e', '4': 'a', '5': 's',
+        '7': 't', '8': 'b', '@': 'a', '$': 's'
+    }
+    for old, new in replacements.items():
+        name = name.replace(old, new)
+    return name
+
+def levenshtein_distance(s1, s2):
+    """Calcule la distance de Levenshtein entre deux chaînes"""
+    if len(s1) < len(s2):
+        return levenshtein_distance(s2, s1)
+    
+    if len(s2) == 0:
+        return len(s1)
+    
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    
+    return previous_row[-1]
+
+def username_similarity(name1, name2):
+    """Calcule la similarité entre deux noms d'utilisateur (0-100)"""
+    n1 = normalize_username(name1)
+    n2 = normalize_username(name2)
+    
+    if not n1 or not n2:
+        return 0
+    
+    # Distance de Levenshtein
+    distance = levenshtein_distance(n1, n2)
+    max_len = max(len(n1), len(n2))
+    
+    if max_len == 0:
+        return 0
+    
+    similarity = (1 - distance / max_len) * 100
+    return max(0, min(100, similarity))
+
+def get_avatar_hash(member):
+    """Récupère le hash de l'avatar d'un membre"""
+    if member.avatar:
+        return str(member.avatar.key)
+    return "default"
+
+async def save_user_fingerprint(guild_id, member):
+    """Sauvegarde l'empreinte d'un utilisateur pour détection future"""
+    try:
+        avatar_hash = get_avatar_hash(member)
+        username_norm = normalize_username(member.name)
+        created_ts = int(member.created_at.timestamp()) if member.created_at else 0
+        joined_ts = int(member.joined_at.timestamp()) if member.joined_at else 0
+        
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('''
+                INSERT INTO user_fingerprints 
+                (guild_id, user_id, avatar_hash, username_normalized, created_at_ts, joined_at_ts, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                    avatar_hash = ?, username_normalized = ?, updated_at = ?
+            ''', (guild_id, member.id, avatar_hash, username_norm, created_ts, joined_ts, now().isoformat(),
+                  avatar_hash, username_norm, now().isoformat()))
+            await db.commit()
+    except Exception as ex:
+        print(f"[ALT] Erreur save fingerprint: {ex}")
+
+async def save_ban_info(guild_id, user_id, username, avatar_hash, reason):
+    """Sauvegarde les infos d'un ban pour détection de contournement"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('''
+                INSERT INTO ban_history (guild_id, user_id, username, avatar_hash, reason)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (guild_id, user_id, username, avatar_hash, reason))
+            await db.commit()
+    except Exception as ex:
+        print(f"[ALT] Erreur save ban: {ex}")
+
+async def detect_alt_account(guild, new_member):
+    """
+    Détecte si un nouveau membre est potentiellement un compte secondaire.
+    Retourne: (is_alt, confidence, main_account_id, reasons)
+    """
+    reasons = []
+    confidence = 0
+    main_account_id = None
+    
+    try:
+        new_avatar = get_avatar_hash(new_member)
+        new_username_norm = normalize_username(new_member.name)
+        new_created_ts = int(new_member.created_at.timestamp()) if new_member.created_at else 0
+        
+        async with aiosqlite.connect(DB_PATH) as db:
+            # 1. Vérifier si l'avatar correspond à un utilisateur banni
+            async with db.execute('''
+                SELECT user_id, username FROM ban_history 
+                WHERE guild_id = ? AND avatar_hash = ? AND avatar_hash != "default"
+            ''', (guild.id, new_avatar)) as cursor:
+                banned_match = await cursor.fetchone()
+                if banned_match:
+                    confidence += 60
+                    main_account_id = banned_match[0]
+                    reasons.append(f"Avatar identique à l'utilisateur banni {banned_match[1]} ({banned_match[0]})")
+            
+            # 2. Vérifier les noms similaires avec des utilisateurs bannis
+            async with db.execute('''
+                SELECT user_id, username FROM ban_history WHERE guild_id = ?
+            ''', (guild.id,)) as cursor:
+                banned_users = await cursor.fetchall()
+                for banned_id, banned_name in banned_users:
+                    sim = username_similarity(new_member.name, banned_name)
+                    if sim >= 80:
+                        confidence += 40
+                        if not main_account_id:
+                            main_account_id = banned_id
+                        reasons.append(f"Nom similaire ({int(sim)}%) à l'utilisateur banni {banned_name}")
+            
+            # 3. Vérifier si l'avatar correspond à un membre existant (même avatar = même personne)
+            async with db.execute('''
+                SELECT user_id FROM user_fingerprints 
+                WHERE guild_id = ? AND avatar_hash = ? AND avatar_hash != "default" AND user_id != ?
+            ''', (guild.id, new_avatar, new_member.id)) as cursor:
+                avatar_matches = await cursor.fetchall()
+                for (existing_id,) in avatar_matches:
+                    existing_member = guild.get_member(existing_id)
+                    if existing_member:
+                        confidence += 50
+                        if not main_account_id:
+                            main_account_id = existing_id
+                        reasons.append(f"Avatar identique à {existing_member.name} ({existing_id})")
+            
+            # 4. Vérifier les noms très similaires avec des membres existants
+            async with db.execute('''
+                SELECT user_id, username_normalized FROM user_fingerprints 
+                WHERE guild_id = ? AND user_id != ?
+            ''', (guild.id, new_member.id)) as cursor:
+                existing_users = await cursor.fetchall()
+                for existing_id, existing_norm in existing_users:
+                    if existing_norm and new_username_norm:
+                        sim = username_similarity(new_member.name, existing_norm)
+                        if sim >= 85:
+                            existing_member = guild.get_member(existing_id)
+                            if existing_member:
+                                confidence += 30
+                                if not main_account_id:
+                                    main_account_id = existing_id
+                                reasons.append(f"Nom très similaire ({int(sim)}%) à {existing_member.name}")
+            
+            # 5. Vérifier si le compte a été créé juste après un ban
+            async with db.execute('''
+                SELECT user_id, username, banned_at FROM ban_history 
+                WHERE guild_id = ? 
+                ORDER BY banned_at DESC LIMIT 10
+            ''', (guild.id,)) as cursor:
+                recent_bans = await cursor.fetchall()
+                for banned_id, banned_name, banned_at in recent_bans:
+                    try:
+                        ban_ts = datetime.fromisoformat(banned_at).timestamp()
+                        # Si le compte a été créé dans les 7 jours suivant un ban
+                        if 0 < new_created_ts - ban_ts < 7 * 86400:
+                            confidence += 25
+                            if not main_account_id:
+                                main_account_id = banned_id
+                            reasons.append(f"Compte créé peu après le ban de {banned_name}")
+                    except:
+                        pass
+            
+            # 6. Compte très récent (moins de 7 jours) = plus suspect
+            account_age_days = (now() - new_member.created_at.replace(tzinfo=timezone.utc)).days if new_member.created_at else 365
+            if account_age_days < 1:
+                confidence += 15
+                reasons.append("Compte créé aujourd'hui")
+            elif account_age_days < 7:
+                confidence += 10
+                reasons.append(f"Compte très récent ({account_age_days} jours)")
+        
+        # Plafonner la confiance à 100
+        confidence = min(100, confidence)
+        
+        # Sauvegarder la détection si suffisamment confiant
+        if confidence >= 40 and main_account_id:
+            await save_alt_detection(guild.id, main_account_id, new_member.id, confidence, reasons)
+        
+        return confidence >= 40, confidence, main_account_id, reasons
+        
+    except Exception as ex:
+        print(f"[ALT] Erreur détection: {ex}")
+        return False, 0, None, []
+
+async def save_alt_detection(guild_id, main_id, alt_id, confidence, reasons):
+    """Sauvegarde une détection de compte secondaire"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('''
+                INSERT INTO alt_accounts (guild_id, main_account_id, alt_account_id, confidence, reasons, status)
+                VALUES (?, ?, ?, ?, ?, "suspected")
+                ON CONFLICT(guild_id, main_account_id, alt_account_id) DO UPDATE SET
+                    confidence = ?, reasons = ?, detected_at = CURRENT_TIMESTAMP
+            ''', (guild_id, main_id, alt_id, confidence, json.dumps(reasons), confidence, json.dumps(reasons)))
+            await db.commit()
+    except Exception as ex:
+        print(f"[ALT] Erreur save detection: {ex}")
+
+async def get_alt_accounts(guild_id):
+    """Récupère tous les comptes secondaires détectés pour un serveur"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('''
+                SELECT id, main_account_id, alt_account_id, confidence, reasons, status, detected_at, action_taken
+                FROM alt_accounts WHERE guild_id = ?
+                ORDER BY confidence DESC, detected_at DESC
+            ''', (guild_id,)) as cursor:
+                return await cursor.fetchall()
+    except:
+        return []
+
+async def update_alt_status(guild_id, alt_id, status, action=""):
+    """Met à jour le statut d'un compte secondaire"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('''
+                UPDATE alt_accounts SET status = ?, action_taken = ?
+                WHERE guild_id = ? AND alt_account_id = ?
+            ''', (status, action, guild_id, alt_id))
+            await db.commit()
+    except Exception as ex:
+        print(f"[ALT] Erreur update status: {ex}")
+
+async def scan_all_members_for_alts(guild):
+    """Scanne tous les membres du serveur pour détecter les comptes secondaires"""
+    detected = []
+    
+    try:
+        # D'abord, sauvegarder les fingerprints de tous les membres
+        for member in guild.members:
+            if not member.bot:
+                await save_user_fingerprint(guild.id, member)
+        
+        # Ensuite, détecter les alts
+        for member in guild.members:
+            if not member.bot:
+                is_alt, confidence, main_id, reasons = await detect_alt_account(guild, member)
+                if is_alt:
+                    detected.append({
+                        'member': member,
+                        'confidence': confidence,
+                        'main_id': main_id,
+                        'reasons': reasons
+                    })
+    except Exception as ex:
+        print(f"[ALT] Erreur scan: {ex}")
+    
+    return detected
+
 class MainPanel(View):
     def __init__(self, u, g):
         super().__init__(timeout=600)
@@ -2004,6 +2324,31 @@ class ProtDetail(View):
             e.add_field(name="⚡ Action", value=action.upper(), inline=True)
             e.add_field(name="📊 Base de données", value=f"`{len(SCAM_KEYWORDS)}` mots-clés détectés", inline=True)
         
+        elif self.key == "anti_alt":
+            alt_cfg = c.get('alt_config', {})
+            e.description = (
+                "👥 **Détection des Comptes Secondaires**\n\n"
+                "Détecte automatiquement les comptes secondaires (alts) :\n"
+                "• Avatar identique à un membre existant/banni\n"
+                "• Nom d'utilisateur similaire\n"
+                "• Compte créé juste après un ban\n"
+                "• Comportement suspect"
+            )
+            
+            action = c.get('alt_action', 'kick')
+            auto = alt_cfg.get('auto_action', False)
+            min_conf = alt_cfg.get('min_confidence', 70)
+            
+            e.add_field(name="⚡ Action", value=action.upper(), inline=True)
+            e.add_field(name="🤖 Action auto", value="✅ Activé" if auto else "❌ Désactivé", inline=True)
+            e.add_field(name="📊 Confiance min.", value=f"{min_conf}%", inline=True)
+            
+            # Comptes secondaires détectés
+            alts = await get_alt_accounts(self.g.id)
+            suspected = len([a for a in alts if a[5] == 'suspected'])
+            confirmed = len([a for a in alts if a[5] == 'confirmed'])
+            e.add_field(name="🔍 Détections", value=f"⚠️ {suspected} suspects\n✅ {confirmed} confirmés", inline=False)
+        
         # Salon de log
         log_ch = self.g.get_channel(c.get(f'log_{self.key}', 0))
         e.add_field(name="📜 Salon de log", value=log_ch.mention if log_ch else "❌ Non configuré", inline=False)
@@ -2035,16 +2380,24 @@ class ProtDetail(View):
         elif self.key == "anti_raid":
             v = AntiRaidConfigPanel(self.u, self.g)
             await i.response.edit_message(embed=await v.embed(), view=v)
+        elif self.key == "anti_alt":
+            v = AltConfigPanel(self.u, self.g)
+            await i.response.edit_message(embed=await v.embed(), view=v)
         else:
             await i.response.send_message("ℹ️ Pas de configuration supplémentaire", ephemeral=True)
     
     @discord.ui.button(label="📜 Définir Log", style=discord.ButtonStyle.secondary, row=0)
     async def set_log(self, i, b):
-        chs = list(self.g.text_channels)[:25]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        opts.insert(0, discord.SelectOption(label="❌ Aucun log", value="0", emoji="🚫"))
-        v = LogSelectView(self.u, self.g, opts, self.key, self.prot)
-        await i.response.edit_message(embed=discord.Embed(title="📜 Choisir le salon de log", color=C.PURPLE), view=v)
+        try:
+            chs = list(self.g.text_channels)[:24]  # 24 pour laisser place à "Aucun"
+            opts = [discord.SelectOption(label="❌ Aucun log", value="0", emoji="🚫")]
+            for c in chs:
+                opts.append(discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)))
+            v = LogSelectView(self.u, self.g, opts, self.key, self.prot)
+            await i.response.edit_message(embed=discord.Embed(title="📜 Choisir le salon de log", description=f"Pour la protection **{self.prot[2]}**", color=C.PURPLE), view=v)
+        except Exception as ex:
+            print(f"[LOG SELECT ERROR] {ex}")
+            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
@@ -2054,7 +2407,16 @@ class ProtDetail(View):
 class LogSelectView(View):
     def __init__(self, u, g, opts, key, prot):
         super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+        self.key = key
+        self.prot = prot
         self.add_item(LogSelect(u, g, opts, key, prot))
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = ProtDetail(self.u, self.g, self.prot)
+        await i.response.edit_message(embed=await v.embed(), view=v)
 
 class LogSelect(Select):
     def __init__(self, u, g, opts, key, prot):
@@ -2065,9 +2427,22 @@ class LogSelect(Select):
         self.prot = prot
     
     async def callback(self, i):
-        await db_set(i.guild.id, f'log_{self.key}', int(self.values[0]))
-        v = ProtDetail(self.u, self.g, self.prot)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        try:
+            channel_id = int(self.values[0])
+            await db_set(i.guild.id, f'log_{self.key}', channel_id)
+            
+            # Message de confirmation
+            if channel_id == 0:
+                msg = f"✅ Logs désactivés pour **{self.prot[2]}**"
+            else:
+                ch = i.guild.get_channel(channel_id)
+                msg = f"✅ Logs de **{self.prot[2]}** définis dans {ch.mention if ch else 'salon inconnu'}"
+            
+            v = ProtDetail(self.u, self.g, self.prot)
+            await i.response.edit_message(content=msg, embed=await v.embed(), view=v)
+        except Exception as ex:
+            print(f"[LOG SELECT CALLBACK ERROR] {ex}")
+            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🖼️ ANTI-IMAGE CONFIG
@@ -2562,6 +2937,402 @@ class AntiRaidConfigPanel(View):
     async def back(self, i, b):
         prot = next(p for p in PROTS if p[0] == "anti_raid")
         v = ProtDetail(self.u, self.g, prot)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           👥 ANTI-ALT CONFIG (Comptes Secondaires)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class AltConfigPanel(View):
+    """Panel de configuration pour la détection de comptes secondaires"""
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        alt_cfg = c.get('alt_config', {})
+        
+        e = discord.Embed(title="👥 Configuration Anti-MultiCompte", color=0x9B59B6)
+        e.description = (
+            "Détecte et gère les comptes secondaires (alts).\n\n"
+            "**Méthodes de détection :**\n"
+            "• 🖼️ Avatar identique\n"
+            "• 📝 Nom similaire\n"
+            "• ⏰ Compte créé après un ban\n"
+            "• 🔍 Comportement suspect"
+        )
+        
+        # État
+        enabled = c.get('anti_alt', 0)
+        e.add_field(name="🔘 État", value="✅ ACTIVÉ" if enabled else "❌ DÉSACTIVÉ", inline=True)
+        
+        # Action
+        action = c.get('alt_action', 'kick')
+        action_emoji = {'kick': '👢', 'ban': '🔨', 'mute': '🔇'}.get(action, '⚡')
+        e.add_field(name="⚡ Action", value=f"{action_emoji} {action.upper()}", inline=True)
+        
+        # Action auto
+        auto = alt_cfg.get('auto_action', False)
+        e.add_field(name="🤖 Action auto", value="✅ Activé" if auto else "❌ Désactivé", inline=True)
+        
+        # Confiance minimale
+        min_conf = alt_cfg.get('min_confidence', 70)
+        e.add_field(name="📊 Confiance minimum", value=f"{min_conf}%", inline=True)
+        
+        # Stats
+        alts = await get_alt_accounts(self.g.id)
+        suspected = len([a for a in alts if a[5] == 'suspected'])
+        confirmed = len([a for a in alts if a[5] == 'confirmed'])
+        actioned = len([a for a in alts if a[7]])  # action_taken non vide
+        
+        e.add_field(name="📈 Statistiques", value=(
+            f"⚠️ **{suspected}** suspects\n"
+            f"✅ **{confirmed}** confirmés\n"
+            f"⚡ **{actioned}** sanctionnés"
+        ), inline=True)
+        
+        e.set_footer(text="💡 Utilisez 'Scanner' pour analyser tous les membres")
+        return e
+    
+    @discord.ui.button(label="🔄 ON/OFF", style=discord.ButtonStyle.success, row=0)
+    async def toggle(self, i, b):
+        c = await cfg(self.g.id)
+        await db_set(self.g.id, 'anti_alt', 0 if c.get('anti_alt') else 1)
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="⚡ Action", style=discord.ButtonStyle.primary, row=0)
+    async def set_action(self, i, b):
+        c = await cfg(self.g.id)
+        actions = ['kick', 'ban', 'mute']
+        current = c.get('alt_action', 'kick')
+        next_idx = (actions.index(current) + 1) % len(actions)
+        await db_set(self.g.id, 'alt_action', actions[next_idx])
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="🤖 Auto ON/OFF", style=discord.ButtonStyle.primary, row=0)
+    async def toggle_auto(self, i, b):
+        c = await cfg(self.g.id)
+        alt_cfg = c.get('alt_config', {})
+        alt_cfg['auto_action'] = not alt_cfg.get('auto_action', False)
+        await db_set(self.g.id, 'alt_config', alt_cfg)
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="📊 Confiance", style=discord.ButtonStyle.secondary, row=0)
+    async def set_confidence(self, i, b):
+        await i.response.send_modal(AltConfidenceModal(self.g, self.u))
+    
+    @discord.ui.button(label="🔍 Scanner", style=discord.ButtonStyle.success, row=1)
+    async def scan_alts(self, i, b):
+        """Scanne tous les membres pour détecter les comptes secondaires"""
+        await i.response.send_message("🔍 **Scan des comptes secondaires en cours...**", ephemeral=True)
+        
+        try:
+            detected = await scan_all_members_for_alts(self.g)
+            
+            if detected:
+                v = AltScanResultsPanel(self.u, self.g, detected)
+                await i.edit_original_response(
+                    content=None,
+                    embed=await v.embed(),
+                    view=v
+                )
+            else:
+                await i.edit_original_response(
+                    content="✅ **Aucun compte secondaire détecté !**\n\nTous les membres semblent être des comptes uniques.",
+                    embed=None,
+                    view=None
+                )
+        except Exception as ex:
+            print(f"[ALT SCAN ERROR] {ex}")
+            await i.edit_original_response(content=f"❌ Erreur: {ex}")
+    
+    @discord.ui.button(label="📋 Voir détections", style=discord.ButtonStyle.secondary, row=1)
+    async def view_detections(self, i, b):
+        """Affiche les comptes secondaires déjà détectés"""
+        alts = await get_alt_accounts(self.g.id)
+        
+        if not alts:
+            return await i.response.send_message("📋 Aucun compte secondaire détecté pour le moment.", ephemeral=True)
+        
+        v = AltDetectionsPanel(self.u, self.g, alts)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+    async def back(self, i, b):
+        prot = next(p for p in PROTS if p[0] == "anti_alt")
+        v = ProtDetail(self.u, self.g, prot)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class AltConfidenceModal(Modal, title="📊 Confiance minimum"):
+    value = TextInput(
+        label="Pourcentage de confiance (40-100)",
+        placeholder="70",
+        default="70",
+        max_length=3
+    )
+    
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+    
+    async def on_submit(self, i):
+        try:
+            val = int(self.value.value)
+            val = max(40, min(100, val))
+            
+            c = await cfg(self.g.id)
+            alt_cfg = c.get('alt_config', {})
+            alt_cfg['min_confidence'] = val
+            await db_set(self.g.id, 'alt_config', alt_cfg)
+            
+            v = AltConfigPanel(self.u, self.g)
+            await i.response.edit_message(content=f"✅ Confiance minimum définie à **{val}%**", embed=await v.embed(), view=v)
+        except:
+            await i.response.send_message("❌ Valeur invalide", ephemeral=True)
+
+class AltScanResultsPanel(View):
+    """Affiche les résultats d'un scan de comptes secondaires"""
+    def __init__(self, u, g, detected):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.detected = detected
+        self.page = 0
+        self.per_page = 5
+    
+    async def embed(self):
+        e = discord.Embed(title="🔍 Résultats du Scan", color=0xE74C3C)
+        
+        total = len(self.detected)
+        high_conf = len([d for d in self.detected if d['confidence'] >= 70])
+        
+        e.description = f"**{total}** comptes secondaires potentiels détectés\n**{high_conf}** avec haute confiance (≥70%)"
+        
+        # Pagination
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_items = self.detected[start:end]
+        
+        for item in page_items:
+            member = item['member']
+            confidence = item['confidence']
+            main_id = item['main_id']
+            reasons = item['reasons']
+            
+            # Emoji de confiance
+            if confidence >= 80:
+                conf_emoji = "🔴"
+            elif confidence >= 60:
+                conf_emoji = "🟠"
+            else:
+                conf_emoji = "🟡"
+            
+            # Compte principal
+            main_member = self.g.get_member(main_id)
+            main_txt = f"{main_member.name}" if main_member else f"ID: {main_id} (banni/parti)"
+            
+            field_value = (
+                f"**Confiance:** {conf_emoji} {confidence}%\n"
+                f"**Compte principal:** {main_txt}\n"
+                f"**Raisons:** {', '.join(reasons[:2])}"
+            )
+            
+            e.add_field(
+                name=f"👤 {member.display_name} (`{member.id}`)",
+                value=field_value,
+                inline=False
+            )
+        
+        total_pages = max(1, (total - 1) // self.per_page + 1)
+        e.set_footer(text=f"Page {self.page + 1}/{total_pages} • Cliquez sur les boutons pour agir")
+        
+        return e
+    
+    @discord.ui.button(label="◀️", style=discord.ButtonStyle.secondary, row=0)
+    async def prev_page(self, i, b):
+        if self.page > 0:
+            self.page -= 1
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="▶️", style=discord.ButtonStyle.secondary, row=0)
+    async def next_page(self, i, b):
+        max_page = max(0, (len(self.detected) - 1) // self.per_page)
+        if self.page < max_page:
+            self.page += 1
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="👢 Kick tous (≥70%)", style=discord.ButtonStyle.danger, row=1)
+    async def kick_high_conf(self, i, b):
+        high_conf = [d for d in self.detected if d['confidence'] >= 70]
+        if not high_conf:
+            return await i.response.send_message("✅ Aucun compte avec ≥70% de confiance", ephemeral=True)
+        
+        v = ConfirmAltActionView(self.u, self.g, high_conf, 'kick')
+        await i.response.send_message(
+            embed=discord.Embed(
+                title="⚠️ Confirmation",
+                description=f"Voulez-vous **KICK** {len(high_conf)} compte(s) secondaire(s) avec ≥70% de confiance ?",
+                color=0xE74C3C
+            ),
+            view=v,
+            ephemeral=True
+        )
+    
+    @discord.ui.button(label="🔨 Ban tous (≥80%)", style=discord.ButtonStyle.danger, row=1)
+    async def ban_high_conf(self, i, b):
+        very_high = [d for d in self.detected if d['confidence'] >= 80]
+        if not very_high:
+            return await i.response.send_message("✅ Aucun compte avec ≥80% de confiance", ephemeral=True)
+        
+        v = ConfirmAltActionView(self.u, self.g, very_high, 'ban')
+        await i.response.send_message(
+            embed=discord.Embed(
+                title="⚠️ Confirmation",
+                description=f"Voulez-vous **BAN** {len(very_high)} compte(s) secondaire(s) avec ≥80% de confiance ?",
+                color=0xE74C3C
+            ),
+            view=v,
+            ephemeral=True
+        )
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+    async def back(self, i, b):
+        v = AltConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class ConfirmAltActionView(View):
+    def __init__(self, u, g, targets, action):
+        super().__init__(timeout=60)
+        self.u = u
+        self.g = g
+        self.targets = targets
+        self.action = action
+    
+    @discord.ui.button(label="✅ Confirmer", style=discord.ButtonStyle.danger, row=0)
+    async def confirm(self, i, b):
+        await i.response.edit_message(content="⏳ Exécution en cours...", embed=None, view=None)
+        
+        success = 0
+        failed = 0
+        
+        for item in self.targets:
+            member = item['member']
+            try:
+                if self.action == 'kick':
+                    await member.kick(reason=f"Compte secondaire détecté (confiance: {item['confidence']}%)")
+                elif self.action == 'ban':
+                    await member.ban(reason=f"Compte secondaire détecté (confiance: {item['confidence']}%)")
+                
+                await update_alt_status(self.g.id, member.id, 'actioned', self.action)
+                success += 1
+            except:
+                failed += 1
+        
+        await i.edit_original_response(
+            content=f"✅ **{success}** compte(s) {self.action}{'s' if success > 1 else ''}\n❌ **{failed}** échec(s)"
+        )
+    
+    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.secondary, row=0)
+    async def cancel(self, i, b):
+        await i.response.edit_message(content="❌ Action annulée", embed=None, view=None)
+
+class AltDetectionsPanel(View):
+    """Affiche l'historique des détections de comptes secondaires"""
+    def __init__(self, u, g, alts):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.alts = alts
+        self.page = 0
+        self.per_page = 5
+    
+    async def embed(self):
+        e = discord.Embed(title="📋 Détections de Comptes Secondaires", color=0x9B59B6)
+        
+        if not self.alts:
+            e.description = "*Aucune détection enregistrée*"
+            return e
+        
+        # Pagination
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_items = self.alts[start:end]
+        
+        for alt in page_items:
+            # id, main_account_id, alt_account_id, confidence, reasons, status, detected_at, action_taken
+            _, main_id, alt_id, confidence, reasons_json, status, detected_at, action_taken = alt
+            
+            try:
+                reasons = json.loads(reasons_json) if reasons_json else []
+            except:
+                reasons = []
+            
+            # Status emoji
+            status_emoji = {'suspected': '⚠️', 'confirmed': '✅', 'dismissed': '❌', 'actioned': '⚡'}.get(status, '❓')
+            
+            # Confiance emoji
+            if confidence >= 80:
+                conf_emoji = "🔴"
+            elif confidence >= 60:
+                conf_emoji = "🟠"
+            else:
+                conf_emoji = "🟡"
+            
+            # Membres
+            alt_member = self.g.get_member(alt_id)
+            main_member = self.g.get_member(main_id)
+            
+            alt_txt = f"{alt_member.name}" if alt_member else f"ID: {alt_id} (parti)"
+            main_txt = f"{main_member.name}" if main_member else f"ID: {main_id}"
+            
+            field_value = (
+                f"**Principal:** {main_txt}\n"
+                f"**Confiance:** {conf_emoji} {confidence}%\n"
+                f"**Status:** {status_emoji} {status}\n"
+                f"**Raisons:** {', '.join(reasons[:2]) if reasons else 'N/A'}"
+            )
+            
+            if action_taken:
+                field_value += f"\n**Action:** {action_taken.upper()}"
+            
+            e.add_field(name=f"👤 {alt_txt}", value=field_value, inline=False)
+        
+        total_pages = max(1, (len(self.alts) - 1) // self.per_page + 1)
+        e.set_footer(text=f"Page {self.page + 1}/{total_pages}")
+        
+        return e
+    
+    @discord.ui.button(label="◀️", style=discord.ButtonStyle.secondary, row=0)
+    async def prev_page(self, i, b):
+        if self.page > 0:
+            self.page -= 1
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="▶️", style=discord.ButtonStyle.secondary, row=0)
+    async def next_page(self, i, b):
+        max_page = max(0, (len(self.alts) - 1) // self.per_page)
+        if self.page < max_page:
+            self.page += 1
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="🗑️ Effacer historique", style=discord.ButtonStyle.danger, row=1)
+    async def clear_history(self, i, b):
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute('DELETE FROM alt_accounts WHERE guild_id = ?', (self.g.id,))
+                await db.commit()
+            await i.response.send_message("✅ Historique effacé", ephemeral=True)
+            v = AltConfigPanel(self.u, self.g)
+            await i.message.edit(embed=await v.embed(), view=v)
+        except Exception as ex:
+            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = AltConfigPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 class SuspectScanPanel(View):
@@ -6377,7 +7148,14 @@ class TempVoicePanel(View):
         voice_cfg = c.get('temp_voice_config', {})
         
         e = discord.Embed(title="🔊 Vocaux Temporaires", color=0x9B59B6)
-        e.description = "Créez un salon vocal qui génère des vocaux personnalisés."
+        e.description = (
+            "Créez un salon vocal qui génère des vocaux personnalisés.\n\n"
+            "**Configuration automatique :**\n"
+            "✅ Détection vocale activée (pas de push-to-talk)\n"
+            "✅ Stream autorisé pour tous\n"
+            "❌ Écriture bloquée (sauf propriétaire)\n"
+            "🗑️ Suppression auto si vide"
+        )
         
         # État
         enabled = voice_cfg.get('enabled', False)
@@ -6410,6 +7188,10 @@ class TempVoicePanel(View):
             perm_list.append("👢 Expulser")
         
         e.add_field(name="👑 Permissions Propriétaire", value=" • ".join(perm_list) if perm_list else "*Aucune*", inline=False)
+        
+        # Vocaux actifs
+        active_count = len([ch for ch in temp_voice_channels.keys() if self.g.get_channel(ch)])
+        e.add_field(name="📊 Vocaux actifs", value=str(active_count), inline=True)
         
         e.set_footer(text="💡 Les membres rejoignent le hub pour créer leur vocal")
         return e
@@ -6656,7 +7438,7 @@ class CommandChannelsPanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = MiniGamesPanel(self.u, self.g)
+        v = CommandsPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 class PaginatedChannelSelectForCmd(View):
@@ -9532,6 +10314,29 @@ async def sync_cmd(i: discord.Interaction):
         await i.followup.send(f"❌ Erreur: {ex}", ephemeral=True)
 
 @bot.event
+async def on_member_ban(guild, user):
+    """Sauvegarde les informations du membre banni pour détection de comptes secondaires"""
+    try:
+        # Récupérer le hash de l'avatar
+        avatar_hash = str(user.avatar.key) if user.avatar else "default"
+        
+        # Essayer de récupérer la raison du ban
+        reason = "Non spécifiée"
+        try:
+            ban_entry = await guild.fetch_ban(user)
+            if ban_entry.reason:
+                reason = ban_entry.reason
+        except:
+            pass
+        
+        # Sauvegarder les infos du ban
+        await save_ban_info(guild.id, user.id, user.name, avatar_hash, reason)
+        print(f"[BAN] Sauvegardé: {user.name} ({user.id}) sur {guild.name}")
+        
+    except Exception as ex:
+        print(f"[BAN] Erreur sauvegarde: {ex}")
+
+@bot.event
 async def on_member_remove(m):
     try:
         async with aiosqlite.connect(DB_PATH) as db:
@@ -9635,6 +10440,57 @@ async def on_member_join(m):
             if age < days:
                 await send_log(m.guild, 'anti_newaccount', m, None, "Compte trop récent", f"Âge: {age} jour(s)")
                 await m.kick(reason=f"Compte trop récent ({age} jours)")
+                return  # Ne pas continuer
+        
+        # ═══════════════ ANTI-ALT (Comptes Secondaires) ═══════════════
+        # Toujours sauvegarder le fingerprint du nouveau membre
+        await save_user_fingerprint(m.guild.id, m)
+        
+        if c.get('anti_alt'):
+            alt_cfg = c.get('alt_config', {})
+            auto_action = alt_cfg.get('auto_action', False)
+            min_confidence = alt_cfg.get('min_confidence', 70)
+            action = c.get('alt_action', 'kick')
+            
+            # Détecter si c'est un compte secondaire
+            is_alt, confidence, main_id, reasons = await detect_alt_account(m.guild, m)
+            
+            if is_alt and confidence >= min_confidence:
+                # Envoyer le log
+                main_member = m.guild.get_member(main_id)
+                main_txt = f"{main_member.name} ({main_id})" if main_member else f"ID: {main_id} (banni/parti)"
+                
+                log_ch = m.guild.get_channel(c.get('log_anti_alt', 0))
+                if log_ch:
+                    e = discord.Embed(
+                        title="👥 COMPTE SECONDAIRE DÉTECTÉ !",
+                        description=f"**Compte secondaire:** {m.mention} (`{m.id}`)\n**Compte principal:** {main_txt}\n**Confiance:** {confidence}%",
+                        color=0xE74C3C
+                    )
+                    e.add_field(name="📋 Raisons", value="\n".join([f"• {r}" for r in reasons[:5]]), inline=False)
+                    e.add_field(name="⚡ Action auto", value="✅ Activée" if auto_action else "❌ Désactivée", inline=True)
+                    e.set_thumbnail(url=m.display_avatar.url if m.display_avatar else None)
+                    e.timestamp = now()
+                    await log_ch.send(embed=e)
+                
+                # Appliquer l'action automatique si activée
+                if auto_action:
+                    reason = f"Compte secondaire détecté (confiance: {confidence}%, principal: {main_id})"
+                    try:
+                        if action == 'ban':
+                            await m.ban(reason=reason)
+                        elif action == 'kick':
+                            await m.kick(reason=reason)
+                        elif action == 'mute':
+                            await m.timeout(timedelta(hours=24), reason=reason)
+                        
+                        await update_alt_status(m.guild.id, m.id, 'actioned', action)
+                        await send_log(m.guild, 'anti_alt', m, None, "Compte secondaire", f"Confiance: {confidence}%, Action: {action.upper()}")
+                    except Exception as ex:
+                        print(f"[ALT] Erreur action: {ex}")
+                    
+                    return  # Ne pas continuer
+                    
     except Exception as ex:
         print(f"Erreur on_member_join: {ex}")
 
@@ -11900,17 +12756,35 @@ async def on_voice_state_update(member, before, after):
                 if category:
                     channel_name = default_name.replace('{user}', member.display_name)[:50]
                     
-                    # Permissions du propriétaire
+                    # Permissions pour TOUS les utilisateurs
+                    # use_voice_activation = True permet d'utiliser la détection vocale (pas push-to-talk)
+                    # send_messages = False bloque l'écriture pour TOUT LE MONDE
                     overwrites = {
-                        member.guild.default_role: discord.PermissionOverwrite(connect=True, speak=True),
+                        member.guild.default_role: discord.PermissionOverwrite(
+                            connect=True,
+                            speak=True,
+                            use_voice_activation=True,  # ✅ Détection vocale activée (pas de push-to-talk obligatoire)
+                            stream=True,
+                            send_messages=False,  # ❌ Pas d'écriture dans le chat du vocal
+                            read_messages=True
+                        ),
                         member: discord.PermissionOverwrite(
-                            connect=True, speak=True, stream=True,
+                            connect=True,
+                            speak=True,
+                            use_voice_activation=True,  # ✅ Détection vocale
+                            stream=True,
+                            send_messages=False,  # ❌ Même le propriétaire ne peut pas écrire
+                            read_messages=True,
                             mute_members=perms.get('can_mute', True),
                             move_members=perms.get('can_kick', True),
                             manage_channels=perms.get('can_rename', True) or perms.get('can_limit', True)
                         ),
                         member.guild.me: discord.PermissionOverwrite(
-                            connect=True, speak=True, manage_channels=True, move_members=True
+                            connect=True,
+                            speak=True,
+                            manage_channels=True,
+                            move_members=True,
+                            send_messages=True  # Le bot peut envoyer des messages si besoin
                         )
                     }
                     
@@ -11926,15 +12800,27 @@ async def on_voice_state_update(member, before, after):
                     }
                     
                     await member.move_to(new_channel)
+                    print(f"[TEMP VOICE] Créé vocal '{channel_name}' pour {member.display_name}")
             
-            # Si l'utilisateur quitte un vocal temporaire vide → supprimer
+            # Si l'utilisateur quitte un vocal temporaire → vérifier si vide et supprimer
             if before.channel and before.channel.id in temp_voice_channels:
-                if len(before.channel.members) == 0:
-                    try:
-                        await before.channel.delete(reason="Vocal temporaire vide")
+                # Vérifier après un petit délai (pour éviter les bugs de timing)
+                await asyncio.sleep(1)
+                
+                # Re-récupérer le salon pour avoir le nombre de membres à jour
+                try:
+                    channel = member.guild.get_channel(before.channel.id)
+                    if channel and len(channel.members) == 0:
+                        await channel.delete(reason="Vocal temporaire vide")
                         del temp_voice_channels[before.channel.id]
-                    except:
-                        pass
+                        print(f"[TEMP VOICE] Supprimé vocal vide: {before.channel.name}")
+                except discord.NotFound:
+                    # Salon déjà supprimé
+                    if before.channel.id in temp_voice_channels:
+                        del temp_voice_channels[before.channel.id]
+                except Exception as ex:
+                    print(f"[TEMP VOICE] Erreur suppression: {ex}")
+                    
     except Exception as ex:
         print(f"Erreur temp voice: {ex}")
     
