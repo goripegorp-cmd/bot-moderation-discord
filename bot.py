@@ -207,40 +207,6 @@ class SafeView(View):
         return True
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                           🛡️ PATCH GLOBAL POUR LES VIEWS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# Sauvegarder la méthode originale
-View._original_dispatch = View._dispatch
-
-async def _patched_dispatch(self, item, interaction):
-    """Dispatch patché qui gère les erreurs silencieusement"""
-    try:
-        # Appeler la méthode originale
-        await View._original_dispatch(self, item, interaction)
-    except discord.errors.InteractionResponded:
-        pass  # Déjà répondu, ignorer
-    except discord.errors.NotFound:
-        pass  # Interaction expirée, ignorer
-    except discord.errors.HTTPException as e:
-        if e.code == 10062:  # Unknown interaction
-            pass
-        else:
-            print(f"[VIEW DISPATCH] HTTP Error: {e}")
-    except Exception as ex:
-        print(f"[VIEW DISPATCH] {self.__class__.__name__}: {ex}")
-        # Essayer de répondre avec une erreur
-        try:
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌ Erreur, réessayez.", ephemeral=True)
-        except:
-            pass
-
-# Appliquer le patch
-View._dispatch = _patched_dispatch
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 #                           🔒 SYSTÈME DE SÉCURITÉ
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -15293,4 +15259,3 @@ if __name__ == "__main__":
     print("🎙️ Vocaux temporaires multi-hubs")
     print("🛡️ Anti-badwords amélioré (mots entiers)")
     bot.run(TOKEN)
-
