@@ -29,6 +29,218 @@ spam_tracker = {}
 voice_join_tracker = {}  # {(guild_id, user_id): datetime} - pour tracker le temps en vocal
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#                           ⚡ SYSTÈME DE CACHE OPTIMISÉ
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ConfigCache:
+    """Cache LRU avec TTL pour les configurations - évite les appels DB répétitifs"""
+    
+    def __init__(self, max_size=100, ttl_seconds=30):
+        self._cache = {}  # {guild_id: (data, timestamp)}
+        self._max_size = max_size
+        self._ttl = ttl_seconds
+        self._lock = asyncio.Lock()
+    
+    def get(self, guild_id):
+        """Récupère depuis le cache si valide"""
+        if guild_id in self._cache:
+            data, ts = self._cache[guild_id]
+            if time.time() - ts < self._ttl:
+                return data
+            else:
+                del self._cache[guild_id]
+        return None
+    
+    def set(self, guild_id, data):
+        """Stocke dans le cache"""
+        # Nettoyage LRU si trop gros
+        if len(self._cache) >= self._max_size:
+            # Supprimer les plus anciens
+            oldest = sorted(self._cache.items(), key=lambda x: x[1][1])[:self._max_size // 4]
+            for gid, _ in oldest:
+                del self._cache[gid]
+        
+        self._cache[guild_id] = (data.copy(), time.time())
+    
+    def invalidate(self, guild_id):
+        """Invalide le cache pour un serveur"""
+        if guild_id in self._cache:
+            del self._cache[guild_id]
+    
+    def clear(self):
+        """Vide tout le cache"""
+        self._cache.clear()
+
+# Instance globale du cache
+_config_cache = ConfigCache(max_size=200, ttl_seconds=30)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           ⚡ SYSTÈME D'INTERACTION OPTIMISÉ
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def safe_callback(func):
+    """Décorateur pour protéger les callbacks d'interaction"""
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except discord.errors.InteractionResponded:
+            pass  # Déjà répondu
+        except discord.errors.NotFound:
+            pass  # Interaction expirée
+        except discord.errors.HTTPException as e:
+            if e.code == 10062:  # Unknown interaction
+                pass
+            else:
+                print(f"[CALLBACK HTTP ERROR] {func.__name__}: {e}")
+        except Exception as ex:
+            print(f"[CALLBACK ERROR] {func.__name__}: {ex}")
+            # Essayer de répondre avec une erreur
+            try:
+                i = args[1] if len(args) > 1 else kwargs.get('i') or kwargs.get('interaction')
+                if i and not i.response.is_done():
+                    await i.response.send_message("❌ Erreur, réessayez.", ephemeral=True)
+            except:
+                pass
+    return wrapper
+
+async def safe_respond(interaction, **kwargs):
+    """Répond à une interaction de manière sécurisée - évite les erreurs de timeout"""
+    try:
+        if interaction.response.is_done():
+            try:
+                await interaction.edit_original_response(**kwargs)
+            except:
+                try:
+                    await interaction.followup.send(**kwargs, ephemeral=True)
+                except:
+                    pass
+        else:
+            await interaction.response.edit_message(**kwargs)
+    except discord.errors.InteractionResponded:
+        try:
+            await interaction.edit_original_response(**kwargs)
+        except:
+            pass
+    except discord.errors.NotFound:
+        pass
+    except discord.errors.HTTPException as e:
+        if e.code != 10062:
+            print(f"[SAFE_RESPOND] HTTP Error: {e}")
+    except Exception as ex:
+        print(f"[SAFE_RESPOND] Erreur: {ex}")
+
+async def safe_defer(interaction, ephemeral=False):
+    """Defer une interaction de manière sécurisée"""
+    try:
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=ephemeral)
+            return True
+    except:
+        pass
+    return False
+
+async def safe_send_message(interaction, content=None, embed=None, view=None, ephemeral=True):
+    """Envoie un message de manière sécurisée"""
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(content=content, embed=embed, view=view, ephemeral=ephemeral)
+        else:
+            await interaction.response.send_message(content=content, embed=embed, view=view, ephemeral=ephemeral)
+    except:
+        pass
+
+async def safe_edit(interaction, **kwargs):
+    """Modifie un message de manière sécurisée"""
+    try:
+        if interaction.response.is_done():
+            await interaction.edit_original_response(**kwargs)
+        else:
+            await interaction.response.edit_message(**kwargs)
+    except discord.errors.InteractionResponded:
+        try:
+            await interaction.edit_original_response(**kwargs)
+        except:
+            pass
+    except:
+        pass
+
+class SafeView(View):
+    """View optimisée avec gestion d'erreur automatique"""
+    
+    def __init__(self, user, guild, timeout=300):
+        super().__init__(timeout=timeout)
+        self.u = user
+        self.g = guild
+        self._error_count = 0
+    
+    async def on_error(self, interaction, error, item):
+        """Gestion centralisée des erreurs"""
+        self._error_count += 1
+        print(f"[VIEW ERROR] {self.__class__.__name__}: {error}")
+        
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "❌ Une erreur est survenue. Réessayez.",
+                    ephemeral=True
+                )
+        except:
+            pass
+    
+    async def on_timeout(self):
+        """Nettoyage lors du timeout"""
+        pass
+    
+    async def interaction_check(self, interaction) -> bool:
+        """Vérifie que l'utilisateur est autorisé"""
+        # Seul l'utilisateur qui a ouvert le menu peut interagir
+        if interaction.user.id != self.u.id:
+            try:
+                await interaction.response.send_message(
+                    "❌ Vous ne pouvez pas utiliser ce menu.",
+                    ephemeral=True
+                )
+            except:
+                pass
+            return False
+        return True
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           🛡️ PATCH GLOBAL POUR LES VIEWS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Sauvegarder la méthode originale
+View._original_dispatch = View._dispatch
+
+async def _patched_dispatch(self, item, interaction):
+    """Dispatch patché qui gère les erreurs silencieusement"""
+    try:
+        # Appeler la méthode originale
+        await View._original_dispatch(self, item, interaction)
+    except discord.errors.InteractionResponded:
+        pass  # Déjà répondu, ignorer
+    except discord.errors.NotFound:
+        pass  # Interaction expirée, ignorer
+    except discord.errors.HTTPException as e:
+        if e.code == 10062:  # Unknown interaction
+            pass
+        else:
+            print(f"[VIEW DISPATCH] HTTP Error: {e}")
+    except Exception as ex:
+        print(f"[VIEW DISPATCH] {self.__class__.__name__}: {ex}")
+        # Essayer de répondre avec une erreur
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message("❌ Erreur, réessayez.", ephemeral=True)
+        except:
+            pass
+
+# Appliquer le patch
+View._dispatch = _patched_dispatch
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #                           🔒 SYSTÈME DE SÉCURITÉ
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -592,12 +804,22 @@ async def db_set(gid, key, val):
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('INSERT INTO guild_config(guild_id, data) VALUES(?,?) ON CONFLICT(guild_id) DO UPDATE SET data=?', (gid, jd, jd))
             await db.commit()
+        
+        # Invalider le cache après modification
+        _config_cache.invalidate(gid)
         return True
     except Exception as ex:
         print(f"[DB SET ERROR] {ex}")
         return False
 
 async def cfg(gid):
+    """Récupère la configuration avec cache pour optimiser les performances"""
+    # Vérifier le cache d'abord
+    cached = _config_cache.get(gid)
+    if cached is not None:
+        return cached
+    
+    # Si pas en cache, récupérer de la DB
     data = await db_get(gid)
     defaults = {
         'anti_link': 0, 'anti_invite': 0, 'anti_image': 0, 'anti_phishing': 1, 'anti_scam': 1,
@@ -613,13 +835,16 @@ async def cfg(gid):
         'log_anti_newaccount': 0, 'log_anti_raid': 0, 'log_anti_compromised': 0, 'log_anti_qrcode': 0,
         'log_anti_alt': 0,
         'raid_config': {'join_threshold': 10, 'join_interval': 10, 'min_account_age': 7, 'auto_mode': True, 'block_invites': True, 'action': 'kick'},
-        'alt_config': {'auto_action': False, 'min_confidence': 70},  # Config anti-alt
+        'alt_config': {'auto_action': False, 'min_confidence': 70},
         'channel_configs': {},
         'ticket_staff': 0, 'ticket_log': 0, 'ticket_panels': {},
         'mod_warn_role': 0, 'mod_mute_role': 0, 'mod_infractions_role': 0, 'mod_log_channel': 0
     }
     for k, v in defaults.items():
         if k not in data: data[k] = v
+    
+    # Mettre en cache
+    _config_cache.set(gid, data)
     return data
 
 async def is_immune(m, key, channel=None):
@@ -8210,71 +8435,181 @@ class TempVoiceAddHubCategory(View):
         )
 
 class TempVoiceAddHubRole(View):
-    """Étape 3: Sélection du rôle requis (optionnel)"""
-    def __init__(self, u, g, hub_id, cat_id):
-        super().__init__(timeout=120)
+    """Étape 3: Sélection du rôle requis avec pagination complète"""
+    def __init__(self, u, g, hub_id, cat_id, page=0):
+        super().__init__(timeout=300)
         self.u = u
         self.g = g
         self.hub_id = hub_id
         self.cat_id = cat_id
+        self.page = page
         
-        # Filtrer les rôles (exclure @everyone et les rôles de bot)
-        roles = [r for r in g.roles if not r.is_default() and not r.managed][:24]
-        opts = [discord.SelectOption(label="🔓 Public (tous)", value="0", emoji="✅", description="Tout le monde peut voir et rejoindre")]
-        for r in roles:
-            opts.append(discord.SelectOption(label=f"🔒 {r.name}"[:25], value=str(r.id), description="Privé - réservé à ce rôle"))
+        # Filtrer les rôles (exclure @everyone et les rôles de bot) - triés par position
+        self.all_roles = [r for r in sorted(g.roles, key=lambda x: x.position, reverse=True) if not r.is_default() and not r.managed]
+        self.per_page = 24  # Max 25 options par select, on garde 24 pour la marge
+        self.max_page = max(0, len(self.all_roles) // self.per_page)
         
+        self._build()
+    
+    def _build(self):
+        self.clear_items()
+        
+        # Calculer les rôles pour cette page
+        start = self.page * self.per_page
+        end = min(start + self.per_page, len(self.all_roles))
+        page_roles = self.all_roles[start:end]
+        
+        # Construire les options
+        opts = []
+        
+        # Option "Public" seulement sur la première page
+        if self.page == 0:
+            opts.append(discord.SelectOption(
+                label="🔓 Public (tous peuvent rejoindre)",
+                value="0",
+                description="Aucune restriction de rôle",
+                emoji="✅"
+            ))
+        
+        # Ajouter les rôles de cette page
+        for r in page_roles:
+            if len(opts) >= 25:
+                break
+            opts.append(discord.SelectOption(
+                label=r.name[:100],
+                value=str(r.id),
+                description=f"Réservé aux membres avec ce rôle",
+                emoji="🔒"
+            ))
+        
+        # Créer le select si on a des options
         if opts:
-            select = Select(placeholder="Choisir un rôle requis...", options=opts[:25])
-            select.callback = self.select_callback
+            select = Select(
+                placeholder=f"Sélectionner un rôle ({len(self.all_roles)} disponibles)...",
+                options=opts,
+                row=0
+            )
+            select.callback = self._on_select
             self.add_item(select)
+        
+        # Boutons de navigation si plusieurs pages
+        if self.max_page > 0:
+            # Bouton précédent
+            prev_btn = Button(label="◀️ Précédent", style=discord.ButtonStyle.primary, row=1, disabled=(self.page == 0))
+            prev_btn.callback = self._prev
+            self.add_item(prev_btn)
+            
+            # Indicateur de page
+            info_btn = Button(label=f"Page {self.page + 1}/{self.max_page + 1}", style=discord.ButtonStyle.secondary, row=1, disabled=True)
+            self.add_item(info_btn)
+            
+            # Bouton suivant
+            next_btn = Button(label="Suivant ▶️", style=discord.ButtonStyle.primary, row=1, disabled=(self.page >= self.max_page))
+            next_btn.callback = self._next
+            self.add_item(next_btn)
+        
+        # Bouton retour
+        back_btn = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+        back_btn.callback = self._back
+        self.add_item(back_btn)
     
-    async def select_callback(self, i):
-        role_id = int(i.data['values'][0])
+    async def _prev(self, i: discord.Interaction):
+        # Répondre IMMÉDIATEMENT pour éviter le timeout
+        try:
+            await i.response.defer()
+        except:
+            pass
         
-        # Sauvegarder le hub
-        c = await cfg(self.g.id)
-        voice_cfg = c.get('temp_voice_config', {})
-        hubs = voice_cfg.get('hubs', {})
+        if self.page > 0:
+            self.page -= 1
+            self._build()
         
-        hubs[str(self.hub_id)] = {
-            'category': self.cat_id,
-            'required_role': role_id,
-            'default_name': '🔊 Vocal de {user}'
-        }
-        
-        voice_cfg['hubs'] = hubs
-        await db_set(self.g.id, 'temp_voice_config', voice_cfg)
-        
-        # Confirmation
-        hub_ch = self.g.get_channel(self.hub_id)
-        cat = self.g.get_channel(self.cat_id)
-        role = self.g.get_role(role_id) if role_id else None
-        
-        if role:
-            visibility_txt = f"🔒 **PRIVÉ** - Réservé à @{role.name}\n*Les vocaux créés seront invisibles pour les autres*"
-        else:
-            visibility_txt = "🔓 **PUBLIC** - Tout le monde peut voir et rejoindre"
-        
-        v = TempVoicePanel(self.u, self.g)
-        await i.response.edit_message(
-            content=f"✅ **Hub ajouté avec succès !**\n\n🎤 Hub: **{hub_ch.name}**\n📁 Catégorie: **{cat.name}**\n{visibility_txt}",
-            embed=await v.embed(),
-            view=v
-        )
+        try:
+            await i.edit_original_response(view=self)
+        except:
+            pass
     
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
-    async def back(self, i, b):
-        v = TempVoiceAddHubCategory(self.u, self.g, self.hub_id)
-        hub_ch = self.g.get_channel(self.hub_id)
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="➕ Ajouter un Hub Vocal",
-                description=f"**Étape 2/3** - Choisissez la catégorie.\n\n🎤 Hub: **{hub_ch.name}**",
-                color=0x9B59B6
-            ),
-            view=v
-        )
+    async def _next(self, i: discord.Interaction):
+        try:
+            await i.response.defer()
+        except:
+            pass
+        
+        if self.page < self.max_page:
+            self.page += 1
+            self._build()
+        
+        try:
+            await i.edit_original_response(view=self)
+        except:
+            pass
+    
+    async def _back(self, i: discord.Interaction):
+        try:
+            await i.response.defer()
+        except:
+            pass
+        
+        try:
+            v = TempVoiceAddHubCategory(self.u, self.g, self.hub_id)
+            hub_ch = self.g.get_channel(self.hub_id)
+            await i.edit_original_response(
+                embed=discord.Embed(
+                    title="➕ Ajouter un Hub Vocal",
+                    description=f"**Étape 2/3** - Choisissez la catégorie.\n\n🎤 Hub: **{hub_ch.name if hub_ch else 'Inconnu'}**",
+                    color=0x9B59B6
+                ),
+                view=v
+            )
+        except Exception as ex:
+            print(f"[TempVoiceAddHubRole._back] {ex}")
+    
+    async def _on_select(self, i: discord.Interaction):
+        # Répondre immédiatement
+        try:
+            await i.response.defer()
+        except:
+            pass
+        
+        try:
+            role_id = int(i.data['values'][0])
+            
+            # Sauvegarder le hub
+            c = await cfg(self.g.id)
+            voice_cfg = c.get('temp_voice_config', {})
+            hubs = voice_cfg.get('hubs', {})
+            
+            hubs[str(self.hub_id)] = {
+                'category': self.cat_id,
+                'required_role': role_id,
+                'default_name': '🔊 Vocal de {user}'
+            }
+            
+            voice_cfg['hubs'] = hubs
+            await db_set(self.g.id, 'temp_voice_config', voice_cfg)
+            
+            # Confirmation
+            hub_ch = self.g.get_channel(self.hub_id)
+            cat = self.g.get_channel(self.cat_id)
+            role = self.g.get_role(role_id) if role_id else None
+            
+            if role:
+                visibility_txt = f"🔒 **PRIVÉ** - Réservé à @{role.name}\n*Les vocaux créés seront invisibles pour les autres*"
+            else:
+                visibility_txt = "🔓 **PUBLIC** - Tout le monde peut voir et rejoindre"
+            
+            v = TempVoicePanel(self.u, self.g)
+            await i.edit_original_response(
+                content=f"✅ **Hub ajouté avec succès !**\n\n🎤 Hub: **{hub_ch.name if hub_ch else 'Inconnu'}**\n📁 Catégorie: **{cat.name if cat else 'Inconnue'}**\n{visibility_txt}",
+                embed=await v.embed(),
+                view=v
+            )
+        except Exception as ex:
+            print(f"[TempVoiceAddHubRole._on_select] {ex}")
+            try:
+                await i.edit_original_response(content="❌ Une erreur est survenue. Réessayez.")
+            except:
+                pass
 
 class TempVoiceHubsListPanel(View):
     """Panel pour lister et gérer les hubs existants"""
@@ -8526,53 +8861,143 @@ class TempVoiceHubEditCategory(View):
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 class TempVoiceHubEditRole(View):
-    """Modifier le rôle requis d'un hub"""
-    def __init__(self, u, g, hub_id):
-        super().__init__(timeout=120)
+    """Modifier le rôle requis d'un hub avec pagination complète"""
+    def __init__(self, u, g, hub_id, page=0):
+        super().__init__(timeout=300)
         self.u = u
         self.g = g
         self.hub_id = hub_id
+        self.page = page
         
-        roles = [r for r in g.roles if not r.is_default() and not r.managed][:24]
-        opts = [discord.SelectOption(label="🔓 Public (tous)", value="0", emoji="✅", description="Tout le monde peut voir et rejoindre")]
-        for r in roles:
-            opts.append(discord.SelectOption(label=f"🔒 {r.name}"[:25], value=str(r.id), description="Privé - réservé à ce rôle"))
+        # Filtrer les rôles
+        self.all_roles = [r for r in sorted(g.roles, key=lambda x: x.position, reverse=True) if not r.is_default() and not r.managed]
+        self.per_page = 24
+        self.max_page = max(0, len(self.all_roles) // self.per_page)
+        
+        self._build()
+    
+    def _build(self):
+        self.clear_items()
+        
+        start = self.page * self.per_page
+        end = min(start + self.per_page, len(self.all_roles))
+        page_roles = self.all_roles[start:end]
+        
+        opts = []
+        if self.page == 0:
+            opts.append(discord.SelectOption(
+                label="🔓 Public (tous peuvent rejoindre)",
+                value="0",
+                description="Aucune restriction de rôle",
+                emoji="✅"
+            ))
+        
+        for r in page_roles:
+            if len(opts) >= 25:
+                break
+            opts.append(discord.SelectOption(
+                label=r.name[:100],
+                value=str(r.id),
+                description="Réservé aux membres avec ce rôle",
+                emoji="🔒"
+            ))
         
         if opts:
-            select = Select(placeholder="Choisir un rôle...", options=opts[:25])
-            select.callback = self.select_callback
+            select = Select(
+                placeholder=f"Sélectionner un rôle ({len(self.all_roles)} disponibles)...",
+                options=opts,
+                row=0
+            )
+            select.callback = self._on_select
             self.add_item(select)
+        
+        if self.max_page > 0:
+            prev_btn = Button(label="◀️ Précédent", style=discord.ButtonStyle.primary, row=1, disabled=(self.page == 0))
+            prev_btn.callback = self._prev
+            self.add_item(prev_btn)
+            
+            info_btn = Button(label=f"Page {self.page + 1}/{self.max_page + 1}", style=discord.ButtonStyle.secondary, row=1, disabled=True)
+            self.add_item(info_btn)
+            
+            next_btn = Button(label="Suivant ▶️", style=discord.ButtonStyle.primary, row=1, disabled=(self.page >= self.max_page))
+            next_btn.callback = self._next
+            self.add_item(next_btn)
+        
+        back_btn = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+        back_btn.callback = self._back
+        self.add_item(back_btn)
     
-    async def select_callback(self, i):
-        role_id = int(i.data['values'][0])
+    async def _prev(self, i: discord.Interaction):
+        try:
+            await i.response.defer()
+        except:
+            pass
         
-        c = await cfg(self.g.id)
-        voice_cfg = c.get('temp_voice_config', {})
-        hubs = voice_cfg.get('hubs', {})
+        if self.page > 0:
+            self.page -= 1
+            self._build()
         
-        if str(self.hub_id) in hubs:
-            hubs[str(self.hub_id)]['required_role'] = role_id
-            voice_cfg['hubs'] = hubs
-            await db_set(self.g.id, 'temp_voice_config', voice_cfg)
-        
-        role = self.g.get_role(role_id) if role_id else None
-        
-        if role:
-            msg = f"✅ **Rôle changé: @{role.name}**\n🔒 Les vocaux seront invisibles pour les membres sans ce rôle"
-        else:
-            msg = f"✅ **Mode PUBLIC activé**\n🔓 Tout le monde peut voir et rejoindre les vocaux créés"
-        
-        v = TempVoiceHubEditPanel(self.u, self.g, self.hub_id)
-        await i.response.edit_message(
-            content=msg,
-            embed=await v.embed(),
-            view=v
-        )
+        try:
+            await i.edit_original_response(view=self)
+        except:
+            pass
     
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
-    async def back(self, i, b):
-        v = TempVoiceHubEditPanel(self.u, self.g, self.hub_id)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+    async def _next(self, i: discord.Interaction):
+        try:
+            await i.response.defer()
+        except:
+            pass
+        
+        if self.page < self.max_page:
+            self.page += 1
+            self._build()
+        
+        try:
+            await i.edit_original_response(view=self)
+        except:
+            pass
+    
+    async def _back(self, i: discord.Interaction):
+        try:
+            await i.response.defer()
+        except:
+            pass
+        
+        try:
+            v = TempVoiceHubEditPanel(self.u, self.g, self.hub_id)
+            await i.edit_original_response(embed=await v.embed(), view=v)
+        except:
+            pass
+    
+    async def _on_select(self, i: discord.Interaction):
+        try:
+            await i.response.defer()
+        except:
+            pass
+        
+        try:
+            role_id = int(i.data['values'][0])
+            
+            c = await cfg(self.g.id)
+            voice_cfg = c.get('temp_voice_config', {})
+            hubs = voice_cfg.get('hubs', {})
+            
+            if str(self.hub_id) in hubs:
+                hubs[str(self.hub_id)]['required_role'] = role_id
+                voice_cfg['hubs'] = hubs
+                await db_set(self.g.id, 'temp_voice_config', voice_cfg)
+            
+            role = self.g.get_role(role_id) if role_id else None
+            
+            if role:
+                msg = f"✅ **Rôle changé: @{role.name}**\n🔒 Les vocaux seront invisibles pour les membres sans ce rôle"
+            else:
+                msg = f"✅ **Mode PUBLIC activé**\n🔓 Tout le monde peut voir et rejoindre les vocaux créés"
+            
+            v = TempVoiceHubEditPanel(self.u, self.g, self.hub_id)
+            await i.edit_original_response(content=msg, embed=await v.embed(), view=v)
+        except Exception as ex:
+            print(f"[TempVoiceHubEditRole._on_select] {ex}")
 
 class TempVoiceHubNameModal(Modal, title="📝 Nom par défaut"):
     name_input = TextInput(
@@ -9214,9 +9639,6 @@ async def handle_auto_help(message):
 #                           💰 FONCTIONS ÉCONOMIE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-# Verrous pour éviter les exploits de double-claim
-active_locks = set()
-
 async def get_user_economy(guild_id, user_id):
     """Récupère les données économiques d'un utilisateur"""
     async with aiosqlite.connect(DB_PATH) as db:
@@ -9291,123 +9713,6 @@ async def add_coins(guild_id, user_id, amount):
             row = await cursor.fetchone()
             return row[0] if row else 0
 
-async def claim_daily(guild_id, user_id, amount):
-    """Réclame le daily de manière atomique avec verrou"""
-    lock_key = f"daily_{guild_id}_{user_id}"
-    
-    # Verrou en mémoire pour éviter les double-claims
-    if lock_key in active_locks:
-        return (False, 0, 1)  # Déjà en cours
-    
-    active_locks.add(lock_key)
-    
-    try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            # Activer le mode WAL pour de meilleures performances concurrentes
-            await db.execute('PRAGMA journal_mode=WAL')
-            
-            # S'assurer que l'utilisateur existe
-            await db.execute(
-                'INSERT OR IGNORE INTO economy (guild_id, user_id, coins, bank, xp, level) VALUES (?, ?, 0, 0, 0, 1)',
-                (guild_id, user_id)
-            )
-            
-            # Vérifier et mettre à jour en une seule transaction
-            async with db.execute(
-                'SELECT coins, last_daily FROM economy WHERE guild_id=? AND user_id=?',
-                (guild_id, user_id)
-            ) as cursor:
-                row = await cursor.fetchone()
-                if not row:
-                    return (False, 0, 0)
-                
-                current_coins, last_daily = row
-                current_coins = current_coins or 0
-                
-                # Vérifier si 24h sont passées
-                if last_daily:
-                    try:
-                        last = datetime.fromisoformat(str(last_daily))
-                        if last.tzinfo:
-                            last = last.replace(tzinfo=None)
-                        elapsed = (now() - last).total_seconds()
-                        if elapsed < 86400:
-                            return (False, current_coins, 86400 - elapsed)
-                    except Exception as ex:
-                        print(f"Erreur parsing date daily: {ex}")
-                
-                # Donner la récompense immédiatement
-                new_coins = current_coins + amount
-                current_time = now().isoformat()
-                
-                await db.execute(
-                    'UPDATE economy SET coins=?, last_daily=? WHERE guild_id=? AND user_id=?',
-                    (new_coins, current_time, guild_id, user_id)
-                )
-                await db.commit()
-                
-                return (True, new_coins, 0)
-    finally:
-        active_locks.discard(lock_key)
-
-async def claim_work(guild_id, user_id, amount, cooldown_seconds):
-    """Réclame le work de manière atomique avec verrou"""
-    lock_key = f"work_{guild_id}_{user_id}"
-    
-    # Verrou en mémoire pour éviter les double-claims
-    if lock_key in active_locks:
-        return (False, 0, 1)  # Déjà en cours
-    
-    active_locks.add(lock_key)
-    
-    try:
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute('PRAGMA journal_mode=WAL')
-            
-            # S'assurer que l'utilisateur existe
-            await db.execute(
-                'INSERT OR IGNORE INTO economy (guild_id, user_id, coins, bank, xp, level) VALUES (?, ?, 0, 0, 0, 1)',
-                (guild_id, user_id)
-            )
-            
-            # Vérifier le cooldown
-            async with db.execute(
-                'SELECT coins, last_work FROM economy WHERE guild_id=? AND user_id=?',
-                (guild_id, user_id)
-            ) as cursor:
-                row = await cursor.fetchone()
-                if not row:
-                    return (False, 0, 0)
-                
-                current_coins, last_work = row
-                current_coins = current_coins or 0
-                
-                # Vérifier le cooldown
-                if last_work:
-                    try:
-                        last = datetime.fromisoformat(str(last_work))
-                        if last.tzinfo:
-                            last = last.replace(tzinfo=None)
-                        elapsed = (now() - last).total_seconds()
-                        if elapsed < cooldown_seconds:
-                            return (False, current_coins, cooldown_seconds - elapsed)
-                    except Exception as ex:
-                        print(f"Erreur parsing date work: {ex}")
-                
-                # Donner la récompense
-                new_coins = current_coins + amount
-                current_time = now().isoformat()
-                
-                await db.execute(
-                    'UPDATE economy SET coins=?, last_work=? WHERE guild_id=? AND user_id=?',
-                    (new_coins, current_time, guild_id, user_id)
-                )
-                await db.commit()
-                
-                return (True, new_coins, 0)
-    finally:
-        active_locks.discard(lock_key)
-
 async def add_xp(guild_id, user_id, amount, channel=None):
     """Ajoute de l'XP et vérifie le level up"""
     eco = await get_user_economy(guild_id, user_id)
@@ -9467,35 +9772,6 @@ async def check_command_channel(interaction, cmd_key):
                 ephemeral=True
             )
             return False
-    return True
-
-async def check_games_permission(interaction):
-    """Vérifie si l'utilisateur peut jouer aux jeux"""
-    c = await cfg(interaction.guild.id)
-    games_cfg = c.get('minigames_config', {})
-    
-    # Vérifier le salon
-    games_ch = games_cfg.get('games_channel', 0)
-    if games_ch and games_ch != interaction.channel.id:
-        ch = interaction.guild.get_channel(games_ch)
-        if ch:
-            await interaction.response.send_message(
-                f"❌ Les jeux ne sont utilisables que dans {ch.mention}",
-                ephemeral=True
-            )
-            return False
-    
-    # Vérifier le rôle
-    games_role = games_cfg.get('games_role', 0)
-    if games_role:
-        role = interaction.guild.get_role(games_role)
-        if role and role not in interaction.user.roles:
-            await interaction.response.send_message(
-                f"❌ Vous devez avoir le rôle {role.mention} pour jouer",
-                ephemeral=True
-            )
-            return False
-    
     return True
 
 class GiveawayListPanel(View):
@@ -11514,6 +11790,37 @@ async def update_realsy_activity(guild_id, user_id):
                     await db.commit()
     except:
         pass
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           🛡️ GESTIONNAIRE D'ERREURS GLOBAL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error):
+    """Gestionnaire d'erreur global pour les commandes slash - évite 'échec de l'interaction'"""
+    try:
+        # Log l'erreur
+        print(f"[APP CMD ERROR] {interaction.command.name if interaction.command else 'Unknown'}: {error}")
+        
+        # Essayer de répondre
+        error_msg = "❌ Une erreur est survenue. Réessayez."
+        
+        if isinstance(error, discord.app_commands.errors.MissingPermissions):
+            error_msg = "❌ Vous n'avez pas les permissions nécessaires."
+        elif isinstance(error, discord.app_commands.errors.CommandOnCooldown):
+            error_msg = f"⏱️ Commande en cooldown. Réessayez dans {error.retry_after:.0f}s"
+        elif isinstance(error, discord.app_commands.errors.MissingRole):
+            error_msg = "❌ Vous n'avez pas le rôle requis."
+        
+        if not interaction.response.is_done():
+            await interaction.response.send_message(error_msg, ephemeral=True)
+        else:
+            try:
+                await interaction.followup.send(error_msg, ephemeral=True)
+            except:
+                pass
+    except Exception as ex:
+        print(f"[APP CMD ERROR HANDLER] {ex}")
 
 @bot.event
 async def on_ready():
@@ -14713,89 +15020,6 @@ async def before_check_scheduled_messages():
     await bot.wait_until_ready()
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#                           💰 COMMANDES ÉCONOMIE & MINI-JEUX
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@bot.tree.command(name="daily", description="💵 Récupérer votre récompense quotidienne")
-async def daily_cmd(i: discord.Interaction):
-    # Vérifier le salon
-    if not await check_command_channel(i, 'daily'):
-        return
-    
-    # Vérifier si l'économie est activée
-    c = await cfg(i.guild.id)
-    games_cfg = c.get('minigames_config', {})
-    if not games_cfg.get('economy_enabled', False):
-        return await i.response.send_message("❌ L'économie n'est pas activée sur ce serveur", ephemeral=True)
-    
-    # Réclamer le daily de manière atomique
-    daily_amount = games_cfg.get('daily_amount', 100)
-    success, new_coins, remaining = await claim_daily(i.guild.id, i.user.id, daily_amount)
-    
-    if not success:
-        hours = int(remaining // 3600)
-        mins = int((remaining % 3600) // 60)
-        return await i.response.send_message(
-            f"⏱️ Revenez dans **{hours}h {mins}min** pour votre prochain daily !",
-            ephemeral=True
-        )
-    
-    e = discord.Embed(title="💵 Récompense Quotidienne", color=0xF1C40F)
-    e.description = f"Vous avez reçu **{daily_amount}** 🪙 coins !"
-    e.add_field(name="💰 Total", value=f"**{new_coins}** coins", inline=True)
-    e.set_footer(text="Revenez demain pour une nouvelle récompense !")
-    e.set_thumbnail(url=i.user.display_avatar.url)
-    
-    await i.response.send_message(embed=e)
-
-@bot.tree.command(name="work", description="💼 Travailler pour gagner des coins")
-async def work_cmd(i: discord.Interaction):
-    # Vérifier le salon
-    if not await check_command_channel(i, 'work'):
-        return
-    
-    # Vérifier si l'économie est activée
-    c = await cfg(i.guild.id)
-    games_cfg = c.get('minigames_config', {})
-    if not games_cfg.get('economy_enabled', False):
-        return await i.response.send_message("❌ L'économie n'est pas activée sur ce serveur", ephemeral=True)
-    
-    # Calculer les gains
-    work_min = games_cfg.get('work_min', 50)
-    work_max = games_cfg.get('work_max', 150)
-    work_cooldown = games_cfg.get('work_cooldown', 3600)
-    earnings = random.randint(work_min, work_max)
-    
-    # Réclamer le work de manière atomique
-    success, new_coins, remaining = await claim_work(i.guild.id, i.user.id, earnings, work_cooldown)
-    
-    if not success:
-        mins = int(remaining // 60)
-        secs = int(remaining % 60)
-        return await i.response.send_message(
-            f"⏱️ Vous pouvez retravailler dans **{mins}min {secs}s**",
-            ephemeral=True
-        )
-    
-    # Messages aléatoires
-    jobs = [
-        f"💻 Vous avez codé un site web et gagné **{earnings}** coins !",
-        f"🍕 Vous avez livré des pizzas et gagné **{earnings}** coins !",
-        f"🎨 Vous avez vendu une œuvre d'art et gagné **{earnings}** coins !",
-        f"🎮 Vous avez streamé et gagné **{earnings}** coins !",
-        f"📦 Vous avez trié des colis et gagné **{earnings}** coins !",
-        f"🎵 Vous avez joué de la guitare et gagné **{earnings}** coins !",
-        f"🔧 Vous avez réparé une voiture et gagné **{earnings}** coins !",
-    ]
-    
-    e = discord.Embed(title="💼 Travail", color=0x3498DB)
-    e.description = random.choice(jobs)
-    e.add_field(name="💰 Total", value=f"**{new_coins}** coins", inline=True)
-    e.set_thumbnail(url=i.user.display_avatar.url)
-    
-    await i.response.send_message(embed=e)
-
-# ═══════════════════════════════════════════════════════════════════════════════
 #                           📈 COMMANDES NIVEAU & BOUTIQUE
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -15026,33 +15250,6 @@ async def check_expired_roles():
 async def before_check_expired():
     await bot.wait_until_ready()
 
-@bot.tree.command(name="balance", description="💰 Voir votre solde")
-@app_commands.describe(membre="Le membre dont vous voulez voir le solde")
-async def balance_cmd(i: discord.Interaction, membre: discord.Member = None):
-    # Vérifier le salon
-    if not await check_command_channel(i, 'balance'):
-        return
-    
-    target = membre or i.user
-    
-    # Vérifier si l'économie est activée
-    c = await cfg(i.guild.id)
-    games_cfg = c.get('minigames_config', {})
-    if not games_cfg.get('economy_enabled', False):
-        return await i.response.send_message("❌ L'économie n'est pas activée sur ce serveur", ephemeral=True)
-    
-    eco = await get_user_economy(i.guild.id, target.id)
-    
-    e = discord.Embed(title=f"💰 Solde de {target.display_name}", color=0xF1C40F)
-    e.add_field(name="🪙 Coins", value=f"**{eco['coins']}**", inline=True)
-    e.add_field(name="🏦 Banque", value=f"**{eco['bank']}**", inline=True)
-    e.add_field(name="💎 Total", value=f"**{eco['coins'] + eco['bank']}**", inline=True)
-    e.add_field(name="📈 Niveau", value=f"**{eco['level']}**", inline=True)
-    e.add_field(name="✨ XP", value=f"**{eco['xp']}** / **{eco['level'] * 100}**", inline=True)
-    e.set_thumbnail(url=target.display_avatar.url)
-    
-    await i.response.send_message(embed=e)
-
 @bot.tree.command(name="leaderboard", description="🏆 Voir le classement des plus riches")
 async def leaderboard_cmd(i: discord.Interaction):
     # Vérifier si l'économie est activée
@@ -15088,358 +15285,12 @@ async def leaderboard_cmd(i: discord.Interaction):
     
     await i.response.send_message(embed=e)
 
-# ─────────────────────────────── MINI-JEUX ───────────────────────────────
-
-@bot.tree.command(name="slots", description="🎰 Jouer à la machine à sous")
-@app_commands.describe(mise="Montant à miser (défaut: 10)")
-async def slots_cmd(i: discord.Interaction, mise: int = 10):
-    # Vérifier les permissions
-    if not await check_games_permission(i):
-        return
-    
-    # Vérifier si l'économie est activée
-    c = await cfg(i.guild.id)
-    games_cfg = c.get('minigames_config', {})
-    if not games_cfg.get('economy_enabled', False):
-        return await i.response.send_message("❌ L'économie n'est pas activée sur ce serveur", ephemeral=True)
-    
-    if mise < 1:
-        return await i.response.send_message("❌ Mise minimum: 1 coin", ephemeral=True)
-    
-    eco = await get_user_economy(i.guild.id, i.user.id)
-    if eco['coins'] < mise:
-        return await i.response.send_message(f"❌ Vous n'avez que **{eco['coins']}** coins", ephemeral=True)
-    
-    # Symboles et leurs multiplicateurs
-    symbols = ["🍒", "🍋", "🍊", "🍇", "⭐", "💎", "7️⃣"]
-    weights = [30, 25, 20, 15, 7, 2, 1]  # Probabilités
-    
-    # Tirer 3 symboles
-    result = random.choices(symbols, weights=weights, k=3)
-    
-    # Calculer les gains
-    multiplier = 0
-    if result[0] == result[1] == result[2]:
-        # Trois identiques
-        if result[0] == "7️⃣":
-            multiplier = 100
-        elif result[0] == "💎":
-            multiplier = 50
-        elif result[0] == "⭐":
-            multiplier = 25
-        else:
-            multiplier = 10
-    elif result[0] == result[1] or result[1] == result[2] or result[0] == result[2]:
-        # Deux identiques
-        multiplier = 2
-    
-    # Appliquer les gains/pertes
-    if multiplier > 0:
-        gain = mise * multiplier
-        await add_coins(i.guild.id, i.user.id, gain - mise)
-        result_text = f"🎉 **GAGNÉ !** x{multiplier}\n+**{gain}** coins"
-        color = 0x2ECC71
-    else:
-        await add_coins(i.guild.id, i.user.id, -mise)
-        result_text = f"😢 **Perdu...**\n-**{mise}** coins"
-        color = 0xE74C3C
-    
-    eco = await get_user_economy(i.guild.id, i.user.id)
-    
-    e = discord.Embed(title="🎰 Machine à Sous", color=color)
-    e.description = f"╔════════════╗\n║  {result[0]}  {result[1]}  {result[2]}  ║\n╚════════════╝"
-    e.add_field(name="Résultat", value=result_text, inline=False)
-    e.add_field(name="💰 Solde", value=f"**{eco['coins']}** coins", inline=True)
-    e.set_footer(text=f"Mise: {mise} coins")
-    
-    await i.response.send_message(embed=e)
-
-@bot.tree.command(name="coinflip", description="🪙 Pile ou face")
-@app_commands.describe(choix="Votre choix", mise="Montant à miser")
-@app_commands.choices(choix=[
-    app_commands.Choice(name="Pile", value="pile"),
-    app_commands.Choice(name="Face", value="face")
-])
-async def coinflip_cmd(i: discord.Interaction, choix: str, mise: int = 10):
-    # Vérifier les permissions
-    if not await check_games_permission(i):
-        return
-    
-    # Vérifier si l'économie est activée
-    c = await cfg(i.guild.id)
-    games_cfg = c.get('minigames_config', {})
-    if not games_cfg.get('economy_enabled', False):
-        return await i.response.send_message("❌ L'économie n'est pas activée sur ce serveur", ephemeral=True)
-    
-    if mise < 1:
-        return await i.response.send_message("❌ Mise minimum: 1 coin", ephemeral=True)
-    
-    eco = await get_user_economy(i.guild.id, i.user.id)
-    if eco['coins'] < mise:
-        return await i.response.send_message(f"❌ Vous n'avez que **{eco['coins']}** coins", ephemeral=True)
-    
-    # Lancer la pièce
-    result = random.choice(["pile", "face"])
-    won = (result == choix)
-    
-    if won:
-        await add_coins(i.guild.id, i.user.id, mise)
-        e = discord.Embed(title="🪙 Pile ou Face", color=0x2ECC71)
-        e.description = f"**{result.upper()}** !\n\n🎉 Vous avez gagné **{mise}** coins !"
-    else:
-        await add_coins(i.guild.id, i.user.id, -mise)
-        e = discord.Embed(title="🪙 Pile ou Face", color=0xE74C3C)
-        e.description = f"**{result.upper()}** !\n\n😢 Vous avez perdu **{mise}** coins..."
-    
-    eco = await get_user_economy(i.guild.id, i.user.id)
-    e.add_field(name="💰 Solde", value=f"**{eco['coins']}** coins", inline=True)
-    
-    await i.response.send_message(embed=e)
-
-@bot.tree.command(name="dice", description="🎲 Lancer les dés")
-@app_commands.describe(mise="Montant à miser", nombre="Nombre sur lequel parier (1-6)")
-async def dice_cmd(i: discord.Interaction, nombre: int, mise: int = 10):
-    # Vérifier les permissions
-    if not await check_games_permission(i):
-        return
-    
-    # Vérifier si l'économie est activée
-    c = await cfg(i.guild.id)
-    games_cfg = c.get('minigames_config', {})
-    if not games_cfg.get('economy_enabled', False):
-        return await i.response.send_message("❌ L'économie n'est pas activée sur ce serveur", ephemeral=True)
-    
-    if nombre < 1 or nombre > 6:
-        return await i.response.send_message("❌ Choisissez un nombre entre 1 et 6", ephemeral=True)
-    
-    if mise < 1:
-        return await i.response.send_message("❌ Mise minimum: 1 coin", ephemeral=True)
-    
-    eco = await get_user_economy(i.guild.id, i.user.id)
-    if eco['coins'] < mise:
-        return await i.response.send_message(f"❌ Vous n'avez que **{eco['coins']}** coins", ephemeral=True)
-    
-    # Lancer le dé
-    result = random.randint(1, 6)
-    dice_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣"]
-    
-    won = (result == nombre)
-    
-    if won:
-        gain = mise * 5
-        await add_coins(i.guild.id, i.user.id, gain)
-        e = discord.Embed(title="🎲 Lancer de Dé", color=0x2ECC71)
-        e.description = f"Le dé affiche: {dice_emojis[result-1]}\n\n🎉 **Gagné !** +**{gain}** coins"
-    else:
-        await add_coins(i.guild.id, i.user.id, -mise)
-        e = discord.Embed(title="🎲 Lancer de Dé", color=0xE74C3C)
-        e.description = f"Le dé affiche: {dice_emojis[result-1]}\n\n😢 **Perdu...** -{mise} coins"
-    
-    eco = await get_user_economy(i.guild.id, i.user.id)
-    e.add_field(name="Votre pari", value=f"{dice_emojis[nombre-1]}", inline=True)
-    e.add_field(name="💰 Solde", value=f"**{eco['coins']}** coins", inline=True)
-    
-    await i.response.send_message(embed=e)
-
-@bot.tree.command(name="rps", description="✊ Pierre-Feuille-Ciseaux")
-@app_commands.describe(choix="Votre choix", mise="Montant à miser (optionnel)")
-@app_commands.choices(choix=[
-    app_commands.Choice(name="🪨 Pierre", value="pierre"),
-    app_commands.Choice(name="📄 Feuille", value="feuille"),
-    app_commands.Choice(name="✂️ Ciseaux", value="ciseaux")
-])
-async def rps_cmd(i: discord.Interaction, choix: str, mise: int = 0):
-    # Vérifier les permissions
-    if not await check_games_permission(i):
-        return
-    
-    c = await cfg(i.guild.id)
-    games_cfg = c.get('minigames_config', {})
-    
-    # Vérifier la mise si économie activée
-    if mise > 0:
-        if not games_cfg.get('economy_enabled', False):
-            return await i.response.send_message("❌ L'économie n'est pas activée", ephemeral=True)
-        
-        eco = await get_user_economy(i.guild.id, i.user.id)
-        if eco['coins'] < mise:
-            return await i.response.send_message(f"❌ Vous n'avez que **{eco['coins']}** coins", ephemeral=True)
-    
-    # Choix du bot
-    choices = ["pierre", "feuille", "ciseaux"]
-    bot_choice = random.choice(choices)
-    
-    emojis = {"pierre": "🪨", "feuille": "📄", "ciseaux": "✂️"}
-    
-    # Déterminer le gagnant
-    if choix == bot_choice:
-        result = "draw"
-        color = 0xF1C40F
-        text = "🤝 **Égalité !**"
-    elif (choix == "pierre" and bot_choice == "ciseaux") or \
-         (choix == "feuille" and bot_choice == "pierre") or \
-         (choix == "ciseaux" and bot_choice == "feuille"):
-        result = "win"
-        color = 0x2ECC71
-        text = "🎉 **Vous avez gagné !**"
-    else:
-        result = "lose"
-        color = 0xE74C3C
-        text = "😢 **Vous avez perdu...**"
-    
-    # Appliquer les gains/pertes
-    if mise > 0:
-        if result == "win":
-            await add_coins(i.guild.id, i.user.id, mise)
-            text += f"\n+**{mise}** coins"
-        elif result == "lose":
-            await add_coins(i.guild.id, i.user.id, -mise)
-            text += f"\n-**{mise}** coins"
-    
-    e = discord.Embed(title="✊ Pierre-Feuille-Ciseaux", color=color)
-    e.add_field(name="Vous", value=emojis[choix], inline=True)
-    e.add_field(name="VS", value="⚔️", inline=True)
-    e.add_field(name="Bot", value=emojis[bot_choice], inline=True)
-    e.add_field(name="Résultat", value=text, inline=False)
-    
-    if mise > 0:
-        eco = await get_user_economy(i.guild.id, i.user.id)
-        e.add_field(name="💰 Solde", value=f"**{eco['coins']}** coins", inline=True)
-    
-    await i.response.send_message(embed=e)
-
-@bot.tree.command(name="guess", description="🔢 Deviner le nombre mystère")
-@app_commands.describe(nombre="Votre supposition (1-100)")
-async def guess_cmd(i: discord.Interaction, nombre: int):
-    # Vérifier les permissions
-    if not await check_games_permission(i):
-        return
-    
-    if nombre < 1 or nombre > 100:
-        return await i.response.send_message("❌ Choisissez un nombre entre 1 et 100", ephemeral=True)
-    
-    # Générer le nombre mystère
-    secret = random.randint(1, 100)
-    diff = abs(secret - nombre)
-    
-    if diff == 0:
-        e = discord.Embed(title="🔢 Nombre Mystère", color=0x2ECC71)
-        e.description = f"🎉 **BRAVO !** Vous avez trouvé le nombre **{secret}** !"
-        
-        # Bonus si économie activée
-        c = await cfg(i.guild.id)
-        if c.get('minigames_config', {}).get('economy_enabled', False):
-            bonus = random.randint(50, 100)
-            await add_coins(i.guild.id, i.user.id, bonus)
-            e.add_field(name="🎁 Bonus", value=f"+**{bonus}** coins !", inline=True)
-    elif diff <= 5:
-        e = discord.Embed(title="🔢 Nombre Mystère", color=0xF1C40F)
-        e.description = f"🔥 **Très proche !** Le nombre était **{secret}** (vous: {nombre})"
-    elif diff <= 15:
-        e = discord.Embed(title="🔢 Nombre Mystère", color=0xE67E22)
-        e.description = f"👀 **Pas mal !** Le nombre était **{secret}** (vous: {nombre})"
-    else:
-        hint = "plus grand" if secret > nombre else "plus petit"
-        e = discord.Embed(title="🔢 Nombre Mystère", color=0xE74C3C)
-        e.description = f"❌ **Raté !** Le nombre était **{secret}**\nIndice: c'était {hint} que {nombre}"
-    
-    await i.response.send_message(embed=e)
-
-# ─────────────────────────────── RÉACTION RAPIDE ───────────────────────────────
-
-react_games = {}  # {channel_id: timestamp}
-
-@bot.tree.command(name="react", description="⚡ Lancer un jeu de réaction rapide")
-async def react_cmd(i: discord.Interaction):
-    # Vérifier les permissions de jeu
-    if not await check_games_permission(i):
-        return
-    
-    # Vérifier si un jeu est déjà en cours (avec timeout de 30s)
-    if i.channel.id in react_games:
-        elapsed = (now() - react_games[i.channel.id]).total_seconds()
-        if elapsed < 30:
-            return await i.response.send_message("❌ Un jeu est déjà en cours dans ce salon", ephemeral=True)
-        else:
-            del react_games[i.channel.id]
-    
-    # Marquer le jeu comme en cours
-    react_games[i.channel.id] = now()
-    
-    # Répondre immédiatement
-    await i.response.send_message("⏳ **Préparez-vous...**\nCliquez sur le bouton dès qu'il apparaît !")
-    
-    # Attendre un délai aléatoire
-    delay = random.uniform(2, 5)
-    await asyncio.sleep(delay)
-    
-    # Vérifier que le jeu est toujours actif
-    if i.channel.id not in react_games:
-        return
-    
-    # Enregistrer le temps de départ
-    start_time = now()
-    game_data = {'start_time': start_time, 'winner': None, 'clicked': False}
-    
-    # Créer la vue avec le bouton
-    class QuickReactView(View):
-        def __init__(self):
-            super().__init__(timeout=10)
-        
-        @discord.ui.button(label="⚡ CLIQUEZ !", style=discord.ButtonStyle.success)
-        async def click_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-            # Vérifier si quelqu'un a déjà gagné
-            if game_data['clicked']:
-                return await interaction.response.send_message("❌ Trop tard !", ephemeral=True)
-            
-            game_data['clicked'] = True
-            game_data['winner'] = interaction.user.id
-            
-            # Calculer le temps de réaction
-            reaction_time = (now() - game_data['start_time']).total_seconds() * 1000
-            
-            # Bonus si économie activée
-            bonus_text = ""
-            try:
-                c = await cfg(i.guild.id)
-                if c.get('minigames_config', {}).get('economy_enabled', False):
-                    bonus = max(10, 100 - int(reaction_time / 10))
-                    await add_coins(i.guild.id, interaction.user.id, bonus)
-                    bonus_text = f"\n🎁 +**{bonus}** coins !"
-            except:
-                pass
-            
-            # Nettoyer
-            if i.channel.id in react_games:
-                del react_games[i.channel.id]
-            
-            # Afficher le résultat
-            e = discord.Embed(title="⚡ Réaction Rapide", color=0x2ECC71)
-            e.description = f"🎉 **{interaction.user.mention}** a gagné !\n⏱️ Temps: **{reaction_time:.0f}ms**{bonus_text}"
-            
-            button.disabled = True
-            button.label = f"✅ {interaction.user.display_name} - {reaction_time:.0f}ms"
-            button.style = discord.ButtonStyle.secondary
-            
-            await interaction.response.edit_message(content=None, embed=e, view=self)
-        
-        async def on_timeout(self):
-            if i.channel.id in react_games:
-                del react_games[i.channel.id]
-    
-    # Envoyer le bouton
-    try:
-        view = QuickReactView()
-        await i.channel.send("⚡ **MAINTENANT !**", view=view)
-    except Exception as ex:
-        print(f"Erreur react send: {ex}")
-        if i.channel.id in react_games:
-            del react_games[i.channel.id]
 
 if __name__ == "__main__":
-    print("🚀 Bot v26 - Démarrage...")
+    print("🚀 Bot v27.5 - Démarrage...")
     print("🔒 Système de sécurité activé")
     print("👑 Système d'immunités complet")
-    print("🎮 Mini-jeux et économie intégrés")
+    print("🎙️ Vocaux temporaires multi-hubs")
     print("🛡️ Anti-badwords amélioré (mots entiers)")
     bot.run(TOKEN)
+
