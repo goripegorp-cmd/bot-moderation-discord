@@ -1695,15 +1695,15 @@ class AntiRaidConfigPanel(View):
         auto_mode = raid_cfg.get('auto_mode', True)
         e.add_field(
             name="🤖 Mode automatique",
-            value="✅ Activé (action auto)" if auto_mode else "❌ Désactivé (alerte seulement)",
+            value="✅ Oui" if auto_mode else "❌ Non",
             inline=True
         )
         
         # Bloquer les invitations
         block_invites = raid_cfg.get('block_invites', True)
         e.add_field(
-            name="🔒 Bloquer invitations",
-            value="✅ Oui (pendant raid)" if block_invites else "❌ Non",
+            name="🔒 Bloquer invit.",
+            value="✅ Oui" if block_invites else "❌ Non",
             inline=True
         )
         
@@ -1714,20 +1714,19 @@ class AntiRaidConfigPanel(View):
         
         # État du lockdown
         lockdown = raid_tracker.get(self.g.id, {}).get('lockdown', False)
-        if lockdown:
-            e.add_field(name="🚨 LOCKDOWN ACTIF", value="⚠️ Le serveur est en mode protection", inline=False)
+        e.add_field(name="🚨 Lockdown", value="⚠️ **ACTIF**" if lockdown else "✅ Inactif", inline=True)
         
         return e
     
-    @discord.ui.button(label="👥 Seuil Détection", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="👥 Seuil", style=discord.ButtonStyle.primary, row=0)
     async def set_threshold(self, i, b):
         await i.response.send_modal(RaidThresholdModal(self.g, self.u))
     
-    @discord.ui.button(label="📅 Âge Compte", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="📅 Âge", style=discord.ButtonStyle.primary, row=0)
     async def set_age(self, i, b):
         await i.response.send_modal(RaidAgeModal(self.g, self.u))
     
-    @discord.ui.button(label="🤖 Mode Auto", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="🤖 Auto", style=discord.ButtonStyle.secondary, row=0)
     async def toggle_auto(self, i, b):
         c = await cfg(self.g.id)
         raid_cfg = c.get('raid_config', {})
@@ -1735,7 +1734,12 @@ class AntiRaidConfigPanel(View):
         await db_set(self.g.id, 'raid_config', raid_cfg)
         await i.response.edit_message(embed=await self.embed(), view=self)
     
-    @discord.ui.button(label="🔒 Bloquer Invit.", style=discord.ButtonStyle.secondary, row=1)
+    @discord.ui.button(label="⚡ Action", style=discord.ButtonStyle.secondary, row=0)
+    async def set_action(self, i, b):
+        v = RaidActionSelect(self.u, self.g)
+        await i.response.edit_message(embed=discord.Embed(title="⚡ Choisir l'action anti-raid", color=0xE74C3C), view=v)
+    
+    @discord.ui.button(label="🔒 Invit.", style=discord.ButtonStyle.secondary, row=1)
     async def toggle_block(self, i, b):
         c = await cfg(self.g.id)
         raid_cfg = c.get('raid_config', {})
@@ -1743,34 +1747,271 @@ class AntiRaidConfigPanel(View):
         await db_set(self.g.id, 'raid_config', raid_cfg)
         await i.response.edit_message(embed=await self.embed(), view=self)
     
-    @discord.ui.button(label="⚡ Action", style=discord.ButtonStyle.secondary, row=1)
-    async def set_action(self, i, b):
-        v = RaidActionSelect(self.u, self.g)
-        await i.response.edit_message(embed=discord.Embed(title="⚡ Choisir l'action anti-raid", color=0xE74C3C), view=v)
-    
-    @discord.ui.button(label="🚨 Lockdown Manuel", style=discord.ButtonStyle.danger, row=2)
+    @discord.ui.button(label="🚨 Lockdown", style=discord.ButtonStyle.danger, row=1)
     async def manual_lockdown(self, i, b):
         guild_id = self.g.id
         if guild_id not in raid_tracker:
             raid_tracker[guild_id] = {'joins': [], 'lockdown': False}
         
-        if raid_tracker[guild_id].get('lockdown', False):
-            # Désactiver le lockdown
-            raid_tracker[guild_id]['lockdown'] = False
-            await i.response.send_message("✅ **Lockdown désactivé !**\nLes nouvelles invitations sont de nouveau autorisées.", ephemeral=True)
-        else:
-            # Activer le lockdown
-            raid_tracker[guild_id]['lockdown'] = True
-            await i.response.send_message("🚨 **Lockdown activé !**\nLes nouvelles arrivées seront traitées selon la configuration.", ephemeral=True)
+        raid_tracker[guild_id]['lockdown'] = not raid_tracker[guild_id].get('lockdown', False)
+        status = "🚨 **ACTIVÉ**" if raid_tracker[guild_id]['lockdown'] else "✅ **DÉSACTIVÉ**"
         
-        # Rafraîchir l'affichage
-        await i.message.edit(embed=await self.embed(), view=self)
+        await i.response.edit_message(embed=await self.embed(), view=self)
+        await i.followup.send(f"Lockdown {status}", ephemeral=True)
+    
+    @discord.ui.button(label="🔍 Scanner", style=discord.ButtonStyle.success, row=1)
+    async def scan_suspects(self, i, b):
+        await i.response.defer()
+        v = SuspectScanPanel(self.u, self.g)
+        await v.scan_members()
+        await i.followup.send(embed=await v.embed(), view=v, ephemeral=True)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
         prot = next(p for p in PROTS if p[0] == "anti_raid")
         v = ProtDetail(self.u, self.g, prot)
         await i.response.edit_message(embed=await v.embed(), view=v)
+
+class SuspectScanPanel(View):
+    """Panel pour scanner et afficher les comptes suspects"""
+    def __init__(self, u, g):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.suspects = []
+        self.bots = []
+        self.page = 0
+        self.per_page = 10
+    
+    async def scan_members(self):
+        """Scanne tous les membres pour détecter les comptes suspects"""
+        self.suspects = []
+        self.bots = []
+        
+        for member in self.g.members:
+            if member.bot:
+                # Vérifier si c'est un bot non vérifié
+                if not member.public_flags.verified_bot:
+                    self.bots.append({
+                        'member': member,
+                        'reason': "Bot non vérifié",
+                        'severity': 'high'
+                    })
+                continue
+            
+            # Calculer le score de suspicion
+            suspicion_score = 0
+            reasons = []
+            
+            # 1. Âge du compte
+            account_age = (now() - member.created_at.replace(tzinfo=timezone.utc)).days
+            if account_age < 1:
+                suspicion_score += 50
+                reasons.append(f"Compte créé il y a {account_age} jour(s)")
+            elif account_age < 7:
+                suspicion_score += 30
+                reasons.append(f"Compte récent ({account_age}j)")
+            elif account_age < 30:
+                suspicion_score += 10
+                reasons.append(f"Compte jeune ({account_age}j)")
+            
+            # 2. Pas d'avatar
+            if member.avatar is None:
+                suspicion_score += 15
+                reasons.append("Pas d'avatar")
+            
+            # 3. Nom suspect (caractères spéciaux, nombres, etc.)
+            name = member.name.lower()
+            if any(c.isdigit() for c in name[-4:]):  # Finit par des chiffres
+                suspicion_score += 5
+                reasons.append("Nom avec chiffres")
+            
+            # 4. Flags publics Discord
+            flags = member.public_flags
+            if flags.spammer:
+                suspicion_score += 100
+                reasons.append("🚨 SPAMMER (signalé par Discord)")
+            if flags.quarantined_username:
+                suspicion_score += 50
+                reasons.append("⚠️ Pseudo en quarantaine")
+            
+            # 5. Pas de rôles (juste @everyone)
+            if len(member.roles) <= 1:
+                suspicion_score += 5
+                reasons.append("Aucun rôle")
+            
+            # 6. Rejoint récemment
+            if member.joined_at:
+                joined_days = (now() - member.joined_at.replace(tzinfo=timezone.utc)).days
+                if joined_days < 1:
+                    suspicion_score += 10
+                    reasons.append("Rejoint aujourd'hui")
+            
+            # Ajouter si score suffisant
+            if suspicion_score >= 20:
+                severity = 'critical' if suspicion_score >= 80 else 'high' if suspicion_score >= 50 else 'medium' if suspicion_score >= 30 else 'low'
+                self.suspects.append({
+                    'member': member,
+                    'score': suspicion_score,
+                    'reasons': reasons,
+                    'severity': severity
+                })
+        
+        # Trier par score décroissant
+        self.suspects.sort(key=lambda x: x['score'], reverse=True)
+    
+    async def embed(self):
+        e = discord.Embed(title="🔍 Scan des Comptes Suspects", color=0xE74C3C)
+        
+        # Résumé
+        critical = len([s for s in self.suspects if s['severity'] == 'critical'])
+        high = len([s for s in self.suspects if s['severity'] == 'high'])
+        medium = len([s for s in self.suspects if s['severity'] == 'medium'])
+        
+        summary = f"**🚨 Critiques:** {critical}\n**⚠️ Élevés:** {high}\n**⚡ Moyens:** {medium}\n**🤖 Bots non vérifiés:** {len(self.bots)}"
+        e.add_field(name="📊 Résumé", value=summary, inline=False)
+        
+        # Liste des suspects (paginée)
+        if self.suspects:
+            start = self.page * self.per_page
+            end = start + self.per_page
+            page_suspects = self.suspects[start:end]
+            
+            lines = []
+            for s in page_suspects:
+                member = s['member']
+                severity_emoji = {'critical': '🚨', 'high': '⚠️', 'medium': '⚡', 'low': '📋'}.get(s['severity'], '📋')
+                reasons_short = ", ".join(s['reasons'][:2])
+                lines.append(f"{severity_emoji} **{member.display_name}** (`{member.id}`)\n   └ {reasons_short}")
+            
+            e.add_field(
+                name=f"👥 Suspects ({len(self.suspects)}) - Page {self.page + 1}/{max(1, (len(self.suspects) - 1) // self.per_page + 1)}",
+                value="\n".join(lines) if lines else "*Aucun*",
+                inline=False
+            )
+        else:
+            e.add_field(name="👥 Suspects", value="✅ Aucun compte suspect détecté !", inline=False)
+        
+        # Bots non vérifiés
+        if self.bots:
+            bot_lines = [f"🤖 **{b['member'].name}** (`{b['member'].id}`)" for b in self.bots[:5]]
+            if len(self.bots) > 5:
+                bot_lines.append(f"*... et {len(self.bots) - 5} autres*")
+            e.add_field(name="🤖 Bots non vérifiés", value="\n".join(bot_lines), inline=False)
+        
+        e.set_footer(text="⚠️ Vérifiez manuellement avant d'agir • Les scores sont indicatifs")
+        return e
+    
+    @discord.ui.button(label="◀️ Préc.", style=discord.ButtonStyle.secondary, row=0)
+    async def prev_page(self, i, b):
+        if self.page > 0:
+            self.page -= 1
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="▶️ Suiv.", style=discord.ButtonStyle.secondary, row=0)
+    async def next_page(self, i, b):
+        max_page = max(0, (len(self.suspects) - 1) // self.per_page)
+        if self.page < max_page:
+            self.page += 1
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="🔄 Re-scanner", style=discord.ButtonStyle.primary, row=0)
+    async def rescan(self, i, b):
+        await i.response.defer()
+        await self.scan_members()
+        await i.edit_original_response(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="👢 Kick Critiques", style=discord.ButtonStyle.danger, row=1)
+    async def kick_critical(self, i, b):
+        critical = [s for s in self.suspects if s['severity'] == 'critical']
+        if not critical:
+            return await i.response.send_message("✅ Aucun compte critique à kick", ephemeral=True)
+        
+        v = ConfirmKickView(self.u, self.g, critical, 'critical')
+        await i.response.send_message(
+            embed=discord.Embed(
+                title="⚠️ Confirmer le kick",
+                description=f"Vous allez kick **{len(critical)}** compte(s) critique(s).\n\nÊtes-vous sûr ?",
+                color=0xFF0000
+            ),
+            view=v,
+            ephemeral=True
+        )
+    
+    @discord.ui.button(label="🤖 Kick Bots", style=discord.ButtonStyle.danger, row=1)
+    async def kick_bots(self, i, b):
+        if not self.bots:
+            return await i.response.send_message("✅ Aucun bot non vérifié à kick", ephemeral=True)
+        
+        v = ConfirmKickView(self.u, self.g, self.bots, 'bots')
+        await i.response.send_message(
+            embed=discord.Embed(
+                title="⚠️ Confirmer le kick des bots",
+                description=f"Vous allez kick **{len(self.bots)}** bot(s) non vérifié(s).\n\nÊtes-vous sûr ?",
+                color=0xFF0000
+            ),
+            view=v,
+            ephemeral=True
+        )
+    
+    @discord.ui.button(label="👢 Kick Tous Suspects", style=discord.ButtonStyle.danger, row=1)
+    async def kick_all(self, i, b):
+        high_and_critical = [s for s in self.suspects if s['severity'] in ['critical', 'high']]
+        if not high_and_critical:
+            return await i.response.send_message("✅ Aucun compte à kick", ephemeral=True)
+        
+        v = ConfirmKickView(self.u, self.g, high_and_critical, 'all')
+        await i.response.send_message(
+            embed=discord.Embed(
+                title="⚠️ Confirmer le kick massif",
+                description=f"Vous allez kick **{len(high_and_critical)}** compte(s) suspects (critiques + élevés).\n\n**⚠️ Cette action est irréversible !**",
+                color=0xFF0000
+            ),
+            view=v,
+            ephemeral=True
+        )
+    
+    @discord.ui.button(label="❌ Fermer", style=discord.ButtonStyle.secondary, row=2)
+    async def close(self, i, b):
+        await i.response.edit_message(content="✅ Scan fermé", embed=None, view=None)
+
+class ConfirmKickView(View):
+    """Vue de confirmation pour kick les suspects"""
+    def __init__(self, u, g, targets, kick_type):
+        super().__init__(timeout=60)
+        self.u = u
+        self.g = g
+        self.targets = targets
+        self.kick_type = kick_type
+    
+    @discord.ui.button(label="✅ Confirmer", style=discord.ButtonStyle.danger)
+    async def confirm(self, i, b):
+        await i.response.defer()
+        
+        kicked = 0
+        failed = 0
+        
+        for t in self.targets:
+            member = t['member']
+            try:
+                reason = f"Anti-Raid: {t.get('reason', 'Compte suspect')} (score: {t.get('score', 'N/A')})"
+                await member.kick(reason=reason)
+                kicked += 1
+            except:
+                failed += 1
+        
+        await i.edit_original_response(
+            embed=discord.Embed(
+                title="✅ Kick terminé",
+                description=f"**{kicked}** membre(s) kick\n**{failed}** échec(s)",
+                color=0x2ECC71 if failed == 0 else 0xE67E22
+            ),
+            view=None
+        )
+    
+    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, i, b):
+        await i.response.edit_message(content="❌ Kick annulé", embed=None, view=None)
 
 class RaidThresholdModal(Modal, title="👥 Seuil de détection"):
     threshold_input = TextInput(label="Nombre de membres", placeholder="10", max_length=3)
