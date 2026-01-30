@@ -1943,6 +1943,17 @@ class TicketCreateButton(Button):
             pnl = c.get('ticket_panels', {}).get(self.pid, {})
             if not pnl:
                 return await i.response.send_message("❌ Panel introuvable", ephemeral=True)
+            
+            # ═══════════════════════════════════════════════════════════════════════════════
+            #                    🚫 VÉRIFICATION BLACKLIST
+            # ═══════════════════════════════════════════════════════════════════════════════
+            blacklist = pnl.get('blacklist', [])
+            if i.user.id in blacklist:
+                return await i.response.send_message(
+                    "🚫 **Accès refusé**\n\nVous avez été blacklisté de ce panel de tickets.\nContactez un administrateur si vous pensez que c'est une erreur.",
+                    ephemeral=True
+                )
+            
             qs = pnl.get('questions', [])
             mx = pnl.get('max', 1)
             if await count_user_tickets(i.guild, i.user.id, self.pid) >= mx:
@@ -11601,17 +11612,25 @@ class TicketMainPanel(View):
         e = discord.Embed(title="🎫 Configuration Tickets", color=C.PURPLE)
         staff = self.g.get_role(c.get('ticket_staff', 0))
         lch = self.g.get_channel(c.get('ticket_log', 0))
+        blacklist_role = self.g.get_role(c.get('ticket_blacklist_role', 0))
+        
         e.add_field(name="👮 Rôle Staff", value=staff.mention if staff else "❌ Non configuré", inline=True)
         e.add_field(name="📜 Salon Logs", value=lch.mention if lch else "❌ Non configuré", inline=True)
+        e.add_field(name="🚫 Rôle Blacklist", value=blacklist_role.mention if blacklist_role else "*Staff par défaut*", inline=True)
+        
         panels = c.get('ticket_panels', {})
         if panels:
             pl = []
             for pid, pd in list(panels.items())[:10]:
                 cat = self.g.get_channel(pd.get('category', 0))
-                pl.append(f"• **{pd.get('name', pid)[:20]}** → `{cat.name if cat else '❌'}` ({len(pd.get('questions', []))} questions, max {pd.get('max', 1)})")
+                bl_count = len(pd.get('blacklist', []))
+                bl_txt = f", 🚫{bl_count}" if bl_count > 0 else ""
+                pl.append(f"• **{pd.get('name', pid)[:20]}** → `{cat.name if cat else '❌'}` ({len(pd.get('questions', []))} Q, max {pd.get('max', 1)}{bl_txt})")
             e.add_field(name=f"📋 Panels ({len(panels)})", value="\n".join(pl), inline=False)
         else:
             e.add_field(name="📋 Panels", value="*Aucun panel créé*", inline=False)
+        
+        e.set_footer(text="💡 Le rôle Blacklist peut utiliser /ticketblacklist")
         return e
     
     @discord.ui.button(label="👮 Définir Staff", style=discord.ButtonStyle.primary, row=0)
@@ -11633,6 +11652,20 @@ class TicketMainPanel(View):
         chs = list(self.g.text_channels)[:25]
         opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
         await i.response.edit_message(embed=discord.Embed(title="📜 Choisir le salon Logs", color=C.PURPLE), view=TkLogView(self.u, self.g, opts))
+    
+    @discord.ui.button(label="🚫 Rôle Blacklist", style=discord.ButtonStyle.danger, row=0)
+    async def blacklist_role(self, i, b):
+        v = PaginatedRoleSelectForBlacklist(self.u, self.g)
+        total_roles = len(v.roles)
+        total_pages = v.max_page + 1
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="🚫 Rôle pour /ticketblacklist", 
+                description=f"**{total_roles} rôles** disponibles • Page 1/{total_pages}\n\nCe rôle pourra utiliser la commande `/ticketblacklist` pour gérer les blacklists.\n\n*Aucun = seuls les Staff et Admins peuvent blacklister*",
+                color=0xE74C3C
+            ), 
+            view=v
+        )
     
     @discord.ui.button(label="➕ Nouveau Panel", style=discord.ButtonStyle.success, row=1)
     async def new(self, i, b):
@@ -11738,6 +11771,106 @@ class StaffGlobalRoleSelect(Select):
         v = TicketMainPanel(self.parent.u, self.parent.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#              🚫 SÉLECTEUR DE RÔLE POUR BLACKLIST TICKETS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class PaginatedRoleSelectForBlacklist(View):
+    """Sélecteur de rôle pour /ticketblacklist avec pagination"""
+    def __init__(self, u, g, page=0):
+        super().__init__(timeout=180)
+        self.u = u
+        self.g = g
+        self.page = page
+        self.roles = [r for r in g.roles[1:] if not r.is_bot_managed()]
+        self.per_page = 23  # 23 pour laisser place à "Aucun"
+        self.max_page = max(0, (len(self.roles) - 1) // self.per_page)
+        self._build()
+    
+    def _build(self):
+        self.clear_items()
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_roles = self.roles[start:end]
+        
+        opts = []
+        # Option "Aucun" sur la première page
+        if self.page == 0:
+            opts.append(discord.SelectOption(
+                label="❌ Aucun (Staff par défaut)", 
+                value="0",
+                description="Seuls les Staff et Admins peuvent blacklister"
+            ))
+        
+        for r in page_roles:
+            color_hex = f"#{r.color.value:06x}" if r.color.value else "Défaut"
+            opts.append(discord.SelectOption(
+                label=f"@{r.name}"[:25], 
+                value=str(r.id),
+                description=f"Couleur: {color_hex}"[:50]
+            ))
+        
+        if opts:
+            self.add_item(BlacklistRoleSelect(self, opts))
+        
+        # Boutons de pagination
+        if self.page > 0:
+            btn = discord.ui.Button(label="◀️ Page préc.", style=discord.ButtonStyle.secondary, row=1)
+            btn.callback = self.prev_page
+            self.add_item(btn)
+        
+        if self.page < self.max_page:
+            btn = discord.ui.Button(label="▶️ Page suiv.", style=discord.ButtonStyle.secondary, row=1)
+            btn.callback = self.next_page
+            self.add_item(btn)
+        
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=1)
+        back_btn.callback = self.go_back
+        self.add_item(back_btn)
+    
+    async def prev_page(self, i):
+        v = PaginatedRoleSelectForBlacklist(self.u, self.g, self.page - 1)
+        embed = discord.Embed(
+            title="🚫 Rôle pour /ticketblacklist", 
+            description=f"**{len(self.roles)} rôles** disponibles • Page {self.page}/{self.max_page + 1}\n\nCe rôle pourra utiliser `/ticketblacklist`.",
+            color=0xE74C3C
+        )
+        await i.response.edit_message(embed=embed, view=v)
+    
+    async def next_page(self, i):
+        v = PaginatedRoleSelectForBlacklist(self.u, self.g, self.page + 1)
+        embed = discord.Embed(
+            title="🚫 Rôle pour /ticketblacklist", 
+            description=f"**{len(self.roles)} rôles** disponibles • Page {self.page + 2}/{self.max_page + 1}\n\nCe rôle pourra utiliser `/ticketblacklist`.",
+            color=0xE74C3C
+        )
+        await i.response.edit_message(embed=embed, view=v)
+    
+    async def go_back(self, i):
+        v = TicketMainPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class BlacklistRoleSelect(Select):
+    def __init__(self, parent, opts):
+        placeholder = f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un rôle..."
+        super().__init__(placeholder=placeholder, options=opts)
+        self.parent = parent
+    
+    async def callback(self, i):
+        role_id = int(self.values[0])
+        await db_set(i.guild.id, 'ticket_blacklist_role', role_id)
+        
+        if role_id == 0:
+            msg = "✅ Rôle blacklist supprimé. Seuls les **Staff** et **Admins** peuvent utiliser `/ticketblacklist`."
+        else:
+            role = i.guild.get_role(role_id)
+            msg = f"✅ Le rôle {role.mention if role else 'sélectionné'} peut maintenant utiliser `/ticketblacklist`."
+        
+        v = TicketMainPanel(self.parent.u, self.parent.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+        await i.followup.send(msg, ephemeral=True)
+
 class TkStaffSel(Select):
     def __init__(self, u, g, opts):
         super().__init__(placeholder="Choisir un rôle...", options=opts)
@@ -11834,6 +11967,15 @@ class PanelEditView(View):
             e.add_field(name=f"📝 Questions ({len(qs)})", value="\n".join([f"• {q['title']}" for q in qs[:5]]), inline=False)
         else:
             e.add_field(name="📝 Questions", value="*Aucune question*", inline=False)
+        
+        # Afficher le nombre de membres blacklistés
+        blacklist = pnl.get('blacklist', [])
+        if blacklist:
+            bl_txt = f"**{len(blacklist)}** membre(s) blacklisté(s)"
+        else:
+            bl_txt = "*Aucun membre blacklisté*"
+        e.add_field(name="🚫 Blacklist", value=bl_txt, inline=False)
+        
         return e
     
     @discord.ui.button(label="📁 Catégorie", style=discord.ButtonStyle.primary, row=0)
@@ -11861,6 +12003,11 @@ class PanelEditView(View):
     @discord.ui.button(label="📝 Questions", style=discord.ButtonStyle.primary, row=0)
     async def qs(self, i, b):
         v = PanelQsView(self.u, self.g, self.pid)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="🚫 Blacklist", style=discord.ButtonStyle.danger, row=0)
+    async def blacklist(self, i, b):
+        v = PanelBlacklistView(self.u, self.g, self.pid)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="🔢 Max tickets", style=discord.ButtonStyle.secondary, row=1)
@@ -11894,6 +12041,283 @@ class PanelEditView(View):
     async def back(self, i, b):
         v = TicketMainPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                        🚫 SYSTÈME DE BLACKLIST PAR PANEL
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class PanelBlacklistView(View):
+    """Gestion de la blacklist d'un panel de ticket"""
+    def __init__(self, u, g, pid, page=0):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+        self.pid = pid
+        self.page = page
+        self.per_page = 10
+    
+    async def get_panel(self):
+        c = await cfg(self.g.id)
+        return c.get('ticket_panels', {}).get(self.pid, {})
+    
+    async def embed(self):
+        pnl = await self.get_panel()
+        blacklist = pnl.get('blacklist', [])
+        
+        e = discord.Embed(
+            title=f"🚫 Blacklist - {pnl.get('name', '?')}",
+            color=0xE74C3C
+        )
+        
+        if not blacklist:
+            e.description = "*Aucun membre blacklisté sur ce panel*\n\nUtilisez le bouton **➕ Ajouter** pour blacklister un membre."
+        else:
+            # Pagination
+            total_pages = max(1, (len(blacklist) - 1) // self.per_page + 1)
+            start = self.page * self.per_page
+            end = start + self.per_page
+            page_users = blacklist[start:end]
+            
+            desc = f"**{len(blacklist)}** membre(s) blacklisté(s)\n\n"
+            for uid in page_users:
+                member = self.g.get_member(uid)
+                if member:
+                    desc += f"• {member.mention} (`{uid}`)\n"
+                else:
+                    desc += f"• *Utilisateur parti* (`{uid}`)\n"
+            
+            e.description = desc
+            e.set_footer(text=f"Page {self.page + 1}/{total_pages}")
+        
+        return e
+    
+    @discord.ui.button(label="➕ Ajouter", style=discord.ButtonStyle.success, row=0)
+    async def add_member(self, i, b):
+        await i.response.send_modal(BlacklistAddModal(self.u, self.g, self.pid))
+    
+    @discord.ui.button(label="➖ Retirer", style=discord.ButtonStyle.danger, row=0)
+    async def remove_member(self, i, b):
+        pnl = await self.get_panel()
+        blacklist = pnl.get('blacklist', [])
+        if not blacklist:
+            return await i.response.send_message("❌ La blacklist est vide", ephemeral=True)
+        await i.response.send_modal(BlacklistRemoveModal(self.u, self.g, self.pid))
+    
+    @discord.ui.button(label="🗑️ Tout vider", style=discord.ButtonStyle.danger, row=0)
+    async def clear_all(self, i, b):
+        pnl = await self.get_panel()
+        blacklist = pnl.get('blacklist', [])
+        if not blacklist:
+            return await i.response.send_message("❌ La blacklist est déjà vide", ephemeral=True)
+        
+        # Confirmer
+        v = BlacklistClearConfirmView(self.u, self.g, self.pid)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="⚠️ Confirmer la suppression",
+                description=f"Êtes-vous sûr de vouloir retirer **{len(blacklist)}** membre(s) de la blacklist ?",
+                color=0xE74C3C
+            ),
+            view=v
+        )
+    
+    @discord.ui.button(label="◀️ Préc.", style=discord.ButtonStyle.secondary, row=1)
+    async def prev_page(self, i, b):
+        if self.page > 0:
+            self.page -= 1
+        v = PanelBlacklistView(self.u, self.g, self.pid, self.page)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="▶️ Suiv.", style=discord.ButtonStyle.secondary, row=1)
+    async def next_page(self, i, b):
+        pnl = await self.get_panel()
+        blacklist = pnl.get('blacklist', [])
+        max_page = max(0, (len(blacklist) - 1) // self.per_page)
+        if self.page < max_page:
+            self.page += 1
+        v = PanelBlacklistView(self.u, self.g, self.pid, self.page)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="🔄 Rafraîchir", style=discord.ButtonStyle.secondary, row=1)
+    async def refresh(self, i, b):
+        v = PanelBlacklistView(self.u, self.g, self.pid, self.page)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.primary, row=2)
+    async def back(self, i, b):
+        v = PanelEditView(self.u, self.g, self.pid)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class BlacklistAddModal(Modal, title="🚫 Ajouter à la blacklist"):
+    def __init__(self, u, g, pid):
+        super().__init__()
+        self.u = u
+        self.g = g
+        self.pid = pid
+    
+    user_input = TextInput(
+        label="ID ou @mention du membre",
+        placeholder="Ex: 123456789012345678 ou @Pseudo",
+        required=True,
+        max_length=100
+    )
+    
+    reason = TextInput(
+        label="Raison (optionnel)",
+        placeholder="Ex: Spam de tickets, comportement abusif...",
+        required=False,
+        max_length=200
+    )
+    
+    async def on_submit(self, i):
+        try:
+            # Extraire l'ID du membre
+            user_str = self.user_input.value.strip()
+            user_id = None
+            
+            # Si c'est une mention <@123456789>
+            if user_str.startswith('<@') and user_str.endswith('>'):
+                user_str = user_str[2:-1]
+                if user_str.startswith('!'):
+                    user_str = user_str[1:]
+            
+            try:
+                user_id = int(user_str)
+            except ValueError:
+                # Chercher par nom
+                member = discord.utils.find(lambda m: m.name.lower() == user_str.lower() or m.display_name.lower() == user_str.lower(), self.g.members)
+                if member:
+                    user_id = member.id
+            
+            if not user_id:
+                return await i.response.send_message("❌ Membre introuvable. Utilisez un ID ou une @mention.", ephemeral=True)
+            
+            # Vérifier que ce n'est pas un admin
+            member = self.g.get_member(user_id)
+            if member and (member.guild_permissions.administrator or member.id == self.g.owner_id):
+                return await i.response.send_message("❌ Impossible de blacklister un administrateur.", ephemeral=True)
+            
+            # Ajouter à la blacklist
+            c = await cfg(self.g.id)
+            panels = c.get('ticket_panels', {})
+            if self.pid not in panels:
+                return await i.response.send_message("❌ Panel introuvable", ephemeral=True)
+            
+            blacklist = panels[self.pid].get('blacklist', [])
+            if user_id in blacklist:
+                return await i.response.send_message("❌ Ce membre est déjà blacklisté sur ce panel.", ephemeral=True)
+            
+            blacklist.append(user_id)
+            panels[self.pid]['blacklist'] = blacklist
+            await db_set(self.g.id, 'ticket_panels', panels)
+            
+            # Message de confirmation
+            member_txt = f"<@{user_id}>" if member else f"`{user_id}`"
+            reason_txt = f"\n📝 Raison: *{self.reason.value}*" if self.reason.value else ""
+            
+            v = PanelBlacklistView(self.u, self.g, self.pid)
+            await i.response.edit_message(
+                embed=await v.embed(),
+                view=v
+            )
+            await i.followup.send(f"✅ {member_txt} a été blacklisté de ce panel.{reason_txt}", ephemeral=True)
+            
+        except Exception as ex:
+            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+
+
+class BlacklistRemoveModal(Modal, title="✅ Retirer de la blacklist"):
+    def __init__(self, u, g, pid):
+        super().__init__()
+        self.u = u
+        self.g = g
+        self.pid = pid
+    
+    user_input = TextInput(
+        label="ID ou @mention du membre",
+        placeholder="Ex: 123456789012345678 ou @Pseudo",
+        required=True,
+        max_length=100
+    )
+    
+    async def on_submit(self, i):
+        try:
+            # Extraire l'ID du membre
+            user_str = self.user_input.value.strip()
+            user_id = None
+            
+            # Si c'est une mention <@123456789>
+            if user_str.startswith('<@') and user_str.endswith('>'):
+                user_str = user_str[2:-1]
+                if user_str.startswith('!'):
+                    user_str = user_str[1:]
+            
+            try:
+                user_id = int(user_str)
+            except ValueError:
+                # Chercher par nom
+                member = discord.utils.find(lambda m: m.name.lower() == user_str.lower() or m.display_name.lower() == user_str.lower(), self.g.members)
+                if member:
+                    user_id = member.id
+            
+            if not user_id:
+                return await i.response.send_message("❌ Membre introuvable. Utilisez un ID.", ephemeral=True)
+            
+            # Retirer de la blacklist
+            c = await cfg(self.g.id)
+            panels = c.get('ticket_panels', {})
+            if self.pid not in panels:
+                return await i.response.send_message("❌ Panel introuvable", ephemeral=True)
+            
+            blacklist = panels[self.pid].get('blacklist', [])
+            if user_id not in blacklist:
+                return await i.response.send_message("❌ Ce membre n'est pas blacklisté sur ce panel.", ephemeral=True)
+            
+            blacklist.remove(user_id)
+            panels[self.pid]['blacklist'] = blacklist
+            await db_set(self.g.id, 'ticket_panels', panels)
+            
+            # Message de confirmation
+            member = self.g.get_member(user_id)
+            member_txt = f"<@{user_id}>" if member else f"`{user_id}`"
+            
+            v = PanelBlacklistView(self.u, self.g, self.pid)
+            await i.response.edit_message(
+                embed=await v.embed(),
+                view=v
+            )
+            await i.followup.send(f"✅ {member_txt} a été retiré de la blacklist.", ephemeral=True)
+            
+        except Exception as ex:
+            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+
+
+class BlacklistClearConfirmView(View):
+    def __init__(self, u, g, pid):
+        super().__init__(timeout=60)
+        self.u = u
+        self.g = g
+        self.pid = pid
+    
+    @discord.ui.button(label="✅ Confirmer", style=discord.ButtonStyle.danger)
+    async def confirm(self, i, b):
+        c = await cfg(self.g.id)
+        panels = c.get('ticket_panels', {})
+        if self.pid in panels:
+            old_count = len(panels[self.pid].get('blacklist', []))
+            panels[self.pid]['blacklist'] = []
+            await db_set(self.g.id, 'ticket_panels', panels)
+        
+        v = PanelBlacklistView(self.u, self.g, self.pid)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+        await i.followup.send(f"✅ **{old_count}** membre(s) ont été retirés de la blacklist.", ephemeral=True)
+    
+    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, i, b):
+        v = PanelBlacklistView(self.u, self.g, self.pid)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
 
 class PaginatedRoleSelectForPanel(View):
     """Sélecteur de rôle pour le panel de ticket avec pagination"""
@@ -13089,6 +13513,154 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
     
     # Log
     await send_mod_log(i.guild, 'infractions', i.user, membre, extra=f"Total: {len(rows)} infractions")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                        🚫 TICKET BLACKLIST COMMAND
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@bot.tree.command(name="ticketblacklist", description="🚫 Gérer la blacklist des tickets")
+@app_commands.describe(
+    action="Ajouter ou retirer de la blacklist",
+    membre="Le membre à blacklister/déblacklister",
+    panel="Le nom du panel (laissez vide pour voir la liste)"
+)
+@app_commands.choices(action=[
+    app_commands.Choice(name="➕ Ajouter à la blacklist", value="add"),
+    app_commands.Choice(name="➖ Retirer de la blacklist", value="remove"),
+    app_commands.Choice(name="📋 Voir la liste", value="list")
+])
+async def ticketblacklist_cmd(
+    i: discord.Interaction, 
+    action: str,
+    membre: discord.Member = None,
+    panel: str = None
+):
+    c = await cfg(i.guild.id)
+    panels = c.get('ticket_panels', {})
+    
+    # ═══════════════════════════════════════════════════════════════════════════════
+    #                    🔒 VÉRIFICATION DES PERMISSIONS
+    # ═══════════════════════════════════════════════════════════════════════════════
+    # Peut utiliser si : Admin OU Owner OU a le rôle ticket_blacklist_role OU a le rôle ticket_staff
+    is_admin = i.user.guild_permissions.administrator
+    is_owner = i.user.id == i.guild.owner_id
+    
+    blacklist_role_id = c.get('ticket_blacklist_role', 0)
+    staff_role_id = c.get('ticket_staff', 0)
+    
+    has_blacklist_role = blacklist_role_id and i.guild.get_role(blacklist_role_id) in i.user.roles
+    has_staff_role = staff_role_id and i.guild.get_role(staff_role_id) in i.user.roles
+    
+    if not (is_admin or is_owner or has_blacklist_role or has_staff_role):
+        return await i.response.send_message(
+            "❌ Vous n'avez pas la permission d'utiliser cette commande.\n"
+            "*Requis : Admin, rôle Staff tickets, ou rôle Blacklist configuré*",
+            ephemeral=True
+        )
+    
+    if not panels:
+        return await i.response.send_message("❌ Aucun panel de ticket configuré.", ephemeral=True)
+    
+    # Si action = list, afficher tous les panels et leurs blacklists
+    if action == "list":
+        e = discord.Embed(title="🚫 Blacklists des Panels de Tickets", color=0xE74C3C)
+        
+        for pid, pdata in panels.items():
+            blacklist = pdata.get('blacklist', [])
+            panel_name = pdata.get('name', pid)
+            
+            if blacklist:
+                bl_text = ""
+                for uid in blacklist[:5]:
+                    member = i.guild.get_member(uid)
+                    bl_text += f"• {member.mention if member else f'`{uid}`'}\n"
+                if len(blacklist) > 5:
+                    bl_text += f"*...et {len(blacklist) - 5} autre(s)*"
+            else:
+                bl_text = "*Aucun membre*"
+            
+            e.add_field(name=f"📋 {panel_name} ({len(blacklist)})", value=bl_text, inline=True)
+        
+        e.set_footer(text="Utilisez /ticketblacklist add/remove pour modifier")
+        return await i.response.send_message(embed=e, ephemeral=True)
+    
+    # Pour add/remove, membre requis
+    if not membre:
+        return await i.response.send_message("❌ Spécifiez un membre.", ephemeral=True)
+    
+    # Trouver le panel
+    target_pid = None
+    if panel:
+        # Chercher par nom
+        for pid, pdata in panels.items():
+            if pdata.get('name', '').lower() == panel.lower() or pid == panel:
+                target_pid = pid
+                break
+        if not target_pid:
+            panel_names = [pdata.get('name', pid) for pid, pdata in panels.items()]
+            return await i.response.send_message(
+                f"❌ Panel introuvable.\n\n**Panels disponibles:**\n" + "\n".join([f"• {n}" for n in panel_names]),
+                ephemeral=True
+            )
+    else:
+        # Si pas de panel spécifié et qu'il n'y en a qu'un, l'utiliser
+        if len(panels) == 1:
+            target_pid = list(panels.keys())[0]
+        else:
+            # Afficher le sélecteur
+            panel_names = [pdata.get('name', pid) for pid, pdata in panels.items()]
+            return await i.response.send_message(
+                f"❌ Plusieurs panels disponibles, spécifiez lequel:\n" + "\n".join([f"• `{n}`" for n in panel_names]),
+                ephemeral=True
+            )
+    
+    panel_name = panels[target_pid].get('name', target_pid)
+    blacklist = panels[target_pid].get('blacklist', [])
+    
+    if action == "add":
+        # Vérifier que ce n'est pas un admin
+        if membre.guild_permissions.administrator or membre.id == i.guild.owner_id:
+            return await i.response.send_message("❌ Impossible de blacklister un administrateur.", ephemeral=True)
+        
+        if membre.id in blacklist:
+            return await i.response.send_message(f"❌ {membre.mention} est déjà blacklisté du panel **{panel_name}**.", ephemeral=True)
+        
+        blacklist.append(membre.id)
+        panels[target_pid]['blacklist'] = blacklist
+        await db_set(i.guild.id, 'ticket_panels', panels)
+        
+        e = discord.Embed(
+            title="🚫 Membre Blacklisté",
+            description=f"{membre.mention} ne peut plus créer de tickets sur le panel **{panel_name}**.",
+            color=0xE74C3C
+        )
+        e.set_thumbnail(url=membre.display_avatar.url)
+        e.add_field(name="👤 Membre", value=f"{membre.mention}\n`{membre.id}`", inline=True)
+        e.add_field(name="📋 Panel", value=panel_name, inline=True)
+        e.add_field(name="👮 Par", value=i.user.mention, inline=True)
+        e.set_footer(text="Le membre verra un message d'erreur s'il essaie de créer un ticket")
+        
+        await i.response.send_message(embed=e)
+        
+    elif action == "remove":
+        if membre.id not in blacklist:
+            return await i.response.send_message(f"❌ {membre.mention} n'est pas blacklisté du panel **{panel_name}**.", ephemeral=True)
+        
+        blacklist.remove(membre.id)
+        panels[target_pid]['blacklist'] = blacklist
+        await db_set(i.guild.id, 'ticket_panels', panels)
+        
+        e = discord.Embed(
+            title="✅ Membre Déblacklisté",
+            description=f"{membre.mention} peut à nouveau créer des tickets sur le panel **{panel_name}**.",
+            color=0x2ECC71
+        )
+        e.set_thumbnail(url=membre.display_avatar.url)
+        e.add_field(name="👤 Membre", value=f"{membre.mention}\n`{membre.id}`", inline=True)
+        e.add_field(name="📋 Panel", value=panel_name, inline=True)
+        e.add_field(name="👮 Par", value=i.user.mention, inline=True)
+        
+        await i.response.send_message(embed=e)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              🎭 RELLSEAS COMMAND
@@ -16489,3 +17061,4 @@ if __name__ == "__main__":
     print("🛡️ Anti-badwords amélioré (mots entiers)")
     print("🎮 Système de promotions jeux vidéo")
     bot.run(TOKEN)
+
