@@ -1827,8 +1827,8 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
         c = await cfg(g.id)
         lch = g.get_channel(c.get('ticket_log', 0))
         if not lch: return
-        colors = {'create': C.GREEN, 'claim': C.BLUE, 'close': C.RED, 'leave': C.ORANGE, 'add_staff': C.PURPLE}
-        titles = {'create': '🎫 Ticket Créé', 'claim': '🙋 Ticket Pris', 'close': '🔒 Ticket Fermé', 'leave': '🚪 Utilisateur Parti', 'add_staff': '➕ Staff Ajouté'}
+        colors = {'create': C.GREEN, 'claim': C.BLUE, 'close': C.RED, 'leave': C.ORANGE, 'add_staff': C.PURPLE, 'blacklist': 0xE74C3C}
+        titles = {'create': '🎫 Ticket Créé', 'claim': '🙋 Ticket Pris', 'close': '🔒 Ticket Fermé', 'leave': '🚪 Utilisateur Parti', 'add_staff': '➕ Staff Ajouté', 'blacklist': '🚫 Membre Blacklisté'}
         e = discord.Embed(title=titles.get(lt, '🎫'), color=colors.get(lt, C.BLURPLE), timestamp=now())
         e.add_field(name="🎫 Ticket", value=f"#{ti.get('id', '?')}", inline=True)
         uid = user.id if hasattr(user, 'id') else user
@@ -1839,6 +1839,14 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
             e.add_field(name="🔒 Fermé par", value=closer.mention, inline=True)
         elif lt == 'add_staff' and extra:
             e.add_field(name="➕ Staff ajouté", value=f"<@{extra}>", inline=True)
+        elif lt == 'blacklist' and extra:
+            e.add_field(name="🚫 Blacklisté par", value=f"<@{extra}>", inline=True)
+            # Ajouter le nom du panel
+            panel_id = ti.get('panel_id', '')
+            panels = c.get('ticket_panels', {})
+            if panel_id and panel_id in panels:
+                panel_name = panels[panel_id].get('name', panel_id)
+                e.add_field(name="📋 Panel", value=panel_name, inline=True)
         if ti.get('answers') and lt in ['create', 'close']:
             at = "\n".join([f"**{q}**: {a[:80]}" for q, a in list(ti['answers'].items())[:5]])
             if at: e.add_field(name="📝 Réponses", value=at[:1024], inline=False)
@@ -2059,6 +2067,88 @@ class TicketControlView(View):
             opts = [discord.SelectOption(label=f"@{m.display_name}"[:25], value=str(m.id)) for m in staffs]
             await i.response.send_message("👥 Choisir un staff:", view=AddStaffView(opts, i.channel.id), ephemeral=True)
         except: await i.response.send_message("❌ Erreur", ephemeral=True)
+    
+    @discord.ui.button(label="🚫 Blacklist", style=discord.ButtonStyle.secondary, custom_id="ticket_ctrl_blacklist")
+    async def blacklist_user(self, i, btn):
+        """Blacklist le créateur du ticket sur ce panel"""
+        try:
+            tk = await get_ticket(i.channel.id)
+            if not tk: 
+                return await i.response.send_message("❌ Ticket non trouvé", ephemeral=True)
+            
+            c = await cfg(i.guild.id)
+            
+            # ═══════════════════════════════════════════════════════════════════════════════
+            #                    🔒 VÉRIFICATION DES PERMISSIONS
+            # ═══════════════════════════════════════════════════════════════════════════════
+            is_admin = i.user.guild_permissions.administrator
+            is_owner = i.user.id == i.guild.owner_id
+            
+            blacklist_role_id = c.get('ticket_blacklist_role', 0)
+            staff_role_id = c.get('ticket_staff', 0)
+            
+            has_blacklist_role = blacklist_role_id and i.guild.get_role(blacklist_role_id) in i.user.roles
+            has_staff_role = staff_role_id and i.guild.get_role(staff_role_id) in i.user.roles
+            
+            if not (is_admin or is_owner or has_blacklist_role or has_staff_role):
+                return await i.response.send_message(
+                    "❌ Vous n'avez pas la permission de blacklister.\n"
+                    "*Requis : Admin, rôle Staff, ou rôle Blacklist configuré*",
+                    ephemeral=True
+                )
+            
+            # Vérifier que le créateur n'est pas admin
+            ticket_user = i.guild.get_member(tk['user'])
+            if ticket_user and (ticket_user.guild_permissions.administrator or ticket_user.id == i.guild.owner_id):
+                return await i.response.send_message("❌ Impossible de blacklister un administrateur.", ephemeral=True)
+            
+            # Récupérer le panel
+            panel_id = tk.get('panel_id')
+            if not panel_id:
+                return await i.response.send_message("❌ Panel du ticket introuvable.", ephemeral=True)
+            
+            panels = c.get('ticket_panels', {})
+            if panel_id not in panels:
+                return await i.response.send_message("❌ Panel introuvable dans la configuration.", ephemeral=True)
+            
+            panel_name = panels[panel_id].get('name', panel_id)
+            blacklist = panels[panel_id].get('blacklist', [])
+            
+            # Vérifier si déjà blacklisté
+            if tk['user'] in blacklist:
+                return await i.response.send_message(
+                    f"⚠️ <@{tk['user']}> est déjà blacklisté du panel **{panel_name}**.",
+                    ephemeral=True
+                )
+            
+            # Ajouter à la blacklist
+            blacklist.append(tk['user'])
+            panels[panel_id]['blacklist'] = blacklist
+            await db_set(i.guild.id, 'ticket_panels', panels)
+            
+            # Créer l'embed de confirmation
+            e = discord.Embed(
+                title="🚫 Membre Blacklisté",
+                color=0xE74C3C,
+                timestamp=now()
+            )
+            
+            user_mention = f"<@{tk['user']}>"
+            if ticket_user:
+                e.set_thumbnail(url=ticket_user.display_avatar.url)
+            
+            e.add_field(name="👤 Membre", value=f"{user_mention}\n`{tk['user']}`", inline=True)
+            e.add_field(name="📋 Panel", value=f"**{panel_name}**", inline=True)
+            e.add_field(name="👮 Par", value=i.user.mention, inline=True)
+            e.set_footer(text="Ce membre ne pourra plus créer de tickets sur ce panel")
+            
+            await i.response.send_message(embed=e)
+            
+            # Log
+            await send_ticket_log(i.guild, 'blacklist', tk['user'], tk, extra=i.user.id)
+            
+        except Exception as ex:
+            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
     
     @discord.ui.button(label="🔒 Fermer", style=discord.ButtonStyle.danger, custom_id="ticket_ctrl_close")
     async def close(self, i, btn):
@@ -17061,4 +17151,3 @@ if __name__ == "__main__":
     print("🛡️ Anti-badwords amélioré (mots entiers)")
     print("🎮 Système de promotions jeux vidéo")
     bot.run(TOKEN)
-
