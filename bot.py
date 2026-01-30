@@ -1207,113 +1207,212 @@ class UniversalCategorySelectMenu(Select):
 class PaginatedChannelSelect(View):
     """Sélecteur de salon avec pagination pour supporter plus de 25 salons"""
     def __init__(self, u, g, callback_key, return_panel_class, page=0, multi=False, current_channels=None):
-        super().__init__(timeout=180)
+        super().__init__(timeout=300)
         self.u = u
         self.g = g
-        self.callback_key = callback_key  # Clé de config à modifier
-        self.return_panel_class = return_panel_class  # Classe du panel de retour
+        self.callback_key = callback_key
+        self.return_panel_class = return_panel_class
         self.page = page
-        self.multi = multi  # Si True, permet plusieurs salons
-        self.current_channels = current_channels or []  # Salons déjà sélectionnés
+        self.multi = multi
+        self.current_channels = list(current_channels) if current_channels else []
         self.channels = list(g.text_channels)
-        self.max_page = (len(self.channels) - 1) // 23  # 23 pour laisser place à "Aucun"
+        self.max_page = max(0, (len(self.channels) - 1) // 23)
         
-        self._build_select()
-        self._build_buttons()
+        self._build()
     
-    def _build_select(self):
+    def _build(self):
+        self.clear_items()
+        
         # Calculer les salons de cette page
         start = self.page * 23
         end = start + 23
         page_channels = self.channels[start:end]
         
         opts = []
+        
+        # Option "Aucun" seulement en mode simple
         if not self.multi and self.page == 0:
             opts.append(discord.SelectOption(label="❌ Aucun / Désactiver", value="0", emoji="❌"))
         
         for ch in page_channels:
             is_selected = ch.id in self.current_channels
-            label = f"{'✅ ' if is_selected else ''}# {ch.name}"[:25]
+            # Marquer clairement les salons sélectionnés
+            if is_selected:
+                label = f"✅ {ch.name}"[:25]
+                emoji = "✅"
+            else:
+                label = f"# {ch.name}"[:25]
+                emoji = "💬"
+            
             desc = ch.category.name[:50] if ch.category else "Sans catégorie"
+            if is_selected:
+                desc = "✓ Sélectionné • " + desc
+            
             opts.append(discord.SelectOption(
                 label=label, 
                 value=str(ch.id),
-                description=desc,
-                default=is_selected if self.multi else False
+                description=desc[:50],
+                emoji=emoji
             ))
         
         if opts:
-            select = PaginatedChannelSelectMenu(
-                self, opts, 
-                multi=self.multi,
-                placeholder=f"Page {self.page + 1}/{self.max_page + 1} - Sélectionner..."
+            placeholder = f"Page {self.page + 1}/{self.max_page + 1}"
+            if self.multi:
+                placeholder += f" • {len(self.current_channels)} salon(s) sélectionné(s)"
+            
+            select = Select(
+                placeholder=placeholder,
+                options=opts,
+                max_values=min(len(opts), 5) if self.multi else 1,
+                min_values=0 if self.multi else 1,
+                row=0
             )
+            select.callback = self._on_select
             self.add_item(select)
-    
-    def _build_buttons(self):
-        # Bouton page précédente
-        prev_btn = discord.ui.Button(
-            label="◀️", 
-            style=discord.ButtonStyle.secondary, 
-            disabled=(self.page == 0),
-            row=1
-        )
-        prev_btn.callback = self.prev_page
-        self.add_item(prev_btn)
         
-        # Bouton page suivante
-        next_btn = discord.ui.Button(
-            label="▶️", 
-            style=discord.ButtonStyle.secondary, 
-            disabled=(self.page >= self.max_page),
-            row=1
-        )
-        next_btn.callback = self.next_page
-        self.add_item(next_btn)
+        # Navigation
+        if self.max_page > 0:
+            prev_btn = Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
+            prev_btn.callback = self._prev
+            self.add_item(prev_btn)
+            
+            page_btn = Button(label=f"{self.page + 1}/{self.max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
+            self.add_item(page_btn)
+            
+            next_btn = Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
+            next_btn.callback = self._next
+            self.add_item(next_btn)
         
-        # Bouton retour
-        back_btn = discord.ui.Button(
-            label="◀️ Retour", 
-            style=discord.ButtonStyle.danger,
-            row=1
-        )
-        back_btn.callback = self.go_back
-        self.add_item(back_btn)
-        
-        # Si multi-sélection, ajouter bouton "Valider"
-        if self.multi and self.current_channels:
-            validate_btn = discord.ui.Button(
+        # Boutons d'action pour le mode multi
+        if self.multi:
+            # Bouton Valider - TOUJOURS visible
+            validate_btn = Button(
                 label=f"✅ Valider ({len(self.current_channels)})", 
                 style=discord.ButtonStyle.success,
-                row=1
+                row=2
             )
-            validate_btn.callback = self.validate
+            validate_btn.callback = self._validate
             self.add_item(validate_btn)
+            
+            # Bouton Vider
+            if self.current_channels:
+                clear_btn = Button(label="🗑️ Tout effacer", style=discord.ButtonStyle.danger, row=2)
+                clear_btn.callback = self._clear
+                self.add_item(clear_btn)
+        
+        # Bouton retour
+        back_btn = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+        back_btn.callback = self._back
+        self.add_item(back_btn)
     
-    async def prev_page(self, i):
-        v = PaginatedChannelSelect(
-            self.u, self.g, self.callback_key, self.return_panel_class,
-            page=self.page - 1, multi=self.multi, current_channels=self.current_channels
-        )
-        await i.response.edit_message(view=v)
+    async def _on_select(self, i: discord.Interaction):
+        try:
+            await i.response.defer()
+        except:
+            pass
+        
+        selected_ids = [int(v) for v in i.data.get('values', []) if v != "0"]
+        
+        if self.multi:
+            # Mode multi : toggle chaque salon sélectionné
+            for ch_id in selected_ids:
+                if ch_id in self.current_channels:
+                    self.current_channels.remove(ch_id)
+                else:
+                    self.current_channels.append(ch_id)
+            
+            # Rafraîchir la vue
+            self._build()
+            
+            try:
+                await i.edit_original_response(view=self)
+            except:
+                pass
+        else:
+            # Mode simple : sauvegarder directement
+            value = int(i.data['values'][0]) if i.data.get('values') and i.data['values'][0] != "0" else 0
+            await db_set(self.g.id, self.callback_key, value)
+            
+            try:
+                v = self.return_panel_class(self.u, self.g)
+                await i.edit_original_response(embed=await v.embed(), view=v)
+            except:
+                pass
     
-    async def next_page(self, i):
-        v = PaginatedChannelSelect(
-            self.u, self.g, self.callback_key, self.return_panel_class,
-            page=self.page + 1, multi=self.multi, current_channels=self.current_channels
-        )
-        await i.response.edit_message(view=v)
+    async def _prev(self, i: discord.Interaction):
+        try:
+            await i.response.defer()
+        except:
+            pass
+        
+        if self.page > 0:
+            self.page -= 1
+            self._build()
+        
+        try:
+            await i.edit_original_response(view=self)
+        except:
+            pass
     
-    async def go_back(self, i):
-        v = self.return_panel_class(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+    async def _next(self, i: discord.Interaction):
+        try:
+            await i.response.defer()
+        except:
+            pass
+        
+        if self.page < self.max_page:
+            self.page += 1
+            self._build()
+        
+        try:
+            await i.edit_original_response(view=self)
+        except:
+            pass
     
-    async def validate(self, i):
+    async def _back(self, i: discord.Interaction):
+        try:
+            await i.response.defer()
+        except:
+            pass
+        
+        try:
+            v = self.return_panel_class(self.u, self.g)
+            await i.edit_original_response(embed=await v.embed(), view=v)
+        except:
+            pass
+    
+    async def _validate(self, i: discord.Interaction):
+        try:
+            await i.response.defer()
+        except:
+            pass
+        
         # Sauvegarder les salons sélectionnés
         await db_set(self.g.id, self.callback_key, self.current_channels)
-        v = self.return_panel_class(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        
+        try:
+            v = self.return_panel_class(self.u, self.g)
+            count = len(self.current_channels)
+            content = f"✅ **{count} salon(s)** configuré(s) !" if count > 0 else "✅ Aucun salon configuré (commande désactivée)"
+            await i.edit_original_response(content=content, embed=await v.embed(), view=v)
+        except:
+            pass
+    
+    async def _clear(self, i: discord.Interaction):
+        try:
+            await i.response.defer()
+        except:
+            pass
+        
+        self.current_channels = []
+        self._build()
+        
+        try:
+            await i.edit_original_response(view=self)
+        except:
+            pass
 
+# Garder l'ancienne classe pour compatibilité mais elle n'est plus utilisée
 class PaginatedChannelSelectMenu(Select):
     def __init__(self, parent_view, opts, multi=False, placeholder="Sélectionner..."):
         max_vals = min(len(opts), 10) if multi else 1
@@ -5473,9 +5572,27 @@ class TradePanel(View):
         c = await cfg(self.g.id)
         current = c.get('trade_allowed_channels', [])
         v = PaginatedChannelSelect(self.u, self.g, 'trade_allowed_channels', TradePanel, multi=True, current_channels=current)
+        
+        # Afficher les salons actuellement sélectionnés
+        if current:
+            selected_txt = ""
+            for ch_id in current[:5]:
+                ch = self.g.get_channel(ch_id)
+                if ch:
+                    selected_txt += f"• {ch.mention}\n"
+            if len(current) > 5:
+                selected_txt += f"*+{len(current) - 5} autres...*\n"
+        else:
+            selected_txt = "*Aucun salon sélectionné*"
+        
         await i.response.edit_message(embed=discord.Embed(
             title="📌 Salons autorisés pour /trade", 
-            description="Sélectionnez les salons où la commande peut être utilisée.\n\n📢 *Le trade sera publié dans le salon où la commande est utilisée.*",
+            description=(
+                "**Sélectionnez les salons** où `/trade` peut être utilisée.\n\n"
+                "👆 **Cliquez sur un salon** pour l'ajouter/retirer\n"
+                "✅ **Cliquez sur Valider** pour sauvegarder\n\n"
+                f"📋 **Actuellement sélectionnés ({len(current)}) :**\n{selected_txt}"
+            ),
             color=C.PURPLE
         ), view=v)
     
