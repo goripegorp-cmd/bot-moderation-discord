@@ -6716,19 +6716,35 @@ class AdsDealsPanel(View):
         
         e.description = (
             "Recevez automatiquement les meilleures promotions de jeux vidéo !\n\n"
-            "**🎮 Plateformes supportées :**\n"
-            "• 🎮 **Steam** - Promotions officielles\n"
-            "• 🎯 **Epic Games** - Jeux gratuits & promos\n"
-            "• 🟣 **GOG** - Jeux sans DRM\n"
-            "• ⚡ **Instant Gaming** - Clés officielles\n"
-            "• ❤️ **Humble Bundle** - Bundles & promos"
+            "**🏪 +20 Plateformes supportées :**"
+        )
+        
+        # Plateformes majeures
+        e.add_field(
+            name="🎮 Majeures",
+            value="Steam • Epic Games • GOG\nUbisoft • EA/Origin • Battle.net",
+            inline=True
+        )
+        
+        # Revendeurs de clés
+        e.add_field(
+            name="🔑 Revendeurs",
+            value="Humble Bundle • Fanatical\nGreen Man Gaming • Gamesplanet",
+            inline=True
+        )
+        
+        # Autres
+        e.add_field(
+            name="🛒 Autres",
+            value="GameBillet • IndieGala\nVoidu • DLGamer • +10 autres",
+            inline=True
         )
         
         e.add_field(name="📍 Salon", value=deals_ch.mention if deals_ch else "❌ Non configuré", inline=True)
         e.add_field(name="📊 Statut", value="✅ Activé" if deals_enabled else "❌ Désactivé", inline=True)
         e.add_field(name="🔻 Minimum", value=f"**-{deals_min_discount}%**", inline=True)
         
-        e.set_footer(text="💡 Les promotions sont vérifiées toutes les 30 minutes")
+        e.set_footer(text="💡 Données via CheapShark API • Vérification toutes les 30 min")
         return e
     
     @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
@@ -14611,28 +14627,47 @@ async def check_twitter_feeds(session, guild, data):
 
 async def check_rosocial_feeds(session, guild, data):
     """Vérifie les nouveaux posts RoSocial"""
-    channel = guild.get_channel(data.get('ads_rosocial_channel', 0))
+    default_channel = guild.get_channel(data.get('ads_rosocial_channel', 0))
     feeds = data.get('ads_rosocial_feeds', [])
-    if not channel or not feeds:
+    if not feeds:
         return
     
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8'
+    }
     
-    for username in feeds:
+    for feed in feeds:
         try:
-            url = f"https://rosocial.net/{username}"
+            # Gérer le format dict ou string
+            if isinstance(feed, dict):
+                username = feed.get('username', '')
+                feed_channel_id = feed.get('channel_id', 0)
+                channel = guild.get_channel(feed_channel_id) if feed_channel_id else default_channel
+            else:
+                username = str(feed)
+                channel = default_channel
             
-            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if not username or not channel:
+                continue
+            
+            profile_url = f"https://rosocial.net/{username}"
+            
+            # Récupérer la page du profil
+            async with session.get(profile_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                 if resp.status != 200:
                     continue
                 html = await resp.text()
             
             import re
             
-            # Trouver le dernier post
+            # Trouver le dernier post (plusieurs patterns)
             posts = re.findall(r'href="https://rosocial\.net/posts/(\d+)"', html)
             if not posts:
                 posts = re.findall(r'/posts/(\d+)', html)
+            if not posts:
+                posts = re.findall(r'data-post-id="(\d+)"', html)
             
             if not posts:
                 continue
@@ -14646,57 +14681,113 @@ async def check_rosocial_feeds(session, guild, data):
             posted_content[cache_key] = latest_post_id
             
             post_url = f"https://rosocial.net/posts/{latest_post_id}"
-            profile_url = f"https://rosocial.net/{username}"
             
-            # Extraire la photo de profil si possible
-            avatar_match = re.search(rf'{username}[^>]*<img[^>]+src="([^"]+)"', html)
-            avatar_url = "https://rosocial.net/content/uploads/photos/2025/11/roso_597f00df39d1431f924ec9403430e921.png"
-            if avatar_match:
-                avatar_url = avatar_match.group(1)
-            
-            # Extraire le contenu du post si possible
+            # ═══════════════════════════════════════════════════════════════════════════════
+            #                    📥 RÉCUPÉRER LA PAGE DU POST POUR L'IMAGE
+            # ═══════════════════════════════════════════════════════════════════════════════
             post_content = ""
-            content_match = re.search(rf'/posts/{latest_post_id}"[^>]*>.*?<p[^>]*>([^<]+)</p>', html, re.DOTALL)
-            if content_match:
-                post_content = content_match.group(1).strip()[:200]
-            
-            # Extraire une image du post si présente
             image_url = None
-            img_match = re.search(rf'/posts/{latest_post_id}.*?<img[^>]+src="(https://rosocial\.net/content/uploads/photos/[^"]+)"', html, re.DOTALL)
-            if img_match:
-                image_url = img_match.group(1)
+            avatar_url = None
             
-            # ═══════════════ EMBED ROSOCIAL PROFESSIONNEL ═══════════════
-            e = discord.Embed(color=0x00D4AA)
+            try:
+                async with session.get(post_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as post_resp:
+                    if post_resp.status == 200:
+                        post_html = await post_resp.text()
+                        
+                        # Extraire le contenu du post
+                        content_patterns = [
+                            r'<div[^>]*class="[^"]*post-content[^"]*"[^>]*>(.*?)</div>',
+                            r'<p[^>]*class="[^"]*post-text[^"]*"[^>]*>(.*?)</p>',
+                            r'<div[^>]*class="[^"]*activity-text[^"]*"[^>]*>(.*?)</div>',
+                            r'<div[^>]*id="post-content"[^>]*>(.*?)</div>',
+                        ]
+                        for pattern in content_patterns:
+                            match = re.search(pattern, post_html, re.DOTALL | re.IGNORECASE)
+                            if match:
+                                # Nettoyer le HTML
+                                content = re.sub(r'<[^>]+>', '', match.group(1))
+                                content = content.strip()
+                                if content and len(content) > 5:
+                                    post_content = content[:300]
+                                    break
+                        
+                        # Extraire l'image du post (plusieurs patterns)
+                        image_patterns = [
+                            r'<img[^>]+src="(https://rosocial\.net/content/uploads/photos/[^"]+)"',
+                            r'<img[^>]+data-src="(https://rosocial\.net/content/uploads/photos/[^"]+)"',
+                            r'src="(https://rosocial\.net/content/uploads/[^"]+\.(jpg|jpeg|png|gif|webp))"',
+                            r'"(https://rosocial\.net/content/uploads/photos/\d+/\d+/[^"]+)"',
+                            r'og:image"[^>]+content="([^"]+)"',
+                        ]
+                        for pattern in image_patterns:
+                            match = re.search(pattern, post_html, re.IGNORECASE)
+                            if match:
+                                img = match.group(1)
+                                # Vérifier que c'est une vraie image et pas un avatar
+                                if 'avatar' not in img.lower() and 'profile' not in img.lower():
+                                    image_url = img
+                                    break
+                        
+                        # Extraire l'avatar
+                        avatar_patterns = [
+                            r'<img[^>]+class="[^"]*avatar[^"]*"[^>]+src="([^"]+)"',
+                            r'<img[^>]+src="([^"]+)"[^>]+class="[^"]*avatar[^"]*"',
+                            rf'{username}[^>]*<img[^>]+src="([^"]+)"',
+                        ]
+                        for pattern in avatar_patterns:
+                            match = re.search(pattern, post_html, re.IGNORECASE)
+                            if match:
+                                avatar_url = match.group(1)
+                                break
+            except:
+                pass
             
-            e.title = f"📝 Nouveau post de {username}"
-            e.url = post_url
+            # Avatar par défaut si non trouvé
+            if not avatar_url:
+                avatar_url = "https://rosocial.net/themes/flavor/flavor-developer/img/user-avatar.png"
             
-            if post_content:
-                e.description = f"*{post_content}...*"
+            # ═══════════════════════════════════════════════════════════════════════════════
+            #                        🎨 EMBED ROSOCIAL - DESIGN PROFESSIONNEL
+            # ═══════════════════════════════════════════════════════════════════════════════
             
+            e = discord.Embed(color=0x00D4AA)  # Vert RoSocial
+            
+            # Header avec le nom de l'auteur
             e.set_author(
                 name=f"🎮 ROSOCIAL • {username}",
                 url=profile_url,
-                icon_url="https://rosocial.net/content/uploads/photos/2025/11/roso_597f00df39d1431f924ec9403430e921.png"
+                icon_url=avatar_url
             )
             
-            # Thumbnail avec avatar ou logo
-            e.set_thumbnail(url=avatar_url)
+            # Titre
+            e.title = f"📝 Nouveau post"
+            e.url = post_url
             
-            # Image du post si disponible
+            # Contenu du post
+            if post_content and post_content.strip():
+                # Nettoyer le contenu
+                clean_content = post_content.replace('\n', ' ').strip()
+                if clean_content:
+                    e.description = f"*{clean_content}*"
+            
+            # IMAGE PRINCIPALE (le plus important !)
             if image_url:
                 e.set_image(url=image_url)
             
+            # Thumbnail avec avatar
+            e.set_thumbnail(url=avatar_url)
+            
+            # Liens
             e.add_field(
                 name="",
-                value=f"[🎮 **Voir le post**]({post_url}) • [👤 **Profil**]({profile_url})",
+                value=f"### [🔗 Voir le post]({post_url}) • [👤 Profil]({profile_url})",
                 inline=False
             )
             
+            # Footer
             e.set_footer(
                 text=f"RoSocial • {username}",
-                icon_url="https://rosocial.net/content/uploads/photos/2025/11/roso_597f00df39d1431f924ec9403430e921.png"
+                icon_url="https://rosocial.net/themes/flavor/flavor-developer/img/logo.png"
             )
             e.timestamp = now()
             
@@ -14704,7 +14795,7 @@ async def check_rosocial_feeds(session, guild, data):
             await asyncio.sleep(1)
             
         except Exception as ex:
-            print(f"Erreur RoSocial feed {username}: {ex}")
+            print(f"Erreur RoSocial feed {feed}: {ex}")
             continue
 
 async def check_roblox_ugc_feeds(session, guild, data):
@@ -14772,8 +14863,24 @@ async def check_roblox_ugc_feeds(session, guild, data):
                 # URL de l'item
                 item_url = f"https://www.roblox.com/catalog/{item_id}"
                 
-                # Image haute qualité via thumbnails API
-                thumb_url = f"https://www.roblox.com/asset-thumbnail/image?assetId={item_id}&width=420&height=420&format=png"
+                # ═══════════════════════════════════════════════════════════════════════════════
+                #                    🖼️ RÉCUPÉRATION DE L'IMAGE VIA THUMBNAILS API
+                # ═══════════════════════════════════════════════════════════════════════════════
+                thumb_url = None
+                try:
+                    thumb_api = f"https://thumbnails.roblox.com/v1/assets?assetIds={item_id}&returnPolicy=PlaceHolder&size=420x420&format=Png&isCircular=false"
+                    async with session.get(thumb_api, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as thumb_resp:
+                        if thumb_resp.status == 200:
+                            thumb_data = await thumb_resp.json()
+                            thumb_list = thumb_data.get('data', [])
+                            if thumb_list and thumb_list[0].get('imageUrl'):
+                                thumb_url = thumb_list[0]['imageUrl']
+                except:
+                    pass
+                
+                # Fallback si l'API ne retourne rien
+                if not thumb_url:
+                    thumb_url = f"https://rbxcdn.com/asset-thumbnail/image?assetId={item_id}&width=420&height=420&format=Png"
                 
                 # ═══════════════════════════════════════════════════════════════════════════════
                 #                        🎨 EMBED ROBLOX UGC - DESIGN ÉPURÉ
@@ -14786,7 +14893,8 @@ async def check_roblox_ugc_feeds(session, guild, data):
                 e.url = item_url
                 
                 # Image GRANDE de l'article (c'est le plus important)
-                e.set_image(url=thumb_url)
+                if thumb_url:
+                    e.set_image(url=thumb_url)
                 
                 # Prix - bien visible
                 if item_price and item_price > 0:
@@ -14801,7 +14909,7 @@ async def check_roblox_ugc_feeds(session, guild, data):
                 # Lien d'achat bien visible
                 e.add_field(
                     name="",
-                    value=f"## [🛒 Voir sur Roblox]({item_url})",
+                    value=f"### [🛒 Voir sur Roblox]({item_url})",
                     inline=False
                 )
                 
@@ -14823,54 +14931,176 @@ async def check_roblox_ugc_feeds(session, guild, data):
 _deals_cache = {}
 _deals_last_check = {}
 
-# Configuration des plateformes de jeux
+# ═══════════════════════════════════════════════════════════════════════════════
+#                    🎮 CONFIGURATION DES PLATEFORMES DE JEUX
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Mapping CheapShark Store IDs vers nos configs
+CHEAPSHARK_STORES = {
+    '1': 'steam',
+    '2': 'gamersgate',
+    '3': 'greenmangaming',
+    '7': 'gog',
+    '8': 'origin',
+    '11': 'humble',
+    '13': 'uplay',
+    '15': 'fanatical',
+    '21': 'wingamestore',
+    '23': 'gamebillet',
+    '24': 'voidu',
+    '25': 'epic',
+    '27': 'gamesplanet',
+    '28': 'gamesload',
+    '29': '2game',
+    '30': 'indiegala',
+    '31': 'blizzard',
+    '33': 'dlgamer',
+    '34': 'noctre',
+    '35': 'dreamgame',
+}
+
 GAME_PLATFORMS = {
+    # === PLATEFORMES MAJEURES ===
     'steam': {
         'name': 'Steam',
         'color': 0x1B2838,
         'icon': 'https://store.steampowered.com/favicon.ico',
         'emoji': '🎮',
-        'logo': 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/Steam_icon_logo.svg/512px-Steam_icon_logo.svg.png'
     },
     'epic': {
         'name': 'Epic Games',
         'color': 0x0078F2,
         'icon': 'https://static-assets-prod.epicgames.com/epic-store/static/favicon.ico',
         'emoji': '🎯',
-        'logo': 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/31/Epic_Games_logo.svg/512px-Epic_Games_logo.svg.png'
     },
     'gog': {
         'name': 'GOG',
         'color': 0x86328A,
         'icon': 'https://www.gog.com/favicon.ico',
         'emoji': '🟣',
-        'logo': 'https://www.gog.com/favicon.ico'
     },
-    'ubisoft': {
-        'name': 'Ubisoft Store',
+    'uplay': {
+        'name': 'Ubisoft Connect',
         'color': 0x0070FF,
-        'icon': 'https://staticctf.ubisoft.com/J3yJr34U2pZ2Ieem48Dwy9uqj5PNUQTn/5RAqpPB8t95GfMmcWHdWjd/5c574a0f1a0daa3a8d7c6e0e5e82e2a5/Ubisoft_Logo.png',
+        'icon': 'https://ubistatic3-a.akamaihd.net/orbit/uplay_launcher_3_0/prod/latest/assets/favicon.ico',
         'emoji': '🔵',
-        'logo': 'https://staticctf.ubisoft.com/J3yJr34U2pZ2Ieem48Dwy9uqj5PNUQTn/5RAqpPB8t95GfMmcWHdWjd/5c574a0f1a0daa3a8d7c6e0e5e82e2a5/Ubisoft_Logo.png'
     },
+    'origin': {
+        'name': 'EA App / Origin',
+        'color': 0xFF4747,
+        'icon': 'https://www.ea.com/favicon.ico',
+        'emoji': '🔴',
+    },
+    'blizzard': {
+        'name': 'Battle.net',
+        'color': 0x00AEFF,
+        'icon': 'https://www.blizzard.com/favicon.ico',
+        'emoji': '❄️',
+    },
+    
+    # === REVENDEURS CLÉS OFFICIELLES ===
     'instant': {
         'name': 'Instant Gaming',
         'color': 0xFF6B00,
         'icon': 'https://www.instant-gaming.com/favicon.ico',
         'emoji': '⚡',
-        'logo': 'https://www.instant-gaming.com/themes/flavor/images/logos/logo.png'
     },
     'humble': {
         'name': 'Humble Bundle',
         'color': 0xCC2929,
         'icon': 'https://humblebundle-a.akamaihd.net/static/hashed/47e474bc43d5b4a7.ico',
         'emoji': '❤️',
-        'logo': 'https://humblebundle-a.akamaihd.net/static/hashed/47e474bc43d5b4a7.ico'
-    }
+    },
+    'fanatical': {
+        'name': 'Fanatical',
+        'color': 0xFF5500,
+        'icon': 'https://www.fanatical.com/favicon.ico',
+        'emoji': '🔥',
+    },
+    'greenmangaming': {
+        'name': 'Green Man Gaming',
+        'color': 0x2ECC71,
+        'icon': 'https://www.greenmangaming.com/favicon.ico',
+        'emoji': '🟢',
+    },
+    'gamesplanet': {
+        'name': 'Gamesplanet',
+        'color': 0x3498DB,
+        'icon': 'https://www.gamesplanet.com/favicon.ico',
+        'emoji': '🌍',
+    },
+    'gamersgate': {
+        'name': 'GamersGate',
+        'color': 0x2C3E50,
+        'icon': 'https://www.gamersgate.com/favicon.ico',
+        'emoji': '🚪',
+    },
+    'gamebillet': {
+        'name': 'GameBillet',
+        'color': 0x9B59B6,
+        'icon': 'https://www.gamebillet.com/favicon.ico',
+        'emoji': '🎫',
+    },
+    'voidu': {
+        'name': 'Voidu',
+        'color': 0x1ABC9C,
+        'icon': 'https://www.voidu.com/favicon.ico',
+        'emoji': '🎪',
+    },
+    'wingamestore': {
+        'name': 'WinGameStore',
+        'color': 0x3498DB,
+        'icon': 'https://www.wingamestore.com/favicon.ico',
+        'emoji': '🏪',
+    },
+    'indiegala': {
+        'name': 'IndieGala',
+        'color': 0xE74C3C,
+        'icon': 'https://www.indiegala.com/favicon.ico',
+        'emoji': '🎭',
+    },
+    '2game': {
+        'name': '2Game',
+        'color': 0xF39C12,
+        'icon': 'https://2game.com/favicon.ico',
+        'emoji': '2️⃣',
+    },
+    'gamesload': {
+        'name': 'Gamesload',
+        'color': 0x27AE60,
+        'icon': 'https://www.gamesload.com/favicon.ico',
+        'emoji': '📥',
+    },
+    'dlgamer': {
+        'name': 'DLGamer',
+        'color': 0x8E44AD,
+        'icon': 'https://www.dlgamer.com/favicon.ico',
+        'emoji': '💾',
+    },
+    'noctre': {
+        'name': 'Noctre',
+        'color': 0x2C3E50,
+        'icon': 'https://www.noctre.com/favicon.ico',
+        'emoji': '🌙',
+    },
+    'dreamgame': {
+        'name': 'DreamGame',
+        'color': 0x9B59B6,
+        'icon': 'https://www.dreamgame.com/favicon.ico',
+        'emoji': '💭',
+    },
+    
+    # === FALLBACK ===
+    'unknown': {
+        'name': 'Boutique',
+        'color': 0x7F8C8D,
+        'icon': 'https://cdn-icons-png.flaticon.com/512/3081/3081559.png',
+        'emoji': '🛒',
+    },
 }
 
 async def check_game_deals(session, guild, data):
-    """Vérifie les réductions de jeux vidéo sur plusieurs plateformes"""
+    """Vérifie les réductions de jeux vidéo sur TOUTES les plateformes via CheapShark API"""
     if not data.get('ads_deals_enabled', False):
         return
     
@@ -14889,77 +15119,105 @@ async def check_game_deals(session, guild, data):
     
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/html',
-        'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8'
+        'Accept': 'application/json',
     }
     
     deals_posted = 0
-    max_deals = 5
+    max_deals = 8  # Maximum de deals à poster par vérification
     
     # ═══════════════════════════════════════════════════════════════════════════════
-    #                                   STEAM
+    #                    🎮 API CHEAPSHARK - TOUTES LES PLATEFORMES
     # ═══════════════════════════════════════════════════════════════════════════════
+    # CheapShark agrège les deals de : Steam, GOG, Humble, GreenManGaming, Fanatical,
+    # GamersGate, Epic Games, Ubisoft, EA/Origin, Blizzard, et bien d'autres !
+    
     try:
-        steam_url = "https://store.steampowered.com/api/featuredcategories?cc=fr&l=french"
+        # Récupérer les meilleurs deals triés par économie
+        cheapshark_url = f"https://www.cheapshark.com/api/1.0/deals?sortBy=Savings&pageSize=30&onSale=1"
         
-        async with session.get(steam_url, headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as resp:
-            if resp.status == 200:
-                steam_data = await resp.json()
+        async with session.get(cheapshark_url, headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+            if resp.status != 200:
+                print(f"CheapShark API error: {resp.status}")
+                return
+            
+            deals = await resp.json()
+        
+        for deal in deals:
+            if deals_posted >= max_deals:
+                break
+            
+            try:
+                # Infos du deal
+                game_name = deal.get('title', 'Jeu inconnu')
+                store_id = deal.get('storeID', '1')
+                deal_id = deal.get('dealID', '')
                 
-                specials = steam_data.get('specials', {}).get('items', [])
+                # Prix
+                sale_price = float(deal.get('salePrice', 0))
+                normal_price = float(deal.get('normalPrice', 0))
                 
-                for game in specials[:8]:
-                    if deals_posted >= max_deals:
-                        break
-                    
-                    try:
-                        game_id = game.get('id')
-                        game_name = game.get('name', 'Jeu inconnu')
-                        discount = game.get('discount_percent', 0)
-                        
-                        # Prix en centimes -> euros
-                        original_price = game.get('original_price', 0)
-                        final_price = game.get('final_price', 0)
-                        if original_price > 100:  # En centimes
-                            original_price = original_price / 100
-                            final_price = final_price / 100
-                        
-                        if discount < min_discount or final_price <= 0:
-                            continue
-                        
-                        deal_key = f"steam_{guild.id}_{game_id}"
-                        if deal_key in _deals_cache:
-                            continue
-                        _deals_cache[deal_key] = time.time()
-                        
-                        game_url = f"https://store.steampowered.com/app/{game_id}"
-                        image_url = game.get('large_capsule_image') or game.get('header_image') or f"https://cdn.akamai.steamstatic.com/steam/apps/{game_id}/header.jpg"
-                        
-                        e = await create_deal_embed(
-                            platform='steam',
-                            game_name=game_name,
-                            game_url=game_url,
-                            image_url=image_url,
-                            original_price=original_price,
-                            final_price=final_price,
-                            discount=discount
-                        )
-                        
-                        await channel.send(embed=e)
-                        deals_posted += 1
-                        await asyncio.sleep(2)
-                        
-                    except Exception as ex:
-                        continue
-                        
+                # Calculer la réduction
+                if normal_price > 0:
+                    discount = int(((normal_price - sale_price) / normal_price) * 100)
+                else:
+                    discount = 0
+                
+                # Vérifier si la réduction est suffisante
+                if discount < min_discount:
+                    continue
+                
+                # Éviter les doublons
+                deal_key = f"cs_{guild.id}_{deal_id}"
+                if deal_key in _deals_cache:
+                    continue
+                _deals_cache[deal_key] = time.time()
+                
+                # Déterminer la plateforme
+                platform_key = CHEAPSHARK_STORES.get(store_id, 'unknown')
+                
+                # URL du deal (redirige vers la boutique)
+                game_url = f"https://www.cheapshark.com/redirect?dealID={deal_id}"
+                
+                # Image du jeu (via Steam si disponible, sinon CheapShark)
+                steam_app_id = deal.get('steamAppID')
+                if steam_app_id:
+                    image_url = f"https://cdn.akamai.steamstatic.com/steam/apps/{steam_app_id}/header.jpg"
+                else:
+                    thumb = deal.get('thumb', '')
+                    image_url = thumb if thumb.startswith('http') else None
+                
+                # Score Metacritic si disponible
+                metacritic = deal.get('metacriticScore', '0')
+                
+                # Créer l'embed
+                e = await create_deal_embed(
+                    platform=platform_key,
+                    game_name=game_name,
+                    game_url=game_url,
+                    image_url=image_url,
+                    original_price=normal_price,
+                    final_price=sale_price,
+                    discount=discount,
+                    metacritic=metacritic
+                )
+                
+                await channel.send(embed=e)
+                deals_posted += 1
+                await asyncio.sleep(2)
+                
+            except Exception as ex:
+                print(f"Erreur deal CheapShark: {ex}")
+                continue
+    
     except Exception as ex:
-        print(f"Erreur Steam deals: {ex}")
+        print(f"Erreur CheapShark API: {ex}")
     
     # ═══════════════════════════════════════════════════════════════════════════════
-    #                               EPIC GAMES
+    #                         🎁 EPIC GAMES - JEUX GRATUITS
     # ═══════════════════════════════════════════════════════════════════════════════
+    # Epic Games offre des jeux gratuits chaque semaine - on les affiche toujours !
+    
     try:
-        # Epic Games Free Games API
         epic_url = "https://store-site-backend-static-ipv4.ak.epicgames.com/freeGamesPromotions?locale=fr&country=FR&allowCountries=FR"
         
         async with session.get(epic_url, headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as resp:
@@ -14968,38 +15226,41 @@ async def check_game_deals(session, guild, data):
                 
                 games = epic_data.get('data', {}).get('Catalog', {}).get('searchStore', {}).get('elements', [])
                 
-                for game in games[:5]:
+                for game in games[:3]:
                     if deals_posted >= max_deals:
                         break
                     
                     try:
                         game_name = game.get('title', 'Jeu inconnu')
                         
-                        # Vérifier les promotions
+                        # Vérifier les promotions actives
                         promotions = game.get('promotions')
                         if not promotions:
                             continue
                         
                         promo_offers = promotions.get('promotionalOffers', [])
-                        if not promo_offers:
+                        if not promo_offers or not promo_offers[0].get('promotionalOffers'):
                             continue
                         
-                        # Vérifier si c'est gratuit ou en promo
+                        # Vérifier si c'est gratuit
                         price_info = game.get('price', {}).get('totalPrice', {})
                         original_price = price_info.get('originalPrice', 0) / 100
                         final_price = price_info.get('discountPrice', 0) / 100
                         
-                        if original_price <= 0:
+                        # On veut surtout les jeux gratuits
+                        if final_price > 0 and original_price <= 0:
                             continue
                         
-                        discount = int((1 - final_price / original_price) * 100) if original_price > 0 else 0
+                        discount = 100 if final_price == 0 and original_price > 0 else 0
+                        if discount == 0:
+                            discount = int((1 - final_price / original_price) * 100) if original_price > 0 else 0
                         
-                        if discount < min_discount and final_price > 0:
+                        if discount < min_discount:
                             continue
                         
                         # Slug pour l'URL
-                        slug = game.get('productSlug') or game.get('urlSlug', '')
-                        if not slug:
+                        slug = game.get('productSlug') or game.get('urlSlug') or game.get('catalogNs', {}).get('mappings', [{}])[0].get('pageSlug', '')
+                        if not slug or slug == '[]':
                             continue
                         
                         deal_key = f"epic_{guild.id}_{slug}"
@@ -15013,7 +15274,7 @@ async def check_game_deals(session, guild, data):
                         images = game.get('keyImages', [])
                         image_url = None
                         for img in images:
-                            if img.get('type') in ['OfferImageWide', 'DieselStoreFrontWide', 'Thumbnail']:
+                            if img.get('type') in ['OfferImageWide', 'DieselStoreFrontWide', 'Thumbnail', 'VaultClosed']:
                                 image_url = img.get('url')
                                 break
                         if not image_url and images:
@@ -15037,151 +15298,7 @@ async def check_game_deals(session, guild, data):
                         continue
                         
     except Exception as ex:
-        print(f"Erreur Epic deals: {ex}")
-    
-    # ═══════════════════════════════════════════════════════════════════════════════
-    #                                    GOG
-    # ═══════════════════════════════════════════════════════════════════════════════
-    try:
-        gog_url = "https://www.gog.com/games/ajax/filtered?mediaType=game&sort=discount&page=1"
-        
-        async with session.get(gog_url, headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as resp:
-            if resp.status == 200:
-                gog_data = await resp.json()
-                
-                products = gog_data.get('products', [])
-                
-                for game in products[:5]:
-                    if deals_posted >= max_deals:
-                        break
-                    
-                    try:
-                        game_name = game.get('title', 'Jeu inconnu')
-                        discount = game.get('price', {}).get('discountPercentage', 0)
-                        
-                        if discount < min_discount:
-                            continue
-                        
-                        price_str = game.get('price', {}).get('finalAmount', '0')
-                        original_str = game.get('price', {}).get('baseAmount', '0')
-                        
-                        final_price = float(price_str) if price_str else 0
-                        original_price = float(original_str) if original_str else final_price
-                        
-                        if final_price <= 0:
-                            continue
-                        
-                        slug = game.get('slug', '')
-                        deal_key = f"gog_{guild.id}_{slug}"
-                        if deal_key in _deals_cache:
-                            continue
-                        _deals_cache[deal_key] = time.time()
-                        
-                        game_url = f"https://www.gog.com/game/{slug}"
-                        image_url = "https:" + game.get('image', '') + "_product_card_v2_mobile_slider_639.jpg" if game.get('image') else None
-                        
-                        e = await create_deal_embed(
-                            platform='gog',
-                            game_name=game_name,
-                            game_url=game_url,
-                            image_url=image_url,
-                            original_price=original_price,
-                            final_price=final_price,
-                            discount=discount
-                        )
-                        
-                        await channel.send(embed=e)
-                        deals_posted += 1
-                        await asyncio.sleep(2)
-                        
-                    except Exception as ex:
-                        continue
-                        
-    except Exception as ex:
-        print(f"Erreur GOG deals: {ex}")
-    
-    # ═══════════════════════════════════════════════════════════════════════════════
-    #                            INSTANT GAMING (via IsThereAnyDeal API)
-    # ═══════════════════════════════════════════════════════════════════════════════
-    try:
-        # Utiliser l'API publique IsThereAnyDeal pour Instant Gaming
-        itad_url = "https://api.isthereanydeal.com/deals/v2?country=FR&sort=-cut&limit=20"
-        
-        async with session.get(itad_url, headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as resp:
-            if resp.status == 200:
-                itad_data = await resp.json()
-                
-                deals_list = itad_data.get('list', [])
-                
-                for deal in deals_list[:10]:
-                    if deals_posted >= max_deals:
-                        break
-                    
-                    try:
-                        game_name = deal.get('title', 'Jeu inconnu')
-                        
-                        # Vérifier la source
-                        shop = deal.get('shop', {})
-                        shop_name = shop.get('name', '').lower()
-                        
-                        # Filtrer pour les plateformes connues
-                        platform_key = None
-                        if 'instant' in shop_name:
-                            platform_key = 'instant'
-                        elif 'steam' in shop_name:
-                            continue  # Déjà géré par Steam API
-                        elif 'epic' in shop_name:
-                            continue  # Déjà géré par Epic API
-                        elif 'gog' in shop_name:
-                            continue  # Déjà géré par GOG API
-                        elif 'humble' in shop_name:
-                            platform_key = 'humble'
-                        elif 'ubisoft' in shop_name:
-                            platform_key = 'ubisoft'
-                        else:
-                            continue  # Plateforme non supportée
-                        
-                        # Prix
-                        price_new = deal.get('deal', {}).get('price', {}).get('amount', 0)
-                        price_old = deal.get('deal', {}).get('regular', {}).get('amount', 0)
-                        discount = deal.get('deal', {}).get('cut', 0)
-                        
-                        if discount < min_discount:
-                            continue
-                        
-                        game_id = deal.get('id', '')
-                        deal_key = f"itad_{guild.id}_{platform_key}_{game_id}"
-                        if deal_key in _deals_cache:
-                            continue
-                        _deals_cache[deal_key] = time.time()
-                        
-                        # URL du deal
-                        game_url = deal.get('deal', {}).get('url', '')
-                        if not game_url:
-                            continue
-                        
-                        # Image (si disponible)
-                        image_url = deal.get('assets', {}).get('banner400', '') or deal.get('assets', {}).get('banner300', '')
-                        
-                        e = await create_deal_embed(
-                            platform=platform_key,
-                            game_name=game_name,
-                            game_url=game_url,
-                            image_url=image_url,
-                            original_price=price_old,
-                            final_price=price_new,
-                            discount=discount
-                        )
-                        
-                        await channel.send(embed=e)
-                        deals_posted += 1
-                        await asyncio.sleep(2)
-                        
-                    except Exception as ex:
-                        continue
-                        
-    except Exception as ex:
-        print(f"Erreur ITAD deals: {ex}")
+        print(f"Erreur Epic Games: {ex}")
     
     # Nettoyer le cache périodiquement (garder 24h)
     current_time = time.time()
@@ -15189,10 +15306,10 @@ async def check_game_deals(session, guild, data):
     for k in keys_to_remove:
         del _deals_cache[k]
 
-async def create_deal_embed(platform: str, game_name: str, game_url: str, image_url: str, original_price: float, final_price: float, discount: int):
+async def create_deal_embed(platform: str, game_name: str, game_url: str, image_url: str, original_price: float, final_price: float, discount: int, metacritic: str = None):
     """Crée un embed uniforme et beau pour les deals de jeux"""
     
-    plat = GAME_PLATFORMS.get(platform, GAME_PLATFORMS['steam'])
+    plat = GAME_PLATFORMS.get(platform, GAME_PLATFORMS.get('unknown', GAME_PLATFORMS['steam']))
     
     e = discord.Embed(color=plat['color'])
     
@@ -15203,7 +15320,7 @@ async def create_deal_embed(platform: str, game_name: str, game_url: str, image_
     # Header avec la plateforme
     e.set_author(
         name=f"{plat['emoji']} {plat['name'].upper()} • PROMOTION",
-        icon_url=plat.get('logo', plat['icon'])
+        icon_url=plat.get('icon')
     )
     
     # Titre = Nom du jeu (bien visible)
@@ -15216,8 +15333,10 @@ async def create_deal_embed(platform: str, game_name: str, game_url: str, image_
     
     # ═══════════════ AFFICHAGE DES PRIX ═══════════════
     
-    # Badge de réduction
-    if discount >= 75:
+    # Badge de réduction avec style selon le pourcentage
+    if discount >= 90:
+        discount_badge = f"🔥🔥 **-{discount}%** 🔥🔥"
+    elif discount >= 75:
         discount_badge = f"🔥 **-{discount}%** 🔥"
     elif discount >= 50:
         discount_badge = f"⭐ **-{discount}%**"
@@ -15226,9 +15345,9 @@ async def create_deal_embed(platform: str, game_name: str, game_url: str, image_
     
     # Prix formaté
     if final_price == 0:
-        price_display = f"~~{original_price:.2f}€~~\n# **GRATUIT** 🎁"
+        price_display = f"~~{original_price:.2f}€~~\n## **GRATUIT** 🎁"
     else:
-        price_display = f"~~{original_price:.2f}€~~\n# **{final_price:.2f}€**"
+        price_display = f"~~{original_price:.2f}€~~\n## **{final_price:.2f}€**"
     
     # Économie
     savings = original_price - final_price
@@ -15240,10 +15359,24 @@ async def create_deal_embed(platform: str, game_name: str, game_url: str, image_
     if savings > 0:
         e.add_field(name="💵 Économie", value=f"**{savings:.2f}€**", inline=True)
     
+    # Score Metacritic si disponible
+    if metacritic and metacritic not in ['0', '']:
+        try:
+            score = int(metacritic)
+            if score >= 75:
+                score_emoji = "🟢"
+            elif score >= 50:
+                score_emoji = "🟡"
+            else:
+                score_emoji = "🔴"
+            e.add_field(name="📊 Metacritic", value=f"{score_emoji} **{score}/100**", inline=True)
+        except:
+            pass
+    
     # Lien d'achat - TRÈS VISIBLE
     e.add_field(
         name="",
-        value=f"## [{plat['emoji']} Acheter sur {plat['name']}]({game_url})",
+        value=f"### [{plat['emoji']} Acheter sur {plat['name']}]({game_url})",
         inline=False
     )
     
