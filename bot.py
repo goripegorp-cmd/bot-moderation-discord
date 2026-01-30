@@ -6714,17 +6714,19 @@ class AdsDealsPanel(View):
         deals_enabled = c.get('ads_deals_enabled', False)
         deals_min_discount = c.get('ads_deals_min_discount', 50)
         
-        e.description = "Recevez automatiquement les meilleures promotions de jeux vidéo du moment!\n\n*Sources: Steam, GOG, Epic Games, Humble Bundle, etc.*"
-        
-        e.add_field(name="📍 Salon de publication", value=deals_ch.mention if deals_ch else "❌ Non configuré", inline=True)
-        e.add_field(name="📊 Statut", value="✅ Activé" if deals_enabled else "❌ Désactivé", inline=True)
-        e.add_field(name="🔻 Réduction minimum", value=f"**{deals_min_discount}%**", inline=True)
-        
-        e.add_field(
-            name="ℹ️ Comment ça marche",
-            value="Le bot vérifie régulièrement les promotions sur plusieurs plateformes et publie les meilleures offres dans le salon configuré.",
-            inline=False
+        e.description = (
+            "Recevez automatiquement les meilleures promotions de jeux vidéo !\n\n"
+            "**🎮 Plateformes supportées :**\n"
+            "• 🎮 **Steam** - Promotions officielles\n"
+            "• 🎯 **Epic Games** - Jeux gratuits & promos\n"
+            "• 🟣 **GOG** - Jeux sans DRM\n"
+            "• ⚡ **Instant Gaming** - Clés officielles\n"
+            "• ❤️ **Humble Bundle** - Bundles & promos"
         )
+        
+        e.add_field(name="📍 Salon", value=deals_ch.mention if deals_ch else "❌ Non configuré", inline=True)
+        e.add_field(name="📊 Statut", value="✅ Activé" if deals_enabled else "❌ Désactivé", inline=True)
+        e.add_field(name="🔻 Minimum", value=f"**-{deals_min_discount}%**", inline=True)
         
         e.set_footer(text="💡 Les promotions sont vérifiées toutes les 30 minutes")
         return e
@@ -14738,7 +14740,7 @@ async def check_roblox_ugc_feeds(session, guild, data):
                 continue
             
             # Vérifier chaque item
-            for item in items[:3]:  # Limiter à 3 items récents
+            for item in items[:3]:
                 item_id = item.get('id')
                 item_type = item.get('itemType', 'Asset')
                 
@@ -14766,49 +14768,47 @@ async def check_roblox_ugc_feeds(session, guild, data):
                 
                 item_name = details.get('Name') or details.get('name') or f"Création #{item_id}"
                 item_price = details.get('PriceInRobux') or details.get('price') or 0
-                item_desc = details.get('Description') or details.get('description') or ""
                 
                 # URL de l'item
                 item_url = f"https://www.roblox.com/catalog/{item_id}"
                 
-                # Image de l'item
+                # Image haute qualité via thumbnails API
                 thumb_url = f"https://www.roblox.com/asset-thumbnail/image?assetId={item_id}&width=420&height=420&format=png"
                 
-                # ═══════════════ EMBED ROBLOX UGC ═══════════════
-                e = discord.Embed(color=0x00A86B)
+                # ═══════════════════════════════════════════════════════════════════════════════
+                #                        🎨 EMBED ROBLOX UGC - DESIGN ÉPURÉ
+                # ═══════════════════════════════════════════════════════════════════════════════
                 
+                e = discord.Embed(color=0x00B06B)  # Vert Roblox
+                
+                # Titre simple = Nom de l'article
                 e.title = f"🎨 {item_name}"
                 e.url = item_url
                 
-                if item_desc:
-                    e.description = item_desc[:200] + "..." if len(item_desc) > 200 else item_desc
-                
-                e.set_author(
-                    name=f"🟢 ROBLOX UGC • {username}",
-                    url=f"https://www.roblox.com/users/{user_id}/profile",
-                    icon_url="https://images.rbxcdn.com/23421382939a9f4ae8bbe60dbe2a3e7e.png"
-                )
-                
-                e.set_thumbnail(url=thumb_url)
+                # Image GRANDE de l'article (c'est le plus important)
                 e.set_image(url=thumb_url)
                 
-                # Prix
+                # Prix - bien visible
                 if item_price and item_price > 0:
-                    e.add_field(name="💰 Prix", value=f"**{item_price:,}** Robux", inline=True)
+                    price_txt = f"**{item_price:,}** R$"
                 else:
-                    e.add_field(name="💰 Prix", value="**Gratuit**", inline=True)
+                    price_txt = "**Gratuit** 🎁"
                 
+                # Informations simples en ligne
+                e.add_field(name="💰 Prix", value=price_txt, inline=True)
                 e.add_field(name="👤 Créateur", value=f"**{username}**", inline=True)
                 
+                # Lien d'achat bien visible
                 e.add_field(
                     name="",
-                    value=f"[🛒 **Voir sur Roblox**]({item_url})",
+                    value=f"## [🛒 Voir sur Roblox]({item_url})",
                     inline=False
                 )
                 
+                # Footer simple
                 e.set_footer(
                     text=f"Roblox UGC • {username}",
-                    icon_url="https://images.rbxcdn.com/23421382939a9f4ae8bbe60dbe2a3e7e.png"
+                    icon_url="https://images.rbxcdn.com/0785a14c892a503ab498b8f4100d4340.png"
                 )
                 e.timestamp = now()
                 
@@ -14823,8 +14823,54 @@ async def check_roblox_ugc_feeds(session, guild, data):
 _deals_cache = {}
 _deals_last_check = {}
 
+# Configuration des plateformes de jeux
+GAME_PLATFORMS = {
+    'steam': {
+        'name': 'Steam',
+        'color': 0x1B2838,
+        'icon': 'https://store.steampowered.com/favicon.ico',
+        'emoji': '🎮',
+        'logo': 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/Steam_icon_logo.svg/512px-Steam_icon_logo.svg.png'
+    },
+    'epic': {
+        'name': 'Epic Games',
+        'color': 0x0078F2,
+        'icon': 'https://static-assets-prod.epicgames.com/epic-store/static/favicon.ico',
+        'emoji': '🎯',
+        'logo': 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/31/Epic_Games_logo.svg/512px-Epic_Games_logo.svg.png'
+    },
+    'gog': {
+        'name': 'GOG',
+        'color': 0x86328A,
+        'icon': 'https://www.gog.com/favicon.ico',
+        'emoji': '🟣',
+        'logo': 'https://www.gog.com/favicon.ico'
+    },
+    'ubisoft': {
+        'name': 'Ubisoft Store',
+        'color': 0x0070FF,
+        'icon': 'https://staticctf.ubisoft.com/J3yJr34U2pZ2Ieem48Dwy9uqj5PNUQTn/5RAqpPB8t95GfMmcWHdWjd/5c574a0f1a0daa3a8d7c6e0e5e82e2a5/Ubisoft_Logo.png',
+        'emoji': '🔵',
+        'logo': 'https://staticctf.ubisoft.com/J3yJr34U2pZ2Ieem48Dwy9uqj5PNUQTn/5RAqpPB8t95GfMmcWHdWjd/5c574a0f1a0daa3a8d7c6e0e5e82e2a5/Ubisoft_Logo.png'
+    },
+    'instant': {
+        'name': 'Instant Gaming',
+        'color': 0xFF6B00,
+        'icon': 'https://www.instant-gaming.com/favicon.ico',
+        'emoji': '⚡',
+        'logo': 'https://www.instant-gaming.com/themes/flavor/images/logos/logo.png'
+    },
+    'humble': {
+        'name': 'Humble Bundle',
+        'color': 0xCC2929,
+        'icon': 'https://humblebundle-a.akamaihd.net/static/hashed/47e474bc43d5b4a7.ico',
+        'emoji': '❤️',
+        'logo': 'https://humblebundle-a.akamaihd.net/static/hashed/47e474bc43d5b4a7.ico'
+    }
+}
+
 async def check_game_deals(session, guild, data):
-    """Vérifie les réductions de jeux vidéo"""
+    """Vérifie les réductions de jeux vidéo sur plusieurs plateformes"""
     if not data.get('ads_deals_enabled', False):
         return
     
@@ -14842,110 +14888,373 @@ async def check_game_deals(session, guild, data):
     _deals_last_check[cache_key] = time.time()
     
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/html',
+        'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8'
     }
     
+    deals_posted = 0
+    max_deals = 5
+    
+    # ═══════════════════════════════════════════════════════════════════════════════
+    #                                   STEAM
+    # ═══════════════════════════════════════════════════════════════════════════════
     try:
-        # Utiliser l'API Steam pour les promotions
-        steam_url = "https://store.steampowered.com/api/featuredcategories"
+        steam_url = "https://store.steampowered.com/api/featuredcategories?cc=fr&l=french"
         
         async with session.get(steam_url, headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as resp:
-            if resp.status != 200:
-                return
-            steam_data = await resp.json()
-        
-        # Récupérer les jeux en promotion
-        specials = steam_data.get('specials', {}).get('items', [])
-        
-        deals_posted = 0
-        for game in specials[:10]:  # Limiter à 10 jeux
-            try:
-                game_id = game.get('id')
-                game_name = game.get('name', 'Jeu inconnu')
-                discount = game.get('discount_percent', 0)
-                original_price = game.get('original_price', 0) / 100 if game.get('original_price') else 0
-                final_price = game.get('final_price', 0) / 100 if game.get('final_price') else 0
+            if resp.status == 200:
+                steam_data = await resp.json()
                 
-                # Vérifier si la réduction est suffisante
-                if discount < min_discount:
-                    continue
+                specials = steam_data.get('specials', {}).get('items', [])
                 
-                deal_key = f"deal_{guild.id}_{game_id}"
-                if deal_key in _deals_cache:
-                    continue
-                
-                _deals_cache[deal_key] = time.time()
-                
-                # Nettoyer le cache périodiquement (garder seulement les entrées des dernières 24h)
-                current_time = time.time()
-                keys_to_remove = [k for k, v in _deals_cache.items() if current_time - v > 86400]
-                for k in keys_to_remove:
-                    del _deals_cache[k]
-                
-                # URL du jeu
-                game_url = f"https://store.steampowered.com/app/{game_id}"
-                
-                # Image
-                header_image = game.get('header_image') or f"https://cdn.akamai.steamstatic.com/steam/apps/{game_id}/header.jpg"
-                
-                # ═══════════════ EMBED RÉDUCTION ═══════════════
-                e = discord.Embed(color=0xFF6B35)
-                
-                e.title = f"🎮 {game_name}"
-                e.url = game_url
-                
-                e.set_author(
-                    name="🎯 PROMOTION STEAM",
-                    icon_url="https://store.steampowered.com/favicon.ico"
-                )
-                
-                e.set_image(url=header_image)
-                
-                # Prix et réduction
-                e.add_field(
-                    name="💰 Prix",
-                    value=f"~~{original_price:.2f}€~~ → **{final_price:.2f}€**",
-                    inline=True
-                )
-                
-                e.add_field(
-                    name="🔻 Réduction",
-                    value=f"**-{discount}%**",
-                    inline=True
-                )
-                
-                e.add_field(
-                    name="💵 Économie",
-                    value=f"**{original_price - final_price:.2f}€**",
-                    inline=True
-                )
-                
-                e.add_field(
-                    name="",
-                    value=f"[🛒 **Acheter sur Steam**]({game_url})",
-                    inline=False
-                )
-                
-                e.set_footer(
-                    text="Steam Deals • Offre limitée",
-                    icon_url="https://store.steampowered.com/favicon.ico"
-                )
-                e.timestamp = now()
-                
-                await channel.send(embed=e)
-                deals_posted += 1
-                await asyncio.sleep(3)
-                
-                if deals_posted >= 5:  # Max 5 deals par vérification
-                    break
+                for game in specials[:8]:
+                    if deals_posted >= max_deals:
+                        break
                     
-            except Exception as ex:
-                print(f"Erreur deal game: {ex}")
-                continue
-                
+                    try:
+                        game_id = game.get('id')
+                        game_name = game.get('name', 'Jeu inconnu')
+                        discount = game.get('discount_percent', 0)
+                        
+                        # Prix en centimes -> euros
+                        original_price = game.get('original_price', 0)
+                        final_price = game.get('final_price', 0)
+                        if original_price > 100:  # En centimes
+                            original_price = original_price / 100
+                            final_price = final_price / 100
+                        
+                        if discount < min_discount or final_price <= 0:
+                            continue
+                        
+                        deal_key = f"steam_{guild.id}_{game_id}"
+                        if deal_key in _deals_cache:
+                            continue
+                        _deals_cache[deal_key] = time.time()
+                        
+                        game_url = f"https://store.steampowered.com/app/{game_id}"
+                        image_url = game.get('large_capsule_image') or game.get('header_image') or f"https://cdn.akamai.steamstatic.com/steam/apps/{game_id}/header.jpg"
+                        
+                        e = await create_deal_embed(
+                            platform='steam',
+                            game_name=game_name,
+                            game_url=game_url,
+                            image_url=image_url,
+                            original_price=original_price,
+                            final_price=final_price,
+                            discount=discount
+                        )
+                        
+                        await channel.send(embed=e)
+                        deals_posted += 1
+                        await asyncio.sleep(2)
+                        
+                    except Exception as ex:
+                        continue
+                        
     except Exception as ex:
-        print(f"Erreur check_game_deals: {ex}")
+        print(f"Erreur Steam deals: {ex}")
+    
+    # ═══════════════════════════════════════════════════════════════════════════════
+    #                               EPIC GAMES
+    # ═══════════════════════════════════════════════════════════════════════════════
+    try:
+        # Epic Games Free Games API
+        epic_url = "https://store-site-backend-static-ipv4.ak.epicgames.com/freeGamesPromotions?locale=fr&country=FR&allowCountries=FR"
+        
+        async with session.get(epic_url, headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+            if resp.status == 200:
+                epic_data = await resp.json()
+                
+                games = epic_data.get('data', {}).get('Catalog', {}).get('searchStore', {}).get('elements', [])
+                
+                for game in games[:5]:
+                    if deals_posted >= max_deals:
+                        break
+                    
+                    try:
+                        game_name = game.get('title', 'Jeu inconnu')
+                        
+                        # Vérifier les promotions
+                        promotions = game.get('promotions')
+                        if not promotions:
+                            continue
+                        
+                        promo_offers = promotions.get('promotionalOffers', [])
+                        if not promo_offers:
+                            continue
+                        
+                        # Vérifier si c'est gratuit ou en promo
+                        price_info = game.get('price', {}).get('totalPrice', {})
+                        original_price = price_info.get('originalPrice', 0) / 100
+                        final_price = price_info.get('discountPrice', 0) / 100
+                        
+                        if original_price <= 0:
+                            continue
+                        
+                        discount = int((1 - final_price / original_price) * 100) if original_price > 0 else 0
+                        
+                        if discount < min_discount and final_price > 0:
+                            continue
+                        
+                        # Slug pour l'URL
+                        slug = game.get('productSlug') or game.get('urlSlug', '')
+                        if not slug:
+                            continue
+                        
+                        deal_key = f"epic_{guild.id}_{slug}"
+                        if deal_key in _deals_cache:
+                            continue
+                        _deals_cache[deal_key] = time.time()
+                        
+                        game_url = f"https://store.epicgames.com/fr/p/{slug}"
+                        
+                        # Image
+                        images = game.get('keyImages', [])
+                        image_url = None
+                        for img in images:
+                            if img.get('type') in ['OfferImageWide', 'DieselStoreFrontWide', 'Thumbnail']:
+                                image_url = img.get('url')
+                                break
+                        if not image_url and images:
+                            image_url = images[0].get('url')
+                        
+                        e = await create_deal_embed(
+                            platform='epic',
+                            game_name=game_name,
+                            game_url=game_url,
+                            image_url=image_url,
+                            original_price=original_price,
+                            final_price=final_price,
+                            discount=discount
+                        )
+                        
+                        await channel.send(embed=e)
+                        deals_posted += 1
+                        await asyncio.sleep(2)
+                        
+                    except Exception as ex:
+                        continue
+                        
+    except Exception as ex:
+        print(f"Erreur Epic deals: {ex}")
+    
+    # ═══════════════════════════════════════════════════════════════════════════════
+    #                                    GOG
+    # ═══════════════════════════════════════════════════════════════════════════════
+    try:
+        gog_url = "https://www.gog.com/games/ajax/filtered?mediaType=game&sort=discount&page=1"
+        
+        async with session.get(gog_url, headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+            if resp.status == 200:
+                gog_data = await resp.json()
+                
+                products = gog_data.get('products', [])
+                
+                for game in products[:5]:
+                    if deals_posted >= max_deals:
+                        break
+                    
+                    try:
+                        game_name = game.get('title', 'Jeu inconnu')
+                        discount = game.get('price', {}).get('discountPercentage', 0)
+                        
+                        if discount < min_discount:
+                            continue
+                        
+                        price_str = game.get('price', {}).get('finalAmount', '0')
+                        original_str = game.get('price', {}).get('baseAmount', '0')
+                        
+                        final_price = float(price_str) if price_str else 0
+                        original_price = float(original_str) if original_str else final_price
+                        
+                        if final_price <= 0:
+                            continue
+                        
+                        slug = game.get('slug', '')
+                        deal_key = f"gog_{guild.id}_{slug}"
+                        if deal_key in _deals_cache:
+                            continue
+                        _deals_cache[deal_key] = time.time()
+                        
+                        game_url = f"https://www.gog.com/game/{slug}"
+                        image_url = "https:" + game.get('image', '') + "_product_card_v2_mobile_slider_639.jpg" if game.get('image') else None
+                        
+                        e = await create_deal_embed(
+                            platform='gog',
+                            game_name=game_name,
+                            game_url=game_url,
+                            image_url=image_url,
+                            original_price=original_price,
+                            final_price=final_price,
+                            discount=discount
+                        )
+                        
+                        await channel.send(embed=e)
+                        deals_posted += 1
+                        await asyncio.sleep(2)
+                        
+                    except Exception as ex:
+                        continue
+                        
+    except Exception as ex:
+        print(f"Erreur GOG deals: {ex}")
+    
+    # ═══════════════════════════════════════════════════════════════════════════════
+    #                            INSTANT GAMING (via IsThereAnyDeal API)
+    # ═══════════════════════════════════════════════════════════════════════════════
+    try:
+        # Utiliser l'API publique IsThereAnyDeal pour Instant Gaming
+        itad_url = "https://api.isthereanydeal.com/deals/v2?country=FR&sort=-cut&limit=20"
+        
+        async with session.get(itad_url, headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+            if resp.status == 200:
+                itad_data = await resp.json()
+                
+                deals_list = itad_data.get('list', [])
+                
+                for deal in deals_list[:10]:
+                    if deals_posted >= max_deals:
+                        break
+                    
+                    try:
+                        game_name = deal.get('title', 'Jeu inconnu')
+                        
+                        # Vérifier la source
+                        shop = deal.get('shop', {})
+                        shop_name = shop.get('name', '').lower()
+                        
+                        # Filtrer pour les plateformes connues
+                        platform_key = None
+                        if 'instant' in shop_name:
+                            platform_key = 'instant'
+                        elif 'steam' in shop_name:
+                            continue  # Déjà géré par Steam API
+                        elif 'epic' in shop_name:
+                            continue  # Déjà géré par Epic API
+                        elif 'gog' in shop_name:
+                            continue  # Déjà géré par GOG API
+                        elif 'humble' in shop_name:
+                            platform_key = 'humble'
+                        elif 'ubisoft' in shop_name:
+                            platform_key = 'ubisoft'
+                        else:
+                            continue  # Plateforme non supportée
+                        
+                        # Prix
+                        price_new = deal.get('deal', {}).get('price', {}).get('amount', 0)
+                        price_old = deal.get('deal', {}).get('regular', {}).get('amount', 0)
+                        discount = deal.get('deal', {}).get('cut', 0)
+                        
+                        if discount < min_discount:
+                            continue
+                        
+                        game_id = deal.get('id', '')
+                        deal_key = f"itad_{guild.id}_{platform_key}_{game_id}"
+                        if deal_key in _deals_cache:
+                            continue
+                        _deals_cache[deal_key] = time.time()
+                        
+                        # URL du deal
+                        game_url = deal.get('deal', {}).get('url', '')
+                        if not game_url:
+                            continue
+                        
+                        # Image (si disponible)
+                        image_url = deal.get('assets', {}).get('banner400', '') or deal.get('assets', {}).get('banner300', '')
+                        
+                        e = await create_deal_embed(
+                            platform=platform_key,
+                            game_name=game_name,
+                            game_url=game_url,
+                            image_url=image_url,
+                            original_price=price_old,
+                            final_price=price_new,
+                            discount=discount
+                        )
+                        
+                        await channel.send(embed=e)
+                        deals_posted += 1
+                        await asyncio.sleep(2)
+                        
+                    except Exception as ex:
+                        continue
+                        
+    except Exception as ex:
+        print(f"Erreur ITAD deals: {ex}")
+    
+    # Nettoyer le cache périodiquement (garder 24h)
+    current_time = time.time()
+    keys_to_remove = [k for k, v in _deals_cache.items() if current_time - v > 86400]
+    for k in keys_to_remove:
+        del _deals_cache[k]
+
+async def create_deal_embed(platform: str, game_name: str, game_url: str, image_url: str, original_price: float, final_price: float, discount: int):
+    """Crée un embed uniforme et beau pour les deals de jeux"""
+    
+    plat = GAME_PLATFORMS.get(platform, GAME_PLATFORMS['steam'])
+    
+    e = discord.Embed(color=plat['color'])
+    
+    # ═══════════════════════════════════════════════════════════════════════════════
+    #                         🎮 DESIGN ÉPURÉ ET PROFESSIONNEL
+    # ═══════════════════════════════════════════════════════════════════════════════
+    
+    # Header avec la plateforme
+    e.set_author(
+        name=f"{plat['emoji']} {plat['name'].upper()} • PROMOTION",
+        icon_url=plat.get('logo', plat['icon'])
+    )
+    
+    # Titre = Nom du jeu (bien visible)
+    e.title = f"🎮 {game_name}"
+    e.url = game_url
+    
+    # Image du jeu - GRANDE et bien visible
+    if image_url:
+        e.set_image(url=image_url)
+    
+    # ═══════════════ AFFICHAGE DES PRIX ═══════════════
+    
+    # Badge de réduction
+    if discount >= 75:
+        discount_badge = f"🔥 **-{discount}%** 🔥"
+    elif discount >= 50:
+        discount_badge = f"⭐ **-{discount}%**"
+    else:
+        discount_badge = f"**-{discount}%**"
+    
+    # Prix formaté
+    if final_price == 0:
+        price_display = f"~~{original_price:.2f}€~~\n# **GRATUIT** 🎁"
+    else:
+        price_display = f"~~{original_price:.2f}€~~\n# **{final_price:.2f}€**"
+    
+    # Économie
+    savings = original_price - final_price
+    
+    # Affichage en colonnes
+    e.add_field(name="💰 Prix", value=price_display, inline=True)
+    e.add_field(name="🔻 Réduction", value=discount_badge, inline=True)
+    
+    if savings > 0:
+        e.add_field(name="💵 Économie", value=f"**{savings:.2f}€**", inline=True)
+    
+    # Lien d'achat - TRÈS VISIBLE
+    e.add_field(
+        name="",
+        value=f"## [{plat['emoji']} Acheter sur {plat['name']}]({game_url})",
+        inline=False
+    )
+    
+    # Footer avec plateforme
+    e.set_footer(
+        text=f"{plat['name']} • Offre limitée",
+        icon_url=plat['icon']
+    )
+    e.timestamp = now()
+    
+    return e
 
 @check_social_feeds.before_loop
 async def before_social_check():
