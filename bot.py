@@ -5061,12 +5061,13 @@ class CommandsPanel(View):
         
         # Trade
         trade_role = self.g.get_role(c.get('trade_role', 0))
-        trade_ch = self.g.get_channel(c.get('trade_channel', 0))
         trade_cd = c.get('trade_cooldown', 1)
         trade_unit = c.get('trade_cooldown_unit', 'heures')
+        trade_allowed = c.get('trade_allowed_channels', [])
+        trade_count = len(trade_allowed) if trade_allowed else 0
         e.add_field(
             name="🔄 Trade",
-            value=f"🎭 {trade_role.mention if trade_role else 'Tous'}\n📍 {trade_ch.mention if trade_ch else '❌'}\n⏱️ {trade_cd} {trade_unit}",
+            value=f"🎭 {trade_role.mention if trade_role else 'Tous'}\n📌 {trade_count} salon(s)\n⏱️ {trade_cd} {trade_unit}",
             inline=True
         )
         
@@ -5436,7 +5437,6 @@ class TradePanel(View):
         e = discord.Embed(title="🔄 Configuration Trade", color=C.PURPLE)
         
         trade_role = self.g.get_role(c.get('trade_role', 0))
-        trade_ch = self.g.get_channel(c.get('trade_channel', 0))
         trade_cd = c.get('trade_cooldown', 1)
         trade_unit = c.get('trade_cooldown_unit', 'heures')
         
@@ -5452,16 +5452,15 @@ class TradePanel(View):
             if len(allowed_chs) > 5:
                 allowed_txt += f" +{len(allowed_chs) - 5} autres"
         else:
-            allowed_txt = "*Partout*"
+            allowed_txt = "❌ Non configuré"
         
-        e.description = "Configurez le système d'échange pour votre serveur."
+        e.description = "Configurez le système d'échange pour votre serveur.\n\n📢 *Les trades sont publiés dans le salon où la commande est utilisée.*"
         
         e.add_field(name="🎭 Rôle autorisé", value=trade_role.mention if trade_role else "*Tout le monde*", inline=True)
         e.add_field(name="⏱️ Cooldown", value=f"{trade_cd} {trade_unit}", inline=True)
-        e.add_field(name="📍 Salon de publication", value=trade_ch.mention if trade_ch else "❌ Non configuré", inline=False)
         e.add_field(name="📌 Salons autorisés", value=allowed_txt, inline=False)
         
-        e.set_footer(text="💡 /trade • Salon publication ≠ Salons où utiliser la commande")
+        e.set_footer(text="💡 /trade • Définissez les salons où la commande peut être utilisée")
         return e
     
     @discord.ui.button(label="🎭 Rôle", style=discord.ButtonStyle.primary, row=0)
@@ -5469,19 +5468,14 @@ class TradePanel(View):
         v = PaginatedRoleSelect(self.u, self.g, 'trade_role', TradePanel)
         await i.response.edit_message(embed=discord.Embed(title="🎭 Rôle autorisé pour /trade", color=C.PURPLE), view=v)
     
-    @discord.ui.button(label="📍 Salon publication", style=discord.ButtonStyle.primary, row=0)
-    async def set_channel(self, i, b):
-        v = PaginatedChannelSelect(self.u, self.g, 'trade_channel', TradePanel)
-        await i.response.edit_message(embed=discord.Embed(title="📍 Salon de publication", description="Où les trades seront envoyés", color=C.PURPLE), view=v)
-    
-    @discord.ui.button(label="📌 Salons commande", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="📌 Salons autorisés", style=discord.ButtonStyle.success, row=0)
     async def set_allowed_channels(self, i, b):
         c = await cfg(self.g.id)
         current = c.get('trade_allowed_channels', [])
         v = PaginatedChannelSelect(self.u, self.g, 'trade_allowed_channels', TradePanel, multi=True, current_channels=current)
         await i.response.edit_message(embed=discord.Embed(
             title="📌 Salons autorisés pour /trade", 
-            description="Sélectionnez les salons où la commande peut être utilisée.\n*Vide = partout*",
+            description="Sélectionnez les salons où la commande peut être utilisée.\n\n📢 *Le trade sera publié dans le salon où la commande est utilisée.*",
             color=C.PURPLE
         ), view=v)
     
@@ -5590,6 +5584,24 @@ class AdsPanel(View):
             inline=True
         )
         
+        # Roblox UGC
+        rblx_ch = self.g.get_channel(c.get('ads_roblox_channel', 0))
+        rblx_feeds = c.get('ads_roblox_feeds', [])
+        e.add_field(
+            name="🟢 Roblox UGC",
+            value=f"📍 {rblx_ch.mention if rblx_ch else '❌'}\n🎨 {len(rblx_feeds)} créateur(s)",
+            inline=True
+        )
+        
+        # Réductions Jeux
+        deals_ch = self.g.get_channel(c.get('ads_deals_channel', 0))
+        deals_enabled = c.get('ads_deals_enabled', False)
+        e.add_field(
+            name="🎯 Réductions",
+            value=f"📍 {deals_ch.mention if deals_ch else '❌'}\n{'✅ Activé' if deals_enabled else '❌ Désactivé'}",
+            inline=True
+        )
+        
         e.set_footer(text="💡 Les notifications sont vérifiées toutes les 5 minutes")
         return e
     
@@ -5621,6 +5633,16 @@ class AdsPanel(View):
     @discord.ui.button(label="🎮 RoSocial", style=discord.ButtonStyle.success, row=1)
     async def rosocial(self, i, b):
         v = AdsRoSocialPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="🟢 Roblox UGC", style=discord.ButtonStyle.success, row=1)
+    async def roblox_ugc(self, i, b):
+        v = AdsRobloxPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="🎯 Réductions", style=discord.ButtonStyle.primary, row=1)
+    async def deals(self, i, b):
+        v = AdsDealsPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
@@ -6435,6 +6457,216 @@ class AdsRoSocialChannelSelect(Select):
         
         await i.response.edit_message(content=f"✅ Profil **{self.feed_data['username']}** ajouté ! Publications dans {salon_txt}", view=None)
 
+# ─────────────────────────────── ROBLOX UGC ───────────────────────────────
+
+class AdsRobloxPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        e = discord.Embed(title="🟢 Roblox UGC - Créations", color=0x00A86B)
+        
+        rblx_ch = self.g.get_channel(c.get('ads_roblox_channel', 0))
+        rblx_feeds = c.get('ads_roblox_feeds', [])
+        
+        e.description = "Recevez automatiquement les nouvelles créations UGC de vos créateurs Roblox préférés!"
+        
+        e.add_field(name="📍 Salon de publication", value=rblx_ch.mention if rblx_ch else "❌ Non configuré", inline=False)
+        
+        if rblx_feeds:
+            feeds_txt = ""
+            for f in rblx_feeds[:10]:
+                if isinstance(f, dict):
+                    name = f.get('username', '?')
+                    user_id = f.get('user_id', '?')
+                    feeds_txt += f"• `{name}` (ID: {user_id})\n"
+                else:
+                    feeds_txt += f"• `{f}`\n"
+            e.add_field(name=f"🎨 Créateurs suivis ({len(rblx_feeds)})", value=feeds_txt, inline=False)
+        else:
+            e.add_field(name="🎨 Créateurs suivis", value="*Aucun créateur configuré*", inline=False)
+        
+        e.set_footer(text="💡 Les nouvelles créations UGC sont vérifiées toutes les 10 minutes")
+        return e
+    
+    @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
+    async def set_channel(self, i, b):
+        v = PaginatedAdsChannelSelect(self.u, self.g, 'ads_roblox_channel', 'roblox')
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="📍 Salon Roblox UGC",
+                description="Où publier les nouvelles créations UGC",
+                color=0x00A86B
+            ),
+            view=v
+        )
+    
+    @discord.ui.button(label="➕ Ajouter Créateur", style=discord.ButtonStyle.success, row=0)
+    async def add_feed(self, i, b):
+        await i.response.send_modal(AdsRobloxAddModal(self.g, self.u))
+    
+    @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, row=0)
+    async def remove_feed(self, i, b):
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_roblox_feeds', [])
+        if not feeds:
+            return await i.response.send_message("❌ Aucun créateur à supprimer", ephemeral=True)
+        opts = []
+        for idx, f in enumerate(feeds[:25]):
+            if isinstance(f, dict):
+                opts.append(discord.SelectOption(label=f.get('username', str(idx))[:25], value=str(idx)))
+            else:
+                opts.append(discord.SelectOption(label=str(f)[:25], value=str(idx)))
+        v = AdsFeedRemoveView(self.u, self.g, opts, 'ads_roblox_feeds', 'roblox')
+        await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer un créateur", color=C.RED), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = AdsPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class AdsRobloxAddModal(Modal, title="➕ Ajouter un créateur Roblox"):
+    username = TextInput(label="Nom d'utilisateur Roblox", placeholder="Ex: Roblox", max_length=50)
+    
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+    
+    async def on_submit(self, i):
+        await i.response.defer(ephemeral=True)
+        
+        username = self.username.value.strip()
+        
+        # Récupérer l'ID utilisateur Roblox via l'API
+        try:
+            async with aiohttp.ClientSession() as session:
+                # API pour obtenir l'ID utilisateur
+                async with session.post(
+                    'https://users.roblox.com/v1/usernames/users',
+                    json={'usernames': [username], 'excludeBannedUsers': True}
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get('data') and len(data['data']) > 0:
+                            user_data = data['data'][0]
+                            user_id = user_data.get('id')
+                            display_name = user_data.get('displayName', username)
+                            
+                            # Vérifier si déjà ajouté
+                            c = await cfg(self.g.id)
+                            feeds = c.get('ads_roblox_feeds', [])
+                            
+                            for f in feeds:
+                                if isinstance(f, dict) and f.get('user_id') == user_id:
+                                    return await i.followup.send("❌ Ce créateur est déjà ajouté!", ephemeral=True)
+                            
+                            # Ajouter le créateur
+                            new_feed = {
+                                'username': display_name,
+                                'user_id': user_id
+                            }
+                            feeds.append(new_feed)
+                            await db_set(self.g.id, 'ads_roblox_feeds', feeds)
+                            
+                            await i.followup.send(f"✅ Créateur **{display_name}** (ID: {user_id}) ajouté !", ephemeral=True)
+                        else:
+                            await i.followup.send(f"❌ Utilisateur Roblox `{username}` introuvable", ephemeral=True)
+                    else:
+                        await i.followup.send("❌ Erreur lors de la recherche Roblox", ephemeral=True)
+        except Exception as ex:
+            print(f"Erreur Roblox API: {ex}")
+            await i.followup.send("❌ Erreur de connexion à l'API Roblox", ephemeral=True)
+
+# ─────────────────────────────── RÉDUCTIONS JEUX ───────────────────────────────
+
+class AdsDealsPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        e = discord.Embed(title="🎯 Réductions de Jeux Vidéo", color=0xFF6B35)
+        
+        deals_ch = self.g.get_channel(c.get('ads_deals_channel', 0))
+        deals_enabled = c.get('ads_deals_enabled', False)
+        deals_min_discount = c.get('ads_deals_min_discount', 50)
+        
+        e.description = "Recevez automatiquement les meilleures promotions de jeux vidéo du moment!\n\n*Sources: Steam, GOG, Epic Games, Humble Bundle, etc.*"
+        
+        e.add_field(name="📍 Salon de publication", value=deals_ch.mention if deals_ch else "❌ Non configuré", inline=True)
+        e.add_field(name="📊 Statut", value="✅ Activé" if deals_enabled else "❌ Désactivé", inline=True)
+        e.add_field(name="🔻 Réduction minimum", value=f"**{deals_min_discount}%**", inline=True)
+        
+        e.add_field(
+            name="ℹ️ Comment ça marche",
+            value="Le bot vérifie régulièrement les promotions sur plusieurs plateformes et publie les meilleures offres dans le salon configuré.",
+            inline=False
+        )
+        
+        e.set_footer(text="💡 Les promotions sont vérifiées toutes les 30 minutes")
+        return e
+    
+    @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
+    async def set_channel(self, i, b):
+        v = PaginatedAdsChannelSelect(self.u, self.g, 'ads_deals_channel', 'deals')
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="📍 Salon des Réductions",
+                description="Où publier les promotions de jeux",
+                color=0xFF6B35
+            ),
+            view=v
+        )
+    
+    @discord.ui.button(label="✅ Activer", style=discord.ButtonStyle.success, row=0)
+    async def enable(self, i, b):
+        c = await cfg(self.g.id)
+        if not c.get('ads_deals_channel'):
+            return await i.response.send_message("❌ Configurez d'abord un salon!", ephemeral=True)
+        await db_set(self.g.id, 'ads_deals_enabled', True)
+        v = AdsDealsPanel(self.u, self.g)
+        await i.response.edit_message(content="✅ Réductions activées!", embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="❌ Désactiver", style=discord.ButtonStyle.danger, row=0)
+    async def disable(self, i, b):
+        await db_set(self.g.id, 'ads_deals_enabled', False)
+        v = AdsDealsPanel(self.u, self.g)
+        await i.response.edit_message(content="❌ Réductions désactivées", embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="🔻 Réduction min", style=discord.ButtonStyle.secondary, row=1)
+    async def set_min_discount(self, i, b):
+        await i.response.send_modal(AdsDealsMinDiscountModal(self.g, self.u))
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = AdsPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class AdsDealsMinDiscountModal(Modal, title="🔻 Réduction Minimum"):
+    discount = TextInput(label="Pourcentage minimum (ex: 50)", placeholder="50", default="50", max_length=3)
+    
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+    
+    async def on_submit(self, i):
+        try:
+            value = int(self.discount.value)
+            value = max(10, min(90, value))  # Entre 10% et 90%
+            await db_set(self.g.id, 'ads_deals_min_discount', value)
+            
+            v = AdsDealsPanel(self.u, self.g)
+            await i.response.edit_message(content=f"✅ Réduction minimum: **{value}%**", embed=await v.embed(), view=v)
+        except:
+            await i.response.send_message("❌ Entrez un nombre valide (10-90)", ephemeral=True)
+
 # ─────────────────────────────── COMMON VIEWS ───────────────────────────────
 
 class PaginatedAdsChannelSelect(View):
@@ -6461,6 +6693,10 @@ class PaginatedAdsChannelSelect(View):
             return AdsDiscordPanel(self.u, self.g)
         elif self.platform == 'rosocial':
             return AdsRoSocialPanel(self.u, self.g)
+        elif self.platform == 'roblox':
+            return AdsRobloxPanel(self.u, self.g)
+        elif self.platform == 'deals':
+            return AdsDealsPanel(self.u, self.g)
         else:
             return AdsRedditPanel(self.u, self.g)
     
@@ -12914,7 +13150,10 @@ async def trade_cmd(i: discord.Interaction):
     
     # Vérifier les salons autorisés pour la commande
     allowed_channels = c.get('trade_allowed_channels', [])
-    if allowed_channels and i.channel.id not in allowed_channels:
+    if not allowed_channels:
+        return await i.response.send_message("❌ Aucun salon n'est configuré pour les trades. Demandez à un admin de configurer `/configure` → Commandes → Trade", ephemeral=True)
+    
+    if i.channel.id not in allowed_channels:
         mentions = []
         for ch_id in allowed_channels[:3]:
             ch = i.guild.get_channel(ch_id)
@@ -12936,10 +13175,8 @@ async def trade_cmd(i: discord.Interaction):
             if role and role not in i.user.roles:
                 return await i.response.send_message(f"❌ Vous devez avoir le rôle {role.mention}", ephemeral=True)
     
-    # Vérifier le salon de publication
-    trade_ch = i.guild.get_channel(c.get('trade_channel', 0))
-    if not trade_ch:
-        return await i.response.send_message("❌ Le salon des trades n'est pas configuré", ephemeral=True)
+    # Le trade sera publié dans le même salon où la commande est utilisée
+    trade_ch = i.channel
     
     # Vérifier le cooldown (sauf immunisés)
     if not is_immune:
@@ -13883,6 +14120,12 @@ async def check_social_feeds():
                             # RoSocial
                             await check_rosocial_feeds(session, guild, data)
                             
+                            # Roblox UGC
+                            await check_roblox_ugc_feeds(session, guild, data)
+                            
+                            # Réductions de jeux (vérifiée moins souvent via counter)
+                            await check_game_deals(session, guild, data)
+                            
                         except Exception as ex:
                             print(f"Erreur feed {guild_id}: {ex}")
                             continue
@@ -14344,6 +14587,248 @@ async def check_rosocial_feeds(session, guild, data):
         except Exception as ex:
             print(f"Erreur RoSocial feed {username}: {ex}")
             continue
+
+async def check_roblox_ugc_feeds(session, guild, data):
+    """Vérifie les nouvelles créations UGC Roblox"""
+    channel = guild.get_channel(data.get('ads_roblox_channel', 0))
+    feeds = data.get('ads_roblox_feeds', [])
+    if not channel or not feeds:
+        return
+    
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    
+    for feed in feeds:
+        try:
+            if isinstance(feed, dict):
+                user_id = feed.get('user_id')
+                username = feed.get('username', 'Créateur')
+            else:
+                continue
+            
+            if not user_id:
+                continue
+            
+            # API Roblox Catalog - Récupérer les créations récentes
+            catalog_url = f"https://catalog.roblox.com/v1/search/items?creatorTargetId={user_id}&creatorType=User&limit=10&sortType=3"
+            
+            async with session.get(catalog_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status != 200:
+                    continue
+                catalog_data = await resp.json()
+            
+            items = catalog_data.get('data', [])
+            if not items:
+                continue
+            
+            # Vérifier chaque item
+            for item in items[:3]:  # Limiter à 3 items récents
+                item_id = item.get('id')
+                item_type = item.get('itemType', 'Asset')
+                
+                cache_key = f"rblx_{guild.id}_{user_id}_{item_id}"
+                
+                if cache_key in posted_content:
+                    continue
+                
+                posted_content[cache_key] = True
+                
+                # Récupérer les détails de l'item
+                if item_type == 'Asset':
+                    details_url = f"https://economy.roblox.com/v2/assets/{item_id}/details"
+                else:
+                    details_url = f"https://catalog.roblox.com/v1/catalog/items/{item_id}/details?itemType={item_type}"
+                
+                try:
+                    async with session.get(details_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp2:
+                        if resp2.status == 200:
+                            details = await resp2.json()
+                        else:
+                            details = {}
+                except:
+                    details = {}
+                
+                item_name = details.get('Name') or details.get('name') or f"Création #{item_id}"
+                item_price = details.get('PriceInRobux') or details.get('price') or 0
+                item_desc = details.get('Description') or details.get('description') or ""
+                
+                # URL de l'item
+                item_url = f"https://www.roblox.com/catalog/{item_id}"
+                
+                # Image de l'item
+                thumb_url = f"https://www.roblox.com/asset-thumbnail/image?assetId={item_id}&width=420&height=420&format=png"
+                
+                # ═══════════════ EMBED ROBLOX UGC ═══════════════
+                e = discord.Embed(color=0x00A86B)
+                
+                e.title = f"🎨 {item_name}"
+                e.url = item_url
+                
+                if item_desc:
+                    e.description = item_desc[:200] + "..." if len(item_desc) > 200 else item_desc
+                
+                e.set_author(
+                    name=f"🟢 ROBLOX UGC • {username}",
+                    url=f"https://www.roblox.com/users/{user_id}/profile",
+                    icon_url="https://images.rbxcdn.com/23421382939a9f4ae8bbe60dbe2a3e7e.png"
+                )
+                
+                e.set_thumbnail(url=thumb_url)
+                e.set_image(url=thumb_url)
+                
+                # Prix
+                if item_price and item_price > 0:
+                    e.add_field(name="💰 Prix", value=f"**{item_price:,}** Robux", inline=True)
+                else:
+                    e.add_field(name="💰 Prix", value="**Gratuit**", inline=True)
+                
+                e.add_field(name="👤 Créateur", value=f"**{username}**", inline=True)
+                
+                e.add_field(
+                    name="",
+                    value=f"[🛒 **Voir sur Roblox**]({item_url})",
+                    inline=False
+                )
+                
+                e.set_footer(
+                    text=f"Roblox UGC • {username}",
+                    icon_url="https://images.rbxcdn.com/23421382939a9f4ae8bbe60dbe2a3e7e.png"
+                )
+                e.timestamp = now()
+                
+                await channel.send(embed=e)
+                await asyncio.sleep(2)
+                
+        except Exception as ex:
+            print(f"Erreur Roblox UGC feed {feed}: {ex}")
+            continue
+
+# Cache pour éviter de republier les mêmes deals
+_deals_cache = {}
+_deals_last_check = {}
+
+async def check_game_deals(session, guild, data):
+    """Vérifie les réductions de jeux vidéo"""
+    if not data.get('ads_deals_enabled', False):
+        return
+    
+    channel = guild.get_channel(data.get('ads_deals_channel', 0))
+    if not channel:
+        return
+    
+    min_discount = data.get('ads_deals_min_discount', 50)
+    
+    # Vérifier seulement toutes les 30 minutes par serveur
+    cache_key = f"deals_{guild.id}"
+    last_check = _deals_last_check.get(cache_key, 0)
+    if time.time() - last_check < 1800:  # 30 minutes
+        return
+    _deals_last_check[cache_key] = time.time()
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7'
+    }
+    
+    try:
+        # Utiliser l'API Steam pour les promotions
+        steam_url = "https://store.steampowered.com/api/featuredcategories"
+        
+        async with session.get(steam_url, headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+            if resp.status != 200:
+                return
+            steam_data = await resp.json()
+        
+        # Récupérer les jeux en promotion
+        specials = steam_data.get('specials', {}).get('items', [])
+        
+        deals_posted = 0
+        for game in specials[:10]:  # Limiter à 10 jeux
+            try:
+                game_id = game.get('id')
+                game_name = game.get('name', 'Jeu inconnu')
+                discount = game.get('discount_percent', 0)
+                original_price = game.get('original_price', 0) / 100 if game.get('original_price') else 0
+                final_price = game.get('final_price', 0) / 100 if game.get('final_price') else 0
+                
+                # Vérifier si la réduction est suffisante
+                if discount < min_discount:
+                    continue
+                
+                deal_key = f"deal_{guild.id}_{game_id}"
+                if deal_key in _deals_cache:
+                    continue
+                
+                _deals_cache[deal_key] = time.time()
+                
+                # Nettoyer le cache périodiquement (garder seulement les entrées des dernières 24h)
+                current_time = time.time()
+                keys_to_remove = [k for k, v in _deals_cache.items() if current_time - v > 86400]
+                for k in keys_to_remove:
+                    del _deals_cache[k]
+                
+                # URL du jeu
+                game_url = f"https://store.steampowered.com/app/{game_id}"
+                
+                # Image
+                header_image = game.get('header_image') or f"https://cdn.akamai.steamstatic.com/steam/apps/{game_id}/header.jpg"
+                
+                # ═══════════════ EMBED RÉDUCTION ═══════════════
+                e = discord.Embed(color=0xFF6B35)
+                
+                e.title = f"🎮 {game_name}"
+                e.url = game_url
+                
+                e.set_author(
+                    name="🎯 PROMOTION STEAM",
+                    icon_url="https://store.steampowered.com/favicon.ico"
+                )
+                
+                e.set_image(url=header_image)
+                
+                # Prix et réduction
+                e.add_field(
+                    name="💰 Prix",
+                    value=f"~~{original_price:.2f}€~~ → **{final_price:.2f}€**",
+                    inline=True
+                )
+                
+                e.add_field(
+                    name="🔻 Réduction",
+                    value=f"**-{discount}%**",
+                    inline=True
+                )
+                
+                e.add_field(
+                    name="💵 Économie",
+                    value=f"**{original_price - final_price:.2f}€**",
+                    inline=True
+                )
+                
+                e.add_field(
+                    name="",
+                    value=f"[🛒 **Acheter sur Steam**]({game_url})",
+                    inline=False
+                )
+                
+                e.set_footer(
+                    text="Steam Deals • Offre limitée",
+                    icon_url="https://store.steampowered.com/favicon.ico"
+                )
+                e.timestamp = now()
+                
+                await channel.send(embed=e)
+                deals_posted += 1
+                await asyncio.sleep(3)
+                
+                if deals_posted >= 5:  # Max 5 deals par vérification
+                    break
+                    
+            except Exception as ex:
+                print(f"Erreur deal game: {ex}")
+                continue
+                
+    except Exception as ex:
+        print(f"Erreur check_game_deals: {ex}")
 
 @check_social_feeds.before_loop
 async def before_social_check():
@@ -15259,3 +15744,4 @@ if __name__ == "__main__":
     print("🎙️ Vocaux temporaires multi-hubs")
     print("🛡️ Anti-badwords amélioré (mots entiers)")
     bot.run(TOKEN)
+
