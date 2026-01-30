@@ -15172,7 +15172,7 @@ async def check_game_deals(session, guild, data):
                 games = epic_data.get('data', {}).get('Catalog', {}).get('searchStore', {}).get('elements', [])
                 print(f"[DEALS] Epic Games: {len(games)} jeux trouvés")
                 
-                for game in games[:5]:
+                for game in games[:8]:
                     if deals_posted >= max_deals:
                         break
                     
@@ -15182,16 +15182,31 @@ async def check_game_deals(session, guild, data):
                         # Vérifier les promotions actives
                         promotions = game.get('promotions')
                         if not promotions:
+                            print(f"[DEALS] Epic: {game_name} - pas de promotions")
                             continue
                         
                         promo_offers = promotions.get('promotionalOffers', [])
-                        if not promo_offers or not promo_offers[0].get('promotionalOffers'):
+                        upcoming = promotions.get('upcomingPromotionalOffers', [])
+                        
+                        # Accepter les promos actives OU à venir
+                        if not promo_offers and not upcoming:
+                            print(f"[DEALS] Epic: {game_name} - pas d'offres")
+                            continue
+                        
+                        # Si pas de promo active, skip (on veut que les actives)
+                        if not promo_offers:
+                            continue
+                        
+                        # Vérifier qu'il y a bien des offres dans la liste
+                        if not promo_offers[0].get('promotionalOffers'):
                             continue
                         
                         # Prix
                         price_info = game.get('price', {}).get('totalPrice', {})
                         original_price = price_info.get('originalPrice', 0) / 100
                         final_price = price_info.get('discountPrice', 0) / 100
+                        
+                        print(f"[DEALS] Epic: {game_name} - Original: {original_price}€, Final: {final_price}€")
                         
                         if original_price <= 0:
                             continue
@@ -15201,6 +15216,8 @@ async def check_game_deals(session, guild, data):
                             discount = 100
                         else:
                             discount = int((1 - final_price / original_price) * 100)
+                        
+                        print(f"[DEALS] Epic: {game_name} - Réduction: {discount}% (min: {min_discount}%)")
                         
                         if discount < min_discount:
                             continue
@@ -15213,10 +15230,12 @@ async def check_game_deals(session, guild, data):
                                 slug = mappings[0].get('pageSlug', '')
                         
                         if not slug:
+                            print(f"[DEALS] Epic: {game_name} - pas de slug")
                             continue
                         
                         deal_key = f"epic_{guild.id}_{slug}"
                         if deal_key in _deals_cache:
+                            print(f"[DEALS] Epic: {game_name} - déjà posté (cache)")
                             continue
                         _deals_cache[deal_key] = time.time()
                         
@@ -15244,7 +15263,7 @@ async def check_game_deals(session, guild, data):
                         
                         await channel.send(embed=e)
                         deals_posted += 1
-                        print(f"[DEALS] Posté: {game_name} (-{discount}%) sur Epic Games")
+                        print(f"[DEALS] ✅ Posté: {game_name} (-{discount}%) sur Epic Games")
                         await asyncio.sleep(2)
                         
                     except Exception as ex:
@@ -15266,28 +15285,45 @@ async def check_game_deals(session, guild, data):
             if resp.status == 200:
                 gog_data = await resp.json()
                 products = gog_data.get('products', [])
-                print(f"[DEALS] GOG: {len(products)} jeux en promo trouvés")
+                print(f"[DEALS] GOG: {len(products)} jeux trouvés")
                 
-                for game in products[:5]:
+                for game in products[:10]:
                     if deals_posted >= max_deals:
                         break
                     
                     try:
                         game_name = game.get('title', 'Jeu inconnu')
-                        discount = game.get('price', {}).get('discountPercentage', 0)
+                        
+                        # Récupérer le discount (peut être int ou float)
+                        discount_raw = game.get('price', {}).get('discountPercentage', 0)
+                        discount = int(discount_raw) if discount_raw else 0
+                        
+                        print(f"[DEALS] GOG: {game_name} - Réduction: {discount}% (min: {min_discount}%)")
                         
                         if discount < min_discount:
                             continue
                         
-                        price_str = game.get('price', {}).get('finalAmount', '0')
-                        original_str = game.get('price', {}).get('baseAmount', '0')
+                        # Prix (peuvent être des strings ou des floats)
+                        price_data = game.get('price', {})
+                        price_str = price_data.get('finalAmount') or price_data.get('amount', '0')
+                        original_str = price_data.get('baseAmount', '0')
                         
-                        final_price = float(price_str) if price_str else 0
-                        original_price = float(original_str) if original_str else final_price
+                        try:
+                            final_price = float(str(price_str).replace(',', '.')) if price_str else 0
+                            original_price = float(str(original_str).replace(',', '.')) if original_str else final_price
+                        except:
+                            final_price = 0
+                            original_price = 0
+                        
+                        print(f"[DEALS] GOG: {game_name} - Prix: {original_price}€ → {final_price}€")
                         
                         slug = game.get('slug', '')
+                        if not slug:
+                            continue
+                            
                         deal_key = f"gog_{guild.id}_{slug}"
                         if deal_key in _deals_cache:
+                            print(f"[DEALS] GOG: {game_name} - déjà posté (cache)")
                             continue
                         _deals_cache[deal_key] = time.time()
                         
@@ -15308,7 +15344,7 @@ async def check_game_deals(session, guild, data):
                         
                         await channel.send(embed=e)
                         deals_posted += 1
-                        print(f"[DEALS] Posté: {game_name} (-{discount}%) sur GOG")
+                        print(f"[DEALS] ✅ Posté: {game_name} (-{discount}%) sur GOG")
                         await asyncio.sleep(2)
                         
                     except Exception as ex:
@@ -16338,12 +16374,17 @@ async def testdeals_cmd(i: discord.Interaction):
     if not deals_channel:
         return await i.followup.send("❌ Aucun salon configuré pour les réductions.\n➡️ Utilisez `/setup` > Publicité > 🎯 Réductions > 📍 Salon")
     
-    await i.followup.send(f"🔄 Test en cours...\n📍 Salon: {deals_channel.mention}\n🔻 Réduction minimum: {min_discount}%")
+    await i.followup.send(f"🔄 Test en cours...\n📍 Salon: {deals_channel.mention}\n🔻 Réduction minimum: **{min_discount}%**")
     
     # Réinitialiser le cache pour forcer la vérification
     cache_key = f"deals_{i.guild.id}"
     if cache_key in _deals_last_check:
         del _deals_last_check[cache_key]
+    
+    # Vider aussi le cache des deals pour ce serveur
+    keys_to_remove = [k for k in _deals_cache.keys() if str(i.guild.id) in k]
+    for k in keys_to_remove:
+        del _deals_cache[k]
     
     # Créer une session et tester
     async with aiohttp.ClientSession() as session:
@@ -16361,8 +16402,15 @@ async def testdeals_cmd(i: discord.Interaction):
                 if resp.status == 200:
                     data = await resp.json()
                     specials = data.get('specials', {}).get('items', [])
-                    count = sum(1 for g in specials if g.get('discount_percent', 0) >= min_discount)
-                    results.append(f"🎮 **Steam**: {len(specials)} promos trouvées, {count} avec -{min_discount}%+")
+                    eligible = [g for g in specials if g.get('discount_percent', 0) >= min_discount]
+                    
+                    results.append(f"🎮 **Steam**: {len(specials)} promos, **{len(eligible)}** éligibles (≥{min_discount}%)")
+                    
+                    # Montrer les 3 premiers éligibles
+                    for g in eligible[:3]:
+                        name = g.get('name', '?')[:30]
+                        disc = g.get('discount_percent', 0)
+                        results.append(f"   • {name} : **-{disc}%**")
                 else:
                     results.append(f"🎮 **Steam**: ❌ Erreur HTTP {resp.status}")
         except Exception as ex:
@@ -16375,8 +16423,25 @@ async def testdeals_cmd(i: discord.Interaction):
                 if resp.status == 200:
                     data = await resp.json()
                     games = data.get('data', {}).get('Catalog', {}).get('searchStore', {}).get('elements', [])
-                    free_count = sum(1 for g in games if g.get('promotions', {}).get('promotionalOffers'))
-                    results.append(f"🎯 **Epic Games**: {len(games)} jeux trouvés, {free_count} en promo/gratuit")
+                    
+                    eligible = []
+                    for g in games:
+                        promos = g.get('promotions')
+                        if promos and promos.get('promotionalOffers'):
+                            offers = promos['promotionalOffers']
+                            if offers and offers[0].get('promotionalOffers'):
+                                price = g.get('price', {}).get('totalPrice', {})
+                                orig = price.get('originalPrice', 0) / 100
+                                final = price.get('discountPrice', 0) / 100
+                                if orig > 0:
+                                    disc = 100 if final == 0 else int((1 - final/orig) * 100)
+                                    if disc >= min_discount:
+                                        eligible.append({'name': g.get('title', '?'), 'discount': disc})
+                    
+                    results.append(f"🎯 **Epic Games**: {len(games)} jeux, **{len(eligible)}** éligibles")
+                    
+                    for g in eligible[:3]:
+                        results.append(f"   • {g['name'][:30]} : **-{g['discount']}%**")
                 else:
                     results.append(f"🎯 **Epic Games**: ❌ Erreur HTTP {resp.status}")
         except Exception as ex:
@@ -16389,8 +16454,14 @@ async def testdeals_cmd(i: discord.Interaction):
                 if resp.status == 200:
                     data = await resp.json()
                     products = data.get('products', [])
-                    count = sum(1 for g in products if g.get('price', {}).get('discountPercentage', 0) >= min_discount)
-                    results.append(f"🟣 **GOG**: {len(products)} promos trouvées, {count} avec -{min_discount}%+")
+                    eligible = [g for g in products if int(g.get('price', {}).get('discountPercentage', 0) or 0) >= min_discount]
+                    
+                    results.append(f"🟣 **GOG**: {len(products)} promos, **{len(eligible)}** éligibles")
+                    
+                    for g in eligible[:3]:
+                        name = g.get('title', '?')[:30]
+                        disc = int(g.get('price', {}).get('discountPercentage', 0) or 0)
+                        results.append(f"   • {name} : **-{disc}%**")
                 else:
                     results.append(f"🟣 **GOG**: ❌ Erreur HTTP {resp.status}")
         except Exception as ex:
@@ -16399,14 +16470,13 @@ async def testdeals_cmd(i: discord.Interaction):
     # Envoyer les résultats
     result_msg = "\n".join(results)
     
-    # Forcer l'exécution du check
     await i.followup.send(f"📊 **Résultats des APIs:**\n{result_msg}\n\n⏳ Lancement de la publication...")
     
     # Exécuter le vrai check
     try:
         async with aiohttp.ClientSession() as session:
             await check_game_deals(session, i.guild, c)
-        await i.followup.send("✅ Vérification terminée ! Regardez le salon configuré.")
+        await i.followup.send("✅ Vérification terminée ! Regardez le salon configuré.\n\n💡 *Les logs détaillés sont dans la console Railway.*")
     except Exception as ex:
         await i.followup.send(f"❌ Erreur lors de la publication: {str(ex)}")
 
@@ -16419,4 +16489,3 @@ if __name__ == "__main__":
     print("🛡️ Anti-badwords amélioré (mots entiers)")
     print("🎮 Système de promotions jeux vidéo")
     bot.run(TOKEN)
-
