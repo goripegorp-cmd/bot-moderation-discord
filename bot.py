@@ -10841,10 +10841,601 @@ class StatPanel(View):
             ephemeral=True
         )
     
+    @discord.ui.button(label="🔕 Rôle AFK", style=discord.ButtonStyle.primary, row=1)
+    async def afk_role(self, i, b):
+        v = AfkRolePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           🔕 SYSTÈME RÔLE AFK
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class AfkRolePanel(View):
+    """Panel de gestion du système de rôle AFK"""
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        afk_cfg = c.get('afk_role_config', {})
+        
+        e = discord.Embed(
+            title="🔕 Système Rôle AFK",
+            description="Surveillez l'activité des membres avec un rôle spécifique.\n\n"
+                        "💡 **Fonctionnement :**\n"
+                        "• Les membres avec le rôle surveillé doivent être actifs\n"
+                        "• Activité = Message **OU** Vocal (au moins l'un des deux)\n"
+                        "• Après X jours sans activité → Actions configurées",
+            color=0xE74C3C
+        )
+        
+        # Configuration actuelle
+        role_id = afk_cfg.get('role', 0)
+        role = self.g.get_role(role_id)
+        days = afk_cfg.get('days', 7)
+        notif_ch = self.g.get_channel(afk_cfg.get('notif_channel', 0))
+        enabled = afk_cfg.get('enabled', False)
+        
+        status = "✅ Activé" if enabled else "❌ Désactivé"
+        
+        e.add_field(name="📊 Statut", value=status, inline=True)
+        e.add_field(name="🎭 Rôle surveillé", value=role.mention if role else "❌ Non défini", inline=True)
+        e.add_field(name="📅 Jours d'inactivité", value=f"**{days}** jour(s)", inline=True)
+        e.add_field(name="📢 Salon notifications", value=notif_ch.mention if notif_ch else "❌ Non défini", inline=True)
+        
+        # Compter les membres AFK
+        if role:
+            afk_count, total = await self.count_afk_with_role(role, days)
+            e.add_field(name="😴 Membres AFK", value=f"**{afk_count}** / {total} membre(s)", inline=True)
+        else:
+            e.add_field(name="😴 Membres AFK", value="*Configurez un rôle*", inline=True)
+        
+        e.set_footer(text="💡 Cliquez sur 📋 Liste AFK pour voir les membres inactifs")
+        
+        return e
+    
+    async def count_afk_with_role(self, role, days):
+        """Compte les membres AFK ayant le rôle surveillé"""
+        afk_count = 0
+        total = 0
+        now_dt = now()
+        threshold = now_dt - timedelta(days=days)
+        
+        try:
+            # Récupérer tous les membres avec le rôle
+            members_with_role = [m for m in self.g.members if role in m.roles and not m.bot]
+            total = len(members_with_role)
+            
+            if not members_with_role:
+                return 0, 0
+            
+            member_ids = [m.id for m in members_with_role]
+            
+            async with aiosqlite.connect(DB_PATH) as db:
+                # Récupérer l'activité de ces membres
+                placeholders = ','.join('?' * len(member_ids))
+                async with db.execute(
+                    f'SELECT user_id, last_message, last_vocal FROM activity_tracking WHERE guild_id=? AND user_id IN ({placeholders})',
+                    [self.g.id] + member_ids
+                ) as cursor:
+                    tracked = {}
+                    async for row in cursor:
+                        user_id, last_msg, last_vocal = row
+                        tracked[user_id] = (last_msg, last_vocal)
+                
+                # Vérifier chaque membre
+                for member in members_with_role:
+                    if member.id in tracked:
+                        last_msg, last_vocal = tracked[member.id]
+                        last_activity = None
+                        
+                        if last_msg:
+                            try:
+                                last_activity = datetime.fromisoformat(last_msg)
+                            except:
+                                pass
+                        if last_vocal:
+                            try:
+                                lv = datetime.fromisoformat(last_vocal)
+                                if not last_activity or lv > last_activity:
+                                    last_activity = lv
+                            except:
+                                pass
+                        
+                        if last_activity:
+                            if last_activity.replace(tzinfo=timezone.utc) < threshold.replace(tzinfo=timezone.utc):
+                                afk_count += 1
+                        else:
+                            afk_count += 1  # Pas d'activité enregistrée
+                    else:
+                        afk_count += 1  # Non tracké = considéré AFK
+        except Exception as ex:
+            print(f"[AFK ROLE] Erreur count: {ex}")
+        
+        return afk_count, total
+    
+    async def get_afk_members(self, role, days):
+        """Retourne la liste des membres AFK avec le rôle surveillé"""
+        afk_members = []
+        now_dt = now()
+        threshold = now_dt - timedelta(days=days)
+        
+        try:
+            members_with_role = [m for m in self.g.members if role in m.roles and not m.bot]
+            if not members_with_role:
+                return []
+            
+            member_ids = [m.id for m in members_with_role]
+            
+            async with aiosqlite.connect(DB_PATH) as db:
+                placeholders = ','.join('?' * len(member_ids))
+                async with db.execute(
+                    f'SELECT user_id, last_message, last_vocal FROM activity_tracking WHERE guild_id=? AND user_id IN ({placeholders})',
+                    [self.g.id] + member_ids
+                ) as cursor:
+                    tracked = {}
+                    async for row in cursor:
+                        user_id, last_msg, last_vocal = row
+                        tracked[user_id] = (last_msg, last_vocal)
+                
+                for member in members_with_role:
+                    if member.id in tracked:
+                        last_msg, last_vocal = tracked[member.id]
+                        last_activity = None
+                        
+                        if last_msg:
+                            try:
+                                last_activity = datetime.fromisoformat(last_msg)
+                            except:
+                                pass
+                        if last_vocal:
+                            try:
+                                lv = datetime.fromisoformat(last_vocal)
+                                if not last_activity or lv > last_activity:
+                                    last_activity = lv
+                            except:
+                                pass
+                        
+                        if last_activity:
+                            if last_activity.replace(tzinfo=timezone.utc) < threshold.replace(tzinfo=timezone.utc):
+                                days_afk = (now_dt.replace(tzinfo=timezone.utc) - last_activity.replace(tzinfo=timezone.utc)).days
+                                afk_members.append((member, days_afk))
+                        else:
+                            afk_members.append((member, 999))  # Très longtemps AFK
+                    else:
+                        afk_members.append((member, 999))  # Non tracké
+        except Exception as ex:
+            print(f"[AFK ROLE] Erreur get_afk: {ex}")
+        
+        # Trier par nombre de jours AFK (décroissant)
+        afk_members.sort(key=lambda x: x[1], reverse=True)
+        return afk_members
+    
+    @discord.ui.button(label="✅ Activer/Désactiver", style=discord.ButtonStyle.success, row=0)
+    async def toggle(self, i, b):
+        c = await cfg(self.g.id)
+        afk_cfg = c.get('afk_role_config', {})
+        afk_cfg['enabled'] = not afk_cfg.get('enabled', False)
+        await db_set(self.g.id, 'afk_role_config', afk_cfg)
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="🎭 Définir Rôle", style=discord.ButtonStyle.primary, row=0)
+    async def set_role(self, i, b):
+        roles = [r for r in self.g.roles if not r.is_default() and not r.managed][:25]
+        if not roles:
+            return await i.response.send_message("❌ Aucun rôle disponible", ephemeral=True)
+        
+        opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
+        v = AfkRoleSelectView(self.u, self.g, opts)
+        await i.response.edit_message(
+            embed=discord.Embed(title="🎭 Choisir le rôle à surveiller", color=C.PURPLE),
+            view=v
+        )
+    
+    @discord.ui.button(label="📅 Définir Jours", style=discord.ButtonStyle.primary, row=0)
+    async def set_days(self, i, b):
+        await i.response.send_modal(AfkDaysModal(self.u, self.g))
+    
+    @discord.ui.button(label="📢 Salon Notifs", style=discord.ButtonStyle.primary, row=1)
+    async def set_channel(self, i, b):
+        channels = list(self.g.text_channels)[:25]
+        opts = [discord.SelectOption(label=f"# {ch.name}"[:25], value=str(ch.id)) for ch in channels]
+        v = AfkNotifChannelView(self.u, self.g, opts)
+        await i.response.edit_message(
+            embed=discord.Embed(title="📢 Choisir le salon de notifications", color=C.PURPLE),
+            view=v
+        )
+    
+    @discord.ui.button(label="📋 Liste AFK", style=discord.ButtonStyle.secondary, row=1)
+    async def list_afk(self, i, b):
+        c = await cfg(self.g.id)
+        afk_cfg = c.get('afk_role_config', {})
+        role_id = afk_cfg.get('role', 0)
+        role = self.g.get_role(role_id)
+        days = afk_cfg.get('days', 7)
+        
+        if not role:
+            return await i.response.send_message("❌ Aucun rôle configuré", ephemeral=True)
+        
+        afk_members = await self.get_afk_members(role, days)
+        
+        if not afk_members:
+            return await i.response.send_message(f"✅ Aucun membre AFK avec le rôle {role.mention}!", ephemeral=True)
+        
+        v = AfkListView(self.u, self.g, afk_members, role)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="⚡ Actions", style=discord.ButtonStyle.danger, row=1)
+    async def actions(self, i, b):
+        c = await cfg(self.g.id)
+        afk_cfg = c.get('afk_role_config', {})
+        role_id = afk_cfg.get('role', 0)
+        role = self.g.get_role(role_id)
+        days = afk_cfg.get('days', 7)
+        
+        if not role:
+            return await i.response.send_message("❌ Aucun rôle configuré", ephemeral=True)
+        
+        afk_members = await self.get_afk_members(role, days)
+        
+        if not afk_members:
+            return await i.response.send_message(f"✅ Aucun membre AFK à traiter!", ephemeral=True)
+        
+        v = AfkActionsView(self.u, self.g, afk_members, role)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+    async def back(self, i, b):
+        v = StatPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class AfkRoleSelectView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=60)
+        self.u = u
+        self.g = g
+        self.add_item(AfkRoleSelect(u, g, opts))
+
+
+class AfkRoleSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir un rôle...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        c = await cfg(self.g.id)
+        afk_cfg = c.get('afk_role_config', {})
+        afk_cfg['role'] = int(self.values[0])
+        await db_set(self.g.id, 'afk_role_config', afk_cfg)
+        
+        v = AfkRolePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class AfkNotifChannelView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=60)
+        self.u = u
+        self.g = g
+        self.add_item(AfkNotifChannelSelect(u, g, opts))
+
+
+class AfkNotifChannelSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        c = await cfg(self.g.id)
+        afk_cfg = c.get('afk_role_config', {})
+        afk_cfg['notif_channel'] = int(self.values[0])
+        await db_set(self.g.id, 'afk_role_config', afk_cfg)
+        
+        v = AfkRolePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class AfkDaysModal(Modal):
+    def __init__(self, u, g):
+        super().__init__(title="📅 Jours d'inactivité")
+        self.u = u
+        self.g = g
+        
+        self.days_input = TextInput(
+            label="Nombre de jours sans activité",
+            placeholder="Ex: 7",
+            default="7",
+            max_length=3,
+            required=True
+        )
+        self.add_item(self.days_input)
+    
+    async def on_submit(self, i):
+        try:
+            days = int(self.days_input.value)
+            if days < 1 or days > 365:
+                return await i.response.send_message("❌ Le nombre doit être entre 1 et 365", ephemeral=True)
+            
+            c = await cfg(self.g.id)
+            afk_cfg = c.get('afk_role_config', {})
+            afk_cfg['days'] = days
+            await db_set(self.g.id, 'afk_role_config', afk_cfg)
+            
+            v = AfkRolePanel(self.u, self.g)
+            await i.response.edit_message(embed=await v.embed(), view=v)
+        except ValueError:
+            await i.response.send_message("❌ Entrez un nombre valide", ephemeral=True)
+
+
+class AfkListView(View):
+    """Liste paginée des membres AFK"""
+    def __init__(self, u, g, afk_members, role, page=0):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.afk_members = afk_members
+        self.role = role
+        self.page = page
+        self.per_page = 15
+    
+    async def embed(self):
+        total = len(self.afk_members)
+        max_page = (total - 1) // self.per_page
+        
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_members = self.afk_members[start:end]
+        
+        e = discord.Embed(
+            title=f"📋 Membres AFK avec {self.role.name}",
+            description=f"**{total}** membre(s) inactif(s) détecté(s)",
+            color=0xE74C3C
+        )
+        
+        if page_members:
+            lines = []
+            for member, days_afk in page_members:
+                if days_afk >= 999:
+                    days_txt = "Jamais actif"
+                else:
+                    days_txt = f"{days_afk}j AFK"
+                lines.append(f"• {member.mention} - **{days_txt}**")
+            
+            e.add_field(name=f"Page {self.page + 1}/{max_page + 1}", value="\n".join(lines), inline=False)
+        
+        e.set_footer(text="💡 Utilisez ⚡ Actions pour agir sur ces membres")
+        
+        return e
+    
+    @discord.ui.button(label="◀️ Préc.", style=discord.ButtonStyle.secondary, row=0)
+    async def prev(self, i, b):
+        if self.page > 0:
+            self.page -= 1
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="▶️ Suiv.", style=discord.ButtonStyle.secondary, row=0)
+    async def next(self, i, b):
+        max_page = (len(self.afk_members) - 1) // self.per_page
+        if self.page < max_page:
+            self.page += 1
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="🔄 Actualiser", style=discord.ButtonStyle.primary, row=0)
+    async def refresh(self, i, b):
+        # Recalculer la liste
+        c = await cfg(self.g.id)
+        afk_cfg = c.get('afk_role_config', {})
+        days = afk_cfg.get('days', 7)
+        
+        panel = AfkRolePanel(self.u, self.g)
+        self.afk_members = await panel.get_afk_members(self.role, days)
+        await i.response.edit_message(embed=await self.embed(), view=self)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = AfkRolePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class AfkActionsView(View):
+    """Choisir et exécuter les actions sur les membres AFK"""
+    def __init__(self, u, g, afk_members, role):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.afk_members = afk_members
+        self.role = role
+    
+    async def embed(self):
+        e = discord.Embed(
+            title="⚡ Actions sur les membres AFK",
+            description=f"**{len(self.afk_members)}** membre(s) AFK avec le rôle {self.role.mention}\n\n"
+                        "⚠️ **Choisissez une action à exécuter :**",
+            color=0xE74C3C
+        )
+        
+        # Aperçu des membres (5 premiers)
+        preview = []
+        for member, days_afk in self.afk_members[:5]:
+            days_txt = f"{days_afk}j" if days_afk < 999 else "∞"
+            preview.append(f"• {member.display_name} ({days_txt})")
+        
+        if len(self.afk_members) > 5:
+            preview.append(f"*...et {len(self.afk_members) - 5} autres*")
+        
+        e.add_field(name="👥 Membres concernés", value="\n".join(preview), inline=False)
+        
+        e.add_field(
+            name="🎭 Retirer le rôle",
+            value=f"Enlève {self.role.mention} aux membres AFK",
+            inline=True
+        )
+        e.add_field(
+            name="👢 Kick",
+            value="Expulse les membres AFK du serveur",
+            inline=True
+        )
+        e.add_field(
+            name="📢 Ping",
+            value="Mentionne les membres dans le salon de notifications",
+            inline=True
+        )
+        
+        return e
+    
+    @discord.ui.button(label="🎭 Retirer le rôle", style=discord.ButtonStyle.primary, row=0)
+    async def remove_role(self, i, b):
+        await i.response.defer()
+        
+        success = 0
+        failed = 0
+        
+        for member, _ in self.afk_members:
+            try:
+                await member.remove_roles(self.role, reason="AFK - Rôle retiré automatiquement")
+                success += 1
+            except:
+                failed += 1
+        
+        # Log dans le salon de notifications
+        c = await cfg(self.g.id)
+        afk_cfg = c.get('afk_role_config', {})
+        notif_ch = self.g.get_channel(afk_cfg.get('notif_channel', 0))
+        
+        if notif_ch:
+            e = discord.Embed(
+                title="🎭 Rôles retirés - Membres AFK",
+                description=f"Le rôle {self.role.mention} a été retiré à **{success}** membre(s) inactif(s).",
+                color=0xE74C3C,
+                timestamp=now()
+            )
+            e.add_field(name="✅ Succès", value=str(success), inline=True)
+            e.add_field(name="❌ Échecs", value=str(failed), inline=True)
+            e.set_footer(text=f"Action par {i.user.display_name}")
+            await notif_ch.send(embed=e)
+        
+        await i.followup.send(f"✅ Rôle retiré à **{success}** membre(s)!\n❌ Échecs: **{failed}**", ephemeral=True)
+        
+        v = AfkRolePanel(self.u, self.g)
+        await i.message.edit(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="👢 Kick", style=discord.ButtonStyle.danger, row=0)
+    async def kick_members(self, i, b):
+        # Demander confirmation
+        await i.response.send_message(
+            f"⚠️ **Confirmation requise**\n\n"
+            f"Vous êtes sur le point de **kick {len(self.afk_members)} membre(s)**.\n"
+            f"Cette action est irréversible!\n\n"
+            f"Êtes-vous sûr ?",
+            view=AfkKickConfirmView(self.u, self.g, self.afk_members, self.role),
+            ephemeral=True
+        )
+    
+    @discord.ui.button(label="📢 Ping dans salon", style=discord.ButtonStyle.success, row=0)
+    async def ping_members(self, i, b):
+        c = await cfg(self.g.id)
+        afk_cfg = c.get('afk_role_config', {})
+        notif_ch = self.g.get_channel(afk_cfg.get('notif_channel', 0))
+        days = afk_cfg.get('days', 7)
+        
+        if not notif_ch:
+            return await i.response.send_message("❌ Aucun salon de notifications configuré!", ephemeral=True)
+        
+        await i.response.defer()
+        
+        # Créer l'embed avec les mentions
+        e = discord.Embed(
+            title="🔕 Alerte Inactivité",
+            description=f"Les membres suivants avec le rôle {self.role.mention} sont inactifs depuis plus de **{days} jours**.\n\n"
+                        "⚠️ **Merci de manifester votre activité (message ou vocal) pour conserver votre rôle.**",
+            color=0xE74C3C,
+            timestamp=now()
+        )
+        
+        # Ajouter les mentions par groupes de 20
+        mentions = [m.mention for m, _ in self.afk_members]
+        mention_chunks = [mentions[i:i+20] for i in range(0, len(mentions), 20)]
+        
+        for idx, chunk in enumerate(mention_chunks[:5]):  # Max 5 chunks (100 membres)
+            e.add_field(
+                name=f"👥 Membres ({idx*20 + 1}-{idx*20 + len(chunk)})" if len(mention_chunks) > 1 else "👥 Membres concernés",
+                value=" ".join(chunk),
+                inline=False
+            )
+        
+        if len(self.afk_members) > 100:
+            e.add_field(name="⚠️", value=f"*...et {len(self.afk_members) - 100} autres membres*", inline=False)
+        
+        e.set_footer(text=f"Action par {i.user.display_name} • {len(self.afk_members)} membre(s) concerné(s)")
+        
+        # Envoyer avec mention
+        mention_content = " ".join(mentions[:50])  # Max 50 mentions directes
+        await notif_ch.send(content=mention_content, embed=e)
+        
+        await i.followup.send(f"✅ Message envoyé dans {notif_ch.mention} avec **{len(self.afk_members)}** mention(s)!", ephemeral=True)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = AfkRolePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class AfkKickConfirmView(View):
+    def __init__(self, u, g, afk_members, role):
+        super().__init__(timeout=60)
+        self.u = u
+        self.g = g
+        self.afk_members = afk_members
+        self.role = role
+    
+    @discord.ui.button(label="✅ Confirmer le Kick", style=discord.ButtonStyle.danger)
+    async def confirm(self, i, b):
+        await i.response.defer()
+        
+        success = 0
+        failed = 0
+        
+        for member, _ in self.afk_members:
+            try:
+                await member.kick(reason=f"AFK - Inactif depuis trop longtemps")
+                success += 1
+            except:
+                failed += 1
+        
+        # Log
+        c = await cfg(self.g.id)
+        afk_cfg = c.get('afk_role_config', {})
+        notif_ch = self.g.get_channel(afk_cfg.get('notif_channel', 0))
+        
+        if notif_ch:
+            e = discord.Embed(
+                title="👢 Membres Kick - Inactivité",
+                description=f"**{success}** membre(s) ont été expulsés pour inactivité.",
+                color=0xE74C3C,
+                timestamp=now()
+            )
+            e.add_field(name="✅ Kicks réussis", value=str(success), inline=True)
+            e.add_field(name="❌ Échecs", value=str(failed), inline=True)
+            e.set_footer(text=f"Action par {i.user.display_name}")
+            await notif_ch.send(embed=e)
+        
+        await i.followup.send(f"✅ **{success}** membre(s) kick!\n❌ Échecs: **{failed}**", ephemeral=True)
+    
+    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.secondary)
+    async def cancel(self, i, b):
+        await i.response.edit_message(content="❌ Action annulée", view=None)
+
 
 class StatActionPanel(View):
     def __init__(self, u, g):
@@ -12154,14 +12745,26 @@ class PanelEditView(View):
     @discord.ui.button(label="🎨 Apparence", style=discord.ButtonStyle.success, row=1)
     async def customize_embed(self, i, b):
         """Customiser l'embed du panel"""
-        pnl = await self.get_panel()
-        await i.response.send_modal(PanelAppearanceModal(self.u, self.g, self.pid, pnl))
+        try:
+            # Créer le modal sans attendre la DB
+            modal = PanelAppearanceModalSimple(self.u, self.g, self.pid)
+            await i.response.send_modal(modal)
+        except Exception as ex:
+            print(f"[APPARENCE MODAL ERROR] {ex}")
+            try: await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+            except: pass
     
     @discord.ui.button(label="👋 Message accueil", style=discord.ButtonStyle.success, row=1)
     async def welcome_msg(self, i, b):
         """Customiser le message de bienvenue"""
-        pnl = await self.get_panel()
-        await i.response.send_modal(WelcomeMessageModal(self.u, self.g, self.pid, pnl))
+        try:
+            # Créer le modal sans attendre la DB
+            modal = WelcomeMessageModalSimple(self.u, self.g, self.pid)
+            await i.response.send_modal(modal)
+        except Exception as ex:
+            print(f"[WELCOME MODAL ERROR] {ex}")
+            try: await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+            except: pass
     
     @discord.ui.button(label="🚫 Blacklist", style=discord.ButtonStyle.danger, row=1)
     async def blacklist(self, i, b):
@@ -12201,103 +12804,70 @@ class PanelEditView(View):
 #                    🎨 MODALS CUSTOMISATION PANEL DE TICKETS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class PanelAppearanceModal(Modal):
-    """Modal pour customiser l'embed du panel de tickets"""
-    def __init__(self, u, g, pid, pnl):
-        super().__init__(title="🎨 Personnaliser l'apparence")
+class PanelAppearanceModalSimple(Modal):
+    """Modal pour customiser l'embed du panel de tickets (sans pré-remplissage)"""
+    def __init__(self, u, g, pid):
+        super().__init__(title="🎨 Apparence du panel")
         self.u = u
         self.g = g
         self.pid = pid
         
-        # Créer les TextInput avec les valeurs pré-remplies
-        self.embed_title = TextInput(
-            label="Titre de l'embed",
-            placeholder="Ex: 🎫 Support - Besoin d'aide ?",
-            required=False,
-            max_length=256,
-            default=pnl.get('embed_title', '') or ''
-        )
+        self.embed_title = TextInput(label="Titre", placeholder="Ex: 🎫 Support - Besoin d'aide ?", required=False, max_length=256)
         self.add_item(self.embed_title)
         
-        self.embed_desc = TextInput(
-            label="Description",
-            placeholder="Ex: Cliquez sur le bouton ci-dessous pour créer un ticket...",
-            style=discord.TextStyle.paragraph,
-            required=False,
-            max_length=2000,
-            default=pnl.get('embed_description', '') or ''
-        )
+        self.embed_desc = TextInput(label="Description", placeholder="Cliquez pour créer un ticket...", style=discord.TextStyle.paragraph, required=False, max_length=2000)
         self.add_item(self.embed_desc)
         
-        self.embed_links = TextInput(
-            label="Liens utiles (un par ligne: Texte | URL)",
-            placeholder="📜 Règlement | https://example.com/rules",
-            style=discord.TextStyle.paragraph,
-            required=False,
-            max_length=1000,
-            default=pnl.get('embed_links', '') or ''
-        )
+        self.embed_links = TextInput(label="Liens (Texte | URL par ligne)", placeholder="📜 Règles | https://...", style=discord.TextStyle.paragraph, required=False, max_length=1000)
         self.add_item(self.embed_links)
     
     async def on_submit(self, i):
         try:
             c = await cfg(self.g.id)
             panels = c.get('ticket_panels', {})
-            
             if self.pid not in panels:
                 return await i.response.send_message("❌ Panel introuvable", ephemeral=True)
             
-            panels[self.pid]['embed_title'] = self.embed_title.value.strip()
-            panels[self.pid]['embed_description'] = self.embed_desc.value.strip()
-            panels[self.pid]['embed_links'] = self.embed_links.value.strip()
-            
+            panels[self.pid]['embed_title'] = (self.embed_title.value or '').strip()
+            panels[self.pid]['embed_description'] = (self.embed_desc.value or '').strip()
+            panels[self.pid]['embed_links'] = (self.embed_links.value or '').strip()
             await db_set(self.g.id, 'ticket_panels', panels)
             
             v = PanelEditView(self.u, self.g, self.pid)
             await i.response.edit_message(embed=await v.embed(), view=v)
-            await i.followup.send("✅ Apparence du panel mise à jour!", ephemeral=True)
-            
+            await i.followup.send("✅ Apparence mise à jour!", ephemeral=True)
         except Exception as ex:
-            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+            try: await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+            except: pass
 
 
-class WelcomeMessageModal(Modal):
-    """Modal pour le message envoyé à la création du ticket"""
-    def __init__(self, u, g, pid, pnl):
+class WelcomeMessageModalSimple(Modal):
+    """Modal pour le message d'accueil (sans pré-remplissage)"""
+    def __init__(self, u, g, pid):
         super().__init__(title="👋 Message d'accueil")
         self.u = u
         self.g = g
         self.pid = pid
         
-        # Créer le TextInput avec la valeur pré-remplie
-        self.welcome_msg = TextInput(
-            label="Message d'accueil (envoyé dans le ticket)",
-            placeholder="Ex: Bienvenue ! Un membre du staff va vous répondre.\n\n📌 En attendant, décrivez votre problème en détail.",
-            style=discord.TextStyle.paragraph,
-            required=False,
-            max_length=1500,
-            default=pnl.get('welcome_message', '') or ''
-        )
+        self.welcome_msg = TextInput(label="Message (envoyé dans le ticket)", placeholder="Bienvenue ! Un staff va vous répondre...", style=discord.TextStyle.paragraph, required=False, max_length=1500)
         self.add_item(self.welcome_msg)
     
     async def on_submit(self, i):
         try:
             c = await cfg(self.g.id)
             panels = c.get('ticket_panels', {})
-            
             if self.pid not in panels:
                 return await i.response.send_message("❌ Panel introuvable", ephemeral=True)
             
-            panels[self.pid]['welcome_message'] = self.welcome_msg.value.strip()
-            
+            panels[self.pid]['welcome_message'] = (self.welcome_msg.value or '').strip()
             await db_set(self.g.id, 'ticket_panels', panels)
             
             v = PanelEditView(self.u, self.g, self.pid)
             await i.response.edit_message(embed=await v.embed(), view=v)
             await i.followup.send("✅ Message d'accueil mis à jour!", ephemeral=True)
-            
         except Exception as ex:
-            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+            try: await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+            except: pass
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                        🚫 SYSTÈME DE BLACKLIST PAR PANEL
@@ -14189,22 +14759,21 @@ class RellseasQuizMenu(View):
     async def embed(self):
         c = await cfg(self.g.id)
         questions = c.get('rellseas_questions', [])
-        quiz_channel = self.g.get_channel(c.get('rellseas_quiz_channel', 0))
         
         e = discord.Embed(
             title="📝 Questionnaire Realsy",
-            description="Configurez et lancez des questionnaires pour les candidats.",
+            description="Configurez vos questions et lancez des questionnaires.\n\n"
+                        "💡 **Fonctionnement :**\n"
+                        "1. Ajoutez vos questions (max 10)\n"
+                        "2. Cliquez sur 🚀 Lancer\n"
+                        "3. Choisissez le salon et les questions à inclure\n"
+                        "4. Les réponses s'afficheront directement dans l'embed",
             color=0x3498DB
         )
         
         e.add_field(
-            name="📍 Salon des questionnaires",
-            value=quiz_channel.mention if quiz_channel else "❌ Non configuré",
-            inline=True
-        )
-        e.add_field(
-            name="❓ Questions",
-            value=f"**{len(questions)}** configurée(s)",
+            name="❓ Questions configurées",
+            value=f"**{len(questions)}** question(s)",
             inline=True
         )
         
@@ -14214,9 +14783,11 @@ class RellseasQuizMenu(View):
                 q_list += f"**{idx}.** {q['title']}\n"
             if len(questions) > 8:
                 q_list += f"*...et {len(questions) - 8} autres*"
-            e.add_field(name="📋 Questions", value=q_list, inline=False)
+            e.add_field(name="📋 Liste des questions", value=q_list, inline=False)
         else:
             e.add_field(name="📋 Questions", value="*Aucune question configurée*\nCliquez sur ➕ Ajouter pour créer des questions.", inline=False)
+        
+        e.set_footer(text="Max 5 questions par questionnaire (limite Discord)")
         
         return e
     
@@ -14240,41 +14811,44 @@ class RellseasQuizMenu(View):
             view=v
         )
     
-    @discord.ui.button(label="📍 Définir salon", style=discord.ButtonStyle.primary, row=0)
-    async def set_channel(self, i, b):
-        channels = [ch for ch in self.g.text_channels][:25]
-        opts = [discord.SelectOption(label=f"# {ch.name}"[:25], value=str(ch.id)) for ch in channels]
-        
-        v = RellseasQuizChannelView(self.u, self.g, opts)
-        await i.response.edit_message(
-            embed=discord.Embed(title="📍 Salon des questionnaires", description="Choisissez où seront postés les questionnaires", color=0x3498DB),
-            view=v
-        )
-    
-    @discord.ui.button(label="🚀 Lancer questionnaire", style=discord.ButtonStyle.success, row=1)
+    @discord.ui.button(label="🚀 Lancer questionnaire", style=discord.ButtonStyle.primary, row=1)
     async def launch_quiz(self, i, b):
         c = await cfg(self.g.id)
         questions = c.get('rellseas_questions', [])
-        quiz_channel = self.g.get_channel(c.get('rellseas_quiz_channel', 0))
         
         if not questions:
-            return await i.response.send_message("❌ Aucune question configurée", ephemeral=True)
-        if not quiz_channel:
-            return await i.response.send_message("❌ Aucun salon configuré pour les questionnaires", ephemeral=True)
+            return await i.response.send_message("❌ Aucune question configurée. Ajoutez des questions d'abord!", ephemeral=True)
         
-        await i.response.send_modal(RellseasLaunchQuizModal(self.u, self.g, quiz_channel))
+        # Étape 1 : Sélectionner les questions à inclure
+        opts = [discord.SelectOption(
+            label=f"{idx+1}. {q['title']}"[:50], 
+            value=str(idx),
+            description=q['question'][:50] if len(q['question']) > 50 else q['question']
+        ) for idx, q in enumerate(questions[:25])]
+        
+        v = RellseasSelectQuestionsView(self.u, self.g, opts)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="🚀 Lancer un questionnaire",
+                description="**Étape 1/3** : Sélectionnez les questions à inclure\n\n"
+                            "⚠️ Maximum **5 questions** par questionnaire (limite Discord)\n\n"
+                            "💡 *Maintenez Ctrl/Cmd pour sélectionner plusieurs questions*",
+                color=0x3498DB
+            ),
+            view=v
+        )
     
     @discord.ui.button(label="📊 Voir les réponses", style=discord.ButtonStyle.secondary, row=1)
     async def view_responses(self, i, b):
         # Récupérer les questionnaires en attente
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute('''SELECT id, user_id, created_at FROM rellseas_quizzes 
-                WHERE guild_id=? AND status='pending' ORDER BY created_at DESC LIMIT 25''',
+                WHERE guild_id=? AND status='answered' ORDER BY created_at DESC LIMIT 25''',
                 (self.g.id,)) as cur:
                 rows = await cur.fetchall()
         
         if not rows:
-            return await i.response.send_message("📭 Aucune réponse en attente", ephemeral=True)
+            return await i.response.send_message("📭 Aucune réponse en attente d'examen", ephemeral=True)
         
         opts = []
         for quiz_id, user_id, created_at in rows:
@@ -14292,6 +14866,97 @@ class RellseasQuizMenu(View):
     async def back(self, i, b):
         v = RellseasMainMenu(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                    🚀 LANCEMENT QUESTIONNAIRE - SÉLECTION QUESTIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class RellseasSelectQuestionsView(View):
+    """Sélection des questions à inclure dans le questionnaire"""
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+        self.add_item(RellseasSelectQuestionsSelect(u, g, opts))
+    
+    @discord.ui.button(label="◀️ Annuler", style=discord.ButtonStyle.secondary, row=1)
+    async def cancel(self, i, b):
+        v = RellseasQuizMenu(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class RellseasSelectQuestionsSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(
+            placeholder="📝 Choisir les questions (max 5)...", 
+            options=opts,
+            min_values=1,
+            max_values=min(5, len(opts))  # Max 5 questions (limite Discord modal)
+        )
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        # Récupérer les indices des questions sélectionnées
+        selected_indices = [int(v) for v in self.values]
+        
+        if len(selected_indices) > 5:
+            return await i.response.send_message("❌ Maximum 5 questions par questionnaire", ephemeral=True)
+        
+        # Étape 2 : Sélectionner le salon
+        channels = [ch for ch in self.g.text_channels][:25]
+        opts = [discord.SelectOption(label=f"# {ch.name}"[:25], value=str(ch.id)) for ch in channels]
+        
+        c = await cfg(self.g.id)
+        questions = c.get('rellseas_questions', [])
+        selected_questions = [questions[idx] for idx in selected_indices if idx < len(questions)]
+        
+        v = RellseasSelectChannelForQuizView(self.u, self.g, opts, selected_questions)
+        
+        # Afficher les questions sélectionnées
+        q_preview = "\n".join([f"• {q['title']}" for q in selected_questions])
+        
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="🚀 Lancer un questionnaire",
+                description=f"**Étape 2/3** : Choisissez le salon d'envoi\n\n"
+                            f"📝 **Questions sélectionnées ({len(selected_questions)}):**\n{q_preview}",
+                color=0x3498DB
+            ),
+            view=v
+        )
+
+
+class RellseasSelectChannelForQuizView(View):
+    """Sélection du salon pour envoyer le questionnaire"""
+    def __init__(self, u, g, opts, selected_questions):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+        self.selected_questions = selected_questions
+        self.add_item(RellseasSelectChannelForQuizSelect(u, g, opts, selected_questions))
+    
+    @discord.ui.button(label="◀️ Annuler", style=discord.ButtonStyle.secondary, row=1)
+    async def cancel(self, i, b):
+        v = RellseasQuizMenu(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class RellseasSelectChannelForQuizSelect(Select):
+    def __init__(self, u, g, opts, selected_questions):
+        super().__init__(placeholder="📍 Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+        self.selected_questions = selected_questions
+    
+    async def callback(self, i):
+        channel = i.guild.get_channel(int(self.values[0]))
+        if not channel:
+            return await i.response.send_message("❌ Salon introuvable", ephemeral=True)
+        
+        # Étape 3 : Sélectionner le membre
+        await i.response.send_modal(RellseasLaunchQuizModal(self.u, self.g, channel, self.selected_questions))
 
 
 class RellseasAddQuestionModal(Modal, title="➕ Ajouter une question"):
@@ -14385,11 +15050,12 @@ class RellseasQuizChannelSelect(Select):
 
 
 class RellseasLaunchQuizModal(Modal, title="🚀 Lancer un questionnaire"):
-    def __init__(self, u, g, channel):
+    def __init__(self, u, g, channel, selected_questions):
         super().__init__()
         self.u = u
         self.g = g
         self.channel = channel
+        self.selected_questions = selected_questions
     
     member_input = TextInput(
         label="Candidat (ID ou @mention)",
@@ -14424,33 +15090,44 @@ class RellseasLaunchQuizModal(Modal, title="🚀 Lancer un questionnaire"):
         if not membre:
             return await i.response.send_message("❌ Ce membre n'est pas sur le serveur", ephemeral=True)
         
-        c = await cfg(self.g.id)
-        questions = c.get('rellseas_questions', [])
+        # Sauvegarder les questions sélectionnées avec le quiz
+        questions_json = json.dumps(self.selected_questions, ensure_ascii=False)
         
         # Créer l'entrée dans la base de données
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute('''CREATE TABLE IF NOT EXISTS rellseas_quizzes 
                 (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, user_id INTEGER, 
-                examiner_id INTEGER, status TEXT, answers TEXT, created_at TEXT)''')
+                examiner_id INTEGER, status TEXT, answers TEXT, questions TEXT, created_at TEXT)''')
+            
+            # Ajouter la colonne questions si elle n'existe pas
+            try:
+                await db.execute('ALTER TABLE rellseas_quizzes ADD COLUMN questions TEXT')
+            except:
+                pass
             
             cursor = await db.execute('''INSERT INTO rellseas_quizzes 
-                (guild_id, user_id, examiner_id, status, answers, created_at) 
-                VALUES (?, ?, ?, 'pending', '{}', ?)''',
-                (self.g.id, membre.id, i.user.id, now().isoformat()))
+                (guild_id, user_id, examiner_id, status, answers, questions, created_at) 
+                VALUES (?, ?, ?, 'pending', '{}', ?, ?)''',
+                (self.g.id, membre.id, i.user.id, questions_json, now().isoformat()))
             quiz_id = cursor.lastrowid
             await db.commit()
         
         # Créer l'embed du questionnaire
         e = discord.Embed(
             title="📝 Questionnaire Realsy",
-            description=f"Bonjour {membre.mention} !\n\nVous avez été sélectionné pour passer le questionnaire Realsy.\nCliquez sur le bouton ci-dessous pour répondre aux questions.",
+            description=f"Bonjour {membre.mention} !\n\n"
+                        f"Vous avez été sélectionné pour passer un questionnaire.\n"
+                        f"Cliquez sur le bouton ci-dessous pour répondre.",
             color=0x9B59B6,
             timestamp=now()
         )
-        e.add_field(name="📋 Questions", value=f"**{len(questions)}** question(s) à répondre", inline=True)
-        e.add_field(name="👮 Examinateur", value=i.user.mention, inline=True)
+        
+        # Afficher les questions
+        q_preview = "\n".join([f"• **{q['title']}**" for q in self.selected_questions])
+        e.add_field(name=f"📋 Questions ({len(self.selected_questions)})", value=q_preview, inline=False)
+        e.add_field(name="👮 Envoyé par", value=i.user.mention, inline=True)
         e.set_thumbnail(url=membre.display_avatar.url)
-        e.set_footer(text=f"Questionnaire #{quiz_id}")
+        e.set_footer(text=f"Questionnaire #{quiz_id} • Cliquez sur le bouton pour répondre")
         
         # Envoyer dans le salon
         await self.channel.send(
@@ -14459,7 +15136,11 @@ class RellseasLaunchQuizModal(Modal, title="🚀 Lancer un questionnaire"):
             view=RellseasQuizAnswerView(quiz_id, self.g.id)
         )
         
-        await i.response.send_message(f"✅ Questionnaire envoyé à {membre.mention} dans {self.channel.mention}!", ephemeral=True)
+        await i.response.send_message(
+            f"✅ Questionnaire envoyé à {membre.mention} dans {self.channel.mention}!\n"
+            f"📝 **{len(self.selected_questions)}** question(s) incluse(s)",
+            ephemeral=True
+        )
 
 
 class RellseasQuizAnswerView(View):
@@ -14484,7 +15165,7 @@ class RellseasAnswerButton(Button):
     async def callback(self, i):
         # Vérifier que c'est bien le candidat
         async with aiosqlite.connect(DB_PATH) as db:
-            async with db.execute('SELECT user_id, status FROM rellseas_quizzes WHERE id=?', (self.quiz_id,)) as cur:
+            async with db.execute('SELECT user_id, status, questions FROM rellseas_quizzes WHERE id=?', (self.quiz_id,)) as cur:
                 row = await cur.fetchone()
         
         if not row:
@@ -14496,9 +15177,18 @@ class RellseasAnswerButton(Button):
         if row[1] != 'pending':
             return await i.response.send_message("❌ Ce questionnaire a déjà été traité", ephemeral=True)
         
-        # Récupérer les questions
-        c = await cfg(i.guild.id)
-        questions = c.get('rellseas_questions', [])
+        # Récupérer les questions sauvegardées avec le quiz
+        questions = []
+        if row[2]:
+            try:
+                questions = json.loads(row[2])
+            except:
+                pass
+        
+        # Fallback vers les questions globales si pas de questions sauvegardées
+        if not questions:
+            c = await cfg(i.guild.id)
+            questions = c.get('rellseas_questions', [])
         
         if not questions:
             return await i.response.send_message("❌ Aucune question configurée", ephemeral=True)
@@ -14540,18 +15230,34 @@ class RellseasAnswerModal(Modal, title="📝 Vos réponses"):
             ephemeral=True
         )
         
-        # Mettre à jour le message original
+        # ═══════════════════════════════════════════════════════════════════════════════
+        #          📋 METTRE À JOUR L'EMBED AVEC LES RÉPONSES DIRECTEMENT
+        # ═══════════════════════════════════════════════════════════════════════════════
         try:
             e = discord.Embed(
-                title="📝 Questionnaire Realsy - Répondu",
-                description=f"{i.user.mention} a répondu au questionnaire.\n\n*En attente d'examen par un staff...*",
-                color=0xF39C12,
+                title="📝 Questionnaire Realsy - Répondu ✅",
+                description=f"**{i.user.mention}** a répondu au questionnaire.\n\n*En attente d'examen par un staff...*",
+                color=0x2ECC71,  # Vert
                 timestamp=now()
             )
-            e.set_footer(text=f"Questionnaire #{self.quiz_id}")
-            await i.message.edit(embed=e, view=None)
-        except:
-            pass
+            
+            # Ajouter les réponses directement dans l'embed
+            for question_title, answer in answers.items():
+                # Tronquer la réponse si trop longue
+                answer_display = answer if len(answer) <= 500 else answer[:497] + "..."
+                e.add_field(
+                    name=f"❓ {question_title}",
+                    value=f"```{answer_display}```",
+                    inline=False
+                )
+            
+            e.set_thumbnail(url=i.user.display_avatar.url)
+            e.set_footer(text=f"Questionnaire #{self.quiz_id} • Cliquez sur les boutons pour examiner")
+            
+            # Ajouter les boutons d'examen
+            await i.message.edit(embed=e, view=RellseasExamineResponseView(self.quiz_id, i.guild.id))
+        except Exception as ex:
+            print(f"[QUIZ] Erreur mise à jour embed: {ex}")
 
 
 class RellseasViewResponsesView(View):
