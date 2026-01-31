@@ -12201,41 +12201,43 @@ class PanelEditView(View):
 #                    🎨 MODALS CUSTOMISATION PANEL DE TICKETS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class PanelAppearanceModal(Modal, title="🎨 Personnaliser l'apparence"):
+class PanelAppearanceModal(Modal):
     """Modal pour customiser l'embed du panel de tickets"""
     def __init__(self, u, g, pid, pnl):
-        super().__init__()
+        super().__init__(title="🎨 Personnaliser l'apparence")
         self.u = u
         self.g = g
         self.pid = pid
         
-        # Pré-remplir avec les valeurs existantes
-        self.embed_title.default = pnl.get('embed_title', '')
-        self.embed_desc.default = pnl.get('embed_description', '')
-        self.embed_links.default = pnl.get('embed_links', '')
-    
-    embed_title = TextInput(
-        label="Titre de l'embed",
-        placeholder="Ex: 🎫 Support - Besoin d'aide ?",
-        required=False,
-        max_length=256
-    )
-    
-    embed_desc = TextInput(
-        label="Description",
-        placeholder="Ex: Cliquez sur le bouton ci-dessous pour créer un ticket...",
-        style=discord.TextStyle.paragraph,
-        required=False,
-        max_length=2000
-    )
-    
-    embed_links = TextInput(
-        label="Liens utiles (un par ligne: Texte | URL)",
-        placeholder="Ex:\n📜 Règlement | https://example.com/rules\n❓ FAQ | https://example.com/faq",
-        style=discord.TextStyle.paragraph,
-        required=False,
-        max_length=1000
-    )
+        # Créer les TextInput avec les valeurs pré-remplies
+        self.embed_title = TextInput(
+            label="Titre de l'embed",
+            placeholder="Ex: 🎫 Support - Besoin d'aide ?",
+            required=False,
+            max_length=256,
+            default=pnl.get('embed_title', '') or ''
+        )
+        self.add_item(self.embed_title)
+        
+        self.embed_desc = TextInput(
+            label="Description",
+            placeholder="Ex: Cliquez sur le bouton ci-dessous pour créer un ticket...",
+            style=discord.TextStyle.paragraph,
+            required=False,
+            max_length=2000,
+            default=pnl.get('embed_description', '') or ''
+        )
+        self.add_item(self.embed_desc)
+        
+        self.embed_links = TextInput(
+            label="Liens utiles (un par ligne: Texte | URL)",
+            placeholder="📜 Règlement | https://example.com/rules",
+            style=discord.TextStyle.paragraph,
+            required=False,
+            max_length=1000,
+            default=pnl.get('embed_links', '') or ''
+        )
+        self.add_item(self.embed_links)
     
     async def on_submit(self, i):
         try:
@@ -12259,24 +12261,24 @@ class PanelAppearanceModal(Modal, title="🎨 Personnaliser l'apparence"):
             await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
 
 
-class WelcomeMessageModal(Modal, title="👋 Message d'accueil"):
+class WelcomeMessageModal(Modal):
     """Modal pour le message envoyé à la création du ticket"""
     def __init__(self, u, g, pid, pnl):
-        super().__init__()
+        super().__init__(title="👋 Message d'accueil")
         self.u = u
         self.g = g
         self.pid = pid
         
-        # Pré-remplir avec la valeur existante
-        self.welcome_msg.default = pnl.get('welcome_message', '')
-    
-    welcome_msg = TextInput(
-        label="Message d'accueil (envoyé dans le ticket)",
-        placeholder="Ex: Bienvenue ! Un membre du staff va vous répondre.\n\n📌 En attendant, décrivez votre problème en détail.",
-        style=discord.TextStyle.paragraph,
-        required=False,
-        max_length=1500
-    )
+        # Créer le TextInput avec la valeur pré-remplie
+        self.welcome_msg = TextInput(
+            label="Message d'accueil (envoyé dans le ticket)",
+            placeholder="Ex: Bienvenue ! Un membre du staff va vous répondre.\n\n📌 En attendant, décrivez votre problème en détail.",
+            style=discord.TextStyle.paragraph,
+            required=False,
+            max_length=1500,
+            default=pnl.get('welcome_message', '') or ''
+        )
+        self.add_item(self.welcome_msg)
     
     async def on_submit(self, i):
         try:
