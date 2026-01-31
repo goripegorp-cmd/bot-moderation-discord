@@ -1897,9 +1897,14 @@ async def create_ticket(i, pid, ans=None):
             async with db.execute('SELECT id FROM tickets WHERE channel_id=?', (ch.id,)) as cur:
                 row = await cur.fetchone()
                 tid = row[0] if row else 0
+        
+        # ═══════════════════════════════════════════════════════════════════════════════
+        #                    📨 EMBED PRINCIPAL DU TICKET
+        # ═══════════════════════════════════════════════════════════════════════════════
         emb = discord.Embed(title="🎫 Nouveau Ticket", color=C.BLURPLE, timestamp=now())
         emb.add_field(name="👤 Créé par", value=f"{i.user.mention}\n`{i.user.id}`", inline=True)
         emb.add_field(name="🎫 ID", value=f"#{tid}", inline=True)
+        emb.add_field(name="📋 Panel", value=pnl.get('name', 'Support'), inline=True)
         emb.set_thumbnail(url=i.user.display_avatar.url)
         if ans:
             for t, a in ans.items():
@@ -1908,7 +1913,22 @@ async def create_ticket(i, pid, ans=None):
         mention = i.user.mention
         if staff: mention += f" {staff.mention}"
         await ch.send(content=mention, embed=emb, view=TicketControlView())
-        await send_ticket_log(i.guild, 'create', i.user, {'id': tid, 'answers': ans or {}})
+        
+        # ═══════════════════════════════════════════════════════════════════════════════
+        #                    👋 MESSAGE D'ACCUEIL PERSONNALISÉ
+        # ═══════════════════════════════════════════════════════════════════════════════
+        welcome_message = pnl.get('welcome_message', '').strip()
+        if welcome_message:
+            # Créer un embed pour le message d'accueil
+            welcome_emb = discord.Embed(
+                title="👋 Bienvenue !",
+                description=welcome_message,
+                color=0x3498DB  # Bleu clair
+            )
+            welcome_emb.set_footer(text=f"Panel: {pnl.get('name', 'Support')}")
+            await ch.send(embed=welcome_emb)
+        
+        await send_ticket_log(i.guild, 'create', i.user, {'id': tid, 'answers': ans or {}, 'panel_id': pid})
         return ch, None
     except Exception as ex:
         if ch:
@@ -12058,13 +12078,31 @@ class PanelEditView(View):
         else:
             e.add_field(name="📝 Questions", value="*Aucune question*", inline=False)
         
-        # Afficher le nombre de membres blacklistés
-        blacklist = pnl.get('blacklist', [])
-        if blacklist:
-            bl_txt = f"**{len(blacklist)}** membre(s) blacklisté(s)"
+        # Customisation de l'embed du panel
+        embed_title = pnl.get('embed_title', '')
+        embed_desc = pnl.get('embed_description', '')
+        if embed_title or embed_desc:
+            custom_txt = ""
+            if embed_title:
+                custom_txt += f"**Titre:** {embed_title[:50]}...\n" if len(embed_title) > 50 else f"**Titre:** {embed_title}\n"
+            if embed_desc:
+                custom_txt += f"**Description:** {embed_desc[:50]}..." if len(embed_desc) > 50 else f"**Description:** {embed_desc}"
+            e.add_field(name="🎨 Apparence Panel", value=custom_txt, inline=False)
         else:
-            bl_txt = "*Aucun membre blacklisté*"
-        e.add_field(name="🚫 Blacklist", value=bl_txt, inline=False)
+            e.add_field(name="🎨 Apparence Panel", value="*Par défaut*", inline=False)
+        
+        # Message de bienvenue
+        welcome = pnl.get('welcome_message', '')
+        if welcome:
+            welcome_preview = welcome[:80] + "..." if len(welcome) > 80 else welcome
+            e.add_field(name="👋 Message d'accueil", value=f"*{welcome_preview}*", inline=False)
+        else:
+            e.add_field(name="👋 Message d'accueil", value="*Aucun message configuré*", inline=False)
+        
+        # Blacklist
+        blacklist = pnl.get('blacklist', [])
+        bl_txt = f"**{len(blacklist)}** membre(s)" if blacklist else "*Aucun*"
+        e.add_field(name="🚫 Blacklist", value=bl_txt, inline=True)
         
         return e
     
@@ -12095,16 +12133,28 @@ class PanelEditView(View):
         v = PanelQsView(self.u, self.g, self.pid)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
-    @discord.ui.button(label="🚫 Blacklist", style=discord.ButtonStyle.danger, row=0)
+    @discord.ui.button(label="🔢 Max", style=discord.ButtonStyle.secondary, row=0)
+    async def mx(self, i, b):
+        await i.response.send_modal(SetMaxModal(self.u, self.g, self.pid))
+    
+    @discord.ui.button(label="🎨 Apparence", style=discord.ButtonStyle.success, row=1)
+    async def customize_embed(self, i, b):
+        """Customiser l'embed du panel"""
+        pnl = await self.get_panel()
+        await i.response.send_modal(PanelAppearanceModal(self.u, self.g, self.pid, pnl))
+    
+    @discord.ui.button(label="👋 Message accueil", style=discord.ButtonStyle.success, row=1)
+    async def welcome_msg(self, i, b):
+        """Customiser le message de bienvenue"""
+        pnl = await self.get_panel()
+        await i.response.send_modal(WelcomeMessageModal(self.u, self.g, self.pid, pnl))
+    
+    @discord.ui.button(label="🚫 Blacklist", style=discord.ButtonStyle.danger, row=1)
     async def blacklist(self, i, b):
         v = PanelBlacklistView(self.u, self.g, self.pid)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
-    @discord.ui.button(label="🔢 Max tickets", style=discord.ButtonStyle.secondary, row=1)
-    async def mx(self, i, b):
-        await i.response.send_modal(SetMaxModal(self.u, self.g, self.pid))
-    
-    @discord.ui.button(label="📤 Envoyer", style=discord.ButtonStyle.success, row=1)
+    @discord.ui.button(label="📤 Envoyer", style=discord.ButtonStyle.primary, row=2)
     async def send(self, i, b):
         pnl = await self.get_panel()
         c = await cfg(self.g.id)
@@ -12117,7 +12167,7 @@ class PanelEditView(View):
         opts = [discord.SelectOption(label=f"# {ch.name}"[:25], value=str(ch.id)) for ch in chs]
         await i.response.edit_message(embed=discord.Embed(title="📤 Où envoyer le panel?", color=C.PURPLE), view=SendPanelView(self.u, self.g, self.pid, opts))
     
-    @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, row=1)
+    @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, row=2)
     async def delete(self, i, b):
         c = await cfg(self.g.id)
         panels = c.get('ticket_panels', {})
@@ -12131,6 +12181,107 @@ class PanelEditView(View):
     async def back(self, i, b):
         v = TicketMainPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                    🎨 MODALS CUSTOMISATION PANEL DE TICKETS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class PanelAppearanceModal(Modal, title="🎨 Personnaliser l'apparence"):
+    """Modal pour customiser l'embed du panel de tickets"""
+    def __init__(self, u, g, pid, pnl):
+        super().__init__()
+        self.u = u
+        self.g = g
+        self.pid = pid
+        
+        # Pré-remplir avec les valeurs existantes
+        self.embed_title.default = pnl.get('embed_title', '')
+        self.embed_desc.default = pnl.get('embed_description', '')
+        self.embed_links.default = pnl.get('embed_links', '')
+    
+    embed_title = TextInput(
+        label="Titre de l'embed",
+        placeholder="Ex: 🎫 Support - Besoin d'aide ?",
+        required=False,
+        max_length=256
+    )
+    
+    embed_desc = TextInput(
+        label="Description",
+        placeholder="Ex: Cliquez sur le bouton ci-dessous pour créer un ticket...",
+        style=discord.TextStyle.paragraph,
+        required=False,
+        max_length=2000
+    )
+    
+    embed_links = TextInput(
+        label="Liens utiles (un par ligne: Texte | URL)",
+        placeholder="Ex:\n📜 Règlement | https://example.com/rules\n❓ FAQ | https://example.com/faq",
+        style=discord.TextStyle.paragraph,
+        required=False,
+        max_length=1000
+    )
+    
+    async def on_submit(self, i):
+        try:
+            c = await cfg(self.g.id)
+            panels = c.get('ticket_panels', {})
+            
+            if self.pid not in panels:
+                return await i.response.send_message("❌ Panel introuvable", ephemeral=True)
+            
+            panels[self.pid]['embed_title'] = self.embed_title.value.strip()
+            panels[self.pid]['embed_description'] = self.embed_desc.value.strip()
+            panels[self.pid]['embed_links'] = self.embed_links.value.strip()
+            
+            await db_set(self.g.id, 'ticket_panels', panels)
+            
+            v = PanelEditView(self.u, self.g, self.pid)
+            await i.response.edit_message(embed=await v.embed(), view=v)
+            await i.followup.send("✅ Apparence du panel mise à jour!", ephemeral=True)
+            
+        except Exception as ex:
+            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+
+
+class WelcomeMessageModal(Modal, title="👋 Message d'accueil"):
+    """Modal pour le message envoyé à la création du ticket"""
+    def __init__(self, u, g, pid, pnl):
+        super().__init__()
+        self.u = u
+        self.g = g
+        self.pid = pid
+        
+        # Pré-remplir avec la valeur existante
+        self.welcome_msg.default = pnl.get('welcome_message', '')
+    
+    welcome_msg = TextInput(
+        label="Message d'accueil (envoyé dans le ticket)",
+        placeholder="Ex: Bienvenue ! Un membre du staff va vous répondre.\n\n📌 En attendant, décrivez votre problème en détail.",
+        style=discord.TextStyle.paragraph,
+        required=False,
+        max_length=1500
+    )
+    
+    async def on_submit(self, i):
+        try:
+            c = await cfg(self.g.id)
+            panels = c.get('ticket_panels', {})
+            
+            if self.pid not in panels:
+                return await i.response.send_message("❌ Panel introuvable", ephemeral=True)
+            
+            panels[self.pid]['welcome_message'] = self.welcome_msg.value.strip()
+            
+            await db_set(self.g.id, 'ticket_panels', panels)
+            
+            v = PanelEditView(self.u, self.g, self.pid)
+            await i.response.edit_message(embed=await v.embed(), view=v)
+            await i.followup.send("✅ Message d'accueil mis à jour!", ephemeral=True)
+            
+        except Exception as ex:
+            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                        🚫 SYSTÈME DE BLACKLIST PAR PANEL
@@ -12617,11 +12768,49 @@ class SendPanelSel(Select):
         pnl = c.get('ticket_panels', {}).get(self.pid, {})
         qs = pnl.get('questions', [])
         mx = pnl.get('max', 1)
-        desc = "Cliquez sur le bouton ci-dessous pour créer un ticket."
+        
+        # ═══════════════════════════════════════════════════════════════════════════════
+        #                    🎨 EMBED PERSONNALISÉ DU PANEL
+        # ═══════════════════════════════════════════════════════════════════════════════
+        
+        # Titre personnalisé ou par défaut
+        embed_title = pnl.get('embed_title', '').strip()
+        if not embed_title:
+            embed_title = f"🎫 {pnl.get('name', 'Support')}"
+        
+        # Description personnalisée ou par défaut
+        embed_desc = pnl.get('embed_description', '').strip()
+        if not embed_desc:
+            embed_desc = "Cliquez sur le bouton ci-dessous pour créer un ticket."
+        
+        # Ajouter les infos automatiques (questions, max tickets)
+        auto_info = ""
         if qs:
-            desc += f"\n\n📝 Vous devrez répondre à **{len(qs)}** question(s)."
-        desc += f"\n🔢 Maximum **{mx}** ticket(s) simultané(s)."
-        emb = discord.Embed(title=f"🎫 {pnl.get('name', 'Support')}", description=desc, color=C.BLURPLE)
+            auto_info += f"\n\n📝 Vous devrez répondre à **{len(qs)}** question(s)."
+        auto_info += f"\n🔢 Maximum **{mx}** ticket(s) simultané(s)."
+        
+        full_desc = embed_desc + auto_info
+        
+        emb = discord.Embed(title=embed_title, description=full_desc, color=C.BLURPLE)
+        
+        # Ajouter les liens personnalisés
+        embed_links = pnl.get('embed_links', '').strip()
+        if embed_links:
+            links_text = ""
+            for line in embed_links.split('\n'):
+                line = line.strip()
+                if '|' in line:
+                    parts = line.split('|', 1)
+                    link_text = parts[0].strip()
+                    link_url = parts[1].strip()
+                    if link_url.startswith('http'):
+                        links_text += f"[{link_text}]({link_url})\n"
+                elif line:
+                    links_text += f"{line}\n"
+            
+            if links_text:
+                emb.add_field(name="🔗 Liens utiles", value=links_text.strip(), inline=False)
+        
         await ch.send(embed=emb, view=TicketCreateView(self.pid))
         await i.response.send_message(f"✅ Panel envoyé dans {ch.mention}!", ephemeral=True)
 
@@ -17151,3 +17340,4 @@ if __name__ == "__main__":
     print("🛡️ Anti-badwords amélioré (mots entiers)")
     print("🎮 Système de promotions jeux vidéo")
     bot.run(TOKEN)
+
