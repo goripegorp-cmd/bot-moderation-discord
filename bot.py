@@ -6710,22 +6710,42 @@ class AdsRobloxPanel(View):
         rblx_ch = self.g.get_channel(c.get('ads_roblox_channel', 0))
         rblx_feeds = c.get('ads_roblox_feeds', [])
         
-        e.description = "Recevez automatiquement les nouvelles créations UGC de vos créateurs Roblox préférés!"
+        e.description = "Recevez automatiquement les nouvelles créations UGC de vos créateurs et groupes Roblox préférés!"
         
         e.add_field(name="📍 Salon de publication", value=rblx_ch.mention if rblx_ch else "❌ Non configuré", inline=False)
         
         if rblx_feeds:
-            feeds_txt = ""
-            for f in rblx_feeds[:10]:
+            # Séparer utilisateurs et groupes
+            users_txt = ""
+            groups_txt = ""
+            user_count = 0
+            group_count = 0
+            
+            for f in rblx_feeds:
                 if isinstance(f, dict):
-                    name = f.get('username', '?')
-                    user_id = f.get('user_id', '?')
-                    feeds_txt += f"• `{name}` (ID: {user_id})\n"
-                else:
-                    feeds_txt += f"• `{f}`\n"
-            e.add_field(name=f"🎨 Créateurs suivis ({len(rblx_feeds)})", value=feeds_txt, inline=False)
+                    feed_type = f.get('type', 'user')  # 'user' par défaut pour rétrocompatibilité
+                    
+                    if feed_type == 'group':
+                        name = f.get('group_name', '?')
+                        feed_id = f.get('group_id', '?')
+                        groups_txt += f"• `{name}` (ID: {feed_id})\n"
+                        group_count += 1
+                    else:
+                        name = f.get('username', '?')
+                        feed_id = f.get('user_id', '?')
+                        users_txt += f"• `{name}` (ID: {feed_id})\n"
+                        user_count += 1
+            
+            if users_txt:
+                e.add_field(name=f"👤 Créateurs suivis ({user_count})", value=users_txt[:1024], inline=False)
+            
+            if groups_txt:
+                e.add_field(name=f"👥 Groupes suivis ({group_count})", value=groups_txt[:1024], inline=False)
+            
+            if not users_txt and not groups_txt:
+                e.add_field(name="📋 Feeds configurés", value="*Aucun feed valide*", inline=False)
         else:
-            e.add_field(name="🎨 Créateurs suivis", value="*Aucun créateur configuré*", inline=False)
+            e.add_field(name="📋 Feeds suivis", value="*Aucun créateur ou groupe configuré*", inline=False)
         
         e.set_footer(text="💡 Les nouvelles créations UGC sont vérifiées toutes les 10 minutes")
         return e
@@ -6742,31 +6762,41 @@ class AdsRobloxPanel(View):
             view=v
         )
     
-    @discord.ui.button(label="➕ Ajouter Créateur", style=discord.ButtonStyle.success, row=0)
-    async def add_feed(self, i, b):
-        await i.response.send_modal(AdsRobloxAddModal(self.g, self.u))
+    @discord.ui.button(label="👤 Ajouter Créateur", style=discord.ButtonStyle.success, row=0)
+    async def add_user(self, i, b):
+        await i.response.send_modal(AdsRobloxAddUserModal(self.g, self.u))
     
-    @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, row=0)
+    @discord.ui.button(label="👥 Ajouter Groupe", style=discord.ButtonStyle.success, row=0)
+    async def add_group(self, i, b):
+        await i.response.send_modal(AdsRobloxAddGroupModal(self.g, self.u))
+    
+    @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, row=1)
     async def remove_feed(self, i, b):
         c = await cfg(self.g.id)
         feeds = c.get('ads_roblox_feeds', [])
         if not feeds:
-            return await i.response.send_message("❌ Aucun créateur à supprimer", ephemeral=True)
+            return await i.response.send_message("❌ Aucun feed à supprimer", ephemeral=True)
+        
         opts = []
         for idx, f in enumerate(feeds[:25]):
             if isinstance(f, dict):
-                opts.append(discord.SelectOption(label=f.get('username', str(idx))[:25], value=str(idx)))
-            else:
-                opts.append(discord.SelectOption(label=str(f)[:25], value=str(idx)))
+                feed_type = f.get('type', 'user')
+                if feed_type == 'group':
+                    label = f"👥 {f.get('group_name', str(idx))}"
+                else:
+                    label = f"👤 {f.get('username', str(idx))}"
+                opts.append(discord.SelectOption(label=label[:25], value=str(idx)))
+        
         v = AdsFeedRemoveView(self.u, self.g, opts, 'ads_roblox_feeds', 'roblox')
-        await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer un créateur", color=C.RED), view=v)
+        await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer un feed", color=0xE74C3C), view=v)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
         v = AdsPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
-class AdsRobloxAddModal(Modal, title="➕ Ajouter un créateur Roblox"):
+
+class AdsRobloxAddUserModal(Modal, title="👤 Ajouter un créateur Roblox"):
     username = TextInput(label="Nom d'utilisateur Roblox", placeholder="Ex: Roblox", max_length=50)
     
     def __init__(self, g, u):
@@ -6799,11 +6829,12 @@ class AdsRobloxAddModal(Modal, title="➕ Ajouter un créateur Roblox"):
                             feeds = c.get('ads_roblox_feeds', [])
                             
                             for f in feeds:
-                                if isinstance(f, dict) and f.get('user_id') == user_id:
+                                if isinstance(f, dict) and f.get('type', 'user') == 'user' and f.get('user_id') == user_id:
                                     return await i.followup.send("❌ Ce créateur est déjà ajouté!", ephemeral=True)
                             
                             # Ajouter le créateur
                             new_feed = {
+                                'type': 'user',
                                 'username': display_name,
                                 'user_id': user_id
                             }
@@ -6817,6 +6848,117 @@ class AdsRobloxAddModal(Modal, title="➕ Ajouter un créateur Roblox"):
                         await i.followup.send("❌ Erreur lors de la recherche Roblox", ephemeral=True)
         except Exception as ex:
             print(f"Erreur Roblox API: {ex}")
+            await i.followup.send("❌ Erreur de connexion à l'API Roblox", ephemeral=True)
+
+
+class AdsRobloxAddGroupModal(Modal, title="👥 Ajouter un groupe Roblox"):
+    group_input = TextInput(
+        label="Nom ou ID du groupe Roblox",
+        placeholder="Ex: UGC Creators ou 12345678",
+        max_length=100
+    )
+    
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+    
+    async def on_submit(self, i):
+        await i.response.defer(ephemeral=True)
+        
+        group_input = self.group_input.value.strip()
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                
+                group_id = None
+                group_name = None
+                
+                # Vérifier si c'est un ID (que des chiffres)
+                if group_input.isdigit():
+                    # C'est un ID, on récupère directement les infos du groupe
+                    group_id = int(group_input)
+                    async with session.get(
+                        f'https://groups.roblox.com/v1/groups/{group_id}',
+                        headers=headers
+                    ) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            group_name = data.get('name')
+                        elif resp.status == 404:
+                            return await i.followup.send(f"❌ Groupe avec l'ID `{group_id}` introuvable", ephemeral=True)
+                        else:
+                            return await i.followup.send("❌ Erreur lors de la recherche du groupe", ephemeral=True)
+                else:
+                    # C'est un nom, on recherche le groupe
+                    search_url = f'https://groups.roblox.com/v1/groups/search/lookup?groupName={group_input}'
+                    async with session.get(search_url, headers=headers) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            groups = data.get('data', [])
+                            
+                            if groups:
+                                # Prendre le premier résultat (correspondance exacte ou proche)
+                                group_data = groups[0]
+                                group_id = group_data.get('id')
+                                group_name = group_data.get('name')
+                            else:
+                                # Essayer une recherche plus large
+                                search_url2 = f'https://groups.roblox.com/v1/groups/search?keyword={group_input}&limit=10'
+                                async with session.get(search_url2, headers=headers) as resp2:
+                                    if resp2.status == 200:
+                                        data2 = await resp2.json()
+                                        groups2 = data2.get('data', [])
+                                        if groups2:
+                                            group_data = groups2[0]
+                                            group_id = group_data.get('id')
+                                            group_name = group_data.get('name')
+                                        else:
+                                            return await i.followup.send(f"❌ Groupe `{group_input}` introuvable", ephemeral=True)
+                                    else:
+                                        return await i.followup.send("❌ Erreur lors de la recherche", ephemeral=True)
+                        else:
+                            return await i.followup.send("❌ Erreur lors de la recherche du groupe", ephemeral=True)
+                
+                if not group_id or not group_name:
+                    return await i.followup.send("❌ Impossible de trouver ce groupe", ephemeral=True)
+                
+                # Vérifier si le groupe a des créations UGC
+                catalog_url = f"https://catalog.roblox.com/v1/search/items?creatorTargetId={group_id}&creatorType=Group&limit=1"
+                async with session.get(catalog_url, headers=headers) as resp:
+                    if resp.status == 200:
+                        catalog_data = await resp.json()
+                        items_count = len(catalog_data.get('data', []))
+                        has_ugc = items_count > 0
+                    else:
+                        has_ugc = False
+                
+                # Vérifier si déjà ajouté
+                c = await cfg(self.g.id)
+                feeds = c.get('ads_roblox_feeds', [])
+                
+                for f in feeds:
+                    if isinstance(f, dict) and f.get('type') == 'group' and f.get('group_id') == group_id:
+                        return await i.followup.send("❌ Ce groupe est déjà ajouté!", ephemeral=True)
+                
+                # Ajouter le groupe
+                new_feed = {
+                    'type': 'group',
+                    'group_name': group_name,
+                    'group_id': group_id
+                }
+                feeds.append(new_feed)
+                await db_set(self.g.id, 'ads_roblox_feeds', feeds)
+                
+                # Message de confirmation
+                if has_ugc:
+                    await i.followup.send(f"✅ Groupe **{group_name}** (ID: {group_id}) ajouté !\n💡 Ce groupe a des créations UGC.", ephemeral=True)
+                else:
+                    await i.followup.send(f"✅ Groupe **{group_name}** (ID: {group_id}) ajouté !\n⚠️ Ce groupe ne semble pas avoir de créations UGC pour le moment.", ephemeral=True)
+                    
+        except Exception as ex:
+            print(f"Erreur Roblox Group API: {ex}")
             await i.followup.send("❌ Erreur de connexion à l'API Roblox", ephemeral=True)
 
 # ─────────────────────────────── RÉDUCTIONS JEUX ───────────────────────────────
@@ -17409,7 +17551,7 @@ async def check_rosocial_feeds(session, guild, data):
             continue
 
 async def check_roblox_ugc_feeds(session, guild, data):
-    """Vérifie les nouvelles créations UGC Roblox"""
+    """Vérifie les nouvelles créations UGC Roblox (utilisateurs ET groupes)"""
     channel = guild.get_channel(data.get('ads_roblox_channel', 0))
     feeds = data.get('ads_roblox_feeds', [])
     if not channel or not feeds:
@@ -17419,17 +17561,28 @@ async def check_roblox_ugc_feeds(session, guild, data):
     
     for feed in feeds:
         try:
-            if isinstance(feed, dict):
-                user_id = feed.get('user_id')
-                username = feed.get('username', 'Créateur')
-            else:
+            if not isinstance(feed, dict):
                 continue
             
-            if not user_id:
+            # Déterminer le type de feed (user ou group)
+            feed_type = feed.get('type', 'user')  # 'user' par défaut pour rétrocompatibilité
+            
+            if feed_type == 'group':
+                creator_id = feed.get('group_id')
+                creator_name = feed.get('group_name', 'Groupe')
+                creator_type = 'Group'
+                creator_emoji = '👥'
+            else:
+                creator_id = feed.get('user_id')
+                creator_name = feed.get('username', 'Créateur')
+                creator_type = 'User'
+                creator_emoji = '👤'
+            
+            if not creator_id:
                 continue
             
             # API Roblox Catalog - Récupérer les créations récentes
-            catalog_url = f"https://catalog.roblox.com/v1/search/items?creatorTargetId={user_id}&creatorType=User&limit=10&sortType=3"
+            catalog_url = f"https://catalog.roblox.com/v1/search/items?creatorTargetId={creator_id}&creatorType={creator_type}&limit=10&sortType=3"
             
             async with session.get(catalog_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                 if resp.status != 200:
@@ -17445,7 +17598,7 @@ async def check_roblox_ugc_feeds(session, guild, data):
                 item_id = item.get('id')
                 item_type = item.get('itemType', 'Asset')
                 
-                cache_key = f"rblx_{guild.id}_{user_id}_{item_id}"
+                cache_key = f"rblx_{guild.id}_{creator_type}_{creator_id}_{item_id}"
                 
                 if cache_key in posted_content:
                     continue
@@ -17475,7 +17628,6 @@ async def check_roblox_ugc_feeds(session, guild, data):
                 date_str = ""
                 if created_date:
                     try:
-                        # Format: "2025-01-30T10:30:00.000Z"
                         from datetime import datetime
                         dt = datetime.fromisoformat(created_date.replace('Z', '+00:00'))
                         date_str = dt.strftime("%d/%m/%Y à %H:%M")
@@ -17526,7 +17678,12 @@ async def check_roblox_ugc_feeds(session, guild, data):
                 
                 # Informations
                 e.add_field(name="💰 Prix", value=price_txt, inline=True)
-                e.add_field(name="👤 Créateur", value=f"**{username}**", inline=True)
+                
+                # Créateur ou Groupe
+                if feed_type == 'group':
+                    e.add_field(name="👥 Groupe", value=f"**{creator_name}**", inline=True)
+                else:
+                    e.add_field(name="👤 Créateur", value=f"**{creator_name}**", inline=True)
                 
                 # Date de publication
                 if date_str:
@@ -17539,9 +17696,10 @@ async def check_roblox_ugc_feeds(session, guild, data):
                     inline=False
                 )
                 
-                # Footer
+                # Footer avec indication du type
+                footer_text = f"Roblox UGC • {creator_emoji} {creator_name}"
                 e.set_footer(
-                    text=f"Roblox UGC • {username}",
+                    text=footer_text,
                     icon_url="https://images.rbxcdn.com/0785a14c892a503ab498b8f4100d4340.png"
                 )
                 e.timestamp = now()
@@ -19141,11 +19299,11 @@ async def testdeals_cmd(i: discord.Interaction):
 
 
 if __name__ == "__main__":
-    print("🚀 Bot v28 - Démarrage...")
+    print("🚀 Bot v29 - Démarrage...")
     print("🔒 Système de sécurité activé")
     print("👑 Système d'immunités complet")
     print("🎙️ Vocaux temporaires multi-hubs")
     print("🛡️ Anti-badwords amélioré (mots entiers)")
     print("🎮 Système de promotions jeux vidéo")
+    print("👥 Roblox UGC - Support des groupes")
     bot.run(TOKEN)
-
