@@ -10053,45 +10053,59 @@ async def handle_auto_help(message):
             if message.id == auto_help_messages[channel_id]:
                 return  # C'est notre propre message d'aide, ne pas boucler
         
-        # ═══════════════ SUPPRESSION ROBUSTE DE L'ANCIEN MESSAGE ═══════════════
-        old_msg_id = auto_help_messages.get(channel_id)
-        if old_msg_id:
-            # Supprimer du cache immédiatement pour éviter les doublons
-            del auto_help_messages[channel_id]
-            
-            # Essayer plusieurs méthodes de suppression
+        # ═══════════════ SUPPRESSION ROBUSTE DE TOUS LES ANCIENS MESSAGES ═══════════════
+        
+        # 1. D'abord supprimer via le cache si on a l'ID
+        old_msg_id = auto_help_messages.pop(channel_id, None)
+        
+        # 2. Chercher et supprimer TOUS les messages d'aide du bot dans ce salon
+        messages_to_delete = []
+        try:
+            async for msg in message.channel.history(limit=30):
+                # Ne pas supprimer le message qui vient d'arriver
+                if msg.id == message.id:
+                    continue
+                # Vérifier si c'est un message d'aide du bot
+                if msg.author.id == bot.user.id and msg.embeds:
+                    embed = msg.embeds[0]
+                    footer_text = str(embed.footer.text) if embed.footer else ""
+                    # Identifier les messages d'aide par leur footer
+                    if "repositionne automatiquement" in footer_text:
+                        messages_to_delete.append(msg)
+        except Exception as ex:
+            print(f"[AUTO_HELP] Erreur recherche anciens messages: {ex}")
+        
+        # 3. Supprimer tous les anciens messages d'aide trouvés
+        for old_msg in messages_to_delete:
             try:
-                old_msg = await message.channel.fetch_message(old_msg_id)
                 await old_msg.delete()
             except discord.NotFound:
-                pass  # Message déjà supprimé
+                pass  # Déjà supprimé
             except discord.Forbidden:
                 pass  # Pas les permissions
             except Exception as ex:
-                print(f"[AUTO_HELP] Erreur suppression ancien message: {ex}")
-                # Essayer de supprimer via l'historique
-                try:
-                    async for msg in message.channel.history(limit=50):
-                        if msg.author.id == bot.user.id and msg.embeds:
-                            if msg.embeds[0].footer and "repositionne automatiquement" in str(msg.embeds[0].footer.text or ""):
-                                await msg.delete()
-                                break
-                except:
-                    pass
+                print(f"[AUTO_HELP] Erreur suppression: {ex}")
         
-        # Petit délai pour que le message soit bien envoyé
-        await asyncio.sleep(0.3)
+        # 4. Petit délai pour s'assurer que les suppressions sont effectuées
+        await asyncio.sleep(0.5)
         
-        # Créer et envoyer le nouveau message d'aide
-        e = discord.Embed(title=f"💡 {help_data.get('title', 'Aide')}", color=help_data.get('color', 0x3498DB))
+        # ═══════════════ ENVOI DU NOUVEAU MESSAGE D'AIDE ═══════════════
+        
+        e = discord.Embed(
+            title=f"💡 {help_data.get('title', 'Aide')}", 
+            color=help_data.get('color', 0x3498DB)
+        )
         e.description = help_data.get('content', '')
         e.set_footer(text="Ce message se repositionne automatiquement")
         
-        new_msg = await message.channel.send(embed=e)
-        auto_help_messages[channel_id] = new_msg.id
+        try:
+            new_msg = await message.channel.send(embed=e)
+            auto_help_messages[channel_id] = new_msg.id
+        except Exception as ex:
+            print(f"[AUTO_HELP] Erreur envoi nouveau message: {ex}")
         
     except Exception as ex:
-        print(f"Erreur auto_help: {ex}")
+        print(f"[AUTO_HELP] Erreur générale: {ex}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           💰 FONCTIONS ÉCONOMIE
@@ -12876,6 +12890,13 @@ async def on_ready():
                         for pid in data.get('ticket_panels', {}):
                             bot.add_view(TicketCreateView(pid))
                     except: pass
+            
+            # Charger les vues de questionnaires Realsy en attente
+            try:
+                async with db.execute('SELECT id, guild_id FROM rellseas_quizzes WHERE status IN ("pending", "answered")') as c:
+                    for row in await c.fetchall():
+                        bot.add_view(RellseasQuizAnswerView(row[0], row[1]))
+            except: pass
     except: pass
     
     # Sync global des commandes
@@ -13362,13 +13383,25 @@ async def on_message(msg):
         
         # ═══════════════ PROTECTIONS STANDARD (IGNORÉES SI IMMUNISÉ) ═══════════════
         
-        # Config salon spécifique
+        # Config salon spécifique (commandes uniquement, pas de messages, etc.)
         chcf = c.get('channel_configs', {}).get(str(chid))
-        if chcf and not (iag and chcf.get('gifs', True)):
-            vio, _ = check_channel_cfg(msg, chcf)
+        if chcf:
+            # Vérifier les violations de config salon
+            vio, vio_type = check_channel_cfg(msg, chcf)
             if vio:
-                await msg.delete()
-                return
+                # Exception pour les GIFs autorisés globalement - ne pas bloquer si c'est un GIF autorisé
+                if vio_type == "gifs" and iag:
+                    pass  # GIF autorisé globalement, ne pas supprimer
+                else:
+                    try:
+                        await msg.delete()
+                    except discord.Forbidden:
+                        pass  # Pas la permission de supprimer
+                    except discord.NotFound:
+                        pass  # Message déjà supprimé
+                    except Exception as ex:
+                        print(f"[CHANNEL_CFG] Erreur suppression: {ex}")
+                    return
         
         # Anti-badwords
         if c.get('anti_badwords'):
@@ -13945,78 +13978,800 @@ async def ticketblacklist_cmd(
 #                              🎭 RELLSEAS COMMAND
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="rellseas", description="🎭 Donner ou retirer le rôle Realsy à un membre")
-@app_commands.describe(membre="Le membre", action="Donner ou retirer le rôle")
-@app_commands.choices(action=[
-    app_commands.Choice(name="Donner le rôle", value="add"),
-    app_commands.Choice(name="Retirer le rôle", value="remove")
-])
-async def rellseas_cmd(i: discord.Interaction, membre: discord.Member, action: str):
+@bot.tree.command(name="rellseas", description="🎭 Gérer le système Realsy (rôle + questionnaire)")
+async def rellseas_cmd(i: discord.Interaction):
     c = await cfg(i.guild.id)
     
     # Vérifier si l'utilisateur est autorisé
     if i.user.id != c.get('rellseas_user', 0) and not i.user.guild_permissions.administrator:
         return await i.response.send_message("❌ Vous n'êtes pas autorisé à utiliser cette commande", ephemeral=True)
     
-    # Vérifier si le rôle est configuré
-    role = i.guild.get_role(c.get('rellseas_role', 0))
-    if not role:
-        return await i.response.send_message("❌ Le rôle Realsy n'est pas configuré", ephemeral=True)
+    # Afficher le menu principal
+    v = RellseasMainMenu(i.user, i.guild)
+    await i.response.send_message(embed=await v.embed(), view=v, ephemeral=True)
+
+
+class RellseasMainMenu(View):
+    """Menu principal de la commande /rellseas"""
+    def __init__(self, u, g):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
     
-    if action == "add":
-        if role in membre.roles:
-            return await i.response.send_message(f"❌ {membre.mention} a déjà le rôle {role.mention}", ephemeral=True)
+    async def embed(self):
+        c = await cfg(self.g.id)
+        role = self.g.get_role(c.get('rellseas_role', 0))
+        quiz_channel = self.g.get_channel(c.get('rellseas_quiz_channel', 0))
+        questions = c.get('rellseas_questions', [])
+        
+        e = discord.Embed(
+            title="🎭 Système Realsy",
+            description="Gérez le rôle Realsy et le système de questionnaire.",
+            color=0x9B59B6
+        )
+        
+        e.add_field(
+            name="🎯 Rôle Realsy",
+            value=role.mention if role else "❌ Non configuré",
+            inline=True
+        )
+        e.add_field(
+            name="📝 Salon Quiz",
+            value=quiz_channel.mention if quiz_channel else "❌ Non configuré",
+            inline=True
+        )
+        e.add_field(
+            name="❓ Questions",
+            value=f"**{len(questions)}** question(s) configurée(s)",
+            inline=True
+        )
+        
+        # Afficher les questions existantes
+        if questions:
+            q_list = "\n".join([f"• **{q['title']}**" for q in questions[:5]])
+            if len(questions) > 5:
+                q_list += f"\n*...et {len(questions) - 5} autres*"
+            e.add_field(name="📋 Liste des questions", value=q_list, inline=False)
+        
+        e.set_footer(text="Choisissez une action ci-dessous")
+        return e
+    
+    @discord.ui.button(label="🎁 Donner le rôle", style=discord.ButtonStyle.success, row=0)
+    async def give_role(self, i, b):
+        c = await cfg(self.g.id)
+        role = self.g.get_role(c.get('rellseas_role', 0))
+        if not role:
+            return await i.response.send_message("❌ Le rôle Realsy n'est pas configuré", ephemeral=True)
+        
+        # Sélecteur de membre
+        await i.response.send_message(
+            "👤 **Mentionnez le membre** à qui donner le rôle (ex: @Pseudo)",
+            view=RellseasMemberInputView(self.u, self.g, "add"),
+            ephemeral=True
+        )
+    
+    @discord.ui.button(label="🚫 Retirer le rôle", style=discord.ButtonStyle.danger, row=0)
+    async def remove_role(self, i, b):
+        c = await cfg(self.g.id)
+        role = self.g.get_role(c.get('rellseas_role', 0))
+        if not role:
+            return await i.response.send_message("❌ Le rôle Realsy n'est pas configuré", ephemeral=True)
+        
+        await i.response.send_message(
+            "👤 **Mentionnez le membre** à qui retirer le rôle (ex: @Pseudo)",
+            view=RellseasMemberInputView(self.u, self.g, "remove"),
+            ephemeral=True
+        )
+    
+    @discord.ui.button(label="📝 Questionnaire", style=discord.ButtonStyle.primary, row=1)
+    async def quiz_menu(self, i, b):
+        v = RellseasQuizMenu(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+    
+    @discord.ui.button(label="⚙️ Configuration", style=discord.ButtonStyle.secondary, row=1)
+    async def config(self, i, b):
+        v = RellseasConfigMenu(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class RellseasMemberInputView(View):
+    """Vue pour saisir un membre"""
+    def __init__(self, u, g, action):
+        super().__init__(timeout=60)
+        self.u = u
+        self.g = g
+        self.action = action
+    
+    @discord.ui.button(label="📝 Entrer l'ID", style=discord.ButtonStyle.primary)
+    async def enter_id(self, i, b):
+        await i.response.send_modal(RellseasMemberModal(self.u, self.g, self.action))
+
+
+class RellseasMemberModal(Modal, title="👤 Sélectionner un membre"):
+    def __init__(self, u, g, action):
+        super().__init__()
+        self.u = u
+        self.g = g
+        self.action = action
+    
+    member_input = TextInput(
+        label="ID ou @mention du membre",
+        placeholder="Ex: 123456789012345678 ou @Pseudo",
+        required=True
+    )
+    
+    async def on_submit(self, i):
+        # Parser l'ID
+        user_str = self.member_input.value.strip()
+        user_id = None
+        
+        if user_str.startswith('<@') and user_str.endswith('>'):
+            user_str = user_str[2:-1]
+            if user_str.startswith('!'):
+                user_str = user_str[1:]
         
         try:
-            await membre.add_roles(role, reason=f"RellSeas par {i.user.name}")
+            user_id = int(user_str)
+        except:
+            member = discord.utils.find(
+                lambda m: m.name.lower() == user_str.lower() or m.display_name.lower() == user_str.lower(),
+                self.g.members
+            )
+            if member:
+                user_id = member.id
+        
+        if not user_id:
+            return await i.response.send_message("❌ Membre introuvable", ephemeral=True)
+        
+        membre = self.g.get_member(user_id)
+        if not membre:
+            return await i.response.send_message("❌ Ce membre n'est pas sur le serveur", ephemeral=True)
+        
+        c = await cfg(self.g.id)
+        role = self.g.get_role(c.get('rellseas_role', 0))
+        
+        if not role:
+            return await i.response.send_message("❌ Le rôle Realsy n'est pas configuré", ephemeral=True)
+        
+        if self.action == "add":
+            if role in membre.roles:
+                return await i.response.send_message(f"❌ {membre.mention} a déjà le rôle", ephemeral=True)
             
-            # Enregistrer l'activité initiale
+            await membre.add_roles(role, reason=f"Realsy par {i.user.name}")
+            
             async with aiosqlite.connect(DB_PATH) as db:
                 await db.execute('''INSERT OR REPLACE INTO realsy_tracking 
                     (guild_id, user_id, last_activity, warn_count) VALUES (?, ?, ?, 0)''',
-                    (i.guild.id, membre.id, now().isoformat()))
+                    (self.g.id, membre.id, now().isoformat()))
                 await db.commit()
             
             e = discord.Embed(title="🎭 Rôle Realsy donné", color=C.GREEN, timestamp=now())
-            e.add_field(name="👤 Membre", value=f"{membre.mention}", inline=True)
-            e.add_field(name="👮 Par", value=f"{i.user.mention}", inline=True)
+            e.add_field(name="👤 Membre", value=membre.mention, inline=True)
+            e.add_field(name="👮 Par", value=i.user.mention, inline=True)
             e.set_thumbnail(url=membre.display_avatar.url)
-            await i.response.send_message(embed=e)
+            await i.response.send_message(embed=e, ephemeral=True)
             
-            # Log
-            log_ch = i.guild.get_channel(c.get('rellseas_log_channel', 0))
+            log_ch = self.g.get_channel(c.get('rellseas_log_channel', 0))
             if log_ch:
                 await log_ch.send(embed=e)
-                
-        except discord.Forbidden:
-            return await i.response.send_message("❌ Je ne peux pas donner ce rôle", ephemeral=True)
-    
-    else:  # remove
-        if role not in membre.roles:
-            return await i.response.send_message(f"❌ {membre.mention} n'a pas le rôle {role.mention}", ephemeral=True)
         
-        try:
-            await membre.remove_roles(role, reason=f"RellSeas retiré par {i.user.name}")
+        else:  # remove
+            if role not in membre.roles:
+                return await i.response.send_message(f"❌ {membre.mention} n'a pas le rôle", ephemeral=True)
             
-            # Supprimer du tracking
+            await membre.remove_roles(role, reason=f"Realsy retiré par {i.user.name}")
+            
             async with aiosqlite.connect(DB_PATH) as db:
                 await db.execute('DELETE FROM realsy_tracking WHERE guild_id=? AND user_id=?',
-                    (i.guild.id, membre.id))
+                    (self.g.id, membre.id))
                 await db.commit()
             
             e = discord.Embed(title="🎭 Rôle Realsy retiré", color=C.RED, timestamp=now())
-            e.add_field(name="👤 Membre", value=f"{membre.mention}", inline=True)
-            e.add_field(name="👮 Par", value=f"{i.user.mention}", inline=True)
+            e.add_field(name="👤 Membre", value=membre.mention, inline=True)
+            e.add_field(name="👮 Par", value=i.user.mention, inline=True)
             e.set_thumbnail(url=membre.display_avatar.url)
-            await i.response.send_message(embed=e)
+            await i.response.send_message(embed=e, ephemeral=True)
             
-            # Log
-            log_ch = i.guild.get_channel(c.get('rellseas_log_channel', 0))
+            log_ch = self.g.get_channel(c.get('rellseas_log_channel', 0))
             if log_ch:
                 await log_ch.send(embed=e)
-                
-        except discord.Forbidden:
-            return await i.response.send_message("❌ Je ne peux pas retirer ce rôle", ephemeral=True)
+
+
+class RellseasQuizMenu(View):
+    """Menu de gestion du questionnaire"""
+    def __init__(self, u, g):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        questions = c.get('rellseas_questions', [])
+        quiz_channel = self.g.get_channel(c.get('rellseas_quiz_channel', 0))
+        
+        e = discord.Embed(
+            title="📝 Questionnaire Realsy",
+            description="Configurez et lancez des questionnaires pour les candidats.",
+            color=0x3498DB
+        )
+        
+        e.add_field(
+            name="📍 Salon des questionnaires",
+            value=quiz_channel.mention if quiz_channel else "❌ Non configuré",
+            inline=True
+        )
+        e.add_field(
+            name="❓ Questions",
+            value=f"**{len(questions)}** configurée(s)",
+            inline=True
+        )
+        
+        if questions:
+            q_list = ""
+            for idx, q in enumerate(questions[:8], 1):
+                q_list += f"**{idx}.** {q['title']}\n"
+            if len(questions) > 8:
+                q_list += f"*...et {len(questions) - 8} autres*"
+            e.add_field(name="📋 Questions", value=q_list, inline=False)
+        else:
+            e.add_field(name="📋 Questions", value="*Aucune question configurée*\nCliquez sur ➕ Ajouter pour créer des questions.", inline=False)
+        
+        return e
+    
+    @discord.ui.button(label="➕ Ajouter question", style=discord.ButtonStyle.success, row=0)
+    async def add_question(self, i, b):
+        await i.response.send_modal(RellseasAddQuestionModal(self.u, self.g))
+    
+    @discord.ui.button(label="🗑️ Supprimer question", style=discord.ButtonStyle.danger, row=0)
+    async def remove_question(self, i, b):
+        c = await cfg(self.g.id)
+        questions = c.get('rellseas_questions', [])
+        if not questions:
+            return await i.response.send_message("❌ Aucune question à supprimer", ephemeral=True)
+        
+        opts = [discord.SelectOption(label=f"{idx+1}. {q['title']}"[:50], value=str(idx)) 
+                for idx, q in enumerate(questions[:25])]
+        
+        v = RellseasDeleteQuestionView(self.u, self.g, opts)
+        await i.response.edit_message(
+            embed=discord.Embed(title="🗑️ Supprimer une question", description="Sélectionnez la question à supprimer", color=0xE74C3C),
+            view=v
+        )
+    
+    @discord.ui.button(label="📍 Définir salon", style=discord.ButtonStyle.primary, row=0)
+    async def set_channel(self, i, b):
+        channels = [ch for ch in self.g.text_channels][:25]
+        opts = [discord.SelectOption(label=f"# {ch.name}"[:25], value=str(ch.id)) for ch in channels]
+        
+        v = RellseasQuizChannelView(self.u, self.g, opts)
+        await i.response.edit_message(
+            embed=discord.Embed(title="📍 Salon des questionnaires", description="Choisissez où seront postés les questionnaires", color=0x3498DB),
+            view=v
+        )
+    
+    @discord.ui.button(label="🚀 Lancer questionnaire", style=discord.ButtonStyle.success, row=1)
+    async def launch_quiz(self, i, b):
+        c = await cfg(self.g.id)
+        questions = c.get('rellseas_questions', [])
+        quiz_channel = self.g.get_channel(c.get('rellseas_quiz_channel', 0))
+        
+        if not questions:
+            return await i.response.send_message("❌ Aucune question configurée", ephemeral=True)
+        if not quiz_channel:
+            return await i.response.send_message("❌ Aucun salon configuré pour les questionnaires", ephemeral=True)
+        
+        await i.response.send_modal(RellseasLaunchQuizModal(self.u, self.g, quiz_channel))
+    
+    @discord.ui.button(label="📊 Voir les réponses", style=discord.ButtonStyle.secondary, row=1)
+    async def view_responses(self, i, b):
+        # Récupérer les questionnaires en attente
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('''SELECT id, user_id, created_at FROM rellseas_quizzes 
+                WHERE guild_id=? AND status='pending' ORDER BY created_at DESC LIMIT 25''',
+                (self.g.id,)) as cur:
+                rows = await cur.fetchall()
+        
+        if not rows:
+            return await i.response.send_message("📭 Aucune réponse en attente", ephemeral=True)
+        
+        opts = []
+        for quiz_id, user_id, created_at in rows:
+            member = self.g.get_member(user_id)
+            name = member.display_name if member else f"User {user_id}"
+            opts.append(discord.SelectOption(label=f"#{quiz_id} - {name}"[:50], value=str(quiz_id)))
+        
+        v = RellseasViewResponsesView(self.u, self.g, opts)
+        await i.response.edit_message(
+            embed=discord.Embed(title="📊 Réponses en attente", description=f"**{len(rows)}** questionnaire(s) à examiner", color=0xF39C12),
+            view=v
+        )
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+    async def back(self, i, b):
+        v = RellseasMainMenu(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class RellseasAddQuestionModal(Modal, title="➕ Ajouter une question"):
+    def __init__(self, u, g):
+        super().__init__()
+        self.u = u
+        self.g = g
+    
+    title_input = TextInput(
+        label="Titre de la question",
+        placeholder="Ex: Expérience Roblox",
+        max_length=100,
+        required=True
+    )
+    
+    question_input = TextInput(
+        label="Question complète",
+        placeholder="Ex: Depuis combien de temps jouez-vous à Roblox ?",
+        style=discord.TextStyle.paragraph,
+        max_length=500,
+        required=True
+    )
+    
+    async def on_submit(self, i):
+        c = await cfg(self.g.id)
+        questions = c.get('rellseas_questions', [])
+        
+        if len(questions) >= 10:
+            return await i.response.send_message("❌ Maximum 10 questions atteint", ephemeral=True)
+        
+        questions.append({
+            'title': self.title_input.value.strip(),
+            'question': self.question_input.value.strip()
+        })
+        
+        await db_set(self.g.id, 'rellseas_questions', questions)
+        
+        v = RellseasQuizMenu(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+        await i.followup.send(f"✅ Question **{self.title_input.value}** ajoutée!", ephemeral=True)
+
+
+class RellseasDeleteQuestionView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=60)
+        self.u = u
+        self.g = g
+        self.add_item(RellseasDeleteQuestionSelect(u, g, opts))
+
+
+class RellseasDeleteQuestionSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir une question...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        c = await cfg(self.g.id)
+        questions = c.get('rellseas_questions', [])
+        idx = int(self.values[0])
+        
+        if 0 <= idx < len(questions):
+            removed = questions.pop(idx)
+            await db_set(self.g.id, 'rellseas_questions', questions)
+            
+            v = RellseasQuizMenu(self.u, self.g)
+            await i.response.edit_message(embed=await v.embed(), view=v)
+            await i.followup.send(f"✅ Question **{removed['title']}** supprimée!", ephemeral=True)
+
+
+class RellseasQuizChannelView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=60)
+        self.u = u
+        self.g = g
+        self.add_item(RellseasQuizChannelSelect(u, g, opts))
+
+
+class RellseasQuizChannelSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        await db_set(self.g.id, 'rellseas_quiz_channel', int(self.values[0]))
+        
+        v = RellseasQuizMenu(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+        await i.followup.send("✅ Salon configuré!", ephemeral=True)
+
+
+class RellseasLaunchQuizModal(Modal, title="🚀 Lancer un questionnaire"):
+    def __init__(self, u, g, channel):
+        super().__init__()
+        self.u = u
+        self.g = g
+        self.channel = channel
+    
+    member_input = TextInput(
+        label="Candidat (ID ou @mention)",
+        placeholder="Ex: 123456789 ou @Pseudo",
+        required=True
+    )
+    
+    async def on_submit(self, i):
+        # Parser l'ID
+        user_str = self.member_input.value.strip()
+        user_id = None
+        
+        if user_str.startswith('<@') and user_str.endswith('>'):
+            user_str = user_str[2:-1]
+            if user_str.startswith('!'):
+                user_str = user_str[1:]
+        
+        try:
+            user_id = int(user_str)
+        except:
+            member = discord.utils.find(
+                lambda m: m.name.lower() == user_str.lower() or m.display_name.lower() == user_str.lower(),
+                self.g.members
+            )
+            if member:
+                user_id = member.id
+        
+        if not user_id:
+            return await i.response.send_message("❌ Membre introuvable", ephemeral=True)
+        
+        membre = self.g.get_member(user_id)
+        if not membre:
+            return await i.response.send_message("❌ Ce membre n'est pas sur le serveur", ephemeral=True)
+        
+        c = await cfg(self.g.id)
+        questions = c.get('rellseas_questions', [])
+        
+        # Créer l'entrée dans la base de données
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('''CREATE TABLE IF NOT EXISTS rellseas_quizzes 
+                (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, user_id INTEGER, 
+                examiner_id INTEGER, status TEXT, answers TEXT, created_at TEXT)''')
+            
+            cursor = await db.execute('''INSERT INTO rellseas_quizzes 
+                (guild_id, user_id, examiner_id, status, answers, created_at) 
+                VALUES (?, ?, ?, 'pending', '{}', ?)''',
+                (self.g.id, membre.id, i.user.id, now().isoformat()))
+            quiz_id = cursor.lastrowid
+            await db.commit()
+        
+        # Créer l'embed du questionnaire
+        e = discord.Embed(
+            title="📝 Questionnaire Realsy",
+            description=f"Bonjour {membre.mention} !\n\nVous avez été sélectionné pour passer le questionnaire Realsy.\nCliquez sur le bouton ci-dessous pour répondre aux questions.",
+            color=0x9B59B6,
+            timestamp=now()
+        )
+        e.add_field(name="📋 Questions", value=f"**{len(questions)}** question(s) à répondre", inline=True)
+        e.add_field(name="👮 Examinateur", value=i.user.mention, inline=True)
+        e.set_thumbnail(url=membre.display_avatar.url)
+        e.set_footer(text=f"Questionnaire #{quiz_id}")
+        
+        # Envoyer dans le salon
+        await self.channel.send(
+            content=membre.mention,
+            embed=e,
+            view=RellseasQuizAnswerView(quiz_id, self.g.id)
+        )
+        
+        await i.response.send_message(f"✅ Questionnaire envoyé à {membre.mention} dans {self.channel.mention}!", ephemeral=True)
+
+
+class RellseasQuizAnswerView(View):
+    """Vue pour que le candidat réponde au questionnaire"""
+    def __init__(self, quiz_id, guild_id):
+        super().__init__(timeout=None)
+        self.quiz_id = quiz_id
+        self.guild_id = guild_id
+        self.add_item(RellseasAnswerButton(quiz_id, guild_id))
+
+
+class RellseasAnswerButton(Button):
+    def __init__(self, quiz_id, guild_id):
+        super().__init__(
+            label="📝 Répondre au questionnaire",
+            style=discord.ButtonStyle.success,
+            custom_id=f"rellseas_answer_{quiz_id}"
+        )
+        self.quiz_id = quiz_id
+        self.guild_id = guild_id
+    
+    async def callback(self, i):
+        # Vérifier que c'est bien le candidat
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('SELECT user_id, status FROM rellseas_quizzes WHERE id=?', (self.quiz_id,)) as cur:
+                row = await cur.fetchone()
+        
+        if not row:
+            return await i.response.send_message("❌ Questionnaire introuvable", ephemeral=True)
+        
+        if row[0] != i.user.id:
+            return await i.response.send_message("❌ Ce questionnaire ne vous est pas destiné", ephemeral=True)
+        
+        if row[1] != 'pending':
+            return await i.response.send_message("❌ Ce questionnaire a déjà été traité", ephemeral=True)
+        
+        # Récupérer les questions
+        c = await cfg(i.guild.id)
+        questions = c.get('rellseas_questions', [])
+        
+        if not questions:
+            return await i.response.send_message("❌ Aucune question configurée", ephemeral=True)
+        
+        # Lancer le modal de réponse
+        await i.response.send_modal(RellseasAnswerModal(self.quiz_id, questions))
+
+
+class RellseasAnswerModal(Modal, title="📝 Vos réponses"):
+    def __init__(self, quiz_id, questions):
+        super().__init__()
+        self.quiz_id = quiz_id
+        self.questions = questions[:5]  # Max 5 questions dans un modal
+        
+        for q in self.questions:
+            self.add_item(TextInput(
+                label=q['title'][:45],
+                placeholder=q['question'][:100],
+                style=discord.TextStyle.paragraph,
+                required=True,
+                max_length=1000
+            ))
+    
+    async def on_submit(self, i):
+        # Sauvegarder les réponses
+        answers = {}
+        for idx, child in enumerate(self.children):
+            if idx < len(self.questions):
+                answers[self.questions[idx]['title']] = child.value
+        
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('UPDATE rellseas_quizzes SET answers=?, status=? WHERE id=?',
+                (json.dumps(answers, ensure_ascii=False), 'answered', self.quiz_id))
+            await db.commit()
+        
+        # Confirmer
+        await i.response.send_message(
+            "✅ **Merci !**\n\nVos réponses ont été enregistrées. Un examinateur va les examiner prochainement.",
+            ephemeral=True
+        )
+        
+        # Mettre à jour le message original
+        try:
+            e = discord.Embed(
+                title="📝 Questionnaire Realsy - Répondu",
+                description=f"{i.user.mention} a répondu au questionnaire.\n\n*En attente d'examen par un staff...*",
+                color=0xF39C12,
+                timestamp=now()
+            )
+            e.set_footer(text=f"Questionnaire #{self.quiz_id}")
+            await i.message.edit(embed=e, view=None)
+        except:
+            pass
+
+
+class RellseasViewResponsesView(View):
+    def __init__(self, u, g, opts):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+        self.add_item(RellseasViewResponsesSelect(u, g, opts))
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = RellseasQuizMenu(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class RellseasViewResponsesSelect(Select):
+    def __init__(self, u, g, opts):
+        super().__init__(placeholder="Choisir un questionnaire...", options=opts)
+        self.u = u
+        self.g = g
+    
+    async def callback(self, i):
+        quiz_id = int(self.values[0])
+        
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('SELECT user_id, examiner_id, answers, status FROM rellseas_quizzes WHERE id=?',
+                (quiz_id,)) as cur:
+                row = await cur.fetchone()
+        
+        if not row:
+            return await i.response.send_message("❌ Questionnaire introuvable", ephemeral=True)
+        
+        user_id, examiner_id, answers_json, status = row
+        answers = json.loads(answers_json) if answers_json else {}
+        
+        member = self.g.get_member(user_id)
+        examiner = self.g.get_member(examiner_id)
+        
+        e = discord.Embed(
+            title=f"📊 Questionnaire #{quiz_id}",
+            color=0x3498DB,
+            timestamp=now()
+        )
+        e.add_field(name="👤 Candidat", value=member.mention if member else f"ID: {user_id}", inline=True)
+        e.add_field(name="👮 Examinateur", value=examiner.mention if examiner else f"ID: {examiner_id}", inline=True)
+        e.add_field(name="📊 Statut", value=status.upper(), inline=True)
+        
+        if member:
+            e.set_thumbnail(url=member.display_avatar.url)
+        
+        # Afficher les réponses
+        if answers:
+            for q_title, answer in list(answers.items())[:10]:
+                e.add_field(name=f"❓ {q_title}", value=answer[:1024] if answer else "*Pas de réponse*", inline=False)
+        else:
+            e.add_field(name="📝 Réponses", value="*En attente de réponse du candidat*", inline=False)
+        
+        v = RellseasReviewView(self.u, self.g, quiz_id, user_id, status)
+        await i.response.edit_message(embed=e, view=v)
+
+
+class RellseasReviewView(View):
+    """Vue pour examiner et valider/refuser un questionnaire"""
+    def __init__(self, u, g, quiz_id, user_id, status):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.quiz_id = quiz_id
+        self.user_id = user_id
+        
+        # Désactiver les boutons si déjà traité
+        if status not in ['pending', 'answered']:
+            for child in self.children:
+                if hasattr(child, 'disabled'):
+                    child.disabled = True
+    
+    @discord.ui.button(label="✅ Accepter + Donner rôle", style=discord.ButtonStyle.success, row=0)
+    async def accept(self, i, b):
+        c = await cfg(self.g.id)
+        role = self.g.get_role(c.get('rellseas_role', 0))
+        member = self.g.get_member(self.user_id)
+        
+        if not role:
+            return await i.response.send_message("❌ Le rôle Realsy n'est pas configuré", ephemeral=True)
+        
+        if not member:
+            return await i.response.send_message("❌ Le membre n'est plus sur le serveur", ephemeral=True)
+        
+        # Donner le rôle
+        try:
+            await member.add_roles(role, reason=f"Questionnaire Realsy accepté par {i.user.name}")
+        except:
+            return await i.response.send_message("❌ Impossible de donner le rôle", ephemeral=True)
+        
+        # Mettre à jour le questionnaire
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('UPDATE rellseas_quizzes SET status=? WHERE id=?', ('accepted', self.quiz_id))
+            await db.execute('''INSERT OR REPLACE INTO realsy_tracking 
+                (guild_id, user_id, last_activity, warn_count) VALUES (?, ?, ?, 0)''',
+                (self.g.id, self.user_id, now().isoformat()))
+            await db.commit()
+        
+        e = discord.Embed(
+            title="✅ Questionnaire Accepté",
+            description=f"{member.mention} a été accepté et a reçu le rôle {role.mention}!",
+            color=C.GREEN,
+            timestamp=now()
+        )
+        e.add_field(name="👮 Validé par", value=i.user.mention, inline=True)
+        e.set_thumbnail(url=member.display_avatar.url)
+        
+        await i.response.edit_message(embed=e, view=None)
+        
+        # Log
+        log_ch = self.g.get_channel(c.get('rellseas_log_channel', 0))
+        if log_ch:
+            await log_ch.send(embed=e)
+        
+        # Notifier le membre
+        try:
+            await member.send(embed=discord.Embed(
+                title="🎉 Félicitations !",
+                description=f"Votre candidature Realsy sur **{self.g.name}** a été acceptée !\n\nVous avez reçu le rôle {role.mention}.",
+                color=C.GREEN
+            ))
+        except:
+            pass
+    
+    @discord.ui.button(label="❌ Refuser", style=discord.ButtonStyle.danger, row=0)
+    async def reject(self, i, b):
+        await i.response.send_modal(RellseasRejectModal(self.u, self.g, self.quiz_id, self.user_id))
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = RellseasQuizMenu(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class RellseasRejectModal(Modal, title="❌ Raison du refus"):
+    def __init__(self, u, g, quiz_id, user_id):
+        super().__init__()
+        self.u = u
+        self.g = g
+        self.quiz_id = quiz_id
+        self.user_id = user_id
+    
+    reason = TextInput(
+        label="Raison du refus",
+        placeholder="Ex: Réponses insuffisantes, manque d'expérience...",
+        style=discord.TextStyle.paragraph,
+        required=True,
+        max_length=500
+    )
+    
+    async def on_submit(self, i):
+        member = self.g.get_member(self.user_id)
+        
+        # Mettre à jour le questionnaire
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('UPDATE rellseas_quizzes SET status=? WHERE id=?', ('rejected', self.quiz_id))
+            await db.commit()
+        
+        e = discord.Embed(
+            title="❌ Questionnaire Refusé",
+            description=f"Le questionnaire de {member.mention if member else f'<@{self.user_id}>'} a été refusé.",
+            color=C.RED,
+            timestamp=now()
+        )
+        e.add_field(name="👮 Refusé par", value=i.user.mention, inline=True)
+        e.add_field(name="📝 Raison", value=self.reason.value, inline=False)
+        
+        if member:
+            e.set_thumbnail(url=member.display_avatar.url)
+        
+        v = RellseasQuizMenu(self.u, self.g)
+        await i.response.edit_message(embed=e, view=None)
+        
+        # Log
+        c = await cfg(self.g.id)
+        log_ch = self.g.get_channel(c.get('rellseas_log_channel', 0))
+        if log_ch:
+            await log_ch.send(embed=e)
+        
+        # Notifier le membre
+        if member:
+            try:
+                await member.send(embed=discord.Embed(
+                    title="❌ Candidature refusée",
+                    description=f"Votre candidature Realsy sur **{self.g.name}** a été refusée.\n\n**Raison:** {self.reason.value}",
+                    color=C.RED
+                ))
+            except:
+                pass
+
+
+class RellseasConfigMenu(View):
+    """Menu de configuration Realsy"""
+    def __init__(self, u, g):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        role = self.g.get_role(c.get('rellseas_role', 0))
+        user = self.g.get_member(c.get('rellseas_user', 0))
+        log_ch = self.g.get_channel(c.get('rellseas_log_channel', 0))
+        
+        e = discord.Embed(
+            title="⚙️ Configuration Realsy",
+            color=0x95A5A6
+        )
+        e.add_field(name="🎯 Rôle Realsy", value=role.mention if role else "❌ Non configuré", inline=True)
+        e.add_field(name="👤 Utilisateur autorisé", value=user.mention if user else "❌ Non configuré", inline=True)
+        e.add_field(name="📜 Salon logs", value=log_ch.mention if log_ch else "❌ Non configuré", inline=True)
+        
+        return e
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=0)
+    async def back(self, i, b):
+        v = RellseasMainMenu(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              💡 SUGGESTION COMMAND
