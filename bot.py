@@ -1606,7 +1606,7 @@ async def send_log(g, key, m, msg, reason, extra=None):
         e.set_thumbnail(url=m.display_avatar.url)
         e.set_footer(text=f"Protection {g.name} • ID: {m.id}", icon_url=g.icon.url if g.icon else None)
         
-        await ch.send(embed=e)
+        await webhook_send(ch, 'protection', embed=e)
     except Exception as ex:
         print(f"[LOG ERROR] {key}: {ex}")
 
@@ -1882,12 +1882,12 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
                 async for m in ch.history(limit=200, oldest_first=True):
                     lines.append(f"[{m.created_at.strftime('%H:%M')}] {m.author.name}: {m.content or '[média]'}")
                 f = discord.File(io.BytesIO(("\n".join(lines)).encode()), filename=f"ticket-{ti['id']}.txt")
-                await lch.send(embed=e, file=f)
+                await webhook_send(lch, 'ticket', embed=e, file=f)
                 return
             except: pass
         if hasattr(user, 'display_avatar'):
             e.set_thumbnail(url=user.display_avatar.url)
-        await lch.send(embed=e)
+        await webhook_send(lch, 'ticket', embed=e)
     except: pass
 
 async def create_ticket(i, pid, ans=None):
@@ -1952,7 +1952,7 @@ async def create_ticket(i, pid, ans=None):
                 color=0x3498DB  # Bleu clair
             )
             welcome_emb.set_footer(text=f"Panel: {pnl.get('name', 'Support')}")
-            await ch.send(embed=welcome_emb)
+            await webhook_send(ch, 'ticket', embed=welcome_emb)
         
         await send_ticket_log(i.guild, 'create', i.user, {'id': tid, 'answers': ans or {}, 'panel_id': pid})
         return ch, None
@@ -4624,15 +4624,15 @@ async def send_mod_log(guild, action, mod, target, reason=None, duration=None, e
         if not log_ch:
             return
         
-        colors = {'warn': C.YELLOW, 'unwarn': C.GREEN, 'mute': C.ORANGE, 'unmute': C.GREEN, 'infractions': C.BLUE}
-        emojis = {'warn': '⚠️', 'unwarn': '✅', 'mute': '🔇', 'unmute': '🔊', 'infractions': '📋'}
-        titles = {'warn': 'Avertissement', 'unwarn': 'Warn supprimé', 'mute': 'Mute', 'unmute': 'Unmute', 'infractions': 'Consultation infractions'}
+        colors = {'warn': 0xF39C12, 'unwarn': 0x2ECC71, 'mute': 0xE67E22, 'unmute': 0x2ECC71, 'kick': 0xE74C3C, 'ban': 0xC0392B, 'unban': 0x27AE60, 'infractions': 0x3498DB}
+        emojis = {'warn': '⚠️', 'unwarn': '✅', 'mute': '🔇', 'unmute': '🔊', 'kick': '👢', 'ban': '🔨', 'unban': '🔓', 'infractions': '📋'}
+        titles = {'warn': 'Avertissement', 'unwarn': 'Warn supprimé', 'mute': 'Mute', 'unmute': 'Unmute', 'kick': 'Expulsion', 'ban': 'Bannissement', 'unban': 'Débannissement', 'infractions': 'Consultation infractions'}
         
         e = discord.Embed(
-            title=f"{emojis.get(action, '🔨')} {titles.get(action, action.upper())}",
             color=colors.get(action, C.ORANGE),
             timestamp=now()
         )
+        e.set_author(name=f"{emojis.get(action, '🔨')} {titles.get(action, action.upper())}", icon_url=guild.icon.url if guild.icon else None)
         e.add_field(name="👮 Modérateur", value=f"{mod.mention}\n`{mod.id}`", inline=True)
         e.add_field(name="👤 Membre", value=f"{target.mention}\n`{target.id}`", inline=True)
         
@@ -4644,7 +4644,8 @@ async def send_mod_log(guild, action, mod, target, reason=None, duration=None, e
             e.add_field(name="ℹ️ Info", value=extra, inline=False)
         
         e.set_thumbnail(url=target.display_avatar.url)
-        await log_ch.send(embed=e)
+        e.set_footer(text=f"ID cible: {target.id}")
+        await webhook_send(log_ch, 'mod_log', embed=e)
     except Exception as ex:
         print(f"[MOD LOG ERROR] {ex}")
 
@@ -5794,6 +5795,112 @@ class TradeCooldownModal(Modal, title="⏱️ Cooldown Trade"):
 
 # Cache pour éviter de republier les mêmes posts
 posted_content = {}
+
+# Cache des webhooks par (channel_id, platform) pour éviter de les recréer
+_webhook_cache = {}
+
+# Configuration des webhooks par plateforme / module
+WEBHOOK_PROFILES = {
+    # ─── Réseaux sociaux ───
+    'youtube': {'name': 'YouTube', 'avatar': 'https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png'},
+    'youtube_live': {'name': 'YouTube Live', 'avatar': 'https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png'},
+    'twitch': {'name': 'Twitch', 'avatar': 'https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png'},
+    'twitch_live': {'name': 'Twitch Live', 'avatar': 'https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png'},
+    'tiktok': {'name': 'TikTok', 'avatar': 'https://sf16-website-login.neutral.ttwstatic.com/obj/tiktok_web_login_static/tiktok/webapp/main/webapp-desktop/47624c235266dedd8e4d.png'},
+    'tiktok_live': {'name': 'TikTok Live', 'avatar': 'https://sf16-website-login.neutral.ttwstatic.com/obj/tiktok_web_login_static/tiktok/webapp/main/webapp-desktop/47624c235266dedd8e4d.png'},
+    'twitter': {'name': '𝕏 Twitter', 'avatar': 'https://abs.twimg.com/responsive-web/client-web/icon-ios.77d25eba.png'},
+    'reddit': {'name': 'Reddit', 'avatar': 'https://www.redditstatic.com/desktop2x/img/favicon/android-icon-192x192.png'},
+    'discord_relay': {'name': '📡 Discord Relay', 'avatar': 'https://assets-global.website-files.com/6257adef93867e50d84d30e2/636e0a69f118df70ad7828d4_icon_clyde_blurple_RGB.png'},
+    'rosocial': {'name': 'RoSocial', 'avatar': 'https://tr.rbxcdn.com/38c6edcb50633730ff4cf39ac8859c85/420/420/Hat/Png'},
+    'roblox_ugc': {'name': 'Roblox UGC', 'avatar': 'https://tr.rbxcdn.com/38c6edcb50633730ff4cf39ac8859c85/420/420/Hat/Png'},
+    'deals': {'name': '🏷️ Bons Plans', 'avatar': 'https://store.steampowered.com/favicon.ico'},
+    # ─── Modération & Sécurité ───
+    'mod_log': {'name': '🔨 Modération', 'avatar': None},
+    'protection': {'name': '🛡️ Protection', 'avatar': None},
+    'raid_alert': {'name': '🚨 Anti-Raid', 'avatar': None},
+    # ─── Communauté ───
+    'welcome': {'name': '👋 Bienvenue', 'avatar': None},
+    'announcement': {'name': '📢 Annonces', 'avatar': None},
+    'auto_message': {'name': '💬 Auto-Message', 'avatar': None},
+    'giveaway': {'name': '🎁 Giveaway', 'avatar': None},
+    'suggestion': {'name': '💡 Suggestions', 'avatar': None},
+    'trade': {'name': '🔄 Échanges', 'avatar': None},
+    'level_up': {'name': '⭐ Niveau', 'avatar': None},
+    'ticket': {'name': '🎫 Tickets', 'avatar': None},
+    'realsy': {'name': '🎭 Activité', 'avatar': None},
+    'auto_help': {'name': '❓ Aide Auto', 'avatar': None},
+}
+
+async def get_webhook(channel, platform: str):
+    """Récupère ou crée un webhook pour une plateforme dans un salon"""
+    cache_key = (channel.id, platform)
+    
+    if cache_key in _webhook_cache:
+        return _webhook_cache[cache_key]
+    
+    wh_name = f"Bot-{platform}"
+    
+    try:
+        webhooks = await channel.webhooks()
+        for wh in webhooks:
+            if wh.name == wh_name and wh.user and wh.user.id == channel.guild.me.id:
+                _webhook_cache[cache_key] = wh
+                return wh
+        
+        # Avatar personnalisé du bot pour les modules serveur
+        wh = await channel.create_webhook(name=wh_name, reason=f"Notifications {platform}")
+        _webhook_cache[cache_key] = wh
+        return wh
+    except discord.Forbidden:
+        return None
+    except Exception as ex:
+        print(f"Erreur webhook {platform} dans #{channel.name}: {ex}")
+        return None
+
+async def webhook_send(channel, platform: str, embed=None, content=None, file=None, files=None, embeds=None):
+    """Envoie un message via webhook avec le profil de la plateforme.
+    Supporte: content, embed, embeds, file, files
+    Fallback automatique sur channel.send si webhook impossible."""
+    
+    def _build_kwargs(include_profile=True):
+        kw = {}
+        if content is not None: kw['content'] = content
+        if embed: kw['embed'] = embed
+        if embeds: kw['embeds'] = embeds
+        if file: kw['file'] = file
+        if files: kw['files'] = files
+        if include_profile:
+            profile = WEBHOOK_PROFILES.get(platform, {'name': '📢 Notifications', 'avatar': None})
+            kw['username'] = profile['name']
+            # Avatar : profil plateforme > icône du serveur > None
+            avatar = profile.get('avatar')
+            if not avatar and hasattr(channel, 'guild') and channel.guild.icon:
+                avatar = channel.guild.icon.url
+            kw['avatar_url'] = avatar
+            kw['wait'] = True
+        return kw
+    
+    wh = await get_webhook(channel, platform)
+    if not wh:
+        return await channel.send(**_build_kwargs(False)) if _build_kwargs(False) else None
+    
+    try:
+        return await wh.send(**_build_kwargs(True))
+    except (discord.NotFound, discord.InvalidData):
+        cache_key = (channel.id, platform)
+        _webhook_cache.pop(cache_key, None)
+        try:
+            wh = await channel.create_webhook(name=f"Bot-{platform}", reason=f"Recréation webhook {platform}")
+            _webhook_cache[cache_key] = wh
+            return await wh.send(**_build_kwargs(True))
+        except:
+            return await channel.send(**_build_kwargs(False)) if _build_kwargs(False) else None
+    except Exception as ex:
+        print(f"Erreur webhook {platform}: {ex}")
+        try:
+            return await channel.send(**_build_kwargs(False)) if _build_kwargs(False) else None
+        except:
+            return None
 
 class AdsPanel(View):
     def __init__(self, u, g):
@@ -7615,30 +7722,21 @@ class AnnouncementChannelSelectPaginated(Select):
         
         # Créer l'embed d'annonce
         e = discord.Embed(color=self.data['color'])
+        e.set_author(name=f"📢 {self.g.name}", icon_url=self.g.icon.url if self.g.icon else None)
         
-        # Titre stylisé
         e.title = self.data['title']
+        e.description = self.data['description']
         
-        # Description formatée
-        e.description = (
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"{self.data['description']}\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        )
-        
-        # Image
         if self.data['image_url']:
             e.set_image(url=self.data['image_url'])
         
-        # Footer
-        e.set_footer(text=f"📢 Annonce de {self.g.name}")
+        e.set_footer(text="Annonce officielle", icon_url=self.g.icon.url if self.g.icon else None)
         e.timestamp = now()
         
-        # Mention éventuelle
         mention_text = self.data.get('mention', '')
         
         try:
-            await channel.send(content=mention_text if mention_text else None, embed=e)
+            await webhook_send(channel, 'announcement', content=mention_text if mention_text else None, embed=e)
             await i.response.edit_message(content=f"✅ **Annonce envoyée** dans {channel.mention}!", view=None)
         except discord.Forbidden:
             await i.response.edit_message(content="❌ Je n'ai pas la permission d'envoyer dans ce salon", view=None)
@@ -7668,23 +7766,15 @@ class AnnouncementChannelSelect(Select):
         
         # Créer l'embed d'annonce
         e = discord.Embed(color=self.data['color'])
+        e.set_author(name=f"📢 {self.g.name}", icon_url=self.g.icon.url if self.g.icon else None)
         
-        # Titre stylisé
         e.title = self.data['title']
+        e.description = self.data['description']
         
-        # Description formatée
-        e.description = (
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"{self.data['description']}\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        )
-        
-        # Image
         if self.data['image_url']:
             e.set_image(url=self.data['image_url'])
         
-        # Footer
-        e.set_footer(text=f"📢 Annonce par {self.u.display_name}", icon_url=self.u.display_avatar.url if self.u.display_avatar else None)
+        e.set_footer(text=f"Par {self.u.display_name}", icon_url=self.u.display_avatar.url if self.u.display_avatar else None)
         e.timestamp = now()
         
         # Préparer le contenu de mention
@@ -7701,7 +7791,7 @@ class AnnouncementChannelSelect(Select):
         
         # Envoyer l'annonce
         try:
-            await channel.send(content=content, embed=e)
+            await webhook_send(channel, 'announcement', content=content, embed=e)
             await i.response.edit_message(content=f"✅ **Annonce envoyée** dans {channel.mention} !", view=None)
         except Exception as ex:
             await i.response.edit_message(content=f"❌ Erreur: {ex}", view=None)
@@ -10451,10 +10541,11 @@ class AutoHelpConfigModal(Modal, title="💡 Configurer l'aide automatique"):
             # Envoyer le premier message d'aide
             channel = self.g.get_channel(int(self.channel_id))
             if channel:
-                e = discord.Embed(title=f"💡 {self.help_title.value}", color=color)
+                e = discord.Embed(color=color)
+                e.set_author(name=f"💡 {self.help_title.value}", icon_url=self.g.icon.url if self.g.icon else None)
                 e.description = self.help_content.value
                 e.set_footer(text="Ce message se repositionne automatiquement")
-                msg = await channel.send(embed=e)
+                msg = await webhook_send(channel, 'auto_help', embed=e)
                 auto_help_messages[int(self.channel_id)] = msg.id
             
             v = AutoHelpPanel(self.u, self.g)
@@ -10603,14 +10694,14 @@ async def handle_auto_help(message):
         # ═══════════════ ENVOI DU NOUVEAU MESSAGE D'AIDE ═══════════════
         
         e = discord.Embed(
-            title=f"💡 {help_data.get('title', 'Aide')}", 
             color=help_data.get('color', 0x3498DB)
         )
+        e.set_author(name=f"💡 {help_data.get('title', 'Aide')}", icon_url=message.guild.icon.url if message.guild.icon else None)
         e.description = help_data.get('content', '')
         e.set_footer(text="Ce message se repositionne automatiquement")
         
         try:
-            new_msg = await message.channel.send(embed=e)
+            new_msg = await webhook_send(message.channel, 'auto_help', embed=e)
             auto_help_messages[channel_id] = new_msg.id
         except Exception as ex:
             print(f"[AUTO_HELP] Erreur envoi nouveau message: {ex}")
@@ -10887,7 +10978,12 @@ async def end_giveaway(guild, giveaway_id):
             try:
                 msg = await channel.fetch_message(message_id)
                 await msg.edit(embed=e, view=None)
-                await channel.send(f"🎉 **{winner.mention if winner else f'<@{winner_id}>'}** a gagné **{title}** !")
+                win_e = discord.Embed(color=0xF1C40F)
+                win_e.set_author(name="🎁 Giveaway terminé !", icon_url=channel.guild.icon.url if channel.guild.icon else None)
+                win_e.description = f"🎉 **{winner.mention if winner else f'<@{winner_id}>'}** a remporté **{title}** !\n\nFélicitations ! 🏆"
+                win_e.set_footer(text="Merci à tous les participants !")
+                win_e.timestamp = now()
+                await webhook_send(channel, 'giveaway', embed=win_e)
             except:
                 pass
         
@@ -11859,7 +11955,7 @@ class AfkActionsView(View):
             e.add_field(name="✅ Succès", value=str(success), inline=True)
             e.add_field(name="❌ Échecs", value=str(failed), inline=True)
             e.set_footer(text=f"Action par {i.user.display_name}")
-            await notif_ch.send(embed=e)
+            await webhook_send(notif_ch, 'realsy', embed=e)
         
         await i.followup.send(f"✅ Rôle retiré à **{success}** membre(s)!\n❌ Échecs: **{failed}**", ephemeral=True)
         
@@ -11916,8 +12012,8 @@ class AfkActionsView(View):
         e.set_footer(text=f"Action par {i.user.display_name} • {len(self.afk_members)} membre(s) concerné(s)")
         
         # Envoyer avec mention
-        mention_content = " ".join(mentions[:50])  # Max 50 mentions directes
-        await notif_ch.send(content=mention_content, embed=e)
+        mention_content = " ".join(mentions[:50])
+        await webhook_send(notif_ch, 'realsy', content=mention_content, embed=e)
         
         await i.followup.send(f"✅ Message envoyé dans {notif_ch.mention} avec **{len(self.afk_members)}** mention(s)!", ephemeral=True)
     
@@ -17274,7 +17370,7 @@ async def check_youtube_feeds(session, guild, data):
                                 e.set_footer(text=f"YouTube Live • {channel_name}", icon_url="https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png")
                                 e.timestamp = now()
                                 
-                                await live_channel.send(embed=e)
+                                await webhook_send(live_channel, 'youtube_live', embed=e)
                             
                             elif not is_live and was_live:
                                 posted_content[live_cache_key] = False
@@ -17333,7 +17429,7 @@ async def check_youtube_feeds(session, guild, data):
             e.set_footer(text=f"YouTube • {channel_name}", icon_url="https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png")
             e.timestamp = now()
             
-            await target_channel.send(embed=e)
+            await webhook_send(target_channel, 'youtube', embed=e)
             await asyncio.sleep(1)
             
         except Exception as ex:
@@ -17394,7 +17490,7 @@ async def check_twitch_feeds(session, guild, data):
                 e.set_footer(text=f"Twitch • {username}", icon_url="https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png")
                 e.timestamp = now()
                 
-                await notif_channel.send(embed=e)
+                await webhook_send(notif_channel, 'twitch_live', embed=e)
                 
             elif not is_live and was_live:
                 posted_content[cache_key] = False
@@ -17458,7 +17554,7 @@ async def check_tiktok_feeds(session, guild, data):
                                 e.set_footer(text=f"TikTok Live • @{username}", icon_url="https://www.tiktok.com/favicon.ico")
                                 e.timestamp = now()
                                 
-                                await live_channel.send(embed=e)
+                                await webhook_send(live_channel, 'tiktok_live', embed=e)
                             
                             elif not is_live and was_live:
                                 posted_content[live_cache_key] = False
@@ -17519,7 +17615,7 @@ async def check_tiktok_feeds(session, guild, data):
                 e.set_footer(text=f"TikTok • @{username}", icon_url="https://www.tiktok.com/favicon.ico")
                 e.timestamp = now()
                 
-                await target_channel.send(embed=e)
+                await webhook_send(target_channel, 'tiktok', embed=e)
                 await asyncio.sleep(2)
                 
             except Exception as ex:
@@ -17615,7 +17711,7 @@ async def check_reddit_feeds(session, guild, data):
             )
             e.timestamp = now()
             
-            await channel.send(embed=e)
+            await webhook_send(channel, 'reddit', embed=e)
             await asyncio.sleep(1)
             
         except Exception as ex:
@@ -17714,7 +17810,7 @@ async def check_twitter_feeds(session, guild, data):
             )
             e.timestamp = now()
             
-            await channel.send(embed=e)
+            await webhook_send(channel, 'twitter', embed=e)
             await asyncio.sleep(1)
             
         except Exception as ex:
@@ -17838,7 +17934,7 @@ async def check_rosocial_feeds(session, guild, data):
             )
             e.timestamp = now()
             
-            await channel.send(embed=e)
+            await webhook_send(channel, 'rosocial', embed=e)
             await asyncio.sleep(1)
             
         except Exception as ex:
@@ -17999,7 +18095,7 @@ async def check_roblox_ugc_feeds(session, guild, data):
                 )
                 e.timestamp = now()
                 
-                await channel.send(embed=e)
+                await webhook_send(channel, 'roblox_ugc', embed=e)
                 await asyncio.sleep(2)
                 
         except Exception as ex:
@@ -18340,8 +18436,8 @@ async def check_game_deals(session, guild, data):
                             final_price=final_price, discount=discount
                         )
                         
-                        msg = await channel.send(embed=e)
-                        await save_posted_deal(guild.id, 'steam', game_id, game_name, msg.id, channel.id, discount, original_price, final_price, game_url, image_url)
+                        msg = await webhook_send(channel, 'deals', embed=e)
+                        await save_posted_deal(guild.id, 'steam', game_id, game_name, msg.id if msg else 0, channel.id, discount, original_price, final_price, game_url, image_url)
                         deals_posted += 1
                         print(f"[DEALS] ✅ Nouveau: {game_name} (-{discount}%) Steam")
                         await asyncio.sleep(2)
@@ -18415,8 +18511,8 @@ async def check_game_deals(session, guild, data):
                             final_price=final_price, discount=discount
                         )
                         
-                        msg = await channel.send(embed=e)
-                        await save_posted_deal(guild.id, 'epic', slug, game_name, msg.id, channel.id, discount, original_price, final_price, game_url, image_url)
+                        msg = await webhook_send(channel, 'deals', embed=e)
+                        await save_posted_deal(guild.id, 'epic', slug, game_name, msg.id if msg else 0, channel.id, discount, original_price, final_price, game_url, image_url)
                         deals_posted += 1
                         print(f"[DEALS] ✅ Nouveau: {game_name} (-{discount}%) Epic Games")
                         await asyncio.sleep(2)
@@ -18478,8 +18574,8 @@ async def check_game_deals(session, guild, data):
                             final_price=final_price, discount=discount
                         )
                         
-                        msg = await channel.send(embed=e)
-                        await save_posted_deal(guild.id, 'gog', slug, game_name, msg.id, channel.id, discount, original_price, final_price, game_url, image_url)
+                        msg = await webhook_send(channel, 'deals', embed=e)
+                        await save_posted_deal(guild.id, 'gog', slug, game_name, msg.id if msg else 0, channel.id, discount, original_price, final_price, game_url, image_url)
                         deals_posted += 1
                         print(f"[DEALS] ✅ Nouveau: {game_name} (-{discount}%) GOG")
                         await asyncio.sleep(2)
@@ -19109,7 +19205,12 @@ async def check_giveaways():
                         try:
                             msg = await channel.fetch_message(message_id)
                             await msg.edit(embed=e, view=None)
-                            await channel.send(f"🎉 **{winner.mention if winner else f'<@{winner_id}>'}** a gagné **{title}** !")
+                            win_e = discord.Embed(color=0xF1C40F)
+                            win_e.set_author(name="🎁 Giveaway terminé !", icon_url=guild.icon.url if guild.icon else None)
+                            win_e.description = f"🎉 **{winner.mention if winner else f'<@{winner_id}>'}** a remporté **{title}** !\n\nFélicitations ! 🏆"
+                            win_e.set_footer(text="Merci à tous les participants !")
+                            win_e.timestamp = now()
+                            await webhook_send(channel, 'giveaway', embed=win_e)
                         except:
                             pass
                     
