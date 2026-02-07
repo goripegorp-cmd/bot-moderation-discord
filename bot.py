@@ -5807,20 +5807,30 @@ posted_content = {}
 _webhook_cache = {}
 
 # Configuration des webhooks par plateforme / module
+# Avatars : URLs Wikimedia Commons (stables, permanentes) ou CDN officiels
+_YT_ICON = 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/72/YouTube_social_white_square_%282017%29.svg/240px-YouTube_social_white_square_%282017%29.svg.png'
+_TW_ICON = 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/d3/Twitch_Glitch_Logo_Purple.svg/240px-Twitch_Glitch_Logo_Purple.svg.png'
+_TK_ICON = 'https://upload.wikimedia.org/wikipedia/en/thumb/a/a9/TikTok_logo.svg/240px-TikTok_logo.svg.png'
+_X_ICON = 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/ce/X_logo_2023.svg/240px-X_logo_2023.svg.png'
+_RD_ICON = 'https://www.redditstatic.com/desktop2x/img/favicon/android-icon-192x192.png'
+_DC_ICON = 'https://upload.wikimedia.org/wikipedia/fr/thumb/4/4f/Discord_Logo_sans_texte.svg/240px-Discord_Logo_sans_texte.svg.png'
+_RBX_ICON = 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/bb/Roblox_logo_2022.svg/240px-Roblox_logo_2022.svg.png'
+_STM_ICON = 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/Steam_icon_logo.svg/240px-Steam_icon_logo.svg.png'
+
 WEBHOOK_PROFILES = {
     # ─── Réseaux sociaux ───
-    'youtube': {'name': 'YouTube', 'avatar': 'https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png'},
-    'youtube_live': {'name': 'YouTube Live', 'avatar': 'https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png'},
-    'twitch': {'name': 'Twitch', 'avatar': 'https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png'},
-    'twitch_live': {'name': 'Twitch Live', 'avatar': 'https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png'},
-    'tiktok': {'name': 'TikTok', 'avatar': 'https://sf16-website-login.neutral.ttwstatic.com/obj/tiktok_web_login_static/tiktok/webapp/main/webapp-desktop/47624c235266dedd8e4d.png'},
-    'tiktok_live': {'name': 'TikTok Live', 'avatar': 'https://sf16-website-login.neutral.ttwstatic.com/obj/tiktok_web_login_static/tiktok/webapp/main/webapp-desktop/47624c235266dedd8e4d.png'},
-    'twitter': {'name': '𝕏 Twitter', 'avatar': 'https://abs.twimg.com/responsive-web/client-web/icon-ios.77d25eba.png'},
-    'reddit': {'name': 'Reddit', 'avatar': 'https://www.redditstatic.com/desktop2x/img/favicon/android-icon-192x192.png'},
-    'discord_relay': {'name': '📡 Discord Relay', 'avatar': 'https://assets-global.website-files.com/6257adef93867e50d84d30e2/636e0a69f118df70ad7828d4_icon_clyde_blurple_RGB.png'},
-    'rosocial': {'name': 'RoSocial', 'avatar': 'https://tr.rbxcdn.com/38c6edcb50633730ff4cf39ac8859c85/420/420/Hat/Png'},
-    'roblox_ugc': {'name': 'Roblox UGC', 'avatar': 'https://tr.rbxcdn.com/38c6edcb50633730ff4cf39ac8859c85/420/420/Hat/Png'},
-    'deals': {'name': '🏷️ Bons Plans', 'avatar': 'https://store.steampowered.com/favicon.ico'},
+    'youtube': {'name': 'YouTube', 'avatar': _YT_ICON},
+    'youtube_live': {'name': '🔴 YouTube Live', 'avatar': _YT_ICON},
+    'twitch': {'name': 'Twitch', 'avatar': _TW_ICON},
+    'twitch_live': {'name': '🔴 Twitch Live', 'avatar': _TW_ICON},
+    'tiktok': {'name': 'TikTok', 'avatar': _TK_ICON},
+    'tiktok_live': {'name': '🔴 TikTok Live', 'avatar': _TK_ICON},
+    'twitter': {'name': '𝕏', 'avatar': _X_ICON},
+    'reddit': {'name': 'Reddit', 'avatar': _RD_ICON},
+    'discord_relay': {'name': 'Discord Relay', 'avatar': _DC_ICON},
+    'rosocial': {'name': 'RoSocial', 'avatar': _RBX_ICON},
+    'roblox_ugc': {'name': 'Roblox UGC', 'avatar': _RBX_ICON},
+    'deals': {'name': 'Bons Plans', 'avatar': _STM_ICON},
     # ─── Modération & Sécurité ───
     'mod_log': {'name': '🔨 Modération', 'avatar': None},
     'protection': {'name': '🛡️ Protection', 'avatar': None},
@@ -6035,7 +6045,7 @@ class AdsYouTubePanel(View):
     async def embed(self):
         c = await cfg(self.g.id)
         e = discord.Embed(color=0xFF0000)
-        e.set_author(name="━━━  YouTube  ━━━", icon_url="https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png")
+        e.set_author(name="━━━  YouTube  ━━━", icon_url=_YT_ICON)
         
         yt_ch = self.g.get_channel(c.get('ads_youtube_channel', 0))
         yt_live_ch = self.g.get_channel(c.get('ads_youtube_live_channel', 0))
@@ -6167,7 +6177,7 @@ class AdsTwitchPanel(View):
     async def embed(self):
         c = await cfg(self.g.id)
         e = discord.Embed(color=0x9146FF)
-        e.set_author(name="━━━  Twitch  ━━━", icon_url="https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png")
+        e.set_author(name="━━━  Twitch  ━━━", icon_url=_TW_ICON)
         
         tw_ch = self.g.get_channel(c.get('ads_twitch_channel', 0))
         tw_live_ch = self.g.get_channel(c.get('ads_twitch_live_channel', 0))
@@ -6306,7 +6316,7 @@ class AdsTikTokPanel(View):
     async def embed(self):
         c = await cfg(self.g.id)
         e = discord.Embed(color=0x010101)
-        e.set_author(name="━━━  TikTok  ━━━", icon_url="https://www.tiktok.com/favicon.ico")
+        e.set_author(name="━━━  TikTok  ━━━", icon_url=_TK_ICON)
         
         tk_ch = self.g.get_channel(c.get('ads_tiktok_channel', 0))
         tk_live_ch = self.g.get_channel(c.get('ads_tiktok_live_channel', 0))
@@ -17434,11 +17444,11 @@ async def check_youtube_feeds(session, guild, data):
                                 
                                 live_url = f"https://www.youtube.com/channel/{channel_id}/live"
                                 e = discord.Embed(color=0xFF0000, url=live_url)
-                                e.set_author(name=f"🔴 EN DIRECT SUR YOUTUBE", url=live_url, icon_url="https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png")
+                                e.set_author(name=f"🔴 EN DIRECT SUR YOUTUBE", url=live_url, icon_url=_YT_ICON)
                                 e.title = f"{channel_name} est en LIVE !"
                                 e.description = f"**{channel_name}** vient de lancer un stream en direct !\n\n▶️ [**Rejoindre le live**]({live_url})"
                                 e.set_image(url=f"https://img.youtube.com/vi/live_user_{channel_id}/maxresdefault.jpg?t={int(now().timestamp())}")
-                                e.set_footer(text=f"YouTube Live • {channel_name}", icon_url="https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png")
+                                e.set_footer(text=f"YouTube Live • {channel_name}", icon_url=_YT_ICON)
                                 e.timestamp = now()
                                 
                                 await webhook_send(live_channel, 'youtube_live', embed=e)
@@ -17475,7 +17485,27 @@ async def check_youtube_feeds(session, guild, data):
             if media_group is not None:
                 desc_elem = media_group.find('media:description', ns)
                 if desc_elem is not None and desc_elem.text:
-                    description = desc_elem.text[:200] + "..." if len(desc_elem.text) > 200 else desc_elem.text
+                    # Nettoyer la description : garder seulement la première ligne utile
+                    raw = desc_elem.text.strip()
+                    clean_lines = []
+                    for line in raw.split('\n'):
+                        line = line.strip()
+                        if not line:
+                            break  # Arrêter au premier saut de ligne vide
+                        # Ignorer les lignes CTA/promo
+                        skip_words = ['abonne', 'subscribe', 'like', 'commentes', 'rejoins', '🔔', '❤️', '👍', '💬', '🔥',
+                                      'follow', 'lâche', 'prend juste', 'clique', 'activer', 'merci de']
+                        if any(sw in line.lower() for sw in skip_words):
+                            continue
+                        # Ignorer les lignes qui sont principalement des emojis/symboles
+                        if len(line) < 5 or line.startswith('─') or line.startswith('━') or line.startswith('╌'):
+                            continue
+                        clean_lines.append(line)
+                        if len('\n'.join(clean_lines)) >= 150:
+                            break
+                    description = '\n'.join(clean_lines)[:150]
+                    if len(description) < len('\n'.join(clean_lines)):
+                        description += "..."
             
             if video_id_elem is None or title_elem is None:
                 continue
@@ -17489,16 +17519,19 @@ async def check_youtube_feeds(session, guild, data):
             
             posted_content[cache_key] = video_id
             
-            e = discord.Embed(color=0xFF0000, url=f"https://www.youtube.com/watch?v={video_id}")
-            e.set_author(name=f"YOUTUBE • {channel_name}", url=f"https://www.youtube.com/channel/{channel_id}", icon_url="https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png")
+            video_url = f"https://www.youtube.com/watch?v={video_id}"
+            e = discord.Embed(color=0xFF0000, url=video_url)
+            e.set_author(name=f"YOUTUBE • {channel_name}", url=f"https://www.youtube.com/channel/{channel_id}", icon_url=_YT_ICON)
             e.title = f"▶️ {title}"
-            desc_parts = []
-            if description:
-                desc_parts.append(f"*{description}*\n")
-            desc_parts.append(f"🔗 [**Regarder sur YouTube**](https://www.youtube.com/watch?v={video_id})")
-            e.description = "\n".join(desc_parts)
+            
+            # Description propre : seulement si non-vide après nettoyage
+            if description and len(description.strip()) > 10:
+                e.description = f"*{description}*\n\n🔗 [**Regarder sur YouTube**]({video_url})"
+            else:
+                e.description = f"🔗 [**Regarder sur YouTube**]({video_url})"
+            
             e.set_image(url=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg")
-            e.set_footer(text=f"YouTube • {channel_name}", icon_url="https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png")
+            e.set_footer(text=f"YouTube • {channel_name}", icon_url=_YT_ICON)
             e.timestamp = now()
             
             await webhook_send(target_channel, 'youtube', embed=e)
@@ -17554,11 +17587,11 @@ async def check_twitch_feeds(session, guild, data):
                 
                 stream_url = f"https://www.twitch.tv/{username}"
                 e = discord.Embed(color=0x9146FF, url=stream_url)
-                e.set_author(name=f"🔴 EN DIRECT SUR TWITCH", url=stream_url, icon_url="https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png")
+                e.set_author(name=f"🔴 EN DIRECT SUR TWITCH", url=stream_url, icon_url=_TW_ICON)
                 e.title = f"{username} est en live !"
                 e.description = f"**{username}** vient de lancer un stream !\n\n▶️ [**Rejoindre le stream**]({stream_url})"
                 e.set_image(url=f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{username.lower()}-1280x720.jpg?t={int(now().timestamp())}")
-                e.set_footer(text=f"Twitch • {username}", icon_url="https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png")
+                e.set_footer(text=f"Twitch • {username}", icon_url=_TW_ICON)
                 e.timestamp = now()
                 
                 await webhook_send(notif_channel, 'twitch_live', embed=e)
@@ -17618,10 +17651,10 @@ async def check_tiktok_feeds(session, guild, data):
                                 
                                 tiktok_live_url = f"https://www.tiktok.com/@{username}/live"
                                 e = discord.Embed(color=0xFE2C55, url=tiktok_live_url)
-                                e.set_author(name=f"🔴 EN DIRECT SUR TIKTOK", url=tiktok_live_url, icon_url="https://www.tiktok.com/favicon.ico")
+                                e.set_author(name=f"🔴 EN DIRECT SUR TIKTOK", url=tiktok_live_url, icon_url=_TK_ICON)
                                 e.title = f"@{username} est en LIVE !"
                                 e.description = f"**@{username}** est en direct sur TikTok !\n\n🎵 [**Rejoindre le live**]({tiktok_live_url})"
-                                e.set_footer(text=f"TikTok Live • @{username}", icon_url="https://www.tiktok.com/favicon.ico")
+                                e.set_footer(text=f"TikTok Live • @{username}", icon_url=_TK_ICON)
                                 e.timestamp = now()
                                 
                                 await webhook_send(live_channel, 'tiktok_live', embed=e)
@@ -17663,14 +17696,33 @@ async def check_tiktok_feeds(session, guild, data):
                 
                 posted_content[cache_key] = latest_video_id
                 
-                # Extraire le titre si possible
-                title_match = re.search(r'"desc":"([^"]{0,200})"', html)
-                video_title = title_match.group(1) if title_match else f"Nouvelle vidéo de @{username}"
+                # Extraire le titre de la vidéo (pas la bio du profil)
+                # Chercher le "desc" qui apparaît APRÈS l'ID vidéo dans le HTML
+                video_title = f"Nouvelle vidéo de @{username}"
+                
+                # Méthode 1 : chercher dans le bloc JSON contenant l'ID vidéo
+                vid_pos = html.find(latest_video_id)
+                if vid_pos > 0:
+                    # Chercher "desc" dans la zone autour de l'ID vidéo (±2000 chars)
+                    search_start = max(0, vid_pos - 500)
+                    search_end = min(len(html), vid_pos + 2000)
+                    local_html = html[search_start:search_end]
+                    local_match = re.search(r'"desc"\s*:\s*"([^"]{1,200})"', local_html)
+                    if local_match and len(local_match.group(1).strip()) > 3:
+                        video_title = local_match.group(1).strip()
+                
+                # Méthode 2 : fallback — chercher tous les "desc" et prendre le plus long (pas la bio)
+                if video_title == f"Nouvelle vidéo de @{username}":
+                    all_descs = re.findall(r'"desc"\s*:\s*"([^"]{5,300})"', html)
+                    # Filtrer les bios courtes type "13.6k abonnés"  
+                    valid_descs = [d for d in all_descs if not any(kw in d.lower() for kw in ['abonné', 'follower', 'following', 'j\'aime', 'likes'])]
+                    if valid_descs:
+                        video_title = valid_descs[0][:200]
                 
                 video_url = f"https://www.tiktok.com/@{username}/video/{latest_video_id}"
                 
                 e = discord.Embed(color=0xFE2C55, url=video_url)
-                e.set_author(name=f"TIKTOK • @{username}", url=f"https://www.tiktok.com/@{username}", icon_url="https://www.tiktok.com/favicon.ico")
+                e.set_author(name=f"TIKTOK • @{username}", url=f"https://www.tiktok.com/@{username}", icon_url=_TK_ICON)
                 e.title = f"🎵 {video_title[:200]}"
                 e.description = f"**@{username}** a publié une nouvelle vidéo !\n\n▶️ [**Voir la vidéo**]({video_url})"
                 
@@ -17680,7 +17732,7 @@ async def check_tiktok_feeds(session, guild, data):
                     thumb_url = thumb_match.group(1).replace('\\u002F', '/')
                     e.set_image(url=thumb_url)
                 
-                e.set_footer(text=f"TikTok • @{username}", icon_url="https://www.tiktok.com/favicon.ico")
+                e.set_footer(text=f"TikTok • @{username}", icon_url=_TK_ICON)
                 e.timestamp = now()
                 
                 await webhook_send(target_channel, 'tiktok', embed=e)
@@ -17758,7 +17810,7 @@ async def check_reddit_feeds(session, guild, data):
             e.set_author(
                 name=f"🟠 REDDIT • r/{subreddit}",
                 url=f"https://www.reddit.com/r/{subreddit}",
-                icon_url="https://www.redditstatic.com/desktop2x/img/favicon/android-icon-192x192.png"
+                icon_url=_RD_ICON
             )
             
             e.add_field(name="👤 Auteur", value=f"u/{author}", inline=True)
@@ -17775,7 +17827,7 @@ async def check_reddit_feeds(session, guild, data):
             
             e.set_footer(
                 text=f"Reddit • r/{subreddit}",
-                icon_url="https://www.redditstatic.com/desktop2x/img/favicon/android-icon-192x192.png"
+                icon_url=_RD_ICON
             )
             e.timestamp = now()
             
@@ -17857,7 +17909,7 @@ async def check_twitter_feeds(session, guild, data):
             e.set_author(
                 name=f"🐦 TWITTER/X • @{username}",
                 url=f"https://twitter.com/{username}",
-                icon_url="https://abs.twimg.com/responsive-web/client-web/icon-ios.77d25eba.png"
+                icon_url=_X_ICON
             )
             
             if image_url:
@@ -17874,7 +17926,7 @@ async def check_twitter_feeds(session, guild, data):
             
             e.set_footer(
                 text=f"Twitter/X • @{username}",
-                icon_url="https://abs.twimg.com/responsive-web/client-web/icon-ios.77d25eba.png"
+                icon_url=_X_ICON
             )
             e.timestamp = now()
             
@@ -17998,7 +18050,7 @@ async def check_rosocial_feeds(session, guild, data):
             # Footer
             e.set_footer(
                 text=f"RoSocial • {username}",
-                icon_url="https://rosocial.net/themes/flavor/flavor-developer/img/logo.png"
+                icon_url=_RBX_ICON
             )
             e.timestamp = now()
             
@@ -18159,7 +18211,7 @@ async def check_roblox_ugc_feeds(session, guild, data):
                 footer_text = f"Roblox UGC • {creator_emoji} {creator_name}"
                 e.set_footer(
                     text=footer_text,
-                    icon_url="https://images.rbxcdn.com/0785a14c892a503ab498b8f4100d4340.png"
+                    icon_url=_RBX_ICON
                 )
                 e.timestamp = now()
                 
