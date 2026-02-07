@@ -2851,85 +2851,68 @@ class MainPanel(View):
         e.set_author(name="━━━  Panneau de Configuration  ━━━", icon_url=self.g.icon.url if self.g.icon else None)
         
         desc = f"**{self.g.name}**\n"
-        desc += f"👥 `{self.g.member_count}` membres  •  📺 `{len(self.g.channels)}` salons  •  🎭 `{len(self.g.roles)}` rôles\n"
-        desc += f"\n─────────────────────────────────\n"
-        desc += f"🛡️ **Sécurité**  ─  Protection, Modération, Immunités\n"
-        desc += f"🎫 **Communauté**  ─  Tickets, Suggestions, Niveaux\n"
-        desc += f"📢 **Contenu**  ─  Publicité, Stats, Centre d'aide\n"
-        desc += f"🔧 **Outils**  ─  Salons, Vocaux, Commandes\n"
-        desc += f"─────────────────────────────────\n"
-        desc += f"*Sélectionnez une catégorie ci-dessous*"
+        desc += f"👥 `{self.g.member_count}` membres  •  📺 `{len(self.g.channels)}` salons  •  🎭 `{len(self.g.roles)}` rôles\n\n"
+        desc += "╔══════════════════════════════════╗\n"
+        desc += "║  🛡️  **Sécurité & Modération**       ║\n"
+        desc += "║  Protection, Modération, Immunités    ║\n"
+        desc += "╠══════════════════════════════════╣\n"
+        desc += "║  🎫  **Communauté & Interactions**  ║\n"
+        desc += "║  Tickets, Niveaux, Commandes          ║\n"
+        desc += "╠══════════════════════════════════╣\n"
+        desc += "║  📢  **Contenu & Publicité**              ║\n"
+        desc += "║  Feeds sociaux, Stats, Aide auto         ║\n"
+        desc += "╠══════════════════════════════════╣\n"
+        desc += "║  🔧  **Outils & Configuration**        ║\n"
+        desc += "║  Salons, Vocaux, Config avancée        ║\n"
+        desc += "╚══════════════════════════════════╝\n"
+        desc += "\n*▼ Sélectionnez un module ci-dessous*"
         e.description = desc
         
         if self.g.icon:
             e.set_thumbnail(url=self.g.icon.url)
-        if self.g.banner:
-            e.set_image(url=self.g.banner.url)
         
         e.set_footer(text=f"Configuré par {self.u.display_name}  •  Timeout: 10 min", icon_url=self.u.display_avatar.url)
         return e
     
-    @discord.ui.button(label="Protection", emoji="🛡️", style=discord.ButtonStyle.primary, row=0)
-    async def prot(self, i, b):
-        v = ProtPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+    @discord.ui.select(
+        placeholder="📂 Choisir un module à configurer...",
+        options=[
+            discord.SelectOption(label="Protection", value="prot", emoji="🛡️", description="Anti-spam, anti-raid, filtres"),
+            discord.SelectOption(label="Modération", value="mod", emoji="🔨", description="Warn, mute, rôles modérateurs"),
+            discord.SelectOption(label="Immunités", value="immune", emoji="👑", description="Rôles et utilisateurs immunisés"),
+            discord.SelectOption(label="Commandes", value="cmds", emoji="⚡", description="Suggestions, trade, commandes"),
+            discord.SelectOption(label="Config Salon", value="chan", emoji="📺", description="Configuration par salon"),
+            discord.SelectOption(label="Tickets", value="tickets", emoji="🎫", description="Système de tickets complet"),
+            discord.SelectOption(label="Publicité", value="ads", emoji="📢", description="YouTube, Twitch, TikTok, etc."),
+            discord.SelectOption(label="Statistiques", value="stats", emoji="📊", description="Stats membres et serveur"),
+            discord.SelectOption(label="Centre", value="centre", emoji="🎯", description="Annonces, giveaways, messages"),
+            discord.SelectOption(label="Niveaux & Économie", value="levels", emoji="📈", description="XP, boutique, leaderboard"),
+            discord.SelectOption(label="Vocaux Temporaires", value="voice", emoji="🔊", description="Hubs vocaux personnalisables"),
+            discord.SelectOption(label="Aide Automatique", value="help", emoji="💡", description="FAQ et aide contextuelle"),
+        ],
+        row=0
+    )
+    async def module_select(self, i, s):
+        val = s.values[0]
+        panels = {
+            'prot': lambda: ProtPanel(self.u, self.g),
+            'mod': lambda: ModerationPanel(self.u, self.g),
+            'immune': lambda: ImmunePanel(self.u, self.g),
+            'cmds': lambda: CommandsPanel(self.u, self.g),
+            'chan': lambda: ChanPanel(self.u, self.g),
+            'tickets': lambda: TicketMainPanel(self.u, self.g),
+            'ads': lambda: AdsPanel(self.u, self.g),
+            'stats': lambda: StatPanel(self.u, self.g),
+            'centre': lambda: CentrePanel(self.u, self.g),
+            'levels': lambda: LevelSystemPanel(self.u, self.g),
+            'voice': lambda: TempVoicePanel(self.u, self.g),
+            'help': lambda: AutoHelpPanel(self.u, self.g),
+        }
+        v = panels[val]()
+        emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
+        await i.response.edit_message(embed=emb, view=v)
     
-    @discord.ui.button(label="Modération", emoji="🔨", style=discord.ButtonStyle.primary, row=0)
-    async def moderation(self, i, b):
-        v = ModerationPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="Commandes", emoji="⚡", style=discord.ButtonStyle.primary, row=0)
-    async def commands(self, i, b):
-        v = CommandsPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="Immunités", emoji="👑", style=discord.ButtonStyle.secondary, row=1)
-    async def immune(self, i, b):
-        v = ImmunePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="Config Salon", emoji="📺", style=discord.ButtonStyle.secondary, row=1)
-    async def chan(self, i, b):
-        v = ChanPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="Tickets", emoji="🎫", style=discord.ButtonStyle.success, row=1)
-    async def tickets(self, i, b):
-        v = TicketMainPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="Publicité", emoji="📢", style=discord.ButtonStyle.success, row=2)
-    async def ads(self, i, b):
-        v = AdsPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="Statistiques", emoji="📊", style=discord.ButtonStyle.success, row=2)
-    async def stats(self, i, b):
-        v = StatPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="Centre", emoji="🎯", style=discord.ButtonStyle.success, row=2)
-    async def centre(self, i, b):
-        v = CentrePanel(self.u, self.g)
-        await i.response.edit_message(embed=v.embed(), view=v)
-    
-    @discord.ui.button(label="Niveaux", emoji="📈", style=discord.ButtonStyle.primary, row=3)
-    async def levels(self, i, b):
-        v = LevelSystemPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="Création", emoji="🔊", style=discord.ButtonStyle.primary, row=3)
-    async def temp_voice(self, i, b):
-        v = TempVoicePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="Aide Auto", emoji="💡", style=discord.ButtonStyle.primary, row=3)
-    async def auto_help(self, i, b):
-        v = AutoHelpPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger, row=4)
+    @discord.ui.button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger, row=1)
     async def close(self, i, b):
         await i.message.delete()
 
@@ -5820,125 +5803,83 @@ class AdsPanel(View):
     
     async def embed(self):
         c = await cfg(self.g.id)
-        e = discord.Embed(title="📢 Publicité & Notifications", color=C.PURPLE)
-        e.description = "Recevez les dernières publications de vos créateurs préférés!"
+        e = discord.Embed(color=0x9B59B6)
+        e.set_author(name="━━━  Publicité & Notifications  ━━━", icon_url=self.g.icon.url if self.g.icon else None)
         
-        # YouTube
-        yt_ch = self.g.get_channel(c.get('ads_youtube_channel', 0))
-        yt_feeds = c.get('ads_youtube_feeds', [])
-        e.add_field(
-            name="🔴 YouTube",
-            value=f"📍 {yt_ch.mention if yt_ch else '❌'}\n📺 {len(yt_feeds)} chaîne(s)",
-            inline=True
-        )
+        def _status(key, feeds_key):
+            ch = self.g.get_channel(c.get(key, 0))
+            feeds = c.get(feeds_key, [])
+            live_ch = self.g.get_channel(c.get(key.replace('_channel', '_live_channel'), 0))
+            ch_txt = ch.mention if ch else "❌"
+            live_txt = f"  🔴 {live_ch.mention}" if live_ch else ""
+            return f"📍 {ch_txt}{live_txt}\n📡 `{len(feeds)}` feed(s)"
         
-        # Twitch
-        tw_ch = self.g.get_channel(c.get('ads_twitch_channel', 0))
-        tw_feeds = c.get('ads_twitch_feeds', [])
-        e.add_field(
-            name="🟣 Twitch",
-            value=f"📍 {tw_ch.mention if tw_ch else '❌'}\n🎮 {len(tw_feeds)} streamer(s)",
-            inline=True
-        )
+        # Ligne 1 : Vidéo & Stream
+        e.add_field(name="🔴 YouTube", value=_status('ads_youtube_channel', 'ads_youtube_feeds'), inline=True)
+        e.add_field(name="🟣 Twitch", value=_status('ads_twitch_channel', 'ads_twitch_feeds'), inline=True)
+        e.add_field(name="🎵 TikTok", value=_status('ads_tiktok_channel', 'ads_tiktok_feeds'), inline=True)
         
-        # Twitter/X
+        # Ligne 2 : Réseaux sociaux
         x_ch = self.g.get_channel(c.get('ads_twitter_channel', 0))
         x_feeds = c.get('ads_twitter_feeds', [])
-        e.add_field(
-            name="🐦 Twitter/X",
-            value=f"📍 {x_ch.mention if x_ch else '❌'}\n👤 {len(x_feeds)} compte(s)",
-            inline=True
-        )
+        e.add_field(name="🐦 Twitter/X", value=f"📍 {x_ch.mention if x_ch else '❌'}\n📡 `{len(x_feeds)}` feed(s)", inline=True)
         
-        # Reddit
         rd_ch = self.g.get_channel(c.get('ads_reddit_channel', 0))
         rd_feeds = c.get('ads_reddit_feeds', [])
-        e.add_field(
-            name="🟠 Reddit",
-            value=f"📍 {rd_ch.mention if rd_ch else '❌'}\n📰 {len(rd_feeds)} subreddit(s)",
-            inline=True
-        )
+        e.add_field(name="🟠 Reddit", value=f"📍 {rd_ch.mention if rd_ch else '❌'}\n📡 `{len(rd_feeds)}` feed(s)", inline=True)
         
-        # Discord
         dc_ch = self.g.get_channel(c.get('ads_discord_channel', 0))
         dc_feeds = c.get('ads_discord_feeds', [])
-        e.add_field(
-            name="📡 Discord",
-            value=f"📍 {dc_ch.mention if dc_ch else '❌'}\n💬 {len(dc_feeds)} salon(s)",
-            inline=True
-        )
+        e.add_field(name="📡 Discord", value=f"📍 {dc_ch.mention if dc_ch else '❌'}\n📡 `{len(dc_feeds)}` feed(s)", inline=True)
         
-        # RoSocial
+        # Ligne 3 : Gaming
         rs_ch = self.g.get_channel(c.get('ads_rosocial_channel', 0))
         rs_feeds = c.get('ads_rosocial_feeds', [])
-        e.add_field(
-            name="🎮 RoSocial",
-            value=f"📍 {rs_ch.mention if rs_ch else '❌'}\n👤 {len(rs_feeds)} profil(s)",
-            inline=True
-        )
+        e.add_field(name="🎮 RoSocial", value=f"📍 {rs_ch.mention if rs_ch else '❌'}\n📡 `{len(rs_feeds)}` feed(s)", inline=True)
         
-        # Roblox UGC
         rblx_ch = self.g.get_channel(c.get('ads_roblox_channel', 0))
         rblx_feeds = c.get('ads_roblox_feeds', [])
-        e.add_field(
-            name="🟢 Roblox UGC",
-            value=f"📍 {rblx_ch.mention if rblx_ch else '❌'}\n🎨 {len(rblx_feeds)} créateur(s)",
-            inline=True
-        )
+        e.add_field(name="🟢 Roblox UGC", value=f"📍 {rblx_ch.mention if rblx_ch else '❌'}\n📡 `{len(rblx_feeds)}` feed(s)", inline=True)
         
-        # Réductions Jeux
         deals_ch = self.g.get_channel(c.get('ads_deals_channel', 0))
-        deals_enabled = c.get('ads_deals_enabled', False)
-        e.add_field(
-            name="🎯 Réductions",
-            value=f"📍 {deals_ch.mention if deals_ch else '❌'}\n{'✅ Activé' if deals_enabled else '❌ Désactivé'}",
-            inline=True
-        )
+        deals_on = c.get('ads_deals_enabled', False)
+        e.add_field(name="🎯 Réductions", value=f"📍 {deals_ch.mention if deals_ch else '❌'}\n{'✅ Activé' if deals_on else '❌ Désactivé'}", inline=True)
         
-        e.set_footer(text="💡 Les notifications sont vérifiées toutes les 5 minutes")
+        e.set_footer(text="▼ Sélectionnez une plateforme  •  🔴 = salon lives configuré  •  Vérification toutes les 5 min")
         return e
     
-    @discord.ui.button(label="🔴 YouTube", style=discord.ButtonStyle.danger, row=0)
-    async def youtube(self, i, b):
-        v = AdsYouTubePanel(self.u, self.g)
+    @discord.ui.select(
+        placeholder="📢 Choisir une plateforme à configurer...",
+        options=[
+            discord.SelectOption(label="YouTube", value="youtube", emoji="🔴", description="Vidéos + détection lives"),
+            discord.SelectOption(label="Twitch", value="twitch", emoji="🟣", description="Streams + détection lives"),
+            discord.SelectOption(label="TikTok", value="tiktok", emoji="🎵", description="Vidéos + détection lives"),
+            discord.SelectOption(label="Twitter / X", value="twitter", emoji="🐦", description="Tweets et posts"),
+            discord.SelectOption(label="Reddit", value="reddit", emoji="🟠", description="Posts de subreddits"),
+            discord.SelectOption(label="Discord", value="discord", emoji="📡", description="Relay de salons Discord"),
+            discord.SelectOption(label="RoSocial", value="rosocial", emoji="🎮", description="Profils RoSocial"),
+            discord.SelectOption(label="Roblox UGC", value="roblox", emoji="🟢", description="Créateurs & groupes Roblox"),
+            discord.SelectOption(label="Réductions Jeux", value="deals", emoji="🎯", description="Promos Steam, Epic, GOG..."),
+        ],
+        row=0
+    )
+    async def platform_select(self, i, s):
+        val = s.values[0]
+        panels = {
+            'youtube': lambda: AdsYouTubePanel(self.u, self.g),
+            'twitch': lambda: AdsTwitchPanel(self.u, self.g),
+            'tiktok': lambda: AdsTikTokPanel(self.u, self.g),
+            'twitter': lambda: AdsTwitterPanel(self.u, self.g),
+            'reddit': lambda: AdsRedditPanel(self.u, self.g),
+            'discord': lambda: AdsDiscordPanel(self.u, self.g),
+            'rosocial': lambda: AdsRoSocialPanel(self.u, self.g),
+            'roblox': lambda: AdsRobloxPanel(self.u, self.g),
+            'deals': lambda: AdsDealsPanel(self.u, self.g),
+        }
+        v = panels[val]()
         await i.response.edit_message(embed=await v.embed(), view=v)
     
-    @discord.ui.button(label="🟣 Twitch", style=discord.ButtonStyle.primary, row=0)
-    async def twitch(self, i, b):
-        v = AdsTwitchPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="🐦 Twitter/X", style=discord.ButtonStyle.secondary, row=0)
-    async def twitter(self, i, b):
-        v = AdsTwitterPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="🟠 Reddit", style=discord.ButtonStyle.secondary, row=0)
-    async def reddit(self, i, b):
-        v = AdsRedditPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="📡 Discord", style=discord.ButtonStyle.primary, row=1)
-    async def discord_btn(self, i, b):
-        v = AdsDiscordPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="🎮 RoSocial", style=discord.ButtonStyle.success, row=1)
-    async def rosocial(self, i, b):
-        v = AdsRoSocialPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="🟢 Roblox UGC", style=discord.ButtonStyle.success, row=1)
-    async def roblox_ugc(self, i, b):
-        v = AdsRobloxPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="🎯 Réductions", style=discord.ButtonStyle.primary, row=1)
-    async def deals(self, i, b):
-        v = AdsDealsPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
@@ -5953,49 +5894,54 @@ class AdsYouTubePanel(View):
     
     async def embed(self):
         c = await cfg(self.g.id)
-        e = discord.Embed(title="🔴 YouTube - Notifications", color=0xFF0000)
+        e = discord.Embed(color=0xFF0000)
+        e.set_author(name="━━━  YouTube  ━━━", icon_url="https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png")
         
         yt_ch = self.g.get_channel(c.get('ads_youtube_channel', 0))
+        yt_live_ch = self.g.get_channel(c.get('ads_youtube_live_channel', 0))
         yt_feeds = c.get('ads_youtube_feeds', [])
         
-        e.add_field(name="📍 Salon par défaut", value=yt_ch.mention if yt_ch else "❌ Non configuré", inline=False)
+        desc = "Notifications de nouvelles vidéos et détection de lives.\n"
+        desc += "─────────────────────────────────\n"
+        desc += f"📍 **Salon vidéos** : {yt_ch.mention if yt_ch else '`❌ Non configuré`'}\n"
+        desc += f"🔴 **Salon lives** : {yt_live_ch.mention if yt_live_ch else '`❌ Non configuré`'}\n"
+        desc += "─────────────────────────────────\n"
         
         if yt_feeds:
-            feeds_txt = ""
-            for f in yt_feeds[:10]:
-                # Support ancien et nouveau format
+            for f in yt_feeds[:8]:
                 if isinstance(f, dict):
                     name = f.get('name', '?')
                     feed_ch_id = f.get('channel_id', 0)
                     feed_ch = self.g.get_channel(feed_ch_id) if feed_ch_id else None
-                    salon_txt = f" → {feed_ch.mention}" if feed_ch else ""
-                    feeds_txt += f"• `{name}`{salon_txt}\n"
+                    salon_txt = f" ➜ {feed_ch.mention}" if feed_ch else ""
+                    desc += f"📺 `{name}`{salon_txt}\n"
                 else:
-                    feeds_txt += f"• `{f}`\n"
-            e.add_field(name=f"📺 Chaînes suivies ({len(yt_feeds)})", value=feeds_txt, inline=False)
+                    desc += f"📺 `{f}`\n"
+            if len(yt_feeds) > 8:
+                desc += f"*...et {len(yt_feeds) - 8} autre(s)*\n"
         else:
-            e.add_field(name="📺 Chaînes suivies", value="*Aucune chaîne configurée*", inline=False)
+            desc += "*Aucune chaîne configurée*\n"
         
-        e.set_footer(text="💡 Chaque chaîne peut avoir son propre salon de publication")
+        desc += f"\n**{len(yt_feeds)}** chaîne(s) suivie(s)"
+        e.description = desc
+        e.set_footer(text="💡 Chaque chaîne peut avoir son propre salon  •  Le salon lives détecte les streams en direct")
         return e
     
-    @discord.ui.button(label="📍 Salon par défaut", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="📍 Salon vidéos", style=discord.ButtonStyle.primary, row=0)
     async def set_channel(self, i, b):
         v = PaginatedAdsChannelSelect(self.u, self.g, 'ads_youtube_channel', 'youtube')
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="📍 Salon YouTube par défaut",
-                description=f"📊 {len(list(self.g.text_channels))} salons disponibles",
-                color=0xFF0000
-            ),
-            view=v
-        )
+        await i.response.edit_message(embed=discord.Embed(title="📍 Salon YouTube (vidéos)", description="Sélectionnez le salon pour les nouvelles vidéos", color=0xFF0000), view=v)
     
-    @discord.ui.button(label="➕ Ajouter Chaîne", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="🔴 Salon lives", style=discord.ButtonStyle.danger, row=0)
+    async def set_live_channel(self, i, b):
+        v = PaginatedAdsChannelSelect(self.u, self.g, 'ads_youtube_live_channel', 'youtube')
+        await i.response.edit_message(embed=discord.Embed(title="🔴 Salon YouTube Lives", description="Sélectionnez le salon pour les notifications de streams en direct", color=0xFF0000), view=v)
+    
+    @discord.ui.button(label="➕ Ajouter", style=discord.ButtonStyle.success, row=1)
     async def add_feed(self, i, b):
         await i.response.send_modal(AdsYouTubeAddModal(self.g, self.u))
     
-    @discord.ui.button(label="🗑️ Supprimer Chaîne", style=discord.ButtonStyle.danger, row=0)
+    @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, row=1)
     async def remove_feed(self, i, b):
         c = await cfg(self.g.id)
         feeds = c.get('ads_youtube_feeds', [])
@@ -6080,48 +6026,54 @@ class AdsTwitchPanel(View):
     
     async def embed(self):
         c = await cfg(self.g.id)
-        e = discord.Embed(title="🟣 Twitch - Notifications", color=0x9146FF)
+        e = discord.Embed(color=0x9146FF)
+        e.set_author(name="━━━  Twitch  ━━━", icon_url="https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png")
         
         tw_ch = self.g.get_channel(c.get('ads_twitch_channel', 0))
+        tw_live_ch = self.g.get_channel(c.get('ads_twitch_live_channel', 0))
         tw_feeds = c.get('ads_twitch_feeds', [])
         
-        e.add_field(name="📍 Salon par défaut", value=tw_ch.mention if tw_ch else "❌ Non configuré", inline=False)
+        desc = "Détection automatique des streams en direct.\n"
+        desc += "─────────────────────────────────\n"
+        desc += f"📍 **Salon par défaut** : {tw_ch.mention if tw_ch else '`❌ Non configuré`'}\n"
+        desc += f"🔴 **Salon lives** : {tw_live_ch.mention if tw_live_ch else '`❌ Non configuré`'}\n"
+        desc += "─────────────────────────────────\n"
         
         if tw_feeds:
-            feeds_txt = ""
-            for f in tw_feeds[:10]:
+            for f in tw_feeds[:8]:
                 if isinstance(f, dict):
                     name = f.get('username', '?')
                     feed_ch_id = f.get('channel_id', 0)
                     feed_ch = self.g.get_channel(feed_ch_id) if feed_ch_id else None
-                    salon_txt = f" → {feed_ch.mention}" if feed_ch else ""
-                    feeds_txt += f"• `{name}`{salon_txt}\n"
+                    salon_txt = f" ➜ {feed_ch.mention}" if feed_ch else ""
+                    desc += f"🎮 `{name}`{salon_txt}\n"
                 else:
-                    feeds_txt += f"• `{f}`\n"
-            e.add_field(name=f"🎮 Streamers suivis ({len(tw_feeds)})", value=feeds_txt, inline=False)
+                    desc += f"🎮 `{f}`\n"
+            if len(tw_feeds) > 8:
+                desc += f"*...et {len(tw_feeds) - 8} autre(s)*\n"
         else:
-            e.add_field(name="🎮 Streamers suivis", value="*Aucun streamer configuré*", inline=False)
+            desc += "*Aucun streamer configuré*\n"
         
-        e.set_footer(text="💡 Chaque streamer peut avoir son propre salon de publication")
+        desc += f"\n**{len(tw_feeds)}** streamer(s) suivi(s)"
+        e.description = desc
+        e.set_footer(text="💡 Les notifications sont envoyées quand un streamer lance un live")
         return e
     
     @discord.ui.button(label="📍 Salon par défaut", style=discord.ButtonStyle.primary, row=0)
     async def set_channel(self, i, b):
         v = PaginatedAdsChannelSelect(self.u, self.g, 'ads_twitch_channel', 'twitch')
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="📍 Salon Twitch par défaut",
-                description=f"📊 {len(list(self.g.text_channels))} salons disponibles",
-                color=0x9146FF
-            ),
-            view=v
-        )
+        await i.response.edit_message(embed=discord.Embed(title="📍 Salon Twitch par défaut", description="Sélectionnez le salon pour les notifications Twitch", color=0x9146FF), view=v)
     
-    @discord.ui.button(label="➕ Ajouter Streamer", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="🔴 Salon lives", style=discord.ButtonStyle.danger, row=0)
+    async def set_live_channel(self, i, b):
+        v = PaginatedAdsChannelSelect(self.u, self.g, 'ads_twitch_live_channel', 'twitch')
+        await i.response.edit_message(embed=discord.Embed(title="🔴 Salon Twitch Lives", description="Salon dédié aux notifications de streams en direct", color=0x9146FF), view=v)
+    
+    @discord.ui.button(label="➕ Ajouter", style=discord.ButtonStyle.success, row=1)
     async def add_feed(self, i, b):
         await i.response.send_modal(AdsTwitchAddModal(self.g, self.u))
     
-    @discord.ui.button(label="🗑️ Supprimer Streamer", style=discord.ButtonStyle.danger, row=0)
+    @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, row=1)
     async def remove_feed(self, i, b):
         c = await cfg(self.g.id)
         feeds = c.get('ads_twitch_feeds', [])
@@ -6202,6 +6154,145 @@ class AdsTwitchChannelSelect(Select):
         salon_txt = channel.mention if channel else "salon par défaut"
         
         await i.response.edit_message(content=f"✅ Streamer **{self.feed_data['username']}** ajouté ! Publications dans {salon_txt}", view=None)
+
+# ─────────────────────────────── TIKTOK ───────────────────────────────
+
+class AdsTikTokPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    async def embed(self):
+        c = await cfg(self.g.id)
+        e = discord.Embed(color=0x010101)
+        e.set_author(name="━━━  TikTok  ━━━", icon_url="https://www.tiktok.com/favicon.ico")
+        
+        tk_ch = self.g.get_channel(c.get('ads_tiktok_channel', 0))
+        tk_live_ch = self.g.get_channel(c.get('ads_tiktok_live_channel', 0))
+        tk_feeds = c.get('ads_tiktok_feeds', [])
+        
+        desc = "Notifications de nouvelles vidéos et détection de lives TikTok.\n"
+        desc += "─────────────────────────────────\n"
+        desc += f"📍 **Salon vidéos** : {tk_ch.mention if tk_ch else '`❌ Non configuré`'}\n"
+        desc += f"🔴 **Salon lives** : {tk_live_ch.mention if tk_live_ch else '`❌ Non configuré`'}\n"
+        desc += "─────────────────────────────────\n"
+        
+        if tk_feeds:
+            for f in tk_feeds[:8]:
+                if isinstance(f, dict):
+                    name = f.get('username', '?')
+                    feed_ch_id = f.get('channel_id', 0)
+                    feed_ch = self.g.get_channel(feed_ch_id) if feed_ch_id else None
+                    salon_txt = f" ➜ {feed_ch.mention}" if feed_ch else ""
+                    desc += f"🎵 `@{name}`{salon_txt}\n"
+                else:
+                    desc += f"🎵 `@{f}`\n"
+            if len(tk_feeds) > 8:
+                desc += f"*...et {len(tk_feeds) - 8} autre(s)*\n"
+        else:
+            desc += "*Aucun créateur configuré*\n"
+        
+        desc += f"\n**{len(tk_feeds)}** créateur(s) suivi(s)"
+        e.description = desc
+        e.set_footer(text="💡 Détecte les nouvelles vidéos via RSS et les lives TikTok")
+        return e
+    
+    @discord.ui.button(label="📍 Salon vidéos", style=discord.ButtonStyle.primary, row=0)
+    async def set_channel(self, i, b):
+        v = PaginatedAdsChannelSelect(self.u, self.g, 'ads_tiktok_channel', 'tiktok')
+        await i.response.edit_message(embed=discord.Embed(title="📍 Salon TikTok (vidéos)", description="Sélectionnez le salon pour les nouvelles vidéos TikTok", color=0x010101), view=v)
+    
+    @discord.ui.button(label="🔴 Salon lives", style=discord.ButtonStyle.danger, row=0)
+    async def set_live_channel(self, i, b):
+        v = PaginatedAdsChannelSelect(self.u, self.g, 'ads_tiktok_live_channel', 'tiktok')
+        await i.response.edit_message(embed=discord.Embed(title="🔴 Salon TikTok Lives", description="Salon dédié aux notifications de lives TikTok", color=0x010101), view=v)
+    
+    @discord.ui.button(label="➕ Ajouter", style=discord.ButtonStyle.success, row=1)
+    async def add_feed(self, i, b):
+        await i.response.send_modal(AdsTikTokAddModal(self.g, self.u))
+    
+    @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, row=1)
+    async def remove_feed(self, i, b):
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_tiktok_feeds', [])
+        if not feeds:
+            return await i.response.send_message("❌ Aucun créateur à supprimer", ephemeral=True)
+        opts = []
+        for idx, f in enumerate(feeds[:25]):
+            if isinstance(f, dict):
+                opts.append(discord.SelectOption(label=f"@{f.get('username', str(idx))}"[:25], value=str(idx)))
+            else:
+                opts.append(discord.SelectOption(label=f"@{f}"[:25], value=str(idx)))
+        v = AdsFeedRemoveView(self.u, self.g, opts, 'ads_tiktok_feeds', 'tiktok')
+        await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer un créateur TikTok", color=C.RED), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = AdsPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+class AdsTikTokAddModal(Modal, title="➕ Ajouter un créateur TikTok"):
+    username = TextInput(label="Nom d'utilisateur TikTok (sans @)", placeholder="Ex: khaby.lame", max_length=50)
+    
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+    
+    async def on_submit(self, i):
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_tiktok_feeds', [])
+        
+        username = self.username.value.lower().strip().lstrip('@')
+        
+        # Vérifier si déjà ajouté
+        for f in feeds:
+            if isinstance(f, dict) and f.get('username') == username:
+                return await i.response.send_message("❌ Ce créateur est déjà ajouté!", ephemeral=True)
+            elif isinstance(f, str) and f == username:
+                return await i.response.send_message("❌ Ce créateur est déjà ajouté!", ephemeral=True)
+        
+        # Demander le salon
+        chs = list(self.g.text_channels)[:24]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
+        opts.insert(0, discord.SelectOption(label="📍 Salon par défaut", value="0", description="Utiliser le salon par défaut configuré"))
+        
+        new_feed = {'username': username}
+        v = AdsTikTokChannelSelectView(self.u, self.g, opts, new_feed)
+        await i.response.send_message(f"📍 Dans quel salon publier les vidéos de **@{username}** ?", view=v, ephemeral=True)
+
+class AdsTikTokChannelSelectView(View):
+    def __init__(self, u, g, opts, feed_data):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+        self.feed_data = feed_data
+        self.add_item(AdsTikTokChannelSelect(u, g, opts, feed_data))
+
+class AdsTikTokChannelSelect(Select):
+    def __init__(self, u, g, opts, feed_data):
+        super().__init__(placeholder="Choisir un salon...", options=opts)
+        self.u = u
+        self.g = g
+        self.feed_data = feed_data
+    
+    async def callback(self, i):
+        channel_id = int(self.values[0])
+        
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_tiktok_feeds', [])
+        
+        if channel_id > 0:
+            self.feed_data['channel_id'] = channel_id
+        
+        feeds.append(self.feed_data)
+        await db_set(self.g.id, 'ads_tiktok_feeds', feeds)
+        
+        channel = self.g.get_channel(channel_id) if channel_id else None
+        salon_txt = channel.mention if channel else "salon par défaut"
+        
+        await i.response.edit_message(content=f"✅ Créateur **@{self.feed_data['username']}** ajouté ! Publications dans {salon_txt}", view=None)
 
 # ─────────────────────────────── REDDIT ───────────────────────────────
 
@@ -7136,6 +7227,8 @@ class PaginatedAdsChannelSelect(View):
             return AdsYouTubePanel(self.u, self.g)
         elif self.platform == 'twitch':
             return AdsTwitchPanel(self.u, self.g)
+        elif self.platform == 'tiktok':
+            return AdsTikTokPanel(self.u, self.g)
         elif self.platform == 'twitter':
             return AdsTwitterPanel(self.u, self.g)
         elif self.platform == 'discord':
@@ -7234,6 +7327,8 @@ class AdsChannelSelect(Select):
             v = AdsYouTubePanel(self.u, self.g)
         elif self.platform == 'twitch':
             v = AdsTwitchPanel(self.u, self.g)
+        elif self.platform == 'tiktok':
+            v = AdsTikTokPanel(self.u, self.g)
         elif self.platform == 'twitter':
             v = AdsTwitterPanel(self.u, self.g)
         elif self.platform == 'discord':
@@ -7269,6 +7364,8 @@ class AdsFeedRemoveSelect(Select):
             v = AdsYouTubePanel(self.u, self.g)
         elif self.platform == 'twitch':
             v = AdsTwitchPanel(self.u, self.g)
+        elif self.platform == 'tiktok':
+            v = AdsTikTokPanel(self.u, self.g)
         elif self.platform == 'twitter':
             v = AdsTwitterPanel(self.u, self.g)
         elif self.platform == 'discord':
@@ -17106,6 +17203,9 @@ async def check_social_feeds():
                             # Twitch
                             await check_twitch_feeds(session, guild, data)
                             
+                            # TikTok
+                            await check_tiktok_feeds(session, guild, data)
+                            
                             # Twitter/X
                             await check_twitter_feeds(session, guild, data)
                             
@@ -17128,24 +17228,60 @@ async def check_social_feeds():
         print(f"Erreur check_social_feeds: {ex}")
 
 async def check_youtube_feeds(session, guild, data):
-    """Vérifie les nouvelles vidéos YouTube"""
+    """Vérifie les nouvelles vidéos YouTube + détection de lives"""
     default_channel = guild.get_channel(data.get('ads_youtube_channel', 0))
+    live_channel = guild.get_channel(data.get('ads_youtube_live_channel', 0))
     feeds = data.get('ads_youtube_feeds', [])
     if not feeds:
         return
     
+    headers_yt = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    
     for feed in feeds:
         try:
-            # Support ancien et nouveau format
             if isinstance(feed, dict):
                 channel_id = feed.get('id', '')
                 channel_name = feed.get('name', 'YouTube')
-                # Utiliser le salon spécifique ou le salon par défaut
                 feed_channel_id = feed.get('channel_id', 0)
                 target_channel = guild.get_channel(feed_channel_id) if feed_channel_id else default_channel
             else:
                 continue
             
+            if not target_channel and not live_channel:
+                continue
+            
+            # ═══════════════ DÉTECTION LIVE YOUTUBE ═══════════════
+            if live_channel:
+                live_cache_key = f"yt_live_{guild.id}_{channel_id}"
+                try:
+                    yt_page_url = f"https://www.youtube.com/channel/{channel_id}/live"
+                    async with session.get(yt_page_url, headers=headers_yt, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                        if resp.status == 200:
+                            html = await resp.text()
+                            is_live = '"isLive":true' in html or '"isLiveBroadcast":true' in html
+                            was_live = posted_content.get(live_cache_key, False)
+                            
+                            if is_live and not was_live:
+                                posted_content[live_cache_key] = True
+                                
+                                e = discord.Embed(color=0xFF0000)
+                                e.set_author(name=f"🔴 YOUTUBE LIVE • {channel_name}", url=f"https://www.youtube.com/channel/{channel_id}/live", icon_url="https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png")
+                                e.title = f"🔴 {channel_name} est en LIVE !"
+                                e.url = f"https://www.youtube.com/channel/{channel_id}/live"
+                                e.description = f"**{channel_name}** vient de lancer un stream en direct !\nRejoins le live maintenant !"
+                                e.set_image(url=f"https://img.youtube.com/vi/live_user_{channel_id}/maxresdefault.jpg?t={int(now().timestamp())}")
+                                e.add_field(name="", value=f"[🔴 **Rejoindre le live**](https://www.youtube.com/channel/{channel_id}/live)", inline=False)
+                                e.set_footer(text=f"YouTube Live • {channel_name}", icon_url="https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png")
+                                e.timestamp = now()
+                                
+                                await live_channel.send(embed=e)
+                            
+                            elif not is_live and was_live:
+                                posted_content[live_cache_key] = False
+                except:
+                    pass
+            
+            # ═══════════════ NOUVELLES VIDÉOS (RSS) ═══════════════
             if not target_channel:
                 continue
             
@@ -17166,9 +17302,7 @@ async def check_youtube_feeds(session, guild, data):
             entry = entries[0]
             video_id_elem = entry.find('yt:videoId', ns)
             title_elem = entry.find('atom:title', ns)
-            published_elem = entry.find('atom:published', ns)
             
-            # Essayer de trouver la description
             media_group = entry.find('media:group', ns)
             description = ""
             if media_group is not None:
@@ -17188,39 +17322,15 @@ async def check_youtube_feeds(session, guild, data):
             
             posted_content[cache_key] = video_id
             
-            # ═══════════════ EMBED YOUTUBE PROFESSIONNEL ═══════════════
             e = discord.Embed(color=0xFF0000)
-            
-            # Titre avec bannière
             e.title = f"▶️ {title}"
             e.url = f"https://www.youtube.com/watch?v={video_id}"
-            
-            # Description du post
             if description:
                 e.description = f"*{description}*"
-            
-            # Auteur avec logo YouTube
-            e.set_author(
-                name=f"🔴 YOUTUBE • {channel_name}",
-                url=f"https://www.youtube.com/channel/{channel_id}",
-                icon_url="https://www.gstatic.com/youtube/img/branding/youtubelogo/svg/youtubelogo.svg"
-            )
-            
-            # Miniature grande
+            e.set_author(name=f"🔴 YOUTUBE • {channel_name}", url=f"https://www.youtube.com/channel/{channel_id}", icon_url="https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png")
             e.set_image(url=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg")
-            
-            # Bouton "Regarder"
-            e.add_field(
-                name="",
-                value=f"[▶️ **Regarder la vidéo**](https://www.youtube.com/watch?v={video_id})",
-                inline=False
-            )
-            
-            # Footer avec icône
-            e.set_footer(
-                text=f"YouTube • {channel_name}",
-                icon_url="https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png"
-            )
+            e.add_field(name="", value=f"[▶️ **Regarder la vidéo**](https://www.youtube.com/watch?v={video_id})", inline=False)
+            e.set_footer(text=f"YouTube • {channel_name}", icon_url="https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png")
             e.timestamp = now()
             
             await target_channel.send(embed=e)
@@ -17232,58 +17342,59 @@ async def check_youtube_feeds(session, guild, data):
 
 async def check_twitch_feeds(session, guild, data):
     """Vérifie si des streamers sont en live sur Twitch"""
-    channel = guild.get_channel(data.get('ads_twitch_channel', 0))
+    default_channel = guild.get_channel(data.get('ads_twitch_channel', 0))
+    live_channel = guild.get_channel(data.get('ads_twitch_live_channel', 0))
     feeds = data.get('ads_twitch_feeds', [])
-    if not channel or not feeds:
+    if not feeds or (not default_channel and not live_channel):
         return
     
-    for username in feeds:
+    headers_tw = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    
+    for feed_item in feeds:
         try:
+            if isinstance(feed_item, dict):
+                username = feed_item.get('username', '')
+                feed_ch_id = feed_item.get('channel_id', 0)
+                target_channel = guild.get_channel(feed_ch_id) if feed_ch_id else default_channel
+            elif isinstance(feed_item, str):
+                username = feed_item
+                target_channel = default_channel
+            else:
+                continue
+            
+            if not username:
+                continue
+            
+            # Salon pour les lives : priorité au salon lives dédié
+            notif_channel = live_channel or target_channel
+            if not notif_channel:
+                continue
+            
             url = f"https://www.twitch.tv/{username}"
             cache_key = f"twitch_{guild.id}_{username}"
             
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            async with session.get(url, headers=headers_tw, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 if resp.status != 200:
                     continue
                 html = await resp.text()
             
             is_live = '"isLiveBroadcast":true' in html or 'isLiveBroadcast' in html
-            
             was_live = posted_content.get(cache_key, False)
             
             if is_live and not was_live:
                 posted_content[cache_key] = True
                 
-                # ═══════════════ EMBED TWITCH PROFESSIONNEL ═══════════════
                 e = discord.Embed(color=0x9146FF)
-                
+                e.set_author(name=f"🟣 TWITCH LIVE • {username}", url=f"https://www.twitch.tv/{username}", icon_url="https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png")
                 e.title = f"🔴 {username} est en LIVE !"
                 e.url = f"https://www.twitch.tv/{username}"
-                
                 e.description = f"**{username}** vient de lancer un stream !\nRejoins le live maintenant !"
-                
-                e.set_author(
-                    name=f"🟣 TWITCH • {username}",
-                    url=f"https://www.twitch.tv/{username}",
-                    icon_url="https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png"
-                )
-                
-                # Preview du stream (avec timestamp pour éviter le cache)
                 e.set_image(url=f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{username.lower()}-1280x720.jpg?t={int(now().timestamp())}")
-                
-                e.add_field(
-                    name="",
-                    value=f"[🟣 **Rejoindre le stream**](https://www.twitch.tv/{username})",
-                    inline=False
-                )
-                
-                e.set_footer(
-                    text=f"Twitch • {username}",
-                    icon_url="https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png"
-                )
+                e.add_field(name="", value=f"[🟣 **Rejoindre le stream**](https://www.twitch.tv/{username})", inline=False)
+                e.set_footer(text=f"Twitch • {username}", icon_url="https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png")
                 e.timestamp = now()
                 
-                await channel.send(embed=e)
+                await notif_channel.send(embed=e)
                 
             elif not is_live and was_live:
                 posted_content[cache_key] = False
@@ -17291,7 +17402,132 @@ async def check_twitch_feeds(session, guild, data):
             await asyncio.sleep(1)
             
         except Exception as ex:
-            print(f"Erreur Twitch feed {username}: {ex}")
+            print(f"Erreur Twitch feed {feed_item}: {ex}")
+            continue
+
+async def check_tiktok_feeds(session, guild, data):
+    """Vérifie les nouvelles vidéos TikTok et détection de lives"""
+    default_channel = guild.get_channel(data.get('ads_tiktok_channel', 0))
+    live_channel = guild.get_channel(data.get('ads_tiktok_live_channel', 0))
+    feeds = data.get('ads_tiktok_feeds', [])
+    if not feeds or (not default_channel and not live_channel):
+        return
+    
+    headers_tk = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7'
+    }
+    
+    for feed_item in feeds:
+        try:
+            if isinstance(feed_item, dict):
+                username = feed_item.get('username', '')
+                feed_ch_id = feed_item.get('channel_id', 0)
+                target_channel = guild.get_channel(feed_ch_id) if feed_ch_id else default_channel
+            elif isinstance(feed_item, str):
+                username = feed_item
+                target_channel = default_channel
+            else:
+                continue
+            
+            if not username:
+                continue
+            
+            # ═══════════════ DÉTECTION LIVE TIKTOK ═══════════════
+            if live_channel:
+                live_cache_key = f"tiktok_live_{guild.id}_{username}"
+                try:
+                    live_url = f"https://www.tiktok.com/@{username}/live"
+                    async with session.get(live_url, headers=headers_tk, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                        if resp.status == 200:
+                            html = await resp.text()
+                            # TikTok live détection via JSON-LD ou métadonnées
+                            is_live = '"isLiveBroadcast":true' in html or '"liveRoom"' in html or 'LiveRoom' in html
+                            was_live = posted_content.get(live_cache_key, False)
+                            
+                            if is_live and not was_live:
+                                posted_content[live_cache_key] = True
+                                
+                                e = discord.Embed(color=0x010101)
+                                e.set_author(name=f"🎵 TIKTOK LIVE • @{username}", url=f"https://www.tiktok.com/@{username}/live", icon_url="https://www.tiktok.com/favicon.ico")
+                                e.title = f"🔴 @{username} est en LIVE sur TikTok !"
+                                e.url = f"https://www.tiktok.com/@{username}/live"
+                                e.description = f"**@{username}** est en direct sur TikTok !\nRejoins le live maintenant !"
+                                e.add_field(name="", value=f"[🎵 **Rejoindre le live TikTok**](https://www.tiktok.com/@{username}/live)", inline=False)
+                                e.set_footer(text=f"TikTok Live • @{username}", icon_url="https://www.tiktok.com/favicon.ico")
+                                e.timestamp = now()
+                                
+                                await live_channel.send(embed=e)
+                            
+                            elif not is_live and was_live:
+                                posted_content[live_cache_key] = False
+                except:
+                    pass
+            
+            # ═══════════════ NOUVELLES VIDÉOS TIKTOK (via RSS/page) ═══════════════
+            if not target_channel:
+                continue
+            
+            cache_key = f"tiktok_{guild.id}_{username}"
+            
+            # Méthode RSS via proxitok/instances ou scrape léger
+            try:
+                # Essayer via la page profil TikTok
+                profile_url = f"https://www.tiktok.com/@{username}"
+                async with session.get(profile_url, headers=headers_tk, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    if resp.status != 200:
+                        continue
+                    html = await resp.text()
+                
+                # Extraire les vidéos depuis le JSON embarqué dans la page
+                import re
+                # Chercher les IDs vidéo dans le HTML
+                video_ids = re.findall(r'"id":"(\d{15,25})"', html)
+                if not video_ids:
+                    video_ids = re.findall(r'/video/(\d{15,25})', html)
+                
+                if not video_ids:
+                    continue
+                
+                latest_video_id = video_ids[0]
+                
+                if cache_key in posted_content and posted_content[cache_key] == latest_video_id:
+                    continue
+                
+                posted_content[cache_key] = latest_video_id
+                
+                # Extraire le titre si possible
+                title_match = re.search(r'"desc":"([^"]{0,200})"', html)
+                video_title = title_match.group(1) if title_match else f"Nouvelle vidéo de @{username}"
+                
+                video_url = f"https://www.tiktok.com/@{username}/video/{latest_video_id}"
+                
+                e = discord.Embed(color=0x010101)
+                e.set_author(name=f"🎵 TIKTOK • @{username}", url=f"https://www.tiktok.com/@{username}", icon_url="https://www.tiktok.com/favicon.ico")
+                e.title = f"🎵 {video_title[:200]}"
+                e.url = video_url
+                e.description = f"**@{username}** a publié une nouvelle vidéo !"
+                
+                # Thumbnail TikTok
+                thumb_match = re.search(r'"cover":"(https://[^"]+)"', html)
+                if thumb_match:
+                    thumb_url = thumb_match.group(1).replace('\\u002F', '/')
+                    e.set_image(url=thumb_url)
+                
+                e.add_field(name="", value=f"[🎵 **Voir la vidéo**]({video_url})", inline=False)
+                e.set_footer(text=f"TikTok • @{username}", icon_url="https://www.tiktok.com/favicon.ico")
+                e.timestamp = now()
+                
+                await target_channel.send(embed=e)
+                await asyncio.sleep(2)
+                
+            except Exception as ex:
+                print(f"Erreur TikTok vidéo {username}: {ex}")
+                continue
+            
+        except Exception as ex:
+            print(f"Erreur TikTok feed {feed_item}: {ex}")
             continue
 
 async def check_reddit_feeds(session, guild, data):
@@ -19355,7 +19591,7 @@ async def cleardeals_cmd(i: discord.Interaction):
 
 
 if __name__ == "__main__":
-    print("🚀 Bot v30 - Démarrage...")
+    print("🚀 Bot v31 - Démarrage...")
     print("🔒 Système de sécurité activé")
     print("👑 Système d'immunités complet")
     print("🎙️ Vocaux temporaires multi-hubs")
@@ -19363,5 +19599,8 @@ if __name__ == "__main__":
     print("🎮 Système de deals PERSISTANT (anti-doublon DB)")
     print("🗑️ Nettoyage auto des deals expirés")
     print("👥 Roblox UGC - Support des groupes")
-    print("✨ UI Panels améliorés")
+    print("📋 Navigation par menus déroulants (Select)")
+    print("🎵 TikTok - Vidéos + détection lives")
+    print("🔴 Salons lives dédiés (YouTube, Twitch, TikTok)")
+    print("✨ UI Panels améliorés v2")
     bot.run(TOKEN)
