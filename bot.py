@@ -29,6 +29,83 @@ spam_tracker = {}
 voice_join_tracker = {}  # {(guild_id, user_id): datetime} - pour tracker le temps en vocal
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#                           ⚡ POOL DE CONNEXIONS DB
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class DBPool:
+    """Pool de connexions aiosqlite - évite 114+ open/close par cycle"""
+    
+    def __init__(self, path, pool_size=5):
+        self._path = path
+        self._pool_size = pool_size
+        self._pool = asyncio.Queue(maxsize=pool_size)
+        self._semaphore = asyncio.Semaphore(pool_size)
+        self._initialized = False
+    
+    async def init(self):
+        """Initialise le pool avec N connexions persistantes en WAL mode"""
+        if self._initialized:
+            return
+        for _ in range(self._pool_size):
+            conn = await aiosqlite.connect(self._path)
+            await conn.execute("PRAGMA journal_mode=WAL")
+            await conn.execute("PRAGMA synchronous=NORMAL")
+            await conn.execute("PRAGMA cache_size=10000")
+            await conn.execute("PRAGMA busy_timeout=5000")
+            conn.row_factory = aiosqlite.Row
+            await self._pool.put(conn)
+        self._initialized = True
+    
+    def acquire(self):
+        """Context manager pour acquérir une connexion du pool"""
+        return _DBConnection(self)
+    
+    async def _get(self):
+        await self._semaphore.acquire()
+        return await self._pool.get()
+    
+    async def _put(self, conn):
+        await self._pool.put(conn)
+        self._semaphore.release()
+    
+    async def close_all(self):
+        """Ferme toutes les connexions du pool"""
+        while not self._pool.empty():
+            conn = await self._pool.get()
+            await conn.close()
+        self._initialized = False
+
+class _DBConnection:
+    """Context manager pour utiliser le pool : async with db_pool.acquire() as db:"""
+    def __init__(self, pool):
+        self._pool = pool
+        self._conn = None
+    
+    async def __aenter__(self):
+        self._conn = await self._pool._get()
+        return self._conn
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self._conn:
+            if exc_type is None:
+                try:
+                    await self._conn.commit()
+                except:
+                    pass
+            await self._pool._put(self._conn)
+        return False
+
+# Instance globale du pool
+_db_pool = DBPool(DB_PATH, pool_size=8)
+
+async def get_db():
+    """Raccourci : async with get_db() as db:"""
+    if not _db_pool._initialized:
+        await _db_pool.init()
+    return _db_pool.acquire()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #                           ⚡ SYSTÈME DE CACHE OPTIMISÉ
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -473,7 +550,7 @@ def detect_injection_attempt(text):
 async def log_security_event(guild_id, user_id, action, details):
     """Enregistre un événement de sécurité dans la base de données"""
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute(
                 'INSERT INTO security_logs (guild_id, user_id, action, details) VALUES (?, ?, ?, ?)',
                 (guild_id, user_id, sanitize_input(action, 100), sanitize_input(details, 500))
@@ -511,6 +588,8 @@ def validate_config_value(key, value):
 
 async def db_init():
     async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("PRAGMA journal_mode=WAL")
+        await db.execute("PRAGMA synchronous=NORMAL")
         await db.execute('CREATE TABLE IF NOT EXISTS guild_config(guild_id INTEGER PRIMARY KEY, data TEXT DEFAULT "{}")')
         await db.execute('CREATE TABLE IF NOT EXISTS immune_roles(guild_id INTEGER, role_id INTEGER, PRIMARY KEY(guild_id, role_id))')
         await db.execute('CREATE TABLE IF NOT EXISTS immune_users(guild_id INTEGER, user_id INTEGER, PRIMARY KEY(guild_id, user_id))')
@@ -581,6 +660,21 @@ async def db_init():
             total_vocal_time INTEGER DEFAULT 0,
             PRIMARY KEY (guild_id, user_id)
         )''')
+        # Table pour les stats journalières du serveur (graphiques tendances)
+        await db.execute('''CREATE TABLE IF NOT EXISTS daily_guild_stats (
+            guild_id INTEGER,
+            date TEXT,
+            total_messages INTEGER DEFAULT 0,
+            active_members INTEGER DEFAULT 0,
+            new_members INTEGER DEFAULT 0,
+            left_members INTEGER DEFAULT 0,
+            vocal_minutes INTEGER DEFAULT 0,
+            infractions INTEGER DEFAULT 0,
+            PRIMARY KEY (guild_id, date)
+        )''')
+        try:
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_daily_stats_guild ON daily_guild_stats(guild_id, date)')
+        except: pass
         # Table pour les giveaways (cadeaux)
         await db.execute('''CREATE TABLE IF NOT EXISTS giveaways (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -742,6 +836,22 @@ async def db_init():
         except:
             pass
         
+        # ═══════════════ TABLE ANTI-SPAM LIVE ═══════════════
+        # Persiste l'état des lives pour survivre aux redémarrages du bot
+        await db.execute('''CREATE TABLE IF NOT EXISTS live_announcements (
+            cache_key TEXT PRIMARY KEY,
+            guild_id INTEGER,
+            platform TEXT,
+            username TEXT,
+            announced_at DATETIME,
+            is_live INTEGER DEFAULT 1,
+            fail_count INTEGER DEFAULT 0
+        )''')
+        try:
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_live_guild ON live_announcements(guild_id)')
+        except:
+            pass
+        
         await db.commit()
     print("✅ DB OK")
 
@@ -753,7 +863,7 @@ async def db_get(gid):
         if gid is None:
             return {}
         
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('SELECT data FROM guild_config WHERE guild_id=?', (gid,)) as c:
                 r = await c.fetchone()
                 if r and r[0]:
@@ -793,7 +903,7 @@ async def db_set(gid, key, val):
             print(f"[DB] Config trop grande pour guild {gid}")
             return False
         
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('INSERT INTO guild_config(guild_id, data) VALUES(?,?) ON CONFLICT(guild_id) DO UPDATE SET data=?', (gid, jd, jd))
             await db.commit()
         
@@ -864,7 +974,7 @@ async def is_immune(m, key, channel=None):
     
     # Vérifier immunité personnalisée (rôles/utilisateurs/salons)
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             # Utilisateurs immunisés
             async with db.execute('SELECT user_id FROM immune_users WHERE guild_id=?', (m.guild.id,)) as c:
                 immune_users = [r[0] for r in await c.fetchall()]
@@ -897,7 +1007,7 @@ async def is_fully_immune(m):
     if m.id == m.guild.owner_id or m.guild_permissions.administrator:
         return True
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('SELECT user_id FROM immune_users WHERE guild_id=?', (m.guild.id,)) as c:
                 immune_users = [r[0] for r in await c.fetchall()]
             async with db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (m.guild.id,)) as c:
@@ -909,7 +1019,7 @@ async def is_fully_immune(m):
 async def is_channel_immune(guild_id, channel_id):
     """Vérifie si un salon est immunisé"""
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('SELECT channel_id FROM immune_channels WHERE guild_id=? AND channel_id=?', (guild_id, channel_id)) as c:
                 return await c.fetchone() is not None
     except:
@@ -922,7 +1032,7 @@ async def is_ticket_channel(channel):
     """
     try:
         # Vérifier dans la base de données des tickets
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute(
                 'SELECT id FROM tickets WHERE channel_id=? AND status="open"',
                 (channel.id,)
@@ -1482,7 +1592,7 @@ async def is_fully_immune(member):
         return True
     
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             # Vérifier les rôles immunisés
             async with db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (member.guild.id,)) as c:
                 immune_roles = {r[0] for r in await c.fetchall()}
@@ -1766,6 +1876,13 @@ def check_caps(ct, pct):
     if len(ltrs) < 10: return False
     return sum(1 for c in ltrs if c.isupper()) / len(ltrs) * 100 >= pct
 
+def check_mass_mention(msg, max_mentions=5):
+    """Détecte les messages avec trop de mentions (@user, @role, @everyone, @here)"""
+    total = len(msg.mentions) + len(msg.role_mentions)
+    if msg.mention_everyone:
+        total += msg.guild.member_count  # @everyone = mention massive
+    return total >= max_mentions
+
 def check_image(msg, allowed):
     blocked = []
     gt = get_gif_type(msg)
@@ -1814,7 +1931,7 @@ def check_channel_cfg(msg, conf):
 
 async def get_ticket(ch_id):
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('SELECT id, user_id, claimed_by, answers, panel_id FROM tickets WHERE channel_id=? AND status="open"', (ch_id,)) as c:
                 r = await c.fetchone()
                 if r:
@@ -1834,14 +1951,14 @@ async def count_user_tickets(g, uid, pid=None):
         if pid:
             q += " AND panel_id=?"
             p.append(pid)
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute(q, p) as c:
                 tks = await c.fetchall()
         for tid, chid in tks:
             if g.get_channel(chid): cnt += 1
             else: to_close.append(tid)
         if to_close:
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with get_db() as db:
                 for t in to_close:
                     await db.execute("UPDATE tickets SET status='closed' WHERE id=?", (t,))
                 await db.commit()
@@ -1916,7 +2033,7 @@ async def create_ticket(i, pid, ans=None):
             ow[i.guild.owner] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
         ch = await i.guild.create_text_channel(f"ticket-{i.user.name}"[:50], category=cat, overwrites=ow)
         aj = json.dumps(ans or {}, ensure_ascii=False)
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('INSERT INTO tickets(guild_id, channel_id, user_id, panel_id, claimed_by, status, answers) VALUES(?,?,?,?,0,"open",?)',
                 (i.guild.id, ch.id, i.user.id, pid, aj))
             await db.commit()
@@ -2078,7 +2195,7 @@ class TicketControlView(View):
             if sr:
                 ow[sr] = discord.PermissionOverwrite(view_channel=False)
             await i.channel.edit(overwrites=ow)
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with get_db() as db:
                 await db.execute('UPDATE tickets SET claimed_by=? WHERE channel_id=?', (i.user.id, i.channel.id))
                 await db.commit()
             await i.response.send_message(f"✅ **{i.user.display_name}** prend ce ticket en charge\n\n*Les autres staffs ne peuvent plus voir ce ticket.*")
@@ -2225,7 +2342,7 @@ class TicketControlView(View):
             
             tu = i.guild.get_member(tk['user'])
             await send_ticket_log(i.guild, 'close', tu or tk['user'], tk, closer=i.user, ch=i.channel)
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with get_db() as db:
                 await db.execute("UPDATE tickets SET status='closed' WHERE channel_id=?", (i.channel.id,))
                 await db.commit()
             await i.response.send_message("🔒 Fermeture dans 3 secondes...")
@@ -2272,6 +2389,7 @@ PROTS = [
     ("anti_spam", "📨", "Anti-Spam"),
     ("anti_caps", "🔠", "Anti-Caps"),
     ("anti_badwords", "🤬", "Anti-Insultes"),
+    ("anti_mass_mention", "📢", "Anti-Mentions"),
     ("anti_newaccount", "👶", "Anti-NewAccount"),
     ("anti_raid", "⚔️", "Anti-Raid"),
     ("anti_compromised", "🔐", "Anti-Compromis"),
@@ -2643,7 +2761,7 @@ async def save_user_fingerprint(guild_id, member):
         created_ts = int(member.created_at.timestamp()) if member.created_at else 0
         joined_ts = int(member.joined_at.timestamp()) if member.joined_at else 0
         
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('''
                 INSERT INTO user_fingerprints 
                 (guild_id, user_id, avatar_hash, username_normalized, created_at_ts, joined_at_ts, updated_at)
@@ -2659,7 +2777,7 @@ async def save_user_fingerprint(guild_id, member):
 async def save_ban_info(guild_id, user_id, username, avatar_hash, reason):
     """Sauvegarde les infos d'un ban pour détection de contournement"""
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('''
                 INSERT INTO ban_history (guild_id, user_id, username, avatar_hash, reason)
                 VALUES (?, ?, ?, ?, ?)
@@ -2682,7 +2800,7 @@ async def detect_alt_account(guild, new_member):
         new_username_norm = normalize_username(new_member.name)
         new_created_ts = int(new_member.created_at.timestamp()) if new_member.created_at else 0
         
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             # 1. Vérifier si l'avatar correspond à un utilisateur banni
             async with db.execute('''
                 SELECT user_id, username FROM ban_history 
@@ -2782,7 +2900,7 @@ async def detect_alt_account(guild, new_member):
 async def save_alt_detection(guild_id, main_id, alt_id, confidence, reasons):
     """Sauvegarde une détection de compte secondaire"""
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('''
                 INSERT INTO alt_accounts (guild_id, main_account_id, alt_account_id, confidence, reasons, status)
                 VALUES (?, ?, ?, ?, ?, "suspected")
@@ -2796,7 +2914,7 @@ async def save_alt_detection(guild_id, main_id, alt_id, confidence, reasons):
 async def get_alt_accounts(guild_id):
     """Récupère tous les comptes secondaires détectés pour un serveur"""
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('''
                 SELECT id, main_account_id, alt_account_id, confidence, reasons, status, detected_at, action_taken
                 FROM alt_accounts WHERE guild_id = ?
@@ -2809,7 +2927,7 @@ async def get_alt_accounts(guild_id):
 async def update_alt_status(guild_id, alt_id, status, action=""):
     """Met à jour le statut d'un compte secondaire"""
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('''
                 UPDATE alt_accounts SET status = ?, action_taken = ?
                 WHERE guild_id = ? AND alt_account_id = ?
@@ -2854,31 +2972,41 @@ class MainPanel(View):
         return i.user.id == self.u.id
     
     def embed(self):
-        e = discord.Embed(color=0x5865F2)
-        e.set_author(name="━━━  Panneau de Configuration  ━━━", icon_url=self.g.icon.url if self.g.icon else None)
+        e = discord.Embed(color=0x2F3136)
+        e.set_author(name=f"⚙️ Configuration — {self.g.name}", icon_url=self.g.icon.url if self.g.icon else None)
         
-        desc = f"**{self.g.name}**\n"
-        desc += f"👥 `{self.g.member_count}` membres  •  📺 `{len(self.g.channels)}` salons  •  🎭 `{len(self.g.roles)}` rôles\n\n"
-        desc += "╔══════════════════════════════════╗\n"
-        desc += "║  🛡️  **Sécurité & Modération**       ║\n"
-        desc += "║  Protection, Modération, Immunités    ║\n"
-        desc += "╠══════════════════════════════════╣\n"
-        desc += "║  🎫  **Communauté & Interactions**  ║\n"
-        desc += "║  Tickets, Niveaux, Commandes          ║\n"
-        desc += "╠══════════════════════════════════╣\n"
-        desc += "║  📢  **Contenu & Publicité**              ║\n"
-        desc += "║  Feeds sociaux, Stats, Aide auto         ║\n"
-        desc += "╠══════════════════════════════════╣\n"
-        desc += "║  🔧  **Outils & Configuration**        ║\n"
-        desc += "║  Salons, Vocaux, Config avancée        ║\n"
-        desc += "╚══════════════════════════════════╝\n"
-        desc += "\n*▼ Sélectionnez un module ci-dessous*"
+        # Stats serveur en haut
+        online = sum(1 for m in self.g.members if m.status != discord.Status.offline and not m.bot)
+        bots = sum(1 for m in self.g.members if m.bot)
+        humans = self.g.member_count - bots
+        boosts = self.g.premium_subscription_count or 0
+        
+        desc = (
+            f"```ansi\n"
+            f"\u001b[1;37m{'═' * 40}\n"
+            f"\u001b[1;36m  👥 {humans} membres  •  🤖 {bots} bots  •  🟢 {online} en ligne\n"
+            f"\u001b[1;33m  📺 {len(self.g.text_channels)} salons  •  🔊 {len(self.g.voice_channels)} vocaux  •  💎 {boosts} boosts\n"
+            f"\u001b[1;37m{'═' * 40}\n"
+            f"```\n"
+            f"**🛡️ Sécurité** — Protection, Modération, Immunités\n"
+            f"**🎫 Communauté** — Tickets, Niveaux, Commandes\n"
+            f"**📢 Contenu** — Feeds sociaux, Stats, Aide auto\n"
+            f"**🔧 Outils** — Salons, Vocaux, Config avancée\n\n"
+            f"*▼ Sélectionnez un module ci-dessous*"
+        )
         e.description = desc
         
         if self.g.icon:
             e.set_thumbnail(url=self.g.icon.url)
         
-        e.set_footer(text=f"Configuré par {self.u.display_name}  •  Timeout: 10 min", icon_url=self.u.display_avatar.url)
+        # Banner du serveur si dispo
+        if self.g.banner:
+            e.set_image(url=self.g.banner.url)
+        
+        e.set_footer(
+            text=f"👑 {self.u.display_name} • Owner only • Timeout 10min",
+            icon_url=self.u.display_avatar.url
+        )
         return e
     
     @discord.ui.select(
@@ -2936,26 +3064,38 @@ class ProtPanel(View):
     async def embed(self):
         c = await cfg(self.g.id)
         e = discord.Embed(color=0x3498DB)
-        e.set_author(name="━━━  Protection  ━━━", icon_url=self.g.icon.url if self.g.icon else None)
+        e.set_author(name="🛡️ Protection du Serveur", icon_url=self.g.icon.url if self.g.icon else None)
         
-        lines = []
         enabled_count = 0
+        lines = []
         for key, emoji, name in PROTS:
             is_on = c.get(key)
             if is_on:
                 enabled_count += 1
-            status = "` ✅ ON  `" if is_on else "` ❌ OFF `"
+            status = "🟢" if is_on else "🔴"
             log_ch = self.g.get_channel(c.get(f'log_{key}', 0))
-            log_txt = f"  ➜  {log_ch.mention}" if log_ch else ""
-            lines.append(f"{emoji} **{name}**  {status}{log_txt}")
+            log_txt = f" → {log_ch.mention}" if log_ch else ""
+            lines.append(f"{status} {emoji} **{name}**{log_txt}")
         
-        desc = f"**{enabled_count}/{len(PROTS)}** protections actives\n"
-        desc += f"─────────────────────────────────\n"
+        # Barre de progression visuelle
+        total = len(PROTS)
+        bar_filled = round(enabled_count / total * 10) if total > 0 else 0
+        bar = "█" * bar_filled + "░" * (10 - bar_filled)
+        pct = round(enabled_count / total * 100) if total > 0 else 0
+        
+        desc = (
+            f"**Score de protection : {pct}%**\n"
+            f"`[{bar}]` {enabled_count}/{total} actives\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        )
         desc += "\n".join(lines)
-        desc += f"\n─────────────────────────────────\n"
-        desc += f"*Sélectionnez une protection pour la configurer*"
+        desc += f"\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        desc += "*▼ Sélectionnez une protection pour la configurer*"
         e.description = desc
-        e.set_footer(text="🛡️ Sélectionnez ci-dessous pour configurer")
+        
+        if self.g.icon:
+            e.set_thumbnail(url=self.g.icon.url)
+        e.set_footer(text=f"🛡️ Protection • {self.g.name}")
         return e
     
     @discord.ui.select(
@@ -3022,6 +3162,13 @@ class ProtDetail(View):
         
         elif self.key == "anti_caps":
             e.add_field(name="📊 Pourcentage max", value=f"{c.get('caps_percent', 70)}%", inline=True)
+        
+        elif self.key == "anti_mass_mention":
+            max_mentions = c.get('mention_limit', 5)
+            action = c.get('mention_action', 'mute').upper()
+            e.add_field(name="📊 Max mentions", value=f"`{max_mentions}` par message", inline=True)
+            e.add_field(name="⚡ Action", value=action, inline=True)
+            e.add_field(name="ℹ️ Info", value="Détecte @everyone, @here, et les mentions massives de membres/rôles", inline=False)
         
         elif self.key == "anti_newaccount":
             e.add_field(name="📅 Jours minimum", value=str(c.get('newaccount_days', 7)), inline=True)
@@ -4233,7 +4380,7 @@ class AltDetectionsPanel(View):
     @discord.ui.button(label="🗑️ Effacer historique", style=discord.ButtonStyle.danger, row=1)
     async def clear_history(self, i, b):
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with get_db() as db:
                 await db.execute('DELETE FROM alt_accounts WHERE guild_id = ?', (self.g.id,))
                 await db.commit()
             await i.response.send_message("✅ Historique effacé", ephemeral=True)
@@ -4664,30 +4811,45 @@ class ModerationPanel(View):
     
     async def embed(self):
         c = await cfg(self.g.id)
-        e = discord.Embed(title="🔨 Modération", color=C.ORANGE)
-        e.description = "Configurez les rôles et logs pour les commandes de modération."
+        e = discord.Embed(color=0xE67E22)
+        e.set_author(name="🔨 Modération", icon_url=self.g.icon.url if self.g.icon else None)
+        
+        # Stats infractions
+        inf_count = 0
+        try:
+            async with get_db() as db:
+                async with db.execute('SELECT COUNT(*) FROM infractions WHERE guild_id=?', (self.g.id,)) as cur:
+                    row = await cur.fetchone()
+                    inf_count = row[0] if row else 0
+        except: pass
+        
+        e.description = (
+            f"Configurez les rôles et logs de modération.\n"
+            f"📊 **{inf_count}** infractions enregistrées au total\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        )
         
         # Salon logs
         log_ch = self.g.get_channel(c.get('mod_log_channel', 0))
         e.add_field(
             name="📜 Salon Logs",
-            value=log_ch.mention if log_ch else "❌ Non configuré",
-            inline=False
+            value=f"{'🟢 ' + log_ch.mention if log_ch else '🔴 Non configuré'}",
+            inline=True
         )
         
         # Warn
         warn_role = self.g.get_role(c.get('mod_warn_role', 0))
         e.add_field(
-            name="⚠️ /warn & /unwarn",
-            value=f"Rôle: {warn_role.mention if warn_role else '❌ Non configuré'}",
+            name="⚠️ /warn",
+            value=f"{'🟢 ' + warn_role.mention if warn_role else '🔴 Non configuré'}",
             inline=True
         )
         
         # Mute
         mute_role = self.g.get_role(c.get('mod_mute_role', 0))
         e.add_field(
-            name="🔇 /mute & /unmute",
-            value=f"Rôle: {mute_role.mention if mute_role else '❌ Non configuré'}",
+            name="🔇 /mute",
+            value=f"{'🟢 ' + mute_role.mention if mute_role else '🔴 Non configuré'}",
             inline=True
         )
         
@@ -4695,11 +4857,19 @@ class ModerationPanel(View):
         inf_role = self.g.get_role(c.get('mod_infractions_role', 0))
         e.add_field(
             name="📋 /infractions",
-            value=f"Rôle: {inf_role.mention if inf_role else '❌ Non configuré'}",
+            value=f"{'🟢 ' + inf_role.mention if inf_role else '🔴 Non configuré'}",
             inline=True
         )
         
-        e.set_footer(text="Les admins et le owner ont toujours accès à toutes les commandes")
+        # Clear
+        clear_role = self.g.get_role(c.get('mod_clear_role', 0))
+        e.add_field(
+            name="🧹 /clear",
+            value=f"{'🟢 ' + clear_role.mention if clear_role else '🔴 Non configuré'}",
+            inline=True
+        )
+        
+        e.set_footer(text="👑 Le owner a toujours accès à toutes les commandes")
         return e
     
     @discord.ui.button(label="📜 Salon Logs", style=discord.ButtonStyle.success, row=0)
@@ -4885,7 +5055,7 @@ class ImmunePanel(View):
         self.g = g
     
     async def embed(self):
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (self.g.id,)) as c:
                 rids = [r[0] for r in await c.fetchall()]
             async with db.execute('SELECT user_id FROM immune_users WHERE guild_id=?', (self.g.id,)) as c:
@@ -4893,23 +5063,32 @@ class ImmunePanel(View):
             async with db.execute('SELECT channel_id FROM immune_channels WHERE guild_id=?', (self.g.id,)) as c:
                 chids = [r[0] for r in await c.fetchall()]
         
-        e = discord.Embed(title="👑 Immunités", color=C.YELLOW)
+        total = len(rids) + len(uids) + len(chids)
+        e = discord.Embed(color=0xF1C40F)
+        e.set_author(name="👑 Immunités", icon_url=self.g.icon.url if self.g.icon else None)
         e.description = (
-            "Les éléments immunisés peuvent :\n"
-            "✅ Envoyer des liens librement\n"
-            "✅ Envoyer des images/GIFs partout\n"
-            "✅ Envoyer des invitations Discord\n"
-            "✅ Utiliser les majuscules librement\n\n"
-            "⚠️ **Protection maintenue contre :**\n"
-            "🎣 Phishing (protection critique)\n"
-            "🚨 Scams (détection automatique)"
+            f"**{total}** éléments immunisés au total\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"✅ Liens, images, GIFs, invitations, majuscules\n"
+            f"⚠️ **Phishing & Scams restent détectés**"
         )
         
-        e.add_field(name=f"🎭 Rôles ({len(rids)})", value=", ".join([f"<@&{r}>" for r in rids[:10]]) or "*Aucun*", inline=False)
-        e.add_field(name=f"👤 Utilisateurs ({len(uids)})", value=", ".join([f"<@{u}>" for u in uids[:10]]) or "*Aucun*", inline=False)
-        e.add_field(name=f"📺 Salons ({len(chids)})", value=", ".join([f"<#{c}>" for c in chids[:10]]) or "*Aucun*", inline=False)
+        # Rôles
+        roles_txt = ", ".join([f"<@&{r}>" for r in rids[:10]]) if rids else "*Aucun*"
+        if len(rids) > 10: roles_txt += f"\n*... +{len(rids)-10} autres*"
+        e.add_field(name=f"🎭 Rôles ({len(rids)})", value=roles_txt, inline=False)
         
-        e.set_footer(text="💡 Les tickets sont automatiquement immunisés (sauf phishing/scam)")
+        # Utilisateurs
+        users_txt = ", ".join([f"<@{u}>" for u in uids[:10]]) if uids else "*Aucun*"
+        if len(uids) > 10: users_txt += f"\n*... +{len(uids)-10} autres*"
+        e.add_field(name=f"👤 Utilisateurs ({len(uids)})", value=users_txt, inline=False)
+        
+        # Salons
+        chans_txt = ", ".join([f"<#{c}>" for c in chids[:10]]) if chids else "*Aucun*"
+        if len(chids) > 10: chans_txt += f"\n*... +{len(chids)-10} autres*"
+        e.add_field(name=f"📺 Salons ({len(chids)})", value=chans_txt, inline=False)
+        
+        e.set_footer(text="👑 Immunités • Les tickets sont automatiquement immunisés")
         return e
     
     @discord.ui.button(label="➕ Rôle", style=discord.ButtonStyle.success, row=0)
@@ -4950,7 +5129,7 @@ class ImmunePanel(View):
     
     @discord.ui.button(label="🗑️ Tout supprimer", style=discord.ButtonStyle.danger, row=1)
     async def clear(self, i, b):
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('DELETE FROM immune_roles WHERE guild_id=?', (self.g.id,))
             await db.execute('DELETE FROM immune_users WHERE guild_id=?', (self.g.id,))
             await db.execute('DELETE FROM immune_channels WHERE guild_id=?', (self.g.id,))
@@ -5029,7 +5208,7 @@ class ImmuneRoleSelectMenu(Select):
         self.parent = parent
     
     async def callback(self, i):
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('INSERT OR IGNORE INTO immune_roles VALUES(?,?)', (i.guild.id, int(self.values[0])))
             await db.commit()
         role = i.guild.get_role(int(self.values[0]))
@@ -5108,7 +5287,7 @@ class ImmuneChannelSelectMenu(Select):
         self.parent = parent
     
     async def callback(self, i):
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('INSERT OR IGNORE INTO immune_channels VALUES(?,?)', (i.guild.id, int(self.values[0])))
             await db.commit()
         ch = i.guild.get_channel(int(self.values[0]))
@@ -5139,7 +5318,7 @@ class ImmuneRoleSelect(Select):
         self.g = g
     
     async def callback(self, i):
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('INSERT OR IGNORE INTO immune_roles VALUES(?,?)', (i.guild.id, int(self.values[0])))
             await db.commit()
         v = ImmunePanel(self.u, self.g)
@@ -5164,7 +5343,7 @@ class ImmuneChannelSelect(Select):
         self.g = g
     
     async def callback(self, i):
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('INSERT OR IGNORE INTO immune_channels VALUES(?,?)', (i.guild.id, int(self.values[0])))
             await db.commit()
         v = ImmunePanel(self.u, self.g)
@@ -5178,7 +5357,7 @@ class ImmuneRemoveView(View):
     
     @discord.ui.button(label="🎭 Rôle", style=discord.ButtonStyle.primary, row=0)
     async def remove_role(self, i, b):
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (self.g.id,)) as c:
                 rids = [r[0] for r in await c.fetchall()]
         if not rids:
@@ -5191,7 +5370,7 @@ class ImmuneRemoveView(View):
     
     @discord.ui.button(label="👤 Utilisateur", style=discord.ButtonStyle.primary, row=0)
     async def remove_user(self, i, b):
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('SELECT user_id FROM immune_users WHERE guild_id=?', (self.g.id,)) as c:
                 uids = [r[0] for r in await c.fetchall()]
         if not uids:
@@ -5204,7 +5383,7 @@ class ImmuneRemoveView(View):
     
     @discord.ui.button(label="📺 Salon", style=discord.ButtonStyle.primary, row=0)
     async def remove_channel(self, i, b):
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('SELECT channel_id FROM immune_channels WHERE guild_id=?', (self.g.id,)) as c:
                 chids = [r[0] for r in await c.fetchall()]
         if not chids:
@@ -5232,7 +5411,7 @@ class ImmuneRemoveRoleSelect(Select):
         self.g = g
     
     async def callback(self, i):
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('DELETE FROM immune_roles WHERE guild_id=? AND role_id=?', (i.guild.id, int(self.values[0])))
             await db.commit()
         v = ImmunePanel(self.u, self.g)
@@ -5250,7 +5429,7 @@ class ImmuneRemoveUserSelect(Select):
         self.g = g
     
     async def callback(self, i):
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('DELETE FROM immune_users WHERE guild_id=? AND user_id=?', (i.guild.id, int(self.values[0])))
             await db.commit()
         v = ImmunePanel(self.u, self.g)
@@ -5268,7 +5447,7 @@ class ImmuneRemoveChannelSelect(Select):
         self.g = g
     
     async def callback(self, i):
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('DELETE FROM immune_channels WHERE guild_id=? AND channel_id=?', (i.guild.id, int(self.values[0])))
             await db.commit()
         v = ImmunePanel(self.u, self.g)
@@ -5285,7 +5464,7 @@ class AddImmuneUserModal(Modal, title="➕ Ajouter un utilisateur immunisé"):
     async def on_submit(self, i):
         try:
             user_id = int(self.uid.value)
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with get_db() as db:
                 await db.execute('INSERT OR IGNORE INTO immune_users VALUES(?,?)', (self.g.id, user_id))
                 await db.commit()
         except: pass
@@ -5304,24 +5483,31 @@ class CommandsPanel(View):
     
     async def embed(self):
         c = await cfg(self.g.id)
-        e = discord.Embed(title="⚡ Commandes Personnalisées", color=C.PURPLE)
-        e.description = "Configurez les commandes spéciales du serveur."
+        e = discord.Embed(color=0x9B59B6)
+        e.set_author(name="⚡ Commandes & Interactions", icon_url=self.g.icon.url if self.g.icon else None)
+        
+        e.description = (
+            "Configurez les systèmes interactifs du serveur.\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        )
         
         # RellSeas
         rellseas_user = self.g.get_member(c.get('rellseas_user', 0))
         rellseas_role = self.g.get_role(c.get('rellseas_role', 0))
+        rs_status = "🟢" if rellseas_user and rellseas_role else "🔴"
         e.add_field(
-            name="🎭 RellSeas",
-            value=f"👤 {rellseas_user.mention if rellseas_user else '❌'}\n🎭 {rellseas_role.mention if rellseas_role else '❌'}",
+            name=f"{rs_status} 🎭 RellSeas",
+            value=f"👤 {rellseas_user.mention if rellseas_user else '❌ Non configuré'}\n🎭 {rellseas_role.mention if rellseas_role else '❌ Non configuré'}",
             inline=True
         )
         
         # Suggestions
         sugg_role = self.g.get_role(c.get('suggestion_role', 0))
         sugg_ch = self.g.get_channel(c.get('suggestion_channel', 0))
+        sg_status = "🟢" if sugg_ch else "🔴"
         e.add_field(
-            name="💡 Suggestions",
-            value=f"🎭 {sugg_role.mention if sugg_role else 'Tous'}\n📍 {sugg_ch.mention if sugg_ch else '❌'}",
+            name=f"{sg_status} 💡 Suggestions",
+            value=f"🎭 {sugg_role.mention if sugg_role else '🌐 Tous'}\n📍 {sugg_ch.mention if sugg_ch else '❌ Non configuré'}",
             inline=True
         )
         
@@ -5331,12 +5517,14 @@ class CommandsPanel(View):
         trade_unit = c.get('trade_cooldown_unit', 'heures')
         trade_allowed = c.get('trade_allowed_channels', [])
         trade_count = len(trade_allowed) if trade_allowed else 0
+        tr_status = "🟢" if trade_count > 0 else "🔴"
         e.add_field(
-            name="🔄 Trade",
-            value=f"🎭 {trade_role.mention if trade_role else 'Tous'}\n📌 {trade_count} salon(s)\n⏱️ {trade_cd} {trade_unit}",
+            name=f"{tr_status} 🔄 Trade",
+            value=f"🎭 {trade_role.mention if trade_role else '🌐 Tous'}\n📌 {trade_count} salon(s) • ⏱️ {trade_cd}{trade_unit[0]}",
             inline=True
         )
         
+        e.set_footer(text="⚡ Commandes • Sélectionnez ci-dessous pour configurer")
         return e
     
     @discord.ui.button(label="🎭 RellSeas", style=discord.ButtonStyle.primary, row=0)
@@ -5485,7 +5673,7 @@ class RellSeasUserModal(Modal, title="👤 Utilisateur RellSeas"):
                 try:
                     await member.add_roles(role, reason="RellSeas - Utilisateur autorisé")
                     # Enregistrer dans le tracking
-                    async with aiosqlite.connect(DB_PATH) as db:
+                    async with get_db() as db:
                         await db.execute('''INSERT OR REPLACE INTO realsy_tracking 
                             (guild_id, user_id, last_activity, warn_count) VALUES (?, ?, ?, 0)''',
                             (self.g.id, user_id, now().isoformat()))
@@ -5806,46 +5994,182 @@ posted_content = {}
 # Cache des webhooks par (channel_id, platform) pour éviter de les recréer
 _webhook_cache = {}
 
-# Configuration des webhooks par plateforme / module
-# Avatars : URLs Wikimedia Commons (stables, permanentes) ou CDN officiels
-_YT_ICON = 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/72/YouTube_social_white_square_%282017%29.svg/240px-YouTube_social_white_square_%282017%29.svg.png'
-_TW_ICON = 'https://upload.wikimedia.org/wikipedia/commons/thumb/d/d3/Twitch_Glitch_Logo_Purple.svg/240px-Twitch_Glitch_Logo_Purple.svg.png'
-_TK_ICON = 'https://upload.wikimedia.org/wikipedia/en/thumb/a/a9/TikTok_logo.svg/240px-TikTok_logo.svg.png'
-_X_ICON = 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/ce/X_logo_2023.svg/240px-X_logo_2023.svg.png'
-_RD_ICON = 'https://www.redditstatic.com/desktop2x/img/favicon/android-icon-192x192.png'
-_DC_ICON = 'https://upload.wikimedia.org/wikipedia/fr/thumb/4/4f/Discord_Logo_sans_texte.svg/240px-Discord_Logo_sans_texte.svg.png'
-_RBX_ICON = 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/bb/Roblox_logo_2022.svg/240px-Roblox_logo_2022.svg.png'
-_STM_ICON = 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/Steam_icon_logo.svg/240px-Steam_icon_logo.svg.png'
+# ═══════════════════════════════════════════════════════════════════════════════
+#                    🔴 ANTI-SPAM LIVE : Persisté en DB + RAM
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# RAM cache rapide (rempli depuis DB au boot)
+# _live_state[key] = {'is_live': bool, 'announced_at': datetime, 'fail_count': int}
+_live_state = {}
+
+# Cooldown MINIMUM entre 2 annonces du même live (18 heures)
+# C'est le fix principal du spam : même si le live flicker (TikTok/Twitch HTML instable),
+# on ne re-annonce JAMAIS avant 18h. Un stream de 24h = 1 seule annonce.
+LIVE_ANNOUNCE_COOLDOWN = 64800  # 18 heures en secondes
+# Nombre de checks "non-live" consécutifs avant de considérer le live VRAIMENT terminé
+# Avec check_social_feeds toutes les 5 min → 36 checks = 3 HEURES de debounce
+# Ça évite les faux "fin de live" causés par des erreurs réseau/HTML temporaires
+LIVE_END_THRESHOLD = 36
+# Lock pour empêcher les exécutions concurrentes du task
+_feeds_lock = asyncio.Lock()
+
+async def load_live_state_from_db():
+    """Charge l'état des lives depuis la DB au démarrage"""
+    try:
+        async with get_db() as db:
+            async with db.execute('SELECT cache_key, announced_at, is_live, fail_count FROM live_announcements') as cur:
+                async for row in cur:
+                    key = row[0]
+                    try:
+                        ann_at = datetime.fromisoformat(row[1]).replace(tzinfo=timezone.utc) if row[1] else None
+                    except:
+                        ann_at = None
+                    _live_state[key] = {
+                        'is_live': bool(row[2]),
+                        'announced_at': ann_at,
+                        'fail_count': row[3] or 0
+                    }
+        print(f"✅ Live state loaded: {len(_live_state)} entries")
+    except:
+        pass
+
+async def save_live_state(cache_key: str, guild_id: int = 0, platform: str = '', username: str = ''):
+    """Persiste l'état d'un live en DB"""
+    state = _live_state.get(cache_key)
+    if not state:
+        return
+    try:
+        ann_str = state['announced_at'].isoformat() if state.get('announced_at') else None
+        async with get_db() as db:
+            await db.execute('''
+                INSERT INTO live_announcements (cache_key, guild_id, platform, username, announced_at, is_live, fail_count)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(cache_key) DO UPDATE SET
+                    announced_at = ?, is_live = ?, fail_count = ?
+            ''', (cache_key, guild_id, platform, username, ann_str,
+                  1 if state.get('is_live') else 0, state.get('fail_count', 0),
+                  ann_str, 1 if state.get('is_live') else 0, state.get('fail_count', 0)))
+            await db.commit()
+    except Exception as ex:
+        print(f"[LIVE] Erreur save: {ex}")
+
+async def should_announce_live(cache_key: str) -> bool:
+    """Vérifie si on doit annoncer un live (anti-spam BULLETPROOF).
+    
+    Logique :
+    1. Jamais vu → annoncer (première fois)
+    2. is_live == True → BLOQUER (déjà annoncé, live en cours)
+    3. is_live == False mais < 18h depuis dernière annonce → BLOQUER (cooldown dur)
+    4. is_live == False et > 18h → annoncer (nouveau live le lendemain)
+    """
+    state = _live_state.get(cache_key)
+    if not state:
+        return True  # Jamais vu → annoncer
+    
+    # ═══ RULE 1 : Si le live est marqué comme en cours → TOUJOURS bloquer ═══
+    if state.get('is_live', False):
+        return False
+    
+    # ═══ RULE 2 : Cooldown dur de 18h depuis la DERNIÈRE annonce ═══
+    # Même si is_live est False (HTML flicker), on bloque quand même
+    last = state.get('announced_at')
+    if last:
+        try:
+            now_utc = now().replace(tzinfo=timezone.utc)
+            last_utc = last.replace(tzinfo=timezone.utc) if last.tzinfo is None else last
+            elapsed = (now_utc - last_utc).total_seconds()
+            if elapsed < LIVE_ANNOUNCE_COOLDOWN:
+                return False  # < 18h depuis dernière annonce → BLOQUER
+        except:
+            return False  # En cas de doute → BLOQUER (mieux vaut pas de spam)
+    
+    return True  # Cooldown passé → annoncer
+
+async def mark_live_announced(cache_key: str, guild_id: int = 0, platform: str = '', username: str = ''):
+    """Marque un live comme annoncé (RAM + DB)"""
+    _live_state[cache_key] = {
+        'is_live': True,
+        'announced_at': now(),
+        'fail_count': 0
+    }
+    await save_live_state(cache_key, guild_id, platform, username)
+
+async def check_live_ended(cache_key: str, guild_id: int = 0, platform: str = '', username: str = ''):
+    """Vérifie si le live est vraiment terminé (debounce 30 min)."""
+    state = _live_state.get(cache_key)
+    if not state:
+        return
+    
+    state['fail_count'] = state.get('fail_count', 0) + 1
+    
+    if state['fail_count'] >= LIVE_END_THRESHOLD:
+        # 30 min sans détection → live terminé
+        state['is_live'] = False
+        state['fail_count'] = 0
+    
+    await save_live_state(cache_key, guild_id, platform, username)
+
+def mark_live_still_active(cache_key: str):
+    """Le live est toujours actif — reset le compteur de fin ET s'assurer que is_live=True.
+    
+    FIX CRITIQUE : Si check_live_ended avait mis is_live=False à cause d'un flicker HTML,
+    cette fonction remet is_live=True pour empêcher should_announce_live de re-trigger.
+    """
+    state = _live_state.get(cache_key)
+    if state:
+        state['fail_count'] = 0
+        state['is_live'] = True  # CRUCIAL : maintenir le flag live actif
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                    🎨 WEBHOOK PROFILES & AVATARS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Icônes pour les embeds (set_author, set_footer) — utilisé DANS les embeds seulement
+# IMPORTANT : Discord ne supporte PAS les SVG → utiliser UNIQUEMENT des PNG/JPG
+# Pour l'avatar du webhook lui-même, on utilise TOUJOURS l'avatar du bot
+_YT_ICON = 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/09/YouTube_full-color_icon_%282017%29.svg/120px-YouTube_full-color_icon_%282017%29.svg.png'
+_TW_ICON = 'https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png'
+_TK_ICON = 'https://sf16-scmcdn-va.ibytedtos.com/goofy/tiktok/web/node/_next/static/images/logo-7328701c.png'
+_X_ICON = 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/ce/X_logo_2023.svg/120px-X_logo_2023.svg.png'
+_RD_ICON = 'https://www.redditstatic.com/desktop2x/img/favicon/android-icon-192x192.png'
+_DC_ICON = 'https://cdn.prod.website-files.com/6257adef93867e50d84d30e2/636e0a69f118df70ad7828d4_icon_clyde_blurple_RGB.png'
+_RBX_ICON = 'https://upload.wikimedia.org/wikipedia/commons/thumb/b/bb/Roblox_logo_2022.svg/120px-Roblox_logo_2022.svg.png'
+_STM_ICON = 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/Steam_icon_logo.svg/120px-Steam_icon_logo.svg.png'
+
+# ═══ AVATAR GLOBAL DU BOT (mis à jour dans on_ready) ═══
+# Utilisé comme avatar de TOUS les webhooks — garantit un logo uniforme
+_BOT_AVATAR_URL = None  # Sera défini dans on_ready
+
+# Profils webhooks : avatar est TOUJOURS None → remplacé par l'avatar du bot dans webhook_send
 WEBHOOK_PROFILES = {
     # ─── Réseaux sociaux ───
-    'youtube': {'name': 'YouTube', 'avatar': _YT_ICON},
-    'youtube_live': {'name': '🔴 YouTube Live', 'avatar': _YT_ICON},
-    'twitch': {'name': 'Twitch', 'avatar': _TW_ICON},
-    'twitch_live': {'name': '🔴 Twitch Live', 'avatar': _TW_ICON},
-    'tiktok': {'name': 'TikTok', 'avatar': _TK_ICON},
-    'tiktok_live': {'name': '🔴 TikTok Live', 'avatar': _TK_ICON},
-    'twitter': {'name': '𝕏', 'avatar': _X_ICON},
-    'reddit': {'name': 'Reddit', 'avatar': _RD_ICON},
-    'discord_relay': {'name': 'Discord Relay', 'avatar': _DC_ICON},
-    'rosocial': {'name': 'RoSocial', 'avatar': _RBX_ICON},
-    'roblox_ugc': {'name': 'Roblox UGC', 'avatar': _RBX_ICON},
-    'deals': {'name': 'Bons Plans', 'avatar': _STM_ICON},
+    'youtube': {'name': 'YouTube'},
+    'youtube_live': {'name': '🔴 YouTube Live'},
+    'twitch': {'name': 'Twitch'},
+    'twitch_live': {'name': '🔴 Twitch Live'},
+    'tiktok': {'name': 'TikTok'},
+    'tiktok_live': {'name': '🔴 TikTok Live'},
+    'twitter': {'name': '𝕏'},
+    'reddit': {'name': 'Reddit'},
+    'discord_relay': {'name': 'Discord Relay'},
+    'rosocial': {'name': 'RoSocial'},
+    'roblox_ugc': {'name': 'Roblox UGC'},
+    'deals': {'name': 'Bons Plans'},
     # ─── Modération & Sécurité ───
-    'mod_log': {'name': '🔨 Modération', 'avatar': None},
-    'protection': {'name': '🛡️ Protection', 'avatar': None},
-    'raid_alert': {'name': '🚨 Anti-Raid', 'avatar': None},
+    'mod_log': {'name': '🔨 Modération'},
+    'protection': {'name': '🛡️ Protection'},
+    'raid_alert': {'name': '🚨 Anti-Raid'},
     # ─── Communauté ───
-    'welcome': {'name': '👋 Bienvenue', 'avatar': None},
-    'announcement': {'name': '📢 Annonces', 'avatar': None},
-    'auto_message': {'name': '💬 Auto-Message', 'avatar': None},
-    'giveaway': {'name': '🎁 Giveaway', 'avatar': None},
-    'suggestion': {'name': '💡 Suggestions', 'avatar': None},
-    'trade': {'name': '🔄 Échanges', 'avatar': None},
-    'level_up': {'name': '⭐ Niveau', 'avatar': None},
-    'ticket': {'name': '🎫 Tickets', 'avatar': None},
-    'realsy': {'name': '🎭 Activité', 'avatar': None},
-    'auto_help': {'name': '❓ Aide Auto', 'avatar': None},
+    'welcome': {'name': '👋 Bienvenue'},
+    'announcement': {'name': '📢 Annonces'},
+    'auto_message': {'name': '💬 Auto-Message'},
+    'giveaway': {'name': '🎁 Giveaway'},
+    'suggestion': {'name': '💡 Suggestions'},
+    'trade': {'name': '🔄 Échanges'},
+    'level_up': {'name': '⭐ Niveau'},
+    'ticket': {'name': '🎫 Tickets'},
+    'realsy': {'name': '🎭 Activité'},
+    'auto_help': {'name': '❓ Aide Auto'},
 }
 
 async def get_webhook(channel, platform: str):
@@ -5888,13 +6212,17 @@ async def webhook_send(channel, platform: str, embed=None, content=None, file=No
         if files: kw['files'] = files
         if view: kw['view'] = view
         if include_profile:
-            profile = WEBHOOK_PROFILES.get(platform, {'name': '📢 Notifications', 'avatar': None})
+            profile = WEBHOOK_PROFILES.get(platform, {'name': '📢 Notifications'})
             kw['username'] = profile['name']
-            # Avatar : profil plateforme > icône du serveur > None
-            avatar = profile.get('avatar')
-            if not avatar and hasattr(channel, 'guild') and channel.guild.icon:
-                avatar = channel.guild.icon.url
-            kw['avatar_url'] = avatar
+            # Avatar : TOUJOURS l'avatar du bot (stocké dans _BOT_AVATAR_URL au ready)
+            # Cela garantit un logo UNIFORME sur TOUS les messages webhook
+            if _BOT_AVATAR_URL:
+                kw['avatar_url'] = _BOT_AVATAR_URL
+            else:
+                try:
+                    kw['avatar_url'] = bot.user.display_avatar.url
+                except:
+                    pass  # Bot pas encore prêt
             kw['wait'] = True
         return kw
     
@@ -5954,7 +6282,7 @@ class AdsPanel(View):
     async def embed(self):
         c = await cfg(self.g.id)
         e = discord.Embed(color=0x9B59B6)
-        e.set_author(name="━━━  Publicité & Notifications  ━━━", icon_url=self.g.icon.url if self.g.icon else None)
+        e.set_author(name="📢 Publicité & Notifications", icon_url=self.g.icon.url if self.g.icon else None)
         
         def _status(key, feeds_key):
             ch = self.g.get_channel(c.get(key, 0))
@@ -7277,7 +7605,7 @@ class AdsDealsPanel(View):
         # Compter les deals actifs en DB
         active_deals = 0
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with get_db() as db:
                 async with db.execute('SELECT COUNT(*) FROM posted_deals WHERE guild_id=? AND expired=0', (self.g.id,)) as cur:
                     row = await cur.fetchone()
                     active_deals = row[0] if row else 0
@@ -7537,26 +7865,21 @@ class CentrePanel(View):
         self.g = g
     
     def embed(self):
-        e = discord.Embed(title="🎯 Centre de Gestion", color=C.BLURPLE)
-        e.description = "Gérez les fonctionnalités avancées de votre serveur."
+        e = discord.Embed(color=0x5865F2)
+        e.set_author(name="🎯 Centre de Gestion", icon_url=self.g.icon.url if self.g.icon else None)
         
-        e.add_field(
-            name="🎁 Cadeau (Giveaway)",
-            value="Créez et gérez des cadeaux avec conditions personnalisées",
-            inline=False
-        )
-        e.add_field(
-            name="📢 Annonces",
-            value="Envoyez de belles annonces dans vos salons",
-            inline=False
-        )
-        e.add_field(
-            name="📨 Messages Automatiques",
-            value="Programmez des messages récurrents",
-            inline=False
+        e.description = (
+            "Gérez le contenu et les événements de votre serveur.\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🎁 **Cadeaux** — Giveaways avec conditions, durée, images\n"
+            "📢 **Annonces** — Embeds personnalisés dans vos salons\n"
+            "📨 **Messages Auto** — Envois récurrents programmés\n\n"
+            "*▼ Sélectionnez une fonctionnalité ci-dessous*"
         )
         
-        e.set_footer(text="Sélectionnez une option ci-dessous")
+        if self.g.icon:
+            e.set_thumbnail(url=self.g.icon.url)
+        e.set_footer(text=f"🎯 Centre • {self.g.name}")
         return e
     
     @discord.ui.button(label="🎁 Cadeau", style=discord.ButtonStyle.success, row=0)
@@ -7856,7 +8179,7 @@ class GiveawayPanel(View):
         # Compter les giveaways actifs
         active_count = 0
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with get_db() as db:
                 async with db.execute(
                     'SELECT COUNT(*) FROM giveaways WHERE guild_id=? AND ended=0',
                     (self.g.id,)
@@ -8127,7 +8450,7 @@ class GiveawayChannelSelectPaginated(Select):
         
         # Sauvegarder en BDD avec les conditions
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with get_db() as db:
                 await db.execute('''
                     INSERT INTO giveaways (guild_id, channel_id, message_id, title, description, prize, image_url, end_time, conditions, created_by)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -8297,7 +8620,7 @@ class GiveawayChannelSelect(Select):
         
         # Sauvegarder en BDD avec les conditions
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with get_db() as db:
                 await db.execute('''
                     INSERT INTO giveaways (guild_id, channel_id, message_id, title, description, prize, image_url, end_time, conditions, created_by)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -8329,7 +8652,7 @@ class GiveawayParticipateView(View):
             # ═══════════════ ÉTAPE 1: Récupérer le giveaway ═══════════════
             giveaway_data = None
             try:
-                async with aiosqlite.connect(DB_PATH) as db:
+                async with get_db() as db:
                     async with db.execute(
                         'SELECT id, participants, ended, conditions FROM giveaways WHERE message_id=?',
                         (i.message.id,)
@@ -8374,7 +8697,7 @@ class GiveawayParticipateView(View):
             if min_messages > 0:
                 try:
                     user_msgs = 0
-                    async with aiosqlite.connect(DB_PATH) as db:
+                    async with get_db() as db:
                         async with db.execute(
                             'SELECT total_messages FROM activity_tracking WHERE guild_id=? AND user_id=?',
                             (i.guild.id, i.user.id)
@@ -8392,7 +8715,7 @@ class GiveawayParticipateView(View):
             if min_vocal > 0:
                 try:
                     user_vocal_minutes = 0
-                    async with aiosqlite.connect(DB_PATH) as db:
+                    async with get_db() as db:
                         async with db.execute(
                             'SELECT total_vocal_time FROM activity_tracking WHERE guild_id=? AND user_id=?',
                             (i.guild.id, i.user.id)
@@ -8442,7 +8765,7 @@ class GiveawayParticipateView(View):
             giveaway_data['participants'].append(i.user.id)
             
             try:
-                async with aiosqlite.connect(DB_PATH) as db:
+                async with get_db() as db:
                     await db.execute(
                         'UPDATE giveaways SET participants=? WHERE id=?',
                         (json.dumps(giveaway_data['participants']), giveaway_data['id'])
@@ -8477,7 +8800,7 @@ class GiveawayParticipateView(View):
 async def check_member_afk(guild_id, user_id, days=7):
     """Vérifie si un membre est AFK depuis X jours (les immunisés ne sont jamais AFK)"""
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             # ⚠️ VÉRIFIER L'IMMUNITÉ D'ABORD
             # Vérifier si l'utilisateur est immunisé directement
             async with db.execute('SELECT user_id FROM immune_users WHERE guild_id=? AND user_id=?', (guild_id, user_id)) as cursor:
@@ -8550,11 +8873,16 @@ class LevelSystemPanel(View):
         c = await cfg(self.g.id)
         level_cfg = c.get('level_config', {})
         
-        e = discord.Embed(title="📈 Système de Niveaux & Boutique", color=0x9B59B6)
-        e.description = "Configurez le système de progression de votre serveur."
-        
-        # État
         enabled = level_cfg.get('enabled', False)
+        e = discord.Embed(color=0x9B59B6)
+        e.set_author(name="📈 Niveaux & Économie", icon_url=self.g.icon.url if self.g.icon else None)
+        
+        status_icon = "🟢" if enabled else "🔴"
+        e.description = (
+            f"{status_icon} **{'Système actif' if enabled else 'Système désactivé'}**\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        )
+        
         e.add_field(name="État", value="✅ Activé" if enabled else "❌ Désactivé", inline=True)
         
         # XP par message
@@ -8939,7 +9267,7 @@ class LevelRolesPanel(View):
         e = discord.Embed(title="🎭 Rôles par Niveau", color=0x9B59B6)
         e.description = "Rôles donnés automatiquement quand un membre atteint un niveau."
         
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('SELECT level, role_id FROM level_rewards WHERE guild_id=? ORDER BY level', (self.g.id,)) as cursor:
                 rewards = await cursor.fetchall()
         
@@ -8961,7 +9289,7 @@ class LevelRolesPanel(View):
     
     @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, row=0)
     async def remove(self, i, b):
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('SELECT level, role_id FROM level_rewards WHERE guild_id=?', (self.g.id,)) as cursor:
                 rewards = await cursor.fetchall()
         
@@ -9033,7 +9361,7 @@ class SelectRoleForLevelView(View):
     
     async def select_callback(self, i):
         role_id = int(i.data['values'][0])
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('INSERT OR REPLACE INTO level_rewards VALUES(?,?,?)', (self.g.id, self.level, role_id))
             await db.commit()
         role = self.g.get_role(role_id)
@@ -9058,7 +9386,7 @@ class RemoveLevelRoleView(View):
     
     async def select_callback(self, i):
         level = int(i.data['values'][0])
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('DELETE FROM level_rewards WHERE guild_id=? AND level=?', (self.g.id, level))
             await db.commit()
         v = LevelRolesPanel(self.u, self.g)
@@ -9349,16 +9677,17 @@ class TempVoicePanel(View):
         voice_cfg = c.get('temp_voice_config', {})
         hubs = voice_cfg.get('hubs', {})  # Nouveau format multi-hubs
         
-        e = discord.Embed(title="🔊 Vocaux Temporaires", color=0x9B59B6)
+        enabled = voice_cfg.get('enabled', False)
+        e = discord.Embed(color=0x9B59B6)
+        e.set_author(name="🔊 Vocaux Temporaires", icon_url=self.g.icon.url if self.g.icon else None)
+        
+        status_icon = "🟢" if enabled else "🔴"
         e.description = (
-            "Créez des salons hubs qui génèrent des vocaux personnalisés.\n\n"
-            "**Configuration automatique :**\n"
-            "✅ Détection vocale (pas de push-to-talk)\n"
-            "✅ Stream autorisé\n"
-            "❌ Écriture bloquée\n"
-            "🗑️ Suppression auto si vide\n\n"
-            "**Restriction par rôle :**\n"
-            "🔒 Si un hub a un rôle défini, le vocal créé sera **invisible** pour les membres sans ce rôle"
+            f"{status_icon} **{'Système actif' if enabled else 'Système désactivé'}**\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"✅ Détection vocale • ✅ Stream\n"
+            f"❌ Écriture bloquée • 🗑️ Auto-delete si vide\n"
+            f"🔒 Restriction par rôle disponible"
         )
         
         # État
@@ -10442,8 +10771,16 @@ class AutoHelpPanel(View):
         c = await cfg(self.g.id)
         auto_helps = c.get('auto_help_channels', {})
         
-        e = discord.Embed(title="💡 Messages d'Aide Automatiques", color=0x3498DB)
-        e.description = "Configurez des messages d'aide qui restent toujours en bas du salon.\n\n*À chaque nouveau message, l'aide se repositionne en bas automatiquement.*"
+        e = discord.Embed(color=0x3498DB)
+        e.set_author(name="💡 Aide Automatique", icon_url=self.g.icon.url if self.g.icon else None)
+        
+        count = len(auto_helps)
+        e.description = (
+            f"**{count}** salon(s) configuré(s)\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Le message d'aide reste toujours en bas du salon.\n"
+            f"*Se repositionne automatiquement après chaque message.*"
+        )
         
         if auto_helps:
             help_list = []
@@ -10764,7 +11101,7 @@ async def handle_auto_help(message):
 
 async def get_user_economy(guild_id, user_id):
     """Récupère les données économiques d'un utilisateur"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             'SELECT coins, bank, xp, level, last_daily, last_work, message_count FROM economy WHERE guild_id=? AND user_id=?',
             (guild_id, user_id)
@@ -10791,7 +11128,7 @@ async def get_user_economy(guild_id, user_id):
 
 async def update_user_economy(guild_id, user_id, **kwargs):
     """Met à jour les données économiques d'un utilisateur"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         # S'assurer que l'utilisateur existe
         await db.execute(
             'INSERT OR IGNORE INTO economy (guild_id, user_id, coins, bank, xp, level) VALUES (?, ?, 0, 0, 0, 1)',
@@ -10815,7 +11152,7 @@ async def update_user_economy(guild_id, user_id, **kwargs):
 
 async def add_coins(guild_id, user_id, amount):
     """Ajoute des coins à un utilisateur de manière atomique"""
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         # S'assurer que l'utilisateur existe
         await db.execute(
             'INSERT OR IGNORE INTO economy (guild_id, user_id, coins, bank, xp, level) VALUES (?, ?, 0, 0, 0, 1)',
@@ -10908,7 +11245,7 @@ class GiveawayListPanel(View):
         
         giveaways = []
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with get_db() as db:
                 async with db.execute(
                     'SELECT id, title, end_time, participants FROM giveaways WHERE guild_id=? AND ended=0 ORDER BY end_time',
                     (self.g.id,)
@@ -10939,7 +11276,7 @@ class GiveawayListPanel(View):
         # Récupérer les giveaways actifs
         giveaways = []
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with get_db() as db:
                 async with db.execute(
                     'SELECT id, title FROM giveaways WHERE guild_id=? AND ended=0',
                     (self.g.id,)
@@ -10980,7 +11317,7 @@ class GiveawayEndSelect(Select):
 async def end_giveaway(guild, giveaway_id):
     """Termine un giveaway et tire un gagnant"""
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute(
                 'SELECT channel_id, message_id, title, prize, participants FROM giveaways WHERE id=? AND guild_id=?',
                 (giveaway_id, guild.id)
@@ -11081,7 +11418,7 @@ class MessagePanel(View):
         # Compter les messages programmés
         count = 0
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with get_db() as db:
                 async with db.execute(
                     'SELECT COUNT(*) FROM scheduled_messages WHERE guild_id=? AND enabled=1',
                     (self.g.id,)
@@ -11207,7 +11544,7 @@ class AutoMessageChannelSelect(Select):
         
         # Sauvegarder en BDD
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with get_db() as db:
                 await db.execute('''
                     INSERT INTO scheduled_messages (guild_id, channel_id, title, description, image_url, frequency, frequency_value, send_hour)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -11247,7 +11584,7 @@ class AutoMessageListPanel(View):
         
         messages = []
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with get_db() as db:
                 async with db.execute(
                     'SELECT id, channel_id, title, frequency, frequency_value, send_hour, enabled FROM scheduled_messages WHERE guild_id=? ORDER BY id',
                     (self.g.id,)
@@ -11275,7 +11612,7 @@ class AutoMessageListPanel(View):
     async def delete_msg(self, i, b):
         messages = []
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with get_db() as db:
                 async with db.execute(
                     'SELECT id, title FROM scheduled_messages WHERE guild_id=?',
                     (self.g.id,)
@@ -11311,7 +11648,7 @@ class AutoMessageDeleteSelect(Select):
     async def callback(self, i):
         msg_id = int(self.values[0])
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with get_db() as db:
                 await db.execute('DELETE FROM scheduled_messages WHERE id=? AND guild_id=?', (msg_id, self.g.id))
                 await db.commit()
             await i.response.edit_message(content="✅ Message automatique supprimé !", view=None)
@@ -11330,101 +11667,138 @@ class StatPanel(View):
     
     async def embed(self):
         c = await cfg(self.g.id)
-        e = discord.Embed(title="📊 Statistiques & Activité", color=C.PURPLE)
-        e.description = "**🔄 Système automatique** - Les actions sont exécutées automatiquement chaque jour.\n*⚠️ Aucune mention automatique des membres*"
-        
-        # Config actuelle
         stat_cfg = c.get('stat_config', {})
         
-        # Actions multiples
-        action_labels = {'ping': '📊 Rapport', 'remove_role': '🎭 Rôle', 'kick': '👢 Kick'}
+        e = discord.Embed(color=0x9B59B6)
+        e.set_author(name="📊 Statistiques & Suivi d'Activité", icon_url=self.g.icon.url if self.g.icon else None)
         
-        actions_7d = stat_cfg.get('actions_7d', [])
-        actions_30d = stat_cfg.get('actions_30d', [])
+        # Compter les AFK avec détails
+        afk_data = await self.get_afk_full_data()
+        humans = sum(1 for m in self.g.members if not m.bot)
+        active = humans - afk_data['afk_7d']
+        active_pct = round(active / humans * 100) if humans > 0 else 0
         
-        actions_7d_txt = " + ".join([action_labels.get(a, a) for a in actions_7d]) if actions_7d else "❌ Aucune"
-        actions_30d_txt = " + ".join([action_labels.get(a, a) for a in actions_30d]) if actions_30d else "❌ Aucune"
+        # Barre de santé
+        bar_n = round(active_pct / 10)
+        if active_pct >= 70: bar_color = "🟢"
+        elif active_pct >= 40: bar_color = "🟡"
+        else: bar_color = "🔴"
+        bar = "█" * bar_n + "░" * (10 - bar_n)
         
-        role_id = stat_cfg.get('activity_role', 0)
-        notif_ch = self.g.get_channel(stat_cfg.get('notif_channel', 0))
-        recovery_ch = self.g.get_channel(stat_cfg.get('recovery_channel', 0))
-        
-        role = self.g.get_role(role_id) if role_id else None
-        
-        e.add_field(
-            name="⚙️ Configuration",
-            value=f"**Actions 7j:** {actions_7d_txt}\n"
-                  f"**Actions 30j:** {actions_30d_txt}\n"
-                  f"**Rôle:** {role.mention if role else '❌'} | **Notifs:** {notif_ch.mention if notif_ch else '❌'} | **Récup:** {recovery_ch.mention if recovery_ch else '❌'}",
-            inline=False
+        e.description = (
+            f"**{bar_color} Santé du serveur : {active_pct}%**\n"
+            f"`[{bar}]` {active}/{humans} actifs\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         )
         
-        # Compter les membres AFK
-        afk_7d, afk_30d = await self.count_afk_members()
-        e.add_field(name="😴 AFK 7 jours", value=f"**{afk_7d}** membre(s)", inline=True)
-        e.add_field(name="💤 AFK 30 jours", value=f"**{afk_30d}** membre(s)", inline=True)
-        e.add_field(name="👥 Total membres", value=f"**{self.g.member_count}**", inline=True)
+        # Stats rapides
+        e.add_field(
+            name="📈 Aperçu",
+            value=(
+                f"🟢 **{active}** actifs (7j)\n"
+                f"😴 **{afk_data['afk_7d']}** AFK 7j\n"
+                f"💤 **{afk_data['afk_30d']}** AFK 30j"
+            ),
+            inline=True
+        )
         
-        e.set_footer(text="💡 Les membres récupèrent leur rôle en envoyant un message ou en rejoignant un vocal")
+        # Config
+        action_labels = {'ping': '📊 Rapport', 'remove_role': '🎭 Retrait rôle', 'kick': '👢 Kick'}
+        actions_7d = stat_cfg.get('actions_7d', [])
+        actions_30d = stat_cfg.get('actions_30d', [])
+        role = self.g.get_role(stat_cfg.get('activity_role', 0))
         
+        e.add_field(
+            name="⚙️ Actions auto",
+            value=(
+                f"**7j:** {' + '.join([action_labels.get(a, a) for a in actions_7d]) or '❌'}\n"
+                f"**30j:** {' + '.join([action_labels.get(a, a) for a in actions_30d]) or '❌'}\n"
+                f"**Rôle:** {role.mention if role else '❌'}"
+            ),
+            inline=True
+        )
+        
+        # Salons
+        notif_ch = self.g.get_channel(stat_cfg.get('notif_channel', 0))
+        recovery_ch = self.g.get_channel(stat_cfg.get('recovery_channel', 0))
+        e.add_field(
+            name="📍 Salons",
+            value=(
+                f"📢 {notif_ch.mention if notif_ch else '🔴 Non configuré'}\n"
+                f"🔄 {recovery_ch.mention if recovery_ch else '🔴 Non configuré'}"
+            ),
+            inline=True
+        )
+        
+        # Top 5 AFK
+        if afk_data['top_afk']:
+            afk_lines = []
+            medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+            for idx, (uid, days) in enumerate(afk_data['top_afk'][:5]):
+                m = self.g.get_member(uid)
+                name = m.display_name[:15] if m else f"ID:{uid}"
+                afk_lines.append(f"{medals[idx]} **{name}** — `{days}j` sans activité")
+            e.add_field(name="💤 Top AFK", value="\n".join(afk_lines), inline=False)
+        
+        e.set_footer(text="💡 Récupération auto : message ou vocal • 📊 Graphiques disponibles")
         return e
     
-    async def count_afk_members(self):
-        """Compte les membres AFK sur 7j et 30j"""
-        afk_7d = 0
-        afk_30d = 0
+    async def get_afk_full_data(self):
+        """Récupère stats AFK complètes avec top inactifs"""
+        result = {'afk_7d': 0, 'afk_30d': 0, 'tracked': 0, 'top_afk': []}
         now_dt = now()
-        seven_days_ago = now_dt - timedelta(days=7)
-        thirty_days_ago = now_dt - timedelta(days=30)
+        cutoff_7 = (now_dt - timedelta(days=7)).replace(tzinfo=timezone.utc)
+        cutoff_30 = (now_dt - timedelta(days=30)).replace(tzinfo=timezone.utc)
         
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
-                # Membres trackés
+            async with get_db() as db:
                 async with db.execute(
                     'SELECT user_id, last_message, last_vocal FROM activity_tracking WHERE guild_id=?',
                     (self.g.id,)
                 ) as cursor:
-                    tracked_users = set()
+                    tracked = set()
                     async for row in cursor:
-                        user_id, last_msg, last_vocal = row
-                        tracked_users.add(user_id)
+                        uid, last_msg, last_voc = row[0], row[1], row[2]
+                        tracked.add(uid)
+                        result['tracked'] += 1
                         
-                        last_activity = None
-                        if last_msg:
-                            try:
-                                last_activity = datetime.fromisoformat(last_msg)
-                            except:
-                                pass
-                        if last_vocal:
-                            try:
-                                lv = datetime.fromisoformat(last_vocal)
-                                if not last_activity or lv > last_activity:
-                                    last_activity = lv
-                            except:
-                                pass
+                        la = None
+                        for ts in [last_msg, last_voc]:
+                            if ts:
+                                try:
+                                    dt = datetime.fromisoformat(ts).replace(tzinfo=timezone.utc)
+                                    if not la or dt > la:
+                                        la = dt
+                                except: pass
                         
-                        if last_activity:
-                            if last_activity.replace(tzinfo=timezone.utc) < seven_days_ago.replace(tzinfo=timezone.utc):
-                                afk_7d += 1
-                            if last_activity.replace(tzinfo=timezone.utc) < thirty_days_ago.replace(tzinfo=timezone.utc):
-                                afk_30d += 1
+                        if la:
+                            days_off = (now_dt.replace(tzinfo=timezone.utc) - la).days
+                            if la < cutoff_7:
+                                result['afk_7d'] += 1
+                            if la < cutoff_30:
+                                result['afk_30d'] += 1
+                            if days_off >= 3:
+                                result['top_afk'].append((uid, days_off))
+                        else:
+                            result['afk_7d'] += 1
+                            result['afk_30d'] += 1
                 
-                # Membres non trackés = considérés comme AFK
-                for member in self.g.members:
-                    if not member.bot and member.id not in tracked_users:
-                        afk_7d += 1
-                        afk_30d += 1
-        except:
-            pass
-        
-        return afk_7d, afk_30d
+                for m in self.g.members:
+                    if not m.bot and m.id not in tracked and m.id != self.g.owner_id:
+                        result['afk_7d'] += 1
+                        result['afk_30d'] += 1
+            
+            result['top_afk'].sort(key=lambda x: x[1], reverse=True)
+        except Exception as ex:
+            print(f"[STAT] Erreur AFK: {ex}")
+        return result
     
     @discord.ui.button(label="⚙️ Configurer Actions", style=discord.ButtonStyle.primary, row=0)
     async def config_actions(self, i, b):
         v = StatActionPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
-    @discord.ui.button(label="📈 Voir Graphique", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="📈 Graphique", style=discord.ButtonStyle.success, row=0)
     async def view_graph(self, i, b):
         await i.response.defer()
         
@@ -11441,62 +11815,171 @@ class StatPanel(View):
             await i.followup.send("❌ Erreur lors de la génération du graphique", ephemeral=True)
     
     async def generate_afk_graph(self):
-        """Génère un graphique des membres AFK"""
+        """Génère un graphique professionnel des stats d'activité avec tendances"""
         try:
-            afk_7d, afk_30d = await self.count_afk_members()
-            active_members = self.g.member_count - afk_7d
+            afk_data = await self.get_afk_full_data()
+            humans = sum(1 for m in self.g.members if not m.bot)
+            active = humans - afk_data['afk_7d']
+            afk_only_7d = afk_data['afk_7d'] - afk_data['afk_30d']
+            afk_30d = afk_data['afk_30d']
             
-            # Créer le graphique
-            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-            fig.patch.set_facecolor('#2f3136')
+            # Récupérer les stats journalières (14 derniers jours)
+            daily_data = []
+            try:
+                async with get_db() as db:
+                    fourteen_ago = (now() - timedelta(days=14)).strftime('%Y-%m-%d')
+                    async with db.execute(
+                        'SELECT date, total_messages FROM daily_guild_stats WHERE guild_id=? AND date>=? ORDER BY date',
+                        (self.g.id, fourteen_ago)
+                    ) as cur:
+                        async for row in cur:
+                            daily_data.append((row[0], row[1]))
+            except: pass
             
-            # Graphique 1: Camembert AFK
-            colors1 = ['#57F287', '#FEE75C', '#ED4245']
-            sizes1 = [active_members, afk_7d - afk_30d, afk_30d]
-            labels1 = [f'Actifs\n({active_members})', f'AFK 7j\n({afk_7d - afk_30d})', f'AFK 30j\n({afk_30d})']
+            fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+            fig.patch.set_facecolor('#1a1a2e')
+            fig.suptitle(f'{self.g.name} — Tableau de Bord', color='white', fontsize=18, fontweight='bold', y=0.98)
             
-            # Filtrer les valeurs nulles
-            filtered = [(s, l, c) for s, l, c in zip(sizes1, labels1, colors1) if s > 0]
+            # ── 1. Donut chart (haut gauche) ──
+            ax1 = axes[0][0]
+            sizes = [max(0, active), max(0, afk_only_7d), max(0, afk_30d)]
+            colors = ['#00d2ff', '#f39c12', '#e74c3c']
+            labels = [f'Actifs\n{active}', f'AFK 7j\n{afk_only_7d}', f'AFK 30j\n{afk_30d}']
+            
+            filtered = [(s, l, c) for s, l, c in zip(sizes, labels, colors) if s > 0]
             if filtered:
-                sizes1, labels1, colors1 = zip(*filtered)
+                sizes, labels, colors = zip(*filtered)
             
-            ax1.pie(sizes1, labels=labels1, colors=colors1, autopct='%1.1f%%', startangle=90,
-                   textprops={'color': 'white', 'fontsize': 11, 'fontweight': 'bold'})
-            ax1.set_title('📊 Répartition des Membres', color='white', fontsize=14, fontweight='bold', pad=20)
-            ax1.set_facecolor('#2f3136')
+            wedges, texts, autotexts = ax1.pie(sizes, labels=labels, colors=colors, autopct='%1.0f%%',
+                startangle=90, pctdistance=0.75, textprops={'color': 'white', 'fontsize': 10, 'fontweight': 'bold'},
+                wedgeprops={'width': 0.4, 'edgecolor': '#1a1a2e', 'linewidth': 2})
+            for t in autotexts: t.set_fontsize(9)
+            centre = plt.Circle((0, 0), 0.55, fc='#1a1a2e')
+            ax1.add_artist(centre)
+            ax1.text(0, 0, f'{humans}', ha='center', va='center', color='white', fontsize=24, fontweight='bold')
+            ax1.text(0, -0.15, 'membres', ha='center', va='center', color='#888', fontsize=9)
+            ax1.set_title('Répartition', color='white', fontsize=14, fontweight='bold', pad=15)
+            ax1.set_facecolor('#1a1a2e')
             
-            # Graphique 2: Barres
-            categories = ['Actifs', 'AFK 7 jours', 'AFK 30 jours']
-            values = [active_members, afk_7d, afk_30d]
-            colors2 = ['#57F287', '#FEE75C', '#ED4245']
+            # ── 2. Barres comparaison (haut droite) ──
+            ax2 = axes[0][1]
+            cats = ['Actifs', 'AFK 7j', 'AFK 30j']
+            vals = [active, afk_data['afk_7d'], afk_30d]
+            colors2 = ['#00d2ff', '#f39c12', '#e74c3c']
+            bars = ax2.barh(cats, vals, color=colors2, height=0.5, edgecolor='#1a1a2e')
+            for bar, val in zip(bars, vals):
+                ax2.text(bar.get_width() + max(vals)*0.02, bar.get_y() + bar.get_height()/2,
+                    f'{val}', va='center', color='white', fontweight='bold', fontsize=13)
+            ax2.set_xlim(0, max(vals) * 1.25 if vals else 1)
+            ax2.set_title('Comparaison Activité', color='white', fontsize=14, fontweight='bold', pad=15)
+            ax2.set_facecolor('#16213e')
+            ax2.tick_params(colors='white', labelsize=11)
+            for spine in ax2.spines.values(): spine.set_visible(False)
+            ax2.xaxis.set_visible(False)
             
-            bars = ax2.bar(categories, values, color=colors2, edgecolor='white', linewidth=2)
-            ax2.set_ylabel('Nombre de membres', color='white', fontsize=12)
-            ax2.set_title('📈 Statistiques d\'Activité', color='white', fontsize=14, fontweight='bold', pad=20)
-            ax2.set_facecolor('#36393f')
-            ax2.tick_params(colors='white')
-            ax2.spines['bottom'].set_color('white')
-            ax2.spines['left'].set_color('white')
-            ax2.spines['top'].set_visible(False)
-            ax2.spines['right'].set_visible(False)
+            # ── 3. Top AFK (bas gauche) ──
+            ax3 = axes[1][0]
+            top = afk_data['top_afk'][:8]
+            if top:
+                names, days_vals, bar_colors = [], [], []
+                for uid, d in top:
+                    m = self.g.get_member(uid)
+                    names.append(m.display_name[:10] if m else str(uid)[:8])
+                    days_vals.append(d)
+                    bar_colors.append('#e74c3c' if d >= 30 else '#f39c12' if d >= 14 else '#00d2ff')
+                b3 = ax3.bar(names, days_vals, color=bar_colors, edgecolor='#1a1a2e', width=0.6)
+                for bar, val in zip(b3, days_vals):
+                    ax3.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.5,
+                        f'{val}j', ha='center', color='white', fontweight='bold', fontsize=9)
+                ax3.set_ylabel('Jours', color='#888', fontsize=10)
+            else:
+                ax3.text(0.5, 0.5, 'Pas de données AFK', ha='center', va='center', color='#555', fontsize=13, transform=ax3.transAxes)
+            ax3.set_title('Top Inactifs', color='white', fontsize=14, fontweight='bold', pad=15)
+            ax3.set_facecolor('#16213e')
+            ax3.tick_params(colors='white', labelsize=8, axis='x', rotation=30)
+            for spine in ax3.spines.values(): spine.set_visible(False)
             
-            # Ajouter les valeurs sur les barres
-            for bar, val in zip(bars, values):
-                ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
-                        str(val), ha='center', color='white', fontweight='bold', fontsize=12)
+            # ── 4. Tendance messages 14 jours (bas droite) ──
+            ax4 = axes[1][1]
+            if daily_data:
+                dates = [d[0][-5:] for d in daily_data]  # MM-DD
+                msgs = [d[1] for d in daily_data]
+                ax4.fill_between(range(len(dates)), msgs, alpha=0.3, color='#00d2ff')
+                ax4.plot(range(len(dates)), msgs, color='#00d2ff', linewidth=2.5, marker='o', markersize=4)
+                for idx, val in enumerate(msgs):
+                    if val > 0:
+                        ax4.annotate(str(val), (idx, val), textcoords="offset points", xytext=(0, 8),
+                            ha='center', color='white', fontsize=8, fontweight='bold')
+                ax4.set_xticks(range(len(dates)))
+                ax4.set_xticklabels(dates, rotation=45, ha='right')
+                ax4.set_ylabel('Messages', color='#888', fontsize=10)
+                avg = sum(msgs) / len(msgs) if msgs else 0
+                ax4.axhline(y=avg, color='#f39c12', linestyle='--', alpha=0.5, linewidth=1)
+                ax4.text(len(dates)-1, avg, f' moy: {avg:.0f}', color='#f39c12', fontsize=9, va='bottom')
+            else:
+                ax4.text(0.5, 0.5, 'Pas encore de données\n(se remplit jour après jour)', 
+                    ha='center', va='center', color='#555', fontsize=12, transform=ax4.transAxes)
+            ax4.set_title('Messages / jour (14j)', color='white', fontsize=14, fontweight='bold', pad=15)
+            ax4.set_facecolor('#16213e')
+            ax4.tick_params(colors='white', labelsize=8)
+            for spine in ax4.spines.values(): spine.set_visible(False)
             
-            plt.tight_layout()
-            
-            # Sauvegarder en buffer
+            plt.tight_layout(rect=[0, 0, 1, 0.95])
             buf = io.BytesIO()
-            plt.savefig(buf, format='png', facecolor='#2f3136', edgecolor='none', dpi=100)
+            plt.savefig(buf, format='png', facecolor='#1a1a2e', edgecolor='none', dpi=120, bbox_inches='tight')
             buf.seek(0)
             plt.close(fig)
-            
             return buf
         except Exception as ex:
-            print(f"Erreur graphique: {ex}")
+            print(f"[GRAPH] Erreur: {ex}")
+            import traceback; traceback.print_exc()
             return None
+    
+    @discord.ui.button(label="📋 Liste AFK", style=discord.ButtonStyle.primary, row=0)
+    async def afk_list(self, i, b):
+        """Affiche la liste complète des membres AFK"""
+        await i.response.defer()
+        afk_data = await self.get_afk_full_data()
+        
+        pages = []
+        all_afk = afk_data['top_afk']  # Already sorted by days desc
+        
+        if not all_afk:
+            e = discord.Embed(color=0x57F287)
+            e.set_author(name="📋 Liste AFK", icon_url=self.g.icon.url if self.g.icon else None)
+            e.description = "🎉 **Aucun membre AFK détecté !**\nTout le monde est actif sur le serveur."
+            return await i.followup.send(embed=e, ephemeral=True)
+        
+        # Paginer par 15
+        chunk_size = 15
+        for page_idx in range(0, len(all_afk), chunk_size):
+            chunk = all_afk[page_idx:page_idx+chunk_size]
+            e = discord.Embed(color=0xE74C3C)
+            e.set_author(name=f"📋 Liste AFK — {len(all_afk)} membres", icon_url=self.g.icon.url if self.g.icon else None)
+            
+            lines = []
+            for idx, (uid, days) in enumerate(chunk, page_idx + 1):
+                m = self.g.get_member(uid)
+                name = m.mention if m else f"`{uid}`"
+                if days >= 30:
+                    icon = "🔴"
+                elif days >= 14:
+                    icon = "🟠"
+                elif days >= 7:
+                    icon = "🟡"
+                else:
+                    icon = "🟢"
+                lines.append(f"`{idx:>3}.` {icon} {name} — **{days}j**")
+            
+            e.description = "\n".join(lines)
+            page_num = page_idx // chunk_size + 1
+            total_pages = (len(all_afk) + chunk_size - 1) // chunk_size
+            e.set_footer(text=f"Page {page_num}/{total_pages} • 🔴 30j+ | 🟠 14j+ | 🟡 7j+ | 🟢 3j+")
+            pages.append(e)
+        
+        # Envoyer la première page (max 3 pages en ephemeral)
+        embeds = pages[:3]
+        await i.followup.send(embeds=embeds, ephemeral=True)
     
     @discord.ui.button(label="⚡ Exécuter maintenant", style=discord.ButtonStyle.danger, row=0)
     async def execute_actions(self, i, b):
@@ -11508,13 +11991,13 @@ class StatPanel(View):
         if not actions_7d and not actions_30d:
             return await i.response.send_message("❌ Aucune action configurée. Configurez d'abord les actions.", ephemeral=True)
         
-        afk_7d, afk_30d = await self.count_afk_members()
+        afk_data = await self.get_afk_full_data()
         
         await i.response.send_message(
             f"⚠️ **Exécution manuelle des actions**\n\n"
             f"**Membres concernés:**\n"
-            f"• 😴 AFK 7 jours: **{afk_7d}** membres\n"
-            f"• 💤 AFK 30 jours: **{afk_30d}** membres\n\n"
+            f"• 😴 AFK 7 jours: **{afk_data['afk_7d']}** membres\n"
+            f"• 💤 AFK 30 jours: **{afk_data['afk_30d']}** membres\n\n"
             f"*Le système s'exécute automatiquement chaque jour, mais vous pouvez forcer l'exécution maintenant.*",
             view=StatExecuteConfirmView(self.u, self.g),
             ephemeral=True
@@ -11598,7 +12081,7 @@ class AfkRolePanel(View):
             
             member_ids = [m.id for m in members_with_role]
             
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with get_db() as db:
                 # Récupérer l'activité de ces membres
                 placeholders = ','.join('?' * len(member_ids))
                 async with db.execute(
@@ -11654,7 +12137,7 @@ class AfkRolePanel(View):
             
             member_ids = [m.id for m in members_with_role]
             
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with get_db() as db:
                 placeholders = ','.join('?' * len(member_ids))
                 async with db.execute(
                     f'SELECT user_id, last_message, last_vocal FROM activity_tracking WHERE guild_id=? AND user_id IN ({placeholders})',
@@ -12337,7 +12820,7 @@ async def count_afk_members_by_days(guild, days):
     cutoff = now_dt - timedelta(days=days)
     
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute(
                 'SELECT user_id, last_message, last_vocal FROM activity_tracking WHERE guild_id=?',
                 (guild.id,)
@@ -12406,7 +12889,7 @@ async def kick_afk_members(guild, days):
     skipped = 0
     
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute(
                 'SELECT user_id, last_message, last_vocal FROM activity_tracking WHERE guild_id=?',
                 (guild.id,)
@@ -12550,7 +13033,7 @@ async def execute_afk_actions(guild):
         immune_roles = set()
         immune_users = set()
         
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             # Activités
             async with db.execute(
                 'SELECT user_id, last_message, last_vocal FROM activity_tracking WHERE guild_id=?',
@@ -12793,7 +13276,7 @@ async def send_compact_afk_notification(channel, members, days, recovery_mention
 async def check_afk_automatic():
     """Vérifie automatiquement l'inactivité des membres chaque jour"""
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('SELECT guild_id, data FROM guild_config') as cursor:
                 async for row in cursor:
                     guild_id, data_str = row
@@ -12843,7 +13326,7 @@ async def execute_afk_actions_auto(guild, stat_cfg):
     # Récupérer les activités
     user_activities = {}
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute(
                 'SELECT user_id, last_message, last_vocal FROM activity_tracking WHERE guild_id=?',
                 (guild.id,)
@@ -12954,23 +13437,36 @@ class ChanPanel(View):
     async def embed(self):
         c = await cfg(self.g.id)
         configs = c.get('channel_configs', {})
-        e = discord.Embed(title="📺 Configuration des salons", color=C.ORANGE)
+        e = discord.Embed(color=0xE67E22)
+        e.set_author(name="📺 Configuration des Salons", icon_url=self.g.icon.url if self.g.icon else None)
+        
+        count = len(configs) if configs else 0
         if configs:
             lines = []
             for ch_id, conf in list(configs.items())[:15]:
                 ch = self.g.get_channel(int(ch_id))
                 if ch:
-                    icons = ""
-                    if not conf.get('messages', True): icons += "💬❌ "
-                    if not conf.get('images', True): icons += "🖼️❌ "
-                    if not conf.get('gifs', True): icons += "🎞️❌ "
-                    if not conf.get('emojis', True): icons += "😀❌ "
-                    if not conf.get('links', True): icons += "🔗❌ "
-                    if conf.get('commands_only', False): icons += "🤖✅ "
-                    lines.append(f"{ch.mention}: {icons or '✅ Tout autorisé'}")
-            e.description = "\n".join(lines)
+                    restrictions = []
+                    if not conf.get('messages', True): restrictions.append("💬")
+                    if not conf.get('images', True): restrictions.append("🖼️")
+                    if not conf.get('gifs', True): restrictions.append("🎞️")
+                    if not conf.get('emojis', True): restrictions.append("😀")
+                    if not conf.get('links', True): restrictions.append("🔗")
+                    if conf.get('commands_only', False): restrictions.append("🤖")
+                    status = " ".join(restrictions) + " bloqué(s)" if restrictions else "✅ Tout OK"
+                    lines.append(f"{ch.mention} → {status}")
+            e.description = (
+                f"**{count}** salon(s) avec règles personnalisées\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" +
+                "\n".join(lines)
+            )
         else:
-            e.description = "*Aucun salon configuré*"
+            e.description = (
+                "**0** salon configuré\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "*Aucun salon avec des règles personnalisées*"
+            )
+        e.set_footer(text="📺 Config Salons • Ajoutez des restrictions par salon")
         return e
     
     @discord.ui.button(label="➕ Configurer un salon", style=discord.ButtonStyle.success, row=0)
@@ -14149,7 +14645,7 @@ class SendPanelSel(Select):
 async def update_realsy_activity(guild_id, user_id):
     """Met à jour la dernière activité d'un utilisateur avec le rôle Realsy"""
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('SELECT user_id FROM realsy_tracking WHERE guild_id=? AND user_id=?', 
                 (guild_id, user_id)) as c:
                 if await c.fetchone():
@@ -14193,10 +14689,21 @@ async def on_app_command_error(interaction: discord.Interaction, error):
 @bot.event
 async def on_ready():
     await db_init()
+    await _db_pool.init()  # Initialise le pool de connexions DB
+    await load_live_state_from_db()  # Charge l'état des lives depuis la DB
+    
+    # ═══ Capture l'avatar du bot pour TOUS les webhooks ═══
+    global _BOT_AVATAR_URL
+    try:
+        _BOT_AVATAR_URL = bot.user.display_avatar.url
+        print(f"✅ Bot avatar: {_BOT_AVATAR_URL}")
+    except:
+        _BOT_AVATAR_URL = None
+    
     bot.add_view(TicketControlView())
     bot.add_view(GiveawayParticipateView())  # Pour les boutons de participation aux giveaways
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('SELECT data FROM guild_config') as c:
                 for row in await c.fetchall():
                     try:
@@ -14374,8 +14881,20 @@ async def on_member_ban(guild, user):
 
 @bot.event
 async def on_member_remove(m):
+    # ═══ Tracking stats journalières ═══
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        today = now().strftime('%Y-%m-%d')
+        async with get_db() as db:
+            await db.execute('''
+                INSERT INTO daily_guild_stats (guild_id, date, left_members)
+                VALUES (?, ?, 1)
+                ON CONFLICT(guild_id, date) DO UPDATE SET left_members = left_members + 1
+            ''', (m.guild.id, today))
+            await db.commit()
+    except: pass
+    
+    try:
+        async with get_db() as db:
             async with db.execute("SELECT id, channel_id, claimed_by, answers FROM tickets WHERE guild_id=? AND user_id=? AND status='open'", (m.guild.id, m.id)) as c:
                 tks = await c.fetchall()
         for tk in tks:
@@ -14395,6 +14914,18 @@ async def on_member_remove(m):
 
 @bot.event
 async def on_member_join(m):
+    # ═══ Tracking stats journalières ═══
+    try:
+        today = now().strftime('%Y-%m-%d')
+        async with get_db() as db:
+            await db.execute('''
+                INSERT INTO daily_guild_stats (guild_id, date, new_members)
+                VALUES (?, ?, 1)
+                ON CONFLICT(guild_id, date) DO UPDATE SET new_members = new_members + 1
+            ''', (m.guild.id, today))
+            await db.commit()
+    except: pass
+    
     try:
         c = await cfg(m.guild.id)
         guild_id = m.guild.id
@@ -14411,9 +14942,27 @@ async def on_member_join(m):
             
             # Initialiser le tracker si nécessaire
             if guild_id not in raid_tracker:
-                raid_tracker[guild_id] = {'joins': [], 'lockdown': False}
+                raid_tracker[guild_id] = {'joins': [], 'lockdown': False, 'lockdown_at': None}
             
             current_time = now()
+            
+            # Auto-unlock lockdown après 5 minutes
+            lockdown_at = raid_tracker[guild_id].get('lockdown_at')
+            if raid_tracker[guild_id].get('lockdown') and lockdown_at:
+                if (current_time - lockdown_at).total_seconds() > 300:
+                    raid_tracker[guild_id]['lockdown'] = False
+                    raid_tracker[guild_id]['lockdown_at'] = None
+                    # Log auto-unlock
+                    log_ch = m.guild.get_channel(c.get('log_anti_raid', 0))
+                    if log_ch:
+                        e = discord.Embed(
+                            title="✅ Lockdown terminé",
+                            description="Le mode lockdown anti-raid s'est désactivé automatiquement après 5 minutes.",
+                            color=0x57F287
+                        )
+                        e.timestamp = current_time
+                        try: await webhook_send(log_ch, 'raid_alert', embed=e)
+                        except: pass
             
             # Nettoyer les anciennes entrées (hors intervalle)
             cutoff = current_time - timedelta(seconds=join_interval)
@@ -14433,21 +14982,34 @@ async def on_member_join(m):
             recent_joins = len(raid_tracker[guild_id]['joins'])
             is_raid = recent_joins >= join_threshold
             
-            # Si raid détecté
+            # Si raid détecté → activer lockdown
             if is_raid and not raid_tracker[guild_id].get('lockdown', False):
                 raid_tracker[guild_id]['lockdown'] = True
+                raid_tracker[guild_id]['lockdown_at'] = current_time
                 
-                # Envoyer alerte
+                # Log + alerte
                 log_ch = m.guild.get_channel(c.get('log_anti_raid', 0))
                 if log_ch:
                     e = discord.Embed(
                         title="🚨 RAID DÉTECTÉ !",
                         description=f"**{recent_joins} membres** ont rejoint en moins de **{join_interval} secondes**\n\n"
-                                    f"⚡ **Action automatique:** {'Activée' if auto_mode else 'Désactivée'}\n"
-                                    f"🔒 **Blocage invitations:** {'Activé' if block_invites else 'Désactivé'}",
+                                    f"⚡ **Action auto:** {'Activée' if auto_mode else 'Désactivée'}\n"
+                                    f"🔒 **Lockdown:** Activé (auto-désactivation dans 5 min)\n"
+                                    f"🎯 **Action:** {action.upper()}",
                         color=0xFF0000
                     )
-                    e.set_footer(text="Utilisez /configure > Protection > Anti-Raid pour gérer")
+                    # Lister les derniers joins
+                    recent = raid_tracker[guild_id]['joins'][-10:]
+                    join_list = []
+                    for uid, ts in recent:
+                        member = m.guild.get_member(uid)
+                        name = f"{member.name}" if member else f"ID:{uid}"
+                        age = (current_time - ts).total_seconds()
+                        join_list.append(f"`{name}` — il y a {int(age)}s")
+                    if join_list:
+                        e.add_field(name=f"👥 Derniers joins ({len(recent)})", value="\n".join(join_list[:10]), inline=False)
+                    
+                    e.set_footer(text="🛡️ Anti-Raid • /configure > Protection")
                     e.timestamp = current_time
                     await webhook_send(log_ch, 'raid_alert', content="@here" if auto_mode else "", embed=e)
             
@@ -14539,7 +15101,7 @@ async def relay_discord_message(msg):
     try:
         channel_id = str(msg.channel.id)
         
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('SELECT guild_id, data FROM guild_config') as cursor:
                 async for row in cursor:
                     guild_id, data_str = row
@@ -14775,6 +15337,17 @@ async def on_message(msg):
                 await send_log(msg.guild, 'anti_caps', msg.author, msg, "Trop de majuscules", None)
                 return
         
+        # Anti-mass-mention (détecte @everyone/@here et spam de mentions)
+        if c.get('anti_mass_mention'):
+            max_mentions = c.get('mention_limit', 5)
+            if check_mass_mention(msg, max_mentions):
+                await msg.delete()
+                mention_count = len(msg.mentions) + len(msg.role_mentions) + (1 if msg.mention_everyone else 0)
+                await send_log(msg.guild, 'anti_mass_mention', msg.author, msg, 
+                              "Spam de mentions détecté", f"`{mention_count}` mentions")
+                await sanction(msg.author, c.get('mention_action', 'mute'), 10, "Mass mention", msg.guild)
+                return
+        
         # Anti-QRCode (détection de scams par QR code) - Actif pour tous
         if c.get('anti_qrcode'):
             is_qr_scam, qr_pattern = check_qr_code_scam(ct)
@@ -14836,17 +15409,28 @@ async def security_check(i: discord.Interaction, command_name: str = "command"):
 
 @bot.tree.command(name="configure", description="⚙️ Ouvrir le panneau de configuration")
 async def configure_cmd(i: discord.Interaction):
-    # Vérification de sécurité
+    # ═══════════════ OWNER ONLY - Sécurité maximale ═══════════════
+    # Seul le fondateur (owner) du serveur peut configurer le bot
+    BOT_SUPER_OWNER = 781205382923288593  # GoRipe - Super Owner
+    
+    is_guild_owner = i.user.id == i.guild.owner_id
+    is_super_owner = i.user.id == BOT_SUPER_OWNER
+    
+    if not (is_guild_owner or is_super_owner):
+        e = discord.Embed(color=0xE74C3C)
+        e.set_author(name="⛔ Accès Refusé", icon_url=i.guild.icon.url if i.guild.icon else None)
+        e.description = (
+            f"**Cette commande est réservée au fondateur du serveur.**\n\n"
+            f"👑 Fondateur : {i.guild.owner.mention if i.guild.owner else 'Inconnu'}\n\n"
+            f"*Seul le propriétaire du serveur peut configurer le bot.*"
+        )
+        e.set_footer(text="Sécurité • /configure")
+        return await i.response.send_message(embed=e, ephemeral=True)
+    
+    # Vérification anti-spam
     ok, msg = await security_check(i, "configure")
     if not ok:
         return await i.response.send_message(msg, ephemeral=True)
-    
-    if not i.user.guild_permissions.administrator:
-        e = discord.Embed(
-            description="❌ **Accès refusé** — Vous devez être **administrateur** pour accéder à ce panneau.",
-            color=0xE74C3C
-        )
-        return await i.response.send_message(embed=e, ephemeral=True)
     
     # Log l'accès à la configuration
     await log_security_event(i.guild.id, i.user.id, "CONFIG_ACCESS", "Ouverture du panneau de configuration")
@@ -14895,7 +15479,7 @@ async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
         return await i.response.send_message("❌ Vous ne pouvez pas warn ce membre", ephemeral=True)
     
     # Enregistrer l'infraction
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute(
             'INSERT INTO infractions(guild_id, user_id, mod_id, type, reason, duration) VALUES(?,?,?,?,?,?)',
             (i.guild.id, membre.id, i.user.id, 'warn', raison, '')
@@ -14925,7 +15509,7 @@ async def unwarn_cmd(i: discord.Interaction, membre: discord.Member):
         return await i.response.send_message("❌ Vous n'avez pas la permission", ephemeral=True)
     
     # Récupérer les warns (sans created_at pour éviter l'erreur)
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             'SELECT id, reason FROM infractions WHERE guild_id=? AND user_id=? AND type="warn" ORDER BY id DESC LIMIT 25',
             (i.guild.id, membre.id)
@@ -14965,7 +15549,7 @@ class UnwarnSelect(Select):
         warn_id = int(self.values[0])
         
         # Récupérer info du warn avant suppression
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('SELECT reason FROM infractions WHERE id=?', (warn_id,)) as c:
                 row = await c.fetchone()
                 reason = row[0] if row else "?"
@@ -15043,7 +15627,7 @@ async def mute_cmd(i: discord.Interaction, membre: discord.Member, duree: int, u
         return await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
     
     # Enregistrer l'infraction
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute(
             'INSERT INTO infractions(guild_id, user_id, mod_id, type, reason, duration) VALUES(?,?,?,?,?,?)',
             (i.guild.id, membre.id, i.user.id, 'mute', raison, dur_txt)
@@ -15101,7 +15685,7 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
         return await i.response.send_message("❌ Vous n'avez pas la permission", ephemeral=True)
     
     # Récupérer les infractions (sans ORDER BY created_at pour éviter erreur si colonne n'existe pas)
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             'SELECT type, reason, duration, mod_id FROM infractions WHERE guild_id=? AND user_id=? ORDER BY id DESC',
             (i.guild.id, membre.id)
@@ -15471,7 +16055,7 @@ class RellseasMemberModal(Modal, title="👤 Sélectionner un membre"):
             
             await membre.add_roles(role, reason=f"Realsy par {i.user.name}")
             
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with get_db() as db:
                 await db.execute('''INSERT OR REPLACE INTO realsy_tracking 
                     (guild_id, user_id, last_activity, warn_count) VALUES (?, ?, ?, 0)''',
                     (self.g.id, membre.id, now().isoformat()))
@@ -15493,7 +16077,7 @@ class RellseasMemberModal(Modal, title="👤 Sélectionner un membre"):
             
             await membre.remove_roles(role, reason=f"Realsy retiré par {i.user.name}")
             
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with get_db() as db:
                 await db.execute('DELETE FROM realsy_tracking WHERE guild_id=? AND user_id=?',
                     (self.g.id, membre.id))
                 await db.commit()
@@ -15601,7 +16185,7 @@ class RellseasQuizMenu(View):
     @discord.ui.button(label="📊 Voir les réponses", style=discord.ButtonStyle.secondary, row=1)
     async def view_responses(self, i, b):
         # Récupérer les questionnaires en attente
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('''SELECT id, user_id, created_at FROM rellseas_quizzes 
                 WHERE guild_id=? AND status='answered' ORDER BY created_at DESC LIMIT 25''',
                 (self.g.id,)) as cur:
@@ -15915,7 +16499,7 @@ class RellseasLaunchQuizModal(Modal, title="🚀 Lancer un questionnaire"):
         questions_json = json.dumps(self.selected_questions, ensure_ascii=False)
         
         # Créer l'entrée dans la base de données
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('''CREATE TABLE IF NOT EXISTS rellseas_quizzes 
                 (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, user_id INTEGER, 
                 examiner_id INTEGER, status TEXT, answers TEXT, questions TEXT, created_at TEXT)''')
@@ -15986,7 +16570,7 @@ class RellseasAnswerButton(Button):
     
     async def callback(self, i):
         # Vérifier que c'est bien le candidat
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('SELECT user_id, status, questions FROM rellseas_quizzes WHERE id=?', (self.quiz_id,)) as cur:
                 row = await cur.fetchone()
         
@@ -16041,7 +16625,7 @@ class RellseasAnswerModal(Modal, title="📝 Vos réponses"):
             if idx < len(self.questions):
                 answers[self.questions[idx]['title']] = child.value
         
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('UPDATE rellseas_quizzes SET answers=?, status=? WHERE id=?',
                 (json.dumps(answers, ensure_ascii=False), 'answered', self.quiz_id))
             await db.commit()
@@ -16104,7 +16688,7 @@ class RellseasViewResponsesSelect(Select):
     async def callback(self, i):
         quiz_id = int(self.values[0])
         
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('SELECT user_id, examiner_id, answers, status FROM rellseas_quizzes WHERE id=?',
                 (quiz_id,)) as cur:
                 row = await cur.fetchone()
@@ -16175,7 +16759,7 @@ class RellseasReviewView(View):
             return await i.response.send_message("❌ Impossible de donner le rôle", ephemeral=True)
         
         # Mettre à jour le questionnaire
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('UPDATE rellseas_quizzes SET status=? WHERE id=?', ('accepted', self.quiz_id))
             await db.execute('''INSERT OR REPLACE INTO realsy_tracking 
                 (guild_id, user_id, last_activity, warn_count) VALUES (?, ?, ?, 0)''',
@@ -16238,7 +16822,7 @@ class RellseasRejectModal(Modal, title="❌ Raison du refus"):
         member = self.g.get_member(self.user_id)
         
         # Mettre à jour le questionnaire
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('UPDATE rellseas_quizzes SET status=? WHERE id=?', ('rejected', self.quiz_id))
             await db.commit()
         
@@ -16397,7 +16981,7 @@ async def suggestion_cmd(i: discord.Interaction, titre: str, proposition: str):
         suggestion_cooldowns[cooldown_key] = now()
     
     # Stocker pour le tracking
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         await db.execute('INSERT INTO suggestions (guild_id, message_id, user_id, title) VALUES (?, ?, ?, ?)',
             (i.guild.id, msg.id, i.user.id, titre))
         await db.commit()
@@ -16728,6 +17312,88 @@ class TradeTextWantModal(Modal, title="📥 Ce que je VEUX (texte)"):
 #                              📊 COMMANDE /STAT - STATISTIQUES MEMBRE
 # ═══════════════════════════════════════════════════════════════════════════════
 
+@bot.tree.command(name="afk", description="💤 Voir les membres AFK du serveur")
+@app_commands.describe(jours="Nombre de jours d'inactivité minimum (défaut: 7)")
+async def afk_cmd(i: discord.Interaction, jours: int = 7):
+    """Commande /afk — Liste des membres inactifs"""
+    ok, msg = await security_check(i, "afk")
+    if not ok:
+        return await i.response.send_message(msg, ephemeral=True)
+    
+    # Seuls les admins/owner peuvent voir la liste complète
+    if not (i.user.guild_permissions.administrator or i.user.id == i.guild.owner_id):
+        return await i.response.send_message("❌ Réservé aux administrateurs.", ephemeral=True)
+    
+    await i.response.defer(ephemeral=True)
+    
+    jours = max(1, min(jours, 365))
+    cutoff = (now() - timedelta(days=jours)).replace(tzinfo=timezone.utc)
+    afk_members = []
+    
+    try:
+        async with get_db() as db:
+            tracked = set()
+            async with db.execute(
+                'SELECT user_id, last_message, last_vocal, total_messages FROM activity_tracking WHERE guild_id=?',
+                (i.guild.id,)
+            ) as cursor:
+                async for row in cursor:
+                    uid = row[0]
+                    tracked.add(uid)
+                    la = None
+                    for ts in [row[1], row[2]]:
+                        if ts:
+                            try:
+                                dt = datetime.fromisoformat(ts).replace(tzinfo=timezone.utc)
+                                if not la or dt > la: la = dt
+                            except: pass
+                    
+                    if la and la < cutoff:
+                        days_off = (now().replace(tzinfo=timezone.utc) - la).days
+                        total_msg = row[3] if row[3] else 0
+                        afk_members.append((uid, days_off, total_msg))
+                    elif not la:
+                        afk_members.append((uid, jours, 0))
+            
+            for m in i.guild.members:
+                if not m.bot and m.id not in tracked and m.id != i.guild.owner_id:
+                    days_since_join = (now().replace(tzinfo=timezone.utc) - m.joined_at.replace(tzinfo=timezone.utc)).days if m.joined_at else 999
+                    afk_members.append((m.id, min(days_since_join, 999), 0))
+    except Exception as ex:
+        return await i.followup.send(f"❌ Erreur: {ex}", ephemeral=True)
+    
+    afk_members.sort(key=lambda x: x[1], reverse=True)
+    
+    if not afk_members:
+        e = discord.Embed(color=0x57F287)
+        e.set_author(name=f"💤 AFK ({jours}j+)", icon_url=i.guild.icon.url if i.guild.icon else None)
+        e.description = f"🎉 **Aucun membre AFK depuis {jours}+ jours !**"
+        return await i.followup.send(embed=e, ephemeral=True)
+    
+    # Créer les pages
+    embeds = []
+    chunk_size = 15
+    for page_idx in range(0, min(len(afk_members), 45), chunk_size):
+        chunk = afk_members[page_idx:page_idx+chunk_size]
+        e = discord.Embed(color=0xE74C3C)
+        e.set_author(name=f"💤 {len(afk_members)} membres AFK ({jours}j+)", icon_url=i.guild.icon.url if i.guild.icon else None)
+        
+        lines = []
+        for idx, (uid, days, msgs) in enumerate(chunk, page_idx + 1):
+            m = i.guild.get_member(uid)
+            name = m.mention if m else f"`{uid}`"
+            icon = "🔴" if days >= 30 else ("🟠" if days >= 14 else ("🟡" if days >= 7 else "⚪"))
+            msg_txt = f" ({msgs} msgs)" if msgs else ""
+            lines.append(f"`{idx:>3}.` {icon} {name} — **{days}j**{msg_txt}")
+        
+        e.description = "\n".join(lines)
+        page_num = page_idx // chunk_size + 1
+        total_pages = min((len(afk_members) + chunk_size - 1) // chunk_size, 3)
+        e.set_footer(text=f"Page {page_num}/{total_pages} • 🔴 30j+ | 🟠 14j+ | 🟡 7j+")
+        embeds.append(e)
+    
+    await i.followup.send(embeds=embeds[:3], ephemeral=True)
+
 @bot.tree.command(name="stat", description="📊 Voir les statistiques d'activité d'un membre")
 @app_commands.describe(membre="Le membre dont vous voulez voir les stats (vous par défaut)")
 async def stat_cmd(i: discord.Interaction, membre: discord.Member = None):
@@ -16820,7 +17486,7 @@ async def get_member_stats(guild, member, days):
         cutoff = now() - timedelta(days=days)
         cutoff_str = cutoff.isoformat()
         
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             # Récupérer les messages
             async with db.execute('''
                 SELECT channel_id, message_id, created_at FROM member_activity 
@@ -17201,7 +17867,7 @@ async def on_raw_reaction_add(payload):
     
     # Vérifier si c'est une suggestion
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('SELECT id FROM suggestions WHERE message_id=?', (payload.message_id,)) as c:
                 if not await c.fetchone():
                     return
@@ -17263,7 +17929,7 @@ async def on_raw_reaction_remove(payload):
 async def check_realsy_inactivity():
     """Vérifie l'inactivité des utilisateurs avec le rôle Realsy chaque jour"""
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('SELECT guild_id, user_id, last_activity, warn_count FROM realsy_tracking') as c:
                 rows = await c.fetchall()
         
@@ -17281,7 +17947,7 @@ async def check_realsy_inactivity():
                 member = guild.get_member(user_id)
                 if not member or role not in member.roles:
                     # L'utilisateur n'a plus le rôle, supprimer du tracking
-                    async with aiosqlite.connect(DB_PATH) as db:
+                    async with get_db() as db:
                         await db.execute('DELETE FROM realsy_tracking WHERE guild_id=? AND user_id=?',
                             (guild_id, user_id))
                         await db.commit()
@@ -17303,7 +17969,7 @@ async def check_realsy_inactivity():
                     
                     if warn_count == 0:
                         # Premier warn
-                        async with aiosqlite.connect(DB_PATH) as db:
+                        async with get_db() as db:
                             await db.execute('UPDATE realsy_tracking SET warn_count=1 WHERE guild_id=? AND user_id=?',
                                 (guild_id, user_id))
                             await db.commit()
@@ -17327,7 +17993,7 @@ async def check_realsy_inactivity():
                             await member.remove_roles(role, reason="Inactivité - 2ème avertissement")
                             
                             # Supprimer du tracking
-                            async with aiosqlite.connect(DB_PATH) as db:
+                            async with get_db() as db:
                                 await db.execute('DELETE FROM realsy_tracking WHERE guild_id=? AND user_id=?',
                                     (guild_id, user_id))
                                 await db.commit()
@@ -17363,47 +18029,52 @@ async def before_check():
 @tasks.loop(minutes=5)
 async def check_social_feeds():
     """Vérifie les nouveaux posts YouTube, Twitch, Twitter, Reddit, Discord et RoSocial"""
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with aiosqlite.connect(DB_PATH) as db:
-                async with db.execute('SELECT guild_id, data FROM guild_config') as cursor:
-                    async for row in cursor:
-                        guild_id, data_str = row
-                        try:
-                            data = json.loads(data_str) if data_str else {}
-                            guild = bot.get_guild(guild_id)
-                            if not guild:
+    # Lock : empêche les exécutions concurrentes si le check prend plus de 5min
+    if _feeds_lock.locked():
+        return  # Déjà en cours → skip ce cycle
+    
+    async with _feeds_lock:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with get_db() as db:
+                    async with db.execute('SELECT guild_id, data FROM guild_config') as cursor:
+                        async for row in cursor:
+                            guild_id, data_str = row
+                            try:
+                                data = json.loads(data_str) if data_str else {}
+                                guild = bot.get_guild(guild_id)
+                                if not guild:
+                                    continue
+                            
+                                # YouTube
+                                await check_youtube_feeds(session, guild, data)
+                            
+                                # Twitch
+                                await check_twitch_feeds(session, guild, data)
+                            
+                                # TikTok
+                                await check_tiktok_feeds(session, guild, data)
+                            
+                                # Twitter/X
+                                await check_twitter_feeds(session, guild, data)
+                            
+                                # Reddit
+                                await check_reddit_feeds(session, guild, data)
+                            
+                                # RoSocial
+                                await check_rosocial_feeds(session, guild, data)
+                            
+                                # Roblox UGC
+                                await check_roblox_ugc_feeds(session, guild, data)
+                            
+                                # Réductions de jeux (vérifiée moins souvent via counter)
+                                await check_game_deals(session, guild, data)
+                            
+                            except Exception as ex:
+                                print(f"Erreur feed {guild_id}: {ex}")
                                 continue
-                            
-                            # YouTube
-                            await check_youtube_feeds(session, guild, data)
-                            
-                            # Twitch
-                            await check_twitch_feeds(session, guild, data)
-                            
-                            # TikTok
-                            await check_tiktok_feeds(session, guild, data)
-                            
-                            # Twitter/X
-                            await check_twitter_feeds(session, guild, data)
-                            
-                            # Reddit
-                            await check_reddit_feeds(session, guild, data)
-                            
-                            # RoSocial
-                            await check_rosocial_feeds(session, guild, data)
-                            
-                            # Roblox UGC
-                            await check_roblox_ugc_feeds(session, guild, data)
-                            
-                            # Réductions de jeux (vérifiée moins souvent via counter)
-                            await check_game_deals(session, guild, data)
-                            
-                        except Exception as ex:
-                            print(f"Erreur feed {guild_id}: {ex}")
-                            continue
-    except Exception as ex:
-        print(f"Erreur check_social_feeds: {ex}")
+        except Exception as ex:
+            print(f"Erreur check_social_feeds: {ex}")
 
 async def check_youtube_feeds(session, guild, data):
     """Vérifie les nouvelles vidéos YouTube + détection de lives"""
@@ -17437,26 +18108,29 @@ async def check_youtube_feeds(session, guild, data):
                         if resp.status == 200:
                             html = await resp.text()
                             is_live = '"isLive":true' in html or '"isLiveBroadcast":true' in html
-                            was_live = posted_content.get(live_cache_key, False)
                             
-                            if is_live and not was_live:
-                                posted_content[live_cache_key] = True
+                            if is_live:
+                                mark_live_still_active(live_cache_key)
                                 
-                                live_url = f"https://www.youtube.com/channel/{channel_id}/live"
-                                e = discord.Embed(color=0xFF0000, url=live_url)
-                                e.set_author(name=f"🔴 EN DIRECT SUR YOUTUBE", url=live_url, icon_url=_YT_ICON)
-                                e.title = f"{channel_name} est en LIVE !"
-                                e.description = f"**{channel_name}** vient de lancer un stream en direct !\n\n▶️ [**Rejoindre le live**]({live_url})"
-                                e.set_image(url=f"https://img.youtube.com/vi/live_user_{channel_id}/maxresdefault.jpg?t={int(now().timestamp())}")
-                                e.set_footer(text=f"YouTube Live • {channel_name}", icon_url=_YT_ICON)
-                                e.timestamp = now()
-                                
-                                await webhook_send(live_channel, 'youtube_live', embed=e)
-                            
-                            elif not is_live and was_live:
-                                posted_content[live_cache_key] = False
+                                if await should_announce_live(live_cache_key):
+                                    await mark_live_announced(live_cache_key, guild.id, 'youtube', channel_name)
+                                    
+                                    live_url = f"https://www.youtube.com/channel/{channel_id}/live"
+                                    e = discord.Embed(color=0xFF0000, url=live_url)
+                                    e.set_author(name=f"🔴 EN DIRECT SUR YOUTUBE", url=live_url, icon_url=_YT_ICON)
+                                    e.title = f"{channel_name} est en LIVE !"
+                                    e.description = f"**{channel_name}** vient de lancer un stream en direct !\n\n▶️ [**Rejoindre le live**]({live_url})"
+                                    e.set_image(url=f"https://img.youtube.com/vi/live_user_{channel_id}/maxresdefault.jpg?t={int(now().timestamp())}")
+                                    e.set_footer(text=f"YouTube Live • {channel_name}", icon_url=_YT_ICON)
+                                    e.timestamp = now()
+                                    
+                                    await webhook_send(live_channel, 'youtube_live', embed=e)
+                            else:
+                                # Live pas détecté — debounce avant de considérer comme terminé
+                                await check_live_ended(live_cache_key, guild.id, 'youtube', channel_name)
+                        # Si status != 200, ne rien faire (ne pas reset le cache)
                 except:
-                    pass
+                    pass  # Erreur réseau → ne PAS toucher au cache
             
             # ═══════════════ NOUVELLES VIDÉOS (RSS) ═══════════════
             if not target_channel:
@@ -17572,7 +18246,7 @@ async def check_twitch_feeds(session, guild, data):
                 continue
             
             url = f"https://www.twitch.tv/{username}"
-            cache_key = f"twitch_{guild.id}_{username}"
+            cache_key = f"twitch_live_{guild.id}_{username}"
             
             async with session.get(url, headers=headers_tw, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                 if resp.status != 200:
@@ -17580,24 +18254,25 @@ async def check_twitch_feeds(session, guild, data):
                 html = await resp.text()
             
             is_live = '"isLiveBroadcast":true' in html or 'isLiveBroadcast' in html
-            was_live = posted_content.get(cache_key, False)
             
-            if is_live and not was_live:
-                posted_content[cache_key] = True
+            if is_live:
+                mark_live_still_active(cache_key)
                 
-                stream_url = f"https://www.twitch.tv/{username}"
-                e = discord.Embed(color=0x9146FF, url=stream_url)
-                e.set_author(name=f"🔴 EN DIRECT SUR TWITCH", url=stream_url, icon_url=_TW_ICON)
-                e.title = f"{username} est en live !"
-                e.description = f"**{username}** vient de lancer un stream !\n\n▶️ [**Rejoindre le stream**]({stream_url})"
-                e.set_image(url=f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{username.lower()}-1280x720.jpg?t={int(now().timestamp())}")
-                e.set_footer(text=f"Twitch • {username}", icon_url=_TW_ICON)
-                e.timestamp = now()
-                
-                await webhook_send(notif_channel, 'twitch_live', embed=e)
-                
-            elif not is_live and was_live:
-                posted_content[cache_key] = False
+                if await should_announce_live(cache_key):
+                    await mark_live_announced(cache_key, guild.id, 'twitch', username)
+                    
+                    stream_url = f"https://www.twitch.tv/{username}"
+                    e = discord.Embed(color=0x9146FF, url=stream_url)
+                    e.set_author(name=f"🔴 EN DIRECT SUR TWITCH", url=stream_url, icon_url=_TW_ICON)
+                    e.title = f"{username} est en live !"
+                    e.description = f"**{username}** vient de lancer un stream !\n\n▶️ [**Rejoindre le stream**]({stream_url})"
+                    e.set_image(url=f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{username.lower()}-1280x720.jpg?t={int(now().timestamp())}")
+                    e.set_footer(text=f"Twitch • {username}", icon_url=_TW_ICON)
+                    e.timestamp = now()
+                    
+                    await webhook_send(notif_channel, 'twitch_live', embed=e)
+            else:
+                await check_live_ended(cache_key, guild.id, 'twitch', username)
             
             await asyncio.sleep(1)
             
@@ -17644,25 +18319,26 @@ async def check_tiktok_feeds(session, guild, data):
                             html = await resp.text()
                             # TikTok live détection via JSON-LD ou métadonnées
                             is_live = '"isLiveBroadcast":true' in html or '"liveRoom"' in html or 'LiveRoom' in html
-                            was_live = posted_content.get(live_cache_key, False)
                             
-                            if is_live and not was_live:
-                                posted_content[live_cache_key] = True
+                            if is_live:
+                                mark_live_still_active(live_cache_key)
                                 
-                                tiktok_live_url = f"https://www.tiktok.com/@{username}/live"
-                                e = discord.Embed(color=0xFE2C55, url=tiktok_live_url)
-                                e.set_author(name=f"🔴 EN DIRECT SUR TIKTOK", url=tiktok_live_url, icon_url=_TK_ICON)
-                                e.title = f"@{username} est en LIVE !"
-                                e.description = f"**@{username}** est en direct sur TikTok !\n\n🎵 [**Rejoindre le live**]({tiktok_live_url})"
-                                e.set_footer(text=f"TikTok Live • @{username}", icon_url=_TK_ICON)
-                                e.timestamp = now()
-                                
-                                await webhook_send(live_channel, 'tiktok_live', embed=e)
-                            
-                            elif not is_live and was_live:
-                                posted_content[live_cache_key] = False
+                                if await should_announce_live(live_cache_key):
+                                    await mark_live_announced(live_cache_key, guild.id, 'tiktok', username)
+                                    
+                                    tiktok_live_url = f"https://www.tiktok.com/@{username}/live"
+                                    e = discord.Embed(color=0xFE2C55, url=tiktok_live_url)
+                                    e.set_author(name=f"🔴 EN DIRECT SUR TIKTOK", url=tiktok_live_url, icon_url=_TK_ICON)
+                                    e.title = f"@{username} est en LIVE !"
+                                    e.description = f"**@{username}** est en direct sur TikTok !\n\n🎵 [**Rejoindre le live**]({tiktok_live_url})"
+                                    e.set_footer(text=f"TikTok Live • @{username}", icon_url=_TK_ICON)
+                                    e.timestamp = now()
+                                    
+                                    await webhook_send(live_channel, 'tiktok_live', embed=e)
+                            else:
+                                await check_live_ended(live_cache_key, guild.id, 'tiktok', username)
                 except:
-                    pass
+                    pass  # Erreur réseau → ne PAS toucher au cache
             
             # ═══════════════ NOUVELLES VIDÉOS TIKTOK (via RSS/page) ═══════════════
             if not target_channel:
@@ -18231,7 +18907,7 @@ _deals_last_check = {}  # Throttle en mémoire (pour ne pas spam les API)
 async def is_deal_already_posted(guild_id, platform, game_id):
     """Vérifie en DB si un deal a déjà été posté et n'est pas expiré"""
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute(
                 'SELECT id, message_id, channel_id, discount FROM posted_deals WHERE guild_id=? AND platform=? AND game_id=? AND expired=0',
                 (guild_id, platform, str(game_id))
@@ -18249,7 +18925,7 @@ async def is_deal_already_posted(guild_id, platform, game_id):
 async def save_posted_deal(guild_id, platform, game_id, game_name, message_id, channel_id, discount, original_price, final_price, game_url, image_url):
     """Enregistre un deal posté en DB"""
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('''
                 INSERT OR REPLACE INTO posted_deals 
                 (guild_id, platform, game_id, game_name, message_id, channel_id, discount, original_price, final_price, game_url, image_url, posted_at, last_seen, expired)
@@ -18262,7 +18938,7 @@ async def save_posted_deal(guild_id, platform, game_id, game_name, message_id, c
 async def update_deal_message(guild_id, platform, game_id, message_id):
     """Met à jour le message_id d'un deal existant"""
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute(
                 'UPDATE posted_deals SET message_id=?, last_seen=? WHERE guild_id=? AND platform=? AND game_id=? AND expired=0',
                 (message_id, now().isoformat(), guild_id, platform, str(game_id))
@@ -18275,7 +18951,7 @@ async def cleanup_expired_deals_db(bot_instance):
     """Supprime les messages des deals qui ne sont plus actifs (pas vus depuis 6h)"""
     try:
         cutoff = (now() - timedelta(hours=6)).isoformat()
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             # Récupérer les deals expirés (pas vus depuis 6h et non déjà marqués expired)
             async with db.execute(
                 'SELECT id, guild_id, message_id, channel_id, game_name, platform FROM posted_deals WHERE expired=0 AND last_seen < ?',
@@ -18985,8 +19661,9 @@ async def on_voice_state_update(member, before, after):
 async def track_member_message(msg):
     """Enregistre un message dans le tracking d'activité"""
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             now_str = now().isoformat()
+            today = now().strftime('%Y-%m-%d')
             
             # Mettre à jour activity_tracking
             await db.execute('''
@@ -19002,6 +19679,14 @@ async def track_member_message(msg):
                 INSERT INTO member_activity (guild_id, user_id, activity_type, channel_id, message_id, created_at)
                 VALUES (?, ?, 'message', ?, ?, ?)
             ''', (msg.guild.id, msg.author.id, msg.channel.id, msg.id, now_str))
+            
+            # ═══ Stats journalières agrégées (pour graphiques tendances) ═══
+            await db.execute('''
+                INSERT INTO daily_guild_stats (guild_id, date, total_messages, active_members)
+                VALUES (?, ?, 1, 1)
+                ON CONFLICT(guild_id, date) DO UPDATE SET
+                    total_messages = total_messages + 1
+            ''', (msg.guild.id, today))
             
             await db.commit()
         
@@ -19048,7 +19733,7 @@ async def track_member_message(msg):
                         pass
                     
                     # Vérifier les récompenses de niveau
-                    async with aiosqlite.connect(DB_PATH) as db:
+                    async with get_db() as db:
                         async with db.execute('SELECT role_id FROM level_rewards WHERE guild_id=? AND level=?', (msg.guild.id, new_level)) as cursor:
                             row = await cursor.fetchone()
                             if row:
@@ -19089,7 +19774,7 @@ async def handle_recovery_message(msg, stat_cfg):
         
         # ═══════════════ ÉTAPE 1: METTRE À JOUR L'ACTIVITÉ EN PREMIER ═══════════════
         now_str = now().isoformat()
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('''
                 INSERT INTO activity_tracking (guild_id, user_id, last_message, total_messages)
                 VALUES (?, ?, ?, 1)
@@ -19120,7 +19805,7 @@ async def handle_recovery_message(msg, stat_cfg):
 async def track_member_vocal_join(member, channel):
     """Enregistre une connexion vocale"""
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             now_str = now().isoformat()
             
             # Mettre à jour last_vocal
@@ -19142,7 +19827,7 @@ async def track_member_vocal_join(member, channel):
 async def track_member_vocal_leave(member, channel, duration):
     """Enregistre le temps passé en vocal et donne XP/pièces"""
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             now_str = now().isoformat()
             
             # Mettre à jour le temps total en vocal
@@ -19217,7 +19902,7 @@ async def track_member_vocal_leave(member, channel, duration):
                                 pass
                         
                         # Vérifier les récompenses de niveau
-                        async with aiosqlite.connect(DB_PATH) as db:
+                        async with get_db() as db:
                             async with db.execute('SELECT role_id FROM level_rewards WHERE guild_id=? AND level=?', (member.guild.id, new_level)) as cursor:
                                 row = await cursor.fetchone()
                                 if row:
@@ -19259,7 +19944,7 @@ async def restore_activity_role(member):
         
         # ═══════════════ ENREGISTRER L'ACTIVITÉ ═══════════════
         now_str = now().isoformat()
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute('''
                 INSERT INTO activity_tracking (guild_id, user_id, last_vocal)
                 VALUES (?, ?, ?)
@@ -19288,7 +19973,7 @@ async def check_giveaways():
     try:
         now_dt = now()
         
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             # Récupérer les giveaways à terminer
             async with db.execute(
                 'SELECT id, guild_id, channel_id, message_id, title, prize, participants FROM giveaways WHERE ended=0 AND end_time <= ?',
@@ -19394,7 +20079,7 @@ async def check_scheduled_messages():
         current_hour = now_dt.hour
         current_minute = now_dt.minute
         
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             # Récupérer tous les messages actifs
             async with db.execute(
                 'SELECT id, guild_id, channel_id, title, description, color, image_url, footer, frequency, frequency_value, send_hour, send_minute, last_sent FROM scheduled_messages WHERE enabled=1'
@@ -19536,7 +20221,7 @@ async def level_cmd(i: discord.Interaction, membre: discord.Member = None):
     )
     
     # Prochain rôle de niveau
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             'SELECT level, role_id FROM level_rewards WHERE guild_id=? AND level > ? ORDER BY level LIMIT 1',
             (i.guild.id, current_level)
@@ -19658,7 +20343,7 @@ class ShopPurchaseView(View):
         
         # Enregistrer l'achat pour retrait automatique
         expires_at = now() + timedelta(seconds=duration)
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             await db.execute(
                 'INSERT INTO shop_purchases (guild_id, user_id, role_id, expires_at) VALUES (?, ?, ?, ?)',
                 (self.guild.id, i.user.id, role_id, expires_at.isoformat())
@@ -19675,7 +20360,7 @@ class ShopPurchaseView(View):
 @tasks.loop(minutes=1)
 async def check_expired_roles():
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             now_str = now().isoformat()
             
             # Récupérer les achats expirés
@@ -19717,7 +20402,7 @@ async def leaderboard_cmd(i: discord.Interaction):
         return await i.response.send_message("❌ L'économie n'est pas activée sur ce serveur", ephemeral=True)
     
     # Récupérer le top 10
-    async with aiosqlite.connect(DB_PATH) as db:
+    async with get_db() as db:
         async with db.execute(
             'SELECT user_id, coins, bank, level FROM economy WHERE guild_id=? ORDER BY (coins + bank) DESC LIMIT 10',
             (i.guild.id,)
@@ -19766,7 +20451,7 @@ async def testdeals_cmd(i: discord.Interaction):
     # Compter les deals déjà postés en DB
     posted_count = 0
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             async with db.execute('SELECT COUNT(*) FROM posted_deals WHERE guild_id=? AND expired=0', (i.guild.id,)) as cur:
                 row = await cur.fetchone()
                 posted_count = row[0] if row else 0
@@ -19794,7 +20479,7 @@ async def testdeals_cmd(i: discord.Interaction):
         # Compter les nouveaux deals postés
         new_count = 0
         try:
-            async with aiosqlite.connect(DB_PATH) as db:
+            async with get_db() as db:
                 async with db.execute('SELECT COUNT(*) FROM posted_deals WHERE guild_id=? AND expired=0', (i.guild.id,)) as cur:
                     row = await cur.fetchone()
                     new_count = row[0] if row else 0
@@ -19819,7 +20504,7 @@ async def cleardeals_cmd(i: discord.Interaction):
     
     deleted = 0
     try:
-        async with aiosqlite.connect(DB_PATH) as db:
+        async with get_db() as db:
             # Récupérer tous les deals actifs
             async with db.execute(
                 'SELECT message_id, channel_id, game_name FROM posted_deals WHERE guild_id=? AND expired=0',
