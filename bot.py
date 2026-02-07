@@ -716,6 +716,32 @@ async def db_init():
             banned_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )''')
         
+        # ═══════════════ TABLE DEALS PERSISTANTE ═══════════════
+        # Stocke chaque deal posté pour ne jamais re-publier le même jeu
+        await db.execute('''CREATE TABLE IF NOT EXISTS posted_deals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            platform TEXT,
+            game_id TEXT,
+            game_name TEXT,
+            message_id INTEGER DEFAULT 0,
+            channel_id INTEGER DEFAULT 0,
+            discount INTEGER DEFAULT 0,
+            original_price REAL DEFAULT 0,
+            final_price REAL DEFAULT 0,
+            game_url TEXT DEFAULT "",
+            image_url TEXT DEFAULT "",
+            posted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expired INTEGER DEFAULT 0,
+            UNIQUE(guild_id, platform, game_id)
+        )''')
+        try:
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_posted_deals_guild ON posted_deals(guild_id, platform, game_id)')
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_posted_deals_expired ON posted_deals(guild_id, expired)')
+        except:
+            pass
+        
         await db.commit()
     print("✅ DB OK")
 
@@ -2821,10 +2847,26 @@ class MainPanel(View):
         return i.user.id == self.u.id
     
     def embed(self):
-        e = discord.Embed(title="⚙️ Configuration", color=C.BLURPLE)
-        e.description = f"**{self.g.name}**\n👥 {self.g.member_count} membres"
+        e = discord.Embed(color=0x5865F2)
+        e.set_author(name="━━━  Panneau de Configuration  ━━━", icon_url=self.g.icon.url if self.g.icon else None)
+        
+        desc = f"**{self.g.name}**\n"
+        desc += f"👥 `{self.g.member_count}` membres  •  📺 `{len(self.g.channels)}` salons  •  🎭 `{len(self.g.roles)}` rôles\n"
+        desc += f"\n─────────────────────────────────\n"
+        desc += f"🛡️ **Sécurité**  ─  Protection, Modération, Immunités\n"
+        desc += f"🎫 **Communauté**  ─  Tickets, Suggestions, Niveaux\n"
+        desc += f"📢 **Contenu**  ─  Publicité, Stats, Centre d'aide\n"
+        desc += f"🔧 **Outils**  ─  Salons, Vocaux, Commandes\n"
+        desc += f"─────────────────────────────────\n"
+        desc += f"*Sélectionnez une catégorie ci-dessous*"
+        e.description = desc
+        
         if self.g.icon:
             e.set_thumbnail(url=self.g.icon.url)
+        if self.g.banner:
+            e.set_image(url=self.g.banner.url)
+        
+        e.set_footer(text=f"Configuré par {self.u.display_name}  •  Timeout: 10 min", icon_url=self.u.display_avatar.url)
         return e
     
     @discord.ui.button(label="Protection", emoji="🛡️", style=discord.ButtonStyle.primary, row=0)
@@ -2903,14 +2945,27 @@ class ProtPanel(View):
     
     async def embed(self):
         c = await cfg(self.g.id)
-        e = discord.Embed(title="🛡️ Protection", color=C.BLUE)
+        e = discord.Embed(color=0x3498DB)
+        e.set_author(name="━━━  Protection  ━━━", icon_url=self.g.icon.url if self.g.icon else None)
+        
         lines = []
+        enabled_count = 0
         for key, emoji, name in PROTS:
-            status = "✅" if c.get(key) else "❌"
+            is_on = c.get(key)
+            if is_on:
+                enabled_count += 1
+            status = "` ✅ ON  `" if is_on else "` ❌ OFF `"
             log_ch = self.g.get_channel(c.get(f'log_{key}', 0))
-            log_txt = f"→ {log_ch.mention}" if log_ch else ""
-            lines.append(f"{emoji} **{name}**: {status} {log_txt}")
-        e.description = "\n".join(lines)
+            log_txt = f"  ➜  {log_ch.mention}" if log_ch else ""
+            lines.append(f"{emoji} **{name}**  {status}{log_txt}")
+        
+        desc = f"**{enabled_count}/{len(PROTS)}** protections actives\n"
+        desc += f"─────────────────────────────────\n"
+        desc += "\n".join(lines)
+        desc += f"\n─────────────────────────────────\n"
+        desc += f"*Sélectionnez une protection pour la configurer*"
+        e.description = desc
+        e.set_footer(text="🛡️ Sélectionnez ci-dessous pour configurer")
         return e
     
     @discord.ui.select(
@@ -6971,43 +7026,39 @@ class AdsDealsPanel(View):
     
     async def embed(self):
         c = await cfg(self.g.id)
-        e = discord.Embed(title="🎯 Réductions de Jeux Vidéo", color=0xFF6B35)
+        e = discord.Embed(color=0xFF6B35)
+        e.set_author(name="━━━  Réductions de Jeux Vidéo  ━━━", icon_url=self.g.icon.url if self.g.icon else None)
         
         deals_ch = self.g.get_channel(c.get('ads_deals_channel', 0))
         deals_enabled = c.get('ads_deals_enabled', False)
         deals_min_discount = c.get('ads_deals_min_discount', 50)
         
-        e.description = (
-            "Recevez automatiquement les meilleures promotions de jeux vidéo !\n\n"
-            "**🏪 +20 Plateformes supportées :**"
-        )
+        # Compter les deals actifs en DB
+        active_deals = 0
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute('SELECT COUNT(*) FROM posted_deals WHERE guild_id=? AND expired=0', (self.g.id,)) as cur:
+                    row = await cur.fetchone()
+                    active_deals = row[0] if row else 0
+        except:
+            pass
         
-        # Plateformes majeures
-        e.add_field(
-            name="🎮 Majeures",
-            value="Steam • Epic Games • GOG\nUbisoft • EA/Origin • Battle.net",
-            inline=True
-        )
+        desc = "Recevez automatiquement les meilleures promotions !\n"
+        desc += "Chaque jeu n'est publié **qu'une seule fois** et supprimé quand la promo expire.\n\n"
+        desc += "─────────────────────────────────\n"
+        desc += "🎮 **Steam** • **Epic Games** • **GOG**\n"
+        desc += "🔵 **Ubisoft** • **EA/Origin** • **Battle.net**\n"
+        desc += "🔑 **Humble** • **Fanatical** • **Green Man Gaming** • ...\n"
+        desc += "─────────────────────────────────"
+        e.description = desc
         
-        # Revendeurs de clés
-        e.add_field(
-            name="🔑 Revendeurs",
-            value="Humble Bundle • Fanatical\nGreen Man Gaming • Gamesplanet",
-            inline=True
-        )
-        
-        # Autres
-        e.add_field(
-            name="🛒 Autres",
-            value="GameBillet • IndieGala\nVoidu • DLGamer • +10 autres",
-            inline=True
-        )
-        
+        status_emoji = "✅" if deals_enabled else "❌"
+        e.add_field(name="📊 Statut", value=f"{status_emoji} {'Activé' if deals_enabled else 'Désactivé'}", inline=True)
         e.add_field(name="📍 Salon", value=deals_ch.mention if deals_ch else "❌ Non configuré", inline=True)
-        e.add_field(name="📊 Statut", value="✅ Activé" if deals_enabled else "❌ Désactivé", inline=True)
         e.add_field(name="🔻 Minimum", value=f"**-{deals_min_discount}%**", inline=True)
+        e.add_field(name="📦 Deals actifs", value=f"**{active_deals}** jeu(x) en promo", inline=True)
         
-        e.set_footer(text="💡 Données via CheapShark API • Vérification toutes les 30 min")
+        e.set_footer(text="🔄 Vérification toutes les 30 min  •  Anti-doublon en base de données")
         return e
     
     @discord.ui.button(label="📍 Salon", style=discord.ButtonStyle.primary, row=0)
@@ -13943,6 +13994,10 @@ async def on_ready():
     if not check_expired_roles.is_running():
         check_expired_roles.start()
     
+    # Lancer la tâche de nettoyage des deals expirés
+    if not cleanup_deals_task.is_running():
+        cleanup_deals_task.start()
+    
     print(f"✅ {bot.user.name} v27 prêt!")
     print(f"🌐 Serveurs: {len(bot.guilds)}")
     print(f"📢 Vérification feeds sociaux toutes les 5 minutes")
@@ -14512,7 +14567,11 @@ async def configure_cmd(i: discord.Interaction):
         return await i.response.send_message(msg, ephemeral=True)
     
     if not i.user.guild_permissions.administrator:
-        return await i.response.send_message("❌ Vous devez être administrateur", ephemeral=True)
+        e = discord.Embed(
+            description="❌ **Accès refusé** — Vous devez être **administrateur** pour accéder à ce panneau.",
+            color=0xE74C3C
+        )
+        return await i.response.send_message(embed=e, ephemeral=True)
     
     # Log l'accès à la configuration
     await log_security_event(i.guild.id, i.user.id, "CONFIG_ACCESS", "Ouverture du panneau de configuration")
@@ -17711,9 +17770,98 @@ async def check_roblox_ugc_feeds(session, guild, data):
             print(f"Erreur Roblox UGC feed {feed}: {ex}")
             continue
 
-# Cache pour éviter de republier les mêmes deals
-_deals_cache = {}
-_deals_last_check = {}
+# ═══════════════════════════════════════════════════════════════════════════════
+#              🎮 SYSTÈME DE DEALS PERSISTANT (anti-doublon en DB)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_deals_last_check = {}  # Throttle en mémoire (pour ne pas spam les API)
+
+async def is_deal_already_posted(guild_id, platform, game_id):
+    """Vérifie en DB si un deal a déjà été posté et n'est pas expiré"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                'SELECT id, message_id, channel_id, discount FROM posted_deals WHERE guild_id=? AND platform=? AND game_id=? AND expired=0',
+                (guild_id, platform, str(game_id))
+            ) as cur:
+                row = await cur.fetchone()
+                if row:
+                    # Mettre à jour last_seen pour savoir que le deal est encore actif
+                    await db.execute('UPDATE posted_deals SET last_seen=? WHERE id=?', (now().isoformat(), row[0]))
+                    await db.commit()
+                    return True, row  # (True, (id, message_id, channel_id, discount))
+    except:
+        pass
+    return False, None
+
+async def save_posted_deal(guild_id, platform, game_id, game_name, message_id, channel_id, discount, original_price, final_price, game_url, image_url):
+    """Enregistre un deal posté en DB"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute('''
+                INSERT OR REPLACE INTO posted_deals 
+                (guild_id, platform, game_id, game_name, message_id, channel_id, discount, original_price, final_price, game_url, image_url, posted_at, last_seen, expired)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+            ''', (guild_id, platform, str(game_id), game_name, message_id, channel_id, discount, original_price, final_price, game_url, image_url, now().isoformat(), now().isoformat()))
+            await db.commit()
+    except Exception as ex:
+        print(f"[DEALS DB] Erreur save: {ex}")
+
+async def update_deal_message(guild_id, platform, game_id, message_id):
+    """Met à jour le message_id d'un deal existant"""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                'UPDATE posted_deals SET message_id=?, last_seen=? WHERE guild_id=? AND platform=? AND game_id=? AND expired=0',
+                (message_id, now().isoformat(), guild_id, platform, str(game_id))
+            )
+            await db.commit()
+    except:
+        pass
+
+async def cleanup_expired_deals_db(bot_instance):
+    """Supprime les messages des deals qui ne sont plus actifs (pas vus depuis 6h)"""
+    try:
+        cutoff = (now() - timedelta(hours=6)).isoformat()
+        async with aiosqlite.connect(DB_PATH) as db:
+            # Récupérer les deals expirés (pas vus depuis 6h et non déjà marqués expired)
+            async with db.execute(
+                'SELECT id, guild_id, message_id, channel_id, game_name, platform FROM posted_deals WHERE expired=0 AND last_seen < ?',
+                (cutoff,)
+            ) as cur:
+                expired_deals = await cur.fetchall()
+            
+            for deal_id, guild_id, message_id, channel_id, game_name, platform in expired_deals:
+                # Essayer de supprimer le message Discord
+                try:
+                    guild = bot_instance.get_guild(guild_id)
+                    if guild:
+                        channel = guild.get_channel(channel_id)
+                        if channel and message_id:
+                            try:
+                                msg = await channel.fetch_message(message_id)
+                                await msg.delete()
+                                print(f"[DEALS CLEANUP] 🗑️ Supprimé: {game_name} ({platform}) - promo terminée")
+                            except discord.NotFound:
+                                pass  # Message déjà supprimé
+                            except:
+                                pass
+                except:
+                    pass
+                
+                # Marquer comme expiré en DB
+                await db.execute('UPDATE posted_deals SET expired=1 WHERE id=?', (deal_id,))
+            
+            # Nettoyer les très vieux deals expirés (>7 jours)
+            old_cutoff = (now() - timedelta(days=7)).isoformat()
+            await db.execute('DELETE FROM posted_deals WHERE expired=1 AND last_seen < ?', (old_cutoff,))
+            
+            await db.commit()
+            
+            if expired_deals:
+                print(f"[DEALS CLEANUP] {len(expired_deals)} deal(s) expiré(s) nettoyé(s)")
+    except Exception as ex:
+        print(f"[DEALS CLEANUP] Erreur: {ex}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                    🎮 CONFIGURATION DES PLATEFORMES DE JEUX
@@ -17884,7 +18032,7 @@ GAME_PLATFORMS = {
 }
 
 async def check_game_deals(session, guild, data):
-    """Vérifie les réductions de jeux vidéo sur Steam, Epic Games et GOG"""
+    """Vérifie les réductions de jeux — PERSISTANT, ne re-publie JAMAIS le même deal"""
     if not data.get('ads_deals_enabled', False):
         return
     
@@ -17894,14 +18042,14 @@ async def check_game_deals(session, guild, data):
     
     min_discount = data.get('ads_deals_min_discount', 50)
     
-    # Vérifier seulement toutes les 30 minutes par serveur
+    # Throttle: vérifier seulement toutes les 30 minutes par serveur
     cache_key = f"deals_{guild.id}"
     last_check = _deals_last_check.get(cache_key, 0)
-    if time.time() - last_check < 1800:  # 30 minutes
+    if time.time() - last_check < 1800:
         return
     _deals_last_check[cache_key] = time.time()
     
-    print(f"[DEALS] Vérification des promos pour {guild.name}...")
+    print(f"[DEALS] 🔍 Vérification des promos pour {guild.name}...")
     
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -17910,34 +18058,29 @@ async def check_game_deals(session, guild, data):
     }
     
     deals_posted = 0
-    max_deals = 8
+    max_deals = 10
+    active_deal_keys = set()  # Tous les deals actuellement actifs (pour détecter les expirés)
     
     # ═══════════════════════════════════════════════════════════════════════════════
     #                              🎮 STEAM API
     # ═══════════════════════════════════════════════════════════════════════════════
     try:
         steam_url = "https://store.steampowered.com/api/featuredcategories?cc=fr&l=french"
-        
         async with session.get(steam_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
             if resp.status == 200:
                 steam_data = await resp.json()
                 specials = steam_data.get('specials', {}).get('items', [])
-                print(f"[DEALS] Steam: {len(specials)} jeux en promo trouvés")
                 
-                for game in specials[:10]:
+                for game in specials[:15]:
                     if deals_posted >= max_deals:
                         break
-                    
                     try:
-                        game_id = game.get('id')
+                        game_id = str(game.get('id', ''))
                         game_name = game.get('name', 'Jeu inconnu')
                         discount = game.get('discount_percent', 0)
                         
-                        # Prix
                         original_price = game.get('original_price', 0)
                         final_price = game.get('final_price', 0)
-                        
-                        # Convertir centimes en euros si nécessaire
                         if original_price > 100:
                             original_price = original_price / 100
                             final_price = final_price / 100
@@ -17945,186 +18088,132 @@ async def check_game_deals(session, guild, data):
                         if discount < min_discount:
                             continue
                         
-                        deal_key = f"steam_{guild.id}_{game_id}"
-                        if deal_key in _deals_cache:
+                        active_deal_keys.add(('steam', game_id))
+                        
+                        # Vérifier en DB si déjà posté
+                        already_posted, existing = await is_deal_already_posted(guild.id, 'steam', game_id)
+                        if already_posted:
                             continue
-                        _deals_cache[deal_key] = time.time()
                         
                         game_url = f"https://store.steampowered.com/app/{game_id}"
                         image_url = game.get('large_capsule_image') or game.get('header_image') or f"https://cdn.akamai.steamstatic.com/steam/apps/{game_id}/header.jpg"
                         
                         e = await create_deal_embed(
-                            platform='steam',
-                            game_name=game_name,
-                            game_url=game_url,
-                            image_url=image_url,
-                            original_price=original_price,
-                            final_price=final_price,
-                            discount=discount
+                            platform='steam', game_name=game_name, game_url=game_url,
+                            image_url=image_url, original_price=original_price,
+                            final_price=final_price, discount=discount
                         )
                         
-                        await channel.send(embed=e)
+                        msg = await channel.send(embed=e)
+                        await save_posted_deal(guild.id, 'steam', game_id, game_name, msg.id, channel.id, discount, original_price, final_price, game_url, image_url)
                         deals_posted += 1
-                        print(f"[DEALS] Posté: {game_name} (-{discount}%) sur Steam")
+                        print(f"[DEALS] ✅ Nouveau: {game_name} (-{discount}%) Steam")
                         await asyncio.sleep(2)
-                        
                     except Exception as ex:
-                        print(f"[DEALS] Erreur Steam game: {ex}")
+                        print(f"[DEALS] Erreur Steam: {ex}")
                         continue
-            else:
-                print(f"[DEALS] Steam API erreur: {resp.status}")
-                        
     except Exception as ex:
-        print(f"[DEALS] Erreur Steam: {ex}")
+        print(f"[DEALS] Erreur Steam API: {ex}")
     
     # ═══════════════════════════════════════════════════════════════════════════════
-    #                         🎯 EPIC GAMES - JEUX GRATUITS
+    #                         🎯 EPIC GAMES - JEUX GRATUITS & PROMOS
     # ═══════════════════════════════════════════════════════════════════════════════
     try:
         epic_url = "https://store-site-backend-static-ipv4.ak.epicgames.com/freeGamesPromotions?locale=fr&country=FR&allowCountries=FR"
-        
         async with session.get(epic_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
             if resp.status == 200:
                 epic_data = await resp.json()
                 games = epic_data.get('data', {}).get('Catalog', {}).get('searchStore', {}).get('elements', [])
-                print(f"[DEALS] Epic Games: {len(games)} jeux trouvés")
                 
-                for game in games[:8]:
+                for game in games[:10]:
                     if deals_posted >= max_deals:
                         break
-                    
                     try:
                         game_name = game.get('title', 'Jeu inconnu')
                         
-                        # Vérifier les promotions actives
                         promotions = game.get('promotions')
                         if not promotions:
-                            print(f"[DEALS] Epic: {game_name} - pas de promotions")
                             continue
-                        
                         promo_offers = promotions.get('promotionalOffers', [])
-                        upcoming = promotions.get('upcomingPromotionalOffers', [])
-                        
-                        # Accepter les promos actives OU à venir
-                        if not promo_offers and not upcoming:
-                            print(f"[DEALS] Epic: {game_name} - pas d'offres")
+                        if not promo_offers or not promo_offers[0].get('promotionalOffers'):
                             continue
                         
-                        # Si pas de promo active, skip (on veut que les actives)
-                        if not promo_offers:
-                            continue
-                        
-                        # Vérifier qu'il y a bien des offres dans la liste
-                        if not promo_offers[0].get('promotionalOffers'):
-                            continue
-                        
-                        # Prix
                         price_info = game.get('price', {}).get('totalPrice', {})
                         original_price = price_info.get('originalPrice', 0) / 100
                         final_price = price_info.get('discountPrice', 0) / 100
                         
-                        print(f"[DEALS] Epic: {game_name} - Original: {original_price}€, Final: {final_price}€")
-                        
                         if original_price <= 0:
                             continue
                         
-                        # Calculer réduction
-                        if final_price == 0:
-                            discount = 100
-                        else:
-                            discount = int((1 - final_price / original_price) * 100)
-                        
-                        print(f"[DEALS] Epic: {game_name} - Réduction: {discount}% (min: {min_discount}%)")
-                        
+                        discount = 100 if final_price == 0 else int((1 - final_price / original_price) * 100)
                         if discount < min_discount:
                             continue
                         
-                        # URL
                         slug = game.get('productSlug') or game.get('urlSlug') or ''
                         if not slug or slug == '[]':
                             mappings = game.get('catalogNs', {}).get('mappings', [])
                             if mappings:
                                 slug = mappings[0].get('pageSlug', '')
-                        
                         if not slug:
-                            print(f"[DEALS] Epic: {game_name} - pas de slug")
                             continue
                         
-                        deal_key = f"epic_{guild.id}_{slug}"
-                        if deal_key in _deals_cache:
-                            print(f"[DEALS] Epic: {game_name} - déjà posté (cache)")
+                        active_deal_keys.add(('epic', slug))
+                        
+                        already_posted, existing = await is_deal_already_posted(guild.id, 'epic', slug)
+                        if already_posted:
                             continue
-                        _deals_cache[deal_key] = time.time()
                         
                         game_url = f"https://store.epicgames.com/fr/p/{slug}"
-                        
-                        # Image
                         images = game.get('keyImages', [])
                         image_url = None
                         for img in images:
-                            if img.get('type') in ['OfferImageWide', 'DieselStoreFrontWide', 'Thumbnail', 'VaultClosed']:
+                            if img.get('type') in ['OfferImageWide', 'DieselStoreFrontWide', 'Thumbnail']:
                                 image_url = img.get('url')
                                 break
                         if not image_url and images:
                             image_url = images[0].get('url')
                         
                         e = await create_deal_embed(
-                            platform='epic',
-                            game_name=game_name,
-                            game_url=game_url,
-                            image_url=image_url,
-                            original_price=original_price,
-                            final_price=final_price,
-                            discount=discount
+                            platform='epic', game_name=game_name, game_url=game_url,
+                            image_url=image_url, original_price=original_price,
+                            final_price=final_price, discount=discount
                         )
                         
-                        await channel.send(embed=e)
+                        msg = await channel.send(embed=e)
+                        await save_posted_deal(guild.id, 'epic', slug, game_name, msg.id, channel.id, discount, original_price, final_price, game_url, image_url)
                         deals_posted += 1
-                        print(f"[DEALS] ✅ Posté: {game_name} (-{discount}%) sur Epic Games")
+                        print(f"[DEALS] ✅ Nouveau: {game_name} (-{discount}%) Epic Games")
                         await asyncio.sleep(2)
-                        
                     except Exception as ex:
-                        print(f"[DEALS] Erreur Epic game: {ex}")
+                        print(f"[DEALS] Erreur Epic: {ex}")
                         continue
-            else:
-                print(f"[DEALS] Epic API erreur: {resp.status}")
-                        
     except Exception as ex:
-        print(f"[DEALS] Erreur Epic: {ex}")
+        print(f"[DEALS] Erreur Epic API: {ex}")
     
     # ═══════════════════════════════════════════════════════════════════════════════
     #                               🟣 GOG
     # ═══════════════════════════════════════════════════════════════════════════════
     try:
         gog_url = "https://www.gog.com/games/ajax/filtered?mediaType=game&sort=discount&page=1"
-        
         async with session.get(gog_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
             if resp.status == 200:
                 gog_data = await resp.json()
                 products = gog_data.get('products', [])
-                print(f"[DEALS] GOG: {len(products)} jeux trouvés")
                 
-                for game in products[:10]:
+                for game in products[:15]:
                     if deals_posted >= max_deals:
                         break
-                    
                     try:
                         game_name = game.get('title', 'Jeu inconnu')
-                        
-                        # Récupérer le discount (peut être int ou float)
                         discount_raw = game.get('price', {}).get('discountPercentage', 0)
                         discount = int(discount_raw) if discount_raw else 0
-                        
-                        print(f"[DEALS] GOG: {game_name} - Réduction: {discount}% (min: {min_discount}%)")
                         
                         if discount < min_discount:
                             continue
                         
-                        # Prix (peuvent être des strings ou des floats)
                         price_data = game.get('price', {})
                         price_str = price_data.get('finalAmount') or price_data.get('amount', '0')
                         original_str = price_data.get('baseAmount', '0')
-                        
                         try:
                             final_price = float(str(price_str).replace(',', '.')) if price_str else 0
                             original_price = float(str(original_str).replace(',', '.')) if original_str else final_price
@@ -18132,17 +18221,15 @@ async def check_game_deals(session, guild, data):
                             final_price = 0
                             original_price = 0
                         
-                        print(f"[DEALS] GOG: {game_name} - Prix: {original_price}€ → {final_price}€")
-                        
                         slug = game.get('slug', '')
                         if not slug:
                             continue
-                            
-                        deal_key = f"gog_{guild.id}_{slug}"
-                        if deal_key in _deals_cache:
-                            print(f"[DEALS] GOG: {game_name} - déjà posté (cache)")
+                        
+                        active_deal_keys.add(('gog', slug))
+                        
+                        already_posted, existing = await is_deal_already_posted(guild.id, 'gog', slug)
+                        if already_posted:
                             continue
-                        _deals_cache[deal_key] = time.time()
                         
                         game_url = f"https://www.gog.com/game/{slug}"
                         image_url = None
@@ -18150,122 +18237,115 @@ async def check_game_deals(session, guild, data):
                             image_url = "https:" + game.get('image') + "_product_card_v2_mobile_slider_639.jpg"
                         
                         e = await create_deal_embed(
-                            platform='gog',
-                            game_name=game_name,
-                            game_url=game_url,
-                            image_url=image_url,
-                            original_price=original_price,
-                            final_price=final_price,
-                            discount=discount
+                            platform='gog', game_name=game_name, game_url=game_url,
+                            image_url=image_url, original_price=original_price,
+                            final_price=final_price, discount=discount
                         )
                         
-                        await channel.send(embed=e)
+                        msg = await channel.send(embed=e)
+                        await save_posted_deal(guild.id, 'gog', slug, game_name, msg.id, channel.id, discount, original_price, final_price, game_url, image_url)
                         deals_posted += 1
-                        print(f"[DEALS] ✅ Posté: {game_name} (-{discount}%) sur GOG")
+                        print(f"[DEALS] ✅ Nouveau: {game_name} (-{discount}%) GOG")
                         await asyncio.sleep(2)
-                        
                     except Exception as ex:
-                        print(f"[DEALS] Erreur GOG game: {ex}")
+                        print(f"[DEALS] Erreur GOG: {ex}")
                         continue
-            else:
-                print(f"[DEALS] GOG API erreur: {resp.status}")
-                        
     except Exception as ex:
-        print(f"[DEALS] Erreur GOG: {ex}")
+        print(f"[DEALS] Erreur GOG API: {ex}")
     
-    print(f"[DEALS] Terminé: {deals_posted} promotions postées pour {guild.name}")
+    print(f"[DEALS] ✅ Terminé: {deals_posted} nouvelle(s) promo(s) postée(s) pour {guild.name}")
     
-    # Nettoyer le cache (garder 24h)
-    current_time = time.time()
-    keys_to_remove = [k for k, v in _deals_cache.items() if current_time - v > 86400]
-    for k in keys_to_remove:
-        del _deals_cache[k]
+    # Nettoyage automatique des deals expirés
+    await cleanup_expired_deals_db(bot)
 
 async def create_deal_embed(platform: str, game_name: str, game_url: str, image_url: str, original_price: float, final_price: float, discount: int, metacritic: str = None):
-    """Crée un embed uniforme et beau pour les deals de jeux"""
+    """Crée un embed premium pour les deals de jeux"""
     
     plat = GAME_PLATFORMS.get(platform, GAME_PLATFORMS.get('unknown', GAME_PLATFORMS['steam']))
     
     e = discord.Embed(color=plat['color'])
     
-    # ═══════════════════════════════════════════════════════════════════════════════
-    #                         🎮 DESIGN ÉPURÉ ET PROFESSIONNEL
-    # ═══════════════════════════════════════════════════════════════════════════════
-    
-    # Header avec la plateforme
+    # ═══════════════ HEADER PREMIUM ═══════════════
     e.set_author(
-        name=f"{plat['emoji']} {plat['name'].upper()} • PROMOTION",
+        name=f"{plat['emoji']} {plat['name']}  ━━━  PROMO EN COURS",
         icon_url=plat.get('icon')
     )
     
-    # Titre = Nom du jeu (bien visible)
-    e.title = f"🎮 {game_name}"
+    # Titre du jeu
+    e.title = game_name
     e.url = game_url
     
-    # Image du jeu - GRANDE et bien visible
+    # Image
     if image_url:
         e.set_image(url=image_url)
     
-    # ═══════════════ AFFICHAGE DES PRIX ═══════════════
-    
-    # Badge de réduction avec style selon le pourcentage
+    # ═══════════════ BADGE RÉDUCTION ═══════════════
     if discount >= 90:
-        discount_badge = f"🔥🔥 **-{discount}%** 🔥🔥"
+        disc_text = f"🔥🔥🔥  **-{discount}%**  🔥🔥🔥"
     elif discount >= 75:
-        discount_badge = f"🔥 **-{discount}%** 🔥"
+        disc_text = f"🔥🔥  **-{discount}%**  🔥🔥"
+    elif discount == 100:
+        disc_text = "🎁  **GRATUIT**  🎁"
     elif discount >= 50:
-        discount_badge = f"⭐ **-{discount}%**"
+        disc_text = f"⭐  **-{discount}%**  ⭐"
     else:
-        discount_badge = f"**-{discount}%**"
+        disc_text = f"💰  **-{discount}%**"
     
-    # Prix formaté
+    e.description = f"## {disc_text}"
+    
+    # ═══════════════ PRIX ═══════════════
     if final_price == 0:
-        price_display = f"~~{original_price:.2f}€~~\n## **GRATUIT** 🎁"
+        price_text = f"~~{original_price:.2f}€~~ → **GRATUIT** 🎁"
     else:
-        price_display = f"~~{original_price:.2f}€~~\n## **{final_price:.2f}€**"
+        price_text = f"~~{original_price:.2f}€~~ → **{final_price:.2f}€**"
     
-    # Économie
     savings = original_price - final_price
     
-    # Affichage en colonnes
-    e.add_field(name="💰 Prix", value=price_display, inline=True)
-    e.add_field(name="🔻 Réduction", value=discount_badge, inline=True)
-    
+    e.add_field(name="💳 Prix", value=price_text, inline=True)
     if savings > 0:
         e.add_field(name="💵 Économie", value=f"**{savings:.2f}€**", inline=True)
+    e.add_field(name="📊 Réduction", value=f"**-{discount}%**", inline=True)
     
-    # Score Metacritic si disponible
+    # Metacritic
     if metacritic and metacritic not in ['0', '']:
         try:
             score = int(metacritic)
-            if score >= 75:
-                score_emoji = "🟢"
-            elif score >= 50:
-                score_emoji = "🟡"
-            else:
-                score_emoji = "🔴"
-            e.add_field(name="📊 Metacritic", value=f"{score_emoji} **{score}/100**", inline=True)
+            score_emoji = "🟢" if score >= 75 else ("🟡" if score >= 50 else "🔴")
+            e.add_field(name="🎯 Metacritic", value=f"{score_emoji} **{score}/100**", inline=True)
         except:
             pass
     
-    # Lien d'achat - TRÈS VISIBLE
+    # Lien d'achat
     e.add_field(
         name="",
-        value=f"### [{plat['emoji']} Acheter sur {plat['name']}]({game_url})",
+        value=f"### 🛒 [{plat['emoji']} Acheter sur {plat['name']}]({game_url})",
         inline=False
     )
     
-    # Footer avec plateforme
-    e.set_footer(
-        text=f"{plat['name']} • Offre limitée",
-        icon_url=plat['icon']
-    )
+    # Footer
+    e.set_footer(text=f"{plat['name']}  •  Offre limitée  •  Prix en EUR", icon_url=plat['icon'])
     e.timestamp = now()
     
     return e
 
 @check_social_feeds.before_loop
 async def before_social_check():
+    await bot.wait_until_ready()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                    🗑️ NETTOYAGE AUTOMATIQUE DES DEALS EXPIRÉS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@tasks.loop(hours=1)
+async def cleanup_deals_task():
+    """Nettoie les deals expirés toutes les heures"""
+    try:
+        await cleanup_expired_deals_db(bot)
+    except Exception as ex:
+        print(f"[CLEANUP DEALS] Erreur: {ex}")
+
+@cleanup_deals_task.before_loop
+async def before_cleanup_deals():
     await bot.wait_until_ready()
 
 # Mise à jour activité sur vocal + Vocaux Temporaires
@@ -19179,131 +19259,109 @@ async def testdeals_cmd(i: discord.Interaction):
     
     c = await cfg(i.guild.id)
     
-    # Vérifier la configuration
     deals_enabled = c.get('ads_deals_enabled', False)
     deals_channel_id = c.get('ads_deals_channel', 0)
     min_discount = c.get('ads_deals_min_discount', 50)
     
     if not deals_enabled:
-        return await i.followup.send("❌ Les réductions ne sont pas activées.\n➡️ Utilisez `/setup` > Publicité > 🎯 Réductions > ✅ Activer")
+        return await i.followup.send("❌ Les réductions ne sont pas activées.\n➡️ Utilisez `/configure` > Publicité > 🎯 Réductions > ✅ Activer")
     
     deals_channel = i.guild.get_channel(deals_channel_id)
     if not deals_channel:
-        return await i.followup.send("❌ Aucun salon configuré pour les réductions.\n➡️ Utilisez `/setup` > Publicité > 🎯 Réductions > 📍 Salon")
+        return await i.followup.send("❌ Aucun salon configuré pour les réductions.\n➡️ Utilisez `/configure` > Publicité > 🎯 Réductions > 📍 Salon")
     
-    await i.followup.send(f"🔄 Test en cours...\n📍 Salon: {deals_channel.mention}\n🔻 Réduction minimum: **{min_discount}%**")
+    # Compter les deals déjà postés en DB
+    posted_count = 0
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute('SELECT COUNT(*) FROM posted_deals WHERE guild_id=? AND expired=0', (i.guild.id,)) as cur:
+                row = await cur.fetchone()
+                posted_count = row[0] if row else 0
+    except:
+        pass
     
-    # Réinitialiser le cache pour forcer la vérification
+    await i.followup.send(
+        f"🔄 **Test du système de deals en cours...**\n"
+        f"📍 Salon: {deals_channel.mention}\n"
+        f"🔻 Réduction minimum: **-{min_discount}%**\n"
+        f"📦 Deals déjà postés (actifs): **{posted_count}**\n\n"
+        f"*Seuls les **nouveaux** deals seront publiés — les doublons sont bloqués en DB.*"
+    )
+    
+    # Réinitialiser le throttle pour forcer la vérification
     cache_key = f"deals_{i.guild.id}"
     if cache_key in _deals_last_check:
         del _deals_last_check[cache_key]
     
-    # Vider aussi le cache des deals pour ce serveur
-    keys_to_remove = [k for k in _deals_cache.keys() if str(i.guild.id) in k]
-    for k in keys_to_remove:
-        del _deals_cache[k]
-    
-    # Créer une session et tester
-    async with aiohttp.ClientSession() as session:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json'
-        }
-        
-        results = []
-        
-        # Test Steam
-        try:
-            steam_url = "https://store.steampowered.com/api/featuredcategories?cc=fr&l=french"
-            async with session.get(steam_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    specials = data.get('specials', {}).get('items', [])
-                    eligible = [g for g in specials if g.get('discount_percent', 0) >= min_discount]
-                    
-                    results.append(f"🎮 **Steam**: {len(specials)} promos, **{len(eligible)}** éligibles (≥{min_discount}%)")
-                    
-                    # Montrer les 3 premiers éligibles
-                    for g in eligible[:3]:
-                        name = g.get('name', '?')[:30]
-                        disc = g.get('discount_percent', 0)
-                        results.append(f"   • {name} : **-{disc}%**")
-                else:
-                    results.append(f"🎮 **Steam**: ❌ Erreur HTTP {resp.status}")
-        except Exception as ex:
-            results.append(f"🎮 **Steam**: ❌ {str(ex)[:50]}")
-        
-        # Test Epic Games
-        try:
-            epic_url = "https://store-site-backend-static-ipv4.ak.epicgames.com/freeGamesPromotions?locale=fr&country=FR"
-            async with session.get(epic_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    games = data.get('data', {}).get('Catalog', {}).get('searchStore', {}).get('elements', [])
-                    
-                    eligible = []
-                    for g in games:
-                        promos = g.get('promotions')
-                        if promos and promos.get('promotionalOffers'):
-                            offers = promos['promotionalOffers']
-                            if offers and offers[0].get('promotionalOffers'):
-                                price = g.get('price', {}).get('totalPrice', {})
-                                orig = price.get('originalPrice', 0) / 100
-                                final = price.get('discountPrice', 0) / 100
-                                if orig > 0:
-                                    disc = 100 if final == 0 else int((1 - final/orig) * 100)
-                                    if disc >= min_discount:
-                                        eligible.append({'name': g.get('title', '?'), 'discount': disc})
-                    
-                    results.append(f"🎯 **Epic Games**: {len(games)} jeux, **{len(eligible)}** éligibles")
-                    
-                    for g in eligible[:3]:
-                        results.append(f"   • {g['name'][:30]} : **-{g['discount']}%**")
-                else:
-                    results.append(f"🎯 **Epic Games**: ❌ Erreur HTTP {resp.status}")
-        except Exception as ex:
-            results.append(f"🎯 **Epic Games**: ❌ {str(ex)[:50]}")
-        
-        # Test GOG
-        try:
-            gog_url = "https://www.gog.com/games/ajax/filtered?mediaType=game&sort=discount&page=1"
-            async with session.get(gog_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    products = data.get('products', [])
-                    eligible = [g for g in products if int(g.get('price', {}).get('discountPercentage', 0) or 0) >= min_discount]
-                    
-                    results.append(f"🟣 **GOG**: {len(products)} promos, **{len(eligible)}** éligibles")
-                    
-                    for g in eligible[:3]:
-                        name = g.get('title', '?')[:30]
-                        disc = int(g.get('price', {}).get('discountPercentage', 0) or 0)
-                        results.append(f"   • {name} : **-{disc}%**")
-                else:
-                    results.append(f"🟣 **GOG**: ❌ Erreur HTTP {resp.status}")
-        except Exception as ex:
-            results.append(f"🟣 **GOG**: ❌ {str(ex)[:50]}")
-    
-    # Envoyer les résultats
-    result_msg = "\n".join(results)
-    
-    await i.followup.send(f"📊 **Résultats des APIs:**\n{result_msg}\n\n⏳ Lancement de la publication...")
-    
-    # Exécuter le vrai check
+    # Exécuter le check
     try:
         async with aiohttp.ClientSession() as session:
             await check_game_deals(session, i.guild, c)
-        await i.followup.send("✅ Vérification terminée ! Regardez le salon configuré.\n\n💡 *Les logs détaillés sont dans la console Railway.*")
+        
+        # Compter les nouveaux deals postés
+        new_count = 0
+        try:
+            async with aiosqlite.connect(DB_PATH) as db:
+                async with db.execute('SELECT COUNT(*) FROM posted_deals WHERE guild_id=? AND expired=0', (i.guild.id,)) as cur:
+                    row = await cur.fetchone()
+                    new_count = row[0] if row else 0
+        except:
+            pass
+        
+        added = new_count - posted_count
+        await i.followup.send(
+            f"✅ **Vérification terminée !**\n"
+            f"📊 **{added}** nouveau(x) deal(s) publié(s)\n"
+            f"📦 Total deals actifs: **{new_count}**\n\n"
+            f"*Les deals expirés seront automatiquement supprimés du salon.*"
+        )
     except Exception as ex:
-        await i.followup.send(f"❌ Erreur lors de la publication: {str(ex)}")
+        await i.followup.send(f"❌ Erreur lors de la vérification: {str(ex)}")
+
+@bot.tree.command(name="cleardeals", description="🗑️ [Admin] Supprimer tous les deals postés et réinitialiser")
+@app_commands.default_permissions(administrator=True)
+async def cleardeals_cmd(i: discord.Interaction):
+    """Supprime tous les deals postés et leurs messages"""
+    await i.response.defer(ephemeral=True)
+    
+    deleted = 0
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            # Récupérer tous les deals actifs
+            async with db.execute(
+                'SELECT message_id, channel_id, game_name FROM posted_deals WHERE guild_id=? AND expired=0',
+                (i.guild.id,)
+            ) as cur:
+                deals = await cur.fetchall()
+            
+            # Supprimer les messages Discord
+            for msg_id, ch_id, name in deals:
+                try:
+                    ch = i.guild.get_channel(ch_id)
+                    if ch and msg_id:
+                        msg = await ch.fetch_message(msg_id)
+                        await msg.delete()
+                        deleted += 1
+                except:
+                    pass
+            
+            # Marquer tout comme expiré en DB
+            await db.execute('UPDATE posted_deals SET expired=1 WHERE guild_id=?', (i.guild.id,))
+            await db.commit()
+    except Exception as ex:
+        return await i.followup.send(f"❌ Erreur: {ex}")
+    
+    await i.followup.send(f"✅ **{deleted}** message(s) de deal supprimé(s) et base de données réinitialisée.\n*Les prochaines promos seront re-publiées.*")
 
 
 if __name__ == "__main__":
-    print("🚀 Bot v29 - Démarrage...")
+    print("🚀 Bot v30 - Démarrage...")
     print("🔒 Système de sécurité activé")
     print("👑 Système d'immunités complet")
     print("🎙️ Vocaux temporaires multi-hubs")
     print("🛡️ Anti-badwords amélioré (mots entiers)")
-    print("🎮 Système de promotions jeux vidéo")
+    print("🎮 Système de deals PERSISTANT (anti-doublon DB)")
+    print("🗑️ Nettoyage auto des deals expirés")
     print("👥 Roblox UGC - Support des groupes")
+    print("✨ UI Panels améliorés")
     bot.run(TOKEN)
