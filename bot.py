@@ -1927,18 +1927,22 @@ async def create_ticket(i, pid, ans=None):
         # ═══════════════════════════════════════════════════════════════════════════════
         #                    📨 EMBED PRINCIPAL DU TICKET
         # ═══════════════════════════════════════════════════════════════════════════════
-        emb = discord.Embed(title="🎫 Nouveau Ticket", color=C.BLURPLE, timestamp=now())
-        emb.add_field(name="👤 Créé par", value=f"{i.user.mention}\n`{i.user.id}`", inline=True)
-        emb.add_field(name="🎫 ID", value=f"#{tid}", inline=True)
-        emb.add_field(name="📋 Panel", value=pnl.get('name', 'Support'), inline=True)
+        panel_name = pnl.get('name', 'Support')
+        emb = discord.Embed(color=0x5865F2, timestamp=now())
+        emb.set_author(name=f"🎫 Ticket #{tid} • {panel_name}", icon_url=i.guild.icon.url if i.guild.icon else None)
+        emb.description = (
+            f"**Créé par** {i.user.mention} (`{i.user.name}`)\n"
+            f"**Panel** `{panel_name}`\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        )
         emb.set_thumbnail(url=i.user.display_avatar.url)
         if ans:
             for t, a in ans.items():
                 emb.add_field(name=f"📝 {t}", value=a[:1024], inline=False)
-        emb.set_footer(text="Un staff va prendre en charge")
+        emb.set_footer(text="⏳ En attente de prise en charge par un staff")
         mention = i.user.mention
         if staff: mention += f" {staff.mention}"
-        await ch.send(content=mention, embed=emb, view=TicketControlView())
+        await webhook_send(ch, 'ticket', content=mention, embed=emb, view=TicketControlView())
         
         # ═══════════════════════════════════════════════════════════════════════════════
         #                    👋 MESSAGE D'ACCUEIL PERSONNALISÉ
@@ -2246,7 +2250,10 @@ class AddStaffSelect(Select):
             if st and ch:
                 await ch.set_permissions(st, view_channel=True, send_messages=True, read_message_history=True)
                 await i.response.send_message(f"✅ {st.mention} ajouté au ticket!", ephemeral=True)
-                await ch.send(f"➕ **{st.display_name}** a été ajouté par {i.user.mention}")
+                add_e = discord.Embed(color=0x2ECC71, description=f"➕ **{st.display_name}** a été ajouté au ticket par {i.user.mention}")
+                add_e.set_footer(text="Staff ajouté")
+                add_e.timestamp = now()
+                await webhook_send(ch, 'ticket', embed=add_e)
                 tk = await get_ticket(self.chid)
                 if tk:
                     await send_ticket_log(i.guild, 'add_staff', tk['user'], tk, extra=st.id)
@@ -5857,9 +5864,9 @@ async def get_webhook(channel, platform: str):
         print(f"Erreur webhook {platform} dans #{channel.name}: {ex}")
         return None
 
-async def webhook_send(channel, platform: str, embed=None, content=None, file=None, files=None, embeds=None):
+async def webhook_send(channel, platform: str, embed=None, content=None, file=None, files=None, embeds=None, view=None):
     """Envoie un message via webhook avec le profil de la plateforme.
-    Supporte: content, embed, embeds, file, files
+    Supporte: content, embed, embeds, file, files, view
     Fallback automatique sur channel.send si webhook impossible."""
     
     def _build_kwargs(include_profile=True):
@@ -5869,6 +5876,7 @@ async def webhook_send(channel, platform: str, embed=None, content=None, file=No
         if embeds: kw['embeds'] = embeds
         if file: kw['file'] = file
         if files: kw['files'] = files
+        if view: kw['view'] = view
         if include_profile:
             profile = WEBHOOK_PROFILES.get(platform, {'name': '📢 Notifications', 'avatar': None})
             kw['username'] = profile['name']
@@ -5901,6 +5909,31 @@ async def webhook_send(channel, platform: str, embed=None, content=None, file=No
             return await channel.send(**_build_kwargs(False)) if _build_kwargs(False) else None
         except:
             return None
+
+async def webhook_edit(channel, platform: str, message_id: int, embed=None, content=None, view=discord.utils.MISSING):
+    """Édite un message envoyé par webhook. Fallback sur channel.fetch_message().edit()"""
+    try:
+        wh = await get_webhook(channel, platform)
+        if wh:
+            kw = {}
+            if embed: kw['embed'] = embed
+            if content is not None: kw['content'] = content
+            if view is not discord.utils.MISSING: kw['view'] = view
+            return await wh.edit_message(message_id, **kw)
+    except:
+        pass
+    
+    # Fallback: essayer d'éditer directement le message
+    try:
+        msg = await channel.fetch_message(message_id)
+        kw = {}
+        if embed: kw['embed'] = embed
+        if content is not None: kw['content'] = content
+        if view is not discord.utils.MISSING: kw['view'] = view
+        await msg.edit(**kw)
+        return msg
+    except:
+        return None
 
 class AdsPanel(View):
     def __init__(self, u, g):
@@ -8032,52 +8065,55 @@ class GiveawayChannelSelectPaginated(Select):
         # Calculer la fin
         end_time = now() + timedelta(seconds=self.data['duration_seconds'])
         
-        # Créer l'embed du giveaway
-        e = discord.Embed(title=f"🎁 {self.data['title']}", color=C.GREEN)
-        e.description = f"{self.data['description']}\n\n━━━━━━━━━━━━━━━━━━━━━━"
-        
-        e.add_field(name="🏆 À Gagner", value=f"```{self.data['prize']}```", inline=False)
-        e.add_field(name="⏰ Fin", value=f"<t:{int(end_time.timestamp())}:R>", inline=True)
-        e.add_field(name="👥 Participants", value="```0```", inline=True)
+        # Créer l'embed du giveaway — Design pro
+        e = discord.Embed(color=0xF1C40F)
+        e.set_author(name="🎁 GIVEAWAY", icon_url=self.g.icon.url if self.g.icon else None)
+        e.title = self.data['title']
+        e.description = (
+            f"{self.data['description']}\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🏆 **Prix :** `{self.data['prize']}`\n"
+            f"⏰ **Fin :** <t:{int(end_time.timestamp())}:R> (<t:{int(end_time.timestamp())}:f>)\n"
+            f"👥 **Participants :** `0`\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        )
         
         # Construire le texte des conditions
         conditions = self.data.get('conditions', {})
         conditions_txt = ""
         
         if conditions.get('min_messages', 0) > 0:
-            conditions_txt += f"• 📝 Minimum **{conditions['min_messages']}** messages\n"
+            conditions_txt += f"📝 Minimum **{conditions['min_messages']}** messages\n"
         
         if conditions.get('min_vocal_minutes', 0) > 0:
-            conditions_txt += f"• 🎤 Minimum **{conditions['min_vocal_minutes']}** minutes en vocal\n"
+            conditions_txt += f"🎤 Minimum **{conditions['min_vocal_minutes']}** min en vocal\n"
         
         if conditions.get('required_role', 0) > 0:
             role = self.g.get_role(conditions['required_role'])
             if role:
-                conditions_txt += f"• 🎭 Rôle requis: {role.mention}\n"
+                conditions_txt += f"🎭 Rôle requis: {role.mention}\n"
         
         if conditions.get('min_account_days', 0) > 0:
-            conditions_txt += f"• 📅 Compte d'au moins **{conditions['min_account_days']}** jours\n"
+            conditions_txt += f"📅 Compte ≥ **{conditions['min_account_days']}** jours\n"
         
         if conditions.get('no_afk', True):
             afk_days = conditions.get('afk_days', 7)
-            conditions_txt += f"• ❌ Ne pas être AFK depuis **{afk_days}** jours\n"
+            conditions_txt += f"❌ Pas AFK depuis **{afk_days}** jours\n"
         
         if not conditions_txt:
-            conditions_txt = "• ✅ Aucune condition - Tout le monde peut participer !"
-        
-        conditions_txt += "\n*Cliquez sur le bouton pour participer*"
+            conditions_txt = "✅ Aucune condition — tout le monde peut participer !"
         
         e.add_field(name="📋 Conditions", value=conditions_txt, inline=False)
         
         if self.data['image_url']:
             e.set_image(url=self.data['image_url'])
         
-        e.set_footer(text=f"Créé par {self.u.display_name}")
+        e.set_footer(text=f"🎁 Giveaway • Par {self.u.display_name}", icon_url=self.u.display_avatar.url if self.u.display_avatar else None)
         e.timestamp = now()
         
-        # Envoyer le message
+        # Envoyer via webhook
         giveaway_view = GiveawayParticipateView()
-        msg = await channel.send(embed=e, view=giveaway_view)
+        msg = await webhook_send(channel, 'giveaway', embed=e, view=giveaway_view)
         
         # Sauvegarder en BDD avec les conditions
         try:
@@ -8086,7 +8122,7 @@ class GiveawayChannelSelectPaginated(Select):
                     INSERT INTO giveaways (guild_id, channel_id, message_id, title, description, prize, image_url, end_time, conditions, created_by)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
-                    self.g.id, channel.id, msg.id,
+                    self.g.id, channel.id, msg.id if msg else 0,
                     self.data['title'], self.data['description'], self.data['prize'],
                     self.data['image_url'], end_time.isoformat(), 
                     json.dumps(conditions),
@@ -8199,52 +8235,55 @@ class GiveawayChannelSelect(Select):
         # Calculer la fin
         end_time = now() + timedelta(seconds=self.data['duration_seconds'])
         
-        # Créer l'embed du giveaway
-        e = discord.Embed(title=f"🎁 {self.data['title']}", color=C.GREEN)
-        e.description = f"{self.data['description']}\n\n━━━━━━━━━━━━━━━━━━━━━━"
-        
-        e.add_field(name="🏆 À Gagner", value=f"```{self.data['prize']}```", inline=False)
-        e.add_field(name="⏰ Fin", value=f"<t:{int(end_time.timestamp())}:R>", inline=True)
-        e.add_field(name="👥 Participants", value="```0```", inline=True)
+        # Créer l'embed du giveaway — Design pro
+        e = discord.Embed(color=0xF1C40F)
+        e.set_author(name="🎁 GIVEAWAY", icon_url=self.g.icon.url if self.g.icon else None)
+        e.title = self.data['title']
+        e.description = (
+            f"{self.data['description']}\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🏆 **Prix :** `{self.data['prize']}`\n"
+            f"⏰ **Fin :** <t:{int(end_time.timestamp())}:R> (<t:{int(end_time.timestamp())}:f>)\n"
+            f"👥 **Participants :** `0`\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        )
         
         # Construire le texte des conditions
         conditions = self.data.get('conditions', {})
         conditions_txt = ""
         
         if conditions.get('min_messages', 0) > 0:
-            conditions_txt += f"• 📝 Minimum **{conditions['min_messages']}** messages\n"
+            conditions_txt += f"📝 Minimum **{conditions['min_messages']}** messages\n"
         
         if conditions.get('min_vocal_minutes', 0) > 0:
-            conditions_txt += f"• 🎤 Minimum **{conditions['min_vocal_minutes']}** minutes en vocal\n"
+            conditions_txt += f"🎤 Minimum **{conditions['min_vocal_minutes']}** min en vocal\n"
         
         if conditions.get('required_role', 0) > 0:
             role = self.g.get_role(conditions['required_role'])
             if role:
-                conditions_txt += f"• 🎭 Rôle requis: {role.mention}\n"
+                conditions_txt += f"🎭 Rôle requis: {role.mention}\n"
         
         if conditions.get('min_account_days', 0) > 0:
-            conditions_txt += f"• 📅 Compte d'au moins **{conditions['min_account_days']}** jours\n"
+            conditions_txt += f"📅 Compte ≥ **{conditions['min_account_days']}** jours\n"
         
         if conditions.get('no_afk', True):
             afk_days = conditions.get('afk_days', 7)
-            conditions_txt += f"• ❌ Ne pas être AFK depuis **{afk_days}** jours\n"
+            conditions_txt += f"❌ Pas AFK depuis **{afk_days}** jours\n"
         
         if not conditions_txt:
-            conditions_txt = "• ✅ Aucune condition - Tout le monde peut participer !"
-        
-        conditions_txt += "\n*Cliquez sur le bouton pour participer*"
+            conditions_txt = "✅ Aucune condition — tout le monde peut participer !"
         
         e.add_field(name="📋 Conditions", value=conditions_txt, inline=False)
         
         if self.data['image_url']:
             e.set_image(url=self.data['image_url'])
         
-        e.set_footer(text=f"Créé par {self.u.display_name}")
+        e.set_footer(text=f"🎁 Giveaway • Par {self.u.display_name}", icon_url=self.u.display_avatar.url if self.u.display_avatar else None)
         e.timestamp = now()
         
-        # Envoyer le message
+        # Envoyer via webhook
         giveaway_view = GiveawayParticipateView()
-        msg = await channel.send(embed=e, view=giveaway_view)
+        msg = await webhook_send(channel, 'giveaway', embed=e, view=giveaway_view)
         
         # Sauvegarder en BDD avec les conditions
         try:
@@ -8253,7 +8292,7 @@ class GiveawayChannelSelect(Select):
                     INSERT INTO giveaways (guild_id, channel_id, message_id, title, description, prize, image_url, end_time, conditions, created_by)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
-                    self.g.id, channel_id, msg.id,
+                    self.g.id, channel_id, msg.id if msg else 0,
                     self.data['title'], self.data['description'], self.data['prize'],
                     self.data['image_url'], end_time.isoformat(), 
                     json.dumps(conditions),
@@ -10953,11 +10992,19 @@ async def end_giveaway(guild, giveaway_id):
         if not participants:
             # Pas de participants
             if channel:
-                e = discord.Embed(title=f"🎁 {title} - Terminé", color=C.RED)
-                e.description = "❌ **Aucun participant !**\n\nLe cadeau n'a pas pu être attribué."
+                e = discord.Embed(color=0xE74C3C)
+                e.set_author(name="🎁 GIVEAWAY TERMINÉ", icon_url=guild.icon.url if guild.icon else None)
+                e.title = title
+                e.description = (
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"❌ **Aucun participant !**\n"
+                    f"Le cadeau n'a pas pu être attribué.\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                )
+                e.set_footer(text="Giveaway terminé")
+                e.timestamp = now()
                 try:
-                    msg = await channel.fetch_message(message_id)
-                    await msg.edit(embed=e, view=None)
+                    await webhook_edit(channel, 'giveaway', message_id, embed=e, view=None)
                 except:
                     pass
             return "❌ Aucun participant pour ce cadeau"
@@ -10966,22 +11013,37 @@ async def end_giveaway(guild, giveaway_id):
         import random
         winner_id = random.choice(participants)
         winner = guild.get_member(winner_id)
+        winner_txt = winner.mention if winner else f'<@{winner_id}>'
         
         if channel:
-            e = discord.Embed(title=f"🎁 {title} - Terminé !", color=C.GOLD)
-            e.description = f"🎉 **FÉLICITATIONS !**\n\n🏆 Le gagnant est: **{winner.mention if winner else f'<@{winner_id}>'}**"
-            e.add_field(name="🎁 Prix", value=f"```{prize}```", inline=False)
-            e.add_field(name="👥 Participants", value=f"```{len(participants)}```", inline=True)
-            e.set_footer(text="Merci à tous les participants !")
+            # Éditer le message original
+            e = discord.Embed(color=0xF1C40F)
+            e.set_author(name="🎁 GIVEAWAY TERMINÉ", icon_url=guild.icon.url if guild.icon else None)
+            e.title = title
+            e.description = (
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🏆 **Gagnant :** {winner_txt}\n"
+                f"🎁 **Prix :** `{prize}`\n"
+                f"👥 **Participants :** `{len(participants)}`\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            )
+            e.set_footer(text="🎉 Félicitations au gagnant !")
             e.timestamp = now()
             
             try:
-                msg = await channel.fetch_message(message_id)
-                await msg.edit(embed=e, view=None)
+                await webhook_edit(channel, 'giveaway', message_id, embed=e, view=None)
+                
+                # Message d'annonce séparé
                 win_e = discord.Embed(color=0xF1C40F)
-                win_e.set_author(name="🎁 Giveaway terminé !", icon_url=channel.guild.icon.url if channel.guild.icon else None)
-                win_e.description = f"🎉 **{winner.mention if winner else f'<@{winner_id}>'}** a remporté **{title}** !\n\nFélicitations ! 🏆"
-                win_e.set_footer(text="Merci à tous les participants !")
+                win_e.set_author(name="🎉 GAGNANT ANNONCÉ !", icon_url=guild.icon.url if guild.icon else None)
+                win_e.description = (
+                    f"Félicitations {winner_txt} !\n\n"
+                    f"Tu as gagné **{title}** 🏆\n"
+                    f"Prix : `{prize}`"
+                )
+                if winner and winner.display_avatar:
+                    win_e.set_thumbnail(url=winner.display_avatar.url)
+                win_e.set_footer(text=f"Merci aux {len(participants)} participants !")
                 win_e.timestamp = now()
                 await webhook_send(channel, 'giveaway', embed=win_e)
             except:
@@ -12060,7 +12122,7 @@ class AfkKickConfirmView(View):
             e.add_field(name="✅ Kicks réussis", value=str(success), inline=True)
             e.add_field(name="❌ Échecs", value=str(failed), inline=True)
             e.set_footer(text=f"Action par {i.user.display_name}")
-            await notif_ch.send(embed=e)
+            await webhook_send(notif_ch, 'realsy', embed=e)
         
         await i.followup.send(f"✅ **{success}** membre(s) kick!\n❌ Échecs: **{failed}**", ephemeral=True)
     
@@ -12711,7 +12773,7 @@ async def send_compact_afk_notification(channel, members, days, recovery_mention
     e.set_footer(text=f"📌 Aucune mention automatique • L'administrateur peut ping @here ou @everyone")
     e.timestamp = now()
     
-    await channel.send(embed=e)
+    await webhook_send(channel, 'realsy', embed=e)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🔄 TÂCHE AUTOMATIQUE INACTIVITÉ
@@ -14252,11 +14314,12 @@ async def on_interaction(interaction: discord.Interaction):
                         del auto_help_messages[interaction.channel.id]
                     
                     # Créer et envoyer le nouveau message d'aide
-                    e = discord.Embed(title=f"💡 {help_data.get('title', 'Aide')}", color=help_data.get('color', 0x3498DB))
+                    e = discord.Embed(color=help_data.get('color', 0x3498DB))
+                    e.set_author(name=f"💡 {help_data.get('title', 'Aide')}", icon_url=interaction.guild.icon.url if interaction.guild and interaction.guild.icon else None)
                     e.description = help_data.get('content', '')
                     e.set_footer(text="Ce message se repositionne automatiquement")
                     
-                    new_msg = await interaction.channel.send(embed=e)
+                    new_msg = await webhook_send(interaction.channel, 'auto_help', embed=e)
                     auto_help_messages[interaction.channel.id] = new_msg.id
         except:
             pass
@@ -14313,7 +14376,11 @@ async def on_member_remove(m):
             ch = m.guild.get_channel(tk[1])
             await send_ticket_log(m.guild, 'leave', m, ti)
             if ch:
-                await ch.send(embed=discord.Embed(title="🚪 Utilisateur parti", description=f"**{m.display_name}** a quitté le serveur.", color=C.ORANGE))
+                leave_e = discord.Embed(color=C.ORANGE, timestamp=now())
+                leave_e.set_author(name="🚪 Utilisateur parti", icon_url=m.display_avatar.url if m.display_avatar else None)
+                leave_e.description = f"**{m.display_name}** (`{m.name}`) a quitté le serveur."
+                leave_e.set_thumbnail(url=m.display_avatar.url if m.display_avatar else None)
+                await webhook_send(ch, 'ticket', embed=leave_e)
     except: pass
 
 @bot.event
@@ -14372,7 +14439,7 @@ async def on_member_join(m):
                     )
                     e.set_footer(text="Utilisez /configure > Protection > Anti-Raid pour gérer")
                     e.timestamp = current_time
-                    await log_ch.send(content="@here" if auto_mode else "", embed=e)
+                    await webhook_send(log_ch, 'raid_alert', content="@here" if auto_mode else "", embed=e)
             
             # Appliquer l'action si nécessaire
             should_act = (is_raid or is_suspicious) and (auto_mode or raid_tracker[guild_id].get('lockdown', False))
@@ -14434,7 +14501,7 @@ async def on_member_join(m):
                     e.add_field(name="⚡ Action auto", value="✅ Activée" if auto_action else "❌ Désactivée", inline=True)
                     e.set_thumbnail(url=m.display_avatar.url if m.display_avatar else None)
                     e.timestamp = now()
-                    await log_ch.send(embed=e)
+                    await webhook_send(log_ch, 'protection', embed=e)
                 
                 # Appliquer l'action automatique si activée
                 if auto_action:
@@ -14532,7 +14599,7 @@ async def relay_discord_message(msg):
                         )
                         e.timestamp = msg.created_at
                         
-                        await dest_channel.send(embed=e)
+                        await webhook_send(dest_channel, 'discord_relay', embed=e)
                         
                     except:
                         continue
@@ -14716,10 +14783,15 @@ async def on_message(msg):
                     await msg.delete()
                     await send_log(msg.guild, 'anti_phishing', msg.author, msg, 
                                   "Fichier dangereux détecté", f"Extension: {ext}")
-                    await msg.channel.send(
-                        f"⚠️ {msg.author.mention} a envoyé un fichier potentiellement dangereux (`{ext}`). Le fichier a été supprimé.",
-                        delete_after=10
-                    )
+                    warn_e = discord.Embed(color=0xE74C3C, description=f"⚠️ {msg.author.mention} a envoyé un fichier potentiellement dangereux (`{ext}`).\nLe fichier a été **supprimé** automatiquement.")
+                    warn_e.set_footer(text="🛡️ Protection anti-phishing")
+                    warn_msg = await webhook_send(msg.channel, 'protection', embed=warn_e)
+                    if warn_msg:
+                        async def _del_warn(m):
+                            await asyncio.sleep(10)
+                            try: await m.delete()
+                            except: pass
+                        asyncio.create_task(_del_warn(warn_msg))
                     return
         
     except: pass
@@ -15403,7 +15475,7 @@ class RellseasMemberModal(Modal, title="👤 Sélectionner un membre"):
             
             log_ch = self.g.get_channel(c.get('rellseas_log_channel', 0))
             if log_ch:
-                await log_ch.send(embed=e)
+                await webhook_send(log_ch, 'realsy', embed=e)
         
         else:  # remove
             if role not in membre.roles:
@@ -15424,7 +15496,7 @@ class RellseasMemberModal(Modal, title="👤 Sélectionner un membre"):
             
             log_ch = self.g.get_channel(c.get('rellseas_log_channel', 0))
             if log_ch:
-                await log_ch.send(embed=e)
+                await webhook_send(log_ch, 'realsy', embed=e)
 
 
 class RellseasQuizMenu(View):
@@ -15868,8 +15940,9 @@ class RellseasLaunchQuizModal(Modal, title="🚀 Lancer un questionnaire"):
         e.set_thumbnail(url=membre.display_avatar.url)
         e.set_footer(text=f"Questionnaire #{quiz_id} • Cliquez sur le bouton pour répondre")
         
-        # Envoyer dans le salon
-        await self.channel.send(
+        # Envoyer dans le salon via webhook
+        await webhook_send(
+            self.channel, 'realsy',
             content=membre.mention,
             embed=e,
             view=RellseasQuizAnswerView(quiz_id, self.g.id)
@@ -16113,7 +16186,7 @@ class RellseasReviewView(View):
         # Log
         log_ch = self.g.get_channel(c.get('rellseas_log_channel', 0))
         if log_ch:
-            await log_ch.send(embed=e)
+            await webhook_send(log_ch, 'realsy', embed=e)
         
         # Notifier le membre
         try:
@@ -16178,7 +16251,7 @@ class RellseasRejectModal(Modal, title="❌ Raison du refus"):
         c = await cfg(self.g.id)
         log_ch = self.g.get_channel(c.get('rellseas_log_channel', 0))
         if log_ch:
-            await log_ch.send(embed=e)
+            await webhook_send(log_ch, 'realsy', embed=e)
         
         # Notifier le membre
         if member:
@@ -16301,8 +16374,7 @@ async def suggestion_cmd(i: discord.Interaction, titre: str, proposition: str):
     e.set_thumbnail(url=i.user.display_avatar.url)
     e.set_footer(text="Votez ci-dessous! ✅ Pour | 🟠 Neutre | ❌ Contre")
     
-    # Envoyer
-    msg = await sugg_ch.send(embed=e)
+    msg = await webhook_send(sugg_ch, 'suggestion', embed=e)
     
     # Ajouter les réactions
     await msg.add_reaction("✅")
@@ -16531,7 +16603,7 @@ class TradeBuilderView(View):
         e.set_footer(text="✅ Intéressé? Réagissez! • 💬 MP pour négocier")
         
         # Envoyer
-        trade_msg = await self.trade_ch.send(embed=e, file=image_file)
+        trade_msg = await webhook_send(self.trade_ch, 'trade', embed=e, file=image_file)
         await trade_msg.add_reaction("✅")
         await trade_msg.add_reaction("💬")
         
@@ -17230,14 +17302,14 @@ async def check_realsy_inactivity():
                             e = discord.Embed(title="⚠️ Avertissement Inactivité", color=C.YELLOW, timestamp=now())
                             e.description = f"{member.mention}, vous êtes inactif depuis **{days_inactive} jours**.\n\n⚠️ Si vous restez inactif, votre rôle **{role.name}** sera retiré."
                             e.set_thumbnail(url=member.display_avatar.url)
-                            await warn_ch.send(content=member.mention, embed=e)
+                            await webhook_send(warn_ch, 'realsy', content=member.mention, embed=e)
                         
                         if log_ch:
                             log_e = discord.Embed(title="⚠️ Warn Inactivité #1", color=C.YELLOW, timestamp=now())
                             log_e.add_field(name="👤 Membre", value=f"{member.mention}\n`{member.id}`", inline=True)
                             log_e.add_field(name="📅 Inactif depuis", value=f"{days_inactive} jours", inline=True)
                             log_e.set_thumbnail(url=member.display_avatar.url)
-                            await log_ch.send(embed=log_e)
+                            await webhook_send(log_ch, 'realsy', embed=log_e)
                     
                     elif warn_count >= 1 and days_inactive >= 14:
                         # Deuxième warn - retirer le rôle
@@ -17254,7 +17326,7 @@ async def check_realsy_inactivity():
                                 e = discord.Embed(title="🚫 Rôle Retiré - Inactivité", color=C.RED, timestamp=now())
                                 e.description = f"{member.mention}, votre rôle **{role.name}** a été retiré pour cause d'inactivité prolongée ({days_inactive} jours)."
                                 e.set_thumbnail(url=member.display_avatar.url)
-                                await warn_ch.send(content=member.mention, embed=e)
+                                await webhook_send(warn_ch, 'realsy', content=member.mention, embed=e)
                             
                             if log_ch:
                                 log_e = discord.Embed(title="🚫 Rôle Retiré - AFK", color=C.RED, timestamp=now())
@@ -17262,7 +17334,7 @@ async def check_realsy_inactivity():
                                 log_e.add_field(name="🎭 Rôle retiré", value=role.mention, inline=True)
                                 log_e.add_field(name="📅 Inactif depuis", value=f"{days_inactive} jours", inline=True)
                                 log_e.set_thumbnail(url=member.display_avatar.url)
-                                await log_ch.send(embed=log_e)
+                                await webhook_send(log_ch, 'realsy', embed=log_e)
                         except:
                             pass
             except:
@@ -17360,13 +17432,12 @@ async def check_youtube_feeds(session, guild, data):
                             if is_live and not was_live:
                                 posted_content[live_cache_key] = True
                                 
-                                e = discord.Embed(color=0xFF0000)
-                                e.set_author(name=f"🔴 YOUTUBE LIVE • {channel_name}", url=f"https://www.youtube.com/channel/{channel_id}/live", icon_url="https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png")
-                                e.title = f"🔴 {channel_name} est en LIVE !"
-                                e.url = f"https://www.youtube.com/channel/{channel_id}/live"
-                                e.description = f"**{channel_name}** vient de lancer un stream en direct !\nRejoins le live maintenant !"
+                                live_url = f"https://www.youtube.com/channel/{channel_id}/live"
+                                e = discord.Embed(color=0xFF0000, url=live_url)
+                                e.set_author(name=f"🔴 EN DIRECT SUR YOUTUBE", url=live_url, icon_url="https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png")
+                                e.title = f"{channel_name} est en LIVE !"
+                                e.description = f"**{channel_name}** vient de lancer un stream en direct !\n\n▶️ [**Rejoindre le live**]({live_url})"
                                 e.set_image(url=f"https://img.youtube.com/vi/live_user_{channel_id}/maxresdefault.jpg?t={int(now().timestamp())}")
-                                e.add_field(name="", value=f"[🔴 **Rejoindre le live**](https://www.youtube.com/channel/{channel_id}/live)", inline=False)
                                 e.set_footer(text=f"YouTube Live • {channel_name}", icon_url="https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png")
                                 e.timestamp = now()
                                 
@@ -17418,14 +17489,15 @@ async def check_youtube_feeds(session, guild, data):
             
             posted_content[cache_key] = video_id
             
-            e = discord.Embed(color=0xFF0000)
+            e = discord.Embed(color=0xFF0000, url=f"https://www.youtube.com/watch?v={video_id}")
+            e.set_author(name=f"YOUTUBE • {channel_name}", url=f"https://www.youtube.com/channel/{channel_id}", icon_url="https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png")
             e.title = f"▶️ {title}"
-            e.url = f"https://www.youtube.com/watch?v={video_id}"
+            desc_parts = []
             if description:
-                e.description = f"*{description}*"
-            e.set_author(name=f"🔴 YOUTUBE • {channel_name}", url=f"https://www.youtube.com/channel/{channel_id}", icon_url="https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png")
+                desc_parts.append(f"*{description}*\n")
+            desc_parts.append(f"🔗 [**Regarder sur YouTube**](https://www.youtube.com/watch?v={video_id})")
+            e.description = "\n".join(desc_parts)
             e.set_image(url=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg")
-            e.add_field(name="", value=f"[▶️ **Regarder la vidéo**](https://www.youtube.com/watch?v={video_id})", inline=False)
             e.set_footer(text=f"YouTube • {channel_name}", icon_url="https://www.youtube.com/s/desktop/28b67e7f/img/favicon_144x144.png")
             e.timestamp = now()
             
@@ -17480,13 +17552,12 @@ async def check_twitch_feeds(session, guild, data):
             if is_live and not was_live:
                 posted_content[cache_key] = True
                 
-                e = discord.Embed(color=0x9146FF)
-                e.set_author(name=f"🟣 TWITCH LIVE • {username}", url=f"https://www.twitch.tv/{username}", icon_url="https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png")
-                e.title = f"🔴 {username} est en LIVE !"
-                e.url = f"https://www.twitch.tv/{username}"
-                e.description = f"**{username}** vient de lancer un stream !\nRejoins le live maintenant !"
+                stream_url = f"https://www.twitch.tv/{username}"
+                e = discord.Embed(color=0x9146FF, url=stream_url)
+                e.set_author(name=f"🔴 EN DIRECT SUR TWITCH", url=stream_url, icon_url="https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png")
+                e.title = f"{username} est en live !"
+                e.description = f"**{username}** vient de lancer un stream !\n\n▶️ [**Rejoindre le stream**]({stream_url})"
                 e.set_image(url=f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{username.lower()}-1280x720.jpg?t={int(now().timestamp())}")
-                e.add_field(name="", value=f"[🟣 **Rejoindre le stream**](https://www.twitch.tv/{username})", inline=False)
                 e.set_footer(text=f"Twitch • {username}", icon_url="https://static.twitchcdn.net/assets/favicon-32-e29e246c157142c94346.png")
                 e.timestamp = now()
                 
@@ -17545,12 +17616,11 @@ async def check_tiktok_feeds(session, guild, data):
                             if is_live and not was_live:
                                 posted_content[live_cache_key] = True
                                 
-                                e = discord.Embed(color=0x010101)
-                                e.set_author(name=f"🎵 TIKTOK LIVE • @{username}", url=f"https://www.tiktok.com/@{username}/live", icon_url="https://www.tiktok.com/favicon.ico")
-                                e.title = f"🔴 @{username} est en LIVE sur TikTok !"
-                                e.url = f"https://www.tiktok.com/@{username}/live"
-                                e.description = f"**@{username}** est en direct sur TikTok !\nRejoins le live maintenant !"
-                                e.add_field(name="", value=f"[🎵 **Rejoindre le live TikTok**](https://www.tiktok.com/@{username}/live)", inline=False)
+                                tiktok_live_url = f"https://www.tiktok.com/@{username}/live"
+                                e = discord.Embed(color=0xFE2C55, url=tiktok_live_url)
+                                e.set_author(name=f"🔴 EN DIRECT SUR TIKTOK", url=tiktok_live_url, icon_url="https://www.tiktok.com/favicon.ico")
+                                e.title = f"@{username} est en LIVE !"
+                                e.description = f"**@{username}** est en direct sur TikTok !\n\n🎵 [**Rejoindre le live**]({tiktok_live_url})"
                                 e.set_footer(text=f"TikTok Live • @{username}", icon_url="https://www.tiktok.com/favicon.ico")
                                 e.timestamp = now()
                                 
@@ -17599,11 +17669,10 @@ async def check_tiktok_feeds(session, guild, data):
                 
                 video_url = f"https://www.tiktok.com/@{username}/video/{latest_video_id}"
                 
-                e = discord.Embed(color=0x010101)
-                e.set_author(name=f"🎵 TIKTOK • @{username}", url=f"https://www.tiktok.com/@{username}", icon_url="https://www.tiktok.com/favicon.ico")
+                e = discord.Embed(color=0xFE2C55, url=video_url)
+                e.set_author(name=f"TIKTOK • @{username}", url=f"https://www.tiktok.com/@{username}", icon_url="https://www.tiktok.com/favicon.ico")
                 e.title = f"🎵 {video_title[:200]}"
-                e.url = video_url
-                e.description = f"**@{username}** a publié une nouvelle vidéo !"
+                e.description = f"**@{username}** a publié une nouvelle vidéo !\n\n▶️ [**Voir la vidéo**]({video_url})"
                 
                 # Thumbnail TikTok
                 thumb_match = re.search(r'"cover":"(https://[^"]+)"', html)
@@ -17611,7 +17680,6 @@ async def check_tiktok_feeds(session, guild, data):
                     thumb_url = thumb_match.group(1).replace('\\u002F', '/')
                     e.set_image(url=thumb_url)
                 
-                e.add_field(name="", value=f"[🎵 **Voir la vidéo**]({video_url})", inline=False)
                 e.set_footer(text=f"TikTok • @{username}", icon_url="https://www.tiktok.com/favicon.ico")
                 e.timestamp = now()
                 
@@ -18910,12 +18978,20 @@ async def track_member_message(msg):
                     levelup_ch_id = level_cfg.get('levelup_channel', 0)
                     levelup_ch = msg.guild.get_channel(levelup_ch_id) if levelup_ch_id else msg.channel
                     
-                    e = discord.Embed(title="🎉 Level Up !", color=0xF1C40F)
-                    e.description = f"{msg.author.mention} est passé au **niveau {new_level}** !"
+                    e = discord.Embed(color=0xF1C40F, timestamp=now())
+                    e.set_author(name="⭐ Level Up !", icon_url=msg.author.display_avatar.url if msg.author.display_avatar else None)
+                    e.description = f"🎉 {msg.author.mention} est passé au **niveau {new_level}** !"
                     e.set_thumbnail(url=msg.author.display_avatar.url if msg.author.display_avatar else None)
+                    e.set_footer(text=msg.author.display_name, icon_url=msg.guild.icon.url if msg.guild.icon else None)
                     
                     try:
-                        await levelup_ch.send(embed=e, delete_after=30)
+                        _lu = await webhook_send(levelup_ch, 'level_up', embed=e)
+                        if _lu:
+                            async def _del(m): 
+                                await asyncio.sleep(30)
+                                try: await m.delete()
+                                except: pass
+                            asyncio.create_task(_del(_lu))
                     except:
                         pass
                     
@@ -19072,11 +19148,19 @@ async def track_member_vocal_leave(member, channel, duration):
                         levelup_ch = member.guild.get_channel(levelup_ch_id) if levelup_ch_id else None
                         
                         if levelup_ch:
-                            e = discord.Embed(title="🎉 Level Up !", color=0xF1C40F)
-                            e.description = f"{member.mention} est passé au **niveau {new_level}** !"
-                            e.set_footer(text=f"🎤 Temps en vocal: {duration // 60} min")
+                            e = discord.Embed(color=0xF1C40F, timestamp=now())
+                            e.set_author(name="⭐ Level Up !", icon_url=member.display_avatar.url if member.display_avatar else None)
+                            e.description = f"🎉 {member.mention} est passé au **niveau {new_level}** !"
+                            e.set_thumbnail(url=member.display_avatar.url if member.display_avatar else None)
+                            e.set_footer(text=f"🎤 Temps en vocal: {duration // 60} min", icon_url=member.guild.icon.url if member.guild.icon else None)
                             try:
-                                await levelup_ch.send(embed=e, delete_after=30)
+                                _lu = await webhook_send(levelup_ch, 'level_up', embed=e)
+                                if _lu:
+                                    async def _del2(m): 
+                                        await asyncio.sleep(30)
+                                        try: await m.delete()
+                                        except: pass
+                                    asyncio.create_task(_del2(_lu))
                             except:
                                 pass
                         
@@ -19180,13 +19264,20 @@ async def check_giveaways():
                     
                     if not participants:
                         # Pas de participants
-                        e = discord.Embed(title=f"🎁 {title} - Terminé", color=C.RED)
-                        e.description = "❌ **Aucun participant !**\n\nLe cadeau n'a pas pu être attribué."
+                        e = discord.Embed(color=0xE74C3C)
+                        e.set_author(name="🎁 GIVEAWAY TERMINÉ", icon_url=guild.icon.url if guild.icon else None)
+                        e.title = title
+                        e.description = (
+                            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                            f"❌ **Aucun participant !**\n"
+                            f"Le cadeau n'a pas pu être attribué.\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                        )
+                        e.set_footer(text="Giveaway terminé")
                         e.timestamp = now()
                         
                         try:
-                            msg = await channel.fetch_message(message_id)
-                            await msg.edit(embed=e, view=None)
+                            await webhook_edit(channel, 'giveaway', message_id, embed=e, view=None)
                         except:
                             pass
                     else:
@@ -19194,21 +19285,34 @@ async def check_giveaways():
                         import random
                         winner_id = random.choice(participants)
                         winner = guild.get_member(winner_id)
+                        winner_txt = winner.mention if winner else f'<@{winner_id}>'
                         
-                        e = discord.Embed(title=f"🎁 {title} - Terminé !", color=C.GOLD)
-                        e.description = f"🎉 **FÉLICITATIONS !**\n\n🏆 Le gagnant est: **{winner.mention if winner else f'<@{winner_id}>'}**"
-                        e.add_field(name="🎁 Prix", value=f"```{prize}```", inline=False)
-                        e.add_field(name="👥 Participants", value=f"```{len(participants)}```", inline=True)
-                        e.set_footer(text="Merci à tous les participants !")
+                        e = discord.Embed(color=0xF1C40F)
+                        e.set_author(name="🎁 GIVEAWAY TERMINÉ", icon_url=guild.icon.url if guild.icon else None)
+                        e.title = title
+                        e.description = (
+                            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                            f"🏆 **Gagnant :** {winner_txt}\n"
+                            f"🎁 **Prix :** `{prize}`\n"
+                            f"👥 **Participants :** `{len(participants)}`\n"
+                            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                        )
+                        e.set_footer(text="🎉 Félicitations au gagnant !")
                         e.timestamp = now()
                         
                         try:
-                            msg = await channel.fetch_message(message_id)
-                            await msg.edit(embed=e, view=None)
+                            await webhook_edit(channel, 'giveaway', message_id, embed=e, view=None)
+                            
                             win_e = discord.Embed(color=0xF1C40F)
-                            win_e.set_author(name="🎁 Giveaway terminé !", icon_url=guild.icon.url if guild.icon else None)
-                            win_e.description = f"🎉 **{winner.mention if winner else f'<@{winner_id}>'}** a remporté **{title}** !\n\nFélicitations ! 🏆"
-                            win_e.set_footer(text="Merci à tous les participants !")
+                            win_e.set_author(name="🎉 GAGNANT ANNONCÉ !", icon_url=guild.icon.url if guild.icon else None)
+                            win_e.description = (
+                                f"Félicitations {winner_txt} !\n\n"
+                                f"Tu as gagné **{title}** 🏆\n"
+                                f"Prix : `{prize}`"
+                            )
+                            if winner and winner.display_avatar:
+                                win_e.set_thumbnail(url=winner.display_avatar.url)
+                            win_e.set_footer(text=f"Merci aux {len(participants)} participants !")
                             win_e.timestamp = now()
                             await webhook_send(channel, 'giveaway', embed=win_e)
                         except:
@@ -19301,7 +19405,7 @@ async def check_scheduled_messages():
                     
                     e.timestamp = now()
                     
-                    await channel.send(embed=e)
+                    await webhook_send(channel, 'auto_message', embed=e)
                     
                     # Mettre à jour last_sent
                     await db.execute(
@@ -19692,7 +19796,7 @@ async def cleardeals_cmd(i: discord.Interaction):
 
 
 if __name__ == "__main__":
-    print("🚀 Bot v31 - Démarrage...")
+    print("🚀 Bot v32 - Démarrage...")
     print("🔒 Système de sécurité activé")
     print("👑 Système d'immunités complet")
     print("🎙️ Vocaux temporaires multi-hubs")
@@ -19703,5 +19807,6 @@ if __name__ == "__main__":
     print("📋 Navigation par menus déroulants (Select)")
     print("🎵 TikTok - Vidéos + détection lives")
     print("🔴 Salons lives dédiés (YouTube, Twitch, TikTok)")
-    print("✨ UI Panels améliorés v2")
+    print("🔗 Système Webhook intégral - 51 points d'envoi")
+    print("✨ Embeds repensés - Design professionnel")
     bot.run(TOKEN)
