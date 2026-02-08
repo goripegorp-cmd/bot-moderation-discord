@@ -122,6 +122,8 @@ class _DBConnection:
         self._conn = None
     
     async def __aenter__(self):
+        if not self._pool._initialized:
+            await self._pool.init()
         self._conn = await self._pool._get()
         return self._conn
     
@@ -138,10 +140,8 @@ class _DBConnection:
 # Instance globale du pool
 _db_pool = DBPool(DB_PATH, pool_size=8)
 
-async def get_db():
+def get_db():
     """Raccourci : async with get_db() as db:"""
-    if not _db_pool._initialized:
-        await _db_pool.init()
     return _db_pool.acquire()
 
 
