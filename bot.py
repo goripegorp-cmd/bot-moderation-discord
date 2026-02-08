@@ -929,7 +929,7 @@ async def cfg(gid):
         'anti_raid': 0, 'anti_compromised': 1, 'anti_qrcode': 1, 'anti_alt': 0,
         'link_whitelist': [], 'image_allowed': [], 'badwords_list': [],
         'link_allowed_channels': [], 'image_allowed_channels': [],
-        'phishing_action': 'ban', 'scam_action': 'mute', 'spam_action': 'mute',
+        'phishing_action': 'delete', 'scam_action': 'mute', 'spam_action': 'mute',
         'compromised_action': 'mute', 'qrcode_action': 'mute', 'alt_action': 'kick',
         'spam_max': 5, 'spam_interval': 5, 'caps_percent': 70, 'newaccount_days': 7,
         'log_anti_link': 0, 'log_anti_image': 0, 'log_anti_phishing': 0, 'log_anti_scam': 0,
@@ -1616,7 +1616,9 @@ async def is_fully_immune(member):
 
 async def sanction(m, action, dur, reason, g):
     try:
-        if action == 'mute': await m.timeout(timedelta(minutes=dur), reason=reason)
+        if action == 'delete':
+            pass  # Message déjà supprimé, pas de sanction sur le membre
+        elif action == 'mute': await m.timeout(timedelta(minutes=dur), reason=reason)
         elif action == 'kick': await m.kick(reason=reason)
         elif action == 'ban': await m.ban(reason=reason)
     except: pass
@@ -1687,13 +1689,13 @@ async def send_log(g, key, m, msg, reason, extra=None):
         # Action prise
         action_taken = c.get(f'{key.replace("anti_", "")}_action', 'mute')
         if key == 'anti_phishing':
-            action_taken = c.get('phishing_action', 'ban')
+            action_taken = c.get('phishing_action', 'delete')
         elif key == 'anti_scam':
             action_taken = c.get('scam_action', 'mute')
         elif key == 'anti_compromised':
             action_taken = c.get('compromised_action', 'mute')
         
-        action_emoji = {'mute': '🔇', 'kick': '👢', 'ban': '🔨'}.get(action_taken, '⚡')
+        action_emoji = {'delete': '🗑️', 'mute': '🔇', 'kick': '👢', 'ban': '🔨'}.get(action_taken, '⚡')
         e.add_field(name="⚡ Action", value=f"{action_emoji} {action_taken.upper()}", inline=True)
         
         # Raison détaillée
@@ -3175,7 +3177,10 @@ class ProtDetail(View):
         
         elif self.key in ["anti_phishing", "anti_scam"]:
             ak = 'phishing_action' if self.key == "anti_phishing" else 'scam_action'
-            e.add_field(name="⚡ Action", value=c.get(ak, 'ban' if 'phishing' in ak else 'mute').upper(), inline=True)
+            default = 'delete' if self.key == 'anti_phishing' else 'mute'
+            action = c.get(ak, default)
+            action_emoji = {'delete': '🗑️', 'mute': '🔇', 'kick': '👢', 'ban': '🔨'}.get(action, '⚡')
+            e.add_field(name="⚡ Action", value=f"{action_emoji} {action.upper()}", inline=True)
         
         elif self.key == "anti_raid":
             raid_cfg = c.get('raid_config', {})
@@ -3203,8 +3208,9 @@ class ProtDetail(View):
         
         elif self.key == "anti_phishing":
             e.description = "🎣 **Protection Anti-Phishing Avancée 2026**\n\nProtège contre :\n• Faux sites Discord/Steam/Nitro\n• Typosquatting (dlscord, steampowored...)\n• IP grabbers et raccourcisseurs suspects\n• TLD dangereux (.ru, .tk, .xyz...)"
-            action = c.get('phishing_action', 'ban')
-            e.add_field(name="⚡ Action", value=action.upper(), inline=True)
+            action = c.get('phishing_action', 'delete')
+            action_emoji = {'delete': '🗑️', 'mute': '🔇', 'kick': '👢', 'ban': '🔨'}.get(action, '⚡')
+            e.add_field(name="⚡ Action", value=f"{action_emoji} {action.upper()}", inline=True)
             e.add_field(name="📊 Base de données", value=f"`{len(PHISHING_DOMAINS)}` domaines blacklistés", inline=True)
         
         elif self.key == "anti_scam":
@@ -3247,8 +3253,10 @@ class ProtDetail(View):
     @discord.ui.button(label="🔄 ON/OFF", style=discord.ButtonStyle.primary, row=0)
     async def toggle(self, i, b):
         c = await cfg(self.g.id)
-        await db_set(self.g.id, self.key, 0 if c.get(self.key) else 1)
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        new_val = 0 if c.get(self.key) else 1
+        await db_set(self.g.id, self.key, new_val)
+        v = ProtDetail(self.u, self.g, self.prot)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="⚙️ Configurer", style=discord.ButtonStyle.secondary, row=0)
     async def config(self, i, b):
@@ -3261,7 +3269,7 @@ class ProtDetail(View):
         elif self.key == "anti_link":
             v = LinkConfigPanel(self.u, self.g)
             await i.response.edit_message(embed=await v.embed(), view=v)
-        elif self.key in ["anti_spam", "anti_caps", "anti_newaccount"]:
+        elif self.key in ["anti_spam", "anti_caps", "anti_newaccount", "anti_mass_mention"]:
             await i.response.send_modal(NumberConfigModal(self.g, self.u, self.key))
         elif self.key in ["anti_phishing", "anti_scam", "anti_compromised", "anti_qrcode"]:
             v = ActionConfigPanel(self.u, self.g, self.key)
@@ -3779,6 +3787,9 @@ class NumberConfigModal(Modal, title="⚙️ Configuration"):
         elif key == "anti_newaccount":
             self.val.label = "Âge minimum du compte (jours)"
             self.val.placeholder = "7"
+        elif key == "anti_mass_mention":
+            self.val.label = "Nombre max de mentions par message"
+            self.val.placeholder = "5"
     
     async def on_submit(self, i):
         v = int(self.val.value) if self.val.value.isdigit() else 5
@@ -3788,6 +3799,8 @@ class NumberConfigModal(Modal, title="⚙️ Configuration"):
             await db_set(self.g.id, 'caps_percent', max(10, min(100, v)))
         elif self.key == "anti_newaccount":
             await db_set(self.g.id, 'newaccount_days', max(1, min(365, v)))
+        elif self.key == "anti_mass_mention":
+            await db_set(self.g.id, 'mention_limit', max(2, min(20, v)))
         prot = next(p for p in PROTS if p[0] == self.key)
         vw = ProtDetail(self.u, self.g, prot)
         await i.response.edit_message(embed=await vw.embed(), view=vw)
@@ -3816,7 +3829,7 @@ class ActionConfigPanel(View):
     def _get_default_action(self):
         """Retourne l'action par défaut"""
         defaults = {
-            'anti_phishing': 'ban',
+            'anti_phishing': 'delete',
             'anti_scam': 'mute',
             'anti_compromised': 'mute',
             'anti_qrcode': 'mute',
@@ -3832,11 +3845,16 @@ class ActionConfigPanel(View):
         e = discord.Embed(title=f"⚡ Action pour {name}", color=C.BLUE)
         e.description = f"**Action actuelle:** `{current.upper()}`\n\nChoisissez l'action à effectuer lorsqu'une violation est détectée:"
         
-        e.add_field(name="🔇 Mute", value="Rend muet temporairement", inline=True)
+        e.add_field(name="🗑️ Supprimer", value="Supprime le message uniquement", inline=True)
+        e.add_field(name="🔇 Mute", value="Rend muet + supprime", inline=True)
         e.add_field(name="👢 Kick", value="Expulse du serveur", inline=True)
         e.add_field(name="🔨 Ban", value="Bannit définitivement", inline=True)
         
         return e
+    
+    @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.success, row=0)
+    async def delete_only(self, i, b):
+        await self._set(i, 'delete')
     
     @discord.ui.button(label="🔇 Mute", style=discord.ButtonStyle.primary, row=0)
     async def mute(self, i, b):
@@ -3855,7 +3873,7 @@ class ActionConfigPanel(View):
         await db_set(self.g.id, ak, act)
         prot = next(p for p in PROTS if p[0] == self.key)
         v = ProtDetail(self.u, self.g, prot)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        await i.response.edit_message(content=f"✅ Action changée → **{act.upper()}**", embed=await v.embed(), view=v)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
@@ -15721,7 +15739,7 @@ async def on_message(msg):
                 if f:
                     await msg.delete()
                     await send_log(msg.guild, 'anti_phishing', msg.author, msg, "Lien de phishing détecté", f"`{d}`")
-                    await sanction(msg.author, c.get('phishing_action', 'ban'), 60, "Phishing", msg.guild)
+                    await sanction(msg.author, c.get('phishing_action', 'delete'), 60, "Phishing", msg.guild)
             return
         
         # 2. Vérifier si c'est un ticket (immunité partielle)
@@ -15738,7 +15756,7 @@ async def on_message(msg):
             if f:
                 await msg.delete()
                 await send_log(msg.guild, 'anti_phishing', msg.author, msg, "Lien de phishing détecté", f"`{d}`")
-                await sanction(msg.author, c.get('phishing_action', 'ban'), 60, "Phishing", msg.guild)
+                await sanction(msg.author, c.get('phishing_action', 'delete'), 60, "Phishing", msg.guild)
                 return
         
         # Anti-scam - Actif même dans les tickets (protection contre les hacks)
