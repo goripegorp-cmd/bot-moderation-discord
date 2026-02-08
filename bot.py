@@ -13048,57 +13048,34 @@ class StatActionPanel(View):
         c = await cfg(self.g.id)
         stat_cfg = c.get('stat_config', {})
         
-        e = discord.Embed(title="⚙️ Configuration des Actions", color=C.ORANGE)
-        e.description = "Configurez les actions automatiques sur les membres inactifs.\n**Vous pouvez sélectionner plusieurs actions !**\n\n*⚠️ Aucune mention automatique - Vous ferez le @here/@everyone vous-même*"
+        e = discord.Embed(color=C.ORANGE)
+        e.set_author(name="⚙️ Configuration des Actions", icon_url=self.g.icon.url if self.g.icon else None)
+        e.description = (
+            "Configurez les actions automatiques sur les membres inactifs.\n"
+            "**Vous pouvez sélectionner plusieurs actions !**\n\n"
+            "*⚠️ Aucune mention automatique - Vous ferez le @here/@everyone vous-même*"
+        )
         
         action_labels = {'ping': '📊 Rapport', 'remove_role': '🎭 Retirer rôle', 'kick': '👢 Kick'}
         
-        # Actions 7 jours (maintenant une liste)
         actions_7d = stat_cfg.get('actions_7d', [])
-        if actions_7d:
-            actions_7d_txt = " + ".join([action_labels.get(a, a) for a in actions_7d])
-        else:
-            actions_7d_txt = "❌ Aucune"
+        actions_7d_txt = " + ".join([action_labels.get(a, a) for a in actions_7d]) if actions_7d else "❌ Aucune"
         
-        # Actions 30 jours (maintenant une liste)
         actions_30d = stat_cfg.get('actions_30d', [])
-        if actions_30d:
-            actions_30d_txt = " + ".join([action_labels.get(a, a) for a in actions_30d])
-        else:
-            actions_30d_txt = "❌ Aucune"
+        actions_30d_txt = " + ".join([action_labels.get(a, a) for a in actions_30d]) if actions_30d else "❌ Aucune"
         
         role_id = stat_cfg.get('activity_role', 0)
         notif_ch = self.g.get_channel(stat_cfg.get('notif_channel', 0))
         recovery_ch = self.g.get_channel(stat_cfg.get('recovery_channel', 0))
         role = self.g.get_role(role_id) if role_id else None
         
-        e.add_field(
-            name="😴 Actions après 7 jours",
-            value=actions_7d_txt,
-            inline=True
-        )
-        e.add_field(
-            name="💤 Actions après 30 jours",
-            value=actions_30d_txt,
-            inline=True
-        )
+        e.add_field(name="😴 Actions après 7 jours", value=actions_7d_txt, inline=True)
+        e.add_field(name="💤 Actions après 30 jours", value=actions_30d_txt, inline=True)
         e.add_field(name="\u200b", value="\u200b", inline=True)
         
-        e.add_field(
-            name="🎭 Rôle d'activité",
-            value=role.mention if role else "❌ Non défini",
-            inline=True
-        )
-        e.add_field(
-            name="📢 Salon notifications",
-            value=notif_ch.mention if notif_ch else "❌ Non défini",
-            inline=True
-        )
-        e.add_field(
-            name="💬 Salon récupération",
-            value=recovery_ch.mention if recovery_ch else "❌ Non défini",
-            inline=True
-        )
+        e.add_field(name="🎭 Rôle d'activité", value=role.mention if role else "❌ Non défini", inline=True)
+        e.add_field(name="📢 Salon notifications", value=notif_ch.mention if notif_ch else "❌ Non défini", inline=True)
+        e.add_field(name="💬 Salon récupération", value=recovery_ch.mention if recovery_ch else "❌ Non défini", inline=True)
         
         e.set_footer(text="💡 Le rôle sera redonné automatiquement si le membre envoie un message ou rejoint un vocal")
         return e
@@ -13117,9 +13094,10 @@ class StatActionPanel(View):
     async def action_7d(self, i, s):
         c = await cfg(self.g.id)
         stat_cfg = c.get('stat_config', {})
-        stat_cfg['actions_7d'] = s.values  # Liste d'actions
+        stat_cfg['actions_7d'] = s.values
         await db_set(self.g.id, 'stat_config', stat_cfg)
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = StatActionPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.select(
         placeholder="💤 Actions 30 jours (multi-sélection)...",
@@ -13135,77 +13113,34 @@ class StatActionPanel(View):
     async def action_30d(self, i, s):
         c = await cfg(self.g.id)
         stat_cfg = c.get('stat_config', {})
-        stat_cfg['actions_30d'] = s.values  # Liste d'actions
+        stat_cfg['actions_30d'] = s.values
         await db_set(self.g.id, 'stat_config', stat_cfg)
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = StatActionPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="🎭 Rôle", style=discord.ButtonStyle.primary, row=2)
     async def set_role(self, i, b):
-        roles = [r for r in self.g.roles if not r.is_default() and not r.managed and r < self.g.me.top_role]
-        if not roles:
-            return await i.response.send_message("❌ Aucun rôle disponible", ephemeral=True)
-        
-        async def role_callback(interaction, role_id, extra):
-            c = await cfg(self.g.id)
-            stat_cfg = c.get('stat_config', {})
-            stat_cfg['activity_role'] = role_id
-            await db_set(self.g.id, 'stat_config', stat_cfg)
-            v = StatActionPanel(self.u, self.g)
-            await interaction.response.edit_message(embed=await v.embed(), view=v)
-        
-        v = UniversalRoleSelect(
-            self.u, self.g,
-            callback_func=role_callback,
-            return_view_func=lambda: StatActionPanel(self.u, self.g),
-            title="🎭 Rôle d'activité",
-            allow_none=True
-        )
-        await i.response.edit_message(embed=discord.Embed(title="🎭 Sélectionner le rôle d'activité", description=f"**{len(roles)}** rôles disponibles", color=C.PURPLE), view=v)
+        v = StatRoleSelectView(self.u, self.g)
+        await i.response.edit_message(embed=v.embed(), view=v)
     
     @discord.ui.button(label="📢 Notifs", style=discord.ButtonStyle.primary, row=2)
-    async def set_channel(self, i, b):
-        async def channel_callback(interaction, channel_id, extra):
-            c = await cfg(self.g.id)
-            stat_cfg = c.get('stat_config', {})
-            stat_cfg['notif_channel'] = channel_id
-            await db_set(self.g.id, 'stat_config', stat_cfg)
-            v = StatActionPanel(self.u, self.g)
-            await interaction.response.edit_message(embed=await v.embed(), view=v)
-        
-        v = UniversalChannelSelect(
-            self.u, self.g,
-            callback_func=channel_callback,
-            return_view_func=lambda: StatActionPanel(self.u, self.g),
-            title="📢 Notifications",
-            allow_none=True
-        )
-        await i.response.edit_message(embed=discord.Embed(title="📢 Salon de notifications", description=f"Salon où seront envoyées les alertes d'inactivité\n\n**{len(list(self.g.text_channels))}** salons disponibles", color=C.PURPLE), view=v)
+    async def set_notif(self, i, b):
+        v = StatChannelSelectView(self.u, self.g, config_key='notif_channel', title="📢 Salon Notifications",
+                                   description="Salon où seront envoyés les rapports d'inactivité")
+        await i.response.edit_message(embed=v.embed(), view=v)
     
     @discord.ui.button(label="💬 Récup", style=discord.ButtonStyle.primary, row=2)
     async def set_recovery(self, i, b):
-        async def channel_callback(interaction, channel_id, extra):
-            c = await cfg(self.g.id)
-            stat_cfg = c.get('stat_config', {})
-            stat_cfg['recovery_channel'] = channel_id
-            await db_set(self.g.id, 'stat_config', stat_cfg)
-            v = StatActionPanel(self.u, self.g)
-            await interaction.response.edit_message(embed=await v.embed(), view=v)
-        
-        v = UniversalChannelSelect(
-            self.u, self.g,
-            callback_func=channel_callback,
-            return_view_func=lambda: StatActionPanel(self.u, self.g),
-            title="💬 Récupération",
-            allow_none=True
-        )
-        await i.response.edit_message(embed=discord.Embed(title="💬 Salon de récupération", description=f"Salon où les membres doivent écrire pour récupérer leur activité\n\n**{len(list(self.g.text_channels))}** salons disponibles", color=C.PURPLE), view=v)
+        v = StatChannelSelectView(self.u, self.g, config_key='recovery_channel', title="💬 Salon Récupération",
+                                   description="Les membres écrivent ici pour récupérer leur rôle d'activité")
+        await i.response.edit_message(embed=v.embed(), view=v)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
         v = StatPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
-    @discord.ui.button(label="👢 Expulser AFK 7j", style=discord.ButtonStyle.danger, row=3)
+    @discord.ui.button(label="👢 Kick AFK 7j", style=discord.ButtonStyle.danger, row=3)
     async def kick_7d(self, i, b):
         count = await count_afk_members_by_days(self.g, 7)
         await i.response.send_message(
@@ -13216,7 +13151,7 @@ class StatActionPanel(View):
             ephemeral=True
         )
     
-    @discord.ui.button(label="👢 Expulser AFK 30j", style=discord.ButtonStyle.danger, row=3)
+    @discord.ui.button(label="👢 Kick AFK 30j", style=discord.ButtonStyle.danger, row=3)
     async def kick_30d(self, i, b):
         count = await count_afk_members_by_days(self.g, 30)
         await i.response.send_message(
@@ -13226,6 +13161,184 @@ class StatActionPanel(View):
             view=KickConfirmView(self.u, self.g, 30, count),
             ephemeral=True
         )
+
+
+class StatRoleSelectView(View):
+    """Sélecteur de rôle dédié pour le système d'activité"""
+    def __init__(self, u, g, page=0):
+        super().__init__(timeout=180)
+        self.u = u
+        self.g = g
+        self.page = page
+        self.roles = sorted(
+            [r for r in g.roles[1:] if not r.is_bot_managed() and not r.is_default()],
+            key=lambda r: r.position, reverse=True
+        )
+        self.max_page = max(0, (len(self.roles) - 1) // 23)
+        self._build_select()
+    
+    def embed(self):
+        c_roles = len(self.roles)
+        e = discord.Embed(color=0x9B59B6)
+        e.set_author(name="🎭 Sélectionner le rôle d'activité", icon_url=self.g.icon.url if self.g.icon else None)
+        e.description = (
+            f"Le rôle sera **retiré** aux membres inactifs et **redonné** automatiquement "
+            f"quand ils envoient un message ou rejoignent un vocal.\n\n"
+            f"**{c_roles}** rôles disponibles"
+        )
+        e.set_footer(text=f"Page {self.page + 1}/{self.max_page + 1}")
+        return e
+    
+    def _build_select(self):
+        start = self.page * 23
+        end = start + 23
+        page_roles = self.roles[start:end]
+        
+        opts = [discord.SelectOption(label="❌ Aucun rôle (désactiver)", value="0", emoji="🚫")]
+        for r in page_roles:
+            opts.append(discord.SelectOption(
+                label=f"@{r.name}"[:25], value=str(r.id),
+                description=f"{len(r.members)} membres"
+            ))
+        
+        if opts:
+            select = StatRoleSelectMenu(self, opts)
+            self.add_item(select)
+        
+        if self.page > 0:
+            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.secondary, row=1)
+            prev_btn.callback = self._prev
+            self.add_item(prev_btn)
+        if self.page < self.max_page:
+            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.secondary, row=1)
+            next_btn.callback = self._next
+            self.add_item(next_btn)
+        
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=1)
+        back_btn.callback = self._back
+        self.add_item(back_btn)
+    
+    async def _prev(self, i):
+        v = StatRoleSelectView(self.u, self.g, self.page - 1)
+        await i.response.edit_message(embed=v.embed(), view=v)
+    
+    async def _next(self, i):
+        v = StatRoleSelectView(self.u, self.g, self.page + 1)
+        await i.response.edit_message(embed=v.embed(), view=v)
+    
+    async def _back(self, i):
+        v = StatActionPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class StatRoleSelectMenu(Select):
+    def __init__(self, parent, opts):
+        super().__init__(placeholder="Choisir le rôle d'activité...", options=opts)
+        self.parent = parent
+    
+    async def callback(self, i):
+        role_id = int(self.values[0])
+        try:
+            c = await cfg(self.parent.g.id)
+            stat_cfg = c.get('stat_config', {})
+            stat_cfg['activity_role'] = role_id
+            await db_set(self.parent.g.id, 'stat_config', stat_cfg)
+            
+            role = self.parent.g.get_role(role_id)
+            role_txt = role.mention if role else "Aucun"
+            
+            v = StatActionPanel(self.parent.u, self.parent.g)
+            await i.response.edit_message(content=f"✅ Rôle d'activité : {role_txt}", embed=await v.embed(), view=v)
+        except Exception as ex:
+            print(f"[STAT] Erreur set role: {ex}")
+            await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
+
+
+class StatChannelSelectView(View):
+    """Sélecteur de salon dédié pour le système d'activité"""
+    def __init__(self, u, g, config_key, title, description, page=0):
+        super().__init__(timeout=180)
+        self.u = u
+        self.g = g
+        self.config_key = config_key  # 'notif_channel' ou 'recovery_channel'
+        self.title = title
+        self.description = description
+        self.page = page
+        self.channels = list(g.text_channels)
+        self.max_page = max(0, (len(self.channels) - 1) // 23)
+        self._build_select()
+    
+    def embed(self):
+        e = discord.Embed(color=0x3498DB)
+        e.set_author(name=self.title, icon_url=self.g.icon.url if self.g.icon else None)
+        e.description = f"{self.description}\n\n**{len(self.channels)}** salons disponibles"
+        e.set_footer(text=f"Page {self.page + 1}/{self.max_page + 1}")
+        return e
+    
+    def _build_select(self):
+        start = self.page * 23
+        end = start + 23
+        page_channels = self.channels[start:end]
+        
+        opts = [discord.SelectOption(label="❌ Aucun (désactiver)", value="0", emoji="🚫")]
+        for ch in page_channels:
+            cat = ch.category.name[:30] if ch.category else "Sans catégorie"
+            opts.append(discord.SelectOption(
+                label=f"# {ch.name}"[:25], value=str(ch.id),
+                description=cat
+            ))
+        
+        if opts:
+            select = StatChannelSelectMenu(self, opts)
+            self.add_item(select)
+        
+        if self.page > 0:
+            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.secondary, row=1)
+            prev_btn.callback = self._prev
+            self.add_item(prev_btn)
+        if self.page < self.max_page:
+            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.secondary, row=1)
+            next_btn.callback = self._next
+            self.add_item(next_btn)
+        
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=1)
+        back_btn.callback = self._back
+        self.add_item(back_btn)
+    
+    async def _prev(self, i):
+        v = StatChannelSelectView(self.u, self.g, self.config_key, self.title, self.description, self.page - 1)
+        await i.response.edit_message(embed=v.embed(), view=v)
+    
+    async def _next(self, i):
+        v = StatChannelSelectView(self.u, self.g, self.config_key, self.title, self.description, self.page + 1)
+        await i.response.edit_message(embed=v.embed(), view=v)
+    
+    async def _back(self, i):
+        v = StatActionPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class StatChannelSelectMenu(Select):
+    def __init__(self, parent, opts):
+        super().__init__(placeholder=f"Choisir le salon...", options=opts)
+        self.parent = parent
+    
+    async def callback(self, i):
+        channel_id = int(self.values[0])
+        try:
+            c = await cfg(self.parent.g.id)
+            stat_cfg = c.get('stat_config', {})
+            stat_cfg[self.parent.config_key] = channel_id
+            await db_set(self.parent.g.id, 'stat_config', stat_cfg)
+            
+            ch = self.parent.g.get_channel(channel_id)
+            ch_txt = ch.mention if ch else "Aucun"
+            
+            v = StatActionPanel(self.parent.u, self.parent.g)
+            await i.response.edit_message(content=f"✅ {self.parent.title} : {ch_txt}", embed=await v.embed(), view=v)
+        except Exception as ex:
+            print(f"[STAT] Erreur set channel {self.parent.config_key}: {ex}")
+            await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
 
 async def count_afk_members_by_days(guild, days):
     """Compte les membres AFK depuis X jours"""
@@ -13360,45 +13473,6 @@ async def kick_afk_members(guild, days):
         
     except Exception as ex:
         return f"❌ Erreur: {ex}"
-
-class StatRoleSelectView(View):
-    def __init__(self, u, g, opts):
-        super().__init__(timeout=120)
-        self.add_item(StatRoleSelect(u, g, opts))
-
-class StatRoleSelect(Select):
-    def __init__(self, u, g, opts):
-        super().__init__(placeholder="Choisir un rôle...", options=opts)
-        self.u = u
-        self.g = g
-    
-    async def callback(self, i):
-        c = await cfg(self.g.id)
-        stat_cfg = c.get('stat_config', {})
-        stat_cfg['activity_role'] = int(self.values[0])
-        await db_set(self.g.id, 'stat_config', stat_cfg)
-        v = StatActionPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-
-class StatChannelSelectView(View):
-    def __init__(self, u, g, opts, key):
-        super().__init__(timeout=120)
-        self.add_item(StatChannelSelect(u, g, opts, key))
-
-class StatChannelSelect(Select):
-    def __init__(self, u, g, opts, key):
-        super().__init__(placeholder="Choisir un salon...", options=opts)
-        self.u = u
-        self.g = g
-        self.key = key
-    
-    async def callback(self, i):
-        c = await cfg(self.g.id)
-        stat_cfg = c.get('stat_config', {})
-        stat_cfg[self.key] = int(self.values[0])
-        await db_set(self.g.id, 'stat_config', stat_cfg)
-        v = StatActionPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
 
 class StatExecuteConfirmView(View):
     def __init__(self, u, g):
@@ -20103,6 +20177,23 @@ async def track_member_message(msg):
             ''', (msg.guild.id, today))
             
             await db.commit()
+        
+        # ═══════════════ RESTAURATION DU RÔLE D'ACTIVITÉ ═══════════════
+        # Si le membre a perdu son rôle d'activité à cause de l'AFK,
+        # un simple message N'IMPORTE OÙ suffit à le récupérer
+        try:
+            c = await cfg(msg.guild.id)
+            stat_cfg = c.get('stat_config', {})
+            role_id = stat_cfg.get('activity_role', 0)
+            if role_id:
+                role = msg.guild.get_role(role_id)
+                if role and role not in msg.author.roles:
+                    try:
+                        await msg.author.add_roles(role, reason="Retour d'activité via message")
+                    except:
+                        pass
+        except:
+            pass
         
         # ═══════════════ NOUVEAU SYSTÈME DE NIVEAUX ═══════════════
         try:
