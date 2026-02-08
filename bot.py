@@ -7873,7 +7873,8 @@ class CentrePanel(View):
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "🎁 **Cadeaux** — Giveaways avec conditions, durée, images\n"
             "📢 **Annonces** — Embeds personnalisés dans vos salons\n"
-            "📨 **Messages Auto** — Envois récurrents programmés\n\n"
+            "📨 **Messages Auto** — Envois récurrents programmés\n"
+            "🎭 **Rôles en masse** — Ajouter/Retirer un rôle à tous les membres\n\n"
             "*▼ Sélectionnez une fonctionnalité ci-dessous*"
         )
         
@@ -7897,10 +7898,423 @@ class CentrePanel(View):
         v = MessagePanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
+    @discord.ui.button(label="🎭 Rôles", style=discord.ButtonStyle.success, row=0)
+    async def mass_role(self, i, b):
+        v = MassRolePanel(self.u, self.g)
+        await i.response.edit_message(embed=v.embed(), view=v)
+    
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           🎭 RÔLES EN MASSE (AJOUT / RETRAIT)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class MassRolePanel(View):
+    """Panneau principal pour l'ajout/retrait de rôles en masse"""
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+    
+    def embed(self):
+        e = discord.Embed(color=0x3498DB)
+        e.set_author(name="🎭 Gestion des Rôles en Masse", icon_url=self.g.icon.url if self.g.icon else None)
+        
+        # Compter les membres
+        humans = sum(1 for m in self.g.members if not m.bot)
+        bots = sum(1 for m in self.g.members if m.bot)
+        total = self.g.member_count
+        roles_count = len(self.g.roles) - 1  # Exclure @everyone
+        
+        e.description = (
+            f"Ajoutez ou retirez un rôle à plusieurs membres d'un coup.\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"👥 **{humans}** humains • 🤖 **{bots}** bots • 🎭 **{roles_count}** rôles\n\n"
+            f"➕ **Ajouter** — Donne un rôle à tous ceux qui ne l'ont pas\n"
+            f"➖ **Retirer** — Enlève un rôle à tous ceux qui l'ont\n\n"
+            f"*Sélectionnez l'action à effectuer ci-dessous*"
+        )
+        
+        if self.g.icon:
+            e.set_thumbnail(url=self.g.icon.url)
+        e.set_footer(text="🎭 Rôles en masse • Les changements sont irréversibles")
+        return e
+    
+    @discord.ui.button(label="➕ Ajouter un rôle", style=discord.ButtonStyle.success, row=0)
+    async def add_role(self, i, b):
+        v = MassRoleTargetSelect(self.u, self.g, action='add')
+        await i.response.edit_message(embed=v.embed(), view=v)
+    
+    @discord.ui.button(label="➖ Retirer un rôle", style=discord.ButtonStyle.danger, row=0)
+    async def remove_role(self, i, b):
+        v = MassRoleTargetSelect(self.u, self.g, action='remove')
+        await i.response.edit_message(embed=v.embed(), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = CentrePanel(self.u, self.g)
+        await i.response.edit_message(embed=v.embed(), view=v)
+
+
+class MassRoleTargetSelect(View):
+    """Sélection de la cible : tout le monde, humains, humains + bots"""
+    def __init__(self, u, g, action='add'):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+        self.action = action  # 'add' ou 'remove'
+    
+    def embed(self):
+        action_txt = "➕ Ajouter" if self.action == 'add' else "➖ Retirer"
+        action_desc = "à" if self.action == 'add' else "de"
+        color = 0x2ECC71 if self.action == 'add' else 0xE74C3C
+        
+        humans = sum(1 for m in self.g.members if not m.bot)
+        bots = sum(1 for m in self.g.members if m.bot)
+        
+        e = discord.Embed(color=color)
+        e.set_author(name=f"🎭 {action_txt} un rôle", icon_url=self.g.icon.url if self.g.icon else None)
+        e.description = (
+            f"**À qui voulez-vous {action_desc.replace('à', 'ajouter').replace('de', 'retirer')} le rôle ?**\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"👥 **Humains uniquement** — {humans} membres\n"
+            f"🤖 **Humains + Bots** — {humans + bots} membres\n"
+            f"🌐 **Tout le monde** — {self.g.member_count} membres\n\n"
+            f"*Sélectionnez la cible ci-dessous*"
+        )
+        e.set_footer(text=f"Étape 1/3 • Cible")
+        return e
+    
+    @discord.ui.button(label="👥 Humains uniquement", style=discord.ButtonStyle.primary, row=0)
+    async def humans_only(self, i, b):
+        v = MassRoleSelectView(self.u, self.g, action=self.action, target='humans')
+        await i.response.edit_message(embed=v.embed(), view=v)
+    
+    @discord.ui.button(label="🤖 Humains + Bots", style=discord.ButtonStyle.primary, row=0)
+    async def humans_and_bots(self, i, b):
+        v = MassRoleSelectView(self.u, self.g, action=self.action, target='all')
+        await i.response.edit_message(embed=v.embed(), view=v)
+    
+    @discord.ui.button(label="🌐 Tout le monde", style=discord.ButtonStyle.primary, row=0)
+    async def everyone(self, i, b):
+        v = MassRoleSelectView(self.u, self.g, action=self.action, target='all')
+        await i.response.edit_message(embed=v.embed(), view=v)
+    
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = MassRolePanel(self.u, self.g)
+        await i.response.edit_message(embed=v.embed(), view=v)
+
+
+class MassRoleSelectView(View):
+    """Sélection paginée du rôle à ajouter/retirer"""
+    def __init__(self, u, g, action='add', target='humans', page=0):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+        self.action = action
+        self.target = target
+        self.page = page
+        # Tous les rôles sauf @everyone et les rôles bot-managed, triés par position
+        self.roles = sorted(
+            [r for r in g.roles[1:] if not r.is_bot_managed() and r < g.me.top_role],
+            key=lambda r: r.position, reverse=True
+        )
+        self.max_page = max(0, (len(self.roles) - 1) // 24)
+        self._build()
+    
+    def embed(self):
+        action_txt = "➕ Ajouter" if self.action == 'add' else "➖ Retirer"
+        target_txt = "👥 Humains" if self.target == 'humans' else "🌐 Tout le monde"
+        color = 0x2ECC71 if self.action == 'add' else 0xE74C3C
+        
+        e = discord.Embed(color=color)
+        e.set_author(name=f"🎭 {action_txt} — Choisir le rôle", icon_url=self.g.icon.url if self.g.icon else None)
+        
+        # Liste des rôles de la page actuelle
+        start = self.page * 24
+        end = min(start + 24, len(self.roles))
+        page_roles = self.roles[start:end]
+        
+        role_lines = []
+        for r in page_roles[:15]:
+            member_count = len(r.members)
+            color_hex = f"#{r.color.value:06x}" if r.color.value else "#99aab5"
+            role_lines.append(f"● **{r.name}** — `{member_count}` membres • `{color_hex}`")
+        
+        if len(page_roles) > 15:
+            role_lines.append(f"*... et {len(page_roles) - 15} autres sur cette page*")
+        
+        e.description = (
+            f"**Action :** {action_txt} • **Cible :** {target_txt}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            + "\n".join(role_lines) if role_lines else "*Aucun rôle disponible*"
+        )
+        
+        e.set_footer(text=f"Étape 2/3 • Page {self.page + 1}/{self.max_page + 1} • {len(self.roles)} rôles")
+        return e
+    
+    def _build(self):
+        self.clear_items()
+        
+        start = self.page * 24
+        end = start + 24
+        page_roles = self.roles[start:end]
+        
+        if page_roles:
+            opts = []
+            for r in page_roles:
+                member_count = len(r.members)
+                label = f"@{r.name}"[:25]
+                desc = f"{member_count} membres"[:50]
+                opts.append(discord.SelectOption(label=label, value=str(r.id), description=desc))
+            
+            self.add_item(MassRoleSelectMenu(self, opts))
+        
+        # Pagination
+        if self.page > 0:
+            prev_btn = discord.ui.Button(label="◀️ Page préc.", style=discord.ButtonStyle.secondary, row=1)
+            prev_btn.callback = self._prev
+            self.add_item(prev_btn)
+        
+        if self.page < self.max_page:
+            next_btn = discord.ui.Button(label="▶️ Page suiv.", style=discord.ButtonStyle.secondary, row=1)
+            next_btn.callback = self._next
+            self.add_item(next_btn)
+        
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=1)
+        back_btn.callback = self._back
+        self.add_item(back_btn)
+    
+    async def _prev(self, i):
+        v = MassRoleSelectView(self.u, self.g, self.action, self.target, self.page - 1)
+        await i.response.edit_message(embed=v.embed(), view=v)
+    
+    async def _next(self, i):
+        v = MassRoleSelectView(self.u, self.g, self.action, self.target, self.page + 1)
+        await i.response.edit_message(embed=v.embed(), view=v)
+    
+    async def _back(self, i):
+        v = MassRoleTargetSelect(self.u, self.g, self.action)
+        await i.response.edit_message(embed=v.embed(), view=v)
+
+
+class MassRoleSelectMenu(Select):
+    def __init__(self, parent, opts):
+        super().__init__(
+            placeholder=f"Page {parent.page + 1}/{parent.max_page + 1} — Choisir le rôle...",
+            options=opts
+        )
+        self.parent = parent
+    
+    async def callback(self, i):
+        role_id = int(self.values[0])
+        role = self.parent.g.get_role(role_id)
+        if not role:
+            return await i.response.send_message("❌ Rôle introuvable.", ephemeral=True)
+        
+        # Passer à l'écran de confirmation avec preview
+        v = MassRoleConfirmView(self.parent.u, self.parent.g, self.parent.action, self.parent.target, role)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class MassRoleConfirmView(View):
+    """Confirmation avant exécution avec preview du nombre de membres affectés"""
+    def __init__(self, u, g, action, target, role):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+        self.action = action
+        self.target = target
+        self.role = role
+    
+    def _get_members(self):
+        """Récupère la liste des membres ciblés"""
+        if self.target == 'humans':
+            members = [m for m in self.g.members if not m.bot]
+        else:
+            members = list(self.g.members)
+        return members
+    
+    def _get_affected(self):
+        """Compte les membres qui seront réellement affectés"""
+        members = self._get_members()
+        if self.action == 'add':
+            # Membres qui N'ONT PAS le rôle
+            affected = [m for m in members if self.role not in m.roles]
+        else:
+            # Membres qui ONT le rôle
+            affected = [m for m in members if self.role in m.roles]
+        return affected
+    
+    async def embed(self):
+        members = self._get_members()
+        affected = self._get_affected()
+        already = len(members) - len(affected)
+        
+        if self.action == 'add':
+            action_txt = "➕ AJOUTER"
+            action_verb = "recevront"
+            action_color = 0x2ECC71
+            already_txt = f"✅ **{already}** ont déjà ce rôle"
+        else:
+            action_txt = "➖ RETIRER"
+            action_verb = "perdront"
+            action_color = 0xE74C3C
+            already_txt = f"✅ **{already}** n'ont pas ce rôle"
+        
+        target_txt = "👥 Humains" if self.target == 'humans' else "🌐 Tout le monde"
+        
+        e = discord.Embed(color=action_color)
+        e.set_author(name=f"🎭 Confirmation — {action_txt}", icon_url=self.g.icon.url if self.g.icon else None)
+        
+        # Barre de progression prévisionnelle
+        pct = round(len(affected) / len(members) * 100) if members else 0
+        bar_n = round(pct / 10)
+        bar = "█" * bar_n + "░" * (10 - bar_n)
+        
+        e.description = (
+            f"**Êtes-vous sûr ?** Cette action est irréversible.\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🎭 **Rôle :** {self.role.mention}\n"
+            f"🎯 **Cible :** {target_txt} ({len(members)} membres)\n"
+            f"⚡ **Action :** {action_txt}\n\n"
+            f"**Impact :**\n"
+            f"`[{bar}]` {pct}% des membres ciblés\n"
+            f"🔄 **{len(affected)}** membres {action_verb} le rôle\n"
+            f"{already_txt}\n"
+        )
+        
+        # Preview des premiers membres affectés
+        if affected:
+            preview = affected[:10]
+            preview_txt = ", ".join([m.mention for m in preview])
+            if len(affected) > 10:
+                preview_txt += f"\n*... et {len(affected) - 10} autres*"
+            e.add_field(name=f"👀 Aperçu ({len(affected)} membres)", value=preview_txt, inline=False)
+        
+        # Estimation du temps
+        estimated_seconds = len(affected) * 0.6  # ~0.6s par membre (rate limit Discord)
+        if estimated_seconds < 60:
+            time_txt = f"~{int(estimated_seconds)}s"
+        elif estimated_seconds < 3600:
+            time_txt = f"~{int(estimated_seconds / 60)}min"
+        else:
+            time_txt = f"~{int(estimated_seconds / 3600)}h {int((estimated_seconds % 3600) / 60)}min"
+        
+        e.add_field(name="⏱️ Durée estimée", value=time_txt, inline=True)
+        e.add_field(name="📊 Membres affectés", value=f"**{len(affected)}/{len(members)}**", inline=True)
+        
+        e.set_footer(text="Étape 3/3 • ⚠️ Confirmez ou annulez")
+        return e
+    
+    @discord.ui.button(label="✅ Confirmer et Exécuter", style=discord.ButtonStyle.success, row=0)
+    async def confirm(self, i, b):
+        affected = self._get_affected()
+        
+        if not affected:
+            return await i.response.send_message(
+                "ℹ️ Aucun membre à modifier — tout le monde est déjà dans l'état souhaité.",
+                ephemeral=True
+            )
+        
+        await i.response.defer()
+        
+        action_txt = "Ajout" if self.action == 'add' else "Retrait"
+        
+        # Embed de progression
+        prog_e = discord.Embed(color=0xF39C12)
+        prog_e.set_author(name=f"⏳ {action_txt} en cours...", icon_url=self.g.icon.url if self.g.icon else None)
+        prog_e.description = f"🎭 **{self.role.name}** → **0/{len(affected)}** membres\n`[░░░░░░░░░░]` 0%"
+        prog_e.set_footer(text="Ne fermez pas ce menu")
+        
+        prog_msg = await i.followup.send(embed=prog_e, ephemeral=True)
+        
+        # Exécution
+        success = 0
+        errors = 0
+        total = len(affected)
+        
+        for idx, member in enumerate(affected):
+            try:
+                if self.action == 'add':
+                    await member.add_roles(self.role, reason=f"Mass role add par {self.u.display_name}")
+                else:
+                    await member.remove_roles(self.role, reason=f"Mass role remove par {self.u.display_name}")
+                success += 1
+            except discord.Forbidden:
+                errors += 1
+            except discord.HTTPException:
+                errors += 1
+            except Exception:
+                errors += 1
+            
+            # Mise à jour progression tous les 10 membres ou à la fin
+            if (idx + 1) % 10 == 0 or idx == total - 1:
+                pct = round((idx + 1) / total * 100)
+                bar_n = round(pct / 10)
+                bar = "█" * bar_n + "░" * (10 - bar_n)
+                
+                prog_e.description = (
+                    f"🎭 **{self.role.name}** → **{idx + 1}/{total}** membres\n"
+                    f"`[{bar}]` {pct}%\n"
+                    f"✅ {success} réussis • ❌ {errors} erreurs"
+                )
+                try:
+                    await prog_msg.edit(embed=prog_e)
+                except:
+                    pass
+            
+            # Rate limit : pause pour éviter le 429
+            await asyncio.sleep(0.5)
+        
+        # Résultat final
+        if self.action == 'add':
+            result_color = 0x2ECC71
+            result_icon = "✅"
+            result_txt = f"ajouté à **{success}** membres"
+        else:
+            result_color = 0xE74C3C
+            result_icon = "✅"
+            result_txt = f"retiré de **{success}** membres"
+        
+        final_e = discord.Embed(color=result_color)
+        final_e.set_author(name=f"{result_icon} {action_txt} terminé !", icon_url=self.g.icon.url if self.g.icon else None)
+        final_e.description = (
+            f"🎭 **{self.role.name}** a été {result_txt}.\n\n"
+            f"✅ **{success}** réussis\n"
+            + (f"❌ **{errors}** erreurs (permissions insuffisantes)\n" if errors else "")
+        )
+        final_e.set_footer(text=f"Exécuté par {self.u.display_name}")
+        final_e.timestamp = now()
+        
+        try:
+            await prog_msg.edit(embed=final_e)
+        except:
+            pass
+        
+        # Log l'action
+        await log_security_event(self.g.id, self.u.id, "MASS_ROLE",
+            f"{action_txt} rôle {self.role.name} ({self.role.id}) → {success}/{total} membres")
+    
+    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.danger, row=0)
+    async def cancel(self, i, b):
+        v = MassRolePanel(self.u, self.g)
+        await i.response.edit_message(embed=v.embed(), view=v)
+    
+    @discord.ui.button(label="◀️ Changer le rôle", style=discord.ButtonStyle.secondary, row=1)
+    async def change_role(self, i, b):
+        v = MassRoleSelectView(self.u, self.g, self.action, self.target)
+        await i.response.edit_message(embed=v.embed(), view=v)
+    
+    @discord.ui.button(label="🔄 Changer la cible", style=discord.ButtonStyle.secondary, row=1)
+    async def change_target(self, i, b):
+        v = MassRoleTargetSelect(self.u, self.g, self.action)
+        await i.response.edit_message(embed=v.embed(), view=v)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           📢 ANNONCE PANEL
