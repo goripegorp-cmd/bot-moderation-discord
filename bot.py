@@ -9,6 +9,46 @@ import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 from discord.ui import View, Select, Modal, TextInput, Button
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  🛡️ GESTION D'ERREURS GLOBALE - REND LES ERREURS VISIBLES AU LIEU DE SILENCIEUSES
+# ═══════════════════════════════════════════════════════════════════════════════
+import traceback as _tb
+
+async def _global_view_on_error(self, interaction, error, item):
+    """Gestion d'erreur pour TOUTES les Views - plus d'erreurs silencieuses"""
+    _tb.print_exception(type(error), error, error.__traceback__)
+    print(f"[VIEW ERROR] {self.__class__.__name__} -> {item}: {error}")
+    try:
+        msg = f"❌ Erreur dans {self.__class__.__name__}: `{str(error)[:100]}`"
+        if not interaction.response.is_done():
+            await interaction.response.send_message(msg, ephemeral=True)
+        else:
+            try:
+                await interaction.followup.send(msg, ephemeral=True)
+            except:
+                pass
+    except:
+        pass
+
+async def _global_modal_on_error(self, interaction, error):
+    """Gestion d'erreur pour TOUS les Modals"""
+    _tb.print_exception(type(error), error, error.__traceback__)
+    print(f"[MODAL ERROR] {self.__class__.__name__}: {error}")
+    try:
+        msg = f"❌ Erreur dans {self.__class__.__name__}: `{str(error)[:100]}`"
+        if not interaction.response.is_done():
+            await interaction.response.send_message(msg, ephemeral=True)
+        else:
+            try:
+                await interaction.followup.send(msg, ephemeral=True)
+            except:
+                pass
+    except:
+        pass
+
+View.on_error = _global_view_on_error
+Modal.on_error = _global_modal_on_error
 import aiosqlite, os, re, json, asyncio, unicodedata, io, time, aiohttp, hashlib, secrets
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
@@ -1002,19 +1042,6 @@ async def is_immune(m, key, channel=None):
     
     return False
 
-async def is_fully_immune(m):
-    """Vérifie si un membre a une immunité totale (pour les commandes)"""
-    if m.id == m.guild.owner_id or m.guild_permissions.administrator:
-        return True
-    try:
-        async with get_db() as db:
-            async with db.execute('SELECT user_id FROM immune_users WHERE guild_id=?', (m.guild.id,)) as c:
-                immune_users = [r[0] for r in await c.fetchall()]
-            async with db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (m.guild.id,)) as c:
-                immune_roles = [r[0] for r in await c.fetchall()]
-        return m.id in immune_users or any(role.id in immune_roles for role in m.roles)
-    except:
-        return False
 
 async def is_channel_immune(guild_id, channel_id):
     """Vérifie si un salon est immunisé"""
@@ -3466,17 +3493,20 @@ class ImageConfigPanel(View):
         else:
             items.append(fmt)
         await db_set(self.g.id, 'image_allowed', items)
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = ImageConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="✅ Tout autoriser", style=discord.ButtonStyle.success, row=1)
     async def allow_all(self, i, b):
         await db_set(self.g.id, 'image_allowed', ['png', 'jpg', 'jpeg', 'gif', 'webp', 'tenor', 'giphy'])
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = ImageConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="❌ Tout bloquer", style=discord.ButtonStyle.danger, row=1)
     async def block_all(self, i, b):
         await db_set(self.g.id, 'image_allowed', [])
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = ImageConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
@@ -3515,7 +3545,8 @@ class BadwordsConfigPanel(View):
     @discord.ui.button(label="🗑️ Supprimer tout", style=discord.ButtonStyle.danger, row=0)
     async def clear(self, i, b):
         await db_set(self.g.id, 'badwords_list', [])
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = BadwordsConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
@@ -3587,7 +3618,8 @@ class LinkConfigPanel(View):
     @discord.ui.button(label="🗑️ Vider whitelist", style=discord.ButtonStyle.danger, row=0)
     async def clear_wl(self, i, b):
         await db_set(self.g.id, 'link_whitelist', [])
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = LinkConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="➕ Ajouter salon", style=discord.ButtonStyle.primary, row=1)
     async def add_chan(self, i, b):
@@ -3605,7 +3637,8 @@ class LinkConfigPanel(View):
     @discord.ui.button(label="🗑️ Vider salons", style=discord.ButtonStyle.danger, row=1)
     async def clear_chs(self, i, b):
         await db_set(self.g.id, 'link_allowed_channels', [])
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = LinkConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
@@ -3953,7 +3986,8 @@ class AntiRaidConfigPanel(View):
         raid_cfg = c.get('raid_config', {})
         raid_cfg['auto_mode'] = not raid_cfg.get('auto_mode', True)
         await db_set(self.g.id, 'raid_config', raid_cfg)
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = AntiRaidConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="⚡ Action", style=discord.ButtonStyle.secondary, row=0)
     async def set_action(self, i, b):
@@ -3966,7 +4000,8 @@ class AntiRaidConfigPanel(View):
         raid_cfg = c.get('raid_config', {})
         raid_cfg['block_invites'] = not raid_cfg.get('block_invites', True)
         await db_set(self.g.id, 'raid_config', raid_cfg)
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = AntiRaidConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="🚨 Lockdown", style=discord.ButtonStyle.danger, row=1)
     async def manual_lockdown(self, i, b):
@@ -3977,7 +4012,8 @@ class AntiRaidConfigPanel(View):
         raid_tracker[guild_id]['lockdown'] = not raid_tracker[guild_id].get('lockdown', False)
         status = "🚨 **ACTIVÉ**" if raid_tracker[guild_id]['lockdown'] else "✅ **DÉSACTIVÉ**"
         
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = AntiRaidConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
         await i.followup.send(f"Lockdown {status}", ephemeral=True)
     
     @discord.ui.button(label="🔍 Scanner", style=discord.ButtonStyle.success, row=1)
@@ -4077,7 +4113,8 @@ class AltConfigPanel(View):
     async def toggle(self, i, b):
         c = await cfg(self.g.id)
         await db_set(self.g.id, 'anti_alt', 0 if c.get('anti_alt') else 1)
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = AltConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="⚡ Action", style=discord.ButtonStyle.primary, row=0)
     async def set_action(self, i, b):
@@ -4086,7 +4123,8 @@ class AltConfigPanel(View):
         current = c.get('alt_action', 'kick')
         next_idx = (actions.index(current) + 1) % len(actions)
         await db_set(self.g.id, 'alt_action', actions[next_idx])
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = AltConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="🤖 Auto ON/OFF", style=discord.ButtonStyle.primary, row=0)
     async def toggle_auto(self, i, b):
@@ -4094,7 +4132,8 @@ class AltConfigPanel(View):
         alt_cfg = c.get('alt_config', {})
         alt_cfg['auto_action'] = not alt_cfg.get('auto_action', False)
         await db_set(self.g.id, 'alt_config', alt_cfg)
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = AltConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="📊 Confiance", style=discord.ButtonStyle.secondary, row=0)
     async def set_confidence(self, i, b):
@@ -5152,7 +5191,8 @@ class ImmunePanel(View):
             await db.execute('DELETE FROM immune_users WHERE guild_id=?', (self.g.id,))
             await db.execute('DELETE FROM immune_channels WHERE guild_id=?', (self.g.id,))
             await db.commit()
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = ImmunePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
@@ -5822,6 +5862,7 @@ class PaginatedRoleSelect(View):
         self._build()
     
     def _build(self):
+        self.clear_items()
         start = self.page * 24
         end = start + 24
         page_roles = self.roles[start:end]
@@ -9366,7 +9407,8 @@ class LevelSystemPanel(View):
         level_cfg = c.get('level_config', {})
         level_cfg['enabled'] = not level_cfg.get('enabled', False)
         await db_set(self.g.id, 'level_config', level_cfg)
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = LevelSystemPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="✨ XP/msg", style=discord.ButtonStyle.primary, row=0)
     async def set_xp(self, i, b):
@@ -9514,7 +9556,8 @@ class XPChannelsSelectPanel(View):
         await db_set(self.g.id, 'level_config', level_cfg)
         
         self._build()
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = XPChannelsSelectPanel(self.u, self.g, channel_type=self.channel_type, page=0)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     async def prev_page(self, i):
         self.page = max(0, self.page - 1)
@@ -9637,6 +9680,7 @@ class LevelUpChannelSelect(View):
         self._build()
     
     def _build(self):
+        self.clear_items()
         start = self.page * self.per_page
         end = start + self.per_page
         page_chs = self.channels[start:end]
@@ -9770,6 +9814,7 @@ class SelectRoleForLevelView(View):
         self._build()
     
     def _build(self):
+        self.clear_items()
         start = self.page * self.per_page
         end = start + self.per_page
         page_roles = self.roles[start:end]
@@ -9915,6 +9960,7 @@ class SelectRoleForShopView(View):
         self._build()
     
     def _build(self):
+        self.clear_items()
         start = self.page * self.per_page
         end = start + self.per_page
         page_roles = self.roles[start:end]
@@ -10018,6 +10064,7 @@ class PaginatedChannelSelectGeneric(View):
         self._build()
     
     def _build(self):
+        self.clear_items()
         start = self.page * self.per_page
         end = start + self.per_page
         page_chs = self.channels[start:end]
@@ -10180,7 +10227,8 @@ class TempVoicePanel(View):
         voice_cfg = c.get('temp_voice_config', {})
         voice_cfg['enabled'] = not voice_cfg.get('enabled', False)
         await db_set(self.g.id, 'temp_voice_config', voice_cfg)
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = TempVoicePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="➕ Ajouter Hub", style=discord.ButtonStyle.primary, row=0)
     async def add_hub(self, i, b):
@@ -10981,7 +11029,8 @@ class TempVoicePermissionsPanel(View):
         perms[perm_key] = not perms.get(perm_key, True)
         voice_cfg['owner_permissions'] = perms
         await db_set(self.g.id, 'temp_voice_config', voice_cfg)
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = TempVoicePermissionsPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="✏️ Renommer", style=discord.ButtonStyle.primary, row=0)
     async def toggle_rename(self, i, b):
@@ -11099,6 +11148,7 @@ class PaginatedChannelSelectForCmd(View):
         self._build()
     
     def _build(self):
+        self.clear_items()
         start = self.page * 23
         end = start + 23
         page_channels = self.channels[start:end]
@@ -11263,6 +11313,7 @@ class AutoHelpChannelSelect(View):
         self._build()
     
     def _build(self):
+        self.clear_items()
         start = self.page * 24
         end = start + 24
         page_channels = self.channels[start:end]
@@ -12619,7 +12670,8 @@ class AfkRolePanel(View):
         afk_cfg = c.get('afk_role_config', {})
         afk_cfg['enabled'] = not afk_cfg.get('enabled', False)
         await db_set(self.g.id, 'afk_role_config', afk_cfg)
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = AfkRolePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="🎭 Définir Rôle", style=discord.ButtonStyle.primary, row=0)
     async def set_role(self, i, b):
@@ -12859,7 +12911,8 @@ class AfkListView(View):
         
         panel = AfkRolePanel(self.u, self.g)
         self.afk_members = await panel.get_afk_members(self.role, days)
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = AfkListView(self.u, self.g, self.afk_members, self.role, page=0)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
@@ -14031,7 +14084,8 @@ class EditChanCfg(View):
         conf = await self.get_conf()
         conf[key] = not conf.get(key, default)
         await self.save(conf)
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = EditChanCfg(self.u, self.g, self.ch_id)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="💬 Messages", style=discord.ButtonStyle.primary, row=0)
     async def t1(self, i, b): await self.toggle(i, 'messages')
@@ -14141,7 +14195,8 @@ class TicketMainPanel(View):
     
     @discord.ui.button(label="🔄 Rafraîchir", style=discord.ButtonStyle.secondary, row=2)
     async def ref(self, i, b):
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = TicketMainPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
@@ -14166,6 +14221,7 @@ class PaginatedRoleSelectForStaffGlobal(View):
         self._build()
     
     def _build(self):
+        self.clear_items()
         start = self.page * self.per_page
         end = start + self.per_page
         page_roles = self.roles[start:end]
@@ -14905,6 +14961,7 @@ class PaginatedRoleSelectForPanel(View):
         self._build()
     
     def _build(self):
+        self.clear_items()
         start = self.page * self.per_page
         end = start + self.per_page
         page_roles = self.roles[start:end]
@@ -15052,7 +15109,8 @@ class PanelQsView(View):
         if self.pid in panels:
             panels[self.pid]['questions'] = []
             await db_set(self.g.id, 'ticket_panels', panels)
-        await i.response.edit_message(embed=await self.embed(), view=self)
+        v = PanelQsView(self.u, self.g, pid)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
@@ -15223,6 +15281,7 @@ async def on_ready():
                 async with db.execute('SELECT id, guild_id FROM rellseas_quizzes WHERE status IN ("pending", "answered")') as c:
                     for row in await c.fetchall():
                         bot.add_view(RellseasQuizAnswerView(row[0], row[1]))
+                        bot.add_view(RellseasExamineResponseView(row[0], row[1]))
             except: pass
     except: pass
     
@@ -17170,6 +17229,144 @@ class RellseasAnswerModal(Modal, title="📝 Vos réponses"):
             await i.message.edit(embed=e, view=RellseasExamineResponseView(self.quiz_id, i.guild.id))
         except Exception as ex:
             print(f"[QUIZ] Erreur mise à jour embed: {ex}")
+
+
+class RellseasExamineResponseView(View):
+    """Vue persistante avec boutons d'examen pour les réponses au questionnaire"""
+    def __init__(self, quiz_id, guild_id):
+        super().__init__(timeout=None)
+        self.quiz_id = quiz_id
+        self.guild_id = guild_id
+        self.add_item(RellseasExamineAcceptButton(quiz_id, guild_id))
+        self.add_item(RellseasExamineRejectButton(quiz_id, guild_id))
+
+
+class RellseasExamineAcceptButton(Button):
+    def __init__(self, quiz_id, guild_id):
+        super().__init__(
+            label="✅ Accepter + Donner rôle",
+            style=discord.ButtonStyle.success,
+            custom_id=f"rellseas_examine_accept_{quiz_id}"
+        )
+        self.quiz_id = quiz_id
+        self.guild_id = guild_id
+    
+    async def callback(self, i):
+        g = i.guild
+        c = await cfg(g.id)
+        role = g.get_role(c.get('rellseas_role', 0))
+        
+        # Récupérer le user_id du questionnaire
+        async with get_db() as db:
+            async with db.execute('SELECT user_id, status FROM rellseas_quizzes WHERE id=?', (self.quiz_id,)) as cur:
+                row = await cur.fetchone()
+        
+        if not row:
+            return await i.response.send_message("❌ Questionnaire introuvable", ephemeral=True)
+        
+        user_id, status = row
+        if status not in ('pending', 'answered'):
+            return await i.response.send_message(f"❌ Ce questionnaire a déjà été traité (statut: {status})", ephemeral=True)
+        
+        if not role:
+            return await i.response.send_message("❌ Le rôle Realsy n'est pas configuré", ephemeral=True)
+        
+        member = g.get_member(user_id)
+        if not member:
+            return await i.response.send_message("❌ Le membre n'est plus sur le serveur", ephemeral=True)
+        
+        try:
+            await member.add_roles(role, reason=f"Questionnaire Realsy accepté par {i.user.name}")
+        except:
+            return await i.response.send_message("❌ Impossible de donner le rôle", ephemeral=True)
+        
+        async with get_db() as db:
+            await db.execute('UPDATE rellseas_quizzes SET status=?, examiner_id=? WHERE id=?', ('accepted', i.user.id, self.quiz_id))
+            await db.execute('''INSERT OR REPLACE INTO realsy_tracking 
+                (guild_id, user_id, last_activity, warn_count) VALUES (?, ?, ?, 0)''',
+                (g.id, user_id, now().isoformat()))
+            await db.commit()
+        
+        e = discord.Embed(
+            title="✅ Questionnaire Accepté",
+            description=f"{member.mention} a été accepté et a reçu le rôle {role.mention}!",
+            color=C.GREEN,
+            timestamp=now()
+        )
+        e.add_field(name="👮 Validé par", value=i.user.mention, inline=True)
+        e.set_thumbnail(url=member.display_avatar.url)
+        
+        await i.response.edit_message(embed=e, view=None)
+        
+        log_ch = g.get_channel(c.get('rellseas_log_channel', 0))
+        if log_ch:
+            try: await webhook_send(log_ch, 'realsy', embed=e)
+            except: pass
+        
+        try:
+            await member.send(embed=discord.Embed(
+                title="🎉 Félicitations !",
+                description=f"Votre candidature Realsy sur **{g.name}** a été acceptée !\n\nVous avez reçu le rôle {role.mention}.",
+                color=C.GREEN
+            ))
+        except: pass
+
+
+class RellseasExamineRejectButton(Button):
+    def __init__(self, quiz_id, guild_id):
+        super().__init__(
+            label="❌ Refuser",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"rellseas_examine_reject_{quiz_id}"
+        )
+        self.quiz_id = quiz_id
+        self.guild_id = guild_id
+    
+    async def callback(self, i):
+        g = i.guild
+        
+        async with get_db() as db:
+            async with db.execute('SELECT user_id, status FROM rellseas_quizzes WHERE id=?', (self.quiz_id,)) as cur:
+                row = await cur.fetchone()
+        
+        if not row:
+            return await i.response.send_message("❌ Questionnaire introuvable", ephemeral=True)
+        
+        user_id, status = row
+        if status not in ('pending', 'answered'):
+            return await i.response.send_message(f"❌ Ce questionnaire a déjà été traité (statut: {status})", ephemeral=True)
+        
+        async with get_db() as db:
+            await db.execute('UPDATE rellseas_quizzes SET status=?, examiner_id=? WHERE id=?', ('rejected', i.user.id, self.quiz_id))
+            await db.commit()
+        
+        member = g.get_member(user_id)
+        e = discord.Embed(
+            title="❌ Questionnaire Refusé",
+            description=f"Le questionnaire de {member.mention if member else f'<@{user_id}>'} a été refusé.",
+            color=C.RED,
+            timestamp=now()
+        )
+        e.add_field(name="👮 Refusé par", value=i.user.mention, inline=True)
+        if member:
+            e.set_thumbnail(url=member.display_avatar.url)
+        
+        await i.response.edit_message(embed=e, view=None)
+        
+        c = await cfg(g.id)
+        log_ch = g.get_channel(c.get('rellseas_log_channel', 0))
+        if log_ch:
+            try: await webhook_send(log_ch, 'realsy', embed=e)
+            except: pass
+        
+        if member:
+            try:
+                await member.send(embed=discord.Embed(
+                    title="❌ Candidature refusée",
+                    description=f"Votre candidature Realsy sur **{g.name}** a été refusée.",
+                    color=C.RED
+                ))
+            except: pass
 
 
 class RellseasViewResponsesView(View):
