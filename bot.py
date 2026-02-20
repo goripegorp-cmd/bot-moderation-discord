@@ -921,6 +921,18 @@ async def db_init():
             PRIMARY KEY (guild_id, user_id)
         )''')
 
+        # Table pour les auto-réactions
+        await db.execute('''CREATE TABLE IF NOT EXISTS auto_reactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            channel_id INTEGER DEFAULT 0,
+            trigger_type TEXT DEFAULT 'contains',
+            trigger_text TEXT NOT NULL,
+            emoji TEXT NOT NULL,
+            enabled INTEGER DEFAULT 1,
+            UNIQUE(guild_id, trigger_text, emoji)
+        )''')
+
         await db.commit()
     print("✅ DB OK")
 
@@ -8436,46 +8448,214 @@ class CentrePanel(View):
     def embed(self):
         e = discord.Embed(color=0x5865F2)
         e.set_author(name="🎯 Centre de Gestion", icon_url=self.g.icon.url if self.g.icon else None)
-        
+
         e.description = (
             "Gérez le contenu et les événements de votre serveur.\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "🎁 **Cadeaux** — Giveaways avec conditions, durée, images\n"
             "📢 **Annonces** — Embeds personnalisés dans vos salons\n"
             "📨 **Messages Auto** — Envois récurrents programmés\n"
-            "🎭 **Rôles en masse** — Ajouter/Retirer un rôle à tous les membres\n\n"
+            "🎭 **Rôles en masse** — Ajouter/Retirer un rôle à tous les membres\n"
+            "😄 **Réactions** — Réagir auto aux messages (bonjour → 👋)\n\n"
             "*▼ Sélectionnez une fonctionnalité ci-dessous*"
         )
-        
+
         if self.g.icon:
             e.set_thumbnail(url=self.g.icon.url)
         e.set_footer(text=f"🎯 Centre • {self.g.name}")
         return e
-    
+
     @discord.ui.button(label="🎁 Cadeau", style=discord.ButtonStyle.success, row=0)
     async def giveaway(self, i, b):
         v = GiveawayPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
-    
+
     @discord.ui.button(label="📢 Annonce", style=discord.ButtonStyle.primary, row=0)
     async def announcement(self, i, b):
         v = AnnouncementPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
-    
+
     @discord.ui.button(label="📨 Messages", style=discord.ButtonStyle.primary, row=0)
     async def messages(self, i, b):
         v = MessagePanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
-    
+
     @discord.ui.button(label="🎭 Rôles", style=discord.ButtonStyle.success, row=0)
     async def mass_role(self, i, b):
         v = MassRolePanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
-    
+
+    @discord.ui.button(label="😄 Réaction", style=discord.ButtonStyle.primary, row=1)
+    async def auto_react(self, i, b):
+        v = AutoReactionPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           😄 AUTO-RÉACTIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class AutoReactionPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def embed(self):
+        e = discord.Embed(title="😄 Auto-Réactions", color=0xFFD700)
+        e.description = (
+            "Le bot réagira automatiquement aux messages correspondant aux triggers configurés.\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        )
+
+        # Lister les réactions existantes
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT id, channel_id, trigger_type, trigger_text, emoji, enabled FROM auto_reactions WHERE guild_id=? ORDER BY id',
+                (self.g.id,)
+            ) as cur:
+                rows = await cur.fetchall()
+
+        if rows:
+            for idx, (rid, ch_id, ttype, ttext, emoji, enabled) in enumerate(rows[:10]):
+                status = "✅" if enabled else "❌"
+                ch = self.g.get_channel(ch_id)
+                ch_txt = ch.mention if ch else "🌐 Tous"
+                type_txt = "Contient" if ttype == 'contains' else ("Commence par" if ttype == 'startswith' else "Exact")
+                e.add_field(
+                    name=f"{status} #{idx+1} — {emoji}",
+                    value=f"📝 **{type_txt}** : `{ttext[:30]}`\n📍 {ch_txt}",
+                    inline=True
+                )
+        else:
+            e.add_field(name="📭 Aucune réaction", value="Ajoutez-en avec le bouton ➕", inline=False)
+
+        e.set_footer(text=f"😄 {len(rows)} réaction(s) configurée(s)")
+        return e
+
+    @discord.ui.button(label="➕ Ajouter", style=discord.ButtonStyle.success, row=0)
+    async def add(self, i, b):
+        await i.response.send_modal(AutoReactionAddModal(self.g, self.u))
+
+    @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, row=0)
+    async def remove(self, i, b):
+        await i.response.send_modal(AutoReactionRemoveModal(self.g, self.u))
+
+    @discord.ui.button(label="🔄 Toggle", style=discord.ButtonStyle.secondary, row=0)
+    async def toggle(self, i, b):
+        await i.response.send_modal(AutoReactionToggleModal(self.g, self.u))
+
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = CentrePanel(self.u, self.g)
+        await i.response.edit_message(embed=v.embed(), view=v)
+
+
+class AutoReactionAddModal(Modal, title="➕ Ajouter une Réaction"):
+    trigger = TextInput(label="Trigger (mot/phrase)", placeholder="bonjour, salut, hey...", max_length=100)
+    emoji_input = TextInput(label="Emoji (réaction)", placeholder="👋 ou :wave: ou emoji custom", max_length=50)
+    channel_input = TextInput(label="Salon ID (0 = tous les salons)", placeholder="0", required=False, max_length=20)
+    type_input = TextInput(label="Type : contains / startswith / exact", placeholder="contains", required=False, max_length=15)
+
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+
+    async def on_submit(self, i):
+        trigger_text = self.trigger.value.strip().lower()
+        emoji_val = self.emoji_input.value.strip()
+        ch_id = int(self.channel_input.value.strip()) if self.channel_input.value and self.channel_input.value.strip().isdigit() else 0
+        ttype = self.type_input.value.strip().lower() if self.type_input.value else 'contains'
+        if ttype not in ('contains', 'startswith', 'exact'):
+            ttype = 'contains'
+
+        if not trigger_text or not emoji_val:
+            return await i.response.send_message("❌ Trigger et emoji requis.", ephemeral=True)
+
+        async with get_db() as db:
+            try:
+                await db.execute(
+                    'INSERT INTO auto_reactions (guild_id, channel_id, trigger_type, trigger_text, emoji, enabled) VALUES (?, ?, ?, ?, ?, 1)',
+                    (self.g.id, ch_id, ttype, trigger_text, emoji_val)
+                )
+                await db.commit()
+            except Exception:
+                return await i.response.send_message("❌ Cette réaction existe déjà.", ephemeral=True)
+
+        v = AutoReactionPanel(self.u, self.g)
+        await i.response.edit_message(content=f"✅ Réaction ajoutée : `{trigger_text}` → {emoji_val}", embed=await v.embed(), view=v)
+
+
+class AutoReactionRemoveModal(Modal, title="🗑️ Supprimer une Réaction"):
+    num = TextInput(label="Numéro de la réaction (#1, #2...)", placeholder="1", max_length=3)
+
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+
+    async def on_submit(self, i):
+        try:
+            idx = int(self.num.value.strip()) - 1
+        except ValueError:
+            return await i.response.send_message("❌ Numéro invalide.", ephemeral=True)
+
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT id, trigger_text, emoji FROM auto_reactions WHERE guild_id=? ORDER BY id',
+                (self.g.id,)
+            ) as cur:
+                rows = await cur.fetchall()
+
+            if idx < 0 or idx >= len(rows):
+                return await i.response.send_message(f"❌ Numéro invalide (1-{len(rows)}).", ephemeral=True)
+
+            rid, ttext, emoji = rows[idx]
+            await db.execute('DELETE FROM auto_reactions WHERE id=?', (rid,))
+            await db.commit()
+
+        v = AutoReactionPanel(self.u, self.g)
+        await i.response.edit_message(content=f"✅ Réaction #{idx+1} supprimée : `{ttext}` → {emoji}", embed=await v.embed(), view=v)
+
+
+class AutoReactionToggleModal(Modal, title="🔄 Activer/Désactiver"):
+    num = TextInput(label="Numéro de la réaction (#1, #2...)", placeholder="1", max_length=3)
+
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+
+    async def on_submit(self, i):
+        try:
+            idx = int(self.num.value.strip()) - 1
+        except ValueError:
+            return await i.response.send_message("❌ Numéro invalide.", ephemeral=True)
+
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT id, trigger_text, emoji, enabled FROM auto_reactions WHERE guild_id=? ORDER BY id',
+                (self.g.id,)
+            ) as cur:
+                rows = await cur.fetchall()
+
+            if idx < 0 or idx >= len(rows):
+                return await i.response.send_message(f"❌ Numéro invalide (1-{len(rows)}).", ephemeral=True)
+
+            rid, ttext, emoji, enabled = rows[idx]
+            new_state = 0 if enabled else 1
+            await db.execute('UPDATE auto_reactions SET enabled=? WHERE id=?', (new_state, rid))
+            await db.commit()
+
+        status = "✅ activée" if new_state else "❌ désactivée"
+        v = AutoReactionPanel(self.u, self.g)
+        await i.response.edit_message(content=f"🔄 Réaction #{idx+1} `{ttext}` → {emoji} : {status}", embed=await v.embed(), view=v)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🎭 RÔLES EN MASSE (AJOUT / RETRAIT)
@@ -16369,7 +16549,39 @@ async def on_message(msg):
     
     # ═══════════════ TRACKING ACTIVITÉ MEMBRE ═══════════════
     await track_member_message(msg)
-    
+
+    # ═══════════════ AUTO-RÉACTIONS ═══════════════
+    try:
+        _ar_content = msg.content.lower().strip()
+        if _ar_content and len(_ar_content) < 500:
+            async with get_db() as _ar_db:
+                async with _ar_db.execute(
+                    'SELECT channel_id, trigger_type, trigger_text, emoji FROM auto_reactions WHERE guild_id=? AND enabled=1',
+                    (msg.guild.id,)
+                ) as _ar_cur:
+                    _ar_rows = await _ar_cur.fetchall()
+
+            for _ar_ch, _ar_type, _ar_trigger, _ar_emoji in _ar_rows:
+                # Vérifier le salon (0 = tous)
+                if _ar_ch and _ar_ch != msg.channel.id:
+                    continue
+
+                matched = False
+                if _ar_type == 'contains' and _ar_trigger in _ar_content:
+                    matched = True
+                elif _ar_type == 'startswith' and _ar_content.startswith(_ar_trigger):
+                    matched = True
+                elif _ar_type == 'exact' and _ar_content == _ar_trigger:
+                    matched = True
+
+                if matched:
+                    try:
+                        await msg.add_reaction(_ar_emoji.strip())
+                    except:
+                        pass
+    except:
+        pass
+
     try:
         c = await cfg(msg.guild.id)
         ct = msg.content or ""
@@ -19860,16 +20072,51 @@ async def check_tiktok_feeds(session, guild, data):
                             
                             if is_live:
                                 mark_live_still_active(live_cache_key)
-                                
+
                                 if await should_announce_live(live_cache_key):
                                     tiktok_live_url = f"https://www.tiktok.com/@{username}/live"
+
+                                    # Extraire le titre du live et la cover
+                                    live_title = None
+                                    live_cover = None
+                                    try:
+                                        title_m = re.search(r'"title"\s*:\s*"([^"]{2,200})"', html)
+                                        if title_m:
+                                            live_title = title_m.group(1).encode().decode('unicode_escape', errors='ignore')
+                                        cover_m = re.search(r'"cover"\s*:\s*\{[^}]*"url_list"\s*:\s*\["([^"]+)"', html)
+                                        if cover_m:
+                                            live_cover = cover_m.group(1).replace('\\u002F', '/')
+                                        if not live_cover:
+                                            cover_m2 = re.search(r'"coverUrl"\s*:\s*"([^"]+)"', html)
+                                            if cover_m2:
+                                                live_cover = cover_m2.group(1).replace('\\u002F', '/')
+                                        if not live_cover:
+                                            og_m = re.search(r'og:image"[^>]+content="([^"]+)"', html)
+                                            if og_m:
+                                                live_cover = og_m.group(1)
+                                    except:
+                                        pass
+
                                     e = discord.Embed(color=0xFE2C55, url=tiktok_live_url)
                                     e.set_author(name=f"🔴 EN DIRECT SUR TIKTOK", url=tiktok_live_url, icon_url=_TK_ICON)
                                     e.title = f"@{username} est en LIVE !"
-                                    e.description = f"**@{username}** est en direct sur TikTok !\n\n🎵 [**Rejoindre le live**]({tiktok_live_url})"
+
+                                    desc_parts = []
+                                    if live_title:
+                                        desc_parts.append(f"**{live_title}**\n")
+                                    desc_parts.append(f"**@{username}** est en direct sur TikTok !")
+                                    desc_parts.append(f"\n🔴 [**Rejoindre le live**]({tiktok_live_url})")
+                                    e.description = "\n".join(desc_parts)
+
                                     tk_avatar = await fetch_avatar_url('tiktok', username, session)
-                                    if tk_avatar:
+                                    if tk_avatar and live_cover:
                                         e.set_thumbnail(url=tk_avatar)
+                                        e.set_image(url=live_cover)
+                                    elif live_cover:
+                                        e.set_image(url=live_cover)
+                                    elif tk_avatar:
+                                        e.set_thumbnail(url=tk_avatar)
+
                                     e.set_footer(text=f"TikTok Live • @{username}", icon_url=_TK_ICON)
                                     e.timestamp = now()
 
@@ -20283,18 +20530,62 @@ async def check_rosocial_feeds(session, guild, data):
             posted_content[cache_key] = latest_post_id
             
             post_url = f"https://rosocial.net/posts/{latest_post_id}"
-            
+
             # ═══════════════════════════════════════════════════════════════════════════════
-            #                    📥 RÉCUPÉRER LA PAGE DU POST POUR L'IMAGE
+            #                    📥 RÉCUPÉRER LA PAGE DU POST — CONTENU COMPLET
             # ═══════════════════════════════════════════════════════════════════════════════
             image_url = None
-            
+            video_url = None
+            post_text = None
+
             try:
                 async with session.get(post_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as post_resp:
                     if post_resp.status == 200:
                         post_html = await post_resp.text()
-                        
-                        # Extraire l'image du post (plusieurs patterns)
+
+                        # ─── Extraire le texte du post ───
+                        text_patterns = [
+                            r'<div[^>]*class="[^"]*post[_-]?text[^"]*"[^>]*>(.*?)</div>',
+                            r'<div[^>]*class="[^"]*post[_-]?content[^"]*"[^>]*>(.*?)</div>',
+                            r'<p[^>]*class="[^"]*post[_-]?body[^"]*"[^>]*>(.*?)</p>',
+                            r'<div[^>]*class="[^"]*activity[_-]?inner[^"]*"[^>]*>(.*?)</div>',
+                            r'og:description"[^>]+content="([^"]{5,})"',
+                            r'<meta[^>]+name="description"[^>]+content="([^"]{5,})"',
+                        ]
+                        for tp in text_patterns:
+                            tm = re.search(tp, post_html, re.IGNORECASE | re.DOTALL)
+                            if tm:
+                                raw = tm.group(1)
+                                # Nettoyer le HTML
+                                clean = re.sub(r'<br\s*/?>', '\n', raw)
+                                clean = re.sub(r'<a[^>]+href="([^"]+)"[^>]*>([^<]+)</a>', r'[\2](\1)', clean)
+                                clean = re.sub(r'<[^>]+>', '', clean)
+                                clean = clean.strip()
+                                if clean and len(clean) > 3:
+                                    post_text = clean[:500]
+                                    break
+
+                        # ─── Extraire les liens dans le post ───
+                        post_links = re.findall(r'<a[^>]+href="(https?://[^"]+)"[^>]*class="[^"]*(?:post|activity)[^"]*"', post_html, re.IGNORECASE)
+                        if not post_links:
+                            post_links = re.findall(r'<a[^>]+href="(https?://(?:(?!rosocial\.net)[^"])+)"[^>]*>', post_html)
+                            # Filtrer les liens de nav/menu
+                            post_links = [l for l in post_links if not any(x in l for x in ['login', 'register', 'terms', 'privacy', 'about', 'cdn', 'favicon', '.css', '.js'])]
+
+                        # ─── Extraire la vidéo ───
+                        video_patterns = [
+                            r'<video[^>]+src="([^"]+)"',
+                            r'<source[^>]+src="([^"]+)"[^>]+type="video',
+                            r'"(https://rosocial\.net/content/uploads/videos/[^"]+)"',
+                            r'"(https?://[^"]+\.(?:mp4|webm|mov))"',
+                        ]
+                        for vp in video_patterns:
+                            vm = re.search(vp, post_html, re.IGNORECASE)
+                            if vm:
+                                video_url = vm.group(1)
+                                break
+
+                        # ─── Extraire l'image du post (plusieurs patterns) ───
                         image_patterns = [
                             r'<img[^>]+src="(https://rosocial\.net/content/uploads/photos/[^"]+)"',
                             r'<img[^>]+data-src="(https://rosocial\.net/content/uploads/photos/[^"]+)"',
@@ -20306,25 +20597,40 @@ async def check_rosocial_feeds(session, guild, data):
                             match = re.search(pattern, post_html, re.IGNORECASE)
                             if match:
                                 img = match.group(1)
-                                # Vérifier que c'est une vraie image du post et pas un avatar/logo
                                 if 'avatar' not in img.lower() and 'profile' not in img.lower() and 'logo' not in img.lower():
                                     image_url = img
                                     break
             except:
                 pass
-            
+
             # ═══════════════════════════════════════════════════════════════════════════════
-            #                    🎨 EMBED ROSOCIAL - IMAGE EN HAUT À DROITE
+            #                    🎨 EMBED ROSOCIAL — CONTENU RÉEL DU POST
             # ═══════════════════════════════════════════════════════════════════════════════
 
             rs_avatar = await fetch_avatar_url('rosocial', username, session)
 
-            e = discord.Embed(color=0x00D4AA, url=post_url)  # Vert RoSocial
+            e = discord.Embed(color=0x00D4AA, url=post_url)
             e.set_author(name=f"ROSOCIAL • {username}", url=profile_url, icon_url=_RBX_ICON)
             e.title = f"📝 Nouveau post de {username}"
-            e.description = f"**{username}** a publié un nouveau post sur RoSocial !\n\n🔗 [**Voir le post**]({post_url}) • 👤 [**Profil**]({profile_url})"
 
-            # Avatar du créateur en thumbnail + image du post en grande image
+            # Construire la description avec le contenu réel
+            desc_parts = []
+            if post_text:
+                desc_parts.append(post_text)
+            if video_url:
+                desc_parts.append(f"\n🎬 [**Voir la vidéo**]({video_url})")
+            if post_links:
+                for pl in post_links[:3]:
+                    desc_parts.append(f"🔗 [**Lien**]({pl})")
+
+            if desc_parts:
+                desc = "\n".join(desc_parts)
+            else:
+                desc = f"**{username}** a publié un nouveau post sur RoSocial !"
+
+            desc += f"\n\n📌 [**Voir le post**]({post_url}) • 👤 [**Profil**]({profile_url})"
+            e.description = desc[:4000]
+
             if rs_avatar:
                 e.set_thumbnail(url=rs_avatar)
             if image_url:
@@ -20974,8 +21280,71 @@ async def check_game_deals(session, guild, data):
     except Exception as ex:
         print(f"[DEALS] Erreur GOG API: {ex}")
     
+    # ═══════════════════════════════════════════════════════════════════════════════
+    #                    ⚡ CHEAPSHARK API (Instant Gaming, Humble, Fanatical, etc.)
+    # ═══════════════════════════════════════════════════════════════════════════════
+    try:
+        cheapshark_url = f"https://www.cheapshark.com/api/1.0/deals?onSale=1&sortBy=Savings&pageSize=20&upperPrice=60"
+        async with session.get(cheapshark_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status == 200:
+                cs_deals = await resp.json()
+
+                for deal in cs_deals:
+                    if deals_posted >= max_deals:
+                        break
+                    try:
+                        store_id = deal.get('storeID', '1')
+                        platform_key = CHEAPSHARK_STORES.get(store_id, '')
+                        # Ne pas dupliquer Steam/Epic/GOG — déjà gérés par APIs directes
+                        if platform_key in ('steam', 'epic', 'gog', ''):
+                            continue
+
+                        game_name = deal.get('title', 'Jeu inconnu')
+                        savings_pct = float(deal.get('savings', 0))
+                        discount = int(savings_pct)
+
+                        if discount < min_discount:
+                            continue
+
+                        original_price = float(deal.get('normalPrice', 0))
+                        final_price = float(deal.get('salePrice', 0))
+
+                        deal_id = deal.get('dealID', '')
+                        game_id = f"cs_{deal.get('gameID', '')}"
+
+                        active_deal_keys.add((platform_key, game_id))
+
+                        already_posted, existing = await is_deal_already_posted(guild.id, platform_key, game_id)
+                        if already_posted:
+                            continue
+
+                        game_url = f"https://www.cheapshark.com/redirect?dealID={deal_id}"
+                        image_url = deal.get('thumb', '')
+                        if image_url and not image_url.startswith('http'):
+                            image_url = 'https:' + image_url
+
+                        metacritic = deal.get('metacriticScore', None)
+
+                        e = await create_deal_embed(
+                            platform=platform_key, game_name=game_name, game_url=game_url,
+                            image_url=image_url, original_price=original_price,
+                            final_price=final_price, discount=discount, metacritic=metacritic
+                        )
+
+                        msg = await webhook_send(channel, 'deals', embed=e)
+                        await save_posted_deal(guild.id, platform_key, game_id, game_name, msg.id if msg else 0, channel.id, discount, original_price, final_price, game_url, image_url)
+                        deals_posted += 1
+                        plat_name = GAME_PLATFORMS.get(platform_key, {}).get('name', platform_key)
+                        print(f"[DEALS] ✅ Nouveau: {game_name} (-{discount}%) {plat_name}")
+                        await asyncio.sleep(2)
+                    except Exception as ex:
+                        print(f"[DEALS] Erreur CheapShark: {ex}")
+                        continue
+    except Exception as ex:
+        print(f"[DEALS] Erreur CheapShark API: {ex}")
+
     print(f"[DEALS] ✅ Terminé: {deals_posted} nouvelle(s) promo(s) postée(s) pour {guild.name}")
-    
+
     # Nettoyage automatique des deals expirés
     await cleanup_expired_deals_db(bot)
 
@@ -21039,7 +21408,7 @@ async def create_deal_embed(platform: str, game_name: str, game_url: str, image_
     # Lien d'achat
     e.add_field(
         name="",
-        value=f"### 🛒 [{plat['emoji']} Acheter sur {plat['name']}]({game_url})",
+        value=f"🛒 [{plat['emoji']} **Acheter sur {plat['name']}**]({game_url})",
         inline=False
     )
     
