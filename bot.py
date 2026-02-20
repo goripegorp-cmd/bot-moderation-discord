@@ -476,9 +476,6 @@ def now(): return datetime.now(timezone.utc)
 #                              🔒 SÉCURITÉ AVANCÉE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-import hashlib
-import secrets
-
 # Rate limiting pour prévenir les abus
 rate_limits = {}  # {(guild_id, user_id, action): [timestamps]}
 RATE_LIMITS_CONFIG = {
@@ -3447,7 +3444,13 @@ class LogChannelSelectMenu(Select):
             await i.response.edit_message(content=msg, embed=await v.embed(), view=v)
         except Exception as ex:
             print(f"[LOG SELECT ERROR] {ex}")
-            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+                else:
+                    await i.followup.send(f"❌ Erreur: {ex}", ephemeral=True)
+            except:
+                pass
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🖼️ ANTI-IMAGE CONFIG
@@ -4121,7 +4124,10 @@ class AltConfigPanel(View):
         c = await cfg(self.g.id)
         actions = ['kick', 'ban', 'mute']
         current = c.get('alt_action', 'kick')
-        next_idx = (actions.index(current) + 1) % len(actions)
+        try:
+            next_idx = (actions.index(current) + 1) % len(actions)
+        except ValueError:
+            next_idx = 0
         await db_set(self.g.id, 'alt_action', actions[next_idx])
         v = AltConfigPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
@@ -4440,11 +4446,16 @@ class AltDetectionsPanel(View):
             async with get_db() as db:
                 await db.execute('DELETE FROM alt_accounts WHERE guild_id = ?', (self.g.id,))
                 await db.commit()
-            await i.response.send_message("✅ Historique effacé", ephemeral=True)
             v = AltConfigPanel(self.u, self.g)
-            await i.message.edit(embed=await v.embed(), view=v)
+            await i.response.edit_message(embed=await v.embed(), view=v)
         except Exception as ex:
-            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+                else:
+                    await i.followup.send(f"❌ Erreur: {ex}", ephemeral=True)
+            except:
+                pass
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
@@ -5857,7 +5868,7 @@ class PaginatedRoleSelect(View):
         self.return_panel_class = return_panel_class
         self.page = page
         self.roles = [r for r in g.roles[1:] if not r.is_bot_managed()]
-        self.max_page = (len(self.roles) - 1) // 24
+        self.max_page = max(0, (len(self.roles) - 1) // 24)
         
         self._build()
     
@@ -7468,8 +7479,13 @@ class AdsRobloxPanel(View):
                     label = f"👥 {f.get('group_name', str(idx))}"
                 else:
                     label = f"👤 {f.get('username', str(idx))}"
-                opts.append(discord.SelectOption(label=label[:25], value=str(idx)))
-        
+            else:
+                label = f"Feed #{idx+1}: {str(f)[:20]}"
+            opts.append(discord.SelectOption(label=label[:25], value=str(idx)))
+
+        if not opts:
+            return await i.response.send_message("❌ Aucun feed valide à supprimer", ephemeral=True)
+
         v = AdsFeedRemoveView(self.u, self.g, opts, 'ads_roblox_feeds', 'roblox')
         await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer un feed", color=0xE74C3C), view=v)
     
@@ -7860,21 +7876,24 @@ class AdsChannelSelect(Select):
     
     async def callback(self, i):
         await db_set(i.guild.id, self.key, int(self.values[0]))
-        if self.platform == 'youtube':
-            v = AdsYouTubePanel(self.u, self.g)
-        elif self.platform == 'twitch':
-            v = AdsTwitchPanel(self.u, self.g)
-        elif self.platform == 'tiktok':
-            v = AdsTikTokPanel(self.u, self.g)
-        elif self.platform == 'twitter':
-            v = AdsTwitterPanel(self.u, self.g)
-        elif self.platform == 'discord':
-            v = AdsDiscordPanel(self.u, self.g)
-        elif self.platform == 'rosocial':
-            v = AdsRoSocialPanel(self.u, self.g)
-        else:
-            v = AdsRedditPanel(self.u, self.g)
+        v = _get_ads_panel(self.platform, self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
+
+def _get_ads_panel(platform, u, g):
+    """Retourne le bon panel Ads selon la plateforme"""
+    panels = {
+        'youtube': AdsYouTubePanel,
+        'twitch': AdsTwitchPanel,
+        'tiktok': AdsTikTokPanel,
+        'twitter': AdsTwitterPanel,
+        'discord': AdsDiscordPanel,
+        'rosocial': AdsRoSocialPanel,
+        'reddit': AdsRedditPanel,
+        'roblox': AdsRobloxPanel,
+        'deals': AdsDealsPanel,
+    }
+    panel_class = panels.get(platform, AdsRedditPanel)
+    return panel_class(u, g)
 
 class AdsFeedRemoveView(View):
     def __init__(self, u, g, opts, key, platform):
@@ -7897,20 +7916,7 @@ class AdsFeedRemoveSelect(Select):
             feeds.pop(idx)
             await db_set(self.g.id, self.key, feeds)
         
-        if self.platform == 'youtube':
-            v = AdsYouTubePanel(self.u, self.g)
-        elif self.platform == 'twitch':
-            v = AdsTwitchPanel(self.u, self.g)
-        elif self.platform == 'tiktok':
-            v = AdsTikTokPanel(self.u, self.g)
-        elif self.platform == 'twitter':
-            v = AdsTwitterPanel(self.u, self.g)
-        elif self.platform == 'discord':
-            v = AdsDiscordPanel(self.u, self.g)
-        elif self.platform == 'rosocial':
-            v = AdsRoSocialPanel(self.u, self.g)
-        else:
-            v = AdsRedditPanel(self.u, self.g)
+        v = _get_ads_panel(self.platform, self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -8769,7 +8775,7 @@ class GiveawayConditionsPanel(View):
         e.add_field(name="📅 Ancienneté", value=f"`{min_days} jours`" if min_days else "*Aucun*", inline=True)
         
         # AFK check
-        no_afk = conditions.get('no_afk', True)
+        no_afk = conditions.get('no_afk', False)
         afk_days = conditions.get('afk_days', 7)
         e.add_field(name="❌ Pas AFK", value=f"`{afk_days} jours`" if no_afk else "*Désactivé*", inline=True)
         
@@ -8902,7 +8908,7 @@ class GiveawayChannelSelectPaginated(Select):
         if conditions.get('min_account_days', 0) > 0:
             conditions_txt += f"📅 Compte ≥ **{conditions['min_account_days']}** jours\n"
         
-        if conditions.get('no_afk', True):
+        if conditions.get('no_afk', False):
             afk_days = conditions.get('afk_days', 7)
             conditions_txt += f"❌ Pas AFK depuis **{afk_days}** jours\n"
         
@@ -9072,7 +9078,7 @@ class GiveawayChannelSelect(Select):
         if conditions.get('min_account_days', 0) > 0:
             conditions_txt += f"📅 Compte ≥ **{conditions['min_account_days']}** jours\n"
         
-        if conditions.get('no_afk', True):
+        if conditions.get('no_afk', False):
             afk_days = conditions.get('afk_days', 7)
             conditions_txt += f"❌ Pas AFK depuis **{afk_days}** jours\n"
         
@@ -9219,8 +9225,8 @@ class GiveawayParticipateView(View):
             if min_days > 0:
                 try:
                     created = member.created_at
-                    if created.tzinfo:
-                        created = created.replace(tzinfo=None)
+                    if not created.tzinfo:
+                        created = created.replace(tzinfo=timezone.utc)
                     account_age = (now() - created).days
                     if account_age < min_days:
                         failed_conditions.append(f"📅 Votre compte a **{account_age}** jours (minimum: **{min_days}**)")
@@ -9251,11 +9257,26 @@ class GiveawayParticipateView(View):
             # ═══════════════ ÉTAPE 4: Mettre à jour l'embed ═══════════════
             try:
                 embed = i.message.embeds[0].copy()
+                count = len(giveaway_data['participants'])
+                # Mettre à jour le compteur dans la description
+                if embed.description:
+                    import re as _re
+                    embed.description = _re.sub(
+                        r'(👥\s*\*\*Participants\s*:\*\*\s*)`\d+`',
+                        f'\\1`{count}`',
+                        embed.description
+                    )
+                # Aussi vérifier les fields au cas où
                 for idx, field in enumerate(embed.fields):
                     if "Participants" in field.name:
-                        embed.set_field_at(idx, name="👥 Participants", value=f"```{len(giveaway_data['participants'])}```", inline=True)
+                        embed.set_field_at(idx, name="👥 Participants", value=f"```{count}```", inline=True)
                         break
-                await i.message.edit(embed=embed)
+                # Utiliser webhook_edit si le message vient d'un webhook
+                try:
+                    await i.message.edit(embed=embed)
+                except discord.Forbidden:
+                    # Message envoyé par webhook, on ne peut pas l'éditer directement
+                    pass
             except Exception as e:
                 print(f"Erreur update embed: {e}")
             
@@ -11415,7 +11436,8 @@ class AutoHelpConfigModal(Modal, title="💡 Configurer l'aide automatique"):
                 e.description = self.help_content.value
                 e.set_footer(text="Ce message se repositionne automatiquement")
                 msg = await webhook_send(channel, 'auto_help', embed=e)
-                auto_help_messages[int(self.channel_id)] = msg.id
+                if msg:
+                    auto_help_messages[int(self.channel_id)] = msg.id
             
             v = AutoHelpPanel(self.u, self.g)
             await i.response.edit_message(embed=await v.embed(), view=v)
@@ -11536,8 +11558,9 @@ async def handle_auto_help(message):
                 # Ne pas supprimer le message qui vient d'arriver
                 if msg.id == message.id:
                     continue
-                # Vérifier si c'est un message d'aide du bot
-                if msg.author.id == bot.user.id and msg.embeds:
+                # Vérifier si c'est un message d'aide du bot (y compris via webhook)
+                is_bot_msg = msg.author.id == bot.user.id or (msg.webhook_id and msg.embeds)
+                if is_bot_msg and msg.embeds:
                     embed = msg.embeds[0]
                     footer_text = str(embed.footer.text) if embed.footer else ""
                     # Identifier les messages d'aide par leur footer
@@ -11571,7 +11594,8 @@ async def handle_auto_help(message):
         
         try:
             new_msg = await webhook_send(message.channel, 'auto_help', embed=e)
-            auto_help_messages[channel_id] = new_msg.id
+            if new_msg:
+                auto_help_messages[channel_id] = new_msg.id
         except Exception as ex:
             print(f"[AUTO_HELP] Erreur envoi nouveau message: {ex}")
         
@@ -17225,8 +17249,23 @@ class RellseasAnswerModal(Modal, title="📝 Vos réponses"):
             e.set_thumbnail(url=i.user.display_avatar.url)
             e.set_footer(text=f"Questionnaire #{self.quiz_id} • Cliquez sur les boutons pour examiner")
             
-            # Ajouter les boutons d'examen
-            await i.message.edit(embed=e, view=RellseasExamineResponseView(self.quiz_id, i.guild.id))
+            # Ajouter les boutons d'examen - chercher le message original du quiz
+            try:
+                c = await cfg(i.guild.id)
+                quiz_channel_id = c.get('rellseas_channel', 0)
+                quiz_channel = i.guild.get_channel(quiz_channel_id)
+                if quiz_channel:
+                    async with get_db() as db:
+                        async with db.execute('SELECT message_id FROM rellseas_quizzes WHERE id=?', (self.quiz_id,)) as cur:
+                            row = await cur.fetchone()
+                            if row and row[0]:
+                                try:
+                                    quiz_msg = await quiz_channel.fetch_message(row[0])
+                                    await quiz_msg.edit(embed=e, view=RellseasExamineResponseView(self.quiz_id, i.guild.id))
+                                except:
+                                    pass
+            except:
+                pass
         except Exception as ex:
             print(f"[QUIZ] Erreur mise à jour embed: {ex}")
 
@@ -17672,7 +17711,9 @@ async def suggestion_cmd(i: discord.Interaction, titre: str, proposition: str):
     e.set_footer(text="Votez ci-dessous! ✅ Pour | 🟠 Neutre | ❌ Contre")
     
     msg = await webhook_send(sugg_ch, 'suggestion', embed=e)
-    
+    if not msg:
+        return await i.followup.send("❌ Erreur lors de l'envoi de la suggestion", ephemeral=True)
+
     # Ajouter les réactions
     await msg.add_reaction("✅")
     await msg.add_reaction("🟠")
@@ -17901,6 +17942,8 @@ class TradeBuilderView(View):
         
         # Envoyer
         trade_msg = await webhook_send(self.trade_ch, 'trade', embed=e, file=image_file)
+        if not trade_msg:
+            return await i.followup.send("❌ Erreur lors de la publication du trade", ephemeral=True)
         await trade_msg.add_reaction("✅")
         await trade_msg.add_reaction("💬")
         
@@ -18586,7 +18629,7 @@ async def on_raw_reaction_add(payload):
         votes = {"✅": 0, "🟠": 0, "❌": 0}
         for reaction in msg.reactions:
             if reaction.emoji in votes:
-                votes[reaction.emoji] = reaction.count - 1  # -1 pour le bot
+                votes[reaction.emoji] = max(0, reaction.count - 1)  # -1 pour le bot, min 0
         
         # Déterminer la couleur
         total = sum(votes.values())
@@ -20111,12 +20154,12 @@ async def create_deal_embed(platform: str, game_name: str, game_url: str, image_
         e.set_image(url=image_url)
     
     # ═══════════════ BADGE RÉDUCTION ═══════════════
-    if discount >= 90:
+    if discount == 100:
+        disc_text = "🎁  **GRATUIT**  🎁"
+    elif discount >= 90:
         disc_text = f"🔥🔥🔥  **-{discount}%**  🔥🔥🔥"
     elif discount >= 75:
         disc_text = f"🔥🔥  **-{discount}%**  🔥🔥"
-    elif discount == 100:
-        disc_text = "🎁  **GRATUIT**  🎁"
     elif discount >= 50:
         disc_text = f"⭐  **-{discount}%**  ⭐"
     else:
@@ -20810,8 +20853,8 @@ async def check_scheduled_messages():
             
             for msg_id, guild_id, channel_id, title, description, color, image_url, footer, frequency, freq_val, send_hour, send_minute, last_sent_str in messages:
                 try:
-                    # Vérifier si c'est l'heure d'envoyer
-                    if current_hour != send_hour:
+                    # Vérifier si c'est l'heure d'envoyer (heure ET minute)
+                    if current_hour != send_hour or current_minute != send_minute:
                         continue
                     
                     # Vérifier le dernier envoi
@@ -21266,4 +21309,8 @@ if __name__ == "__main__":
     print("🔴 Salons lives dédiés (YouTube, Twitch, TikTok)")
     print("🔗 Système Webhook intégral - 51 points d'envoi")
     print("✨ Embeds repensés - Design professionnel")
+    if not TOKEN:
+        print("❌ ERREUR: BOT_TOKEN non défini dans le fichier .env !")
+        print("   Créez un fichier .env avec: BOT_TOKEN=votre_token_ici")
+        exit(1)
     bot.run(TOKEN)
