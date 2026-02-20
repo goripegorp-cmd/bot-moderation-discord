@@ -20661,7 +20661,7 @@ async def check_reddit_feeds(session, guild, data):
             continue
 
 async def check_twitter_feeds(session, guild, data):
-    """Vérifie les nouveaux tweets via Nitter/xcancel + RSS-Bridge fallback"""
+    """Vérifie les nouveaux tweets via Twitter Syndication API (+ Nitter fallback)"""
     channel = guild.get_channel(data.get('ads_twitter_channel', 0))
     feeds = data.get('ads_twitter_feeds', [])
     if not channel or not feeds:
@@ -20671,107 +20671,115 @@ async def check_twitter_feeds(session, guild, data):
 
     for username in feeds:
         try:
-            xml_text = None
-            working_instance = None
-            feed_format = 'rss'  # 'rss' ou 'atom'
+            tweet_id = None
+            tweet_text = None
+            tweet_link = None
+            image_url = None
+            tw_avatar_url = None
 
-            # ─── Essayer les instances Nitter ───
-            for instance in NITTER_INSTANCES:
-                try:
-                    rss_url = f"https://{instance}/{username}/rss"
-                    async with session.get(rss_url, headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as resp:
-                        if resp.status == 200:
-                            text = await resp.text()
-                            # Vérifier que c'est bien du XML valide avec du contenu
-                            if '<item>' in text or '<entry>' in text:
-                                xml_text = text
-                                working_instance = instance
-                                feed_format = 'atom' if '<entry>' in text else 'rss'
-                                break
-                except Exception as ex:
-                    print(f"[TWITTER] Instance {instance} échouée pour @{username}: {ex}")
-                    continue
+            # ═══════════════ MÉTHODE 1 : Twitter Syndication API (officielle, gratuite) ═══════════════
+            try:
+                synd_url = f"https://syndication.twitter.com/srv/timeline-profile/screen-name/{username}"
+                async with session.get(synd_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    if resp.status == 200:
+                        html = await resp.text()
+                        # Extraire le JSON __NEXT_DATA__
+                        nd_match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html)
+                        if nd_match:
+                            import json as _json
+                            nd_data = _json.loads(nd_match.group(1))
+                            entries = nd_data.get('props', {}).get('pageProps', {}).get('timeline', {}).get('entries', [])
+                            if entries:
+                                tweet_data = entries[0].get('content', {}).get('tweet', {})
+                                if tweet_data:
+                                    tweet_id = tweet_data.get('id_str', '')
+                                    tweet_text = tweet_data.get('text', '') or tweet_data.get('full_text', '')
+                                    permalink = tweet_data.get('permalink', '')
+                                    tweet_link = f"https://twitter.com{permalink}" if permalink else f"https://twitter.com/{username}/status/{tweet_id}"
+                                    # Avatar
+                                    user_data = tweet_data.get('user', {})
+                                    tw_avatar_url = user_data.get('profile_image_url_https', '').replace('_normal', '_400x400')
+                                    # Image du tweet
+                                    media_details = tweet_data.get('mediaDetails', [])
+                                    if media_details:
+                                        for md in media_details:
+                                            if md.get('type') == 'photo':
+                                                image_url = md.get('media_url_https', '')
+                                                break
+                                    if not image_url:
+                                        entities_media = tweet_data.get('entities', {}).get('media', [])
+                                        for em in entities_media:
+                                            if em.get('type') == 'photo':
+                                                image_url = em.get('media_url_https', '')
+                                                break
+            except Exception as ex:
+                print(f"[TWITTER] Syndication API échouée pour @{username}: {ex}")
 
-            # ─── Fallback RSS-Bridge si Nitter échoue ───
-            if not xml_text:
-                for bridge_url_tpl in RSS_BRIDGE_URLS:
+            # ═══════════════ MÉTHODE 2 : Nitter RSS (fallback) ═══════════════
+            if not tweet_id:
+                working_instance = None
+                for instance in NITTER_INSTANCES:
                     try:
-                        bridge_url = bridge_url_tpl.replace('{username}', username)
-                        async with session.get(bridge_url, headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                        rss_url = f"https://{instance}/{username}/rss"
+                        async with session.get(rss_url, headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as resp:
                             if resp.status == 200:
                                 text = await resp.text()
-                                if '<entry>' in text or '<item>' in text:
-                                    xml_text = text
-                                    working_instance = None
-                                    feed_format = 'atom' if '<entry>' in text else 'rss'
-                                    break
-                    except Exception as ex:
-                        print(f"[TWITTER] RSS-Bridge échoué pour @{username}: {ex}")
+                                if '<item>' in text or '<entry>' in text:
+                                    root = ET.fromstring(text)
+                                    if '<entry>' in text:
+                                        ns = {'atom': 'http://www.w3.org/2005/Atom'}
+                                        entry = (root.findall('.//atom:entry', ns) or root.findall('.//entry') or [None])[0]
+                                        if entry is not None:
+                                            id_el = entry.find('atom:id', ns) or entry.find('id')
+                                            title_el = entry.find('atom:title', ns) or entry.find('title')
+                                            link_el = entry.find('atom:link', ns) or entry.find('link')
+                                            tweet_id = id_el.text if id_el is not None else ""
+                                            tweet_text = title_el.text if title_el is not None else ""
+                                            tweet_link = link_el.get('href', '') if link_el is not None else ""
+                                    else:
+                                        item = (root.findall('.//item') or [None])[0]
+                                        if item is not None:
+                                            guid_el = item.find('guid')
+                                            title_el = item.find('title')
+                                            link_el = item.find('link')
+                                            desc_el = item.find('description')
+                                            tweet_id = guid_el.text if guid_el is not None else ""
+                                            tweet_text = title_el.text if title_el is not None else ""
+                                            tweet_link = link_el.text if link_el is not None else ""
+                                            if desc_el is not None and desc_el.text:
+                                                img_m = re.search(r'<img[^>]+src="([^"]+)"', desc_el.text)
+                                                if img_m:
+                                                    image_url = img_m.group(1)
+                                    if tweet_id:
+                                        working_instance = instance
+                                        break
+                    except:
                         continue
 
-            if not xml_text:
+                # Convertir liens Nitter → Twitter
+                if working_instance and tweet_link and working_instance in tweet_link:
+                    tweet_link = tweet_link.replace(f"https://{working_instance}", "https://twitter.com")
+                if working_instance and image_url and working_instance in image_url:
+                    image_url = image_url.replace(f"https://{working_instance}", "https://pbs.twimg.com")
+
+            if not tweet_id:
                 print(f"[TWITTER] ⚠️ Aucune source disponible pour @{username}")
                 continue
 
-            # ─── Parser le XML (RSS ou Atom) ───
-            root = ET.fromstring(xml_text)
+            if not tweet_link:
+                tweet_link = f"https://twitter.com/{username}/status/{tweet_id}"
 
-            if feed_format == 'atom':
-                ns = {'atom': 'http://www.w3.org/2005/Atom'}
-                entries = root.findall('.//atom:entry', ns) or root.findall('.//entry')
-                if not entries:
-                    continue
-                entry = entries[0]
-                title_el = entry.find('atom:title', ns) or entry.find('title')
-                link_el = entry.find('atom:link', ns) or entry.find('link')
-                id_el = entry.find('atom:id', ns) or entry.find('id')
-                content_el = entry.find('atom:content', ns) or entry.find('content') or entry.find('atom:summary', ns) or entry.find('summary')
-
-                tweet_id = id_el.text if id_el is not None else ""
-                tweet_text = title_el.text if title_el is not None else ""
-                tweet_link = link_el.get('href', '') if link_el is not None else f"https://twitter.com/{username}"
-            else:
-                items = root.findall('.//item')
-                if not items:
-                    continue
-                item = items[0]
-                title_el = item.find('title')
-                link_el = item.find('link')
-                guid_el = item.find('guid')
-                content_el = item.find('description')
-
-                if title_el is None and guid_el is None:
-                    continue
-
-                tweet_id = guid_el.text if guid_el is not None else ""
-                tweet_text = title_el.text if title_el is not None else ""
-                tweet_link = link_el.text if link_el is not None else f"https://twitter.com/{username}"
-
-            # Convertir lien Nitter en lien Twitter
-            if working_instance and working_instance in tweet_link:
-                tweet_link = tweet_link.replace(f"https://{working_instance}", "https://twitter.com")
-
-            # Extraire image si présente
-            image_url = None
-            desc_text = content_el.text if content_el is not None else ""
-            if desc_text:
-                img_match = re.search(r'<img[^>]+src="([^"]+)"', desc_text)
-                if img_match:
-                    image_url = img_match.group(1)
-            
             cache_key = f"twitter_{guild.id}_{username}"
-            
             if cache_key in posted_content and posted_content[cache_key] == tweet_id:
                 continue
-            
             posted_content[cache_key] = tweet_id
-            
+
             # ═══════════════ EMBED TWITTER PROFESSIONNEL ═══════════════
-            tw_avatar = await fetch_avatar_url('twitter', username, session)
+            if not tw_avatar_url:
+                tw_avatar_url = await fetch_avatar_url('twitter', username, session)
 
             e = discord.Embed(color=0x1DA1F2)
-
-            e.description = f"💬 {tweet_text[:1900]}"
+            e.description = f"💬 {tweet_text[:1900]}" if tweet_text else f"Nouveau tweet de @{username}"
 
             e.set_author(
                 name=f"🐦 TWITTER/X • @{username}",
@@ -20779,21 +20787,18 @@ async def check_twitter_feeds(session, guild, data):
                 icon_url=_X_ICON
             )
 
-            if tw_avatar:
-                e.set_thumbnail(url=tw_avatar)
+            if tw_avatar_url:
+                e.set_thumbnail(url=tw_avatar_url)
 
             if image_url:
-                # Convertir URL Nitter en URL Twitter si nécessaire
-                if working_instance and working_instance in image_url:
-                    image_url = image_url.replace(f"https://{working_instance}", "https://pbs.twimg.com")
                 e.set_image(url=image_url)
-            
+
             e.add_field(
                 name="",
                 value=f"[🐦 **Voir le tweet**]({tweet_link})",
                 inline=False
             )
-            
+
             e.set_footer(
                 text=f"Twitter/X • @{username}",
                 icon_url=_X_ICON
