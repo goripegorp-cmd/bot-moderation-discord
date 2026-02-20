@@ -7038,13 +7038,9 @@ class AdsYouTubeAddModal(Modal, title="➕ Ajouter une chaîne YouTube"):
             if isinstance(f, dict) and f.get('id') == self.channel_id.value:
                 return await i.response.send_message("❌ Cette chaîne est déjà ajoutée!", ephemeral=True)
         
-        # Demander le salon
-        chs = list(self.g.text_channels)[:24]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        opts.insert(0, discord.SelectOption(label="📍 Salon par défaut", value="0", description="Utiliser le salon par défaut configuré"))
-        
+        # Demander le salon (paginé)
         new_feed = {'name': self.name.value, 'id': self.channel_id.value}
-        v = AdsYouTubeChannelSelectView(self.u, self.g, opts, new_feed)
+        v = AdsFeedChannelPaginatedView(self.u, self.g, new_feed, 'ads_youtube_feeds')
         await i.response.send_message("📍 Dans quel salon publier les vidéos de cette chaîne ?", view=v, ephemeral=True)
 
 class AdsYouTubeChannelSelectView(View):
@@ -7178,13 +7174,9 @@ class AdsTwitchAddModal(Modal, title="➕ Ajouter un streamer Twitch"):
             elif isinstance(f, str) and f == username:
                 return await i.response.send_message("❌ Ce streamer est déjà ajouté!", ephemeral=True)
         
-        # Demander le salon
-        chs = list(self.g.text_channels)[:24]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        opts.insert(0, discord.SelectOption(label="📍 Salon par défaut", value="0", description="Utiliser le salon par défaut configuré"))
-        
+        # Demander le salon (paginé)
         new_feed = {'username': username}
-        v = AdsTwitchChannelSelectView(self.u, self.g, opts, new_feed)
+        v = AdsFeedChannelPaginatedView(self.u, self.g, new_feed, 'ads_twitch_feeds')
         await i.response.send_message("📍 Dans quel salon publier les lives de ce streamer ?", view=v, ephemeral=True)
 
 class AdsTwitchChannelSelectView(View):
@@ -7317,13 +7309,9 @@ class AdsTikTokAddModal(Modal, title="➕ Ajouter un créateur TikTok"):
             elif isinstance(f, str) and f == username:
                 return await i.response.send_message("❌ Ce créateur est déjà ajouté!", ephemeral=True)
         
-        # Demander le salon
-        chs = list(self.g.text_channels)[:24]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        opts.insert(0, discord.SelectOption(label="📍 Salon par défaut", value="0", description="Utiliser le salon par défaut configuré"))
-        
+        # Demander le salon (paginé)
         new_feed = {'username': username}
-        v = AdsTikTokChannelSelectView(self.u, self.g, opts, new_feed)
+        v = AdsFeedChannelPaginatedView(self.u, self.g, new_feed, 'ads_tiktok_feeds')
         await i.response.send_message(f"📍 Dans quel salon publier les vidéos de **@{username}** ?", view=v, ephemeral=True)
 
 class AdsTikTokChannelSelectView(View):
@@ -7450,13 +7438,9 @@ class AdsRedditAddModal(Modal, title="➕ Ajouter un subreddit"):
             elif isinstance(f, str) and f == sub:
                 return await i.response.send_message("❌ Ce subreddit est déjà ajouté!", ephemeral=True)
         
-        # Demander le salon
-        chs = list(self.g.text_channels)[:24]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        opts.insert(0, discord.SelectOption(label="📍 Salon par défaut", value="0", description="Utiliser le salon par défaut configuré"))
-        
+        # Demander le salon (paginé)
         new_feed = {'subreddit': sub}
-        v = AdsRedditChannelSelectView(self.u, self.g, opts, new_feed)
+        v = AdsFeedChannelPaginatedView(self.u, self.g, new_feed, 'ads_reddit_feeds')
         await i.response.send_message("📍 Dans quel salon publier les posts de ce subreddit ?", view=v, ephemeral=True)
 
 class AdsRedditChannelSelectView(View):
@@ -7594,13 +7578,9 @@ class AdsTwitterAddModal(Modal, title="➕ Ajouter un compte Twitter"):
             elif isinstance(f, str) and f == username:
                 return await i.response.send_message("❌ Ce compte est déjà ajouté!", ephemeral=True)
         
-        # Demander le salon
-        chs = list(self.g.text_channels)[:24]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        opts.insert(0, discord.SelectOption(label="📍 Salon par défaut", value="0", description="Utiliser le salon par défaut configuré"))
-        
+        # Demander le salon (paginé)
         new_feed = {'username': username}
-        v = AdsTwitterChannelSelectView(self.u, self.g, opts, new_feed)
+        v = AdsFeedChannelPaginatedView(self.u, self.g, new_feed, 'ads_twitter_feeds')
         await i.response.send_message("📍 Dans quel salon publier les tweets de ce compte ?", view=v, ephemeral=True)
 
 class AdsTwitterChannelSelectView(View):
@@ -7731,13 +7711,9 @@ class AdsDiscordAddModal(Modal, title="➕ Suivre un salon Discord"):
         if any(f['channel_id'] == str(ch_id) for f in feeds):
             return await i.response.send_message("❌ Ce salon est déjà suivi!", ephemeral=True)
         
-        # Demander le salon de destination
-        chs = list(self.g.text_channels)[:24]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        opts.insert(0, discord.SelectOption(label="📍 Salon par défaut", value="0", description="Utiliser le salon par défaut configuré"))
-        
+        # Demander le salon de destination (paginé)
         new_feed = {'channel_id': str(ch_id), 'guild_name': ch.guild.name, 'channel_name': ch.name}
-        v = AdsDiscordDestSelectView(self.u, self.g, opts, new_feed)
+        v = AdsFeedChannelPaginatedView(self.u, self.g, new_feed, 'ads_discord_feeds')
         await i.response.send_message(f"📍 Dans quel salon publier les messages de **#{ch.name}** ?", view=v, ephemeral=True)
 
 class AdsDiscordDestSelectView(View):
@@ -7864,13 +7840,9 @@ class AdsRoSocialAddModal(Modal, title="➕ Ajouter un profil RoSocial"):
             elif isinstance(f, str) and f.lower() == username.lower():
                 return await i.response.send_message("❌ Ce profil est déjà ajouté!", ephemeral=True)
         
-        # Demander le salon
-        chs = list(self.g.text_channels)[:24]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        opts.insert(0, discord.SelectOption(label="📍 Salon par défaut", value="0", description="Utiliser le salon par défaut configuré"))
-        
+        # Demander le salon (paginé)
         new_feed = {'username': username}
-        v = AdsRoSocialChannelSelectView(self.u, self.g, opts, new_feed)
+        v = AdsFeedChannelPaginatedView(self.u, self.g, new_feed, 'ads_rosocial_feeds')
         await i.response.send_message("📍 Dans quel salon publier les posts de ce profil ?", view=v, ephemeral=True)
 
 class AdsRoSocialChannelSelectView(View):
@@ -8375,6 +8347,80 @@ class PaginatedAdsChannelMenu(Select):
             content=f"✅ Salon défini: **{ch.mention if ch else 'Aucun'}**",
             embed=await v.embed(), view=v
         )
+
+class AdsFeedChannelPaginatedView(View):
+    """Sélecteur de salon paginé pour ajouter un feed (YouTube, Twitch, TikTok, etc.)
+    Supporte TOUS les salons du serveur avec pagination."""
+    def __init__(self, u, g, feed_data, feeds_config_key, page=0):
+        super().__init__(timeout=180)
+        self.u = u
+        self.g = g
+        self.feed_data = feed_data
+        self.feeds_config_key = feeds_config_key  # ex: 'ads_youtube_feeds'
+        self.page = page
+        self.channels = list(g.text_channels)
+        self.per_page = 23
+        self.max_page = max(0, (len(self.channels) - 1) // self.per_page)
+        self._build()
+
+    def _build(self):
+        self.clear_items()
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_chs = self.channels[start:end]
+
+        opts = []
+        if self.page == 0:
+            opts.append(discord.SelectOption(label="📍 Salon par défaut", value="0", description="Utiliser le salon par défaut configuré"))
+
+        for ch in page_chs:
+            desc = ch.category.name[:50] if ch.category else "Sans catégorie"
+            opts.append(discord.SelectOption(label=f"# {ch.name}"[:25], value=str(ch.id), description=desc))
+
+        if opts:
+            select = AdsFeedChannelPaginatedSelect(self, opts)
+            self.add_item(select)
+
+        if self.max_page > 0:
+            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
+            prev_btn.callback = self._prev
+            self.add_item(prev_btn)
+            page_btn = discord.ui.Button(label=f"{self.page+1}/{self.max_page+1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
+            self.add_item(page_btn)
+            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
+            next_btn.callback = self._next
+            self.add_item(next_btn)
+
+    async def _prev(self, i):
+        self.page -= 1
+        self._build()
+        await i.response.edit_message(view=self)
+
+    async def _next(self, i):
+        self.page += 1
+        self._build()
+        await i.response.edit_message(view=self)
+
+
+class AdsFeedChannelPaginatedSelect(Select):
+    def __init__(self, parent, opts):
+        placeholder = f"Page {parent.page+1}/{parent.max_page+1} — Choisir un salon..."[:100]
+        super().__init__(placeholder=placeholder, options=opts)
+        self.parent = parent
+
+    async def callback(self, i):
+        channel_id = int(self.values[0])
+        if channel_id > 0:
+            self.parent.feed_data['channel_id'] = channel_id
+        c = await cfg(self.parent.g.id)
+        feeds = c.get(self.parent.feeds_config_key, [])
+        feeds.append(self.parent.feed_data)
+        await db_set(self.parent.g.id, self.parent.feeds_config_key, feeds)
+        ch = self.parent.g.get_channel(channel_id) if channel_id else None
+        salon_txt = ch.mention if ch else "salon par défaut"
+        name = self.parent.feed_data.get('name') or self.parent.feed_data.get('username') or self.parent.feed_data.get('id', '?')
+        await i.response.edit_message(content=f"✅ **{name}** ajouté ! Publications dans {salon_txt}", view=None)
+
 
 # Anciennes classes gardées pour compatibilité
 class AdsChannelSelectView(View):
@@ -9493,11 +9539,8 @@ class GiveawayConditionsPanel(View):
 
     @discord.ui.button(label="🎭 Rôle requis", style=discord.ButtonStyle.secondary, row=0)
     async def set_role(self, i, b):
-        roles = [r for r in self.g.roles if not r.is_default() and not r.is_bot_managed()][:24]
-        opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
-        opts.insert(0, discord.SelectOption(label="❌ Aucun rôle requis", value="0"))
-        v = GiveawayRoleSelectView(self, opts)
-        await i.response.edit_message(embed=discord.Embed(title="🎭 Sélectionner le rôle requis", color=C.ORANGE), view=v)
+        v = GiveawayRolePaginatedView(self, 'required_role', "🎭 Sélectionner le rôle requis")
+        await i.response.edit_message(embed=discord.Embed(title="🎭 Sélectionner le rôle requis", description=f"📊 {len([r for r in self.g.roles[1:] if not r.is_bot_managed()])} rôles disponibles", color=C.ORANGE), view=v)
 
     @discord.ui.button(label="📅 Ancienneté", style=discord.ButtonStyle.secondary, row=1)
     async def set_account_age(self, i, b):
@@ -9517,11 +9560,8 @@ class GiveawayConditionsPanel(View):
 
     @discord.ui.button(label="🔔 Rôle Ping", style=discord.ButtonStyle.secondary, row=2)
     async def set_ping_role(self, i, b):
-        roles = [r for r in self.g.roles if not r.is_default() and not r.is_bot_managed()][:24]
-        opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
-        opts.insert(0, discord.SelectOption(label="❌ Aucun ping", value="0"))
-        v = GiveawayPingRoleSelectView(self, opts)
-        await i.response.edit_message(embed=discord.Embed(title="🔔 Sélectionner le rôle à ping", color=C.ORANGE), view=v)
+        v = GiveawayRolePaginatedView(self, 'ping_role', "🔔 Sélectionner le rôle à ping")
+        await i.response.edit_message(embed=discord.Embed(title="🔔 Sélectionner le rôle à ping", description=f"📊 {len([r for r in self.g.roles[1:] if not r.is_bot_managed()])} rôles disponibles", color=C.ORANGE), view=v)
 
     @discord.ui.button(label="✅ Publier le Cadeau", style=discord.ButtonStyle.success, row=3)
     async def publish(self, i, b):
@@ -9722,48 +9762,90 @@ class GiveawayConditionModal(Modal):
         
         await i.response.edit_message(embed=self.panel.embed(), view=self.panel)
 
-class GiveawayRoleSelectView(View):
-    def __init__(self, panel, opts):
-        super().__init__(timeout=120)
+class GiveawayRolePaginatedView(View):
+    """Sélecteur de rôle paginé pour les giveaways — supporte TOUS les rôles du serveur"""
+    def __init__(self, panel, role_key, title, page=0):
+        super().__init__(timeout=180)
         self.panel = panel
-        self.add_item(GiveawayRoleSelect(panel, opts))
+        self.role_key = role_key  # 'required_role' ou 'ping_role'
+        self.title = title
+        self.page = page
+        self.roles = [r for r in panel.g.roles if not r.is_default() and not r.is_bot_managed()]
+        self.per_page = 23
+        self.max_page = max(0, (len(self.roles) - 1) // self.per_page)
+        self._build()
 
-class GiveawayRoleSelect(Select):
-    def __init__(self, panel, opts):
-        super().__init__(placeholder="Choisir un rôle...", options=opts)
-        self.panel = panel
-    
-    async def callback(self, i):
-        role_id = int(self.values[0])
-        
-        if 'conditions' not in self.panel.data:
-            self.panel.data['conditions'] = {}
-        
-        if role_id > 0:
-            self.panel.data['conditions']['required_role'] = role_id
-        else:
-            self.panel.data['conditions'].pop('required_role', None)
-        
+    def _build(self):
+        self.clear_items()
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_roles = self.roles[start:end]
+
+        opts = []
+        if self.page == 0:
+            none_label = "❌ Aucun rôle requis" if self.role_key == 'required_role' else "❌ Aucun ping"
+            opts.append(discord.SelectOption(label=none_label, value="0", emoji="🚫"))
+
+        for r in page_roles:
+            desc = f"{len(r.members)} membres"
+            opts.append(discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id), description=desc))
+
+        if opts:
+            select = GiveawayRolePaginatedSelect(self, opts)
+            self.add_item(select)
+
+        if self.max_page > 0:
+            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
+            prev_btn.callback = self._prev
+            self.add_item(prev_btn)
+            page_btn = discord.ui.Button(label=f"{self.page+1}/{self.max_page+1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
+            self.add_item(page_btn)
+            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
+            next_btn.callback = self._next
+            self.add_item(next_btn)
+
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=2)
+        back_btn.callback = self._back
+        self.add_item(back_btn)
+
+    async def _prev(self, i):
+        self.page -= 1
+        self._build()
+        await i.response.edit_message(view=self)
+
+    async def _next(self, i):
+        self.page += 1
+        self._build()
+        await i.response.edit_message(view=self)
+
+    async def _back(self, i):
         await i.response.edit_message(embed=self.panel.embed(), view=self.panel)
 
-class GiveawayPingRoleSelectView(View):
-    def __init__(self, panel, opts):
-        super().__init__(timeout=120)
-        self.panel = panel
-        self.add_item(GiveawayPingRoleSelect(panel, opts))
 
-class GiveawayPingRoleSelect(Select):
-    def __init__(self, panel, opts):
-        super().__init__(placeholder="Choisir un rôle à ping...", options=opts)
-        self.panel = panel
+class GiveawayRolePaginatedSelect(Select):
+    def __init__(self, parent, opts):
+        placeholder = f"Page {parent.page+1}/{parent.max_page+1} — {parent.title}"[:100]
+        super().__init__(placeholder=placeholder, options=opts)
+        self.parent = parent
 
     async def callback(self, i):
         role_id = int(self.values[0])
-        if role_id > 0:
-            self.panel.data['ping_role'] = role_id
-        else:
-            self.panel.data.pop('ping_role', None)
-        await i.response.edit_message(embed=self.panel.embed(), view=self.panel)
+        panel = self.parent.panel
+
+        if self.parent.role_key == 'required_role':
+            if 'conditions' not in panel.data:
+                panel.data['conditions'] = {}
+            if role_id > 0:
+                panel.data['conditions']['required_role'] = role_id
+            else:
+                panel.data['conditions'].pop('required_role', None)
+        elif self.parent.role_key == 'ping_role':
+            if role_id > 0:
+                panel.data['ping_role'] = role_id
+            else:
+                panel.data.pop('ping_role', None)
+
+        await i.response.edit_message(embed=panel.embed(), view=panel)
 
 def parse_duration_to_seconds(duration_str):
     """Convertit une durée (1h, 2d, etc.) en secondes"""
@@ -10999,25 +11081,58 @@ class TempVoicePanel(View):
         await i.response.edit_message(embed=v.embed(), view=v)
 
 class TempVoiceAddHubSelect(View):
-    """Étape 1: Sélection du salon hub"""
-    def __init__(self, u, g):
-        super().__init__(timeout=120)
+    """Étape 1: Sélection du salon hub — Paginé"""
+    def __init__(self, u, g, page=0):
+        super().__init__(timeout=180)
         self.u = u
         self.g = g
-        
-        # Récupérer les hubs déjà configurés
-        voice_channels = [c for c in g.channels if isinstance(c, discord.VoiceChannel)][:25]
-        
-        opts = [discord.SelectOption(label=f"🔊 {c.name}"[:25], value=str(c.id)) for c in voice_channels]
+        self.page = page
+        self.voice_channels = [c for c in g.channels if isinstance(c, discord.VoiceChannel)]
+        self.per_page = 23
+        self.max_page = max(0, (len(self.voice_channels) - 1) // self.per_page)
+        self._build()
+
+    def _build(self):
+        self.clear_items()
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_chs = self.voice_channels[start:end]
+        opts = [discord.SelectOption(label=f"🔊 {c.name}"[:25], value=str(c.id), description=(c.category.name[:50] if c.category else "Sans catégorie")) for c in page_chs]
         if opts:
-            select = Select(placeholder="Choisir un salon vocal...", options=opts)
+            select = Select(placeholder=f"Page {self.page+1}/{self.max_page+1} — Salon vocal...", options=opts)
             select.callback = self.select_callback
             self.add_item(select)
-    
+        if self.max_page > 0:
+            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
+            prev_btn.callback = self._prev
+            self.add_item(prev_btn)
+            page_btn = discord.ui.Button(label=f"{self.page+1}/{self.max_page+1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
+            self.add_item(page_btn)
+            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
+            next_btn.callback = self._next
+            self.add_item(next_btn)
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+        back_btn.callback = self._back
+        self.add_item(back_btn)
+
+    async def _prev(self, i):
+        self.page -= 1
+        self._build()
+        await i.response.edit_message(view=self)
+
+    async def _next(self, i):
+        self.page += 1
+        self._build()
+        await i.response.edit_message(view=self)
+
+    async def _back(self, i):
+        v = TempVoicePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
     async def select_callback(self, i):
         hub_id = int(i.data['values'][0])
         hub_ch = self.g.get_channel(hub_id)
-        
+
         # Passer à l'étape 2: choisir la catégorie
         v = TempVoiceAddHubCategory(self.u, self.g, hub_id)
         await i.response.edit_message(
@@ -11028,32 +11143,55 @@ class TempVoiceAddHubSelect(View):
             ),
             view=v
         )
-    
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
-    async def back(self, i, b):
-        v = TempVoicePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
 
 class TempVoiceAddHubCategory(View):
-    """Étape 2: Sélection de la catégorie"""
-    def __init__(self, u, g, hub_id):
-        super().__init__(timeout=120)
+    """Étape 2: Sélection de la catégorie — Paginé"""
+    def __init__(self, u, g, hub_id, page=0):
+        super().__init__(timeout=180)
         self.u = u
         self.g = g
         self.hub_id = hub_id
-        
-        categories = list(g.categories)[:25]
-        opts = [discord.SelectOption(label=f"📁 {c.name}"[:25], value=str(c.id)) for c in categories]
+        self.page = page
+        self.categories = list(g.categories)
+        self.per_page = 23
+        self.max_page = max(0, (len(self.categories) - 1) // self.per_page)
+        self._build()
+
+    def _build(self):
+        self.clear_items()
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_cats = self.categories[start:end]
+        opts = [discord.SelectOption(label=f"📁 {c.name}"[:25], value=str(c.id)) for c in page_cats]
         if opts:
-            select = Select(placeholder="Choisir une catégorie...", options=opts)
+            select = Select(placeholder=f"Page {self.page+1}/{self.max_page+1} — Catégorie...", options=opts)
             select.callback = self.select_callback
             self.add_item(select)
+        if self.max_page > 0:
+            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
+            prev_btn.callback = self._prev
+            self.add_item(prev_btn)
+            page_btn = discord.ui.Button(label=f"{self.page+1}/{self.max_page+1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
+            self.add_item(page_btn)
+            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
+            next_btn.callback = self._next
+            self.add_item(next_btn)
     
+    async def _prev(self, i):
+        self.page -= 1
+        self._build()
+        await i.response.edit_message(view=self)
+
+    async def _next(self, i):
+        self.page += 1
+        self._build()
+        await i.response.edit_message(view=self)
+
     async def select_callback(self, i):
         cat_id = int(i.data['values'][0])
         cat = self.g.get_channel(cat_id)
         hub_ch = self.g.get_channel(self.hub_id)
-        
+
         # Passer à l'étape 3: choisir le rôle requis (optionnel)
         v = TempVoiceAddHubRole(self.u, self.g, self.hub_id, cat_id)
         await i.response.edit_message(
@@ -11068,18 +11206,6 @@ class TempVoiceAddHubCategory(View):
                     f"• Le vocal créé sera **invisible** pour les autres membres\n"
                     f"• Seuls les membres avec le rôle peuvent voir/rejoindre le vocal"
                 ),
-                color=0x9B59B6
-            ),
-            view=v
-        )
-    
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
-    async def back(self, i, b):
-        v = TempVoiceAddHubSelect(self.u, self.g)
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="➕ Ajouter un Hub Vocal",
-                description="**Étape 1/3** - Choisissez le salon vocal qui servira de hub.",
                 color=0x9B59B6
             ),
             view=v
@@ -11472,32 +11598,64 @@ class TempVoiceHubEditPanel(View):
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 class TempVoiceHubEditCategory(View):
-    """Modifier la catégorie d'un hub"""
-    def __init__(self, u, g, hub_id):
-        super().__init__(timeout=120)
+    """Modifier la catégorie d'un hub — Paginé"""
+    def __init__(self, u, g, hub_id, page=0):
+        super().__init__(timeout=180)
         self.u = u
         self.g = g
         self.hub_id = hub_id
-        
-        categories = list(g.categories)[:25]
-        opts = [discord.SelectOption(label=f"📁 {c.name}"[:25], value=str(c.id)) for c in categories]
+        self.page = page
+        self.categories = list(g.categories)
+        self.per_page = 23
+        self.max_page = max(0, (len(self.categories) - 1) // self.per_page)
+        self._build()
+
+    def _build(self):
+        self.clear_items()
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_cats = self.categories[start:end]
+        opts = [discord.SelectOption(label=f"📁 {c.name}"[:25], value=str(c.id)) for c in page_cats]
         if opts:
-            select = Select(placeholder="Choisir une catégorie...", options=opts)
+            select = Select(placeholder=f"Page {self.page+1}/{self.max_page+1} — Catégorie...", options=opts)
             select.callback = self.select_callback
             self.add_item(select)
-    
+        if self.max_page > 0:
+            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
+            prev_btn.callback = self._prev
+            self.add_item(prev_btn)
+            page_btn = discord.ui.Button(label=f"{self.page+1}/{self.max_page+1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
+            self.add_item(page_btn)
+            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
+            next_btn.callback = self._next
+            self.add_item(next_btn)
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+        back_btn.callback = self._back
+        self.add_item(back_btn)
+
+    async def _prev(self, i):
+        self.page -= 1
+        self._build()
+        await i.response.edit_message(view=self)
+
+    async def _next(self, i):
+        self.page += 1
+        self._build()
+        await i.response.edit_message(view=self)
+
+    async def _back(self, i):
+        v = TempVoiceHubEditPanel(self.u, self.g, self.hub_id)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
     async def select_callback(self, i):
         cat_id = int(i.data['values'][0])
-        
         c = await cfg(self.g.id)
         voice_cfg = c.get('temp_voice_config', {})
         hubs = voice_cfg.get('hubs', {})
-        
         if str(self.hub_id) in hubs:
             hubs[str(self.hub_id)]['category'] = cat_id
             voice_cfg['hubs'] = hubs
             await db_set(self.g.id, 'temp_voice_config', voice_cfg)
-        
         cat = self.g.get_channel(cat_id)
         v = TempVoiceHubEditPanel(self.u, self.g, self.hub_id)
         await i.response.edit_message(
@@ -11505,11 +11663,6 @@ class TempVoiceHubEditCategory(View):
             embed=await v.embed(),
             view=v
         )
-    
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
-    async def back(self, i, b):
-        v = TempVoiceHubEditPanel(self.u, self.g, self.hub_id)
-        await i.response.edit_message(embed=await v.embed(), view=v)
 
 class TempVoiceHubEditRole(View):
     """Modifier le rôle requis d'un hub avec pagination complète"""
@@ -12753,32 +12906,58 @@ class AutoMessageCreateModal(Modal):
             'image_url': self.image_input.value or None
         }
         
-        # Demander le salon
-        channels = list(self.g.text_channels)[:25]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in channels]
-        v = AutoMessageChannelSelectView(self.u, self.g, opts, msg_data)
+        # Demander le salon — paginé
+        v = AutoMessageChannelPaginatedView(self.u, self.g, msg_data)
         await i.response.send_message("📢 **Sélectionnez le salon** où publier le message:", view=v, ephemeral=True)
 
-class AutoMessageChannelSelectView(View):
-    def __init__(self, u, g, opts, data):
-        super().__init__(timeout=120)
-        self.add_item(AutoMessageChannelSelect(u, g, opts, data))
-
-class AutoMessageChannelSelect(Select):
-    def __init__(self, u, g, opts, data):
-        super().__init__(placeholder="Choisir un salon...", options=opts)
+class AutoMessageChannelPaginatedView(View):
+    """Sélecteur de salon paginé pour les messages automatiques"""
+    def __init__(self, u, g, data, page=0):
+        super().__init__(timeout=180)
         self.u = u
         self.g = g
         self.data = data
-    
-    async def callback(self, i):
-        channel_id = int(self.values[0])
+        self.page = page
+        self.channels = list(g.text_channels)
+        self.per_page = 23
+        self.max_page = max(0, (len(self.channels) - 1) // self.per_page)
+        self._build()
+
+    def _build(self):
+        self.clear_items()
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_chs = self.channels[start:end]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id), description=(c.category.name[:50] if c.category else "Sans catégorie")) for c in page_chs]
+        if opts:
+            select = Select(placeholder=f"Page {self.page+1}/{self.max_page+1} — Salon...", options=opts)
+            select.callback = self._select_cb
+            self.add_item(select)
+        if self.max_page > 0:
+            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
+            prev_btn.callback = self._prev
+            self.add_item(prev_btn)
+            page_btn = discord.ui.Button(label=f"{self.page+1}/{self.max_page+1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
+            self.add_item(page_btn)
+            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
+            next_btn.callback = self._next
+            self.add_item(next_btn)
+
+    async def _prev(self, i):
+        self.page -= 1
+        self._build()
+        await i.response.edit_message(view=self)
+
+    async def _next(self, i):
+        self.page += 1
+        self._build()
+        await i.response.edit_message(view=self)
+
+    async def _select_cb(self, i):
+        channel_id = int(i.data['values'][0])
         channel = self.g.get_channel(channel_id)
-        
         if not channel:
             return await i.response.edit_message(content="❌ Salon introuvable", view=None)
-        
-        # Sauvegarder en BDD
         try:
             async with get_db() as db:
                 await db.execute('''
@@ -12793,14 +12972,12 @@ class AutoMessageChannelSelect(Select):
         except Exception as ex:
             print(f"Erreur sauvegarde message auto: {ex}")
             return await i.response.edit_message(content=f"❌ Erreur: {ex}", view=None)
-        
         freq_labels = {
             'minutes': f"toutes les {self.data['frequency_value']} minute(s)",
             'hourly': f"toutes les {self.data['frequency_value']} heure(s)",
             'daily': f"tous les {self.data['frequency_value']} jour(s)",
             'weekly': f"toutes les {self.data['frequency_value']} semaine(s)"
         }
-        
         await i.response.edit_message(
             content=f"✅ **Message automatique créé !**\n\n"
                     f"📢 Salon: {channel.mention}\n"
@@ -12808,6 +12985,9 @@ class AutoMessageChannelSelect(Select):
                     f"⏰ Heure d'envoi: {self.data['send_hour']}h00",
             view=None
         )
+
+# Legacy compat
+AutoMessageChannelSelectView = AutoMessageChannelPaginatedView
 
 class AutoMessageListPanel(View):
     def __init__(self, u, g):
@@ -14783,29 +14963,69 @@ class ChanPanel(View):
     
     @discord.ui.button(label="➕ Configurer un salon", style=discord.ButtonStyle.success, row=0)
     async def add(self, i, b):
-        chs = list(self.g.text_channels)[:25]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        await i.response.edit_message(embed=discord.Embed(title="📺 Choisir un salon", color=C.ORANGE), view=ChanSelectView(self.u, self.g, opts))
+        v = ChanSelectPaginatedView(self.u, self.g)
+        await i.response.edit_message(embed=discord.Embed(title="📺 Choisir un salon", description=f"**{len(v.channels)} salons** • Page 1/{v.max_page+1}", color=C.ORANGE), view=v)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
 
-class ChanSelectView(View):
-    def __init__(self, u, g, opts):
-        super().__init__(timeout=120)
-        self.add_item(ChanSelect(u, g, opts))
-
-class ChanSelect(Select):
-    def __init__(self, u, g, opts):
-        super().__init__(placeholder="Choisir un salon...", options=opts)
+class ChanSelectPaginatedView(View):
+    """Sélecteur de salon paginé pour Config Salon"""
+    def __init__(self, u, g, page=0):
+        super().__init__(timeout=180)
         self.u = u
         self.g = g
-    
-    async def callback(self, i):
-        v = EditChanCfg(self.u, self.g, self.values[0])
+        self.page = page
+        self.channels = list(g.text_channels)
+        self.per_page = 23
+        self.max_page = max(0, (len(self.channels) - 1) // self.per_page)
+        self._build()
+
+    def _build(self):
+        self.clear_items()
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_chs = self.channels[start:end]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id), description=(c.category.name[:50] if c.category else "Sans catégorie")) for c in page_chs]
+        if opts:
+            select = Select(placeholder=f"Page {self.page+1}/{self.max_page+1} — Salon...", options=opts)
+            select.callback = self._select_cb
+            self.add_item(select)
+        if self.max_page > 0:
+            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
+            prev_btn.callback = self._prev
+            self.add_item(prev_btn)
+            page_btn = discord.ui.Button(label=f"{self.page+1}/{self.max_page+1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
+            self.add_item(page_btn)
+            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
+            next_btn.callback = self._next
+            self.add_item(next_btn)
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+        back_btn.callback = self._back
+        self.add_item(back_btn)
+
+    async def _prev(self, i):
+        self.page -= 1
+        self._build()
+        await i.response.edit_message(embed=discord.Embed(title="📺 Choisir un salon", description=f"**{len(self.channels)} salons** • Page {self.page+1}/{self.max_page+1}", color=C.ORANGE), view=self)
+
+    async def _next(self, i):
+        self.page += 1
+        self._build()
+        await i.response.edit_message(embed=discord.Embed(title="📺 Choisir un salon", description=f"**{len(self.channels)} salons** • Page {self.page+1}/{self.max_page+1}", color=C.ORANGE), view=self)
+
+    async def _back(self, i):
+        v = ChanPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
+
+    async def _select_cb(self, i):
+        v = EditChanCfg(self.u, self.g, i.data['values'][0])
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+# Legacy compat
+ChanSelectView = ChanSelectPaginatedView
 
 class EditChanCfg(View):
     def __init__(self, u, g, ch_id):
@@ -14915,9 +15135,8 @@ class TicketMainPanel(View):
     
     @discord.ui.button(label="📜 Définir Logs", style=discord.ButtonStyle.primary, row=0)
     async def logs(self, i, b):
-        chs = list(self.g.text_channels)[:25]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id)) for c in chs]
-        await i.response.edit_message(embed=discord.Embed(title="📜 Choisir le salon Logs", color=C.PURPLE), view=TkLogView(self.u, self.g, opts))
+        v = TkLogPaginatedView(self.u, self.g)
+        await i.response.edit_message(embed=discord.Embed(title="📜 Choisir le salon Logs", description=f"**{len(v.channels)} salons** • Page 1/{v.max_page+1}", color=C.PURPLE), view=v)
     
     @discord.ui.button(label="🚫 Rôle Blacklist", style=discord.ButtonStyle.danger, row=0)
     async def blacklist_role(self, i, b):
@@ -15150,21 +15369,62 @@ class TkStaffSel(Select):
         v = TicketMainPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
-class TkLogView(View):
-    def __init__(self, u, g, opts):
-        super().__init__(timeout=120)
-        self.add_item(TkLogSel(u, g, opts))
-
-class TkLogSel(Select):
-    def __init__(self, u, g, opts):
-        super().__init__(placeholder="Choisir un salon...", options=opts)
+class TkLogPaginatedView(View):
+    """Sélecteur de salon Logs paginé pour les tickets"""
+    def __init__(self, u, g, page=0):
+        super().__init__(timeout=180)
         self.u = u
         self.g = g
-    
-    async def callback(self, i):
-        await db_set(i.guild.id, 'ticket_log', int(self.values[0]))
+        self.page = page
+        self.channels = list(g.text_channels)
+        self.per_page = 23
+        self.max_page = max(0, (len(self.channels) - 1) // self.per_page)
+        self._build()
+
+    def _build(self):
+        self.clear_items()
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_chs = self.channels[start:end]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id), description=(c.category.name[:50] if c.category else "Sans catégorie")) for c in page_chs]
+        if opts:
+            select = Select(placeholder=f"Page {self.page+1}/{self.max_page+1} — Salon logs...", options=opts)
+            select.callback = self._select_cb
+            self.add_item(select)
+        if self.max_page > 0:
+            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
+            prev_btn.callback = self._prev
+            self.add_item(prev_btn)
+            page_btn = discord.ui.Button(label=f"{self.page+1}/{self.max_page+1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
+            self.add_item(page_btn)
+            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
+            next_btn.callback = self._next
+            self.add_item(next_btn)
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+        back_btn.callback = self._back
+        self.add_item(back_btn)
+
+    async def _prev(self, i):
+        self.page -= 1
+        self._build()
+        await i.response.edit_message(embed=discord.Embed(title="📜 Choisir le salon Logs", description=f"**{len(self.channels)} salons** • Page {self.page+1}/{self.max_page+1}", color=C.PURPLE), view=self)
+
+    async def _next(self, i):
+        self.page += 1
+        self._build()
+        await i.response.edit_message(embed=discord.Embed(title="📜 Choisir le salon Logs", description=f"**{len(self.channels)} salons** • Page {self.page+1}/{self.max_page+1}", color=C.PURPLE), view=self)
+
+    async def _back(self, i):
         v = TicketMainPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
+
+    async def _select_cb(self, i):
+        await db_set(i.guild.id, 'ticket_log', int(i.data['values'][0]))
+        v = TicketMainPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+# Legacy compat
+TkLogView = TkLogPaginatedView
 
 class NewPanelModal(Modal, title="➕ Nouveau Panel"):
     name = TextInput(label="Nom du panel", placeholder="Support, Partenariat...", max_length=30)
@@ -15266,11 +15526,11 @@ class PanelEditView(View):
     
     @discord.ui.button(label="📁 Catégorie", style=discord.ButtonStyle.primary, row=0)
     async def cat(self, i, b):
-        cats = list(self.g.categories)[:25]
+        cats = list(self.g.categories)
         if not cats:
             return await i.response.send_message("❌ Aucune catégorie sur ce serveur", ephemeral=True)
-        opts = [discord.SelectOption(label=f"📁 {c.name}"[:25], value=str(c.id)) for c in cats]
-        await i.response.edit_message(embed=discord.Embed(title="📁 Choisir la catégorie", color=C.PURPLE), view=PanelCatView(self.u, self.g, self.pid, opts))
+        v = PanelCatPaginatedView(self.u, self.g, self.pid)
+        await i.response.edit_message(embed=discord.Embed(title="📁 Choisir la catégorie", description=f"**{len(cats)} catégories** • Page 1/{v.max_page+1}", color=C.PURPLE), view=v)
     
     @discord.ui.button(label="👥 Rôle Staff", style=discord.ButtonStyle.primary, row=0)
     async def staff_role(self, i, b):
@@ -15333,9 +15593,8 @@ class PanelEditView(View):
         # Vérifier qu'un rôle staff est configuré (panel ou global)
         if not pnl.get('staff_role') and not c.get('ticket_staff'):
             return await i.response.send_message("❌ Configure le rôle Staff d'abord (panel ou global)!", ephemeral=True)
-        chs = list(self.g.text_channels)[:25]
-        opts = [discord.SelectOption(label=f"# {ch.name}"[:25], value=str(ch.id)) for ch in chs]
-        await i.response.edit_message(embed=discord.Embed(title="📤 Où envoyer le panel?", color=C.PURPLE), view=SendPanelView(self.u, self.g, self.pid, opts))
+        v = SendPanelPaginatedView(self.u, self.g, self.pid)
+        await i.response.edit_message(embed=discord.Embed(title="📤 Où envoyer le panel?", description=f"**{len(v.channels)} salons** • Page 1/{v.max_page+1}", color=C.PURPLE), view=v)
     
     @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, row=2)
     async def delete(self, i, b):
@@ -15787,26 +16046,67 @@ class PanelStaffRoleSelect(Select):
         v = PanelEditView(self.parent.u, self.parent.g, self.parent.pid)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
-class PanelCatView(View):
-    def __init__(self, u, g, pid, opts):
-        super().__init__(timeout=120)
-        self.add_item(PanelCatSel(u, g, pid, opts))
-
-class PanelCatSel(Select):
-    def __init__(self, u, g, pid, opts):
-        super().__init__(placeholder="Choisir une catégorie...", options=opts)
+class PanelCatPaginatedView(View):
+    """Sélecteur de catégorie paginé pour les panels de tickets"""
+    def __init__(self, u, g, pid, page=0):
+        super().__init__(timeout=180)
         self.u = u
         self.g = g
         self.pid = pid
-    
-    async def callback(self, i):
+        self.page = page
+        self.categories = list(g.categories)
+        self.per_page = 23
+        self.max_page = max(0, (len(self.categories) - 1) // self.per_page)
+        self._build()
+
+    def _build(self):
+        self.clear_items()
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_cats = self.categories[start:end]
+        opts = [discord.SelectOption(label=f"📁 {c.name}"[:25], value=str(c.id)) for c in page_cats]
+        if opts:
+            select = Select(placeholder=f"Page {self.page+1}/{self.max_page+1} — Catégorie...", options=opts)
+            select.callback = self._select_cb
+            self.add_item(select)
+        if self.max_page > 0:
+            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
+            prev_btn.callback = self._prev
+            self.add_item(prev_btn)
+            page_btn = discord.ui.Button(label=f"{self.page+1}/{self.max_page+1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
+            self.add_item(page_btn)
+            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
+            next_btn.callback = self._next
+            self.add_item(next_btn)
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+        back_btn.callback = self._back
+        self.add_item(back_btn)
+
+    async def _prev(self, i):
+        self.page -= 1
+        self._build()
+        await i.response.edit_message(embed=discord.Embed(title="📁 Choisir la catégorie", description=f"**{len(self.categories)} catégories** • Page {self.page+1}/{self.max_page+1}", color=C.PURPLE), view=self)
+
+    async def _next(self, i):
+        self.page += 1
+        self._build()
+        await i.response.edit_message(embed=discord.Embed(title="📁 Choisir la catégorie", description=f"**{len(self.categories)} catégories** • Page {self.page+1}/{self.max_page+1}", color=C.PURPLE), view=self)
+
+    async def _back(self, i):
+        v = PanelEditView(self.u, self.g, self.pid)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+    async def _select_cb(self, i):
         c = await cfg(i.guild.id)
         panels = c.get('ticket_panels', {})
         if self.pid in panels:
-            panels[self.pid]['category'] = int(self.values[0])
+            panels[self.pid]['category'] = int(i.data['values'][0])
             await db_set(i.guild.id, 'ticket_panels', panels)
         v = PanelEditView(self.u, self.g, self.pid)
         await i.response.edit_message(embed=await v.embed(), view=v)
+
+# Legacy compat
+PanelCatView = PanelCatPaginatedView
 
 class SetMaxModal(Modal, title="🔢 Max tickets par utilisateur"):
     mx = TextInput(label="Nombre maximum", placeholder="1-10", default="1", max_length=2)
@@ -15889,52 +16189,83 @@ class AddQModal(Modal, title="➕ Ajouter une question"):
         v = PanelQsView(self.u, self.g, self.pid)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
-class SendPanelView(View):
-    def __init__(self, u, g, pid, opts):
-        super().__init__(timeout=120)
-        self.add_item(SendPanelSel(u, g, pid, opts))
-
-class SendPanelSel(Select):
-    def __init__(self, u, g, pid, opts):
-        super().__init__(placeholder="Choisir un salon...", options=opts)
+class SendPanelPaginatedView(View):
+    """Sélecteur de salon paginé pour envoyer un panel de tickets"""
+    def __init__(self, u, g, pid, page=0):
+        super().__init__(timeout=180)
         self.u = u
         self.g = g
         self.pid = pid
-    
-    async def callback(self, i):
-        ch = i.guild.get_channel(int(self.values[0]))
+        self.page = page
+        self.channels = list(g.text_channels)
+        self.per_page = 23
+        self.max_page = max(0, (len(self.channels) - 1) // self.per_page)
+        self._build()
+
+    def _build(self):
+        self.clear_items()
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_chs = self.channels[start:end]
+        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id), description=(c.category.name[:50] if c.category else "Sans catégorie")) for c in page_chs]
+        if opts:
+            select = Select(placeholder=f"Page {self.page+1}/{self.max_page+1} — Envoyer dans...", options=opts)
+            select.callback = self._select_cb
+            self.add_item(select)
+        if self.max_page > 0:
+            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
+            prev_btn.callback = self._prev
+            self.add_item(prev_btn)
+            page_btn = discord.ui.Button(label=f"{self.page+1}/{self.max_page+1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
+            self.add_item(page_btn)
+            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
+            next_btn.callback = self._next
+            self.add_item(next_btn)
+        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+        back_btn.callback = self._back
+        self.add_item(back_btn)
+
+    async def _prev(self, i):
+        self.page -= 1
+        self._build()
+        await i.response.edit_message(embed=discord.Embed(title="📤 Où envoyer le panel?", description=f"**{len(self.channels)} salons** • Page {self.page+1}/{self.max_page+1}", color=C.PURPLE), view=self)
+
+    async def _next(self, i):
+        self.page += 1
+        self._build()
+        await i.response.edit_message(embed=discord.Embed(title="📤 Où envoyer le panel?", description=f"**{len(self.channels)} salons** • Page {self.page+1}/{self.max_page+1}", color=C.PURPLE), view=self)
+
+    async def _back(self, i):
+        v = PanelEditView(self.u, self.g, self.pid)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+    async def _select_cb(self, i):
+        ch = i.guild.get_channel(int(i.data['values'][0]))
         if not ch:
             return await i.response.send_message("❌ Salon introuvable", ephemeral=True)
         c = await cfg(i.guild.id)
         pnl = c.get('ticket_panels', {}).get(self.pid, {})
         qs = pnl.get('questions', [])
         mx = pnl.get('max', 1)
-        
-        # ═══════════════════════════════════════════════════════════════════════════════
-        #                    🎨 EMBED PERSONNALISÉ DU PANEL
-        # ═══════════════════════════════════════════════════════════════════════════════
-        
+
         # Titre personnalisé ou par défaut
         embed_title = pnl.get('embed_title', '').strip()
         if not embed_title:
             embed_title = f"🎫 {pnl.get('name', 'Support')}"
-        
+
         # Description personnalisée ou par défaut
         embed_desc = pnl.get('embed_description', '').strip()
         if not embed_desc:
             embed_desc = "Cliquez sur le bouton ci-dessous pour créer un ticket."
-        
-        # Ajouter les infos automatiques (questions, max tickets)
+
         auto_info = ""
         if qs:
             auto_info += f"\n\n📝 Vous devrez répondre à **{len(qs)}** question(s)."
         auto_info += f"\n🔢 Maximum **{mx}** ticket(s) simultané(s)."
-        
+
         full_desc = embed_desc + auto_info
-        
         emb = discord.Embed(title=embed_title, description=full_desc, color=C.BLURPLE)
-        
-        # Ajouter les liens personnalisés
+
         embed_links = pnl.get('embed_links', '').strip()
         if embed_links:
             links_text = ""
@@ -15948,12 +16279,14 @@ class SendPanelSel(Select):
                         links_text += f"[{link_text}]({link_url})\n"
                 elif line:
                     links_text += f"{line}\n"
-            
             if links_text:
                 emb.add_field(name="🔗 Liens utiles", value=links_text.strip(), inline=False)
-        
+
         await ch.send(embed=emb, view=TicketCreateView(self.pid))
         await i.response.send_message(f"✅ Panel envoyé dans {ch.mention}!", ephemeral=True)
+
+# Legacy compat
+SendPanelView = SendPanelPaginatedView
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              🎯 EVENTS
@@ -20532,79 +20865,7 @@ async def check_rosocial_feeds(session, guild, data):
             post_url = f"https://rosocial.net/posts/{latest_post_id}"
 
             # ═══════════════════════════════════════════════════════════════════════════════
-            #                    📥 RÉCUPÉRER LA PAGE DU POST — CONTENU COMPLET
-            # ═══════════════════════════════════════════════════════════════════════════════
-            image_url = None
-            video_url = None
-            post_text = None
-
-            try:
-                async with session.get(post_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as post_resp:
-                    if post_resp.status == 200:
-                        post_html = await post_resp.text()
-
-                        # ─── Extraire le texte du post ───
-                        text_patterns = [
-                            r'<div[^>]*class="[^"]*post[_-]?text[^"]*"[^>]*>(.*?)</div>',
-                            r'<div[^>]*class="[^"]*post[_-]?content[^"]*"[^>]*>(.*?)</div>',
-                            r'<p[^>]*class="[^"]*post[_-]?body[^"]*"[^>]*>(.*?)</p>',
-                            r'<div[^>]*class="[^"]*activity[_-]?inner[^"]*"[^>]*>(.*?)</div>',
-                            r'og:description"[^>]+content="([^"]{5,})"',
-                            r'<meta[^>]+name="description"[^>]+content="([^"]{5,})"',
-                        ]
-                        for tp in text_patterns:
-                            tm = re.search(tp, post_html, re.IGNORECASE | re.DOTALL)
-                            if tm:
-                                raw = tm.group(1)
-                                # Nettoyer le HTML
-                                clean = re.sub(r'<br\s*/?>', '\n', raw)
-                                clean = re.sub(r'<a[^>]+href="([^"]+)"[^>]*>([^<]+)</a>', r'[\2](\1)', clean)
-                                clean = re.sub(r'<[^>]+>', '', clean)
-                                clean = clean.strip()
-                                if clean and len(clean) > 3:
-                                    post_text = clean[:500]
-                                    break
-
-                        # ─── Extraire les liens dans le post ───
-                        post_links = re.findall(r'<a[^>]+href="(https?://[^"]+)"[^>]*class="[^"]*(?:post|activity)[^"]*"', post_html, re.IGNORECASE)
-                        if not post_links:
-                            post_links = re.findall(r'<a[^>]+href="(https?://(?:(?!rosocial\.net)[^"])+)"[^>]*>', post_html)
-                            # Filtrer les liens de nav/menu
-                            post_links = [l for l in post_links if not any(x in l for x in ['login', 'register', 'terms', 'privacy', 'about', 'cdn', 'favicon', '.css', '.js'])]
-
-                        # ─── Extraire la vidéo ───
-                        video_patterns = [
-                            r'<video[^>]+src="([^"]+)"',
-                            r'<source[^>]+src="([^"]+)"[^>]+type="video',
-                            r'"(https://rosocial\.net/content/uploads/videos/[^"]+)"',
-                            r'"(https?://[^"]+\.(?:mp4|webm|mov))"',
-                        ]
-                        for vp in video_patterns:
-                            vm = re.search(vp, post_html, re.IGNORECASE)
-                            if vm:
-                                video_url = vm.group(1)
-                                break
-
-                        # ─── Extraire l'image du post (plusieurs patterns) ───
-                        image_patterns = [
-                            r'<img[^>]+src="(https://rosocial\.net/content/uploads/photos/[^"]+)"',
-                            r'<img[^>]+data-src="(https://rosocial\.net/content/uploads/photos/[^"]+)"',
-                            r'src="(https://rosocial\.net/content/uploads/[^"]+\.(jpg|jpeg|png|gif|webp))"',
-                            r'"(https://rosocial\.net/content/uploads/photos/\d+/\d+/[^"]+)"',
-                            r'og:image"[^>]+content="([^"]+rosocial[^"]+)"',
-                        ]
-                        for pattern in image_patterns:
-                            match = re.search(pattern, post_html, re.IGNORECASE)
-                            if match:
-                                img = match.group(1)
-                                if 'avatar' not in img.lower() and 'profile' not in img.lower() and 'logo' not in img.lower():
-                                    image_url = img
-                                    break
-            except:
-                pass
-
-            # ═══════════════════════════════════════════════════════════════════════════════
-            #                    🎨 EMBED ROSOCIAL — CONTENU RÉEL DU POST
+            #                    🎨 EMBED ROSOCIAL — FORMAT SIMPLE
             # ═══════════════════════════════════════════════════════════════════════════════
 
             rs_avatar = await fetch_avatar_url('rosocial', username, session)
@@ -20612,29 +20873,10 @@ async def check_rosocial_feeds(session, guild, data):
             e = discord.Embed(color=0x00D4AA, url=post_url)
             e.set_author(name=f"ROSOCIAL • {username}", url=profile_url, icon_url=_RBX_ICON)
             e.title = f"📝 Nouveau post de {username}"
-
-            # Construire la description avec le contenu réel
-            desc_parts = []
-            if post_text:
-                desc_parts.append(post_text)
-            if video_url:
-                desc_parts.append(f"\n🎬 [**Voir la vidéo**]({video_url})")
-            if post_links:
-                for pl in post_links[:3]:
-                    desc_parts.append(f"🔗 [**Lien**]({pl})")
-
-            if desc_parts:
-                desc = "\n".join(desc_parts)
-            else:
-                desc = f"**{username}** a publié un nouveau post sur RoSocial !"
-
-            desc += f"\n\n📌 [**Voir le post**]({post_url}) • 👤 [**Profil**]({profile_url})"
-            e.description = desc[:4000]
+            e.description = f"**{username}** a publié un nouveau post sur RoSocial !\n\n📌 [**Voir le post**]({post_url}) • 👤 [**Profil**]({profile_url})"
 
             if rs_avatar:
                 e.set_thumbnail(url=rs_avatar)
-            if image_url:
-                e.set_image(url=image_url)
 
             e.set_footer(text=f"RoSocial • {username}", icon_url=_RBX_ICON)
             e.timestamp = now()
