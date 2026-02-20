@@ -888,9 +888,169 @@ async def db_init():
             await db.execute('CREATE INDEX IF NOT EXISTS idx_live_guild ON live_announcements(guild_id)')
         except:
             pass
-        
+
+        # Migration: ajouter message_id et channel_id pour suppression auto des lives
+        try:
+            async with db.execute('PRAGMA table_info(live_announcements)') as cur:
+                cols = [r[1] async for r in cur]
+            if 'message_id' not in cols:
+                await db.execute('ALTER TABLE live_announcements ADD COLUMN message_id INTEGER DEFAULT 0')
+            if 'live_channel_id' not in cols:
+                await db.execute('ALTER TABLE live_announcements ADD COLUMN live_channel_id INTEGER DEFAULT 0')
+        except:
+            pass
+
+        # Table cache avatars pour les réseaux sociaux
+        await db.execute('''CREATE TABLE IF NOT EXISTS feed_avatars (
+            platform TEXT,
+            username TEXT,
+            avatar_url TEXT,
+            fetched_at DATETIME,
+            PRIMARY KEY (platform, username)
+        )''')
+
         await db.commit()
     print("✅ DB OK")
+
+# ═══════════════ CACHE AVATARS RÉSEAUX SOCIAUX ═══════════════
+_avatar_cache = {}  # {(platform, username): avatar_url}
+
+async def get_cached_avatar(platform: str, username: str) -> str:
+    """Récupère l'avatar depuis le cache RAM → DB → None"""
+    key = (platform, username)
+    if key in _avatar_cache:
+        return _avatar_cache[key]
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT avatar_url, fetched_at FROM feed_avatars WHERE platform=? AND username=?',
+                (platform, username)
+            ) as cur:
+                row = await cur.fetchone()
+                if row and row[0]:
+                    # Cache valide pendant 7 jours
+                    try:
+                        fetched = datetime.fromisoformat(row[1])
+                        if (now() - fetched.replace(tzinfo=timezone.utc)).days < 7:
+                            _avatar_cache[key] = row[0]
+                            return row[0]
+                    except:
+                        _avatar_cache[key] = row[0]
+                        return row[0]
+    except:
+        pass
+    return None
+
+async def save_avatar_cache(platform: str, username: str, avatar_url: str):
+    """Sauvegarde un avatar dans le cache RAM + DB"""
+    if not avatar_url:
+        return
+    _avatar_cache[(platform, username)] = avatar_url
+    try:
+        async with get_db() as db:
+            await db.execute('''
+                INSERT INTO feed_avatars (platform, username, avatar_url, fetched_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(platform, username) DO UPDATE SET avatar_url = ?, fetched_at = ?
+            ''', (platform, username, avatar_url, now().isoformat(), avatar_url, now().isoformat()))
+            await db.commit()
+    except:
+        pass
+
+async def fetch_avatar_url(platform: str, username: str, session) -> str:
+    """Scrape l'avatar depuis la plateforme (avec cache)"""
+    cached = await get_cached_avatar(platform, username)
+    if cached:
+        return cached
+
+    avatar_url = None
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        if platform == 'youtube':
+            # YouTube: extraire avatar depuis la page channel
+            url = f"https://www.youtube.com/channel/{username}"
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    html = await resp.text()
+                    import re
+                    m = re.search(r'"avatar":\{"thumbnails":\[\{"url":"([^"]+)"', html)
+                    if m:
+                        avatar_url = m.group(1).split('=')[0]  # Enlever les params de taille
+
+        elif platform == 'twitch':
+            url = f"https://www.twitch.tv/{username}"
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    html = await resp.text()
+                    import re
+                    m = re.search(r'<meta\s+property="og:image"\s+content="([^"]+)"', html)
+                    if m:
+                        avatar_url = m.group(1)
+
+        elif platform == 'tiktok':
+            url = f"https://www.tiktok.com/@{username}"
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    html = await resp.text()
+                    import re
+                    m = re.search(r'<meta\s+property="og:image"\s+content="([^"]+)"', html)
+                    if m:
+                        avatar_url = m.group(1)
+
+        elif platform == 'roblox_user':
+            url = f"https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={username}&size=150x150&format=Png"
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get('data') and len(data['data']) > 0:
+                        avatar_url = data['data'][0].get('imageUrl')
+
+        elif platform == 'twitter':
+            # Twitter: essayer via Nitter instances pour og:image
+            nitter_instances = ['nitter.net', 'nitter.privacydev.net', 'nitter.poast.org']
+            for inst in nitter_instances:
+                try:
+                    url = f"https://{inst}/{username}"
+                    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                        if resp.status == 200:
+                            html = await resp.text()
+                            import re
+                            m = re.search(r'<meta\s+property="og:image"\s+content="([^"]+)"', html)
+                            if m:
+                                avatar_url = m.group(1)
+                                if 'nitter' in avatar_url:
+                                    avatar_url = avatar_url.replace(f"https://{inst}", "https://pbs.twimg.com")
+                                break
+                except:
+                    continue
+
+        elif platform == 'reddit':
+            url = f"https://www.reddit.com/r/{username}/about.json"
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    icon = data.get('data', {}).get('icon_img') or data.get('data', {}).get('community_icon', '')
+                    if icon:
+                        avatar_url = icon.split('?')[0]
+
+        elif platform == 'rosocial':
+            url = f"https://rosocial.net/{username}"
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    html = await resp.text()
+                    import re
+                    m = re.search(r'<img[^>]+class="[^"]*avatar[^"]*"[^>]+src="([^"]+)"', html, re.IGNORECASE)
+                    if not m:
+                        m = re.search(r'<img[^>]+src="([^"]+)"[^>]+class="[^"]*avatar[^"]*"', html, re.IGNORECASE)
+                    if m:
+                        avatar_url = m.group(1)
+
+    except:
+        pass
+
+    if avatar_url:
+        await save_avatar_cache(platform, username, avatar_url)
+    return avatar_url
 
 async def db_get(gid):
     """Récupère la configuration d'un serveur de manière sécurisée"""
@@ -6087,7 +6247,7 @@ async def load_live_state_from_db():
     """Charge l'état des lives depuis la DB au démarrage"""
     try:
         async with get_db() as db:
-            async with db.execute('SELECT cache_key, announced_at, is_live, fail_count FROM live_announcements') as cur:
+            async with db.execute('SELECT cache_key, announced_at, is_live, fail_count, message_id, live_channel_id FROM live_announcements') as cur:
                 async for row in cur:
                     key = row[0]
                     try:
@@ -6097,7 +6257,9 @@ async def load_live_state_from_db():
                     _live_state[key] = {
                         'is_live': bool(row[2]),
                         'announced_at': ann_at,
-                        'fail_count': row[3] or 0
+                        'fail_count': row[3] or 0,
+                        'message_id': row[4] or 0,
+                        'live_channel_id': row[5] or 0
                     }
         print(f"✅ Live state loaded: {len(_live_state)} entries")
     except:
@@ -6110,15 +6272,17 @@ async def save_live_state(cache_key: str, guild_id: int = 0, platform: str = '',
         return
     try:
         ann_str = state['announced_at'].isoformat() if state.get('announced_at') else None
+        msg_id = state.get('message_id', 0)
+        ch_id = state.get('live_channel_id', 0)
         async with get_db() as db:
             await db.execute('''
-                INSERT INTO live_announcements (cache_key, guild_id, platform, username, announced_at, is_live, fail_count)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO live_announcements (cache_key, guild_id, platform, username, announced_at, is_live, fail_count, message_id, live_channel_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(cache_key) DO UPDATE SET
-                    announced_at = ?, is_live = ?, fail_count = ?
+                    announced_at = ?, is_live = ?, fail_count = ?, message_id = ?, live_channel_id = ?
             ''', (cache_key, guild_id, platform, username, ann_str,
-                  1 if state.get('is_live') else 0, state.get('fail_count', 0),
-                  ann_str, 1 if state.get('is_live') else 0, state.get('fail_count', 0)))
+                  1 if state.get('is_live') else 0, state.get('fail_count', 0), msg_id, ch_id,
+                  ann_str, 1 if state.get('is_live') else 0, state.get('fail_count', 0), msg_id, ch_id))
             await db.commit()
     except Exception as ex:
         print(f"[LIVE] Erreur save: {ex}")
@@ -6155,28 +6319,51 @@ async def should_announce_live(cache_key: str) -> bool:
     
     return True  # Cooldown passé → annoncer
 
-async def mark_live_announced(cache_key: str, guild_id: int = 0, platform: str = '', username: str = ''):
-    """Marque un live comme annoncé (RAM + DB)"""
+async def mark_live_announced(cache_key: str, guild_id: int = 0, platform: str = '', username: str = '', message_id: int = 0, live_channel_id: int = 0):
+    """Marque un live comme annoncé (RAM + DB) et stocke le message_id pour suppression auto"""
     _live_state[cache_key] = {
         'is_live': True,
         'announced_at': now(),
-        'fail_count': 0
+        'fail_count': 0,
+        'message_id': message_id,
+        'live_channel_id': live_channel_id
     }
     await save_live_state(cache_key, guild_id, platform, username)
 
 async def check_live_ended(cache_key: str, guild_id: int = 0, platform: str = '', username: str = ''):
-    """Vérifie si le live est vraiment terminé (debounce 30 min)."""
+    """Vérifie si le live est vraiment terminé (debounce 3h). Supprime le message Discord si le live est fini."""
     state = _live_state.get(cache_key)
     if not state:
         return
-    
+
     state['fail_count'] = state.get('fail_count', 0) + 1
-    
+
     if state['fail_count'] >= LIVE_END_THRESHOLD:
-        # 30 min sans détection → live terminé
+        # Live terminé — supprimer le message Discord
+        msg_id = state.get('message_id', 0)
+        ch_id = state.get('live_channel_id', 0)
+        if msg_id and ch_id and guild_id:
+            try:
+                guild = bot.get_guild(guild_id)
+                if guild:
+                    channel = guild.get_channel(ch_id)
+                    if channel:
+                        try:
+                            old_msg = await channel.fetch_message(msg_id)
+                            await old_msg.delete()
+                            print(f"[LIVE] Message supprimé: {platform} {username} (guild {guild_id})")
+                        except discord.NotFound:
+                            pass  # Déjà supprimé
+                        except discord.Forbidden:
+                            print(f"[LIVE] Permission refusée pour supprimer le message live {msg_id}")
+            except Exception as ex:
+                print(f"[LIVE] Erreur suppression message: {ex}")
+
         state['is_live'] = False
         state['fail_count'] = 0
-    
+        state['message_id'] = 0
+        state['live_channel_id'] = 0
+
     await save_live_state(cache_key, guild_id, platform, username)
 
 def mark_live_still_active(cache_key: str):
@@ -8750,46 +8937,63 @@ class GiveawayConditionsPanel(View):
         self.u = u
         self.g = g
         self.data = data
-    
+        # Initialiser le mode si pas encore défini
+        if 'conditions' not in self.data:
+            self.data['conditions'] = {}
+        if 'condition_mode' not in self.data['conditions']:
+            self.data['conditions']['condition_mode'] = 'OR'
+
     def embed(self):
         e = discord.Embed(title="⚙️ Conditions de Participation", color=C.ORANGE)
-        e.description = "Configurez les conditions pour participer au cadeau.\n**Laissez vide = tout le monde peut participer**"
-        
+
         conditions = self.data.get('conditions', {})
-        
+        mode = conditions.get('condition_mode', 'OR')
+
+        if mode == 'OR':
+            mode_txt = "🔀 **Mode : OU** — une seule condition suffit pour participer"
+        else:
+            mode_txt = "🔗 **Mode : ET** — toutes les conditions doivent être remplies"
+
+        e.description = f"{mode_txt}\n\nConfigurez les conditions pour participer au cadeau.\n**Laissez vide = tout le monde peut participer**"
+
         # Messages minimum
         min_msgs = conditions.get('min_messages', 0)
         e.add_field(name="📝 Messages minimum", value=f"`{min_msgs}`" if min_msgs else "*Aucun*", inline=True)
-        
+
         # Temps vocal minimum (en minutes)
         min_vocal = conditions.get('min_vocal_minutes', 0)
         e.add_field(name="🎤 Vocal minimum", value=f"`{min_vocal} min`" if min_vocal else "*Aucun*", inline=True)
-        
+
         # Rôle requis
         role_id = conditions.get('required_role', 0)
         role = self.g.get_role(role_id) if role_id else None
         e.add_field(name="🎭 Rôle requis", value=role.mention if role else "*Aucun*", inline=True)
-        
+
         # Ancienneté minimum (en jours)
         min_days = conditions.get('min_account_days', 0)
         e.add_field(name="📅 Ancienneté", value=f"`{min_days} jours`" if min_days else "*Aucun*", inline=True)
-        
+
         # AFK check
         no_afk = conditions.get('no_afk', False)
         afk_days = conditions.get('afk_days', 7)
         e.add_field(name="❌ Pas AFK", value=f"`{afk_days} jours`" if no_afk else "*Désactivé*", inline=True)
-        
+
+        # Rôle Ping
+        ping_role_id = self.data.get('ping_role', 0)
+        ping_role = self.g.get_role(ping_role_id) if ping_role_id else None
+        e.add_field(name="🔔 Ping", value=ping_role.mention if ping_role else "*Aucun*", inline=True)
+
         e.set_footer(text="💡 Cliquez sur Publier quand vous avez fini")
         return e
-    
+
     @discord.ui.button(label="📝 Messages min", style=discord.ButtonStyle.secondary, row=0)
     async def set_messages(self, i, b):
         await i.response.send_modal(GiveawayConditionModal(self, 'min_messages', "Nombre minimum de messages", "Ex: 100"))
-    
+
     @discord.ui.button(label="🎤 Vocal min", style=discord.ButtonStyle.secondary, row=0)
     async def set_vocal(self, i, b):
         await i.response.send_modal(GiveawayConditionModal(self, 'min_vocal_minutes', "Minutes minimum en vocal", "Ex: 60"))
-    
+
     @discord.ui.button(label="🎭 Rôle requis", style=discord.ButtonStyle.secondary, row=0)
     async def set_role(self, i, b):
         roles = [r for r in self.g.roles if not r.is_default() and not r.is_bot_managed()][:24]
@@ -8797,22 +9001,37 @@ class GiveawayConditionsPanel(View):
         opts.insert(0, discord.SelectOption(label="❌ Aucun rôle requis", value="0"))
         v = GiveawayRoleSelectView(self, opts)
         await i.response.edit_message(embed=discord.Embed(title="🎭 Sélectionner le rôle requis", color=C.ORANGE), view=v)
-    
+
     @discord.ui.button(label="📅 Ancienneté", style=discord.ButtonStyle.secondary, row=1)
     async def set_account_age(self, i, b):
         await i.response.send_modal(GiveawayConditionModal(self, 'min_account_days', "Jours d'ancienneté minimum", "Ex: 30"))
-    
+
     @discord.ui.button(label="❌ AFK", style=discord.ButtonStyle.secondary, row=1)
     async def set_afk(self, i, b):
         await i.response.send_modal(GiveawayConditionModal(self, 'afk_days', "Jours AFK max (0 = désactivé)", "Ex: 7 (ou 0 pour désactiver)"))
-    
-    @discord.ui.button(label="✅ Publier le Cadeau", style=discord.ButtonStyle.success, row=2)
+
+    @discord.ui.button(label="🔀 Mode AND/OR", style=discord.ButtonStyle.primary, row=1)
+    async def toggle_mode(self, i, b):
+        conditions = self.data.get('conditions', {})
+        current = conditions.get('condition_mode', 'OR')
+        conditions['condition_mode'] = 'AND' if current == 'OR' else 'OR'
+        self.data['conditions'] = conditions
+        await i.response.edit_message(embed=self.embed(), view=self)
+
+    @discord.ui.button(label="🔔 Rôle Ping", style=discord.ButtonStyle.secondary, row=2)
+    async def set_ping_role(self, i, b):
+        roles = [r for r in self.g.roles if not r.is_default() and not r.is_bot_managed()][:24]
+        opts = [discord.SelectOption(label=f"@{r.name}"[:25], value=str(r.id)) for r in roles]
+        opts.insert(0, discord.SelectOption(label="❌ Aucun ping", value="0"))
+        v = GiveawayPingRoleSelectView(self, opts)
+        await i.response.edit_message(embed=discord.Embed(title="🔔 Sélectionner le rôle à ping", color=C.ORANGE), view=v)
+
+    @discord.ui.button(label="✅ Publier le Cadeau", style=discord.ButtonStyle.success, row=3)
     async def publish(self, i, b):
-        # Demander le salon avec pagination
         v = GiveawayPaginatedChannelView(self.u, self.g, self.data)
         await i.response.edit_message(content="📢 **Sélectionnez le salon** où publier le cadeau:", embed=None, view=v)
-    
-    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.danger, row=2)
+
+    @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.danger, row=3)
     async def cancel(self, i, b):
         await i.response.edit_message(content="❌ Création annulée", embed=None, view=None)
 
@@ -8862,88 +9081,112 @@ class GiveawayPaginatedChannelView(View):
         await i.response.edit_message(content=f"📢 **Sélectionnez le salon** (Page {self.page+1}/{self.max_page+1}):", view=self)
 
 
+def _build_giveaway_embed(data, guild, user):
+    """Construit l'embed du giveaway avec support AND/OR"""
+    end_time = now() + timedelta(seconds=data['duration_seconds'])
+    conditions = data.get('conditions', {})
+    mode = conditions.get('condition_mode', 'OR')
+
+    e = discord.Embed(color=0xF1C40F)
+    e.set_author(name="🎁 GIVEAWAY", icon_url=guild.icon.url if guild.icon else None)
+    e.title = data['title']
+    e.description = (
+        f"{data['description']}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🏆 **Prix :** `{data['prize']}`\n"
+        f"⏰ **Fin :** <t:{int(end_time.timestamp())}:R> (<t:{int(end_time.timestamp())}:f>)\n"
+        f"👥 **Participants :** `0`\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    )
+
+    # Construire le texte des conditions avec mode AND/OR
+    separator = " **OU**\n" if mode == 'OR' else "\n"
+    condition_parts = []
+
+    if conditions.get('min_messages', 0) > 0:
+        condition_parts.append(f"📝 **{conditions['min_messages']}**+ messages")
+    if conditions.get('min_vocal_minutes', 0) > 0:
+        condition_parts.append(f"🎤 **{conditions['min_vocal_minutes']}**+ min en vocal")
+    if conditions.get('required_role', 0) > 0:
+        role = guild.get_role(conditions['required_role'])
+        if role:
+            condition_parts.append(f"🎭 Rôle {role.mention}")
+    if conditions.get('min_account_days', 0) > 0:
+        condition_parts.append(f"📅 Compte ≥ **{conditions['min_account_days']}** jours")
+    if conditions.get('no_afk', False):
+        afk_days = conditions.get('afk_days', 7)
+        condition_parts.append(f"❌ Pas AFK depuis **{afk_days}** jours")
+
+    if condition_parts:
+        if mode == 'OR':
+            conditions_title = "📋 Conditions (OU — une seule suffit)"
+        else:
+            conditions_title = "📋 Conditions (ET — toutes requises)"
+        conditions_txt = separator.join(condition_parts)
+    else:
+        conditions_title = "📋 Conditions"
+        conditions_txt = "✅ Aucune condition — tout le monde peut participer !"
+
+    e.add_field(name=conditions_title, value=conditions_txt, inline=False)
+
+    if data.get('image_url'):
+        e.set_image(url=data['image_url'])
+
+    e.set_footer(text=f"🎁 Giveaway • Par {user.display_name}", icon_url=user.display_avatar.url if user.display_avatar else None)
+    e.timestamp = now()
+    return e, conditions
+
+
+async def _publish_giveaway(data, guild, user, channel):
+    """Publie un giveaway dans un salon et sauvegarde en BDD"""
+    e, conditions = _build_giveaway_embed(data, guild, user)
+
+    giveaway_view = GiveawayParticipateView()
+    msg = await webhook_send(channel, 'giveaway', embed=e, view=giveaway_view)
+
+    # Ping le rôle configuré
+    ping_role_id = data.get('ping_role', 0)
+    if ping_role_id:
+        ping_role = guild.get_role(ping_role_id)
+        if ping_role:
+            try:
+                await channel.send(ping_role.mention, delete_after=5)
+            except:
+                pass
+
+    # Sauvegarder en BDD
+    end_time = now() + timedelta(seconds=data['duration_seconds'])
+    try:
+        async with get_db() as db:
+            await db.execute('''
+                INSERT INTO giveaways (guild_id, channel_id, message_id, title, description, prize, image_url, end_time, conditions, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                guild.id, channel.id, msg.id if msg else 0,
+                data['title'], data['description'], data['prize'],
+                data.get('image_url'), end_time.isoformat(),
+                json.dumps(conditions),
+                user.id
+            ))
+            await db.commit()
+    except Exception as ex:
+        print(f"Erreur sauvegarde giveaway: {ex}")
+
+    return msg
+
+
 class GiveawayChannelSelectPaginated(Select):
     def __init__(self, u, g, opts, data):
         super().__init__(placeholder="Choisir un salon...", options=opts, row=0)
         self.u = u
         self.g = g
         self.data = data
-    
+
     async def callback(self, i):
         channel = self.g.get_channel(int(self.values[0]))
         if not channel:
             return await i.response.edit_message(content="❌ Salon introuvable", view=None)
-        
-        # Calculer la fin
-        end_time = now() + timedelta(seconds=self.data['duration_seconds'])
-        
-        # Créer l'embed du giveaway — Design pro
-        e = discord.Embed(color=0xF1C40F)
-        e.set_author(name="🎁 GIVEAWAY", icon_url=self.g.icon.url if self.g.icon else None)
-        e.title = self.data['title']
-        e.description = (
-            f"{self.data['description']}\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🏆 **Prix :** `{self.data['prize']}`\n"
-            f"⏰ **Fin :** <t:{int(end_time.timestamp())}:R> (<t:{int(end_time.timestamp())}:f>)\n"
-            f"👥 **Participants :** `0`\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        )
-        
-        # Construire le texte des conditions
-        conditions = self.data.get('conditions', {})
-        conditions_txt = ""
-        
-        if conditions.get('min_messages', 0) > 0:
-            conditions_txt += f"📝 Minimum **{conditions['min_messages']}** messages\n"
-        
-        if conditions.get('min_vocal_minutes', 0) > 0:
-            conditions_txt += f"🎤 Minimum **{conditions['min_vocal_minutes']}** min en vocal\n"
-        
-        if conditions.get('required_role', 0) > 0:
-            role = self.g.get_role(conditions['required_role'])
-            if role:
-                conditions_txt += f"🎭 Rôle requis: {role.mention}\n"
-        
-        if conditions.get('min_account_days', 0) > 0:
-            conditions_txt += f"📅 Compte ≥ **{conditions['min_account_days']}** jours\n"
-        
-        if conditions.get('no_afk', False):
-            afk_days = conditions.get('afk_days', 7)
-            conditions_txt += f"❌ Pas AFK depuis **{afk_days}** jours\n"
-        
-        if not conditions_txt:
-            conditions_txt = "✅ Aucune condition — tout le monde peut participer !"
-        
-        e.add_field(name="📋 Conditions", value=conditions_txt, inline=False)
-        
-        if self.data['image_url']:
-            e.set_image(url=self.data['image_url'])
-        
-        e.set_footer(text=f"🎁 Giveaway • Par {self.u.display_name}", icon_url=self.u.display_avatar.url if self.u.display_avatar else None)
-        e.timestamp = now()
-        
-        # Envoyer via webhook
-        giveaway_view = GiveawayParticipateView()
-        msg = await webhook_send(channel, 'giveaway', embed=e, view=giveaway_view)
-        
-        # Sauvegarder en BDD avec les conditions
-        try:
-            async with get_db() as db:
-                await db.execute('''
-                    INSERT INTO giveaways (guild_id, channel_id, message_id, title, description, prize, image_url, end_time, conditions, created_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    self.g.id, channel.id, msg.id if msg else 0,
-                    self.data['title'], self.data['description'], self.data['prize'],
-                    self.data['image_url'], end_time.isoformat(), 
-                    json.dumps(conditions),
-                    self.u.id
-                ))
-                await db.commit()
-        except Exception as ex:
-            print(f"Erreur sauvegarde giveaway: {ex}")
-        
+        await _publish_giveaway(self.data, self.g, self.u, channel)
         await i.response.edit_message(content=f"✅ **Cadeau créé !** Publié dans {channel.mention}", view=None)
 
 class GiveawayConditionModal(Modal):
@@ -9006,6 +9249,25 @@ class GiveawayRoleSelect(Select):
         
         await i.response.edit_message(embed=self.panel.embed(), view=self.panel)
 
+class GiveawayPingRoleSelectView(View):
+    def __init__(self, panel, opts):
+        super().__init__(timeout=120)
+        self.panel = panel
+        self.add_item(GiveawayPingRoleSelect(panel, opts))
+
+class GiveawayPingRoleSelect(Select):
+    def __init__(self, panel, opts):
+        super().__init__(placeholder="Choisir un rôle à ping...", options=opts)
+        self.panel = panel
+
+    async def callback(self, i):
+        role_id = int(self.values[0])
+        if role_id > 0:
+            self.panel.data['ping_role'] = role_id
+        else:
+            self.panel.data.pop('ping_role', None)
+        await i.response.edit_message(embed=self.panel.embed(), view=self.panel)
+
 def parse_duration_to_seconds(duration_str):
     """Convertit une durée (1h, 2d, etc.) en secondes"""
     import re
@@ -9036,84 +9298,13 @@ class GiveawayChannelSelect(Select):
         self.u = u
         self.g = g
         self.data = data
-    
+
     async def callback(self, i):
         channel_id = int(self.values[0])
         channel = self.g.get_channel(channel_id)
-        
         if not channel:
             return await i.response.edit_message(content="❌ Salon introuvable", view=None)
-        
-        # Calculer la fin
-        end_time = now() + timedelta(seconds=self.data['duration_seconds'])
-        
-        # Créer l'embed du giveaway — Design pro
-        e = discord.Embed(color=0xF1C40F)
-        e.set_author(name="🎁 GIVEAWAY", icon_url=self.g.icon.url if self.g.icon else None)
-        e.title = self.data['title']
-        e.description = (
-            f"{self.data['description']}\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🏆 **Prix :** `{self.data['prize']}`\n"
-            f"⏰ **Fin :** <t:{int(end_time.timestamp())}:R> (<t:{int(end_time.timestamp())}:f>)\n"
-            f"👥 **Participants :** `0`\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        )
-        
-        # Construire le texte des conditions
-        conditions = self.data.get('conditions', {})
-        conditions_txt = ""
-        
-        if conditions.get('min_messages', 0) > 0:
-            conditions_txt += f"📝 Minimum **{conditions['min_messages']}** messages\n"
-        
-        if conditions.get('min_vocal_minutes', 0) > 0:
-            conditions_txt += f"🎤 Minimum **{conditions['min_vocal_minutes']}** min en vocal\n"
-        
-        if conditions.get('required_role', 0) > 0:
-            role = self.g.get_role(conditions['required_role'])
-            if role:
-                conditions_txt += f"🎭 Rôle requis: {role.mention}\n"
-        
-        if conditions.get('min_account_days', 0) > 0:
-            conditions_txt += f"📅 Compte ≥ **{conditions['min_account_days']}** jours\n"
-        
-        if conditions.get('no_afk', False):
-            afk_days = conditions.get('afk_days', 7)
-            conditions_txt += f"❌ Pas AFK depuis **{afk_days}** jours\n"
-        
-        if not conditions_txt:
-            conditions_txt = "✅ Aucune condition — tout le monde peut participer !"
-        
-        e.add_field(name="📋 Conditions", value=conditions_txt, inline=False)
-        
-        if self.data['image_url']:
-            e.set_image(url=self.data['image_url'])
-        
-        e.set_footer(text=f"🎁 Giveaway • Par {self.u.display_name}", icon_url=self.u.display_avatar.url if self.u.display_avatar else None)
-        e.timestamp = now()
-        
-        # Envoyer via webhook
-        giveaway_view = GiveawayParticipateView()
-        msg = await webhook_send(channel, 'giveaway', embed=e, view=giveaway_view)
-        
-        # Sauvegarder en BDD avec les conditions
-        try:
-            async with get_db() as db:
-                await db.execute('''
-                    INSERT INTO giveaways (guild_id, channel_id, message_id, title, description, prize, image_url, end_time, conditions, created_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    self.g.id, channel_id, msg.id if msg else 0,
-                    self.data['title'], self.data['description'], self.data['prize'],
-                    self.data['image_url'], end_time.isoformat(), 
-                    json.dumps(conditions),
-                    self.u.id
-                ))
-                await db.commit()
-        except Exception as ex:
-            print(f"Erreur sauvegarde giveaway: {ex}")
-        
+        await _publish_giveaway(self.data, self.g, self.u, channel)
         await i.response.edit_message(content=f"✅ **Cadeau créé !** Publié dans {channel.mention}", view=None)
 
 class GiveawayParticipateView(View):
@@ -9159,21 +9350,28 @@ class GiveawayParticipateView(View):
             
             # ═══════════════ ÉTAPE 2: Vérifier les conditions ═══════════════
             conditions = giveaway_data['conditions']
+            mode = conditions.get('condition_mode', 'OR')
             failed_conditions = []
-            
-            # 1. Vérifier AFK (seulement si configuré)
+            passed_conditions = []
+            total_conditions = 0
+
+            # 1. Vérifier AFK
             afk_days = conditions.get('afk_days', 0)
             if afk_days > 0:
+                total_conditions += 1
                 try:
                     is_afk = await check_member_afk(i.guild.id, i.user.id, days=afk_days)
                     if is_afk:
                         failed_conditions.append(f"❌ Vous êtes **inactif** depuis plus de {afk_days} jours")
+                    else:
+                        passed_conditions.append("afk")
                 except Exception as e:
                     print(f"Erreur check AFK: {e}")
-            
+
             # 2. Vérifier les messages minimum
             min_messages = conditions.get('min_messages', 0)
             if min_messages > 0:
+                total_conditions += 1
                 try:
                     user_msgs = 0
                     async with get_db() as db:
@@ -9183,15 +9381,17 @@ class GiveawayParticipateView(View):
                         ) as cursor:
                             msg_row = await cursor.fetchone()
                             user_msgs = msg_row[0] if msg_row and msg_row[0] else 0
-                    
                     if user_msgs < min_messages:
                         failed_conditions.append(f"📝 Vous avez **{user_msgs}** messages (minimum: **{min_messages}**)")
+                    else:
+                        passed_conditions.append("messages")
                 except Exception as e:
                     print(f"Erreur check messages: {e}")
-            
+
             # 3. Vérifier le temps vocal minimum
             min_vocal = conditions.get('min_vocal_minutes', 0)
             if min_vocal > 0:
+                total_conditions += 1
                 try:
                     user_vocal_minutes = 0
                     async with get_db() as db:
@@ -9202,27 +9402,32 @@ class GiveawayParticipateView(View):
                             vocal_row = await cursor.fetchone()
                             user_vocal_seconds = vocal_row[0] if vocal_row and vocal_row[0] else 0
                             user_vocal_minutes = user_vocal_seconds // 60
-                    
                     if user_vocal_minutes < min_vocal:
                         failed_conditions.append(f"🎤 Vous avez **{user_vocal_minutes}** min en vocal (minimum: **{min_vocal}**)")
+                    else:
+                        passed_conditions.append("vocal")
                 except Exception as e:
                     print(f"Erreur check vocal: {e}")
-            
+
             # 4. Vérifier le rôle requis
             required_role_id = conditions.get('required_role', 0)
             if required_role_id > 0:
+                total_conditions += 1
                 try:
                     role = i.guild.get_role(required_role_id)
                     if role:
                         member_role_ids = [r.id for r in member.roles]
                         if role.id not in member_role_ids:
                             failed_conditions.append(f"🎭 Vous devez avoir le rôle **{role.name}**")
+                        else:
+                            passed_conditions.append("role")
                 except Exception as e:
                     print(f"Erreur check role: {e}")
-            
+
             # 5. Vérifier l'ancienneté du compte
             min_days = conditions.get('min_account_days', 0)
             if min_days > 0:
+                total_conditions += 1
                 try:
                     created = member.created_at
                     if not created.tzinfo:
@@ -9230,15 +9435,26 @@ class GiveawayParticipateView(View):
                     account_age = (now() - created).days
                     if account_age < min_days:
                         failed_conditions.append(f"📅 Votre compte a **{account_age}** jours (minimum: **{min_days}**)")
+                    else:
+                        passed_conditions.append("account_age")
                 except Exception as e:
                     print(f"Erreur check account age: {e}")
-            
-            # Si des conditions ne sont pas remplies
-            if failed_conditions:
-                error_msg = "❌ **Vous ne pouvez pas participer !**\n\n**Conditions non remplies:**\n"
-                error_msg += "\n".join(failed_conditions)
-                error_msg += "\n\n*Remplissez ces conditions pour pouvoir participer.*"
-                return await i.response.send_message(error_msg, ephemeral=True)
+
+            # Vérification selon le mode
+            if total_conditions > 0 and failed_conditions:
+                if mode == 'OR':
+                    # Mode OR : au moins 1 condition remplie suffit
+                    if not passed_conditions:
+                        error_msg = "❌ **Vous ne pouvez pas participer !**\n\n**Vous devez remplir au moins UNE condition :**\n"
+                        error_msg += "\n".join(failed_conditions)
+                        error_msg += "\n\n*Remplissez au moins une condition pour participer.*"
+                        return await i.response.send_message(error_msg, ephemeral=True)
+                else:
+                    # Mode AND : toutes les conditions doivent être remplies
+                    error_msg = "❌ **Vous ne pouvez pas participer !**\n\n**Conditions non remplies :**\n"
+                    error_msg += "\n".join(failed_conditions)
+                    error_msg += "\n\n*Remplissez toutes les conditions pour participer.*"
+                    return await i.response.send_message(error_msg, ephemeral=True)
             
             # ═══════════════ ÉTAPE 3: Ajouter le participant ═══════════════
             giveaway_data['participants'].append(i.user.id)
@@ -18888,18 +19104,20 @@ async def check_youtube_feeds(session, guild, data):
                                 mark_live_still_active(live_cache_key)
                                 
                                 if await should_announce_live(live_cache_key):
-                                    await mark_live_announced(live_cache_key, guild.id, 'youtube', channel_name)
-                                    
                                     live_url = f"https://www.youtube.com/channel/{channel_id}/live"
                                     e = discord.Embed(color=0xFF0000, url=live_url)
                                     e.set_author(name=f"🔴 EN DIRECT SUR YOUTUBE", url=live_url, icon_url=_YT_ICON)
                                     e.title = f"{channel_name} est en LIVE !"
                                     e.description = f"**{channel_name}** vient de lancer un stream en direct !\n\n▶️ [**Rejoindre le live**]({live_url})"
                                     e.set_image(url=f"https://img.youtube.com/vi/live_user_{channel_id}/maxresdefault.jpg?t={int(now().timestamp())}")
+                                    yt_avatar = await fetch_avatar_url('youtube', channel_id, session)
+                                    if yt_avatar:
+                                        e.set_thumbnail(url=yt_avatar)
                                     e.set_footer(text=f"YouTube Live • {channel_name}", icon_url=_YT_ICON)
                                     e.timestamp = now()
-                                    
-                                    await webhook_send(live_channel, 'youtube_live', embed=e)
+
+                                    _live_msg = await webhook_send(live_channel, 'youtube_live', embed=e)
+                                    await mark_live_announced(live_cache_key, guild.id, 'youtube', channel_name, message_id=_live_msg.id if _live_msg else 0, live_channel_id=live_channel.id)
                             else:
                                 # Live pas détecté — debounce avant de considérer comme terminé
                                 await check_live_ended(live_cache_key, guild.id, 'youtube', channel_name)
@@ -18972,17 +19190,23 @@ async def check_youtube_feeds(session, guild, data):
             e = discord.Embed(color=0xFF0000, url=video_url)
             e.set_author(name=f"YOUTUBE • {channel_name}", url=f"https://www.youtube.com/channel/{channel_id}", icon_url=_YT_ICON)
             e.title = f"▶️ {title}"
-            
+
             # Description propre : seulement si non-vide après nettoyage
             if description and len(description.strip()) > 10:
                 e.description = f"*{description}*\n\n🔗 [**Regarder sur YouTube**]({video_url})"
             else:
                 e.description = f"🔗 [**Regarder sur YouTube**]({video_url})"
-            
+
             e.set_image(url=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg")
+
+            # Avatar de la chaîne en thumbnail
+            yt_avatar = await fetch_avatar_url('youtube', channel_id, session)
+            if yt_avatar:
+                e.set_thumbnail(url=yt_avatar)
+
             e.set_footer(text=f"YouTube • {channel_name}", icon_url=_YT_ICON)
             e.timestamp = now()
-            
+
             await webhook_send(target_channel, 'youtube', embed=e)
             await asyncio.sleep(1)
             
@@ -19034,18 +19258,20 @@ async def check_twitch_feeds(session, guild, data):
                 mark_live_still_active(cache_key)
                 
                 if await should_announce_live(cache_key):
-                    await mark_live_announced(cache_key, guild.id, 'twitch', username)
-                    
                     stream_url = f"https://www.twitch.tv/{username}"
                     e = discord.Embed(color=0x9146FF, url=stream_url)
                     e.set_author(name=f"🔴 EN DIRECT SUR TWITCH", url=stream_url, icon_url=_TW_ICON)
                     e.title = f"{username} est en live !"
                     e.description = f"**{username}** vient de lancer un stream !\n\n▶️ [**Rejoindre le stream**]({stream_url})"
                     e.set_image(url=f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{username.lower()}-1280x720.jpg?t={int(now().timestamp())}")
+                    tw_avatar = await fetch_avatar_url('twitch', username, session)
+                    if tw_avatar:
+                        e.set_thumbnail(url=tw_avatar)
                     e.set_footer(text=f"Twitch • {username}", icon_url=_TW_ICON)
                     e.timestamp = now()
-                    
-                    await webhook_send(notif_channel, 'twitch_live', embed=e)
+
+                    _live_msg = await webhook_send(notif_channel, 'twitch_live', embed=e)
+                    await mark_live_announced(cache_key, guild.id, 'twitch', username, message_id=_live_msg.id if _live_msg else 0, live_channel_id=notif_channel.id)
             else:
                 await check_live_ended(cache_key, guild.id, 'twitch', username)
             
@@ -19099,17 +19325,19 @@ async def check_tiktok_feeds(session, guild, data):
                                 mark_live_still_active(live_cache_key)
                                 
                                 if await should_announce_live(live_cache_key):
-                                    await mark_live_announced(live_cache_key, guild.id, 'tiktok', username)
-                                    
                                     tiktok_live_url = f"https://www.tiktok.com/@{username}/live"
                                     e = discord.Embed(color=0xFE2C55, url=tiktok_live_url)
                                     e.set_author(name=f"🔴 EN DIRECT SUR TIKTOK", url=tiktok_live_url, icon_url=_TK_ICON)
                                     e.title = f"@{username} est en LIVE !"
                                     e.description = f"**@{username}** est en direct sur TikTok !\n\n🎵 [**Rejoindre le live**]({tiktok_live_url})"
+                                    tk_avatar = await fetch_avatar_url('tiktok', username, session)
+                                    if tk_avatar:
+                                        e.set_thumbnail(url=tk_avatar)
                                     e.set_footer(text=f"TikTok Live • @{username}", icon_url=_TK_ICON)
                                     e.timestamp = now()
-                                    
-                                    await webhook_send(live_channel, 'tiktok_live', embed=e)
+
+                                    _live_msg = await webhook_send(live_channel, 'tiktok_live', embed=e)
+                                    await mark_live_announced(live_cache_key, guild.id, 'tiktok', username, message_id=_live_msg.id if _live_msg else 0, live_channel_id=live_channel.id)
                             else:
                                 await check_live_ended(live_cache_key, guild.id, 'tiktok', username)
                 except:
@@ -19171,18 +19399,23 @@ async def check_tiktok_feeds(session, guild, data):
                         video_title = valid_descs[0][:200]
                 
                 video_url = f"https://www.tiktok.com/@{username}/video/{latest_video_id}"
-                
+
+                tk_avatar = await fetch_avatar_url('tiktok', username, session)
+
                 e = discord.Embed(color=0xFE2C55, url=video_url)
                 e.set_author(name=f"TIKTOK • @{username}", url=f"https://www.tiktok.com/@{username}", icon_url=_TK_ICON)
                 e.title = f"🎵 {video_title[:200]}"
                 e.description = f"**@{username}** a publié une nouvelle vidéo !\n\n▶️ [**Voir la vidéo**]({video_url})"
-                
-                # Thumbnail TikTok
+
+                if tk_avatar:
+                    e.set_thumbnail(url=tk_avatar)
+
+                # Image de couverture TikTok
                 thumb_match = re.search(r'"cover":"(https://[^"]+)"', html)
                 if thumb_match:
                     thumb_url = thumb_match.group(1).replace('\\u002F', '/')
                     e.set_image(url=thumb_url)
-                
+
                 e.set_footer(text=f"TikTok • @{username}", icon_url=_TK_ICON)
                 e.timestamp = now()
                 
@@ -19253,20 +19486,25 @@ async def check_reddit_feeds(session, guild, data):
             posted_content[cache_key] = post_id
             
             # ═══════════════ EMBED REDDIT PROFESSIONNEL ═══════════════
+            rd_avatar = await fetch_avatar_url('reddit', subreddit, session)
+
             e = discord.Embed(color=0xFF4500)
-            
+
             e.title = f"📰 {title[:200]}"
             e.url = link
-            
+
             e.set_author(
                 name=f"🟠 REDDIT • r/{subreddit}",
                 url=f"https://www.reddit.com/r/{subreddit}",
                 icon_url=_RD_ICON
             )
-            
+
+            if rd_avatar:
+                e.set_thumbnail(url=rd_avatar)
+
             e.add_field(name="👤 Auteur", value=f"u/{author}", inline=True)
             e.add_field(name="📁 Subreddit", value=f"r/{subreddit}", inline=True)
-            
+
             if image_url and ('i.redd.it' in image_url or 'preview.redd.it' in image_url):
                 e.set_image(url=image_url)
             
@@ -19353,16 +19591,21 @@ async def check_twitter_feeds(session, guild, data):
             posted_content[cache_key] = tweet_id
             
             # ═══════════════ EMBED TWITTER PROFESSIONNEL ═══════════════
+            tw_avatar = await fetch_avatar_url('twitter', username, session)
+
             e = discord.Embed(color=0x1DA1F2)
-            
+
             e.description = f"💬 {tweet_text[:1900]}"
-            
+
             e.set_author(
                 name=f"🐦 TWITTER/X • @{username}",
                 url=f"https://twitter.com/{username}",
                 icon_url=_X_ICON
             )
-            
+
+            if tw_avatar:
+                e.set_thumbnail(url=tw_avatar)
+
             if image_url:
                 # Convertir URL Nitter en URL Twitter si nécessaire
                 if working_instance and working_instance in image_url:
@@ -19477,17 +19720,23 @@ async def check_rosocial_feeds(session, guild, data):
             # ═══════════════════════════════════════════════════════════════════════════════
             #                    🎨 EMBED ROSOCIAL - IMAGE EN HAUT À DROITE
             # ═══════════════════════════════════════════════════════════════════════════════
-            
+
+            rs_avatar = await fetch_avatar_url('rosocial', username, session)
+
             e = discord.Embed(color=0x00D4AA)  # Vert RoSocial
-            
+
             # Titre
             e.title = f"📝 Nouveau post de {username}"
             e.url = post_url
-            
-            # IMAGE DU POST en haut à droite (thumbnail)
-            if image_url:
+
+            # Avatar du créateur + image du post
+            if rs_avatar:
+                e.set_thumbnail(url=rs_avatar)
+                if image_url:
+                    e.set_image(url=image_url)
+            elif image_url:
                 e.set_thumbnail(url=image_url)
-            
+
             # Informations
             e.add_field(name="👤 Créateur", value=f"**{username}**", inline=True)
             
@@ -19621,15 +19870,24 @@ async def check_roblox_ugc_feeds(session, guild, data):
                 # ═══════════════════════════════════════════════════════════════════════════════
                 #                        🎨 EMBED ROBLOX UGC - IMAGE EN HAUT À DROITE
                 # ═══════════════════════════════════════════════════════════════════════════════
-                
+
+                # Avatar du créateur
+                rbx_avatar = None
+                if feed_type == 'user' and creator_id:
+                    rbx_avatar = await fetch_avatar_url('roblox_user', str(creator_id), session)
+
                 e = discord.Embed(color=0x00B06B)  # Vert Roblox
-                
+
                 # Titre = Nom de l'article
                 e.title = f"🎨 {item_name}"
                 e.url = item_url
-                
-                # Image en HAUT À DROITE (thumbnail)
-                if thumb_url:
+
+                # Avatar en thumbnail, image item en image
+                if rbx_avatar:
+                    e.set_thumbnail(url=rbx_avatar)
+                    if thumb_url:
+                        e.set_image(url=thumb_url)
+                elif thumb_url:
                     e.set_thumbnail(url=thumb_url)
                 
                 # Prix
