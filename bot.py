@@ -909,6 +909,18 @@ async def db_init():
             PRIMARY KEY (platform, username)
         )''')
 
+        # Table pour les membres restreints (/restrict)
+        await db.execute('''CREATE TABLE IF NOT EXISTS restricted_members (
+            guild_id INTEGER,
+            user_id INTEGER,
+            roles_backup TEXT DEFAULT '[]',
+            restricted_at DATETIME,
+            duration INTEGER DEFAULT 0,
+            reason TEXT DEFAULT '',
+            restricted_by INTEGER DEFAULT 0,
+            PRIMARY KEY (guild_id, user_id)
+        )''')
+
         await db.commit()
     print("✅ DB OK")
 
@@ -1006,19 +1018,19 @@ async def fetch_avatar_url(platform: str, username: str, session) -> str:
                         avatar_url = data['data'][0].get('imageUrl')
 
         elif platform == 'twitter':
-            # Twitter: essayer via Nitter instances pour og:image
-            nitter_instances = ['nitter.net', 'nitter.privacydev.net', 'nitter.poast.org']
-            for inst in nitter_instances:
+            # Twitter: essayer via xcancel/Nitter pour og:image
+            for inst in NITTER_INSTANCES:
                 try:
                     url = f"https://{inst}/{username}"
-                    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+                    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
                         if resp.status == 200:
                             html = await resp.text()
-                            import re
                             m = re.search(r'<meta\s+property="og:image"\s+content="([^"]+)"', html)
+                            if not m:
+                                m = re.search(r'<img[^>]+class="[^"]*profile[^"]*"[^>]+src="([^"]+)"', html, re.IGNORECASE)
                             if m:
                                 avatar_url = m.group(1)
-                                if 'nitter' in avatar_url:
+                                if inst in avatar_url:
                                     avatar_url = avatar_url.replace(f"https://{inst}", "https://pbs.twimg.com")
                                 break
                 except:
@@ -1156,7 +1168,7 @@ async def is_immune(m, key, channel=None):
     
     # Protections CRITIQUES - JAMAIS ignorées même pour les immunisés
     # Ces protections protègent contre les comptes hackés
-    critical_protections = ['anti_phishing', 'anti_compromised']
+    critical_protections = ['anti_phishing', 'anti_compromised', 'anti_scam']
     
     if key in critical_protections:
         return False  # Personne n'est immunisé contre le phishing
@@ -2595,20 +2607,32 @@ alt_account_cache = {}  # {guild_id: {user_id: {'main_account': user_id, 'alts':
 
 # Domaines de phishing connus (2026 - mise à jour)
 PHISHING_DOMAINS = [
-    # Faux Discord
+    # Faux Discord (classiques)
     'discord-gift.com', 'discord-nitro.gift', 'discordgift.site', 'discordnitro.com',
     'dlscord.com', 'dlscord.gift', 'discorcl.com', 'discrod.com', 'discordc.com',
     'discord-app.com', 'discordapp.gift', 'discord.gift', 'discord-airdrop.com',
     'discordn.com', 'discordi.com', 'discord-claim.com', 'discordnitros.com',
     'dlscord-nitro.com', 'discordd.gift', 'disc0rd.gift', 'disc0rd-nitro.com',
     'discorid.gift', 'discordl.com', 'discord-free.com', 'discordgiveaway.com',
+    # Faux Discord 2026 — verify/login scams
+    'discord-verify.com', 'discordlogin.net', 'd1scord.com', 'discord-verify.net',
+    'discordapp-gifts.com', 'discordapp-nitro.com', 'discordfree-nitro.com',
+    'discord-login.com', 'discord-login.net', 'discord-safeguard.com',
+    'discord-age-verify.com', 'discord-verify-age.com', 'verify-discord.com',
+    'steam-discord.com', 'discord-security.com', 'discord-captcha.com',
+    # Faux Steam
     'steamcomminuty.com', 'steampowored.com', 'steamcommunlty.com', 'steancommunity.com',
     'store-steampowered.com', 'steamcommunity.ru.com', 'steamcommunitv.com',
-    # Faux Steam
     'steamcommunity-login.com', 'steam-guard.com', 'steamguard-code.com',
+    '1steam.xyz', '2-csgo.com',
+    # Faux Roblox
+    '0www-roblox.com', '1-robiox.website', '1-roblox.info', '1robiox1.xyz', '1roblofx.com',
     # Crypto scams
     'free-ethereum.com', 'free-bitcoin.gift', 'crypto-airdrop.com', 'nft-free.com',
     'opensea-drop.com', 'metamask-airdrop.com', 'eth-giveaway.com',
+    '0x1trade.com', '1000usdc.net', '1000usdc.top', '2000usdt.top',
+    # Token grabbers / Malware hosts
+    '18nsfw-verification.xyz', '1captcha.site',
     # Faux services
     'paypal-verify.com', 'amazon-gift.com', 'netflix-free.com', 'spotify-premium.gift',
     # IP grabbers
@@ -2620,14 +2644,26 @@ PHISHING_DOMAINS = [
 
 # Patterns de phishing dans les URLs
 PHISHING_URL_PATTERNS = [
+    # Classiques
     r'discord.*gift', r'discord.*nitro', r'discord.*free', r'discord.*claim',
     r'steam.*community.*login', r'steam.*guard', r'steam.*trade',
     r'free.*nitro', r'nitro.*free', r'claim.*nitro', r'get.*nitro',
     r'crypto.*airdrop', r'free.*eth', r'free.*btc', r'nft.*drop',
     r'discord.*airdrop', r'discord.*giveaway',
     r'paypal.*verify', r'amazon.*gift', r'netflix.*free',
-    r'@everyone.*http', r'@here.*http',  # Mention + lien
+    r'@everyone.*http', r'@here.*http',
     r'\.gift\/', r'\.ru\/.*discord', r'\.tk\/.*gift',
+    # 2026 — Scams vérification âge / Safeguard / ClickFix
+    r'verify.*age.*group', r'age.*verif', r'discord.*age.*check',
+    r'discord.*verify.*bot', r'safeguard.*verify', r'discord.*safeguard',
+    r'captcha.*fix.*discord', r'discord.*captcha',
+    r'discord.*login.*verify', r'discord.*security.*check',
+    # pages.dev phishing (hébergement gratuit Cloudflare abusé)
+    r'\.pages\.dev.*(discord|nitro|steam|verify|login)',
+    # Fake game / playtest download
+    r'playtest.*download', r'test.*my.*game.*http',
+    # PowerShell / terminal commands
+    r'powershell.*-e', r'cmd.*\/c.*http',
 ]
 
 # Mots-clés de scam dans les messages
@@ -2652,6 +2688,16 @@ SCAM_KEYWORDS = [
     # Romance/Social scams
     'im a girl', 'add me on', 'check my profile', 'link in bio',
     'onlyfans free', 'leaked content', 'exclusive content',
+    # 2026 — Vérification âge / Safeguard / Token grabber / ClickFix
+    'verify age group', 'age verification required', 'vérifier votre âge',
+    'scan this qr', 'scan the qr code', 'scannez ce qr',
+    'playtest my game', 'test my game', 'teste mon jeu',
+    'run this command', 'paste in terminal', 'colle dans le terminal',
+    'paste in powershell', 'run in cmd',
+    'discord token', 'grab token', 'token login',
+    'safeguard bot', 'safeguard verify', 'click verify button',
+    'captcha fix', 'fix your captcha',
+    'sensitive content', 'contenu sensible',
 ]
 
 # Patterns de messages de comptes compromis
@@ -2662,6 +2708,10 @@ COMPROMISED_PATTERNS = [
     r'yo.*this.*real.*http', r'omg.*http',
     r'free.*gift.*http', r'won.*http',
     r'http.*\.(gift|ru|tk|ml|ga|cf|gq)(\s|$)',  # TLD suspects
+    # 2026 — Nouveaux patterns comptes compromis
+    r'verify.*age.*http', r'safeguard.*http',
+    r'playtest.*http', r'test.*game.*http',
+    r'sensitive.*content.*http', r'nsfw.*verify.*http',
 ]
 
 # Extensions de fichiers dangereux
@@ -2671,7 +2721,47 @@ DANGEROUS_EXTENSIONS = [
     '.ps1', '.psm1', '.psd1',  # PowerShell
     '.hta', '.cpl', '.msc', '.jar',  # Autres exécutables
     '.dll', '.sys', '.drv',  # Bibliothèques
+    '.appx', '.msix',  # Windows App packages
+    '.reg',  # Registry files
+    '.lnk',  # Shortcut files
+    '.inf',  # Setup information
 ]
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#       🔗 DÉTECTION DE LIENS MASQUÉS (Markdown [texte](url) phishing)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Domaines de confiance utilisés par les scammers pour tromper
+TRUSTED_DOMAINS_FOR_MASKING = [
+    'discord.com', 'discord.gg', 'discord.gift', 'discordapp.com',
+    'store.steampowered.com', 'steamcommunity.com',
+    'roblox.com', 'twitter.com', 'x.com',
+    'youtube.com', 'twitch.tv', 'tiktok.com',
+]
+
+def check_masked_links(content):
+    """Détecte les liens markdown masqués : [texte légitime](url malveillante)"""
+    # Pattern : [texte contenant un domaine](url réelle)
+    masked = re.findall(r'\[([^\]]+)\]\((https?://[^)]+)\)', content)
+    for display_text, real_url in masked:
+        # Extraire le domaine du texte affiché (s'il contient un domaine)
+        display_domains = re.findall(r'(?:https?://)?([a-zA-Z0-9][-a-zA-Z0-9]*\.(?:com|gg|gift|org|net|tv|io|co)(?:/\S*)?)', display_text)
+        if not display_domains:
+            continue
+        # Extraire le domaine de l'URL réelle
+        real_domain_match = re.search(r'https?://([^/\s]+)', real_url)
+        if not real_domain_match:
+            continue
+        real_domain = real_domain_match.group(1).lower()
+        # Vérifier si le texte prétend être un domaine de confiance mais l'URL est différente
+        for disp_dom in display_domains:
+            disp_dom_clean = disp_dom.split('/')[0].lower()
+            # Le texte montre un domaine de confiance...
+            if any(trusted in disp_dom_clean for trusted in TRUSTED_DOMAINS_FOR_MASKING):
+                # ...mais l'URL réelle pointe vers un domaine différent
+                if not any(trusted in real_domain for trusted in TRUSTED_DOMAINS_FOR_MASKING):
+                    return True, f"Lien masqué: [{disp_dom_clean}] → {real_domain}"
+    return False, None
 
 # Cache pour détecter les comportements suspects
 compromised_cache = {}  # {user_id: {'messages': [], 'flags': 0}}
@@ -3315,6 +3405,18 @@ class ProtDetail(View):
         )
         e.add_field(name="🔘 État", value="✅ ACTIVÉ" if on else "❌ DÉSACTIVÉ", inline=False)
         
+        # ─── Helper pour afficher action + durée ───
+        def _add_sanction_fields(embed, protection_key):
+            acp = ActionConfigPanel(self.u, self.g, protection_key)
+            ak = acp._get_action_key()
+            dk = acp._get_duration_key()
+            act = c.get(ak, acp._get_default_action())
+            dur = c.get(dk, acp._get_default_duration())
+            act_emoji = {'delete': '🗑️', 'mute': '🔇', 'kick': '👢', 'ban': '🔨'}.get(act, '⚡')
+            embed.add_field(name="⚡ Sanction", value=f"{act_emoji} **{act.upper()}**", inline=True)
+            if act == 'mute':
+                embed.add_field(name="⏱️ Durée mute", value=f"`{dur}` min", inline=True)
+
         # Configs spécifiques
         if self.key == "anti_link":
             wl = c.get('link_whitelist', [])
@@ -3322,17 +3424,18 @@ class ProtDetail(View):
             chs = c.get('link_allowed_channels', [])
             ch_txt = ", ".join([f"<#{x}>" for x in chs[:10]]) if chs else "*Aucun salon*"
             e.add_field(name="📍 Salons autorisés", value=ch_txt, inline=False)
-        
+            _add_sanction_fields(e, self.key)
+
         elif self.key == "anti_image":
             items = c.get('image_allowed', [])
             fmts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'tenor', 'giphy']
             fmt_txt = " ".join([f"{'✅' if f in items else '❌'} `{f}`" for f in fmts])
             e.add_field(name="📁 Formats autorisés", value=fmt_txt, inline=False)
-        
+            _add_sanction_fields(e, self.key)
+
         elif self.key == "anti_badwords":
             words = c.get('badwords_list', [])
             if words:
-                # Afficher tous les mots, ou limiter avec compteur
                 if len(words) <= 30:
                     words_txt = ", ".join([f"`{w}`" for w in words])
                 else:
@@ -3340,31 +3443,31 @@ class ProtDetail(View):
                 e.add_field(name=f"🚫 Mots interdits ({len(words)})", value=words_txt[:1024], inline=False)
             else:
                 e.add_field(name="🚫 Mots interdits", value="*Aucun mot configuré*", inline=False)
-        
+            _add_sanction_fields(e, self.key)
+
         elif self.key == "anti_spam":
             e.add_field(name="📊 Max messages", value=str(c.get('spam_max', 5)), inline=True)
             e.add_field(name="⏱️ Intervalle (sec)", value=str(c.get('spam_interval', 5)), inline=True)
-            e.add_field(name="⚡ Action", value=c.get('spam_action', 'mute').upper(), inline=True)
-        
+            _add_sanction_fields(e, self.key)
+
         elif self.key == "anti_caps":
             e.add_field(name="📊 Pourcentage max", value=f"{c.get('caps_percent', 70)}%", inline=True)
-        
+            _add_sanction_fields(e, self.key)
+
         elif self.key == "anti_mass_mention":
             max_mentions = c.get('mention_limit', 5)
-            action = c.get('mention_action', 'mute').upper()
             e.add_field(name="📊 Max mentions", value=f"`{max_mentions}` par message", inline=True)
-            e.add_field(name="⚡ Action", value=action, inline=True)
+            _add_sanction_fields(e, self.key)
             e.add_field(name="ℹ️ Info", value="Détecte @everyone, @here, et les mentions massives de membres/rôles", inline=False)
-        
+
         elif self.key == "anti_newaccount":
             e.add_field(name="📅 Jours minimum", value=str(c.get('newaccount_days', 7)), inline=True)
-        
+
         elif self.key in ["anti_phishing", "anti_scam"]:
-            ak = 'phishing_action' if self.key == "anti_phishing" else 'scam_action'
-            default = 'delete' if self.key == 'anti_phishing' else 'mute'
-            action = c.get(ak, default)
-            action_emoji = {'delete': '🗑️', 'mute': '🔇', 'kick': '👢', 'ban': '🔨'}.get(action, '⚡')
-            e.add_field(name="⚡ Action", value=f"{action_emoji} {action.upper()}", inline=True)
+            _add_sanction_fields(e, self.key)
+
+        elif self.key == "anti_invite":
+            _add_sanction_fields(e, self.key)
         
         elif self.key == "anti_raid":
             raid_cfg = c.get('raid_config', {})
@@ -3381,26 +3484,39 @@ class ProtDetail(View):
         
         elif self.key == "anti_compromised":
             e.description = "🔐 **Détection des comptes compromis/hackés**\n\nDétecte les comportements suspects indiquant qu'un compte a été compromis :\n• Spam de @everyone avec liens\n• Messages identiques répétés\n• Premier message = lien suspect"
-            action = c.get('compromised_action', 'mute')
-            e.add_field(name="⚡ Action", value=action.upper(), inline=True)
+            _add_sanction_fields(e, self.key)
             e.add_field(name="📊 Détections", value=f"`{len(PHISHING_DOMAINS)}` domaines\n`{len(SCAM_KEYWORDS)}` mots-clés\n`{len(COMPROMISED_PATTERNS)}` patterns", inline=True)
-        
+
         elif self.key == "anti_qrcode":
             e.description = "📱 **Protection contre les scams par QR Code**\n\nDétecte les tentatives de vol de compte via QR code Discord :\n• Messages demandant de scanner un QR code\n• Faux QR codes de 'cadeaux'\n• Tentatives de vol de token"
-            action = c.get('qrcode_action', 'mute')
-            e.add_field(name="⚡ Action", value=action.upper(), inline=True)
-        
+            _add_sanction_fields(e, self.key)
+
         elif self.key == "anti_phishing":
-            e.description = "🎣 **Protection Anti-Phishing Avancée 2026**\n\nProtège contre :\n• Faux sites Discord/Steam/Nitro\n• Typosquatting (dlscord, steampowored...)\n• IP grabbers et raccourcisseurs suspects\n• TLD dangereux (.ru, .tk, .xyz...)"
-            action = c.get('phishing_action', 'delete')
-            action_emoji = {'delete': '🗑️', 'mute': '🔇', 'kick': '👢', 'ban': '🔨'}.get(action, '⚡')
-            e.add_field(name="⚡ Action", value=f"{action_emoji} {action.upper()}", inline=True)
+            e.description = (
+                "🎣 **Protection Anti-Phishing Avancée 2026**\n\nProtège contre :\n"
+                "• Faux sites Discord/Steam/Nitro/Roblox\n"
+                "• Typosquatting (dlscord, steampowored...)\n"
+                "• Liens masqués [texte](url phishing)\n"
+                "• Scam 'Verify age group' / Safeguard bot\n"
+                "• IP grabbers et raccourcisseurs suspects\n"
+                "• TLD dangereux (.ru, .tk, .xyz...)\n"
+                "• URLs dans les embeds de messages"
+            )
+            _add_sanction_fields(e, self.key)
             e.add_field(name="📊 Base de données", value=f"`{len(PHISHING_DOMAINS)}` domaines blacklistés", inline=True)
-        
+
         elif self.key == "anti_scam":
-            e.description = "🚨 **Protection Anti-Scam Avancée 2026**\n\nDétecte :\n• Free Nitro / Steam Gift scams\n• Crypto giveaway / Airdrop scams\n• Investment scams\n• Faux jobs / Romance scams\n• Urgence artificielle"
-            action = c.get('scam_action', 'mute')
-            e.add_field(name="⚡ Action", value=action.upper(), inline=True)
+            e.description = (
+                "🚨 **Protection Anti-Scam Avancée 2026**\n\nDétecte :\n"
+                "• Free Nitro / Steam Gift scams\n"
+                "• Crypto giveaway / Airdrop scams\n"
+                "• Scam vérification âge Discord\n"
+                "• Token grabbers / ClickFix\n"
+                "• Faux jeux à tester (playtest)\n"
+                "• Investment / Job / Romance scams\n"
+                "• Urgence artificielle"
+            )
+            _add_sanction_fields(e, self.key)
             e.add_field(name="📊 Base de données", value=f"`{len(SCAM_KEYWORDS)}` mots-clés détectés", inline=True)
         
         elif self.key == "anti_alt":
@@ -3455,9 +3571,6 @@ class ProtDetail(View):
             await i.response.edit_message(embed=await v.embed(), view=v)
         elif self.key in ["anti_spam", "anti_caps", "anti_newaccount", "anti_mass_mention"]:
             await i.response.send_modal(NumberConfigModal(self.g, self.u, self.key))
-        elif self.key in ["anti_phishing", "anti_scam", "anti_compromised", "anti_qrcode"]:
-            v = ActionConfigPanel(self.u, self.g, self.key)
-            await i.response.edit_message(embed=await v.embed(), view=v)
         elif self.key == "anti_raid":
             v = AntiRaidConfigPanel(self.u, self.g)
             await i.response.edit_message(embed=await v.embed(), view=v)
@@ -3465,7 +3578,15 @@ class ProtDetail(View):
             v = AltConfigPanel(self.u, self.g)
             await i.response.edit_message(embed=await v.embed(), view=v)
         else:
-            await i.response.send_message("ℹ️ Pas de configuration supplémentaire", ephemeral=True)
+            # Toutes les autres protections → ActionConfigPanel (action + durée mute)
+            v = ActionConfigPanel(self.u, self.g, self.key)
+            await i.response.edit_message(embed=await v.embed(), view=v)
+
+    @discord.ui.button(label="⚡ Sanction", style=discord.ButtonStyle.danger, row=0)
+    async def sanction_btn(self, i, b):
+        """Ouvrir le panel de sanction pour n'importe quelle protection"""
+        v = ActionConfigPanel(self.u, self.g, self.key)
+        await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="📜 Définir Log", style=discord.ButtonStyle.secondary, row=0)
     async def set_log(self, i, b):
@@ -4011,7 +4132,7 @@ class ActionConfigPanel(View):
         self.u = u
         self.g = g
         self.key = key
-    
+
     def _get_action_key(self):
         """Retourne la clé de configuration pour l'action"""
         action_keys = {
@@ -4019,63 +4140,145 @@ class ActionConfigPanel(View):
             'anti_scam': 'scam_action',
             'anti_compromised': 'compromised_action',
             'anti_qrcode': 'qrcode_action',
+            'anti_spam': 'spam_action',
+            'anti_mass_mention': 'mention_action',
+            'anti_link': 'link_action',
+            'anti_invite': 'invite_action',
+            'anti_image': 'image_action',
+            'anti_badwords': 'badwords_action',
+            'anti_caps': 'caps_action',
         }
         return action_keys.get(self.key, f'{self.key.replace("anti_", "")}_action')
-    
+
+    def _get_duration_key(self):
+        """Retourne la clé de durée de mute"""
+        dur_keys = {
+            'anti_phishing': 'phishing_mute_duration',
+            'anti_scam': 'scam_mute_duration',
+            'anti_compromised': 'compromised_mute_duration',
+            'anti_qrcode': 'qrcode_mute_duration',
+            'anti_spam': 'spam_mute_duration',
+            'anti_mass_mention': 'mention_mute_duration',
+            'anti_link': 'link_mute_duration',
+            'anti_invite': 'invite_mute_duration',
+            'anti_image': 'image_mute_duration',
+            'anti_badwords': 'badwords_mute_duration',
+            'anti_caps': 'caps_mute_duration',
+        }
+        return dur_keys.get(self.key, f'{self.key.replace("anti_", "")}_mute_duration')
+
     def _get_default_action(self):
         """Retourne l'action par défaut"""
         defaults = {
-            'anti_phishing': 'delete',
-            'anti_scam': 'mute',
-            'anti_compromised': 'mute',
-            'anti_qrcode': 'mute',
+            'anti_phishing': 'delete', 'anti_scam': 'mute',
+            'anti_compromised': 'mute', 'anti_qrcode': 'mute',
+            'anti_spam': 'mute', 'anti_mass_mention': 'mute',
+            'anti_link': 'delete', 'anti_invite': 'delete',
+            'anti_image': 'delete', 'anti_badwords': 'delete',
+            'anti_caps': 'delete',
         }
-        return defaults.get(self.key, 'mute')
-    
+        return defaults.get(self.key, 'delete')
+
+    def _get_default_duration(self):
+        defaults = {
+            'anti_phishing': 60, 'anti_scam': 60,
+            'anti_compromised': 60, 'anti_qrcode': 30,
+            'anti_spam': 10, 'anti_mass_mention': 10,
+            'anti_link': 5, 'anti_invite': 5,
+            'anti_image': 5, 'anti_badwords': 5,
+            'anti_caps': 5,
+        }
+        return defaults.get(self.key, 5)
+
     async def embed(self):
         c = await cfg(self.g.id)
         ak = self._get_action_key()
-        current = c.get(ak, self._get_default_action())
-        
+        dk = self._get_duration_key()
+        current_action = c.get(ak, self._get_default_action())
+        current_dur = c.get(dk, self._get_default_duration())
+
+        action_emoji = {'delete': '🗑️', 'mute': '🔇', 'kick': '👢', 'ban': '🔨'}.get(current_action, '⚡')
         name = self.key.replace('anti_', '').replace('_', ' ').title()
-        e = discord.Embed(title=f"⚡ Action pour {name}", color=C.BLUE)
-        e.description = f"**Action actuelle:** `{current.upper()}`\n\nChoisissez l'action à effectuer lorsqu'une violation est détectée:"
-        
+        e = discord.Embed(title=f"⚡ Sanction pour {name}", color=C.BLUE)
+        e.description = (
+            f"**Action actuelle:** {action_emoji} `{current_action.upper()}`\n"
+            f"**Durée du mute:** `{current_dur}` minutes\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Choisissez l'action à effectuer lors d'une violation :"
+        )
+
         e.add_field(name="🗑️ Supprimer", value="Supprime le message uniquement", inline=True)
         e.add_field(name="🔇 Mute", value="Rend muet + supprime", inline=True)
         e.add_field(name="👢 Kick", value="Expulse du serveur", inline=True)
         e.add_field(name="🔨 Ban", value="Bannit définitivement", inline=True)
-        
+
         return e
-    
+
     @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.success, row=0)
     async def delete_only(self, i, b):
         await self._set(i, 'delete')
-    
+
     @discord.ui.button(label="🔇 Mute", style=discord.ButtonStyle.primary, row=0)
     async def mute(self, i, b):
         await self._set(i, 'mute')
-    
+
     @discord.ui.button(label="👢 Kick", style=discord.ButtonStyle.secondary, row=0)
     async def kick(self, i, b):
         await self._set(i, 'kick')
-    
+
     @discord.ui.button(label="🔨 Ban", style=discord.ButtonStyle.danger, row=0)
     async def ban(self, i, b):
         await self._set(i, 'ban')
-    
+
+    @discord.ui.button(label="⏱️ Durée Mute", style=discord.ButtonStyle.primary, row=1)
+    async def set_duration(self, i, b):
+        await i.response.send_modal(DurationConfigModal(self.g, self.u, self.key))
+
     async def _set(self, i, act):
         ak = self._get_action_key()
         await db_set(self.g.id, ak, act)
         prot = next(p for p in PROTS if p[0] == self.key)
         v = ProtDetail(self.u, self.g, prot)
         await i.response.edit_message(content=f"✅ Action changée → **{act.upper()}**", embed=await v.embed(), view=v)
-    
+
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
         prot = next(p for p in PROTS if p[0] == self.key)
         v = ProtDetail(self.u, self.g, prot)
         await i.response.edit_message(embed=await v.embed(), view=v)
+
+class DurationConfigModal(Modal, title="⏱️ Durée du Mute"):
+    dur_input = TextInput(label="Durée en minutes", placeholder="5", max_length=5)
+
+    def __init__(self, g, u, key):
+        super().__init__()
+        self.g = g
+        self.u = u
+        self.key = key
+        # Clé de durée
+        dur_keys = {
+            'anti_phishing': 'phishing_mute_duration',
+            'anti_scam': 'scam_mute_duration',
+            'anti_compromised': 'compromised_mute_duration',
+            'anti_qrcode': 'qrcode_mute_duration',
+            'anti_spam': 'spam_mute_duration',
+            'anti_mass_mention': 'mention_mute_duration',
+            'anti_link': 'link_mute_duration',
+            'anti_invite': 'invite_mute_duration',
+            'anti_image': 'image_mute_duration',
+            'anti_badwords': 'badwords_mute_duration',
+            'anti_caps': 'caps_mute_duration',
+        }
+        self.dur_key = dur_keys.get(key, f'{key.replace("anti_", "")}_mute_duration')
+
+    async def on_submit(self, i):
+        val = self.dur_input.value.strip()
+        dur = int(val) if val.isdigit() else 5
+        dur = max(1, min(40320, dur))  # 1 min à 28 jours max
+        await db_set(self.g.id, self.dur_key, dur)
+        prot = next(p for p in PROTS if p[0] == self.key)
+        v = ProtDetail(self.u, self.g, prot)
+        await i.response.edit_message(content=f"✅ Durée du mute → **{dur}** minutes", embed=await v.embed(), view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           ⚔️ ANTI-RAID CONFIG PANEL
@@ -7164,15 +7367,15 @@ class AdsRedditChannelSelect(Select):
 
 # ─────────────────────────────── TWITTER/X ───────────────────────────────
 
-# Liste d'instances Nitter fonctionnelles (fallback)
+# Liste d'instances Nitter fonctionnelles (2026 - xcancel en priorité)
 NITTER_INSTANCES = [
+    "xcancel.com",
     "nitter.poast.org",
-    "xcancel.com", 
     "nitter.privacydev.net",
-    "nitter.woodland.cafe",
-    "nitter.1d4.us",
-    "nitter.kavin.rocks",
-    "nitter.unixfox.eu",
+]
+# Fallback RSS-Bridge si Nitter échoue
+RSS_BRIDGE_URLS = [
+    "https://rss-bridge.org/bridge01/?action=display&bridge=TwitterBridge&context=By+username&u={username}&format=Atom",
 ]
 
 class AdsTwitterPanel(View):
@@ -15590,8 +15793,12 @@ async def on_ready():
     # Lancer la tâche de nettoyage des deals expirés
     if not cleanup_deals_task.is_running():
         cleanup_deals_task.start()
-    
-    print(f"✅ {bot.user.name} v27 prêt!")
+
+    # Lancer la tâche des restrictions expirées
+    if not check_expired_restrictions.is_running():
+        check_expired_restrictions.start()
+
+    print(f"✅ {bot.user.name} v28 prêt!")
     print(f"🌐 Serveurs: {len(bot.guilds)}")
     print(f"📢 Vérification feeds sociaux toutes les 5 minutes")
     print(f"🎁 Vérification giveaways toutes les 30 secondes")
@@ -16084,8 +16291,30 @@ async def on_message(msg):
             if f:
                 await msg.delete()
                 await send_log(msg.guild, 'anti_phishing', msg.author, msg, "Lien de phishing détecté", f"`{d}`")
-                await sanction(msg.author, c.get('phishing_action', 'delete'), 60, "Phishing", msg.guild)
+                dur = c.get('phishing_mute_duration', 60)
+                await sanction(msg.author, c.get('phishing_action', 'delete'), dur, "Phishing", msg.guild)
                 return
+
+            # Vérifier les liens masqués en markdown [texte](url)
+            f_mask, d_mask = check_masked_links(ct)
+            if f_mask:
+                await msg.delete()
+                await send_log(msg.guild, 'anti_phishing', msg.author, msg, "Lien masqué détecté (phishing)", f"`{d_mask}`")
+                dur = c.get('phishing_mute_duration', 60)
+                await sanction(msg.author, c.get('phishing_action', 'delete'), dur, "Lien masqué phishing", msg.guild)
+                return
+
+            # Vérifier les URLs dans les embeds du message
+            for emb in msg.embeds:
+                for emb_url in [emb.url, getattr(emb.thumbnail, 'url', None), getattr(emb.image, 'url', None)]:
+                    if emb_url:
+                        f_emb, d_emb = check_phishing(emb_url)
+                        if f_emb:
+                            await msg.delete()
+                            await send_log(msg.guild, 'anti_phishing', msg.author, msg, "Phishing dans embed", f"`{d_emb}`")
+                            dur = c.get('phishing_mute_duration', 60)
+                            await sanction(msg.author, c.get('phishing_action', 'delete'), dur, "Phishing embed", msg.guild)
+                            return
         
         # Anti-scam - Actif même dans les tickets (protection contre les hacks)
         if c.get('anti_scam'):
@@ -16093,7 +16322,8 @@ async def on_message(msg):
             if f:
                 await msg.delete()
                 await send_log(msg.guild, 'anti_scam', msg.author, msg, "Message de scam détecté", f"`{p}`")
-                await sanction(msg.author, c.get('scam_action', 'mute'), 60, "Scam", msg.guild)
+                dur = c.get('scam_mute_duration', 60)
+                await sanction(msg.author, c.get('scam_action', 'mute'), dur, "Scam", msg.guild)
                 return
         
         # Si utilisateur immunisé OU dans un ticket = ignorer les autres protections
@@ -16128,16 +16358,22 @@ async def on_message(msg):
             if f:
                 await msg.delete()
                 await send_log(msg.guild, 'anti_badwords', msg.author, msg, "Mot interdit détecté", f"`{w}`")
+                action = c.get('badwords_action', 'delete')
+                dur = c.get('badwords_mute_duration', 5)
+                await sanction(msg.author, action, dur, "Mot interdit", msg.guild)
                 return
-        
+
         # Anti-invite
         if c.get('anti_invite'):
             f, inv = check_invite(ct)
             if f:
                 await msg.delete()
                 await send_log(msg.guild, 'anti_invite', msg.author, msg, "Invitation Discord", f"`{inv}`")
+                action = c.get('invite_action', 'delete')
+                dur = c.get('invite_mute_duration', 5)
+                await sanction(msg.author, action, dur, "Invitation Discord", msg.guild)
                 return
-        
+
         # Anti-link
         if c.get('anti_link') and not iag:
             if chid not in c.get('link_allowed_channels', []):
@@ -16145,8 +16381,11 @@ async def on_message(msg):
                 if f:
                     await msg.delete()
                     await send_log(msg.guild, 'anti_link', msg.author, msg, "Lien non autorisé", f"`{url}`")
+                    action = c.get('link_action', 'delete')
+                    dur = c.get('link_mute_duration', 5)
+                    await sanction(msg.author, action, dur, "Lien non autorisé", msg.guild)
                     return
-        
+
         # Anti-image
         if c.get('anti_image') and not iag:
             if chid not in c.get('image_allowed_channels', []):
@@ -16154,42 +16393,51 @@ async def on_message(msg):
                 if bl:
                     await msg.delete()
                     await send_log(msg.guild, 'anti_image', msg.author, msg, "Format non autorisé", f"`{', '.join(bl)}`")
+                    action = c.get('image_action', 'delete')
+                    dur = c.get('image_mute_duration', 5)
+                    await sanction(msg.author, action, dur, "Format non autorisé", msg.guild)
                     return
-        
+
         # Anti-spam
         if c.get('anti_spam'):
             if await check_spam(msg, c.get('spam_max', 5), c.get('spam_interval', 5)):
                 await msg.delete()
                 await send_log(msg.guild, 'anti_spam', msg.author, msg, "Spam détecté", None)
-                await sanction(msg.author, c.get('spam_action', 'mute'), 10, "Spam", msg.guild)
+                dur = c.get('spam_mute_duration', 10)
+                await sanction(msg.author, c.get('spam_action', 'mute'), dur, "Spam", msg.guild)
                 return
-        
+
         # Anti-caps
         if c.get('anti_caps'):
             if check_caps(ct, c.get('caps_percent', 70)):
                 await msg.delete()
                 await send_log(msg.guild, 'anti_caps', msg.author, msg, "Trop de majuscules", None)
+                action = c.get('caps_action', 'delete')
+                dur = c.get('caps_mute_duration', 5)
+                await sanction(msg.author, action, dur, "Majuscules excessives", msg.guild)
                 return
-        
+
         # Anti-mass-mention (détecte @everyone/@here et spam de mentions)
         if c.get('anti_mass_mention'):
             max_mentions = c.get('mention_limit', 5)
             if check_mass_mention(msg, max_mentions):
                 await msg.delete()
                 mention_count = len(msg.mentions) + len(msg.role_mentions) + (1 if msg.mention_everyone else 0)
-                await send_log(msg.guild, 'anti_mass_mention', msg.author, msg, 
+                await send_log(msg.guild, 'anti_mass_mention', msg.author, msg,
                               "Spam de mentions détecté", f"`{mention_count}` mentions")
-                await sanction(msg.author, c.get('mention_action', 'mute'), 10, "Mass mention", msg.guild)
+                dur = c.get('mention_mute_duration', 10)
+                await sanction(msg.author, c.get('mention_action', 'mute'), dur, "Mass mention", msg.guild)
                 return
-        
+
         # Anti-QRCode (détection de scams par QR code) - Actif pour tous
         if c.get('anti_qrcode'):
             is_qr_scam, qr_pattern = check_qr_code_scam(ct)
             if is_qr_scam:
                 await msg.delete()
-                await send_log(msg.guild, 'anti_qrcode', msg.author, msg, 
+                await send_log(msg.guild, 'anti_qrcode', msg.author, msg,
                               "Scam QR Code détecté", f"Pattern: {qr_pattern}")
-                await sanction(msg.author, c.get('qrcode_action', 'mute'), 30, "Scam QR Code", msg.guild)
+                dur = c.get('qrcode_mute_duration', 30)
+                await sanction(msg.author, c.get('qrcode_action', 'mute'), dur, "Scam QR Code", msg.guild)
                 return
         
         # Fichiers dangereux - Actif pour tous
@@ -16507,6 +16755,181 @@ async def unmute_cmd(i: discord.Interaction, membre: discord.Member, raison: str
     
     # Log
     await send_mod_log(i.guild, 'unmute', i.user, membre, raison)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                              🔒 RESTRICT / UNRESTRICT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@bot.tree.command(name="restrict", description="🔒 Restreindre complètement un membre (mute + retrait rôles)")
+@app_commands.describe(
+    membre="Le membre à restreindre",
+    duree="Durée en minutes (0 = permanent)",
+    raison="Raison de la restriction"
+)
+async def restrict_cmd(i: discord.Interaction, membre: discord.Member, duree: int = 0, raison: str = "Aucune raison"):
+    # Vérifier les permissions
+    c = await cfg(i.guild.id)
+    allowed_role_id = c.get('restrict_allowed_role', 0)
+    allowed_user_id = c.get('restrict_allowed_user', 0)
+    is_owner = i.user.id == i.guild.owner_id
+    is_super = i.user.id == 781205382923288593
+    has_role = any(r.id == allowed_role_id for r in i.user.roles) if allowed_role_id else False
+    is_user = i.user.id == allowed_user_id if allowed_user_id else False
+
+    if not (is_owner or is_super or has_role or is_user or i.user.guild_permissions.administrator):
+        return await i.response.send_message("⛔ Vous n'avez pas la permission d'utiliser cette commande.", ephemeral=True)
+
+    if membre.id == i.user.id:
+        return await i.response.send_message("❌ Vous ne pouvez pas vous restreindre vous-même.", ephemeral=True)
+    if membre.id == i.guild.owner_id:
+        return await i.response.send_message("❌ Impossible de restreindre le propriétaire du serveur.", ephemeral=True)
+    if membre.top_role >= i.guild.me.top_role:
+        return await i.response.send_message("❌ Ce membre a un rôle trop élevé pour être restreint.", ephemeral=True)
+
+    await i.response.defer(ephemeral=True)
+
+    # Sauvegarder les rôles actuels (sauf @everyone)
+    saved_roles = [r.id for r in membre.roles if r != i.guild.default_role and r.is_assignable()]
+
+    # Créer ou récupérer le rôle "🔒 Restricted"
+    restricted_role = discord.utils.get(i.guild.roles, name="🔒 Restricted")
+    if not restricted_role:
+        restricted_role = await i.guild.create_role(
+            name="🔒 Restricted",
+            permissions=discord.Permissions.none(),
+            color=discord.Color.dark_grey(),
+            reason="Rôle créé automatiquement par /restrict"
+        )
+        # Placer le rôle en bas
+        await restricted_role.edit(position=1)
+        # Désactiver les permissions dans TOUS les salons
+        for channel in i.guild.channels:
+            try:
+                await channel.set_permissions(restricted_role,
+                    send_messages=False, speak=False, connect=False,
+                    add_reactions=False, create_public_threads=False,
+                    create_private_threads=False, send_messages_in_threads=False,
+                    reason="Configuration auto /restrict"
+                )
+            except:
+                pass
+
+    # Retirer tous les rôles et ajouter "Restricted"
+    try:
+        roles_to_remove = [r for r in membre.roles if r != i.guild.default_role and r.is_assignable()]
+        if roles_to_remove:
+            await membre.remove_roles(*roles_to_remove, reason=f"Restrict par {i.user}: {raison}")
+        await membre.add_roles(restricted_role, reason=f"Restrict par {i.user}: {raison}")
+    except Exception as ex:
+        return await i.followup.send(f"❌ Erreur lors de la restriction: {ex}", ephemeral=True)
+
+    # Appliquer le timeout Discord aussi (max 28 jours)
+    try:
+        timeout_dur = min(duree, 40320) if duree > 0 else 40320  # Max 28 jours
+        await membre.timeout(timedelta(minutes=timeout_dur), reason=f"Restrict: {raison}")
+    except:
+        pass
+
+    # Sauvegarder en DB
+    import json
+    async with get_db() as db:
+        await db.execute('''
+            INSERT OR REPLACE INTO restricted_members
+            (guild_id, user_id, roles_backup, restricted_at, duration, reason, restricted_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (i.guild.id, membre.id, json.dumps(saved_roles), now().isoformat(), duree, raison, i.user.id))
+        await db.commit()
+
+    # Embed de confirmation
+    dur_txt = f"`{duree}` minutes" if duree > 0 else "**Permanent** ♾️"
+    e = discord.Embed(color=0xFF0000, title="🔒 Membre Restreint")
+    e.add_field(name="👤 Membre", value=f"{membre.mention} (`{membre.id}`)", inline=True)
+    e.add_field(name="⏱️ Durée", value=dur_txt, inline=True)
+    e.add_field(name="📝 Raison", value=raison, inline=False)
+    e.add_field(name="🔧 Actions effectuées", value=(
+        f"• Tous les rôles retirés (`{len(saved_roles)}`)\n"
+        f"• Rôle `🔒 Restricted` ajouté\n"
+        f"• Timeout Discord appliqué\n"
+        f"• Envoyer/parler/réagir désactivé"
+    ), inline=False)
+    e.set_thumbnail(url=membre.display_avatar.url)
+    e.set_footer(text=f"Par {i.user.display_name}", icon_url=i.user.display_avatar.url)
+    e.timestamp = now()
+
+    await i.followup.send(embed=e, ephemeral=True)
+
+    # Log modération
+    await send_mod_log(i.guild, 'restrict', i.user, membre, raison)
+
+
+@bot.tree.command(name="unrestrict", description="🔓 Retirer la restriction d'un membre (restaurer rôles)")
+@app_commands.describe(
+    membre="Le membre à libérer",
+    raison="Raison de la levée de restriction"
+)
+async def unrestrict_cmd(i: discord.Interaction, membre: discord.Member, raison: str = "Levée de restriction"):
+    c = await cfg(i.guild.id)
+    allowed_role_id = c.get('restrict_allowed_role', 0)
+    allowed_user_id = c.get('restrict_allowed_user', 0)
+    is_owner = i.user.id == i.guild.owner_id
+    is_super = i.user.id == 781205382923288593
+    has_role = any(r.id == allowed_role_id for r in i.user.roles) if allowed_role_id else False
+    is_user = i.user.id == allowed_user_id if allowed_user_id else False
+
+    if not (is_owner or is_super or has_role or is_user or i.user.guild_permissions.administrator):
+        return await i.response.send_message("⛔ Permission refusée.", ephemeral=True)
+
+    await i.response.defer(ephemeral=True)
+
+    import json
+    async with get_db() as db:
+        async with db.execute(
+            'SELECT roles_backup FROM restricted_members WHERE guild_id=? AND user_id=?',
+            (i.guild.id, membre.id)
+        ) as cur:
+            row = await cur.fetchone()
+
+        if not row:
+            return await i.followup.send("❌ Ce membre n'est pas restreint.", ephemeral=True)
+
+        saved_roles = json.loads(row[0]) if row[0] else []
+
+        # Retirer le rôle Restricted
+        restricted_role = discord.utils.get(i.guild.roles, name="🔒 Restricted")
+        if restricted_role and restricted_role in membre.roles:
+            await membre.remove_roles(restricted_role, reason=raison)
+
+        # Restaurer les rôles
+        restored = 0
+        for role_id in saved_roles:
+            role = i.guild.get_role(role_id)
+            if role and role.is_assignable():
+                try:
+                    await membre.add_roles(role, reason=f"Unrestrict: restauration")
+                    restored += 1
+                except:
+                    pass
+
+        # Retirer le timeout
+        try:
+            await membre.timeout(None, reason=raison)
+        except:
+            pass
+
+        # Supprimer de la DB
+        await db.execute('DELETE FROM restricted_members WHERE guild_id=? AND user_id=?', (i.guild.id, membre.id))
+        await db.commit()
+
+    e = discord.Embed(color=0x2ECC71, title="🔓 Restriction Levée")
+    e.add_field(name="👤 Membre", value=f"{membre.mention}", inline=True)
+    e.add_field(name="🔄 Rôles restaurés", value=f"`{restored}/{len(saved_roles)}`", inline=True)
+    e.add_field(name="📝 Raison", value=raison, inline=False)
+    e.set_thumbnail(url=membre.display_avatar.url)
+    e.timestamp = now()
+
+    await i.followup.send(embed=e, ephemeral=True)
+    await send_mod_log(i.guild, 'unrestrict', i.user, membre, raison)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              📋 INFRACTIONS
@@ -19407,14 +19830,30 @@ async def check_tiktok_feeds(session, guild, data):
                 e.title = f"🎵 {video_title[:200]}"
                 e.description = f"**@{username}** a publié une nouvelle vidéo !\n\n▶️ [**Voir la vidéo**]({video_url})"
 
-                if tk_avatar:
-                    e.set_thumbnail(url=tk_avatar)
-
-                # Image de couverture TikTok
-                thumb_match = re.search(r'"cover":"(https://[^"]+)"', html)
+                # Image de couverture TikTok (plusieurs patterns)
+                thumb_url = None
+                # Pattern 1: "cover" dans le JSON
+                thumb_match = re.search(r'"cover"\s*:\s*"(https?://[^"]+)"', html)
                 if thumb_match:
                     thumb_url = thumb_match.group(1).replace('\\u002F', '/')
+                # Pattern 2: "originCover" ou "dynamicCover"
+                if not thumb_url:
+                    thumb_match = re.search(r'"(?:originCover|dynamicCover)"\s*:\s*"(https?://[^"]+)"', html)
+                    if thumb_match:
+                        thumb_url = thumb_match.group(1).replace('\\u002F', '/')
+                # Pattern 3: og:image meta tag
+                if not thumb_url:
+                    thumb_match = re.search(r'<meta\s+property="og:image"\s+content="([^"]+)"', html)
+                    if thumb_match:
+                        thumb_url = thumb_match.group(1)
+
+                if tk_avatar and thumb_url:
+                    e.set_thumbnail(url=tk_avatar)
                     e.set_image(url=thumb_url)
+                elif thumb_url:
+                    e.set_image(url=thumb_url)
+                elif tk_avatar:
+                    e.set_thumbnail(url=tk_avatar)
 
                 e.set_footer(text=f"TikTok • @{username}", icon_url=_TK_ICON)
                 e.timestamp = now()
@@ -19528,58 +19967,101 @@ async def check_reddit_feeds(session, guild, data):
             continue
 
 async def check_twitter_feeds(session, guild, data):
-    """Vérifie les nouveaux tweets via Nitter"""
+    """Vérifie les nouveaux tweets via Nitter/xcancel + RSS-Bridge fallback"""
     channel = guild.get_channel(data.get('ads_twitter_channel', 0))
     feeds = data.get('ads_twitter_feeds', [])
     if not channel or not feeds:
         return
-    
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-    
+
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'}
+
     for username in feeds:
         try:
             xml_text = None
             working_instance = None
+            feed_format = 'rss'  # 'rss' ou 'atom'
+
+            # ─── Essayer les instances Nitter ───
             for instance in NITTER_INSTANCES:
                 try:
                     rss_url = f"https://{instance}/{username}/rss"
-                    async with session.get(rss_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                    async with session.get(rss_url, headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as resp:
                         if resp.status == 200:
-                            xml_text = await resp.text()
-                            working_instance = instance
-                            break
-                except:
+                            text = await resp.text()
+                            # Vérifier que c'est bien du XML valide avec du contenu
+                            if '<item>' in text or '<entry>' in text:
+                                xml_text = text
+                                working_instance = instance
+                                feed_format = 'atom' if '<entry>' in text else 'rss'
+                                break
+                except Exception as ex:
+                    print(f"[TWITTER] Instance {instance} échouée pour @{username}: {ex}")
                     continue
-            
+
+            # ─── Fallback RSS-Bridge si Nitter échoue ───
             if not xml_text:
+                for bridge_url_tpl in RSS_BRIDGE_URLS:
+                    try:
+                        bridge_url = bridge_url_tpl.replace('{username}', username)
+                        async with session.get(bridge_url, headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                            if resp.status == 200:
+                                text = await resp.text()
+                                if '<entry>' in text or '<item>' in text:
+                                    xml_text = text
+                                    working_instance = None
+                                    feed_format = 'atom' if '<entry>' in text else 'rss'
+                                    break
+                    except Exception as ex:
+                        print(f"[TWITTER] RSS-Bridge échoué pour @{username}: {ex}")
+                        continue
+
+            if not xml_text:
+                print(f"[TWITTER] ⚠️ Aucune source disponible pour @{username}")
                 continue
-            
+
+            # ─── Parser le XML (RSS ou Atom) ───
             root = ET.fromstring(xml_text)
-            items = root.findall('.//item')
-            if not items:
-                continue
-            
-            item = items[0]
-            title = item.find('title')
-            link = item.find('link')
-            guid = item.find('guid')
-            description = item.find('description')
-            
-            if title is None or guid is None:
-                continue
-            
-            tweet_id = guid.text if guid is not None else ""
-            tweet_text = title.text if title is not None else ""
-            tweet_link = link.text if link is not None else f"https://twitter.com/{username}"
-            
+
+            if feed_format == 'atom':
+                ns = {'atom': 'http://www.w3.org/2005/Atom'}
+                entries = root.findall('.//atom:entry', ns) or root.findall('.//entry')
+                if not entries:
+                    continue
+                entry = entries[0]
+                title_el = entry.find('atom:title', ns) or entry.find('title')
+                link_el = entry.find('atom:link', ns) or entry.find('link')
+                id_el = entry.find('atom:id', ns) or entry.find('id')
+                content_el = entry.find('atom:content', ns) or entry.find('content') or entry.find('atom:summary', ns) or entry.find('summary')
+
+                tweet_id = id_el.text if id_el is not None else ""
+                tweet_text = title_el.text if title_el is not None else ""
+                tweet_link = link_el.get('href', '') if link_el is not None else f"https://twitter.com/{username}"
+            else:
+                items = root.findall('.//item')
+                if not items:
+                    continue
+                item = items[0]
+                title_el = item.find('title')
+                link_el = item.find('link')
+                guid_el = item.find('guid')
+                content_el = item.find('description')
+
+                if title_el is None and guid_el is None:
+                    continue
+
+                tweet_id = guid_el.text if guid_el is not None else ""
+                tweet_text = title_el.text if title_el is not None else ""
+                tweet_link = link_el.text if link_el is not None else f"https://twitter.com/{username}"
+
             # Convertir lien Nitter en lien Twitter
-            tweet_link = tweet_link.replace(f"https://{working_instance}", "https://twitter.com") if working_instance else tweet_link
-            
+            if working_instance and working_instance in tweet_link:
+                tweet_link = tweet_link.replace(f"https://{working_instance}", "https://twitter.com")
+
             # Extraire image si présente
             image_url = None
-            if description is not None and description.text:
-                import re
-                img_match = re.search(r'<img[^>]+src="([^"]+)"', description.text)
+            desc_text = content_el.text if content_el is not None else ""
+            if desc_text:
+                img_match = re.search(r'<img[^>]+src="([^"]+)"', desc_text)
                 if img_match:
                     image_url = img_match.group(1)
             
@@ -19723,37 +20205,20 @@ async def check_rosocial_feeds(session, guild, data):
 
             rs_avatar = await fetch_avatar_url('rosocial', username, session)
 
-            e = discord.Embed(color=0x00D4AA)  # Vert RoSocial
-
-            # Titre
+            e = discord.Embed(color=0x00D4AA, url=post_url)  # Vert RoSocial
+            e.set_author(name=f"ROSOCIAL • {username}", url=profile_url, icon_url=_RBX_ICON)
             e.title = f"📝 Nouveau post de {username}"
-            e.url = post_url
+            e.description = f"**{username}** a publié un nouveau post sur RoSocial !\n\n🔗 [**Voir le post**]({post_url}) • 👤 [**Profil**]({profile_url})"
 
-            # Avatar du créateur + image du post
+            # Avatar du créateur en thumbnail + image du post en grande image
             if rs_avatar:
                 e.set_thumbnail(url=rs_avatar)
-                if image_url:
-                    e.set_image(url=image_url)
-            elif image_url:
-                e.set_thumbnail(url=image_url)
+            if image_url:
+                e.set_image(url=image_url)
 
-            # Informations
-            e.add_field(name="👤 Créateur", value=f"**{username}**", inline=True)
-            
-            # Liens
-            e.add_field(
-                name="",
-                value=f"### [🔗 Voir le post]({post_url}) • [👤 Profil]({profile_url})",
-                inline=False
-            )
-            
-            # Footer
-            e.set_footer(
-                text=f"RoSocial • {username}",
-                icon_url=_RBX_ICON
-            )
+            e.set_footer(text=f"RoSocial • {username}", icon_url=_RBX_ICON)
             e.timestamp = now()
-            
+
             await webhook_send(channel, 'rosocial', embed=e)
             await asyncio.sleep(1)
             
@@ -19876,52 +20341,33 @@ async def check_roblox_ugc_feeds(session, guild, data):
                 if feed_type == 'user' and creator_id:
                     rbx_avatar = await fetch_avatar_url('roblox_user', str(creator_id), session)
 
-                e = discord.Embed(color=0x00B06B)  # Vert Roblox
-
-                # Titre = Nom de l'article
-                e.title = f"🎨 {item_name}"
-                e.url = item_url
-
-                # Avatar en thumbnail, image item en image
-                if rbx_avatar:
-                    e.set_thumbnail(url=rbx_avatar)
-                    if thumb_url:
-                        e.set_image(url=thumb_url)
-                elif thumb_url:
-                    e.set_thumbnail(url=thumb_url)
-                
-                # Prix
+                # Prix texte
                 if item_price and item_price > 0:
                     price_txt = f"**{item_price:,}** R$"
                 else:
                     price_txt = "**Gratuit** 🎁"
-                
-                # Informations
-                e.add_field(name="💰 Prix", value=price_txt, inline=True)
-                
-                # Créateur ou Groupe
-                if feed_type == 'group':
-                    e.add_field(name="👥 Groupe", value=f"**{creator_name}**", inline=True)
-                else:
-                    e.add_field(name="👤 Créateur", value=f"**{creator_name}**", inline=True)
-                
-                # Date de publication
+
+                creator_label = f"👥 {creator_name}" if feed_type == 'group' else f"👤 {creator_name}"
+
+                e = discord.Embed(color=0x00B06B, url=item_url)  # Vert Roblox
+                e.set_author(name=f"ROBLOX UGC • {creator_emoji} {creator_name}", url=item_url, icon_url=_RBX_ICON)
+                e.title = f"🎨 {item_name}"
+
+                desc_parts = [f"Nouvelle création de **{creator_name}** !"]
+                desc_parts.append(f"\n💰 Prix : {price_txt}")
                 if date_str:
-                    e.add_field(name="📅 Publié le", value=f"**{date_str}**", inline=True)
-                
-                # Lien
-                e.add_field(
-                    name="",
-                    value=f"### [🛒 Voir sur Roblox]({item_url})",
-                    inline=False
-                )
-                
-                # Footer avec indication du type
+                    desc_parts.append(f"📅 Publié le : **{date_str}**")
+                desc_parts.append(f"\n🛒 [**Voir sur Roblox**]({item_url})")
+                e.description = "\n".join(desc_parts)
+
+                # Image de l'item en grande + avatar en thumbnail
+                if thumb_url:
+                    e.set_image(url=thumb_url)
+                if rbx_avatar:
+                    e.set_thumbnail(url=rbx_avatar)
+
                 footer_text = f"Roblox UGC • {creator_emoji} {creator_name}"
-                e.set_footer(
-                    text=footer_text,
-                    icon_url=_RBX_ICON
-                )
+                e.set_footer(text=footer_text, icon_url=_RBX_ICON)
                 e.timestamp = now()
                 
                 await webhook_send(channel, 'roblox_ugc', embed=e)
@@ -21446,6 +21892,67 @@ async def check_expired_roles():
 
 @check_expired_roles.before_loop
 async def before_check_expired():
+    await bot.wait_until_ready()
+
+# ─── Tâche pour lever les restrictions expirées ───
+@tasks.loop(minutes=1)
+async def check_expired_restrictions():
+    try:
+        import json
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT guild_id, user_id, roles_backup, restricted_at, duration FROM restricted_members WHERE duration > 0'
+            ) as cur:
+                rows = await cur.fetchall()
+
+            for guild_id, user_id, roles_json, restricted_at, duration in rows:
+                try:
+                    from datetime import datetime
+                    restricted_dt = datetime.fromisoformat(restricted_at)
+                    elapsed = (now() - restricted_dt).total_seconds() / 60
+                    if elapsed >= duration:
+                        guild = bot.get_guild(guild_id)
+                        if not guild:
+                            continue
+                        member = guild.get_member(user_id)
+                        if not member:
+                            # Membre parti → supprimer l'entrée
+                            await db.execute('DELETE FROM restricted_members WHERE guild_id=? AND user_id=?', (guild_id, user_id))
+                            continue
+
+                        # Retirer le rôle Restricted
+                        restricted_role = discord.utils.get(guild.roles, name="🔒 Restricted")
+                        if restricted_role and restricted_role in member.roles:
+                            await member.remove_roles(restricted_role, reason="Restriction expirée")
+
+                        # Restaurer les rôles
+                        saved_roles = json.loads(roles_json) if roles_json else []
+                        for role_id in saved_roles:
+                            role = guild.get_role(role_id)
+                            if role and role.is_assignable():
+                                try:
+                                    await member.add_roles(role, reason="Restauration auto - restriction expirée")
+                                except:
+                                    pass
+
+                        # Retirer timeout
+                        try:
+                            await member.timeout(None, reason="Restriction expirée")
+                        except:
+                            pass
+
+                        await db.execute('DELETE FROM restricted_members WHERE guild_id=? AND user_id=?', (guild_id, user_id))
+                        print(f"[RESTRICT] ✅ Restriction expirée pour {user_id} dans {guild_id}")
+                except Exception as ex:
+                    print(f"[RESTRICT] Erreur vérification: {ex}")
+                    continue
+
+            await db.commit()
+    except Exception as ex:
+        print(f"[RESTRICT] Erreur task: {ex}")
+
+@check_expired_restrictions.before_loop
+async def before_check_restrictions():
     await bot.wait_until_ready()
 
 @bot.tree.command(name="leaderboard", description="🏆 Voir le classement des plus riches")
