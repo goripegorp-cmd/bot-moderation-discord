@@ -11263,6 +11263,8 @@ class CmdChannelSelectMenu(Select):
 
 # Cache pour stocker les IDs des messages d'aide actuels
 auto_help_messages = {}  # {channel_id: message_id}
+# Locks par salon pour éviter les exécutions concurrentes d'auto-help
+_auto_help_locks = {}  # {channel_id: asyncio.Lock}
 
 class AutoHelpPanel(View):
     def __init__(self, u, g):
@@ -11526,79 +11528,93 @@ class AutoHelpManageView(View):
 
 async def handle_auto_help(message):
     """Gère le repositionnement automatique des messages d'aide"""
-    
+
     try:
         c = await cfg(message.guild.id)
         auto_helps = c.get('auto_help_channels', {})
-        
+
         channel_id_str = str(message.channel.id)
         if channel_id_str not in auto_helps:
             return
-        
+
         help_data = auto_helps[channel_id_str]
         if not help_data.get('enabled', True):
             return
-        
+
         channel_id = message.channel.id
-        
+
         # Vérifier si le message n'est pas le message d'aide lui-même
         if channel_id in auto_help_messages:
             if message.id == auto_help_messages[channel_id]:
                 return  # C'est notre propre message d'aide, ne pas boucler
-        
-        # ═══════════════ SUPPRESSION ROBUSTE DE TOUS LES ANCIENS MESSAGES ═══════════════
-        
-        # 1. D'abord supprimer via le cache si on a l'ID
-        old_msg_id = auto_help_messages.pop(channel_id, None)
-        
-        # 2. Chercher et supprimer TOUS les messages d'aide du bot dans ce salon
-        messages_to_delete = []
-        try:
-            async for msg in message.channel.history(limit=30):
-                # Ne pas supprimer le message qui vient d'arriver
-                if msg.id == message.id:
-                    continue
-                # Vérifier si c'est un message d'aide du bot (y compris via webhook)
-                is_bot_msg = msg.author.id == bot.user.id or (msg.webhook_id and msg.embeds)
-                if is_bot_msg and msg.embeds:
-                    embed = msg.embeds[0]
-                    footer_text = str(embed.footer.text) if embed.footer else ""
-                    # Identifier les messages d'aide par leur footer
-                    if "repositionne automatiquement" in footer_text:
-                        messages_to_delete.append(msg)
-        except Exception as ex:
-            print(f"[AUTO_HELP] Erreur recherche anciens messages: {ex}")
-        
-        # 3. Supprimer tous les anciens messages d'aide trouvés
-        for old_msg in messages_to_delete:
+
+        # Ignorer les messages envoyés par nos propres webhooks
+        if message.webhook_id and message.embeds:
+            footer_text = str(message.embeds[0].footer.text) if message.embeds[0].footer else ""
+            if "repositionne automatiquement" in footer_text:
+                auto_help_messages[channel_id] = message.id
+                return
+
+        # ═══════════════ LOCK PAR SALON — ANTI-DUPLICATION ═══════════════
+        if channel_id not in _auto_help_locks:
+            _auto_help_locks[channel_id] = asyncio.Lock()
+
+        lock = _auto_help_locks[channel_id]
+        if lock.locked():
+            return  # Une autre tâche gère déjà ce salon, on skip
+
+        async with lock:
+            # ═══════════════ SUPPRESSION ROBUSTE DE TOUS LES ANCIENS MESSAGES ═══════════════
+
+            # 1. D'abord supprimer via le cache si on a l'ID
+            old_msg_id = auto_help_messages.pop(channel_id, None)
+
+            # 2. Chercher et supprimer TOUS les messages d'aide dans ce salon
+            messages_to_delete = []
             try:
-                await old_msg.delete()
-            except discord.NotFound:
-                pass  # Déjà supprimé
-            except discord.Forbidden:
-                pass  # Pas les permissions
+                async for msg in message.channel.history(limit=30):
+                    # Ne pas supprimer le message qui vient d'arriver
+                    if msg.id == message.id:
+                        continue
+                    # Vérifier si c'est un message d'aide (bot direct ou webhook)
+                    has_embeds = bool(msg.embeds)
+                    is_bot_or_webhook = msg.author.id == bot.user.id or bool(msg.webhook_id)
+                    if is_bot_or_webhook and has_embeds:
+                        embed = msg.embeds[0]
+                        footer_text = str(embed.footer.text) if embed.footer else ""
+                        if "repositionne automatiquement" in footer_text:
+                            messages_to_delete.append(msg)
             except Exception as ex:
-                print(f"[AUTO_HELP] Erreur suppression: {ex}")
-        
-        # 4. Petit délai pour s'assurer que les suppressions sont effectuées
-        await asyncio.sleep(0.5)
-        
-        # ═══════════════ ENVOI DU NOUVEAU MESSAGE D'AIDE ═══════════════
-        
-        e = discord.Embed(
-            color=help_data.get('color', 0x3498DB)
-        )
-        e.set_author(name=f"💡 {help_data.get('title', 'Aide')}", icon_url=message.guild.icon.url if message.guild.icon else None)
-        e.description = help_data.get('content', '')
-        e.set_footer(text="Ce message se repositionne automatiquement")
-        
-        try:
-            new_msg = await webhook_send(message.channel, 'auto_help', embed=e)
-            if new_msg:
-                auto_help_messages[channel_id] = new_msg.id
-        except Exception as ex:
-            print(f"[AUTO_HELP] Erreur envoi nouveau message: {ex}")
-        
+                print(f"[AUTO_HELP] Erreur recherche anciens messages: {ex}")
+
+            # 3. Supprimer tous les anciens messages d'aide trouvés
+            for old_msg in messages_to_delete:
+                try:
+                    await old_msg.delete()
+                except (discord.NotFound, discord.Forbidden):
+                    pass
+                except Exception as ex:
+                    print(f"[AUTO_HELP] Erreur suppression: {ex}")
+
+            # 4. Petit délai pour s'assurer que les suppressions sont effectuées
+            await asyncio.sleep(0.5)
+
+            # ═══════════════ ENVOI DU NOUVEAU MESSAGE D'AIDE ═══════════════
+
+            e = discord.Embed(
+                color=help_data.get('color', 0x3498DB)
+            )
+            e.set_author(name=f"💡 {help_data.get('title', 'Aide')}", icon_url=message.guild.icon.url if message.guild.icon else None)
+            e.description = help_data.get('content', '')
+            e.set_footer(text="Ce message se repositionne automatiquement")
+
+            try:
+                new_msg = await webhook_send(message.channel, 'auto_help', embed=e)
+                if new_msg:
+                    auto_help_messages[channel_id] = new_msg.id
+            except Exception as ex:
+                print(f"[AUTO_HELP] Erreur envoi nouveau message: {ex}")
+
     except Exception as ex:
         print(f"[AUTO_HELP] Erreur générale: {ex}")
 
@@ -15375,60 +15391,73 @@ async def on_ready():
 @bot.event
 async def on_interaction(interaction: discord.Interaction):
     """Repositionne les messages d'aide après les interactions (commandes slash, boutons, etc.)"""
-    # Ignorer si pas de channel ou pas de guild
     if not interaction.channel or not interaction.guild:
         return
-    
-    # Ignorer si c'est une interaction sans réponse visible (ephemeral check)
-    # On ne peut pas toujours savoir si la réponse est ephemeral, donc on vérifie après un délai
-    
-    # Vérifier si ce salon a une aide automatique configurée
+
     try:
         c = await cfg(interaction.guild.id)
         auto_helps = c.get('auto_help_channels', {})
         channel_id_str = str(interaction.channel.id)
-        
+
         if channel_id_str not in auto_helps:
             return
-        
+
         help_data = auto_helps[channel_id_str]
         if not help_data.get('enabled', True):
             return
-        
-        # Attendre que la réponse de l'interaction soit envoyée
-        await asyncio.sleep(1.5)
-        
-        # Vérifier si le dernier message n'est pas déjà notre message d'aide
-        try:
-            last_msg = [m async for m in interaction.channel.history(limit=1)]
-            if last_msg:
-                last_msg = last_msg[0]
-                # Si c'est déjà notre message d'aide, ne rien faire
-                if interaction.channel.id in auto_help_messages:
-                    if last_msg.id == auto_help_messages[interaction.channel.id]:
-                        return
-                
-                # Si le dernier message n'est pas de notre bot, repositionner
-                if last_msg.author.id != bot.user.id or last_msg.id != auto_help_messages.get(interaction.channel.id, 0):
-                    # Supprimer l'ancien message d'aide
-                    if interaction.channel.id in auto_help_messages:
+
+        channel_id = interaction.channel.id
+
+        # Lock par salon — même lock que handle_auto_help
+        if channel_id not in _auto_help_locks:
+            _auto_help_locks[channel_id] = asyncio.Lock()
+
+        lock = _auto_help_locks[channel_id]
+        if lock.locked():
+            return  # Déjà en cours de repositionnement
+
+        async with lock:
+            # Attendre que la réponse de l'interaction soit envoyée
+            await asyncio.sleep(1.5)
+
+            # Vérifier si le dernier message n'est pas déjà notre message d'aide
+            try:
+                last_msg = [m async for m in interaction.channel.history(limit=1)]
+                if last_msg:
+                    last_msg = last_msg[0]
+                    if channel_id in auto_help_messages:
+                        if last_msg.id == auto_help_messages[channel_id]:
+                            return
+
+                    # Supprimer TOUS les anciens messages d'aide (scan historique)
+                    messages_to_delete = []
+                    async for msg in interaction.channel.history(limit=30):
+                        is_bot_or_webhook = msg.author.id == bot.user.id or bool(msg.webhook_id)
+                        if is_bot_or_webhook and msg.embeds:
+                            footer_text = str(msg.embeds[0].footer.text) if msg.embeds[0].footer else ""
+                            if "repositionne automatiquement" in footer_text:
+                                messages_to_delete.append(msg)
+
+                    for old_msg in messages_to_delete:
                         try:
-                            old_msg = await interaction.channel.fetch_message(auto_help_messages[interaction.channel.id])
                             await old_msg.delete()
-                        except:
+                        except (discord.NotFound, discord.Forbidden):
                             pass
-                        del auto_help_messages[interaction.channel.id]
-                    
-                    # Créer et envoyer le nouveau message d'aide
+
+                    auto_help_messages.pop(channel_id, None)
+                    await asyncio.sleep(0.3)
+
+                    # Envoyer le nouveau message d'aide
                     e = discord.Embed(color=help_data.get('color', 0x3498DB))
                     e.set_author(name=f"💡 {help_data.get('title', 'Aide')}", icon_url=interaction.guild.icon.url if interaction.guild and interaction.guild.icon else None)
                     e.description = help_data.get('content', '')
                     e.set_footer(text="Ce message se repositionne automatiquement")
-                    
+
                     new_msg = await webhook_send(interaction.channel, 'auto_help', embed=e)
-                    auto_help_messages[interaction.channel.id] = new_msg.id
-        except:
-            pass
+                    if new_msg:
+                        auto_help_messages[channel_id] = new_msg.id
+            except:
+                pass
     except Exception as ex:
         print(f"Erreur on_interaction auto_help: {ex}")
 
@@ -15793,13 +15822,13 @@ async def on_message(msg):
         c = await cfg(msg.guild.id)
         stat_cfg = c.get('stat_config', {})
         recovery_ch_id = stat_cfg.get('recovery_channel', 0)
-        
+
         # Si le message est dans le salon de récupération
         if recovery_ch_id and msg.channel.id == recovery_ch_id:
             await handle_recovery_message(msg, stat_cfg)
             return  # Ne pas traiter le reste
-    except:
-        pass
+    except Exception as ex:
+        print(f"[RECOVERY] Erreur vérification salon récupération: {ex}")
     
     # ═══════════════ TRACKING ACTIVITÉ MEMBRE ═══════════════
     await track_member_message(msg)
@@ -20448,8 +20477,10 @@ async def track_member_message(msg):
                 if role and role not in msg.author.roles:
                     try:
                         await msg.author.add_roles(role, reason="Retour d'activité via message")
-                    except:
-                        pass
+                    except discord.Forbidden:
+                        print(f"[ACTIVITY] Permission refusée pour rôle {role.name} à {msg.author}")
+                    except Exception as ex:
+                        print(f"[ACTIVITY] Erreur ajout rôle: {ex}")
         except:
             pass
         
@@ -20551,17 +20582,20 @@ async def handle_recovery_message(msg, stat_cfg):
         if role and role not in msg.author.roles:
             try:
                 await msg.author.add_roles(role, reason="Récupération d'activité via salon dédié")
-            except:
-                pass
-        
+                print(f"[RECOVERY] Rôle {role.name} redonné à {msg.author} dans {msg.guild.name}")
+            except discord.Forbidden:
+                print(f"[RECOVERY] Permission refusée pour ajouter le rôle {role.name} à {msg.author}")
+            except Exception as ex:
+                print(f"[RECOVERY] Erreur ajout rôle: {ex}")
+        elif not role:
+            print(f"[RECOVERY] Aucun rôle d'activité configuré (role_id={role_id})")
+
         # ═══════════════ ÉTAPE 3: SUPPRIMER LE MESSAGE ═══════════════
         try:
             await msg.delete()
         except:
             pass
-        
-        # Pas de notification - silencieux
-        
+
     except Exception as ex:
         print(f"Erreur handle_recovery_message: {ex}")
 
@@ -20853,28 +20887,28 @@ async def check_scheduled_messages():
             
             for msg_id, guild_id, channel_id, title, description, color, image_url, footer, frequency, freq_val, send_hour, send_minute, last_sent_str in messages:
                 try:
-                    # Vérifier si c'est l'heure d'envoyer (heure ET minute)
-                    if current_hour != send_hour or current_minute != send_minute:
+                    # Calculer l'intervalle minimum selon la fréquence
+                    if frequency == 'minutes':
+                        min_interval = timedelta(minutes=max(1, freq_val))
+                    elif frequency == 'hourly':
+                        min_interval = timedelta(hours=max(1, freq_val))
+                    elif frequency == 'daily':
+                        min_interval = timedelta(days=max(1, freq_val))
+                    elif frequency == 'weekly':
+                        min_interval = timedelta(weeks=max(1, freq_val))
+                    else:
                         continue
-                    
-                    # Vérifier le dernier envoi
+
+                    # Pour daily/weekly: vérifier heure ET minute exactes
+                    # Pour minutes/hourly: pas de gate horaire, on utilise seulement l'intervalle
+                    if frequency in ('daily', 'weekly'):
+                        if current_hour != send_hour or current_minute != send_minute:
+                            continue
+
+                    # Vérifier le dernier envoi (intervalle minimum)
                     if last_sent_str:
                         try:
                             last_sent = datetime.fromisoformat(last_sent_str)
-                            
-                            # Calculer l'intervalle minimum
-                            if frequency == 'minutes':
-                                min_interval = timedelta(minutes=freq_val)
-                            elif frequency == 'hourly':
-                                min_interval = timedelta(hours=freq_val)
-                            elif frequency == 'daily':
-                                min_interval = timedelta(days=freq_val)
-                            elif frequency == 'weekly':
-                                min_interval = timedelta(weeks=freq_val)
-                            else:
-                                continue
-                            
-                            # Si pas assez de temps écoulé, passer
                             if now_dt - last_sent < min_interval:
                                 continue
                         except:
