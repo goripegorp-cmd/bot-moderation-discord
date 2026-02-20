@@ -909,7 +909,7 @@ async def db_init():
             PRIMARY KEY (platform, username)
         )''')
 
-        # Table pour les membres restreints (/restrict)
+        # Table pour les membres restreints (/direction)
         await db.execute('''CREATE TABLE IF NOT EXISTS restricted_members (
             guild_id INTEGER,
             user_id INTEGER,
@@ -5955,7 +5955,24 @@ class CommandsPanel(View):
             value=f"🎭 {trade_role.mention if trade_role else '🌐 Tous'}\n📌 {trade_count} salon(s) • ⏱️ {trade_cd}{trade_unit[0]}",
             inline=True
         )
-        
+
+        # Direction
+        dir_role = self.g.get_role(c.get('direction_allowed_role', 0))
+        dir_user = self.g.get_member(c.get('direction_allowed_user', 0))
+        dir_status = "🟢" if dir_role or dir_user else "🔴"
+        dir_info = ""
+        if dir_user:
+            dir_info += f"👤 {dir_user.mention}\n"
+        if dir_role:
+            dir_info += f"🎭 {dir_role.mention}"
+        if not dir_info:
+            dir_info = "❌ Non configuré"
+        e.add_field(
+            name=f"{dir_status} 🔒 Direction",
+            value=dir_info,
+            inline=True
+        )
+
         e.set_footer(text="⚡ Commandes • Sélectionnez ci-dessous pour configurer")
         return e
     
@@ -5973,11 +5990,108 @@ class CommandsPanel(View):
     async def trade(self, i, b):
         v = TradePanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+
+    @discord.ui.button(label="🔒 Direction", style=discord.ButtonStyle.primary, row=1)
+    async def direction(self, i, b):
+        v = DirectionPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                           🔒 DIRECTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class DirectionPanel(View):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def embed(self):
+        c = await cfg(self.g.id)
+        e = discord.Embed(title="🔒 Configuration Direction", color=0xFF4444)
+
+        dir_user = self.g.get_member(c.get('direction_allowed_user', 0))
+        dir_role = self.g.get_role(c.get('direction_allowed_role', 0))
+
+        e.description = (
+            "La commande `/direction` permet de **restreindre complètement** un membre :\n"
+            "• Retrait de tous les rôles\n"
+            "• Ajout du rôle `🔒 Restricted` (0 permissions)\n"
+            "• Timeout Discord appliqué\n\n"
+            "Configurez qui peut utiliser cette commande."
+        )
+
+        e.add_field(name="👤 Utilisateur autorisé", value=dir_user.mention if dir_user else "❌ Non configuré", inline=False)
+        e.add_field(name="🎭 Rôle autorisé", value=dir_role.mention if dir_role else "❌ Non configuré", inline=False)
+
+        e.set_footer(text="🔒 Direction • /direction @membre [durée] [raison]")
+        return e
+
+    @discord.ui.button(label="👤 Utilisateur", style=discord.ButtonStyle.primary, row=0)
+    async def set_user(self, i, b):
+        await i.response.send_modal(DirectionUserModal(self.g, self.u))
+
+    @discord.ui.button(label="🎭 Rôle autorisé", style=discord.ButtonStyle.primary, row=0)
+    async def set_role(self, i, b):
+        async def callback(interaction, role_id, extra):
+            await db_set(interaction.guild.id, 'direction_allowed_role', role_id)
+            v = DirectionPanel(self.u, self.g)
+            role = interaction.guild.get_role(role_id)
+            await interaction.response.edit_message(
+                content=f"✅ Rôle Direction défini: **{role.name if role else 'Aucun'}**",
+                embed=await v.embed(), view=v
+            )
+
+        v = UniversalRoleSelect(
+            self.u, self.g,
+            callback_func=callback,
+            return_view_func=lambda: DirectionPanel(self.u, self.g),
+            title="Rôle Direction"
+        )
+        await i.response.edit_message(
+            embed=discord.Embed(title="🎭 Choisir le rôle autorisé", description=f"📊 {len([r for r in self.g.roles[1:] if not r.is_bot_managed()])} rôles disponibles", color=0xFF4444),
+            view=v
+        )
+
+    @discord.ui.button(label="🗑️ Reset", style=discord.ButtonStyle.danger, row=1)
+    async def reset(self, i, b):
+        await db_set(self.g.id, 'direction_allowed_role', 0)
+        await db_set(self.g.id, 'direction_allowed_user', 0)
+        v = DirectionPanel(self.u, self.g)
+        await i.response.edit_message(content="✅ Configuration Direction réinitialisée.", embed=await v.embed(), view=v)
+
+    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
+    async def back(self, i, b):
+        v = CommandsPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class DirectionUserModal(Modal, title="👤 Utilisateur Direction"):
+    uid = TextInput(label="ID de l'utilisateur", placeholder="123456789012345678")
+
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+
+    async def on_submit(self, i):
+        try:
+            user_id = int(self.uid.value)
+            await db_set(self.g.id, 'direction_allowed_user', user_id)
+            member = self.g.get_member(user_id)
+            v = DirectionPanel(self.u, self.g)
+            await i.response.edit_message(
+                content=f"✅ Utilisateur Direction défini: **{member.display_name if member else user_id}**",
+                embed=await v.embed(), view=v
+            )
+        except ValueError:
+            await i.response.send_message("❌ ID invalide.", ephemeral=True)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🎭 RELLSEAS
@@ -15794,7 +15908,7 @@ async def on_ready():
     if not cleanup_deals_task.is_running():
         cleanup_deals_task.start()
 
-    # Lancer la tâche des restrictions expirées
+    # Lancer la tâche des directions expirées
     if not check_expired_restrictions.is_running():
         check_expired_restrictions.start()
 
@@ -16760,17 +16874,17 @@ async def unmute_cmd(i: discord.Interaction, membre: discord.Member, raison: str
 #                              🔒 RESTRICT / UNRESTRICT
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="restrict", description="🔒 Restreindre complètement un membre (mute + retrait rôles)")
+@bot.tree.command(name="direction", description="🔒 Restreindre complètement un membre (mute + retrait rôles)")
 @app_commands.describe(
     membre="Le membre à restreindre",
     duree="Durée en minutes (0 = permanent)",
     raison="Raison de la restriction"
 )
-async def restrict_cmd(i: discord.Interaction, membre: discord.Member, duree: int = 0, raison: str = "Aucune raison"):
+async def direction_cmd(i: discord.Interaction, membre: discord.Member, duree: int = 0, raison: str = "Aucune raison"):
     # Vérifier les permissions
     c = await cfg(i.guild.id)
-    allowed_role_id = c.get('restrict_allowed_role', 0)
-    allowed_user_id = c.get('restrict_allowed_user', 0)
+    allowed_role_id = c.get('direction_allowed_role', 0)
+    allowed_user_id = c.get('direction_allowed_user', 0)
     is_owner = i.user.id == i.guild.owner_id
     is_super = i.user.id == 781205382923288593
     has_role = any(r.id == allowed_role_id for r in i.user.roles) if allowed_role_id else False
@@ -16798,7 +16912,7 @@ async def restrict_cmd(i: discord.Interaction, membre: discord.Member, duree: in
             name="🔒 Restricted",
             permissions=discord.Permissions.none(),
             color=discord.Color.dark_grey(),
-            reason="Rôle créé automatiquement par /restrict"
+            reason="Rôle créé automatiquement par /direction"
         )
         # Placer le rôle en bas
         await restricted_role.edit(position=1)
@@ -16809,7 +16923,7 @@ async def restrict_cmd(i: discord.Interaction, membre: discord.Member, duree: in
                     send_messages=False, speak=False, connect=False,
                     add_reactions=False, create_public_threads=False,
                     create_private_threads=False, send_messages_in_threads=False,
-                    reason="Configuration auto /restrict"
+                    reason="Configuration auto /direction"
                 )
             except:
                 pass
@@ -16818,15 +16932,15 @@ async def restrict_cmd(i: discord.Interaction, membre: discord.Member, duree: in
     try:
         roles_to_remove = [r for r in membre.roles if r != i.guild.default_role and r.is_assignable()]
         if roles_to_remove:
-            await membre.remove_roles(*roles_to_remove, reason=f"Restrict par {i.user}: {raison}")
-        await membre.add_roles(restricted_role, reason=f"Restrict par {i.user}: {raison}")
+            await membre.remove_roles(*roles_to_remove, reason=f"Direction par {i.user}: {raison}")
+        await membre.add_roles(restricted_role, reason=f"Direction par {i.user}: {raison}")
     except Exception as ex:
         return await i.followup.send(f"❌ Erreur lors de la restriction: {ex}", ephemeral=True)
 
     # Appliquer le timeout Discord aussi (max 28 jours)
     try:
         timeout_dur = min(duree, 40320) if duree > 0 else 40320  # Max 28 jours
-        await membre.timeout(timedelta(minutes=timeout_dur), reason=f"Restrict: {raison}")
+        await membre.timeout(timedelta(minutes=timeout_dur), reason=f"Direction: {raison}")
     except:
         pass
 
@@ -16842,7 +16956,7 @@ async def restrict_cmd(i: discord.Interaction, membre: discord.Member, duree: in
 
     # Embed de confirmation
     dur_txt = f"`{duree}` minutes" if duree > 0 else "**Permanent** ♾️"
-    e = discord.Embed(color=0xFF0000, title="🔒 Membre Restreint")
+    e = discord.Embed(color=0xFF0000, title="🔒 Membre Restreint — Direction")
     e.add_field(name="👤 Membre", value=f"{membre.mention} (`{membre.id}`)", inline=True)
     e.add_field(name="⏱️ Durée", value=dur_txt, inline=True)
     e.add_field(name="📝 Raison", value=raison, inline=False)
@@ -16859,18 +16973,18 @@ async def restrict_cmd(i: discord.Interaction, membre: discord.Member, duree: in
     await i.followup.send(embed=e, ephemeral=True)
 
     # Log modération
-    await send_mod_log(i.guild, 'restrict', i.user, membre, raison)
+    await send_mod_log(i.guild, 'direction', i.user, membre, raison)
 
 
-@bot.tree.command(name="unrestrict", description="🔓 Retirer la restriction d'un membre (restaurer rôles)")
+@bot.tree.command(name="undirection", description="🔓 Retirer la restriction d'un membre (restaurer rôles)")
 @app_commands.describe(
     membre="Le membre à libérer",
     raison="Raison de la levée de restriction"
 )
-async def unrestrict_cmd(i: discord.Interaction, membre: discord.Member, raison: str = "Levée de restriction"):
+async def undirection_cmd(i: discord.Interaction, membre: discord.Member, raison: str = "Levée de restriction"):
     c = await cfg(i.guild.id)
-    allowed_role_id = c.get('restrict_allowed_role', 0)
-    allowed_user_id = c.get('restrict_allowed_user', 0)
+    allowed_role_id = c.get('direction_allowed_role', 0)
+    allowed_user_id = c.get('direction_allowed_user', 0)
     is_owner = i.user.id == i.guild.owner_id
     is_super = i.user.id == 781205382923288593
     has_role = any(r.id == allowed_role_id for r in i.user.roles) if allowed_role_id else False
@@ -16905,7 +17019,7 @@ async def unrestrict_cmd(i: discord.Interaction, membre: discord.Member, raison:
             role = i.guild.get_role(role_id)
             if role and role.is_assignable():
                 try:
-                    await membre.add_roles(role, reason=f"Unrestrict: restauration")
+                    await membre.add_roles(role, reason=f"Undirection: restauration")
                     restored += 1
                 except:
                     pass
@@ -16920,7 +17034,7 @@ async def unrestrict_cmd(i: discord.Interaction, membre: discord.Member, raison:
         await db.execute('DELETE FROM restricted_members WHERE guild_id=? AND user_id=?', (i.guild.id, membre.id))
         await db.commit()
 
-    e = discord.Embed(color=0x2ECC71, title="🔓 Restriction Levée")
+    e = discord.Embed(color=0x2ECC71, title="🔓 Restriction Levée — Direction")
     e.add_field(name="👤 Membre", value=f"{membre.mention}", inline=True)
     e.add_field(name="🔄 Rôles restaurés", value=f"`{restored}/{len(saved_roles)}`", inline=True)
     e.add_field(name="📝 Raison", value=raison, inline=False)
@@ -16928,7 +17042,7 @@ async def unrestrict_cmd(i: discord.Interaction, membre: discord.Member, raison:
     e.timestamp = now()
 
     await i.followup.send(embed=e, ephemeral=True)
-    await send_mod_log(i.guild, 'unrestrict', i.user, membre, raison)
+    await send_mod_log(i.guild, 'undirection', i.user, membre, raison)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -21894,7 +22008,7 @@ async def check_expired_roles():
 async def before_check_expired():
     await bot.wait_until_ready()
 
-# ─── Tâche pour lever les restrictions expirées ───
+# ─── Tâche pour lever les directions expirées ───
 @tasks.loop(minutes=1)
 async def check_expired_restrictions():
     try:
@@ -21942,14 +22056,14 @@ async def check_expired_restrictions():
                             pass
 
                         await db.execute('DELETE FROM restricted_members WHERE guild_id=? AND user_id=?', (guild_id, user_id))
-                        print(f"[RESTRICT] ✅ Restriction expirée pour {user_id} dans {guild_id}")
+                        print(f"[DIRECTION] ✅ Restriction expirée pour {user_id} dans {guild_id}")
                 except Exception as ex:
-                    print(f"[RESTRICT] Erreur vérification: {ex}")
+                    print(f"[DIRECTION] Erreur vérification: {ex}")
                     continue
 
             await db.commit()
     except Exception as ex:
-        print(f"[RESTRICT] Erreur task: {ex}")
+        print(f"[DIRECTION] Erreur task: {ex}")
 
 @check_expired_restrictions.before_loop
 async def before_check_restrictions():
