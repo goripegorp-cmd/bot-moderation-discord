@@ -8602,7 +8602,7 @@ class AutoReactionPanel(View):
 
 
 class AutoReactionAddModal(Modal, title="➕ Ajouter une Réaction"):
-    trigger = TextInput(label="Trigger (mot/phrase)", placeholder="bonjour, salut, hey...", max_length=100)
+    trigger = TextInput(label="Triggers (séparés par des virgules)", placeholder="bonjour, salut, hey, coucou", max_length=200)
     emoji_input = TextInput(label="Emoji (réaction)", placeholder="👋 ou :wave: ou emoji custom", max_length=50)
     channel_input = TextInput(label="Salon ID (0 = tous les salons)", placeholder="0", required=False, max_length=20)
     type_input = TextInput(label="Type : contains / startswith / exact", placeholder="contains", required=False, max_length=15)
@@ -16895,17 +16895,23 @@ async def on_message(msg):
                     _ar_rows = await _ar_cur.fetchall()
 
             for _ar_ch, _ar_type, _ar_trigger, _ar_emoji in _ar_rows:
-                # Vérifier le salon (0 = tous)
                 if _ar_ch and _ar_ch != msg.channel.id:
                     continue
 
+                # Supporter les triggers multiples séparés par des virgules
+                _ar_triggers = [t.strip() for t in _ar_trigger.split(',') if t.strip()]
+
                 matched = False
-                if _ar_type == 'contains' and _ar_trigger in _ar_content:
-                    matched = True
-                elif _ar_type == 'startswith' and _ar_content.startswith(_ar_trigger):
-                    matched = True
-                elif _ar_type == 'exact' and _ar_content == _ar_trigger:
-                    matched = True
+                for _single_trigger in _ar_triggers:
+                    if _ar_type == 'contains' and _single_trigger in _ar_content:
+                        matched = True
+                        break
+                    elif _ar_type == 'startswith' and _ar_content.startswith(_single_trigger):
+                        matched = True
+                        break
+                    elif _ar_type == 'exact' and _ar_content == _single_trigger:
+                        matched = True
+                        break
 
                 if matched:
                     try:
