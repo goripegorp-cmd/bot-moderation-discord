@@ -1389,11 +1389,15 @@ class UniversalChannelSelect(View):
     
     async def go_back(self, i):
         v = self.return_view_func()
+        # V2-aware navigation (Phase 3.0d)
+        if hasattr(v, 'render_to'):
+            await v.render_to(i, edit=True)
+            return
         if hasattr(v, 'embed'):
             embed = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
-            await i.response.edit_message(content=None, embed=embed, view=v)
+            await i.response.edit_message(content=None, embed=embed, view=v, attachments=[])
         else:
-            await i.response.edit_message(content=None, view=v)
+            await i.response.edit_message(content=None, view=v, attachments=[])
 
 class UniversalChannelSelectMenu(Select):
     def __init__(self, parent, opts):
@@ -1482,11 +1486,15 @@ class UniversalRoleSelect(View):
     
     async def go_back(self, i):
         v = self.return_view_func()
+        # V2-aware navigation (Phase 3.0d)
+        if hasattr(v, 'render_to'):
+            await v.render_to(i, edit=True)
+            return
         if hasattr(v, 'embed'):
             embed = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
-            await i.response.edit_message(content=None, embed=embed, view=v)
+            await i.response.edit_message(content=None, embed=embed, view=v, attachments=[])
         else:
-            await i.response.edit_message(content=None, view=v)
+            await i.response.edit_message(content=None, view=v, attachments=[])
 
 class UniversalRoleSelectMenu(Select):
     def __init__(self, parent, opts):
@@ -1569,11 +1577,15 @@ class UniversalCategorySelect(View):
     
     async def go_back(self, i):
         v = self.return_view_func()
+        # V2-aware navigation (Phase 3.0d)
+        if hasattr(v, 'render_to'):
+            await v.render_to(i, edit=True)
+            return
         if hasattr(v, 'embed'):
             embed = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
-            await i.response.edit_message(content=None, embed=embed, view=v)
+            await i.response.edit_message(content=None, embed=embed, view=v, attachments=[])
         else:
-            await i.response.edit_message(content=None, view=v)
+            await i.response.edit_message(content=None, view=v, attachments=[])
 
 class UniversalCategorySelectMenu(Select):
     def __init__(self, parent, opts):
@@ -4841,8 +4853,9 @@ class PaginatedLinkChanSelectView(View):
         await i.response.edit_message(view=self)
     
     async def go_back(self, i):
-        v = LinkConfigPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        # Phase 3.0d : V2 panel
+        v = LinkConfigPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class LinkChanSelectMenu(Select):
     def __init__(self, parent, opts):
@@ -7763,18 +7776,19 @@ class ImmuneRemoveViewV2(LayoutView):
             await interaction.response.send_message(view=self, ephemeral=True)
 
     async def _cb_role(self, i):
+        # Phase 3.0d : pagination, plus de truncation a 25
         async with get_db() as db:
             async with db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (self.g.id,)) as c:
                 rids = [r[0] for r in await c.fetchall()]
         if not rids:
             return await i.response.send_message("❌ Aucun rôle immunisé", ephemeral=True)
-        opts = []
-        for rid in rids[:25]:
-            role = self.g.get_role(rid)
-            opts.append(discord.SelectOption(label=f"@{role.name if role else rid}"[:25], value=str(rid)))
+        view = PaginatedImmuneRemoveView(self.u, self.g, 'role', rids, page=0)
         await i.response.edit_message(
-            embed=discord.Embed(title="🗑️ Supprimer un rôle immunisé", color=0xE74C3C),
-            view=ImmuneRemoveRoleView(self.u, self.g, opts),
+            embed=discord.Embed(
+                title=f"🗑️ Supprimer un rôle immunisé ({len(rids)} total)",
+                color=0xE74C3C,
+            ),
+            view=view,
             attachments=[],
         )
 
@@ -7784,13 +7798,13 @@ class ImmuneRemoveViewV2(LayoutView):
                 uids = [r[0] for r in await c.fetchall()]
         if not uids:
             return await i.response.send_message("❌ Aucun utilisateur immunisé", ephemeral=True)
-        opts = []
-        for uid in uids[:25]:
-            member = self.g.get_member(uid)
-            opts.append(discord.SelectOption(label=f"@{member.display_name if member else uid}"[:25], value=str(uid)))
+        view = PaginatedImmuneRemoveView(self.u, self.g, 'user', uids, page=0)
         await i.response.edit_message(
-            embed=discord.Embed(title="🗑️ Supprimer un utilisateur immunisé", color=0xE74C3C),
-            view=ImmuneRemoveUserView(self.u, self.g, opts),
+            embed=discord.Embed(
+                title=f"🗑️ Supprimer un utilisateur immunisé ({len(uids)} total)",
+                color=0xE74C3C,
+            ),
+            view=view,
             attachments=[],
         )
 
@@ -7800,18 +7814,118 @@ class ImmuneRemoveViewV2(LayoutView):
                 chids = [r[0] for r in await c.fetchall()]
         if not chids:
             return await i.response.send_message("❌ Aucun salon immunisé", ephemeral=True)
-        opts = []
-        for chid in chids[:25]:
-            ch = self.g.get_channel(chid)
-            opts.append(discord.SelectOption(label=f"# {ch.name if ch else chid}"[:25], value=str(chid)))
+        view = PaginatedImmuneRemoveView(self.u, self.g, 'channel', chids, page=0)
         await i.response.edit_message(
-            embed=discord.Embed(title="🗑️ Supprimer un salon immunisé", color=0xE74C3C),
-            view=ImmuneRemoveChannelView(self.u, self.g, opts),
+            embed=discord.Embed(
+                title=f"🗑️ Supprimer un salon immunisé ({len(chids)} total)",
+                color=0xE74C3C,
+            ),
+            view=view,
             attachments=[],
         )
 
     async def _cb_back(self, i):
         v = ImmunePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+class PaginatedImmuneRemoveView(View):
+    """Vue paginee unifiee pour supprimer une immunite (role/user/channel).
+
+    Phase 3.0d : remplace les anciens [:25] hardcodes qui cachaient les
+    elements au-dela du 25e. Pagination par 24 elements / page + boutons
+    nav <- ->.
+    """
+
+    KIND_TABLE = {'role': 'immune_roles', 'user': 'immune_users', 'channel': 'immune_channels'}
+    KIND_COL = {'role': 'role_id', 'user': 'user_id', 'channel': 'channel_id'}
+    KIND_LABEL_FN = {
+        'role': lambda g, x: f"@{g.get_role(x).name if g.get_role(x) else x}"[:25],
+        'user': lambda g, x: f"@{g.get_member(x).display_name if g.get_member(x) else x}"[:25],
+        'channel': lambda g, x: (lambda c: f"# {c.name if c else x}"[:25])(g.get_channel(x)),
+    }
+
+    def __init__(self, u, g, kind: str, items: list[int], page: int = 0):
+        super().__init__(timeout=180)
+        self.u = u
+        self.g = g
+        self.kind = kind
+        self.items = items
+        self.page = page
+        self.max_page = max(0, (len(items) - 1) // 24)
+        self._build()
+
+    def _build(self):
+        self.clear_items()
+        start = self.page * 24
+        end = start + 24
+        page_items = self.items[start:end]
+        label_fn = self.KIND_LABEL_FN[self.kind]
+
+        opts = []
+        for item_id in page_items:
+            try:
+                label = label_fn(self.g, item_id)
+            except Exception:
+                label = str(item_id)[:25]
+            opts.append(discord.SelectOption(label=label, value=str(item_id)))
+
+        if opts:
+            self.add_item(_PaginatedImmuneRemoveSelect(self, opts))
+
+        if self.max_page > 0:
+            prev_btn = Button(label="◀️", style=discord.ButtonStyle.secondary, row=1, disabled=(self.page == 0))
+            prev_btn.callback = self._prev
+            self.add_item(prev_btn)
+            page_btn = Button(label=f"{self.page+1}/{self.max_page+1}", style=discord.ButtonStyle.primary, row=1, disabled=True)
+            self.add_item(page_btn)
+            nxt_btn = Button(label="▶️", style=discord.ButtonStyle.secondary, row=1, disabled=(self.page >= self.max_page))
+            nxt_btn.callback = self._next
+            self.add_item(nxt_btn)
+
+        back_btn = Button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=2)
+        back_btn.callback = self._back
+        self.add_item(back_btn)
+
+    async def _prev(self, i):
+        v = PaginatedImmuneRemoveView(self.u, self.g, self.kind, self.items, self.page - 1)
+        await i.response.edit_message(view=v, attachments=[])
+
+    async def _next(self, i):
+        v = PaginatedImmuneRemoveView(self.u, self.g, self.kind, self.items, self.page + 1)
+        await i.response.edit_message(view=v, attachments=[])
+
+    async def _back(self, i):
+        v = ImmuneRemoveViewV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+class _PaginatedImmuneRemoveSelect(Select):
+    def __init__(self, parent: PaginatedImmuneRemoveView, opts):
+        kind_placeholder = {
+            'role': "Choisir un rôle à supprimer...",
+            'user': "Choisir un utilisateur à supprimer...",
+            'channel': "Choisir un salon à supprimer...",
+        }[parent.kind]
+        if parent.max_page > 0:
+            kind_placeholder = f"Page {parent.page+1}/{parent.max_page+1} — {kind_placeholder}"
+        super().__init__(placeholder=kind_placeholder, options=opts)
+        self.parent = parent
+
+    async def callback(self, i):
+        kind = self.parent.kind
+        item_id = int(self.values[0])
+        try:
+            async with get_db() as db:
+                await db.execute(
+                    f'DELETE FROM {PaginatedImmuneRemoveView.KIND_TABLE[kind]} '
+                    f'WHERE guild_id=? AND {PaginatedImmuneRemoveView.KIND_COL[kind]}=?',
+                    (self.parent.g.id, item_id),
+                )
+                await db.commit()
+        except Exception as ex:
+            print(f"[IMMUNE REMOVE] erreur DB : {ex}")
+        v = ImmuneRemoveViewV2(self.parent.u, self.parent.g)
         await v.render_to(i, edit=True)
 
 
@@ -14895,7 +15009,11 @@ class PaginatedChannelSelectGeneric(View):
     
     async def go_back(self, i):
         v = self.return_panel_class(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        # V2-aware navigation (Phase 3.0d)
+        if hasattr(v, 'render_to'):
+            await v.render_to(i, edit=True)
+        else:
+            await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🔊 VOCAUX TEMPORAIRES
@@ -22495,8 +22613,9 @@ class PaginatedRoleSelectForPanel(View):
         await i.response.edit_message(embed=embed, view=v)
     
     async def go_back(self, i):
-        v = PanelEditView(self.u, self.g, self.pid)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        # Phase 3.0d : V2 panel
+        v = PanelEditViewV2(self.u, self.g, self.pid)
+        await v.render_to(i, edit=True)
 
 class PanelStaffRoleSelect(Select):
     def __init__(self, parent, opts):
