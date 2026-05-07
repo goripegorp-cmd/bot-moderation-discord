@@ -3467,12 +3467,12 @@ class MainPanelV2(LayoutView):
             'ads': lambda: AdsPanelV2(self.u, self.g),
             'voice': lambda: TempVoicePanelV2(self.u, self.g),
             'stats': lambda: StatPanelV2(self.u, self.g),
+            'levels': lambda: LevelSystemPanelV2(self.u, self.g),
         }
         # Modules encore en V1 (View + embed)
         v1_panels = {
             'prot': lambda: ProtPanel(self.u, self.g),
             'tickets': lambda: TicketMainPanel(self.u, self.g),
-            'levels': lambda: LevelSystemPanel(self.u, self.g),
         }
 
         if val in v2_panels:
@@ -11025,6 +11025,166 @@ class LevelSystemPanel(View):
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+class LevelSystemPanelV2(LayoutView):
+    """Panneau Niveaux & Économie en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        level_cfg = c.get('level_config', {})
+        enabled = level_cfg.get('enabled', False)
+
+        xp_per_msg = level_cfg.get('xp_per_message', 15)
+        xp_per_vocal = level_cfg.get('xp_per_vocal', 5)
+        xp_vocal_unit = level_cfg.get('xp_vocal_unit', 'minute')
+        coins_msgs = level_cfg.get('coins_per_messages', 1)
+        coins_amount = level_cfg.get('coins_amount', 1)
+        coins_per_vocal = level_cfg.get('coins_per_vocal', 1)
+        coins_vocal_unit = level_cfg.get('coins_vocal_unit', 'minute')
+        unit_labels = {'minute': 'min', 'hour': 'h', 'day': 'jour'}
+        shop_items = level_cfg.get('shop_items', [])
+
+        xp_text_channels = level_cfg.get('xp_text_channels', [])
+        xp_voice_channels = level_cfg.get('xp_voice_channels', [])
+
+        if xp_text_channels:
+            text_chans_txt = ", ".join(f"<#{c}>" for c in xp_text_channels[:3])
+            if len(xp_text_channels) > 3:
+                text_chans_txt += f" _+{len(xp_text_channels) - 3}_"
+        else:
+            text_chans_txt = "_Tous_"
+
+        if xp_voice_channels:
+            voc_chans_txt = ", ".join(f"`{self.g.get_channel(c).name if self.g.get_channel(c) else c}`" for c in xp_voice_channels[:3])
+            if len(xp_voice_channels) > 3:
+                voc_chans_txt += f" _+{len(xp_voice_channels) - 3}_"
+        else:
+            voc_chans_txt = "_Tous_"
+
+        # Boutons (11 total répartis en 3 ActionRows + Back)
+        self.clear_items()
+        b_toggle = Button(
+            label=("⏸️ Désactiver" if enabled else "▶️ Activer"),
+            style=(discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success),
+            custom_id="lspv2_toggle",
+        )
+        b_toggle.callback = self._cb_toggle
+        b_xp = Button(label="✨ XP/msg", style=discord.ButtonStyle.primary, custom_id="lspv2_xp")
+        b_xp.callback = self._cb_xp
+        b_coins = Button(label="🪙 Pièces/msg", style=discord.ButtonStyle.primary, custom_id="lspv2_coins")
+        b_coins.callback = self._cb_coins
+        b_xp_voc = Button(label="🎤 XP/voc", style=discord.ButtonStyle.primary, custom_id="lspv2_xp_voc")
+        b_xp_voc.callback = self._cb_xp_voc
+        b_coins_voc = Button(label="🎤 Pièces/voc", style=discord.ButtonStyle.secondary, custom_id="lspv2_coins_voc")
+        b_coins_voc.callback = self._cb_coins_voc
+        b_roles = Button(label="🎭 Rôles", style=discord.ButtonStyle.secondary, custom_id="lspv2_roles")
+        b_roles.callback = self._cb_roles
+        b_shop = Button(label="🛒 Boutique", style=discord.ButtonStyle.success, custom_id="lspv2_shop")
+        b_shop.callback = self._cb_shop
+        b_text_ch = Button(label="📝 Salons Msg", style=discord.ButtonStyle.secondary, custom_id="lspv2_text_ch")
+        b_text_ch.callback = self._cb_text_ch
+        b_voc_ch = Button(label="🎤 Salons Voc", style=discord.ButtonStyle.secondary, custom_id="lspv2_voc_ch")
+        b_voc_ch.callback = self._cb_voc_ch
+        b_announce = Button(label="📢 Annonces", style=discord.ButtonStyle.secondary, custom_id="lspv2_announce")
+        b_announce.callback = self._cb_announce
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="lspv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = []
+        if self.g.icon:
+            items.append(v2_section(
+                v2_title("📈 Niveaux & Économie"),
+                v2_subtitle(f"{'🟢 Système actif' if enabled else '🔴 Système désactivé'}"),
+                accessory=v2_thumb(self.g.icon.url),
+            ))
+        else:
+            items.append(v2_title("📈 Niveaux & Économie"))
+            items.append(v2_subtitle(f"{'🟢 Système actif' if enabled else '🔴 Système désactivé'}"))
+
+        items.append(v2_divider())
+        items.append(v2_title("⚙️ Paramètres XP & Pièces", level=3))
+        items.append(v2_body(
+            f"✨ **XP/message** · `{xp_per_msg}` XP\n"
+            f"🎤 **XP/vocal** · `{xp_per_vocal}` XP / {unit_labels.get(xp_vocal_unit, 'min')}\n"
+            f"🪙 **Pièces/msg** · `{coins_amount}` pièces / `{coins_msgs}` message(s)\n"
+            f"🎤 **Pièces/vocal** · `{coins_per_vocal}` / {unit_labels.get(coins_vocal_unit, 'min')}"
+        ))
+        items.append(v2_divider())
+        items.append(v2_title("📍 Salons & Boutique", level=3))
+        items.append(v2_body(
+            f"📝 **Salons XP (msg)** · {text_chans_txt}\n"
+            f"🎤 **Salons XP (voc)** · {voc_chans_txt}\n"
+            f"🛒 **Boutique** · `{len(shop_items)}` article(s)"
+        ))
+        items.append(v2_divider())
+        items.append(v2_subtitle("💡 /level pour voir sa progression · /shop pour acheter"))
+        items.append(discord.ui.ActionRow(b_toggle, b_xp, b_coins, b_xp_voc, b_coins_voc))
+        items.append(discord.ui.ActionRow(b_roles, b_shop, b_text_ch, b_voc_ch, b_announce))
+        items.append(discord.ui.ActionRow(b_back))
+
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_toggle(self, i):
+        c = await cfg(self.g.id)
+        level_cfg = c.get('level_config', {})
+        level_cfg['enabled'] = not level_cfg.get('enabled', False)
+        await db_set(self.g.id, 'level_config', level_cfg)
+        new_panel = LevelSystemPanelV2(self.u, self.g)
+        await new_panel.render_to(i, edit=True)
+
+    async def _cb_xp(self, i):
+        await i.response.send_modal(LevelXPModal(self.g, self.u))
+
+    async def _cb_coins(self, i):
+        await i.response.send_modal(LevelCoinsModal(self.g, self.u))
+
+    async def _cb_xp_voc(self, i):
+        await i.response.send_modal(LevelXPVocalModal(self.g, self.u))
+
+    async def _cb_coins_voc(self, i):
+        await i.response.send_modal(LevelCoinsVocalModal(self.g, self.u))
+
+    async def _cb_roles(self, i):
+        v = LevelRolesPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+
+    async def _cb_shop(self, i):
+        v = ShopConfigPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+
+    async def _cb_text_ch(self, i):
+        v = XPChannelsSelectPanel(self.u, self.g, 'text')
+        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+
+    async def _cb_voc_ch(self, i):
+        v = XPChannelsSelectPanel(self.u, self.g, 'voice')
+        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+
+    async def _cb_announce(self, i):
+        v = LevelUpChannelSelect(self.u, self.g)
+        await i.response.edit_message(
+            embed=discord.Embed(title="📢 Salon des annonces level-up", color=0x9B59B6),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_back(self, i):
+        v = MainPanelV2(self.u, self.g)
+        await i.response.edit_message(view=v, embed=None, attachments=[])
+
 
 class XPChannelsSelectPanel(View):
     """Panel pour sélectionner les salons où on gagne de l'XP/pièces"""
