@@ -6648,7 +6648,8 @@ class CommandsPanelV2(LayoutView):
         await v.render_to(i, edit=True)
 
     async def _cb_tr(self, i):
-        await self._open_v1(i, lambda: TradePanel(self.u, self.g))
+        v = TradePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _cb_dir(self, i):
         await self._open_v1(i, lambda: DirectionPanel(self.u, self.g))
@@ -7271,6 +7272,105 @@ class TradePanel(View):
     async def back(self, i, b):
         v = CommandsPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
+
+class TradePanelV2(LayoutView):
+    """Configuration Trade en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        trade_role = self.g.get_role(c.get('trade_role', 0))
+        trade_cd = c.get('trade_cooldown', 1)
+        trade_unit = c.get('trade_cooldown_unit', 'heures')
+        allowed_chs = c.get('trade_allowed_channels', [])
+
+        if allowed_chs:
+            ch_mentions = [self.g.get_channel(ch_id).mention for ch_id in allowed_chs[:5] if self.g.get_channel(ch_id)]
+            allowed_txt = ", ".join(ch_mentions) if ch_mentions else "_Vide_"
+            if len(allowed_chs) > 5:
+                allowed_txt += f" _+{len(allowed_chs) - 5}_"
+        else:
+            allowed_txt = "🔴 _Aucun salon configuré_"
+
+        # Boutons
+        self.clear_items()
+        b_role = Button(label="🎭 Rôle", style=discord.ButtonStyle.primary, custom_id="tpgv2_role")
+        b_role.callback = self._cb_role
+        b_allowed = Button(label="📌 Salons autorisés", style=discord.ButtonStyle.success, custom_id="tpgv2_allowed")
+        b_allowed.callback = self._cb_allowed
+        b_cd = Button(label="⏱️ Cooldown", style=discord.ButtonStyle.secondary, custom_id="tpgv2_cd")
+        b_cd.callback = self._cb_cd
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="tpgv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("🔄 Configuration Trade"),
+            v2_subtitle("Configure le système d'échange pour ton serveur"),
+            v2_divider(),
+            v2_body(
+                f"🎭 **Rôle autorisé** · {trade_role.mention if trade_role else '_Tout le monde_'}\n"
+                f"⏱️ **Cooldown** · `{trade_cd}` {trade_unit}\n"
+                f"📌 **Salons autorisés** · {allowed_txt}"
+            ),
+            v2_divider(),
+            v2_subtitle("📢 Les trades sont publiés dans le salon où la commande est utilisée"),
+            discord.ui.ActionRow(b_role, b_allowed, b_cd, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.PREMIUM))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_role(self, i):
+        v = PaginatedRoleSelect(self.u, self.g, 'trade_role', TradePanelV2)
+        await i.response.edit_message(
+            embed=discord.Embed(title="🎭 Rôle autorisé pour /trade", color=0xF1C40F),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_allowed(self, i):
+        c = await cfg(self.g.id)
+        current = c.get('trade_allowed_channels', [])
+        v = PaginatedChannelSelect(self.u, self.g, 'trade_allowed_channels', TradePanelV2, multi=True, current_channels=current)
+        if current:
+            selected_txt = "\n".join(f"• {self.g.get_channel(ch_id).mention}" for ch_id in current[:5] if self.g.get_channel(ch_id))
+            if len(current) > 5:
+                selected_txt += f"\n_+{len(current) - 5} autres_"
+        else:
+            selected_txt = "_Aucun salon sélectionné_"
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="📌 Salons autorisés pour /trade",
+                description=(
+                    "**Sélectionne les salons** où `/trade` peut être utilisée.\n\n"
+                    "👆 Clique sur un salon pour l'ajouter / retirer\n"
+                    "✅ Clique sur Valider pour sauvegarder\n\n"
+                    f"📋 **Actuellement ({len(current)}) :**\n{selected_txt}"
+                ),
+                color=0xF1C40F,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_cd(self, i):
+        await i.response.send_modal(TradeCooldownModal(self.g, self.u))
+
+    async def _cb_back(self, i):
+        v = CommandsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
 
 class TradeCooldownModal(Modal, title="⏱️ Cooldown Trade"):
     duree = TextInput(label="Durée (nombre)", placeholder="1", default="1", max_length=3)
