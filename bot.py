@@ -3466,12 +3466,12 @@ class MainPanelV2(LayoutView):
             'chan': lambda: ChanPanelV2(self.u, self.g),
             'ads': lambda: AdsPanelV2(self.u, self.g),
             'voice': lambda: TempVoicePanelV2(self.u, self.g),
+            'stats': lambda: StatPanelV2(self.u, self.g),
         }
         # Modules encore en V1 (View + embed)
         v1_panels = {
             'prot': lambda: ProtPanel(self.u, self.g),
             'tickets': lambda: TicketMainPanel(self.u, self.g),
-            'stats': lambda: StatPanel(self.u, self.g),
             'levels': lambda: LevelSystemPanel(self.u, self.g),
         }
 
@@ -14409,6 +14409,144 @@ class StatPanel(View):
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🔕 SYSTÈME RÔLE AFK
 # ═══════════════════════════════════════════════════════════════════════════════
+
+
+class StatPanelV2(LayoutView):
+    """Panneau Statistiques & Suivi d'Activité en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def get_afk_full_data(self):
+        return await StatPanel(self.u, self.g).get_afk_full_data()
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        stat_cfg = c.get('stat_config', {})
+
+        afk_data = await self.get_afk_full_data()
+        humans = sum(1 for m in self.g.members if not m.bot)
+        active = humans - afk_data['afk_7d']
+        active_pct = round(active / humans * 100) if humans > 0 else 0
+
+        bar_n = round(active_pct / 10)
+        if active_pct >= 70: bar_color = "🟢"
+        elif active_pct >= 40: bar_color = "🟡"
+        else: bar_color = "🔴"
+        bar = "█" * bar_n + "░" * (10 - bar_n)
+
+        action_labels = {'ping': '📊 Rapport', 'remove_role': '🎭 Retrait rôle', 'kick': '👢 Kick'}
+        actions_7d = stat_cfg.get('actions_7d', [])
+        actions_30d = stat_cfg.get('actions_30d', [])
+        role = self.g.get_role(stat_cfg.get('activity_role', 0))
+        notif_ch = self.g.get_channel(stat_cfg.get('notif_channel', 0))
+        recovery_ch = self.g.get_channel(stat_cfg.get('recovery_channel', 0))
+
+        # Top AFK
+        top_afk_lines = []
+        if afk_data['top_afk']:
+            medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+            for idx, (uid, days) in enumerate(afk_data['top_afk'][:5]):
+                m = self.g.get_member(uid)
+                name = m.display_name[:20] if m else f"ID:{uid}"
+                top_afk_lines.append(f"{medals[idx]} **{name}** — `{days}j` sans activité")
+        top_afk_block = "\n".join(top_afk_lines) if top_afk_lines else "_Aucune donnée AFK_"
+
+        # Boutons
+        self.clear_items()
+        b_actions = Button(label="⚙️ Configurer Actions", style=discord.ButtonStyle.primary, custom_id="spv2_actions")
+        b_actions.callback = self._cb_actions
+        b_graph = Button(label="📈 Graphique", style=discord.ButtonStyle.success, custom_id="spv2_graph")
+        b_graph.callback = self._cb_graph
+        b_afk_role = Button(label="🔕 Rôle AFK", style=discord.ButtonStyle.primary, custom_id="spv2_afkrole")
+        b_afk_role.callback = self._cb_afk_role
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="spv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = []
+        if self.g.icon:
+            items.append(v2_section(
+                v2_title("📊 Statistiques & Suivi d'Activité"),
+                v2_subtitle(f"{bar_color} Santé du serveur · {active_pct}%"),
+                accessory=v2_thumb(self.g.icon.url),
+            ))
+        else:
+            items.append(v2_title("📊 Statistiques & Suivi d'Activité"))
+            items.append(v2_subtitle(f"{bar_color} Santé du serveur · {active_pct}%"))
+
+        items.append(v2_divider())
+        items.append(v2_body(f"`[{bar}]` **{active}** / `{humans}` actifs"))
+        items.append(v2_divider())
+        items.append(v2_body(
+            f"🟢 **Actifs (7j)** · `{active}`\n"
+            f"😴 **AFK 7j** · `{afk_data['afk_7d']}`\n"
+            f"💤 **AFK 30j** · `{afk_data['afk_30d']}`"
+        ))
+        items.append(v2_divider())
+        items.append(v2_title("⚙️ Actions automatiques", level=3))
+        items.append(v2_body(
+            f"**7 jours** · {' + '.join(action_labels.get(a, a) for a in actions_7d) if actions_7d else '_Aucune_'}\n"
+            f"**30 jours** · {' + '.join(action_labels.get(a, a) for a in actions_30d) if actions_30d else '_Aucune_'}\n"
+            f"**Rôle d'activité** · {role.mention if role else '_Non configuré_'}"
+        ))
+        items.append(v2_divider())
+        items.append(v2_title("📍 Salons", level=3))
+        items.append(v2_body(
+            f"📢 **Notifications** · {notif_ch.mention if notif_ch else '🔴 _Non configuré_'}\n"
+            f"🔄 **Récupération** · {recovery_ch.mention if recovery_ch else '🔴 _Non configuré_'}"
+        ))
+        if top_afk_block != "_Aucune donnée AFK_":
+            items.append(v2_divider())
+            items.append(v2_title("💤 Top AFK", level=3))
+            items.append(v2_body(top_afk_block))
+        items.append(v2_divider())
+        items.append(v2_subtitle("💡 Récupération auto : message ou vocal · 📊 Graphiques disponibles"))
+        items.append(discord.ui.ActionRow(b_actions, b_graph, b_afk_role, b_back))
+
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_actions(self, i):
+        v = StatActionPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+
+    async def _cb_graph(self, i):
+        await i.response.defer()
+        old_panel = StatPanel(self.u, self.g)
+        img = await old_panel.generate_afk_graph()
+        if img:
+            file = discord.File(img, filename="afk_stats.png")
+            view = LayoutView(timeout=None)
+            view.add_item(v2_container(
+                v2_title("📊 Statistiques d'Activité", level=2),
+                v2_subtitle(f"{self.g.name}"),
+                v2_divider(),
+                discord.ui.MediaGallery(
+                    discord.MediaGalleryItem(media="attachment://afk_stats.png")
+                ),
+                color=Palette.ACCENT,
+            ))
+            await i.followup.send(view=view, file=file, ephemeral=True)
+        else:
+            await i.followup.send("❌ Erreur lors de la génération du graphique", ephemeral=True)
+
+    async def _cb_afk_role(self, i):
+        v = AfkRolePanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+
+    async def _cb_back(self, i):
+        v = MainPanelV2(self.u, self.g)
+        await i.response.edit_message(view=v, embed=None, attachments=[])
+
 
 class AfkRolePanel(View):
     """Panel de gestion du système de rôle AFK"""
