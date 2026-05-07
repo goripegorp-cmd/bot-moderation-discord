@@ -10289,10 +10289,14 @@ class AdsRedditChannelSelect(Select):
 
 # ─────────────────────────────── TWITTER/X ───────────────────────────────
 
-# Liste d'instances Nitter fonctionnelles (2026 - xcancel en priorité)
+# Liste d'instances Nitter fonctionnelles (2026)
+# Audit live (Phase 3.0b) : nitter.net est l'instance la plus stable.
+# xcancel.com en backup, les autres tombent souvent.
 NITTER_INSTANCES = [
+    "nitter.net",
     "xcancel.com",
     "nitter.poast.org",
+    "nitter.cz",
     "nitter.privacydev.net",
 ]
 # Fallback RSS-Bridge si Nitter échoue
@@ -27154,15 +27158,82 @@ async def check_twitch_feeds(session, guild, data):
             if not notif_channel:
                 continue
             
-            url = f"https://www.twitch.tv/{username}"
             cache_key = f"twitch_live_{guild.id}_{username}"
-            
-            async with session.get(url, headers=headers_tw, timeout=aiohttp.ClientTimeout(total=10)) as resp:
-                if resp.status != 200:
-                    continue
-                html = await resp.text()
-            
-            is_live = '"isLiveBroadcast":true' in html or 'isLiveBroadcast' in html
+
+            # Twitch a deprecie les markers JSON dans la page HTML : on utilise
+            # l'API GQL publique (Client-ID web Twitch). Marche sans auth.
+            is_live = False
+            stream_title = None
+            game_name = None
+            try:
+                gql_headers = dict(headers_tw)
+                gql_headers["Client-ID"] = "kimne78kx3ncx6brgo4mv6wki5h1ko"
+                gql_headers["Content-Type"] = "application/json"
+                gql_body = [{
+                    "operationName": "UseLive",
+                    "variables": {"channelLogin": username.lower()},
+                    "extensions": {
+                        "persistedQuery": {
+                            "version": 1,
+                            "sha256Hash": "639d5f11bfb8bf3053b424d9ef650d04c4ebb7d94711d644afb08fe9a0fad5d9",
+                        }
+                    },
+                }]
+                async with session.post(
+                    "https://gql.twitch.tv/gql",
+                    json=gql_body, headers=gql_headers,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status == 200:
+                        gql_data = await resp.json()
+                        try:
+                            stream_obj = gql_data[0]["data"]["user"]["stream"]
+                            is_live = stream_obj is not None
+                        except (KeyError, IndexError, TypeError):
+                            is_live = False
+                    else:
+                        # Fallback : ancienne methode HTML (au cas ou Twitch reactive le marker)
+                        async with session.get(
+                            f"https://www.twitch.tv/{username}",
+                            headers=headers_tw,
+                            timeout=aiohttp.ClientTimeout(total=10),
+                        ) as r2:
+                            if r2.status == 200:
+                                html_fallback = await r2.text()
+                                is_live = '"isLiveBroadcast":true' in html_fallback
+            except Exception as ex:
+                print(f"[TWITCH GQL] erreur pour {username}: {ex}")
+                continue
+
+            # Si live detecte, recuperer titre + jeu via une seconde requete GQL legere
+            if is_live:
+                try:
+                    gql_body2 = [{
+                        "operationName": "ChannelShell",
+                        "variables": {"login": username.lower()},
+                        "extensions": {
+                            "persistedQuery": {
+                                "version": 1,
+                                "sha256Hash": "580ab410bcd0c1ad194224957ae2241e5d252b2c5173d8e0cce9d32d5bb14efe",
+                            }
+                        },
+                    }]
+                    async with session.post(
+                        "https://gql.twitch.tv/gql",
+                        json=gql_body2, headers=gql_headers,
+                        timeout=aiohttp.ClientTimeout(total=8),
+                    ) as r3:
+                        if r3.status == 200:
+                            d = await r3.json()
+                            try:
+                                user_data = d[0]["data"]["userOrError"]
+                                stream_obj2 = user_data.get("stream") or {}
+                                stream_title = stream_obj2.get("title")
+                                game_name = (stream_obj2.get("game") or {}).get("displayName")
+                            except (KeyError, IndexError, TypeError, AttributeError):
+                                pass
+                except Exception:
+                    pass
             
             if is_live:
                 mark_live_still_active(cache_key)
@@ -27172,7 +27243,13 @@ async def check_twitch_feeds(session, guild, data):
                     e = discord.Embed(color=0x9146FF, url=stream_url)
                     e.set_author(name=f"🔴 EN DIRECT SUR TWITCH", url=stream_url, icon_url=_TW_ICON)
                     e.title = f"{username} est en live !"
-                    e.description = f"**{username}** vient de lancer un stream !\n\n▶️ [**Rejoindre le stream**]({stream_url})"
+                    desc_lines = [f"**{username}** vient de lancer un stream !"]
+                    if stream_title:
+                        desc_lines.append(f"📺 **{stream_title}**")
+                    if game_name:
+                        desc_lines.append(f"🎮 {game_name}")
+                    desc_lines.append(f"\n▶️ [**Rejoindre le stream**]({stream_url})")
+                    e.description = "\n".join(desc_lines)
                     e.set_image(url=f"https://static-cdn.jtvnw.net/previews-ttv/live_user_{username.lower()}-1280x720.jpg?t={int(now().timestamp())}")
                     tw_avatar = await fetch_avatar_url('twitch', username, session)
                     if tw_avatar:
@@ -27297,20 +27374,52 @@ async def check_tiktok_feeds(session, guild, data):
             # Méthode RSS via proxitok/instances ou scrape léger
             try:
                 # Essayer via la page profil TikTok
+                # NOTE 2026: TikTok a renforce sa detection anti-bot. Les patterns
+                # JSON traditionnels ne sont plus dans le HTML public et les
+                # API tiers (tikwm, rsshub) sont derriere Cloudflare.
+                # Si tu veux une detection TikTok fiable, utilise une API payante
+                # (TikAPI.io) ou un service hostant Playwright/Selenium.
                 profile_url = f"https://www.tiktok.com/@{username}"
                 async with session.get(profile_url, headers=headers_tk, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                     if resp.status != 200:
+                        print(f"[TIKTOK] @{username} : profile HTTP {resp.status}, skip")
                         continue
                     html = await resp.text()
-                
+
                 # Extraire les vidéos depuis le JSON embarqué dans la page
                 import re
-                # Chercher les IDs vidéo dans le HTML
+                # Chercher les IDs vidéo dans le HTML (patterns historiques)
                 video_ids = re.findall(r'"id":"(\d{15,25})"', html)
                 if not video_ids:
                     video_ids = re.findall(r'/video/(\d{15,25})', html)
-                
+                # Pattern 2026 : __UNIVERSAL_DATA_FOR_REHYDRATION__ avec ItemModule
                 if not video_ids:
+                    udi = re.search(r'<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>(.*?)</script>', html, re.DOTALL)
+                    if udi:
+                        try:
+                            import json as _j
+                            udi_data = _j.loads(udi.group(1))
+                            scope = udi_data.get('__DEFAULT_SCOPE__', {})
+                            # ItemModule contient les videos avec id
+                            item_module = scope.get('webapp.video-detail', {}).get('itemInfo', {})
+                            if item_module:
+                                vid = item_module.get('itemStruct', {}).get('id')
+                                if vid:
+                                    video_ids = [vid]
+                            # Aussi checker les keys autres
+                            if not video_ids:
+                                for key in scope:
+                                    val = scope[key]
+                                    if isinstance(val, dict) and 'ItemModule' in val:
+                                        item_mod = val['ItemModule']
+                                        if isinstance(item_mod, dict):
+                                            video_ids = list(item_mod.keys())
+                                            break
+                        except Exception as _ex:
+                            print(f"[TIKTOK] @{username} : parse __UNIVERSAL_DATA__ failed: {_ex}")
+
+                if not video_ids:
+                    print(f"[TIKTOK] @{username} : aucune video detectee (page contient probablement un challenge anti-bot)")
                     continue
                 
                 latest_video_id = video_ids[0]
@@ -27522,90 +27631,96 @@ async def check_twitter_feeds(session, guild, data):
             image_url = None
             tw_avatar_url = None
 
-            # ═══════════════ MÉTHODE 1 : Twitter Syndication API (officielle, gratuite) ═══════════════
-            try:
-                synd_url = f"https://syndication.twitter.com/srv/timeline-profile/screen-name/{username}"
-                async with session.get(synd_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                    if resp.status == 200:
-                        html = await resp.text()
-                        # Extraire le JSON __NEXT_DATA__
-                        nd_match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html)
-                        if nd_match:
-                            import json as _json
-                            nd_data = _json.loads(nd_match.group(1))
-                            entries = nd_data.get('props', {}).get('pageProps', {}).get('timeline', {}).get('entries', [])
-                            if entries:
-                                tweet_data = entries[0].get('content', {}).get('tweet', {})
-                                if tweet_data:
-                                    tweet_id = tweet_data.get('id_str', '')
-                                    tweet_text = tweet_data.get('text', '') or tweet_data.get('full_text', '')
-                                    permalink = tweet_data.get('permalink', '')
-                                    tweet_link = f"https://twitter.com{permalink}" if permalink else f"https://twitter.com/{username}/status/{tweet_id}"
-                                    # Avatar
-                                    user_data = tweet_data.get('user', {})
-                                    tw_avatar_url = user_data.get('profile_image_url_https', '').replace('_normal', '_400x400')
-                                    # Image du tweet
-                                    media_details = tweet_data.get('mediaDetails', [])
-                                    if media_details:
-                                        for md in media_details:
-                                            if md.get('type') == 'photo':
-                                                image_url = md.get('media_url_https', '')
-                                                break
-                                    if not image_url:
-                                        entities_media = tweet_data.get('entities', {}).get('media', [])
-                                        for em in entities_media:
-                                            if em.get('type') == 'photo':
-                                                image_url = em.get('media_url_https', '')
-                                                break
-            except Exception as ex:
-                print(f"[TWITTER] Syndication API échouée pour @{username}: {ex}")
+            # ═══════════════ MÉTHODE 1 : Nitter RSS (plus stable que Syndication) ═══════════════
+            # Note (2026): Twitter Syndication renvoie souvent 429 depuis IP datacenter.
+            # On essaye Nitter d'abord, qui marche bien.
+            working_instance = None
+            for instance in NITTER_INSTANCES:
+                try:
+                    rss_url = f"https://{instance}/{username}/rss"
+                    async with session.get(rss_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                        if resp.status == 200:
+                            text = await resp.text()
+                            if '<item>' in text or '<entry>' in text:
+                                root = ET.fromstring(text)
+                                if '<entry>' in text:
+                                    ns = {'atom': 'http://www.w3.org/2005/Atom'}
+                                    entry = (root.findall('.//atom:entry', ns) or root.findall('.//entry') or [None])[0]
+                                    if entry is not None:
+                                        id_el = entry.find('atom:id', ns) or entry.find('id')
+                                        title_el = entry.find('atom:title', ns) or entry.find('title')
+                                        link_el = entry.find('atom:link', ns) or entry.find('link')
+                                        tweet_id = id_el.text if id_el is not None else ""
+                                        tweet_text = title_el.text if title_el is not None else ""
+                                        tweet_link = link_el.get('href', '') if link_el is not None else ""
+                                else:
+                                    item = (root.findall('.//item') or [None])[0]
+                                    if item is not None:
+                                        guid_el = item.find('guid')
+                                        title_el = item.find('title')
+                                        link_el = item.find('link')
+                                        desc_el = item.find('description')
+                                        tweet_id = guid_el.text if guid_el is not None else ""
+                                        tweet_text = title_el.text if title_el is not None else ""
+                                        tweet_link = link_el.text if link_el is not None else ""
+                                        if desc_el is not None and desc_el.text:
+                                            img_m = re.search(r'<img[^>]+src="([^"]+)"', desc_el.text)
+                                            if img_m:
+                                                image_url = img_m.group(1)
+                                if tweet_id:
+                                    # Extraire l'ID numerique (Nitter le wrap parfois)
+                                    id_match = re.search(r'(\d{15,})', tweet_id)
+                                    if id_match:
+                                        tweet_id = id_match.group(1)
+                                    working_instance = instance
+                                    break
+                except Exception:
+                    continue
 
-            # ═══════════════ MÉTHODE 2 : Nitter RSS (fallback) ═══════════════
+            # Convertir liens Nitter → Twitter
+            if working_instance and tweet_link and working_instance in tweet_link:
+                tweet_link = tweet_link.replace(f"https://{working_instance}", "https://twitter.com")
+            if working_instance and image_url and working_instance in image_url:
+                image_url = image_url.replace(f"https://{working_instance}", "https://pbs.twimg.com")
+
+            # ═══════════════ MÉTHODE 2 : Twitter Syndication API (fallback) ═══════════════
+            # Souvent rate-limitee (429) depuis cloud, mais on tente quand meme si Nitter rate.
             if not tweet_id:
-                working_instance = None
-                for instance in NITTER_INSTANCES:
-                    try:
-                        rss_url = f"https://{instance}/{username}/rss"
-                        async with session.get(rss_url, headers=headers, timeout=aiohttp.ClientTimeout(total=20)) as resp:
-                            if resp.status == 200:
-                                text = await resp.text()
-                                if '<item>' in text or '<entry>' in text:
-                                    root = ET.fromstring(text)
-                                    if '<entry>' in text:
-                                        ns = {'atom': 'http://www.w3.org/2005/Atom'}
-                                        entry = (root.findall('.//atom:entry', ns) or root.findall('.//entry') or [None])[0]
-                                        if entry is not None:
-                                            id_el = entry.find('atom:id', ns) or entry.find('id')
-                                            title_el = entry.find('atom:title', ns) or entry.find('title')
-                                            link_el = entry.find('atom:link', ns) or entry.find('link')
-                                            tweet_id = id_el.text if id_el is not None else ""
-                                            tweet_text = title_el.text if title_el is not None else ""
-                                            tweet_link = link_el.get('href', '') if link_el is not None else ""
-                                    else:
-                                        item = (root.findall('.//item') or [None])[0]
-                                        if item is not None:
-                                            guid_el = item.find('guid')
-                                            title_el = item.find('title')
-                                            link_el = item.find('link')
-                                            desc_el = item.find('description')
-                                            tweet_id = guid_el.text if guid_el is not None else ""
-                                            tweet_text = title_el.text if title_el is not None else ""
-                                            tweet_link = link_el.text if link_el is not None else ""
-                                            if desc_el is not None and desc_el.text:
-                                                img_m = re.search(r'<img[^>]+src="([^"]+)"', desc_el.text)
-                                                if img_m:
-                                                    image_url = img_m.group(1)
-                                    if tweet_id:
-                                        working_instance = instance
-                                        break
-                    except:
-                        continue
-
-                # Convertir liens Nitter → Twitter
-                if working_instance and tweet_link and working_instance in tweet_link:
-                    tweet_link = tweet_link.replace(f"https://{working_instance}", "https://twitter.com")
-                if working_instance and image_url and working_instance in image_url:
-                    image_url = image_url.replace(f"https://{working_instance}", "https://pbs.twimg.com")
+                try:
+                    synd_url = f"https://syndication.twitter.com/srv/timeline-profile/screen-name/{username}"
+                    async with session.get(synd_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                        if resp.status == 200:
+                            html = await resp.text()
+                            nd_match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html)
+                            if nd_match:
+                                import json as _json
+                                nd_data = _json.loads(nd_match.group(1))
+                                entries = nd_data.get('props', {}).get('pageProps', {}).get('timeline', {}).get('entries', [])
+                                if entries:
+                                    tweet_data = entries[0].get('content', {}).get('tweet', {})
+                                    if tweet_data:
+                                        tweet_id = tweet_data.get('id_str', '')
+                                        tweet_text = tweet_data.get('text', '') or tweet_data.get('full_text', '')
+                                        permalink = tweet_data.get('permalink', '')
+                                        tweet_link = f"https://twitter.com{permalink}" if permalink else f"https://twitter.com/{username}/status/{tweet_id}"
+                                        user_data = tweet_data.get('user', {})
+                                        tw_avatar_url = user_data.get('profile_image_url_https', '').replace('_normal', '_400x400')
+                                        media_details = tweet_data.get('mediaDetails', [])
+                                        if media_details:
+                                            for md in media_details:
+                                                if md.get('type') == 'photo':
+                                                    image_url = md.get('media_url_https', '')
+                                                    break
+                                        if not image_url:
+                                            entities_media = tweet_data.get('entities', {}).get('media', [])
+                                            for em in entities_media:
+                                                if em.get('type') == 'photo':
+                                                    image_url = em.get('media_url_https', '')
+                                                    break
+                        elif resp.status == 429:
+                            print(f"[TWITTER] Syndication rate-limited (429) pour @{username}")
+                except Exception as ex:
+                    print(f"[TWITTER] Syndication API échouée pour @{username}: {ex}")
 
             if not tweet_id:
                 print(f"[TWITTER] ⚠️ Aucune source disponible pour @{username}")
