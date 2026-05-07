@@ -19484,35 +19484,56 @@ async def afk_cmd(i: discord.Interaction, jours: int = 7):
     
     afk_members.sort(key=lambda x: x[1], reverse=True)
     
+    # ─── Aucun membre AFK ───
     if not afk_members:
-        e = discord.Embed(color=0x57F287)
-        e.set_author(name=f"💤 AFK ({jours}j+)", icon_url=i.guild.icon.url if i.guild.icon else None)
-        e.description = f"🎉 **Aucun membre AFK depuis {jours}+ jours !**"
-        return await i.followup.send(embed=e, ephemeral=True)
-    
-    # Créer les pages
-    embeds = []
-    chunk_size = 15
-    for page_idx in range(0, min(len(afk_members), 45), chunk_size):
-        chunk = afk_members[page_idx:page_idx+chunk_size]
-        e = discord.Embed(color=0xE74C3C)
-        e.set_author(name=f"💤 {len(afk_members)} membres AFK ({jours}j+)", icon_url=i.guild.icon.url if i.guild.icon else None)
-        
-        lines = []
-        for idx, (uid, days, msgs) in enumerate(chunk, page_idx + 1):
-            m = i.guild.get_member(uid)
-            name = m.mention if m else f"`{uid}`"
-            icon = "🔴" if days >= 30 else ("🟠" if days >= 14 else ("🟡" if days >= 7 else "⚪"))
-            msg_txt = f" ({msgs} msgs)" if msgs else ""
-            lines.append(f"`{idx:>3}.` {icon} {name} — **{days}j**{msg_txt}")
-        
-        e.description = "\n".join(lines)
-        page_num = page_idx // chunk_size + 1
-        total_pages = min((len(afk_members) + chunk_size - 1) // chunk_size, 3)
-        e.set_footer(text=f"Page {page_num}/{total_pages} • 🔴 30j+ | 🟠 14j+ | 🟡 7j+")
-        embeds.append(e)
-    
-    await i.followup.send(embeds=embeds[:3], ephemeral=True)
+        empty_view = LayoutView(timeout=None)
+        empty_items = []
+        if i.guild.icon:
+            empty_items.append(v2_section(
+                v2_title(f"💤 AFK ({jours}j+)"),
+                v2_body(f"🎉 Aucun membre inactif depuis **{jours}+ jours** !"),
+                accessory=v2_thumb(i.guild.icon.url),
+            ))
+        else:
+            empty_items.append(v2_title(f"💤 AFK ({jours}j+)"))
+            empty_items.append(v2_body(f"🎉 Aucun membre inactif depuis **{jours}+ jours** !"))
+        empty_view.add_item(v2_container(*empty_items, color=Palette.SUCCESS))
+        return await i.followup.send(view=empty_view, ephemeral=True)
+
+    # ─── Liste des AFK (max 45 affichés) ───
+    afk_to_show = afk_members[:45]
+    lines_out = []
+    for idx, (uid, days, msgs) in enumerate(afk_to_show, 1):
+        m = i.guild.get_member(uid)
+        name = m.mention if m else f"`{uid}`"
+        icon = "🔴" if days >= 30 else ("🟠" if days >= 14 else ("🟡" if days >= 7 else "⚪"))
+        msg_txt = f" · `{msgs}` msgs" if msgs else ""
+        lines_out.append(f"`{idx:>3}.` {icon} {name} — **{days}j**{msg_txt}")
+
+    items_v2 = []
+    if i.guild.icon:
+        items_v2.append(v2_section(
+            v2_title(f"💤 {len(afk_members)} membres AFK"),
+            v2_body(f"Inactifs depuis **{jours}+ jours**"),
+            accessory=v2_thumb(i.guild.icon.url),
+        ))
+    else:
+        items_v2.append(v2_title(f"💤 {len(afk_members)} membres AFK"))
+        items_v2.append(v2_subtitle(f"Inactifs depuis {jours}+ jours"))
+    items_v2.append(v2_divider())
+    items_v2.append(v2_body("\n".join(lines_out)))
+
+    # Indication si plus de 45 membres
+    if len(afk_members) > 45:
+        items_v2.append(v2_divider())
+        items_v2.append(v2_subtitle(f"+ {len(afk_members) - 45} autres membres non affichés"))
+
+    items_v2.append(v2_divider())
+    items_v2.append(v2_subtitle("🔴 30j+  ·  🟠 14j+  ·  🟡 7j+  ·  ⚪ < 7j"))
+
+    view = LayoutView(timeout=None)
+    view.add_item(v2_container(*items_v2, color=Palette.DANGER))
+    await i.followup.send(view=view, ephemeral=True)
 
 @bot.tree.command(name="stat", description="📊 Voir les statistiques d'activité d'un membre")
 @app_commands.describe(membre="Le membre dont vous voulez voir les stats (vous par défaut)")
