@@ -15212,7 +15212,13 @@ class TempVoiceHubEditPanelV2(LayoutView):
         hubs = voice_cfg.get('hubs', {})
         return hubs.get(str(self.hub_id), {})
 
-    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+    def _build(self):
+        """Construit le LayoutView (sans l'envoyer)."""
+        # On a besoin des données — donc cette fonction est async en réalité.
+        # On la transforme en méthode async distincte _build_async.
+        pass
+
+    async def _build_async(self):
         hub_data = await self._get_hub_data()
         hub_ch = self.g.get_channel(int(self.hub_id))
 
@@ -15221,7 +15227,6 @@ class TempVoiceHubEditPanelV2(LayoutView):
         role = self.g.get_role(role_id) if role_id else None
         default_name = hub_data.get('default_name', '🔊 Vocal de {user}')
 
-        # Mode descriptif
         if role:
             mode_line = f"🔒 **PRIVÉ** · {role.mention}"
             mode_desc = f"_Les vocaux créés seront invisibles pour les membres sans le rôle {role.name}._"
@@ -15256,10 +15261,20 @@ class TempVoiceHubEditPanelV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        await self._build_async()
         if edit:
             await interaction.response.edit_message(view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def render_after_defer(self, interaction: discord.Interaction, *, content=None):
+        """À utiliser quand interaction.response.defer() a déjà été appelé."""
+        await self._build_async()
+        kwargs = dict(view=self, embed=None, attachments=[])
+        if content is not None:
+            kwargs['content'] = content
+        await interaction.edit_original_response(**kwargs)
 
     async def _cb_cat(self, i):
         v = TempVoiceHubEditCategory(self.u, self.g, self.hub_id)
@@ -15464,9 +15479,10 @@ class TempVoiceHubEditRole(View):
         
         try:
             v = TempVoiceHubEditPanelV2(self.u, self.g, self.hub_id)
-            await i.edit_original_response(embed=await v.embed(), view=v)
-        except:
-            pass
+            # response déjà deferred → on construit la View puis edit_original_response
+            await v.render_after_defer(i)
+        except Exception as ex:
+            print(f"[VoiceHubEditRole back] {ex}")
     
     async def _on_select(self, i: discord.Interaction):
         try:
@@ -15494,7 +15510,8 @@ class TempVoiceHubEditRole(View):
                 msg = f"✅ **Mode PUBLIC activé**\n🔓 Tout le monde peut voir et rejoindre les vocaux créés"
             
             v = TempVoiceHubEditPanelV2(self.u, self.g, self.hub_id)
-            await i.edit_original_response(content=msg, embed=await v.embed(), view=v)
+            # response deferred → render via edit_original_response
+            await v.render_after_defer(i, content=msg)
         except Exception as ex:
             print(f"[TempVoiceHubEditRole._on_select] {ex}")
 
