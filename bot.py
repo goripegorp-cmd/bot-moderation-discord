@@ -15015,16 +15015,8 @@ class TempVoicePanelV2(LayoutView):
         await new_panel.render_to(i, edit=True)
 
     async def _cb_add(self, i):
-        v = TempVoiceAddHubSelect(self.u, self.g)
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="➕ Ajouter un Hub Vocal",
-                description="**Étape 1/3** — Choisis le salon vocal qui servira de hub.\n\nQuand un membre rejoindra ce salon, un vocal personnel sera créé.",
-                color=0x9B59B6,
-            ),
-            view=v,
-            attachments=[],
-        )
+        v = TempVoiceAddHubSelectV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _cb_manage(self, i):
         c = await cfg(self.g.id)
@@ -15041,6 +15033,90 @@ class TempVoicePanelV2(LayoutView):
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
         await i.response.edit_message(view=v, embed=None, attachments=[])
+
+
+class TempVoiceAddHubSelectV2(LayoutView):
+    """Etape 1/3 : choisir le salon hub (V2)."""
+
+    def __init__(self, u, g, page=0):
+        super().__init__(timeout=180)
+        self.u = u
+        self.g = g
+        self.page = page
+        self.voice_channels = [c for c in g.channels if isinstance(c, discord.VoiceChannel)]
+        self.per_page = 23
+        self.max_page = max(0, (len(self.voice_channels) - 1) // self.per_page)
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    def _build(self):
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_chs = self.voice_channels[start:end]
+        opts = [
+            discord.SelectOption(
+                label=f"🔊 {c.name}"[:25],
+                value=str(c.id),
+                description=(c.category.name[:50] if c.category else "Sans catégorie"),
+            )
+            for c in page_chs
+        ]
+        sel = Select(placeholder=f"Page {self.page+1}/{self.max_page+1} — Salon vocal…", options=opts, custom_id="tvahsv2_sel") if opts else None
+        if sel:
+            sel.callback = self._cb_select
+
+        self.clear_items()
+        b_prev = Button(label="◀️", style=discord.ButtonStyle.secondary, disabled=(self.page <= 0), custom_id="tvahsv2_prev")
+        b_prev.callback = self._cb_prev
+        b_page = Button(label=f"Page {self.page + 1}/{self.max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, custom_id="tvahsv2_page")
+        b_next = Button(label="▶️", style=discord.ButtonStyle.secondary, disabled=(self.page >= self.max_page), custom_id="tvahsv2_next")
+        b_next.callback = self._cb_next
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="tvahsv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("➕ Ajouter un Hub Vocal"),
+            v2_subtitle("Étape 1/3 · Choisis le salon vocal qui servira de hub"),
+            v2_divider(),
+            v2_body(
+                "Quand un membre rejoindra ce salon, un vocal personnel sera créé\n"
+                "automatiquement dans la catégorie que tu choisiras à l'étape suivante."
+            ),
+            v2_divider(),
+            v2_subtitle(f"`{len(self.voice_channels)}` salon(s) vocal(aux) disponible(s)"),
+        ]
+        if sel:
+            items.append(discord.ui.ActionRow(sel))
+        items.append(discord.ui.ActionRow(b_prev, b_page, b_next, b_back))
+
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+    async def render_to(self, interaction, *, edit=True):
+        self._build()
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_prev(self, i):
+        if self.page > 0:
+            self.page -= 1
+        await self.render_to(i, edit=True)
+
+    async def _cb_next(self, i):
+        if self.page < self.max_page:
+            self.page += 1
+        await self.render_to(i, edit=True)
+
+    async def _cb_back(self, i):
+        v = TempVoicePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+    async def _cb_select(self, i):
+        hub_id = int(i.data['values'][0])
+        v = TempVoiceAddHubCategoryV2(self.u, self.g, hub_id)
+        await v.render_to(i, edit=True)
 
 
 class TempVoiceAddHubSelect(View):
@@ -15106,6 +15182,84 @@ class TempVoiceAddHubSelect(View):
             ),
             view=v
         )
+
+class TempVoiceAddHubCategoryV2(LayoutView):
+    """Etape 2/3 : choisir la catégorie (V2)."""
+
+    def __init__(self, u, g, hub_id, page=0):
+        super().__init__(timeout=180)
+        self.u = u
+        self.g = g
+        self.hub_id = hub_id
+        self.page = page
+        self.categories = list(g.categories)
+        self.per_page = 23
+        self.max_page = max(0, (len(self.categories) - 1) // self.per_page)
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    def _build(self):
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_cats = self.categories[start:end]
+        opts = [discord.SelectOption(label=f"📁 {c.name}"[:25], value=str(c.id)) for c in page_cats]
+        sel = Select(placeholder=f"Page {self.page+1}/{self.max_page+1} — Catégorie…", options=opts, custom_id="tvahcv2_sel") if opts else None
+        if sel:
+            sel.callback = self._cb_select
+
+        hub_ch = self.g.get_channel(self.hub_id)
+        hub_name = hub_ch.name if hub_ch else "Inconnu"
+
+        self.clear_items()
+        b_prev = Button(label="◀️", style=discord.ButtonStyle.secondary, disabled=(self.page <= 0), custom_id="tvahcv2_prev")
+        b_prev.callback = self._cb_prev
+        b_page = Button(label=f"Page {self.page + 1}/{self.max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, custom_id="tvahcv2_page")
+        b_next = Button(label="▶️", style=discord.ButtonStyle.secondary, disabled=(self.page >= self.max_page), custom_id="tvahcv2_next")
+        b_next.callback = self._cb_next
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="tvahcv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("➕ Ajouter un Hub Vocal"),
+            v2_subtitle(f"Étape 2/3 · Catégorie où créer les vocaux"),
+            v2_divider(),
+            v2_body(f"🎤 **Hub** · `{hub_name}`"),
+            v2_divider(),
+            v2_subtitle(f"`{len(self.categories)}` catégorie(s) disponible(s)"),
+        ]
+        if sel:
+            items.append(discord.ui.ActionRow(sel))
+        items.append(discord.ui.ActionRow(b_prev, b_page, b_next, b_back))
+
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+    async def render_to(self, interaction, *, edit=True):
+        self._build()
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_prev(self, i):
+        if self.page > 0:
+            self.page -= 1
+        await self.render_to(i, edit=True)
+
+    async def _cb_next(self, i):
+        if self.page < self.max_page:
+            self.page += 1
+        await self.render_to(i, edit=True)
+
+    async def _cb_back(self, i):
+        v = TempVoiceAddHubSelectV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+    async def _cb_select(self, i):
+        cat_id = int(i.data['values'][0])
+        v = TempVoiceAddHubRoleV2(self.u, self.g, self.hub_id, cat_id)
+        await v.render_to(i, edit=True)
+
 
 class TempVoiceAddHubCategory(View):
     """Étape 2: Sélection de la catégorie — Paginé"""
@@ -15173,6 +15327,122 @@ class TempVoiceAddHubCategory(View):
             ),
             view=v
         )
+
+class TempVoiceAddHubRoleV2(LayoutView):
+    """Etape 3/3 : rôle requis (V2). Une fois validé, sauvegarde le hub."""
+
+    def __init__(self, u, g, hub_id, cat_id, page=0):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.hub_id = hub_id
+        self.cat_id = cat_id
+        self.page = page
+        self.all_roles = [r for r in sorted(g.roles, key=lambda x: x.position, reverse=True) if not r.is_default() and not r.managed]
+        self.per_page = 23
+        self.max_page = max(0, (len(self.all_roles) - 1) // self.per_page) if self.all_roles else 0
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    def _build(self):
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_roles = self.all_roles[start:end]
+
+        opts = []
+        if self.page == 0:
+            opts.append(discord.SelectOption(label="🔓 Public (tous)", value="0", description="Aucune restriction", emoji="✅"))
+        for r in page_roles:
+            if len(opts) >= 25:
+                break
+            opts.append(discord.SelectOption(label=r.name[:100], value=str(r.id), description="Réservé aux membres avec ce rôle", emoji="🔒"))
+
+        sel = Select(placeholder=f"Page {self.page+1}/{self.max_page+1} — Rôle…", options=opts, custom_id="tvahrv2_sel") if opts else None
+        if sel:
+            sel.callback = self._cb_select
+
+        hub_ch = self.g.get_channel(self.hub_id)
+        cat = self.g.get_channel(self.cat_id)
+
+        self.clear_items()
+        b_prev = Button(label="◀️", style=discord.ButtonStyle.secondary, disabled=(self.page <= 0), custom_id="tvahrv2_prev")
+        b_prev.callback = self._cb_prev
+        b_page = Button(label=f"Page {self.page + 1}/{self.max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, custom_id="tvahrv2_page")
+        b_next = Button(label="▶️", style=discord.ButtonStyle.secondary, disabled=(self.page >= self.max_page), custom_id="tvahrv2_next")
+        b_next.callback = self._cb_next
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="tvahrv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("➕ Ajouter un Hub Vocal"),
+            v2_subtitle("Étape 3/3 · Rôle requis (optionnel)"),
+            v2_divider(),
+            v2_body(
+                f"🎤 **Hub** · `{hub_ch.name if hub_ch else 'Inconnu'}`\n"
+                f"📁 **Catégorie** · `{cat.name if cat else 'Inconnu'}`"
+            ),
+            v2_divider(),
+            v2_body(
+                "**🔒 Effet du rôle requis :**\n"
+                "• Seuls les membres avec ce rôle peuvent créer un vocal\n"
+                "• Le vocal créé sera **invisible** pour les autres membres\n"
+                "• Seuls les membres avec le rôle peuvent voir/rejoindre le vocal"
+            ),
+            v2_divider(),
+            v2_subtitle(f"`{len(self.all_roles)}` rôle(s) disponible(s) · Choisis 🔓 Public ou un rôle 🔒"),
+        ]
+        if sel:
+            items.append(discord.ui.ActionRow(sel))
+        items.append(discord.ui.ActionRow(b_prev, b_page, b_next, b_back))
+
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+    async def render_to(self, interaction, *, edit=True):
+        self._build()
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_prev(self, i):
+        if self.page > 0:
+            self.page -= 1
+        await self.render_to(i, edit=True)
+
+    async def _cb_next(self, i):
+        if self.page < self.max_page:
+            self.page += 1
+        await self.render_to(i, edit=True)
+
+    async def _cb_back(self, i):
+        v = TempVoiceAddHubCategoryV2(self.u, self.g, self.hub_id)
+        await v.render_to(i, edit=True)
+
+    async def _cb_select(self, i):
+        try:
+            role_id = int(i.data['values'][0])
+            c = await cfg(self.g.id)
+            voice_cfg = c.get('temp_voice_config', {})
+            hubs = voice_cfg.get('hubs', {})
+            hubs[str(self.hub_id)] = {
+                'category': self.cat_id,
+                'required_role': role_id,
+                'default_name': '🔊 Vocal de {user}',
+            }
+            voice_cfg['hubs'] = hubs
+            voice_cfg.setdefault('enabled', True)
+            await db_set(self.g.id, 'temp_voice_config', voice_cfg)
+            # Retour au panel TempVoice V2 avec confirmation
+            v = TempVoicePanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[TempVoiceAddHubRoleV2._cb_select] {ex}")
+            try:
+                await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+            except Exception:
+                pass
+
 
 class TempVoiceAddHubRole(View):
     """Étape 3: Sélection du rôle requis avec pagination complète"""
