@@ -5270,13 +5270,9 @@ class AntiRaidConfigPanelV2(LayoutView):
     async def _cb_scan(self, i):
         try:
             await i.response.send_message("🔍 **Scan en cours…**\n\nAnalyse des membres du serveur…", ephemeral=True)
-            scanner = SuspectScanPanel(self.u, self.g)
+            scanner = SuspectScanPanelV2(self.u, self.g)
             await scanner.scan_members()
-            await i.edit_original_response(
-                content=None,
-                embed=await scanner.embed(),
-                view=scanner,
-            )
+            await scanner.render_after_defer(i)
         except Exception as ex:
             print(f"[SCANNER V2 ERROR] {ex}")
             try:
@@ -5554,8 +5550,8 @@ class AltConfigPanelV2(LayoutView):
         try:
             detected = await scan_all_members_for_alts(self.g)
             if detected:
-                v = AltScanResultsPanel(self.u, self.g, detected)
-                await i.edit_original_response(content=None, embed=await v.embed(), view=v)
+                v = AltScanResultsPanelV2(self.u, self.g, detected)
+                await v.render_after_defer(i)
             else:
                 await i.edit_original_response(
                     content="✅ **Aucun compte secondaire détecté !**\n\nTous les membres semblent être des comptes uniques.",
@@ -5573,8 +5569,8 @@ class AltConfigPanelV2(LayoutView):
         alts = await get_alt_accounts(self.g.id)
         if not alts:
             return await i.response.send_message("📋 Aucun compte secondaire détecté.", ephemeral=True)
-        v = AltDetectionsPanel(self.u, self.g, alts)
-        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+        v = AltDetectionsPanelV2(self.u, self.g, alts)
+        await v.render_to(i, edit=True)
 
     async def _cb_back(self, i):
         prot = next(p for p in PROTS if p[0] == "anti_alt")
@@ -5738,6 +5734,129 @@ class AltConfidenceModal(Modal, title="📊 Confiance minimum"):
         except:
             await i.response.send_message("❌ Valeur invalide", ephemeral=True)
 
+class AltScanResultsPanelV2(LayoutView):
+    """Resultats d'un scan d'alts en V2."""
+
+    def __init__(self, u, g, detected):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.detected = detected
+        self.page = 0
+        self.per_page = 5
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    def _build(self):
+        total = len(self.detected)
+        high_conf = len([d for d in self.detected if d['confidence'] >= 70])
+        very_high = len([d for d in self.detected if d['confidence'] >= 80])
+        max_page = max(0, (total - 1) // self.per_page) if total else 0
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_items = self.detected[start:end]
+
+        item_blocks = []
+        for item in page_items:
+            member = item['member']
+            confidence = item['confidence']
+            main_id = item['main_id']
+            reasons = item['reasons']
+            conf_emoji = "🔴" if confidence >= 80 else ("🟠" if confidence >= 60 else "🟡")
+            main_member = self.g.get_member(main_id)
+            main_txt = f"{main_member.name}" if main_member else f"ID `{main_id}` (parti)"
+            block = (
+                f"**👤 {member.display_name}** (`{member.id}`)\n"
+                f"  ┣ Confiance · {conf_emoji} `{confidence}%`\n"
+                f"  ┣ Compte principal · {main_txt}\n"
+                f"  ┗ Raisons · {', '.join(reasons[:2])}"
+            )
+            item_blocks.append(block)
+        list_block = "\n\n".join(item_blocks) if item_blocks else "_Aucun résultat sur cette page_"
+
+        self.clear_items()
+        b_prev = Button(label="◀️", style=discord.ButtonStyle.secondary, disabled=(self.page <= 0), custom_id="asrv2_prev")
+        b_prev.callback = self._cb_prev
+        b_page = Button(label=f"Page {self.page + 1}/{max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, custom_id="asrv2_page")
+        b_next = Button(label="▶️", style=discord.ButtonStyle.secondary, disabled=(self.page >= max_page), custom_id="asrv2_next")
+        b_next.callback = self._cb_next
+        b_kick70 = Button(label="👢 Kick tous (>=70%)", style=discord.ButtonStyle.danger, disabled=(high_conf == 0), custom_id="asrv2_kick70")
+        b_kick70.callback = self._cb_kick70
+        b_ban80 = Button(label="🔨 Ban tous (>=80%)", style=discord.ButtonStyle.danger, disabled=(very_high == 0), custom_id="asrv2_ban80")
+        b_ban80.callback = self._cb_ban80
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="asrv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("🔍 Résultats du Scan"),
+            v2_subtitle(f"`{total}` alts potentiels · `{high_conf}` haute confiance (>=70%) · `{very_high}` très haute (>=80%)"),
+            v2_divider(),
+            v2_body(list_block),
+            v2_divider(),
+            discord.ui.ActionRow(b_prev, b_page, b_next),
+            discord.ui.ActionRow(b_kick70, b_ban80, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.DANGER))
+
+    async def render_to(self, interaction, *, edit=True):
+        self._build()
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def render_after_defer(self, interaction):
+        self._build()
+        await interaction.edit_original_response(view=self, embed=None, attachments=[], content=None)
+
+    async def _cb_prev(self, i):
+        if self.page > 0:
+            self.page -= 1
+        await self.render_to(i, edit=True)
+
+    async def _cb_next(self, i):
+        max_page = max(0, (len(self.detected) - 1) // self.per_page) if self.detected else 0
+        if self.page < max_page:
+            self.page += 1
+        await self.render_to(i, edit=True)
+
+    async def _cb_kick70(self, i):
+        high_conf = [d for d in self.detected if d['confidence'] >= 70]
+        if not high_conf:
+            return await i.response.send_message("✅ Aucun compte avec >=70% de confiance", ephemeral=True)
+        v = ConfirmAltActionView(self.u, self.g, high_conf, 'kick')
+        await i.response.send_message(
+            embed=discord.Embed(
+                title="⚠️ Confirmation",
+                description=f"Voulez-vous **KICK** {len(high_conf)} compte(s) secondaire(s) avec >=70% de confiance ?",
+                color=0xE74C3C,
+            ),
+            view=v,
+            ephemeral=True,
+        )
+
+    async def _cb_ban80(self, i):
+        very_high = [d for d in self.detected if d['confidence'] >= 80]
+        if not very_high:
+            return await i.response.send_message("✅ Aucun compte avec >=80% de confiance", ephemeral=True)
+        v = ConfirmAltActionView(self.u, self.g, very_high, 'ban')
+        await i.response.send_message(
+            embed=discord.Embed(
+                title="⚠️ Confirmation",
+                description=f"Voulez-vous **BAN** {len(very_high)} compte(s) secondaire(s) avec >=80% de confiance ?",
+                color=0xE74C3C,
+            ),
+            view=v,
+            ephemeral=True,
+        )
+
+    async def _cb_back(self, i):
+        v = AltConfigPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
 class AltScanResultsPanel(View):
     """Affiche les résultats d'un scan de comptes secondaires"""
     def __init__(self, u, g, detected):
@@ -5884,6 +6003,112 @@ class ConfirmAltActionView(View):
     async def cancel(self, i, b):
         await i.response.edit_message(content="❌ Action annulée", embed=None, view=None)
 
+class AltDetectionsPanelV2(LayoutView):
+    """Historique des detections d'alts en V2."""
+
+    def __init__(self, u, g, alts):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.alts = alts
+        self.page = 0
+        self.per_page = 5
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit=True):
+        total = len(self.alts)
+        max_page = max(0, (total - 1) // self.per_page) if total else 0
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_items = self.alts[start:end]
+
+        item_blocks = []
+        for alt in page_items:
+            _, main_id, alt_id, confidence, reasons_json, status, detected_at, action_taken = alt
+            try:
+                reasons = json.loads(reasons_json) if reasons_json else []
+            except Exception:
+                reasons = []
+            status_emoji = {'suspected': '⚠️', 'confirmed': '✅', 'dismissed': '❌', 'actioned': '⚡'}.get(status, '❓')
+            conf_emoji = "🔴" if confidence >= 80 else ("🟠" if confidence >= 60 else "🟡")
+            alt_member = self.g.get_member(alt_id)
+            main_member = self.g.get_member(main_id)
+            alt_txt = f"{alt_member.name}" if alt_member else f"ID `{alt_id}` (parti)"
+            main_txt = f"{main_member.name}" if main_member else f"ID `{main_id}`"
+            block = (
+                f"**👤 {alt_txt}**\n"
+                f"  ┣ Principal · {main_txt}\n"
+                f"  ┣ Confiance · {conf_emoji} `{confidence}%`\n"
+                f"  ┣ Status · {status_emoji} `{status}`\n"
+                f"  ┗ Raisons · {', '.join(reasons[:2]) if reasons else '_N/A_'}"
+            )
+            if action_taken:
+                block += f"\n  ⚡ **Action** · `{action_taken.upper()}`"
+            item_blocks.append(block)
+        list_block = "\n\n".join(item_blocks) if item_blocks else "_Aucune détection enregistrée_"
+
+        self.clear_items()
+        b_prev = Button(label="◀️", style=discord.ButtonStyle.secondary, disabled=(self.page <= 0), custom_id="adpv2_prev")
+        b_prev.callback = self._cb_prev
+        b_page = Button(label=f"Page {self.page + 1}/{max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, custom_id="adpv2_page")
+        b_next = Button(label="▶️", style=discord.ButtonStyle.secondary, disabled=(self.page >= max_page), custom_id="adpv2_next")
+        b_next.callback = self._cb_next
+        b_clear = Button(label="🗑️ Effacer historique", style=discord.ButtonStyle.danger, disabled=(not self.alts), custom_id="adpv2_clear")
+        b_clear.callback = self._cb_clear
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="adpv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("📋 Détections de Comptes Secondaires"),
+            v2_subtitle(f"`{total}` détection(s) enregistrée(s)"),
+            v2_divider(),
+            v2_body(list_block),
+            v2_divider(),
+            discord.ui.ActionRow(b_prev, b_page, b_next),
+            discord.ui.ActionRow(b_clear, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_prev(self, i):
+        if self.page > 0:
+            self.page -= 1
+        await self.render_to(i, edit=True)
+
+    async def _cb_next(self, i):
+        max_page = max(0, (len(self.alts) - 1) // self.per_page) if self.alts else 0
+        if self.page < max_page:
+            self.page += 1
+        await self.render_to(i, edit=True)
+
+    async def _cb_clear(self, i):
+        try:
+            async with get_db() as db:
+                await db.execute('DELETE FROM alt_accounts WHERE guild_id = ?', (self.g.id,))
+                await db.commit()
+            v = AltConfigPanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+                else:
+                    await i.followup.send(f"❌ Erreur: {ex}", ephemeral=True)
+            except Exception:
+                pass
+
+    async def _cb_back(self, i):
+        v = AltConfigPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
 class AltDetectionsPanel(View):
     """Affiche l'historique des détections de comptes secondaires"""
     def __init__(self, u, g, alts):
@@ -5984,6 +6209,152 @@ class AltDetectionsPanel(View):
     async def back(self, i, b):
         v = AltConfigPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
+
+class SuspectScanPanelV2(LayoutView):
+    """Resultats du scan suspects en V2 (delegue le scan a SuspectScanPanel V1)."""
+
+    def __init__(self, u, g, suspects=None, bots=None):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.suspects = suspects if suspects is not None else []
+        self.bots = bots if bots is not None else []
+        self.page = 0
+        self.per_page = 8
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def scan_members(self):
+        helper = SuspectScanPanel(self.u, self.g)
+        await helper.scan_members()
+        self.suspects = helper.suspects
+        self.bots = helper.bots
+
+    def _build(self):
+        critical = len([s for s in self.suspects if s['severity'] == 'critical'])
+        high = len([s for s in self.suspects if s['severity'] == 'high'])
+        medium = len([s for s in self.suspects if s['severity'] == 'medium'])
+        max_page = max(0, (len(self.suspects) - 1) // self.per_page) if self.suspects else 0
+
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_suspects = self.suspects[start:end]
+
+        sus_lines = []
+        for s in page_suspects:
+            member = s['member']
+            severity_emoji = {'critical': '🚨', 'high': '⚠️', 'medium': '⚡', 'low': '📋'}.get(s['severity'], '📋')
+            reasons_short = ", ".join(s['reasons'][:2])
+            sus_lines.append(f"{severity_emoji} **{member.display_name}** (`{member.id}`)\n  ┗ {reasons_short}")
+        sus_block = "\n".join(sus_lines) if sus_lines else "✅ _Aucun compte suspect détecté !_"
+
+        bot_lines = []
+        for b in self.bots[:5]:
+            bot_lines.append(f"🤖 **{b['member'].name}** (`{b['member'].id}`)")
+        if len(self.bots) > 5:
+            bot_lines.append(f"_… et {len(self.bots) - 5} autres_")
+        bot_block = "\n".join(bot_lines) if bot_lines else None
+
+        self.clear_items()
+        b_prev = Button(label="◀️ Préc.", style=discord.ButtonStyle.secondary, disabled=(self.page <= 0), custom_id="sspv2_prev")
+        b_prev.callback = self._cb_prev
+        b_next = Button(label="▶️ Suiv.", style=discord.ButtonStyle.secondary, disabled=(self.page >= max_page), custom_id="sspv2_next")
+        b_next.callback = self._cb_next
+        b_rescan = Button(label="🔄 Re-scanner", style=discord.ButtonStyle.primary, custom_id="sspv2_rescan")
+        b_rescan.callback = self._cb_rescan
+        b_kick_crit = Button(label="👢 Kick Critiques", style=discord.ButtonStyle.danger, disabled=(critical == 0), custom_id="sspv2_kick_crit")
+        b_kick_crit.callback = self._cb_kick_crit
+        b_kick_bots = Button(label="🤖 Kick Bots", style=discord.ButtonStyle.danger, disabled=(not self.bots), custom_id="sspv2_kick_bots")
+        b_kick_bots.callback = self._cb_kick_bots
+        b_kick_all = Button(label="👢 Kick Tous Suspects", style=discord.ButtonStyle.danger, disabled=((critical + high) == 0), custom_id="sspv2_kick_all")
+        b_kick_all.callback = self._cb_kick_all
+        b_close = Button(label="❌ Fermer", style=discord.ButtonStyle.secondary, custom_id="sspv2_close")
+        b_close.callback = self._cb_close
+
+        items: list = [
+            v2_title("🔍 Scan des Comptes Suspects"),
+            v2_subtitle(f"🚨 {critical} crit · ⚠️ {high} elevés · ⚡ {medium} moyens · 🤖 {len(self.bots)} bots non vérifiés"),
+            v2_divider(),
+            v2_title(f"👥 Suspects ({len(self.suspects)}) — Page {self.page + 1}/{max_page + 1}", level=3),
+            v2_body(sus_block),
+        ]
+        if bot_block:
+            items.append(v2_divider())
+            items.append(v2_title("🤖 Bots non vérifiés", level=3))
+            items.append(v2_body(bot_block))
+        items.append(v2_divider())
+        items.append(v2_subtitle("⚠️ Vérifie manuellement avant d'agir · Les scores sont indicatifs"))
+        items.append(discord.ui.ActionRow(b_prev, b_next, b_rescan))
+        items.append(discord.ui.ActionRow(b_kick_crit, b_kick_bots, b_kick_all))
+        items.append(discord.ui.ActionRow(b_close))
+
+        self.add_item(v2_container(*items, color=Palette.DANGER))
+
+    async def render_to(self, interaction, *, edit=True):
+        self._build()
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def render_after_defer(self, interaction):
+        self._build()
+        await interaction.edit_original_response(view=self, embed=None, attachments=[], content=None)
+
+    async def _cb_prev(self, i):
+        if self.page > 0:
+            self.page -= 1
+        await self.render_to(i, edit=True)
+
+    async def _cb_next(self, i):
+        max_page = max(0, (len(self.suspects) - 1) // self.per_page) if self.suspects else 0
+        if self.page < max_page:
+            self.page += 1
+        await self.render_to(i, edit=True)
+
+    async def _cb_rescan(self, i):
+        await i.response.defer()
+        await self.scan_members()
+        self.page = 0
+        await self.render_after_defer(i)
+
+    async def _cb_kick_crit(self, i):
+        critical = [s for s in self.suspects if s['severity'] == 'critical']
+        if not critical:
+            return await i.response.send_message("✅ Aucun compte critique à kick", ephemeral=True)
+        v = ConfirmKickView(self.u, self.g, critical, 'critical')
+        await i.response.send_message(
+            embed=discord.Embed(title="⚠️ Confirmer le kick", description=f"Tu vas kick **{len(critical)}** compte(s) critique(s).", color=0xFF0000),
+            view=v, ephemeral=True,
+        )
+
+    async def _cb_kick_bots(self, i):
+        if not self.bots:
+            return await i.response.send_message("✅ Aucun bot non vérifié à kick", ephemeral=True)
+        v = ConfirmKickView(self.u, self.g, self.bots, 'bots')
+        await i.response.send_message(
+            embed=discord.Embed(title="⚠️ Confirmer le kick des bots", description=f"Tu vas kick **{len(self.bots)}** bot(s) non vérifié(s).", color=0xFF0000),
+            view=v, ephemeral=True,
+        )
+
+    async def _cb_kick_all(self, i):
+        high_and_critical = [s for s in self.suspects if s['severity'] in ['critical', 'high']]
+        if not high_and_critical:
+            return await i.response.send_message("✅ Aucun compte à kick", ephemeral=True)
+        v = ConfirmKickView(self.u, self.g, high_and_critical, 'all')
+        await i.response.send_message(
+            embed=discord.Embed(
+                title="⚠️ Confirmer le kick massif",
+                description=f"Tu vas kick **{len(high_and_critical)}** compte(s) suspects (critiques + élevés).\n\n**⚠️ Action irréversible !**",
+                color=0xFF0000,
+            ),
+            view=v, ephemeral=True,
+        )
+
+    async def _cb_close(self, i):
+        await i.response.edit_message(content="✅ Scan fermé", embed=None, view=None, attachments=[])
+
 
 class SuspectScanPanel(View):
     """Panel pour scanner et afficher les comptes suspects"""
@@ -18228,6 +18599,88 @@ class AfkListViewV2(LayoutView):
         await v.render_to(i, edit=True)
 
 
+class AfkListViewV2(LayoutView):
+    """Liste paginee des membres AFK en V2."""
+
+    def __init__(self, u, g, afk_members, role, page=0):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.afk_members = afk_members
+        self.role = role
+        self.page = page
+        self.per_page = 15
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit=True):
+        total = len(self.afk_members)
+        max_page = max(0, (total - 1) // self.per_page)
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_members = self.afk_members[start:end]
+
+        lines_out = []
+        for member, days_afk in page_members:
+            days_txt = "Jamais actif" if days_afk >= 999 else f"{days_afk}j AFK"
+            lines_out.append(f"• {member.mention} · **{days_txt}**")
+        list_block = "\n".join(lines_out) if lines_out else "_Aucun membre sur cette page_"
+
+        self.clear_items()
+        b_prev = Button(label="◀️", style=discord.ButtonStyle.secondary, disabled=(self.page <= 0), custom_id="alvv2_prev")
+        b_prev.callback = self._cb_prev
+        b_page = Button(label=f"Page {self.page + 1}/{max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, custom_id="alvv2_page")
+        b_next = Button(label="▶️", style=discord.ButtonStyle.secondary, disabled=(self.page >= max_page), custom_id="alvv2_next")
+        b_next.callback = self._cb_next
+        b_refresh = Button(label="🔄 Actualiser", style=discord.ButtonStyle.primary, custom_id="alvv2_refresh")
+        b_refresh.callback = self._cb_refresh
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="alvv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title(f"📋 Membres AFK avec {self.role.name}"),
+            v2_subtitle(f"`{total}` membre(s) inactif(s) détecté(s)"),
+            v2_divider(),
+            v2_body(list_block),
+            v2_divider(),
+            v2_subtitle("💡 Utilise ⚡ Actions pour agir sur ces membres"),
+            discord.ui.ActionRow(b_prev, b_page, b_next, b_refresh),
+            discord.ui.ActionRow(b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.DANGER))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_prev(self, i):
+        if self.page > 0:
+            self.page -= 1
+        await self.render_to(i, edit=True)
+
+    async def _cb_next(self, i):
+        max_page = max(0, (len(self.afk_members) - 1) // self.per_page)
+        if self.page < max_page:
+            self.page += 1
+        await self.render_to(i, edit=True)
+
+    async def _cb_refresh(self, i):
+        c = await cfg(self.g.id)
+        afk_cfg = c.get('afk_role_config', {})
+        days = afk_cfg.get('days', 7)
+        helper = AfkRolePanel(self.u, self.g)
+        self.afk_members = await helper.get_afk_members(self.role, days)
+        self.page = 0
+        await self.render_to(i, edit=True)
+
+    async def _cb_back(self, i):
+        v = AfkRolePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
 class AfkListView(View):
     """Liste paginée des membres AFK"""
     def __init__(self, u, g, afk_members, role, page=0):
@@ -18384,6 +18837,143 @@ class AfkActionsViewV2(LayoutView):
         # Retour au panel V2 AfkRole
         v = AfkRolePanelV2(self.u, self.g)
         await i.message.edit(view=v, embed=None, attachments=[])
+
+    async def _cb_kick(self, i):
+        await i.response.send_message(
+            f"⚠️ **Confirmation requise**\n\n"
+            f"Tu es sur le point de **kick {len(self.afk_members)} membre(s)**.\n"
+            f"Cette action est irréversible !",
+            view=AfkKickConfirmView(self.u, self.g, self.afk_members, self.role),
+            ephemeral=True,
+        )
+
+    async def _cb_ping(self, i):
+        c = await cfg(self.g.id)
+        afk_cfg = c.get('afk_role_config', {})
+        notif_ch = self.g.get_channel(afk_cfg.get('notif_channel', 0))
+        days = afk_cfg.get('days', 7)
+        if not notif_ch:
+            return await i.response.send_message("❌ Aucun salon de notifications configuré !", ephemeral=True)
+        await i.response.defer()
+
+        e = discord.Embed(
+            title="🔕 Alerte Inactivité",
+            description=(
+                f"Les membres suivants avec le rôle {self.role.mention} sont inactifs depuis plus de **{days} jours**.\n\n"
+                "⚠️ **Merci de manifester votre activité (message ou vocal) pour conserver votre rôle.**"
+            ),
+            color=0xE74C3C,
+            timestamp=now(),
+        )
+        mentions = [m.mention for m, _ in self.afk_members]
+        mention_chunks = [mentions[k:k + 20] for k in range(0, len(mentions), 20)]
+        for idx, chunk in enumerate(mention_chunks[:5]):
+            e.add_field(
+                name=(f"👥 Membres ({idx*20 + 1}-{idx*20 + len(chunk)})" if len(mention_chunks) > 1 else "👥 Membres concernés"),
+                value=" ".join(chunk),
+                inline=False,
+            )
+        if len(self.afk_members) > 100:
+            e.add_field(name="⚠️", value=f"_… et {len(self.afk_members) - 100} autres membres_", inline=False)
+        e.set_footer(text=f"Action par {i.user.display_name} · {len(self.afk_members)} membre(s) concerné(s)")
+        mention_content = " ".join(mentions[:50])
+        await webhook_send(notif_ch, 'realsy', content=mention_content, embed=e)
+        await i.followup.send(
+            f"✅ Message envoyé dans {notif_ch.mention} avec **{len(self.afk_members)}** mention(s) !",
+            ephemeral=True,
+        )
+
+    async def _cb_back(self, i):
+        v = AfkRolePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+class AfkActionsViewV2(LayoutView):
+    """Actions sur les membres AFK en V2."""
+
+    def __init__(self, u, g, afk_members, role):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.afk_members = afk_members
+        self.role = role
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit=True):
+        preview_lines = []
+        for member, days_afk in self.afk_members[:5]:
+            days_txt = f"{days_afk}j" if days_afk < 999 else "∞"
+            preview_lines.append(f"• {member.display_name} · `{days_txt}`")
+        if len(self.afk_members) > 5:
+            preview_lines.append(f"_… + {len(self.afk_members) - 5} autres_")
+        preview_block = "\n".join(preview_lines) if preview_lines else "_Aucun membre_"
+
+        self.clear_items()
+        b_remove = Button(label="🎭 Retirer le rôle", style=discord.ButtonStyle.primary, custom_id="aavv2_remove")
+        b_remove.callback = self._cb_remove
+        b_kick = Button(label="👢 Kick", style=discord.ButtonStyle.danger, custom_id="aavv2_kick")
+        b_kick.callback = self._cb_kick
+        b_ping = Button(label="📢 Ping dans salon", style=discord.ButtonStyle.success, custom_id="aavv2_ping")
+        b_ping.callback = self._cb_ping
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="aavv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("⚡ Actions sur les membres AFK"),
+            v2_subtitle(f"`{len(self.afk_members)}` membre(s) AFK avec {self.role.mention}"),
+            v2_divider(),
+            v2_title("👥 Membres concernés", level=3),
+            v2_body(preview_block),
+            v2_divider(),
+            v2_body(
+                "🎭 **Retirer le rôle** · enlève le rôle d'activité aux membres\n"
+                "👢 **Kick** · expulse les membres du serveur (irréversible)\n"
+                "📢 **Ping dans salon** · mention dans le salon de notifications"
+            ),
+            v2_divider(),
+            v2_subtitle("⚠️ Choisis une action à exécuter"),
+            discord.ui.ActionRow(b_remove, b_kick, b_ping, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.DANGER))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_remove(self, i):
+        await i.response.defer()
+        success = 0
+        failed = 0
+        for member, _ in self.afk_members:
+            try:
+                await member.remove_roles(self.role, reason="AFK - Rôle retiré automatiquement")
+                success += 1
+            except Exception:
+                failed += 1
+        c = await cfg(self.g.id)
+        afk_cfg = c.get('afk_role_config', {})
+        notif_ch = self.g.get_channel(afk_cfg.get('notif_channel', 0))
+        if notif_ch:
+            e = discord.Embed(
+                title="🎭 Rôles retirés - Membres AFK",
+                description=f"Le rôle {self.role.mention} a été retiré à **{success}** membre(s) inactif(s).",
+                color=0xE74C3C,
+                timestamp=now(),
+            )
+            e.add_field(name="✅ Succès", value=str(success), inline=True)
+            e.add_field(name="❌ Échecs", value=str(failed), inline=True)
+            e.set_footer(text=f"Action par {i.user.display_name}")
+            await webhook_send(notif_ch, 'realsy', embed=e)
+        await i.followup.send(f"✅ Rôle retiré à **{success}** membre(s) ! ❌ Échecs : **{failed}**", ephemeral=True)
+        v = AfkRolePanelV2(self.u, self.g)
+        try:
+            await i.message.edit(view=v, embed=None, attachments=[])
+        except Exception:
+            pass
 
     async def _cb_kick(self, i):
         await i.response.send_message(
