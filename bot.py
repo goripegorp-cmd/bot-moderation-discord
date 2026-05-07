@@ -8400,10 +8400,12 @@ class AdsPanelV2(LayoutView):
 
     async def _cb_platform(self, interaction):
         val = interaction.data['values'][0]
-        panels = {
-            'youtube': lambda: AdsYouTubePanel(self.u, self.g),
-            'twitch': lambda: AdsTwitchPanel(self.u, self.g),
-            'tiktok': lambda: AdsTikTokPanel(self.u, self.g),
+        # Plateformes avec live (V2 générique)
+        if val in ('youtube', 'twitch', 'tiktok'):
+            v = AdsLivePlatformV2(self.u, self.g, val)
+            return await v.render_to(interaction, edit=True)
+        # Plateformes encore en V1
+        v1_panels = {
             'twitter': lambda: AdsTwitterPanel(self.u, self.g),
             'reddit': lambda: AdsRedditPanel(self.u, self.g),
             'discord': lambda: AdsDiscordPanel(self.u, self.g),
@@ -8411,7 +8413,7 @@ class AdsPanelV2(LayoutView):
             'roblox': lambda: AdsRobloxPanel(self.u, self.g),
             'deals': lambda: AdsDealsPanel(self.u, self.g),
         }
-        v = panels[val]()
+        v = v1_panels[val]()
         emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
         await interaction.response.edit_message(embed=emb, view=v, attachments=[])
 
@@ -8421,6 +8423,171 @@ class AdsPanelV2(LayoutView):
 
 
 # ─────────────────────────────── YOUTUBE ───────────────────────────────
+
+class AdsLivePlatformV2(LayoutView):
+    """V2 panel pour les plateformes Ads avec détection de lives (YouTube/Twitch/TikTok)."""
+
+    PLATFORM_SPECS = {
+        'youtube': {
+            'name': 'YouTube',
+            'emoji': '🔴',
+            'color': 0xFF0000,
+            'channel_key': 'ads_youtube_channel',
+            'live_key': 'ads_youtube_live_channel',
+            'feeds_key': 'ads_youtube_feeds',
+            'add_modal': lambda g, u: AdsYouTubeAddModal(g, u),
+            'desc': "Notifications de nouvelles vidéos et détection de lives.",
+            'platform_id': 'youtube',
+        },
+        'twitch': {
+            'name': 'Twitch',
+            'emoji': '🟣',
+            'color': 0x9146FF,
+            'channel_key': 'ads_twitch_channel',
+            'live_key': 'ads_twitch_live_channel',
+            'feeds_key': 'ads_twitch_feeds',
+            'add_modal': lambda g, u: AdsTwitchAddModal(g, u),
+            'desc': "Détection automatique des streams en direct.",
+            'platform_id': 'twitch',
+        },
+        'tiktok': {
+            'name': 'TikTok',
+            'emoji': '🎵',
+            'color': 0x69C9D0,
+            'channel_key': 'ads_tiktok_channel',
+            'live_key': 'ads_tiktok_live_channel',
+            'feeds_key': 'ads_tiktok_feeds',
+            'add_modal': lambda g, u: AdsTikTokAddModal(g, u),
+            'desc': "Vidéos et lives TikTok.",
+            'platform_id': 'tiktok',
+        },
+    }
+
+    def __init__(self, u, g, platform: str):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+        self.spec = self.PLATFORM_SPECS[platform]
+        self.platform = platform
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        spec = self.spec
+
+        ch = self.g.get_channel(c.get(spec['channel_key'], 0))
+        live_ch = self.g.get_channel(c.get(spec['live_key'], 0))
+        feeds = c.get(spec['feeds_key'], [])
+
+        # Liste des feeds
+        feed_lines = []
+        for f in feeds[:8]:
+            if isinstance(f, dict):
+                name = f.get('name', '?')
+                feed_ch_id = f.get('channel_id', 0)
+                feed_ch = self.g.get_channel(feed_ch_id) if feed_ch_id else None
+                salon_txt = f" → {feed_ch.mention}" if feed_ch else ""
+                feed_lines.append(f"📺 `{name}`{salon_txt}")
+            else:
+                feed_lines.append(f"📺 `{f}`")
+        if len(feeds) > 8:
+            feed_lines.append(f"_… + {len(feeds) - 8} autre(s)_")
+        feeds_block = "\n".join(feed_lines) if feed_lines else "_Aucune source configurée_"
+
+        # Boutons
+        self.clear_items()
+        b_chan = Button(label="📍 Salon vidéos", style=discord.ButtonStyle.primary, custom_id=f"adsv2_{spec['platform_id']}_chan")
+        b_chan.callback = self._cb_chan
+        b_live = Button(label="🔴 Salon lives", style=discord.ButtonStyle.danger, custom_id=f"adsv2_{spec['platform_id']}_live")
+        b_live.callback = self._cb_live
+        b_add = Button(label="➕ Ajouter", style=discord.ButtonStyle.success, custom_id=f"adsv2_{spec['platform_id']}_add")
+        b_add.callback = self._cb_add
+        b_remove = Button(
+            label="🗑️ Supprimer",
+            style=discord.ButtonStyle.danger,
+            disabled=(not feeds),
+            custom_id=f"adsv2_{spec['platform_id']}_remove",
+        )
+        b_remove.callback = self._cb_remove
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id=f"adsv2_{spec['platform_id']}_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title(f"{spec['emoji']}  {spec['name']}"),
+            v2_subtitle(spec['desc']),
+            v2_divider(),
+            v2_body(
+                f"📍 **Salon vidéos** · {ch.mention if ch else '🔴 _Non configuré_'}\n"
+                f"🔴 **Salon lives** · {live_ch.mention if live_ch else '🔴 _Non configuré_'}"
+            ),
+            v2_divider(),
+            v2_title(f"📡 Sources suivies ({len(feeds)})", level=3),
+            v2_body(feeds_block),
+            v2_divider(),
+            v2_subtitle("💡 Chaque source peut avoir son propre salon · Le salon lives détecte les streams en direct"),
+            discord.ui.ActionRow(b_chan, b_live, b_add, b_remove, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=discord.Color(spec['color'])))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_chan(self, i):
+        v = PaginatedAdsChannelSelect(self.u, self.g, self.spec['channel_key'], self.platform)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title=f"📍 Salon {self.spec['name']} (vidéos)",
+                description="Sélectionne le salon pour les nouvelles publications",
+                color=self.spec['color'],
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_live(self, i):
+        v = PaginatedAdsChannelSelect(self.u, self.g, self.spec['live_key'], self.platform)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title=f"🔴 Salon {self.spec['name']} Lives",
+                description="Sélectionne le salon pour les notifications de streams en direct",
+                color=self.spec['color'],
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_add(self, i):
+        modal = self.spec['add_modal'](self.g, self.u)
+        await i.response.send_modal(modal)
+
+    async def _cb_remove(self, i):
+        c = await cfg(self.g.id)
+        feeds = c.get(self.spec['feeds_key'], [])
+        if not feeds:
+            return await i.response.send_message("❌ Aucune source à supprimer", ephemeral=True)
+        opts = [
+            discord.SelectOption(
+                label=(f.get('name', str(idx))[:25] if isinstance(f, dict) else str(f)[:25]),
+                value=str(idx),
+            )
+            for idx, f in enumerate(feeds[:25])
+        ]
+        v = AdsFeedRemoveView(self.u, self.g, opts, self.spec['feeds_key'], self.platform)
+        await i.response.edit_message(
+            embed=discord.Embed(title="🗑️ Supprimer une source", color=0xE74C3C),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_back(self, i):
+        v = AdsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
 
 class AdsYouTubePanel(View):
     def __init__(self, u, g):
