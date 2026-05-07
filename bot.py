@@ -3469,19 +3469,18 @@ class MainPanelV2(LayoutView):
             'stats': lambda: StatPanelV2(self.u, self.g),
             'levels': lambda: LevelSystemPanelV2(self.u, self.g),
             'prot': lambda: ProtPanelV2(self.u, self.g),
+            'tickets': lambda: TicketMainPanelV2(self.u, self.g),
         }
-        # Modules encore en V1 (View + embed)
-        v1_panels = {
-            'tickets': lambda: TicketMainPanel(self.u, self.g),
-        }
+        # Tous les modules sont maintenant en V2 ! 🎉
+        v1_panels: dict = {}
 
         if val in v2_panels:
             v = v2_panels[val]()
             await v.render_to(i, edit=True)
         else:
+            # Fallback V1 (vide actuellement, gardé pour cohérence)
             v = v1_panels[val]()
             emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
-            # Transition V2 → V1: attachments=[] efface les pièces jointes V2.
             await i.response.edit_message(embed=emb, view=v, attachments=[])
 
     async def _close(self, i):
@@ -16612,6 +16611,148 @@ class TicketMainPanel(View):
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+class TicketMainPanelV2(LayoutView):
+    """Panneau Tickets en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        staff = self.g.get_role(c.get('ticket_staff', 0))
+        lch = self.g.get_channel(c.get('ticket_log', 0))
+        blacklist_role = self.g.get_role(c.get('ticket_blacklist_role', 0))
+        panels = c.get('ticket_panels', {})
+
+        # Liste des panels
+        panel_lines = []
+        if panels:
+            for pid, pd in list(panels.items())[:10]:
+                cat = self.g.get_channel(pd.get('category', 0))
+                bl_count = len(pd.get('blacklist', []))
+                bl_txt = f" · 🚫 `{bl_count}`" if bl_count > 0 else ""
+                panel_lines.append(
+                    f"• **{pd.get('name', pid)[:20]}** → `{cat.name if cat else '❌'}` "
+                    f"({len(pd.get('questions', []))} Q · max {pd.get('max', 1)}{bl_txt})"
+                )
+            if len(panels) > 10:
+                panel_lines.append(f"_… + {len(panels) - 10} autres_")
+        panels_block = "\n".join(panel_lines) if panel_lines else "_Aucun panel créé · clique ➕ pour commencer_"
+
+        # Boutons
+        self.clear_items()
+        b_staff = Button(label="👮 Définir Staff", style=discord.ButtonStyle.primary, custom_id="tmpv2_staff")
+        b_staff.callback = self._cb_staff
+        b_logs = Button(label="📜 Définir Logs", style=discord.ButtonStyle.primary, custom_id="tmpv2_logs")
+        b_logs.callback = self._cb_logs
+        b_blacklist = Button(label="🚫 Rôle Blacklist", style=discord.ButtonStyle.danger, custom_id="tmpv2_blacklist")
+        b_blacklist.callback = self._cb_blacklist
+        b_new = Button(label="➕ Nouveau Panel", style=discord.ButtonStyle.success, custom_id="tmpv2_new")
+        b_new.callback = self._cb_new
+        b_edit = Button(label="📝 Modifier Panel", style=discord.ButtonStyle.secondary, disabled=(not panels), custom_id="tmpv2_edit")
+        b_edit.callback = self._cb_edit
+        b_refresh = Button(label="🔄 Rafraîchir", style=discord.ButtonStyle.secondary, custom_id="tmpv2_refresh")
+        b_refresh.callback = self._cb_refresh
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="tmpv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = []
+        if self.g.icon:
+            items.append(v2_section(
+                v2_title("🎫 Configuration Tickets"),
+                v2_subtitle(f"{len(panels)} panel(s) configuré(s)"),
+                accessory=v2_thumb(self.g.icon.url),
+            ))
+        else:
+            items.append(v2_title("🎫 Configuration Tickets"))
+            items.append(v2_subtitle(f"{len(panels)} panel(s) configuré(s)"))
+
+        items.append(v2_divider())
+        items.append(v2_body(
+            f"👮 **Rôle Staff** · {staff.mention if staff else '🔴 _Non configuré_'}\n"
+            f"📜 **Salon Logs** · {lch.mention if lch else '🔴 _Non configuré_'}\n"
+            f"🚫 **Rôle Blacklist** · {blacklist_role.mention if blacklist_role else '_Staff par défaut_'}"
+        ))
+        items.append(v2_divider())
+        items.append(v2_title(f"📋 Panels de tickets ({len(panels)})", level=3))
+        items.append(v2_body(panels_block))
+        items.append(v2_divider())
+        items.append(v2_subtitle("💡 Le rôle Blacklist peut utiliser /ticketblacklist"))
+        items.append(discord.ui.ActionRow(b_staff, b_logs, b_blacklist))
+        items.append(discord.ui.ActionRow(b_new, b_edit, b_refresh, b_back))
+
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_staff(self, i):
+        v = PaginatedRoleSelectForStaffGlobal(self.u, self.g)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="👮 Choisir le rôle Staff",
+                description=f"**{len(v.roles)} rôles** disponibles · Page 1/{v.max_page+1}\n\nCe rôle aura accès à **tous** les tickets.",
+                color=0x9B59B6,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_logs(self, i):
+        v = TkLogPaginatedView(self.u, self.g)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="📜 Choisir le salon Logs",
+                description=f"**{len(v.channels)} salons** · Page 1/{v.max_page+1}",
+                color=0x9B59B6,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_blacklist(self, i):
+        v = PaginatedRoleSelectForBlacklist(self.u, self.g)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="🚫 Rôle pour /ticketblacklist",
+                description=f"**{len(v.roles)} rôles** disponibles · Page 1/{v.max_page+1}\n\nCe rôle pourra utiliser /ticketblacklist.\n_Aucun = seuls Staff et Admins peuvent blacklister_",
+                color=0xE74C3C,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_new(self, i):
+        await i.response.send_modal(NewPanelModal(self.u, self.g))
+
+    async def _cb_edit(self, i):
+        c = await cfg(self.g.id)
+        panels = c.get('ticket_panels', {})
+        if not panels:
+            return await i.response.send_message("❌ Aucun panel créé", ephemeral=True)
+        opts = [discord.SelectOption(label=pd.get('name', pid)[:25], value=pid) for pid, pd in list(panels.items())[:25]]
+        await i.response.edit_message(
+            embed=discord.Embed(title="📝 Choisir un panel à modifier", color=0x9B59B6),
+            view=EditPanelSelectView(self.u, self.g, opts),
+            attachments=[],
+        )
+
+    async def _cb_refresh(self, i):
+        new_panel = TicketMainPanelV2(self.u, self.g)
+        await new_panel.render_to(i, edit=True)
+
+    async def _cb_back(self, i):
+        v = MainPanelV2(self.u, self.g)
+        await i.response.edit_message(view=v, embed=None, attachments=[])
+
 
 class TkStaffView(View):
     def __init__(self, u, g, opts):
