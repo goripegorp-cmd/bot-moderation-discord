@@ -3629,8 +3629,8 @@ class ProtPanelV2(LayoutView):
     async def _cb_sel(self, interaction):
         val = interaction.data['values'][0]
         prot = next(p for p in PROTS if p[0] == val)
-        v = ProtDetail(self.u, self.g, prot)
-        emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
+        v = ProtDetailV2(self.u, self.g, prot)
+        await v.render_to(i, edit=True)
         await interaction.response.edit_message(embed=emb, view=v, attachments=[])
 
     async def _cb_back(self, i):
@@ -3860,6 +3860,281 @@ class ProtDetail(View):
         v = ProtPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
+class ProtDetailV2(LayoutView):
+    """Detail d'une protection en V2 — toutes les sub-panels accessibles."""
+
+    def __init__(self, u, g, prot):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+        self.prot = prot
+        self.key = prot[0]
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        on = bool(c.get(self.key))
+
+        # Helper sanction (action + durée)
+        def _sanction_line(protection_key):
+            try:
+                acp = ActionConfigPanel(self.u, self.g, protection_key)
+                ak = acp._get_action_key()
+                dk = acp._get_duration_key()
+                act = c.get(ak, acp._get_default_action())
+                dur = c.get(dk, acp._get_default_duration())
+                act_emoji = {'delete': '🗑️', 'mute': '🔇', 'kick': '👢', 'ban': '🔨'}.get(act, '⚡')
+                line = f"⚡ **Sanction** · {act_emoji} `{act.upper()}`"
+                if act == 'mute':
+                    line += f"  ·  ⏱️ Durée mute · `{dur}` min"
+                return line
+            except Exception:
+                return None
+
+        # Items de base : titre + status
+        items: list = [
+            v2_title(f"{self.prot[1]} {self.prot[2]}"),
+            v2_subtitle(f"État · {'🟢 ACTIVÉ' if on else '🔴 DÉSACTIVÉ'}"),
+            v2_divider(),
+        ]
+
+        # Configs spécifiques par protection
+        if self.key == "anti_link":
+            wl = c.get('link_whitelist', [])
+            chs = c.get('link_allowed_channels', [])
+            wl_txt = ", ".join(f"`{d}`" for d in wl[:15]) if wl else "_Aucun domaine_"
+            ch_txt = ", ".join(f"<#{x}>" for x in chs[:10]) if chs else "_Aucun salon_"
+            items.append(v2_body(f"🌐 **Whitelist domaines** · {wl_txt}\n📍 **Salons autorisés** · {ch_txt}"))
+            sl = _sanction_line(self.key)
+            if sl: items.append(v2_body(sl))
+
+        elif self.key == "anti_image":
+            allowed = c.get('image_allowed', [])
+            fmts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'tenor', 'giphy']
+            fmt_txt = "  ".join(f"{'✅' if f in allowed else '❌'} `{f}`" for f in fmts)
+            items.append(v2_body(f"📁 **Formats autorisés**\n{fmt_txt}"))
+            sl = _sanction_line(self.key)
+            if sl: items.append(v2_body(sl))
+
+        elif self.key == "anti_badwords":
+            words = c.get('badwords_list', [])
+            if words:
+                if len(words) <= 30:
+                    words_txt = ", ".join(f"`{w}`" for w in words)
+                else:
+                    words_txt = ", ".join(f"`{w}`" for w in words[:30]) + f"\n_… + {len(words) - 30} autres_"
+                items.append(v2_body(f"🚫 **Mots interdits** ({len(words)})\n{words_txt[:1000]}"))
+            else:
+                items.append(v2_body("🚫 **Mots interdits** · _Aucun mot configuré_"))
+            sl = _sanction_line(self.key)
+            if sl: items.append(v2_body(sl))
+
+        elif self.key == "anti_spam":
+            items.append(v2_body(
+                f"📊 **Max messages** · `{c.get('spam_max', 5)}`  ·  "
+                f"⏱️ **Intervalle** · `{c.get('spam_interval', 5)}` sec"
+            ))
+            sl = _sanction_line(self.key)
+            if sl: items.append(v2_body(sl))
+
+        elif self.key == "anti_caps":
+            items.append(v2_body(f"📊 **Pourcentage max** · `{c.get('caps_percent', 70)}%`"))
+            sl = _sanction_line(self.key)
+            if sl: items.append(v2_body(sl))
+
+        elif self.key == "anti_mass_mention":
+            items.append(v2_body(f"📊 **Max mentions** · `{c.get('mention_limit', 5)}` par message"))
+            sl = _sanction_line(self.key)
+            if sl: items.append(v2_body(sl))
+            items.append(v2_body("ℹ️ Détecte @everyone, @here, et les mentions massives de membres/rôles"))
+
+        elif self.key == "anti_newaccount":
+            items.append(v2_body(f"📅 **Jours minimum** · `{c.get('newaccount_days', 7)}`"))
+
+        elif self.key == "anti_invite":
+            sl = _sanction_line(self.key)
+            if sl: items.append(v2_body(sl))
+
+        elif self.key == "anti_raid":
+            raid_cfg = c.get('raid_config', {})
+            lockdown = raid_tracker.get(self.g.id, {}).get('lockdown', False)
+            items.append(v2_body(
+                f"👥 **Seuil détection** · `{raid_cfg.get('join_threshold', 10)}` membres en `{raid_cfg.get('join_interval', 10)}` sec\n"
+                f"📅 **Âge compte min** · `{raid_cfg.get('min_account_age', 7)}` jours\n"
+                f"🤖 **Mode auto** · {'✅' if raid_cfg.get('auto_mode', True) else '❌'}  ·  "
+                f"🔒 **Bloquer invitations** · {'✅' if raid_cfg.get('block_invites', True) else '❌'}\n"
+                f"⚡ **Action** · `{raid_cfg.get('action', 'kick').upper()}`\n"
+                f"🚨 **Lockdown actif** · {'⚠️ **OUI**' if lockdown else '✅ Non'}"
+            ))
+
+        elif self.key == "anti_compromised":
+            items.append(v2_body(
+                "🔐 **Détection des comptes compromis/hackés**\n\n"
+                "Détecte les comportements suspects indiquant qu'un compte a été compromis :\n"
+                "• Spam de @everyone avec liens\n"
+                "• Messages identiques répétés\n"
+                "• Premier message = lien suspect"
+            ))
+            sl = _sanction_line(self.key)
+            if sl: items.append(v2_body(sl))
+            items.append(v2_body(
+                f"📊 **Détections** · `{len(PHISHING_DOMAINS)}` domaines · "
+                f"`{len(SCAM_KEYWORDS)}` mots-clés · `{len(COMPROMISED_PATTERNS)}` patterns"
+            ))
+
+        elif self.key == "anti_qrcode":
+            items.append(v2_body(
+                "📱 **Protection contre les scams par QR Code**\n\n"
+                "Détecte les tentatives de vol de compte via QR code Discord :\n"
+                "• Messages demandant de scanner un QR code\n"
+                "• Faux QR codes de 'cadeaux'\n"
+                "• Tentatives de vol de token"
+            ))
+            sl = _sanction_line(self.key)
+            if sl: items.append(v2_body(sl))
+
+        elif self.key == "anti_phishing":
+            items.append(v2_body(
+                "🎣 **Protection Anti-Phishing Avancée 2026**\n\nProtège contre :\n"
+                "• Faux sites Discord/Steam/Nitro/Roblox\n"
+                "• Typosquatting (dlscord, steampowored…)\n"
+                "• Liens masqués [texte](url phishing)\n"
+                "• Scam 'Verify age group' / Safeguard bot\n"
+                "• IP grabbers et raccourcisseurs suspects\n"
+                "• TLD dangereux (.ru, .tk, .xyz…)\n"
+                "• URLs dans les embeds de messages"
+            ))
+            sl = _sanction_line(self.key)
+            if sl: items.append(v2_body(sl))
+            items.append(v2_body(f"📊 **Base de données** · `{len(PHISHING_DOMAINS)}` domaines blacklistés"))
+
+        elif self.key == "anti_scam":
+            items.append(v2_body(
+                "🚨 **Protection Anti-Scam Avancée 2026**\n\nDétecte :\n"
+                "• Free Nitro / Steam Gift scams\n"
+                "• Crypto giveaway / Airdrop scams\n"
+                "• Scam vérification âge Discord\n"
+                "• Token grabbers / ClickFix\n"
+                "• Faux jeux à tester (playtest)\n"
+                "• Investment / Job / Romance scams\n"
+                "• Urgence artificielle"
+            ))
+            sl = _sanction_line(self.key)
+            if sl: items.append(v2_body(sl))
+            items.append(v2_body(f"📊 **Base de données** · `{len(SCAM_KEYWORDS)}` mots-clés détectés"))
+
+        elif self.key == "anti_alt":
+            alt_cfg = c.get('alt_config', {})
+            action = c.get('alt_action', 'kick')
+            auto = alt_cfg.get('auto_action', False)
+            min_conf = alt_cfg.get('min_confidence', 70)
+            try:
+                alts = await get_alt_accounts(self.g.id)
+                suspected = len([a for a in alts if a[5] == 'suspected'])
+                confirmed = len([a for a in alts if a[5] == 'confirmed'])
+            except Exception:
+                suspected = confirmed = 0
+            items.append(v2_body(
+                "👥 **Détection des Comptes Secondaires**\n\n"
+                "Détecte automatiquement les comptes secondaires (alts) :\n"
+                "• Avatar identique à un membre existant/banni\n"
+                "• Nom d'utilisateur similaire\n"
+                "• Compte créé juste après un ban\n"
+                "• Comportement suspect"
+            ))
+            items.append(v2_body(
+                f"⚡ **Action** · `{action.upper()}`  ·  "
+                f"🤖 **Action auto** · {'✅' if auto else '❌'}  ·  "
+                f"📊 **Confiance min.** · `{min_conf}%`\n"
+                f"🔍 **Détections** · ⚠️ `{suspected}` suspects · ✅ `{confirmed}` confirmés"
+            ))
+
+        # Salon de log (commun à toutes)
+        log_ch = self.g.get_channel(c.get(f'log_{self.key}', 0))
+        items.append(v2_divider())
+        items.append(v2_body(f"📜 **Salon de log** · {log_ch.mention if log_ch else '🔴 _Non configuré_'}"))
+
+        # Boutons
+        self.clear_items()
+        b_toggle = Button(
+            label=("⏸️ Désactiver" if on else "▶️ Activer"),
+            style=(discord.ButtonStyle.danger if on else discord.ButtonStyle.success),
+            custom_id="pdv2_toggle",
+        )
+        b_toggle.callback = self._cb_toggle
+        b_config = Button(label="⚙️ Configurer", style=discord.ButtonStyle.primary, custom_id="pdv2_config")
+        b_config.callback = self._cb_config
+        b_sanction = Button(label="⚡ Sanction", style=discord.ButtonStyle.secondary, custom_id="pdv2_sanction")
+        b_sanction.callback = self._cb_sanction
+        b_log = Button(label="📜 Définir Log", style=discord.ButtonStyle.secondary, custom_id="pdv2_log")
+        b_log.callback = self._cb_log
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="pdv2_back")
+        b_back.callback = self._cb_back
+
+        items.append(v2_divider())
+        items.append(discord.ui.ActionRow(b_toggle, b_config, b_sanction, b_log, b_back))
+
+        color = Palette.SUCCESS if on else Palette.DANGER
+        self.add_item(v2_container(*items, color=color))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_toggle(self, i):
+        c = await cfg(self.g.id)
+        new_val = 0 if c.get(self.key) else 1
+        await db_set(self.g.id, self.key, new_val)
+        await ProtDetailV2(self.u, self.g, self.prot).render_to(i, edit=True)
+
+    async def _cb_config(self, i):
+        if self.key == "anti_image":
+            v = ImageConfigPanel(self.u, self.g)
+        elif self.key == "anti_badwords":
+            v = BadwordsConfigPanel(self.u, self.g)
+        elif self.key == "anti_link":
+            v = LinkConfigPanel(self.u, self.g)
+        elif self.key in ["anti_spam", "anti_caps", "anti_newaccount", "anti_mass_mention"]:
+            return await i.response.send_modal(NumberConfigModal(self.g, self.u, self.key))
+        elif self.key == "anti_raid":
+            v = AntiRaidConfigPanel(self.u, self.g)
+        elif self.key == "anti_alt":
+            v = AltConfigPanel(self.u, self.g)
+        else:
+            v = ActionConfigPanel(self.u, self.g, self.key)
+        emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
+        await i.response.edit_message(embed=emb, view=v, attachments=[])
+
+    async def _cb_sanction(self, i):
+        v = ActionConfigPanel(self.u, self.g, self.key)
+        emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
+        await i.response.edit_message(embed=emb, view=v, attachments=[])
+
+    async def _cb_log(self, i):
+        try:
+            total_channels = len(list(self.g.text_channels))
+            v = LogSelectView(self.u, self.g, self.key, self.prot)
+            await i.response.edit_message(
+                embed=discord.Embed(
+                    title="📜 Choisir le salon de log",
+                    description=f"Pour la protection **{self.prot[2]}**\n\n📊 {total_channels} salons disponibles",
+                    color=0x9B59B6,
+                ),
+                view=v,
+                attachments=[],
+            )
+        except Exception as ex:
+            print(f"[LOG SELECT V2 ERROR] {ex}")
+            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+
+    async def _cb_back(self, i):
+        v = ProtPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
 class LogSelectView(View):
     """Sélecteur de salon de log PAGINÉ pour supporter tous les salons"""
     def __init__(self, u, g, key, prot, page=0):
@@ -4045,8 +4320,8 @@ class ImageConfigPanel(View):
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
         prot = next(p for p in PROTS if p[0] == "anti_image")
-        v = ProtDetail(self.u, self.g, prot)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ProtDetailV2(self.u, self.g, prot)
+        await v.render_to(i, edit=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🤬 ANTI-BADWORDS CONFIG
@@ -4085,8 +4360,8 @@ class BadwordsConfigPanel(View):
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
         prot = next(p for p in PROTS if p[0] == "anti_badwords")
-        v = ProtDetail(self.u, self.g, prot)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ProtDetailV2(self.u, self.g, prot)
+        await v.render_to(i, edit=True)
 
 class AddBadwordsModal(Modal, title="➕ Ajouter des mots interdits"):
     words = TextInput(
@@ -4177,8 +4452,8 @@ class LinkConfigPanel(View):
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
         prot = next(p for p in PROTS if p[0] == "anti_link")
-        v = ProtDetail(self.u, self.g, prot)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ProtDetailV2(self.u, self.g, prot)
+        await v.render_to(i, edit=True)
 
 class AddDomainModal(Modal, title="➕ Ajouter des domaines"):
     doms = TextInput(
@@ -4488,14 +4763,14 @@ class ActionConfigPanel(View):
         ak = self._get_action_key()
         await db_set(self.g.id, ak, act)
         prot = next(p for p in PROTS if p[0] == self.key)
-        v = ProtDetail(self.u, self.g, prot)
-        await i.response.edit_message(content=f"✅ Action changée → **{act.upper()}**", embed=await v.embed(), view=v)
+        v = ProtDetailV2(self.u, self.g, prot)
+        await v.render_to(i, edit=True)
 
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
         prot = next(p for p in PROTS if p[0] == self.key)
-        v = ProtDetail(self.u, self.g, prot)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ProtDetailV2(self.u, self.g, prot)
+        await v.render_to(i, edit=True)
 
 class DurationConfigModal(Modal, title="⏱️ Durée du Mute"):
     dur_input = TextInput(label="Durée en minutes", placeholder="5", max_length=5)
@@ -4527,8 +4802,8 @@ class DurationConfigModal(Modal, title="⏱️ Durée du Mute"):
         dur = max(1, min(40320, dur))  # 1 min à 28 jours max
         await db_set(self.g.id, self.dur_key, dur)
         prot = next(p for p in PROTS if p[0] == self.key)
-        v = ProtDetail(self.u, self.g, prot)
-        await i.response.edit_message(content=f"✅ Durée du mute → **{dur}** minutes", embed=await v.embed(), view=v)
+        v = ProtDetailV2(self.u, self.g, prot)
+        await v.render_to(i, edit=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           ⚔️ ANTI-RAID CONFIG PANEL
@@ -4665,8 +4940,8 @@ class AntiRaidConfigPanel(View):
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
         prot = next(p for p in PROTS if p[0] == "anti_raid")
-        v = ProtDetail(self.u, self.g, prot)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ProtDetailV2(self.u, self.g, prot)
+        await v.render_to(i, edit=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           👥 ANTI-ALT CONFIG (Comptes Secondaires)
@@ -4797,8 +5072,8 @@ class AltConfigPanel(View):
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
         prot = next(p for p in PROTS if p[0] == "anti_alt")
-        v = ProtDetail(self.u, self.g, prot)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ProtDetailV2(self.u, self.g, prot)
+        await v.render_to(i, edit=True)
 
 class AltConfidenceModal(Modal, title="📊 Confiance minimum"):
     value = TextInput(
