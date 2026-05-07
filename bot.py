@@ -17991,11 +17991,32 @@ class AfkRolePanelV2(LayoutView):
         await i.response.edit_message(embed=v.embed() if not asyncio.iscoroutinefunction(v.embed) else await v.embed(), view=v, attachments=[])
 
     async def _cb_list(self, i):
-        v = AfkListView(self.u, self.g)
+        c = await cfg(self.g.id)
+        afk_cfg = c.get('afk_role_config', {})
+        role_id = afk_cfg.get('role', 0)
+        role = self.g.get_role(role_id)
+        if not role:
+            return await i.response.send_message("❌ Aucun rôle AFK configuré", ephemeral=True)
+        # Réutilise la méthode get_afk_members du V1 panel
+        helper = AfkRolePanel(self.u, self.g)
+        afk_members = await helper.get_afk_members(role, afk_cfg.get('days', 7))
+        if not afk_members:
+            return await i.response.send_message(f"✅ Aucun membre AFK avec le rôle {role.mention} !", ephemeral=True)
+        v = AfkListView(self.u, self.g, afk_members, role)
         await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
 
     async def _cb_actions(self, i):
-        v = AfkActionsView(self.u, self.g)
+        c = await cfg(self.g.id)
+        afk_cfg = c.get('afk_role_config', {})
+        role_id = afk_cfg.get('role', 0)
+        role = self.g.get_role(role_id)
+        if not role:
+            return await i.response.send_message("❌ Aucun rôle AFK configuré", ephemeral=True)
+        helper = AfkRolePanel(self.u, self.g)
+        afk_members = await helper.get_afk_members(role, afk_cfg.get('days', 7))
+        if not afk_members:
+            return await i.response.send_message(f"✅ Aucun membre AFK avec le rôle {role.mention} !", ephemeral=True)
+        v = AfkActionsView(self.u, self.g, afk_members, role)
         await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
 
     async def _cb_back(self, i):
