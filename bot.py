@@ -27878,13 +27878,19 @@ async def check_rosocial_feeds(session, guild, data):
             continue
 
 async def check_roblox_ugc_feeds(session, guild, data):
-    """Vérifie les nouvelles créations UGC Roblox (utilisateurs ET groupes)"""
+    """Vérifie les nouvelles créations UGC Roblox (utilisateurs ET groupes).
+
+    Phase 3.1 : utilise le systeme de galerie au lieu d'envoyer 1 message
+    par item. Une seule galerie par salon est maintenue, contenant les N
+    dernieres creations en grille d'images cliquables (plus recente en haut).
+    """
     channel = guild.get_channel(data.get('ads_roblox_channel', 0))
     feeds = data.get('ads_roblox_feeds', [])
     if not channel or not feeds:
         return
-    
+
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    items_added = False  # True si on a ajoute au moins 1 item -> render gallery a la fin
     
     for feed in feeds:
         try:
@@ -28000,61 +28006,37 @@ async def check_roblox_ugc_feeds(session, guild, data):
                 if not thumb_url:
                     thumb_url = f"https://rbxcdn.com/asset-thumbnail/image?assetId={item_id}&width=420&height=420&format=Png"
                 
-                # ═══════════════════════════════════════════════════════════════════════════════
-                #                        🎨 EMBED ROBLOX UGC - IMAGE EN HAUT À DROITE
-                # ═══════════════════════════════════════════════════════════════════════════════
-
-                # Avatar du créateur
-                rbx_avatar = None
-                if feed_type == 'user' and creator_id:
-                    rbx_avatar = await fetch_avatar_url('roblox_user', str(creator_id), session)
-
-                # Prix texte
-                if item_price and item_price > 0:
-                    price_txt = f"**{item_price:,}** R$"
-                else:
-                    price_txt = "**Gratuit** 🎁"
-
-                creator_label = f"👥 {creator_name}" if feed_type == 'group' else f"👤 {creator_name}"
-
-                e = discord.Embed(color=0x00B06B, url=item_url)  # Vert Roblox
-                e.set_author(name=f"ROBLOX UGC • {creator_emoji} {creator_name}", url=item_url, icon_url=_RBX_ICON)
-                e.title = f"🎨 {item_name}"
-
-                desc_parts = [f"Nouvelle création de **{creator_name}** !"]
-                desc_parts.append(f"\n💰 Prix : {price_txt}")
-                if date_str:
-                    desc_parts.append(f"📅 Publié le : **{date_str}**")
-                desc_parts.append(f"\n🛒 [**Voir sur Roblox**]({item_url})")
-                e.description = "\n".join(desc_parts)
-
-                # Image de l'item en grande + avatar en thumbnail
-                if thumb_url:
-                    e.set_image(url=thumb_url)
-                if rbx_avatar:
-                    e.set_thumbnail(url=rbx_avatar)
-
-                footer_text = f"Roblox UGC • {creator_emoji} {creator_name}"
-                e.set_footer(text=footer_text, icon_url=_RBX_ICON)
-                e.timestamp = now()
-
-                _rblx_msg = await webhook_send(channel, 'roblox_ugc', embed=e)
+                # Phase 3.1 : on enregistre dans tracking_layer (sans envoyer
+                # de message individuel) - la galerie sera rendue a la fin
+                # de la boucle pour ce salon.
                 try:
                     await tracking2026.record_post(
                         guild.id, "roblox_ugc", str(creator_id), _rblx_pid,
                         channel_id=channel.id,
-                        message_id=getattr(_rblx_msg, 'id', 0) or 0,
+                        message_id=0,  # pas de message individuel, c'est la galerie qui s'affiche
                         post_type="ugc",
-                        title=str(item.get('name', 'Item Roblox'))[:200],
-                        url=f"https://www.roblox.com/catalog/{item_id}",
+                        title=item_name[:200],
+                        url=item_url,
                     )
-                except Exception:
-                    pass
-                await asyncio.sleep(2)
-                
+                    items_added = True
+                except Exception as ex:
+                    print(f"[ROBLOX UGC] record_post echoue : {ex}")
+
+                # Petit delai entre les details API pour eviter le rate-limit Roblox
+                await asyncio.sleep(0.5)
+
         except Exception as ex:
             print(f"Erreur Roblox UGC feed {feed}: {ex}")
             continue
+
+    # Phase 3.1 : si au moins un nouvel item a ete enregistre, on (re)render
+    # la galerie pour ce salon (1 seul message qui s'auto-update).
+    if items_added:
+        try:
+            import social_gallery as gallery2026
+            await gallery2026.render(bot, guild.id, "roblox_ugc", channel.id)
+        except Exception as ex:
+            print(f"[ROBLOX UGC] render gallery echoue : {ex}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #              🎮 SYSTÈME DE DEALS PERSISTANT (anti-doublon en DB)
