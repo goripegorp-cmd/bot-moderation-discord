@@ -6652,7 +6652,8 @@ class CommandsPanelV2(LayoutView):
         await v.render_to(i, edit=True)
 
     async def _cb_dir(self, i):
-        await self._open_v1(i, lambda: DirectionPanel(self.u, self.g))
+        v = DirectionPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
@@ -6727,6 +6728,112 @@ class DirectionPanel(View):
     async def back(self, i, b):
         v = CommandsPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class DirectionPanelV2(LayoutView):
+    """Configuration Direction en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        dir_user = self.g.get_member(c.get('direction_allowed_user', 0))
+        dir_role = self.g.get_role(c.get('direction_allowed_role', 0))
+
+        # Boutons
+        self.clear_items()
+        b_user = Button(label="👤 Utilisateur", style=discord.ButtonStyle.primary, custom_id="dpv2_user")
+        b_user.callback = self._cb_user
+        b_role = Button(label="🎭 Rôle", style=discord.ButtonStyle.primary, custom_id="dpv2_role")
+        b_role.callback = self._cb_role
+        b_reset = Button(label="🗑️ Reset", style=discord.ButtonStyle.danger, custom_id="dpv2_reset")
+        b_reset.callback = self._cb_reset
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="dpv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("🔒 Configuration Direction"),
+            v2_subtitle("Restriction complète d'un membre via /direction"),
+            v2_divider(),
+            v2_body(
+                "La commande `/direction` permet de **restreindre complètement** un membre :\n"
+                "• Retrait de tous les rôles\n"
+                "• Ajout du rôle `🔒 Restricted` (0 permissions)\n"
+                "• Timeout Discord appliqué\n\n"
+                "Configure qui peut utiliser cette commande."
+            ),
+            v2_divider(),
+            v2_body(
+                f"👤 **Utilisateur autorisé** · {dir_user.mention if dir_user else '🔴 _Non configuré_'}\n"
+                f"🎭 **Rôle autorisé** · {dir_role.mention if dir_role else '🔴 _Non configuré_'}"
+            ),
+            v2_divider(),
+            v2_subtitle("🔒 /direction @membre [durée] [raison]"),
+            discord.ui.ActionRow(b_user, b_role, b_reset, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.DANGER))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_user(self, i):
+        # Ouvre le modal V1 mais override la callback pour revenir V2
+        modal = DirectionUserModal(self.g, self.u)
+        # Patch on_submit pour revenir vers V2
+        original_submit = modal.on_submit
+
+        async def v2_submit(interaction):
+            try:
+                user_id = int(modal.uid.value)
+                await db_set(self.g.id, 'direction_allowed_user', user_id)
+                new_panel = DirectionPanelV2(self.u, self.g)
+                await new_panel.render_to(interaction, edit=True)
+            except ValueError:
+                await interaction.response.send_message("❌ ID invalide", ephemeral=True)
+
+        modal.on_submit = v2_submit
+        await i.response.send_modal(modal)
+
+    async def _cb_role(self, i):
+        async def picker_callback(interaction, role_id, extra):
+            await db_set(interaction.guild.id, 'direction_allowed_role', role_id)
+            new_panel = DirectionPanelV2(self.u, self.g)
+            await new_panel.render_to(interaction, edit=True)
+
+        v = UniversalRoleSelect(
+            self.u, self.g,
+            callback_func=picker_callback,
+            return_view_func=lambda: DirectionPanelV2(self.u, self.g),
+            title="Rôle Direction",
+        )
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="🎭 Choisir le rôle autorisé",
+                description=f"📊 {len([r for r in self.g.roles[1:] if not r.is_bot_managed()])} rôles disponibles",
+                color=0xFF4444,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_reset(self, i):
+        await db_set(self.g.id, 'direction_allowed_role', 0)
+        await db_set(self.g.id, 'direction_allowed_user', 0)
+        new_panel = DirectionPanelV2(self.u, self.g)
+        await new_panel.render_to(i, edit=True)
+
+    async def _cb_back(self, i):
+        v = CommandsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class DirectionUserModal(Modal, title="👤 Utilisateur Direction"):
