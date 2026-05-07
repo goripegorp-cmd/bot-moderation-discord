@@ -22517,118 +22517,141 @@ async def shop_cmd(i: discord.Interaction):
     # Vérifier le salon
     if not await check_level_channel(i):
         return
-    
+
     # Vérifier si le système est activé
     c = await cfg(i.guild.id)
     level_cfg = c.get('level_config', {})
     if not level_cfg.get('enabled', False):
         return await i.response.send_message("❌ Le système de niveaux n'est pas activé", ephemeral=True)
-    
+
     shop_items = level_cfg.get('shop_items', [])
     if not shop_items:
         return await i.response.send_message("❌ La boutique est vide", ephemeral=True)
-    
-    eco = await get_user_economy(i.guild.id, i.user.id)
-    
-    e = discord.Embed(title="🛒 Boutique", color=0xE67E22)
-    e.description = f"💰 Vos pièces: **{eco['coins']}** 🪙\n\nSélectionnez un article à acheter:"
-    
-    for idx, item in enumerate(shop_items[:10]):
-        role = i.guild.get_role(item.get('role_id', 0))
-        price = item.get('price', 0)
-        duration = item.get('duration', 3600)
-        dur_txt = format_duration(duration)
-        
-        can_afford = "✅" if eco['coins'] >= price else "❌"
-        e.add_field(
-            name=f"{can_afford} {role.name if role else '?'}",
-            value=f"**{price}** 🪙 • Durée: {dur_txt}",
-            inline=True
-        )
-    
-    # Créer la vue avec le sélecteur
-    view = ShopPurchaseView(i.user, i.guild, shop_items, eco['coins'])
-    
-    await i.response.send_message(embed=e, view=view, ephemeral=True)
 
-class ShopPurchaseView(View):
+    eco = await get_user_economy(i.guild.id, i.user.id)
+    view = ShopV2View(i.user, i.guild, shop_items, eco['coins'])
+    await i.response.send_message(view=view, ephemeral=True)
+
+
+class ShopV2View(LayoutView):
+    """Boutique V2 — Container + ActionRow(Select) en un seul LayoutView."""
+
     def __init__(self, user, guild, items, coins):
         super().__init__(timeout=120)
         self.user = user
         self.guild = guild
         self.items = items
         self.coins = coins
-        
-        # Créer les options
+
+        # Lignes d'affichage des articles (max 10 visibles)
+        item_lines = []
+        for idx, item in enumerate(items[:10]):
+            role = guild.get_role(item.get('role_id', 0))
+            price = item.get('price', 0)
+            duration = item.get('duration', 3600)
+            dur_txt = format_duration(duration)
+            mark = "✅" if coins >= price else "❌"
+            item_lines.append(
+                f"{mark} **{role.name if role else '?'}** · `{price:,}` 🪙 · {dur_txt}"
+            )
+
+        # Options du Select (max 25 selon Discord)
         opts = []
         for idx, item in enumerate(items[:25]):
             role = guild.get_role(item.get('role_id', 0))
             price = item.get('price', 0)
             duration = item.get('duration', 3600)
             dur_txt = format_duration(duration)
-            
             can_afford = coins >= price
-            emoji = "✅" if can_afford else "❌"
-            
+            label = f"{role.name if role else '?'} - {price} 🪙"
+            desc = f"Durée: {dur_txt}" + (" (pas assez)" if not can_afford else "")
             opts.append(discord.SelectOption(
-                label=f"{role.name if role else '?'} - {price} 🪙"[:25],
+                label=label[:100],
                 value=str(idx),
-                description=f"Durée: {dur_txt}" + (" (pas assez)" if not can_afford else ""),
-                emoji=emoji
+                description=desc[:100],
+                emoji="✅" if can_afford else "❌",
             ))
-        
+
+        # Construction du Container
+        children = [
+            v2_title("🛒 Boutique"),
+            v2_subtitle(f"💰 Vos pièces : {coins:,} 🪙"),
+            v2_divider(),
+            v2_body("\n".join(item_lines) if item_lines else "_Aucun article disponible_"),
+        ]
         if opts:
-            select = Select(placeholder="Choisir un article...", options=opts)
-            select.callback = self.purchase_callback
-            self.add_item(select)
-    
-    async def purchase_callback(self, i: discord.Interaction):
-        if i.user.id != self.user.id:
-            return await i.response.send_message("❌ Ce n'est pas votre boutique", ephemeral=True)
-        
-        idx = int(i.data['values'][0])
+            children.append(v2_divider())
+            children.append(v2_subtitle("Sélectionnez un article ci-dessous pour l'acheter"))
+            sel = Select(placeholder="Choisir un article...", options=opts)
+            sel.callback = self.purchase_callback
+            children.append(discord.ui.ActionRow(sel))
+
+        self.add_item(v2_container(*children, color=Palette.PREMIUM))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("❌ Ce n'est pas votre boutique", ephemeral=True)
+            return False
+        return True
+
+    async def purchase_callback(self, interaction: discord.Interaction):
+        idx = int(interaction.data['values'][0])
         if idx >= len(self.items):
-            return await i.response.send_message("❌ Article invalide", ephemeral=True)
-        
+            return await interaction.response.send_message("❌ Article invalide", ephemeral=True)
+
         item = self.items[idx]
         price = item.get('price', 0)
         duration = item.get('duration', 3600)
         role_id = item.get('role_id', 0)
-        
+
         # Vérifier les pièces
-        eco = await get_user_economy(self.guild.id, i.user.id)
+        eco = await get_user_economy(self.guild.id, interaction.user.id)
         if eco['coins'] < price:
-            return await i.response.send_message(f"❌ Vous n'avez pas assez de pièces ({eco['coins']}/{price})", ephemeral=True)
-        
+            return await interaction.response.send_message(
+                f"❌ Vous n'avez pas assez de pièces ({eco['coins']}/{price})", ephemeral=True
+            )
+
         role = self.guild.get_role(role_id)
         if not role:
-            return await i.response.send_message("❌ Rôle introuvable", ephemeral=True)
-        
+            return await interaction.response.send_message("❌ Rôle introuvable", ephemeral=True)
+
         # Retirer les pièces
-        await add_coins(self.guild.id, i.user.id, -price)
-        
-        # Donner le rôle
+        await add_coins(self.guild.id, interaction.user.id, -price)
+
+        # Donner le rôle (rembourser si échec)
         try:
-            await i.user.add_roles(role, reason=f"Achat boutique - {price} pièces")
-        except:
-            # Rembourser si erreur
-            await add_coins(self.guild.id, i.user.id, price)
-            return await i.response.send_message("❌ Impossible d'ajouter le rôle", ephemeral=True)
-        
+            await interaction.user.add_roles(role, reason=f"Achat boutique - {price} pièces")
+        except discord.Forbidden:
+            await add_coins(self.guild.id, interaction.user.id, price)
+            return await interaction.response.send_message(
+                "❌ Le bot n'a pas la permission d'attribuer ce rôle", ephemeral=True
+            )
+        except Exception as ex:
+            await add_coins(self.guild.id, interaction.user.id, price)
+            print(f"[SHOP] Erreur ajout rôle: {ex}")
+            return await interaction.response.send_message("❌ Impossible d'ajouter le rôle", ephemeral=True)
+
         # Enregistrer l'achat pour retrait automatique
         expires_at = now() + timedelta(seconds=duration)
         async with get_db() as db:
             await db.execute(
                 'INSERT INTO shop_purchases (guild_id, user_id, role_id, expires_at) VALUES (?, ?, ?, ?)',
-                (self.guild.id, i.user.id, role_id, expires_at.isoformat())
+                (self.guild.id, interaction.user.id, role_id, expires_at.isoformat())
             )
             await db.commit()
-        
+
         dur_txt = format_duration(duration)
-        e = discord.Embed(title="✅ Achat réussi !", color=0x2ECC71)
-        e.description = f"Vous avez acheté {role.mention} pour **{price}** 🪙\n\n⏱️ Ce rôle expirera dans **{dur_txt}**"
-        
-        await i.response.edit_message(embed=e, view=None)
+
+        # Vue de confirmation V2 (statique, sans interaction)
+        success_view = LayoutView(timeout=None)
+        success_view.add_item(v2_container(
+            v2_title("Achat réussi !", level=2),
+            v2_body(f"Tu as acheté {role.mention} pour **{price:,}** 🪙"),
+            v2_divider(),
+            v2_subtitle(f"⏱️ Ce rôle expirera dans {dur_txt}"),
+            color=Palette.SUCCESS,
+        ))
+        await interaction.response.edit_message(view=success_view)
 
 # Tâche pour retirer les rôles expirés
 @tasks.loop(minutes=1)
