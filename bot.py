@@ -8408,15 +8408,15 @@ class AdsPanelV2(LayoutView):
         if val in ('twitter', 'reddit', 'discord', 'rosocial'):
             v = AdsSimplePlatformV2(self.u, self.g, val)
             return await v.render_to(interaction, edit=True)
-        # Plateformes spéciales encore en V1 (Roblox UGC : 2 add buttons,
-        # Deals : toggle + min discount)
-        v1_panels = {
-            'roblox': lambda: AdsRobloxPanel(self.u, self.g),
-            'deals': lambda: AdsDealsPanel(self.u, self.g),
-        }
-        v = v1_panels[val]()
-        emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
-        await interaction.response.edit_message(embed=emb, view=v, attachments=[])
+        # Plateformes spéciales en V2 dédiées
+        if val == 'roblox':
+            v = AdsRobloxPanelV2(self.u, self.g)
+            return await v.render_to(interaction, edit=True)
+        if val == 'deals':
+            v = AdsDealsPanelV2(self.u, self.g)
+            return await v.render_to(interaction, edit=True)
+        # Fallback (ne devrait jamais arriver)
+        await interaction.response.send_message(f"❌ Plateforme inconnue : {val}", ephemeral=True)
 
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
@@ -9680,6 +9680,120 @@ class AdsRoSocialChannelSelect(Select):
 
 # ─────────────────────────────── ROBLOX UGC ───────────────────────────────
 
+class AdsRobloxPanelV2(LayoutView):
+    """Roblox UGC en V2 (créateurs + groupes)."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        rblx_ch = self.g.get_channel(c.get('ads_roblox_channel', 0))
+        feeds = c.get('ads_roblox_feeds', [])
+
+        # Séparer users et groups
+        users_lines = []
+        groups_lines = []
+        for f in feeds:
+            if isinstance(f, dict):
+                if f.get('type') == 'group':
+                    groups_lines.append(f"• `{f.get('group_name', '?')}` (ID: `{f.get('group_id', '?')}`)")
+                else:
+                    users_lines.append(f"• `{f.get('username', '?')}` (ID: `{f.get('user_id', '?')}`)")
+        users_block = "\n".join(users_lines) if users_lines else "_Aucun_"
+        groups_block = "\n".join(groups_lines) if groups_lines else "_Aucun_"
+
+        # Boutons
+        self.clear_items()
+        b_chan = Button(label="📍 Salon", style=discord.ButtonStyle.primary, custom_id="adsv2_rblx_chan")
+        b_chan.callback = self._cb_chan
+        b_user = Button(label="👤 Ajouter Créateur", style=discord.ButtonStyle.success, custom_id="adsv2_rblx_user")
+        b_user.callback = self._cb_user
+        b_group = Button(label="👥 Ajouter Groupe", style=discord.ButtonStyle.success, custom_id="adsv2_rblx_group")
+        b_group.callback = self._cb_group
+        b_remove = Button(
+            label="🗑️ Supprimer",
+            style=discord.ButtonStyle.danger,
+            disabled=(not feeds),
+            custom_id="adsv2_rblx_remove",
+        )
+        b_remove.callback = self._cb_remove
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="adsv2_rblx_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("🟢  Roblox UGC"),
+            v2_subtitle("Nouvelles créations UGC de tes créateurs et groupes Roblox"),
+            v2_divider(),
+            v2_body(f"📍 **Salon** · {rblx_ch.mention if rblx_ch else '🔴 _Non configuré_'}"),
+            v2_divider(),
+            v2_title(f"👤 Créateurs suivis ({len(users_lines)})", level=3),
+            v2_body(users_block),
+            v2_divider(),
+            v2_title(f"👥 Groupes suivis ({len(groups_lines)})", level=3),
+            v2_body(groups_block),
+            v2_divider(),
+            v2_subtitle("💡 Vérification toutes les 10 minutes"),
+            discord.ui.ActionRow(b_chan, b_user, b_group, b_remove, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=discord.Color(0x00A86B)))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_chan(self, i):
+        v = PaginatedAdsChannelSelect(self.u, self.g, 'ads_roblox_channel', 'roblox')
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="📍 Salon Roblox UGC",
+                description="Où publier les nouvelles créations UGC",
+                color=0x00A86B,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_user(self, i):
+        await i.response.send_modal(AdsRobloxAddUserModal(self.g, self.u))
+
+    async def _cb_group(self, i):
+        await i.response.send_modal(AdsRobloxAddGroupModal(self.g, self.u))
+
+    async def _cb_remove(self, i):
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_roblox_feeds', [])
+        if not feeds:
+            return await i.response.send_message("❌ Aucun feed à supprimer", ephemeral=True)
+        opts = []
+        for idx, f in enumerate(feeds[:25]):
+            if isinstance(f, dict):
+                if f.get('type') == 'group':
+                    label = f"👥 {f.get('group_name', '?')}"[:25]
+                else:
+                    label = f"👤 {f.get('username', '?')}"[:25]
+            else:
+                label = str(f)[:25]
+            opts.append(discord.SelectOption(label=label, value=str(idx)))
+        v = AdsFeedRemoveView(self.u, self.g, opts, 'ads_roblox_feeds', 'roblox')
+        await i.response.edit_message(
+            embed=discord.Embed(title="🗑️ Supprimer un feed Roblox", color=0xE74C3C),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_back(self, i):
+        v = AdsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
 class AdsRobloxPanel(View):
     def __init__(self, u, g):
         super().__init__(timeout=600)
@@ -9950,6 +10064,109 @@ class AdsRobloxAddGroupModal(Modal, title="👥 Ajouter un groupe Roblox"):
             await i.followup.send("❌ Erreur de connexion à l'API Roblox", ephemeral=True)
 
 # ─────────────────────────────── RÉDUCTIONS JEUX ───────────────────────────────
+
+class AdsDealsPanelV2(LayoutView):
+    """Réductions de jeux vidéo en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        deals_ch = self.g.get_channel(c.get('ads_deals_channel', 0))
+        enabled = c.get('ads_deals_enabled', False)
+        min_discount = c.get('ads_deals_min_discount', 50)
+
+        active_deals = 0
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT COUNT(*) FROM posted_deals WHERE guild_id=? AND expired=0',
+                    (self.g.id,)
+                ) as cur:
+                    row = await cur.fetchone()
+                    active_deals = row[0] if row else 0
+        except Exception as ex:
+            print(f"[DEALS-V2] Erreur count: {ex}")
+
+        # Boutons
+        self.clear_items()
+        b_chan = Button(label="📍 Salon", style=discord.ButtonStyle.primary, custom_id="adsv2_deals_chan")
+        b_chan.callback = self._cb_chan
+        b_toggle = Button(
+            label=("⏸️ Désactiver" if enabled else "▶️ Activer"),
+            style=(discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success),
+            custom_id="adsv2_deals_toggle",
+        )
+        b_toggle.callback = self._cb_toggle
+        b_min = Button(label="🔻 Réduction min", style=discord.ButtonStyle.secondary, custom_id="adsv2_deals_min")
+        b_min.callback = self._cb_min
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="adsv2_deals_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("🎯  Réductions Jeux Vidéo"),
+            v2_subtitle(f"{'🟢 Activé' if enabled else '🔴 Désactivé'}  ·  `{active_deals}` deal(s) actif(s)"),
+            v2_divider(),
+            v2_body(
+                "Reçois automatiquement les meilleures promotions !\n"
+                "Chaque jeu n'est publié **qu'une seule fois** et supprimé quand la promo expire."
+            ),
+            v2_divider(),
+            v2_body(
+                "🎮 **Steam** · **Epic Games** · **GOG**\n"
+                "🔵 **Ubisoft** · **EA/Origin** · **Battle.net**\n"
+                "🔑 **Humble** · **Fanatical** · **Green Man Gaming** · …"
+            ),
+            v2_divider(),
+            v2_body(
+                f"📍 **Salon** · {deals_ch.mention if deals_ch else '🔴 _Non configuré_'}\n"
+                f"🔻 **Réduction minimum** · `-{min_discount}%`"
+            ),
+            v2_divider(),
+            v2_subtitle("🔄 Vérification toutes les 30 min · Anti-doublon en base de données"),
+            discord.ui.ActionRow(b_chan, b_toggle, b_min, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=discord.Color(0xFF6B35)))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_chan(self, i):
+        v = PaginatedAdsChannelSelect(self.u, self.g, 'ads_deals_channel', 'deals')
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="📍 Salon des Réductions",
+                description="Où publier les promotions de jeux",
+                color=0xFF6B35,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_toggle(self, i):
+        c = await cfg(self.g.id)
+        enabled = c.get('ads_deals_enabled', False)
+        if not enabled and not c.get('ads_deals_channel'):
+            return await i.response.send_message("❌ Configure d'abord un salon !", ephemeral=True)
+        await db_set(self.g.id, 'ads_deals_enabled', not enabled)
+        await AdsDealsPanelV2(self.u, self.g).render_to(i, edit=True)
+
+    async def _cb_min(self, i):
+        await i.response.send_modal(AdsDealsMinDiscountModal(self.g, self.u))
+
+    async def _cb_back(self, i):
+        v = AdsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
 
 class AdsDealsPanel(View):
     def __init__(self, u, g):
