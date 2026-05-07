@@ -16760,7 +16760,22 @@ async def on_member_join(m):
                         print(f"[ALT] Erreur action: {ex}")
                     
                     return  # Ne pas continuer
-                    
+
+        # ═══════════════ AUTO-RÔLE D'ACTIVITÉ (donné dès l'arrivée) ═══════════════
+        # Si un activity_role est configuré, on l'attribue automatiquement
+        # au nouveau membre sans qu'il ait besoin d'envoyer un message au préalable.
+        try:
+            stat_cfg = c.get('stat_config', {})
+            role_id = stat_cfg.get('activity_role', 0)
+            if role_id:
+                role = m.guild.get_role(role_id)
+                if role and role not in m.roles and role < m.guild.me.top_role:
+                    await m.add_roles(role, reason="Rôle d'activité automatique à l'arrivée")
+        except discord.Forbidden:
+            print(f"[AUTOROLE] Permission refusée pour {m} dans {m.guild.name}")
+        except Exception as ex:
+            print(f"[AUTOROLE] Erreur ajout rôle d'activité: {ex}")
+
     except Exception as ex:
         print(f"Erreur on_member_join: {ex}")
 
