@@ -3463,11 +3463,11 @@ class MainPanelV2(LayoutView):
             'help': lambda: AutoHelpPanelV2(self.u, self.g),
             'immune': lambda: ImmunePanelV2(self.u, self.g),
             'centre': lambda: CentrePanelV2(self.u, self.g),
+            'chan': lambda: ChanPanelV2(self.u, self.g),
         }
         # Modules encore en V1 (View + embed)
         v1_panels = {
             'prot': lambda: ProtPanel(self.u, self.g),
-            'chan': lambda: ChanPanel(self.u, self.g),
             'tickets': lambda: TicketMainPanel(self.u, self.g),
             'ads': lambda: AdsPanel(self.u, self.g),
             'stats': lambda: StatPanel(self.u, self.g),
@@ -15697,6 +15697,91 @@ class ChanPanel(View):
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+class ChanPanelV2(LayoutView):
+    """Panneau Configuration des Salons en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        configs = c.get('channel_configs', {})
+        count = len(configs) if configs else 0
+
+        # Liste des salons configurés
+        if configs:
+            list_lines = []
+            for ch_id, conf in list(configs.items())[:15]:
+                ch = self.g.get_channel(int(ch_id))
+                if ch:
+                    restrictions = []
+                    if not conf.get('messages', True): restrictions.append("💬")
+                    if not conf.get('images', True): restrictions.append("🖼️")
+                    if not conf.get('gifs', True): restrictions.append("🎞️")
+                    if not conf.get('emojis', True): restrictions.append("😀")
+                    if not conf.get('links', True): restrictions.append("🔗")
+                    if conf.get('commands_only', False): restrictions.append("🤖")
+                    status = (" ".join(restrictions) + " bloqué(s)") if restrictions else "✅ Tout OK"
+                    list_lines.append(f"{ch.mention} → {status}")
+            list_block = "\n".join(list_lines)
+            if count > 15:
+                list_block += f"\n_… + {count - 15} autres_"
+        else:
+            list_block = "_Aucun salon avec règles personnalisées_"
+
+        # Boutons
+        self.clear_items()
+        b_add = Button(label="➕ Configurer un salon", style=discord.ButtonStyle.success, custom_id="chpv2_add")
+        b_add.callback = self._cb_add
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="chpv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = []
+        if self.g.icon:
+            items.append(v2_section(
+                v2_title("📺 Configuration des Salons"),
+                v2_subtitle(f"{count} salon(s) avec règles personnalisées"),
+                accessory=v2_thumb(self.g.icon.url),
+            ))
+        else:
+            items.append(v2_title("📺 Configuration des Salons"))
+            items.append(v2_subtitle(f"{count} salon(s) avec règles personnalisées"))
+
+        items.append(v2_divider())
+        items.append(v2_body(list_block))
+        items.append(v2_divider())
+        items.append(v2_subtitle("Légende : 💬 messages · 🖼️ images · 🎞️ GIFs · 😀 emojis · 🔗 liens · 🤖 cmds only"))
+        items.append(discord.ui.ActionRow(b_add, b_back))
+
+        self.add_item(v2_container(*items, color=Palette.WARNING))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_add(self, i):
+        v = ChanSelectPaginatedView(self.u, self.g)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="📺 Choisir un salon",
+                description=f"**{len(v.channels)} salons** · Page 1/{v.max_page+1}",
+                color=0xE67E22,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_back(self, i):
+        v = MainPanelV2(self.u, self.g)
+        await i.response.edit_message(view=v, embed=None, attachments=[])
+
 
 class ChanSelectPaginatedView(View):
     """Sélecteur de salon paginé pour Config Salon"""
