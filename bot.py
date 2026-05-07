@@ -16016,8 +16016,8 @@ class AutoHelpChannelSelect(View):
         await i.response.edit_message(view=v)
     
     async def go_back(self, i):
-        v = AutoHelpPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = AutoHelpPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class AutoHelpChannelSelectMenu(Select):
     def __init__(self, parent, opts):
@@ -16085,8 +16085,8 @@ class AutoHelpConfigModal(Modal, title="💡 Configurer l'aide automatique"):
                 if msg:
                     auto_help_messages[int(self.channel_id)] = msg.id
             
-            v = AutoHelpPanel(self.u, self.g)
-            await i.response.edit_message(embed=await v.embed(), view=v)
+            v = AutoHelpPanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
         except Exception as ex:
             await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
 
@@ -16162,13 +16162,13 @@ class AutoHelpManageView(View):
             v = await AutoHelpManageView.create(self.u, self.g)
             await i.response.edit_message(embed=await v.embed(), view=v)
         else:
-            v = AutoHelpPanel(self.u, self.g)
-            await i.response.edit_message(embed=await v.embed(), view=v)
-    
+            v = AutoHelpPanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = AutoHelpPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = AutoHelpPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 async def handle_auto_help(message):
     """Gère le repositionnement automatique des messages d'aide"""
