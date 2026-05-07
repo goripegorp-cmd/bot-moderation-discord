@@ -25535,10 +25535,256 @@ async def trade_cmd(i: discord.Interaction):
                     time_txt = f"{int(remaining)}s"
                 return await i.response.send_message(f"⏱️ Attendez encore **{time_txt}**", ephemeral=True)
     
-    # Afficher le menu de création
-    v = TradeBuilderView(i.user, i.guild, i.channel, trade_ch, is_immune)
-    e = v.get_embed()
-    await i.response.send_message(embed=e, view=v, ephemeral=True)
+    # Afficher le menu de création (V2)
+    v = TradeBuilderViewV2(i.user, i.guild, i.channel, trade_ch, is_immune)
+    v._build()
+    await i.response.send_message(view=v, ephemeral=True)
+
+class TradeBuilderViewV2(LayoutView):
+    """Builder interactif d'annonce de trade en V2."""
+
+    def __init__(self, user, guild, channel, trade_ch, is_immune=False):
+        super().__init__(timeout=300)
+        self.user = user
+        self.guild = guild
+        self.channel = channel
+        self.trade_ch = trade_ch
+        self.is_immune = is_immune
+        self.jeu = ""
+        self.je_donne = []
+        self.je_veux = []
+        self.texte_donne = ""
+        self.texte_veux = ""
+
+    async def interaction_check(self, i):
+        return i.user.id == self.user.id
+
+    def _build(self):
+        donne_display = " ".join(self.je_donne) + (" " + self.texte_donne if self.texte_donne else "")
+        veux_display = " ".join(self.je_veux) + (" " + self.texte_veux if self.texte_veux else "")
+        donne_clean = donne_display.strip() if donne_display.strip() else "_Rien sélectionné_"
+        veux_clean = veux_display.strip() if veux_display.strip() else "_Rien sélectionné_"
+
+        ready = bool(self.jeu and (donne_display.strip() or veux_display.strip()))
+
+        # Selects emojis (max 25 emojis du serveur)
+        emojis = list(self.guild.emojis)[:25]
+        give_sel = None
+        want_sel = None
+        if emojis:
+            # Build emoji map
+            self._emoji_map = {}
+            for e in emojis:
+                if e.animated:
+                    self._emoji_map[str(e.id)] = f"<a:{e.name}:{e.id}>"
+                else:
+                    self._emoji_map[str(e.id)] = f"<:{e.name}:{e.id}>"
+            give_options = [discord.SelectOption(label=e.name[:25], value=str(e.id), emoji=e) for e in emojis]
+            want_options = [discord.SelectOption(label=e.name[:25], value=str(e.id), emoji=e) for e in emojis]
+            give_sel = Select(
+                placeholder="📤 Emojis à DONNER…",
+                options=give_options,
+                min_values=0,
+                max_values=min(len(give_options), 10),
+                custom_id="tbvv2_give",
+            )
+            give_sel.callback = self._cb_select_give
+            want_sel = Select(
+                placeholder="📥 Emojis que je VEUX…",
+                options=want_options,
+                min_values=0,
+                max_values=min(len(want_options), 10),
+                custom_id="tbvv2_want",
+            )
+            want_sel.callback = self._cb_select_want
+
+        # Boutons
+        self.clear_items()
+        b_game = Button(label="🎮 Définir le Jeu", style=discord.ButtonStyle.primary, custom_id="tbvv2_game")
+        b_game.callback = self._cb_game
+        b_text_give = Button(label="✏️ Texte Donne", style=discord.ButtonStyle.secondary, custom_id="tbvv2_tg")
+        b_text_give.callback = self._cb_text_give
+        b_text_want = Button(label="✏️ Texte Veux", style=discord.ButtonStyle.secondary, custom_id="tbvv2_tw")
+        b_text_want.callback = self._cb_text_want
+        b_confirm = Button(
+            label="✅ Confirmer",
+            style=discord.ButtonStyle.success,
+            disabled=(not ready),
+            custom_id="tbvv2_confirm",
+        )
+        b_confirm.callback = self._cb_confirm
+        b_cancel = Button(label="❌ Annuler", style=discord.ButtonStyle.danger, custom_id="tbvv2_cancel")
+        b_cancel.callback = self._cb_cancel
+
+        items: list = [
+            v2_title("🔄 Créer un Trade"),
+            v2_subtitle(f"🎮 Jeu · {self.jeu if self.jeu else '_Non défini_'}"),
+            v2_divider(),
+            v2_body(
+                f"📤 **Je DONNE** · {donne_clean}\n"
+                f"📥 **Je VEUX** · {veux_clean}"
+            ),
+            v2_divider(),
+            v2_subtitle(
+                "✅ Cliquez sur Confirmer pour continuer"
+                if ready
+                else "1️⃣ Définir le jeu  ·  2️⃣ Sélectionner/écrire des items  ·  3️⃣ Confirmer"
+            ),
+        ]
+        if give_sel:
+            items.append(discord.ui.ActionRow(give_sel))
+        if want_sel:
+            items.append(discord.ui.ActionRow(want_sel))
+        items.append(discord.ui.ActionRow(b_game, b_text_give, b_text_want))
+        items.append(discord.ui.ActionRow(b_confirm, b_cancel))
+
+        color = Palette.SUCCESS if ready else Palette.PREMIUM
+        self.add_item(v2_container(*items, color=color))
+
+    async def render_to(self, interaction, *, edit=True):
+        self._build()
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_select_give(self, i):
+        emoji_ids = i.data.get('values', [])
+        self.je_donne = [self._emoji_map[eid] for eid in emoji_ids if eid in self._emoji_map]
+        await self.render_to(i, edit=True)
+
+    async def _cb_select_want(self, i):
+        emoji_ids = i.data.get('values', [])
+        self.je_veux = [self._emoji_map[eid] for eid in emoji_ids if eid in self._emoji_map]
+        await self.render_to(i, edit=True)
+
+    async def _cb_game(self, i):
+        modal = TradeGameModal.__new__(TradeGameModal)
+        Modal.__init__(modal)
+        modal.parent = self
+        # Remplacer on_submit pour utiliser render V2
+        original_on_submit = TradeGameModal.on_submit
+
+        async def v2_submit(interaction):
+            self.jeu = modal.jeu.value
+            await self.render_to(interaction, edit=True)
+
+        modal.on_submit = v2_submit
+        # Re-add the TextInput
+        for child_attr in dir(TradeGameModal):
+            attr = getattr(TradeGameModal, child_attr, None)
+            if isinstance(attr, TextInput):
+                # Already declared on the class — modal needs an instance copy.
+                pass
+        # Simpler: just instantiate a fresh modal and override on_submit
+        fresh = TradeGameModal(self)
+        async def v2_submit2(interaction):
+            self.jeu = fresh.jeu.value
+            await self.render_to(interaction, edit=True)
+        fresh.on_submit = v2_submit2
+        await i.response.send_modal(fresh)
+
+    async def _cb_text_give(self, i):
+        fresh = TradeTextGiveModal(self)
+        async def v2_submit(interaction):
+            self.texte_donne = fresh.texte.value
+            await self.render_to(interaction, edit=True)
+        fresh.on_submit = v2_submit
+        await i.response.send_modal(fresh)
+
+    async def _cb_text_want(self, i):
+        fresh = TradeTextWantModal(self)
+        async def v2_submit(interaction):
+            self.texte_veux = fresh.texte.value
+            await self.render_to(interaction, edit=True)
+        fresh.on_submit = v2_submit
+        await i.response.send_modal(fresh)
+
+    async def _cb_confirm(self, i):
+        donne_display = " ".join(self.je_donne) + (" " + self.texte_donne if self.texte_donne else "")
+        veux_display = " ".join(self.je_veux) + (" " + self.texte_veux if self.texte_veux else "")
+
+        if not self.jeu:
+            return await i.response.send_message("❌ Définis le jeu d'abord !", ephemeral=True)
+        if not donne_display.strip() and not veux_display.strip():
+            return await i.response.send_message("❌ Ajoute au moins un item !", ephemeral=True)
+
+        # Demande de preuve : transition vers une vue d'attente
+        wait_view = LayoutView(timeout=None)
+        wait_view.add_item(v2_container(
+            v2_title("📸 Preuve requise", level=2),
+            v2_body("**Envoie une image** de preuve dans les **3 minutes**."),
+            color=Palette.WARNING,
+        ))
+        await i.response.edit_message(view=wait_view, embed=None, attachments=[])
+
+        def check(m):
+            return m.author.id == self.user.id and m.channel.id == self.channel.id and m.attachments
+
+        try:
+            msg = await bot.wait_for('message', timeout=180.0, check=check)
+            attachment = msg.attachments[0]
+            image_data = await attachment.read()
+            image_filename = attachment.filename
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+        except asyncio.TimeoutError:
+            return await i.followup.send("❌ Temps écoulé !", ephemeral=True)
+
+        # Publication V2
+        image_file = discord.File(io.BytesIO(image_data), filename=image_filename)
+        donne_clean = donne_display.strip() if donne_display.strip() else "—"
+        veux_clean = veux_display.strip() if veux_display.strip() else "—"
+
+        trade_view = LayoutView(timeout=None)
+        trade_view.add_item(v2_container(
+            v2_section(
+                v2_title(f"🔄 TRADE — {self.jeu.upper()}"),
+                v2_subtitle(f"par {self.user.display_name} · <t:{int(now().timestamp())}:R>"),
+                accessory=v2_thumb(self.user.display_avatar.url),
+            ),
+            v2_divider(),
+            v2_body(f"📤 **Donne** · {donne_clean}\n📥 **Veut** · {veux_clean}"),
+            v2_divider(),
+            v2_body(f"👤 {self.user.mention} · ID `{self.user.id}`"),
+            v2_divider(),
+            discord.ui.MediaGallery(
+                discord.MediaGalleryItem(media=f"attachment://{image_filename}", description="Preuve du trade")
+            ),
+            v2_divider(),
+            v2_subtitle("✅ Intéressé ? Réagissez !  ·  💬 MP pour négocier"),
+            color=Palette.PREMIUM,
+        ))
+
+        trade_msg = await webhook_send(self.trade_ch, 'trade', view=trade_view, file=image_file)
+        if not trade_msg:
+            return await i.followup.send("❌ Erreur lors de la publication du trade", ephemeral=True)
+        try:
+            await trade_msg.add_reaction("✅")
+            await trade_msg.add_reaction("💬")
+        except Exception as ex:
+            print(f"[TRADE V2] Erreur ajout réactions: {ex}")
+
+        trade_cooldowns[(self.guild.id, self.user.id)] = now()
+
+        confirm_view = LayoutView(timeout=None)
+        confirm_view.add_item(v2_container(
+            v2_title("✅ Trade publié !", level=2),
+            v2_body(f"Ton offre a été publiée dans {self.trade_ch.mention}"),
+            color=Palette.SUCCESS,
+        ))
+        await i.followup.send(view=confirm_view, ephemeral=True)
+
+    async def _cb_cancel(self, i):
+        cancel_view = LayoutView(timeout=None)
+        cancel_view.add_item(v2_container(
+            v2_title("❌ Trade annulé", level=2),
+            color=Palette.DANGER,
+        ))
+        await i.response.edit_message(view=cancel_view, embed=None, attachments=[])
+
 
 class TradeBuilderView(View):
     def __init__(self, user, guild, channel, trade_ch, is_immune=False):
