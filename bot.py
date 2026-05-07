@@ -3465,6 +3465,7 @@ class MainPanelV2(LayoutView):
             'centre': lambda: CentrePanelV2(self.u, self.g),
             'chan': lambda: ChanPanelV2(self.u, self.g),
             'ads': lambda: AdsPanelV2(self.u, self.g),
+            'voice': lambda: TempVoicePanelV2(self.u, self.g),
         }
         # Modules encore en V1 (View + embed)
         v1_panels = {
@@ -3472,7 +3473,6 @@ class MainPanelV2(LayoutView):
             'tickets': lambda: TicketMainPanel(self.u, self.g),
             'stats': lambda: StatPanel(self.u, self.g),
             'levels': lambda: LevelSystemPanel(self.u, self.g),
-            'voice': lambda: TempVoicePanel(self.u, self.g),
         }
 
         if val in v2_panels:
@@ -11830,6 +11830,142 @@ class TempVoicePanel(View):
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+class TempVoicePanelV2(LayoutView):
+    """Panneau Vocaux Temporaires en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        voice_cfg = c.get('temp_voice_config', {})
+        hubs = voice_cfg.get('hubs', {})
+        enabled = voice_cfg.get('enabled', False)
+
+        # Hubs valides + actifs
+        active_hubs = len([h_id for h_id in hubs if self.g.get_channel(int(h_id))])
+        try:
+            active_count = len([ch for ch in temp_voice_channels.keys() if self.g.get_channel(ch)])
+        except Exception:
+            active_count = 0
+
+        # Liste des hubs
+        hub_lines = []
+        if hubs:
+            for hub_id, hub_data in list(hubs.items())[:5]:
+                hub_ch = self.g.get_channel(int(hub_id))
+                if hub_ch:
+                    role_id = hub_data.get('required_role', 0)
+                    role = self.g.get_role(role_id) if role_id else None
+                    role_txt = f"🔒 {role.mention} _(privé)_" if role else "🔓 _Public_"
+                    cat = self.g.get_channel(hub_data.get('category', 0))
+                    cat_txt = cat.name if cat else "_Non défini_"
+                    hub_lines.append(f"🎤 **{hub_ch.name}** · {role_txt} · 📁 `{cat_txt}`")
+            if len(hubs) > 5:
+                hub_lines.append(f"_… + {len(hubs) - 5} autres_")
+        hubs_block = "\n".join(hub_lines) if hub_lines else "_Aucun hub configuré · ajoute-en un avec ➕_"
+
+        # Permissions
+        perms = voice_cfg.get('owner_permissions', {})
+        perm_chips = []
+        if perms.get('can_rename', True): perm_chips.append("✏️ Renommer")
+        if perms.get('can_limit', True): perm_chips.append("🔢 Limite")
+        if perms.get('can_mute', True): perm_chips.append("🔇 Mute")
+        if perms.get('can_kick', True): perm_chips.append("👢 Expulser")
+        perms_txt = " · ".join(perm_chips) if perm_chips else "_Aucune permission accordée au propriétaire_"
+
+        # Boutons
+        self.clear_items()
+        b_toggle = Button(
+            label=("⏸️ Désactiver" if enabled else "▶️ Activer"),
+            style=(discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success),
+            custom_id="tvpv2_toggle",
+        )
+        b_toggle.callback = self._cb_toggle
+        b_add = Button(label="➕ Ajouter Hub", style=discord.ButtonStyle.primary, custom_id="tvpv2_add")
+        b_add.callback = self._cb_add
+        b_manage = Button(label="📋 Gérer Hubs", style=discord.ButtonStyle.primary, disabled=(active_hubs == 0), custom_id="tvpv2_manage")
+        b_manage.callback = self._cb_manage
+        b_perms = Button(label="👑 Permissions", style=discord.ButtonStyle.secondary, custom_id="tvpv2_perms")
+        b_perms.callback = self._cb_perms
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="tvpv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = []
+        if self.g.icon:
+            items.append(v2_section(
+                v2_title("🔊 Vocaux Temporaires"),
+                v2_subtitle(f"{'🟢 Système actif' if enabled else '🔴 Système désactivé'} · `{active_hubs}` hub(s) · `{active_count}` vocaux actifs"),
+                accessory=v2_thumb(self.g.icon.url),
+            ))
+        else:
+            items.append(v2_title("🔊 Vocaux Temporaires"))
+            items.append(v2_subtitle(f"{'🟢 Système actif' if enabled else '🔴 Système désactivé'} · `{active_hubs}` hub(s) · `{active_count}` vocaux actifs"))
+
+        items.append(v2_divider())
+        items.append(v2_body(
+            "✅ Détection vocale & stream  ·  ❌ Écriture bloquée\n"
+            "🗑️ Auto-delete si vide  ·  🔒 Restriction par rôle"
+        ))
+        items.append(v2_divider())
+        items.append(v2_title("📋 Hubs configurés", level=3))
+        items.append(v2_body(hubs_block))
+        items.append(v2_divider())
+        items.append(v2_title("👑 Permissions du propriétaire", level=3))
+        items.append(v2_body(perms_txt))
+        items.append(v2_divider())
+        items.append(discord.ui.ActionRow(b_toggle, b_add, b_manage))
+        items.append(discord.ui.ActionRow(b_perms, b_back))
+
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_toggle(self, i):
+        c = await cfg(self.g.id)
+        voice_cfg = c.get('temp_voice_config', {})
+        voice_cfg['enabled'] = not voice_cfg.get('enabled', False)
+        await db_set(self.g.id, 'temp_voice_config', voice_cfg)
+        new_panel = TempVoicePanelV2(self.u, self.g)
+        await new_panel.render_to(i, edit=True)
+
+    async def _cb_add(self, i):
+        v = TempVoiceAddHubSelect(self.u, self.g)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="➕ Ajouter un Hub Vocal",
+                description="**Étape 1/3** — Choisis le salon vocal qui servira de hub.\n\nQuand un membre rejoindra ce salon, un vocal personnel sera créé.",
+                color=0x9B59B6,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_manage(self, i):
+        c = await cfg(self.g.id)
+        voice_cfg = c.get('temp_voice_config', {})
+        if not voice_cfg.get('hubs', {}):
+            return await i.response.send_message("❌ Aucun hub configuré", ephemeral=True)
+        v = TempVoiceHubsListPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+
+    async def _cb_perms(self, i):
+        v = TempVoicePermissionsPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+
+    async def _cb_back(self, i):
+        v = MainPanelV2(self.u, self.g)
+        await i.response.edit_message(view=v, embed=None, attachments=[])
+
 
 class TempVoiceAddHubSelect(View):
     """Étape 1: Sélection du salon hub — Paginé"""
