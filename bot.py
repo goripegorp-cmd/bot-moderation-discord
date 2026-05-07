@@ -19070,45 +19070,59 @@ async def suggestion_cmd(i: discord.Interaction, titre: str, proposition: str):
     titre = Security.sanitize_input(titre, 100)
     proposition = Security.sanitize_input(proposition, 1000)
     
-    # Créer un bel embed de suggestion
-    e = discord.Embed(color=C.BLURPLE, timestamp=now())
-    e.set_author(name="💡 Nouvelle Suggestion", icon_url=i.guild.icon.url if i.guild.icon else None)
-    
-    e.add_field(name="📋 Titre", value=f"```{titre[:100]}```", inline=False)
-    e.add_field(name="📝 Proposition", value=proposition[:1000], inline=False)
-    
-    e.add_field(name="👤 Auteur", value=f"{i.user.mention}", inline=True)
-    e.add_field(name="🆔 ID", value=f"`{i.user.id}`", inline=True)
-    e.add_field(name="📅 Date", value=f"<t:{int(now().timestamp())}:R>", inline=True)
-    
-    e.set_thumbnail(url=i.user.display_avatar.url)
-    e.set_footer(text="Votez ci-dessous! ✅ Pour | 🟠 Neutre | ❌ Contre")
-    
-    msg = await webhook_send(sugg_ch, 'suggestion', embed=e)
-    if not msg:
-        return await i.followup.send("❌ Erreur lors de l'envoi de la suggestion", ephemeral=True)
+    # ─── Suggestion : LayoutView V2 envoyé en webhook ───
+    sugg_view = LayoutView(timeout=None)
+    sugg_view.add_item(v2_container(
+        v2_section(
+            v2_title("💡 Nouvelle Suggestion"),
+            v2_subtitle(f"par {i.user.display_name} · <t:{int(now().timestamp())}:R>"),
+            accessory=v2_thumb(i.user.display_avatar.url),
+        ),
+        v2_divider(),
+        v2_title(f"📋 {titre}", level=2),
+        v2_body(proposition),
+        v2_divider(),
+        v2_body(f"👤 **Auteur** · {i.user.mention} · ID `{i.user.id}`"),
+        v2_divider(),
+        v2_subtitle("Votez ci-dessous · ✅ Pour  ·  🟠 Neutre  ·  ❌ Contre"),
+        color=Palette.PRIMARY,
+    ))
 
-    # Ajouter les réactions
-    await msg.add_reaction("✅")
-    await msg.add_reaction("🟠")
-    await msg.add_reaction("❌")
-    
-    # Enregistrer le cooldown (sauf immunisés)
+    msg = await webhook_send(sugg_ch, 'suggestion', view=sugg_view)
+    if not msg:
+        return await i.response.send_message("❌ Erreur lors de l\'envoi de la suggestion", ephemeral=True)
+
+    # Réactions de vote
+    try:
+        await msg.add_reaction("✅")
+        await msg.add_reaction("🟠")
+        await msg.add_reaction("❌")
+    except Exception as ex:
+        print(f"[SUGGESTION] Erreur ajout réactions: {ex}")
+
+    # Cooldown (sauf immunisés)
     if not is_immune:
         cooldown_key = (i.guild.id, i.user.id)
         suggestion_cooldowns[cooldown_key] = now()
-    
-    # Stocker pour le tracking
+
+    # Tracking en base
     async with get_db() as db:
-        await db.execute('INSERT INTO suggestions (guild_id, message_id, user_id, title) VALUES (?, ?, ?, ?)',
-            (i.guild.id, msg.id, i.user.id, titre))
+        await db.execute(
+            'INSERT INTO suggestions (guild_id, message_id, user_id, title) VALUES (?, ?, ?, ?)',
+            (i.guild.id, msg.id, i.user.id, titre),
+        )
         await db.commit()
-    
-    # Confirmation
-    confirm = discord.Embed(title="✅ Suggestion envoyée!", color=C.GREEN)
-    confirm.description = f"Votre suggestion a été publiée dans {sugg_ch.mention}"
-    confirm.add_field(name="📋 Titre", value=titre[:100], inline=False)
-    await i.response.send_message(embed=confirm, ephemeral=True)
+
+    # ─── Confirmation V2 ───
+    confirm_view = LayoutView(timeout=None)
+    confirm_view.add_item(v2_container(
+        v2_title("✅ Suggestion envoyée !", level=2),
+        v2_body(f"Ta suggestion a été publiée dans {sugg_ch.mention}"),
+        v2_divider(),
+        v2_subtitle(f"📋 {titre[:100]}"),
+        color=Palette.SUCCESS,
+    ))
+    await i.response.send_message(view=confirm_view, ephemeral=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              🔄 TRADE COMMAND
