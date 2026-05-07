@@ -28,6 +28,27 @@ from ui_v2 import (
     info_card as v2_info_card,
 )
 
+# ─── Modules redesign 2026 (Phase 0 + 1) ───
+# Permissions granulaires, vocabulaire centralisé, aide multi-niveaux,
+# engagement non-intrusif, sauvegardes versionnées, social media avec
+# anti-doublon + auto-clean, protection sans faux-positifs, features
+# communautaires.
+import permissions as perms2026
+import vocabulary as vocab2026
+import help_system as help2026
+import engagement as engage2026
+import backup_system as backup2026
+import social_media as social2026
+import protection_guards as guards2026
+import community_features as comm2026
+import admin_panels_v2 as panels2026
+import antiscam as antiscam2026
+import activity_tracker as activity2026
+import setup_wizard as wizard2026
+import slash_commands_2026 as slashcmds2026
+import tracking_layer as tracking2026
+import social_liveness as liveness2026
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  🛡️ GESTION D'ERREURS GLOBALE - REND LES ERREURS VISIBLES AU LIEU DE SILENCIEUSES
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -26990,13 +27011,14 @@ async def check_youtube_feeds(session, guild, data):
             
             video_id = video_id_elem.text
             title = title_elem.text
-            cache_key = f"yt_{guild.id}_{channel_id}"
-            
-            if cache_key in posted_content and posted_content[cache_key] == video_id:
+
+            # Dedup persistant (Phase 1.8) - garde l'historique entre redemarrages
+            if await tracking2026.was_posted(guild.id, "youtube", channel_id, video_id):
                 continue
-            
+            # Cache RAM conserve pour back-compat (autres parties du code)
+            cache_key = f"yt_{guild.id}_{channel_id}"
             posted_content[cache_key] = video_id
-            
+
             video_url = f"https://www.youtube.com/watch?v={video_id}"
             e = discord.Embed(color=0xFF0000, url=video_url)
             e.set_author(name=f"YOUTUBE • {channel_name}", url=f"https://www.youtube.com/channel/{channel_id}", icon_url=_YT_ICON)
@@ -27018,9 +27040,19 @@ async def check_youtube_feeds(session, guild, data):
             e.set_footer(text=f"YouTube • {channel_name}", icon_url=_YT_ICON)
             e.timestamp = now()
 
-            await webhook_send(target_channel, 'youtube', embed=e)
+            _yt_msg = await webhook_send(target_channel, 'youtube', embed=e)
+            # Trace persistant : memorise (post_id, message_id) pour anti-doublon + auto-clean
+            try:
+                await tracking2026.record_post(
+                    guild.id, "youtube", channel_id, video_id,
+                    channel_id=target_channel.id,
+                    message_id=getattr(_yt_msg, 'id', 0) or 0,
+                    post_type="video", title=title or "", url=video_url,
+                )
+            except Exception:
+                pass
             await asyncio.sleep(1)
-            
+
         except Exception as ex:
             print(f"Erreur YouTube feed {feed}: {ex}")
             continue
@@ -27215,11 +27247,11 @@ async def check_tiktok_feeds(session, guild, data):
                     continue
                 
                 latest_video_id = video_ids[0]
-                
-                if cache_key in posted_content and posted_content[cache_key] == latest_video_id:
+
+                # Dedup persistant (Phase 1.8) - garde l'historique entre redemarrages
+                if await tracking2026.was_posted(guild.id, "tiktok", username, latest_video_id):
                     continue
-                
-                posted_content[cache_key] = latest_video_id
+                posted_content[cache_key] = latest_video_id  # back-compat RAM
                 
                 # Extraire le titre de la vidéo (pas la bio du profil)
                 # Chercher le "desc" qui apparaît APRÈS l'ID vidéo dans le HTML
@@ -27280,10 +27312,19 @@ async def check_tiktok_feeds(session, guild, data):
 
                 e.set_footer(text=f"TikTok • @{username}", icon_url=_TK_ICON)
                 e.timestamp = now()
-                
-                await webhook_send(target_channel, 'tiktok', embed=e)
+
+                _tk_msg = await webhook_send(target_channel, 'tiktok', embed=e)
+                try:
+                    await tracking2026.record_post(
+                        guild.id, "tiktok", username, latest_video_id,
+                        channel_id=target_channel.id,
+                        message_id=getattr(_tk_msg, 'id', 0) or 0,
+                        post_type="video", title=video_title or "", url=video_url,
+                    )
+                except Exception:
+                    pass
                 await asyncio.sleep(2)
-                
+
             except Exception as ex:
                 print(f"Erreur TikTok vidéo {username}: {ex}")
                 continue
@@ -27340,13 +27381,12 @@ async def check_reddit_feeds(session, guild, data):
                 if img_match:
                     image_url = img_match.group(1)
             
-            cache_key = f"rd_{guild.id}_{subreddit}"
-            
-            if cache_key in posted_content and posted_content[cache_key] == post_id:
+            # Dedup persistant (Phase 1.8) - garde l'historique entre redemarrages
+            if await tracking2026.was_posted(guild.id, "reddit", subreddit, post_id):
                 continue
-            
-            posted_content[cache_key] = post_id
-            
+            cache_key = f"rd_{guild.id}_{subreddit}"
+            posted_content[cache_key] = post_id  # back-compat RAM
+
             # ═══════════════ EMBED REDDIT PROFESSIONNEL ═══════════════
             rd_avatar = await fetch_avatar_url('reddit', subreddit, session)
 
@@ -27381,10 +27421,19 @@ async def check_reddit_feeds(session, guild, data):
                 icon_url=_RD_ICON
             )
             e.timestamp = now()
-            
-            await webhook_send(channel, 'reddit', embed=e)
+
+            _rd_msg = await webhook_send(channel, 'reddit', embed=e)
+            try:
+                await tracking2026.record_post(
+                    guild.id, "reddit", subreddit, post_id,
+                    channel_id=channel.id,
+                    message_id=getattr(_rd_msg, 'id', 0) or 0,
+                    post_type="post", title=(title or "")[:200], url=link or "",
+                )
+            except Exception:
+                pass
             await asyncio.sleep(1)
-            
+
         except Exception as ex:
             print(f"Erreur Reddit feed {subreddit}: {ex}")
             continue
@@ -27498,10 +27547,11 @@ async def check_twitter_feeds(session, guild, data):
             if not tweet_link:
                 tweet_link = f"https://twitter.com/{username}/status/{tweet_id}"
 
-            cache_key = f"twitter_{guild.id}_{username}"
-            if cache_key in posted_content and posted_content[cache_key] == tweet_id:
+            # Dedup persistant (Phase 1.8) - garde l'historique entre redemarrages
+            if await tracking2026.was_posted(guild.id, "twitter", username, tweet_id):
                 continue
-            posted_content[cache_key] = tweet_id
+            cache_key = f"twitter_{guild.id}_{username}"
+            posted_content[cache_key] = tweet_id  # back-compat RAM
 
             # ═══════════════ EMBED TWITTER PROFESSIONNEL ═══════════════
             if not tw_avatar_url:
@@ -27533,8 +27583,19 @@ async def check_twitter_feeds(session, guild, data):
                 icon_url=_X_ICON
             )
             e.timestamp = now()
-            
-            await webhook_send(channel, 'twitter', embed=e)
+
+            _tw_msg = await webhook_send(channel, 'twitter', embed=e)
+            try:
+                await tracking2026.record_post(
+                    guild.id, "twitter", username, tweet_id,
+                    channel_id=channel.id,
+                    message_id=getattr(_tw_msg, 'id', 0) or 0,
+                    post_type="tweet",
+                    title=(tweet_text or "")[:200],
+                    url=tweet_link,
+                )
+            except Exception:
+                pass
             await asyncio.sleep(1)
             
         except Exception as ex:
@@ -27589,13 +27650,13 @@ async def check_rosocial_feeds(session, guild, data):
                 continue
             
             latest_post_id = posts[0]
-            cache_key = f"rs_{guild.id}_{username}"
-            
-            if cache_key in posted_content and posted_content[cache_key] == latest_post_id:
+
+            # Dedup persistant (Phase 1.8) - garde l'historique entre redemarrages
+            if await tracking2026.was_posted(guild.id, "rosocial", username, latest_post_id):
                 continue
-            
-            posted_content[cache_key] = latest_post_id
-            
+            cache_key = f"rs_{guild.id}_{username}"
+            posted_content[cache_key] = latest_post_id  # back-compat RAM
+
             post_url = f"https://rosocial.net/posts/{latest_post_id}"
 
             # ═══════════════════════════════════════════════════════════════════════════════
@@ -27615,9 +27676,20 @@ async def check_rosocial_feeds(session, guild, data):
             e.set_footer(text=f"RoSocial • {username}", icon_url=_RBX_ICON)
             e.timestamp = now()
 
-            await webhook_send(channel, 'rosocial', embed=e)
+            _rs_msg = await webhook_send(channel, 'rosocial', embed=e)
+            try:
+                await tracking2026.record_post(
+                    guild.id, "rosocial", username, latest_post_id,
+                    channel_id=channel.id,
+                    message_id=getattr(_rs_msg, 'id', 0) or 0,
+                    post_type="post",
+                    title=f"Nouveau post de {username}",
+                    url=post_url,
+                )
+            except Exception:
+                pass
             await asyncio.sleep(1)
-            
+
         except Exception as ex:
             print(f"Erreur RoSocial feed {feed}: {ex}")
             continue
@@ -27669,13 +27741,13 @@ async def check_roblox_ugc_feeds(session, guild, data):
             for item in items[:3]:
                 item_id = item.get('id')
                 item_type = item.get('itemType', 'Asset')
-                
-                cache_key = f"rblx_{guild.id}_{creator_type}_{creator_id}_{item_id}"
-                
-                if cache_key in posted_content:
+
+                # Dedup persistant (Phase 1.8) - cle composite stockee comme post_id
+                _rblx_pid = f"{creator_type}_{creator_id}_{item_id}_{item_type}"
+                if await tracking2026.was_posted(guild.id, "roblox_ugc", str(creator_id), _rblx_pid):
                     continue
-                
-                posted_content[cache_key] = True
+                cache_key = f"rblx_{guild.id}_{creator_type}_{creator_id}_{item_id}"
+                posted_content[cache_key] = True  # back-compat RAM
                 
                 # Récupérer les détails de l'item
                 if item_type == 'Asset':
@@ -27765,8 +27837,19 @@ async def check_roblox_ugc_feeds(session, guild, data):
                 footer_text = f"Roblox UGC • {creator_emoji} {creator_name}"
                 e.set_footer(text=footer_text, icon_url=_RBX_ICON)
                 e.timestamp = now()
-                
-                await webhook_send(channel, 'roblox_ugc', embed=e)
+
+                _rblx_msg = await webhook_send(channel, 'roblox_ugc', embed=e)
+                try:
+                    await tracking2026.record_post(
+                        guild.id, "roblox_ugc", str(creator_id), _rblx_pid,
+                        channel_id=channel.id,
+                        message_id=getattr(_rblx_msg, 'id', 0) or 0,
+                        post_type="ugc",
+                        title=str(item.get('name', 'Item Roblox'))[:200],
+                        url=f"https://www.roblox.com/catalog/{item_id}",
+                    )
+                except Exception:
+                    pass
                 await asyncio.sleep(2)
                 
         except Exception as ex:
@@ -29603,6 +29686,185 @@ async def cleardeals_cmd(i: discord.Interaction):
         return await i.followup.send(f"❌ Erreur: {ex}")
     
     await i.followup.send(f"✅ **{deleted}** message(s) de deal supprimé(s) et base de données réinitialisée.\n*Les prochaines promos seront re-publiées.*")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#                    🆕 INTÉGRATION MODULES REDESIGN 2026
+# ═══════════════════════════════════════════════════════════════════════════════
+# Branche les slashs (tableau de bord owner + wizard + commandes granulaires).
+# Tous les modules (permissions, social, protection, community, backup) sont
+# accessibles depuis :
+#   /admin   - dashboard V2 (tout en panneaux)
+#   /setup   - wizard d'installation guidée (6 étapes)
+#   /permissions, /social, /protection, /backup, /community - granular CLI
+panels2026.setup_admin_command(bot)
+wizard2026.setup_setup_command(bot)
+slashcmds2026.setup_all_commands(bot)
+
+
+async def _2026_on_ready_addon():
+    """Initialise les modules 2026 quand le bot est ready.
+
+    Non-invasif : tourne en parallèle de l'on_ready existant via add_listener.
+    - Configure le SocialMediaManager avec les adapters Twitch/YouTube si
+      les env vars correspondantes sont définies (sinon mode manuel uniquement).
+    - Branche les callbacks post/delete sur le bot.
+    - Lance les tâches background (polling + cleanup).
+    """
+    try:
+        mgr = social2026.SocialMediaManager(
+            poll_interval_seconds=int(os.getenv("SOCIAL_POLL_SECONDS", "300")),
+            cleanup_interval_seconds=int(os.getenv("SOCIAL_CLEANUP_SECONDS", "1800")),
+        )
+        # Adapters réels si credentials présents, sinon manuel
+        for plat in social2026.Platform:
+            if plat == social2026.Platform.TWITCH and os.getenv("TWITCH_CLIENT_ID"):
+                mgr.register_adapter(social2026.TwitchAdapter())
+            elif plat == social2026.Platform.YOUTUBE and os.getenv("YOUTUBE_API_KEY"):
+                mgr.register_adapter(social2026.YouTubeAdapter())
+            else:
+                mgr.register_adapter(social2026.ManualAdapter(plat))
+        await mgr.setup_all()
+
+        # Callbacks Discord
+        async def _post_cb(sub: social2026.Subscription, post: social2026.SocialPost):
+            chan = bot.get_channel(sub.target_channel_id)
+            if chan is None:
+                return None
+            content = social2026.render_template(sub, post)
+            if sub.role_to_ping:
+                content = f"<@&{sub.role_to_ping}> {content}"
+            try:
+                msg = await chan.send(content)
+                return msg.id
+            except Exception:
+                return None
+
+        async def _delete_cb(ann: social2026.Announcement):
+            chan = bot.get_channel(ann.discord_channel_id)
+            if chan is None:
+                return False
+            try:
+                msg = await chan.fetch_message(ann.discord_message_id)
+                await msg.delete()
+                return True
+            except Exception:
+                return False
+
+        mgr.set_post_callback(_post_cb)
+        mgr.set_delete_callback(_delete_cb)
+        panels2026.set_social_manager(mgr)
+
+        # Charge les guilds connues
+        for g in bot.guilds:
+            try:
+                await mgr.load_guild(g.id)
+            except Exception:
+                pass
+
+        mgr.start_background_tasks()
+        configured = ", ".join(p.value for p in mgr.configured_platforms())
+        print(f"✅ [2026] SocialMediaManager prêt — adapters configurés : {configured or 'manuel uniquement'}")
+    except Exception as ex:
+        print(f"⚠️  [2026] Erreur init SocialMediaManager : {ex}")
+
+
+bot.add_listener(_2026_on_ready_addon, "on_ready")
+
+
+# ─── Activity tracking (listeners non-invasifs) ───
+async def _2026_on_message_track(msg: discord.Message):
+    """Tracke chaque message dans activity_tracker (n'interfere pas avec antimode)."""
+    if msg.guild is None or msg.author.bot:
+        return
+    try:
+        await activity2026.track_message(msg.guild.id, msg.author.id, msg.channel.id)
+    except Exception:
+        pass
+
+
+async def _2026_on_voice_state_track(member, before, after):
+    """Tracke les join/leave vocaux pour le calcul du voice time."""
+    if member.bot:
+        return
+    try:
+        if before.channel is None and after.channel is not None:
+            # Joined
+            await activity2026.track_voice_join(member.guild.id, member.id)
+        elif before.channel is not None and after.channel is None:
+            # Left
+            await activity2026.track_voice_leave(member.guild.id, member.id)
+    except Exception:
+        pass
+
+
+async def _2026_on_reaction_add_track(reaction, user):
+    """Tracke les reactions helpful sur les messages d'autres."""
+    if user.bot or reaction.message.author.bot:
+        return
+    if user.id == reaction.message.author.id:
+        return  # pas de self-reaction
+    if reaction.message.guild is None:
+        return
+    emoji_str = str(reaction.emoji)
+    if not activity2026.is_helpful_reaction(emoji_str):
+        return
+    try:
+        await activity2026.track_helpful_reaction(
+            reaction.message.guild.id, reaction.message.author.id,
+        )
+    except Exception:
+        pass
+
+
+bot.add_listener(_2026_on_message_track, "on_message")
+bot.add_listener(_2026_on_voice_state_track, "on_voice_state_update")
+bot.add_listener(_2026_on_reaction_add_track, "on_reaction_add")
+
+
+# ─── Boucle d'auto-clean : detecte si une source (tweet/video/post) a ete
+#    supprimee et retire le message Discord correspondant (Phase 1.8).
+#    Tourne toutes les 30 min, max 50 verifications/guild/run pour eviter rate-limit.
+_2026_cleanup_task = None  # asyncio.Task | None
+
+
+async def _2026_social_cleanup_loop():
+    interval = int(os.getenv("SOCIAL_CLEANUP_LOOP_SECONDS", "1800"))
+    interval = max(300, interval)
+    # On reuse la session aiohttp existante si possible, sinon on en cree une
+    session = None
+    try:
+        while not bot.is_closed():
+            try:
+                if session is None or session.closed:
+                    session = aiohttp.ClientSession()
+                for g in bot.guilds:
+                    try:
+                        report = await liveness2026.cleanup_for_guild(
+                            session, g,
+                            max_to_check=50,
+                            bot_get_channel_cb=bot.get_channel,
+                        )
+                        if report["deleted"] > 0:
+                            print(f"[CLEANUP] Guild {g.id} : {report['deleted']} annonces supprimees (sources retirees)")
+                    except Exception as ex:
+                        print(f"[CLEANUP] Guild {g.id} erreur : {ex}")
+            except Exception as ex:
+                print(f"[CLEANUP] Boucle erreur : {ex}")
+            await asyncio.sleep(interval)
+    finally:
+        if session is not None and not session.closed:
+            await session.close()
+
+
+async def _2026_start_cleanup_loop():
+    """Lance la boucle d'auto-clean une seule fois (idempotent)."""
+    global _2026_cleanup_task
+    if _2026_cleanup_task is None or _2026_cleanup_task.done():
+        _2026_cleanup_task = asyncio.create_task(_2026_social_cleanup_loop())
+
+
+bot.add_listener(_2026_start_cleanup_loop, "on_ready")
 
 
 if __name__ == "__main__":
