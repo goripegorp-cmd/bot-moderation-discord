@@ -14545,8 +14545,8 @@ class TempVoicePanelV2(LayoutView):
         voice_cfg = c.get('temp_voice_config', {})
         if not voice_cfg.get('hubs', {}):
             return await i.response.send_message("❌ Aucun hub configuré", ephemeral=True)
-        v = TempVoiceHubsListPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+        v = TempVoiceHubsListPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _cb_perms(self, i):
         v = TempVoicePermissionsPanelV2(self.u, self.g)
@@ -14970,6 +14970,129 @@ class TempVoiceHubsListPanel(View):
     async def back(self, i, b):
         v = TempVoicePanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
+
+class TempVoiceHubsListPanelV2(LayoutView):
+    """Liste paginee des hubs vocaux en V2."""
+
+    def __init__(self, u, g, page=0):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.page = page
+        self.per_page = 5
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def _get_hubs(self):
+        c = await cfg(self.g.id)
+        voice_cfg = c.get('temp_voice_config', {})
+        return voice_cfg.get('hubs', {})
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        hubs = await self._get_hubs()
+        total = len(hubs)
+        max_page = max(0, (total - 1) // self.per_page) if total else 0
+
+        # Construction de la liste paginée
+        hub_blocks = []
+        if hubs:
+            hub_items = list(hubs.items())
+            start = self.page * self.per_page
+            end = start + self.per_page
+            for idx, (hub_id, hub_data) in enumerate(hub_items[start:end], start=start + 1):
+                hub_ch = self.g.get_channel(int(hub_id))
+                if not hub_ch:
+                    hub_blocks.append(f"**{idx}.** ❌ _Salon supprimé_ (ID: `{hub_id}`)")
+                    continue
+                cat = self.g.get_channel(hub_data.get('category', 0))
+                role_id = hub_data.get('required_role', 0)
+                role = self.g.get_role(role_id) if role_id else None
+                default_name = hub_data.get('default_name', '🔊 Vocal de {user}')
+                hub_blocks.append(
+                    f"**{idx}. 🎤 {hub_ch.name}**\n"
+                    f"┣ 📁 Catégorie · `{cat.name if cat else 'Non définie'}`\n"
+                    f"┣ 🔒 Rôle · {role.mention if role else '🔓 _Aucun (tous)_'}\n"
+                    f"┗ 📝 Nom · `{default_name}`"
+                )
+        list_block = "\n\n".join(hub_blocks) if hub_blocks else "_Aucun hub configuré_"
+
+        self.clear_items()
+        b_prev = Button(label="◀️", style=discord.ButtonStyle.secondary, disabled=(self.page <= 0), custom_id="tvhlv2_prev")
+        b_prev.callback = self._cb_prev
+        b_page = Button(label=f"Page {self.page + 1}/{max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, custom_id="tvhlv2_page")
+        b_next = Button(label="▶️", style=discord.ButtonStyle.secondary, disabled=(self.page >= max_page), custom_id="tvhlv2_next")
+        b_next.callback = self._cb_next
+        b_edit = Button(label="✏️ Modifier Hub", style=discord.ButtonStyle.primary, disabled=(not hubs), custom_id="tvhlv2_edit")
+        b_edit.callback = self._cb_edit
+        b_delete = Button(label="🗑️ Supprimer Hub", style=discord.ButtonStyle.danger, disabled=(not hubs), custom_id="tvhlv2_delete")
+        b_delete.callback = self._cb_delete
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="tvhlv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("📋 Liste des Hubs Vocaux"),
+            v2_subtitle(f"`{total}` hub(s) configuré(s)"),
+            v2_divider(),
+            v2_body(list_block),
+            v2_divider(),
+            discord.ui.ActionRow(b_prev, b_page, b_next),
+            discord.ui.ActionRow(b_edit, b_delete, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_prev(self, i):
+        if self.page > 0:
+            self.page -= 1
+        await self.render_to(i, edit=True)
+
+    async def _cb_next(self, i):
+        hubs = await self._get_hubs()
+        max_page = max(0, (len(hubs) - 1) // self.per_page) if hubs else 0
+        if self.page < max_page:
+            self.page += 1
+        await self.render_to(i, edit=True)
+
+    async def _cb_edit(self, i):
+        hubs = await self._get_hubs()
+        if not hubs:
+            return await i.response.send_message("❌ Aucun hub à modifier", ephemeral=True)
+        v = TempVoiceHubEditSelect(self.u, self.g, hubs)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="✏️ Modifier un Hub",
+                description="Sélectionne le hub à modifier.",
+                color=0x9B59B6,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_delete(self, i):
+        hubs = await self._get_hubs()
+        if not hubs:
+            return await i.response.send_message("❌ Aucun hub à supprimer", ephemeral=True)
+        v = TempVoiceHubDeleteSelect(self.u, self.g, hubs)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="🗑️ Supprimer un Hub",
+                description="Sélectionne le hub à supprimer.",
+                color=0xE74C3C,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_back(self, i):
+        v = TempVoicePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
 
 class TempVoiceHubEditSelect(View):
     """Sélection d'un hub à modifier"""
