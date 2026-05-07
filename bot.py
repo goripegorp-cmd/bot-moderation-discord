@@ -17980,15 +17980,56 @@ class AfkRolePanelV2(LayoutView):
         await AfkRolePanelV2(self.u, self.g).render_to(i, edit=True)
 
     async def _cb_role(self, i):
-        v = AfkRoleSelectView(self.u, self.g)
-        await i.response.edit_message(embed=v.embed() if not asyncio.iscoroutinefunction(v.embed) else await v.embed(), view=v, attachments=[])
+        async def role_picker_cb(interaction, role_id, extra):
+            c = await cfg(self.g.id)
+            afk_cfg = c.get('afk_role_config', {})
+            afk_cfg['role'] = role_id
+            await db_set(self.g.id, 'afk_role_config', afk_cfg)
+            await AfkRolePanelV2(self.u, self.g).render_to(interaction, edit=True)
+
+        v = UniversalRoleSelect(
+            self.u, self.g,
+            callback_func=role_picker_cb,
+            return_view_func=lambda: AfkRolePanelV2(self.u, self.g),
+            title="🔕 Rôle AFK",
+        )
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="🔕 Choisir le rôle AFK",
+                description=f"📊 {len([r for r in self.g.roles[1:] if not r.is_bot_managed()])} rôles disponibles",
+                color=0x95A5A6,
+            ),
+            view=v,
+            attachments=[],
+        )
 
     async def _cb_days(self, i):
         await i.response.send_modal(AfkDaysModal(self.g, self.u))
 
     async def _cb_notif(self, i):
-        v = AfkNotifChannelView(self.u, self.g)
-        await i.response.edit_message(embed=v.embed() if not asyncio.iscoroutinefunction(v.embed) else await v.embed(), view=v, attachments=[])
+        async def chan_picker_cb(interaction, channel_id, extra):
+            c = await cfg(self.g.id)
+            afk_cfg = c.get('afk_role_config', {})
+            afk_cfg['notif_channel'] = channel_id
+            await db_set(self.g.id, 'afk_role_config', afk_cfg)
+            await AfkRolePanelV2(self.u, self.g).render_to(interaction, edit=True)
+
+        v = UniversalChannelSelect(
+            self.u, self.g,
+            callback_func=chan_picker_cb,
+            return_view_func=lambda: AfkRolePanelV2(self.u, self.g),
+            title="📢 Salon notifications",
+            allow_none=True,
+        )
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="📢 Choisir le salon de notifications",
+                description=f"**{len(list(self.g.text_channels))}** salons disponibles",
+                color=0x95A5A6,
+            ),
+            view=v,
+            attachments=[],
+        )
 
     async def _cb_list(self, i):
         c = await cfg(self.g.id)
