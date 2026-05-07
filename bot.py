@@ -6641,7 +6641,8 @@ class CommandsPanelV2(LayoutView):
         await interaction.response.edit_message(embed=emb, view=v, attachments=[])
 
     async def _cb_rs(self, i):
-        await self._open_v1(i, lambda: RellSeasPanel(self.u, self.g))
+        v = RellSeasPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _cb_sg(self, i):
         v = SuggestionPanelV2(self.u, self.g)
@@ -6961,6 +6962,129 @@ class RellSeasPanel(View):
     async def back(self, i, b):
         v = CommandsPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
+
+class RellSeasPanelV2(LayoutView):
+    """Configuration RellSeas / Realsy en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        rs_user = self.g.get_member(c.get('rellseas_user', 0))
+        rs_role = self.g.get_role(c.get('rellseas_role', 0))
+        warn_ch = self.g.get_channel(c.get('rellseas_warn_channel', 0))
+        log_ch = self.g.get_channel(c.get('rellseas_log_channel', 0))
+
+        # Boutons
+        self.clear_items()
+        b_user = Button(label="👤 Utilisateur", style=discord.ButtonStyle.primary, custom_id="rspv2_user")
+        b_user.callback = self._cb_user
+        b_role = Button(label="🎭 Rôle Realsy", style=discord.ButtonStyle.primary, custom_id="rspv2_role")
+        b_role.callback = self._cb_role
+        b_warn = Button(label="⚠️ Salon Warn", style=discord.ButtonStyle.secondary, custom_id="rspv2_warn")
+        b_warn.callback = self._cb_warn_ch
+        b_log = Button(label="📜 Salon Logs", style=discord.ButtonStyle.secondary, custom_id="rspv2_log")
+        b_log.callback = self._cb_log_ch
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="rspv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("🎭 Configuration RellSeas"),
+            v2_subtitle("L'utilisateur autorisé reçoit auto le rôle Realsy et peut le donner"),
+            v2_divider(),
+            v2_body(
+                f"👤 **Utilisateur autorisé** · {rs_user.mention if rs_user else '🔴 _Non configuré_'}\n"
+                f"🎭 **Rôle Realsy** · {rs_role.mention if rs_role else '🔴 _Non configuré_'}\n"
+                f"⚠️ **Salon warn** · {warn_ch.mention if warn_ch else '🔴 _Non configuré_'}\n"
+                f"📜 **Salon logs** · {log_ch.mention if log_ch else '🔴 _Non configuré_'}"
+            ),
+            v2_divider(),
+            v2_subtitle("⏱️ 7 jours inactif = Warn  ·  14 jours = Rôle retiré"),
+            discord.ui.ActionRow(b_user, b_role, b_warn, b_log, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_user(self, i):
+        modal = RellSeasUserModal(self.g, self.u)
+
+        async def v2_submit(interaction):
+            try:
+                user_id = int(modal.uid.value)
+                await db_set(self.g.id, 'rellseas_user', user_id)
+                new_panel = RellSeasPanelV2(self.u, self.g)
+                await new_panel.render_to(interaction, edit=True)
+            except ValueError:
+                await interaction.response.send_message("❌ ID invalide", ephemeral=True)
+
+        modal.on_submit = v2_submit
+        await i.response.send_modal(modal)
+
+    async def _cb_role(self, i):
+        async def picker_callback(interaction, role_id, extra):
+            await db_set(interaction.guild.id, 'rellseas_role', role_id)
+            new_panel = RellSeasPanelV2(self.u, self.g)
+            await new_panel.render_to(interaction, edit=True)
+
+        v = UniversalRoleSelect(
+            self.u, self.g,
+            callback_func=picker_callback,
+            return_view_func=lambda: RellSeasPanelV2(self.u, self.g),
+            title="Rôle Realsy",
+        )
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="🎭 Choisir le rôle Realsy",
+                description=f"📊 {len([r for r in self.g.roles[1:] if not r.is_bot_managed()])} rôles disponibles",
+                color=0x9B59B6,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _open_channel_picker(self, i, key, label):
+        async def picker_callback(interaction, channel_id, extra):
+            await db_set(interaction.guild.id, key, channel_id)
+            new_panel = RellSeasPanelV2(self.u, self.g)
+            await new_panel.render_to(interaction, edit=True)
+
+        v = UniversalChannelSelect(
+            self.u, self.g,
+            callback_func=picker_callback,
+            return_view_func=lambda: RellSeasPanelV2(self.u, self.g),
+            title=label,
+        )
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title=f"📍 {label}",
+                description=f"📊 {len(list(self.g.text_channels))} salons disponibles",
+                color=0x9B59B6,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_warn_ch(self, i):
+        await self._open_channel_picker(i, 'rellseas_warn_channel', 'Salon Warn')
+
+    async def _cb_log_ch(self, i):
+        await self._open_channel_picker(i, 'rellseas_log_channel', 'Salon Logs')
+
+    async def _cb_back(self, i):
+        v = CommandsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
 
 class RellSeasUserModal(Modal, title="👤 Utilisateur RellSeas"):
     uid = TextInput(label="ID de l'utilisateur", placeholder="123456789012345678")
