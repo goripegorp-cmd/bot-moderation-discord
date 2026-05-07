@@ -19538,76 +19538,216 @@ async def afk_cmd(i: discord.Interaction, jours: int = 7):
 @bot.tree.command(name="stat", description="📊 Voir les statistiques d'activité d'un membre")
 @app_commands.describe(membre="Le membre dont vous voulez voir les stats (vous par défaut)")
 async def stat_cmd(i: discord.Interaction, membre: discord.Member = None):
-    # Vérifier le salon autorisé
     if not await check_command_channel(i, 'stat'):
         return
-    
+
     target = membre or i.user
-    
     if target.bot:
         return await i.response.send_message("❌ Les bots n'ont pas de statistiques", ephemeral=True)
-    
-    await i.response.defer()
-    
-    # Générer les stats pour 7 jours par défaut
-    stats = await get_member_stats(i.guild, target, 7)
-    embed, file = await create_stat_embed(i.guild, target, stats, 7)
-    
-    v = StatMemberView(i.user, i.guild, target)
-    
-    if file:
-        await i.followup.send(embed=embed, file=file, view=v)
-    else:
-        await i.followup.send(embed=embed, view=v)
 
-class StatMemberView(View):
-    def __init__(self, user, guild, target):
+    await i.response.defer()
+
+    stats = await get_member_stats(i.guild, target, 7)
+    items, _ = build_stat_v2_data(i.guild, target, stats, 7)
+
+    # Génère le graphique synthèse et l'ajoute en MediaGallery
+    file = None
+    img = await generate_stat_graph(stats, 7, target.display_name)
+    if img:
+        file = discord.File(img, filename="stats.png")
+        items.append(v2_divider())
+        items.append(discord.ui.MediaGallery(
+            discord.MediaGalleryItem(media="attachment://stats.png")
+        ))
+
+    view = StatV2View(i.user, i.guild, target, period=7)
+    view.rebuild(items)
+
+    if file:
+        await i.followup.send(view=view, file=file)
+    else:
+        await i.followup.send(view=view)
+
+
+def build_stat_v2_data(guild, member, stats, days):
+    """Construit la liste d'items V2 + l'éventuelle pièce jointe (graphique).
+
+    Renvoie (items_list, discord.File | None).
+    """
+    items: list = [
+        v2_section(
+            v2_title(f"📊 Statistiques de {member.display_name}"),
+            v2_body(f"Période : **{days}** dernier{'s' if days > 1 else ''} jour{'s' if days > 1 else ''}"),
+            accessory=v2_thumb(member.display_avatar.url if member.display_avatar else member.default_avatar.url),
+        ),
+        v2_divider(),
+    ]
+
+    # Stats principales
+    vocal_time = stats['total_vocal_time']
+    if vocal_time >= 3600:
+        time_str = f"{vocal_time // 3600}h {(vocal_time % 3600) // 60}min"
+    elif vocal_time >= 60:
+        time_str = f"{vocal_time // 60}min {vocal_time % 60}s"
+    else:
+        time_str = f"{vocal_time}s"
+    avg_messages = stats['total_messages'] / days if days > 0 else 0
+    items.append(v2_body(
+        f"💬 **Messages** · `{stats['total_messages']:,}`\n"
+        f"🔊 **Temps vocal** · `{time_str}`\n"
+        f"📈 **Moyenne** · `{avg_messages:.1f}` msg/jour"
+    ))
+
+    # Salons favoris
+    items.append(v2_divider())
+    fav_lines = []
+    if stats['channels_messages']:
+        top_ch_id = max(stats['channels_messages'], key=stats['channels_messages'].get)
+        top_ch = guild.get_channel(top_ch_id)
+        top_count = stats['channels_messages'][top_ch_id]
+        fav_lines.append(f"📝 **Salon écrit favori** · {top_ch.mention if top_ch else '`Inconnu`'} (`{top_count}` messages)")
+    else:
+        fav_lines.append("📝 **Salon écrit favori** · _Aucune donnée_")
+
+    if stats['channels_vocal']:
+        top_vc_id = max(stats['channels_vocal'], key=stats['channels_vocal'].get)
+        top_vc = guild.get_channel(top_vc_id)
+        top_duration = stats['channels_vocal'][top_vc_id]
+        if top_duration >= 3600:
+            dur_str = f"{top_duration // 3600}h {(top_duration % 3600) // 60}min"
+        elif top_duration >= 60:
+            dur_str = f"{top_duration // 60}min"
+        else:
+            dur_str = f"{top_duration}s"
+        fav_lines.append(f"🎤 **Salon vocal favori** · `{top_vc.name if top_vc else 'Inconnu'}` (`{dur_str}`)")
+    else:
+        fav_lines.append("🎤 **Salon vocal favori** · _Aucune donnée_")
+    items.append(v2_body("\n".join(fav_lines)))
+
+    # Dernière activité
+    items.append(v2_divider())
+    if stats['last_activity']:
+        items.append(v2_body(f"🕐 **Dernière activité** · <t:{int(stats['last_activity'].timestamp())}:R>"))
+    else:
+        items.append(v2_body("🕐 **Dernière activité** · _Inconnue_"))
+
+    # Message populaire
+    if stats['most_popular_message']:
+        mp = stats['most_popular_message']
+        items.append(v2_divider())
+        items.append(v2_title(f"⭐ Message populaire ({mp['reactions']} réactions)", level=3))
+        items.append(v2_body(f"_« {mp['content']} »_\n[→ Voir le message]({mp['url']})"))
+
+    # Le graphique est généré et ajouté par l'appelant (build_stat_v2_data est sync,
+    # generate_stat_graph est async). Ce return ne fournit que les items texte.
+    return items, None
+
+
+class StatV2View(LayoutView):
+    """Vue interactive des stats — boutons 7j/30j + graphique détaillé."""
+
+    def __init__(self, user, guild, target, period: int = 7):
         super().__init__(timeout=300)
         self.user = user
         self.guild = guild
         self.target = target
-        self.period = 7
-    
-    @discord.ui.button(label="📅 7 Jours", style=discord.ButtonStyle.primary, disabled=True)
-    async def btn_7d(self, i, b):
-        self.period = 7
-        self.btn_7d.disabled = True
-        self.btn_30d.disabled = False
-        await self.refresh(i)
-    
-    @discord.ui.button(label="📅 30 Jours", style=discord.ButtonStyle.secondary)
-    async def btn_30d(self, i, b):
-        self.period = 30
-        self.btn_7d.disabled = False
-        self.btn_30d.disabled = True
-        await self.refresh(i)
-    
-    @discord.ui.button(label="📈 Graphique Détaillé", style=discord.ButtonStyle.success, row=1)
-    async def btn_graph(self, i, b):
-        await i.response.defer()
-        img = await generate_detailed_stat_graph(self.guild, self.target, self.period)
-        if img:
-            file = discord.File(img, filename="stats_detailed.png")
-            e = discord.Embed(
-                title=f"📊 Statistiques Détaillées - {self.target.display_name}",
-                color=C.PURPLE
-            )
-            e.set_image(url="attachment://stats_detailed.png")
-            e.set_footer(text=f"Période: {self.period} jours • {self.guild.name}")
-            await i.followup.send(embed=e, file=file, ephemeral=True)
-        else:
-            await i.followup.send("❌ Pas assez de données pour générer un graphique", ephemeral=True)
-    
-    async def refresh(self, i):
-        await i.response.defer()
+        self.period = period
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("❌ Ce panneau ne vous appartient pas", ephemeral=True)
+            return False
+        return True
+
+    def rebuild(self, items: list):
+        """Reconstruit le LayoutView avec les items + l'ActionRow de boutons."""
+        self.clear_items()
+
+        # Bouton 7j
+        b7 = Button(
+            label="📅 7 Jours",
+            style=discord.ButtonStyle.primary,
+            disabled=(self.period == 7),
+            custom_id="stat_v2_7d",
+        )
+        b7.callback = self._cb_7d
+
+        # Bouton 30j
+        b30 = Button(
+            label="📅 30 Jours",
+            style=discord.ButtonStyle.primary,
+            disabled=(self.period == 30),
+            custom_id="stat_v2_30d",
+        )
+        b30.callback = self._cb_30d
+
+        # Bouton graphique détaillé
+        bg = Button(
+            label="📈 Graphique Détaillé",
+            style=discord.ButtonStyle.success,
+            custom_id="stat_v2_graph",
+        )
+        bg.callback = self._cb_graph
+
+        action_row = discord.ui.ActionRow(b7, b30, bg)
+
+        # Container final = items du build + ActionRow à la fin
+        self.add_item(v2_container(*items, action_row, color=Palette.ACCENT))
+
+    async def _refresh(self, interaction: discord.Interaction):
+        """Recharge les stats avec la nouvelle période et re-render."""
+        await interaction.response.defer()
         stats = await get_member_stats(self.guild, self.target, self.period)
-        embed, file = await create_stat_embed(self.guild, self.target, stats, self.period)
-        
+        items, file = build_stat_v2_data(self.guild, self.target, stats, self.period)
+
+        # Générer le graphique synthèse
+        img = await generate_stat_graph(stats, self.period, self.target.display_name)
+        if img:
+            file = discord.File(img, filename="stats.png")
+            items.append(v2_divider())
+            items.append(discord.ui.MediaGallery(
+                discord.MediaGalleryItem(media="attachment://stats.png")
+            ))
+
+        self.rebuild(items)
+
         if file:
-            await i.message.delete()
-            await i.followup.send(embed=embed, file=file, view=self)
+            try:
+                await interaction.message.delete()
+            except Exception:
+                pass
+            await interaction.followup.send(view=self, file=file)
         else:
-            await i.message.edit(embed=embed, view=self)
+            await interaction.message.edit(view=self, attachments=[])
+
+    async def _cb_7d(self, interaction: discord.Interaction):
+        self.period = 7
+        await self._refresh(interaction)
+
+    async def _cb_30d(self, interaction: discord.Interaction):
+        self.period = 30
+        await self._refresh(interaction)
+
+    async def _cb_graph(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        img = await generate_detailed_stat_graph(self.guild, self.target, self.period)
+        if not img:
+            return await interaction.followup.send(
+                "❌ Pas assez de données pour générer un graphique détaillé",
+                ephemeral=True,
+            )
+        file = discord.File(img, filename="stats_detailed.png")
+        view = LayoutView(timeout=None)
+        view.add_item(v2_container(
+            v2_title(f"📊 Statistiques détaillées — {self.target.display_name}"),
+            v2_subtitle(f"Période : {self.period} jours · {self.guild.name}"),
+            v2_divider(),
+            discord.ui.MediaGallery(
+                discord.MediaGalleryItem(media="attachment://stats_detailed.png")
+            ),
+            color=Palette.ACCENT,
+        ))
+        await interaction.followup.send(view=view, file=file, ephemeral=True)
 
 async def get_member_stats(guild, member, days):
     """Récupère les statistiques d'un membre sur une période donnée"""
@@ -19705,109 +19845,8 @@ async def get_member_stats(guild, member, days):
     
     return stats
 
-async def create_stat_embed(guild, member, stats, days):
-    """Crée l'embed des statistiques avec graphique"""
-    e = discord.Embed(
-        title=f"📊 Statistiques de {member.display_name}",
-        color=C.PURPLE
-    )
-    e.set_thumbnail(url=member.display_avatar.url if member.display_avatar else None)
-    
-    # Période
-    e.description = f"**Période:** {days} derniers jours"
-    
-    # Messages
-    e.add_field(
-        name="💬 Messages",
-        value=f"**{stats['total_messages']}** messages envoyés",
-        inline=True
-    )
-    
-    # Temps vocal
-    vocal_time = stats['total_vocal_time']
-    if vocal_time >= 3600:
-        time_str = f"{vocal_time // 3600}h {(vocal_time % 3600) // 60}min"
-    elif vocal_time >= 60:
-        time_str = f"{vocal_time // 60}min {vocal_time % 60}s"
-    else:
-        time_str = f"{vocal_time}s"
-    
-    e.add_field(
-        name="🔊 Temps en vocal",
-        value=f"**{time_str}**",
-        inline=True
-    )
-    
-    # Moyenne par jour
-    avg_messages = stats['total_messages'] / days if days > 0 else 0
-    e.add_field(
-        name="📈 Moyenne/jour",
-        value=f"**{avg_messages:.1f}** msg/jour",
-        inline=True
-    )
-    
-    # Salon écrit le plus actif
-    if stats['channels_messages']:
-        top_ch_id = max(stats['channels_messages'], key=stats['channels_messages'].get)
-        top_ch = guild.get_channel(top_ch_id)
-        top_count = stats['channels_messages'][top_ch_id]
-        e.add_field(
-            name="📝 Salon écrit favoris",
-            value=f"{top_ch.mention if top_ch else 'Inconnu'}\n({top_count} messages)",
-            inline=True
-        )
-    else:
-        e.add_field(name="📝 Salon écrit favoris", value="*Aucune donnée*", inline=True)
-    
-    # Salon vocal le plus utilisé
-    if stats['channels_vocal']:
-        top_vc_id = max(stats['channels_vocal'], key=stats['channels_vocal'].get)
-        top_vc = guild.get_channel(top_vc_id)
-        top_duration = stats['channels_vocal'][top_vc_id]
-        if top_duration >= 3600:
-            dur_str = f"{top_duration // 3600}h {(top_duration % 3600) // 60}min"
-        elif top_duration >= 60:
-            dur_str = f"{top_duration // 60}min"
-        else:
-            dur_str = f"{top_duration}s"
-        e.add_field(
-            name="🎤 Salon vocal favoris",
-            value=f"{top_vc.name if top_vc else 'Inconnu'}\n({dur_str})",
-            inline=True
-        )
-    else:
-        e.add_field(name="🎤 Salon vocal favoris", value="*Aucune donnée*", inline=True)
-    
-    # Dernière activité
-    if stats['last_activity']:
-        e.add_field(
-            name="🕐 Dernière activité",
-            value=f"<t:{int(stats['last_activity'].timestamp())}:R>",
-            inline=True
-        )
-    else:
-        e.add_field(name="🕐 Dernière activité", value="*Inconnue*", inline=True)
-    
-    # Message le plus populaire
-    if stats['most_popular_message']:
-        mp = stats['most_popular_message']
-        e.add_field(
-            name=f"⭐ Message populaire ({mp['reactions']} réactions)",
-            value=f"*\"{mp['content']}\"*\n[Voir le message]({mp['url']})",
-            inline=False
-        )
-    
-    # Générer le graphique
-    img = await generate_stat_graph(stats, days, member.display_name)
-    file = None
-    if img:
-        file = discord.File(img, filename="stats.png")
-        e.set_image(url="attachment://stats.png")
-    
-    e.set_footer(text=f"{guild.name} • /stat", icon_url=guild.icon.url if guild.icon else None)
-    e.timestamp = now()
-    
-    return e, file
+# create_stat_embed retiré : remplacé par build_stat_v2_data() en V2.
+
 
 async def generate_stat_graph(stats, days, username):
     """Génère un graphique des statistiques"""
