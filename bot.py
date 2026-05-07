@@ -18043,8 +18043,8 @@ class AfkRolePanelV2(LayoutView):
         afk_members = await helper.get_afk_members(role, afk_cfg.get('days', 7))
         if not afk_members:
             return await i.response.send_message(f"✅ Aucun membre AFK avec le rôle {role.mention} !", ephemeral=True)
-        v = AfkListView(self.u, self.g, afk_members, role)
-        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+        v = AfkListViewV2(self.u, self.g, afk_members, role)
+        await v.render_to(i, edit=True)
 
     async def _cb_actions(self, i):
         c = await cfg(self.g.id)
@@ -18057,8 +18057,8 @@ class AfkRolePanelV2(LayoutView):
         afk_members = await helper.get_afk_members(role, afk_cfg.get('days', 7))
         if not afk_members:
             return await i.response.send_message(f"✅ Aucun membre AFK avec le rôle {role.mention} !", ephemeral=True)
-        v = AfkActionsView(self.u, self.g, afk_members, role)
-        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+        v = AfkActionsViewV2(self.u, self.g, afk_members, role)
+        await v.render_to(i, edit=True)
 
     async def _cb_back(self, i):
         v = StatPanelV2(self.u, self.g)
@@ -18145,6 +18145,89 @@ class AfkDaysModal(Modal):
             await i.response.send_message("❌ Entrez un nombre valide", ephemeral=True)
 
 
+class AfkListViewV2(LayoutView):
+    """Liste paginee des membres AFK en V2."""
+
+    def __init__(self, u, g, afk_members, role, page=0):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.afk_members = afk_members
+        self.role = role
+        self.page = page
+        self.per_page = 15
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit=True):
+        total = len(self.afk_members)
+        max_page = max(0, (total - 1) // self.per_page)
+
+        start = self.page * self.per_page
+        end = start + self.per_page
+        page_members = self.afk_members[start:end]
+
+        lines_out = []
+        for member, days_afk in page_members:
+            days_txt = "Jamais actif" if days_afk >= 999 else f"{days_afk}j AFK"
+            lines_out.append(f"• {member.mention} · **{days_txt}**")
+        list_block = "\n".join(lines_out) if lines_out else "_Aucun membre sur cette page_"
+
+        self.clear_items()
+        b_prev = Button(label="◀️", style=discord.ButtonStyle.secondary, disabled=(self.page <= 0), custom_id="alvv2_prev")
+        b_prev.callback = self._cb_prev
+        b_page = Button(label=f"Page {self.page + 1}/{max_page + 1}", style=discord.ButtonStyle.secondary, disabled=True, custom_id="alvv2_page")
+        b_next = Button(label="▶️", style=discord.ButtonStyle.secondary, disabled=(self.page >= max_page), custom_id="alvv2_next")
+        b_next.callback = self._cb_next
+        b_refresh = Button(label="🔄 Actualiser", style=discord.ButtonStyle.primary, custom_id="alvv2_refresh")
+        b_refresh.callback = self._cb_refresh
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="alvv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title(f"📋 Membres AFK avec {self.role.name}"),
+            v2_subtitle(f"`{total}` membre(s) inactif(s) détecté(s)"),
+            v2_divider(),
+            v2_body(list_block),
+            v2_divider(),
+            v2_subtitle("💡 Utilise ⚡ Actions pour agir sur ces membres"),
+            discord.ui.ActionRow(b_prev, b_page, b_next, b_refresh),
+            discord.ui.ActionRow(b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.DANGER))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_prev(self, i):
+        if self.page > 0:
+            self.page -= 1
+        await self.render_to(i, edit=True)
+
+    async def _cb_next(self, i):
+        max_page = max(0, (len(self.afk_members) - 1) // self.per_page)
+        if self.page < max_page:
+            self.page += 1
+        await self.render_to(i, edit=True)
+
+    async def _cb_refresh(self, i):
+        c = await cfg(self.g.id)
+        afk_cfg = c.get('afk_role_config', {})
+        days = afk_cfg.get('days', 7)
+        helper = AfkRolePanel(self.u, self.g)
+        self.afk_members = await helper.get_afk_members(self.role, days)
+        self.page = 0
+        await self.render_to(i, edit=True)
+
+    async def _cb_back(self, i):
+        v = AfkRolePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
 class AfkListView(View):
     """Liste paginée des membres AFK"""
     def __init__(self, u, g, afk_members, role, page=0):
@@ -18212,6 +18295,142 @@ class AfkListView(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
+        v = AfkRolePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+class AfkActionsViewV2(LayoutView):
+    """Actions sur les membres AFK en V2."""
+
+    def __init__(self, u, g, afk_members, role):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.afk_members = afk_members
+        self.role = role
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit=True):
+        # Aperçu des 5 premiers
+        preview_lines = []
+        for member, days_afk in self.afk_members[:5]:
+            days_txt = f"{days_afk}j" if days_afk < 999 else "∞"
+            preview_lines.append(f"• {member.display_name} · `{days_txt}`")
+        if len(self.afk_members) > 5:
+            preview_lines.append(f"_… + {len(self.afk_members) - 5} autres_")
+        preview_block = "\n".join(preview_lines) if preview_lines else "_Aucun membre_"
+
+        self.clear_items()
+        b_remove = Button(label="🎭 Retirer le rôle", style=discord.ButtonStyle.primary, custom_id="aavv2_remove")
+        b_remove.callback = self._cb_remove
+        b_kick = Button(label="👢 Kick", style=discord.ButtonStyle.danger, custom_id="aavv2_kick")
+        b_kick.callback = self._cb_kick
+        b_ping = Button(label="📢 Ping dans salon", style=discord.ButtonStyle.success, custom_id="aavv2_ping")
+        b_ping.callback = self._cb_ping
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="aavv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("⚡ Actions sur les membres AFK"),
+            v2_subtitle(f"`{len(self.afk_members)}` membre(s) AFK avec {self.role.mention}"),
+            v2_divider(),
+            v2_title("👥 Membres concernés", level=3),
+            v2_body(preview_block),
+            v2_divider(),
+            v2_body(
+                "🎭 **Retirer le rôle** · enlève le rôle d'activité aux membres\n"
+                "👢 **Kick** · expulse les membres du serveur (irréversible)\n"
+                "📢 **Ping dans salon** · mention dans le salon de notifications"
+            ),
+            v2_divider(),
+            v2_subtitle("⚠️ Choisis une action à exécuter"),
+            discord.ui.ActionRow(b_remove, b_kick, b_ping, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.DANGER))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_remove(self, i):
+        await i.response.defer()
+        success = 0
+        failed = 0
+        for member, _ in self.afk_members:
+            try:
+                await member.remove_roles(self.role, reason="AFK - Rôle retiré automatiquement")
+                success += 1
+            except Exception:
+                failed += 1
+        c = await cfg(self.g.id)
+        afk_cfg = c.get('afk_role_config', {})
+        notif_ch = self.g.get_channel(afk_cfg.get('notif_channel', 0))
+        if notif_ch:
+            e = discord.Embed(
+                title="🎭 Rôles retirés - Membres AFK",
+                description=f"Le rôle {self.role.mention} a été retiré à **{success}** membre(s) inactif(s).",
+                color=0xE74C3C,
+                timestamp=now(),
+            )
+            e.add_field(name="✅ Succès", value=str(success), inline=True)
+            e.add_field(name="❌ Échecs", value=str(failed), inline=True)
+            e.set_footer(text=f"Action par {i.user.display_name}")
+            await webhook_send(notif_ch, 'realsy', embed=e)
+        await i.followup.send(f"✅ Rôle retiré à **{success}** membre(s) ! ❌ Échecs : **{failed}**", ephemeral=True)
+        # Retour au panel V2 AfkRole
+        v = AfkRolePanelV2(self.u, self.g)
+        await i.message.edit(view=v, embed=None, attachments=[])
+
+    async def _cb_kick(self, i):
+        await i.response.send_message(
+            f"⚠️ **Confirmation requise**\n\n"
+            f"Tu es sur le point de **kick {len(self.afk_members)} membre(s)**.\n"
+            f"Cette action est irréversible !",
+            view=AfkKickConfirmView(self.u, self.g, self.afk_members, self.role),
+            ephemeral=True,
+        )
+
+    async def _cb_ping(self, i):
+        c = await cfg(self.g.id)
+        afk_cfg = c.get('afk_role_config', {})
+        notif_ch = self.g.get_channel(afk_cfg.get('notif_channel', 0))
+        days = afk_cfg.get('days', 7)
+        if not notif_ch:
+            return await i.response.send_message("❌ Aucun salon de notifications configuré !", ephemeral=True)
+        await i.response.defer()
+
+        e = discord.Embed(
+            title="🔕 Alerte Inactivité",
+            description=(
+                f"Les membres suivants avec le rôle {self.role.mention} sont inactifs depuis plus de **{days} jours**.\n\n"
+                "⚠️ **Merci de manifester votre activité (message ou vocal) pour conserver votre rôle.**"
+            ),
+            color=0xE74C3C,
+            timestamp=now(),
+        )
+        mentions = [m.mention for m, _ in self.afk_members]
+        mention_chunks = [mentions[k:k + 20] for k in range(0, len(mentions), 20)]
+        for idx, chunk in enumerate(mention_chunks[:5]):
+            e.add_field(
+                name=(f"👥 Membres ({idx*20 + 1}-{idx*20 + len(chunk)})" if len(mention_chunks) > 1 else "👥 Membres concernés"),
+                value=" ".join(chunk),
+                inline=False,
+            )
+        if len(self.afk_members) > 100:
+            e.add_field(name="⚠️", value=f"_… et {len(self.afk_members) - 100} autres membres_", inline=False)
+        e.set_footer(text=f"Action par {i.user.display_name} · {len(self.afk_members)} membre(s) concerné(s)")
+        mention_content = " ".join(mentions[:50])
+        await webhook_send(notif_ch, 'realsy', content=mention_content, embed=e)
+        await i.followup.send(
+            f"✅ Message envoyé dans {notif_ch.mention} avec **{len(self.afk_members)}** mention(s) !",
+            ephemeral=True,
+        )
+
+    async def _cb_back(self, i):
         v = AfkRolePanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
 
