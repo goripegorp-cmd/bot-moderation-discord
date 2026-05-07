@@ -4229,8 +4229,8 @@ class LogSelectView(View):
         await i.response.edit_message(view=self)
     
     async def go_back(self, i):
-        v = ProtDetail(self.u, self.g, self.prot)
-        await i.response.edit_message(content=None, embed=await v.embed(), view=v)
+        v = ProtDetailV2(self.u, self.g, self.prot)
+        await v.render_to(i, edit=True)
 
 class LogChannelSelectMenu(Select):
     def __init__(self, parent, opts):
@@ -4244,15 +4244,9 @@ class LogChannelSelectMenu(Select):
         try:
             channel_id = int(self.values[0])
             await db_set(i.guild.id, f'log_{self.parent.key}', channel_id)
-            
-            if channel_id == 0:
-                msg = f"✅ Logs désactivés pour **{self.parent.prot[2]}**"
-            else:
-                ch = i.guild.get_channel(channel_id)
-                msg = f"✅ Logs de **{self.parent.prot[2]}** définis dans {ch.mention if ch else 'salon inconnu'}"
-            
-            v = ProtDetail(self.parent.u, self.parent.g, self.parent.prot)
-            await i.response.edit_message(content=msg, embed=await v.embed(), view=v)
+
+            v = ProtDetailV2(self.parent.u, self.parent.g, self.parent.prot)
+            await v.render_to(i, edit=True)
         except Exception as ex:
             print(f"[LOG SELECT ERROR] {ex}")
             try:
@@ -4260,7 +4254,7 @@ class LogChannelSelectMenu(Select):
                     await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
                 else:
                     await i.followup.send(f"❌ Erreur: {ex}", ephemeral=True)
-            except:
+            except Exception:
                 pass
 
 # ═══════════════════════════════════════════════════════════════════════════════
