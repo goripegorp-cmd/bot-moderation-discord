@@ -15115,8 +15115,8 @@ class TempVoiceHubEditSelect(View):
     
     async def select_callback(self, i):
         hub_id = i.data['values'][0]
-        v = TempVoiceHubEditPanel(self.u, self.g, hub_id)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = TempVoiceHubEditPanelV2(self.u, self.g, hub_id)
+        await v.render_to(i, edit=True)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
@@ -15194,6 +15194,108 @@ class TempVoiceHubEditPanel(View):
         v = TempVoiceHubsListPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
+class TempVoiceHubEditPanelV2(LayoutView):
+    """Modifier un hub vocal en V2."""
+
+    def __init__(self, u, g, hub_id):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.hub_id = hub_id
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def _get_hub_data(self):
+        c = await cfg(self.g.id)
+        voice_cfg = c.get('temp_voice_config', {})
+        hubs = voice_cfg.get('hubs', {})
+        return hubs.get(str(self.hub_id), {})
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        hub_data = await self._get_hub_data()
+        hub_ch = self.g.get_channel(int(self.hub_id))
+
+        cat = self.g.get_channel(hub_data.get('category', 0))
+        role_id = hub_data.get('required_role', 0)
+        role = self.g.get_role(role_id) if role_id else None
+        default_name = hub_data.get('default_name', '🔊 Vocal de {user}')
+
+        # Mode descriptif
+        if role:
+            mode_line = f"🔒 **PRIVÉ** · {role.mention}"
+            mode_desc = f"_Les vocaux créés seront invisibles pour les membres sans le rôle {role.name}._"
+        else:
+            mode_line = "🔓 **PUBLIC** · Tout le monde"
+            mode_desc = "_Tout le monde peut voir et rejoindre les vocaux créés._"
+
+        self.clear_items()
+        b_cat = Button(label="📁 Catégorie", style=discord.ButtonStyle.primary, custom_id="tvhepv2_cat")
+        b_cat.callback = self._cb_cat
+        b_role = Button(label="🔐 Mode / Rôle", style=discord.ButtonStyle.primary, custom_id="tvhepv2_role")
+        b_role.callback = self._cb_role
+        b_name = Button(label="📝 Nom par défaut", style=discord.ButtonStyle.secondary, custom_id="tvhepv2_name")
+        b_name.callback = self._cb_name
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="tvhepv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title(f"✏️ Modifier · {hub_ch.name if hub_ch else 'Hub'}"),
+            v2_subtitle("Configuration spécifique de ce hub vocal"),
+            v2_divider(),
+            v2_body(
+                f"📁 **Catégorie** · `{cat.name if cat else 'Non définie'}`\n"
+                f"🔐 **Mode** · {mode_line}"
+            ),
+            v2_body(mode_desc),
+            v2_divider(),
+            v2_body(f"📝 **Nom par défaut** · `{default_name}`"),
+            v2_divider(),
+            discord.ui.ActionRow(b_cat, b_role, b_name, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_cat(self, i):
+        v = TempVoiceHubEditCategory(self.u, self.g, self.hub_id)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="📁 Changer la catégorie",
+                description="Sélectionne la nouvelle catégorie.",
+                color=0x9B59B6,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_role(self, i):
+        v = TempVoiceHubEditRole(self.u, self.g, self.hub_id)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="🔐 Changer le mode",
+                description=(
+                    "**🔓 Public** = Tout le monde voit/rejoint les vocaux\n"
+                    "**🔒 Privé** = Seul le rôle choisi voit/rejoint les vocaux"
+                ),
+                color=0x9B59B6,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_name(self, i):
+        await i.response.send_modal(TempVoiceHubNameModal(self.g, self.u, self.hub_id))
+
+    async def _cb_back(self, i):
+        v = TempVoiceHubsListPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
 class TempVoiceHubEditCategory(View):
     """Modifier la catégorie d'un hub — Paginé"""
     def __init__(self, u, g, hub_id, page=0):
@@ -15241,8 +15343,8 @@ class TempVoiceHubEditCategory(View):
         await i.response.edit_message(view=self)
 
     async def _back(self, i):
-        v = TempVoiceHubEditPanel(self.u, self.g, self.hub_id)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = TempVoiceHubEditPanelV2(self.u, self.g, self.hub_id)
+        await v.render_to(i, edit=True)
 
     async def select_callback(self, i):
         cat_id = int(i.data['values'][0])
@@ -15254,12 +15356,8 @@ class TempVoiceHubEditCategory(View):
             voice_cfg['hubs'] = hubs
             await db_set(self.g.id, 'temp_voice_config', voice_cfg)
         cat = self.g.get_channel(cat_id)
-        v = TempVoiceHubEditPanel(self.u, self.g, self.hub_id)
-        await i.response.edit_message(
-            content=f"✅ Catégorie changée: **{cat.name}**",
-            embed=await v.embed(),
-            view=v
-        )
+        v = TempVoiceHubEditPanelV2(self.u, self.g, self.hub_id)
+        await v.render_to(i, edit=True)
 
 class TempVoiceHubEditRole(View):
     """Modifier le rôle requis d'un hub avec pagination complète"""
@@ -15365,7 +15463,7 @@ class TempVoiceHubEditRole(View):
             pass
         
         try:
-            v = TempVoiceHubEditPanel(self.u, self.g, self.hub_id)
+            v = TempVoiceHubEditPanelV2(self.u, self.g, self.hub_id)
             await i.edit_original_response(embed=await v.embed(), view=v)
         except:
             pass
@@ -15395,7 +15493,7 @@ class TempVoiceHubEditRole(View):
             else:
                 msg = f"✅ **Mode PUBLIC activé**\n🔓 Tout le monde peut voir et rejoindre les vocaux créés"
             
-            v = TempVoiceHubEditPanel(self.u, self.g, self.hub_id)
+            v = TempVoiceHubEditPanelV2(self.u, self.g, self.hub_id)
             await i.edit_original_response(content=msg, embed=await v.embed(), view=v)
         except Exception as ex:
             print(f"[TempVoiceHubEditRole._on_select] {ex}")
@@ -15424,12 +15522,8 @@ class TempVoiceHubNameModal(Modal, title="📝 Nom par défaut"):
             voice_cfg['hubs'] = hubs
             await db_set(self.g.id, 'temp_voice_config', voice_cfg)
         
-        v = TempVoiceHubEditPanel(self.u, self.g, self.hub_id)
-        await i.response.edit_message(
-            content=f"✅ Nom par défaut changé: `{self.name_input.value}`",
-            embed=await v.embed(),
-            view=v
-        )
+        v = TempVoiceHubEditPanelV2(self.u, self.g, self.hub_id)
+        await v.render_to(i, edit=True)
 
 class TempVoiceHubDeleteSelect(View):
     """Sélection d'un hub à supprimer"""
