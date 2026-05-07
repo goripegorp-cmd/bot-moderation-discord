@@ -1739,7 +1739,12 @@ class PaginatedChannelSelect(View):
         
         try:
             v = self.return_panel_class(self.u, self.g)
-            await i.edit_original_response(embed=await v.embed(), view=v)
+            if hasattr(v, 'render_to'):
+                # V2 LayoutView : on doit utiliser une nouvelle interaction ou render_to
+                # Comme on a déjà defer, on edit_original_response avec view=v et embed=None
+                await i.edit_original_response(view=v, embed=None, attachments=[])
+            else:
+                await i.edit_original_response(embed=await v.embed(), view=v, attachments=[])
         except:
             pass
     
@@ -1751,12 +1756,15 @@ class PaginatedChannelSelect(View):
         
         # Sauvegarder les salons sélectionnés
         await db_set(self.g.id, self.callback_key, self.current_channels)
-        
+
         try:
             v = self.return_panel_class(self.u, self.g)
             count = len(self.current_channels)
             content = f"✅ **{count} salon(s)** configuré(s) !" if count > 0 else "✅ Aucun salon configuré (commande désactivée)"
-            await i.edit_original_response(content=content, embed=await v.embed(), view=v)
+            if hasattr(v, 'render_to'):
+                await i.edit_original_response(content=content, view=v, embed=None, attachments=[])
+            else:
+                await i.edit_original_response(content=content, embed=await v.embed(), view=v, attachments=[])
         except:
             pass
     
@@ -6636,7 +6644,8 @@ class CommandsPanelV2(LayoutView):
         await self._open_v1(i, lambda: RellSeasPanel(self.u, self.g))
 
     async def _cb_sg(self, i):
-        await self._open_v1(i, lambda: SuggestionPanel(self.u, self.g))
+        v = SuggestionPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _cb_tr(self, i):
         await self._open_v1(i, lambda: TradePanel(self.u, self.g))
@@ -6983,6 +6992,107 @@ class SuggestionPanel(View):
         v = CommandsPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
+class SuggestionPanelV2(LayoutView):
+    """Configuration Suggestions en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        sugg_role = self.g.get_role(c.get('suggestion_role', 0))
+        sugg_ch = self.g.get_channel(c.get('suggestion_channel', 0))
+        sugg_cd = c.get('suggestion_cooldown', 1)
+        sugg_unit = c.get('suggestion_cooldown_unit', 'jours')
+        allowed_chs = c.get('suggestion_allowed_channels', [])
+
+        if allowed_chs:
+            ch_mentions = [self.g.get_channel(ch_id).mention for ch_id in allowed_chs[:5] if self.g.get_channel(ch_id)]
+            allowed_txt = ", ".join(ch_mentions) if ch_mentions else "_Vide_"
+            if len(allowed_chs) > 5:
+                allowed_txt += f" _+{len(allowed_chs) - 5}_"
+        else:
+            allowed_txt = "_Partout_"
+
+        # Boutons
+        self.clear_items()
+        b_role = Button(label="🎭 Rôle", style=discord.ButtonStyle.primary, custom_id="spgv2_role")
+        b_role.callback = self._cb_role
+        b_chan = Button(label="📍 Salon publication", style=discord.ButtonStyle.primary, custom_id="spgv2_chan")
+        b_chan.callback = self._cb_chan
+        b_allowed = Button(label="📌 Salons commande", style=discord.ButtonStyle.success, custom_id="spgv2_allowed")
+        b_allowed.callback = self._cb_allowed
+        b_cd = Button(label="⏱️ Cooldown", style=discord.ButtonStyle.secondary, custom_id="spgv2_cd")
+        b_cd.callback = self._cb_cd
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="spgv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("💡 Configuration Suggestions"),
+            v2_subtitle("Configure le système de suggestions de la communauté"),
+            v2_divider(),
+            v2_body(
+                f"🎭 **Rôle autorisé** · {sugg_role.mention if sugg_role else '_Tout le monde_'}\n"
+                f"⏱️ **Cooldown** · `{sugg_cd}` {sugg_unit}\n"
+                f"📍 **Salon publication** · {sugg_ch.mention if sugg_ch else '🔴 _Non configuré_'}\n"
+                f"📌 **Salons commande** · {allowed_txt}"
+            ),
+            v2_divider(),
+            v2_subtitle("💡 Salon publication ≠ Salons où utiliser la commande"),
+            discord.ui.ActionRow(b_role, b_chan, b_allowed),
+            discord.ui.ActionRow(b_cd, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_role(self, i):
+        v = PaginatedRoleSelect(self.u, self.g, 'suggestion_role', SuggestionPanelV2)
+        await i.response.edit_message(
+            embed=discord.Embed(title="🎭 Rôle autorisé pour /suggestion", color=0x9B59B6),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_chan(self, i):
+        v = PaginatedChannelSelect(self.u, self.g, 'suggestion_channel', SuggestionPanelV2)
+        await i.response.edit_message(
+            embed=discord.Embed(title="📍 Salon de publication", description="Où les suggestions seront envoyées", color=0x9B59B6),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_allowed(self, i):
+        c = await cfg(self.g.id)
+        current = c.get('suggestion_allowed_channels', [])
+        v = PaginatedChannelSelect(self.u, self.g, 'suggestion_allowed_channels', SuggestionPanelV2, multi=True, current_channels=current)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="📌 Salons autorisés pour /suggestion",
+                description="Sélectionne les salons où la commande peut être utilisée.\n_Vide = partout_",
+                color=0x9B59B6,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_cd(self, i):
+        await i.response.send_modal(SuggCooldownModal(self.g, self.u))
+
+    async def _cb_back(self, i):
+        v = CommandsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
 # Sélecteur de rôle paginé
 class PaginatedRoleSelect(View):
     def __init__(self, u, g, callback_key, return_panel_class, page=0):
@@ -7038,17 +7148,24 @@ class PaginatedRoleSelect(View):
     
     async def go_back(self, i):
         v = self.return_panel_class(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        # Détection V2 (LayoutView avec render_to) vs V1 (View+embed)
+        if hasattr(v, 'render_to'):
+            await v.render_to(i, edit=True)
+        else:
+            await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
 
 class PaginatedRoleSelectMenu(Select):
     def __init__(self, parent, opts):
         super().__init__(placeholder=f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un rôle...", options=opts)
         self.parent = parent
-    
+
     async def callback(self, i):
         await db_set(self.parent.g.id, self.parent.callback_key, int(self.values[0]))
         v = self.parent.return_panel_class(self.parent.u, self.parent.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        if hasattr(v, 'render_to'):
+            await v.render_to(i, edit=True)
+        else:
+            await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
 
 class SuggCooldownModal(Modal, title="⏱️ Cooldown Suggestions"):
     duree = TextInput(label="Durée (nombre)", placeholder="1", default="1", max_length=3)
