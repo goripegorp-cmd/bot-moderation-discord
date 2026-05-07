@@ -15543,8 +15543,8 @@ class StatPanelV2(LayoutView):
             await interaction.response.send_message(view=self, ephemeral=True)
 
     async def _cb_actions(self, i):
-        v = StatActionPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+        v = StatActionPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _cb_graph(self, i):
         await i.response.defer()
@@ -15567,8 +15567,8 @@ class StatPanelV2(LayoutView):
             await i.followup.send("❌ Erreur lors de la génération du graphique", ephemeral=True)
 
     async def _cb_afk_role(self, i):
-        v = AfkRolePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+        v = AfkRolePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
@@ -15841,6 +15841,98 @@ class AfkRolePanel(View):
     async def back(self, i, b):
         v = StatPanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class AfkRolePanelV2(LayoutView):
+    """Configuration du Rôle AFK en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        afk_cfg = c.get('afk_role_config', {})
+        enabled = afk_cfg.get('enabled', False)
+        role = self.g.get_role(afk_cfg.get('role_id', 0))
+        days = afk_cfg.get('days', 14)
+        notif_ch = self.g.get_channel(afk_cfg.get('notif_channel', 0))
+
+        self.clear_items()
+        b_toggle = Button(
+            label=("⏸️ Désactiver" if enabled else "▶️ Activer"),
+            style=(discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success),
+            custom_id="arpv2_toggle",
+        )
+        b_toggle.callback = self._cb_toggle
+        b_role = Button(label="🎭 Définir Rôle", style=discord.ButtonStyle.primary, custom_id="arpv2_role")
+        b_role.callback = self._cb_role
+        b_days = Button(label="📅 Définir Jours", style=discord.ButtonStyle.primary, custom_id="arpv2_days")
+        b_days.callback = self._cb_days
+        b_notif = Button(label="📢 Salon Notifs", style=discord.ButtonStyle.primary, custom_id="arpv2_notif")
+        b_notif.callback = self._cb_notif
+        b_list = Button(label="📋 Liste AFK", style=discord.ButtonStyle.secondary, custom_id="arpv2_list")
+        b_list.callback = self._cb_list
+        b_actions = Button(label="⚡ Actions", style=discord.ButtonStyle.danger, custom_id="arpv2_actions")
+        b_actions.callback = self._cb_actions
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="arpv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("🔕 Configuration Rôle AFK"),
+            v2_subtitle(f"{'🟢 Système actif' if enabled else '🔴 Système désactivé'}"),
+            v2_divider(),
+            v2_body(
+                f"🎭 **Rôle AFK** · {role.mention if role else '🔴 _Non configuré_'}\n"
+                f"📅 **Seuil d'inactivité** · `{days}` jours\n"
+                f"📢 **Salon notifs** · {notif_ch.mention if notif_ch else '🔴 _Non configuré_'}"
+            ),
+            v2_divider(),
+            v2_subtitle("💡 Le rôle AFK est ajouté aux membres inactifs depuis N jours"),
+            discord.ui.ActionRow(b_toggle, b_role, b_days, b_notif),
+            discord.ui.ActionRow(b_list, b_actions, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.NEUTRAL))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_toggle(self, i):
+        c = await cfg(self.g.id)
+        afk_cfg = c.get('afk_role_config', {})
+        afk_cfg['enabled'] = not afk_cfg.get('enabled', False)
+        await db_set(self.g.id, 'afk_role_config', afk_cfg)
+        await AfkRolePanelV2(self.u, self.g).render_to(i, edit=True)
+
+    async def _cb_role(self, i):
+        v = AfkRoleSelectView(self.u, self.g)
+        await i.response.edit_message(embed=v.embed() if not asyncio.iscoroutinefunction(v.embed) else await v.embed(), view=v, attachments=[])
+
+    async def _cb_days(self, i):
+        await i.response.send_modal(AfkDaysModal(self.g, self.u))
+
+    async def _cb_notif(self, i):
+        v = AfkNotifChannelView(self.u, self.g)
+        await i.response.edit_message(embed=v.embed() if not asyncio.iscoroutinefunction(v.embed) else await v.embed(), view=v, attachments=[])
+
+    async def _cb_list(self, i):
+        v = AfkListView(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+
+    async def _cb_actions(self, i):
+        v = AfkActionsView(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+
+    async def _cb_back(self, i):
+        v = StatPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class AfkRoleSelectView(View):
@@ -16305,6 +16397,175 @@ class StatActionPanel(View):
             f"Cette action est **DÉFINITIVE** et ne peut pas être annulée.",
             view=KickConfirmView(self.u, self.g, 30, count),
             ephemeral=True
+        )
+
+
+class StatActionPanelV2(LayoutView):
+    """Configuration des actions d'inactivite en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        stat_cfg = c.get('stat_config', {})
+
+        action_labels = {'ping': 'Rapport', 'remove_role': 'Retrait role', 'kick': 'Kick'}
+        actions_7d = stat_cfg.get('actions_7d', [])
+        actions_30d = stat_cfg.get('actions_30d', [])
+
+        actions_7d_txt = " + ".join(action_labels.get(a, a) for a in actions_7d) if actions_7d else "_Aucune_"
+        actions_30d_txt = " + ".join(action_labels.get(a, a) for a in actions_30d) if actions_30d else "_Aucune_"
+
+        role_id = stat_cfg.get('activity_role', 0)
+        role = self.g.get_role(role_id) if role_id else None
+        notif_ch = self.g.get_channel(stat_cfg.get('notif_channel', 0))
+        recovery_ch = self.g.get_channel(stat_cfg.get('recovery_channel', 0))
+
+        # Selects
+        opt_actions = [
+            discord.SelectOption(label="Envoyer le rapport", value="ping", emoji="📊", description="Afficher le rapport dans le salon"),
+            discord.SelectOption(label="Retirer le rôle", value="remove_role", emoji="🎭", description="Enlever le rôle d'activité"),
+            discord.SelectOption(label="Kick les membres", value="kick", emoji="👢", description="Expulser du serveur"),
+        ]
+        # Marquer les options déjà sélectionnées par "default" — Discord 2.7 supporte default=True
+        def _opts_with_defaults(selected):
+            opts = []
+            for o in opt_actions:
+                opts.append(discord.SelectOption(
+                    label=o.label, value=o.value, emoji=o.emoji,
+                    description=o.description, default=(o.value in selected),
+                ))
+            return opts
+
+        sel_7d = Select(
+            placeholder="😴 Actions 7 jours (multi)…",
+            options=_opts_with_defaults(actions_7d),
+            min_values=0, max_values=3,
+            custom_id="sapv2_7d",
+        )
+        sel_7d.callback = self._cb_7d
+
+        sel_30d = Select(
+            placeholder="💤 Actions 30 jours (multi)…",
+            options=_opts_with_defaults(actions_30d),
+            min_values=0, max_values=3,
+            custom_id="sapv2_30d",
+        )
+        sel_30d.callback = self._cb_30d
+
+        # Boutons
+        self.clear_items()
+        b_role = Button(label="🎭 Rôle", style=discord.ButtonStyle.primary, custom_id="sapv2_role")
+        b_role.callback = self._cb_role
+        b_notif = Button(label="📢 Notifs", style=discord.ButtonStyle.primary, custom_id="sapv2_notif")
+        b_notif.callback = self._cb_notif
+        b_recov = Button(label="💬 Récup", style=discord.ButtonStyle.primary, custom_id="sapv2_recov")
+        b_recov.callback = self._cb_recov
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="sapv2_back")
+        b_back.callback = self._cb_back
+        b_kick7 = Button(label="👢 Kick AFK 7j", style=discord.ButtonStyle.danger, custom_id="sapv2_kick7")
+        b_kick7.callback = self._cb_kick7
+        b_kick30 = Button(label="👢 Kick AFK 30j", style=discord.ButtonStyle.danger, custom_id="sapv2_kick30")
+        b_kick30.callback = self._cb_kick30
+
+        items: list = [
+            v2_title("⚙️ Configuration des Actions"),
+            v2_subtitle("Actions automatiques sur les membres inactifs"),
+            v2_divider(),
+            v2_body(
+                "Configure les actions automatiques. Tu peux sélectionner **plusieurs actions** en même temps.\n\n"
+                "_⚠️ Aucune mention automatique — tu fais le @here / @everyone toi-même._"
+            ),
+            v2_divider(),
+            v2_body(
+                f"😴 **Actions 7 jours** · {actions_7d_txt}\n"
+                f"💤 **Actions 30 jours** · {actions_30d_txt}"
+            ),
+            v2_divider(),
+            v2_body(
+                f"🎭 **Rôle d'activité** · {role.mention if role else '_Non défini_'}\n"
+                f"📢 **Salon notifications** · {notif_ch.mention if notif_ch else '_Non défini_'}\n"
+                f"💬 **Salon récupération** · {recovery_ch.mention if recovery_ch else '_Non défini_'}"
+            ),
+            v2_divider(),
+            v2_subtitle("💡 Le rôle est redonné automatiquement si message ou vocal"),
+            discord.ui.ActionRow(sel_7d),
+            discord.ui.ActionRow(sel_30d),
+            discord.ui.ActionRow(b_role, b_notif, b_recov, b_back),
+            discord.ui.ActionRow(b_kick7, b_kick30),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.WARNING))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_7d(self, i):
+        c = await cfg(self.g.id)
+        stat_cfg = c.get('stat_config', {})
+        stat_cfg['actions_7d'] = i.data.get('values', [])
+        await db_set(self.g.id, 'stat_config', stat_cfg)
+        await StatActionPanelV2(self.u, self.g).render_to(i, edit=True)
+
+    async def _cb_30d(self, i):
+        c = await cfg(self.g.id)
+        stat_cfg = c.get('stat_config', {})
+        stat_cfg['actions_30d'] = i.data.get('values', [])
+        await db_set(self.g.id, 'stat_config', stat_cfg)
+        await StatActionPanelV2(self.u, self.g).render_to(i, edit=True)
+
+    async def _cb_role(self, i):
+        v = StatRoleSelectView(self.u, self.g)
+        await i.response.edit_message(embed=v.embed(), view=v, attachments=[])
+
+    async def _cb_notif(self, i):
+        v = StatChannelSelectView(
+            self.u, self.g,
+            config_key='notif_channel',
+            title="📢 Salon Notifications",
+            description="Salon où seront envoyés les rapports d'inactivité",
+        )
+        await i.response.edit_message(embed=v.embed(), view=v, attachments=[])
+
+    async def _cb_recov(self, i):
+        v = StatChannelSelectView(
+            self.u, self.g,
+            config_key='recovery_channel',
+            title="💬 Salon Récupération",
+            description="Les membres écrivent ici pour récupérer leur rôle d'activité",
+        )
+        await i.response.edit_message(embed=v.embed(), view=v, attachments=[])
+
+    async def _cb_back(self, i):
+        v = StatPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+    async def _cb_kick7(self, i):
+        count = await count_afk_members_by_days(self.g, 7)
+        await i.response.send_message(
+            f"⚠️ **ATTENTION - Action irréversible !**\n\n"
+            f"Tu es sur le point d'expulser **{count}** membre(s) inactif(s) depuis **7 jours**.\n\n"
+            f"Cette action est **DÉFINITIVE** et ne peut pas être annulée.",
+            view=KickConfirmView(self.u, self.g, 7, count),
+            ephemeral=True,
+        )
+
+    async def _cb_kick30(self, i):
+        count = await count_afk_members_by_days(self.g, 30)
+        await i.response.send_message(
+            f"⚠️ **ATTENTION - Action irréversible !**\n\n"
+            f"Tu es sur le point d'expulser **{count}** membre(s) inactif(s) depuis **30 jours**.\n\n"
+            f"Cette action est **DÉFINITIVE** et ne peut pas être annulée.",
+            view=KickConfirmView(self.u, self.g, 30, count),
+            ephemeral=True,
         )
 
 
