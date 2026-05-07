@@ -3459,12 +3459,12 @@ class MainPanelV2(LayoutView):
         # Modules migrés en V2 (LayoutView avec render_to async)
         v2_panels = {
             'mod': lambda: ModerationPanelV2(self.u, self.g),
+            'cmds': lambda: CommandsPanelV2(self.u, self.g),
         }
         # Modules encore en V1 (View + embed)
         v1_panels = {
             'prot': lambda: ProtPanel(self.u, self.g),
             'immune': lambda: ImmunePanel(self.u, self.g),
-            'cmds': lambda: CommandsPanel(self.u, self.g),
             'chan': lambda: ChanPanel(self.u, self.g),
             'tickets': lambda: TicketMainPanel(self.u, self.g),
             'ads': lambda: AdsPanel(self.u, self.g),
@@ -6312,6 +6312,125 @@ class CommandsPanel(View):
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+
+class CommandsPanelV2(LayoutView):
+    """Panneau Commandes & Interactions en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+
+        # Status RellSeas
+        rs_user = self.g.get_member(c.get('rellseas_user', 0))
+        rs_role = self.g.get_role(c.get('rellseas_role', 0))
+        rs_status = "🟢" if rs_user and rs_role else "🔴"
+        rs_line = (
+            f"{rs_status} 🎭 **RellSeas** · "
+            f"{rs_user.mention if rs_user else '_user ?_'} · "
+            f"{rs_role.mention if rs_role else '_rôle ?_'}"
+        )
+
+        # Status Suggestions
+        sg_role = self.g.get_role(c.get('suggestion_role', 0))
+        sg_ch = self.g.get_channel(c.get('suggestion_channel', 0))
+        sg_status = "🟢" if sg_ch else "🔴"
+        sg_line = (
+            f"{sg_status} 💡 **Suggestions** · "
+            f"{sg_role.mention if sg_role else '🌐 Tous'} · "
+            f"{sg_ch.mention if sg_ch else '_salon ?_'}"
+        )
+
+        # Status Trade
+        tr_role = self.g.get_role(c.get('trade_role', 0))
+        tr_cd = c.get('trade_cooldown', 1)
+        tr_unit = c.get('trade_cooldown_unit', 'heures')
+        tr_allowed = c.get('trade_allowed_channels', [])
+        tr_status = "🟢" if tr_allowed else "🔴"
+        tr_line = (
+            f"{tr_status} 🔄 **Trade** · "
+            f"{tr_role.mention if tr_role else '🌐 Tous'} · "
+            f"`{len(tr_allowed)}` salon(s) · ⏱️ `{tr_cd}{tr_unit[0]}`"
+        )
+
+        # Status Direction
+        dir_role = self.g.get_role(c.get('direction_allowed_role', 0))
+        dir_user = self.g.get_member(c.get('direction_allowed_user', 0))
+        dir_status = "🟢" if (dir_role or dir_user) else "🔴"
+        dir_parts = []
+        if dir_user:
+            dir_parts.append(f"👤 {dir_user.mention}")
+        if dir_role:
+            dir_parts.append(f"🎭 {dir_role.mention}")
+        dir_line = f"{dir_status} 🔒 **Direction** · " + (" · ".join(dir_parts) if dir_parts else "_Non configuré_")
+
+        # Boutons
+        self.clear_items()
+        b_rs = Button(label="🎭 RellSeas", style=discord.ButtonStyle.primary, custom_id="cpv2_rs")
+        b_rs.callback = self._cb_rs
+        b_sg = Button(label="💡 Suggestions", style=discord.ButtonStyle.primary, custom_id="cpv2_sg")
+        b_sg.callback = self._cb_sg
+        b_tr = Button(label="🔄 Trade", style=discord.ButtonStyle.primary, custom_id="cpv2_tr")
+        b_tr.callback = self._cb_tr
+        b_dir = Button(label="🔒 Direction", style=discord.ButtonStyle.primary, custom_id="cpv2_dir")
+        b_dir.callback = self._cb_dir
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="cpv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = []
+        if self.g.icon:
+            items.append(v2_section(
+                v2_title("⚡ Commandes & Interactions"),
+                v2_subtitle("Configure les systèmes interactifs du serveur"),
+                accessory=v2_thumb(self.g.icon.url),
+            ))
+        else:
+            items.append(v2_title("⚡ Commandes & Interactions"))
+            items.append(v2_subtitle("Configure les systèmes interactifs du serveur"))
+
+        items.append(v2_divider())
+        items.append(v2_body("\n".join([rs_line, sg_line, tr_line, dir_line])))
+        items.append(v2_divider())
+        items.append(v2_subtitle("Clique sur un système pour le configurer"))
+        items.append(discord.ui.ActionRow(b_rs, b_sg, b_tr, b_dir))
+        items.append(discord.ui.ActionRow(b_back))
+
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _open_v1(self, interaction, panel_factory):
+        """Ouvre un sous-panel V1 (transition V2 → V1)."""
+        v = panel_factory()
+        emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
+        await interaction.response.edit_message(embed=emb, view=v, attachments=[])
+
+    async def _cb_rs(self, i):
+        await self._open_v1(i, lambda: RellSeasPanel(self.u, self.g))
+
+    async def _cb_sg(self, i):
+        await self._open_v1(i, lambda: SuggestionPanel(self.u, self.g))
+
+    async def _cb_tr(self, i):
+        await self._open_v1(i, lambda: TradePanel(self.u, self.g))
+
+    async def _cb_dir(self, i):
+        await self._open_v1(i, lambda: DirectionPanel(self.u, self.g))
+
+    async def _cb_back(self, i):
+        v = MainPanelV2(self.u, self.g)
+        await i.response.edit_message(view=v, embed=None, attachments=[])
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🔒 DIRECTION
