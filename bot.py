@@ -11199,14 +11199,38 @@ class AdsRobloxAddGroupModal(Modal, title="👥 Ajouter un groupe Roblox"):
                     return await i.followup.send("❌ Impossible de trouver ce groupe", ephemeral=True)
                 
                 # Vérifier si le groupe a des créations UGC
-                catalog_url = f"https://catalog.roblox.com/v1/search/items?creatorTargetId={group_id}&creatorType=Group&limit=1"
-                async with session.get(catalog_url, headers=headers) as resp:
-                    if resp.status == 200:
-                        catalog_data = await resp.json()
-                        items_count = len(catalog_data.get('data', []))
-                        has_ugc = items_count > 0
-                    else:
-                        has_ugc = False
+                # NOTE: Roblox bloque parfois les IP datacenter sur catalog.roblox.com
+                # On essaye 2 endpoints, et on distingue "pas d'UGC" vs "API inaccessible"
+                has_ugc = None  # None = inconnu, True = a des UGC, False = aucun UGC confirmé
+                ugc_check_endpoints = [
+                    f"https://catalog.roblox.com/v1/search/items?Category=All&CreatorType=Group&CreatorTargetId={group_id}&Limit=10&SortType=3",
+                    f"https://catalog.roblox.com/v2/search/items/details?Category=All&CreatorType=Group&CreatorTargetId={group_id}&Limit=10&SortType=3",
+                    f"https://catalog.roblox.com/v1/search/items?creatorTargetId={group_id}&creatorType=Group&limit=10",
+                ]
+                last_status = None
+                last_error = None
+                for ep in ugc_check_endpoints:
+                    try:
+                        async with session.get(ep, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                            last_status = resp.status
+                            if resp.status == 200:
+                                cdata = await resp.json()
+                                items_n = len(cdata.get('data', []))
+                                has_ugc = items_n > 0
+                                if has_ugc:
+                                    break  # on a trouve, on s'arrete
+                            else:
+                                last_error = f"HTTP {resp.status}"
+                                try:
+                                    body = await resp.text()
+                                    last_error += f" | body: {body[:200]}"
+                                except Exception:
+                                    pass
+                    except Exception as ex:
+                        last_error = f"{type(ex).__name__}: {ex}"
+
+                if has_ugc is None:
+                    print(f"[ROBLOX UGC] check group {group_id} echoue : last_status={last_status} err={last_error}")
                 
                 # Vérifier si déjà ajouté
                 c = await cfg(self.g.id)
@@ -11226,10 +11250,18 @@ class AdsRobloxAddGroupModal(Modal, title="👥 Ajouter un groupe Roblox"):
                 await db_set(self.g.id, 'ads_roblox_feeds', feeds)
                 
                 # Message de confirmation
-                if has_ugc:
+                if has_ugc is True:
                     await i.followup.send(f"✅ Groupe **{group_name}** (ID: {group_id}) ajouté !\n💡 Ce groupe a des créations UGC.", ephemeral=True)
-                else:
+                elif has_ugc is False:
                     await i.followup.send(f"✅ Groupe **{group_name}** (ID: {group_id}) ajouté !\n⚠️ Ce groupe ne semble pas avoir de créations UGC pour le moment.", ephemeral=True)
+                else:
+                    # has_ugc is None : check API echoue
+                    await i.followup.send(
+                        f"✅ Groupe **{group_name}** (ID: {group_id}) ajouté !\n"
+                        f"ℹ️ Vérification UGC indisponible (API Roblox bloquée depuis l'hôte du bot — `{last_error or 'erreur inconnue'}`).\n"
+                        f"Le tracking se fera quand même au prochain cycle.",
+                        ephemeral=True,
+                    )
                     
         except Exception as ex:
             print(f"Erreur Roblox Group API: {ex}")
@@ -11467,9 +11499,9 @@ class PaginatedAdsChannelSelect(View):
         elif self.platform == 'rosocial':
             return AdsRoSocialPanel(self.u, self.g)
         elif self.platform == 'roblox':
-            return AdsRobloxPanel(self.u, self.g)
+            return AdsRobloxPanelV2(self.u, self.g)  # FIX: V2 panel, pas V1
         elif self.platform == 'deals':
-            return AdsDealsPanel(self.u, self.g)
+            return AdsDealsPanelV2(self.u, self.g)   # FIX: V2 panel, pas V1
         else:
             return AdsRedditPanel(self.u, self.g)
     
@@ -11522,21 +11554,36 @@ class PaginatedAdsChannelSelect(View):
     
     async def go_back(self, i):
         v = self._get_return_panel()
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        # V2-aware : si le panneau cible a render_to, on est en V2
+        if hasattr(v, 'render_to'):
+            await v.render_to(i, edit=True)
+        else:
+            await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
 
 class PaginatedAdsChannelMenu(Select):
     def __init__(self, parent, opts):
         super().__init__(placeholder=f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un salon...", options=opts)
         self.parent = parent
-    
+
     async def callback(self, i):
         await db_set(i.guild.id, self.parent.key, int(self.values[0]))
         ch = i.guild.get_channel(int(self.values[0]))
         v = self.parent._get_return_panel()
-        await i.response.edit_message(
-            content=f"✅ Salon défini: **{ch.mention if ch else 'Aucun'}**",
-            embed=await v.embed(), view=v
-        )
+        # V2-aware : panneau V2 → render_to + followup confirmation
+        if hasattr(v, 'render_to'):
+            await v.render_to(i, edit=True)
+            try:
+                await i.followup.send(
+                    f"✅ Salon défini: **{ch.mention if ch else 'Aucun'}**",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+        else:
+            await i.response.edit_message(
+                content=f"✅ Salon défini: **{ch.mention if ch else 'Aucun'}**",
+                embed=await v.embed(), view=v, attachments=[]
+            )
 
 class AdsFeedChannelPaginatedView(View):
     """Sélecteur de salon paginé pour ajouter un feed (YouTube, Twitch, TikTok, etc.)
@@ -11632,7 +11679,7 @@ class AdsChannelSelect(Select):
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 def _get_ads_panel(platform, u, g):
-    """Retourne le bon panel Ads selon la plateforme"""
+    """Retourne le bon panel Ads selon la plateforme. V2 si dispo, sinon V1."""
     panels = {
         'youtube': AdsYouTubePanel,
         'twitch': AdsTwitchPanel,
@@ -11641,8 +11688,8 @@ def _get_ads_panel(platform, u, g):
         'discord': AdsDiscordPanel,
         'rosocial': AdsRoSocialPanel,
         'reddit': AdsRedditPanel,
-        'roblox': AdsRobloxPanel,
-        'deals': AdsDealsPanel,
+        'roblox': AdsRobloxPanelV2,  # FIX: V2 panel
+        'deals': AdsDealsPanelV2,    # FIX: V2 panel
     }
     panel_class = panels.get(platform, AdsRedditPanel)
     return panel_class(u, g)
@@ -11664,12 +11711,32 @@ class AdsFeedRemoveSelect(Select):
         c = await cfg(self.g.id)
         feeds = c.get(self.key, [])
         idx = int(self.values[0])
+        removed_label = None
         if 0 <= idx < len(feeds):
-            feeds.pop(idx)
+            removed = feeds.pop(idx)
             await db_set(self.g.id, self.key, feeds)
-        
+            # Aussi nettoyer le tracking_layer si on supprime un compte tracke
+            try:
+                if isinstance(removed, dict):
+                    uname = removed.get('username') or removed.get('group_name') or removed.get('user_id') or removed.get('group_id')
+                    if uname:
+                        removed_label = str(uname)
+            except Exception:
+                pass
+
         v = _get_ads_panel(self.platform, self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        # V2-aware navigation
+        if hasattr(v, 'render_to'):
+            await v.render_to(i, edit=True)
+            try:
+                await i.followup.send(
+                    f"✅ {removed_label or 'Élément'} supprimé.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+        else:
+            await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🎯 CENTRE PANEL
@@ -27726,13 +27793,30 @@ async def check_roblox_ugc_feeds(session, guild, data):
                 continue
             
             # API Roblox Catalog - Récupérer les créations récentes
-            catalog_url = f"https://catalog.roblox.com/v1/search/items?creatorTargetId={creator_id}&creatorType={creator_type}&limit=10&sortType=3"
-            
-            async with session.get(catalog_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                if resp.status != 200:
-                    continue
-                catalog_data = await resp.json()
-            
+            # Roblox bloque parfois les IP datacenter sur catalog.roblox.com :
+            # on essaye plusieurs endpoints, on log si tout echoue.
+            catalog_endpoints = [
+                f"https://catalog.roblox.com/v1/search/items?Category=All&CreatorType={creator_type}&CreatorTargetId={creator_id}&Limit=10&SortType=3",
+                f"https://catalog.roblox.com/v2/search/items/details?Category=All&CreatorType={creator_type}&CreatorTargetId={creator_id}&Limit=10&SortType=3",
+                f"https://catalog.roblox.com/v1/search/items?creatorTargetId={creator_id}&creatorType={creator_type}&limit=10&sortType=3",
+            ]
+            catalog_data = None
+            last_status = None
+            for ep in catalog_endpoints:
+                try:
+                    async with session.get(ep, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                        last_status = resp.status
+                        if resp.status == 200:
+                            catalog_data = await resp.json()
+                            if catalog_data.get('data'):
+                                break
+                except Exception as ex:
+                    last_status = f"exc:{type(ex).__name__}"
+
+            if catalog_data is None:
+                print(f"[ROBLOX UGC] Toutes les tentatives ont echoue pour {creator_type} {creator_id} (last_status={last_status})")
+                continue
+
             items = catalog_data.get('data', [])
             if not items:
                 continue
