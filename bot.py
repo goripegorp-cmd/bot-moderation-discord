@@ -3630,8 +3630,7 @@ class ProtPanelV2(LayoutView):
         val = interaction.data['values'][0]
         prot = next(p for p in PROTS if p[0] == val)
         v = ProtDetailV2(self.u, self.g, prot)
-        await v.render_to(i, edit=True)
-        await interaction.response.edit_message(embed=emb, view=v, attachments=[])
+        await v.render_to(interaction, edit=True)
 
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
