@@ -11490,24 +11490,28 @@ class PaginatedAdsChannelSelect(View):
         self._build()
     
     def _get_return_panel(self):
+        # Tous les V2 (Phase 3.0c)
         if self.platform == 'youtube':
-            return AdsYouTubePanel(self.u, self.g)
+            return AdsLivePlatformV2(self.u, self.g, 'youtube')
         elif self.platform == 'twitch':
-            return AdsTwitchPanel(self.u, self.g)
+            return AdsLivePlatformV2(self.u, self.g, 'twitch')
         elif self.platform == 'tiktok':
-            return AdsTikTokPanel(self.u, self.g)
+            return AdsLivePlatformV2(self.u, self.g, 'tiktok')
         elif self.platform == 'twitter':
-            return AdsTwitterPanel(self.u, self.g)
+            return AdsSimplePlatformV2(self.u, self.g, 'twitter')
+        elif self.platform == 'reddit':
+            return AdsSimplePlatformV2(self.u, self.g, 'reddit')
         elif self.platform == 'discord':
-            return AdsDiscordPanel(self.u, self.g)
+            return AdsSimplePlatformV2(self.u, self.g, 'discord')
         elif self.platform == 'rosocial':
-            return AdsRoSocialPanel(self.u, self.g)
+            return AdsSimplePlatformV2(self.u, self.g, 'rosocial')
         elif self.platform == 'roblox':
-            return AdsRobloxPanelV2(self.u, self.g)  # FIX: V2 panel, pas V1
+            return AdsRobloxPanelV2(self.u, self.g)
         elif self.platform == 'deals':
-            return AdsDealsPanelV2(self.u, self.g)   # FIX: V2 panel, pas V1
+            return AdsDealsPanelV2(self.u, self.g)
         else:
-            return AdsRedditPanel(self.u, self.g)
+            # Fallback safe : retour au master panel
+            return AdsPanelV2(self.u, self.g)
     
     def _build(self):
         self.clear_items()
@@ -11683,20 +11687,17 @@ class AdsChannelSelect(Select):
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 def _get_ads_panel(platform, u, g):
-    """Retourne le bon panel Ads selon la plateforme. V2 si dispo, sinon V1."""
-    panels = {
-        'youtube': AdsYouTubePanel,
-        'twitch': AdsTwitchPanel,
-        'tiktok': AdsTikTokPanel,
-        'twitter': AdsTwitterPanel,
-        'discord': AdsDiscordPanel,
-        'rosocial': AdsRoSocialPanel,
-        'reddit': AdsRedditPanel,
-        'roblox': AdsRobloxPanelV2,  # FIX: V2 panel
-        'deals': AdsDealsPanelV2,    # FIX: V2 panel
-    }
-    panel_class = panels.get(platform, AdsRedditPanel)
-    return panel_class(u, g)
+    """Retourne le bon panel Ads selon la plateforme. Tous V2 (Phase 3.0c)."""
+    if platform in ('youtube', 'twitch', 'tiktok'):
+        return AdsLivePlatformV2(u, g, platform)
+    if platform in ('twitter', 'reddit', 'discord', 'rosocial'):
+        return AdsSimplePlatformV2(u, g, platform)
+    if platform == 'roblox':
+        return AdsRobloxPanelV2(u, g)
+    if platform == 'deals':
+        return AdsDealsPanelV2(u, g)
+    # Fallback : master Ads
+    return AdsPanelV2(u, g)
 
 class AdsFeedRemoveView(View):
     def __init__(self, u, g, opts, key, platform):
