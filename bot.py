@@ -3556,8 +3556,8 @@ class ProtPanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = MainPanel(self.u, self.g)
-        await i.response.edit_message(embed=v.embed(), view=v)
+        v = MainPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class ProtPanelV2(LayoutView):
     """Panneau Protection du Serveur en V2."""
@@ -6587,8 +6587,8 @@ class ModerationPanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
-        v = MainPanel(self.u, self.g)
-        await i.response.edit_message(embed=v.embed(), view=v)
+        v = MainPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class ModerationPanelV2(LayoutView):
@@ -6881,8 +6881,8 @@ class ImmunePanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
-        v = MainPanel(self.u, self.g)
-        await i.response.edit_message(embed=v.embed(), view=v)
+        v = MainPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class ImmunePanelV2(LayoutView):
     """Panneau Immunités en V2."""
@@ -7448,8 +7448,8 @@ class CommandsPanel(View):
 
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
-        v = MainPanel(self.u, self.g)
-        await i.response.edit_message(embed=v.embed(), view=v)
+        v = MainPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class CommandsPanelV2(LayoutView):
@@ -8942,8 +8942,8 @@ class AdsPanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = MainPanel(self.u, self.g)
-        await i.response.edit_message(embed=v.embed(), view=v)
+        v = MainPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class AdsPanelV2(LayoutView):
@@ -11194,8 +11194,8 @@ class CentrePanel(View):
 
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = MainPanel(self.u, self.g)
-        await i.response.edit_message(embed=v.embed(), view=v)
+        v = MainPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class CentrePanelV2(LayoutView):
@@ -13282,8 +13282,8 @@ class LevelSystemPanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.danger, row=3)
     async def back(self, i, b):
-        v = MainPanel(self.u, self.g)
-        await i.response.edit_message(embed=v.embed(), view=v)
+        v = MainPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class LevelSystemPanelV2(LayoutView):
     """Panneau Niveaux & Économie en V2."""
@@ -14414,8 +14414,8 @@ class TempVoicePanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
-        v = MainPanel(self.u, self.g)
-        await i.response.edit_message(embed=v.embed(), view=v)
+        v = MainPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class TempVoicePanelV2(LayoutView):
     """Panneau Vocaux Temporaires en V2."""
@@ -15984,8 +15984,8 @@ class AutoHelpPanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = MainPanel(self.u, self.g)
-        await i.response.edit_message(embed=v.embed(), view=v)
+        v = MainPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class AutoHelpPanelV2(LayoutView):
     """Panneau Aide Automatique en V2."""
@@ -17378,8 +17378,8 @@ class StatPanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = MainPanel(self.u, self.g)
-        await i.response.edit_message(embed=v.embed(), view=v)
+        v = MainPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -19319,8 +19319,8 @@ class ChanPanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = MainPanel(self.u, self.g)
-        await i.response.edit_message(embed=v.embed(), view=v)
+        v = MainPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class ChanPanelV2(LayoutView):
     """Panneau Configuration des Salons en V2."""
@@ -19712,8 +19712,8 @@ class TicketMainPanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
-        v = MainPanel(self.u, self.g)
-        await i.response.edit_message(embed=v.embed(), view=v)
+        v = MainPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class TicketMainPanelV2(LayoutView):
     """Panneau Tickets en V2."""
