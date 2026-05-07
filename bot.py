@@ -9806,21 +9806,24 @@ class CentrePanelV2(LayoutView):
         await interaction.response.edit_message(embed=emb, view=v, attachments=[])
 
     async def _cb_giveaway(self, i):
-        await self._open_v1(i, lambda: GiveawayPanel(self.u, self.g))
+        v = GiveawayPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _cb_announce(self, i):
         v = AnnouncementPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
 
     async def _cb_messages(self, i):
-        await self._open_v1(i, lambda: MessagePanel(self.u, self.g))
+        v = MessagePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _cb_mass_role(self, i):
         v = MassRolePanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
 
     async def _cb_auto_react(self, i):
-        await self._open_v1(i, lambda: AutoReactionPanel(self.u, self.g))
+        v = AutoReactionPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
@@ -9885,6 +9888,81 @@ class AutoReactionPanel(View):
     async def back(self, i, b):
         v = CentrePanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+
+class AutoReactionPanelV2(LayoutView):
+    """Auto-Reactions en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT id, channel_id, trigger_type, trigger_text, emoji, enabled FROM auto_reactions WHERE guild_id=? ORDER BY id',
+                (self.g.id,)
+            ) as cur:
+                rows = await cur.fetchall()
+
+        list_lines = []
+        if rows:
+            for idx, (rid, ch_id, ttype, ttext, emoji, enabled) in enumerate(rows[:10], 1):
+                status = "✅" if enabled else "❌"
+                ch = self.g.get_channel(ch_id)
+                ch_txt = ch.mention if ch else "🌐 _Tous_"
+                type_txt = "Contient" if ttype == 'contains' else ("Commence par" if ttype == 'startswith' else "Exact")
+                list_lines.append(
+                    f"{status} `#{idx}` · {emoji} · **{type_txt}** : `{ttext[:30]}` · {ch_txt}"
+                )
+            if len(rows) > 10:
+                list_lines.append(f"_… + {len(rows) - 10} autres_")
+        list_block = "\n".join(list_lines) if list_lines else "📭 _Aucune réaction · ajoute-en avec ➕_"
+
+        self.clear_items()
+        b_add = Button(label="➕ Ajouter", style=discord.ButtonStyle.success, custom_id="arpv2_add")
+        b_add.callback = self._cb_add
+        b_remove = Button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, disabled=(not rows), custom_id="arpv2_remove")
+        b_remove.callback = self._cb_remove
+        b_toggle = Button(label="🔄 Toggle", style=discord.ButtonStyle.secondary, disabled=(not rows), custom_id="arpv2_toggle")
+        b_toggle.callback = self._cb_toggle
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="arpv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("😄 Auto-Réactions"),
+            v2_subtitle(f"{len(rows)} réaction(s) configurée(s)"),
+            v2_divider(),
+            v2_body("Le bot réagira automatiquement aux messages correspondant aux triggers configurés."),
+            v2_divider(),
+            v2_body(list_block),
+            v2_divider(),
+            discord.ui.ActionRow(b_add, b_remove, b_toggle, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.PREMIUM))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_add(self, i):
+        await i.response.send_modal(AutoReactionAddModal(self.g, self.u))
+
+    async def _cb_remove(self, i):
+        await i.response.send_modal(AutoReactionRemoveModal(self.g, self.u))
+
+    async def _cb_toggle(self, i):
+        await i.response.send_modal(AutoReactionToggleModal(self.g, self.u))
+
+    async def _cb_back(self, i):
+        v = CentrePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class AutoReactionAddModal(Modal, title="➕ Ajouter une Réaction"):
@@ -10836,6 +10914,76 @@ class GiveawayPanel(View):
     async def back(self, i, b):
         v = CentrePanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+class GiveawayPanelV2(LayoutView):
+    """Giveaways en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        active_count = 0
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT COUNT(*) FROM giveaways WHERE guild_id=? AND ended=0',
+                    (self.g.id,)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    active_count = row[0] if row else 0
+        except Exception as ex:
+            print(f"[GW-V2] Erreur count: {ex}")
+
+        self.clear_items()
+        b_create = Button(label="➕ Créer un Cadeau", style=discord.ButtonStyle.success, custom_id="gwpv2_create")
+        b_create.callback = self._cb_create
+        b_list = Button(label="📋 Voir les Cadeaux", style=discord.ButtonStyle.primary, disabled=(active_count == 0), custom_id="gwpv2_list")
+        b_list.callback = self._cb_list
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="gwpv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("🎁 Gestion des Cadeaux"),
+            v2_subtitle(f"`{active_count}` cadeau(x) actif(s)"),
+            v2_divider(),
+            v2_body("Crée des cadeaux pour récompenser ta communauté !"),
+            v2_divider(),
+            v2_title("✨ Conditions personnalisables", level=3),
+            v2_body(
+                "• 📝 Nombre minimum de messages\n"
+                "• 🎤 Temps minimum en vocal\n"
+                "• 🎭 Rôle obligatoire\n"
+                "• 📅 Ancienneté minimum\n"
+                "• ❌ Pas AFK (configurable)"
+            ),
+            v2_divider(),
+            v2_subtitle("💡 Crée un cadeau avec ou sans conditions"),
+            discord.ui.ActionRow(b_create, b_list, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.SUCCESS))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_create(self, i):
+        await i.response.send_modal(GiveawayCreateModal(self.u, self.g))
+
+    async def _cb_list(self, i):
+        v = GiveawayListPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+
+    async def _cb_back(self, i):
+        v = CentrePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
 
 class GiveawayCreateModal(Modal):
     def __init__(self, u, g):
@@ -14635,6 +14783,73 @@ class MessagePanel(View):
     async def back(self, i, b):
         v = CentrePanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+class MessagePanelV2(LayoutView):
+    """Messages automatiques en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        count = 0
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT COUNT(*) FROM scheduled_messages WHERE guild_id=? AND enabled=1',
+                    (self.g.id,)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    count = row[0] if row else 0
+        except Exception as ex:
+            print(f"[MSG-V2] Erreur count: {ex}")
+
+        self.clear_items()
+        b_create = Button(label="➕ Créer un Message", style=discord.ButtonStyle.success, custom_id="mpnv2_create")
+        b_create.callback = self._cb_create
+        b_list = Button(label="📋 Voir les Messages", style=discord.ButtonStyle.primary, disabled=(count == 0), custom_id="mpnv2_list")
+        b_list.callback = self._cb_list
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="mpnv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("📨 Messages Automatiques"),
+            v2_subtitle(f"`{count}` message(s) actif(s)"),
+            v2_divider(),
+            v2_body("Programme des messages récurrents pour ton serveur."),
+            v2_divider(),
+            v2_title("💡 Fonctionnalités", level=3),
+            v2_body(
+                "• Messages récurrents (minutes, heures, jours, semaines)\n"
+                "• Heure d'envoi personnalisable\n"
+                "• Embeds personnalisés avec image"
+            ),
+            v2_divider(),
+            discord.ui.ActionRow(b_create, b_list, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.PRIMARY))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_create(self, i):
+        await i.response.send_modal(AutoMessageCreateModal(self.u, self.g))
+
+    async def _cb_list(self, i):
+        v = AutoMessageListPanel(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+
+    async def _cb_back(self, i):
+        v = CentrePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
 
 class AutoMessageCreateModal(Modal):
     def __init__(self, u, g):
