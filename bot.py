@@ -3468,10 +3468,10 @@ class MainPanelV2(LayoutView):
             'voice': lambda: TempVoicePanelV2(self.u, self.g),
             'stats': lambda: StatPanelV2(self.u, self.g),
             'levels': lambda: LevelSystemPanelV2(self.u, self.g),
+            'prot': lambda: ProtPanelV2(self.u, self.g),
         }
         # Modules encore en V1 (View + embed)
         v1_panels = {
-            'prot': lambda: ProtPanel(self.u, self.g),
             'tickets': lambda: TicketMainPanel(self.u, self.g),
         }
 
@@ -3551,6 +3551,85 @@ class ProtPanel(View):
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+class ProtPanelV2(LayoutView):
+    """Panneau Protection du Serveur en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+
+        enabled_count = 0
+        lines_out = []
+        for key, emoji, name in PROTS:
+            is_on = c.get(key)
+            if is_on:
+                enabled_count += 1
+            status = "🟢" if is_on else "🔴"
+            log_ch = self.g.get_channel(c.get(f'log_{key}', 0))
+            log_txt = f" → {log_ch.mention}" if log_ch else ""
+            lines_out.append(f"{status} {emoji} **{name}**{log_txt}")
+
+        total = len(PROTS)
+        bar_filled = round(enabled_count / total * 10) if total > 0 else 0
+        bar = "█" * bar_filled + "░" * (10 - bar_filled)
+        pct = round(enabled_count / total * 100) if total > 0 else 0
+
+        sel = Select(
+            placeholder="🛡️ Sélectionner une protection à configurer…",
+            options=[discord.SelectOption(label=nm, value=k, emoji=em) for k, em, nm in PROTS],
+            custom_id="ppv2_sel",
+        )
+        sel.callback = self._cb_sel
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="ppv2_back")
+        b_back.callback = self._cb_back
+
+        self.clear_items()
+        items: list = []
+        if self.g.icon:
+            items.append(v2_section(
+                v2_title("🛡️ Protection du Serveur"),
+                v2_subtitle(f"Score de protection · {pct}% ({enabled_count}/{total} actives)"),
+                accessory=v2_thumb(self.g.icon.url),
+            ))
+        else:
+            items.append(v2_title("🛡️ Protection du Serveur"))
+            items.append(v2_subtitle(f"Score de protection · {pct}% ({enabled_count}/{total} actives)"))
+
+        items.append(v2_divider())
+        items.append(v2_body(f"`[{bar}]` **{enabled_count}** / `{total}` protections actives"))
+        items.append(v2_divider())
+        items.append(v2_body("\n".join(lines_out)))
+        items.append(v2_divider())
+        items.append(v2_subtitle("▼ Choisis une protection dans le menu pour la configurer"))
+        items.append(discord.ui.ActionRow(sel))
+        items.append(discord.ui.ActionRow(b_back))
+
+        self.add_item(v2_container(*items, color=Palette.INFO))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_sel(self, interaction):
+        val = interaction.data['values'][0]
+        prot = next(p for p in PROTS if p[0] == val)
+        v = ProtDetail(self.u, self.g, prot)
+        emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
+        await interaction.response.edit_message(embed=emb, view=v, attachments=[])
+
+    async def _cb_back(self, i):
+        v = MainPanelV2(self.u, self.g)
+        await i.response.edit_message(view=v, embed=None, attachments=[])
+
 
 class ProtDetail(View):
     def __init__(self, u, g, prot):
