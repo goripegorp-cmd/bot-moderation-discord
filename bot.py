@@ -3462,6 +3462,14 @@ class MainPanelV2(LayoutView):
             color=Palette.PRIMARY,
         ))
 
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        """Compatibilité avec le pattern V2 général (utilisé par sub-panels back-nav)."""
+        # _build est déjà appelé en __init__ donc on envoie directement
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
     async def _module_select(self, i):
         val = i.data['values'][0]
         # Modules migrés en V2 (LayoutView avec render_to async)
@@ -3879,11 +3887,10 @@ class ProtDetailV2(LayoutView):
         # Helper sanction (action + durée)
         def _sanction_line(protection_key):
             try:
-                acp = ActionConfigPanel(self.u, self.g, protection_key)
-                ak = acp._get_action_key()
-                dk = acp._get_duration_key()
-                act = c.get(ak, acp._get_default_action())
-                dur = c.get(dk, acp._get_default_duration())
+                ak = get_prot_action_key(protection_key)
+                dk = get_prot_duration_key(protection_key)
+                act = c.get(ak, get_prot_default_action(protection_key))
+                dur = c.get(dk, get_prot_default_duration(protection_key))
                 act_emoji = {'delete': '🗑️', 'mute': '🔇', 'kick': '👢', 'ban': '🔨'}.get(act, '⚡')
                 line = f"⚡ **Sanction** · {act_emoji} `{act.upper()}`"
                 if act == 'mute':
@@ -4901,6 +4908,67 @@ class NumberConfigModal(Modal, title="⚙️ Configuration"):
 #                           ⚡ ACTION CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# Helpers module-level (utilisés par V1 ActionConfigPanel ET V2 ActionConfigPanelV2 / ProtDetailV2)
+_PROT_ACTION_KEYS = {
+    'anti_phishing': 'phishing_action',
+    'anti_scam': 'scam_action',
+    'anti_compromised': 'compromised_action',
+    'anti_qrcode': 'qrcode_action',
+    'anti_spam': 'spam_action',
+    'anti_mass_mention': 'mention_action',
+    'anti_link': 'link_action',
+    'anti_invite': 'invite_action',
+    'anti_image': 'image_action',
+    'anti_badwords': 'badwords_action',
+    'anti_caps': 'caps_action',
+}
+_PROT_DURATION_KEYS = {
+    'anti_phishing': 'phishing_mute_duration',
+    'anti_scam': 'scam_mute_duration',
+    'anti_compromised': 'compromised_mute_duration',
+    'anti_qrcode': 'qrcode_mute_duration',
+    'anti_spam': 'spam_mute_duration',
+    'anti_mass_mention': 'mention_mute_duration',
+    'anti_link': 'link_mute_duration',
+    'anti_invite': 'invite_mute_duration',
+    'anti_image': 'image_mute_duration',
+    'anti_badwords': 'badwords_mute_duration',
+    'anti_caps': 'caps_mute_duration',
+}
+_PROT_DEFAULT_ACTIONS = {
+    'anti_phishing': 'delete', 'anti_scam': 'mute',
+    'anti_compromised': 'mute', 'anti_qrcode': 'mute',
+    'anti_spam': 'mute', 'anti_mass_mention': 'mute',
+    'anti_link': 'delete', 'anti_invite': 'delete',
+    'anti_image': 'delete', 'anti_badwords': 'delete',
+    'anti_caps': 'delete',
+}
+_PROT_DEFAULT_DURATIONS = {
+    'anti_phishing': 60, 'anti_scam': 60,
+    'anti_compromised': 60, 'anti_qrcode': 30,
+    'anti_spam': 10, 'anti_mass_mention': 10,
+    'anti_link': 5, 'anti_invite': 5,
+    'anti_image': 5, 'anti_badwords': 5,
+    'anti_caps': 5,
+}
+
+
+def get_prot_action_key(key):
+    return _PROT_ACTION_KEYS.get(key, f'{key.replace("anti_", "")}_action')
+
+
+def get_prot_duration_key(key):
+    return _PROT_DURATION_KEYS.get(key, f'{key.replace("anti_", "")}_mute_duration')
+
+
+def get_prot_default_action(key):
+    return _PROT_DEFAULT_ACTIONS.get(key, 'delete')
+
+
+def get_prot_default_duration(key):
+    return _PROT_DEFAULT_DURATIONS.get(key, 5)
+
+
 class ActionConfigPanel(View):
     def __init__(self, u, g, key):
         super().__init__(timeout=600)
@@ -4909,61 +4977,16 @@ class ActionConfigPanel(View):
         self.key = key
 
     def _get_action_key(self):
-        """Retourne la clé de configuration pour l'action"""
-        action_keys = {
-            'anti_phishing': 'phishing_action',
-            'anti_scam': 'scam_action',
-            'anti_compromised': 'compromised_action',
-            'anti_qrcode': 'qrcode_action',
-            'anti_spam': 'spam_action',
-            'anti_mass_mention': 'mention_action',
-            'anti_link': 'link_action',
-            'anti_invite': 'invite_action',
-            'anti_image': 'image_action',
-            'anti_badwords': 'badwords_action',
-            'anti_caps': 'caps_action',
-        }
-        return action_keys.get(self.key, f'{self.key.replace("anti_", "")}_action')
+        return get_prot_action_key(self.key)
 
     def _get_duration_key(self):
-        """Retourne la clé de durée de mute"""
-        dur_keys = {
-            'anti_phishing': 'phishing_mute_duration',
-            'anti_scam': 'scam_mute_duration',
-            'anti_compromised': 'compromised_mute_duration',
-            'anti_qrcode': 'qrcode_mute_duration',
-            'anti_spam': 'spam_mute_duration',
-            'anti_mass_mention': 'mention_mute_duration',
-            'anti_link': 'link_mute_duration',
-            'anti_invite': 'invite_mute_duration',
-            'anti_image': 'image_mute_duration',
-            'anti_badwords': 'badwords_mute_duration',
-            'anti_caps': 'caps_mute_duration',
-        }
-        return dur_keys.get(self.key, f'{self.key.replace("anti_", "")}_mute_duration')
+        return get_prot_duration_key(self.key)
 
     def _get_default_action(self):
-        """Retourne l'action par défaut"""
-        defaults = {
-            'anti_phishing': 'delete', 'anti_scam': 'mute',
-            'anti_compromised': 'mute', 'anti_qrcode': 'mute',
-            'anti_spam': 'mute', 'anti_mass_mention': 'mute',
-            'anti_link': 'delete', 'anti_invite': 'delete',
-            'anti_image': 'delete', 'anti_badwords': 'delete',
-            'anti_caps': 'delete',
-        }
-        return defaults.get(self.key, 'delete')
+        return get_prot_default_action(self.key)
 
     def _get_default_duration(self):
-        defaults = {
-            'anti_phishing': 60, 'anti_scam': 60,
-            'anti_compromised': 60, 'anti_qrcode': 30,
-            'anti_spam': 10, 'anti_mass_mention': 10,
-            'anti_link': 5, 'anti_invite': 5,
-            'anti_image': 5, 'anti_badwords': 5,
-            'anti_caps': 5,
-        }
-        return defaults.get(self.key, 5)
+        return get_prot_default_duration(self.key)
 
     async def embed(self):
         c = await cfg(self.g.id)
@@ -5035,16 +5058,16 @@ class ActionConfigPanelV2(LayoutView):
         return i.user.id == self.u.id
 
     def _get_action_key(self):
-        return ActionConfigPanel(self.u, self.g, self.key)._get_action_key()
+        return get_prot_action_key(self.key)
 
     def _get_duration_key(self):
-        return ActionConfigPanel(self.u, self.g, self.key)._get_duration_key()
+        return get_prot_duration_key(self.key)
 
     def _get_default_action(self):
-        return ActionConfigPanel(self.u, self.g, self.key)._get_default_action()
+        return get_prot_default_action(self.key)
 
     def _get_default_duration(self):
-        return ActionConfigPanel(self.u, self.g, self.key)._get_default_duration()
+        return get_prot_default_duration(self.key)
 
     async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
         c = await cfg(self.g.id)
