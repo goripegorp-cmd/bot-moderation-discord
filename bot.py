@@ -4091,20 +4091,25 @@ class ProtDetailV2(LayoutView):
         await ProtDetailV2(self.u, self.g, self.prot).render_to(i, edit=True)
 
     async def _cb_config(self, i):
+        # Sub-configs V2 dédiés
         if self.key == "anti_image":
-            v = ImageConfigPanel(self.u, self.g)
-        elif self.key == "anti_badwords":
-            v = BadwordsConfigPanel(self.u, self.g)
-        elif self.key == "anti_link":
-            v = LinkConfigPanel(self.u, self.g)
-        elif self.key in ["anti_spam", "anti_caps", "anti_newaccount", "anti_mass_mention"]:
+            v = ImageConfigPanelV2(self.u, self.g)
+            return await v.render_to(i, edit=True)
+        if self.key == "anti_badwords":
+            v = BadwordsConfigPanelV2(self.u, self.g)
+            return await v.render_to(i, edit=True)
+        if self.key == "anti_link":
+            v = LinkConfigPanelV2(self.u, self.g)
+            return await v.render_to(i, edit=True)
+        # Modals directs
+        if self.key in ["anti_spam", "anti_caps", "anti_newaccount", "anti_mass_mention"]:
             return await i.response.send_modal(NumberConfigModal(self.g, self.u, self.key))
-        elif self.key == "anti_raid":
+        # Sub-configs V1 restants (à migrer plus tard)
+        if self.key == "anti_raid":
             v = AntiRaidConfigPanel(self.u, self.g)
         elif self.key == "anti_alt":
             v = AltConfigPanel(self.u, self.g)
         else:
-            # ActionConfigPanelV2 (V2 LayoutView) — sortie spécifique
             v = ActionConfigPanelV2(self.u, self.g, self.key)
             return await v.render_to(i, edit=True)
         emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
@@ -4263,6 +4268,90 @@ class LogChannelSelectMenu(Select):
 #                           🖼️ ANTI-IMAGE CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
 
+class ImageConfigPanelV2(LayoutView):
+    """Configuration des formats d'image autorises en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        allowed = c.get('image_allowed', [])
+        fmts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'tenor', 'giphy']
+
+        lines_out = []
+        for f in fmts:
+            status = "✅ Autorisé" if f in allowed else "❌ Bloqué"
+            lines_out.append(f"`{f.upper():<6}` · {status}")
+
+        # Select avec defaults
+        opts = [
+            discord.SelectOption(label="PNG", value="png", emoji="🖼️", default=("png" in allowed)),
+            discord.SelectOption(label="JPG", value="jpg", emoji="🖼️", default=("jpg" in allowed)),
+            discord.SelectOption(label="JPEG", value="jpeg", emoji="🖼️", default=("jpeg" in allowed)),
+            discord.SelectOption(label="GIF (fichier)", value="gif", emoji="🎞️", default=("gif" in allowed)),
+            discord.SelectOption(label="WEBP", value="webp", emoji="🖼️", default=("webp" in allowed)),
+            discord.SelectOption(label="Tenor", value="tenor", emoji="🎬", default=("tenor" in allowed)),
+            discord.SelectOption(label="Giphy", value="giphy", emoji="🎬", default=("giphy" in allowed)),
+        ]
+        sel = Select(
+            placeholder="Sélectionner les formats à autoriser…",
+            options=opts,
+            min_values=0,
+            max_values=len(opts),
+            custom_id="icpv2_sel",
+        )
+        sel.callback = self._cb_select
+
+        self.clear_items()
+        b_all = Button(label="✅ Tout autoriser", style=discord.ButtonStyle.success, custom_id="icpv2_all")
+        b_all.callback = self._cb_allow_all
+        b_none = Button(label="❌ Tout bloquer", style=discord.ButtonStyle.danger, custom_id="icpv2_none")
+        b_none.callback = self._cb_block_all
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="icpv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("🖼️ Formats d'image autorisés"),
+            v2_subtitle(f"`{len(allowed)}` / `{len(fmts)}` formats activés"),
+            v2_divider(),
+            v2_body("\n".join(lines_out)),
+            v2_divider(),
+            v2_subtitle("Coche les formats à autoriser dans le sélecteur ci-dessous"),
+            discord.ui.ActionRow(sel),
+            discord.ui.ActionRow(b_all, b_none, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.INFO))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_select(self, i):
+        await db_set(self.g.id, 'image_allowed', i.data.get('values', []))
+        await ImageConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+
+    async def _cb_allow_all(self, i):
+        await db_set(self.g.id, 'image_allowed', ['png', 'jpg', 'jpeg', 'gif', 'webp', 'tenor', 'giphy'])
+        await ImageConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+
+    async def _cb_block_all(self, i):
+        await db_set(self.g.id, 'image_allowed', [])
+        await ImageConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+
+    async def _cb_back(self, i):
+        prot = next(p for p in PROTS if p[0] == "anti_image")
+        v = ProtDetailV2(self.u, self.g, prot)
+        await v.render_to(i, edit=True)
+
+
 class ImageConfigPanel(View):
     def __init__(self, u, g):
         super().__init__(timeout=600)
@@ -4327,6 +4416,81 @@ class ImageConfigPanel(View):
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🤬 ANTI-BADWORDS CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
+
+class BadwordsConfigPanelV2(LayoutView):
+    """Mots interdits en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        words = c.get('badwords_list', [])
+
+        if words:
+            words_txt = ", ".join(f"`{w}`" for w in words)
+            if len(words_txt) > 3500:
+                words_txt = words_txt[:3500] + "…"
+            words_block = f"**{len(words)} mot(s) configuré(s) :**\n\n{words_txt}"
+        else:
+            words_block = "_Aucun mot interdit configuré · clique ➕ pour ajouter._"
+
+        self.clear_items()
+        b_add = Button(label="➕ Ajouter des mots", style=discord.ButtonStyle.success, custom_id="bcpv2_add")
+        b_add.callback = self._cb_add
+        b_clear = Button(label="🗑️ Tout effacer", style=discord.ButtonStyle.danger, disabled=(not words), custom_id="bcpv2_clear")
+        b_clear.callback = self._cb_clear
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="bcpv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("🤬 Mots interdits"),
+            v2_subtitle(f"{len(words)} mot(s) bloqué(s)"),
+            v2_divider(),
+            v2_body(words_block),
+            v2_divider(),
+            discord.ui.ActionRow(b_add, b_clear, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.INFO))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_add(self, i):
+        modal = AddBadwordsModal(self.g, self.u)
+        # Patch on_submit pour revenir vers V2
+        async def v2_submit(interaction):
+            c = await cfg(self.g.id)
+            existing = c.get('badwords_list', [])
+            new = [x.strip().lower() for x in modal.words.value.split(',') if x.strip()]
+            added = 0
+            for w in new:
+                if w and w not in existing:
+                    existing.append(w)
+                    added += 1
+            await db_set(self.g.id, 'badwords_list', existing)
+            await BadwordsConfigPanelV2(self.u, self.g).render_to(interaction, edit=True)
+
+        modal.on_submit = v2_submit
+        await i.response.send_modal(modal)
+
+    async def _cb_clear(self, i):
+        await db_set(self.g.id, 'badwords_list', [])
+        await BadwordsConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+
+    async def _cb_back(self, i):
+        prot = next(p for p in PROTS if p[0] == "anti_badwords")
+        v = ProtDetailV2(self.u, self.g, prot)
+        await v.render_to(i, edit=True)
+
 
 class BadwordsConfigPanel(View):
     def __init__(self, u, g):
@@ -4393,6 +4557,98 @@ class AddBadwordsModal(Modal, title="➕ Ajouter des mots interdits"):
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🔗 ANTI-LINK CONFIG
 # ═══════════════════════════════════════════════════════════════════════════════
+
+class LinkConfigPanelV2(LayoutView):
+    """Configuration anti-liens en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        wl = c.get('link_whitelist', [])
+        chs = c.get('link_allowed_channels', [])
+
+        wl_txt = ", ".join(f"`{d}`" for d in wl) if wl else "_Aucun_"
+        ch_txt = ", ".join(f"<#{x}>" for x in chs) if chs else "_Aucun_"
+
+        self.clear_items()
+        b_add_dom = Button(label="➕ Ajouter domaines", style=discord.ButtonStyle.success, custom_id="lcpv2_add_dom")
+        b_add_dom.callback = self._cb_add_dom
+        b_clear_wl = Button(label="🗑️ Vider whitelist", style=discord.ButtonStyle.danger, disabled=(not wl), custom_id="lcpv2_clear_wl")
+        b_clear_wl.callback = self._cb_clear_wl
+        b_add_ch = Button(label="➕ Ajouter salon", style=discord.ButtonStyle.primary, custom_id="lcpv2_add_ch")
+        b_add_ch.callback = self._cb_add_ch
+        b_clear_ch = Button(label="🗑️ Vider salons", style=discord.ButtonStyle.danger, disabled=(not chs), custom_id="lcpv2_clear_ch")
+        b_clear_ch.callback = self._cb_clear_ch
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="lcpv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("🔗 Configuration Anti-Liens"),
+            v2_subtitle("Domaines whitelist + salons autorisés"),
+            v2_divider(),
+            v2_title(f"🌐 Whitelist domaines ({len(wl)})", level=3),
+            v2_body(wl_txt),
+            v2_divider(),
+            v2_title(f"📍 Salons autorisés ({len(chs)})", level=3),
+            v2_body(ch_txt),
+            v2_divider(),
+            discord.ui.ActionRow(b_add_dom, b_clear_wl, b_add_ch, b_clear_ch),
+            discord.ui.ActionRow(b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.INFO))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_add_dom(self, i):
+        modal = AddDomainModal(self.g, self.u)
+        async def v2_submit(interaction):
+            c = await cfg(self.g.id)
+            existing = c.get('link_whitelist', [])
+            new = [x.strip().lower() for x in modal.doms.value.split(',') if x.strip()]
+            for d in new:
+                if d and d not in existing:
+                    existing.append(d)
+            await db_set(self.g.id, 'link_whitelist', existing)
+            await LinkConfigPanelV2(self.u, self.g).render_to(interaction, edit=True)
+        modal.on_submit = v2_submit
+        await i.response.send_modal(modal)
+
+    async def _cb_clear_wl(self, i):
+        await db_set(self.g.id, 'link_whitelist', [])
+        await LinkConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+
+    async def _cb_add_ch(self, i):
+        v = PaginatedLinkChanSelectView(self.u, self.g)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="📍 Choisir un salon à autoriser",
+                description=f"📊 {len(list(self.g.text_channels))} salons disponibles",
+                color=0x9B59B6,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_clear_ch(self, i):
+        await db_set(self.g.id, 'link_allowed_channels', [])
+        await LinkConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+
+    async def _cb_back(self, i):
+        prot = next(p for p in PROTS if p[0] == "anti_link")
+        v = ProtDetailV2(self.u, self.g, prot)
+        await v.render_to(i, edit=True)
+
 
 class LinkConfigPanel(View):
     def __init__(self, u, g):
