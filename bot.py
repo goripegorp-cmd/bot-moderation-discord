@@ -4104,16 +4104,16 @@ class ProtDetailV2(LayoutView):
         # Modals directs
         if self.key in ["anti_spam", "anti_caps", "anti_newaccount", "anti_mass_mention"]:
             return await i.response.send_modal(NumberConfigModal(self.g, self.u, self.key))
-        # Sub-configs V1 restants (à migrer plus tard)
+        # Sub-configs V2 dédiés (suite)
         if self.key == "anti_raid":
-            v = AntiRaidConfigPanel(self.u, self.g)
-        elif self.key == "anti_alt":
-            v = AltConfigPanel(self.u, self.g)
-        else:
-            v = ActionConfigPanelV2(self.u, self.g, self.key)
+            v = AntiRaidConfigPanelV2(self.u, self.g)
             return await v.render_to(i, edit=True)
-        emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
-        await i.response.edit_message(embed=emb, view=v, attachments=[])
+        if self.key == "anti_alt":
+            v = AltConfigPanelV2(self.u, self.g)
+            return await v.render_to(i, edit=True)
+        # Default : ActionConfigPanelV2 pour toutes les autres protections
+        v = ActionConfigPanelV2(self.u, self.g, self.key)
+        await v.render_to(i, edit=True)
 
     async def _cb_sanction(self, i):
         v = ActionConfigPanelV2(self.u, self.g, self.key)
@@ -5161,6 +5161,146 @@ class DurationConfigModal(Modal, title="⏱️ Durée du Mute"):
 #                           ⚔️ ANTI-RAID CONFIG PANEL
 # ═══════════════════════════════════════════════════════════════════════════════
 
+class AntiRaidConfigPanelV2(LayoutView):
+    """Configuration Anti-Raid en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        raid_cfg = c.get('raid_config', {})
+
+        join_threshold = raid_cfg.get('join_threshold', 10)
+        join_interval = raid_cfg.get('join_interval', 10)
+        min_age = raid_cfg.get('min_account_age', 7)
+        auto_mode = raid_cfg.get('auto_mode', True)
+        block_invites = raid_cfg.get('block_invites', True)
+        action = raid_cfg.get('action', 'kick')
+        actions_label = {'kick': '👢 Kick', 'ban': '🔨 Ban', 'mute': '🔇 Mute'}.get(action, action)
+        lockdown = raid_tracker.get(self.g.id, {}).get('lockdown', False)
+
+        self.clear_items()
+        b_thresh = Button(label="👥 Seuil", style=discord.ButtonStyle.primary, custom_id="arcv2_thresh")
+        b_thresh.callback = self._cb_thresh
+        b_age = Button(label="📅 Âge", style=discord.ButtonStyle.primary, custom_id="arcv2_age")
+        b_age.callback = self._cb_age
+        b_auto = Button(
+            label=("🤖 Auto ON" if auto_mode else "🤖 Auto OFF"),
+            style=(discord.ButtonStyle.success if auto_mode else discord.ButtonStyle.danger),
+            custom_id="arcv2_auto",
+        )
+        b_auto.callback = self._cb_toggle_auto
+        b_action = Button(label="⚡ Action", style=discord.ButtonStyle.secondary, custom_id="arcv2_action")
+        b_action.callback = self._cb_action
+        b_invites = Button(
+            label=("🔒 Invit. ON" if block_invites else "🔒 Invit. OFF"),
+            style=(discord.ButtonStyle.success if block_invites else discord.ButtonStyle.danger),
+            custom_id="arcv2_invites",
+        )
+        b_invites.callback = self._cb_toggle_invites
+        b_lockdown = Button(
+            label=("🚨 Lockdown ON" if lockdown else "🚨 Lockdown OFF"),
+            style=(discord.ButtonStyle.danger if lockdown else discord.ButtonStyle.secondary),
+            custom_id="arcv2_lockdown",
+        )
+        b_lockdown.callback = self._cb_lockdown
+        b_scan = Button(label="🔍 Scanner", style=discord.ButtonStyle.success, custom_id="arcv2_scan")
+        b_scan.callback = self._cb_scan
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="arcv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("⚔️ Configuration Anti-Raid"),
+            v2_subtitle("Protège ton serveur contre les attaques massives"),
+            v2_divider(),
+            v2_body(
+                f"👥 **Seuil détection** · `{join_threshold}` membres en `{join_interval}` sec\n"
+                f"📅 **Âge minimum** · `{min_age}` jours\n"
+                f"🤖 **Mode auto** · {'✅' if auto_mode else '❌'}\n"
+                f"🔒 **Bloquer invitations** · {'✅' if block_invites else '❌'}\n"
+                f"⚡ **Action** · {actions_label}\n"
+                f"🚨 **Lockdown** · {'⚠️ **ACTIF**' if lockdown else '✅ Inactif'}"
+            ),
+            v2_divider(),
+            discord.ui.ActionRow(b_thresh, b_age, b_auto, b_action),
+            discord.ui.ActionRow(b_invites, b_lockdown, b_scan, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.DANGER))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_thresh(self, i):
+        await i.response.send_modal(RaidThresholdModal(self.g, self.u))
+
+    async def _cb_age(self, i):
+        await i.response.send_modal(RaidAgeModal(self.g, self.u))
+
+    async def _cb_toggle_auto(self, i):
+        c = await cfg(self.g.id)
+        raid_cfg = c.get('raid_config', {})
+        raid_cfg['auto_mode'] = not raid_cfg.get('auto_mode', True)
+        await db_set(self.g.id, 'raid_config', raid_cfg)
+        await AntiRaidConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+
+    async def _cb_action(self, i):
+        v = RaidActionSelect(self.u, self.g)
+        await i.response.edit_message(
+            embed=discord.Embed(title="⚡ Choisir l'action anti-raid", color=0xE74C3C),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_toggle_invites(self, i):
+        c = await cfg(self.g.id)
+        raid_cfg = c.get('raid_config', {})
+        raid_cfg['block_invites'] = not raid_cfg.get('block_invites', True)
+        await db_set(self.g.id, 'raid_config', raid_cfg)
+        await AntiRaidConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+
+    async def _cb_lockdown(self, i):
+        guild_id = self.g.id
+        if guild_id not in raid_tracker:
+            raid_tracker[guild_id] = {'joins': [], 'lockdown': False}
+        raid_tracker[guild_id]['lockdown'] = not raid_tracker[guild_id].get('lockdown', False)
+        await AntiRaidConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+
+    async def _cb_scan(self, i):
+        try:
+            await i.response.send_message("🔍 **Scan en cours…**\n\nAnalyse des membres du serveur…", ephemeral=True)
+            scanner = SuspectScanPanel(self.u, self.g)
+            await scanner.scan_members()
+            await i.edit_original_response(
+                content=None,
+                embed=await scanner.embed(),
+                view=scanner,
+            )
+        except Exception as ex:
+            print(f"[SCANNER V2 ERROR] {ex}")
+            try:
+                await i.edit_original_response(
+                    content=f"❌ **Erreur scan**\n```{str(ex)[:500]}```",
+                    embed=None,
+                    view=None,
+                )
+            except Exception:
+                pass
+
+    async def _cb_back(self, i):
+        prot = next(p for p in PROTS if p[0] == "anti_raid")
+        v = ProtDetailV2(self.u, self.g, prot)
+        await v.render_to(i, edit=True)
+
+
 class AntiRaidConfigPanel(View):
     def __init__(self, u, g):
         super().__init__(timeout=600)
@@ -5298,6 +5438,156 @@ class AntiRaidConfigPanel(View):
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           👥 ANTI-ALT CONFIG (Comptes Secondaires)
 # ═══════════════════════════════════════════════════════════════════════════════
+
+class AltConfigPanelV2(LayoutView):
+    """Configuration Anti-MultiCompte (alts) en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        alt_cfg = c.get('alt_config', {})
+
+        enabled = bool(c.get('anti_alt', 0))
+        action = c.get('alt_action', 'kick')
+        action_emoji = {'kick': '👢', 'ban': '🔨', 'mute': '🔇'}.get(action, '⚡')
+        auto = alt_cfg.get('auto_action', False)
+        min_conf = alt_cfg.get('min_confidence', 70)
+
+        try:
+            alts = await get_alt_accounts(self.g.id)
+            suspected = len([a for a in alts if a[5] == 'suspected'])
+            confirmed = len([a for a in alts if a[5] == 'confirmed'])
+            actioned = len([a for a in alts if a[7]])
+        except Exception:
+            suspected = confirmed = actioned = 0
+
+        self.clear_items()
+        b_toggle = Button(
+            label=("⏸️ Désactiver" if enabled else "▶️ Activer"),
+            style=(discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success),
+            custom_id="alcv2_toggle",
+        )
+        b_toggle.callback = self._cb_toggle
+        b_action = Button(label="⚡ Action (cycle)", style=discord.ButtonStyle.primary, custom_id="alcv2_action")
+        b_action.callback = self._cb_cycle_action
+        b_auto = Button(
+            label=("🤖 Auto ON" if auto else "🤖 Auto OFF"),
+            style=(discord.ButtonStyle.success if auto else discord.ButtonStyle.danger),
+            custom_id="alcv2_auto",
+        )
+        b_auto.callback = self._cb_toggle_auto
+        b_conf = Button(label="📊 Confiance", style=discord.ButtonStyle.secondary, custom_id="alcv2_conf")
+        b_conf.callback = self._cb_conf
+        b_scan = Button(label="🔍 Scanner", style=discord.ButtonStyle.success, custom_id="alcv2_scan")
+        b_scan.callback = self._cb_scan
+        b_view = Button(label="📋 Voir détections", style=discord.ButtonStyle.secondary, disabled=(not (suspected or confirmed)), custom_id="alcv2_view")
+        b_view.callback = self._cb_view
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="alcv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("👥 Configuration Anti-MultiCompte"),
+            v2_subtitle(f"{'🟢 Système actif' if enabled else '🔴 Système désactivé'}"),
+            v2_divider(),
+            v2_body(
+                "Détecte et gère les comptes secondaires (alts).\n\n"
+                "**Méthodes de détection :**\n"
+                "• 🖼️ Avatar identique\n"
+                "• 📝 Nom similaire\n"
+                "• ⏰ Compte créé après un ban\n"
+                "• 🔍 Comportement suspect"
+            ),
+            v2_divider(),
+            v2_body(
+                f"⚡ **Action** · {action_emoji} `{action.upper()}`\n"
+                f"🤖 **Action auto** · {'✅' if auto else '❌'}\n"
+                f"📊 **Confiance min.** · `{min_conf}%`"
+            ),
+            v2_divider(),
+            v2_title("📈 Statistiques", level=3),
+            v2_body(
+                f"⚠️ **Suspects** · `{suspected}`\n"
+                f"✅ **Confirmés** · `{confirmed}`\n"
+                f"⚡ **Sanctionnés** · `{actioned}`"
+            ),
+            v2_divider(),
+            v2_subtitle("💡 Utilise 'Scanner' pour analyser tous les membres"),
+            discord.ui.ActionRow(b_toggle, b_action, b_auto, b_conf),
+            discord.ui.ActionRow(b_scan, b_view, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_toggle(self, i):
+        c = await cfg(self.g.id)
+        await db_set(self.g.id, 'anti_alt', 0 if c.get('anti_alt') else 1)
+        await AltConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+
+    async def _cb_cycle_action(self, i):
+        c = await cfg(self.g.id)
+        actions = ['kick', 'ban', 'mute']
+        current = c.get('alt_action', 'kick')
+        try:
+            next_idx = (actions.index(current) + 1) % len(actions)
+        except ValueError:
+            next_idx = 0
+        await db_set(self.g.id, 'alt_action', actions[next_idx])
+        await AltConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+
+    async def _cb_toggle_auto(self, i):
+        c = await cfg(self.g.id)
+        alt_cfg = c.get('alt_config', {})
+        alt_cfg['auto_action'] = not alt_cfg.get('auto_action', False)
+        await db_set(self.g.id, 'alt_config', alt_cfg)
+        await AltConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+
+    async def _cb_conf(self, i):
+        await i.response.send_modal(AltConfidenceModal(self.g, self.u))
+
+    async def _cb_scan(self, i):
+        await i.response.send_message("🔍 **Scan des comptes secondaires en cours…**", ephemeral=True)
+        try:
+            detected = await scan_all_members_for_alts(self.g)
+            if detected:
+                v = AltScanResultsPanel(self.u, self.g, detected)
+                await i.edit_original_response(content=None, embed=await v.embed(), view=v)
+            else:
+                await i.edit_original_response(
+                    content="✅ **Aucun compte secondaire détecté !**\n\nTous les membres semblent être des comptes uniques.",
+                    embed=None,
+                    view=None,
+                )
+        except Exception as ex:
+            print(f"[ALT SCAN V2] {ex}")
+            try:
+                await i.edit_original_response(content=f"❌ Erreur: {ex}")
+            except Exception:
+                pass
+
+    async def _cb_view(self, i):
+        alts = await get_alt_accounts(self.g.id)
+        if not alts:
+            return await i.response.send_message("📋 Aucun compte secondaire détecté.", ephemeral=True)
+        v = AltDetectionsPanel(self.u, self.g, alts)
+        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+
+    async def _cb_back(self, i):
+        prot = next(p for p in PROTS if p[0] == "anti_alt")
+        v = ProtDetailV2(self.u, self.g, prot)
+        await v.render_to(i, edit=True)
+
 
 class AltConfigPanel(View):
     """Panel de configuration pour la détection de comptes secondaires"""
