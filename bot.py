@@ -3464,12 +3464,12 @@ class MainPanelV2(LayoutView):
             'immune': lambda: ImmunePanelV2(self.u, self.g),
             'centre': lambda: CentrePanelV2(self.u, self.g),
             'chan': lambda: ChanPanelV2(self.u, self.g),
+            'ads': lambda: AdsPanelV2(self.u, self.g),
         }
         # Modules encore en V1 (View + embed)
         v1_panels = {
             'prot': lambda: ProtPanel(self.u, self.g),
             'tickets': lambda: TicketMainPanel(self.u, self.g),
-            'ads': lambda: AdsPanel(self.u, self.g),
             'stats': lambda: StatPanel(self.u, self.g),
             'levels': lambda: LevelSystemPanel(self.u, self.g),
             'voice': lambda: TempVoicePanel(self.u, self.g),
@@ -7505,6 +7505,119 @@ class AdsPanel(View):
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+
+class AdsPanelV2(LayoutView):
+    """Panneau Publicité & Notifications en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+
+        def _line(emoji, name, key, feeds_key, live_key=None):
+            ch = self.g.get_channel(c.get(key, 0))
+            feeds = c.get(feeds_key, [])
+            live_ch = self.g.get_channel(c.get(live_key, 0)) if live_key else None
+            ch_txt = ch.mention if ch else "❌ _salon ?_"
+            live_txt = f" · 🔴 lives → {live_ch.mention}" if live_ch else ""
+            return f"{emoji} **{name}** · {ch_txt} · `{len(feeds)}` feed(s){live_txt}"
+
+        deals_ch = self.g.get_channel(c.get('ads_deals_channel', 0))
+        deals_on = c.get('ads_deals_enabled', False)
+        deals_line = (
+            f"🎯 **Réductions** · "
+            f"{deals_ch.mention if deals_ch else '❌ _salon ?_'} · "
+            f"{'✅ Activé' if deals_on else '❌ Désactivé'}"
+        )
+
+        platforms_block = "\n".join([
+            _line("🔴", "YouTube", 'ads_youtube_channel', 'ads_youtube_feeds', 'ads_youtube_live_channel'),
+            _line("🟣", "Twitch", 'ads_twitch_channel', 'ads_twitch_feeds', 'ads_twitch_live_channel'),
+            _line("🎵", "TikTok", 'ads_tiktok_channel', 'ads_tiktok_feeds', 'ads_tiktok_live_channel'),
+            _line("🐦", "Twitter / X", 'ads_twitter_channel', 'ads_twitter_feeds'),
+            _line("🟠", "Reddit", 'ads_reddit_channel', 'ads_reddit_feeds'),
+            _line("📡", "Discord", 'ads_discord_channel', 'ads_discord_feeds'),
+            _line("🎮", "RoSocial", 'ads_rosocial_channel', 'ads_rosocial_feeds'),
+            _line("🟢", "Roblox UGC", 'ads_roblox_channel', 'ads_roblox_feeds'),
+            deals_line,
+        ])
+
+        # Select des plateformes
+        sel = Select(
+            placeholder="📢 Choisir une plateforme à configurer…",
+            options=[
+                discord.SelectOption(label="YouTube", value="youtube", emoji="🔴", description="Vidéos + détection lives"),
+                discord.SelectOption(label="Twitch", value="twitch", emoji="🟣", description="Streams + détection lives"),
+                discord.SelectOption(label="TikTok", value="tiktok", emoji="🎵", description="Vidéos + détection lives"),
+                discord.SelectOption(label="Twitter / X", value="twitter", emoji="🐦", description="Tweets et posts"),
+                discord.SelectOption(label="Reddit", value="reddit", emoji="🟠", description="Posts de subreddits"),
+                discord.SelectOption(label="Discord", value="discord", emoji="📡", description="Relay de salons Discord"),
+                discord.SelectOption(label="RoSocial", value="rosocial", emoji="🎮", description="Profils RoSocial"),
+                discord.SelectOption(label="Roblox UGC", value="roblox", emoji="🟢", description="Créateurs & groupes Roblox"),
+                discord.SelectOption(label="Réductions Jeux", value="deals", emoji="🎯", description="Promos Steam, Epic, GOG…"),
+            ],
+            custom_id="apv2_platform",
+        )
+        sel.callback = self._cb_platform
+
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="apv2_back")
+        b_back.callback = self._cb_back
+
+        self.clear_items()
+
+        items: list = []
+        if self.g.icon:
+            items.append(v2_section(
+                v2_title("📢 Publicité & Notifications"),
+                v2_subtitle("9 plateformes · vérification toutes les 5 minutes"),
+                accessory=v2_thumb(self.g.icon.url),
+            ))
+        else:
+            items.append(v2_title("📢 Publicité & Notifications"))
+            items.append(v2_subtitle("9 plateformes · vérification toutes les 5 minutes"))
+
+        items.append(v2_divider())
+        items.append(v2_body(platforms_block))
+        items.append(v2_divider())
+        items.append(v2_subtitle("▼ Choisis une plateforme dans le menu ci-dessous"))
+        items.append(discord.ui.ActionRow(sel))
+        items.append(discord.ui.ActionRow(b_back))
+
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_platform(self, interaction):
+        val = interaction.data['values'][0]
+        panels = {
+            'youtube': lambda: AdsYouTubePanel(self.u, self.g),
+            'twitch': lambda: AdsTwitchPanel(self.u, self.g),
+            'tiktok': lambda: AdsTikTokPanel(self.u, self.g),
+            'twitter': lambda: AdsTwitterPanel(self.u, self.g),
+            'reddit': lambda: AdsRedditPanel(self.u, self.g),
+            'discord': lambda: AdsDiscordPanel(self.u, self.g),
+            'rosocial': lambda: AdsRoSocialPanel(self.u, self.g),
+            'roblox': lambda: AdsRobloxPanel(self.u, self.g),
+            'deals': lambda: AdsDealsPanel(self.u, self.g),
+        }
+        v = panels[val]()
+        emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
+        await interaction.response.edit_message(embed=emb, view=v, attachments=[])
+
+    async def _cb_back(self, i):
+        v = MainPanelV2(self.u, self.g)
+        await i.response.edit_message(view=v, embed=None, attachments=[])
+
 
 # ─────────────────────────────── YOUTUBE ───────────────────────────────
 
