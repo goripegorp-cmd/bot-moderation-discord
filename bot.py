@@ -19347,8 +19347,8 @@ class ChanSelectPaginatedView(View):
         await v.render_to(i, edit=True)
 
     async def _select_cb(self, i):
-        v = EditChanCfg(self.u, self.g, i.data['values'][0])
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = EditChanCfgV2(self.u, self.g, i.data['values'][0])
+        await v.render_to(i, edit=True)
 
 # Legacy compat
 ChanSelectView = ChanSelectPaginatedView
@@ -19408,6 +19408,110 @@ class EditChanCfg(View):
     async def back(self, i, b):
         v = ChanPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
+
+
+class EditChanCfgV2(LayoutView):
+    """Configuration par-salon en V2."""
+
+    def __init__(self, u, g, ch_id):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+        self.ch_id = ch_id
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def _get_conf(self):
+        c = await cfg(self.g.id)
+        return c.get('channel_configs', {}).get(
+            str(self.ch_id),
+            {'messages': True, 'images': True, 'gifs': True, 'emojis': True, 'links': True, 'commands_only': False},
+        )
+
+    async def _save(self, conf):
+        c = await cfg(self.g.id)
+        configs = c.get('channel_configs', {})
+        configs[str(self.ch_id)] = conf
+        await db_set(self.g.id, 'channel_configs', configs)
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        ch = self.g.get_channel(int(self.ch_id))
+        conf = await self._get_conf()
+
+        def s(key, default=True):
+            return "✅ Autorisé" if conf.get(key, default) else "❌ Bloqué"
+
+        cmd_only = conf.get('commands_only', False)
+
+        # Boutons toggle — style dynamique : vert = activé/autorisé, rouge = bloqué
+        def _btn_perm(key, label):
+            allowed = conf.get(key, True)
+            return Button(
+                label=label,
+                style=(discord.ButtonStyle.success if allowed else discord.ButtonStyle.danger),
+                custom_id=f"eccv2_{key}",
+            )
+
+        self.clear_items()
+        b_msg = _btn_perm('messages', "💬 Messages")
+        b_msg.callback = lambda i: self._toggle(i, 'messages')
+        b_img = _btn_perm('images', "🖼️ Images")
+        b_img.callback = lambda i: self._toggle(i, 'images')
+        b_gif = _btn_perm('gifs', "🎞️ GIFs")
+        b_gif.callback = lambda i: self._toggle(i, 'gifs')
+        b_emo = _btn_perm('emojis', "😀 Emojis")
+        b_emo.callback = lambda i: self._toggle(i, 'emojis')
+        b_link = _btn_perm('links', "🔗 Liens")
+        b_link.callback = lambda i: self._toggle(i, 'links')
+        b_cmd = Button(
+            label="🤖 Cmds uniquement",
+            style=(discord.ButtonStyle.success if cmd_only else discord.ButtonStyle.secondary),
+            custom_id="eccv2_cmd",
+        )
+        b_cmd.callback = lambda i: self._toggle(i, 'commands_only', default=False)
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="eccv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title(f"📺 Configuration · #{ch.name if ch else '?'}"),
+            v2_subtitle("Règles d'autorisation par type de contenu"),
+            v2_divider(),
+            v2_body(
+                f"💬 **Messages** · {s('messages')}\n"
+                f"🖼️ **Images** · {s('images')}\n"
+                f"🎞️ **GIFs** · {s('gifs')}\n"
+                f"😀 **Emojis** · {s('emojis')}\n"
+                f"🔗 **Liens** · {s('links')}"
+            ),
+            v2_divider(),
+            v2_body(
+                f"🤖 **Commandes bot uniquement** · {'✅ Activé' if cmd_only else '❌ Désactivé'}\n"
+                "_Si activé, seules les commandes slash peuvent être utilisées._"
+            ),
+            v2_divider(),
+            v2_subtitle("Clique sur un bouton pour activer / désactiver"),
+            discord.ui.ActionRow(b_msg, b_img, b_gif, b_emo, b_link),
+            discord.ui.ActionRow(b_cmd, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.WARNING))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _toggle(self, i, key, default=True):
+        conf = await self._get_conf()
+        conf[key] = not conf.get(key, default)
+        await self._save(conf)
+        await EditChanCfgV2(self.u, self.g, self.ch_id).render_to(i, edit=True)
+
+    async def _cb_back(self, i):
+        v = ChanPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                    🎫 TICKET CONFIG PANEL (INTACT)
