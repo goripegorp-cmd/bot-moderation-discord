@@ -3460,6 +3460,7 @@ class MainPanelV2(LayoutView):
         v2_panels = {
             'mod': lambda: ModerationPanelV2(self.u, self.g),
             'cmds': lambda: CommandsPanelV2(self.u, self.g),
+            'help': lambda: AutoHelpPanelV2(self.u, self.g),
         }
         # Modules encore en V1 (View + embed)
         v1_panels = {
@@ -3472,7 +3473,6 @@ class MainPanelV2(LayoutView):
             'centre': lambda: CentrePanel(self.u, self.g),
             'levels': lambda: LevelSystemPanel(self.u, self.g),
             'voice': lambda: TempVoicePanel(self.u, self.g),
-            'help': lambda: AutoHelpPanel(self.u, self.g),
         }
 
         if val in v2_panels:
@@ -12609,6 +12609,95 @@ class AutoHelpPanel(View):
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+class AutoHelpPanelV2(LayoutView):
+    """Panneau Aide Automatique en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        auto_helps = c.get('auto_help_channels', {})
+        count = len(auto_helps)
+
+        # Liste des salons configurés
+        list_lines = []
+        if auto_helps:
+            for ch_id, help_data in list(auto_helps.items())[:10]:
+                ch = self.g.get_channel(int(ch_id))
+                if ch:
+                    title = help_data.get('title', 'Aide')[:30]
+                    list_lines.append(f"• {ch.mention} · **{title}**")
+        list_block = "\n".join(list_lines) if list_lines else "_Aucun salon configuré pour l\'instant_"
+
+        # Boutons
+        self.clear_items()
+        b_add = Button(label="➕ Ajouter un salon", style=discord.ButtonStyle.success, custom_id="ahpv2_add")
+        b_add.callback = self._cb_add
+        b_manage = Button(label="📋 Gérer les aides", style=discord.ButtonStyle.primary, custom_id="ahpv2_manage", disabled=(count == 0))
+        b_manage.callback = self._cb_manage
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="ahpv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = []
+        if self.g.icon:
+            items.append(v2_section(
+                v2_title("💡 Aide Automatique"),
+                v2_subtitle(f"{count} salon(s) configuré(s)"),
+                accessory=v2_thumb(self.g.icon.url),
+            ))
+        else:
+            items.append(v2_title("💡 Aide Automatique"))
+            items.append(v2_subtitle(f"{count} salon(s) configuré(s)"))
+
+        items.append(v2_divider())
+        items.append(v2_body(
+            "Le message d\'aide reste toujours en bas du salon.\n"
+            "_Se repositionne automatiquement après chaque message._"
+        ))
+        items.append(v2_divider())
+        items.append(v2_title("📋 Salons configurés", level=3))
+        items.append(v2_body(list_block))
+        items.append(v2_divider())
+        items.append(discord.ui.ActionRow(b_add, b_manage, b_back))
+
+        self.add_item(v2_container(*items, color=Palette.INFO))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_add(self, i):
+        v = AutoHelpChannelSelect(self.u, self.g)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="📍 Choisir le salon",
+                description="Sélectionne le salon où afficher l\'aide automatique",
+                color=0x3498DB,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_manage(self, i):
+        c = await cfg(self.g.id)
+        auto_helps = c.get('auto_help_channels', {})
+        if not auto_helps:
+            return await i.response.send_message("❌ Aucun salon configuré", ephemeral=True)
+        v = await AutoHelpManageView.create(self.u, self.g)
+        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+
+    async def _cb_back(self, i):
+        v = MainPanelV2(self.u, self.g)
+        await i.response.edit_message(view=v, embed=None, attachments=[])
+
 
 class AutoHelpChannelSelect(View):
     def __init__(self, u, g, page=0):
