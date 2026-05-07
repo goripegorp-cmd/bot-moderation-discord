@@ -8,7 +8,25 @@ except ModuleNotFoundError:
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
-from discord.ui import View, Select, Modal, TextInput, Button
+from discord.ui import View, Select, Modal, TextInput, Button, LayoutView
+
+# ─── Helpers Components V2 (design system) ───
+from ui_v2 import (
+    Palette,
+    title as v2_title,
+    subtitle as v2_subtitle,
+    body as v2_body,
+    kv_block as v2_kv,
+    bullets as v2_bullets,
+    stats_grid as v2_stats,
+    divider as v2_divider,
+    thumb as v2_thumb,
+    section as v2_section,
+    container as v2_container,
+    BasePanel as V2BasePanel,
+    header as v2_header,
+    info_card as v2_info_card,
+)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  🛡️ GESTION D'ERREURS GLOBALE - REND LES ERREURS VISIBLES AU LIEU DE SILENCIEUSES
@@ -22442,53 +22460,57 @@ async def level_cmd(i: discord.Interaction, membre: discord.Member = None):
     # Vérifier le salon
     if not await check_level_channel(i):
         return
-    
+
     # Vérifier si le système est activé
     c = await cfg(i.guild.id)
     level_cfg = c.get('level_config', {})
     if not level_cfg.get('enabled', False):
         return await i.response.send_message("❌ Le système de niveaux n'est pas activé", ephemeral=True)
-    
+
     target = membre or i.user
     eco = await get_user_economy(i.guild.id, target.id)
-    
+
     current_level = eco['level']
     current_xp = eco['xp']
-    xp_for_next = current_level * 100  # XP requis pour le niveau actuel
-    xp_progress = current_xp % 100 if current_level > 1 else current_xp  # XP vers le prochain niveau
-    xp_needed = 100  # XP nécessaire pour chaque niveau
-    
+    xp_progress = current_xp % 100 if current_level > 1 else current_xp
+    xp_needed = 100
     progress_bar = create_progress_bar(xp_progress, xp_needed)
     percentage = int((xp_progress / xp_needed) * 100) if xp_needed > 0 else 0
-    
-    e = discord.Embed(title=f"📈 Niveau de {target.display_name}", color=0x9B59B6)
-    e.add_field(name="🏆 Niveau", value=f"**{current_level}**", inline=True)
-    e.add_field(name="✨ XP Total", value=f"**{current_xp}**", inline=True)
-    e.add_field(name="🪙 Pièces", value=f"**{eco['coins']}**", inline=True)
-    
-    e.add_field(
-        name=f"📊 Progression ({percentage}%)",
-        value=f"`{progress_bar}` {xp_progress}/{xp_needed}",
-        inline=False
-    )
-    
-    # Prochain rôle de niveau
+
+    # Prochaine récompense de rôle
     async with get_db() as db:
         async with db.execute(
             'SELECT level, role_id FROM level_rewards WHERE guild_id=? AND level > ? ORDER BY level LIMIT 1',
             (i.guild.id, current_level)
         ) as cursor:
             next_reward = await cursor.fetchone()
-    
+
+    # ─── Construction du LayoutView V2 ───
+    items = [
+        v2_section(
+            v2_title(f"📈 Niveau de {target.display_name}"),
+            v2_body(f"🏆 Niveau **{current_level}**  ·  ✨ **{current_xp} XP**  ·  🪙 **{eco['coins']} pièces**"),
+            accessory=v2_thumb(target.display_avatar.url),
+        ),
+        v2_divider(),
+        v2_title(f"Progression — niveau {current_level + 1}", level=2),
+        v2_body(f"`{progress_bar}` **{percentage}%**"),
+        v2_subtitle(f"{xp_progress} / {xp_needed} XP avant le prochain niveau"),
+    ]
+
     if next_reward:
         role = i.guild.get_role(next_reward[1])
         if role:
-            e.add_field(name="🎁 Prochain rôle", value=f"Niveau {next_reward[0]} → {role.mention}", inline=False)
-    
-    e.set_thumbnail(url=target.display_avatar.url)
-    e.set_footer(text=f"XP par message: {level_cfg.get('xp_per_message', 15)}")
-    
-    await i.response.send_message(embed=e)
+            items.append(v2_divider())
+            items.append(v2_title("🎁 Prochain rôle débloqué", level=3))
+            items.append(v2_body(f"Niveau **{next_reward[0]}** → {role.mention}"))
+
+    items.append(v2_divider())
+    items.append(v2_subtitle(f"Gain : {level_cfg.get('xp_per_message', 15)} XP par message"))
+
+    view = LayoutView(timeout=None)
+    view.add_item(v2_container(*items, color=Palette.PRIMARY))
+    await i.response.send_message(view=view)
 
 @bot.tree.command(name="shop", description="🛒 Ouvrir la boutique")
 async def shop_cmd(i: discord.Interaction):
