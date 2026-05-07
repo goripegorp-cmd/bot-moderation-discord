@@ -4104,14 +4104,15 @@ class ProtDetailV2(LayoutView):
         elif self.key == "anti_alt":
             v = AltConfigPanel(self.u, self.g)
         else:
-            v = ActionConfigPanel(self.u, self.g, self.key)
+            # ActionConfigPanelV2 (V2 LayoutView) — sortie spécifique
+            v = ActionConfigPanelV2(self.u, self.g, self.key)
+            return await v.render_to(i, edit=True)
         emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
         await i.response.edit_message(embed=emb, view=v, attachments=[])
 
     async def _cb_sanction(self, i):
-        v = ActionConfigPanel(self.u, self.g, self.key)
-        emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
-        await i.response.edit_message(embed=emb, view=v, attachments=[])
+        v = ActionConfigPanelV2(self.u, self.g, self.key)
+        await v.render_to(i, edit=True)
 
     async def _cb_log(self, i):
         try:
@@ -4771,6 +4772,101 @@ class ActionConfigPanel(View):
         prot = next(p for p in PROTS if p[0] == self.key)
         v = ProtDetailV2(self.u, self.g, prot)
         await v.render_to(i, edit=True)
+
+class ActionConfigPanelV2(LayoutView):
+    """Configuration de la sanction d'une protection en V2."""
+
+    def __init__(self, u, g, key):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+        self.key = key
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    def _get_action_key(self):
+        return ActionConfigPanel(self.u, self.g, self.key)._get_action_key()
+
+    def _get_duration_key(self):
+        return ActionConfigPanel(self.u, self.g, self.key)._get_duration_key()
+
+    def _get_default_action(self):
+        return ActionConfigPanel(self.u, self.g, self.key)._get_default_action()
+
+    def _get_default_duration(self):
+        return ActionConfigPanel(self.u, self.g, self.key)._get_default_duration()
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        ak = self._get_action_key()
+        dk = self._get_duration_key()
+        current_action = c.get(ak, self._get_default_action())
+        current_dur = c.get(dk, self._get_default_duration())
+
+        action_emoji = {'delete': '🗑️', 'mute': '🔇', 'kick': '👢', 'ban': '🔨'}.get(current_action, '⚡')
+        name = self.key.replace('anti_', '').replace('_', ' ').title()
+
+        # Boutons d'action — l'action active a un style différent
+        def _btn(action, label, default_style):
+            is_current = (current_action == action)
+            return Button(
+                label=("✓ " + label if is_current else label),
+                style=(discord.ButtonStyle.success if is_current else default_style),
+                custom_id=f"acpv2_{self.key}_{action}",
+            )
+
+        self.clear_items()
+        b_delete = _btn('delete', "🗑️ Supprimer", discord.ButtonStyle.secondary)
+        b_delete.callback = lambda i: self._set(i, 'delete')
+        b_mute = _btn('mute', "🔇 Mute", discord.ButtonStyle.primary)
+        b_mute.callback = lambda i: self._set(i, 'mute')
+        b_kick = _btn('kick', "👢 Kick", discord.ButtonStyle.secondary)
+        b_kick.callback = lambda i: self._set(i, 'kick')
+        b_ban = _btn('ban', "🔨 Ban", discord.ButtonStyle.danger)
+        b_ban.callback = lambda i: self._set(i, 'ban')
+        b_dur = Button(label="⏱️ Durée Mute", style=discord.ButtonStyle.primary, custom_id=f"acpv2_{self.key}_dur")
+        b_dur.callback = self._cb_duration
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id=f"acpv2_{self.key}_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title(f"⚡ Sanction · {name}"),
+            v2_subtitle(f"Action actuelle · {action_emoji} `{current_action.upper()}`  ·  Durée mute · `{current_dur}` min"),
+            v2_divider(),
+            v2_body(
+                "🗑️ **Supprimer** · Supprime le message uniquement\n"
+                "🔇 **Mute** · Rend muet + supprime\n"
+                "👢 **Kick** · Expulse du serveur\n"
+                "🔨 **Ban** · Bannit définitivement"
+            ),
+            v2_divider(),
+            v2_subtitle("Choisis l'action lors d'une violation"),
+            discord.ui.ActionRow(b_delete, b_mute, b_kick, b_ban),
+            discord.ui.ActionRow(b_dur, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.INFO))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _set(self, i, act):
+        ak = self._get_action_key()
+        await db_set(self.g.id, ak, act)
+        # On reste sur la même page (pour voir le changement)
+        await ActionConfigPanelV2(self.u, self.g, self.key).render_to(i, edit=True)
+
+    async def _cb_duration(self, i):
+        await i.response.send_modal(DurationConfigModal(self.g, self.u, self.key))
+
+    async def _cb_back(self, i):
+        prot = next(p for p in PROTS if p[0] == self.key)
+        v = ProtDetailV2(self.u, self.g, prot)
+        await v.render_to(i, edit=True)
+
 
 class DurationConfigModal(Modal, title="⏱️ Durée du Mute"):
     dur_input = TextInput(label="Durée en minutes", placeholder="5", max_length=5)
