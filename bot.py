@@ -13744,13 +13744,13 @@ class LevelSystemPanel(View):
     
     @discord.ui.button(label="🎭 Rôles", style=discord.ButtonStyle.secondary, row=1)
     async def level_roles(self, i, b):
-        v = LevelRolesPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = LevelRolesPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
     
     @discord.ui.button(label="🛒 Boutique", style=discord.ButtonStyle.success, row=1)
     async def shop_config(self, i, b):
-        v = ShopConfigPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ShopConfigPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
     
     @discord.ui.button(label="📝 Salons Msg", style=discord.ButtonStyle.secondary, row=2)
     async def xp_text_channels(self, i, b):
@@ -14426,8 +14426,8 @@ class RemoveLevelRoleView(View):
         async with get_db() as db:
             await db.execute('DELETE FROM level_rewards WHERE guild_id=? AND level=?', (self.g.id, level))
             await db.commit()
-        v = LevelRolesPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = LevelRolesPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 # ─────────────────────────────── BOUTIQUE CONFIG ───────────────────────────────
 
@@ -14673,8 +14673,8 @@ class RemoveShopItemView(View):
             level_cfg['shop_items'] = shop_items
             await db_set(self.g.id, 'level_config', level_cfg)
         
-        v = ShopConfigPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ShopConfigPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 def format_duration(seconds):
     """Formate une durée en texte lisible"""
