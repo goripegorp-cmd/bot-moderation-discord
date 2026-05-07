@@ -19294,52 +19294,54 @@ class TradeBuilderView(View):
         except asyncio.TimeoutError:
             return await i.followup.send("❌ Temps écoulé!", ephemeral=True)
         
-        # Créer le post professionnel
-        e = discord.Embed(color=C.GOLD)
-        e.set_author(name=f"🔄 TRADE • {self.jeu.upper()}", icon_url=self.user.display_avatar.url)
-        
-        # Affichage horizontal bien propre
-        e.add_field(
-            name="📤 DONNE",
-            value=donne_display.strip() if donne_display.strip() else "—",
-            inline=True
-        )
-        e.add_field(
-            name="⚡",
-            value="🔄",
-            inline=True
-        )
-        e.add_field(
-            name="📥 VEUT",
-            value=veux_display.strip() if veux_display.strip() else "—",
-            inline=True
-        )
-        
-        # Infos trader compactes
-        e.add_field(
-            name="",
-            value=f"👤 {self.user.mention} • `{self.user.id}` • <t:{int(now().timestamp())}:R>",
-            inline=False
-        )
-        
-        # Image en petit (thumbnail en haut à droite)
+        # ─── Publication V2 ───
         image_file = discord.File(io.BytesIO(image_data), filename=image_filename)
-        e.set_thumbnail(url=f"attachment://{image_filename}")
-        
-        e.set_footer(text="✅ Intéressé? Réagissez! • 💬 MP pour négocier")
-        
-        # Envoyer
-        trade_msg = await webhook_send(self.trade_ch, 'trade', embed=e, file=image_file)
+
+        donne_clean = donne_display.strip() if donne_display.strip() else "—"
+        veux_clean = veux_display.strip() if veux_display.strip() else "—"
+
+        trade_view = LayoutView(timeout=None)
+        trade_view.add_item(v2_container(
+            v2_section(
+                v2_title(f"🔄 TRADE — {self.jeu.upper()}"),
+                v2_subtitle(f"par {self.user.display_name} · <t:{int(now().timestamp())}:R>"),
+                accessory=v2_thumb(self.user.display_avatar.url),
+            ),
+            v2_divider(),
+            v2_body(
+                f"📤 **Donne** · {donne_clean}\n"
+                f"📥 **Veut** · {veux_clean}"
+            ),
+            v2_divider(),
+            v2_body(f"👤 {self.user.mention} · ID `{self.user.id}`"),
+            v2_divider(),
+            discord.ui.MediaGallery(
+                discord.MediaGalleryItem(media=f"attachment://{image_filename}", description="Preuve du trade")
+            ),
+            v2_divider(),
+            v2_subtitle("✅ Intéressé ? Réagissez !  ·  💬 MP pour négocier"),
+            color=Palette.PREMIUM,
+        ))
+
+        trade_msg = await webhook_send(self.trade_ch, 'trade', view=trade_view, file=image_file)
         if not trade_msg:
             return await i.followup.send("❌ Erreur lors de la publication du trade", ephemeral=True)
-        await trade_msg.add_reaction("✅")
-        await trade_msg.add_reaction("💬")
-        
+        try:
+            await trade_msg.add_reaction("✅")
+            await trade_msg.add_reaction("💬")
+        except Exception as ex:
+            print(f"[TRADE] Erreur ajout réactions: {ex}")
+
         trade_cooldowns[(self.guild.id, self.user.id)] = now()
-        
-        confirm = discord.Embed(title="✅ Trade publié!", color=C.GREEN)
-        confirm.description = f"Votre offre a été publiée dans {self.trade_ch.mention}"
-        await i.followup.send(embed=confirm, ephemeral=True)
+
+        # Confirmation V2 à l'auteur
+        confirm_view = LayoutView(timeout=None)
+        confirm_view.add_item(v2_container(
+            v2_title("✅ Trade publié !", level=2),
+            v2_body(f"Ton offre a été publiée dans {self.trade_ch.mention}"),
+            color=Palette.SUCCESS,
+        ))
+        await i.followup.send(view=confirm_view, ephemeral=True)
     
     @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.danger, row=3)
     async def cancel(self, i, b):
