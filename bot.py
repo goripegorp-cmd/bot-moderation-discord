@@ -6504,12 +6504,9 @@ class ModerationPanel(View):
         try:
             async def callback(interaction, role_id, extra):
                 await db_set(interaction.guild.id, 'mod_warn_role', role_id)
-                v = ModerationPanel(self.u, self.g)
-                role = interaction.guild.get_role(role_id)
-                await interaction.response.edit_message(
-                    content=f"✅ Rôle /warn défini: **{role.name if role else 'Aucun'}**",
-                    embed=await v.embed(), view=v
-                )
+                await db_set(interaction.guild.id, 'mod_warn_role', role_id)
+                new_panel = ModerationPanelV2(self.u, self.g)
+                await new_panel.render_to(interaction, edit=True)
             
             v = UniversalRoleSelect(
                 self.u, self.g,
@@ -6752,8 +6749,8 @@ class ModLogSelectView(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = ModerationPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ModerationPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class ModLogSelect(Select):
     def __init__(self, u, g, opts):
@@ -6763,8 +6760,8 @@ class ModLogSelect(Select):
     
     async def callback(self, i):
         await db_set(i.guild.id, 'mod_log_channel', int(self.values[0]))
-        v = ModerationPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ModerationPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class ModRoleSelectView(View):
     def __init__(self, u, g, opts, key):
@@ -6775,8 +6772,8 @@ class ModRoleSelectView(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = ModerationPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ModerationPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class ModRoleSelect(Select):
     def __init__(self, u, g, opts, key):
@@ -6787,8 +6784,8 @@ class ModRoleSelect(Select):
     
     async def callback(self, i):
         await db_set(i.guild.id, self.key, int(self.values[0]))
-        v = ModerationPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ModerationPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           👑 IMMUNITÉS (INTACT)
@@ -14384,8 +14381,8 @@ class TempVoicePanel(View):
         voice_cfg = c.get('temp_voice_config', {})
         voice_cfg['enabled'] = not voice_cfg.get('enabled', False)
         await db_set(self.g.id, 'temp_voice_config', voice_cfg)
-        v = TempVoicePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = TempVoicePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
     
     @discord.ui.button(label="➕ Ajouter Hub", style=discord.ButtonStyle.primary, row=0)
     async def add_hub(self, i, b):
@@ -14603,8 +14600,8 @@ class TempVoiceAddHubSelect(View):
         await i.response.edit_message(view=self)
 
     async def _back(self, i):
-        v = TempVoicePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = TempVoicePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def select_callback(self, i):
         hub_id = int(i.data['values'][0])
@@ -14968,8 +14965,8 @@ class TempVoiceHubsListPanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
-        v = TempVoicePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = TempVoicePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class TempVoiceHubsListPanelV2(LayoutView):
     """Liste paginee des hubs vocaux en V2."""
@@ -15537,8 +15534,8 @@ class TempVoicePermissionsPanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = TempVoicePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = TempVoicePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class TempVoicePermissionsPanelV2(LayoutView):
@@ -19496,8 +19493,8 @@ class TicketMainPanel(View):
     
     @discord.ui.button(label="🔄 Rafraîchir", style=discord.ButtonStyle.secondary, row=2)
     async def ref(self, i, b):
-        v = TicketMainPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = TicketMainPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
@@ -19715,8 +19712,8 @@ class PaginatedRoleSelectForStaffGlobal(View):
         await i.response.edit_message(embed=embed, view=v)
     
     async def go_back(self, i):
-        v = TicketMainPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = TicketMainPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class StaffGlobalRoleSelect(Select):
     def __init__(self, parent, opts):
@@ -19805,8 +19802,8 @@ class PaginatedRoleSelectForBlacklist(View):
         await i.response.edit_message(embed=embed, view=v)
     
     async def go_back(self, i):
-        v = TicketMainPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = TicketMainPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class BlacklistRoleSelect(Select):
@@ -19837,8 +19834,8 @@ class TkStaffSel(Select):
     
     async def callback(self, i):
         await db_set(i.guild.id, 'ticket_staff', int(self.values[0]))
-        v = TicketMainPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = TicketMainPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class TkLogPaginatedView(View):
     """Sélecteur de salon Logs paginé pour les tickets"""
@@ -19886,13 +19883,13 @@ class TkLogPaginatedView(View):
         await i.response.edit_message(embed=discord.Embed(title="📜 Choisir le salon Logs", description=f"**{len(self.channels)} salons** • Page {self.page+1}/{self.max_page+1}", color=C.PURPLE), view=self)
 
     async def _back(self, i):
-        v = TicketMainPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = TicketMainPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _select_cb(self, i):
         await db_set(i.guild.id, 'ticket_log', int(i.data['values'][0]))
-        v = TicketMainPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = TicketMainPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 # Legacy compat
 TkLogView = TkLogPaginatedView
@@ -20074,13 +20071,13 @@ class PanelEditView(View):
         if self.pid in panels:
             del panels[self.pid]
         await db_set(self.g.id, 'ticket_panels', panels)
-        v = TicketMainPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = TicketMainPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
-        v = TicketMainPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = TicketMainPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
