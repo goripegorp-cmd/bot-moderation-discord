@@ -22735,7 +22735,7 @@ async def leaderboard_cmd(i: discord.Interaction):
     games_cfg = c.get('minigames_config', {})
     if not games_cfg.get('economy_enabled', False):
         return await i.response.send_message("❌ L'économie n'est pas activée sur ce serveur", ephemeral=True)
-    
+
     # Récupérer le top 10
     async with get_db() as db:
         async with db.execute(
@@ -22743,25 +22743,50 @@ async def leaderboard_cmd(i: discord.Interaction):
             (i.guild.id,)
         ) as cursor:
             rows = await cursor.fetchall()
-    
+
     if not rows:
         return await i.response.send_message("❌ Aucune donnée disponible", ephemeral=True)
-    
-    e = discord.Embed(title="🏆 Classement des plus riches", color=0xF1C40F)
-    
-    desc = ""
+
+    # ─── Construction du LayoutView V2 ───
     medals = ["🥇", "🥈", "🥉"]
+    podium_lines = []
+    rest_lines = []
     for idx, (user_id, coins, bank, level) in enumerate(rows):
         member = i.guild.get_member(user_id)
         name = member.display_name if member else f"User {user_id}"
-        medal = medals[idx] if idx < 3 else f"**{idx + 1}.**"
         total = coins + bank
-        desc += f"{medal} **{name}** - {total} 🪙 (Nv.{level})\n"
-    
-    e.description = desc
-    e.set_footer(text=f"Demandé par {i.user.display_name}")
-    
-    await i.response.send_message(embed=e)
+        if idx < 3:
+            podium_lines.append(f"{medals[idx]} **{name}** · `{total:,}` 🪙 · Niveau **{level}**")
+        else:
+            rest_lines.append(f"`{idx + 1:>2}.` **{name}** · `{total:,}` 🪙 · Niveau **{level}**")
+
+    items: list = []
+    # En-tête : avec icône serveur si dispo, sinon titre direct
+    if i.guild.icon:
+        items.append(v2_section(
+            v2_title("🏆 Classement des plus riches"),
+            v2_subtitle(f"Top {len(rows)} des fortunes du serveur"),
+            accessory=v2_thumb(i.guild.icon.url),
+        ))
+    else:
+        items.append(v2_title("🏆 Classement des plus riches"))
+        items.append(v2_subtitle(f"Top {len(rows)} des fortunes du serveur"))
+
+    items.append(v2_divider())
+    items.append(v2_title("🏅 Podium", level=2))
+    items.append(v2_body("\n".join(podium_lines)))
+
+    if rest_lines:
+        items.append(v2_divider())
+        items.append(v2_title("🪙 Suite du classement", level=3))
+        items.append(v2_body("\n".join(rest_lines)))
+
+    items.append(v2_divider())
+    items.append(v2_subtitle(f"Demandé par {i.user.display_name}"))
+
+    view = LayoutView(timeout=None)
+    view.add_item(v2_container(*items, color=Palette.PREMIUM))
+    await i.response.send_message(view=view)
 
 
 @bot.tree.command(name="testdeals", description="🎮 [Admin] Tester le système de promotions de jeux")
