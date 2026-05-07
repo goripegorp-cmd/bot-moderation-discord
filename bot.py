@@ -9793,6 +9793,13 @@ class CentrePanelV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.PRIMARY))
 
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        """Compatibilité dispatch MainPanelV2 — _build est appelé en __init__."""
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
     async def _open_v1(self, interaction, panel_factory):
         v = panel_factory()
         emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
@@ -9802,13 +9809,15 @@ class CentrePanelV2(LayoutView):
         await self._open_v1(i, lambda: GiveawayPanel(self.u, self.g))
 
     async def _cb_announce(self, i):
-        await self._open_v1(i, lambda: AnnouncementPanel(self.u, self.g))
+        v = AnnouncementPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _cb_messages(self, i):
         await self._open_v1(i, lambda: MessagePanel(self.u, self.g))
 
     async def _cb_mass_role(self, i):
-        await self._open_v1(i, lambda: MassRolePanel(self.u, self.g))
+        v = MassRolePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _cb_auto_react(self, i):
         await self._open_v1(i, lambda: AutoReactionPanel(self.u, self.g))
@@ -10029,6 +10038,71 @@ class MassRolePanel(View):
     async def back(self, i, b):
         v = CentrePanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+
+class MassRolePanelV2(LayoutView):
+    """Gestion des rôles en masse en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        humans = sum(1 for m in self.g.members if not m.bot)
+        bots = sum(1 for m in self.g.members if m.bot)
+        roles_count = len(self.g.roles) - 1
+
+        self.clear_items()
+        b_add = Button(label="➕ Ajouter un rôle", style=discord.ButtonStyle.success, custom_id="mrpv2_add")
+        b_add.callback = self._cb_add
+        b_remove = Button(label="➖ Retirer un rôle", style=discord.ButtonStyle.danger, custom_id="mrpv2_remove")
+        b_remove.callback = self._cb_remove
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="mrpv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = []
+        if self.g.icon:
+            items.append(v2_section(
+                v2_title("🎭 Gestion des Rôles en Masse"),
+                v2_subtitle(f"👥 {humans} humains · 🤖 {bots} bots · 🎭 {roles_count} rôles"),
+                accessory=v2_thumb(self.g.icon.url),
+            ))
+        else:
+            items.append(v2_title("🎭 Gestion des Rôles en Masse"))
+            items.append(v2_subtitle(f"👥 {humans} humains · 🤖 {bots} bots · 🎭 {roles_count} rôles"))
+
+        items.append(v2_divider())
+        items.append(v2_body(
+            "➕ **Ajouter** — Donne un rôle à tous ceux qui ne l'ont pas\n"
+            "➖ **Retirer** — Enlève un rôle à tous ceux qui l'ont"
+        ))
+        items.append(v2_divider())
+        items.append(v2_subtitle("⚠️ Les changements sont irréversibles"))
+        items.append(discord.ui.ActionRow(b_add, b_remove, b_back))
+
+        self.add_item(v2_container(*items, color=Palette.INFO))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_add(self, i):
+        v = MassRoleTargetSelect(self.u, self.g, action='add')
+        await i.response.edit_message(embed=v.embed(), view=v, attachments=[])
+
+    async def _cb_remove(self, i):
+        v = MassRoleTargetSelect(self.u, self.g, action='remove')
+        await i.response.edit_message(embed=v.embed(), view=v, attachments=[])
+
+    async def _cb_back(self, i):
+        v = CentrePanelV2(self.u, self.g)
+        v._build()
+        await i.response.edit_message(view=v, embed=None, attachments=[])
 
 
 class MassRoleTargetSelect(View):
@@ -10428,6 +10502,58 @@ class AnnouncementPanel(View):
     async def back(self, i, b):
         v = CentrePanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+class AnnouncementPanelV2(LayoutView):
+    """Système d'annonces en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    def _build(self):
+        self.clear_items()
+        b_create = Button(label="📢 Créer une Annonce", style=discord.ButtonStyle.success, custom_id="apnv2_create")
+        b_create.callback = self._cb_create
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="apnv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("📢 Système d'Annonces"),
+            v2_subtitle("Crée de belles annonces pour ton serveur"),
+            v2_divider(),
+            v2_body(
+                "**✨ Fonctionnalités**\n"
+                "• Titre personnalisé\n"
+                "• Description détaillée\n"
+                "• Couleur au choix\n"
+                "• Image optionnelle\n"
+                "• Mention optionnelle (@everyone, @here, rôle)"
+            ),
+            v2_divider(),
+            v2_subtitle("💡 L'annonce sera envoyée immédiatement après création"),
+            discord.ui.ActionRow(b_create, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.WARNING))
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_create(self, i):
+        await i.response.send_modal(AnnouncementCreateModal(self.u, self.g))
+
+    async def _cb_back(self, i):
+        v = CentrePanelV2(self.u, self.g)
+        await i.response.edit_message(view=v, embed=None, attachments=[])
+
 
 class AnnouncementCreateModal(Modal):
     def __init__(self, u, g):
