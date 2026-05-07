@@ -3456,9 +3456,13 @@ class MainPanelV2(LayoutView):
 
     async def _module_select(self, i):
         val = i.data['values'][0]
-        panels = {
+        # Modules migrés en V2 (LayoutView avec render_to async)
+        v2_panels = {
+            'mod': lambda: ModerationPanelV2(self.u, self.g),
+        }
+        # Modules encore en V1 (View + embed)
+        v1_panels = {
             'prot': lambda: ProtPanel(self.u, self.g),
-            'mod': lambda: ModerationPanel(self.u, self.g),
             'immune': lambda: ImmunePanel(self.u, self.g),
             'cmds': lambda: CommandsPanel(self.u, self.g),
             'chan': lambda: ChanPanel(self.u, self.g),
@@ -3470,11 +3474,15 @@ class MainPanelV2(LayoutView):
             'voice': lambda: TempVoicePanel(self.u, self.g),
             'help': lambda: AutoHelpPanel(self.u, self.g),
         }
-        v = panels[val]()
-        emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
-        # Transition V2 → V1: edit_message accepte la nouvelle View V1 + embed.
-        # attachments=[] pour effacer toute pièce jointe précédente (sécurité).
-        await i.response.edit_message(embed=emb, view=v, attachments=[])
+
+        if val in v2_panels:
+            v = v2_panels[val]()
+            await v.render_to(i, edit=True)
+        else:
+            v = v1_panels[val]()
+            emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
+            # Transition V2 → V1: attachments=[] efface les pièces jointes V2.
+            await i.response.edit_message(embed=emb, view=v, attachments=[])
 
     async def _close(self, i):
         try:
@@ -5582,6 +5590,154 @@ class ModerationPanel(View):
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+
+class ModerationPanelV2(LayoutView):
+    """Panneau de modération en V2 — config rôles + salon logs."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+        self._loading = True
+        # Build initial (sera complété en async)
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        """Construit le LayoutView et l'envoie/édite via interaction."""
+        c = await cfg(self.g.id)
+
+        # Compter les infractions
+        inf_count = 0
+        try:
+            async with get_db() as db:
+                async with db.execute('SELECT COUNT(*) FROM infractions WHERE guild_id=?', (self.g.id,)) as cur:
+                    row = await cur.fetchone()
+                    inf_count = row[0] if row else 0
+        except Exception as ex:
+            print(f"[MOD-V2] Erreur count infractions: {ex}")
+
+        # Récupérer les éléments configurés
+        log_ch = self.g.get_channel(c.get('mod_log_channel', 0))
+        warn_role = self.g.get_role(c.get('mod_warn_role', 0))
+        mute_role = self.g.get_role(c.get('mod_mute_role', 0))
+        inf_role = self.g.get_role(c.get('mod_infractions_role', 0))
+        clear_role = self.g.get_role(c.get('mod_clear_role', 0))
+
+        def status(item):
+            return f"🟢 {item.mention if hasattr(item, 'mention') else item.name}" if item else "🔴 _Non configuré_"
+
+        # Reconstruire les boutons à chaque render (pour les ré-attacher)
+        self.clear_items()
+
+        b_logs = Button(label="📜 Salon Logs", style=discord.ButtonStyle.success, custom_id="mpv2_set_logs")
+        b_logs.callback = self._cb_set_logs
+        b_warn = Button(label="⚠️ Rôle /warn", style=discord.ButtonStyle.primary, custom_id="mpv2_set_warn")
+        b_warn.callback = self._cb_set_warn
+        b_mute = Button(label="🔇 Rôle /mute", style=discord.ButtonStyle.primary, custom_id="mpv2_set_mute")
+        b_mute.callback = self._cb_set_mute
+        b_inf = Button(label="📋 Rôle /infractions", style=discord.ButtonStyle.primary, custom_id="mpv2_set_inf")
+        b_inf.callback = self._cb_set_inf
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="mpv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = []
+        if self.g.icon:
+            items.append(v2_section(
+                v2_title("🔨 Modération"),
+                v2_subtitle(f"📊 {inf_count} infractions enregistrées au total"),
+                accessory=v2_thumb(self.g.icon.url),
+            ))
+        else:
+            items.append(v2_title("🔨 Modération"))
+            items.append(v2_subtitle(f"📊 {inf_count} infractions enregistrées au total"))
+
+        items.append(v2_divider())
+        items.append(v2_body(
+            f"📜 **Salon Logs** · {status(log_ch)}\n"
+            f"⚠️ **Rôle /warn** · {status(warn_role)}\n"
+            f"🔇 **Rôle /mute** · {status(mute_role)}\n"
+            f"📋 **Rôle /infractions** · {status(inf_role)}\n"
+            f"🧹 **Rôle /clear** · {status(clear_role)}"
+        ))
+        items.append(v2_divider())
+        items.append(v2_subtitle("👑 Le owner a toujours accès à toutes les commandes"))
+
+        items.append(discord.ui.ActionRow(b_logs, b_warn, b_mute))
+        items.append(discord.ui.ActionRow(b_inf, b_back))
+
+        self.add_item(v2_container(*items, color=Palette.WARNING))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _open_channel_picker(self, interaction, key, label):
+        """Ouvre un sélecteur de salon (V1) qui revient vers ModerationPanelV2."""
+        async def picker_callback(inter, channel_id, extra):
+            await db_set(inter.guild.id, key, channel_id)
+            new_panel = ModerationPanelV2(self.u, self.g)
+            await new_panel.render_to(inter, edit=True)
+
+        v = UniversalChannelSelect(
+            self.u, self.g,
+            callback_func=picker_callback,
+            return_view_func=lambda: ModerationPanelV2(self.u, self.g),
+            title=label,
+        )
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                title=f"📜 {label}",
+                description=f"📊 {len(list(self.g.text_channels))} salons disponibles",
+                color=0xE67E22,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _open_role_picker(self, interaction, key, label):
+        """Ouvre un sélecteur de rôle (V1) qui revient vers ModerationPanelV2."""
+        async def picker_callback(inter, role_id, extra):
+            await db_set(inter.guild.id, key, role_id)
+            new_panel = ModerationPanelV2(self.u, self.g)
+            await new_panel.render_to(inter, edit=True)
+
+        v = UniversalRoleSelect(
+            self.u, self.g,
+            callback_func=picker_callback,
+            return_view_func=lambda: ModerationPanelV2(self.u, self.g),
+            title=label,
+            none_label="❌ Aucun rôle requis",
+        )
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                title=f"⚙️ {label}",
+                description=f"Sélectionne le rôle minimum requis.\n📊 {len([r for r in self.g.roles[1:] if not r.is_bot_managed()])} rôles disponibles",
+                color=0xE67E22,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_set_logs(self, i):
+        await self._open_channel_picker(i, 'mod_log_channel', 'Salon Logs')
+
+    async def _cb_set_warn(self, i):
+        await self._open_role_picker(i, 'mod_warn_role', 'Rôle /warn')
+
+    async def _cb_set_mute(self, i):
+        await self._open_role_picker(i, 'mod_mute_role', 'Rôle /mute')
+
+    async def _cb_set_inf(self, i):
+        await self._open_role_picker(i, 'mod_infractions_role', 'Rôle /infractions')
+
+    async def _cb_back(self, i):
+        v = MainPanelV2(self.u, self.g)
+        await i.response.edit_message(view=v, embed=None, attachments=[])
+
 
 # Anciennes classes gardées pour compatibilité
 class ModLogSelectView(View):
