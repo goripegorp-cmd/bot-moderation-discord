@@ -13421,12 +13421,12 @@ class LevelSystemPanelV2(LayoutView):
         await i.response.send_modal(LevelCoinsVocalModal(self.g, self.u))
 
     async def _cb_roles(self, i):
-        v = LevelRolesPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+        v = LevelRolesPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _cb_shop(self, i):
-        v = ShopConfigPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+        v = ShopConfigPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _cb_text_ch(self, i):
         v = XPChannelsSelectPanel(self.u, self.g, 'text')
@@ -13723,6 +13723,90 @@ class LevelUpChannelSelect(View):
 
 # ─────────────────────────────── RÔLES NIVEAU ───────────────────────────────
 
+class LevelRolesPanelV2(LayoutView):
+    """Recompenses de roles par niveau en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT level, role_id FROM level_rewards WHERE guild_id=? ORDER BY level',
+                (self.g.id,)
+            ) as cursor:
+                rewards = await cursor.fetchall()
+
+        # Liste rewards
+        list_lines = []
+        for lvl, role_id in rewards[:15]:
+            role = self.g.get_role(role_id)
+            if role:
+                list_lines.append(f"**Niveau {lvl}** → {role.mention}")
+        if len(rewards) > 15:
+            list_lines.append(f"_… + {len(rewards) - 15} autres_")
+        list_block = "\n".join(list_lines) if list_lines else "_Aucune récompense configurée_"
+
+        self.clear_items()
+        b_add = Button(label="➕ Ajouter", style=discord.ButtonStyle.success, custom_id="lrpv2_add")
+        b_add.callback = self._cb_add
+        b_remove = Button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, disabled=(not rewards), custom_id="lrpv2_remove")
+        b_remove.callback = self._cb_remove
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="lrpv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("🎭 Rôles par Niveau"),
+            v2_subtitle(f"{len(rewards)} récompense(s) configurée(s)"),
+            v2_divider(),
+            v2_body("Rôles donnés automatiquement quand un membre atteint un niveau."),
+            v2_divider(),
+            v2_title("📋 Récompenses", level=3),
+            v2_body(list_block),
+            v2_divider(),
+            discord.ui.ActionRow(b_add, b_remove, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_add(self, i):
+        await i.response.send_modal(AddLevelRoleModal(self.g, self.u))
+
+    async def _cb_remove(self, i):
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT level, role_id FROM level_rewards WHERE guild_id=?',
+                (self.g.id,)
+            ) as cursor:
+                rewards = await cursor.fetchall()
+        if not rewards:
+            return await i.response.send_message("❌ Aucune récompense", ephemeral=True)
+        opts = []
+        for lvl, role_id in rewards[:25]:
+            role = self.g.get_role(role_id)
+            opts.append(discord.SelectOption(label=f"Niveau {lvl} - {role.name if role else '?'}"[:25], value=str(lvl)))
+        v = RemoveLevelRoleView(self.u, self.g, opts)
+        await i.response.edit_message(
+            embed=discord.Embed(title="🗑️ Supprimer une récompense", color=0xE74C3C),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_back(self, i):
+        v = LevelSystemPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
 class LevelRolesPanel(View):
     def __init__(self, u, g):
         super().__init__(timeout=600)
@@ -13860,6 +13944,89 @@ class RemoveLevelRoleView(View):
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 # ─────────────────────────────── BOUTIQUE CONFIG ───────────────────────────────
+
+class ShopConfigPanelV2(LayoutView):
+    """Configuration de la boutique en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        level_cfg = c.get('level_config', {})
+        shop_items = level_cfg.get('shop_items', [])
+
+        list_lines = []
+        for idx, item in enumerate(shop_items[:10], 1):
+            role = self.g.get_role(item.get('role_id', 0))
+            price = item.get('price', 0)
+            duration = item.get('duration', 3600)
+            dur_txt = format_duration(duration)
+            list_lines.append(f"`{idx:>2}.` {role.mention if role else '?'} · `{price}` 🪙 · {dur_txt}")
+        if len(shop_items) > 10:
+            list_lines.append(f"_… + {len(shop_items) - 10} autres_")
+        list_block = "\n".join(list_lines) if list_lines else "_Aucun article · ajoute-en avec ➕_"
+
+        self.clear_items()
+        b_add = Button(label="➕ Ajouter Article", style=discord.ButtonStyle.success, custom_id="scpv2_add")
+        b_add.callback = self._cb_add
+        b_remove = Button(label="🗑️ Supprimer Article", style=discord.ButtonStyle.danger, disabled=(not shop_items), custom_id="scpv2_remove")
+        b_remove.callback = self._cb_remove
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="scpv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("🛒 Configuration Boutique"),
+            v2_subtitle(f"{len(shop_items)} article(s) en vente"),
+            v2_divider(),
+            v2_body("Configure les articles achetables avec `/shop`."),
+            v2_divider(),
+            v2_title("📦 Articles", level=3),
+            v2_body(list_block),
+            v2_divider(),
+            v2_subtitle("💡 Les rôles sont temporaires et retirés automatiquement à expiration"),
+            discord.ui.ActionRow(b_add, b_remove, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.PREMIUM))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_add(self, i):
+        await i.response.send_modal(AddShopItemModal(self.g, self.u))
+
+    async def _cb_remove(self, i):
+        c = await cfg(self.g.id)
+        level_cfg = c.get('level_config', {})
+        shop_items = level_cfg.get('shop_items', [])
+        if not shop_items:
+            return await i.response.send_message("❌ Aucun article", ephemeral=True)
+        opts = []
+        for idx, item in enumerate(shop_items[:25]):
+            role = self.g.get_role(item.get('role_id', 0))
+            opts.append(discord.SelectOption(
+                label=f"{role.name if role else '?'} - {item.get('price', 0)} 🪙"[:25],
+                value=str(idx),
+            ))
+        v = RemoveShopItemView(self.u, self.g, opts)
+        await i.response.edit_message(
+            embed=discord.Embed(title="🗑️ Supprimer un article", color=0xE74C3C),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_back(self, i):
+        v = LevelSystemPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
 
 class ShopConfigPanel(View):
     def __init__(self, u, g):
