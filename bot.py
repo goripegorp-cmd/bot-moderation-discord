@@ -3357,6 +3357,132 @@ class MainPanel(View):
     async def close(self, i, b):
         await i.message.delete()
 
+
+class MainPanelV2(LayoutView):
+    """Panneau principal de configuration en Components V2.
+
+    Dispatch vers les sous-panels existants en V1 (transition gérée
+    nativement par discord.py via edit_message).
+    """
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    def _build(self):
+        # Stats serveur
+        online = sum(1 for m in self.g.members if m.status != discord.Status.offline and not m.bot)
+        bots = sum(1 for m in self.g.members if m.bot)
+        humans = self.g.member_count - bots
+        boosts = self.g.premium_subscription_count or 0
+
+        # En-tête
+        if self.g.icon:
+            head = v2_section(
+                v2_title(f"⚙️ Configuration — {self.g.name}"),
+                v2_subtitle(f"👑 {self.u.display_name} · Owner only · Timeout 10 min"),
+                accessory=v2_thumb(self.g.icon.url),
+            )
+            head_items = [head]
+        else:
+            head_items = [
+                v2_title(f"⚙️ Configuration — {self.g.name}"),
+                v2_subtitle(f"👑 {self.u.display_name} · Owner only · Timeout 10 min"),
+            ]
+
+        # Stats grid
+        stats_block = v2_body(
+            f"👥 **Membres** · `{humans:,}`  ·  🤖 **Bots** · `{bots}`  ·  🟢 **En ligne** · `{online}`\n"
+            f"📺 **Salons** · `{len(self.g.text_channels)}`  ·  🔊 **Vocaux** · `{len(self.g.voice_channels)}`  ·  💎 **Boosts** · `{boosts}`"
+        )
+
+        # Catégories de modules (présentation)
+        modules_block = v2_body(
+            "🛡️ **Sécurité** — Protection, Modération, Immunités\n"
+            "🎫 **Communauté** — Tickets, Niveaux, Commandes\n"
+            "📢 **Contenu** — Feeds sociaux, Stats, Aide auto\n"
+            "🔧 **Outils** — Salons, Vocaux, Config avancée"
+        )
+
+        # Select des modules
+        sel = Select(
+            placeholder="📂 Choisir un module à configurer…",
+            options=[
+                discord.SelectOption(label="Protection", value="prot", emoji="🛡️", description="Anti-spam, anti-raid, filtres"),
+                discord.SelectOption(label="Modération", value="mod", emoji="🔨", description="Warn, mute, rôles modérateurs"),
+                discord.SelectOption(label="Immunités", value="immune", emoji="👑", description="Rôles et utilisateurs immunisés"),
+                discord.SelectOption(label="Commandes", value="cmds", emoji="⚡", description="Suggestions, trade, commandes"),
+                discord.SelectOption(label="Config Salon", value="chan", emoji="📺", description="Configuration par salon"),
+                discord.SelectOption(label="Tickets", value="tickets", emoji="🎫", description="Système de tickets complet"),
+                discord.SelectOption(label="Publicité", value="ads", emoji="📢", description="YouTube, Twitch, TikTok, etc."),
+                discord.SelectOption(label="Statistiques", value="stats", emoji="📊", description="Stats membres et serveur"),
+                discord.SelectOption(label="Centre", value="centre", emoji="🎯", description="Annonces, giveaways, messages"),
+                discord.SelectOption(label="Niveaux & Économie", value="levels", emoji="📈", description="XP, boutique, leaderboard"),
+                discord.SelectOption(label="Vocaux Temporaires", value="voice", emoji="🔊", description="Hubs vocaux personnalisables"),
+                discord.SelectOption(label="Aide Automatique", value="help", emoji="💡", description="FAQ et aide contextuelle"),
+            ],
+            custom_id="mpv2_module",
+        )
+        sel.callback = self._module_select
+
+        # Bouton fermer
+        close_btn = Button(
+            label="Fermer",
+            emoji="✖️",
+            style=discord.ButtonStyle.danger,
+            custom_id="mpv2_close",
+        )
+        close_btn.callback = self._close
+
+        # Container final
+        self.add_item(v2_container(
+            *head_items,
+            v2_divider(),
+            stats_block,
+            v2_divider(),
+            v2_title("Modules disponibles", level=2),
+            modules_block,
+            v2_divider(),
+            v2_subtitle("▼ Sélectionne un module dans le menu ci-dessous"),
+            discord.ui.ActionRow(sel),
+            discord.ui.ActionRow(close_btn),
+            color=Palette.PRIMARY,
+        ))
+
+    async def _module_select(self, i):
+        val = i.data['values'][0]
+        panels = {
+            'prot': lambda: ProtPanel(self.u, self.g),
+            'mod': lambda: ModerationPanel(self.u, self.g),
+            'immune': lambda: ImmunePanel(self.u, self.g),
+            'cmds': lambda: CommandsPanel(self.u, self.g),
+            'chan': lambda: ChanPanel(self.u, self.g),
+            'tickets': lambda: TicketMainPanel(self.u, self.g),
+            'ads': lambda: AdsPanel(self.u, self.g),
+            'stats': lambda: StatPanel(self.u, self.g),
+            'centre': lambda: CentrePanel(self.u, self.g),
+            'levels': lambda: LevelSystemPanel(self.u, self.g),
+            'voice': lambda: TempVoicePanel(self.u, self.g),
+            'help': lambda: AutoHelpPanel(self.u, self.g),
+        }
+        v = panels[val]()
+        emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
+        # Transition V2 → V1: edit_message accepte la nouvelle View V1 + embed.
+        # attachments=[] pour effacer toute pièce jointe précédente (sécurité).
+        await i.response.edit_message(embed=emb, view=v, attachments=[])
+
+    async def _close(self, i):
+        try:
+            await i.message.delete()
+        except Exception:
+            pass
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🛡️ PROTECTION PANEL (REFAIT PROPREMENT)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -17197,15 +17323,19 @@ async def configure_cmd(i: discord.Interaction):
     is_super_owner = i.user.id == BOT_SUPER_OWNER
     
     if not (is_guild_owner or is_super_owner):
-        e = discord.Embed(color=0xE74C3C)
-        e.set_author(name="⛔ Accès Refusé", icon_url=i.guild.icon.url if i.guild.icon else None)
-        e.description = (
-            f"**Cette commande est réservée au fondateur du serveur.**\n\n"
-            f"👑 Fondateur : {i.guild.owner.mention if i.guild.owner else 'Inconnu'}\n\n"
-            f"*Seul le propriétaire du serveur peut configurer le bot.*"
-        )
-        e.set_footer(text="Sécurité • /configure")
-        return await i.response.send_message(embed=e, ephemeral=True)
+        owner_mention = i.guild.owner.mention if i.guild.owner else "_Inconnu_"
+        denied_view = LayoutView(timeout=None)
+        denied_view.add_item(v2_container(
+            v2_title("⛔ Accès Refusé", level=2),
+            v2_body(
+                "**Cette commande est réservée au fondateur du serveur.**\n\n"
+                f"👑 Fondateur : {owner_mention}"
+            ),
+            v2_divider(),
+            v2_subtitle("Seul le propriétaire du serveur peut configurer le bot · Sécurité"),
+            color=Palette.DANGER,
+        ))
+        return await i.response.send_message(view=denied_view, ephemeral=True)
     
     # Vérification anti-spam
     ok, msg = await security_check(i, "configure")
@@ -17215,8 +17345,8 @@ async def configure_cmd(i: discord.Interaction):
     # Log l'accès à la configuration
     await log_security_event(i.guild.id, i.user.id, "CONFIG_ACCESS", "Ouverture du panneau de configuration")
     
-    v = MainPanel(i.user, i.guild)
-    await i.response.send_message(embed=v.embed(), view=v, ephemeral=True)
+    v = MainPanelV2(i.user, i.guild)
+    await i.response.send_message(view=v, ephemeral=True)
 
 async def check_mod_perm(i, cmd_key):
     """Vérifie si l'utilisateur a la permission pour cette commande de modération"""
