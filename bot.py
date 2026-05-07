@@ -6992,6 +6992,11 @@ class ImmunePanelV2(LayoutView):
         )
 
     async def _cb_remove(self, i):
+        v = ImmuneRemoveViewV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+        return  # short-circuit pour éviter le code legacy ci-dessous
+
+    async def _cb_remove_legacy(self, i):
         v = ImmuneRemoveView(self.u, self.g)
         await i.response.edit_message(
             embed=discord.Embed(
@@ -7274,6 +7279,126 @@ class ImmuneRemoveView(View):
     async def back(self, i, b):
         v = ImmunePanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
+
+class ImmuneRemoveViewV2(LayoutView):
+    """Hub V2 pour supprimer une immunite (role / utilisateur / salon)."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=120)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        # Compter les immunités existantes pour disabled
+        async with get_db() as db:
+            async with db.execute('SELECT COUNT(*) FROM immune_roles WHERE guild_id=?', (self.g.id,)) as c:
+                role_count = (await c.fetchone())[0]
+            async with db.execute('SELECT COUNT(*) FROM immune_users WHERE guild_id=?', (self.g.id,)) as c:
+                user_count = (await c.fetchone())[0]
+            async with db.execute('SELECT COUNT(*) FROM immune_channels WHERE guild_id=?', (self.g.id,)) as c:
+                chan_count = (await c.fetchone())[0]
+
+        self.clear_items()
+        b_role = Button(
+            label=f"🎭 Rôle ({role_count})",
+            style=discord.ButtonStyle.primary,
+            disabled=(role_count == 0),
+            custom_id="irvv2_role",
+        )
+        b_role.callback = self._cb_role
+        b_user = Button(
+            label=f"👤 Utilisateur ({user_count})",
+            style=discord.ButtonStyle.primary,
+            disabled=(user_count == 0),
+            custom_id="irvv2_user",
+        )
+        b_user.callback = self._cb_user
+        b_chan = Button(
+            label=f"📺 Salon ({chan_count})",
+            style=discord.ButtonStyle.primary,
+            disabled=(chan_count == 0),
+            custom_id="irvv2_chan",
+        )
+        b_chan.callback = self._cb_chan
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="irvv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("🗑️ Supprimer une immunité"),
+            v2_subtitle("Choisis le type d'élément à retirer"),
+            v2_divider(),
+            v2_body(
+                f"🎭 **Rôles immunisés** · `{role_count}`\n"
+                f"👤 **Utilisateurs immunisés** · `{user_count}`\n"
+                f"📺 **Salons immunisés** · `{chan_count}`"
+            ),
+            v2_divider(),
+            v2_subtitle("Les boutons sont désactivés si aucun élément du type n'existe"),
+            discord.ui.ActionRow(b_role, b_user, b_chan, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.DANGER))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_role(self, i):
+        async with get_db() as db:
+            async with db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (self.g.id,)) as c:
+                rids = [r[0] for r in await c.fetchall()]
+        if not rids:
+            return await i.response.send_message("❌ Aucun rôle immunisé", ephemeral=True)
+        opts = []
+        for rid in rids[:25]:
+            role = self.g.get_role(rid)
+            opts.append(discord.SelectOption(label=f"@{role.name if role else rid}"[:25], value=str(rid)))
+        await i.response.edit_message(
+            embed=discord.Embed(title="🗑️ Supprimer un rôle immunisé", color=0xE74C3C),
+            view=ImmuneRemoveRoleView(self.u, self.g, opts),
+            attachments=[],
+        )
+
+    async def _cb_user(self, i):
+        async with get_db() as db:
+            async with db.execute('SELECT user_id FROM immune_users WHERE guild_id=?', (self.g.id,)) as c:
+                uids = [r[0] for r in await c.fetchall()]
+        if not uids:
+            return await i.response.send_message("❌ Aucun utilisateur immunisé", ephemeral=True)
+        opts = []
+        for uid in uids[:25]:
+            member = self.g.get_member(uid)
+            opts.append(discord.SelectOption(label=f"@{member.display_name if member else uid}"[:25], value=str(uid)))
+        await i.response.edit_message(
+            embed=discord.Embed(title="🗑️ Supprimer un utilisateur immunisé", color=0xE74C3C),
+            view=ImmuneRemoveUserView(self.u, self.g, opts),
+            attachments=[],
+        )
+
+    async def _cb_chan(self, i):
+        async with get_db() as db:
+            async with db.execute('SELECT channel_id FROM immune_channels WHERE guild_id=?', (self.g.id,)) as c:
+                chids = [r[0] for r in await c.fetchall()]
+        if not chids:
+            return await i.response.send_message("❌ Aucun salon immunisé", ephemeral=True)
+        opts = []
+        for chid in chids[:25]:
+            ch = self.g.get_channel(chid)
+            opts.append(discord.SelectOption(label=f"# {ch.name if ch else chid}"[:25], value=str(chid)))
+        await i.response.edit_message(
+            embed=discord.Embed(title="🗑️ Supprimer un salon immunisé", color=0xE74C3C),
+            view=ImmuneRemoveChannelView(self.u, self.g, opts),
+            attachments=[],
+        )
+
+    async def _cb_back(self, i):
+        v = ImmunePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
 
 class ImmuneRemoveRoleView(View):
     def __init__(self, u, g, opts):
