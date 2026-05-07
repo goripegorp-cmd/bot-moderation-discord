@@ -17659,42 +17659,50 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
     warns = sum(1 for r in rows if r[0] == 'warn')
     mutes = sum(1 for r in rows if r[0] == 'mute')
     
-    # Créer l'embed
-    e = discord.Embed(title=f"📋 Infractions de {membre.display_name}", color=C.BLUE, timestamp=now())
-    e.set_thumbnail(url=membre.display_avatar.url)
-    
-    e.add_field(name="👤 Membre", value=f"{membre.mention}\n`{membre.id}`", inline=True)
-    e.add_field(name="📅 Sur le serveur", value=time_on_server, inline=True)
-    e.add_field(name="📊 Total", value=str(len(rows)), inline=True)
-    
-    e.add_field(name="⚠️ Warns", value=str(warns), inline=True)
-    e.add_field(name="🔇 Mutes", value=str(mutes), inline=True)
-    
-    # Statut mute actuel
-    if membre.is_timed_out():
-        timeout_until = membre.timed_out_until
-        if timeout_until:
-            e.add_field(name="🔇 Mute actif", value=f"Jusqu'à <t:{int(timeout_until.timestamp())}:R>", inline=True)
-        else:
-            e.add_field(name="\u200b", value="\u200b", inline=True)
-    else:
-        e.add_field(name="\u200b", value="\u200b", inline=True)
-    
+    # ─── Construction du LayoutView V2 ───
+    items: list = [
+        v2_section(
+            v2_title(f"📋 Infractions de {membre.display_name}"),
+            v2_body(f"{membre.mention} · ID `{membre.id}`"),
+            accessory=v2_thumb(membre.display_avatar.url),
+        ),
+        v2_divider(),
+        v2_body(
+            f"📅 **Sur le serveur** · `{time_on_server}`\n"
+            f"📊 **Total infractions** · `{len(rows)}`\n"
+            f"⚠️ **Warns** · `{warns}`  ·  🔇 **Mutes** · `{mutes}`"
+        ),
+    ]
+
+    # Statut mute actif (timeout natif Discord)
+    if membre.is_timed_out() and membre.timed_out_until:
+        items.append(v2_divider())
+        items.append(v2_body(
+            f"🔇 **Mute actif** — fin <t:{int(membre.timed_out_until.timestamp())}:R>"
+        ))
+
+    # Historique des infractions
+    items.append(v2_divider())
     if rows:
         inf_lines = []
         for j, (typ, reason, duration, mod_id) in enumerate(rows[:10], 1):
             emoji = "⚠️" if typ == "warn" else "🔇"
-            dur_txt = f" ({duration})" if duration else ""
-            reason_short = reason[:40] + "..." if len(reason) > 40 else reason
-            inf_lines.append(f"`{j}.` {emoji} **{typ.upper()}**{dur_txt}\n└ {reason_short}")
-        
-        e.add_field(name="📜 Historique (10 dernières)", value="\n".join(inf_lines)[:1024], inline=False)
+            dur_txt = f" · `{duration}`" if duration else ""
+            reason_short = (reason[:60] + "…") if reason and len(reason) > 60 else (reason or "_Aucune raison_")
+            inf_lines.append(f"`{j:>2}.` {emoji} **{typ.upper()}**{dur_txt}\n     ↳ {reason_short}")
+        items.append(v2_title("📜 Historique (10 dernières)", level=3))
+        items.append(v2_body("\n".join(inf_lines)))
     else:
-        e.add_field(name="📜 Historique", value="✅ Aucune infraction", inline=False)
-    
-    await i.response.send_message(embed=e)
-    
-    # Log
+        items.append(v2_title("📜 Historique", level=3))
+        items.append(v2_body("✅ _Aucune infraction enregistrée_"))
+
+    items.append(v2_divider())
+    items.append(v2_subtitle(f"Demandé par {i.user.display_name} · {now().strftime('%d/%m/%Y %H:%M')}"))
+
+    view = LayoutView(timeout=None)
+    view.add_item(v2_container(*items, color=Palette.INFO))
+    await i.response.send_message(view=view)
+
     await send_mod_log(i.guild, 'infractions', i.user, membre, extra=f"Total: {len(rows)} infractions")
 
 # ═══════════════════════════════════════════════════════════════════════════════
