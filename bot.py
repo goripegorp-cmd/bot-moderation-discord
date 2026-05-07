@@ -3462,6 +3462,7 @@ class MainPanelV2(LayoutView):
             'cmds': lambda: CommandsPanelV2(self.u, self.g),
             'help': lambda: AutoHelpPanelV2(self.u, self.g),
             'immune': lambda: ImmunePanelV2(self.u, self.g),
+            'centre': lambda: CentrePanelV2(self.u, self.g),
         }
         # Modules encore en V1 (View + embed)
         v1_panels = {
@@ -3470,7 +3471,6 @@ class MainPanelV2(LayoutView):
             'tickets': lambda: TicketMainPanel(self.u, self.g),
             'ads': lambda: AdsPanel(self.u, self.g),
             'stats': lambda: StatPanel(self.u, self.g),
-            'centre': lambda: CentrePanel(self.u, self.g),
             'levels': lambda: LevelSystemPanel(self.u, self.g),
             'voice': lambda: TempVoicePanel(self.u, self.g),
         }
@@ -9098,6 +9098,86 @@ class CentrePanel(View):
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+
+class CentrePanelV2(LayoutView):
+    """Panneau Centre de Gestion en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    def _build(self):
+        self.clear_items()
+
+        b_giveaway = Button(label="🎁 Cadeau", style=discord.ButtonStyle.success, custom_id="cpnv2_gw")
+        b_giveaway.callback = self._cb_giveaway
+        b_announce = Button(label="📢 Annonce", style=discord.ButtonStyle.primary, custom_id="cpnv2_ann")
+        b_announce.callback = self._cb_announce
+        b_messages = Button(label="📨 Messages", style=discord.ButtonStyle.primary, custom_id="cpnv2_msg")
+        b_messages.callback = self._cb_messages
+        b_mass_role = Button(label="🎭 Rôles en masse", style=discord.ButtonStyle.success, custom_id="cpnv2_mr")
+        b_mass_role.callback = self._cb_mass_role
+        b_auto_react = Button(label="😄 Auto-réactions", style=discord.ButtonStyle.primary, custom_id="cpnv2_ar")
+        b_auto_react.callback = self._cb_auto_react
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="cpnv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = []
+        if self.g.icon:
+            items.append(v2_section(
+                v2_title("🎯 Centre de Gestion"),
+                v2_subtitle("Gère le contenu et les événements de ton serveur"),
+                accessory=v2_thumb(self.g.icon.url),
+            ))
+        else:
+            items.append(v2_title("🎯 Centre de Gestion"))
+            items.append(v2_subtitle("Gère le contenu et les événements de ton serveur"))
+
+        items.append(v2_divider())
+        items.append(v2_body(
+            "🎁 **Cadeaux** — Giveaways avec conditions, durée, images\n"
+            "📢 **Annonces** — Embeds personnalisés dans tes salons\n"
+            "📨 **Messages Auto** — Envois récurrents programmés\n"
+            "🎭 **Rôles en masse** — Ajouter/retirer un rôle à tous les membres\n"
+            "😄 **Auto-réactions** — Réagir automatiquement aux messages (bonjour → 👋)"
+        ))
+        items.append(v2_divider())
+        items.append(v2_subtitle("▼ Choisis une fonctionnalité ci-dessous"))
+        items.append(discord.ui.ActionRow(b_giveaway, b_announce, b_messages, b_mass_role))
+        items.append(discord.ui.ActionRow(b_auto_react, b_back))
+
+        self.add_item(v2_container(*items, color=Palette.PRIMARY))
+
+    async def _open_v1(self, interaction, panel_factory):
+        v = panel_factory()
+        emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
+        await interaction.response.edit_message(embed=emb, view=v, attachments=[])
+
+    async def _cb_giveaway(self, i):
+        await self._open_v1(i, lambda: GiveawayPanel(self.u, self.g))
+
+    async def _cb_announce(self, i):
+        await self._open_v1(i, lambda: AnnouncementPanel(self.u, self.g))
+
+    async def _cb_messages(self, i):
+        await self._open_v1(i, lambda: MessagePanel(self.u, self.g))
+
+    async def _cb_mass_role(self, i):
+        await self._open_v1(i, lambda: MassRolePanel(self.u, self.g))
+
+    async def _cb_auto_react(self, i):
+        await self._open_v1(i, lambda: AutoReactionPanel(self.u, self.g))
+
+    async def _cb_back(self, i):
+        v = MainPanelV2(self.u, self.g)
+        await i.response.edit_message(view=v, embed=None, attachments=[])
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           😄 AUTO-RÉACTIONS
