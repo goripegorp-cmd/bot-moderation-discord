@@ -104,9 +104,13 @@ def thumb(url: str) -> ui.Thumbnail:
 
 def section(
     *items: Union[ui.TextDisplay, str],
-    accessory: Optional[ui.Item] = None,
+    accessory: ui.Item,
 ) -> ui.Section:
-    """Section avec jusqu'à 3 TextDisplays + 1 accessoire (Thumbnail ou Button).
+    """Section avec jusqu'à 3 TextDisplays + 1 accessoire OBLIGATOIRE.
+
+    `accessory` est requis par discord.py 2.7 (Thumbnail ou Button).
+    Pour un bloc texte SANS accessoire, ajoute directement les TextDisplays
+    dans le Container — pas besoin de Section.
 
     Les `str` passées sont automatiquement enveloppées en TextDisplay.
     """
@@ -165,14 +169,18 @@ def header(
     title_text: str,
     subtitle_text: Optional[str] = None,
     *,
-    icon_url: Optional[str] = None,
+    icon_url: str,
 ) -> ui.Section:
-    """En-tête de panel : titre H1 + sous-titre + icône optionnelle à droite."""
+    """En-tête de panel : titre H1 + sous-titre + icône à droite (Thumbnail).
+
+    `icon_url` est obligatoire (Section requiert un accessoire).
+    Pour un en-tête sans icône, utilise `title()` + `subtitle()` directement
+    dans le Container.
+    """
     parts: list[ui.TextDisplay] = [ui.TextDisplay(f"# {title_text}")]
     if subtitle_text:
         parts.append(ui.TextDisplay(f"-# {subtitle_text}"))
-    accessory = ui.Thumbnail(media=icon_url) if icon_url else None
-    return ui.Section(*parts, accessory=accessory)
+    return ui.Section(*parts, accessory=ui.Thumbnail(media=icon_url))
 
 
 def info_card(
@@ -183,8 +191,17 @@ def info_card(
     color: discord.Color = Palette.PRIMARY,
     footer: Optional[str] = None,
 ) -> ui.Container:
-    """Carte d'information complète : header + description + footer optionnel."""
-    items: list[ui.Item] = [header(title_text, description, icon_url=icon_url)]
+    """Carte d'information complète : header + description + footer optionnel.
+
+    Si `icon_url` est fourni, utilise une Section avec Thumbnail.
+    Sinon, ajoute le titre/description en TextDisplays directs.
+    """
+    items: list[ui.Item] = []
+    if icon_url:
+        items.append(header(title_text, description, icon_url=icon_url))
+    else:
+        items.append(ui.TextDisplay(f"# {title_text}"))
+        items.append(ui.TextDisplay(description))
     if footer:
         items.append(ui.Separator())
         items.append(ui.TextDisplay(f"-# {footer}"))
