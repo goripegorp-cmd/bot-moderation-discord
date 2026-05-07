@@ -12926,8 +12926,8 @@ class GiveawayPanelV2(LayoutView):
         await i.response.send_modal(GiveawayCreateModal(self.u, self.g))
 
     async def _cb_list(self, i):
-        v = GiveawayListPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+        v = GiveawayListPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _cb_back(self, i):
         v = CentrePanelV2(self.u, self.g)
@@ -16998,6 +16998,88 @@ async def check_command_channel(interaction, cmd_key):
             return False
     return True
 
+class GiveawayListPanelV2(LayoutView):
+    """Liste des cadeaux actifs en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit=True):
+        giveaways = []
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT id, title, end_time, participants FROM giveaways WHERE guild_id=? AND ended=0 ORDER BY end_time',
+                    (self.g.id,)
+                ) as cursor:
+                    async for row in cursor:
+                        giveaways.append(row)
+        except Exception:
+            pass
+
+        list_lines = []
+        for gw_id, title, end_time_str, participants_str in giveaways[:10]:
+            try:
+                end_time = datetime.fromisoformat(end_time_str)
+                participants = json.loads(participants_str) if participants_str else []
+                list_lines.append(
+                    f"**#{gw_id}** · {title}\n"
+                    f"  ┗ ⏰ <t:{int(end_time.timestamp())}:R> · 👥 `{len(participants)}` participants"
+                )
+            except Exception:
+                pass
+        list_block = "\n\n".join(list_lines) if list_lines else "_Aucun cadeau actif_"
+
+        self.clear_items()
+        b_end = Button(label="🏁 Terminer un Cadeau", style=discord.ButtonStyle.danger, disabled=(not giveaways), custom_id="gwlpv2_end")
+        b_end.callback = self._cb_end
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="gwlpv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("📋 Cadeaux Actifs"),
+            v2_subtitle(f"`{len(giveaways)}` cadeau(x) en cours"),
+            v2_divider(),
+            v2_body(list_block),
+            v2_divider(),
+            discord.ui.ActionRow(b_end, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.SUCCESS))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_end(self, i):
+        giveaways = []
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT id, title FROM giveaways WHERE guild_id=? AND ended=0',
+                    (self.g.id,)
+                ) as cursor:
+                    async for row in cursor:
+                        giveaways.append(row)
+        except Exception:
+            pass
+        if not giveaways:
+            return await i.response.send_message("❌ Aucun cadeau actif", ephemeral=True)
+        opts = [discord.SelectOption(label=f"#{gw_id} - {title[:40]}", value=str(gw_id)) for gw_id, title in giveaways[:25]]
+        v = GiveawayEndSelectView(self.u, self.g, opts)
+        await i.response.send_message("🏁 Sélectionne le cadeau à terminer :", view=v, ephemeral=True)
+
+    async def _cb_back(self, i):
+        v = GiveawayPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
 class GiveawayListPanel(View):
     def __init__(self, u, g):
         super().__init__(timeout=600)
@@ -17282,8 +17364,8 @@ class MessagePanelV2(LayoutView):
         await i.response.send_modal(AutoMessageCreateModal(self.u, self.g))
 
     async def _cb_list(self, i):
-        v = AutoMessageListPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+        v = AutoMessageListPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _cb_back(self, i):
         v = CentrePanelV2(self.u, self.g)
@@ -17430,6 +17512,86 @@ class AutoMessageChannelPaginatedView(View):
 
 # Legacy compat
 AutoMessageChannelSelectView = AutoMessageChannelPaginatedView
+
+class AutoMessageListPanelV2(LayoutView):
+    """Liste des messages automatiques en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit=True):
+        messages = []
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT id, channel_id, title, frequency, frequency_value, send_hour, enabled FROM scheduled_messages WHERE guild_id=? ORDER BY id',
+                    (self.g.id,)
+                ) as cursor:
+                    async for row in cursor:
+                        messages.append(row)
+        except Exception:
+            pass
+
+        freq_labels = {'minutes': 'min', 'hourly': 'h', 'daily': 'j', 'weekly': 'sem'}
+        list_lines = []
+        for msg_id, channel_id, title, freq, freq_val, hour, enabled in messages[:10]:
+            channel = self.g.get_channel(channel_id)
+            status = "✅" if enabled else "❌"
+            list_lines.append(
+                f"**#{msg_id}** {status} · {title[:30]}\n"
+                f"  ┗ {channel.mention if channel else '_Salon inconnu_'} · `{freq_val}{freq_labels.get(freq, freq)}` · `{hour}h00`"
+            )
+        list_block = "\n\n".join(list_lines) if list_lines else "_Aucun message automatique configuré_"
+
+        self.clear_items()
+        b_delete = Button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, disabled=(not messages), custom_id="amlpv2_del")
+        b_delete.callback = self._cb_delete
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="amlpv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("📋 Messages Automatiques"),
+            v2_subtitle(f"`{len(messages)}` message(s) configuré(s)"),
+            v2_divider(),
+            v2_body(list_block),
+            v2_divider(),
+            discord.ui.ActionRow(b_delete, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.PRIMARY))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_delete(self, i):
+        messages = []
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT id, title FROM scheduled_messages WHERE guild_id=?',
+                    (self.g.id,)
+                ) as cursor:
+                    async for row in cursor:
+                        messages.append(row)
+        except Exception:
+            pass
+        if not messages:
+            return await i.response.send_message("❌ Aucun message à supprimer", ephemeral=True)
+        opts = [discord.SelectOption(label=f"#{msg_id} - {title[:40]}", value=str(msg_id)) for msg_id, title in messages[:25]]
+        v = AutoMessageDeleteSelectView(self.u, self.g, opts)
+        await i.response.send_message("🗑️ Sélectionne le message à supprimer :", view=v, ephemeral=True)
+
+    async def _cb_back(self, i):
+        v = MessagePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
 
 class AutoMessageListPanel(View):
     def __init__(self, u, g):
