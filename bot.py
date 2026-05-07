@@ -3461,11 +3461,11 @@ class MainPanelV2(LayoutView):
             'mod': lambda: ModerationPanelV2(self.u, self.g),
             'cmds': lambda: CommandsPanelV2(self.u, self.g),
             'help': lambda: AutoHelpPanelV2(self.u, self.g),
+            'immune': lambda: ImmunePanelV2(self.u, self.g),
         }
         # Modules encore en V1 (View + embed)
         v1_panels = {
             'prot': lambda: ProtPanel(self.u, self.g),
-            'immune': lambda: ImmunePanel(self.u, self.g),
             'chan': lambda: ChanPanel(self.u, self.g),
             'tickets': lambda: TicketMainPanel(self.u, self.g),
             'ads': lambda: AdsPanel(self.u, self.g),
@@ -5884,6 +5884,145 @@ class ImmunePanel(View):
     async def back(self, i, b):
         v = MainPanel(self.u, self.g)
         await i.response.edit_message(embed=v.embed(), view=v)
+
+class ImmunePanelV2(LayoutView):
+    """Panneau Immunités en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        async with get_db() as db:
+            async with db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (self.g.id,)) as c:
+                rids = [r[0] for r in await c.fetchall()]
+            async with db.execute('SELECT user_id FROM immune_users WHERE guild_id=?', (self.g.id,)) as c:
+                uids = [r[0] for r in await c.fetchall()]
+            async with db.execute('SELECT channel_id FROM immune_channels WHERE guild_id=?', (self.g.id,)) as c:
+                chids = [r[0] for r in await c.fetchall()]
+
+        total = len(rids) + len(uids) + len(chids)
+
+        roles_txt = ", ".join(f"<@&{r}>" for r in rids[:10]) if rids else "_Aucun_"
+        if len(rids) > 10:
+            roles_txt += f"\n_… + {len(rids) - 10} autres_"
+        users_txt = ", ".join(f"<@{u}>" for u in uids[:10]) if uids else "_Aucun_"
+        if len(uids) > 10:
+            users_txt += f"\n_… + {len(uids) - 10} autres_"
+        chans_txt = ", ".join(f"<#{c}>" for c in chids[:10]) if chids else "_Aucun_"
+        if len(chids) > 10:
+            chans_txt += f"\n_… + {len(chids) - 10} autres_"
+
+        # Boutons
+        self.clear_items()
+        b_add_role = Button(label="➕ Rôle", style=discord.ButtonStyle.success, custom_id="ipv2_add_role")
+        b_add_role.callback = self._cb_add_role
+        b_add_user = Button(label="➕ Utilisateur", style=discord.ButtonStyle.success, custom_id="ipv2_add_user")
+        b_add_user.callback = self._cb_add_user
+        b_add_chan = Button(label="➕ Salon", style=discord.ButtonStyle.success, custom_id="ipv2_add_chan")
+        b_add_chan.callback = self._cb_add_chan
+        b_remove = Button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, disabled=(total == 0), custom_id="ipv2_remove")
+        b_remove.callback = self._cb_remove
+        b_clear = Button(label="🗑️ Tout supprimer", style=discord.ButtonStyle.danger, disabled=(total == 0), custom_id="ipv2_clear")
+        b_clear.callback = self._cb_clear
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="ipv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = []
+        if self.g.icon:
+            items.append(v2_section(
+                v2_title("👑 Immunités"),
+                v2_subtitle(f"{total} élément(s) immunisé(s) au total"),
+                accessory=v2_thumb(self.g.icon.url),
+            ))
+        else:
+            items.append(v2_title("👑 Immunités"))
+            items.append(v2_subtitle(f"{total} élément(s) immunisé(s) au total"))
+
+        items.append(v2_divider())
+        items.append(v2_body(
+            "✅ Bypass : liens, images, GIFs, invitations, majuscules\n"
+            "⚠️ **Phishing & Scams restent détectés**"
+        ))
+        items.append(v2_divider())
+        items.append(v2_title(f"🎭 Rôles ({len(rids)})", level=3))
+        items.append(v2_body(roles_txt))
+        items.append(v2_divider())
+        items.append(v2_title(f"👤 Utilisateurs ({len(uids)})", level=3))
+        items.append(v2_body(users_txt))
+        items.append(v2_divider())
+        items.append(v2_title(f"📺 Salons ({len(chids)})", level=3))
+        items.append(v2_body(chans_txt))
+        items.append(v2_divider())
+        items.append(v2_subtitle("👑 Les tickets sont automatiquement immunisés"))
+        items.append(discord.ui.ActionRow(b_add_role, b_add_user, b_add_chan))
+        items.append(discord.ui.ActionRow(b_remove, b_clear, b_back))
+
+        self.add_item(v2_container(*items, color=Palette.PREMIUM))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_add_role(self, i):
+        total_roles = len([r for r in self.g.roles[1:] if not r.is_bot_managed()])
+        v = PaginatedImmuneRoleView(self.u, self.g)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="👑 Ajouter un rôle immunisé",
+                description=f"📊 {total_roles} rôles disponibles",
+                color=0xF1C40F,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_add_user(self, i):
+        await i.response.send_modal(AddImmuneUserModal(self.g, self.u))
+
+    async def _cb_add_chan(self, i):
+        total_channels = len(list(self.g.text_channels))
+        v = PaginatedImmuneChannelView(self.u, self.g)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="📺 Ajouter un salon immunisé",
+                description=f"Ce salon ignorera toutes les protections.\n\n📊 {total_channels} salons disponibles",
+                color=0xF1C40F,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_remove(self, i):
+        v = ImmuneRemoveView(self.u, self.g)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title="🗑️ Supprimer une immunité",
+                description="Choisis le type d'élément à supprimer.",
+                color=0xE74C3C,
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_clear(self, i):
+        async with get_db() as db:
+            await db.execute('DELETE FROM immune_roles WHERE guild_id=?', (self.g.id,))
+            await db.execute('DELETE FROM immune_users WHERE guild_id=?', (self.g.id,))
+            await db.execute('DELETE FROM immune_channels WHERE guild_id=?', (self.g.id,))
+            await db.commit()
+        new_panel = ImmunePanelV2(self.u, self.g)
+        await new_panel.render_to(i, edit=True)
+
+    async def _cb_back(self, i):
+        v = MainPanelV2(self.u, self.g)
+        await i.response.edit_message(view=v, embed=None, attachments=[])
+
 
 class PaginatedImmuneRoleView(View):
     """Sélecteur de rôle paginé pour les immunités"""
