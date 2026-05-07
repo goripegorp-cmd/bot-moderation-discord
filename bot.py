@@ -13194,8 +13194,8 @@ class TempVoicePanelV2(LayoutView):
         await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
 
     async def _cb_perms(self, i):
-        v = TempVoicePermissionsPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+        v = TempVoicePermissionsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
@@ -14061,6 +14061,95 @@ class TempVoicePermissionsPanel(View):
     async def back(self, i, b):
         v = TempVoicePanel(self.u, self.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
+
+
+class TempVoicePermissionsPanelV2(LayoutView):
+    """Permissions du proprietaire de vocal en V2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        voice_cfg = c.get('temp_voice_config', {})
+        perms = voice_cfg.get('owner_permissions', {
+            'can_rename': True, 'can_limit': True, 'can_mute': True, 'can_kick': True
+        })
+
+        def _icon(key):
+            return "✅" if perms.get(key, True) else "❌"
+
+        self.clear_items()
+        b_rename = Button(
+            label="✏️ Renommer",
+            style=(discord.ButtonStyle.success if perms.get('can_rename', True) else discord.ButtonStyle.danger),
+            custom_id="tvpv2_rename",
+        )
+        b_rename.callback = lambda i: self._toggle(i, 'can_rename')
+        b_limit = Button(
+            label="🔢 Limite",
+            style=(discord.ButtonStyle.success if perms.get('can_limit', True) else discord.ButtonStyle.danger),
+            custom_id="tvpv2_limit",
+        )
+        b_limit.callback = lambda i: self._toggle(i, 'can_limit')
+        b_mute = Button(
+            label="🔇 Mute",
+            style=(discord.ButtonStyle.success if perms.get('can_mute', True) else discord.ButtonStyle.danger),
+            custom_id="tvpv2_mute",
+        )
+        b_mute.callback = lambda i: self._toggle(i, 'can_mute')
+        b_kick = Button(
+            label="👢 Expulser",
+            style=(discord.ButtonStyle.success if perms.get('can_kick', True) else discord.ButtonStyle.danger),
+            custom_id="tvpv2_kick",
+        )
+        b_kick.callback = lambda i: self._toggle(i, 'can_kick')
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="tvpv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title("👑 Permissions du Propriétaire"),
+            v2_subtitle("Définit ce que le créateur du vocal peut faire"),
+            v2_divider(),
+            v2_body(
+                f"✏️ **Renommer** · {_icon('can_rename')}\n"
+                f"🔢 **Limite membres** · {_icon('can_limit')}\n"
+                f"🔇 **Mute membres** · {_icon('can_mute')}\n"
+                f"👢 **Expulser membres** · {_icon('can_kick')}"
+            ),
+            v2_divider(),
+            v2_subtitle("Clique sur un bouton pour activer / désactiver la permission"),
+            discord.ui.ActionRow(b_rename, b_limit, b_mute, b_kick),
+            discord.ui.ActionRow(b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _toggle(self, i, perm_key):
+        c = await cfg(self.g.id)
+        voice_cfg = c.get('temp_voice_config', {})
+        perms = voice_cfg.get('owner_permissions', {
+            'can_rename': True, 'can_limit': True, 'can_mute': True, 'can_kick': True
+        })
+        perms[perm_key] = not perms.get(perm_key, True)
+        voice_cfg['owner_permissions'] = perms
+        await db_set(self.g.id, 'temp_voice_config', voice_cfg)
+        await TempVoicePermissionsPanelV2(self.u, self.g).render_to(i, edit=True)
+
+    async def _cb_back(self, i):
+        v = TempVoicePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
 
 # ─────────────────────────────── SALONS COMMANDES ───────────────────────────────
 
