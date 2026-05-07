@@ -8404,12 +8404,13 @@ class AdsPanelV2(LayoutView):
         if val in ('youtube', 'twitch', 'tiktok'):
             v = AdsLivePlatformV2(self.u, self.g, val)
             return await v.render_to(interaction, edit=True)
-        # Plateformes encore en V1
+        # Plateformes simples sans live (V2 générique)
+        if val in ('twitter', 'reddit', 'discord', 'rosocial'):
+            v = AdsSimplePlatformV2(self.u, self.g, val)
+            return await v.render_to(interaction, edit=True)
+        # Plateformes spéciales encore en V1 (Roblox UGC : 2 add buttons,
+        # Deals : toggle + min discount)
         v1_panels = {
-            'twitter': lambda: AdsTwitterPanel(self.u, self.g),
-            'reddit': lambda: AdsRedditPanel(self.u, self.g),
-            'discord': lambda: AdsDiscordPanel(self.u, self.g),
-            'rosocial': lambda: AdsRoSocialPanel(self.u, self.g),
             'roblox': lambda: AdsRobloxPanel(self.u, self.g),
             'deals': lambda: AdsDealsPanel(self.u, self.g),
         }
@@ -9126,6 +9127,167 @@ NITTER_INSTANCES = [
 RSS_BRIDGE_URLS = [
     "https://rss-bridge.org/bridge01/?action=display&bridge=TwitterBridge&context=By+username&u={username}&format=Atom",
 ]
+
+class AdsSimplePlatformV2(LayoutView):
+    """V2 panel pour les plateformes Ads simples (Twitter/Reddit/Discord/RoSocial)."""
+
+    PLATFORM_SPECS = {
+        'twitter': {
+            'name': 'Twitter / X',
+            'emoji': '🐦',
+            'color': 0x1DA1F2,
+            'channel_key': 'ads_twitter_channel',
+            'feeds_key': 'ads_twitter_feeds',
+            'add_modal': lambda g, u: AdsTwitterAddModal(g, u),
+            'desc': "Posts Twitter/X de comptes suivis.",
+            'platform_id': 'twitter',
+            'feed_label': lambda f: f"@{f.get('username', '?')}" if isinstance(f, dict) else f"@{f}",
+            'feed_kind': 'compte',
+        },
+        'reddit': {
+            'name': 'Reddit',
+            'emoji': '🟠',
+            'color': 0xFF4500,
+            'channel_key': 'ads_reddit_channel',
+            'feeds_key': 'ads_reddit_feeds',
+            'add_modal': lambda g, u: AdsRedditAddModal(g, u),
+            'desc': "Posts de subreddits suivis.",
+            'platform_id': 'reddit',
+            'feed_label': lambda f: f"r/{f.get('subreddit', '?')}" if isinstance(f, dict) else f"r/{f}",
+            'feed_kind': 'subreddit',
+        },
+        'discord': {
+            'name': 'Discord (Relay)',
+            'emoji': '📡',
+            'color': 0x5865F2,
+            'channel_key': 'ads_discord_channel',
+            'feeds_key': 'ads_discord_feeds',
+            'add_modal': lambda g, u: AdsDiscordAddModal(g, u),
+            'desc': "Relay de messages depuis d'autres salons Discord.",
+            'platform_id': 'discord',
+            'feed_label': lambda f: f"#{f.get('channel_id', '?')}" if isinstance(f, dict) else f"#{f}",
+            'feed_kind': 'salon',
+        },
+        'rosocial': {
+            'name': 'RoSocial',
+            'emoji': '🎮',
+            'color': 0x00B894,
+            'channel_key': 'ads_rosocial_channel',
+            'feeds_key': 'ads_rosocial_feeds',
+            'add_modal': lambda g, u: AdsRoSocialAddModal(g, u),
+            'desc': "Profils RoSocial suivis.",
+            'platform_id': 'rosocial',
+            'feed_label': lambda f: f.get('username', '?') if isinstance(f, dict) else str(f),
+            'feed_kind': 'profil',
+        },
+    }
+
+    def __init__(self, u, g, platform: str):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+        self.spec = self.PLATFORM_SPECS[platform]
+        self.platform = platform
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        spec = self.spec
+
+        ch = self.g.get_channel(c.get(spec['channel_key'], 0))
+        feeds = c.get(spec['feeds_key'], [])
+
+        # Liste feeds
+        feed_lines = []
+        for f in feeds[:10]:
+            label = spec['feed_label'](f)
+            if isinstance(f, dict):
+                feed_ch_id = f.get('channel_id', 0)
+                feed_ch = self.g.get_channel(feed_ch_id) if feed_ch_id else None
+                salon_txt = f" → {feed_ch.mention}" if feed_ch else ""
+                feed_lines.append(f"• `{label}`{salon_txt}")
+            else:
+                feed_lines.append(f"• `{label}`")
+        if len(feeds) > 10:
+            feed_lines.append(f"_… + {len(feeds) - 10} autre(s)_")
+        feeds_block = "\n".join(feed_lines) if feed_lines else f"_Aucun {spec['feed_kind']} configuré_"
+
+        # Boutons
+        self.clear_items()
+        b_chan = Button(label="📍 Salon par défaut", style=discord.ButtonStyle.primary, custom_id=f"adsv2s_{spec['platform_id']}_chan")
+        b_chan.callback = self._cb_chan
+        b_add = Button(label="➕ Ajouter", style=discord.ButtonStyle.success, custom_id=f"adsv2s_{spec['platform_id']}_add")
+        b_add.callback = self._cb_add
+        b_remove = Button(
+            label="🗑️ Supprimer",
+            style=discord.ButtonStyle.danger,
+            disabled=(not feeds),
+            custom_id=f"adsv2s_{spec['platform_id']}_remove",
+        )
+        b_remove.callback = self._cb_remove
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id=f"adsv2s_{spec['platform_id']}_back")
+        b_back.callback = self._cb_back
+
+        items: list = [
+            v2_title(f"{spec['emoji']}  {spec['name']}"),
+            v2_subtitle(spec['desc']),
+            v2_divider(),
+            v2_body(f"📍 **Salon par défaut** · {ch.mention if ch else '🔴 _Non configuré_'}"),
+            v2_divider(),
+            v2_title(f"📡 {spec['feed_kind'].capitalize()}s suivis ({len(feeds)})", level=3),
+            v2_body(feeds_block),
+            v2_divider(),
+            discord.ui.ActionRow(b_chan, b_add, b_remove, b_back),
+        ]
+
+        self.add_item(v2_container(*items, color=discord.Color(spec['color'])))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_chan(self, i):
+        v = PaginatedAdsChannelSelect(self.u, self.g, self.spec['channel_key'], self.platform)
+        await i.response.edit_message(
+            embed=discord.Embed(
+                title=f"📍 Salon par défaut {self.spec['name']}",
+                description="Sélectionne le salon de publication par défaut",
+                color=self.spec['color'],
+            ),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_add(self, i):
+        await i.response.send_modal(self.spec['add_modal'](self.g, self.u))
+
+    async def _cb_remove(self, i):
+        c = await cfg(self.g.id)
+        feeds = c.get(self.spec['feeds_key'], [])
+        if not feeds:
+            return await i.response.send_message("❌ Aucune source à supprimer", ephemeral=True)
+        spec = self.spec
+        opts = [
+            discord.SelectOption(
+                label=spec['feed_label'](f)[:25],
+                value=str(idx),
+            )
+            for idx, f in enumerate(feeds[:25])
+        ]
+        v = AdsFeedRemoveView(self.u, self.g, opts, self.spec['feeds_key'], self.platform)
+        await i.response.edit_message(
+            embed=discord.Embed(title="🗑️ Supprimer une source", color=0xE74C3C),
+            view=v,
+            attachments=[],
+        )
+
+    async def _cb_back(self, i):
+        v = AdsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
 
 class AdsTwitterPanel(View):
     def __init__(self, u, g):
