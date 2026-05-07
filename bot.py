@@ -6880,8 +6880,8 @@ class ImmunePanel(View):
             await db.execute('DELETE FROM immune_users WHERE guild_id=?', (self.g.id,))
             await db.execute('DELETE FROM immune_channels WHERE guild_id=?', (self.g.id,))
             await db.commit()
-        v = ImmunePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ImmunePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
@@ -7085,8 +7085,8 @@ class PaginatedImmuneRoleView(View):
         await i.response.edit_message(view=self)
     
     async def go_back(self, i):
-        v = ImmunePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ImmunePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class ImmuneRoleSelectMenu(Select):
     def __init__(self, parent, opts):
@@ -7164,8 +7164,8 @@ class PaginatedImmuneChannelView(View):
         await i.response.edit_message(view=self)
     
     async def go_back(self, i):
-        v = ImmunePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ImmunePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class ImmuneChannelSelectMenu(Select):
     def __init__(self, parent, opts):
@@ -7194,8 +7194,8 @@ class ImmuneRoleView(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = ImmunePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ImmunePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class ImmuneRoleSelect(Select):
     def __init__(self, u, g, opts):
@@ -7207,8 +7207,8 @@ class ImmuneRoleSelect(Select):
         async with get_db() as db:
             await db.execute('INSERT OR IGNORE INTO immune_roles VALUES(?,?)', (i.guild.id, int(self.values[0])))
             await db.commit()
-        v = ImmunePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ImmunePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class ImmuneChannelView(View):
     def __init__(self, u, g, opts):
@@ -7219,8 +7219,8 @@ class ImmuneChannelView(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = ImmunePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ImmunePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class ImmuneChannelSelect(Select):
     def __init__(self, u, g, opts):
@@ -7232,8 +7232,8 @@ class ImmuneChannelSelect(Select):
         async with get_db() as db:
             await db.execute('INSERT OR IGNORE INTO immune_channels VALUES(?,?)', (i.guild.id, int(self.values[0])))
             await db.commit()
-        v = ImmunePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ImmunePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class ImmuneRemoveView(View):
     def __init__(self, u, g):
@@ -7282,8 +7282,8 @@ class ImmuneRemoveView(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = ImmunePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ImmunePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class ImmuneRemoveRoleView(View):
     def __init__(self, u, g, opts):
@@ -7300,8 +7300,8 @@ class ImmuneRemoveRoleSelect(Select):
         async with get_db() as db:
             await db.execute('DELETE FROM immune_roles WHERE guild_id=? AND role_id=?', (i.guild.id, int(self.values[0])))
             await db.commit()
-        v = ImmunePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ImmunePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class ImmuneRemoveUserView(View):
     def __init__(self, u, g, opts):
@@ -7318,8 +7318,8 @@ class ImmuneRemoveUserSelect(Select):
         async with get_db() as db:
             await db.execute('DELETE FROM immune_users WHERE guild_id=? AND user_id=?', (i.guild.id, int(self.values[0])))
             await db.commit()
-        v = ImmunePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ImmunePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class ImmuneRemoveChannelView(View):
     def __init__(self, u, g, opts):
@@ -7336,8 +7336,8 @@ class ImmuneRemoveChannelSelect(Select):
         async with get_db() as db:
             await db.execute('DELETE FROM immune_channels WHERE guild_id=? AND channel_id=?', (i.guild.id, int(self.values[0])))
             await db.commit()
-        v = ImmunePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ImmunePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class AddImmuneUserModal(Modal, title="➕ Ajouter un utilisateur immunisé"):
     uid = TextInput(label="ID de l'utilisateur", placeholder="123456789012345678")
@@ -7354,8 +7354,8 @@ class AddImmuneUserModal(Modal, title="➕ Ajouter un utilisateur immunisé"):
                 await db.execute('INSERT OR IGNORE INTO immune_users VALUES(?,?)', (self.g.id, user_id))
                 await db.commit()
         except: pass
-        v = ImmunePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ImmunePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           ⚡ COMMANDES PANEL
@@ -7644,8 +7644,8 @@ class DirectionPanel(View):
 
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = CommandsPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = CommandsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class DirectionPanelV2(LayoutView):
@@ -7877,8 +7877,8 @@ class RellSeasPanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
-        v = CommandsPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = CommandsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class RellSeasPanelV2(LayoutView):
     """Configuration RellSeas / Realsy en V2."""
@@ -8138,8 +8138,8 @@ class SuggestionPanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
-        v = CommandsPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = CommandsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class SuggestionPanelV2(LayoutView):
     """Configuration Suggestions en V2."""
@@ -8418,8 +8418,8 @@ class TradePanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = CommandsPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = CommandsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class TradePanelV2(LayoutView):
     """Configuration Trade en V2."""
@@ -11349,8 +11349,8 @@ class AutoReactionPanel(View):
 
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = CentrePanel(self.u, self.g)
-        await i.response.edit_message(embed=v.embed(), view=v)
+        v = CentrePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class AutoReactionPanelV2(LayoutView):
@@ -11577,8 +11577,8 @@ class MassRolePanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = CentrePanel(self.u, self.g)
-        await i.response.edit_message(embed=v.embed(), view=v)
+        v = CentrePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class MassRolePanelV2(LayoutView):
@@ -12041,8 +12041,8 @@ class AnnouncementPanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = CentrePanel(self.u, self.g)
-        await i.response.edit_message(embed=v.embed(), view=v)
+        v = CentrePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class AnnouncementPanelV2(LayoutView):
     """Système d'annonces en V2."""
@@ -12375,8 +12375,8 @@ class GiveawayPanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = CentrePanel(self.u, self.g)
-        await i.response.edit_message(embed=v.embed(), view=v)
+        v = CentrePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class GiveawayPanelV2(LayoutView):
     """Giveaways en V2."""
@@ -13237,8 +13237,8 @@ class LevelSystemPanel(View):
         level_cfg = c.get('level_config', {})
         level_cfg['enabled'] = not level_cfg.get('enabled', False)
         await db_set(self.g.id, 'level_config', level_cfg)
-        v = LevelSystemPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = LevelSystemPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
     
     @discord.ui.button(label="✨ XP/msg", style=discord.ButtonStyle.primary, row=0)
     async def set_xp(self, i, b):
@@ -13560,8 +13560,8 @@ class XPChannelsSelectPanel(View):
         await i.response.edit_message(embed=await self.embed(), view=self)
     
     async def go_back(self, i):
-        v = LevelSystemPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = LevelSystemPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class LevelXPModal(Modal, title="✨ XP par message"):
     xp_input = TextInput(label="XP gagné par message", placeholder="15", max_length=4)
@@ -13580,8 +13580,8 @@ class LevelXPModal(Modal, title="✨ XP par message"):
             await db_set(self.g.id, 'level_config', level_cfg)
         except:
             pass
-        v = LevelSystemPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = LevelSystemPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class LevelCoinsModal(Modal, title="🪙 Configuration Pièces"):
     msgs_input = TextInput(label="Nombre de messages requis", placeholder="1", max_length=3)
@@ -13603,8 +13603,8 @@ class LevelCoinsModal(Modal, title="🪙 Configuration Pièces"):
             await db_set(self.g.id, 'level_config', level_cfg)
         except:
             pass
-        v = LevelSystemPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = LevelSystemPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class LevelXPVocalModal(Modal, title="🎤 XP en vocal"):
     xp_input = TextInput(label="XP gagné", placeholder="5", max_length=4)
@@ -13629,8 +13629,8 @@ class LevelXPVocalModal(Modal, title="🎤 XP en vocal"):
             await db_set(self.g.id, 'level_config', level_cfg)
         except:
             pass
-        v = LevelSystemPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = LevelSystemPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class LevelCoinsVocalModal(Modal, title="🎤 Pièces en vocal"):
     coins_input = TextInput(label="Pièces gagnées", placeholder="1", max_length=4)
@@ -13655,8 +13655,8 @@ class LevelCoinsVocalModal(Modal, title="🎤 Pièces en vocal"):
             await db_set(self.g.id, 'level_config', level_cfg)
         except:
             pass
-        v = LevelSystemPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = LevelSystemPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class LevelUpChannelSelect(View):
     def __init__(self, u, g, page=0):
@@ -13706,20 +13706,20 @@ class LevelUpChannelSelect(View):
         level_cfg = c.get('level_config', {})
         level_cfg['levelup_channel'] = int(i.data['values'][0])
         await db_set(self.g.id, 'level_config', level_cfg)
-        v = LevelSystemPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
+        v = LevelSystemPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
     async def prev_page(self, i):
         v = LevelUpChannelSelect(self.u, self.g, self.page - 1)
         await i.response.edit_message(view=v)
-    
+
     async def next_page(self, i):
         v = LevelUpChannelSelect(self.u, self.g, self.page + 1)
         await i.response.edit_message(view=v)
-    
+
     async def go_back(self, i):
-        v = LevelSystemPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = LevelSystemPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 # ─────────────────────────────── RÔLES NIVEAU ───────────────────────────────
 
@@ -13856,8 +13856,8 @@ class LevelRolesPanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = LevelSystemPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = LevelSystemPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class AddLevelRoleModal(Modal, title="➕ Ajouter une récompense"):
     level_input = TextInput(label="Niveau requis", placeholder="Ex: 10", max_length=3)
@@ -14080,8 +14080,8 @@ class ShopConfigPanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = LevelSystemPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = LevelSystemPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class AddShopItemModal(Modal, title="➕ Ajouter un article"):
     price_input = TextInput(label="Prix (en pièces)", placeholder="100", max_length=6)
@@ -15706,8 +15706,8 @@ class CommandChannelsPanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = CommandsPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = CommandsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class PaginatedChannelSelectForCmd(View):
     """Sélecteur paginé multi-salons pour les commandes"""
@@ -16623,8 +16623,8 @@ class MessagePanel(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = CentrePanel(self.u, self.g)
-        await i.response.edit_message(embed=v.embed(), view=v)
+        v = CentrePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class MessagePanelV2(LayoutView):
     """Messages automatiques en V2."""
@@ -17056,8 +17056,8 @@ class StatPanel(View):
     
     @discord.ui.button(label="⚙️ Configurer Actions", style=discord.ButtonStyle.primary, row=0)
     async def config_actions(self, i, b):
-        v = StatActionPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = StatActionPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
     
     @discord.ui.button(label="📈 Graphique", style=discord.ButtonStyle.success, row=0)
     async def view_graph(self, i, b):
@@ -17266,8 +17266,8 @@ class StatPanel(View):
     
     @discord.ui.button(label="🔕 Rôle AFK", style=discord.ButtonStyle.primary, row=1)
     async def afk_role(self, i, b):
-        v = AfkRolePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = AfkRolePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
@@ -17586,8 +17586,8 @@ class AfkRolePanel(View):
         afk_cfg = c.get('afk_role_config', {})
         afk_cfg['enabled'] = not afk_cfg.get('enabled', False)
         await db_set(self.g.id, 'afk_role_config', afk_cfg)
-        v = AfkRolePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = AfkRolePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
     
     @discord.ui.button(label="🎭 Définir Rôle", style=discord.ButtonStyle.primary, row=0)
     async def set_role(self, i, b):
@@ -17797,8 +17797,8 @@ class AfkRoleSelect(Select):
         afk_cfg['role'] = int(self.values[0])
         await db_set(self.g.id, 'afk_role_config', afk_cfg)
         
-        v = AfkRolePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = AfkRolePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class AfkNotifChannelView(View):
@@ -17821,8 +17821,8 @@ class AfkNotifChannelSelect(Select):
         afk_cfg['notif_channel'] = int(self.values[0])
         await db_set(self.g.id, 'afk_role_config', afk_cfg)
         
-        v = AfkRolePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = AfkRolePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class AfkDaysModal(Modal):
@@ -17924,8 +17924,8 @@ class AfkListView(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = AfkRolePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = AfkRolePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class AfkActionsView(View):
@@ -18067,8 +18067,8 @@ class AfkActionsView(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = AfkRolePanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = AfkRolePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class AfkKickConfirmView(View):
@@ -18175,8 +18175,8 @@ class StatActionPanel(View):
         stat_cfg = c.get('stat_config', {})
         stat_cfg['actions_7d'] = s.values
         await db_set(self.g.id, 'stat_config', stat_cfg)
-        v = StatActionPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = StatActionPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
     
     @discord.ui.select(
         placeholder="💤 Actions 30 jours (multi-sélection)...",
@@ -18194,8 +18194,8 @@ class StatActionPanel(View):
         stat_cfg = c.get('stat_config', {})
         stat_cfg['actions_30d'] = s.values
         await db_set(self.g.id, 'stat_config', stat_cfg)
-        v = StatActionPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = StatActionPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
     
     @discord.ui.button(label="🎭 Rôle", style=discord.ButtonStyle.primary, row=2)
     async def set_role(self, i, b):
@@ -18475,8 +18475,8 @@ class StatRoleSelectView(View):
         await i.response.edit_message(embed=v.embed(), view=v)
     
     async def _back(self, i):
-        v = StatActionPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = StatActionPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class StatRoleSelectMenu(Select):
@@ -18562,8 +18562,8 @@ class StatChannelSelectView(View):
         await i.response.edit_message(embed=v.embed(), view=v)
     
     async def _back(self, i):
-        v = StatActionPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = StatActionPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class StatChannelSelectMenu(Select):
@@ -19346,8 +19346,8 @@ class ChanSelectPaginatedView(View):
         await i.response.edit_message(embed=discord.Embed(title="📺 Choisir un salon", description=f"**{len(self.channels)} salons** • Page {self.page+1}/{self.max_page+1}", color=C.ORANGE), view=self)
 
     async def _back(self, i):
-        v = ChanPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ChanPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _select_cb(self, i):
         v = EditChanCfg(self.u, self.g, i.data['values'][0])
@@ -19409,8 +19409,8 @@ class EditChanCfg(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
     async def back(self, i, b):
-        v = ChanPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        v = ChanPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                    🎫 TICKET CONFIG PANEL (INTACT)
