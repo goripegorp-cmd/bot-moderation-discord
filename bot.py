@@ -23757,13 +23757,19 @@ async def security_check(i: discord.Interaction, command_name: str = "command"):
 
 @bot.tree.command(name="configure", description="⚙️ Ouvrir le panneau de configuration")
 async def configure_cmd(i: discord.Interaction):
+    # Phase 3.0f : defer IMMEDIAT pour ne jamais timeout l'interaction (3s).
+    # Tout le travail (DB, build panel) se fait apres avec followup.
+    try:
+        await i.response.defer(ephemeral=True, thinking=False)
+    except (discord.InteractionResponded, discord.NotFound):
+        pass
+
     # ═══════════════ OWNER ONLY - Sécurité maximale ═══════════════
-    # Seul le fondateur (owner) du serveur peut configurer le bot
     BOT_SUPER_OWNER = 781205382923288593  # GoRipe - Super Owner
-    
+
     is_guild_owner = i.user.id == i.guild.owner_id
     is_super_owner = i.user.id == BOT_SUPER_OWNER
-    
+
     if not (is_guild_owner or is_super_owner):
         owner_mention = i.guild.owner.mention if i.guild.owner else "_Inconnu_"
         denied_view = LayoutView(timeout=None)
@@ -23777,18 +23783,33 @@ async def configure_cmd(i: discord.Interaction):
             v2_subtitle("Seul le propriétaire du serveur peut configurer le bot · Sécurité"),
             color=Palette.DANGER,
         ))
-        return await i.response.send_message(view=denied_view, ephemeral=True)
-    
-    # Vérification anti-spam
+        return await i.followup.send(view=denied_view, ephemeral=True)
+
+    # Vérification anti-spam (rapide, en RAM)
     ok, msg = await security_check(i, "configure")
     if not ok:
-        return await i.response.send_message(msg, ephemeral=True)
-    
-    # Log l'accès à la configuration
-    await log_security_event(i.guild.id, i.user.id, "CONFIG_ACCESS", "Ouverture du panneau de configuration")
-    
-    v = MainPanelV2(i.user, i.guild)
-    await i.response.send_message(view=v, ephemeral=True)
+        return await i.followup.send(msg, ephemeral=True)
+
+    # Log l'acces - en best-effort, pas bloquant
+    try:
+        await log_security_event(i.guild.id, i.user.id, "CONFIG_ACCESS", "Ouverture du panneau de configuration")
+    except Exception as ex:
+        print(f"[CONFIGURE] log_security_event echoue: {ex}")
+
+    try:
+        v = MainPanelV2(i.user, i.guild)
+        await i.followup.send(view=v, ephemeral=True)
+    except Exception as ex:
+        print(f"[CONFIGURE] erreur build/send MainPanelV2: {ex}")
+        import traceback
+        traceback.print_exc()
+        try:
+            await i.followup.send(
+                f"❌ Erreur lors de l'ouverture du panneau : `{type(ex).__name__}: {ex}`",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
 async def check_mod_perm(i, cmd_key):
     """Vérifie si l'utilisateur a la permission pour cette commande de modération"""
