@@ -7666,17 +7666,18 @@ class ImmuneRemoveView(View):
     
     @discord.ui.button(label="🎭 Rôle", style=discord.ButtonStyle.primary, row=0)
     async def remove_role(self, i, b):
+        # Phase 3.0h : pagination via PaginatedImmuneRemoveView
         async with get_db() as db:
             async with db.execute('SELECT role_id FROM immune_roles WHERE guild_id=?', (self.g.id,)) as c:
                 rids = [r[0] for r in await c.fetchall()]
         if not rids:
             return await i.response.send_message("❌ Aucun rôle immunisé", ephemeral=True)
-        opts = []
-        for rid in rids[:25]:
-            role = self.g.get_role(rid)
-            opts.append(discord.SelectOption(label=f"@{role.name if role else rid}"[:25], value=str(rid)))
-        await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer un rôle", color=C.RED), view=ImmuneRemoveRoleView(self.u, self.g, opts))
-    
+        view = PaginatedImmuneRemoveView(self.u, self.g, 'role', rids, page=0)
+        await i.response.edit_message(
+            embed=discord.Embed(title=f"🗑️ Supprimer un rôle ({len(rids)} total)", color=C.RED),
+            view=view, attachments=[],
+        )
+
     @discord.ui.button(label="👤 Utilisateur", style=discord.ButtonStyle.primary, row=0)
     async def remove_user(self, i, b):
         async with get_db() as db:
@@ -7684,12 +7685,12 @@ class ImmuneRemoveView(View):
                 uids = [r[0] for r in await c.fetchall()]
         if not uids:
             return await i.response.send_message("❌ Aucun utilisateur immunisé", ephemeral=True)
-        opts = []
-        for uid in uids[:25]:
-            member = self.g.get_member(uid)
-            opts.append(discord.SelectOption(label=f"@{member.display_name if member else uid}"[:25], value=str(uid)))
-        await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer un utilisateur", color=C.RED), view=ImmuneRemoveUserView(self.u, self.g, opts))
-    
+        view = PaginatedImmuneRemoveView(self.u, self.g, 'user', uids, page=0)
+        await i.response.edit_message(
+            embed=discord.Embed(title=f"🗑️ Supprimer un utilisateur ({len(uids)} total)", color=C.RED),
+            view=view, attachments=[],
+        )
+
     @discord.ui.button(label="📺 Salon", style=discord.ButtonStyle.primary, row=0)
     async def remove_channel(self, i, b):
         async with get_db() as db:
@@ -7697,11 +7698,11 @@ class ImmuneRemoveView(View):
                 chids = [r[0] for r in await c.fetchall()]
         if not chids:
             return await i.response.send_message("❌ Aucun salon immunisé", ephemeral=True)
-        opts = []
-        for chid in chids[:25]:
-            ch = self.g.get_channel(chid)
-            opts.append(discord.SelectOption(label=f"# {ch.name if ch else chid}"[:25], value=str(chid)))
-        await i.response.edit_message(embed=discord.Embed(title="🗑️ Supprimer un salon", color=C.RED), view=ImmuneRemoveChannelView(self.u, self.g, opts))
+        view = PaginatedImmuneRemoveView(self.u, self.g, 'channel', chids, page=0)
+        await i.response.edit_message(
+            embed=discord.Embed(title=f"🗑️ Supprimer un salon ({len(chids)} total)", color=C.RED),
+            view=view, attachments=[],
+        )
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
@@ -22369,8 +22370,9 @@ class PanelBlacklistView(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.primary, row=2)
     async def back(self, i, b):
-        v = PanelEditView(self.u, self.g, self.pid)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        # Phase 3.0h : retour vers V2 panel
+        v = PanelEditViewV2(self.u, self.g, self.pid)
+        await v.render_to(i, edit=True)
 
 
 class BlacklistAddModal(Modal, title="🚫 Ajouter à la blacklist"):
@@ -22679,8 +22681,9 @@ class PanelCatPaginatedView(View):
         await i.response.edit_message(embed=discord.Embed(title="📁 Choisir la catégorie", description=f"**{len(self.categories)} catégories** • Page {self.page+1}/{self.max_page+1}", color=C.PURPLE), view=self)
 
     async def _back(self, i):
-        v = PanelEditView(self.u, self.g, self.pid)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        # Phase 3.0h : retour vers V2 panel
+        v = PanelEditViewV2(self.u, self.g, self.pid)
+        await v.render_to(i, edit=True)
 
     async def _select_cb(self, i):
         c = await cfg(i.guild.id)
@@ -22688,8 +22691,9 @@ class PanelCatPaginatedView(View):
         if self.pid in panels:
             panels[self.pid]['category'] = int(i.data['values'][0])
             await db_set(i.guild.id, 'ticket_panels', panels)
-        v = PanelEditView(self.u, self.g, self.pid)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        # Phase 3.0h : retour vers V2 panel
+        v = PanelEditViewV2(self.u, self.g, self.pid)
+        await v.render_to(i, edit=True)
 
 # Legacy compat
 PanelCatView = PanelCatPaginatedView
@@ -22753,8 +22757,9 @@ class PanelQsView(View):
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
-        v = PanelEditView(self.u, self.g, self.pid)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        # Phase 3.0h : retour vers V2 panel
+        v = PanelEditViewV2(self.u, self.g, self.pid)
+        await v.render_to(i, edit=True)
 
 class AddQModal(Modal, title="➕ Ajouter une question"):
     t = TextInput(label="Titre (affiché dans le formulaire)", placeholder="Ex: Pseudo en jeu", max_length=45)
@@ -22822,8 +22827,9 @@ class SendPanelPaginatedView(View):
         await i.response.edit_message(embed=discord.Embed(title="📤 Où envoyer le panel?", description=f"**{len(self.channels)} salons** • Page {self.page+1}/{self.max_page+1}", color=C.PURPLE), view=self)
 
     async def _back(self, i):
-        v = PanelEditView(self.u, self.g, self.pid)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        # Phase 3.0h : retour vers V2 panel
+        v = PanelEditViewV2(self.u, self.g, self.pid)
+        await v.render_to(i, edit=True)
 
     async def _select_cb(self, i):
         ch = i.guild.get_channel(int(i.data['values'][0]))
@@ -22897,30 +22903,36 @@ async def update_realsy_activity(guild_id, user_id):
 
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error):
-    """Gestionnaire d'erreur global pour les commandes slash - évite 'échec de l'interaction'"""
+    """Gestionnaire d'erreur global pour les commandes slash - évite 'échec de l'interaction'.
+
+    Phase 3.0h : imprime le traceback complet dans les logs Railway pour debug."""
+    cmd_name = interaction.command.name if interaction.command else 'Unknown'
     try:
-        # Log l'erreur
-        print(f"[APP CMD ERROR] {interaction.command.name if interaction.command else 'Unknown'}: {error}")
-        
-        # Essayer de répondre
+        import traceback
+        print(f"[APP CMD ERROR] /{cmd_name}: {type(error).__name__}: {error}")
+        traceback.print_exception(type(error), error, error.__traceback__)
+
+        # Choix du message utilisateur
         error_msg = "❌ Une erreur est survenue. Réessayez."
-        
         if isinstance(error, discord.app_commands.errors.MissingPermissions):
             error_msg = "❌ Vous n'avez pas les permissions nécessaires."
         elif isinstance(error, discord.app_commands.errors.CommandOnCooldown):
             error_msg = f"⏱️ Commande en cooldown. Réessayez dans {error.retry_after:.0f}s"
         elif isinstance(error, discord.app_commands.errors.MissingRole):
             error_msg = "❌ Vous n'avez pas le rôle requis."
-        
-        if not interaction.response.is_done():
-            await interaction.response.send_message(error_msg, ephemeral=True)
-        else:
-            try:
+        elif isinstance(error, discord.app_commands.errors.CheckFailure):
+            error_msg = "❌ Vous ne pouvez pas utiliser cette commande ici."
+
+        # Tenter d'envoyer la reponse (best-effort)
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(error_msg, ephemeral=True)
+            else:
                 await interaction.followup.send(error_msg, ephemeral=True)
-            except:
-                pass
+        except (discord.NotFound, discord.HTTPException, discord.InteractionResponded):
+            pass  # interaction expiree ou deja repondue
     except Exception as ex:
-        print(f"[APP CMD ERROR HANDLER] {ex}")
+        print(f"[APP CMD ERROR HANDLER FATAL] {ex}")
 
 @bot.event
 async def on_ready():
