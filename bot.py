@@ -30024,16 +30024,29 @@ wizard2026.setup_setup_command(bot)
 slashcmds2026.setup_all_commands(bot)
 
 
+# ─── Phase 3.0g : commande /ping minimale pour tester la liveness ───
+@bot.tree.command(name="ping", description="🏓 Test simple : le bot repond ?")
+async def _2026_ping_cmd(i: discord.Interaction):
+    """Reponse instantanee pour confirmer que le bot est en vie.
+    Aucune dependance, aucune DB - si /ping marche, le bot tourne."""
+    try:
+        latency_ms = round(bot.latency * 1000)
+    except Exception:
+        latency_ms = -1
+    await i.response.send_message(
+        f"🏓 **Pong !** · latence : `{latency_ms}ms` · commit Phase 3.0g",
+        ephemeral=True,
+    )
+
+
 async def _2026_on_ready_addon():
     """Initialise les modules 2026 quand le bot est ready.
 
     Non-invasif : tourne en parallèle de l'on_ready existant via add_listener.
-    - Configure le SocialMediaManager avec les adapters Twitch/YouTube si
-      les env vars correspondantes sont définies (sinon mode manuel uniquement).
-    - Branche les callbacks post/delete sur le bot.
-    - Lance les tâches background (polling + cleanup).
+    DEFENSIVE : tout dans try/except + traceback pour ne jamais bloquer le bot.
     """
     try:
+        print("[2026] on_ready_addon : init SocialMediaManager...")
         mgr = social2026.SocialMediaManager(
             poll_interval_seconds=int(os.getenv("SOCIAL_POLL_SECONDS", "300")),
             cleanup_interval_seconds=int(os.getenv("SOCIAL_CLEANUP_SECONDS", "1800")),
@@ -30088,7 +30101,9 @@ async def _2026_on_ready_addon():
         configured = ", ".join(p.value for p in mgr.configured_platforms())
         print(f"✅ [2026] SocialMediaManager prêt — adapters configurés : {configured or 'manuel uniquement'}")
     except Exception as ex:
+        import traceback
         print(f"⚠️  [2026] Erreur init SocialMediaManager : {ex}")
+        traceback.print_exc()
 
 
 bot.add_listener(_2026_on_ready_addon, "on_ready")
