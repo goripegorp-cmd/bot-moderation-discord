@@ -78,9 +78,17 @@ class GuildStats:
 # =============================================================================
 # STOCKAGE PAR JOUR
 # =============================================================================
+# Phase 3.0e : refonte buffer en memoire + flush periodique pour eviter le
+# disk-thrashing par message (1 read+write disque/message = goulot Asyncio).
+# Maintenant : modifications RAM only, flush toutes les 60s par flush_buffer().
 
 _io_lock = asyncio.Lock()
 _voice_active: dict[tuple[int, int], datetime] = {}  # (guild, user) -> joined_at
+
+# Buffer in-memory : (guild_id, "YYYY-MM-DD") -> day_data dict
+_buffer: dict[tuple[int, str], dict] = {}
+_buffer_dirty: set[tuple[int, str]] = set()
+_buffer_loaded: set[tuple[int, str]] = set()
 
 
 def _guild_dir(guild_id: int) -> Path:
@@ -133,31 +141,50 @@ def _save_day(guild_id: int, day: datetime, data: dict) -> None:
 # TRACKING (a appeler depuis bot.py sur les events)
 # =============================================================================
 
+def _ensure_buffered(guild_id: int, dt: datetime) -> dict:
+    """Charge le jour depuis le disque dans le buffer si pas deja la. Sync, no IO si cache."""
+    day_str = dt.strftime("%Y-%m-%d")
+    key = (guild_id, day_str)
+    if key not in _buffer_loaded:
+        _buffer[key] = _load_day(guild_id, dt)
+        _buffer_loaded.add(key)
+    return _buffer[key]
+
+
+def _mark_dirty(guild_id: int, dt: datetime) -> None:
+    day_str = dt.strftime("%Y-%m-%d")
+    _buffer_dirty.add((guild_id, day_str))
+
+
 async def track_message(
     guild_id: int,
     user_id: int,
     channel_id: int,
     dt: Optional[datetime] = None,
 ) -> None:
-    """Enregistre l'envoi d'un message."""
+    """Enregistre l'envoi d'un message (RAM only, flush async).
+
+    Lockless : risk negligeable de race sur les compteurs (un message
+    rate de temps en temps n'est pas critique pour des stats).
+    """
     dt = dt or datetime.now(timezone.utc)
-    async with _io_lock:
-        data = _load_day(guild_id, dt)
+    try:
+        data = _ensure_buffered(guild_id, dt)
         msgs = data["messages"].setdefault(str(user_id), {})
         msgs[str(channel_id)] = msgs.get(str(channel_id), 0) + 1
-
         first = data["first_message_at"].get(str(user_id))
         if not first:
             data["first_message_at"][str(user_id)] = dt.isoformat()
         data["last_message_at"][str(user_id)] = dt.isoformat()
-
-        _save_day(guild_id, dt, data)
+        _mark_dirty(guild_id, dt)
+    except Exception:
+        pass  # ne jamais faire planter on_message
 
 
 async def track_voice_join(
     guild_id: int, user_id: int, dt: Optional[datetime] = None
 ) -> None:
-    """Marque l'entree en vocal d'un membre."""
+    """Marque l'entree en vocal d'un membre (RAM only)."""
     dt = dt or datetime.now(timezone.utc)
     _voice_active[(guild_id, user_id)] = dt
 
@@ -165,7 +192,7 @@ async def track_voice_join(
 async def track_voice_leave(
     guild_id: int, user_id: int, dt: Optional[datetime] = None
 ) -> None:
-    """Cloture une session vocal et enregistre les minutes."""
+    """Cloture une session vocal et enregistre les minutes (RAM only, flush async)."""
     dt = dt or datetime.now(timezone.utc)
     joined = _voice_active.pop((guild_id, user_id), None)
     if joined is None:
@@ -173,13 +200,13 @@ async def track_voice_leave(
     minutes = max(0, int((dt - joined).total_seconds() // 60))
     if minutes <= 0:
         return
-    async with _io_lock:
-        # On compte les minutes sur le jour de la fin (simple, evite les
-        # complications de cross-midnight - acceptable pour stats)
-        data = _load_day(guild_id, dt)
+    try:
+        data = _ensure_buffered(guild_id, dt)
         cur = data["voice_minutes"].get(str(user_id), 0)
         data["voice_minutes"][str(user_id)] = cur + minutes
-        _save_day(guild_id, dt, data)
+        _mark_dirty(guild_id, dt)
+    except Exception:
+        pass
 
 
 async def track_helpful_reaction(
@@ -187,13 +214,41 @@ async def track_helpful_reaction(
     message_author_id: int,
     dt: Optional[datetime] = None,
 ) -> None:
-    """Enregistre qu'un membre a recu une reaction helpful sur son message."""
+    """Enregistre qu'un membre a recu une reaction helpful sur son message (RAM only)."""
     dt = dt or datetime.now(timezone.utc)
-    async with _io_lock:
-        data = _load_day(guild_id, dt)
+    try:
+        data = _ensure_buffered(guild_id, dt)
         cur = data["helpful_reactions"].get(str(message_author_id), 0)
         data["helpful_reactions"][str(message_author_id)] = cur + 1
-        _save_day(guild_id, dt, data)
+        _mark_dirty(guild_id, dt)
+    except Exception:
+        pass
+
+
+# =============================================================================
+# FLUSH (a appeler periodiquement par bot.py)
+# =============================================================================
+
+async def flush_buffer() -> int:
+    """Flush les jours dirty vers le disque. Retourne le nombre de fichiers ecrits."""
+    if not _buffer_dirty:
+        return 0
+    keys_to_flush = list(_buffer_dirty)
+    _buffer_dirty.clear()
+    written = 0
+    async with _io_lock:
+        for guild_id, day_str in keys_to_flush:
+            data = _buffer.get((guild_id, day_str))
+            if data is None:
+                continue
+            try:
+                day = datetime.strptime(day_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                _save_day(guild_id, day, data)
+                written += 1
+            except Exception:
+                # Si l'ecriture echoue, on remet en dirty pour reessayer plus tard
+                _buffer_dirty.add((guild_id, day_str))
+    return written
 
 
 # =============================================================================
@@ -201,7 +256,11 @@ async def track_helpful_reaction(
 # =============================================================================
 
 async def _aggregate_window(guild_id: int, days: int) -> dict:
-    """Fusionne les donnees des N derniers jours."""
+    """Fusionne les donnees des N derniers jours.
+
+    Inclut a la fois le disque ET le buffer en memoire (pour voir les
+    donnees du jour en cours sans attendre le flush periodique).
+    """
     now = datetime.now(timezone.utc)
     aggregated = {
         "messages": defaultdict(lambda: defaultdict(int)),  # user -> channel -> count
@@ -213,7 +272,13 @@ async def _aggregate_window(guild_id: int, days: int) -> dict:
     async with _io_lock:
         for offset in range(days):
             day = now - timedelta(days=offset)
-            data = _load_day(guild_id, day)
+            day_str = day.strftime("%Y-%m-%d")
+            buffer_key = (guild_id, day_str)
+            # Prefere le buffer (frais) si dispo, sinon disque
+            if buffer_key in _buffer:
+                data = _buffer[buffer_key]
+            else:
+                data = _load_day(guild_id, day)
             for uid, channels in data.get("messages", {}).items():
                 for ch_id, count in channels.items():
                     aggregated["messages"][uid][ch_id] += count
@@ -386,6 +451,7 @@ __all__ = [
     "track_voice_join",
     "track_voice_leave",
     "track_helpful_reaction",
+    "flush_buffer",
     "get_user_stats",
     "get_top_contributors",
     "get_guild_stats",

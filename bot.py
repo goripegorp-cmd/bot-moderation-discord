@@ -30168,6 +30168,34 @@ async def _2026_start_cleanup_loop():
 bot.add_listener(_2026_start_cleanup_loop, "on_ready")
 
 
+# ─── Flush periodique de l'activity tracker (Phase 3.0e)
+#    Evite le disk-thrashing en bufferisant en RAM.
+_2026_flush_task = None
+
+
+async def _2026_activity_flush_loop():
+    """Flush l'activity_tracker toutes les 60s vers le disque."""
+    while not bot.is_closed():
+        try:
+            written = await activity2026.flush_buffer()
+            if written > 0:
+                # Log seulement si on a vraiment ecrit (debug)
+                pass
+        except Exception as ex:
+            print(f"[ACTIVITY FLUSH] erreur: {ex}")
+        await asyncio.sleep(60)
+
+
+async def _2026_start_activity_flush():
+    """Lance la boucle de flush activity (idempotent)."""
+    global _2026_flush_task
+    if _2026_flush_task is None or _2026_flush_task.done():
+        _2026_flush_task = asyncio.create_task(_2026_activity_flush_loop())
+
+
+bot.add_listener(_2026_start_activity_flush, "on_ready")
+
+
 if __name__ == "__main__":
     print("🚀 Bot v32 - Démarrage...")
     print("🔒 Système de sécurité activé")
