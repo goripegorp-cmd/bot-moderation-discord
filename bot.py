@@ -9826,28 +9826,24 @@ class AdsLivePlatformV2(LayoutView):
             await interaction.response.send_message(view=self, ephemeral=True)
 
     async def _cb_chan(self, i):
-        v = PaginatedAdsChannelSelect(self.u, self.g, self.spec['channel_key'], self.platform)
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title=f"📍 Salon {self.spec['name']} (vidéos)",
-                description="Sélectionne le salon pour les nouvelles publications",
-                color=self.spec['color'],
-            ),
-            view=v,
-            attachments=[],
+        # Phase 3.0j : V2 native picker (evite la transition V2->V1 qui plantait)
+        v = V2AdsChannelPicker(
+            self.u, self.g, self.spec['channel_key'], self.platform,
+            title=f"📍 Salon {self.spec['name']} (vidéos)",
+            description=f"Sélectionne le salon pour les nouvelles publications {self.spec['name']}.",
+            color=self.spec['color'],
         )
+        await v.render_to(i, edit=True)
 
     async def _cb_live(self, i):
-        v = PaginatedAdsChannelSelect(self.u, self.g, self.spec['live_key'], self.platform)
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title=f"🔴 Salon {self.spec['name']} Lives",
-                description="Sélectionne le salon pour les notifications de streams en direct",
-                color=self.spec['color'],
-            ),
-            view=v,
-            attachments=[],
+        # Phase 3.0j : V2 native picker
+        v = V2AdsChannelPicker(
+            self.u, self.g, self.spec['live_key'], self.platform,
+            title=f"🔴 Salon {self.spec['name']} Lives",
+            description="Sélectionne le salon pour les notifications de streams en direct.",
+            color=self.spec['color'],
         )
+        await v.render_to(i, edit=True)
 
     async def _cb_add(self, i):
         modal = self.spec['add_modal'](self.g, self.u)
@@ -10541,16 +10537,14 @@ class AdsSimplePlatformV2(LayoutView):
             await interaction.response.send_message(view=self, ephemeral=True)
 
     async def _cb_chan(self, i):
-        v = PaginatedAdsChannelSelect(self.u, self.g, self.spec['channel_key'], self.platform)
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title=f"📍 Salon par défaut {self.spec['name']}",
-                description="Sélectionne le salon de publication par défaut",
-                color=self.spec['color'],
-            ),
-            view=v,
-            attachments=[],
+        # Phase 3.0j : V2 native picker
+        v = V2AdsChannelPicker(
+            self.u, self.g, self.spec['channel_key'], self.platform,
+            title=f"📍 Salon par défaut {self.spec['name']}",
+            description="Sélectionne le salon de publication par défaut.",
+            color=self.spec['color'],
         )
+        await v.render_to(i, edit=True)
 
     async def _cb_add(self, i):
         await i.response.send_modal(self.spec['add_modal'](self.g, self.u))
@@ -11041,16 +11035,14 @@ class AdsRobloxPanelV2(LayoutView):
             await interaction.response.send_message(view=self, ephemeral=True)
 
     async def _cb_chan(self, i):
-        v = PaginatedAdsChannelSelect(self.u, self.g, 'ads_roblox_channel', 'roblox')
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="📍 Salon Roblox UGC",
-                description="Où publier les nouvelles créations UGC",
-                color=0x00A86B,
-            ),
-            view=v,
-            attachments=[],
+        # Phase 3.0j : V2 native picker
+        v = V2AdsChannelPicker(
+            self.u, self.g, 'ads_roblox_channel', 'roblox',
+            title="📍 Salon Roblox UGC",
+            description="Où publier les nouvelles créations UGC.",
+            color=0x00A86B,
         )
+        await v.render_to(i, edit=True)
 
     async def _cb_user(self, i):
         await i.response.send_modal(AdsRobloxAddUserModal(self.g, self.u))
@@ -11464,16 +11456,14 @@ class AdsDealsPanelV2(LayoutView):
             await interaction.response.send_message(view=self, ephemeral=True)
 
     async def _cb_chan(self, i):
-        v = PaginatedAdsChannelSelect(self.u, self.g, 'ads_deals_channel', 'deals')
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="📍 Salon des Réductions",
-                description="Où publier les promotions de jeux",
-                color=0xFF6B35,
-            ),
-            view=v,
-            attachments=[],
+        # Phase 3.0j : V2 native picker
+        v = V2AdsChannelPicker(
+            self.u, self.g, 'ads_deals_channel', 'deals',
+            title="📍 Salon des Réductions",
+            description="Où publier les promotions de jeux.",
+            color=0xFF6B35,
         )
+        await v.render_to(i, edit=True)
 
     async def _cb_toggle(self, i):
         c = await cfg(self.g.id)
@@ -11590,6 +11580,153 @@ class AdsDealsMinDiscountModal(Modal, title="🔻 Réduction Minimum"):
             await i.response.send_message("❌ Entrez un nombre valide (10-90)", ephemeral=True)
 
 # ─────────────────────────────── COMMON VIEWS ───────────────────────────────
+
+class V2AdsChannelPicker(LayoutView):
+    """Selecteur de salon V2 natif (Phase 3.0j).
+
+    Utilise discord.ui.ChannelSelect qui est V2-compatible et evite la
+    transition V2 LayoutView -> V1 View+embed qui plantait en discord.py 2.7.
+    """
+
+    def __init__(self, u, g, config_key: str, platform: str, *,
+                 title: str = "Choisir un salon",
+                 description: str = "Selectionne un salon pour les publications.",
+                 color: int = 0x5865F2,
+                 channel_types=None):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.config_key = config_key
+        self.platform = platform
+        self.title = title
+        self.description = description
+        self.color = color
+        self.channel_types = channel_types or [discord.ChannelType.text, discord.ChannelType.news]
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    def _build(self):
+        self.clear_items()
+
+        # ChannelSelect V2 natif - pas de pagination car Discord-side
+        sel = discord.ui.ChannelSelect(
+            channel_types=self.channel_types,
+            placeholder="📁 Choisir un salon...",
+            min_values=1,
+            max_values=1,
+        )
+        async def _on_select(i):
+            try:
+                ch = sel.values[0]
+                # Resoud channel_id
+                channel_id = ch.id if hasattr(ch, 'id') else int(ch)
+                await db_set(i.guild.id, self.config_key, channel_id)
+                # Retour au panel parent
+                v = self._get_return_panel()
+                if hasattr(v, 'render_to'):
+                    await v.render_to(i, edit=True)
+                    try:
+                        await i.followup.send(
+                            f"✅ Salon défini : <#{channel_id}>",
+                            ephemeral=True,
+                        )
+                    except Exception:
+                        pass
+                else:
+                    await i.response.edit_message(
+                        content=f"✅ Salon défini : <#{channel_id}>",
+                        embed=await v.embed(),
+                        view=v,
+                        attachments=[],
+                    )
+            except Exception as ex:
+                import traceback
+                traceback.print_exc()
+                try:
+                    await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
+                except Exception:
+                    pass
+        sel.callback = _on_select
+
+        # Bouton "Aucun" pour reset le salon
+        b_none = Button(label="❌ Aucun (reset)", style=discord.ButtonStyle.secondary)
+        async def _none(i):
+            try:
+                await db_set(i.guild.id, self.config_key, 0)
+                v = self._get_return_panel()
+                if hasattr(v, 'render_to'):
+                    await v.render_to(i, edit=True)
+                else:
+                    await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+            except Exception as ex:
+                import traceback
+                traceback.print_exc()
+                try:
+                    await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
+                except Exception:
+                    pass
+        b_none.callback = _none
+
+        # Bouton retour
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.danger)
+        async def _back(i):
+            try:
+                v = self._get_return_panel()
+                if hasattr(v, 'render_to'):
+                    await v.render_to(i, edit=True)
+                else:
+                    await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+            except Exception as ex:
+                import traceback
+                traceback.print_exc()
+                try:
+                    await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
+                except Exception:
+                    pass
+        b_back.callback = _back
+
+        items = [
+            v2_title(self.title),
+            v2_subtitle(self.description),
+            v2_divider(),
+            v2_subtitle(f"📂 {len(self.g.text_channels)} salons textuels disponibles · scroll dans le menu pour chercher"),
+            v2_divider(),
+            discord.ui.ActionRow(sel),
+            discord.ui.ActionRow(b_none, b_back),
+        ]
+        self.add_item(v2_container(*items, color=discord.Color(self.color)))
+
+    def _get_return_panel(self):
+        # Meme dispatch que PaginatedAdsChannelSelect
+        if self.platform == 'youtube':
+            return AdsLivePlatformV2(self.u, self.g, 'youtube')
+        elif self.platform == 'twitch':
+            return AdsLivePlatformV2(self.u, self.g, 'twitch')
+        elif self.platform == 'tiktok':
+            return AdsLivePlatformV2(self.u, self.g, 'tiktok')
+        elif self.platform == 'twitter':
+            return AdsSimplePlatformV2(self.u, self.g, 'twitter')
+        elif self.platform == 'reddit':
+            return AdsSimplePlatformV2(self.u, self.g, 'reddit')
+        elif self.platform == 'discord':
+            return AdsSimplePlatformV2(self.u, self.g, 'discord')
+        elif self.platform == 'rosocial':
+            return AdsSimplePlatformV2(self.u, self.g, 'rosocial')
+        elif self.platform == 'roblox':
+            return AdsRobloxPanelV2(self.u, self.g)
+        elif self.platform == 'deals':
+            return AdsDealsPanelV2(self.u, self.g)
+        else:
+            return AdsPanelV2(self.u, self.g)
+
+    async def render_to(self, interaction, *, edit=True):
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
 
 class PaginatedAdsChannelSelect(View):
     """Sélecteur de salon paginé pour les Ads"""
@@ -27123,6 +27260,27 @@ async def check_social_feeds():
         except Exception as ex:
             print(f"Erreur check_social_feeds: {ex}")
 
+# ─── Helper backfill (Phase 3.0j) ──────────────────────────────────────────
+# Quand un nouveau feed est ajoute, on backfill les posts des N derniers jours
+# pour que le salon ait du contenu directement. Au-dela on skip pour eviter
+# de spammer 100 posts d'un coup.
+BACKFILL_MAX_AGE_DAYS = 7
+BACKFILL_MAX_POSTS_PER_FEED = 5
+
+
+def _is_recent_iso(iso_str: str, max_age_days: int = BACKFILL_MAX_AGE_DAYS) -> bool:
+    """True si le timestamp ISO est dans les N derniers jours."""
+    if not iso_str:
+        return False
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        dt = _dt.fromisoformat(iso_str.replace('Z', '+00:00'))
+        age_days = (_dt.now(_tz.utc) - dt).total_seconds() / 86400
+        return age_days <= max_age_days
+    except Exception:
+        return False
+
+
 async def check_youtube_feeds(session, guild, data):
     """Vérifie les nouvelles vidéos YouTube + détection de lives"""
     default_channel = guild.get_channel(data.get('ads_youtube_channel', 0))
@@ -27198,84 +27356,100 @@ async def check_youtube_feeds(session, guild, data):
             entries = root.findall('atom:entry', ns)
             if not entries:
                 continue
-            
-            entry = entries[0]
-            video_id_elem = entry.find('yt:videoId', ns)
-            title_elem = entry.find('atom:title', ns)
-            
-            media_group = entry.find('media:group', ns)
-            description = ""
-            if media_group is not None:
-                desc_elem = media_group.find('media:description', ns)
-                if desc_elem is not None and desc_elem.text:
-                    # Nettoyer la description : garder seulement la première ligne utile
-                    raw = desc_elem.text.strip()
-                    clean_lines = []
-                    for line in raw.split('\n'):
-                        line = line.strip()
-                        if not line:
-                            break  # Arrêter au premier saut de ligne vide
-                        # Ignorer les lignes CTA/promo
-                        skip_words = ['abonne', 'subscribe', 'like', 'commentes', 'rejoins', '🔔', '❤️', '👍', '💬', '🔥',
-                                      'follow', 'lâche', 'prend juste', 'clique', 'activer', 'merci de']
-                        if any(sw in line.lower() for sw in skip_words):
-                            continue
-                        # Ignorer les lignes qui sont principalement des emojis/symboles
-                        if len(line) < 5 or line.startswith('─') or line.startswith('━') or line.startswith('╌'):
-                            continue
-                        clean_lines.append(line)
-                        if len('\n'.join(clean_lines)) >= 150:
-                            break
-                    description = '\n'.join(clean_lines)[:150]
-                    if len(description) < len('\n'.join(clean_lines)):
-                        description += "..."
-            
-            if video_id_elem is None or title_elem is None:
-                continue
-            
-            video_id = video_id_elem.text
-            title = title_elem.text
 
-            # Dedup persistant (Phase 1.8) - garde l'historique entre redemarrages
-            if await tracking2026.was_posted(guild.id, "youtube", channel_id, video_id):
-                continue
-            # Cache RAM conserve pour back-compat (autres parties du code)
+            # Phase 3.0j : iter sur 5 dernieres entrees pour backfill 7 jours
+            posts_to_publish = []
+            for entry in entries[:BACKFILL_MAX_POSTS_PER_FEED]:
+                video_id_elem = entry.find('yt:videoId', ns)
+                title_elem = entry.find('atom:title', ns)
+                if video_id_elem is None or title_elem is None:
+                    continue
+                video_id = video_id_elem.text
+                title = title_elem.text or ""
+                published_elem = entry.find('atom:published', ns)
+                published_at = published_elem.text if published_elem is not None else None
+
+                if await tracking2026.was_posted(guild.id, "youtube", channel_id, video_id):
+                    continue
+
+                # Description nettoyee
+                media_group = entry.find('media:group', ns)
+                description = ""
+                if media_group is not None:
+                    desc_elem = media_group.find('media:description', ns)
+                    if desc_elem is not None and desc_elem.text:
+                        raw = desc_elem.text.strip()
+                        clean_lines = []
+                        for line in raw.split('\n'):
+                            line = line.strip()
+                            if not line:
+                                break
+                            skip_words = ['abonne', 'subscribe', 'like', 'commentes', 'rejoins',
+                                          'follow', 'clique', 'activer', 'merci de']
+                            if any(sw in line.lower() for sw in skip_words):
+                                continue
+                            if len(line) < 5 or line.startswith('-') or line.startswith('='):
+                                continue
+                            clean_lines.append(line)
+                            if len('\n'.join(clean_lines)) >= 150:
+                                break
+                        description = '\n'.join(clean_lines)[:150]
+                        if len(description) < len('\n'.join(clean_lines)):
+                            description += "..."
+
+                video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+                # Trop vieux -> record sans poster
+                if published_at and not _is_recent_iso(published_at, BACKFILL_MAX_AGE_DAYS):
+                    try:
+                        await tracking2026.record_post(
+                            guild.id, "youtube", channel_id, video_id,
+                            channel_id=target_channel.id, message_id=0,
+                            post_type="video", title=title, url=video_url,
+                        )
+                    except Exception:
+                        pass
+                    continue
+
+                posts_to_publish.append((video_id, title, description, video_url))
+
+            # Plus ancien en premier (le plus recent finit en bas du salon)
+            posts_to_publish.reverse()
+
             cache_key = f"yt_{guild.id}_{channel_id}"
-            posted_content[cache_key] = video_id
-
-            video_url = f"https://www.youtube.com/watch?v={video_id}"
-            e = discord.Embed(color=0xFF0000, url=video_url)
-            e.set_author(name=f"YOUTUBE • {channel_name}", url=f"https://www.youtube.com/channel/{channel_id}", icon_url=_YT_ICON)
-            e.title = f"▶️ {title}"
-
-            # Description propre : seulement si non-vide après nettoyage
-            if description and len(description.strip()) > 10:
-                e.description = f"*{description}*\n\n🔗 [**Regarder sur YouTube**]({video_url})"
-            else:
-                e.description = f"🔗 [**Regarder sur YouTube**]({video_url})"
-
-            e.set_image(url=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg")
-
-            # Avatar de la chaîne en thumbnail
             yt_avatar = await fetch_avatar_url('youtube', channel_id, session)
-            if yt_avatar:
-                e.set_thumbnail(url=yt_avatar)
 
-            e.set_footer(text=f"YouTube • {channel_name}", icon_url=_YT_ICON)
-            e.timestamp = now()
+            for video_id, title, description, video_url in posts_to_publish:
+                posted_content[cache_key] = video_id
 
-            _yt_msg = await webhook_send(target_channel, 'youtube', embed=e)
-            # Trace persistant : memorise (post_id, message_id) pour anti-doublon + auto-clean
-            try:
-                await tracking2026.record_post(
-                    guild.id, "youtube", channel_id, video_id,
-                    channel_id=target_channel.id,
-                    message_id=getattr(_yt_msg, 'id', 0) or 0,
-                    post_type="video", title=title or "", url=video_url,
-                )
-            except Exception:
-                pass
-            await asyncio.sleep(1)
+                e = discord.Embed(color=0xFF0000, url=video_url)
+                e.set_author(name=f"YOUTUBE • {channel_name}",
+                             url=f"https://www.youtube.com/channel/{channel_id}",
+                             icon_url=_YT_ICON)
+                e.title = f"▶️ {title}"[:256]
+
+                if description and len(description.strip()) > 10:
+                    e.description = f"*{description}*\n\n🔗 [**Regarder sur YouTube**]({video_url})"
+                else:
+                    e.description = f"🔗 [**Regarder sur YouTube**]({video_url})"
+
+                e.set_image(url=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg")
+                if yt_avatar:
+                    e.set_thumbnail(url=yt_avatar)
+                e.set_footer(text=f"YouTube • {channel_name}", icon_url=_YT_ICON)
+                e.timestamp = now()
+
+                _yt_msg = await webhook_send(target_channel, 'youtube', embed=e)
+                try:
+                    await tracking2026.record_post(
+                        guild.id, "youtube", channel_id, video_id,
+                        channel_id=target_channel.id,
+                        message_id=getattr(_yt_msg, 'id', 0) or 0,
+                        post_type="video", title=title, url=video_url,
+                    )
+                except Exception:
+                    pass
+                await asyncio.sleep(1)
 
         except Exception as ex:
             print(f"Erreur YouTube feed {feed}: {ex}")
