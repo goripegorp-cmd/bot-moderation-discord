@@ -1403,11 +1403,11 @@ class UniversalChannelSelectMenu(Select):
     def __init__(self, parent, opts):
         placeholder = f"Page {parent.page + 1}/{parent.max_page + 1} - {parent.title}"[:100]
         super().__init__(placeholder=placeholder, options=opts)
-        self.parent = parent
+        self.parent_view = parent
     
     async def callback(self, i):
         channel_id = int(self.values[0])
-        await self.parent.callback_func(i, channel_id, self.parent.extra_data)
+        await self.parent_view.callback_func(i, channel_id, self.parent_view.extra_data)
 
 
 class UniversalRoleSelect(View):
@@ -1500,11 +1500,11 @@ class UniversalRoleSelectMenu(Select):
     def __init__(self, parent, opts):
         placeholder = f"Page {parent.page + 1}/{parent.max_page + 1} - {parent.title}"[:100]
         super().__init__(placeholder=placeholder, options=opts)
-        self.parent = parent
+        self.parent_view = parent
     
     async def callback(self, i):
         role_id = int(self.values[0])
-        await self.parent.callback_func(i, role_id, self.parent.extra_data)
+        await self.parent_view.callback_func(i, role_id, self.parent_view.extra_data)
 
 
 class UniversalCategorySelect(View):
@@ -1591,11 +1591,11 @@ class UniversalCategorySelectMenu(Select):
     def __init__(self, parent, opts):
         placeholder = f"Page {parent.page + 1}/{parent.max_page + 1} - {parent.title}"[:100]
         super().__init__(placeholder=placeholder, options=opts)
-        self.parent = parent
+        self.parent_view = parent
     
     async def callback(self, i):
         cat_id = int(self.values[0])
-        await self.parent.callback_func(i, cat_id, self.parent.extra_data)
+        await self.parent_view.callback_func(i, cat_id, self.parent_view.extra_data)
 
 
 # Ancien système gardé pour compatibilité
@@ -4278,14 +4278,14 @@ class LogChannelSelectMenu(Select):
             placeholder=f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un salon...",
             options=opts
         )
-        self.parent = parent
+        self.parent_view = parent
     
     async def callback(self, i):
         try:
             channel_id = int(self.values[0])
-            await db_set(i.guild.id, f'log_{self.parent.key}', channel_id)
+            await db_set(i.guild.id, f'log_{self.parent_view.key}', channel_id)
 
-            v = ProtDetailV2(self.parent.u, self.parent.g, self.parent.prot)
+            v = ProtDetailV2(self.parent_view.u, self.parent_view.g, self.parent_view.prot)
             await v.render_to(i, edit=True)
         except Exception as ex:
             print(f"[LOG SELECT ERROR] {ex}")
@@ -4860,7 +4860,7 @@ class PaginatedLinkChanSelectView(View):
 class LinkChanSelectMenu(Select):
     def __init__(self, parent, opts):
         super().__init__(placeholder=f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un salon...", options=opts)
-        self.parent = parent
+        self.parent_view = parent
     
     async def callback(self, i):
         c = await cfg(i.guild.id)
@@ -4870,7 +4870,7 @@ class LinkChanSelectMenu(Select):
         if chid not in chs:
             chs.append(chid)
             await db_set(i.guild.id, 'link_allowed_channels', chs)
-        v = LinkConfigPanel(self.parent.u, self.parent.g)
+        v = LinkConfigPanel(self.parent_view.u, self.parent_view.g)
         await i.response.edit_message(
             content=f"✅ Salon **{ch.name if ch else 'inconnu'}** ajouté aux salons autorisés",
             embed=await v.embed(),
@@ -7514,14 +7514,14 @@ class PaginatedImmuneRoleView(View):
 class ImmuneRoleSelectMenu(Select):
     def __init__(self, parent, opts):
         super().__init__(placeholder=f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un rôle...", options=opts)
-        self.parent = parent
+        self.parent_view = parent
     
     async def callback(self, i):
         async with get_db() as db:
             await db.execute('INSERT OR IGNORE INTO immune_roles VALUES(?,?)', (i.guild.id, int(self.values[0])))
             await db.commit()
         role = i.guild.get_role(int(self.values[0]))
-        v = ImmunePanel(self.parent.u, self.parent.g)
+        v = ImmunePanel(self.parent_view.u, self.parent_view.g)
         await i.response.edit_message(
             content=f"✅ Rôle **{role.name if role else 'inconnu'}** ajouté aux immunités",
             embed=await v.embed(),
@@ -7593,14 +7593,14 @@ class PaginatedImmuneChannelView(View):
 class ImmuneChannelSelectMenu(Select):
     def __init__(self, parent, opts):
         super().__init__(placeholder=f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un salon...", options=opts)
-        self.parent = parent
+        self.parent_view = parent
     
     async def callback(self, i):
         async with get_db() as db:
             await db.execute('INSERT OR IGNORE INTO immune_channels VALUES(?,?)', (i.guild.id, int(self.values[0])))
             await db.commit()
         ch = i.guild.get_channel(int(self.values[0]))
-        v = ImmunePanel(self.parent.u, self.parent.g)
+        v = ImmunePanel(self.parent_view.u, self.parent_view.g)
         await i.response.edit_message(
             content=f"✅ Salon **{ch.name if ch else 'inconnu'}** ajouté aux immunités",
             embed=await v.embed(),
@@ -7911,22 +7911,22 @@ class _PaginatedImmuneRemoveSelect(Select):
         if parent.max_page > 0:
             kind_placeholder = f"Page {parent.page+1}/{parent.max_page+1} — {kind_placeholder}"
         super().__init__(placeholder=kind_placeholder, options=opts)
-        self.parent = parent
+        self.parent_view = parent
 
     async def callback(self, i):
-        kind = self.parent.kind
+        kind = self.parent_view.kind
         item_id = int(self.values[0])
         try:
             async with get_db() as db:
                 await db.execute(
                     f'DELETE FROM {PaginatedImmuneRemoveView.KIND_TABLE[kind]} '
                     f'WHERE guild_id=? AND {PaginatedImmuneRemoveView.KIND_COL[kind]}=?',
-                    (self.parent.g.id, item_id),
+                    (self.parent_view.g.id, item_id),
                 )
                 await db.commit()
         except Exception as ex:
             print(f"[IMMUNE REMOVE] erreur DB : {ex}")
-        v = ImmuneRemoveViewV2(self.parent.u, self.parent.g)
+        v = ImmuneRemoveViewV2(self.parent_view.u, self.parent_view.g)
         await v.render_to(i, edit=True)
 
 
@@ -8951,11 +8951,11 @@ class PaginatedRoleSelect(View):
 class PaginatedRoleSelectMenu(Select):
     def __init__(self, parent, opts):
         super().__init__(placeholder=f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un rôle...", options=opts)
-        self.parent = parent
+        self.parent_view = parent
 
     async def callback(self, i):
-        await db_set(self.parent.g.id, self.parent.callback_key, int(self.values[0]))
-        v = self.parent.return_panel_class(self.parent.u, self.parent.g)
+        await db_set(self.parent_view.g.id, self.parent_view.callback_key, int(self.values[0]))
+        v = self.parent_view.return_panel_class(self.parent_view.u, self.parent_view.g)
         if hasattr(v, 'render_to'):
             await v.render_to(i, edit=True)
         else:
@@ -11686,12 +11686,12 @@ class PaginatedAdsChannelSelect(View):
 class PaginatedAdsChannelMenu(Select):
     def __init__(self, parent, opts):
         super().__init__(placeholder=f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un salon...", options=opts)
-        self.parent = parent
+        self.parent_view = parent
 
     async def callback(self, i):
-        await db_set(i.guild.id, self.parent.key, int(self.values[0]))
+        await db_set(i.guild.id, self.parent_view.key, int(self.values[0]))
         ch = i.guild.get_channel(int(self.values[0]))
-        v = self.parent._get_return_panel()
+        v = self.parent_view._get_return_panel()
         # V2-aware : panneau V2 → render_to + followup confirmation
         if hasattr(v, 'render_to'):
             await v.render_to(i, edit=True)
@@ -11766,19 +11766,19 @@ class AdsFeedChannelPaginatedSelect(Select):
     def __init__(self, parent, opts):
         placeholder = f"Page {parent.page+1}/{parent.max_page+1} — Choisir un salon..."[:100]
         super().__init__(placeholder=placeholder, options=opts)
-        self.parent = parent
+        self.parent_view = parent
 
     async def callback(self, i):
         channel_id = int(self.values[0])
         if channel_id > 0:
-            self.parent.feed_data['channel_id'] = channel_id
-        c = await cfg(self.parent.g.id)
-        feeds = c.get(self.parent.feeds_config_key, [])
-        feeds.append(self.parent.feed_data)
-        await db_set(self.parent.g.id, self.parent.feeds_config_key, feeds)
-        ch = self.parent.g.get_channel(channel_id) if channel_id else None
+            self.parent_view.feed_data['channel_id'] = channel_id
+        c = await cfg(self.parent_view.g.id)
+        feeds = c.get(self.parent_view.feeds_config_key, [])
+        feeds.append(self.parent_view.feed_data)
+        await db_set(self.parent_view.g.id, self.parent_view.feeds_config_key, feeds)
+        ch = self.parent_view.g.get_channel(channel_id) if channel_id else None
         salon_txt = ch.mention if ch else "salon par défaut"
-        name = self.parent.feed_data.get('name') or self.parent.feed_data.get('username') or self.parent.feed_data.get('id', '?')
+        name = self.parent_view.feed_data.get('name') or self.parent_view.feed_data.get('username') or self.parent_view.feed_data.get('id', '?')
         await i.response.edit_message(content=f"✅ **{name}** ajouté ! Publications dans {salon_txt}", view=None)
 
 
@@ -12512,16 +12512,16 @@ class MassRoleSelectMenu(Select):
             placeholder=f"Page {parent.page + 1}/{parent.max_page + 1} — Choisir le rôle...",
             options=opts
         )
-        self.parent = parent
+        self.parent_view = parent
     
     async def callback(self, i):
         role_id = int(self.values[0])
-        role = self.parent.g.get_role(role_id)
+        role = self.parent_view.g.get_role(role_id)
         if not role:
             return await i.response.send_message("❌ Rôle introuvable.", ephemeral=True)
         
         # Passer à l'écran de confirmation avec preview
-        v = MassRoleConfirmView(self.parent.u, self.parent.g, self.parent.action, self.parent.target, role)
+        v = MassRoleConfirmView(self.parent_view.u, self.parent_view.g, self.parent_view.action, self.parent_view.target, role)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 
@@ -13557,20 +13557,20 @@ class GiveawayRolePaginatedSelect(Select):
     def __init__(self, parent, opts):
         placeholder = f"Page {parent.page+1}/{parent.max_page+1} — {parent.title}"[:100]
         super().__init__(placeholder=placeholder, options=opts)
-        self.parent = parent
+        self.parent_view = parent
 
     async def callback(self, i):
         role_id = int(self.values[0])
-        panel = self.parent.panel
+        panel = self.parent_view.panel
 
-        if self.parent.role_key == 'required_role':
+        if self.parent_view.role_key == 'required_role':
             if 'conditions' not in panel.data:
                 panel.data['conditions'] = {}
             if role_id > 0:
                 panel.data['conditions']['required_role'] = role_id
             else:
                 panel.data['conditions'].pop('required_role', None)
-        elif self.parent.role_key == 'ping_role':
+        elif self.parent_view.role_key == 'ping_role':
             if role_id > 0:
                 panel.data['ping_role'] = role_id
             else:
@@ -16897,20 +16897,20 @@ class CmdChannelSelectMenu(Select):
             options=opts,
             max_values=min(len(opts), 10)
         )
-        self.parent = parent
+        self.parent_view = parent
     
     async def callback(self, i):
         for val in self.values:
             ch_id = int(val)
-            if ch_id in self.parent.current_channels:
-                self.parent.current_channels.remove(ch_id)
+            if ch_id in self.parent_view.current_channels:
+                self.parent_view.current_channels.remove(ch_id)
             else:
-                self.parent.current_channels.append(ch_id)
+                self.parent_view.current_channels.append(ch_id)
         
         v = PaginatedChannelSelectForCmd(
-            self.parent.u, self.parent.g, 
-            self.parent.cmd_key, self.parent.current_channels, 
-            self.parent.page
+            self.parent_view.u, self.parent_view.g, 
+            self.parent_view.cmd_key, self.parent_view.current_channels, 
+            self.parent_view.page
         )
         await i.response.edit_message(view=v)
 
@@ -17124,11 +17124,11 @@ class AutoHelpChannelSelect(View):
 class AutoHelpChannelSelectMenu(Select):
     def __init__(self, parent, opts):
         super().__init__(placeholder=f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un salon...", options=opts)
-        self.parent = parent
+        self.parent_view = parent
     
     async def callback(self, i):
         channel_id = self.values[0]
-        await i.response.send_modal(AutoHelpConfigModal(self.parent.u, self.parent.g, channel_id))
+        await i.response.send_modal(AutoHelpConfigModal(self.parent_view.u, self.parent_view.g, channel_id))
 
 class AutoHelpConfigModal(Modal, title="💡 Configurer l'aide automatique"):
     help_title = TextInput(
@@ -20246,20 +20246,20 @@ class StatRoleSelectView(View):
 class StatRoleSelectMenu(Select):
     def __init__(self, parent, opts):
         super().__init__(placeholder="Choisir le rôle d'activité...", options=opts)
-        self.parent = parent
+        self.parent_view = parent
     
     async def callback(self, i):
         role_id = int(self.values[0])
         try:
-            c = await cfg(self.parent.g.id)
+            c = await cfg(self.parent_view.g.id)
             stat_cfg = c.get('stat_config', {})
             stat_cfg['activity_role'] = role_id
-            await db_set(self.parent.g.id, 'stat_config', stat_cfg)
+            await db_set(self.parent_view.g.id, 'stat_config', stat_cfg)
             
-            role = self.parent.g.get_role(role_id)
+            role = self.parent_view.g.get_role(role_id)
             role_txt = role.mention if role else "Aucun"
             
-            v = StatActionPanel(self.parent.u, self.parent.g)
+            v = StatActionPanel(self.parent_view.u, self.parent_view.g)
             await i.response.edit_message(content=f"✅ Rôle d'activité : {role_txt}", embed=await v.embed(), view=v)
         except Exception as ex:
             print(f"[STAT] Erreur set role: {ex}")
@@ -20333,23 +20333,23 @@ class StatChannelSelectView(View):
 class StatChannelSelectMenu(Select):
     def __init__(self, parent, opts):
         super().__init__(placeholder=f"Choisir le salon...", options=opts)
-        self.parent = parent
+        self.parent_view = parent
     
     async def callback(self, i):
         channel_id = int(self.values[0])
         try:
-            c = await cfg(self.parent.g.id)
+            c = await cfg(self.parent_view.g.id)
             stat_cfg = c.get('stat_config', {})
-            stat_cfg[self.parent.config_key] = channel_id
-            await db_set(self.parent.g.id, 'stat_config', stat_cfg)
+            stat_cfg[self.parent_view.config_key] = channel_id
+            await db_set(self.parent_view.g.id, 'stat_config', stat_cfg)
             
-            ch = self.parent.g.get_channel(channel_id)
+            ch = self.parent_view.g.get_channel(channel_id)
             ch_txt = ch.mention if ch else "Aucun"
             
-            v = StatActionPanel(self.parent.u, self.parent.g)
-            await i.response.edit_message(content=f"✅ {self.parent.title} : {ch_txt}", embed=await v.embed(), view=v)
+            v = StatActionPanel(self.parent_view.u, self.parent_view.g)
+            await i.response.edit_message(content=f"✅ {self.parent_view.title} : {ch_txt}", embed=await v.embed(), view=v)
         except Exception as ex:
-            print(f"[STAT] Erreur set channel {self.parent.config_key}: {ex}")
+            print(f"[STAT] Erreur set channel {self.parent_view.config_key}: {ex}")
             await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
 
 async def count_afk_members_by_days(guild, days):
@@ -21587,11 +21587,11 @@ class StaffGlobalRoleSelect(Select):
     def __init__(self, parent, opts):
         placeholder = f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un rôle..."
         super().__init__(placeholder=placeholder, options=opts)
-        self.parent = parent
+        self.parent_view = parent
     
     async def callback(self, i):
         await db_set(i.guild.id, 'ticket_staff', int(self.values[0]))
-        v = TicketMainPanel(self.parent.u, self.parent.g)
+        v = TicketMainPanel(self.parent_view.u, self.parent_view.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -21678,7 +21678,7 @@ class BlacklistRoleSelect(Select):
     def __init__(self, parent, opts):
         placeholder = f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un rôle..."
         super().__init__(placeholder=placeholder, options=opts)
-        self.parent = parent
+        self.parent_view = parent
     
     async def callback(self, i):
         role_id = int(self.values[0])
@@ -21690,7 +21690,7 @@ class BlacklistRoleSelect(Select):
             role = i.guild.get_role(role_id)
             msg = f"✅ Le rôle {role.mention if role else 'sélectionné'} peut maintenant utiliser `/ticketblacklist`."
         
-        v = TicketMainPanel(self.parent.u, self.parent.g)
+        v = TicketMainPanel(self.parent_view.u, self.parent_view.g)
         await i.response.edit_message(embed=await v.embed(), view=v)
         await i.followup.send(msg, ephemeral=True)
 
@@ -22623,15 +22623,15 @@ class PanelStaffRoleSelect(Select):
     def __init__(self, parent, opts):
         placeholder = f"Page {parent.page + 1}/{parent.max_page + 1} - Choisir un rôle..."
         super().__init__(placeholder=placeholder, options=opts)
-        self.parent = parent
+        self.parent_view = parent
     
     async def callback(self, i):
         c = await cfg(i.guild.id)
         panels = c.get('ticket_panels', {})
-        if self.parent.pid in panels:
-            panels[self.parent.pid]['staff_role'] = int(self.values[0])
+        if self.parent_view.pid in panels:
+            panels[self.parent_view.pid]['staff_role'] = int(self.values[0])
             await db_set(i.guild.id, 'ticket_panels', panels)
-        v = PanelEditView(self.parent.u, self.parent.g, self.parent.pid)
+        v = PanelEditView(self.parent_view.u, self.parent_view.g, self.parent_view.pid)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
 class PanelCatPaginatedView(View):
@@ -26200,7 +26200,7 @@ class TradeBuilderView(View):
 
 class TradeEmojiGiveSelect(Select):
     def __init__(self, parent, emojis):
-        self.parent = parent
+        self.parent_view = parent
         self.emoji_map = {}  # Stocker le mapping id -> format string
         options = []
         for e in emojis[:25]:
@@ -26223,16 +26223,16 @@ class TradeEmojiGiveSelect(Select):
         )
     
     async def callback(self, i):
-        self.parent.je_donne = []
+        self.parent_view.je_donne = []
         for emoji_id in self.values:
             # Utiliser le format stocké directement
             if emoji_id in self.emoji_map:
-                self.parent.je_donne.append(self.emoji_map[emoji_id])
-        await i.response.edit_message(embed=self.parent.get_embed(), view=self.parent)
+                self.parent_view.je_donne.append(self.emoji_map[emoji_id])
+        await i.response.edit_message(embed=self.parent_view.get_embed(), view=self.parent_view)
 
 class TradeEmojiWantSelect(Select):
     def __init__(self, parent, emojis):
-        self.parent = parent
+        self.parent_view = parent
         self.emoji_map = {}  # Stocker le mapping id -> format string
         options = []
         for e in emojis[:25]:
@@ -26255,12 +26255,12 @@ class TradeEmojiWantSelect(Select):
         )
     
     async def callback(self, i):
-        self.parent.je_veux = []
+        self.parent_view.je_veux = []
         for emoji_id in self.values:
             # Utiliser le format stocké directement
             if emoji_id in self.emoji_map:
-                self.parent.je_veux.append(self.emoji_map[emoji_id])
-        await i.response.edit_message(embed=self.parent.get_embed(), view=self.parent)
+                self.parent_view.je_veux.append(self.emoji_map[emoji_id])
+        await i.response.edit_message(embed=self.parent_view.get_embed(), view=self.parent_view)
 
 class TradeGameModal(Modal, title="🎮 Définir le Jeu"):
     jeu = TextInput(label="Nom du jeu", placeholder="Ex: Rocket League, Fortnite, GTA RP...", max_length=50)
