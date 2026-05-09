@@ -7097,51 +7097,28 @@ class ModerationPanelV2(LayoutView):
             await interaction.response.send_message(view=self, ephemeral=True)
 
     async def _open_channel_picker(self, interaction, key, label):
-        """Ouvre un sélecteur de salon (V1) qui revient vers ModerationPanelV2."""
-        async def picker_callback(inter, channel_id, extra):
-            await db_set(inter.guild.id, key, channel_id)
-            new_panel = ModerationPanelV2(self.u, self.g)
-            await new_panel.render_to(inter, edit=True)
-
-        v = UniversalChannelSelect(
+        """Phase 3.0k : V2 native picker (plus de transition V2->V1 qui plantait)."""
+        v = V2GenericChannelPicker(
             self.u, self.g,
-            callback_func=picker_callback,
-            return_view_func=lambda: ModerationPanelV2(self.u, self.g),
-            title=label,
+            config_key=key,
+            return_panel_factory=lambda: ModerationPanelV2(self.u, self.g),
+            title=f"📜 {label}",
+            description=f"Sélectionne le salon. {len(list(self.g.text_channels))} disponibles.",
+            color=0xE67E22,
         )
-        await interaction.response.edit_message(
-            embed=discord.Embed(
-                title=f"📜 {label}",
-                description=f"📊 {len(list(self.g.text_channels))} salons disponibles",
-                color=0xE67E22,
-            ),
-            view=v,
-            attachments=[],
-        )
+        await v.render_to(interaction, edit=True)
 
     async def _open_role_picker(self, interaction, key, label):
-        """Ouvre un sélecteur de rôle (V1) qui revient vers ModerationPanelV2."""
-        async def picker_callback(inter, role_id, extra):
-            await db_set(inter.guild.id, key, role_id)
-            new_panel = ModerationPanelV2(self.u, self.g)
-            await new_panel.render_to(inter, edit=True)
-
-        v = UniversalRoleSelect(
+        """Phase 3.0k : V2 native picker."""
+        v = V2GenericRolePicker(
             self.u, self.g,
-            callback_func=picker_callback,
-            return_view_func=lambda: ModerationPanelV2(self.u, self.g),
-            title=label,
-            none_label="❌ Aucun rôle requis",
+            config_key=key,
+            return_panel_factory=lambda: ModerationPanelV2(self.u, self.g),
+            title=f"⚙️ {label}",
+            description="Sélectionne le rôle minimum requis pour cette commande.",
+            color=0xE67E22,
         )
-        await interaction.response.edit_message(
-            embed=discord.Embed(
-                title=f"⚙️ {label}",
-                description=f"Sélectionne le rôle minimum requis.\n📊 {len([r for r in self.g.roles[1:] if not r.is_bot_managed()])} rôles disponibles",
-                color=0xE67E22,
-            ),
-            view=v,
-            attachments=[],
-        )
+        await v.render_to(interaction, edit=True)
 
     async def _cb_set_logs(self, i):
         await self._open_channel_picker(i, 'mod_log_channel', 'Salon Logs')
@@ -8367,26 +8344,16 @@ class DirectionPanelV2(LayoutView):
         await i.response.send_modal(modal)
 
     async def _cb_role(self, i):
-        async def picker_callback(interaction, role_id, extra):
-            await db_set(interaction.guild.id, 'direction_allowed_role', role_id)
-            new_panel = DirectionPanelV2(self.u, self.g)
-            await new_panel.render_to(interaction, edit=True)
-
-        v = UniversalRoleSelect(
+        # Phase 3.0k : V2 native picker
+        v = V2GenericRolePicker(
             self.u, self.g,
-            callback_func=picker_callback,
-            return_view_func=lambda: DirectionPanelV2(self.u, self.g),
-            title="Rôle Direction",
+            config_key='direction_allowed_role',
+            return_panel_factory=lambda: DirectionPanelV2(self.u, self.g),
+            title="🎭 Rôle Direction autorisé",
+            description="Sélectionne le rôle qui peut utiliser /direction.",
+            color=0xFF4444,
         )
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="🎭 Choisir le rôle autorisé",
-                description=f"📊 {len([r for r in self.g.roles[1:] if not r.is_bot_managed()])} rôles disponibles",
-                color=0xFF4444,
-            ),
-            view=v,
-            attachments=[],
-        )
+        await v.render_to(i, edit=True)
 
     async def _cb_reset(self, i):
         await db_set(self.g.id, 'direction_allowed_role', 0)
@@ -8594,48 +8561,28 @@ class RellSeasPanelV2(LayoutView):
         await i.response.send_modal(modal)
 
     async def _cb_role(self, i):
-        async def picker_callback(interaction, role_id, extra):
-            await db_set(interaction.guild.id, 'rellseas_role', role_id)
-            new_panel = RellSeasPanelV2(self.u, self.g)
-            await new_panel.render_to(interaction, edit=True)
-
-        v = UniversalRoleSelect(
+        # Phase 3.0k : V2 native picker
+        v = V2GenericRolePicker(
             self.u, self.g,
-            callback_func=picker_callback,
-            return_view_func=lambda: RellSeasPanelV2(self.u, self.g),
-            title="Rôle Realsy",
+            config_key='rellseas_role',
+            return_panel_factory=lambda: RellSeasPanelV2(self.u, self.g),
+            title="🎭 Rôle Realsy",
+            description="Sélectionne le rôle qui sera attribué automatiquement.",
+            color=0x9B59B6,
         )
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="🎭 Choisir le rôle Realsy",
-                description=f"📊 {len([r for r in self.g.roles[1:] if not r.is_bot_managed()])} rôles disponibles",
-                color=0x9B59B6,
-            ),
-            view=v,
-            attachments=[],
-        )
+        await v.render_to(i, edit=True)
 
     async def _open_channel_picker(self, i, key, label):
-        async def picker_callback(interaction, channel_id, extra):
-            await db_set(interaction.guild.id, key, channel_id)
-            new_panel = RellSeasPanelV2(self.u, self.g)
-            await new_panel.render_to(interaction, edit=True)
-
-        v = UniversalChannelSelect(
+        # Phase 3.0k : V2 native picker
+        v = V2GenericChannelPicker(
             self.u, self.g,
-            callback_func=picker_callback,
-            return_view_func=lambda: RellSeasPanelV2(self.u, self.g),
-            title=label,
+            config_key=key,
+            return_panel_factory=lambda: RellSeasPanelV2(self.u, self.g),
+            title=f"📍 {label}",
+            description=f"Sélectionne le salon. {len(list(self.g.text_channels))} disponibles.",
+            color=0x9B59B6,
         )
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title=f"📍 {label}",
-                description=f"📊 {len(list(self.g.text_channels))} salons disponibles",
-                color=0x9B59B6,
-            ),
-            view=v,
-            attachments=[],
-        )
+        await v.render_to(i, edit=True)
 
     async def _cb_warn_ch(self, i):
         await self._open_channel_picker(i, 'rellseas_warn_channel', 'Salon Warn')
@@ -8850,22 +8797,31 @@ class SuggestionPanelV2(LayoutView):
             await interaction.response.send_message(view=self, ephemeral=True)
 
     async def _cb_role(self, i):
-        v = PaginatedRoleSelect(self.u, self.g, 'suggestion_role', SuggestionPanelV2)
-        await i.response.edit_message(
-            embed=discord.Embed(title="🎭 Rôle autorisé pour /suggestion", color=0x9B59B6),
-            view=v,
-            attachments=[],
+        # Phase 3.0k : V2 native picker
+        v = V2GenericRolePicker(
+            self.u, self.g,
+            config_key='suggestion_role',
+            return_panel_factory=lambda: SuggestionPanelV2(self.u, self.g),
+            title="🎭 Rôle autorisé pour /suggestion",
+            description="Sélectionne le rôle minimum pour utiliser /suggestion.",
+            color=0x9B59B6,
         )
+        await v.render_to(i, edit=True)
 
     async def _cb_chan(self, i):
-        v = PaginatedChannelSelect(self.u, self.g, 'suggestion_channel', SuggestionPanelV2)
-        await i.response.edit_message(
-            embed=discord.Embed(title="📍 Salon de publication", description="Où les suggestions seront envoyées", color=0x9B59B6),
-            view=v,
-            attachments=[],
+        # Phase 3.0k : V2 native picker
+        v = V2GenericChannelPicker(
+            self.u, self.g,
+            config_key='suggestion_channel',
+            return_panel_factory=lambda: SuggestionPanelV2(self.u, self.g),
+            title="📍 Salon de publication",
+            description="Où les suggestions seront envoyées.",
+            color=0x9B59B6,
         )
+        await v.render_to(i, edit=True)
 
     async def _cb_allowed(self, i):
+        # Multi-channel garde l'ancien selecteur paginé V1 (besoin multi=True)
         c = await cfg(self.g.id)
         current = c.get('suggestion_allowed_channels', [])
         v = PaginatedChannelSelect(self.u, self.g, 'suggestion_allowed_channels', SuggestionPanelV2, multi=True, current_channels=current)
@@ -9125,12 +9081,16 @@ class TradePanelV2(LayoutView):
             await interaction.response.send_message(view=self, ephemeral=True)
 
     async def _cb_role(self, i):
-        v = PaginatedRoleSelect(self.u, self.g, 'trade_role', TradePanelV2)
-        await i.response.edit_message(
-            embed=discord.Embed(title="🎭 Rôle autorisé pour /trade", color=0xF1C40F),
-            view=v,
-            attachments=[],
+        # Phase 3.0k : V2 native picker
+        v = V2GenericRolePicker(
+            self.u, self.g,
+            config_key='trade_role',
+            return_panel_factory=lambda: TradePanelV2(self.u, self.g),
+            title="🎭 Rôle autorisé pour /trade",
+            description="Sélectionne le rôle minimum pour utiliser /trade.",
+            color=0xF1C40F,
         )
+        await v.render_to(i, edit=True)
 
     async def _cb_allowed(self, i):
         c = await cfg(self.g.id)
@@ -11580,6 +11540,266 @@ class AdsDealsMinDiscountModal(Modal, title="🔻 Réduction Minimum"):
             await i.response.send_message("❌ Entrez un nombre valide (10-90)", ephemeral=True)
 
 # ─────────────────────────────── COMMON VIEWS ───────────────────────────────
+
+class V2GenericChannelPicker(LayoutView):
+    """Selecteur de salon V2 generique (Phase 3.0k).
+
+    Utilisable depuis n'importe quel panel V2. Stocke le channel_id selectionne
+    dans la config via la cle, puis retourne au panel parent (factory callable).
+
+    Aucune transition V2->V1 (qui plantait en discord.py 2.7+).
+
+    Usage:
+        v = V2GenericChannelPicker(
+            self.u, self.g,
+            config_key='mod_logs_channel',
+            return_panel_factory=lambda: ModerationPanelV2(self.u, self.g),
+            title="📋 Salon des logs",
+            description="Salon ou seront envoyes les logs.",
+            color=0x9B59B6,
+        )
+        await v.render_to(i, edit=True)
+    """
+
+    def __init__(self, u, g, *, config_key: str = None, return_panel_factory,
+                 title: str = "Choisir un salon",
+                 description: str = "Selectionne un salon.",
+                 color: int = 0x5865F2,
+                 channel_types=None,
+                 sub_dict_key: str = None,
+                 save_fn=None):
+        """sub_dict_key : si la cle est imbriquee (ex: 'level_config' avec sous-cle
+        'announce_channel'), on stocke {sub_dict_key: {config_key: id}}.
+        save_fn : async callable(guild_id, channel_id) optionnel pour cas custom
+        (ex: save dans une nested dict, ou fait autre chose).
+        """
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.config_key = config_key
+        self.return_panel_factory = return_panel_factory
+        self.title = title
+        self.description = description
+        self.color = color
+        self.channel_types = channel_types or [discord.ChannelType.text, discord.ChannelType.news]
+        self.sub_dict_key = sub_dict_key
+        self.save_fn = save_fn
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def _save(self, channel_id: int):
+        if self.save_fn is not None:
+            await self.save_fn(self.g.id, channel_id)
+        elif self.sub_dict_key:
+            c = await cfg(self.g.id)
+            sub = c.get(self.sub_dict_key, {}) or {}
+            if not isinstance(sub, dict):
+                sub = {}
+            sub[self.config_key] = channel_id
+            await db_set(self.g.id, self.sub_dict_key, sub)
+        else:
+            await db_set(self.g.id, self.config_key, channel_id)
+
+    async def _return_to_parent(self, i: discord.Interaction):
+        v = self.return_panel_factory()
+        if hasattr(v, 'render_to'):
+            await v.render_to(i, edit=True)
+        elif hasattr(v, 'embed'):
+            emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
+            await i.response.edit_message(embed=emb, view=v, attachments=[])
+        else:
+            await i.response.edit_message(view=v, attachments=[])
+
+    def _build(self):
+        self.clear_items()
+
+        sel = discord.ui.ChannelSelect(
+            channel_types=self.channel_types,
+            placeholder="📁 Choisir un salon...",
+            min_values=1, max_values=1,
+        )
+
+        async def _on_select(i):
+            try:
+                ch = sel.values[0]
+                channel_id = ch.id
+                await self._save(channel_id)
+                await self._return_to_parent(i)
+                try:
+                    await i.followup.send(f"✅ Salon défini : <#{channel_id}>", ephemeral=True)
+                except Exception:
+                    pass
+            except Exception as ex:
+                import traceback; traceback.print_exc()
+                try:
+                    await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
+                except Exception:
+                    pass
+        sel.callback = _on_select
+
+        b_none = Button(label="❌ Aucun (reset)", style=discord.ButtonStyle.secondary)
+        async def _none(i):
+            try:
+                await self._save(0)
+                await self._return_to_parent(i)
+            except Exception as ex:
+                import traceback; traceback.print_exc()
+                try:
+                    await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
+                except Exception:
+                    pass
+        b_none.callback = _none
+
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.danger)
+        async def _back(i):
+            try:
+                await self._return_to_parent(i)
+            except Exception as ex:
+                import traceback; traceback.print_exc()
+                try:
+                    await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
+                except Exception:
+                    pass
+        b_back.callback = _back
+
+        items = [
+            v2_title(self.title),
+            v2_subtitle(self.description),
+            v2_divider(),
+            v2_subtitle(f"📂 {len(self.g.text_channels)} salons disponibles · scroll dans le menu"),
+            v2_divider(),
+            discord.ui.ActionRow(sel),
+            discord.ui.ActionRow(b_none, b_back),
+        ]
+        self.add_item(v2_container(*items, color=discord.Color(self.color)))
+
+    async def render_to(self, interaction, *, edit=True):
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+
+class V2GenericRolePicker(LayoutView):
+    """Selecteur de role V2 generique (Phase 3.0k).
+
+    Equivalent de V2GenericChannelPicker mais pour les roles.
+    """
+
+    def __init__(self, u, g, *, config_key: str = None, return_panel_factory,
+                 title: str = "Choisir un rôle",
+                 description: str = "Selectionne un rôle.",
+                 color: int = 0x5865F2,
+                 sub_dict_key: str = None,
+                 save_fn=None):
+        """save_fn : async callable(guild_id, role_id) optionnel pour cas custom."""
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.config_key = config_key
+        self.return_panel_factory = return_panel_factory
+        self.title = title
+        self.description = description
+        self.color = color
+        self.sub_dict_key = sub_dict_key
+        self.save_fn = save_fn
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def _save(self, role_id: int):
+        if self.save_fn is not None:
+            await self.save_fn(self.g.id, role_id)
+        elif self.sub_dict_key:
+            c = await cfg(self.g.id)
+            sub = c.get(self.sub_dict_key, {}) or {}
+            if not isinstance(sub, dict):
+                sub = {}
+            sub[self.config_key] = role_id
+            await db_set(self.g.id, self.sub_dict_key, sub)
+        else:
+            await db_set(self.g.id, self.config_key, role_id)
+
+    async def _return_to_parent(self, i: discord.Interaction):
+        v = self.return_panel_factory()
+        if hasattr(v, 'render_to'):
+            await v.render_to(i, edit=True)
+        elif hasattr(v, 'embed'):
+            emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
+            await i.response.edit_message(embed=emb, view=v, attachments=[])
+        else:
+            await i.response.edit_message(view=v, attachments=[])
+
+    def _build(self):
+        self.clear_items()
+
+        sel = discord.ui.RoleSelect(
+            placeholder="🎭 Choisir un rôle...",
+            min_values=1, max_values=1,
+        )
+
+        async def _on_select(i):
+            try:
+                role = sel.values[0]
+                await self._save(role.id)
+                await self._return_to_parent(i)
+                try:
+                    await i.followup.send(f"✅ Rôle défini : {role.mention}", ephemeral=True)
+                except Exception:
+                    pass
+            except Exception as ex:
+                import traceback; traceback.print_exc()
+                try:
+                    await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
+                except Exception:
+                    pass
+        sel.callback = _on_select
+
+        b_none = Button(label="❌ Aucun (reset)", style=discord.ButtonStyle.secondary)
+        async def _none(i):
+            try:
+                await self._save(0)
+                await self._return_to_parent(i)
+            except Exception as ex:
+                import traceback; traceback.print_exc()
+                try:
+                    await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
+                except Exception:
+                    pass
+        b_none.callback = _none
+
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.danger)
+        async def _back(i):
+            try:
+                await self._return_to_parent(i)
+            except Exception as ex:
+                import traceback; traceback.print_exc()
+                try:
+                    await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
+                except Exception:
+                    pass
+        b_back.callback = _back
+
+        items = [
+            v2_title(self.title),
+            v2_subtitle(self.description),
+            v2_divider(),
+            v2_subtitle(f"🎭 {len([r for r in self.g.roles if not r.is_bot_managed()])} rôles disponibles"),
+            v2_divider(),
+            discord.ui.ActionRow(sel),
+            discord.ui.ActionRow(b_none, b_back),
+        ]
+        self.add_item(v2_container(*items, color=discord.Color(self.color)))
+
+    async def render_to(self, interaction, *, edit=True):
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
 
 class V2AdsChannelPicker(LayoutView):
     """Selecteur de salon V2 natif (Phase 3.0j).
@@ -14291,12 +14511,17 @@ class LevelSystemPanelV2(LayoutView):
         await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
 
     async def _cb_announce(self, i):
-        v = LevelUpChannelSelect(self.u, self.g)
-        await i.response.edit_message(
-            embed=discord.Embed(title="📢 Salon des annonces level-up", color=0x9B59B6),
-            view=v,
-            attachments=[],
+        # Phase 3.0k : V2 native picker - sauve dans level_config['announce_channel']
+        v = V2GenericChannelPicker(
+            self.u, self.g,
+            config_key='announce_channel',
+            sub_dict_key='level_config',
+            return_panel_factory=lambda: LevelSystemPanelV2(self.u, self.g),
+            title="📢 Salon des annonces level-up",
+            description="Salon où le bot envoie les notifications de level-up.",
+            color=0x9B59B6,
         )
+        await v.render_to(i, edit=True)
 
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
@@ -19155,56 +19380,33 @@ class AfkRolePanelV2(LayoutView):
         await AfkRolePanelV2(self.u, self.g).render_to(i, edit=True)
 
     async def _cb_role(self, i):
-        async def role_picker_cb(interaction, role_id, extra):
-            c = await cfg(self.g.id)
-            afk_cfg = c.get('afk_role_config', {})
-            afk_cfg['role'] = role_id
-            await db_set(self.g.id, 'afk_role_config', afk_cfg)
-            await AfkRolePanelV2(self.u, self.g).render_to(interaction, edit=True)
-
-        v = UniversalRoleSelect(
+        # Phase 3.0k : V2 native picker, sub_dict_key='afk_role_config' avec sous-cle 'role'
+        v = V2GenericRolePicker(
             self.u, self.g,
-            callback_func=role_picker_cb,
-            return_view_func=lambda: AfkRolePanelV2(self.u, self.g),
+            config_key='role',
+            sub_dict_key='afk_role_config',
+            return_panel_factory=lambda: AfkRolePanelV2(self.u, self.g),
             title="🔕 Rôle AFK",
+            description="Sélectionne le rôle attribué aux membres inactifs.",
+            color=0x95A5A6,
         )
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="🔕 Choisir le rôle AFK",
-                description=f"📊 {len([r for r in self.g.roles[1:] if not r.is_bot_managed()])} rôles disponibles",
-                color=0x95A5A6,
-            ),
-            view=v,
-            attachments=[],
-        )
+        await v.render_to(i, edit=True)
 
     async def _cb_days(self, i):
         await i.response.send_modal(AfkDaysModal(self.g, self.u))
 
     async def _cb_notif(self, i):
-        async def chan_picker_cb(interaction, channel_id, extra):
-            c = await cfg(self.g.id)
-            afk_cfg = c.get('afk_role_config', {})
-            afk_cfg['notif_channel'] = channel_id
-            await db_set(self.g.id, 'afk_role_config', afk_cfg)
-            await AfkRolePanelV2(self.u, self.g).render_to(interaction, edit=True)
-
-        v = UniversalChannelSelect(
+        # Phase 3.0k : V2 native picker
+        v = V2GenericChannelPicker(
             self.u, self.g,
-            callback_func=chan_picker_cb,
-            return_view_func=lambda: AfkRolePanelV2(self.u, self.g),
-            title="📢 Salon notifications",
-            allow_none=True,
+            config_key='notif_channel',
+            sub_dict_key='afk_role_config',
+            return_panel_factory=lambda: AfkRolePanelV2(self.u, self.g),
+            title="📢 Salon notifications AFK",
+            description="Salon où le bot annonce les actions AFK.",
+            color=0x95A5A6,
         )
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="📢 Choisir le salon de notifications",
-                description=f"**{len(list(self.g.text_channels))}** salons disponibles",
-                color=0x95A5A6,
-            ),
-            view=v,
-            attachments=[],
-        )
+        await v.render_to(i, edit=True)
 
     async def _cb_list(self, i):
         c = await cfg(self.g.id)
@@ -21185,20 +21387,77 @@ class ChanPanelV2(LayoutView):
             await interaction.response.send_message(view=self, ephemeral=True)
 
     async def _cb_add(self, i):
-        v = ChanSelectPaginatedView(self.u, self.g)
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="📺 Choisir un salon",
-                description=f"**{len(v.channels)} salons** · Page 1/{v.max_page+1}",
-                color=0xE67E22,
-            ),
-            view=v,
-            attachments=[],
-        )
+        # Phase 3.0k : V2 native picker - on select va vers EditChanCfgV2
+        v = _ChanPickerV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
         await i.response.edit_message(view=v, embed=None, attachments=[])
+
+
+class _ChanPickerV2(LayoutView):
+    """V2 picker pour ChanPanelV2 : selectionne un salon, ouvre EditChanCfgV2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    def _build(self):
+        self.clear_items()
+        sel = discord.ui.ChannelSelect(
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news,
+                           discord.ChannelType.voice],
+            placeholder="📁 Choisir un salon a configurer...",
+            min_values=1, max_values=1,
+        )
+        async def _on_select(i):
+            try:
+                ch = sel.values[0]
+                v = EditChanCfgV2(self.u, self.g, str(ch.id))
+                await v.render_to(i, edit=True)
+            except Exception as ex:
+                import traceback; traceback.print_exc()
+                try:
+                    await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
+                except Exception:
+                    pass
+        sel.callback = _on_select
+
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.danger)
+        async def _back(i):
+            try:
+                v = ChanPanelV2(self.u, self.g)
+                await v.render_to(i, edit=True)
+            except Exception as ex:
+                import traceback; traceback.print_exc()
+                try:
+                    await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
+                except Exception:
+                    pass
+        b_back.callback = _back
+
+        items = [
+            v2_title("📺 Choisir un salon a configurer"),
+            v2_subtitle(f"{len(self.g.text_channels)} salons textuels et {len(self.g.voice_channels)} vocaux"),
+            v2_divider(),
+            v2_subtitle("Selectionne le salon dans le menu, tu pourras ensuite definir les regles."),
+            v2_divider(),
+            discord.ui.ActionRow(sel),
+            discord.ui.ActionRow(b_back),
+        ]
+        self.add_item(v2_container(*items, color=Palette.WARNING))
+
+    async def render_to(self, interaction, *, edit=True):
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
 
 
 class ChanSelectPaginatedView(View):
@@ -21592,40 +21851,41 @@ class TicketMainPanelV2(LayoutView):
             await interaction.response.send_message(view=self, ephemeral=True)
 
     async def _cb_staff(self, i):
-        v = PaginatedRoleSelectForStaffGlobal(self.u, self.g)
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="👮 Choisir le rôle Staff",
-                description=f"**{len(v.roles)} rôles** disponibles · Page 1/{v.max_page+1}\n\nCe rôle aura accès à **tous** les tickets.",
-                color=0x9B59B6,
-            ),
-            view=v,
-            attachments=[],
+        # Phase 3.0k : V2 native picker
+        v = V2GenericRolePicker(
+            self.u, self.g,
+            config_key='ticket_staff',
+            return_panel_factory=lambda: TicketMainPanelV2(self.u, self.g),
+            title="👮 Rôle Staff Tickets",
+            description="Ce rôle aura accès à tous les tickets.",
+            color=0x9B59B6,
         )
+        await v.render_to(i, edit=True)
 
     async def _cb_logs(self, i):
-        v = TkLogPaginatedView(self.u, self.g)
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="📜 Choisir le salon Logs",
-                description=f"**{len(v.channels)} salons** · Page 1/{v.max_page+1}",
-                color=0x9B59B6,
-            ),
-            view=v,
-            attachments=[],
+        # Phase 3.0k : V2 native picker
+        v = V2GenericChannelPicker(
+            self.u, self.g,
+            config_key='ticket_log_channel',
+            return_panel_factory=lambda: TicketMainPanelV2(self.u, self.g),
+            title="📜 Salon des Logs Tickets",
+            description="Salon où sont enregistrés les évenements tickets.",
+            color=0x9B59B6,
         )
+        await v.render_to(i, edit=True)
 
     async def _cb_blacklist(self, i):
-        v = PaginatedRoleSelectForBlacklist(self.u, self.g)
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="🚫 Rôle pour /ticketblacklist",
-                description=f"**{len(v.roles)} rôles** disponibles · Page 1/{v.max_page+1}\n\nCe rôle pourra utiliser /ticketblacklist.\n_Aucun = seuls Staff et Admins peuvent blacklister_",
-                color=0xE74C3C,
-            ),
-            view=v,
-            attachments=[],
+        # Phase 3.0k : V2 native picker
+        v = V2GenericRolePicker(
+            self.u, self.g,
+            config_key='ticket_blacklist_role',
+            return_panel_factory=lambda: TicketMainPanelV2(self.u, self.g),
+            title="🚫 Rôle /ticketblacklist",
+            description="Ce rôle pourra utiliser /ticketblacklist. Aucun = seuls Staff et Admins.",
+            color=0xE74C3C,
         )
+        await v.render_to(i, edit=True)
+
 
     async def _cb_new(self, i):
         await i.response.send_modal(NewPanelModal(self.u, self.g))
@@ -22105,18 +22365,23 @@ class PanelEditViewV2(LayoutView):
         )
 
     async def _cb_staff(self, i):
-        v = PaginatedRoleSelectForPanel(self.u, self.g, self.pid)
-        total_roles = len(v.roles)
-        total_pages = v.max_page + 1
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="👥 Rôle Staff du Panel",
-                description=f"**{total_roles} rôles** · Page 1/{total_pages}\n\nChoisis le rôle qui gère ce panel.\n_Aucun = utilise le rôle staff global_",
-                color=0x9B59B6,
-            ),
-            view=v,
-            attachments=[],
+        # Phase 3.0k : V2 native picker avec save_fn nested (ticket_panels[pid].staff_role)
+        pid = self.pid
+        async def _save(guild_id, role_id):
+            c = await cfg(guild_id)
+            panels = c.get('ticket_panels', {}) or {}
+            if pid in panels:
+                panels[pid]['staff_role'] = role_id
+                await db_set(guild_id, 'ticket_panels', panels)
+        v = V2GenericRolePicker(
+            self.u, self.g,
+            return_panel_factory=lambda: PanelEditViewV2(self.u, self.g, self.pid),
+            title="👥 Rôle Staff du Panel",
+            description="Le rôle qui gère ce panel. Aucun = utilise le rôle staff global.",
+            color=0x9B59B6,
+            save_fn=_save,
         )
+        await v.render_to(i, edit=True)
 
     async def _cb_qs(self, i):
         v = PanelQsView(self.u, self.g, self.pid)
