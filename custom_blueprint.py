@@ -140,9 +140,11 @@ def _cat(name, channels):
     return CustomCategory(name=name, channels=channels)
 
 
-def _role(name, color=0x99AAB5, mentionable=True, perms=None):
-    return CustomRole(name=name, color=color, mentionable=mentionable,
-                       permissions=perms or [])
+def _role(name, color=0x99AAB5, mentionable=True, hoist=False, perms=None):
+    return CustomRole(
+        name=name, color=color, mentionable=mentionable, hoist=hoist,
+        permissions=perms or [],
+    )
 
 
 PRESET_GAMEDEV = CustomBlueprint(
