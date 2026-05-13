@@ -25,6 +25,7 @@ from discord import app_commands
 
 import server_architect as architect
 import roles_panel as rpanel
+import custom_blueprint as cblueprint
 
 
 def _is_owner_or_admin():
@@ -235,6 +236,156 @@ async def architecture_rename_category(
         )
     except Exception as ex:
         await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+
+
+@architecture_group.command(
+    name="preview_preset",
+    description="Apercu detaille d'un preset (sans rien appliquer)",
+)
+@_is_owner_or_admin()
+@app_commands.describe(preset="Type de preset")
+@app_commands.choices(preset=[
+    app_commands.Choice(name="Game Development Studio", value="gamedev"),
+    app_commands.Choice(name="Communauté de Créateur", value="streamer"),
+    app_commands.Choice(name="Communauté Gaming", value="gaming"),
+    app_commands.Choice(name="Communauté Généraliste", value="community"),
+])
+async def architecture_preview_preset(
+    i: discord.Interaction, preset: app_commands.Choice[str],
+):
+    bp = cblueprint.PRESETS.get(preset.value)
+    if not bp:
+        return await i.response.send_message("❌ Preset inconnu.", ephemeral=True)
+    lines = [
+        f"**📐 Preset `{preset.name}`**",
+        f"_{bp.description}_",
+        "",
+        f"**{len(bp.categories)} catégories · "
+        f"{sum(len(c.channels) for c in bp.categories)} salons · "
+        f"{len(bp.roles)} rôles · "
+        f"{len(bp.mention_roles)} rôles de mention**",
+        "",
+    ]
+    for cat in bp.categories[:15]:
+        lines.append(f"**{cat.name}** ({len(cat.channels)} salons)")
+        for ch in cat.channels[:6]:
+            icon = "🔊" if ch.ctype == "voice" else "📰" if ch.ctype == "announcement" else "💬"
+            lines.append(f"  {icon} {ch.name}")
+        if len(cat.channels) > 6:
+            lines.append(f"  _… +{len(cat.channels) - 6} salons_")
+    if len(bp.categories) > 15:
+        lines.append(f"_… +{len(bp.categories) - 15} catégories_")
+    lines.append("")
+    lines.append("**Rôles à créer** :")
+    for r in bp.roles:
+        flags = []
+        if r.hoist: flags.append("hoist")
+        if "administrator" in r.permissions: flags.append("admin")
+        elif r.permissions: flags.append(f"{len(r.permissions)} perms")
+        flags_str = f" ({', '.join(flags)})" if flags else ""
+        lines.append(f"  • **{r.name}**{flags_str}")
+    lines.append("")
+    lines.append(
+        f"_Pour l'appliquer :_ `/architecture build_preset preset:{preset.value}`"
+    )
+    await i.response.send_message("\n".join(lines)[:1900], ephemeral=True)
+
+
+@architecture_group.command(
+    name="build_preset",
+    description="WIPE + reconstruit le serveur depuis un preset (avec backup auto)",
+)
+@_is_owner_or_admin()
+@app_commands.describe(
+    preset="Type de preset a appliquer",
+    confirmation="Tape exactement : RECONSTRUIRE pour confirmer",
+    wipe_first="True (par defaut) = detruit tout avant de reconstruire",
+    dry_run="True = simule sans rien faire",
+)
+@app_commands.choices(preset=[
+    app_commands.Choice(name="Game Development Studio", value="gamedev"),
+    app_commands.Choice(name="Communauté de Créateur", value="streamer"),
+    app_commands.Choice(name="Communauté Gaming", value="gaming"),
+    app_commands.Choice(name="Communauté Généraliste", value="community"),
+])
+async def architecture_build_preset(
+    i: discord.Interaction,
+    preset: app_commands.Choice[str],
+    confirmation: str = "",
+    wipe_first: bool = True,
+    dry_run: bool = True,
+):
+    # Owner uniquement (pas admin) si on wipe
+    if wipe_first and not dry_run and i.user.id != i.guild.owner_id:
+        return await i.response.send_message(
+            "❌ Seul le **propriétaire du serveur** peut faire un wipe+rebuild.",
+            ephemeral=True,
+        )
+    if wipe_first and not dry_run and confirmation != "RECONSTRUIRE":
+        return await i.response.send_message(
+            "❌ Pour confirmer le WIPE + REBUILD, tape exactement `RECONSTRUIRE` "
+            "dans le champ confirmation.\n"
+            "Sinon utilise `dry_run:True` pour simuler.",
+            ephemeral=True,
+        )
+
+    bp = cblueprint.PRESETS.get(preset.value)
+    if not bp:
+        return await i.response.send_message("❌ Preset inconnu.", ephemeral=True)
+
+    await i.response.defer(ephemeral=True, thinking=True)
+    try:
+        report = await cblueprint.apply_blueprint(
+            i.guild, bp, wipe_first=wipe_first, dry_run=dry_run,
+        )
+        lines = [
+            f"**🏗️ Build preset `{preset.name}`** :", "",
+        ]
+        if dry_run:
+            lines.append("🟦 **DRY-RUN** : rien n'a ete fait.\n")
+        if report.backup_id:
+            lines.append(f"💾 Backup avant : `{report.backup_id}` (pour rollback)")
+        lines.append(f"📁 Catégories créées : `{len(report.categories_created)}`")
+        lines.append(f"📺 Salons créés : `{len(report.channels_created)}`")
+        lines.append(f"🎭 Rôles créés : `{len(report.roles_created)}`")
+        lines.append(f"⚠️ Erreurs : `{len(report.errors)}`")
+        if report.errors:
+            lines.append("\n**Erreurs** :")
+            for e in report.errors[:10]:
+                lines.append(f"  • {e}")
+        if not dry_run and not report.errors:
+            lines.append(
+                "\n✅ **Reconstruction réussie**. "
+                f"Si tu veux annuler : `/architecture restore <backup_id={report.backup_id}>`"
+            )
+            lines.append(
+                f"\nSuggestion : `/architecture create_roles` pour ajouter le panneau "
+                f"self-service avec les {len(bp.mention_roles)} rôles de mention."
+            )
+        await i.followup.send("\n".join(lines)[:1900], ephemeral=True)
+    except Exception as ex:
+        import traceback; traceback.print_exc()
+        await i.followup.send(f"❌ Erreur : `{type(ex).__name__}: {ex}`", ephemeral=True)
+
+
+@architecture_group.command(
+    name="presets",
+    description="Liste les presets disponibles avec leur description",
+)
+@_is_owner_or_admin()
+async def architecture_presets(i: discord.Interaction):
+    lines = ["**📐 Presets disponibles** :", ""]
+    for key, bp in cblueprint.PRESETS.items():
+        cats = len(bp.categories)
+        chans = sum(len(c.channels) for c in bp.categories)
+        roles = len(bp.roles)
+        lines.append(f"**`{key}`** — {bp.name}")
+        lines.append(f"   _{bp.description}_")
+        lines.append(f"   📁 {cats} catégories · 📺 {chans} salons · 🎭 {roles} rôles")
+        lines.append("")
+    lines.append("`/architecture preview_preset preset:<key>` pour voir le détail")
+    lines.append("`/architecture build_preset preset:<key>` pour appliquer")
+    await i.response.send_message("\n".join(lines)[:1900], ephemeral=True)
 
 
 @architecture_group.command(
