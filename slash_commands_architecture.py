@@ -154,6 +154,122 @@ async def architecture_backups(i: discord.Interaction):
 
 
 @architecture_group.command(
+    name="suggest_roles",
+    description="Liste les rôles de mention suggérés pour votre serveur",
+)
+@_is_owner_or_admin()
+async def architecture_suggest_roles(i: discord.Interaction):
+    await i.response.defer(ephemeral=True, thinking=True)
+    try:
+        blueprint = architect.analyze_guild(i.guild)
+        suggestions = architect.suggest_roles_for_guild(blueprint)
+        template = architect.detect_template(blueprint)
+        tpl_meta = architect.TEMPLATE_META[template]
+        lines = [
+            f"**🤖 Type de serveur détecté** : {tpl_meta['name']}",
+            f"_{tpl_meta['desc']}_",
+            "",
+            f"**🔔 Rôles de mention suggérés** ({len(suggestions)}) :",
+            "",
+        ]
+        for s in suggestions:
+            emoji = s.emoji + " " if s.emoji else ""
+            lines.append(f"{emoji}**{s.label}** — {s.description}")
+        lines.append("")
+        lines.append("_Pour créer ces rôles + un panneau self-service :_")
+        lines.append("`/architecture create_roles`")
+        await i.followup.send("\n".join(lines)[:1900], ephemeral=True)
+    except Exception as ex:
+        import traceback; traceback.print_exc()
+        await i.followup.send(f"❌ Erreur : `{type(ex).__name__}: {ex}`", ephemeral=True)
+
+
+@architecture_group.command(
+    name="create_roles",
+    description="Crée les rôles suggérés + un panneau self-service dans ce salon",
+)
+@_is_owner_or_admin()
+async def architecture_create_roles(i: discord.Interaction):
+    await i.response.defer(ephemeral=True, thinking=True)
+    try:
+        blueprint = architect.analyze_guild(i.guild)
+        suggestions = architect.suggest_roles_for_guild(blueprint)
+        if not suggestions:
+            return await i.followup.send(
+                "❌ Aucune suggestion (serveur trop petit ou themes non detectes).",
+                ephemeral=True,
+            )
+
+        created_roles: list[discord.Role] = []
+        existing_roles_by_name = {r.name.lower(): r for r in i.guild.roles}
+        for s in suggestions:
+            role_name = s.label
+            existing = existing_roles_by_name.get(role_name.lower())
+            if existing:
+                created_roles.append(existing)
+                continue
+            try:
+                new_role = await i.guild.create_role(
+                    name=role_name,
+                    color=discord.Color(s.color),
+                    mentionable=True,
+                    reason="Architecture Phase 3.2 - role de mention suggere",
+                )
+                created_roles.append(new_role)
+            except discord.Forbidden:
+                continue
+            except Exception:
+                continue
+
+        if not created_roles:
+            return await i.followup.send(
+                "❌ Aucun role n'a pu etre cree (permissions manquantes ?)",
+                ephemeral=True,
+            )
+
+        # Cree un roles_panel avec ces roles
+        cfg = rpanel.RolesPanelConfig(
+            panel_id=rpanel.new_panel_id(),
+            guild_id=i.guild.id,
+            channel_id=i.channel.id,
+            title="🔔 Mes notifications",
+            description=(
+                "Choisis les sujets qui t'intéressent. Tu seras mentionné "
+                "uniquement sur ceux que tu actives."
+            ),
+        )
+        # Map suggestions -> roles crees
+        suggestions_by_name = {s.label.lower(): s for s in suggestions}
+        for role in created_roles:
+            s = suggestions_by_name.get(role.name.lower())
+            if not s:
+                continue
+            cfg.roles.append(rpanel.RolesPanelRole(
+                role_id=role.id,
+                label=s.label[:80],
+                emoji=s.emoji or None,
+                description=s.description[:200],
+            ))
+        await rpanel.upsert_panel(cfg)
+        msg_id = await rpanel.post_or_update_panel(i.client, cfg)
+
+        lines = [
+            f"✅ **{len(created_roles)} rôles** créés (ou réutilisés s'ils existaient)",
+            f"📋 **Panneau self-service** posté dans {i.channel.mention} (ID `{cfg.panel_id}`)",
+            "",
+            "Les membres peuvent maintenant cliquer pour s'abonner à chaque type de notification.",
+            "",
+            "**Rôles créés** :",
+        ]
+        for r in created_roles[:15]:
+            lines.append(f"  • {r.mention}")
+        await i.followup.send("\n".join(lines)[:1900], ephemeral=True)
+    except Exception as ex:
+        import traceback; traceback.print_exc()
+        await i.followup.send(f"❌ Erreur : `{type(ex).__name__}: {ex}`", ephemeral=True)
+
+
+@architecture_group.command(
     name="restore",
     description="Restaure le serveur depuis un backup",
 )

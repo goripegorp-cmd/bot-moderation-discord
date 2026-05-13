@@ -55,6 +55,10 @@ class Theme(str, Enum):
     ANNOUNCEMENTS = "announcements"
     LIVES = "lives"
     SOCIAL = "social"
+    DEVELOPMENT = "development"     # Phase 3.2 : devlog, playtest, builds
+    STUDIOS = "studios"             # Phase 3.2 : studios suivis, leurs actus
+    LORE = "lore"                   # Phase 3.2 : worldbuilding, design
+    EVENTS = "events"               # Phase 3.2 : evenements, contests
     DISCUSSION = "discussion"
     GAMING = "gaming"
     MARKETPLACE = "marketplace"
@@ -70,84 +74,144 @@ THEME_META: dict[Theme, dict] = {
                           "desc": "Règles, choix de rôles, présentations"},
     Theme.ANNOUNCEMENTS: {"icon": "📣", "name": "Annonces",        "order": 1,
                           "desc": "Annonces officielles, news, info"},
-    Theme.LIVES:         {"icon": "🎬", "name": "Lives & Vidéos",  "order": 2,
+    Theme.DEVELOPMENT:   {"icon": "🛠️", "name": "Développement",   "order": 2,
+                          "desc": "Devlog, playtests, builds, design game"},
+    Theme.STUDIOS:       {"icon": "🏢", "name": "Studios suivis",  "order": 3,
+                          "desc": "Actus des studios que vous suivez"},
+    Theme.LIVES:         {"icon": "🎬", "name": "Lives & Vidéos",  "order": 4,
                           "desc": "Notifications Twitch, YouTube, TikTok"},
-    Theme.SOCIAL:        {"icon": "📡", "name": "Réseaux sociaux", "order": 3,
+    Theme.SOCIAL:        {"icon": "📡", "name": "Réseaux sociaux", "order": 5,
                           "desc": "Twitter, Instagram, Reddit, etc."},
-    Theme.DISCUSSION:    {"icon": "💬", "name": "Discussion",      "order": 4,
+    Theme.EVENTS:        {"icon": "🎉", "name": "Évènements",      "order": 6,
+                          "desc": "Évènements, contests, giveaways"},
+    Theme.LORE:          {"icon": "📖", "name": "Lore & Univers",  "order": 7,
+                          "desc": "Histoire, worldbuilding, concept art"},
+    Theme.DISCUSSION:    {"icon": "💬", "name": "Discussion",      "order": 8,
                           "desc": "Général, off-topic, mèmes"},
-    Theme.GAMING:        {"icon": "🎮", "name": "Gaming",          "order": 5,
+    Theme.GAMING:        {"icon": "🎮", "name": "Gaming",          "order": 9,
                           "desc": "Salons par jeu"},
-    Theme.MARKETPLACE:   {"icon": "🛒", "name": "Marketplace",     "order": 6,
+    Theme.MARKETPLACE:   {"icon": "🛒", "name": "Marketplace",     "order": 10,
                           "desc": "Trade, vente, recherche"},
-    Theme.SUPPORT:       {"icon": "🎫", "name": "Support & Aide",  "order": 7,
+    Theme.SUPPORT:       {"icon": "🎫", "name": "Support & Aide",  "order": 11,
                           "desc": "Tickets, aide, FAQ"},
-    Theme.VOICE:         {"icon": "🎤", "name": "Vocaux",          "order": 8,
+    Theme.VOICE:         {"icon": "🎤", "name": "Vocaux",          "order": 12,
                           "desc": "Salons vocaux libres et lobbies"},
-    Theme.STAFF:         {"icon": "🔧", "name": "Staff",           "order": 9,
+    Theme.STAFF:         {"icon": "🔧", "name": "Staff",           "order": 13,
                           "desc": "Salons mods/admins uniquement"},
-    Theme.LOGS:          {"icon": "📋", "name": "Logs",            "order": 10,
+    Theme.LOGS:          {"icon": "📋", "name": "Logs",            "order": 14,
                           "desc": "Audit, modération, join-leave"},
-    Theme.OTHER:         {"icon": "📦", "name": "Autres",          "order": 11,
+    Theme.OTHER:         {"icon": "📦", "name": "Autres",          "order": 15,
                           "desc": "Salons non classifiés"},
 }
 
 
 # Patterns de classification (lower-case match dans le nom du salon)
-# Premier match gagne.
+# Premier match gagne. Phase 3.2 : etendu avec game dev, studios, lore, events.
 CLASSIFICATION_RULES: list[tuple[Theme, list[str]]] = [
     (Theme.WELCOME, [
         "regle", "rule", "rules", "welcome", "bienvenue", "presentation",
         "choix-role", "choix-roles", "choix-rôle", "roles-mention", "self-role",
-        "lis-moi", "lisez-moi", "info-server",
+        "lis-moi", "lisez-moi", "info-server", "info-serveur",
+        "abylumis", "abylum",  # phase 3.2 : utilisateur specifique
     ]),
     (Theme.ANNOUNCEMENTS, [
         "annonce", "announce", "announcement", "news", "actu", "info-bot",
-        "changelog", "update", "patch", "communique",
+        "changelog", "update", "patch", "communique", "communiqué",
+        "mise-a-jour", "mise-à-jour",
+    ]),
+    (Theme.DEVELOPMENT, [  # Phase 3.2 : devlog game dev
+        "devlog", "dev-log", "dev-blog", "development", "developpement",
+        "developement", "build", "builds", "playtest", "play-test",
+        "alpha", "beta", "testing", "test-server", "qa",
+        "feedback-dev", "bug-report", "feature-request",
+        "concept", "wip", "work-in-progress", "showcase",
+    ]),
+    (Theme.STUDIOS, [  # Phase 3.2 : studios suivis
+        "studio", "studios", "studios-suivis", "developer-news",
+        "indie-news", "studio-news", "studio-actu", "follows",
+        "creators-news",
     ]),
     (Theme.LIVES, [
         "live", "lives", "stream", "streams", "twitch", "youtube",
         "tiktok", "kick", "vod", "video", "videos", "yt-",
+        "broadcast", "diffusion", "en-direct",
     ]),
     (Theme.SOCIAL, [
         "twitter", "x-post", "instagram", "reddit", "rosocial", "social",
-        "tweet", "post-x",
+        "tweet", "post-x", "facebook", "linkedin",
+    ]),
+    (Theme.EVENTS, [  # Phase 3.2 : events / contests
+        "event", "events", "evenement", "evenements", "évènement", "évènements",
+        "contest", "concours", "tournoi", "tournament",
+        "giveaway", "tirage", "calendar", "calendrier",
+        "halloween", "noel", "noël", "paques", "pâques",
+    ]),
+    (Theme.LORE, [  # Phase 3.2 : lore / worldbuilding
+        "lore", "univers", "world", "worldbuilding", "background",
+        "histoire", "history", "story", "stories",
+        "concept-art", "art", "fanart", "design-doc",
+        "personnage", "character", "characters", "factions",
     ]),
     (Theme.MARKETPLACE, [
         "trade", "echange", "achat", "vente", "marketplace", "ventes",
         "vend", "buy", "sell", "deals", "promo", "promotion",
+        "shop", "boutique", "soldes",
     ]),
     (Theme.SUPPORT, [
         "ticket", "support", "aide", "help", "faq", "demande",
         "candidature", "report", "signalement", "contact-staff",
+        "question", "questions",
     ]),
     (Theme.STAFF, [
         "staff", "mod-only", "admin-only", "modo", "moderateur",
-        "salon-staff", "discussion-staff", "moderation",
+        "salon-staff", "discussion-staff", "moderation", "modération",
+        "dev-only", "team",
     ]),
     (Theme.LOGS, [
         "log", "logs", "audit", "mod-log", "ban-log", "join-leave",
-        "boost-log", "voice-log", "delete-log",
+        "boost-log", "voice-log", "delete-log", "member-log",
+        "message-log", "server-log",
     ]),
     (Theme.GAMING, [
         "jeu", "game", "gaming", "roblox", "minecraft", "valorant",
         "fortnite", "cs", "csgo", "cs2", "lol", "league",
         "wow", "warcraft", "apex", "overwatch", "fifa", "ea-",
+        "rocket-league", "rl-", "destiny", "dota",
     ]),
     (Theme.DISCUSSION, [
-        "general", "tchat", "chat", "off-topic", "blague", "discord",
+        "general", "général", "tchat", "chat", "off-topic", "blague", "discord",
         "meme", "memes", "random", "discussion", "papote", "media",
-        "images", "photos",
+        "images", "photos", "art-share", "musique", "music",
     ]),
 ]
 
 
+# Phase 3.2 : keywords supplementaires a matcher dans le TOPIC du salon
+TOPIC_RULES: list[tuple[Theme, list[str]]] = [
+    (Theme.DEVELOPMENT, [
+        "devlog", "playtest", "build", "feedback développement",
+        "feedback dev", "alpha", "bêta",
+    ]),
+    (Theme.STUDIOS, [
+        "studios suivis", "actualités des studios", "studio news",
+    ]),
+    (Theme.LIVES, ["live", "stream", "diffusion"]),
+    (Theme.MARKETPLACE, ["trade", "marketplace", "vente"]),
+    (Theme.LORE, ["lore", "histoire", "worldbuilding", "univers"]),
+]
+
+
 def classify_channel(channel: discord.abc.GuildChannel) -> Theme:
-    """Determine le theme d'un salon par son nom et type."""
+    """Determine le theme d'un salon par son nom, topic et categorie actuelle.
+
+    Phase 3.2 : utilise plusieurs signaux avec priorite :
+    1. Topic du salon (le plus precis si configure)
+    2. Nom de la categorie parente (preserve l'organisation existante)
+    3. Nom du salon (fallback)
+    """
     # Vocal -> Voice (sauf si nom contient un keyword Logs/Staff/etc.)
     if isinstance(channel, discord.VoiceChannel):
         name_lower = channel.name.lower()
-        # Voice channels avec nom revelateur
         for theme, keywords in CLASSIFICATION_RULES:
             if theme in (Theme.STAFF, Theme.LOGS):
                 if any(kw in name_lower for kw in keywords):
@@ -155,15 +219,30 @@ def classify_channel(channel: discord.abc.GuildChannel) -> Theme:
         return Theme.VOICE
 
     if isinstance(channel, discord.ForumChannel):
-        # Forums -> souvent Support ou Marketplace selon nom
         name_lower = channel.name.lower()
         if any(kw in name_lower for kw in ("support", "aide", "help", "question")):
             return Theme.SUPPORT
         if any(kw in name_lower for kw in ("trade", "vente", "achat")):
             return Theme.MARKETPLACE
+        if any(kw in name_lower for kw in ("devlog", "playtest", "build")):
+            return Theme.DEVELOPMENT
         return Theme.DISCUSSION
 
-    # Text channels et threads : on classifie par nom
+    # 1. Topic du salon
+    topic = (getattr(channel, "topic", None) or "").lower()
+    if topic:
+        for theme, keywords in TOPIC_RULES:
+            if any(kw in topic for kw in keywords):
+                return theme
+
+    # 2. Nom de la categorie parente (preserve l'organisation user)
+    if channel.category:
+        cat_name_lower = channel.category.name.lower()
+        for theme, keywords in CLASSIFICATION_RULES:
+            if any(kw in cat_name_lower for kw in keywords):
+                return theme
+
+    # 3. Nom du salon (fallback)
     name_lower = channel.name.lower()
     for theme, keywords in CLASSIFICATION_RULES:
         if any(kw in name_lower for kw in keywords):
@@ -541,10 +620,140 @@ async def restore_state(
     return report
 
 
+# =============================================================================
+# SUGGESTIONS DE ROLES DE MENTION (Phase 3.2)
+# =============================================================================
+# Apres avoir analyse l'architecture, on propose des roles de mention adaptes
+# au type de serveur detecte. L'owner peut creer un roles_panel pour que les
+# membres s'abonnent eux-memes a ces mentions (evite les @everyone abusifs).
+
+@dataclass
+class SuggestedRole:
+    """Un role de mention suggere pour le serveur."""
+
+    label: str                # ex: "🎬 Stream Alerts"
+    description: str          # ex: "Notifie quand quelqu'un est en live"
+    emoji: str = ""           # emoji optionnel
+    color: int = 0x5865F2     # couleur de role suggeree
+
+
+# Suggestions par theme detecte sur le serveur
+ROLE_SUGGESTIONS_BY_THEME: dict[Theme, list[SuggestedRole]] = {
+    Theme.LIVES: [
+        SuggestedRole("Stream Alerts", "Mentionne quand un créateur est en live", "🎬", 0x9146FF),
+        SuggestedRole("Nouvelles Vidéos", "Mentionne pour les nouvelles vidéos YouTube", "🔴", 0xFF0000),
+    ],
+    Theme.DEVELOPMENT: [
+        SuggestedRole("Devlog", "Mises à jour développement du jeu", "🛠️", 0x3498DB),
+        SuggestedRole("Playtest", "Sessions de test ouvertes aux membres", "🎮", 0xE67E22),
+        SuggestedRole("Builds", "Nouvelles versions à tester", "📦", 0x95A5A6),
+    ],
+    Theme.STUDIOS: [
+        SuggestedRole("Studios News", "Actus des studios suivis", "🏢", 0x2ECC71),
+    ],
+    Theme.MARKETPLACE: [
+        SuggestedRole("Trade", "Annonces de trades et ventes", "💰", 0xF1C40F),
+        SuggestedRole("Deals Gaming", "Promotions Steam/Epic/etc.", "🎯", 0xFF6B35),
+    ],
+    Theme.EVENTS: [
+        SuggestedRole("Évènements", "Notifie pour les events serveur", "🎉", 0xEB459E),
+        SuggestedRole("Giveaways", "Mentionne pour les tirages au sort", "🎁", 0xE74C3C),
+    ],
+    Theme.LORE: [
+        SuggestedRole("Lore Updates", "Mises à jour de l'univers", "📖", 0x9B59B6),
+    ],
+    Theme.ANNOUNCEMENTS: [
+        SuggestedRole("Annonces Importantes", "Annonces officielles du serveur", "📣", 0xE67E22),
+    ],
+    Theme.SOCIAL: [
+        SuggestedRole("Posts Réseaux", "Notifie pour les nouveaux posts X/Twitter/etc.", "📡", 0x1DA1F2),
+    ],
+}
+
+
+def suggest_roles_for_guild(blueprint: Blueprint) -> list[SuggestedRole]:
+    """Genere une liste de roles de mention adaptes au serveur detecte.
+
+    Base sur les themes presents dans le blueprint (i.e. les categories qu'on
+    va creer). On suggere des roles UNIQUEMENT pour les themes qui ont des
+    salons.
+    """
+    out: list[SuggestedRole] = []
+    by_theme = blueprint.by_theme()
+    for theme in Theme:
+        if not by_theme.get(theme):
+            continue
+        suggestions = ROLE_SUGGESTIONS_BY_THEME.get(theme, [])
+        for s in suggestions:
+            out.append(s)
+    return out
+
+
+# =============================================================================
+# TEMPLATES SERVEUR (Phase 3.2)
+# =============================================================================
+
+class ServerTemplate(str, Enum):
+    """Template de configuration adapte au type de serveur."""
+    GAMEDEV = "gamedev"        # Studio / dev de jeu
+    STREAMER = "streamer"      # Communaute de createur
+    GAMING = "gaming"          # Communaute jeu video
+    COMMUNITY = "community"    # Communaute generique
+
+
+TEMPLATE_META: dict[ServerTemplate, dict] = {
+    ServerTemplate.GAMEDEV: {
+        "name": "Game Development",
+        "desc": "Pour un studio ou un projet de jeu en cours",
+        "themes": [Theme.WELCOME, Theme.ANNOUNCEMENTS, Theme.DEVELOPMENT, Theme.STUDIOS,
+                   Theme.LORE, Theme.EVENTS, Theme.LIVES, Theme.SOCIAL,
+                   Theme.DISCUSSION, Theme.VOICE, Theme.SUPPORT, Theme.STAFF, Theme.LOGS],
+    },
+    ServerTemplate.STREAMER: {
+        "name": "Communauté de Créateur",
+        "desc": "Pour un streamer / créateur de contenu",
+        "themes": [Theme.WELCOME, Theme.ANNOUNCEMENTS, Theme.LIVES, Theme.SOCIAL,
+                   Theme.EVENTS, Theme.DISCUSSION, Theme.GAMING, Theme.VOICE,
+                   Theme.SUPPORT, Theme.STAFF, Theme.LOGS],
+    },
+    ServerTemplate.GAMING: {
+        "name": "Communauté Gaming",
+        "desc": "Pour une communauté autour de jeux vidéo",
+        "themes": [Theme.WELCOME, Theme.ANNOUNCEMENTS, Theme.GAMING, Theme.MARKETPLACE,
+                   Theme.LIVES, Theme.EVENTS, Theme.DISCUSSION, Theme.VOICE,
+                   Theme.SUPPORT, Theme.STAFF, Theme.LOGS],
+    },
+    ServerTemplate.COMMUNITY: {
+        "name": "Communauté Généraliste",
+        "desc": "Communauté large, multi-sujets",
+        "themes": [Theme.WELCOME, Theme.ANNOUNCEMENTS, Theme.DISCUSSION,
+                   Theme.EVENTS, Theme.SOCIAL, Theme.VOICE,
+                   Theme.SUPPORT, Theme.STAFF, Theme.LOGS],
+    },
+}
+
+
+def detect_template(blueprint: Blueprint) -> ServerTemplate:
+    """Devine le type de serveur en fonction des themes presents."""
+    by_theme = blueprint.by_theme()
+    has_dev = bool(by_theme.get(Theme.DEVELOPMENT)) or bool(by_theme.get(Theme.LORE))
+    has_streams = bool(by_theme.get(Theme.LIVES))
+    has_gaming = bool(by_theme.get(Theme.GAMING))
+
+    if has_dev:
+        return ServerTemplate.GAMEDEV
+    if has_streams and not has_gaming:
+        return ServerTemplate.STREAMER
+    if has_gaming or has_streams:
+        return ServerTemplate.GAMING
+    return ServerTemplate.COMMUNITY
+
+
 __all__ = [
     "Theme",
     "THEME_META",
     "CLASSIFICATION_RULES",
+    "TOPIC_RULES",
     "classify_channel",
     "ChannelSnapshot",
     "CategorySnapshot",
@@ -558,4 +767,10 @@ __all__ = [
     "load_backup",
     "apply_blueprint",
     "restore_state",
+    "SuggestedRole",
+    "ROLE_SUGGESTIONS_BY_THEME",
+    "suggest_roles_for_guild",
+    "ServerTemplate",
+    "TEMPLATE_META",
+    "detect_template",
 ]
