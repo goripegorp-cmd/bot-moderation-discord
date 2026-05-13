@@ -469,6 +469,155 @@ async def save_blueprint(guild_id: int, bp: CustomBlueprint) -> None:
 
 
 # =============================================================================
+# MUTATIONS (utilises par le V2 builder)
+# =============================================================================
+
+async def get_or_create_blueprint(guild_id: int) -> CustomBlueprint:
+    """Charge le blueprint du serveur, ou en cree un nouveau vide."""
+    bp = await load_blueprint(guild_id)
+    if bp is None:
+        bp = CustomBlueprint(name="Mon Serveur", description="Custom build")
+    return bp
+
+
+def mutate_load_preset(bp: CustomBlueprint, preset_key: str) -> bool:
+    """Remplace le blueprint par un preset (in-place)."""
+    preset = PRESETS.get(preset_key)
+    if not preset:
+        return False
+    bp.name = preset.name
+    bp.description = preset.description
+    bp.categories = [
+        CustomCategory(
+            name=c.name,
+            channels=[CustomChannel(**asdict(ch)) for ch in c.channels],
+            role_perms=dict(c.role_perms),
+        )
+        for c in preset.categories
+    ]
+    bp.roles = [CustomRole(**asdict(r)) for r in preset.roles]
+    bp.mention_roles = list(preset.mention_roles)
+    return True
+
+
+def mutate_add_category(bp: CustomBlueprint, name: str) -> bool:
+    """Ajoute une categorie vide. Retourne False si nom deja pris."""
+    if any(c.name == name for c in bp.categories):
+        return False
+    bp.categories.append(CustomCategory(name=name))
+    return True
+
+
+def mutate_rename_category(bp: CustomBlueprint, old: str, new: str) -> bool:
+    for c in bp.categories:
+        if c.name == old:
+            c.name = new
+            return True
+    return False
+
+
+def mutate_delete_category(bp: CustomBlueprint, name: str) -> bool:
+    n = len(bp.categories)
+    bp.categories = [c for c in bp.categories if c.name != name]
+    return len(bp.categories) < n
+
+
+def mutate_move_category(bp: CustomBlueprint, name: str, direction: int) -> bool:
+    """Deplace une categorie haut (-1) ou bas (+1)."""
+    for i, c in enumerate(bp.categories):
+        if c.name == name:
+            ni = i + direction
+            if 0 <= ni < len(bp.categories):
+                bp.categories[i], bp.categories[ni] = bp.categories[ni], bp.categories[i]
+                return True
+            return False
+    return False
+
+
+def mutate_add_channel(
+    bp: CustomBlueprint, cat_name: str, ch_name: str,
+    ctype: str = "text", topic: str = "", slowmode: int = 0,
+) -> bool:
+    for c in bp.categories:
+        if c.name == cat_name:
+            if any(ch.name == ch_name for ch in c.channels):
+                return False
+            c.channels.append(CustomChannel(
+                name=ch_name, ctype=ctype, topic=topic, slowmode=slowmode,
+            ))
+            return True
+    return False
+
+
+def mutate_rename_channel(
+    bp: CustomBlueprint, cat_name: str, old: str, new: str,
+) -> bool:
+    for c in bp.categories:
+        if c.name == cat_name:
+            for ch in c.channels:
+                if ch.name == old:
+                    ch.name = new
+                    return True
+    return False
+
+
+def mutate_delete_channel(
+    bp: CustomBlueprint, cat_name: str, ch_name: str,
+) -> bool:
+    for c in bp.categories:
+        if c.name == cat_name:
+            n = len(c.channels)
+            c.channels = [ch for ch in c.channels if ch.name != ch_name]
+            return len(c.channels) < n
+    return False
+
+
+def mutate_add_role(
+    bp: CustomBlueprint, name: str, color: int = 0x99AAB5,
+    mentionable: bool = True, hoist: bool = False,
+    permissions: Optional[list[str]] = None,
+) -> bool:
+    if any(r.name == name for r in bp.roles):
+        return False
+    bp.roles.append(CustomRole(
+        name=name, color=color, mentionable=mentionable, hoist=hoist,
+        permissions=permissions or [],
+    ))
+    return True
+
+
+def mutate_rename_role(bp: CustomBlueprint, old: str, new: str) -> bool:
+    for r in bp.roles:
+        if r.name == old:
+            r.name = new
+            return True
+    return False
+
+
+def mutate_delete_role(bp: CustomBlueprint, name: str) -> bool:
+    n = len(bp.roles)
+    bp.roles = [r for r in bp.roles if r.name != name]
+    return len(bp.roles) < n
+
+
+def mutate_set_role_color(bp: CustomBlueprint, name: str, color: int) -> bool:
+    for r in bp.roles:
+        if r.name == name:
+            r.color = color
+            return True
+    return False
+
+
+def mutate_clear(bp: CustomBlueprint) -> None:
+    """Vide le blueprint (pour recommencer)."""
+    bp.categories = []
+    bp.roles = []
+    bp.mention_roles = []
+    bp.name = "Vide"
+    bp.description = ""
+
+
+# =============================================================================
 # APPLY
 # =============================================================================
 

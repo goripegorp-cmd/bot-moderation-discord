@@ -26,6 +26,7 @@ from discord import app_commands
 import server_architect as architect
 import roles_panel as rpanel
 import custom_blueprint as cblueprint
+import architecture_builder as builder
 
 
 def _is_owner_or_admin():
@@ -366,6 +367,28 @@ async def architecture_build_preset(
     except Exception as ex:
         import traceback; traceback.print_exc()
         await i.followup.send(f"❌ Erreur : `{type(ex).__name__}: {ex}`", ephemeral=True)
+
+
+@architecture_group.command(
+    name="builder",
+    description="Ouvre le BUILDER interactif - customise tout puis applique",
+)
+@_is_owner_or_admin()
+async def architecture_builder_cmd(i: discord.Interaction):
+    """Ouvre le panel builder V2 ou tout est customisable visuellement."""
+    try:
+        view = builder.BuilderMainV2(i.user, i.guild)
+        await view.render_to(i, edit=False)
+    except Exception as ex:
+        import traceback; traceback.print_exc()
+        try:
+            await i.response.send_message(
+                f"❌ Erreur : `{type(ex).__name__}: {ex}`", ephemeral=True,
+            )
+        except discord.InteractionResponded:
+            await i.followup.send(
+                f"❌ Erreur : `{type(ex).__name__}: {ex}`", ephemeral=True,
+            )
 
 
 @architecture_group.command(
