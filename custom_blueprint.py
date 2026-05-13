@@ -129,8 +129,11 @@ class CustomBlueprint:
 # 4 templates clé en main. Chacun definit categories + channels + roles.
 # Perms par defaut sensées : everyone voit, le @Staff modere.
 
-def _ch(name, ctype="text", topic="", slowmode=0):
-    return CustomChannel(name=name, ctype=ctype, topic=topic, slowmode=slowmode)
+def _ch(name, ctype="text", topic="", slowmode=0, role_perms=None):
+    return CustomChannel(
+        name=name, ctype=ctype, topic=topic, slowmode=slowmode,
+        role_perms=role_perms or {},
+    )
 
 
 def _cat(name, channels):
