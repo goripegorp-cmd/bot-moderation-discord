@@ -48,6 +48,9 @@ import setup_wizard as wizard2026
 import slash_commands_2026 as slashcmds2026
 import tracking_layer as tracking2026
 import social_liveness as liveness2026
+import server_architect as architect2026
+import roles_panel as rolespanel2026
+import slash_commands_architecture as slashcmds_arch2026
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  🛡️ GESTION D'ERREURS GLOBALE - REND LES ERREURS VISIBLES AU LIEU DE SILENCIEUSES
@@ -30473,6 +30476,7 @@ async def cleardeals_cmd(i: discord.Interaction):
 panels2026.setup_admin_command(bot)
 wizard2026.setup_setup_command(bot)
 slashcmds2026.setup_all_commands(bot)
+slashcmds_arch2026.setup_architecture_commands(bot)
 
 
 # ─── Phase 3.0g : commande /ping minimale pour tester la liveness ───
@@ -30554,6 +30558,17 @@ async def _2026_on_ready_addon():
     except Exception as ex:
         import traceback
         print(f"⚠️  [2026] Erreur init SocialMediaManager : {ex}")
+        traceback.print_exc()
+
+    # Phase 3.1 : recharge les RolesPanelView persistantes pour qu'elles
+    # continuent de fonctionner apres un redemarrage du bot.
+    try:
+        count = await rolespanel2026.register_persistent_views(bot)
+        if count > 0:
+            print(f"✅ [2026] {count} roles panel(s) persistants rechargés")
+    except Exception as ex:
+        import traceback
+        print(f"⚠️  [2026] Erreur rechargement roles panels : {ex}")
         traceback.print_exc()
 
 
