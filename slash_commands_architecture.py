@@ -18,6 +18,8 @@ Groups :
 """
 from __future__ import annotations
 
+from typing import Optional
+
 import discord
 from discord import app_commands
 
@@ -154,6 +156,88 @@ async def architecture_backups(i: discord.Interaction):
 
 
 @architecture_group.command(
+    name="move_channel",
+    description="Deplace manuellement un salon vers une categorie (controle fin)",
+)
+@_is_owner_or_admin()
+@app_commands.describe(
+    channel="Salon a deplacer",
+    category="Categorie cible (vide = pas de categorie)",
+)
+async def architecture_move_channel(
+    i: discord.Interaction,
+    channel: discord.abc.GuildChannel,
+    category: Optional[discord.CategoryChannel] = None,
+):
+    await i.response.defer(ephemeral=True, thinking=False)
+    try:
+        await channel.edit(category=category, reason=f"Move manuel par {i.user.name}")
+        cat_name = category.name if category else "_aucune_"
+        await i.followup.send(
+            f"✅ {channel.mention} déplacé vers **{cat_name}**", ephemeral=True,
+        )
+    except discord.Forbidden:
+        await i.followup.send("❌ Permissions manquantes.", ephemeral=True)
+    except Exception as ex:
+        await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+
+
+@architecture_group.command(
+    name="delete_empty",
+    description="Supprime toutes les categories vides (utile apres une refonte)",
+)
+@_is_owner_or_admin()
+@app_commands.describe(dry_run="True = simule sans supprimer")
+async def architecture_delete_empty(i: discord.Interaction, dry_run: bool = False):
+    await i.response.defer(ephemeral=True, thinking=True)
+    deleted = []
+    errors = []
+    for cat in list(i.guild.categories):
+        if len(cat.channels) > 0:
+            continue
+        if dry_run:
+            deleted.append(f"[dry-run] {cat.name}")
+            continue
+        try:
+            await cat.delete(reason=f"Cleanup categorie vide par {i.user.name}")
+            deleted.append(cat.name)
+            await __import__('asyncio').sleep(0.3)
+        except Exception as ex:
+            errors.append(f"{cat.name}: {ex}")
+    lines = [f"**🗑️ Catégories vides** :", "",
+             f"Supprimées : `{len(deleted)}`"]
+    for d in deleted[:15]:
+        lines.append(f"  • {d}")
+    if errors:
+        lines.append(f"\n⚠️ Erreurs : `{len(errors)}`")
+        for e in errors[:5]:
+            lines.append(f"  • {e}")
+    await i.followup.send("\n".join(lines)[:1900], ephemeral=True)
+
+
+@architecture_group.command(
+    name="rename_category",
+    description="Renomme une categorie (correction post-refonte)",
+)
+@_is_owner_or_admin()
+@app_commands.describe(category="Categorie a renommer", new_name="Nouveau nom")
+async def architecture_rename_category(
+    i: discord.Interaction,
+    category: discord.CategoryChannel,
+    new_name: str,
+):
+    await i.response.defer(ephemeral=True, thinking=False)
+    try:
+        old_name = category.name
+        await category.edit(name=new_name[:100], reason=f"Rename par {i.user.name}")
+        await i.followup.send(
+            f"✅ Catégorie renommée : **{old_name}** → **{new_name}**", ephemeral=True,
+        )
+    except Exception as ex:
+        await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+
+
+@architecture_group.command(
     name="suggest_roles",
     description="Liste les rôles de mention suggérés pour votre serveur",
 )
@@ -271,17 +355,109 @@ async def architecture_create_roles(i: discord.Interaction):
 
 @architecture_group.command(
     name="restore",
-    description="Restaure le serveur depuis un backup",
+    description="Restaure le serveur depuis un backup (supprime cat vides crees apres)",
 )
 @_is_owner_or_admin()
-@app_commands.describe(backup_id="ID du backup (cf /architecture backups)")
-async def architecture_restore(i: discord.Interaction, backup_id: str):
+@app_commands.describe(
+    backup_id="ID du backup (cf /architecture backups)",
+    delete_new_categories="Aussi supprimer les categories crees apres le backup et vides (par defaut: oui)",
+)
+async def architecture_restore(
+    i: discord.Interaction, backup_id: str,
+    delete_new_categories: bool = True,
+):
     await i.response.defer(ephemeral=True, thinking=True)
     try:
-        report = await architect.restore_state(i.guild, backup_id, dry_run=False)
+        report = await architect.restore_state(
+            i.guild, backup_id, dry_run=False,
+            delete_new_categories=delete_new_categories,
+        )
         lines = [f"**🔄 Restore `{backup_id}`** :", ""]
         lines.append(f"📺 Salons restaurés : `{len(report.channels_moved)}`")
+        deleted = [c for c in report.categories_created if c.startswith("DELETED")]
+        if deleted:
+            lines.append(f"🗑️ Catégories vides supprimées : `{len(deleted)}`")
         lines.append(f"⚠️ Erreurs : `{len(report.errors)}`")
+        if report.errors:
+            lines.append("\n**Erreurs** :")
+            for e in report.errors[:10]:
+                lines.append(f"  • {e}")
+        await i.followup.send("\n".join(lines)[:1900], ephemeral=True)
+    except Exception as ex:
+        import traceback; traceback.print_exc()
+        await i.followup.send(f"❌ Erreur : `{type(ex).__name__}: {ex}`", ephemeral=True)
+
+
+@architecture_group.command(
+    name="restore_latest",
+    description="URGENT: Restaure le backup le plus recent (annule la derniere refonte)",
+)
+@_is_owner_or_admin()
+async def architecture_restore_latest(i: discord.Interaction):
+    await i.response.defer(ephemeral=True, thinking=True)
+    try:
+        backup_id = await architect.latest_backup_id(i.guild.id)
+        if not backup_id:
+            return await i.followup.send(
+                "❌ Aucun backup disponible pour ce serveur.", ephemeral=True,
+            )
+        report = await architect.restore_state(
+            i.guild, backup_id, dry_run=False, delete_new_categories=True,
+        )
+        lines = [
+            f"**🚑 Recovery rapide** depuis backup `{backup_id}`",
+            "",
+            f"📺 Salons restaurés : `{len(report.channels_moved)}`",
+        ]
+        deleted = [c for c in report.categories_created if c.startswith("DELETED")]
+        if deleted:
+            lines.append(f"🗑️ Catégories vides supprimées : `{len(deleted)}`")
+        lines.append(f"⚠️ Erreurs : `{len(report.errors)}`")
+        if report.errors:
+            lines.append("\n**Erreurs** :")
+            for e in report.errors[:10]:
+                lines.append(f"  • {e}")
+        await i.followup.send("\n".join(lines)[:1900], ephemeral=True)
+    except Exception as ex:
+        import traceback; traceback.print_exc()
+        await i.followup.send(f"❌ Erreur : `{type(ex).__name__}: {ex}`", ephemeral=True)
+
+
+@architecture_group.command(
+    name="wipe",
+    description="DANGEREUX : supprime TOUS les salons (avec backup auto)",
+)
+@_is_owner_or_admin()
+@app_commands.describe(
+    confirmation="Tape exactement : SUPPRIMER TOUT pour confirmer",
+    dry_run="True = simule sans rien supprimer",
+)
+async def architecture_wipe(
+    i: discord.Interaction, confirmation: str = "", dry_run: bool = True,
+):
+    if confirmation != "SUPPRIMER TOUT" and not dry_run:
+        return await i.response.send_message(
+            "❌ Pour vraiment supprimer, tape exactement `SUPPRIMER TOUT` dans le champ confirmation.\n"
+            "Sinon utilise `dry_run:True` pour simuler.",
+            ephemeral=True,
+        )
+    if i.user.id != i.guild.owner_id:
+        return await i.response.send_message(
+            "❌ Seul le **propriétaire du serveur** peut utiliser /architecture wipe.",
+            ephemeral=True,
+        )
+    await i.response.defer(ephemeral=True, thinking=True)
+    try:
+        report = await architect.wipe_guild(i.guild, dry_run=dry_run)
+        lines = [
+            "**🧨 WIPE serveur** :", "",
+            f"💾 Backup avant : `{report.backup_id}`" if report.backup_id else "_(dry_run, pas de backup)_",
+            f"🗑️ Salons supprimés : `{len(report.channels_moved)}`",
+            f"🗑️ Catégories supprimées : `{len(report.categories_created)}`",
+            f"⚠️ Erreurs : `{len(report.errors)}`",
+        ]
+        if dry_run:
+            lines.insert(1, "🟦 **DRY-RUN** : rien n'a été supprimé.\n")
         if report.errors:
             lines.append("\n**Erreurs** :")
             for e in report.errors[:10]:

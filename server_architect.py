@@ -573,13 +573,19 @@ async def apply_blueprint(
 # =============================================================================
 
 async def restore_state(
-    guild: discord.Guild, backup_id: str, *, dry_run: bool = False
+    guild: discord.Guild, backup_id: str, *, dry_run: bool = False,
+    delete_new_categories: bool = True,
 ) -> ApplyReport:
     """Restaure l'etat du serveur depuis un backup.
 
-    Restaure : positions, categories des salons, overwrites principaux.
-    Ne supprime PAS les nouvelles categories/salons crees apres le backup
-    (pour eviter perte de donnees).
+    Restaure : positions, categories des salons.
+    Si delete_new_categories=True : supprime aussi les categories CREES apres
+    le backup ET maintenant vides (i.e. les categories que mon apply a cree
+    et qui ne sont plus utilisees apres le re-deplacement des salons).
+
+    Ne supprime PAS les NOUVEAUX SALONS crees apres le backup (pour eviter
+    perte de donnees - si l'owner a cree des salons manuellement apres, on
+    les garde).
     """
     report = ApplyReport(backup_id=backup_id)
     data = await load_backup(guild.id, backup_id)
@@ -589,9 +595,11 @@ async def restore_state(
 
     snap = data.get("snapshot", {})
 
-    # Remap categories par ID (les nouvelles categories crees apres backup n'existaient pas)
-    cat_id_to_obj = {cat.id: cat for cat in guild.categories}
+    # IDs des categories presentes au moment du backup
+    backup_cat_ids = {c["category_id"] for c in snap.get("categories", [])}
 
+    # 1. Deplacer les salons vers leur categorie d'origine
+    cat_id_to_obj = {cat.id: cat for cat in guild.categories}
     for ch_snap in snap.get("channels", []):
         try:
             ch = guild.get_channel(ch_snap["channel_id"])
@@ -602,7 +610,9 @@ async def restore_state(
             changes = {}
             if target_cat is not None and (not ch.category or ch.category.id != target_cat.id):
                 changes["category"] = target_cat
-            # On garde position relative
+            elif ch_snap["category_id"] is None and ch.category is not None:
+                # Etait sans categorie a l'origine
+                changes["category"] = None
             if ch.position != ch_snap["position"]:
                 changes["position"] = ch_snap["position"]
             if changes and not dry_run:
@@ -616,6 +626,103 @@ async def restore_state(
                 report.channels_moved.append(f"[dry-run] #{ch.name}")
         except Exception as ex:
             report.errors.append(f"restore {ch_snap.get('channel_id')} : {ex}")
+
+    # 2. Phase 3.3 : delete les categories crees APRES le backup ET maintenant vides
+    if delete_new_categories:
+        for cat in list(guild.categories):
+            if cat.id in backup_cat_ids:
+                continue  # existait deja au backup, on garde
+            # Categorie creee apres le backup : si vide, on supprime
+            if len(cat.channels) == 0:
+                if dry_run:
+                    report.categories_created.append(f"[dry-run] DELETE '{cat.name}'")
+                    continue
+                try:
+                    await cat.delete(reason=f"Restore backup {backup_id} - cleanup categorie vide")
+                    report.categories_created.append(f"DELETED '{cat.name}'")
+                    await asyncio.sleep(0.3)
+                except Exception as ex:
+                    report.errors.append(f"delete category '{cat.name}' : {ex}")
+
+    # 3. Re-positionner les categories d'origine selon le backup
+    cat_position_map = {c["category_id"]: c["position"] for c in snap.get("categories", [])}
+    for cat in guild.categories:
+        if cat.id not in cat_position_map:
+            continue
+        target_pos = cat_position_map[cat.id]
+        if cat.position == target_pos:
+            continue
+        if dry_run:
+            continue
+        try:
+            await cat.edit(position=target_pos, reason=f"Restore backup {backup_id}")
+            await asyncio.sleep(0.3)
+        except Exception as ex:
+            report.errors.append(f"position cat '{cat.name}' : {ex}")
+
+    return report
+
+
+async def latest_backup_id(guild_id: int) -> Optional[str]:
+    """Retourne l'ID du backup le plus recent pour ce guild."""
+    backups = await list_backups(guild_id)
+    if not backups:
+        return None
+    return backups[0]["backup_id"]
+
+
+# Phase 3.3 : wipe complet du serveur (DANGEREUX)
+async def wipe_guild(
+    guild: discord.Guild, *, preserve_channel_ids: Optional[list[int]] = None,
+    dry_run: bool = False,
+) -> ApplyReport:
+    """SUPPRIME tous les salons et categories du serveur sauf ceux preserves.
+
+    Crée AUTOMATIQUEMENT un backup avant pour rollback total possible.
+    Preserve par defaut : aucun (mais l'owner peut passer une liste d'IDs).
+    """
+    report = ApplyReport()
+    if not dry_run:
+        try:
+            report.backup_id = await backup_state(guild, label="before-wipe")
+        except Exception as ex:
+            report.errors.append(f"backup avant wipe echoue : {ex}")
+            return report
+
+    preserve = set(preserve_channel_ids or [])
+    # On ne touche jamais au salon de communaute Discord ou au salon system
+    sys_chans = {guild.system_channel.id if guild.system_channel else 0,
+                 guild.rules_channel.id if guild.rules_channel else 0,
+                 guild.public_updates_channel.id if guild.public_updates_channel else 0}
+    preserve |= sys_chans
+
+    # Supprime salons un par un
+    for ch in list(guild.channels):
+        if isinstance(ch, discord.CategoryChannel):
+            continue
+        if ch.id in preserve:
+            continue
+        if dry_run:
+            report.channels_moved.append(f"[dry-run] DELETE #{ch.name}")
+            continue
+        try:
+            await ch.delete(reason="Wipe via /architecture wipe")
+            report.channels_moved.append(f"DELETED #{ch.name}")
+            await asyncio.sleep(0.3)
+        except Exception as ex:
+            report.errors.append(f"delete #{ch.name} : {ex}")
+
+    # Supprime categories (vides apres delete des salons)
+    for cat in list(guild.categories):
+        if dry_run:
+            report.categories_created.append(f"[dry-run] DELETE '{cat.name}'")
+            continue
+        try:
+            await cat.delete(reason="Wipe via /architecture wipe")
+            report.categories_created.append(f"DELETED '{cat.name}'")
+            await asyncio.sleep(0.3)
+        except Exception as ex:
+            report.errors.append(f"delete cat '{cat.name}' : {ex}")
 
     return report
 
@@ -767,6 +874,8 @@ __all__ = [
     "load_backup",
     "apply_blueprint",
     "restore_state",
+    "latest_backup_id",
+    "wipe_guild",
     "SuggestedRole",
     "ROLE_SUGGESTIONS_BY_THEME",
     "suggest_roles_for_guild",
