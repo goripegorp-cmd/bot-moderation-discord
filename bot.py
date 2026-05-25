@@ -55,6 +55,7 @@ import social_gallery as gallery2026
 import game_updates as gameupdates2026
 import delegations as delegations2026
 import compromised_detector as compromised2026
+import events_engine as events2026
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  🛡️ GESTION D'ERREURS GLOBALE - REND LES ERREURS VISIBLES AU LIEU DE SILENCIEUSES
@@ -895,6 +896,56 @@ async def db_init():
             ended INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )''')
+
+        # Phase 30 : Système d'événements (Boss Raid)
+        await db.execute('''CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            event_type TEXT DEFAULT 'boss_raid',
+            boss_json TEXT,
+            arena_channel_id INTEGER,
+            arena_message_id INTEGER,
+            started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            ends_at DATETIME,
+            ended INTEGER DEFAULT 0,
+            victory INTEGER DEFAULT 0,
+            triggered_by INTEGER DEFAULT 0
+        )''')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_events_guild_active ON events(guild_id, ended)')
+
+        # Participation des joueurs à un event
+        await db.execute('''CREATE TABLE IF NOT EXISTS event_participants (
+            event_id INTEGER,
+            user_id INTEGER,
+            damage_dealt INTEGER DEFAULT 0,
+            attacks_count INTEGER DEFAULT 0,
+            last_attack_ts REAL DEFAULT 0,
+            PRIMARY KEY (event_id, user_id)
+        )''')
+
+        # Snapshots des permissions de salons (pour restauration)
+        await db.execute('''CREATE TABLE IF NOT EXISTS event_channel_snapshots (
+            event_id INTEGER,
+            channel_id INTEGER,
+            had_overwrite INTEGER DEFAULT 0,
+            allow_value INTEGER DEFAULT 0,
+            deny_value INTEGER DEFAULT 0,
+            PRIMARY KEY (event_id, channel_id)
+        )''')
+
+        # Inventaire joueur (pour gear/HP/coins event)
+        await db.execute('''CREATE TABLE IF NOT EXISTS player_inventory (
+            guild_id INTEGER,
+            user_id INTEGER,
+            hp INTEGER DEFAULT 100,
+            max_hp INTEGER DEFAULT 100,
+            weapon_json TEXT DEFAULT '{}',
+            armor_json TEXT DEFAULT '{}',
+            kills INTEGER DEFAULT 0,
+            total_damage INTEGER DEFAULT 0,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (guild_id, user_id)
+        )''')
         
         # Ajouter colonne message_count si elle n'existe pas
         async with db.execute('PRAGMA table_info(economy)') as cursor:
@@ -1307,6 +1358,15 @@ async def cfg(gid):
         'birthday_role': 0,                  # rôle donné le jour J
         'birthday_message': "🎂 Joyeux anniversaire {user} ! 🎉 Toute l'équipe te souhaite une belle journée !",
         'birthdays': {},                     # { str(user_id): "MM-DD" }
+        # Phase 30 : Système d'événements
+        'event_enabled': False,
+        'event_auto_interval_hours': 24,      # auto-trigger tous les N heures (0 = manuel uniquement)
+        'event_difficulty': 100,              # 50-500, 100 = normal
+        'event_duration_min': 30,             # boss s'enfuit après N minutes
+        'event_coin_multiplier': 1.0,         # multiplicateur récompenses
+        'event_arena_channel_name': '⚔️-arène-du-boss',  # nom du salon créé
+        'event_log_channel': 0,                # logs des events (recap)
+        'event_last_run': '',                  # ISO timestamp dernière event
     }
     for k, v in defaults.items():
         if k not in data: data[k] = v
@@ -3809,6 +3869,10 @@ class MainPanelV2(LayoutView):
                     label="Permissions", value="permissions", emoji="🔐",
                     description="Qui peut utiliser quelle commande (par rôle ou utilisateur)",
                 ),
+                discord.SelectOption(
+                    label="Événements", value="events", emoji="🎪",
+                    description="Boss Raids · combats communautaires · inventaire · loot · arène temporaire",
+                ),
             ],
             custom_id="mpv2_module",
         )
@@ -3856,6 +3920,7 @@ class MainPanelV2(LayoutView):
             'creativite':   lambda: CentrePanelV2(self.u, self.g),
             'progression':  lambda: LevelSystemPanelV2(self.u, self.g),
             'permissions':  lambda: PermissionsHubPanelV2(self.u, self.g),
+            'events':       lambda: EventConfigPanelV2(self.u, self.g),
         }
         if val in v2_panels:
             v = v2_panels[val]()
@@ -5558,6 +5623,944 @@ class _BirthdayMsgModal(Modal, title="📝 Message d'anniversaire"):
             await BirthdayConfigPanelV2(self.u, self.g).render_to(i, edit=True)
         except Exception as ex:
             print(f"[_BirthdayMsgModal on_submit] {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  🎪 PHASE 30 — SYSTÈME D'ÉVÉNEMENTS COMMUNAUTAIRES
+#
+#  Permet à l'owner de déclencher (auto ou manuel) des Boss Raids :
+#  - Tous les salons sont MASQUÉS (overwrite view_channel=False sur @everyone)
+#  - Une arène temporaire est créée
+#  - Les membres attaquent le boss en cliquant ⚔️ Attaquer
+#  - Récompenses : coins + équipement aléatoire (gear)
+#  - À la fin, tous les salons sont RESTAURÉS dans leur état exact d'avant
+#  - SÉCURITÉ : badwords/anti-spam/everyone restent actifs pendant l'event
+#  - Owner et admins voient toujours tous les salons (jamais affectés)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ── État runtime des événements (en plus de la DB) ──
+# Cache rapide : { guild_id: {event_id, arena_channel_id, arena_message_id} }
+_active_events_cache: dict[int, dict] = {}
+# Rate-limit des attaques : { (guild_id, user_id): last_ts }
+_attack_cooldown: dict[tuple[int, int], float] = {}
+
+
+async def _get_or_create_inventory(guild_id: int, user_id: int) -> dict:
+    """Retourne l'inventaire d'un joueur (en crée un par défaut si absent)."""
+    async with get_db() as db:
+        async with db.execute(
+            'SELECT hp, max_hp, weapon_json, armor_json, kills, total_damage FROM player_inventory WHERE guild_id=? AND user_id=?',
+            (guild_id, user_id),
+        ) as cur:
+            row = await cur.fetchone()
+        if row:
+            return {
+                'hp': row[0], 'max_hp': row[1],
+                'weapon': json.loads(row[2]) if row[2] else {},
+                'armor': json.loads(row[3]) if row[3] else {},
+                'kills': row[4], 'total_damage': row[5],
+            }
+        # Création par défaut
+        await db.execute(
+            'INSERT INTO player_inventory(guild_id, user_id, hp, max_hp, weapon_json, armor_json) VALUES(?,?,?,?,?,?)',
+            (guild_id, user_id, 100, 100, '{}', '{}'),
+        )
+        await db.commit()
+    return {'hp': 100, 'max_hp': 100, 'weapon': {}, 'armor': {}, 'kills': 0, 'total_damage': 0}
+
+
+async def _save_inventory(guild_id: int, user_id: int, inv: dict):
+    async with get_db() as db:
+        await db.execute(
+            'UPDATE player_inventory SET hp=?, max_hp=?, weapon_json=?, armor_json=?, kills=?, total_damage=?, updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?',
+            (
+                int(inv.get('hp', 100)), int(inv.get('max_hp', 100)),
+                json.dumps(inv.get('weapon', {})), json.dumps(inv.get('armor', {})),
+                int(inv.get('kills', 0)), int(inv.get('total_damage', 0)),
+                guild_id, user_id,
+            ),
+        )
+        await db.commit()
+
+
+# ─────────────────────────── PANEL DE CONFIG ───────────────────────────
+
+class EventConfigPanelV2(LayoutView):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        enabled = bool(c.get('event_enabled', False))
+        interval = int(c.get('event_auto_interval_hours', 24) or 24)
+        difficulty = int(c.get('event_difficulty', 100) or 100)
+        duration = int(c.get('event_duration_min', 30) or 30)
+        coin_mult = float(c.get('event_coin_multiplier', 1.0) or 1.0)
+        arena_name = c.get('event_arena_channel_name', '⚔️-arène-du-boss')
+        log_ch_id = int(c.get('event_log_channel', 0) or 0)
+        log_ch = self.g.get_channel(log_ch_id) if log_ch_id else None
+        last_run = c.get('event_last_run', '')
+
+        # État actuel : event en cours ?
+        active = False
+        active_info = ""
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT id, boss_json, arena_channel_id, ends_at FROM events WHERE guild_id=? AND ended=0 ORDER BY id DESC LIMIT 1',
+                    (self.g.id,),
+                ) as cur:
+                    row = await cur.fetchone()
+            if row:
+                active = True
+                boss = json.loads(row[1]) if row[1] else {}
+                ch = self.g.get_channel(int(row[2] or 0))
+                active_info = (
+                    f"🚨 **ÉVÉNEMENT EN COURS** · {boss.get('name', '?')}\n"
+                    f"Arène : {ch.mention if ch else '_introuvable_'}\n"
+                    f"Se termine <t:{int(datetime.fromisoformat(row[3]).timestamp())}:R>"
+                )
+        except Exception as ex:
+            print(f"[EventConfigPanelV2 active check] {ex}")
+
+        # Quel est l'intervalle restant avant le prochain auto ?
+        next_run_str = "_planification désactivée_"
+        if enabled and interval > 0 and last_run:
+            try:
+                last_dt = datetime.fromisoformat(last_run)
+                next_dt = last_dt + timedelta(hours=interval)
+                next_run_str = f"<t:{int(next_dt.timestamp())}:R>"
+            except Exception:
+                pass
+        elif enabled and interval > 0:
+            next_run_str = "Au prochain check (dans <1h)"
+
+        difficulty_label = {
+            50: "🟢 Très facile", 75: "🟢 Facile",
+            100: "🟡 Normal", 150: "🟠 Difficile",
+            200: "🔴 Très difficile", 300: "💀 Cauchemar", 500: "👑 Légendaire",
+        }
+        diff_str = "Normal"
+        for k, v in sorted(difficulty_label.items()):
+            if difficulty <= k:
+                diff_str = v
+                break
+        else:
+            diff_str = difficulty_label[500]
+
+        self.clear_items()
+
+        b_toggle = Button(
+            label=("🔘 Désactiver système" if enabled else "⚪ Activer système"),
+            style=(discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success),
+            custom_id="evt_toggle",
+        )
+        b_toggle.callback = self._cb_toggle
+
+        b_start = Button(
+            label="⚔️ Lancer un Boss Raid maintenant",
+            style=discord.ButtonStyle.danger,
+            disabled=active,
+            custom_id="evt_start_now",
+        )
+        b_start.callback = self._cb_start_now
+
+        b_stop = Button(
+            label="🛑 Stopper l'événement en cours",
+            style=discord.ButtonStyle.secondary,
+            disabled=(not active),
+            custom_id="evt_stop_now",
+        )
+        b_stop.callback = self._cb_stop_now
+
+        b_settings = Button(label="⚙️ Réglages", style=discord.ButtonStyle.primary, custom_id="evt_settings")
+        b_settings.callback = self._cb_settings
+
+        log_select = discord.ui.ChannelSelect(
+            placeholder=f"📢 Salon récap : {(log_ch.name if log_ch else 'aucun')}",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            min_values=0, max_values=1, custom_id="evt_logch",
+        )
+        log_select.callback = self._cb_log_channel
+
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="evt_back")
+        b_back.callback = self._cb_back
+
+        config_block = (
+            f"🔌 **État système** · {'🟢 actif' if enabled else '⚪ désactivé'}\n"
+            f"⏰ **Auto toutes les** · `{interval}` h ({'manuel uniquement' if interval == 0 else next_run_str})\n"
+            f"⚔️ **Difficulté** · {diff_str} (`{difficulty}`)\n"
+            f"⏱️ **Durée d'un boss** · `{duration}` min (le boss s'enfuit après)\n"
+            f"💰 **Multiplicateur coins** · `×{coin_mult:.1f}`\n"
+            f"🏟️ **Nom de l'arène** · `{arena_name}`\n"
+            f"📜 **Salon récap** · {log_ch.mention if log_ch else '_aucun_'}"
+        )
+
+        how_it_works = (
+            "**Comment ça marche :**\n"
+            "1. Le bot **sauvegarde** la visibilité de TOUS les salons\n"
+            "2. Tous les salons deviennent invisibles pour `@everyone` (admins/owner gardent l'accès)\n"
+            "3. Une arène est créée avec le boss + bouton **⚔️ Attaquer**\n"
+            "4. Les membres collaborent pour vaincre le boss avant la fin du timer\n"
+            "5. Récompenses : pièces 🪙 + équipement aléatoire 🎁\n"
+            "6. Tout est **restauré** à l'identique\n\n"
+            "**Sécurité pendant l'event :**\n"
+            "• Le filtre badwords reste actif\n"
+            "• `@everyone`/`@here` sont auto-supprimés et ne comptent pas comme attaque\n"
+            "• Limite : 1 attaque par membre toutes les 5 secondes\n"
+            "• L'owner peut stopper l'event à tout moment"
+        )
+
+        items = [
+            v2_title("🎪 Événements communautaires"),
+            v2_subtitle("Boss Raids · combats live · arène temporaire · récompenses"),
+            v2_divider(),
+        ]
+        if active:
+            items.append(v2_body(active_info))
+            items.append(v2_divider())
+        items.append(v2_body(config_block))
+        items.append(v2_divider())
+        items.append(v2_body(how_it_works))
+        items.append(v2_divider())
+        items.append(discord.ui.ActionRow(log_select))
+        items.append(discord.ui.ActionRow(b_toggle, b_settings, b_start, b_stop))
+        items.append(discord.ui.ActionRow(b_back))
+
+        self.add_item(v2_container(*items, color=Palette.DANGER))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_toggle(self, i):
+        try:
+            c = await cfg(self.g.id)
+            await db_set(self.g.id, 'event_enabled', not bool(c.get('event_enabled', False)))
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[EventConfigPanelV2 _cb_toggle] {ex}")
+
+    async def _cb_log_channel(self, i):
+        try:
+            vals = i.data.get('values', [])
+            await db_set(self.g.id, 'event_log_channel', int(vals[0]) if vals else 0)
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[EventConfigPanelV2 _cb_log_channel] {ex}")
+
+    async def _cb_settings(self, i):
+        try:
+            c = await cfg(self.g.id)
+            modal = _EventSettingsModal(self.g, self.u)
+            modal.interval.default = str(int(c.get('event_auto_interval_hours', 24) or 24))
+            modal.difficulty.default = str(int(c.get('event_difficulty', 100) or 100))
+            modal.duration.default = str(int(c.get('event_duration_min', 30) or 30))
+            modal.coin_mult.default = str(float(c.get('event_coin_multiplier', 1.0) or 1.0))
+            modal.arena_name.default = c.get('event_arena_channel_name', '⚔️-arène-du-boss')
+            await i.response.send_modal(modal)
+        except Exception as ex:
+            print(f"[EventConfigPanelV2 _cb_settings] {ex}")
+
+    async def _cb_start_now(self, i):
+        try:
+            await i.response.defer(ephemeral=True)
+            result = await _start_boss_raid(self.g, self.u.id, manual=True)
+            if result.get('ok'):
+                await i.followup.send(
+                    f"⚔️ **Boss Raid lancé !** Arène : <#{result['arena_channel_id']}>",
+                    ephemeral=True,
+                )
+            else:
+                await i.followup.send(
+                    f"❌ Impossible de lancer l'event : `{result.get('error', '?')}`",
+                    ephemeral=True,
+                )
+            # Re-render
+            try:
+                await self.render_to(i, edit=False)
+            except Exception:
+                pass
+        except Exception as ex:
+            print(f"[EventConfigPanelV2 _cb_start_now] {ex}")
+            try:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+    async def _cb_stop_now(self, i):
+        try:
+            await i.response.defer(ephemeral=True)
+            await _end_active_event(self.g, victory=False, reason="Stoppé par l'owner")
+            await i.followup.send("🛑 Événement stoppé et serveur restauré.", ephemeral=True)
+            try:
+                await self.render_to(i, edit=False)
+            except Exception:
+                pass
+        except Exception as ex:
+            print(f"[EventConfigPanelV2 _cb_stop_now] {ex}")
+            try:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+    async def _cb_back(self, i):
+        v = MainPanelV2(self.u, self.g)
+        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
+
+
+class _EventSettingsModal(Modal, title="⚙️ Réglages des événements"):
+    interval = TextInput(label="Auto toutes les X heures (0 = manuel)", placeholder="24", max_length=4, required=True)
+    difficulty = TextInput(label="Difficulté (50-500, 100 = normal)", placeholder="100", max_length=4, required=True)
+    duration = TextInput(label="Durée max d'un boss en minutes (5-180)", placeholder="30", max_length=3, required=True)
+    coin_mult = TextInput(label="Multiplicateur de coins (0.5 - 3.0)", placeholder="1.0", max_length=4, required=True)
+    arena_name = TextInput(label="Nom du salon arène (créé temp.)", placeholder="⚔️-arène-du-boss", max_length=80, required=True)
+
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+
+    async def on_submit(self, i):
+        try:
+            interval = max(0, min(168, int(self.interval.value.strip())))
+            diff = max(50, min(500, int(self.difficulty.value.strip())))
+            dur = max(5, min(180, int(self.duration.value.strip())))
+            mult = max(0.5, min(3.0, float(self.coin_mult.value.strip())))
+            arena = (self.arena_name.value or '⚔️-arène-du-boss').strip()[:80]
+            await db_set(self.g.id, 'event_auto_interval_hours', interval)
+            await db_set(self.g.id, 'event_difficulty', diff)
+            await db_set(self.g.id, 'event_duration_min', dur)
+            await db_set(self.g.id, 'event_coin_multiplier', mult)
+            await db_set(self.g.id, 'event_arena_channel_name', arena)
+            await EventConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+        except Exception as ex:
+            try:
+                await i.response.send_message(f"❌ Valeurs invalides : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
+# ─────────────────────────── ENGINE — START / END ───────────────────────────
+
+async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False) -> dict:
+    """Lance un Boss Raid. Retourne {ok, error?, event_id?, arena_channel_id?}."""
+    try:
+        c = await cfg(guild.id)
+        # Sanity : pas d'event en cours ?
+        async with get_db() as db:
+            async with db.execute('SELECT id FROM events WHERE guild_id=? AND ended=0', (guild.id,)) as cur:
+                if await cur.fetchone():
+                    return {"ok": False, "error": "Un événement est déjà en cours"}
+
+        # Permissions du bot
+        me = guild.me
+        if not (me.guild_permissions.manage_channels and me.guild_permissions.manage_roles):
+            return {"ok": False, "error": "Le bot n'a pas les permissions manage_channels + manage_roles"}
+
+        difficulty = int(c.get('event_difficulty', 100) or 100)
+        duration_min = int(c.get('event_duration_min', 30) or 30)
+        arena_name = (c.get('event_arena_channel_name', '⚔️-arène-du-boss') or '⚔️-arène-du-boss')
+
+        # Boss aléatoire
+        boss = events2026.random_boss(difficulty)
+
+        # Créer l'event en DB (avant de modifier quoi que ce soit, pour traçabilité)
+        ends_at_dt = datetime.now(timezone.utc) + timedelta(minutes=duration_min)
+        async with get_db() as db:
+            cur = await db.execute(
+                'INSERT INTO events(guild_id, event_type, boss_json, arena_channel_id, ends_at, triggered_by) '
+                'VALUES (?,?,?,?,?,?)',
+                (guild.id, 'boss_raid', json.dumps(boss), 0, ends_at_dt.isoformat(), triggered_by_id),
+            )
+            event_id = cur.lastrowid
+            await db.commit()
+
+        # ─── 1. Sauvegarder les permissions @everyone de chaque salon ───
+        async with get_db() as db:
+            for ch in guild.channels:
+                # On ne touche pas aux catégories
+                if isinstance(ch, discord.CategoryChannel):
+                    continue
+                try:
+                    everyone_role = guild.default_role
+                    overw = ch.overwrites_for(everyone_role)
+                    had_overwrite = 1 if overw != discord.PermissionOverwrite() else 0
+                    allow_val, deny_val = overw.pair()
+                    await db.execute(
+                        'INSERT OR REPLACE INTO event_channel_snapshots(event_id, channel_id, had_overwrite, allow_value, deny_value) '
+                        'VALUES (?,?,?,?,?)',
+                        (event_id, ch.id, had_overwrite, allow_val.value, deny_val.value),
+                    )
+                except Exception as ex:
+                    print(f"[event start snapshot ch={ch.id}] {ex}")
+            await db.commit()
+
+        # ─── 2. Créer l'arène (catégorie au-dessus de tout, salon visible) ───
+        try:
+            arena_overwrites = {
+                guild.default_role: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    read_message_history=True,
+                    add_reactions=True,
+                ),
+                guild.me: discord.PermissionOverwrite(
+                    view_channel=True,
+                    send_messages=True,
+                    manage_messages=True,
+                    embed_links=True,
+                ),
+            }
+            arena_channel = await guild.create_text_channel(
+                name=arena_name[:90],
+                overwrites=arena_overwrites,
+                reason=f"Boss Raid event {event_id}",
+            )
+            # Positionner en haut
+            try:
+                await arena_channel.edit(position=0)
+            except Exception:
+                pass
+        except discord.Forbidden:
+            return {"ok": False, "error": "Permission manage_channels refusée"}
+        except Exception as ex:
+            return {"ok": False, "error": f"Création arène échouée : {ex}"}
+
+        # ─── 3. Masquer tous les autres salons pour @everyone ───
+        for ch in guild.channels:
+            if isinstance(ch, discord.CategoryChannel):
+                continue
+            if ch.id == arena_channel.id:
+                continue
+            try:
+                # On ajoute simplement view_channel=False à l'overwrite @everyone
+                overw = ch.overwrites_for(guild.default_role)
+                overw.view_channel = False
+                await ch.set_permissions(guild.default_role, overwrite=overw, reason=f"Event {event_id} mask")
+            except discord.Forbidden:
+                # Pas grave si certains salons ne sont pas modifiables (déjà privés)
+                continue
+            except Exception as ex:
+                print(f"[event start mask ch={ch.id}] {ex}")
+                continue
+
+        # ─── 4. Envoyer le message d'arène avec boutons ───
+        try:
+            view = BossAttackView(event_id)
+            embed = _build_boss_embed(boss, [], ends_at_dt, guild)
+            arena_msg = await arena_channel.send(
+                content="🚨 **UN BOSS APPARAÎT !** Tous les membres : préparez-vous au combat !",
+                embed=embed,
+                view=view,
+            )
+            async with get_db() as db:
+                await db.execute(
+                    'UPDATE events SET arena_channel_id=?, arena_message_id=? WHERE id=?',
+                    (arena_channel.id, arena_msg.id, event_id),
+                )
+                await db.commit()
+        except Exception as ex:
+            print(f"[event start send arena] {ex}")
+
+        # Cache
+        _active_events_cache[guild.id] = {
+            "event_id": event_id,
+            "arena_channel_id": arena_channel.id,
+            "arena_message_id": arena_msg.id if 'arena_msg' in locals() else 0,
+        }
+
+        # Marquer last_run
+        await db_set(guild.id, 'event_last_run', datetime.now(timezone.utc).isoformat())
+
+        print(f"[EVENT START] guild={guild.id} event={event_id} boss={boss.get('name')} HP={boss.get('max_hp')}")
+        return {"ok": True, "event_id": event_id, "arena_channel_id": arena_channel.id}
+    except Exception as ex:
+        print(f"[_start_boss_raid] {ex}")
+        import traceback; traceback.print_exc()
+        return {"ok": False, "error": str(ex)}
+
+
+def _build_boss_embed(boss: dict, participants: list[dict], ends_at_dt: datetime, guild) -> discord.Embed:
+    """Construit l'embed du boss avec HP bar + top damagers."""
+    hp = int(boss.get('current_hp', boss.get('max_hp', 1000)))
+    max_hp = int(boss.get('max_hp', 1000))
+    bar = events2026.hp_bar(hp, max_hp, length=24)
+
+    color = boss.get('color', 0xE74C3C)
+    if hp == 0:
+        color = 0x95A5A6  # gris : vaincu
+
+    desc = (
+        f"_{boss.get('lore', '')}_\n\n"
+        f"**❤️ Points de vie**\n"
+        f"`{bar}` `{hp:,}/{max_hp:,}`\n\n"
+        f"**Capacités** · {' · '.join(boss.get('abilities', []))}"
+    )
+
+    e = discord.Embed(
+        title=boss.get('name', '?'),
+        description=desc,
+        color=color,
+        timestamp=datetime.now(timezone.utc),
+    )
+
+    if ends_at_dt and hp > 0:
+        e.add_field(name="⏰ Temps restant", value=f"<t:{int(ends_at_dt.timestamp())}:R>", inline=True)
+    e.add_field(name="👥 Participants", value=f"`{len(participants)}` combattant(s)", inline=True)
+
+    # Top 5 damagers
+    if participants:
+        sorted_p = sorted(participants, key=lambda p: p.get('damage', 0), reverse=True)[:5]
+        lines = []
+        medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+        for idx, p in enumerate(sorted_p):
+            member = guild.get_member(int(p['user_id']))
+            name = member.display_name if member else f"User#{p['user_id']}"
+            lines.append(f"{medals[idx]} **{name}** · `{p['damage']:,}` dégâts ({p.get('attacks', 0)} attaques)")
+        e.add_field(name="⚔️ Top combattants", value="\n".join(lines), inline=False)
+
+    e.set_footer(text=f"{guild.name} · Boss Raid", icon_url=(guild.icon.url if guild.icon else None))
+    return e
+
+
+# ─────────────────────────── BOUTON ATTAQUE ───────────────────────────
+
+class BossAttackView(View):
+    """View persistante pour attaquer le boss."""
+
+    def __init__(self, event_id: int):
+        super().__init__(timeout=None)
+        self.event_id = event_id
+        # Button avec custom_id stable pour persistance
+        b_attack = Button(
+            label="⚔️ ATTAQUER",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"boss_attack_{event_id}",
+        )
+        b_attack.callback = self._on_attack
+        self.add_item(b_attack)
+
+        b_inv = Button(
+            label="🎒 Inventaire",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"boss_inv_{event_id}",
+        )
+        b_inv.callback = self._on_inv
+        self.add_item(b_inv)
+
+    async def _on_attack(self, i: discord.Interaction):
+        await _handle_boss_attack(i, self.event_id)
+
+    async def _on_inv(self, i: discord.Interaction):
+        try:
+            inv = await _get_or_create_inventory(i.guild.id, i.user.id)
+            w = inv.get('weapon', {})
+            a = inv.get('armor', {})
+            txt = (
+                f"**🎒 Ton équipement :**\n"
+                f"⚔️ Arme : {w.get('emoji', '')} **{w.get('name', '_aucune_')}** · `+{w.get('atk', 0)}` ATK · _{w.get('rarity', '—')}_\n"
+                f"🛡️ Armure : {a.get('emoji', '')} **{a.get('name', '_aucune_')}** · `+{a.get('def', 0)}` DEF · _{a.get('rarity', '—')}_\n"
+                f"❤️ PV : `{inv.get('hp', 100)}/{inv.get('max_hp', 100)}`\n"
+                f"💀 Kills : `{inv.get('kills', 0)}` · Total dégâts : `{inv.get('total_damage', 0)}`"
+            )
+            await i.response.send_message(txt, ephemeral=True)
+        except Exception as ex:
+            print(f"[BossAttackView _on_inv] {ex}")
+
+
+async def _handle_boss_attack(i: discord.Interaction, event_id: int):
+    """Gère un clic sur le bouton Attaquer."""
+    try:
+        # Charger l'event
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT boss_json, ended, ends_at FROM events WHERE id=? AND guild_id=?',
+                (event_id, i.guild.id),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return await i.response.send_message("❌ Cet événement n'existe plus.", ephemeral=True)
+        boss = json.loads(row[0]) if row[0] else {}
+        ended = bool(row[1])
+        if ended:
+            return await i.response.send_message("⏰ Cet événement est déjà terminé.", ephemeral=True)
+
+        # Rate-limit 5s
+        key = (i.guild.id, i.user.id)
+        now_ts = time.time()
+        last = _attack_cooldown.get(key, 0)
+        if now_ts - last < 5:
+            remaining = 5 - (now_ts - last)
+            return await i.response.send_message(
+                f"⏱️ Attends encore `{remaining:.1f}s` avant ta prochaine attaque !",
+                ephemeral=True,
+            )
+        _attack_cooldown[key] = now_ts
+
+        # Anti-bot / anti-self-attack
+        if i.user.bot:
+            return await i.response.send_message("🤖 Les bots ne peuvent pas attaquer.", ephemeral=True)
+
+        # Charger / créer participant
+        inv = await _get_or_create_inventory(i.guild.id, i.user.id)
+        damage, is_crit = events2026.calc_damage(inv.get('weapon'), inv.get('hp', 100))
+
+        # Appliquer les dégâts au boss
+        new_hp = max(0, int(boss.get('current_hp', 0)) - damage)
+        boss['current_hp'] = new_hp
+
+        async with get_db() as db:
+            await db.execute(
+                'UPDATE events SET boss_json=? WHERE id=?',
+                (json.dumps(boss), event_id),
+            )
+            # Upsert participant
+            await db.execute(
+                'INSERT INTO event_participants(event_id, user_id, damage_dealt, attacks_count, last_attack_ts) '
+                'VALUES (?,?,?,1,?) '
+                'ON CONFLICT(event_id, user_id) DO UPDATE SET '
+                'damage_dealt = damage_dealt + ?, attacks_count = attacks_count + 1, last_attack_ts = ?',
+                (event_id, i.user.id, damage, now_ts, damage, now_ts),
+            )
+            await db.commit()
+
+        # Update inventory total damage
+        inv['total_damage'] = inv.get('total_damage', 0) + damage
+        await _save_inventory(i.guild.id, i.user.id, inv)
+
+        # Réponse immédiate à l'attaque
+        crit_str = " 🌟 **CRITIQUE !**" if is_crit else ""
+        await i.response.send_message(
+            f"⚔️ Tu infliges `{damage}` dégâts au boss !{crit_str}",
+            ephemeral=True,
+        )
+
+        # Refresh embed
+        try:
+            await _refresh_boss_message(i.guild, event_id)
+        except Exception as ex:
+            print(f"[boss attack refresh] {ex}")
+
+        # Boss vaincu ?
+        if new_hp == 0:
+            await _end_active_event(i.guild, victory=True, reason="Boss vaincu !")
+    except Exception as ex:
+        print(f"[_handle_boss_attack] {ex}")
+        import traceback; traceback.print_exc()
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+async def _refresh_boss_message(guild, event_id: int):
+    """Met à jour le message du boss avec les nouveaux HP."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT boss_json, arena_channel_id, arena_message_id, ends_at FROM events WHERE id=?',
+                (event_id,),
+            ) as cur:
+                row = await cur.fetchone()
+            if not row:
+                return
+            boss = json.loads(row[0]) if row[0] else {}
+            ch_id = int(row[1] or 0)
+            msg_id = int(row[2] or 0)
+            ends_at_dt = datetime.fromisoformat(row[3]) if row[3] else None
+
+            # Récupérer les participants
+            async with db.execute(
+                'SELECT user_id, damage_dealt, attacks_count FROM event_participants WHERE event_id=?',
+                (event_id,),
+            ) as cur:
+                parts = [
+                    {"user_id": r[0], "damage": r[1], "attacks": r[2]}
+                    for r in await cur.fetchall()
+                ]
+
+        if not ch_id or not msg_id:
+            return
+        ch = guild.get_channel(ch_id)
+        if not ch:
+            return
+        try:
+            msg = await ch.fetch_message(msg_id)
+        except Exception:
+            return
+
+        e = _build_boss_embed(boss, parts, ends_at_dt, guild)
+        await msg.edit(embed=e)
+    except Exception as ex:
+        print(f"[_refresh_boss_message] {ex}")
+
+
+# ─────────────────────────── END EVENT (restauration) ───────────────────────────
+
+async def _end_active_event(guild, *, victory: bool, reason: str = ""):
+    """Termine l'event actif : restaure les salons, distribue les récompenses, supprime l'arène."""
+    try:
+        # Charger l'event
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT id, boss_json, arena_channel_id, arena_message_id FROM events WHERE guild_id=? AND ended=0 ORDER BY id DESC LIMIT 1',
+                (guild.id,),
+            ) as cur:
+                row = await cur.fetchone()
+            if not row:
+                return
+            event_id = row[0]
+            boss = json.loads(row[1]) if row[1] else {}
+            arena_ch_id = int(row[2] or 0)
+            arena_msg_id = int(row[3] or 0)
+
+            # Marquer ended
+            await db.execute(
+                'UPDATE events SET ended=1, victory=? WHERE id=?',
+                (1 if victory else 0, event_id),
+            )
+            await db.commit()
+
+            # Récupérer participants
+            async with db.execute(
+                'SELECT user_id, damage_dealt, attacks_count FROM event_participants WHERE event_id=?',
+                (event_id,),
+            ) as cur:
+                participants = [
+                    {"user_id": r[0], "damage": r[1], "attacks": r[2]}
+                    for r in await cur.fetchall()
+                ]
+
+            # Récupérer snapshots
+            async with db.execute(
+                'SELECT channel_id, had_overwrite, allow_value, deny_value FROM event_channel_snapshots WHERE event_id=?',
+                (event_id,),
+            ) as cur:
+                snapshots = await cur.fetchall()
+
+        # ─── Restauration des permissions ───
+        for snap in snapshots:
+            ch_id, had, allow_v, deny_v = snap
+            ch = guild.get_channel(int(ch_id))
+            if not ch:
+                continue
+            try:
+                if had:
+                    # Restaurer l'overwrite exact
+                    perm = discord.PermissionOverwrite.from_pair(
+                        discord.Permissions(int(allow_v)),
+                        discord.Permissions(int(deny_v)),
+                    )
+                    await ch.set_permissions(guild.default_role, overwrite=perm, reason=f"Event {event_id} restoration")
+                else:
+                    # Pas d'overwrite à l'origine → on supprime celui qu'on a ajouté
+                    await ch.set_permissions(guild.default_role, overwrite=None, reason=f"Event {event_id} restoration")
+            except discord.Forbidden:
+                continue
+            except Exception as ex:
+                print(f"[event restore ch={ch_id}] {ex}")
+
+        # ─── Distribution des récompenses ───
+        c = await cfg(guild.id)
+        coin_mult = float(c.get('event_coin_multiplier', 1.0) or 1.0)
+        boss_max_hp = int(boss.get('max_hp', 1000))
+        rewards = events2026.compute_rewards(participants, boss_max_hp, victory, coin_mult)
+
+        # Appliquer rewards : add coins via économy, équiper le gear si meilleur
+        reward_lines = []
+        for r in rewards:
+            uid = r['user_id']
+            member = guild.get_member(uid)
+            if not member:
+                continue
+            # Coins
+            try:
+                await add_coins(guild.id, uid, r['coins'])
+            except Exception:
+                pass
+            # Gear : auto-équiper si la rareté est >= actuelle, sinon stocker comme drop
+            gear_str = ""
+            if r.get('gear'):
+                gear = r['gear']
+                inv = await _get_or_create_inventory(guild.id, uid)
+                slot = gear['slot']
+                cur_gear = inv.get(slot, {})
+                rarity_rank = {"commune": 0, "rare": 1, "épique": 2, "légendaire": 3}
+                if rarity_rank.get(gear.get('rarity', 'commune'), 0) >= rarity_rank.get(cur_gear.get('rarity', 'commune'), 0):
+                    # Remplacer
+                    inv[slot] = {
+                        'name': gear['name'],
+                        'rarity': gear['rarity'],
+                        'emoji': gear.get('emoji', ''),
+                        'atk': gear.get('atk', 0),
+                        'def': gear.get('def', 0),
+                    }
+                    gear_str = f"+ {events2026.RARITY_EMOJIS.get(gear['rarity'], '')} **{gear['emoji']} {gear['name']}** ({gear['rarity']}) — équipé !"
+                else:
+                    gear_str = f"+ {events2026.RARITY_EMOJIS.get(gear['rarity'], '')} **{gear['emoji']} {gear['name']}** ({gear['rarity']})"
+                # Compter kill si victory + top 3
+                if victory and r['rank'] <= 3:
+                    inv['kills'] = inv.get('kills', 0) + 1
+                await _save_inventory(guild.id, uid, inv)
+
+            medal = ["🥇", "🥈", "🥉"]
+            rank_emoji = medal[r['rank'] - 1] if r['rank'] <= 3 else f"`#{r['rank']}`"
+            reward_lines.append(
+                f"{rank_emoji} {member.mention} · `{r['damage']:,}` dégâts · `+{r['coins']}` 🪙 {gear_str}"
+            )
+
+        # ─── Recap dans le salon log ───
+        log_ch_id = int(c.get('event_log_channel', 0) or 0)
+        log_ch = guild.get_channel(log_ch_id) if log_ch_id else None
+
+        recap_title = (
+            f"🏆 **VICTOIRE !** Le **{boss.get('name', '?')}** est vaincu !" if victory
+            else f"💀 **Défaite.** Le **{boss.get('name', '?')}** s'enfuit dans l'ombre…"
+        )
+        recap_desc = (
+            f"{recap_title}\n\n"
+            f"**Combattants** : `{len(participants)}` · "
+            f"**Total dégâts** : `{sum(p['damage'] for p in participants):,}`"
+        )
+        if reward_lines:
+            recap_desc += "\n\n**🎁 Récompenses :**\n" + "\n".join(reward_lines[:20])
+            if len(reward_lines) > 20:
+                recap_desc += f"\n_… + {len(reward_lines) - 20} autre(s)_"
+        if reason:
+            recap_desc += f"\n\n_{reason}_"
+
+        recap_embed = discord.Embed(
+            description=recap_desc[:4000],
+            color=0x2ECC71 if victory else 0x95A5A6,
+            timestamp=datetime.now(timezone.utc),
+        )
+        recap_embed.set_author(name=f"⚔️ Fin du Boss Raid", icon_url=(guild.icon.url if guild.icon else None))
+
+        # ─── Supprimer le salon arène (le contenu sera perdu mais c'est temporaire par design) ───
+        arena_ch = guild.get_channel(arena_ch_id) if arena_ch_id else None
+        if arena_ch:
+            # Envoyer un dernier message dans l'arène avant de la fermer
+            try:
+                await arena_ch.send(embed=recap_embed)
+                await asyncio.sleep(10)  # laisser le temps de lire
+            except Exception:
+                pass
+            try:
+                await arena_ch.delete(reason=f"Event {event_id} terminé")
+            except Exception as ex:
+                print(f"[event arena delete] {ex}")
+
+        # Salon log
+        if log_ch:
+            try:
+                await log_ch.send(embed=recap_embed)
+            except Exception:
+                pass
+
+        # Cleanup cache
+        _active_events_cache.pop(guild.id, None)
+        print(f"[EVENT END] guild={guild.id} event={event_id} victory={victory}")
+    except Exception as ex:
+        print(f"[_end_active_event] {ex}")
+        import traceback; traceback.print_exc()
+
+
+# ─────────────────────────── BACKGROUND TASKS ───────────────────────────
+
+@tasks.loop(minutes=2)
+async def event_timeout_checker():
+    """Vérifie toutes les 2 min si un event a dépassé sa durée → end."""
+    try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT id, guild_id FROM events WHERE ended=0 AND ends_at IS NOT NULL AND ends_at < ?',
+                (now_iso,),
+            ) as cur:
+                rows = await cur.fetchall()
+        for event_id, guild_id in rows:
+            guild = bot.get_guild(int(guild_id))
+            if guild:
+                await _end_active_event(guild, victory=False, reason="⏰ Temps écoulé — le boss s'enfuit.")
+    except Exception as ex:
+        print(f"[event_timeout_checker] {ex}")
+
+
+@tasks.loop(hours=1)
+async def event_auto_scheduler():
+    """Vérifie chaque heure si un event auto doit être lancé."""
+    try:
+        for guild in bot.guilds:
+            try:
+                c = await cfg(guild.id)
+                if not c.get('event_enabled', False):
+                    continue
+                interval_h = int(c.get('event_auto_interval_hours', 24) or 24)
+                if interval_h <= 0:
+                    continue  # manuel uniquement
+
+                last_run = c.get('event_last_run', '')
+                if last_run:
+                    try:
+                        last_dt = datetime.fromisoformat(last_run)
+                        if (datetime.now(timezone.utc) - last_dt).total_seconds() < interval_h * 3600:
+                            continue
+                    except Exception:
+                        pass
+
+                # Vérifier qu'aucun event n'est en cours
+                async with get_db() as db:
+                    async with db.execute('SELECT id FROM events WHERE guild_id=? AND ended=0', (guild.id,)) as cur:
+                        if await cur.fetchone():
+                            continue
+
+                # Lancer !
+                result = await _start_boss_raid(guild, bot.user.id, manual=False)
+                if result.get('ok'):
+                    print(f"[EVENT AUTO] guild={guild.id} déclenché")
+            except Exception as ex:
+                print(f"[event_auto_scheduler guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[event_auto_scheduler] {ex}")
+
+
+@event_timeout_checker.before_loop
+async def _evt_timeout_wait():
+    await bot.wait_until_ready()
+
+
+@event_auto_scheduler.before_loop
+async def _evt_auto_wait():
+    await bot.wait_until_ready()
+
+
+# ─────────────────────────── RESTAURATION AU BOOT ───────────────────────────
+
+async def restore_active_events():
+    """Au boot du bot : restore les BossAttackView des events actifs."""
+    try:
+        async with get_db() as db:
+            async with db.execute('SELECT id FROM events WHERE ended=0') as cur:
+                rows = await cur.fetchall()
+        for (event_id,) in rows:
+            try:
+                v = BossAttackView(int(event_id))
+                bot.add_view(v)
+            except Exception as ex:
+                print(f"[restore_active_events event_id={event_id}] {ex}")
+        if rows:
+            print(f"[EVENTS] {len(rows)} événement(s) actif(s) restauré(s)")
+    except Exception as ex:
+        print(f"[restore_active_events] {ex}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -29136,6 +30139,16 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready restore_active_polls] {ex}")
 
+    # Phase 30 : events — timeout checker + auto scheduler + restore active
+    if not event_timeout_checker.is_running():
+        event_timeout_checker.start()
+    if not event_auto_scheduler.is_running():
+        event_auto_scheduler.start()
+    try:
+        await restore_active_events()
+    except Exception as ex:
+        print(f"[on_ready restore_active_events] {ex}")
+
     print(f"✅ {bot.user.name} v28 prêt!")
     print(f"🌐 Serveurs: {len(bot.guilds)}")
     print(f"📢 Vérification feeds sociaux toutes les 5 minutes")
@@ -31722,6 +32735,165 @@ async def poll_closer():
 @poll_closer.before_loop
 async def _poll_closer_wait():
     await bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  /event /inventory /event_start — Phase 30
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@bot.tree.command(name="event", description="🎪 Voir l'événement en cours et tes stats")
+async def event_cmd(i: discord.Interaction):
+    """Affiche l'événement actif (s'il y en a un) et l'inventaire du joueur."""
+    try:
+        c = await cfg(i.guild.id)
+        enabled = bool(c.get('event_enabled', False))
+
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT id, boss_json, arena_channel_id, ends_at FROM events WHERE guild_id=? AND ended=0 ORDER BY id DESC LIMIT 1',
+                (i.guild.id,),
+            ) as cur:
+                row = await cur.fetchone()
+
+        if not enabled:
+            return await i.response.send_message(
+                "_Le système d'événements n'est pas activé sur ce serveur._\n"
+                "L'owner peut l'activer via `/configure → 🎪 Événements`.",
+                ephemeral=True,
+            )
+        if not row:
+            # Pas d'event actif → afficher inventaire
+            inv = await _get_or_create_inventory(i.guild.id, i.user.id)
+            w = inv.get('weapon', {})
+            a = inv.get('armor', {})
+            interval = int(c.get('event_auto_interval_hours', 24) or 24)
+            last_run = c.get('event_last_run', '')
+            next_str = "_planification désactivée_"
+            if interval > 0 and last_run:
+                try:
+                    next_dt = datetime.fromisoformat(last_run) + timedelta(hours=interval)
+                    next_str = f"<t:{int(next_dt.timestamp())}:R>"
+                except Exception:
+                    pass
+
+            e = discord.Embed(
+                title="🎪 Événements",
+                description=(
+                    f"_Aucun événement en cours._\n\n"
+                    f"**Prochain boss** · {next_str}\n\n"
+                    f"**🎒 Ton équipement :**\n"
+                    f"⚔️ Arme : {w.get('emoji', '')} **{w.get('name', '_aucune_')}** · `+{w.get('atk', 0)}` ATK · _{w.get('rarity', '—')}_\n"
+                    f"🛡️ Armure : {a.get('emoji', '')} **{a.get('name', '_aucune_')}** · `+{a.get('def', 0)}` DEF · _{a.get('rarity', '—')}_\n"
+                    f"❤️ PV : `{inv.get('hp', 100)}/{inv.get('max_hp', 100)}`\n"
+                    f"💀 Boss vaincus : `{inv.get('kills', 0)}` · Total dégâts cumulés : `{inv.get('total_damage', 0):,}`"
+                ),
+                color=0x5865F2,
+            )
+            e.set_footer(text=f"{i.guild.name}", icon_url=(i.guild.icon.url if i.guild.icon else None))
+            return await i.response.send_message(embed=e, ephemeral=True)
+
+        # Event actif → afficher infos
+        boss = json.loads(row[1]) if row[1] else {}
+        ch_id = int(row[2] or 0)
+        ch = i.guild.get_channel(ch_id)
+        await i.response.send_message(
+            f"⚔️ **{boss.get('name', '?')}** est dans l'arène ! Rejoins le combat → {ch.mention if ch else '_arène introuvable_'}",
+            ephemeral=True,
+        )
+    except Exception as ex:
+        print(f"[/event] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+@bot.tree.command(name="inventory", description="🎒 Affiche ton équipement et tes stats")
+async def inventory_cmd(i: discord.Interaction):
+    try:
+        inv = await _get_or_create_inventory(i.guild.id, i.user.id)
+        w = inv.get('weapon', {})
+        a = inv.get('armor', {})
+
+        atk = (w.get('atk', 0) or 0)
+        defe = (a.get('def', 0) or 0)
+        power_score = atk + defe * 2
+
+        # Récupérer coins via économie existante
+        coins = 0
+        try:
+            eco = await get_user_economy(i.guild.id, i.user.id)
+            coins = (eco.get('coins', 0) or 0) + (eco.get('bank', 0) or 0)
+        except Exception:
+            pass
+
+        e = discord.Embed(
+            title=f"🎒 Inventaire de {i.user.display_name}",
+            color=0x5865F2,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_thumbnail(url=i.user.display_avatar.url)
+        e.add_field(
+            name="⚔️ Arme équipée",
+            value=(
+                f"{w.get('emoji', '⚪')} **{w.get('name', '_aucune_')}**\n"
+                f"`+{atk}` ATK · _{w.get('rarity', '—')}_"
+            ),
+            inline=True,
+        )
+        e.add_field(
+            name="🛡️ Armure équipée",
+            value=(
+                f"{a.get('emoji', '⚪')} **{a.get('name', '_aucune_')}**\n"
+                f"`+{defe}` DEF · _{a.get('rarity', '—')}_"
+            ),
+            inline=True,
+        )
+        e.add_field(name="❤️ Points de vie", value=f"`{inv.get('hp', 100)}/{inv.get('max_hp', 100)}`", inline=True)
+        e.add_field(name="💰 Pièces", value=f"`{coins:,}` 🪙", inline=True)
+        e.add_field(name="💀 Boss vaincus", value=f"`{inv.get('kills', 0)}`", inline=True)
+        e.add_field(name="⚡ Puissance", value=f"`{power_score}`", inline=True)
+        e.add_field(
+            name="📊 Stats à vie",
+            value=f"Total dégâts infligés : `{inv.get('total_damage', 0):,}`",
+            inline=False,
+        )
+        e.set_footer(text="Utilise /event pour voir l'événement en cours")
+        await i.response.send_message(embed=e, ephemeral=True)
+    except Exception as ex:
+        print(f"[/inventory] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+@bot.tree.command(name="event_start", description="⚔️ [Owner] Lance un Boss Raid maintenant")
+async def event_start_cmd(i: discord.Interaction):
+    # Owner only
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("⛔ Réservé au propriétaire du serveur.", ephemeral=True)
+    try:
+        await i.response.defer(ephemeral=True)
+        result = await _start_boss_raid(i.guild, i.user.id, manual=True)
+        if result.get('ok'):
+            await i.followup.send(
+                f"⚔️ **Boss Raid lancé !** → <#{result['arena_channel_id']}>",
+                ephemeral=True,
+            )
+        else:
+            await i.followup.send(
+                f"❌ Impossible : `{result.get('error', '?')}`",
+                ephemeral=True,
+            )
+    except Exception as ex:
+        print(f"[/event_start] {ex}")
+        try:
+            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
 
 
 async def check_mod_perm(i, cmd_key):
