@@ -4587,8 +4587,13 @@ class AddBadwordsModal(Modal, title="➕ Ajouter des mots interdits"):
                 items.append(w)
                 added += 1
         await db_set(self.g.id, 'badwords_list', items)
-        v = BadwordsConfigPanel(self.u, self.g)
-        await i.response.edit_message(content=f"✅ {added} mot(s) ajouté(s)!", embed=await v.embed(), view=v)
+        # Phase 3.6 : retour V2
+        v = BadwordsConfigPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+        try:
+            await i.followup.send(f"✅ {added} mot(s) ajouté(s)!", ephemeral=True)
+        except Exception:
+            pass
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🔗 ANTI-LINK CONFIG
@@ -4783,19 +4788,23 @@ class AddDomainModal(Modal, title="➕ Ajouter des domaines"):
         items.extend(new_domains)
         await db_set(self.g.id, 'link_whitelist', items)
         
-        v = LinkConfigPanel(self.u, self.g)
-        if new_domains:
-            await i.response.edit_message(
-                content=f"✅ **{len(new_domains)} domaine(s) ajouté(s) !**\n`{', '.join(new_domains)}`",
-                embed=await v.embed(), 
-                view=v
-            )
-        else:
-            await i.response.edit_message(
-                content="⚠️ Aucun nouveau domaine ajouté (déjà présents ou invalides)",
-                embed=await v.embed(), 
-                view=v
-            )
+        # Phase 3.6 : retour V2
+        v = LinkConfigPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+        try:
+            if new_domains:
+                await i.followup.send(
+                    f"✅ **{len(new_domains)} domaine(s) ajouté(s) !**\n"
+                    f"`{', '.join(new_domains)}`",
+                    ephemeral=True,
+                )
+            else:
+                await i.followup.send(
+                    "⚠️ Aucun nouveau domaine ajouté (déjà présents ou invalides)",
+                    ephemeral=True,
+                )
+        except Exception:
+            pass
 
 class PaginatedLinkChanSelectView(View):
     """Sélecteur de salon paginé pour les liens autorisés"""
@@ -4938,8 +4947,9 @@ class NumberConfigModal(Modal, title="⚙️ Configuration"):
         elif self.key == "anti_mass_mention":
             await db_set(self.g.id, 'mention_limit', max(2, min(20, v)))
         prot = next(p for p in PROTS if p[0] == self.key)
-        vw = ProtDetail(self.u, self.g, prot)
-        await i.response.edit_message(embed=await vw.embed(), view=vw)
+        # Phase 3.6 : retour V2 (panel parent appelant est V2)
+        vw = ProtDetailV2(self.u, self.g, prot)
+        await vw.render_to(i, edit=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           ⚡ ACTION CONFIG
@@ -5789,10 +5799,18 @@ class AltConfidenceModal(Modal, title="📊 Confiance minimum"):
             alt_cfg['min_confidence'] = val
             await db_set(self.g.id, 'alt_config', alt_cfg)
             
-            v = AltConfigPanel(self.u, self.g)
-            await i.response.edit_message(content=f"✅ Confiance minimum définie à **{val}%**", embed=await v.embed(), view=v)
-        except:
-            await i.response.send_message("❌ Valeur invalide", ephemeral=True)
+            # Phase 3.6 : retour V2
+            v = AltConfigPanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+            try:
+                await i.followup.send(f"✅ Confiance minimum définie à **{val}%**", ephemeral=True)
+            except Exception:
+                pass
+        except Exception:
+            try:
+                await i.response.send_message("❌ Valeur invalide", ephemeral=True)
+            except discord.InteractionResponded:
+                pass
 
 class AltScanResultsPanelV2(LayoutView):
     """Resultats d'un scan d'alts en V2."""
@@ -6732,19 +6750,20 @@ class RaidThresholdModal(Modal, title="👥 Seuil de détection"):
             raid_cfg['join_threshold'] = threshold
             raid_cfg['join_interval'] = interval
             await db_set(self.g.id, 'raid_config', raid_cfg)
-        except:
+        except Exception:
             pass
-        v = AntiRaidConfigPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        # Phase 3.6 : retour V2
+        v = AntiRaidConfigPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class RaidAgeModal(Modal, title="📅 Âge minimum du compte"):
     age_input = TextInput(label="Jours minimum", placeholder="7", max_length=4)
-    
+
     def __init__(self, g, u):
         super().__init__()
         self.g = g
         self.u = u
-    
+
     async def on_submit(self, i):
         try:
             age = max(0, min(365, int(self.age_input.value)))
@@ -6752,10 +6771,11 @@ class RaidAgeModal(Modal, title="📅 Âge minimum du compte"):
             raid_cfg = c.get('raid_config', {})
             raid_cfg['min_account_age'] = age
             await db_set(self.g.id, 'raid_config', raid_cfg)
-        except:
+        except Exception:
             pass
-        v = AntiRaidConfigPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        # Phase 3.6 : retour V2
+        v = AntiRaidConfigPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 class RaidActionSelect(View):
     def __init__(self, u, g):
@@ -8937,9 +8957,11 @@ class SuggCooldownModal(Modal, title="⏱️ Cooldown Suggestions"):
                 unit = 'jours'
             await db_set(self.g.id, 'suggestion_cooldown', cd)
             await db_set(self.g.id, 'suggestion_cooldown_unit', unit)
-        except: pass
-        v = SuggestionPanel(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        except Exception:
+            pass
+        # Phase 3.6 : retour V2
+        v = SuggestionPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🔄 TRADE PANEL
@@ -9145,12 +9167,12 @@ class TradeCooldownModal(Modal, title="⏱️ Cooldown Trade"):
                 unit = 'heures'
             await db_set(self.g.id, 'trade_cooldown', cd)
             await db_set(self.g.id, 'trade_cooldown_unit', unit)
-        except:
+        except Exception:
             pass
-        
-        v = TradePanel(self.u, self.g)
-        e = await v.embed()
-        await i.response.edit_message(embed=e, view=v)
+
+        # Phase 3.6 : retour V2
+        v = TradePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           📢 PUBLICITÉ / NOTIFICATIONS SOCIALES
