@@ -3520,24 +3520,24 @@ class MainPanelV2(LayoutView):
             placeholder="📂 Sélectionne un module…",
             options=[
                 discord.SelectOption(
-                    label="Sécurité", value="security", emoji="🛡️",
-                    description="Modération · Anti-raid · Anti-spam · Immunités",
+                    label="Modération & Sécurité", value="security", emoji="🛡️",
+                    description="Sanctions · Protection · Immunités · AFK",
                 ),
                 discord.SelectOption(
                     label="Tickets", value="tickets", emoji="🎫",
-                    description="Système de support · Catégories · Staff",
+                    description="Système de support du serveur",
                 ),
                 discord.SelectOption(
-                    label="Publications", value="publications", emoji="📢",
+                    label="Réseaux Sociaux", value="publications", emoji="📢",
                     description="YouTube · Twitch · TikTok · Twitter · Roblox",
                 ),
                 discord.SelectOption(
-                    label="Logs unifiés", value="logs", emoji="📋",
-                    description="Un salon · Tous les événements · Filtres",
+                    label="Logs & Audit", value="logs", emoji="📋",
+                    description="Un salon · tous les événements",
                 ),
                 discord.SelectOption(
-                    label="Jeux & Économie", value="games", emoji="🎮",
-                    description="Giveaways · Deals · Récompenses",
+                    label="Jeux & Concours", value="games", emoji="🎮",
+                    description="Giveaways · Game deals",
                 ),
             ],
             custom_id="mpv2_module",
@@ -3675,13 +3675,13 @@ class SecurityPanelV2(LayoutView):
 
         if self.g.icon:
             items.append(v2_section(
-                v2_title("🛡️ Sécurité"),
-                v2_subtitle("Modération · Protection · Immunités · AFK"),
+                v2_title("🛡️ Modération & Sécurité"),
+                v2_subtitle("Sanctions · Protection · Immunités · AFK"),
                 accessory=v2_thumb(self.g.icon.url),
             ))
         else:
-            items.append(v2_title("🛡️ Sécurité"))
-            items.append(v2_subtitle("Modération · Protection · Immunités · AFK"))
+            items.append(v2_title("🛡️ Modération & Sécurité"))
+            items.append(v2_subtitle("Sanctions · Protection · Immunités · AFK"))
 
         items.append(v2_divider())
         items.append(v2_body(
@@ -3776,12 +3776,12 @@ class GamesPanelV2(LayoutView):
 
         if self.g.icon:
             items.append(v2_section(
-                v2_title("🎮 Jeux & Économie"),
+                v2_title("🎮 Jeux & Concours"),
                 v2_subtitle("Giveaways · Game deals"),
                 accessory=v2_thumb(self.g.icon.url),
             ))
         else:
-            items.append(v2_title("🎮 Jeux & Économie"))
+            items.append(v2_title("🎮 Jeux & Concours"))
             items.append(v2_subtitle("Giveaways · Game deals"))
 
         items.append(v2_divider())
@@ -4132,21 +4132,18 @@ class ProtPanelV2(LayoutView):
         enabled_count = 0
         lines_out = []
         for key, emoji, name in PROTS:
-            is_on = c.get(key)
+            is_on = bool(c.get(key))
             if is_on:
                 enabled_count += 1
-            status = "🟢" if is_on else "🔴"
-            log_ch = self.g.get_channel(c.get(f'log_{key}', 0))
-            log_txt = f" → {log_ch.mention}" if log_ch else ""
-            lines_out.append(f"{status} {emoji} **{name}**{log_txt}")
+            # Phase 5.3 : radio-style 🔘 / ⚪ au lieu de feu 🟢 / 🔴
+            dot = "🔘" if is_on else "⚪"
+            lines_out.append(f"{dot} {emoji} **{name}**")
 
         total = len(PROTS)
-        bar_filled = round(enabled_count / total * 10) if total > 0 else 0
-        bar = "█" * bar_filled + "░" * (10 - bar_filled)
         pct = round(enabled_count / total * 100) if total > 0 else 0
 
         sel = Select(
-            placeholder="🛡️ Sélectionner une protection à configurer…",
+            placeholder="🛡️ Choisir une protection à configurer…",
             options=[discord.SelectOption(label=nm, value=k, emoji=em) for k, em, nm in PROTS],
             custom_id="ppv2_sel",
         )
@@ -4158,20 +4155,17 @@ class ProtPanelV2(LayoutView):
         items: list = []
         if self.g.icon:
             items.append(v2_section(
-                v2_title("🛡️ Protection du Serveur"),
-                v2_subtitle(f"Score de protection · {pct}% ({enabled_count}/{total} actives)"),
+                v2_title("🛡️ Protection"),
+                v2_subtitle(f"`{enabled_count}/{total}` filtres actifs · `{pct}%`"),
                 accessory=v2_thumb(self.g.icon.url),
             ))
         else:
-            items.append(v2_title("🛡️ Protection du Serveur"))
-            items.append(v2_subtitle(f"Score de protection · {pct}% ({enabled_count}/{total} actives)"))
+            items.append(v2_title("🛡️ Protection"))
+            items.append(v2_subtitle(f"`{enabled_count}/{total}` filtres actifs · `{pct}%`"))
 
-        items.append(v2_divider())
-        items.append(v2_body(f"`[{bar}]` **{enabled_count}** / `{total}` protections actives"))
         items.append(v2_divider())
         items.append(v2_body("\n".join(lines_out)))
         items.append(v2_divider())
-        items.append(v2_subtitle("▼ Choisis une protection dans le menu pour la configurer"))
         items.append(discord.ui.ActionRow(sel))
         items.append(discord.ui.ActionRow(b_back))
 
@@ -10238,47 +10232,71 @@ class AdsPanelV2(LayoutView):
     async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
         c = await cfg(self.g.id)
 
+        # Phase 5.1 : affichage radio button + compact
         def _line(emoji, name, key, feeds_key, live_key=None):
             ch = self.g.get_channel(c.get(key, 0))
             feeds = c.get(feeds_key, [])
             live_ch = self.g.get_channel(c.get(live_key, 0)) if live_key else None
-            ch_txt = ch.mention if ch else "❌ _salon ?_"
-            live_txt = f" · 🔴 lives → {live_ch.mention}" if live_ch else ""
-            return f"{emoji} **{name}** · {ch_txt} · `{len(feeds)}` feed(s){live_txt}"
+            count = len(feeds)
+            if ch and count > 0:
+                dot = "🔘"
+                ch_txt = ch.mention
+                live_txt = f" · 🔴 lives → {live_ch.mention}" if live_ch else ""
+                return f"{dot} {emoji} **{name}** · {ch_txt} · `{count}` suivi(s){live_txt}"
+            elif ch:
+                return f"⚪ {emoji} **{name}** · {ch.mention} · _aucun suivi_"
+            else:
+                return f"⚪ {emoji} **{name}** · _non configuré_"
 
         deals_ch = self.g.get_channel(c.get('ads_deals_channel', 0))
         deals_on = c.get('ads_deals_enabled', False)
-        deals_line = (
-            f"🎯 **Réductions** · "
-            f"{deals_ch.mention if deals_ch else '❌ _salon ?_'} · "
-            f"{'✅ Activé' if deals_on else '❌ Désactivé'}"
-        )
+        if deals_on and deals_ch:
+            deals_line = f"🔘 🎯 **Game Deals** · {deals_ch.mention}"
+        else:
+            deals_line = "⚪ 🎯 **Game Deals** · _désactivé_"
 
         platforms_block = "\n".join([
             _line("🔴", "YouTube", 'ads_youtube_channel', 'ads_youtube_feeds', 'ads_youtube_live_channel'),
             _line("🟣", "Twitch", 'ads_twitch_channel', 'ads_twitch_feeds', 'ads_twitch_live_channel'),
             _line("🎵", "TikTok", 'ads_tiktok_channel', 'ads_tiktok_feeds', 'ads_tiktok_live_channel'),
-            _line("🐦", "Twitter / X", 'ads_twitter_channel', 'ads_twitter_feeds'),
+            _line("🐦", "X / Twitter", 'ads_twitter_channel', 'ads_twitter_feeds'),
             _line("🟠", "Reddit", 'ads_reddit_channel', 'ads_reddit_feeds'),
-            _line("📡", "Discord", 'ads_discord_channel', 'ads_discord_feeds'),
+            _line("📡", "Discord (relay)", 'ads_discord_channel', 'ads_discord_feeds'),
             _line("🎮", "RoSocial", 'ads_rosocial_channel', 'ads_rosocial_feeds'),
             _line("🟢", "Roblox UGC", 'ads_roblox_channel', 'ads_roblox_feeds'),
             deals_line,
         ])
 
-        # Select des plateformes
+        # Compteurs rapides
+        active_count = sum(
+            1 for k_chan, k_feeds in [
+                ('ads_youtube_channel', 'ads_youtube_feeds'),
+                ('ads_twitch_channel', 'ads_twitch_feeds'),
+                ('ads_tiktok_channel', 'ads_tiktok_feeds'),
+                ('ads_twitter_channel', 'ads_twitter_feeds'),
+                ('ads_reddit_channel', 'ads_reddit_feeds'),
+                ('ads_discord_channel', 'ads_discord_feeds'),
+                ('ads_rosocial_channel', 'ads_rosocial_feeds'),
+                ('ads_roblox_channel', 'ads_roblox_feeds'),
+            ]
+            if c.get(k_chan, 0) and len(c.get(k_feeds, []) or []) > 0
+        )
+        if deals_on and deals_ch:
+            active_count += 1
+
+        # Select des plateformes (Phase 5 : noms courts)
         sel = Select(
             placeholder="📢 Choisir une plateforme à configurer…",
             options=[
-                discord.SelectOption(label="YouTube", value="youtube", emoji="🔴", description="Vidéos + détection lives"),
-                discord.SelectOption(label="Twitch", value="twitch", emoji="🟣", description="Streams + détection lives"),
-                discord.SelectOption(label="TikTok", value="tiktok", emoji="🎵", description="Vidéos + détection lives"),
-                discord.SelectOption(label="Twitter / X", value="twitter", emoji="🐦", description="Tweets et posts"),
+                discord.SelectOption(label="YouTube", value="youtube", emoji="🔴", description="Vidéos + lives"),
+                discord.SelectOption(label="Twitch", value="twitch", emoji="🟣", description="Streams + lives"),
+                discord.SelectOption(label="TikTok", value="tiktok", emoji="🎵", description="Vidéos + lives"),
+                discord.SelectOption(label="X / Twitter", value="twitter", emoji="🐦", description="Tweets et posts"),
                 discord.SelectOption(label="Reddit", value="reddit", emoji="🟠", description="Posts de subreddits"),
-                discord.SelectOption(label="Discord", value="discord", emoji="📡", description="Relay de salons Discord"),
+                discord.SelectOption(label="Discord (relay)", value="discord", emoji="📡", description="Relayer un salon"),
                 discord.SelectOption(label="RoSocial", value="rosocial", emoji="🎮", description="Profils RoSocial"),
-                discord.SelectOption(label="Roblox UGC", value="roblox", emoji="🟢", description="Créateurs & groupes Roblox"),
-                discord.SelectOption(label="Réductions Jeux", value="deals", emoji="🎯", description="Promos Steam, Epic, GOG…"),
+                discord.SelectOption(label="Roblox UGC", value="roblox", emoji="🟢", description="Créateurs & groupes"),
+                discord.SelectOption(label="Game Deals", value="deals", emoji="🎯", description="Promos Steam, Epic, GOG"),
             ],
             custom_id="apv2_platform",
         )
@@ -10292,18 +10310,17 @@ class AdsPanelV2(LayoutView):
         items: list = []
         if self.g.icon:
             items.append(v2_section(
-                v2_title("📢 Publicité & Notifications"),
-                v2_subtitle("9 plateformes · vérification toutes les 5 minutes"),
+                v2_title("📢 Réseaux Sociaux"),
+                v2_subtitle(f"`{active_count}` plateforme(s) active(s) · check 5 min"),
                 accessory=v2_thumb(self.g.icon.url),
             ))
         else:
-            items.append(v2_title("📢 Publicité & Notifications"))
-            items.append(v2_subtitle("9 plateformes · vérification toutes les 5 minutes"))
+            items.append(v2_title("📢 Réseaux Sociaux"))
+            items.append(v2_subtitle(f"`{active_count}` plateforme(s) active(s) · check 5 min"))
 
         items.append(v2_divider())
         items.append(v2_body(platforms_block))
         items.append(v2_divider())
-        items.append(v2_subtitle("▼ Choisis une plateforme dans le menu ci-dessous"))
         items.append(discord.ui.ActionRow(sel))
         items.append(discord.ui.ActionRow(b_back))
 
@@ -22724,62 +22741,64 @@ class TicketMainPanelV2(LayoutView):
         blacklist_role = self.g.get_role(c.get('ticket_blacklist_role', 0))
         panels = c.get('ticket_panels', {})
 
-        # Liste des panels
+        def dot(item, fallback="_non défini_"):
+            return f"🔘 {item.mention}" if item else f"⚪ {fallback}"
+
+        # Liste compacte des panels (max 8)
         panel_lines = []
         if panels:
-            for pid, pd in list(panels.items())[:10]:
+            for pid, pd in list(panels.items())[:8]:
                 cat = self.g.get_channel(pd.get('category', 0))
+                q_count = len(pd.get('questions', []))
+                max_t = pd.get('max', 1)
                 bl_count = len(pd.get('blacklist', []))
                 bl_txt = f" · 🚫 `{bl_count}`" if bl_count > 0 else ""
                 panel_lines.append(
-                    f"• **{pd.get('name', pid)[:20]}** → `{cat.name if cat else '❌'}` "
-                    f"({len(pd.get('questions', []))} Q · max {pd.get('max', 1)}{bl_txt})"
+                    f"• **{pd.get('name', pid)[:24]}** → {cat.mention if cat else '⚪ _catégorie ?_'} "
+                    f"· `{q_count}` Q · max `{max_t}`{bl_txt}"
                 )
-            if len(panels) > 10:
-                panel_lines.append(f"_… + {len(panels) - 10} autres_")
-        panels_block = "\n".join(panel_lines) if panel_lines else "_Aucun panel créé · clique ➕ pour commencer_"
+            if len(panels) > 8:
+                panel_lines.append(f"_… + {len(panels) - 8} autres_")
+        panels_block = "\n".join(panel_lines) if panel_lines else "_Aucun panel — clique ➕ Nouveau panel_"
 
         # Boutons
         self.clear_items()
-        b_staff = Button(label="👮 Définir Staff", style=discord.ButtonStyle.primary, custom_id="tmpv2_staff")
+        b_staff = Button(label="👮 Staff", style=discord.ButtonStyle.primary, custom_id="tmpv2_staff")
         b_staff.callback = self._cb_staff
-        b_logs = Button(label="📜 Définir Logs", style=discord.ButtonStyle.primary, custom_id="tmpv2_logs")
+        b_logs = Button(label="📜 Logs", style=discord.ButtonStyle.primary, custom_id="tmpv2_logs")
         b_logs.callback = self._cb_logs
-        b_blacklist = Button(label="🚫 Rôle Blacklist", style=discord.ButtonStyle.danger, custom_id="tmpv2_blacklist")
+        b_blacklist = Button(label="🚫 Blacklist", style=discord.ButtonStyle.primary, custom_id="tmpv2_blacklist")
         b_blacklist.callback = self._cb_blacklist
-        b_new = Button(label="➕ Nouveau Panel", style=discord.ButtonStyle.success, custom_id="tmpv2_new")
+        b_new = Button(label="➕ Nouveau panel", style=discord.ButtonStyle.success, custom_id="tmpv2_new")
         b_new.callback = self._cb_new
-        b_edit = Button(label="📝 Modifier Panel", style=discord.ButtonStyle.secondary, disabled=(not panels), custom_id="tmpv2_edit")
+        b_edit = Button(label="📝 Modifier", style=discord.ButtonStyle.secondary, disabled=(not panels), custom_id="tmpv2_edit")
         b_edit.callback = self._cb_edit
-        b_refresh = Button(label="🔄 Rafraîchir", style=discord.ButtonStyle.secondary, custom_id="tmpv2_refresh")
-        b_refresh.callback = self._cb_refresh
         b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="tmpv2_back")
         b_back.callback = self._cb_back
 
         items: list = []
         if self.g.icon:
             items.append(v2_section(
-                v2_title("🎫 Configuration Tickets"),
-                v2_subtitle(f"{len(panels)} panel(s) configuré(s)"),
+                v2_title("🎫 Tickets"),
+                v2_subtitle(f"`{len(panels)}` panel(s) · système de support"),
                 accessory=v2_thumb(self.g.icon.url),
             ))
         else:
-            items.append(v2_title("🎫 Configuration Tickets"))
-            items.append(v2_subtitle(f"{len(panels)} panel(s) configuré(s)"))
+            items.append(v2_title("🎫 Tickets"))
+            items.append(v2_subtitle(f"`{len(panels)}` panel(s) · système de support"))
 
         items.append(v2_divider())
         items.append(v2_body(
-            f"👮 **Rôle Staff** · {staff.mention if staff else '🔴 _Non configuré_'}\n"
-            f"📜 **Salon Logs** · {lch.mention if lch else '🔴 _Non configuré_'}\n"
-            f"🚫 **Rôle Blacklist** · {blacklist_role.mention if blacklist_role else '_Staff par défaut_'}"
+            f"👮 **Staff** · {dot(staff)}\n"
+            f"📜 **Logs** · {dot(lch)}\n"
+            f"🚫 **Blacklist** · {dot(blacklist_role, '_Staff par défaut_')}"
         ))
         items.append(v2_divider())
-        items.append(v2_title(f"📋 Panels de tickets ({len(panels)})", level=3))
+        items.append(v2_title("Panels de tickets", level=3))
         items.append(v2_body(panels_block))
         items.append(v2_divider())
-        items.append(v2_subtitle("💡 Le rôle Blacklist peut utiliser /ticketblacklist"))
         items.append(discord.ui.ActionRow(b_staff, b_logs, b_blacklist))
-        items.append(discord.ui.ActionRow(b_new, b_edit, b_refresh, b_back))
+        items.append(discord.ui.ActionRow(b_new, b_edit, b_back))
 
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
@@ -22801,13 +22820,14 @@ class TicketMainPanelV2(LayoutView):
         await v.render_to(i, edit=True)
 
     async def _cb_logs(self, i):
-        # Phase 3.0k : V2 native picker
+        # Phase 5.2 fix : cohérence — la clé est 'ticket_log' (pas 'ticket_log_channel')
+        # car le reste du code lit `c.get('ticket_log', 0)`.
         v = V2GenericChannelPicker(
             self.u, self.g,
-            config_key='ticket_log_channel',
+            config_key='ticket_log',
             return_panel_factory=lambda: TicketMainPanelV2(self.u, self.g),
-            title="📜 Salon des Logs Tickets",
-            description="Salon où sont enregistrés les évenements tickets.",
+            title="📜 Salon des logs Tickets",
+            description="Salon où sont enregistrés les événements tickets.",
             color=0x9B59B6,
         )
         await v.render_to(i, edit=True)
