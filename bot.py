@@ -4521,8 +4521,9 @@ class DelegationMembersPanelV2(LayoutView):
                             ephemeral=True,
                         )
                     else:
+                        target_label = member.mention if member else "L'utilisateur"
                         await ix.response.send_message(
-                            f"⚠️ {member.mention if member else 'L\\'utilisateur'} est déjà blacklist.",
+                            f"⚠️ {target_label} est déjà blacklist.",
                             ephemeral=True,
                         )
                 except Exception as ex:
@@ -4564,8 +4565,9 @@ class DelegationMembersPanelV2(LayoutView):
                             ephemeral=True,
                         )
                     else:
+                        target_label = member.mention if member else "L'utilisateur"
                         await ix.response.send_message(
-                            f"⚠️ {member.mention if member else 'L\\'utilisateur'} est déjà whitelist.",
+                            f"⚠️ {target_label} est déjà whitelist.",
                             ephemeral=True,
                         )
                 except Exception as ex:
