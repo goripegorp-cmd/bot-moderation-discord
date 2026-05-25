@@ -9944,16 +9944,52 @@ _STM_ICON = 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/Steam_ico
 _BOT_AVATAR_URL = None  # Sera défini dans on_ready
 
 
-# Phase 3.8 : warnings APIs mortes (Twitter Nitter, TikTok Cloudflare) - une fois par session par guild
-_api_dead_warned: set[tuple[int, str]] = set()  # {(guild_id, "twitter"|"tiktok"|...)}
+# Phase 15 : warnings APIs mortes — PERSISTÉS sur disque (24h cooldown)
+# Avant : set RAM qui se vidait à chaque redémarrage → spam de warnings après chaque push
+# Maintenant : JSON sur disque, warning au max 1× par 24h par (guild, platform)
+_api_warning_state_path = module_dir("api_warnings") / "state.json"
+_api_warning_cooldown_seconds = 24 * 3600  # 24h
+_api_warning_state: dict[str, float] = {}  # key = "guild_id:platform" → timestamp
+_api_warning_state_loaded = False
+
+
+def _load_api_warning_state():
+    global _api_warning_state, _api_warning_state_loaded
+    if _api_warning_state_loaded:
+        return
+    try:
+        if _api_warning_state_path.exists():
+            with open(_api_warning_state_path, encoding='utf-8') as f:
+                _api_warning_state = json.load(f) or {}
+    except Exception as ex:
+        print(f"[_load_api_warning_state] {ex}")
+        _api_warning_state = {}
+    _api_warning_state_loaded = True
+
+
+def _save_api_warning_state():
+    try:
+        _api_warning_state_path.write_text(
+            json.dumps(_api_warning_state, indent=2),
+            encoding='utf-8',
+        )
+    except Exception as ex:
+        print(f"[_save_api_warning_state] {ex}")
 
 
 async def _warn_api_dead(guild, platform: str, reason: str):
-    """Envoie UN seul warning par session/guild/plateforme dans le salon de logs unifié."""
-    key = (guild.id, platform)
-    if key in _api_dead_warned:
-        return
-    _api_dead_warned.add(key)
+    """Envoie UN seul warning par 24h par guild/plateforme dans le salon de logs.
+
+    Phase 15 : persisté sur disque pour survivre aux redémarrages.
+    """
+    _load_api_warning_state()
+    key = f"{guild.id}:{platform}"
+    now_ts = time.time()
+    last_ts = _api_warning_state.get(key, 0)
+    if now_ts - last_ts < _api_warning_cooldown_seconds:
+        return  # Déjà warn dans les 24h
+    _api_warning_state[key] = now_ts
+    _save_api_warning_state()
     try:
         await ulogger2026.log_event(
             bot, guild, ulogger2026.EventType.BOT_INFO,
@@ -9961,10 +9997,10 @@ async def _warn_api_dead(guild, platform: str, reason: str):
             description=(
                 f"**Les publications {platform} ne peuvent pas être détectées automatiquement.**\n\n"
                 f"📡 Cause : {reason}\n\n"
-                "💡 Solution : publie manuellement dans le salon configuré. "
-                "Le bot continuera de vérifier au cas où l'API revient."
+                "💡 Solution : publie manuellement avec `/publish` dans le salon configuré. "
+                "Le bot continuera de vérifier en arrière-plan au cas où l'API revient."
             ),
-            extra={"🛠️ Action": "Aucune (la détection auto est en panne)"},
+            extra={"🛠️ Action": "Aucune (la détection auto est en panne) · Prochaine alerte dans 24h max"},
         )
     except Exception as ex:
         print(f"[_warn_api_dead] {platform}: {ex}")
@@ -30185,17 +30221,126 @@ async def check_twitter_feeds(session, guild, data):
             print(f"Erreur Twitter feed {username}: {ex}")
             continue
 
+# Phase 15 : tracker des guilds déjà backfillés
+_rosocial_backfilled: set[int] = set()
+
+
+async def _backfill_legacy_rosocial(session, guild) -> int:
+    """Phase 15 : re-fetch les anciennes entrées RoSocial sans thumbnail_url
+    propre (capturées avant Phase 14 ou avec extraction échouée).
+    """
+    if guild.id in _rosocial_backfilled:
+        return 0
+    _rosocial_backfilled.add(guild.id)
+
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    }
+
+    await tracking2026._load_guild(guild.id)
+    store = tracking2026._cache.get(guild.id, {})
+    legacy = []
+    for tp in store.values():
+        if tp.platform != "rosocial":
+            continue
+        if tp.deleted:
+            continue
+        needs_thumb = not (tp.thumbnail_url or "").strip()
+        needs_title = (tp.title or "").startswith("Nouveau post de") or not (tp.title or "").strip()
+        if needs_thumb or needs_title:
+            legacy.append(tp)
+
+    if not legacy:
+        return 0
+
+    print(f"[RoSocial backfill] {guild.id} : {len(legacy)} entrée(s) à migrer")
+    migrated = 0
+
+    for tp in legacy[:20]:
+        try:
+            post_url = tp.url or f"https://rosocial.net/posts/{tp.post_id}"
+            async with session.get(post_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as r:
+                if r.status != 200:
+                    continue
+                post_html = await r.text()
+
+            new_title = ""
+            new_image = ""
+
+            # Titre
+            og_title_m = re.search(
+                r'<meta\s+property=["\']og:title["\']\s+content=["\']([^"\']+)["\']',
+                post_html,
+            )
+            if og_title_m:
+                new_title = og_title_m.group(1).strip()
+            else:
+                title_m = re.search(r'<title>([^<]+)</title>', post_html)
+                if title_m:
+                    new_title = re.sub(r'\s*[-|·]\s*RoSocial.*$', '', title_m.group(1).strip()).strip()
+
+            # Image
+            og_image_m = re.search(
+                r'<meta\s+property=["\']og:image["\']\s+content=["\']([^"\']+)["\']',
+                post_html,
+            )
+            if og_image_m:
+                new_image = og_image_m.group(1).strip()
+            else:
+                cdn_imgs = re.findall(
+                    r'src=["\'](https?://[^"\']*(?:rosocial|rbxcdn|cloudfront|amazonaws|imgur)[^"\']*\.(?:png|jpg|jpeg|webp|gif))["\']',
+                    post_html, re.IGNORECASE,
+                )
+                content_imgs = [
+                    u for u in cdn_imgs
+                    if 'avatar' not in u.lower() and 'icon' not in u.lower()
+                ]
+                if content_imgs:
+                    new_image = content_imgs[0]
+                elif cdn_imgs:
+                    new_image = cdn_imgs[0]
+
+            if new_image and new_image.startswith('/'):
+                new_image = f"https://rosocial.net{new_image}"
+
+            if new_title or new_image:
+                await tracking2026.update_post(
+                    guild.id, "rosocial", tp.username, tp.post_id,
+                    title=new_title if new_title else None,
+                    thumbnail_url=new_image if new_image else None,
+                    display_author=tp.username if not tp.display_author else None,
+                )
+                migrated += 1
+                print(f"[RoSocial backfill] ✓ {tp.post_id} → {new_title} / image={'✓' if new_image else '✗'}")
+
+            await asyncio.sleep(0.5)
+        except Exception as ex:
+            print(f"[RoSocial backfill] {tp.post_id} échouée : {ex}")
+
+    print(f"[RoSocial backfill] {guild.id} : {migrated} entrée(s) migrée(s)")
+    return migrated
+
+
 async def check_rosocial_feeds(session, guild, data):
     """Vérifie les nouveaux posts RoSocial.
 
     Phase 14 : qualité égale Roblox UGC — extraction du vrai titre + image
     du post, gallery render à la fin, données stockées dans tracking_layer
     avec thumbnail_url + display_author.
+
+    Phase 15 : backfill auto + détection sneak peek + extraction améliorée.
     """
     default_channel = guild.get_channel(data.get('ads_rosocial_channel', 0))
     feeds = data.get('ads_rosocial_feeds', [])
     if not feeds:
         return
+
+    # Phase 15 : backfill legacy
+    try:
+        await _backfill_legacy_rosocial(session, guild)
+    except Exception as ex:
+        print(f"[RoSocial] backfill échoué : {ex}")
 
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -30247,17 +30392,19 @@ async def check_rosocial_feeds(session, guild, data):
 
             post_url = f"https://rosocial.net/posts/{latest_post_id}"
 
-            # ═══════════════ PHASE 14 — Extraction du contenu réel du post ═══════════════
+            # ═══════════════ PHASE 15 — Extraction améliorée du contenu post ═══════════════
             post_title = ""
             post_image = ""
+            post_video = ""  # Vidéo si présente
             post_excerpt = ""
+            post_is_sneak_peek = False  # Détection sneak peek UGC
 
             try:
                 async with session.get(post_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp2:
                     if resp2.status == 200:
                         post_html = await resp2.text()
 
-                        # Titre — Open Graph d'abord, puis <title>, puis premier h1
+                        # ─── TITRE (multi-source) ───
                         og_title_m = re.search(
                             r'<meta\s+property=["\']og:title["\']\s+content=["\']([^"\']+)["\']',
                             post_html,
@@ -30265,41 +30412,109 @@ async def check_rosocial_feeds(session, guild, data):
                         if og_title_m:
                             post_title = og_title_m.group(1).strip()
                         else:
-                            title_m = re.search(r'<title>([^<]+)</title>', post_html)
-                            if title_m:
-                                post_title = title_m.group(1).strip()
-                                # Retirer le suffix " - RoSocial" si présent
-                                post_title = re.sub(r'\s*[-|·]\s*RoSocial.*$', '', post_title).strip()
+                            tw_title_m = re.search(
+                                r'<meta\s+name=["\']twitter:title["\']\s+content=["\']([^"\']+)["\']',
+                                post_html,
+                            )
+                            if tw_title_m:
+                                post_title = tw_title_m.group(1).strip()
+                            else:
+                                title_m = re.search(r'<title>([^<]+)</title>', post_html)
+                                if title_m:
+                                    post_title = title_m.group(1).strip()
+                                    post_title = re.sub(r'\s*[-|·]\s*RoSocial.*$', '', post_title).strip()
 
-                        # Image — Open Graph image en priorité
+                        # ─── IMAGE (Open Graph / Twitter / scan HTML) ───
                         og_image_m = re.search(
                             r'<meta\s+property=["\']og:image["\']\s+content=["\']([^"\']+)["\']',
                             post_html,
                         )
                         if og_image_m:
                             post_image = og_image_m.group(1).strip()
-                        else:
-                            # Cherche la première image dans le contenu du post
+
+                        if not post_image:
+                            tw_image_m = re.search(
+                                r'<meta\s+name=["\']twitter:image["\']\s+content=["\']([^"\']+)["\']',
+                                post_html,
+                            )
+                            if tw_image_m:
+                                post_image = tw_image_m.group(1).strip()
+
+                        # Phase 15 : scan TOUTES les images du post, pas juste la première
+                        # Privilégier les images de POST (pas avatars/icones UI)
+                        if not post_image:
+                            # Patterns spécifiques RoSocial (CDN, posts content)
+                            cdn_imgs = re.findall(
+                                r'src=["\'](https?://[^"\']*(?:rosocial|rbxcdn|cloudfront|amazonaws|imgur)[^"\']*\.(?:png|jpg|jpeg|webp|gif))["\']',
+                                post_html, re.IGNORECASE,
+                            )
+                            # Filtrer les avatars/icones (typiquement small ou avatar dans le path)
+                            content_imgs = [
+                                u for u in cdn_imgs
+                                if 'avatar' not in u.lower() and 'icon' not in u.lower()
+                                and '/profile/' not in u.lower() and '/user/' not in u.lower()
+                            ]
+                            if content_imgs:
+                                post_image = content_imgs[0]
+                            elif cdn_imgs:
+                                post_image = cdn_imgs[0]
+
+                        if not post_image:
+                            # Generic fallback
                             img_m = re.search(
-                                r'<img[^>]+src=["\']([^"\']+\.(?:png|jpg|jpeg|webp|gif))["\']',
+                                r'<img[^>]+src=["\']([^"\']+\.(?:png|jpg|jpeg|webp|gif))["\'][^>]*(?:class="[^"]*post|data-post)',
                                 post_html, re.IGNORECASE,
                             )
                             if img_m:
                                 post_image = img_m.group(1).strip()
 
-                        # Excerpt — description OG ou premier paragraphe
+                        # ─── VIDÉO (Open Graph) ───
+                        og_video_m = re.search(
+                            r'<meta\s+property=["\']og:video(?::url)?["\']\s+content=["\']([^"\']+)["\']',
+                            post_html,
+                        )
+                        if og_video_m:
+                            post_video = og_video_m.group(1).strip()
+
+                        # ─── EXCERPT ───
                         og_desc_m = re.search(
                             r'<meta\s+property=["\']og:description["\']\s+content=["\']([^"\']+)["\']',
                             post_html,
                         )
                         if og_desc_m:
                             post_excerpt = og_desc_m.group(1).strip()[:200]
+                        else:
+                            tw_desc_m = re.search(
+                                r'<meta\s+name=["\']twitter:description["\']\s+content=["\']([^"\']+)["\']',
+                                post_html,
+                            )
+                            if tw_desc_m:
+                                post_excerpt = tw_desc_m.group(1).strip()[:200]
+
+                        # ─── SNEAK PEEK DETECTION ───
+                        # Détection des sneak peeks (mots clés communs)
+                        sneak_kw = ['sneak peek', 'sneak-peek', 'preview', 'wip', 'work in progress', 'upcoming', 'coming soon']
+                        title_lower = post_title.lower()
+                        excerpt_lower = post_excerpt.lower()
+                        if any(kw in title_lower or kw in excerpt_lower for kw in sneak_kw):
+                            post_is_sneak_peek = True
+
             except Exception as ex:
                 print(f"[RoSocial] extraction post {latest_post_id} échouée : {ex}")
+
+            # Resoudre les URLs relatives en absolues
+            if post_image and post_image.startswith('/'):
+                post_image = f"https://rosocial.net{post_image}"
+            if post_video and post_video.startswith('/'):
+                post_video = f"https://rosocial.net{post_video}"
 
             # Fallbacks
             if not post_title:
                 post_title = f"Nouveau post de {username}"
+            # Préfixe sneak peek pour visibilité
+            if post_is_sneak_peek and not post_title.lower().startswith(('sneak', 'preview', 'wip')):
+                post_title = f"🎨 Sneak Peek · {post_title}"
+
             if not post_image:
                 # Essaye l'avatar du user comme dernier recours
                 try:
@@ -30364,17 +30579,156 @@ async def check_rosocial_feeds(session, guild, data):
         except Exception as ex:
             print(f"[RoSocial] gallery render échoué : {ex}")
 
+# Phase 15 : tracker des guilds déjà backfillés cette session (pas besoin de re-faire)
+_roblox_ugc_backfilled: set[int] = set()
+
+
+async def _backfill_legacy_roblox_ugc(session, guild) -> int:
+    """Phase 15 : re-fetch les anciennes entrées Roblox UGC sans thumbnail_url
+    ou display_author (capturées avant Phase 14). Retourne nb d'entrées migrées.
+
+    Stratégie : pour chaque entry legacy, extraire item_id du post_id et
+    re-fetch nom + thumbnail via les APIs Roblox.
+    """
+    if guild.id in _roblox_ugc_backfilled:
+        return 0
+    _roblox_ugc_backfilled.add(guild.id)
+
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+
+    # Find all legacy Roblox UGC entries
+    await tracking2026._load_guild(guild.id)
+    store = tracking2026._cache.get(guild.id, {})
+    legacy = []
+    for tp in store.values():
+        if tp.platform != "roblox_ugc":
+            continue
+        if tp.deleted:
+            continue
+        # Legacy = pas de thumbnail_url ou pas de display_author propre
+        needs_thumb = not (tp.thumbnail_url or "").strip()
+        needs_author = not (tp.display_author or "").strip() or (tp.display_author or "").isdigit()
+        needs_name = (tp.title or "").startswith("Création #")
+        if needs_thumb or needs_author or needs_name:
+            legacy.append(tp)
+
+    if not legacy:
+        return 0
+
+    print(f"[ROBLOX UGC backfill] {guild.id} : {len(legacy)} entrée(s) à migrer")
+    migrated = 0
+
+    for tp in legacy[:25]:  # max 25 par session pour éviter rate-limit
+        try:
+            # post_id format: "User_<creator_id>_<item_id>_<type>" ou "Group_<creator_id>_<item_id>_<type>"
+            parts = tp.post_id.split("_")
+            if len(parts) < 3:
+                continue
+            creator_type = parts[0]  # User ou Group
+            creator_id = parts[1]
+            item_id = parts[2]
+            item_type = parts[3] if len(parts) >= 4 else 'Asset'
+
+            # 1. Récupérer le nom du créateur si manquant
+            new_display_author = tp.display_author
+            if not new_display_author or new_display_author.isdigit():
+                try:
+                    if creator_type == 'Group':
+                        url_creator = f"https://groups.roblox.com/v1/groups/{creator_id}"
+                        async with session.get(url_creator, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                            if r.status == 200:
+                                data_c = await r.json()
+                                new_display_author = data_c.get('name', '') or new_display_author
+                    else:  # User
+                        url_creator = f"https://users.roblox.com/v1/users/{creator_id}"
+                        async with session.get(url_creator, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                            if r.status == 200:
+                                data_c = await r.json()
+                                new_display_author = data_c.get('displayName') or data_c.get('name', '') or new_display_author
+                except Exception as ex:
+                    print(f"[backfill] fetch creator {creator_type}/{creator_id} échoué : {ex}")
+
+            # 2. Récupérer le nom de l'item si manquant
+            new_title = tp.title
+            if new_title.startswith("Création #"):
+                try:
+                    if item_type == 'Asset':
+                        url_item = f"https://economy.roblox.com/v2/assets/{item_id}/details"
+                    else:
+                        url_item = f"https://catalog.roblox.com/v1/catalog/items/{item_id}/details?itemType={item_type}"
+                    async with session.get(url_item, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                        if r.status == 200:
+                            d_item = await r.json()
+                            new_name = d_item.get('Name') or d_item.get('name')
+                            if new_name:
+                                new_title = new_name
+                except Exception as ex:
+                    print(f"[backfill] fetch item {item_id} échoué : {ex}")
+
+            # 3. Récupérer le thumbnail si manquant
+            new_thumb = tp.thumbnail_url
+            if not new_thumb:
+                try:
+                    url_thumb = (
+                        f"https://thumbnails.roblox.com/v1/assets?"
+                        f"assetIds={item_id}&returnPolicy=PlaceHolder"
+                        f"&size=420x420&format=Png&isCircular=false"
+                    )
+                    async with session.get(url_thumb, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                        if r.status == 200:
+                            data_t = await r.json()
+                            data_list = data_t.get('data', [])
+                            if data_list and data_list[0].get('state') != 'Blocked':
+                                new_thumb = data_list[0].get('imageUrl', '') or new_thumb
+                except Exception as ex:
+                    print(f"[backfill] fetch thumb {item_id} échoué : {ex}")
+
+            # 4. URL avec slug si possible
+            new_url = tp.url
+            if new_title and not new_title.startswith("Création #"):
+                _slug = re.sub(r'[^a-zA-Z0-9]+', '-', new_title)[:50].strip('-') or 'item'
+                new_url = f"https://www.roblox.com/catalog/{item_id}/{_slug}"
+
+            # 5. Update entry
+            changed = await tracking2026.update_post(
+                guild.id, "roblox_ugc", tp.username, tp.post_id,
+                title=new_title if new_title != tp.title else None,
+                url=new_url if new_url != tp.url else None,
+                thumbnail_url=new_thumb if new_thumb != tp.thumbnail_url else None,
+                display_author=new_display_author if new_display_author != tp.display_author else None,
+            )
+            if changed:
+                migrated += 1
+                print(f"[backfill] ✓ {tp.post_id} → {new_display_author} / {new_title} / thumb={'✓' if new_thumb else '✗'}")
+
+            await asyncio.sleep(0.4)  # rate limit Roblox
+        except Exception as ex:
+            print(f"[backfill] entry {tp.post_id} échouée : {ex}")
+            continue
+
+    print(f"[ROBLOX UGC backfill] {guild.id} : {migrated} entrée(s) migrée(s)")
+    return migrated
+
+
 async def check_roblox_ugc_feeds(session, guild, data):
     """Vérifie les nouvelles créations UGC Roblox (utilisateurs ET groupes).
 
     Phase 3.1 : utilise le systeme de galerie au lieu d'envoyer 1 message
     par item. Une seule galerie par salon est maintenue, contenant les N
     dernieres creations en grille d'images cliquables (plus recente en haut).
+
+    Phase 15 : backfill auto des anciennes entrées au premier cycle.
     """
     channel = guild.get_channel(data.get('ads_roblox_channel', 0))
     feeds = data.get('ads_roblox_feeds', [])
     if not channel or not feeds:
         return
+
+    # Phase 15 : backfill legacy entries (UNE FOIS par session par guild)
+    try:
+        await _backfill_legacy_roblox_ugc(session, guild)
+    except Exception as ex:
+        print(f"[ROBLOX UGC] backfill échoué : {ex}")
 
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
     items_added = False  # True si on a ajoute au moins 1 item -> render gallery a la fin

@@ -188,6 +188,46 @@ async def record_post(
     return tp
 
 
+async def update_post(
+    guild_id: int,
+    platform: str,
+    username: str,
+    post_id: str,
+    *,
+    title: Optional[str] = None,
+    url: Optional[str] = None,
+    thumbnail_url: Optional[str] = None,
+    display_author: Optional[str] = None,
+) -> bool:
+    """Phase 14 : met à jour les champs (title/url/thumbnail/author) d'un post
+    existant. Utilisé pour le backfill des anciennes entrées qui n'ont pas
+    `thumbnail_url` ou `display_author` (capturées avant Phase 14).
+
+    Retourne True si la mise à jour a été faite, False si la clé n'existe pas.
+    """
+    await _load_guild(guild_id)
+    key = f"{platform}:{username.lower()}:{post_id}"
+    tp = _cache.get(guild_id, {}).get(key)
+    if tp is None:
+        return False
+    changed = False
+    if title is not None and tp.title != title[:200]:
+        tp.title = title[:200]
+        changed = True
+    if url is not None and tp.url != url:
+        tp.url = url
+        changed = True
+    if thumbnail_url is not None and tp.thumbnail_url != thumbnail_url:
+        tp.thumbnail_url = thumbnail_url
+        changed = True
+    if display_author is not None and tp.display_author != display_author:
+        tp.display_author = display_author
+        changed = True
+    if changed:
+        await _save_guild(guild_id)
+    return changed
+
+
 async def list_announcements(
     guild_id: int,
     platform: Optional[str] = None,
