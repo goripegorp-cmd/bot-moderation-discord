@@ -23555,7 +23555,8 @@ class PanelQsView(View):
         if self.pid in panels:
             panels[self.pid]['questions'] = []
             await db_set(self.g.id, 'ticket_panels', panels)
-        v = PanelQsView(self.u, self.g, pid)
+        # Phase 3.9 fix : `pid` undefined (pyflakes catch) - utiliser self.pid
+        v = PanelQsView(self.u, self.g, self.pid)
         await i.response.edit_message(embed=await v.embed(), view=v)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
