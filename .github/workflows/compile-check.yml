@@ -1,0 +1,54 @@
+name: Python Compile Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Compile all .py files (syntax check)
+        run: |
+          set -e
+          echo "Compiling all Python files..."
+          ERRORS=0
+          for f in $(find . -name '*.py' -not -path './.git/*' -not -path './venv/*'); do
+            python -m py_compile "$f" 2>&1 || ERRORS=$((ERRORS+1))
+          done
+          if [ $ERRORS -ne 0 ]; then
+            echo "❌ $ERRORS file(s) failed to compile"
+            exit 1
+          fi
+          echo "✅ All Python files compile cleanly"
+
+      - name: Verify critical imports
+        run: |
+          python -c "
+          import ast, sys
+          for f in ['bot.py', 'unified_logger.py', 'social_gallery.py', 'tracking_layer.py']:
+              try:
+                  with open(f, encoding='utf-8') as fh:
+                      ast.parse(fh.read(), filename=f)
+                  print(f'✅ {f}: AST OK')
+              except SyntaxError as e:
+                  print(f'❌ {f}: {e}')
+                  sys.exit(1)
+          "
+
+      - name: Lint imports (best-effort)
+        run: |
+          pip install pyflakes
+          # Don't fail the build on lint - just report
+          pyflakes bot.py unified_logger.py social_gallery.py tracking_layer.py | head -50 || true

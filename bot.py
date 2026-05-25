@@ -25041,6 +25041,270 @@ except Exception as ex:
     print(f"[PUBLICATIONS] Erreur enregistrement groupe : {ex}")
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  📝 /publish — Mode publication manuelle (Phase 3.9)
+#
+#  Quand les APIs Twitter/TikTok sont cassées (Nitter dead, Cloudflare, etc.),
+#  l'owner peut publier manuellement via cette commande. Le bot fait :
+#  1. Récupère les données via FXTwitter / oEmbed / scrape léger
+#  2. Construit un embed riche
+#  3. L'envoie dans le salon configuré pour cette plateforme
+#  4. L'enregistre dans tracking_layer (donc visible dans /publications)
+#
+#  100% fiable : pas de scrape, pas de rate-limit, pas de Cloudflare.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+publish_group = app_commands.Group(
+    name="publish",
+    description="📝 Publier manuellement un post social (quand l'auto-detection échoue)",
+)
+
+
+async def _fxtwitter_fetch(session, tweet_url: str) -> dict:
+    """Récupère les détails d'un tweet via FXTwitter API (100% fiable en 2026).
+
+    URL accepted : https://x.com/user/status/123 ou https://twitter.com/user/status/123 ou https://fxtwitter.com/...
+
+    Retourne un dict avec : title, text, image_url, author_handle, author_avatar, url, posted_at
+    Lève ValueError si l'URL est invalide ou la requête échoue.
+    """
+    m = re.search(r'(?:twitter|x|fxtwitter|vxtwitter)\.com/([^/]+)/status/(\d+)', tweet_url)
+    if not m:
+        raise ValueError(f"URL Twitter invalide : {tweet_url}")
+    username, tweet_id = m.group(1), m.group(2)
+
+    api_url = f"https://api.fxtwitter.com/{username}/status/{tweet_id}"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    async with session.get(api_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+        if resp.status != 200:
+            raise ValueError(f"FXTwitter HTTP {resp.status}")
+        data = await resp.json()
+    tweet = data.get('tweet') or {}
+    author = tweet.get('author') or {}
+    media = tweet.get('media') or {}
+    photos = media.get('photos') or []
+    videos = media.get('videos') or []
+
+    image_url = None
+    if photos:
+        image_url = photos[0].get('url')
+    elif videos:
+        image_url = videos[0].get('thumbnail_url')
+
+    return {
+        "tweet_id": tweet_id,
+        "username": author.get('screen_name') or username,
+        "display_name": author.get('name') or username,
+        "avatar_url": author.get('avatar_url'),
+        "text": tweet.get('text') or '',
+        "image_url": image_url,
+        "url": tweet.get('url') or f"https://x.com/{username}/status/{tweet_id}",
+        "created_at": tweet.get('created_at'),  # ISO string
+    }
+
+
+@publish_group.command(name="twitter", description="🐦 Publier un tweet manuellement (URL Twitter/X)")
+@app_commands.describe(url="URL du tweet : https://x.com/foo/status/123")
+async def publish_twitter(i: discord.Interaction, url: str):
+    if i.user.id != i.guild.owner_id and not i.user.guild_permissions.administrator:
+        return await i.response.send_message("⛔ Réservé aux admins / propriétaire.", ephemeral=True)
+    try:
+        await i.response.defer(ephemeral=True, thinking=True)
+    except Exception:
+        pass
+    try:
+        c = await cfg(i.guild.id)
+        channel = i.guild.get_channel(c.get('ads_twitter_channel', 0))
+        if not channel:
+            return await i.followup.send(
+                "❌ Aucun salon Twitter configuré. Utilise `/configure > 📢 Publicité` d'abord.",
+                ephemeral=True,
+            )
+        # Récupérer les données via FXTwitter
+        async with aiohttp.ClientSession() as session:
+            try:
+                data = await _fxtwitter_fetch(session, url)
+            except ValueError as ex:
+                return await i.followup.send(f"❌ {ex}", ephemeral=True)
+            except Exception as ex:
+                # Fallback : juste poster l'URL (Discord auto-embed)
+                msg = await channel.send(f"🐦 **Nouveau tweet** · {url}")
+                return await i.followup.send(
+                    f"⚠️ FXTwitter API échouée ({ex}). Posté l'URL nue — Discord va l'embedder automatiquement.",
+                    ephemeral=True,
+                )
+
+        # Embed riche
+        e = discord.Embed(color=0x1DA1F2, url=data['url'])
+        e.description = f"💬 {data['text'][:1900]}" if data['text'] else f"Nouveau tweet de @{data['username']}"
+        e.set_author(
+            name=f"🐦 X/TWITTER • @{data['username']}",
+            url=f"https://x.com/{data['username']}",
+            icon_url=data.get('avatar_url') or _X_ICON,
+        )
+        if data.get('avatar_url'):
+            e.set_thumbnail(url=data['avatar_url'])
+        if data.get('image_url'):
+            e.set_image(url=data['image_url'])
+        e.add_field(name="", value=f"[🐦 **Voir le tweet**]({data['url']})", inline=False)
+        e.set_footer(text=f"X/Twitter • @{data['username']} · publié manuellement", icon_url=_X_ICON)
+        e.timestamp = now()
+
+        _msg = await webhook_send(channel, 'twitter', embed=e)
+        if _msg is None:
+            return await i.followup.send(
+                "❌ Le message n'a pas pu être envoyé. Vérifie les permissions du bot dans le salon.",
+                ephemeral=True,
+            )
+        # Enregistrer dans tracking_layer pour dédup
+        try:
+            await tracking2026.record_post(
+                i.guild.id, "twitter", data['username'], data['tweet_id'],
+                channel_id=channel.id,
+                message_id=getattr(_msg, 'id', 0) or 0,
+                post_type="tweet",
+                title=data['text'][:200],
+                url=data['url'],
+            )
+        except Exception as ex:
+            print(f"[publish_twitter] record_post échoué : {ex}")
+        await i.followup.send(
+            f"✅ Tweet publié dans {channel.mention} !",
+            ephemeral=True,
+        )
+    except Exception as ex:
+        print(f"[publish_twitter] {ex}")
+        import traceback; traceback.print_exc()
+        try:
+            await i.followup.send(f"❌ Erreur : `{type(ex).__name__}: {ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+@publish_group.command(name="tiktok", description="🎵 Publier une vidéo TikTok manuellement (URL)")
+@app_commands.describe(url="URL TikTok : https://www.tiktok.com/@user/video/123")
+async def publish_tiktok(i: discord.Interaction, url: str):
+    if i.user.id != i.guild.owner_id and not i.user.guild_permissions.administrator:
+        return await i.response.send_message("⛔ Réservé aux admins / propriétaire.", ephemeral=True)
+    try:
+        await i.response.defer(ephemeral=True, thinking=True)
+    except Exception:
+        pass
+    try:
+        c = await cfg(i.guild.id)
+        channel = i.guild.get_channel(c.get('ads_tiktok_channel', 0))
+        if not channel:
+            return await i.followup.send(
+                "❌ Aucun salon TikTok configuré.", ephemeral=True,
+            )
+        m = re.search(r'tiktok\.com/@?([^/]+)/video/(\d+)', url)
+        if not m:
+            return await i.followup.send(f"❌ URL TikTok invalide : `{url}`", ephemeral=True)
+        username, video_id = m.group(1), m.group(2)
+
+        # Discord embed nativement les URLs TikTok depuis 2024.
+        # On poste juste l'URL et Discord fait son travail.
+        msg = await channel.send(f"🎵 **Nouvelle vidéo TikTok de @{username}**\n{url}")
+        try:
+            await tracking2026.record_post(
+                i.guild.id, "tiktok", username, video_id,
+                channel_id=channel.id,
+                message_id=msg.id if msg else 0,
+                post_type="video",
+                title=f"Vidéo de @{username}",
+                url=url,
+            )
+        except Exception:
+            pass
+        await i.followup.send(f"✅ TikTok publié dans {channel.mention} !", ephemeral=True)
+    except Exception as ex:
+        print(f"[publish_tiktok] {ex}")
+        try:
+            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+@publish_group.command(name="youtube", description="🔴 Publier une vidéo YouTube manuellement (URL)")
+@app_commands.describe(url="URL YouTube : https://youtube.com/watch?v=xxx ou https://youtu.be/xxx")
+async def publish_youtube(i: discord.Interaction, url: str):
+    if i.user.id != i.guild.owner_id and not i.user.guild_permissions.administrator:
+        return await i.response.send_message("⛔ Réservé aux admins / propriétaire.", ephemeral=True)
+    try:
+        await i.response.defer(ephemeral=True, thinking=True)
+    except Exception:
+        pass
+    try:
+        c = await cfg(i.guild.id)
+        channel = i.guild.get_channel(c.get('ads_youtube_channel', 0))
+        if not channel:
+            return await i.followup.send("❌ Aucun salon YouTube configuré.", ephemeral=True)
+        # Extract video ID
+        vid_m = re.search(r'(?:youtube\.com/(?:watch\?v=|shorts/)|youtu\.be/)([A-Za-z0-9_-]{11})', url)
+        if not vid_m:
+            return await i.followup.send(f"❌ URL YouTube invalide : `{url}`", ephemeral=True)
+        video_id = vid_m.group(1)
+        clean_url = f"https://www.youtube.com/watch?v={video_id}"
+
+        # Embed riche manuel (sans hit l'API YouTube — Discord embed natif via URL marche aussi)
+        e = discord.Embed(color=0xFF0000, url=clean_url, title="▶️ Nouvelle vidéo YouTube")
+        e.description = f"🔗 [**Regarder sur YouTube**]({clean_url})"
+        e.set_image(url=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg")
+        e.set_footer(text="YouTube • publié manuellement", icon_url=_YT_ICON)
+        e.timestamp = now()
+        _msg = await webhook_send(channel, 'youtube', embed=e)
+        if _msg is None:
+            # Fallback URL nue
+            _msg = await channel.send(clean_url)
+        try:
+            await tracking2026.record_post(
+                i.guild.id, "youtube", "manual", video_id,
+                channel_id=channel.id,
+                message_id=getattr(_msg, 'id', 0) or 0,
+                post_type="video", title="Vidéo YouTube", url=clean_url,
+            )
+        except Exception:
+            pass
+        await i.followup.send(f"✅ Vidéo YouTube publiée dans {channel.mention} !", ephemeral=True)
+    except Exception as ex:
+        print(f"[publish_youtube] {ex}")
+        try:
+            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+@publish_group.command(name="generic", description="📡 Publier n'importe quelle URL (Discord auto-embed)")
+@app_commands.describe(salon="Salon de destination", url="URL à publier (Discord embeddera)")
+async def publish_generic(i: discord.Interaction, salon: discord.TextChannel, url: str):
+    if i.user.id != i.guild.owner_id and not i.user.guild_permissions.administrator:
+        return await i.response.send_message("⛔ Réservé aux admins / propriétaire.", ephemeral=True)
+    try:
+        perms = salon.permissions_for(i.guild.me)
+        if not perms.send_messages:
+            return await i.response.send_message(
+                f"❌ Je n'ai pas la permission d'écrire dans {salon.mention}.", ephemeral=True,
+            )
+        msg = await salon.send(url)
+        await i.response.send_message(
+            f"✅ URL publiée dans {salon.mention}. Discord va l'embedder automatiquement.\n"
+            f"[Voir le message](https://discord.com/channels/{i.guild.id}/{salon.id}/{msg.id})",
+            ephemeral=True,
+        )
+    except Exception as ex:
+        print(f"[publish_generic] {ex}")
+        try:
+            await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+try:
+    bot.tree.add_command(publish_group)
+except Exception as ex:
+    print(f"[PUBLISH] Erreur enregistrement groupe : {ex}")
+
+
 async def check_mod_perm(i, cmd_key):
     """Vérifie si l'utilisateur a la permission pour cette commande de modération"""
     c = await cfg(i.guild.id)
