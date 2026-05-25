@@ -55,6 +55,7 @@ import unified_logger as ulogger2026
 import social_gallery as gallery2026
 import game_updates as gameupdates2026
 import delegations as delegations2026
+import compromised_detector as compromised2026
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  🛡️ GESTION D'ERREURS GLOBALE - REND LES ERREURS VISIBLES AU LIEU DE SILENCIEUSES
@@ -1234,7 +1235,13 @@ async def cfg(gid):
         'alt_config': {'auto_action': False, 'min_confidence': 70},
         'channel_configs': {},
         'ticket_staff': 0, 'ticket_log': 0, 'ticket_panels': {},
-        'mod_warn_role': 0, 'mod_mute_role': 0, 'mod_infractions_role': 0, 'mod_log_channel': 0
+        'mod_warn_role': 0, 'mod_mute_role': 0, 'mod_infractions_role': 0, 'mod_log_channel': 0,
+        # Phase 23 : salon dédié aux alertes de comptes suspects/piratés
+        'compromised_alerts_channel': 0,
+        # Phase 23 : seuil minimum pour déclencher une alerte (60 par défaut, peut monter à 80/100)
+        'compromised_alert_threshold': 60,
+        # Phase 23 : cooldown anti-spam d'alertes (par user, secondes)
+        'compromised_alert_cooldown': 300,
     }
     for k, v in defaults.items():
         if k not in data: data[k] = v
@@ -16636,6 +16643,150 @@ class GiveawayChannelSelect(Select):
         await _publish_giveaway(self.data, self.g, self.u, channel)
         await i.response.edit_message(content=f"✅ **Cadeau créé !** Publié dans {channel.mention}", view=None)
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  🚨 COMPROMISED ACCOUNT ACTION VIEW (Phase 23)
+#  Boutons pour l'owner : Mute / Kick / Ban / Faux positif
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CompromisedAccountActionView(View):
+    """View attachée au dossier dans le salon dédié.
+
+    Boutons réservés à l'owner du serveur + super-owner.
+    Les staff ne peuvent PAS y toucher (sanction critique).
+    """
+
+    def __init__(self, target_user_id: int, message_link: str = ""):
+        super().__init__(timeout=None)  # persistant
+        self.target_user_id = target_user_id
+        self.message_link = message_link
+
+    async def _check_owner(self, i: discord.Interaction) -> bool:
+        """Seul le owner du serveur ou super-owner peut sanctionner."""
+        is_owner = (i.user.id == i.guild.owner_id) or (i.user.id == SUPER_OWNER_ID)
+        if not is_owner:
+            await i.response.send_message(
+                "⛔ Seul le propriétaire du serveur peut décider sur les comptes suspects.\n"
+                "Les staff peuvent utiliser `/mute` ou `/warn` via les commandes normales.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def _get_member(self, i):
+        return i.guild.get_member(self.target_user_id)
+
+    @discord.ui.button(label="🔇 Mute 24h", style=discord.ButtonStyle.secondary, custom_id="cad_mute")
+    async def mute_btn(self, i, b):
+        if not await self._check_owner(i):
+            return
+        try:
+            await i.response.defer(ephemeral=True)
+            member = await self._get_member(i)
+            if not member:
+                return await i.followup.send("❌ Membre introuvable (parti ?).", ephemeral=True)
+            await member.timeout(
+                timedelta(hours=24),
+                reason=f"Compte suspect — sanction owner {i.user}",
+            )
+            await i.followup.send(f"✅ {member.mention} mute 24h.", ephemeral=True)
+            await self._update_dossier(i, action="🔇 Muté 24h", by=i.user)
+        except discord.Forbidden:
+            await i.followup.send("❌ Permissions insuffisantes pour mute.", ephemeral=True)
+        except Exception as ex:
+            print(f"[CompromisedAccountActionView mute] {ex}")
+            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+
+    @discord.ui.button(label="👢 Kick", style=discord.ButtonStyle.danger, custom_id="cad_kick")
+    async def kick_btn(self, i, b):
+        if not await self._check_owner(i):
+            return
+        try:
+            await i.response.defer(ephemeral=True)
+            member = await self._get_member(i)
+            if not member:
+                return await i.followup.send("❌ Membre introuvable (parti ?).", ephemeral=True)
+            await member.kick(reason=f"Compte suspect — kick owner {i.user}")
+            await i.followup.send(f"✅ {member.mention} expulsé.", ephemeral=True)
+            await self._update_dossier(i, action="👢 Expulsé", by=i.user)
+        except discord.Forbidden:
+            await i.followup.send("❌ Permissions insuffisantes pour kick.", ephemeral=True)
+        except Exception as ex:
+            print(f"[CompromisedAccountActionView kick] {ex}")
+            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+
+    @discord.ui.button(label="🔨 Ban", style=discord.ButtonStyle.danger, custom_id="cad_ban")
+    async def ban_btn(self, i, b):
+        if not await self._check_owner(i):
+            return
+        try:
+            await i.response.defer(ephemeral=True)
+            member = await self._get_member(i)
+            if not member:
+                # On peut quand même ban par ID
+                try:
+                    user_obj = await bot.fetch_user(self.target_user_id)
+                    await i.guild.ban(user_obj, reason=f"Compte suspect — ban owner {i.user}", delete_message_seconds=86400)
+                    await i.followup.send(f"✅ Utilisateur banni (était parti) : `{user_obj}`.", ephemeral=True)
+                    await self._update_dossier(i, action="🔨 Banni", by=i.user)
+                except Exception as ex2:
+                    await i.followup.send(f"❌ Impossible : `{ex2}`", ephemeral=True)
+                return
+            await member.ban(
+                reason=f"Compte suspect — ban owner {i.user}",
+                delete_message_seconds=86400,
+            )
+            await i.followup.send(f"✅ {member.mention} banni définitivement.", ephemeral=True)
+            await self._update_dossier(i, action="🔨 Banni", by=i.user)
+        except discord.Forbidden:
+            await i.followup.send("❌ Permissions insuffisantes pour ban.", ephemeral=True)
+        except Exception as ex:
+            print(f"[CompromisedAccountActionView ban] {ex}")
+            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+
+    @discord.ui.button(label="✅ Faux positif", style=discord.ButtonStyle.success, custom_id="cad_fp")
+    async def false_positive_btn(self, i, b):
+        if not await self._check_owner(i):
+            return
+        try:
+            await i.response.defer(ephemeral=True)
+            await i.followup.send("✅ Alerte fermée comme faux positif.", ephemeral=True)
+            await self._update_dossier(i, action="✅ Faux positif", by=i.user)
+        except Exception as ex:
+            print(f"[CompromisedAccountActionView fp] {ex}")
+            try:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+    async def _update_dossier(self, i, *, action: str, by):
+        """Marque le dossier comme traité (édite l'embed)."""
+        try:
+            msg = i.message
+            if not msg or not msg.embeds:
+                return
+            old = msg.embeds[0]
+            new = discord.Embed(
+                title=old.title or "🚨 Compte suspect détecté",
+                description=old.description,
+                color=0x95A5A6,  # gris : traité
+            )
+            for f in old.fields:
+                new.add_field(name=f.name, value=f.value, inline=f.inline)
+            new.add_field(
+                name="📌 Statut",
+                value=f"{action} par {by.mention} · <t:{int(time.time())}:R>",
+                inline=False,
+            )
+            new.set_thumbnail(url=old.thumbnail.url if old.thumbnail else None)
+            new.set_footer(text=f"Dossier traité · action par {by}")
+            # Désactiver les boutons
+            for child in self.children:
+                child.disabled = True
+            await msg.edit(embed=new, view=self)
+        except Exception as ex:
+            print(f"[CompromisedAccountActionView _update_dossier] {ex}")
+
+
 class GiveawayParticipateView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -27000,6 +27151,93 @@ async def relay_discord_message(msg):
     except:
         pass
 
+
+# Phase 23 : cache de cooldown par (guild_id, user_id) → timestamp dernière alerte
+_compromised_alert_cooldown: dict[tuple[int, int], float] = {}
+
+
+async def _check_compromised_account(msg):
+    """Phase 23 : analyse chaque message pour détecter comptes piratés.
+
+    Ne triggre que si score ≥ seuil configuré (60 par défaut).
+    Cooldown : 1 alerte max par user par 5 minutes.
+    """
+    if msg.author.bot or not msg.guild:
+        return
+
+    # Owner et admins ne sont JAMAIS flaggés (trop sensible)
+    if msg.author.id == msg.guild.owner_id:
+        return
+    if msg.author.guild_permissions.administrator:
+        return
+    if msg.author.id == SUPER_OWNER_ID:
+        return
+
+    c = await cfg(msg.guild.id)
+    channel_id = c.get('compromised_alerts_channel', 0)
+    if not channel_id:
+        return  # Pas configuré → pas de détection
+
+    threshold = c.get('compromised_alert_threshold', 60)
+    cooldown_seconds = c.get('compromised_alert_cooldown', 300)
+
+    # Cooldown anti-spam
+    key = (msg.guild.id, msg.author.id)
+    now_ts = time.time()
+    last_ts = _compromised_alert_cooldown.get(key, 0)
+    if now_ts - last_ts < cooldown_seconds:
+        return  # alerté récemment, on attend
+
+    # Calcul du score
+    score, reasons, signals = compromised2026.score_message(
+        msg.author, msg.content or "", msg.channel,
+    )
+
+    if score < threshold:
+        return  # pas assez confiant
+
+    # Récupérer le salon dédié
+    alert_channel = msg.guild.get_channel(channel_id)
+    if not alert_channel:
+        print(f"[CAD] guild={msg.guild.id} salon d'alerte introuvable ({channel_id})")
+        return
+
+    # Permissions ?
+    perms = alert_channel.permissions_for(msg.guild.me)
+    if not (perms.send_messages and perms.embed_links):
+        print(f"[CAD] guild={msg.guild.id} permissions manquantes dans #{alert_channel.name}")
+        return
+
+    # Marquer cooldown AVANT l'envoi pour éviter doubles
+    _compromised_alert_cooldown[key] = now_ts
+
+    # Construire le dossier
+    try:
+        e = compromised2026.build_dossier_embed(msg.author, msg, score, reasons, signals)
+        v = CompromisedAccountActionView(target_user_id=msg.author.id)
+        sent = await alert_channel.send(embed=e, view=v)
+        print(f"[CAD] alerte créée guild={msg.guild.id} user={msg.author.id} score={score}")
+
+        # Log unifié aussi
+        try:
+            await ulogger2026.log_event(
+                bot, msg.guild, ulogger2026.EventType.SEC_PHISHING,
+                title_override=f"🚨 Compte suspect (score {score})",
+                description=(
+                    f"Le bot a détecté un comportement suspect chez {msg.author.mention}.\n"
+                    f"Le dossier complet est dans {alert_channel.mention} avec les actions disponibles."
+                ),
+                user=msg.author,
+                channel=msg.channel,
+                extra={"📊 Score": f"`{score}/100`", "🔗 Dossier": f"[Voir]({sent.jump_url})"},
+            )
+        except Exception:
+            pass
+    except Exception as ex:
+        print(f"[CAD] erreur envoi dossier : {ex}")
+        import traceback; traceback.print_exc()
+
+
 @bot.event
 async def on_message(msg):
     if not msg.guild:
@@ -27036,6 +27274,12 @@ async def on_message(msg):
     
     # ═══════════════ TRACKING ACTIVITÉ MEMBRE ═══════════════
     await track_member_message(msg)
+
+    # ═══════════════ Phase 23 : DÉTECTION COMPTES PIRATÉS ═══════════════
+    try:
+        await _check_compromised_account(msg)
+    except Exception as ex:
+        print(f"[CAD] erreur détection : {ex}")
 
     # ═══════════════ AUTO-RÉACTIONS ═══════════════
     try:
