@@ -1242,6 +1242,13 @@ async def cfg(gid):
         'compromised_alert_threshold': 60,
         # Phase 23 : cooldown anti-spam d'alertes (par user, secondes)
         'compromised_alert_cooldown': 300,
+        # Phase 24 : système progressif badwords
+        'badwords_whitelist': [],          # mots autorisés (court-circuite la détection)
+        'badwords_warn_threshold': 3,      # nb de strikes (mots interdits) avant warn auto
+        'badwords_sanction_threshold': 3,  # nb de warns avant sanction auto
+        'badwords_sanction_action': 'mute',  # 'mute' / 'kick' / 'ban'
+        'badwords_sanction_duration': 60,  # minutes (utilisé seulement pour mute)
+        'badwords_strikes': {},            # { str(user_id): {"count": int, "last_at": float} }
     }
     for k, v in defaults.items():
         if k not in data: data[k] = v
@@ -1931,6 +1938,132 @@ async def sanction(m, action, dur, reason, g):
         elif action == 'ban': await m.ban(reason=reason)
     except: pass
 
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  Phase 24 : système progressif de strikes badwords
+# ═════════════════════════════════════════════════════════════════════════════
+
+async def _badword_strike(msg, c):
+    """Phase 24 : strike progressif après détection mot interdit.
+
+    Flow :
+      1. +1 strike au membre (state persisté par guild).
+      2. Si strikes >= seuil → 1 warn auto (fiche d'infraction) + reset strikes.
+      3. Si total warns >= seuil → sanction auto configurée (mute/kick/ban).
+      4. Reset strikes après 7j sans incident.
+    """
+    try:
+        user_id_str = str(msg.author.id)
+        strikes_dict = dict(c.get('badwords_strikes', {}) or {})
+        user_data = dict(strikes_dict.get(user_id_str) or {'count': 0, 'last_at': 0})
+
+        now_ts = time.time()
+        # Reset si > 7 jours sans infraction
+        if (now_ts - float(user_data.get('last_at', 0) or 0)) > 7 * 86400:
+            user_data = {'count': 0, 'last_at': now_ts}
+
+        user_data['count'] = int(user_data.get('count', 0)) + 1
+        user_data['last_at'] = now_ts
+
+        warn_threshold = max(1, int(c.get('badwords_warn_threshold', 3) or 3))
+
+        warn_issued = False
+        warn_id_str = None
+        total_warns = 0
+
+        if user_data['count'] >= warn_threshold:
+            # ── Issue auto-warn ──
+            try:
+                async with get_db() as db:
+                    cur = await db.execute(
+                        'INSERT INTO infractions(guild_id, user_id, mod_id, type, reason, duration) VALUES(?,?,?,?,?,?)',
+                        (msg.guild.id, msg.author.id, bot.user.id, 'warn',
+                         f"Filtre auto : {user_data['count']} mot(s) interdit(s)", '')
+                    )
+                    infraction_id = cur.lastrowid
+                    await db.commit()
+                    async with db.execute(
+                        'SELECT COUNT(*) FROM infractions WHERE guild_id=? AND user_id=? AND type="warn"',
+                        (msg.guild.id, msg.author.id)
+                    ) as cur2:
+                        total_warns = (await cur2.fetchone())[0]
+                warn_issued = True
+                try:
+                    warn_id_str = _format_warn_id(infraction_id)
+                except Exception:
+                    warn_id_str = f"#{infraction_id}"
+            except Exception as ex:
+                print(f"[BadwordStrike] DB warn error: {ex}")
+
+            # Reset strikes après le warn issued
+            user_data['count'] = 0
+            user_data['last_at'] = now_ts
+
+        strikes_dict[user_id_str] = user_data
+
+        # Persister l'état (en mémoire + DB)
+        c['badwords_strikes'] = strikes_dict
+        try:
+            await db_set(msg.guild.id, 'badwords_strikes', strikes_dict)
+        except Exception as ex:
+            print(f"[BadwordStrike] persist error: {ex}")
+
+        # Notify warn issued (ephemeral channel msg, auto-delete)
+        if warn_issued:
+            try:
+                await msg.channel.send(
+                    f"⚠️ {msg.author.mention} reçoit un avertissement automatique "
+                    f"(fiche `{warn_id_str}` · total warns : `{total_warns}`).",
+                    delete_after=20,
+                    allowed_mentions=discord.AllowedMentions(users=[msg.author], roles=False, everyone=False),
+                )
+            except Exception:
+                pass
+
+            # ── Vérifier seuil de sanction ──
+            sanction_threshold = max(1, int(c.get('badwords_sanction_threshold', 3) or 3))
+            if total_warns >= sanction_threshold:
+                action = str(c.get('badwords_sanction_action', 'mute') or 'mute')
+                if action not in ('mute', 'kick', 'ban'):
+                    action = 'mute'
+                duration = int(c.get('badwords_sanction_duration', 60) or 60)
+                try:
+                    await sanction(
+                        msg.author, action, duration,
+                        f"Filtre auto : {total_warns} avertissements", msg.guild,
+                    )
+                    pretty = {'mute': f"Mute {duration}min", 'kick': "Kick", 'ban': "Ban"}[action]
+                    await msg.channel.send(
+                        f"🔨 {msg.author.mention} a atteint **{sanction_threshold}** avertissements "
+                        f"→ sanction appliquée : **{pretty}**.",
+                        delete_after=25,
+                        allowed_mentions=discord.AllowedMentions(users=[msg.author], roles=False, everyone=False),
+                    )
+                    # Log unifié
+                    try:
+                        await ulogger2026.log_event(
+                            bot, msg.guild, ulogger2026.EventType.SEC_BADWORD,
+                            title_override=f"🔨 Sanction auto badwords ({pretty})",
+                            description=(
+                                f"{msg.author.mention} a accumulé `{total_warns}` warns via le filtre "
+                                f"de mots interdits — sanction `{action}` appliquée."
+                            ),
+                            user=msg.author,
+                            channel=msg.channel,
+                            extra={
+                                "📊 Warns": f"`{total_warns}`",
+                                "🎯 Seuil": f"`{sanction_threshold}`",
+                                "🔨 Action": pretty,
+                            },
+                        )
+                    except Exception:
+                        pass
+                except Exception as ex:
+                    print(f"[BadwordStrike] sanction error: {ex}")
+    except Exception as ex:
+        print(f"[BadwordStrike] outer error: {ex}")
+        import traceback; traceback.print_exc()
+
 async def send_log(g, key, m, msg, reason, extra=None):
     """Envoie un log détaillé dans le salon configuré.
 
@@ -2089,23 +2222,34 @@ def normalize(t):
         for v in vs: t = t.replace(v, l)
     return t
 
-def check_badwords(ct, words):
-    """Vérifie si le message contient des mots interdits (mots entiers uniquement)"""
+def check_badwords(ct, words, whitelist=None):
+    """Vérifie si le message contient des mots interdits (mots entiers uniquement).
+
+    Phase 24 : la `whitelist` (mots autorisés) court-circuite la détection.
+    Un mot présent dans la whitelist ne sera JAMAIS bloqué, même s'il est dans
+    `words`. Cas d'usage : "retard" est autorisé en FR mais aurait pu être bloqué.
+    """
     if not words: return False, None
-    
+
+    # Phase 24 : whitelist court-circuit
+    whitelist_lower = {w.strip().lower() for w in (whitelist or []) if str(w).strip()}
+
     # Normaliser le texte
     text_lower = ct.lower()
-    
+
     # Remplacer les caractères d'évasion courants
     evasion_map = {
         '@': 'a', '4': 'a', '0': 'o', '1': 'i', '!': 'i', '3': 'e',
         '$': 's', '5': 's', '7': 't', '*': '', '.': '', '-': '', '_': '',
         ' ': '', '|': 'i', '€': 'e', '£': 'l'
     }
-    
+
     for word in words:
         word = word.strip().lower()
         if not word:
+            continue
+        # Phase 24 : si le mot interdit est aussi dans la whitelist, on l'ignore
+        if word in whitelist_lower:
             continue
         
         # 1. Vérification mot entier exact (avec limites de mots)
@@ -6158,7 +6302,7 @@ class ImageConfigPanel(View):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class BadwordsConfigPanelV2(LayoutView):
-    """Mots interdits en V2."""
+    """Phase 24 — Panel complet : mots interdits + exceptions + seuils + sanction."""
 
     def __init__(self, u, g):
         super().__init__(timeout=600)
@@ -6168,33 +6312,102 @@ class BadwordsConfigPanelV2(LayoutView):
     async def interaction_check(self, i):
         return i.user.id == self.u.id
 
+    @staticmethod
+    def _fmt_list(items: list, *, max_chars: int = 1400) -> str:
+        if not items:
+            return "_Aucun_"
+        txt = ", ".join(f"`{w}`" for w in items)
+        if len(txt) > max_chars:
+            txt = txt[:max_chars] + " …"
+        return txt
+
     async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
         c = await cfg(self.g.id)
-        words = c.get('badwords_list', [])
+        words = c.get('badwords_list', []) or []
+        whitelist = c.get('badwords_whitelist', []) or []
+        warn_th = int(c.get('badwords_warn_threshold', 3) or 3)
+        sanc_th = int(c.get('badwords_sanction_threshold', 3) or 3)
+        action = str(c.get('badwords_sanction_action', 'mute') or 'mute')
+        duration = int(c.get('badwords_sanction_duration', 60) or 60)
+        pretty_action = {
+            'mute': f"🔇 Mute {duration} min",
+            'kick': "👢 Kick",
+            'ban': "🔨 Ban",
+        }.get(action, f"🔇 Mute {duration} min")
 
-        if words:
-            words_txt = ", ".join(f"`{w}`" for w in words)
-            if len(words_txt) > 3500:
-                words_txt = words_txt[:3500] + "…"
-            words_block = f"**{len(words)} mot(s) configuré(s) :**\n\n{words_txt}"
-        else:
-            words_block = "_Aucun mot interdit configuré · clique ➕ pour ajouter._"
+        # ── Texte des sections ──
+        words_block = (
+            f"**🚫 Mots interdits — {len(words)}**\n"
+            f"{self._fmt_list(words)}"
+        )
+        wl_block = (
+            f"**✅ Exceptions autorisées — {len(whitelist)}**\n"
+            f"_Ces mots ne déclenchent JAMAIS le filtre, même s'ils sont aussi dans la liste interdite._\n"
+            f"{self._fmt_list(whitelist)}"
+        )
+        config_block = (
+            f"**⚙️ Système progressif**\n"
+            f"• 🚨 Warn auto après **`{warn_th}`** mot(s) interdit(s)\n"
+            f"• 🔨 Sanction auto après **`{sanc_th}`** warns cumulés\n"
+            f"• 🎯 Action : **{pretty_action}**\n"
+            f"• ♻️ Reset compteur après **7 jours** sans incident"
+        )
 
+        # ── Boutons ──
         self.clear_items()
-        b_add = Button(label="➕ Ajouter des mots", style=discord.ButtonStyle.success, custom_id="bcpv2_add")
+
+        # Rangée 1 — mots interdits
+        b_add = Button(label="➕ Ajouter mots", style=discord.ButtonStyle.success, custom_id="bcpv2_add")
         b_add.callback = self._cb_add
-        b_clear = Button(label="🗑️ Tout effacer", style=discord.ButtonStyle.danger, disabled=(not words), custom_id="bcpv2_clear")
+        b_remove = Button(
+            label="🗑️ Retirer mot", style=discord.ButtonStyle.secondary,
+            disabled=(not words), custom_id="bcpv2_remove",
+        )
+        b_remove.callback = self._cb_remove
+        b_clear = Button(
+            label="🧹 Tout effacer", style=discord.ButtonStyle.danger,
+            disabled=(not words), custom_id="bcpv2_clear",
+        )
         b_clear.callback = self._cb_clear
+
+        # Rangée 2 — whitelist
+        b_wl_add = Button(label="✅ Autoriser mot", style=discord.ButtonStyle.success, custom_id="bcpv2_wl_add")
+        b_wl_add.callback = self._cb_wl_add
+        b_wl_remove = Button(
+            label="❌ Retirer exception", style=discord.ButtonStyle.secondary,
+            disabled=(not whitelist), custom_id="bcpv2_wl_remove",
+        )
+        b_wl_remove.callback = self._cb_wl_remove
+        b_wl_clear = Button(
+            label="🧹 Effacer exceptions", style=discord.ButtonStyle.danger,
+            disabled=(not whitelist), custom_id="bcpv2_wl_clear",
+        )
+        b_wl_clear.callback = self._cb_wl_clear
+
+        # Rangée 3 — config
+        b_thresholds = Button(label="⚙️ Seuils", style=discord.ButtonStyle.primary, custom_id="bcpv2_th")
+        b_thresholds.callback = self._cb_thresholds
+        b_action = Button(label="🔨 Choisir sanction", style=discord.ButtonStyle.primary, custom_id="bcpv2_act")
+        b_action.callback = self._cb_sanction_action
+
+        # Rangée 4 — retour
         b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="bcpv2_back")
         b_back.callback = self._cb_back
 
         items: list = [
-            v2_title("🤬 Mots interdits"),
-            v2_subtitle(f"{len(words)} mot(s) bloqué(s)"),
+            v2_title("🤬 Filtre de mots interdits"),
+            v2_subtitle(f"{len(words)} bloqué(s) · {len(whitelist)} exception(s) · seuils {warn_th}/{sanc_th}"),
             v2_divider(),
             v2_body(words_block),
+            discord.ui.ActionRow(b_add, b_remove, b_clear),
             v2_divider(),
-            discord.ui.ActionRow(b_add, b_clear, b_back),
+            v2_body(wl_block),
+            discord.ui.ActionRow(b_wl_add, b_wl_remove, b_wl_clear),
+            v2_divider(),
+            v2_body(config_block),
+            discord.ui.ActionRow(b_thresholds, b_action),
+            v2_divider(),
+            discord.ui.ActionRow(b_back),
         ]
 
         self.add_item(v2_container(*items, color=Palette.INFO))
@@ -6204,32 +6417,245 @@ class BadwordsConfigPanelV2(LayoutView):
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
-    async def _cb_add(self, i):
-        modal = AddBadwordsModal(self.g, self.u)
-        # Patch on_submit pour revenir vers V2
-        async def v2_submit(interaction):
-            c = await cfg(self.g.id)
-            existing = c.get('badwords_list', [])
-            new = [x.strip().lower() for x in modal.words.value.split(',') if x.strip()]
-            added = 0
-            for w in new:
-                if w and w not in existing:
-                    existing.append(w)
-                    added += 1
-            await db_set(self.g.id, 'badwords_list', existing)
-            await BadwordsConfigPanelV2(self.u, self.g).render_to(interaction, edit=True)
+    # ─────────── Callbacks Mots interdits ───────────
 
-        modal.on_submit = v2_submit
+    async def _cb_add(self, i):
+        modal = _BadwordsAddListModal(self.g, self.u, key='badwords_list', title_text="➕ Ajouter mots interdits")
+        modal._panel = self
+        await i.response.send_modal(modal)
+
+    async def _cb_remove(self, i):
+        modal = _BadwordsRemoveListModal(self.g, self.u, key='badwords_list', title_text="🗑️ Retirer mots interdits")
+        modal._panel = self
         await i.response.send_modal(modal)
 
     async def _cb_clear(self, i):
         await db_set(self.g.id, 'badwords_list', [])
         await BadwordsConfigPanelV2(self.u, self.g).render_to(i, edit=True)
 
+    # ─────────── Callbacks Whitelist ───────────
+
+    async def _cb_wl_add(self, i):
+        modal = _BadwordsAddListModal(self.g, self.u, key='badwords_whitelist', title_text="✅ Autoriser un mot")
+        modal._panel = self
+        await i.response.send_modal(modal)
+
+    async def _cb_wl_remove(self, i):
+        modal = _BadwordsRemoveListModal(self.g, self.u, key='badwords_whitelist', title_text="❌ Retirer une exception")
+        modal._panel = self
+        await i.response.send_modal(modal)
+
+    async def _cb_wl_clear(self, i):
+        await db_set(self.g.id, 'badwords_whitelist', [])
+        await BadwordsConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+
+    # ─────────── Callbacks Configuration ───────────
+
+    async def _cb_thresholds(self, i):
+        c = await cfg(self.g.id)
+        modal = _BadwordsThresholdsModal(self.g, self.u)
+        modal._panel = self
+        # Pré-remplir avec les valeurs actuelles
+        try:
+            modal.warn_threshold.default = str(int(c.get('badwords_warn_threshold', 3) or 3))
+            modal.sanction_threshold.default = str(int(c.get('badwords_sanction_threshold', 3) or 3))
+            modal.mute_duration.default = str(int(c.get('badwords_sanction_duration', 60) or 60))
+        except Exception:
+            pass
+        await i.response.send_modal(modal)
+
+    async def _cb_sanction_action(self, i):
+        v = _BadwordsSanctionActionView(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+    # ─────────── Retour ───────────
+
     async def _cb_back(self, i):
         prot = next(p for p in PROTS if p[0] == "anti_badwords")
         v = ProtDetailV2(self.u, self.g, prot)
         await v.render_to(i, edit=True)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Modales et vues secondaires Phase 24
+# ══════════════════════════════════════════════════════════════════════════
+
+class _BadwordsAddListModal(Modal):
+    """Modal générique pour ajouter à badwords_list OU badwords_whitelist."""
+    words = TextInput(
+        label="Mots (séparés par des virgules)",
+        placeholder="mot1, mot2, expression interdite, ...",
+        style=discord.TextStyle.paragraph,
+        max_length=2000,
+        required=True,
+    )
+
+    def __init__(self, g, u, *, key: str, title_text: str):
+        super().__init__(title=title_text)
+        self.g = g
+        self.u = u
+        self.key = key
+        self._panel = None
+
+    async def on_submit(self, i):
+        c = await cfg(self.g.id)
+        existing = list(c.get(self.key, []) or [])
+        # Aussi : si on ajoute à la whitelist, retirer le doublon de l'autre liste ? Non, c'est volontaire :
+        # un mot peut être dans la liste interdite ET dans les exceptions — la whitelist gagne.
+        new = [x.strip().lower() for x in (self.words.value or '').split(',') if x.strip()]
+        added = 0
+        for w in new:
+            if w and w not in existing and len(w) <= 60:
+                existing.append(w)
+                added += 1
+        await db_set(self.g.id, self.key, existing)
+        await BadwordsConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+
+
+class _BadwordsRemoveListModal(Modal):
+    """Modal générique pour retirer un ou plusieurs mots d'une des listes."""
+    words = TextInput(
+        label="Mots à retirer (séparés par des virgules)",
+        placeholder="mot1, mot2, ...",
+        style=discord.TextStyle.paragraph,
+        max_length=2000,
+        required=True,
+    )
+
+    def __init__(self, g, u, *, key: str, title_text: str):
+        super().__init__(title=title_text)
+        self.g = g
+        self.u = u
+        self.key = key
+        self._panel = None
+
+    async def on_submit(self, i):
+        c = await cfg(self.g.id)
+        existing = list(c.get(self.key, []) or [])
+        to_remove = {x.strip().lower() for x in (self.words.value or '').split(',') if x.strip()}
+        kept = [w for w in existing if w.strip().lower() not in to_remove]
+        await db_set(self.g.id, self.key, kept)
+        await BadwordsConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+
+
+class _BadwordsThresholdsModal(Modal, title="⚙️ Configurer les seuils"):
+    warn_threshold = TextInput(
+        label="Seuil mots → warn (entier ≥ 1)",
+        placeholder="Ex: 3 — après 3 mots interdits, 1 warn auto",
+        max_length=4,
+        required=True,
+    )
+    sanction_threshold = TextInput(
+        label="Seuil warns → sanction (entier ≥ 1)",
+        placeholder="Ex: 3 — après 3 warns cumulés, sanction auto",
+        max_length=4,
+        required=True,
+    )
+    mute_duration = TextInput(
+        label="Durée mute en minutes (si action = mute)",
+        placeholder="Ex: 60 — entre 1 et 10080 (7j)",
+        max_length=5,
+        required=True,
+    )
+
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+        self._panel = None
+
+    async def on_submit(self, i):
+        try:
+            wt = max(1, min(50, int(self.warn_threshold.value.strip())))
+        except Exception:
+            return await i.response.send_message("❌ Seuil warn invalide (doit être un entier).", ephemeral=True)
+        try:
+            st = max(1, min(50, int(self.sanction_threshold.value.strip())))
+        except Exception:
+            return await i.response.send_message("❌ Seuil sanction invalide (doit être un entier).", ephemeral=True)
+        try:
+            dur = max(1, min(10080, int(self.mute_duration.value.strip())))
+        except Exception:
+            return await i.response.send_message("❌ Durée mute invalide (1 à 10080 minutes).", ephemeral=True)
+
+        await db_set(self.g.id, 'badwords_warn_threshold', wt)
+        await db_set(self.g.id, 'badwords_sanction_threshold', st)
+        await db_set(self.g.id, 'badwords_sanction_duration', dur)
+        await BadwordsConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+
+
+class _BadwordsSanctionActionView(LayoutView):
+    """Sous-panel : choisit l'action sanction (Mute / Kick / Ban)."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        current = str(c.get('badwords_sanction_action', 'mute') or 'mute')
+
+        def mark(value):
+            return "✅" if current == value else "⚪"
+
+        b_mute = Button(
+            label=f"{mark('mute')} Mute",
+            style=discord.ButtonStyle.primary if current == 'mute' else discord.ButtonStyle.secondary,
+            custom_id="bcpv2_sa_mute",
+        )
+        b_mute.callback = lambda i: self._set(i, 'mute')
+
+        b_kick = Button(
+            label=f"{mark('kick')} Kick",
+            style=discord.ButtonStyle.danger if current == 'kick' else discord.ButtonStyle.secondary,
+            custom_id="bcpv2_sa_kick",
+        )
+        b_kick.callback = lambda i: self._set(i, 'kick')
+
+        b_ban = Button(
+            label=f"{mark('ban')} Ban",
+            style=discord.ButtonStyle.danger if current == 'ban' else discord.ButtonStyle.secondary,
+            custom_id="bcpv2_sa_ban",
+        )
+        b_ban.callback = lambda i: self._set(i, 'ban')
+
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="bcpv2_sa_back")
+        b_back.callback = self._back
+
+        self.clear_items()
+        items = [
+            v2_title("🔨 Action quand le seuil de warns est atteint"),
+            v2_subtitle(f"Action actuelle : **{current}**"),
+            v2_divider(),
+            v2_body(
+                "Choisis la sanction automatique appliquée à un membre qui cumule trop d'avertissements :\n"
+                "• **Mute** — silence temporaire (durée configurée dans Seuils)\n"
+                "• **Kick** — expulsion (le membre peut revenir)\n"
+                "• **Ban** — bannissement définitif"
+            ),
+            discord.ui.ActionRow(b_mute, b_kick, b_ban),
+            v2_divider(),
+            discord.ui.ActionRow(b_back),
+        ]
+        self.add_item(v2_container(*items, color=Palette.DANGER))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _set(self, i, action: str):
+        if action not in ('mute', 'kick', 'ban'):
+            action = 'mute'
+        await db_set(self.g.id, 'badwords_sanction_action', action)
+        await self.render_to(i, edit=True)
+
+    async def _back(self, i):
+        await BadwordsConfigPanelV2(self.u, self.g).render_to(i, edit=True)
 
 
 class BadwordsConfigPanel(View):
@@ -27415,15 +27841,24 @@ async def on_message(msg):
                         print(f"[CHANNEL_CFG] Erreur suppression: {ex}")
                     return
         
-        # Anti-badwords
+        # Anti-badwords (Phase 24 : whitelist + strikes progressifs)
         if c.get('anti_badwords'):
-            f, w = check_badwords(ct, c.get('badwords_list', []))
+            f, w = check_badwords(
+                ct,
+                c.get('badwords_list', []),
+                whitelist=c.get('badwords_whitelist', []),
+            )
             if f:
-                await msg.delete()
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
                 await send_log(msg.guild, 'anti_badwords', msg.author, msg, "Mot interdit détecté", f"`{w}`")
-                action = c.get('badwords_action', 'delete')
-                dur = c.get('badwords_mute_duration', 5)
-                await sanction(msg.author, action, dur, "Mot interdit", msg.guild)
+                # Phase 24 : strike progressif (peut déclencher warn auto + sanction auto)
+                try:
+                    await _badword_strike(msg, c)
+                except Exception as ex:
+                    print(f"[anti_badwords strike] {ex}")
                 return
 
         # Anti-invite
