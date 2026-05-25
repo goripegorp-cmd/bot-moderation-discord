@@ -3471,10 +3471,14 @@ class MainPanel(View):
 
 
 class MainPanelV2(LayoutView):
-    """Panneau principal de configuration en Components V2.
+    """Panneau principal de configuration en Components V2 (Phase 4.0 — refonte épurée).
 
-    Dispatch vers les sous-panels existants en V1 (transition gérée
-    nativement par discord.py via edit_message).
+    5 modules essentiels seulement :
+    🛡️ Sécurité · 🎫 Tickets · 📢 Publications · 📋 Logs · 🎮 Jeux
+
+    Tous les autres modules (Stats, Niveaux, Vocaux, Centre, Aide, etc.)
+    restent accessibles via leurs slash commands respectives mais sont
+    retirés du menu central pour rester lisible et focus.
     """
 
     def __init__(self, u, g):
@@ -3487,63 +3491,60 @@ class MainPanelV2(LayoutView):
         return i.user.id == self.u.id
 
     def _build(self):
-        # Stats serveur
+        # Stats serveur (compact)
         online = sum(1 for m in self.g.members if m.status != discord.Status.offline and not m.bot)
-        bots = sum(1 for m in self.g.members if m.bot)
-        humans = self.g.member_count - bots
+        humans = self.g.member_count - sum(1 for m in self.g.members if m.bot)
         boosts = self.g.premium_subscription_count or 0
 
-        # En-tête
+        # En-tête avec icône
         if self.g.icon:
             head = v2_section(
-                v2_title(f"⚙️ Configuration — {self.g.name}"),
-                v2_subtitle(f"👑 {self.u.display_name} · Owner only · Timeout 10 min"),
+                v2_title(f"⚙️ Configuration"),
+                v2_subtitle(f"**{self.g.name}** · 👑 {self.u.display_name}"),
                 accessory=v2_thumb(self.g.icon.url),
             )
             head_items = [head]
         else:
             head_items = [
-                v2_title(f"⚙️ Configuration — {self.g.name}"),
-                v2_subtitle(f"👑 {self.u.display_name} · Owner only · Timeout 10 min"),
+                v2_title("⚙️ Configuration"),
+                v2_subtitle(f"**{self.g.name}** · 👑 {self.u.display_name}"),
             ]
 
-        # Stats grid
+        # Stats compactes (1 ligne)
         stats_block = v2_body(
-            f"👥 **Membres** · `{humans:,}`  ·  🤖 **Bots** · `{bots}`  ·  🟢 **En ligne** · `{online}`\n"
-            f"📺 **Salons** · `{len(self.g.text_channels)}`  ·  🔊 **Vocaux** · `{len(self.g.voice_channels)}`  ·  💎 **Boosts** · `{boosts}`"
+            f"👥 `{humans:,}` membres · 🟢 `{online}` en ligne · 💎 `{boosts}` boosts"
         )
 
-        # Catégories de modules (présentation)
-        modules_block = v2_body(
-            "🛡️ **Sécurité** — Protection, Modération, Immunités\n"
-            "🎫 **Communauté** — Tickets, Niveaux, Commandes\n"
-            "📢 **Contenu** — Feeds sociaux, Stats, Aide auto\n"
-            "🔧 **Outils** — Salons, Vocaux, Config avancée"
-        )
-
-        # Select des modules
+        # Select des 5 modules essentiels
         sel = Select(
-            placeholder="📂 Choisir un module à configurer…",
+            placeholder="📂 Sélectionne un module…",
             options=[
-                discord.SelectOption(label="Protection", value="prot", emoji="🛡️", description="Anti-spam, anti-raid, filtres"),
-                discord.SelectOption(label="Modération", value="mod", emoji="🔨", description="Warn, mute, rôles modérateurs"),
-                discord.SelectOption(label="Immunités", value="immune", emoji="👑", description="Rôles et utilisateurs immunisés"),
-                discord.SelectOption(label="Commandes", value="cmds", emoji="⚡", description="Suggestions, trade, commandes"),
-                discord.SelectOption(label="Config Salon", value="chan", emoji="📺", description="Configuration par salon"),
-                discord.SelectOption(label="Tickets", value="tickets", emoji="🎫", description="Système de tickets complet"),
-                discord.SelectOption(label="Publicité", value="ads", emoji="📢", description="YouTube, Twitch, TikTok, etc."),
-                discord.SelectOption(label="Statistiques", value="stats", emoji="📊", description="Stats membres et serveur"),
-                discord.SelectOption(label="Centre", value="centre", emoji="🎯", description="Annonces, giveaways, messages"),
-                discord.SelectOption(label="Niveaux & Économie", value="levels", emoji="📈", description="XP, boutique, leaderboard"),
-                discord.SelectOption(label="Vocaux Temporaires", value="voice", emoji="🔊", description="Hubs vocaux personnalisables"),
-                discord.SelectOption(label="Aide Automatique", value="help", emoji="💡", description="FAQ et aide contextuelle"),
-                discord.SelectOption(label="Logs Unifiés", value="logs", emoji="📋", description="Salon unique de tous les logs · catégories"),
+                discord.SelectOption(
+                    label="Sécurité", value="security", emoji="🛡️",
+                    description="Modération · Anti-raid · Anti-spam · Immunités",
+                ),
+                discord.SelectOption(
+                    label="Tickets", value="tickets", emoji="🎫",
+                    description="Système de support · Catégories · Staff",
+                ),
+                discord.SelectOption(
+                    label="Publications", value="publications", emoji="📢",
+                    description="YouTube · Twitch · TikTok · Twitter · Roblox",
+                ),
+                discord.SelectOption(
+                    label="Logs unifiés", value="logs", emoji="📋",
+                    description="Un salon · Tous les événements · Filtres",
+                ),
+                discord.SelectOption(
+                    label="Jeux & Économie", value="games", emoji="🎮",
+                    description="Giveaways · Deals · Récompenses",
+                ),
             ],
             custom_id="mpv2_module",
         )
         sel.callback = self._module_select
 
-        # Bouton fermer
+        # Bouton fermer (avec fix éphémère)
         close_btn = Button(
             label="Fermer",
             emoji="✖️",
@@ -3552,24 +3553,21 @@ class MainPanelV2(LayoutView):
         )
         close_btn.callback = self._close
 
-        # Container final
+        # Container final — minimal, élégant
         self.add_item(v2_container(
             *head_items,
             v2_divider(),
             stats_block,
             v2_divider(),
-            v2_title("Modules disponibles", level=2),
-            modules_block,
-            v2_divider(),
-            v2_subtitle("▼ Sélectionne un module dans le menu ci-dessous"),
             discord.ui.ActionRow(sel),
             discord.ui.ActionRow(close_btn),
             color=Palette.PRIMARY,
         ))
 
     async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
-        """Compatibilité avec le pattern V2 général (utilisé par sub-panels back-nav)."""
-        # _build est déjà appelé en __init__ donc on envoie directement
+        # Phase 4 : rebuild à chaque render pour stats fraîches
+        self.clear_items()
+        self._build()
         if edit:
             await interaction.response.edit_message(view=self, embed=None, attachments=[])
         else:
@@ -3577,34 +3575,23 @@ class MainPanelV2(LayoutView):
 
     async def _module_select(self, i):
         val = i.data['values'][0]
-        # Modules migrés en V2 (LayoutView avec render_to async)
+        # Phase 4 : 5 modules essentiels uniquement
         v2_panels = {
-            'mod': lambda: ModerationPanelV2(self.u, self.g),
-            'cmds': lambda: CommandsPanelV2(self.u, self.g),
-            'help': lambda: AutoHelpPanelV2(self.u, self.g),
-            'immune': lambda: ImmunePanelV2(self.u, self.g),
-            'centre': lambda: CentrePanelV2(self.u, self.g),
-            'chan': lambda: ChanPanelV2(self.u, self.g),
-            'ads': lambda: AdsPanelV2(self.u, self.g),
-            'voice': lambda: TempVoicePanelV2(self.u, self.g),
-            'stats': lambda: StatPanelV2(self.u, self.g),
-            'levels': lambda: LevelSystemPanelV2(self.u, self.g),
-            'prot': lambda: ProtPanelV2(self.u, self.g),
-            'tickets': lambda: TicketMainPanelV2(self.u, self.g),
-            # Phase 3.8 : Logs Unifiés (nouvelle entrée)
-            'logs': lambda: LogsPanelV2(self.u, self.g),
+            'security':     lambda: SecurityPanelV2(self.u, self.g),
+            'tickets':      lambda: TicketMainPanelV2(self.u, self.g),
+            'publications': lambda: AdsPanelV2(self.u, self.g),
+            'logs':         lambda: LogsPanelV2(self.u, self.g),
+            'games':        lambda: GamesPanelV2(self.u, self.g),
         }
-        # Tous les modules sont maintenant en V2 ! 🎉
-        v1_panels: dict = {}
-
         if val in v2_panels:
             v = v2_panels[val]()
             await v.render_to(i, edit=True)
         else:
-            # Fallback V1 (vide actuellement, gardé pour cohérence)
-            v = v1_panels[val]()
-            emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
-            await i.response.edit_message(embed=emb, view=v, attachments=[])
+            # Si pour une raison le select retourne un truc inattendu, ack au minimum
+            try:
+                await i.response.defer()
+            except Exception:
+                pass
 
     async def _close(self, i):
         # Phase 3.9 fix : i.message.delete() échoue silencieusement sur ephemeral
@@ -3626,6 +3613,227 @@ class MainPanelV2(LayoutView):
                     await i.response.defer()
             except Exception:
                 pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  🛡️ SÉCURITÉ — Panel V2 unifié (Phase 4.1)
+#
+#  Regroupe Modération + Protection + Immunités en un seul hub propre.
+#  Navigation par boutons vers les sous-sections existantes (réutilise
+#  ModerationPanelV2, ProtPanelV2, ImmunePanelV2 sans les dupliquer).
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class SecurityPanelV2(LayoutView):
+    """Hub Sécurité unifié — accès à Modération, Protection, Immunités."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+
+        # Stats rapides
+        try:
+            async with get_db() as db:
+                async with db.execute('SELECT COUNT(*) FROM infractions WHERE guild_id=?', (self.g.id,)) as cur:
+                    row = await cur.fetchone()
+                    inf_count = row[0] if row else 0
+        except Exception:
+            inf_count = 0
+
+        # Compteurs protection
+        prot_on = sum(1 for k, _, _ in PROTS if c.get(k))
+        prot_total = len(PROTS)
+
+        # Compteurs immunités
+        try:
+            async with get_db() as db:
+                async with db.execute('SELECT COUNT(*) FROM immune_roles WHERE guild_id=?', (self.g.id,)) as cur:
+                    row = await cur.fetchone()
+                    immune_roles_count = row[0] if row else 0
+                async with db.execute('SELECT COUNT(*) FROM immune_users WHERE guild_id=?', (self.g.id,)) as cur:
+                    row = await cur.fetchone()
+                    immune_users_count = row[0] if row else 0
+        except Exception:
+            immune_roles_count = immune_users_count = 0
+
+        # État rapide salon logs mod
+        log_ch = self.g.get_channel(c.get('mod_log_channel', 0))
+
+        self.clear_items()
+        items: list = []
+
+        if self.g.icon:
+            items.append(v2_section(
+                v2_title("🛡️ Sécurité"),
+                v2_subtitle("Modération · Protection · Immunités"),
+                accessory=v2_thumb(self.g.icon.url),
+            ))
+        else:
+            items.append(v2_title("🛡️ Sécurité"))
+            items.append(v2_subtitle("Modération · Protection · Immunités"))
+
+        items.append(v2_divider())
+        items.append(v2_body(
+            f"🔨 **Modération** · `{inf_count}` infractions · {'🟢' if log_ch else '🔴'} logs\n"
+            f"🚨 **Protection** · `{prot_on}/{prot_total}` filtres actifs\n"
+            f"👑 **Immunités** · `{immune_roles_count}` rôles · `{immune_users_count}` utilisateurs"
+        ))
+        items.append(v2_divider())
+
+        # Boutons de navigation
+        b_mod = Button(label="🔨 Modération", style=discord.ButtonStyle.primary, custom_id="secv2_mod")
+        b_mod.callback = self._cb_mod
+        b_prot = Button(label="🚨 Protection", style=discord.ButtonStyle.primary, custom_id="secv2_prot")
+        b_prot.callback = self._cb_prot
+        b_immune = Button(label="👑 Immunités", style=discord.ButtonStyle.primary, custom_id="secv2_immune")
+        b_immune.callback = self._cb_immune
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="secv2_back")
+        b_back.callback = self._cb_back
+
+        items.append(discord.ui.ActionRow(b_mod, b_prot, b_immune))
+        items.append(discord.ui.ActionRow(b_back))
+
+        self.add_item(v2_container(*items, color=Palette.DANGER))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_mod(self, i):
+        v = ModerationPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+    async def _cb_prot(self, i):
+        v = ProtPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+    async def _cb_immune(self, i):
+        v = ImmunePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+    async def _cb_back(self, i):
+        v = MainPanelV2(self.u, self.g)
+        await i.response.edit_message(view=v, embed=None, attachments=[])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  🎮 JEUX & ÉCONOMIE — Panel V2 (Phase 4.2)
+#
+#  Hub jeux : giveaways + game deals + (récompenses).
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class GamesPanelV2(LayoutView):
+    """Hub jeux unifié."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+
+        # Stats giveaways actifs
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT COUNT(*) FROM giveaways WHERE guild_id=? AND ended=0', (self.g.id,)
+                ) as cur:
+                    row = await cur.fetchone()
+                    active_giveaways = row[0] if row else 0
+        except Exception:
+            active_giveaways = 0
+
+        # État deals
+        deals_on = c.get('ads_deals_enabled', False)
+        deals_ch = self.g.get_channel(c.get('ads_deals_channel', 0))
+
+        self.clear_items()
+        items: list = []
+
+        if self.g.icon:
+            items.append(v2_section(
+                v2_title("🎮 Jeux & Économie"),
+                v2_subtitle("Giveaways · Game deals"),
+                accessory=v2_thumb(self.g.icon.url),
+            ))
+        else:
+            items.append(v2_title("🎮 Jeux & Économie"))
+            items.append(v2_subtitle("Giveaways · Game deals"))
+
+        items.append(v2_divider())
+        items.append(v2_body(
+            f"🎁 **Giveaways** · `{active_giveaways}` en cours\n"
+            f"🛒 **Deals** · {'🟢 actif' if deals_on else '🔴 désactivé'}"
+            + (f" dans {deals_ch.mention}" if deals_ch else "")
+        ))
+        items.append(v2_divider())
+
+        b_give = Button(label="🎁 Giveaways", style=discord.ButtonStyle.primary, custom_id="gamev2_give")
+        b_give.callback = self._cb_giveaways
+        b_deals = Button(label="🛒 Game Deals", style=discord.ButtonStyle.primary, custom_id="gamev2_deals")
+        b_deals.callback = self._cb_deals
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="gamev2_back")
+        b_back.callback = self._cb_back
+
+        items.append(discord.ui.ActionRow(b_give, b_deals))
+        items.append(discord.ui.ActionRow(b_back))
+
+        self.add_item(v2_container(*items, color=Palette.SUCCESS))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_giveaways(self, i):
+        # Réutilise le panel giveaway existant
+        try:
+            v = GiveawayPanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[GamesPanelV2 _cb_giveaways] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(
+                        f"❌ Erreur : `{ex}`. Utilise `/giveaway` directement.",
+                        ephemeral=True,
+                    )
+            except Exception:
+                pass
+
+    async def _cb_deals(self, i):
+        # Affiche un message info sur les deals (config via /configure si dispo)
+        try:
+            await i.response.edit_message(
+                content=(
+                    "🛒 **Game Deals**\n\n"
+                    "Pour configurer le système de deals (Epic Games, Steam, GOG…), utilise les commandes :\n"
+                    "• `/testdeals` — tester la détection\n"
+                    "• `/cleardeals` — nettoyer les deals postés\n\n"
+                    "Config du salon : dans la config publication legacy."
+                ),
+                view=None, embed=None, attachments=[],
+            )
+        except Exception:
+            try:
+                await i.response.defer()
+            except Exception:
+                pass
+
+    async def _cb_back(self, i):
+        v = MainPanelV2(self.u, self.g)
+        await i.response.edit_message(view=v, embed=None, attachments=[])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -3957,8 +4165,9 @@ class ProtPanelV2(LayoutView):
         await v.render_to(interaction, edit=True)
 
     async def _cb_back(self, i):
-        v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(view=v, embed=None, attachments=[])
+        # Phase 4 : retour vers SecurityPanelV2 (le hub Sécurité unifié)
+        v = SecurityPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class ProtDetail(View):
@@ -7490,8 +7699,9 @@ class ModerationPanelV2(LayoutView):
         await self._open_role_picker(i, 'mod_infractions_role', 'Rôle /infractions')
 
     async def _cb_back(self, i):
-        v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(view=v, embed=None, attachments=[])
+        # Phase 4 : retour vers SecurityPanelV2
+        v = SecurityPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 # Anciennes classes gardées pour compatibilité
@@ -7780,8 +7990,9 @@ class ImmunePanelV2(LayoutView):
         await new_panel.render_to(i, edit=True)
 
     async def _cb_back(self, i):
-        v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(view=v, embed=None, attachments=[])
+        # Phase 4 : retour vers SecurityPanelV2
+        v = SecurityPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class PaginatedImmuneRoleView(View):
@@ -14141,58 +14352,87 @@ class GiveawayPaginatedChannelView(View):
         await i.response.edit_message(content=f"📢 **Sélectionnez le salon** (Page {self.page+1}/{self.max_page+1}):", view=self)
 
 
-def _build_giveaway_embed(data, guild, user):
-    """Construit l'embed du giveaway avec support AND/OR"""
+def _count_giveaway_conditions(conditions: dict) -> int:
+    """Compte le nombre de conditions actives sur ce giveaway."""
+    n = 0
+    if conditions.get('min_messages', 0) > 0: n += 1
+    if conditions.get('min_vocal_minutes', 0) > 0: n += 1
+    if conditions.get('required_role', 0) > 0: n += 1
+    if conditions.get('min_account_days', 0) > 0: n += 1
+    if conditions.get('no_afk', False): n += 1
+    return n
+
+
+def _format_giveaway_conditions(conditions: dict, guild) -> str:
+    """Format les conditions giveaway en texte propre (utilisé pour l'embed ephemeral)."""
+    mode = conditions.get('condition_mode', 'OR')
+    parts = []
+
+    if conditions.get('min_messages', 0) > 0:
+        parts.append(f"📝 **{conditions['min_messages']}**+ messages envoyés")
+    if conditions.get('min_vocal_minutes', 0) > 0:
+        parts.append(f"🎤 **{conditions['min_vocal_minutes']}**+ minutes en vocal")
+    if conditions.get('required_role', 0) > 0:
+        role = guild.get_role(conditions['required_role'])
+        if role:
+            parts.append(f"🎭 Avoir le rôle {role.mention}")
+    if conditions.get('min_account_days', 0) > 0:
+        parts.append(f"📅 Compte créé il y a ≥ **{conditions['min_account_days']}** jours")
+    if conditions.get('no_afk', False):
+        afk_days = conditions.get('afk_days', 7)
+        parts.append(f"❌ Ne pas être AFK depuis **{afk_days}** jours")
+
+    if not parts:
+        return "✅ **Aucune condition** — tout le monde peut participer !"
+
+    sep = "\n**OU** ".join if mode == 'OR' else "\n**ET** ".join
+    header = (
+        "📋 Conditions (mode **OU** — une seule suffit) :"
+        if mode == 'OR'
+        else "📋 Conditions (mode **ET** — toutes requises) :"
+    )
+    body = "\n".join(parts) if mode == 'AND' else " **OU**\n".join(parts)
+    return f"{header}\n\n{body}"
+
+
+def _build_giveaway_embed(data, guild, user, participants_count: int = 0):
+    """Construit l'embed du giveaway (Phase 4.3 — refonte propre, conditions cachées).
+
+    Les conditions ne sont PLUS affichées dans l'embed principal — uniquement
+    un indicateur "N condition(s)". Le bouton 📋 Conditions sur la view envoie
+    un message ephemeral détaillé au clicker.
+    """
     end_time = now() + timedelta(seconds=data['duration_seconds'])
     conditions = data.get('conditions', {})
-    mode = conditions.get('condition_mode', 'OR')
 
     e = discord.Embed(color=0xF1C40F)
     e.set_author(name="🎁 GIVEAWAY", icon_url=guild.icon.url if guild.icon else None)
     e.title = data['title']
+
+    n_cond = _count_giveaway_conditions(conditions)
+    cond_line = (
+        f"📋 **Conditions** · `{n_cond}` à respecter — clique le bouton pour voir"
+        if n_cond > 0
+        else "✅ **Aucune condition** — ouvert à tous"
+    )
+
     e.description = (
         f"{data['description']}\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🏆 **Prix :** `{data['prize']}`\n"
-        f"⏰ **Fin :** <t:{int(end_time.timestamp())}:R> (<t:{int(end_time.timestamp())}:f>)\n"
-        f"👥 **Participants :** `0`\n"
+        f"🏆 **Prix** · `{data['prize']}`\n"
+        f"⏰ **Fin** · <t:{int(end_time.timestamp())}:R> · <t:{int(end_time.timestamp())}:f>\n"
+        f"👥 **Participants** · `{participants_count}`\n"
+        f"{cond_line}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     )
-
-    # Construire le texte des conditions avec mode AND/OR
-    separator = " **OU**\n" if mode == 'OR' else "\n"
-    condition_parts = []
-
-    if conditions.get('min_messages', 0) > 0:
-        condition_parts.append(f"📝 **{conditions['min_messages']}**+ messages")
-    if conditions.get('min_vocal_minutes', 0) > 0:
-        condition_parts.append(f"🎤 **{conditions['min_vocal_minutes']}**+ min en vocal")
-    if conditions.get('required_role', 0) > 0:
-        role = guild.get_role(conditions['required_role'])
-        if role:
-            condition_parts.append(f"🎭 Rôle {role.mention}")
-    if conditions.get('min_account_days', 0) > 0:
-        condition_parts.append(f"📅 Compte ≥ **{conditions['min_account_days']}** jours")
-    if conditions.get('no_afk', False):
-        afk_days = conditions.get('afk_days', 7)
-        condition_parts.append(f"❌ Pas AFK depuis **{afk_days}** jours")
-
-    if condition_parts:
-        if mode == 'OR':
-            conditions_title = "📋 Conditions (OU — une seule suffit)"
-        else:
-            conditions_title = "📋 Conditions (ET — toutes requises)"
-        conditions_txt = separator.join(condition_parts)
-    else:
-        conditions_title = "📋 Conditions"
-        conditions_txt = "✅ Aucune condition — tout le monde peut participer !"
-
-    e.add_field(name=conditions_title, value=conditions_txt, inline=False)
 
     if data.get('image_url'):
         e.set_image(url=data['image_url'])
 
-    e.set_footer(text=f"🎁 Giveaway • Par {user.display_name}", icon_url=user.display_avatar.url if user.display_avatar else None)
+    e.set_footer(
+        text=f"Par {user.display_name} · Bonne chance !",
+        icon_url=user.display_avatar.url if user.display_avatar else None,
+    )
     e.timestamp = now()
     return e, conditions
 
@@ -14412,7 +14652,48 @@ class GiveawayChannelSelect(Select):
 class GiveawayParticipateView(View):
     def __init__(self):
         super().__init__(timeout=None)
-    
+
+    @discord.ui.button(label="📋 Conditions", style=discord.ButtonStyle.secondary, custom_id="giveaway_conditions")
+    async def show_conditions(self, i, b):
+        """Phase 4.3 : affiche les conditions en ephemeral (visible UNIQUEMENT par le clicker)."""
+        try:
+            # Récupérer les conditions depuis la DB
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT conditions, title, prize, end_time FROM giveaways WHERE message_id=?',
+                    (i.message.id,),
+                ) as cursor:
+                    row = await cursor.fetchone()
+            if not row:
+                return await i.response.send_message(
+                    "❌ Giveaway introuvable.", ephemeral=True,
+                )
+            conditions = json.loads(row[0]) if row[0] else {}
+            title = row[1] or "Giveaway"
+            prize = row[2] or "—"
+
+            n_cond = _count_giveaway_conditions(conditions)
+            cond_text = _format_giveaway_conditions(conditions, i.guild)
+
+            e = discord.Embed(
+                title=f"📋 Conditions · {title}",
+                description=cond_text,
+                color=0xF1C40F,
+            )
+            e.add_field(name="🏆 Prix", value=f"`{prize}`", inline=True)
+            e.add_field(name="📊 Conditions", value=f"`{n_cond}`", inline=True)
+            e.set_footer(text="💡 Tu vois ce message seul · personne d'autre ne peut le voir")
+            await i.response.send_message(embed=e, ephemeral=True)
+        except Exception as ex:
+            print(f"[GiveawayParticipateView show_conditions] {ex}")
+            try:
+                await i.response.send_message(
+                    f"❌ Impossible d'afficher les conditions : `{ex}`",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+
     @discord.ui.button(label="🎉 Participer", style=discord.ButtonStyle.success, custom_id="giveaway_participate")
     async def participate(self, i, b):
         try:
