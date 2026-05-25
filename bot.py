@@ -3739,6 +3739,10 @@ class MainPanelV2(LayoutView):
                     label="Distribution", value="delegations", emoji="🔑",
                     description="Déléguer la gestion d'un rôle à un utilisateur",
                 ),
+                discord.SelectOption(
+                    label="Créativité", value="creativite", emoji="🎨",
+                    description="Messages auto · Vocaux temp · Annonces · Auto-réactions · Rôles masse",
+                ),
             ],
             custom_id="mpv2_module",
         )
@@ -3769,7 +3773,7 @@ class MainPanelV2(LayoutView):
         self.clear_items()
         self._build()
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -3783,6 +3787,7 @@ class MainPanelV2(LayoutView):
             'logs':         lambda: LogsPanelV2(self.u, self.g),
             'games':        lambda: GamesPanelV2(self.u, self.g),
             'delegations':  lambda: DelegationsPanelV2(self.u, self.g),
+            'creativite':   lambda: CentrePanelV2(self.u, self.g),
         }
         if val in v2_panels:
             v = v2_panels[val]()
@@ -3911,7 +3916,7 @@ class SecurityPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.DANGER))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -4006,7 +4011,7 @@ class GamesPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.SUCCESS))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -4143,7 +4148,7 @@ class DelegationsPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -4220,16 +4225,20 @@ class DelegationsPanelV2(LayoutView):
                     name = d_obj.get('name', '?') if d_obj else '?'
                     delegations2026.remove_delegation(cc, delegation_id)
                     await db_set(self.g.id, delegations2026.CONFIG_KEY, cc.get(delegations2026.CONFIG_KEY, []))
-                    await ix.response.send_message(
-                        f"🗑️ Distribution **{name}** supprimée.",
-                        ephemeral=True,
-                    )
-                    # Re-render
+                    # Re-render directement le panel (sans msg de confirmation séparé
+                    # pour éviter content + V2 view conflict)
                     new_v = DelegationsPanelV2(self.u, self.g)
                     try:
-                        await ix.edit_original_response(view=new_v)
+                        await ix.response.edit_message(content=None, view=new_v, embed=None, attachments=[])
                     except Exception:
-                        pass
+                        # Fallback : ephemeral simple
+                        try:
+                            await ix.followup.send(
+                                f"🗑️ Distribution **{name}** supprimée.",
+                                ephemeral=True,
+                            )
+                        except Exception:
+                            pass
                 except Exception as ex:
                     print(f"[delegation remove pick] {ex}")
                     try:
@@ -4413,7 +4422,7 @@ class DelegationConfigPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -4478,16 +4487,19 @@ class DelegationConfigPanelV2(LayoutView):
                 cc = await cfg(self.g.id)
                 delegations2026.update_delegation(cc, self.delegation_id, **{field: new_ids})
                 await db_set(self.g.id, delegations2026.CONFIG_KEY, cc.get(delegations2026.CONFIG_KEY, []))
-                await ix.response.send_message(
-                    f"✅ Mis à jour : `{len(new_ids)}` rôle(s) sélectionné(s).",
-                    ephemeral=True,
-                )
-                # Re-render le panel config
+                # Re-render direct du panel config (pas de msg séparé pour éviter conflit V2)
                 try:
                     new_v = DelegationConfigPanelV2(self.u, self.g, self.delegation_id)
-                    await ix.edit_original_response(view=new_v)
-                except Exception:
-                    pass
+                    await new_v.render_to(ix, edit=True)
+                except Exception as exr:
+                    print(f"[multiselect role re-render] {exr}")
+                    try:
+                        await ix.response.send_message(
+                            f"✅ Mis à jour : `{len(new_ids)}` rôle(s) sélectionné(s).",
+                            ephemeral=True,
+                        )
+                    except Exception:
+                        pass
             except Exception as ex:
                 print(f"[multiselect role pick] {ex}")
                 try:
@@ -4529,15 +4541,19 @@ class DelegationConfigPanelV2(LayoutView):
                 cc = await cfg(self.g.id)
                 delegations2026.update_delegation(cc, self.delegation_id, **{field: new_ids})
                 await db_set(self.g.id, delegations2026.CONFIG_KEY, cc.get(delegations2026.CONFIG_KEY, []))
-                await ix.response.send_message(
-                    f"✅ Mis à jour : `{len(new_ids)}` utilisateur(s) sélectionné(s).",
-                    ephemeral=True,
-                )
+                # Re-render direct (évite conflit content + V2)
                 try:
                     new_v = DelegationConfigPanelV2(self.u, self.g, self.delegation_id)
-                    await ix.edit_original_response(view=new_v)
-                except Exception:
-                    pass
+                    await new_v.render_to(ix, edit=True)
+                except Exception as exr:
+                    print(f"[multiselect user re-render] {exr}")
+                    try:
+                        await ix.response.send_message(
+                            f"✅ Mis à jour : `{len(new_ids)}` utilisateur(s) sélectionné(s).",
+                            ephemeral=True,
+                        )
+                    except Exception:
+                        pass
             except Exception as ex:
                 print(f"[multiselect user pick] {ex}")
                 try:
@@ -4795,7 +4811,7 @@ class DelegationMembersPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -5275,7 +5291,7 @@ class LogsPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.INFO if log_ch else Palette.NEUTRAL))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -5378,7 +5394,7 @@ class LogsCategoriesPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.PRIMARY))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -5513,7 +5529,7 @@ class ProtPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.INFO))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -5970,7 +5986,7 @@ class ProtDetailV2(LayoutView):
         self.add_item(v2_container(*items, color=color))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -6214,7 +6230,7 @@ class ImageConfigPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.INFO))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -6413,7 +6429,7 @@ class BadwordsConfigPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.INFO))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -6644,7 +6660,7 @@ class _BadwordsSanctionActionView(LayoutView):
         self.add_item(v2_container(*items, color=Palette.DANGER))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -6777,7 +6793,7 @@ class LinkConfigPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.INFO))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -7303,7 +7319,7 @@ class ActionConfigPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.INFO))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -7434,7 +7450,7 @@ class AntiRaidConfigPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.DANGER))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -7713,7 +7729,7 @@ class AltConfigPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -8009,7 +8025,7 @@ class AltScanResultsPanelV2(LayoutView):
     async def render_to(self, interaction, *, edit=True):
         self._build()
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -8279,7 +8295,7 @@ class AltDetectionsPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -8500,7 +8516,7 @@ class SuspectScanPanelV2(LayoutView):
     async def render_to(self, interaction, *, edit=True):
         self._build()
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -9296,7 +9312,7 @@ class ModerationPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.WARNING))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -9567,7 +9583,7 @@ class ImmunePanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.PREMIUM))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -10059,7 +10075,7 @@ class ImmuneRemoveViewV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.DANGER))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -10479,7 +10495,7 @@ class CommandsPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -10631,7 +10647,7 @@ class DirectionPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.DANGER))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -10869,7 +10885,7 @@ class RellSeasPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -11141,7 +11157,7 @@ class SuggestionPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -11427,7 +11443,7 @@ class TradePanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.PREMIUM))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -12149,7 +12165,7 @@ class AdsPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -12295,7 +12311,7 @@ class AdsLivePlatformV2(LayoutView):
         self.add_item(v2_container(*items, color=discord.Color(spec['color'])))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -13050,7 +13066,7 @@ class AdsSimplePlatformV2(LayoutView):
         self.add_item(v2_container(*items, color=discord.Color(spec['color'])))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -13554,7 +13570,7 @@ class AdsRobloxPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=discord.Color(0x00A86B)))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -13975,7 +13991,7 @@ class AdsDealsPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=discord.Color(0xFF6B35)))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -14084,7 +14100,7 @@ class AdsGameUpdatesPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.INFO))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -14233,7 +14249,7 @@ class AddGameUpdateView(LayoutView):
 
     async def render_to(self, interaction, *, edit=True):
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -14241,7 +14257,7 @@ class AddGameUpdateView(LayoutView):
         try:
             self.selected_game = i.data.get('values', [None])[0]
             self._build()
-            await i.response.edit_message(view=self, embed=None, attachments=[])
+            await i.response.edit_message(content=None, view=self, embed=None, attachments=[])
         except Exception as ex:
             print(f"[AddGameUpdateView _on_pick_game] {ex}")
             try:
@@ -14530,7 +14546,7 @@ class V2GenericChannelPicker(LayoutView):
 
     async def render_to(self, interaction, *, edit=True):
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -14613,7 +14629,7 @@ class V2GenericMultiChannelPicker(LayoutView):
 
     async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -14763,7 +14779,7 @@ class V2GenericRolePicker(LayoutView):
 
     async def render_to(self, interaction, *, edit=True):
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -14910,7 +14926,7 @@ class V2AdsChannelPicker(LayoutView):
 
     async def render_to(self, interaction, *, edit=True):
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -15275,49 +15291,49 @@ class CentrePanelV2(LayoutView):
     def _build(self):
         self.clear_items()
 
-        b_giveaway = Button(label="🎁 Cadeau", style=discord.ButtonStyle.success, custom_id="cpnv2_gw")
-        b_giveaway.callback = self._cb_giveaway
+        b_messages = Button(label="📨 Messages auto", style=discord.ButtonStyle.primary, custom_id="cpnv2_msg")
+        b_messages.callback = self._cb_messages
+        b_voice = Button(label="🎙️ Vocaux auto", style=discord.ButtonStyle.primary, custom_id="cpnv2_voice")
+        b_voice.callback = self._cb_voice
         b_announce = Button(label="📢 Annonce", style=discord.ButtonStyle.primary, custom_id="cpnv2_ann")
         b_announce.callback = self._cb_announce
-        b_messages = Button(label="📨 Messages", style=discord.ButtonStyle.primary, custom_id="cpnv2_msg")
-        b_messages.callback = self._cb_messages
-        b_mass_role = Button(label="🎭 Rôles en masse", style=discord.ButtonStyle.success, custom_id="cpnv2_mr")
-        b_mass_role.callback = self._cb_mass_role
         b_auto_react = Button(label="😄 Auto-réactions", style=discord.ButtonStyle.primary, custom_id="cpnv2_ar")
         b_auto_react.callback = self._cb_auto_react
+        b_mass_role = Button(label="🎭 Rôles en masse", style=discord.ButtonStyle.success, custom_id="cpnv2_mr")
+        b_mass_role.callback = self._cb_mass_role
         b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="cpnv2_back")
         b_back.callback = self._cb_back
 
         items: list = []
         if self.g.icon:
             items.append(v2_section(
-                v2_title("🎯 Centre de Gestion"),
-                v2_subtitle("Gère le contenu et les événements de ton serveur"),
+                v2_title("🎨 Créativité"),
+                v2_subtitle("Anime ton serveur avec des outils automatiques"),
                 accessory=v2_thumb(self.g.icon.url),
             ))
         else:
-            items.append(v2_title("🎯 Centre de Gestion"))
-            items.append(v2_subtitle("Gère le contenu et les événements de ton serveur"))
+            items.append(v2_title("🎨 Créativité"))
+            items.append(v2_subtitle("Anime ton serveur avec des outils automatiques"))
 
         items.append(v2_divider())
         items.append(v2_body(
-            "🎁 **Cadeaux** — Giveaways avec conditions, durée, images\n"
-            "📢 **Annonces** — Embeds personnalisés dans tes salons\n"
-            "📨 **Messages Auto** — Envois récurrents programmés\n"
-            "🎭 **Rôles en masse** — Ajouter/retirer un rôle à tous les membres\n"
-            "😄 **Auto-réactions** — Réagir automatiquement aux messages (bonjour → 👋)"
+            "📨 **Messages auto** — Envois récurrents programmés dans un salon\n"
+            "🎙️ **Vocaux auto** — Salon-hub qui crée un vocal perso quand un membre s'y connecte (nom + taille configurables)\n"
+            "📢 **Annonces** — Embeds personnalisés à publier dans tes salons\n"
+            "😄 **Auto-réactions** — Le bot réagit aux messages (bonjour → 👋)\n"
+            "🎭 **Rôles en masse** — Ajouter/retirer un rôle à tous les membres"
         ))
         items.append(v2_divider())
         items.append(v2_subtitle("▼ Choisis une fonctionnalité ci-dessous"))
-        items.append(discord.ui.ActionRow(b_giveaway, b_announce, b_messages, b_mass_role))
-        items.append(discord.ui.ActionRow(b_auto_react, b_back))
+        items.append(discord.ui.ActionRow(b_messages, b_voice, b_announce, b_auto_react))
+        items.append(discord.ui.ActionRow(b_mass_role, b_back))
 
         self.add_item(v2_container(*items, color=Palette.PRIMARY))
 
     async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
         """Compatibilité dispatch MainPanelV2 — _build est appelé en __init__."""
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -15325,10 +15341,6 @@ class CentrePanelV2(LayoutView):
         v = panel_factory()
         emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
         await interaction.response.edit_message(embed=emb, view=v, attachments=[])
-
-    async def _cb_giveaway(self, i):
-        v = GiveawayPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
 
     async def _cb_announce(self, i):
         v = AnnouncementPanelV2(self.u, self.g)
@@ -15346,9 +15358,13 @@ class CentrePanelV2(LayoutView):
         v = AutoReactionPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
 
+    async def _cb_voice(self, i):
+        v = TempVoicePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(view=v, embed=None, attachments=[])
+        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -15468,7 +15484,7 @@ class AutoReactionPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.PREMIUM))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -15686,7 +15702,7 @@ class MassRolePanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.INFO))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -16142,7 +16158,7 @@ class AnnouncementPanelV2(LayoutView):
 
     async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -16490,7 +16506,7 @@ class GiveawayPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.SUCCESS))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -17750,7 +17766,7 @@ class LevelSystemPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -18134,7 +18150,7 @@ class LevelRolesPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -18355,7 +18371,7 @@ class ShopConfigPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.PREMIUM))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -18879,7 +18895,7 @@ class TempVoicePanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -18908,8 +18924,9 @@ class TempVoicePanelV2(LayoutView):
         await v.render_to(i, edit=True)
 
     async def _cb_back(self, i):
-        v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(view=v, embed=None, attachments=[])
+        # Phase 25 : retour vers Créativité (hub centralisé)
+        v = CentrePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class TempVoiceAddHubSelectV2(LayoutView):
@@ -18972,7 +18989,7 @@ class TempVoiceAddHubSelectV2(LayoutView):
     async def render_to(self, interaction, *, edit=True):
         self._build()
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -19114,7 +19131,7 @@ class TempVoiceAddHubCategoryV2(LayoutView):
     async def render_to(self, interaction, *, edit=True):
         self._build()
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -19278,7 +19295,7 @@ class TempVoiceAddHubRoleV2(LayoutView):
     async def render_to(self, interaction, *, edit=True):
         self._build()
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -19676,7 +19693,7 @@ class TempVoiceHubsListPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -19862,6 +19879,7 @@ class TempVoiceHubEditPanelV2(LayoutView):
         role_id = hub_data.get('required_role', 0)
         role = self.g.get_role(role_id) if role_id else None
         default_name = hub_data.get('default_name', '🔊 Vocal de {user}')
+        default_limit = int(hub_data.get('default_limit', 0) or 0)
 
         if role:
             mode_line = f"🔒 **PRIVÉ** · {role.mention}"
@@ -19870,13 +19888,17 @@ class TempVoiceHubEditPanelV2(LayoutView):
             mode_line = "🔓 **PUBLIC** · Tout le monde"
             mode_desc = "_Tout le monde peut voir et rejoindre les vocaux créés._"
 
+        limit_str = "♾️ illimité" if default_limit == 0 else f"`{default_limit}` personnes max"
+
         self.clear_items()
         b_cat = Button(label="📁 Catégorie", style=discord.ButtonStyle.primary, custom_id="tvhepv2_cat")
         b_cat.callback = self._cb_cat
         b_role = Button(label="🔐 Mode / Rôle", style=discord.ButtonStyle.primary, custom_id="tvhepv2_role")
         b_role.callback = self._cb_role
-        b_name = Button(label="📝 Nom par défaut", style=discord.ButtonStyle.secondary, custom_id="tvhepv2_name")
+        b_name = Button(label="📝 Nom", style=discord.ButtonStyle.secondary, custom_id="tvhepv2_name")
         b_name.callback = self._cb_name
+        b_limit = Button(label="📐 Taille", style=discord.ButtonStyle.secondary, custom_id="tvhepv2_limit")
+        b_limit.callback = self._cb_limit
         b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="tvhepv2_back")
         b_back.callback = self._cb_back
 
@@ -19890,9 +19912,13 @@ class TempVoiceHubEditPanelV2(LayoutView):
             ),
             v2_body(mode_desc),
             v2_divider(),
-            v2_body(f"📝 **Nom par défaut** · `{default_name}`"),
+            v2_body(
+                f"📝 **Nom du vocal** · `{default_name}`\n"
+                f"📐 **Taille (limite membres)** · {limit_str}"
+            ),
+            v2_body("_Place `{user}` dans le nom pour insérer le pseudo du membre. Taille 0 = pas de limite._"),
             v2_divider(),
-            discord.ui.ActionRow(b_cat, b_role, b_name, b_back),
+            discord.ui.ActionRow(b_cat, b_role, b_name, b_limit, b_back),
         ]
 
         self.add_item(v2_container(*items, color=Palette.ACCENT))
@@ -19900,7 +19926,7 @@ class TempVoiceHubEditPanelV2(LayoutView):
     async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
         await self._build_async()
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -19941,6 +19967,10 @@ class TempVoiceHubEditPanelV2(LayoutView):
 
     async def _cb_name(self, i):
         await i.response.send_modal(TempVoiceHubNameModal(self.g, self.u, self.hub_id))
+
+    async def _cb_limit(self, i):
+        # Phase 25 : taille du vocal créé
+        await i.response.send_modal(TempVoiceHubLimitModal(self.g, self.u, self.hub_id))
 
     async def _cb_back(self, i):
         v = TempVoiceHubsListPanelV2(self.u, self.g)
@@ -20153,30 +20183,75 @@ class TempVoiceHubEditRole(View):
 
 class TempVoiceHubNameModal(Modal, title="📝 Nom par défaut"):
     name_input = TextInput(
-        label="Nom du vocal (utilise {user} pour le pseudo)", 
-        placeholder="🔊 Vocal de {user}", 
+        label="Nom du vocal (utilise {user} pour le pseudo)",
+        placeholder="🔊 Vocal de {user}",
         default="🔊 Vocal de {user}",
         max_length=50
     )
-    
+
     def __init__(self, g, u, hub_id):
         super().__init__()
         self.g = g
         self.u = u
         self.hub_id = hub_id
-    
+
     async def on_submit(self, i):
         c = await cfg(self.g.id)
         voice_cfg = c.get('temp_voice_config', {})
         hubs = voice_cfg.get('hubs', {})
-        
+
         if str(self.hub_id) in hubs:
             hubs[str(self.hub_id)]['default_name'] = self.name_input.value
             voice_cfg['hubs'] = hubs
             await db_set(self.g.id, 'temp_voice_config', voice_cfg)
-        
+
         v = TempVoiceHubEditPanelV2(self.u, self.g, self.hub_id)
         await v.render_to(i, edit=True)
+
+
+class TempVoiceHubLimitModal(Modal, title="📐 Taille du vocal"):
+    """Phase 25 : limite utilisateurs (0 = illimité, max 99)."""
+    limit_input = TextInput(
+        label="Limite de membres (0 à 99, 0 = illimité)",
+        placeholder="0",
+        default="0",
+        max_length=2,
+        required=True,
+    )
+
+    def __init__(self, g, u, hub_id):
+        super().__init__()
+        self.g = g
+        self.u = u
+        self.hub_id = hub_id
+
+    async def on_submit(self, i):
+        # Validation
+        try:
+            limit = int((self.limit_input.value or '0').strip())
+        except Exception:
+            return await i.response.send_message(
+                "❌ Valeur invalide — entre un nombre entre `0` et `99`.",
+                ephemeral=True,
+            )
+        if limit < 0 or limit > 99:
+            return await i.response.send_message(
+                "❌ La taille doit être entre `0` (illimité) et `99`.",
+                ephemeral=True,
+            )
+
+        c = await cfg(self.g.id)
+        voice_cfg = c.get('temp_voice_config', {})
+        hubs = voice_cfg.get('hubs', {})
+
+        if str(self.hub_id) in hubs:
+            hubs[str(self.hub_id)]['default_limit'] = limit
+            voice_cfg['hubs'] = hubs
+            await db_set(self.g.id, 'temp_voice_config', voice_cfg)
+
+        v = TempVoiceHubEditPanelV2(self.u, self.g, self.hub_id)
+        await v.render_to(i, edit=True)
+
 
 class TempVoiceHubDeleteSelect(View):
     """Sélection d'un hub à supprimer"""
@@ -20353,7 +20428,7 @@ class TempVoicePermissionsPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -20684,7 +20759,7 @@ class AutoHelpPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.INFO))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -21200,7 +21275,7 @@ class GiveawayListPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.SUCCESS))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -21503,7 +21578,7 @@ class MessagePanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.PRIMARY))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -21713,7 +21788,7 @@ class AutoMessageListPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.PRIMARY))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -22286,7 +22361,7 @@ class StatPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -22711,7 +22786,7 @@ class AfkRolePanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.INFO if enabled else Palette.NEUTRAL))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -22941,7 +23016,7 @@ class AfkListViewV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.DANGER))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -23023,7 +23098,7 @@ class AfkListViewV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.DANGER))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -23176,7 +23251,7 @@ class AfkActionsViewV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.DANGER))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -23311,7 +23386,7 @@ class AfkActionsViewV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.DANGER))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -23814,7 +23889,7 @@ class StatActionPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.WARNING))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -24808,7 +24883,7 @@ class ChanPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.WARNING))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -24881,7 +24956,7 @@ class _ChanPickerV2(LayoutView):
 
     async def render_to(self, interaction, *, edit=True):
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -25087,7 +25162,7 @@ class EditChanCfgV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.WARNING))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -25274,7 +25349,7 @@ class TicketMainPanelV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -25643,7 +25718,7 @@ class EditPanelSelectViewV2(LayoutView):
     async def render_to(self, interaction, *, edit=True):
         self._build()
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -25774,7 +25849,7 @@ class PanelEditViewV2(LayoutView):
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -26747,7 +26822,7 @@ class SendPanelPaginatedView(LayoutView):
     async def render_to(self, interaction, *, edit=True):
         """V2 render — sans embed (V2 messages ne peuvent pas avoir d'embed)."""
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -26755,7 +26830,7 @@ class SendPanelPaginatedView(LayoutView):
         try:
             self.page -= 1
             self._build()
-            await i.response.edit_message(view=self, embed=None, attachments=[])
+            await i.response.edit_message(content=None, view=self, embed=None, attachments=[])
         except Exception as ex:
             print(f"[SendPanel _prev] {ex}")
             try:
@@ -26768,7 +26843,7 @@ class SendPanelPaginatedView(LayoutView):
         try:
             self.page += 1
             self._build()
-            await i.response.edit_message(view=self, embed=None, attachments=[])
+            await i.response.edit_message(content=None, view=self, embed=None, attachments=[])
         except Exception as ex:
             print(f"[SendPanel _next] {ex}")
             try:
@@ -30854,7 +30929,7 @@ class TradeBuilderViewV2(LayoutView):
     async def render_to(self, interaction, *, edit=True):
         self._build()
         if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
@@ -34474,6 +34549,13 @@ async def on_voice_state_update(member, before, after):
                     category = member.guild.get_channel(cat_id)
                     if category:
                         channel_name = default_name.replace('{user}', member.display_name)[:50]
+                        # Phase 25 : taille (user_limit) configurable par hub
+                        try:
+                            default_user_limit = int(hub_data.get('default_limit', 0) or 0)
+                            if default_user_limit < 0 or default_user_limit > 99:
+                                default_user_limit = 0
+                        except Exception:
+                            default_user_limit = 0
                         
                         # Récupérer le rôle requis pour les permissions
                         required_role = member.guild.get_role(required_role_id) if required_role_id else None
@@ -34540,7 +34622,8 @@ async def on_voice_state_update(member, before, after):
                         new_channel = await member.guild.create_voice_channel(
                             name=channel_name,
                             category=category,
-                            overwrites=overwrites
+                            overwrites=overwrites,
+                            user_limit=default_user_limit,
                         )
                         
                         temp_voice_channels[new_channel.id] = {
