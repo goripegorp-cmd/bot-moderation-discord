@@ -3665,24 +3665,30 @@ class SecurityPanelV2(LayoutView):
         # État rapide salon logs mod
         log_ch = self.g.get_channel(c.get('mod_log_channel', 0))
 
+        # État AFK (Phase 4.6)
+        afk_cfg = c.get('afk_role_config', {})
+        afk_on = bool(afk_cfg.get('enabled', False))
+        afk_role = self.g.get_role(afk_cfg.get('role', 0) or afk_cfg.get('role_id', 0))
+
         self.clear_items()
         items: list = []
 
         if self.g.icon:
             items.append(v2_section(
                 v2_title("🛡️ Sécurité"),
-                v2_subtitle("Modération · Protection · Immunités"),
+                v2_subtitle("Modération · Protection · Immunités · AFK"),
                 accessory=v2_thumb(self.g.icon.url),
             ))
         else:
             items.append(v2_title("🛡️ Sécurité"))
-            items.append(v2_subtitle("Modération · Protection · Immunités"))
+            items.append(v2_subtitle("Modération · Protection · Immunités · AFK"))
 
         items.append(v2_divider())
         items.append(v2_body(
             f"🔨 **Modération** · `{inf_count}` infractions · {'🟢' if log_ch else '🔴'} logs\n"
             f"🚨 **Protection** · `{prot_on}/{prot_total}` filtres actifs\n"
-            f"👑 **Immunités** · `{immune_roles_count}` rôles · `{immune_users_count}` utilisateurs"
+            f"👑 **Immunités** · `{immune_roles_count}` rôles · `{immune_users_count}` utilisateurs\n"
+            f"💤 **AFK** · {('🔘 actif sur ' + afk_role.mention) if (afk_on and afk_role) else ('🔘 actif' if afk_on else '⚪ désactivé')}"
         ))
         items.append(v2_divider())
 
@@ -3693,10 +3699,12 @@ class SecurityPanelV2(LayoutView):
         b_prot.callback = self._cb_prot
         b_immune = Button(label="👑 Immunités", style=discord.ButtonStyle.primary, custom_id="secv2_immune")
         b_immune.callback = self._cb_immune
+        b_afk = Button(label="💤 AFK", style=discord.ButtonStyle.primary, custom_id="secv2_afk")
+        b_afk.callback = self._cb_afk
         b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="secv2_back")
         b_back.callback = self._cb_back
 
-        items.append(discord.ui.ActionRow(b_mod, b_prot, b_immune))
+        items.append(discord.ui.ActionRow(b_mod, b_prot, b_immune, b_afk))
         items.append(discord.ui.ActionRow(b_back))
 
         self.add_item(v2_container(*items, color=Palette.DANGER))
@@ -3716,6 +3724,11 @@ class SecurityPanelV2(LayoutView):
 
     async def _cb_immune(self, i):
         v = ImmunePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+    async def _cb_afk(self, i):
+        # Phase 4.6 : accès au panel AFK depuis le hub Sécurité
+        v = AfkRolePanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
 
     async def _cb_back(self, i):
@@ -3863,51 +3876,62 @@ class LogsPanelV2(LayoutView):
         items: list = []
         if self.g.icon:
             items.append(v2_section(
-                v2_title("📋 Logs Unifiés"),
-                v2_subtitle("Un seul salon pour TOUS les évènements du bot"),
+                v2_title("📋 Logs unifiés"),
+                v2_subtitle("Un salon · tous les événements"),
                 accessory=v2_thumb(self.g.icon.url),
             ))
         else:
-            items.append(v2_title("📋 Logs Unifiés"))
-            items.append(v2_subtitle("Un seul salon pour TOUS les évènements du bot"))
+            items.append(v2_title("📋 Logs unifiés"))
+            items.append(v2_subtitle("Un salon · tous les événements"))
         items.append(v2_divider())
 
-        # État actuel
-        chan_status = (
-            f"🟢 {log_ch.mention}" if log_ch
-            else ("⚠️ Salon configuré mais introuvable" if chan_id else "🔴 _Non configuré_")
-        )
-        cats_status = "\n".join(
-            f"{'✅' if c in cats_enabled else '❌'} **{c}**"
-            for c in all_cats
-        ) or "_(aucune)_"
+        # ─── État du salon (radio visuel) ───
+        if log_ch:
+            chan_line = f"🔘 **Salon actif** · {log_ch.mention}"
+        elif chan_id:
+            chan_line = f"⚠️ **Salon configuré mais introuvable** (`{chan_id}`)"
+        else:
+            chan_line = "⚪ **Salon non défini** — logs unifiés désactivés"
+        items.append(v2_body(chan_line))
 
-        items.append(v2_body(
-            f"📍 **Salon de destination** · {chan_status}\n\n"
-            f"🎛️ **Catégories activées**\n{cats_status}"
-        ))
+        # ─── Catégories (checkbox visuel) ───
+        if log_ch:
+            items.append(v2_divider())
+            cat_emojis = {
+                "Modération": "🔨", "Sécurité": "🛡️", "Membres": "👥",
+                "Messages": "💬", "Vocal": "🎤", "Serveur": "🏷️",
+                "Tickets": "🎫", "Config": "⚙️",
+            }
+            cats_lines = []
+            for c in all_cats:
+                icon = "✅" if c in cats_enabled else "☐"
+                emoji = cat_emojis.get(c, "📋")
+                cats_lines.append(f"{icon} {emoji} {c}")
+            items.append(v2_title("Catégories", level=3))
+            items.append(v2_body("\n".join(cats_lines)))
+
         items.append(v2_divider())
-        items.append(v2_subtitle(
-            "💡 Les logs legacy (par exemple `mod_log_channel`) continuent à fonctionner en parallèle."
-        ))
 
-        # Boutons
-        b_chan = Button(label="📍 Changer le salon", style=discord.ButtonStyle.success, custom_id="logsv2_chan")
-        b_chan.callback = self._cb_set_channel
+        # ─── Boutons ───
+        if log_ch:
+            b_chan = Button(label="📍 Changer salon", style=discord.ButtonStyle.primary, custom_id="logsv2_chan")
+            b_chan.callback = self._cb_set_channel
+            b_cats = Button(label="🎛️ Catégories", style=discord.ButtonStyle.primary, custom_id="logsv2_cats")
+            b_cats.callback = self._cb_categories
+            b_clear = Button(label="⚪ Désactiver", style=discord.ButtonStyle.danger, custom_id="logsv2_clear")
+            b_clear.callback = self._cb_disable
+            b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2_back")
+            b_back.callback = self._cb_back
+            items.append(discord.ui.ActionRow(b_chan, b_cats, b_clear))
+            items.append(discord.ui.ActionRow(b_back))
+        else:
+            b_chan = Button(label="📍 Définir le salon", style=discord.ButtonStyle.success, custom_id="logsv2_chan")
+            b_chan.callback = self._cb_set_channel
+            b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2_back")
+            b_back.callback = self._cb_back
+            items.append(discord.ui.ActionRow(b_chan, b_back))
 
-        b_cats = Button(label="🎛️ Catégories", style=discord.ButtonStyle.primary, custom_id="logsv2_cats")
-        b_cats.callback = self._cb_categories
-
-        b_clear = Button(label="🚫 Désactiver", style=discord.ButtonStyle.danger, custom_id="logsv2_clear")
-        b_clear.callback = self._cb_disable
-
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2_back")
-        b_back.callback = self._cb_back
-
-        items.append(discord.ui.ActionRow(b_chan, b_cats, b_clear))
-        items.append(discord.ui.ActionRow(b_back))
-
-        self.add_item(v2_container(*items, color=Palette.INFO))
+        self.add_item(v2_container(*items, color=Palette.INFO if log_ch else Palette.NEUTRAL))
 
         if edit:
             await interaction.response.edit_message(view=self, embed=None, attachments=[])
@@ -7613,19 +7637,19 @@ class ModerationPanelV2(LayoutView):
         inf_role = self.g.get_role(c.get('mod_infractions_role', 0))
         clear_role = self.g.get_role(c.get('mod_clear_role', 0))
 
-        def status(item):
-            return f"🟢 {item.mention if hasattr(item, 'mention') else item.name}" if item else "🔴 _Non configuré_"
+        def dot(item):
+            return f"🔘 {item.mention if hasattr(item, 'mention') else item.name}" if item else "⚪ _non défini_"
 
         # Reconstruire les boutons à chaque render (pour les ré-attacher)
         self.clear_items()
 
-        b_logs = Button(label="📜 Salon Logs", style=discord.ButtonStyle.success, custom_id="mpv2_set_logs")
+        b_logs = Button(label="📜 Salon Logs", style=discord.ButtonStyle.primary, custom_id="mpv2_set_logs")
         b_logs.callback = self._cb_set_logs
-        b_warn = Button(label="⚠️ Rôle /warn", style=discord.ButtonStyle.primary, custom_id="mpv2_set_warn")
+        b_warn = Button(label="⚠️ Rôle warn", style=discord.ButtonStyle.primary, custom_id="mpv2_set_warn")
         b_warn.callback = self._cb_set_warn
-        b_mute = Button(label="🔇 Rôle /mute", style=discord.ButtonStyle.primary, custom_id="mpv2_set_mute")
+        b_mute = Button(label="🔇 Rôle mute", style=discord.ButtonStyle.primary, custom_id="mpv2_set_mute")
         b_mute.callback = self._cb_set_mute
-        b_inf = Button(label="📋 Rôle /infractions", style=discord.ButtonStyle.primary, custom_id="mpv2_set_inf")
+        b_inf = Button(label="📋 Rôle infractions", style=discord.ButtonStyle.primary, custom_id="mpv2_set_inf")
         b_inf.callback = self._cb_set_inf
         b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="mpv2_back")
         b_back.callback = self._cb_back
@@ -7634,26 +7658,25 @@ class ModerationPanelV2(LayoutView):
         if self.g.icon:
             items.append(v2_section(
                 v2_title("🔨 Modération"),
-                v2_subtitle(f"📊 {inf_count} infractions enregistrées au total"),
+                v2_subtitle(f"`{inf_count}` infractions enregistrées"),
                 accessory=v2_thumb(self.g.icon.url),
             ))
         else:
             items.append(v2_title("🔨 Modération"))
-            items.append(v2_subtitle(f"📊 {inf_count} infractions enregistrées au total"))
+            items.append(v2_subtitle(f"`{inf_count}` infractions enregistrées"))
 
         items.append(v2_divider())
         items.append(v2_body(
-            f"📜 **Salon Logs** · {status(log_ch)}\n"
-            f"⚠️ **Rôle /warn** · {status(warn_role)}\n"
-            f"🔇 **Rôle /mute** · {status(mute_role)}\n"
-            f"📋 **Rôle /infractions** · {status(inf_role)}\n"
-            f"🧹 **Rôle /clear** · {status(clear_role)}"
+            f"📜 **Salon logs** · {dot(log_ch)}\n"
+            f"⚠️ **Rôle /warn** · {dot(warn_role)}\n"
+            f"🔇 **Rôle /mute** · {dot(mute_role)}\n"
+            f"📋 **Rôle /infractions** · {dot(inf_role)}\n"
+            f"🧹 **Rôle /clear** · {dot(clear_role)}"
         ))
         items.append(v2_divider())
-        items.append(v2_subtitle("👑 Le owner a toujours accès à toutes les commandes"))
 
-        items.append(discord.ui.ActionRow(b_logs, b_warn, b_mute))
-        items.append(discord.ui.ActionRow(b_inf, b_back))
+        items.append(discord.ui.ActionRow(b_logs, b_warn, b_mute, b_inf))
+        items.append(discord.ui.ActionRow(b_back))
 
         self.add_item(v2_container(*items, color=Palette.WARNING))
 
@@ -12326,6 +12349,120 @@ class V2GenericChannelPicker(LayoutView):
             await interaction.response.edit_message(view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
+
+
+class V2GenericMultiChannelPicker(LayoutView):
+    """Selecteur multi-salons V2 (Phase 4.5).
+
+    Stocke une liste d'IDs de salons dans la config (clé directe ou sous-clé).
+    Sélection vide acceptée = "tous les salons".
+    """
+
+    def __init__(self, u, g, *, config_key: str, return_panel_factory,
+                 title: str = "Choisir des salons",
+                 description: str = "Sélectionne les salons (vide = tous).",
+                 color: int = 0x5865F2,
+                 channel_types=None,
+                 sub_dict_key: str = None,
+                 max_values: int = 25):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.config_key = config_key
+        self.return_panel_factory = return_panel_factory
+        self.title = title
+        self.description = description
+        self.color = color
+        self.channel_types = channel_types or [discord.ChannelType.text, discord.ChannelType.news]
+        self.sub_dict_key = sub_dict_key
+        self.max_values = min(25, max_values)
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def _save(self, channel_ids: list[int]):
+        if self.sub_dict_key:
+            c = await cfg(self.g.id)
+            sub = c.get(self.sub_dict_key, {}) or {}
+            if not isinstance(sub, dict):
+                sub = {}
+            sub[self.config_key] = channel_ids
+            await db_set(self.g.id, self.sub_dict_key, sub)
+        else:
+            await db_set(self.g.id, self.config_key, channel_ids)
+
+    async def _return_to_parent(self, i: discord.Interaction):
+        v = self.return_panel_factory()
+        if hasattr(v, 'render_to'):
+            await v.render_to(i, edit=True)
+        elif hasattr(v, 'embed'):
+            emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
+            await i.response.edit_message(embed=emb, view=v, attachments=[])
+        else:
+            await i.response.edit_message(view=v, attachments=[])
+
+    def _build(self):
+        self.clear_items()
+        sel = discord.ui.ChannelSelect(
+            channel_types=self.channel_types,
+            placeholder="📁 Sélectionne les salons (multi)...",
+            min_values=0,
+            max_values=self.max_values,
+        )
+        sel.callback = self._on_select
+
+        b_clear = Button(label="🧹 Tout effacer", style=discord.ButtonStyle.danger, custom_id="v2mcp_clear")
+        b_clear.callback = self._cb_clear
+        b_back = Button(label="◀️ Annuler", style=discord.ButtonStyle.secondary, custom_id="v2mcp_back")
+        b_back.callback = self._cb_back
+
+        items = [
+            v2_title(self.title),
+            v2_subtitle(self.description),
+            v2_divider(),
+            v2_subtitle("Tu peux sélectionner plusieurs salons en une seule fois."),
+            discord.ui.ActionRow(sel),
+            discord.ui.ActionRow(b_clear, b_back),
+        ]
+        self.add_item(v2_container(*items, color=discord.Color(self.color)))
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _on_select(self, i):
+        try:
+            channel_ids = [int(c.id) for c in i.data.get('resolved', {}).get('channels', {}).values()] if False else []
+            # discord.py expose les valeurs via i.data['values'] (liste d'IDs en str)
+            raw_values = i.data.get('values', [])
+            channel_ids = [int(v) for v in raw_values]
+            await self._save(channel_ids)
+            await self._return_to_parent(i)
+        except Exception as ex:
+            print(f"[V2GenericMultiChannelPicker] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+    async def _cb_clear(self, i):
+        try:
+            await self._save([])
+            await self._return_to_parent(i)
+        except Exception as ex:
+            print(f"[V2GenericMultiChannelPicker clear] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.defer()
+            except Exception:
+                pass
+
+    async def _cb_back(self, i):
+        await self._return_to_parent(i)
 
 
 class V2GenericRolePicker(LayoutView):
@@ -20028,7 +20165,17 @@ class AfkRolePanel(View):
 
 
 class AfkRolePanelV2(LayoutView):
-    """Configuration du Rôle AFK en V2."""
+    """Configuration AFK — Phase 4.5 refonte propre.
+
+    Modèle d'usage :
+    - PAR DÉFAUT : système désactivé. Les membres rejoignent sans contrôle.
+    - Si ACTIVÉ : surveillance d'activité sur le rôle ciblé.
+      Cible : 1 rôle. Salons surveillés : multi-select (vide = tous).
+      Seuil : N jours sans activité → actions configurées.
+
+    Activité = message dans un salon surveillé OU connexion vocale.
+    Les immunisés sont exclus (admin / owner / rôles immune).
+    """
 
     def __init__(self, u, g):
         super().__init__(timeout=600)
@@ -20041,47 +20188,100 @@ class AfkRolePanelV2(LayoutView):
     async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
         c = await cfg(self.g.id)
         afk_cfg = c.get('afk_role_config', {})
-        enabled = afk_cfg.get('enabled', False)
-        role = self.g.get_role(afk_cfg.get('role_id', 0))
-        days = afk_cfg.get('days', 14)
+        enabled = bool(afk_cfg.get('enabled', False))
+        role = self.g.get_role(afk_cfg.get('role', 0) or afk_cfg.get('role_id', 0))
+        days = int(afk_cfg.get('days', 14))
         notif_ch = self.g.get_channel(afk_cfg.get('notif_channel', 0))
+        tracked_channels = afk_cfg.get('tracked_channels', []) or []
 
+        # Construction des composants
         self.clear_items()
-        b_toggle = Button(
-            label=("⏸️ Désactiver" if enabled else "▶️ Activer"),
-            style=(discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success),
-            custom_id="arpv2_toggle",
-        )
+
+        items: list = []
+        # Header
+        if self.g.icon:
+            items.append(v2_section(
+                v2_title("💤 Système AFK"),
+                v2_subtitle("Surveillance d'activité par rôle"),
+                accessory=v2_thumb(self.g.icon.url),
+            ))
+        else:
+            items.append(v2_title("💤 Système AFK"))
+            items.append(v2_subtitle("Surveillance d'activité par rôle"))
+        items.append(v2_divider())
+
+        # ─── STATE : ACTIVÉ vs DÉSACTIVÉ ───
+        if enabled:
+            items.append(v2_body("🔘 **Système activé** — les membres avec le rôle sont surveillés"))
+        else:
+            items.append(v2_body(
+                "⚪ **Système désactivé** — aucun contrôle d'activité\n"
+                "*Les membres rejoignent et restent librement.*"
+            ))
+        items.append(v2_divider())
+
+        # ─── BOUTON TOGGLE (toujours visible) ───
+        if enabled:
+            b_toggle = Button(
+                label="⚪ Désactiver le système",
+                style=discord.ButtonStyle.danger,
+                custom_id="arpv2_toggle",
+            )
+        else:
+            b_toggle = Button(
+                label="🔘 Activer le système",
+                style=discord.ButtonStyle.success,
+                custom_id="arpv2_toggle",
+            )
         b_toggle.callback = self._cb_toggle
-        b_role = Button(label="🎭 Définir Rôle", style=discord.ButtonStyle.primary, custom_id="arpv2_role")
-        b_role.callback = self._cb_role
-        b_days = Button(label="📅 Définir Jours", style=discord.ButtonStyle.primary, custom_id="arpv2_days")
-        b_days.callback = self._cb_days
-        b_notif = Button(label="📢 Salon Notifs", style=discord.ButtonStyle.primary, custom_id="arpv2_notif")
-        b_notif.callback = self._cb_notif
-        b_list = Button(label="📋 Liste AFK", style=discord.ButtonStyle.secondary, custom_id="arpv2_list")
-        b_list.callback = self._cb_list
-        b_actions = Button(label="⚡ Actions", style=discord.ButtonStyle.danger, custom_id="arpv2_actions")
-        b_actions.callback = self._cb_actions
+        items.append(discord.ui.ActionRow(b_toggle))
+
+        # ─── SI ACTIVÉ : affiche la config détaillée ───
+        if enabled:
+            items.append(v2_divider())
+            items.append(v2_title("⚙️ Configuration", level=3))
+
+            # Liste salons surveillés
+            if tracked_channels:
+                ch_objs = [self.g.get_channel(cid) for cid in tracked_channels]
+                ch_mentions = [c.mention for c in ch_objs if c]
+                tracked_txt = ", ".join(ch_mentions) if ch_mentions else "⚠️ _Salons supprimés_"
+            else:
+                tracked_txt = "📡 **Tous les salons** (config vide = tout compte)"
+
+            items.append(v2_body(
+                f"🎭 **Rôle surveillé** · {role.mention if role else '🔴 _Non défini_'}\n"
+                f"📅 **Seuil d'inactivité** · `{days}` jours\n"
+                f"📺 **Salons d'activité** · {tracked_txt}\n"
+                f"📢 **Salon notifications** · {notif_ch.mention if notif_ch else '🔴 _Non défini_'}"
+            ))
+            items.append(v2_divider())
+
+            # Boutons config
+            b_role = Button(label="🎭 Rôle", style=discord.ButtonStyle.primary, custom_id="arpv2_role")
+            b_role.callback = self._cb_role
+            b_days = Button(label="📅 Jours", style=discord.ButtonStyle.primary, custom_id="arpv2_days")
+            b_days.callback = self._cb_days
+            b_chans = Button(label="📺 Salons", style=discord.ButtonStyle.primary, custom_id="arpv2_chans")
+            b_chans.callback = self._cb_channels
+            b_notif = Button(label="📢 Notifs", style=discord.ButtonStyle.primary, custom_id="arpv2_notif")
+            b_notif.callback = self._cb_notif
+
+            items.append(discord.ui.ActionRow(b_role, b_days, b_chans, b_notif))
+
+            # Boutons actions
+            b_list = Button(label="📋 Voir AFK", style=discord.ButtonStyle.secondary, custom_id="arpv2_list")
+            b_list.callback = self._cb_list
+            b_actions = Button(label="⚡ Actions auto", style=discord.ButtonStyle.danger, custom_id="arpv2_actions")
+            b_actions.callback = self._cb_actions
+            items.append(discord.ui.ActionRow(b_list, b_actions))
+
+        # Bouton retour (toujours)
         b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="arpv2_back")
         b_back.callback = self._cb_back
+        items.append(discord.ui.ActionRow(b_back))
 
-        items: list = [
-            v2_title("🔕 Configuration Rôle AFK"),
-            v2_subtitle(f"{'🟢 Système actif' if enabled else '🔴 Système désactivé'}"),
-            v2_divider(),
-            v2_body(
-                f"🎭 **Rôle AFK** · {role.mention if role else '🔴 _Non configuré_'}\n"
-                f"📅 **Seuil d'inactivité** · `{days}` jours\n"
-                f"📢 **Salon notifs** · {notif_ch.mention if notif_ch else '🔴 _Non configuré_'}"
-            ),
-            v2_divider(),
-            v2_subtitle("💡 Le rôle AFK est ajouté aux membres inactifs depuis N jours"),
-            discord.ui.ActionRow(b_toggle, b_role, b_days, b_notif),
-            discord.ui.ActionRow(b_list, b_actions, b_back),
-        ]
-
-        self.add_item(v2_container(*items, color=Palette.NEUTRAL))
+        self.add_item(v2_container(*items, color=Palette.INFO if enabled else Palette.NEUTRAL))
 
         if edit:
             await interaction.response.edit_message(view=self, embed=None, attachments=[])
@@ -20091,70 +20291,92 @@ class AfkRolePanelV2(LayoutView):
     async def _cb_toggle(self, i):
         c = await cfg(self.g.id)
         afk_cfg = c.get('afk_role_config', {})
-        afk_cfg['enabled'] = not afk_cfg.get('enabled', False)
+        afk_cfg['enabled'] = not bool(afk_cfg.get('enabled', False))
         await db_set(self.g.id, 'afk_role_config', afk_cfg)
         await AfkRolePanelV2(self.u, self.g).render_to(i, edit=True)
 
     async def _cb_role(self, i):
-        # Phase 3.0k : V2 native picker, sub_dict_key='afk_role_config' avec sous-cle 'role'
         v = V2GenericRolePicker(
             self.u, self.g,
             config_key='role',
             sub_dict_key='afk_role_config',
             return_panel_factory=lambda: AfkRolePanelV2(self.u, self.g),
-            title="🔕 Rôle AFK",
-            description="Sélectionne le rôle attribué aux membres inactifs.",
-            color=0x95A5A6,
+            title="🎭 Rôle à surveiller",
+            description="Les membres avec ce rôle seront vérifiés pour leur activité.",
+            color=0x3498DB,
         )
         await v.render_to(i, edit=True)
 
     async def _cb_days(self, i):
         await i.response.send_modal(AfkDaysModal(self.g, self.u))
 
+    async def _cb_channels(self, i):
+        # Phase 4.5 : nouveau picker multi-salons
+        v = V2GenericMultiChannelPicker(
+            self.u, self.g,
+            config_key='tracked_channels',
+            sub_dict_key='afk_role_config',
+            return_panel_factory=lambda: AfkRolePanelV2(self.u, self.g),
+            title="📺 Salons d'activité",
+            description=(
+                "Sélectionne les salons qui comptent comme activité.\n"
+                "**Aucune sélection = tous les salons comptent.**"
+            ),
+            color=0x3498DB,
+        )
+        await v.render_to(i, edit=True)
+
     async def _cb_notif(self, i):
-        # Phase 3.0k : V2 native picker
         v = V2GenericChannelPicker(
             self.u, self.g,
             config_key='notif_channel',
             sub_dict_key='afk_role_config',
             return_panel_factory=lambda: AfkRolePanelV2(self.u, self.g),
             title="📢 Salon notifications AFK",
-            description="Salon où le bot annonce les actions AFK.",
-            color=0x95A5A6,
+            description="Salon où le bot annonce les détections et actions.",
+            color=0x3498DB,
         )
         await v.render_to(i, edit=True)
 
     async def _cb_list(self, i):
         c = await cfg(self.g.id)
         afk_cfg = c.get('afk_role_config', {})
-        role_id = afk_cfg.get('role', 0)
+        role_id = afk_cfg.get('role', 0) or afk_cfg.get('role_id', 0)
         role = self.g.get_role(role_id)
         if not role:
-            return await i.response.send_message("❌ Aucun rôle AFK configuré", ephemeral=True)
-        # Réutilise la méthode get_afk_members du V1 panel
+            return await i.response.send_message(
+                "❌ Aucun rôle surveillé configuré.", ephemeral=True,
+            )
         helper = AfkRolePanel(self.u, self.g)
-        afk_members = await helper.get_afk_members(role, afk_cfg.get('days', 7))
+        afk_members = await helper.get_afk_members(role, int(afk_cfg.get('days', 7)))
         if not afk_members:
-            return await i.response.send_message(f"✅ Aucun membre AFK avec le rôle {role.mention} !", ephemeral=True)
+            return await i.response.send_message(
+                f"✅ Aucun membre AFK avec le rôle {role.mention} !", ephemeral=True,
+            )
         v = AfkListViewV2(self.u, self.g, afk_members, role)
         await v.render_to(i, edit=True)
 
     async def _cb_actions(self, i):
         c = await cfg(self.g.id)
         afk_cfg = c.get('afk_role_config', {})
-        role_id = afk_cfg.get('role', 0)
+        role_id = afk_cfg.get('role', 0) or afk_cfg.get('role_id', 0)
         role = self.g.get_role(role_id)
         if not role:
-            return await i.response.send_message("❌ Aucun rôle AFK configuré", ephemeral=True)
+            return await i.response.send_message(
+                "❌ Aucun rôle surveillé configuré.", ephemeral=True,
+            )
         helper = AfkRolePanel(self.u, self.g)
-        afk_members = await helper.get_afk_members(role, afk_cfg.get('days', 7))
+        afk_members = await helper.get_afk_members(role, int(afk_cfg.get('days', 7)))
         if not afk_members:
-            return await i.response.send_message(f"✅ Aucun membre AFK avec le rôle {role.mention} !", ephemeral=True)
+            return await i.response.send_message(
+                f"✅ Aucun membre AFK avec le rôle {role.mention} !", ephemeral=True,
+            )
         v = AfkActionsViewV2(self.u, self.g, afk_members, role)
         await v.render_to(i, edit=True)
 
     async def _cb_back(self, i):
-        v = StatPanelV2(self.u, self.g)
+        # Phase 4.6 : retour vers SecurityPanelV2 (le hub)
+        v = SecurityPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
 
 
@@ -30879,20 +31101,48 @@ async def on_voice_state_update(member, before, after):
         print(f"Erreur tracking vocal: {ex}")
 
 async def track_member_message(msg):
-    """Enregistre un message dans le tracking d'activité"""
+    """Enregistre un message dans le tracking d'activité.
+
+    Phase 4.5 : si le système AFK est actif ET qu'une liste de salons surveillés
+    est définie, seuls les messages dans ces salons mettent à jour `last_message`.
+    Le compteur total_messages reste mis à jour partout (pour stats globales).
+    """
     try:
+        # Phase 4.5 : vérifier si le salon compte pour l'activité AFK
+        afk_tracks_this_channel = True
+        try:
+            c = await cfg(msg.guild.id)
+            afk_cfg = c.get('afk_role_config', {})
+            if afk_cfg.get('enabled', False):
+                tracked = afk_cfg.get('tracked_channels', []) or []
+                if tracked and msg.channel.id not in tracked:
+                    afk_tracks_this_channel = False
+        except Exception:
+            pass  # En cas d'erreur, on compte (fail-open)
+
         async with get_db() as db:
             now_str = now().isoformat()
             today = now().strftime('%Y-%m-%d')
-            
+
             # Mettre à jour activity_tracking
-            await db.execute('''
-                INSERT INTO activity_tracking (guild_id, user_id, last_message, total_messages)
-                VALUES (?, ?, ?, 1)
-                ON CONFLICT(guild_id, user_id) DO UPDATE SET
-                    last_message = ?,
-                    total_messages = total_messages + 1
-            ''', (msg.guild.id, msg.author.id, now_str, now_str))
+            # Si AFK actif mais salon hors-liste : on incrémente total_messages
+            # mais on NE met PAS à jour last_message (donc AFK continue à compter)
+            if afk_tracks_this_channel:
+                await db.execute('''
+                    INSERT INTO activity_tracking (guild_id, user_id, last_message, total_messages)
+                    VALUES (?, ?, ?, 1)
+                    ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                        last_message = ?,
+                        total_messages = total_messages + 1
+                ''', (msg.guild.id, msg.author.id, now_str, now_str))
+            else:
+                # Incrémenter compteur uniquement (sans toucher last_message)
+                await db.execute('''
+                    INSERT INTO activity_tracking (guild_id, user_id, total_messages)
+                    VALUES (?, ?, 1)
+                    ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                        total_messages = total_messages + 1
+                ''', (msg.guild.id, msg.author.id))
             
             # Enregistrer dans member_activity pour les stats détaillées
             await db.execute('''
