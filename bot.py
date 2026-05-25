@@ -109,6 +109,11 @@ TOKEN = os.getenv('BOT_TOKEN')
 DB_PATH = '/data/bot.db' if os.path.exists('/data') else 'bot.db'
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  👑 SUPER-OWNER — accès illimité partout (Phase 3.8 : extracté en constante)
+# ═══════════════════════════════════════════════════════════════════════════════
+SUPER_OWNER_ID = 781205382923288593  # GoRipe
 spam_tracker = {}
 voice_join_tracker = {}  # {(guild_id, user_id): datetime} - pour tracker le temps en vocal
 
@@ -676,6 +681,8 @@ async def db_init():
         await db.execute('CREATE TABLE IF NOT EXISTS immune_users(guild_id INTEGER, user_id INTEGER, PRIMARY KEY(guild_id, user_id))')
         await db.execute('CREATE TABLE IF NOT EXISTS immune_channels(guild_id INTEGER, channel_id INTEGER, PRIMARY KEY(guild_id, channel_id))')
         # Table pour les logs de sécurité
+        # Phase 3.8 : ip_hash conservé pour compat schéma (les anciens dumps l'incluent)
+        # mais jamais peuplé (aucun acces aux IP des utilisateurs Discord)
         await db.execute('''CREATE TABLE IF NOT EXISTS security_logs(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             guild_id INTEGER,
@@ -1198,9 +1205,13 @@ async def cfg(gid):
         'compromised_action': 'mute', 'qrcode_action': 'mute', 'alt_action': 'kick',
         'spam_max': 5, 'spam_interval': 5, 'caps_percent': 70, 'newaccount_days': 7,
         'log_anti_link': 0, 'log_anti_image': 0, 'log_anti_phishing': 0, 'log_anti_scam': 0,
-        'log_anti_spam': 0, 'log_anti_caps': 0, 'log_anti_badwords': 0, 'log_anti_invite': 0, 
+        'log_anti_spam': 0, 'log_anti_caps': 0, 'log_anti_badwords': 0, 'log_anti_invite': 0,
         'log_anti_newaccount': 0, 'log_anti_raid': 0, 'log_anti_compromised': 0, 'log_anti_qrcode': 0,
         'log_anti_alt': 0,
+        # Phase 3.8 : defaults manquants détectés par l'audit
+        'log_anti_mass_mention': 0,  # log salon pour anti-mass-mention
+        'mention_limit': 5,           # limite de mentions par message (anti-mass-mention)
+        'mod_clear_role': 0,          # rôle requis pour /clear (purge)
         'raid_config': {'join_threshold': 10, 'join_interval': 10, 'min_account_age': 7, 'auto_mode': True, 'block_invites': True, 'action': 'kick'},
         'alt_config': {'auto_action': False, 'min_confidence': 70},
         'channel_configs': {},
@@ -3507,6 +3518,7 @@ class MainPanelV2(LayoutView):
                 discord.SelectOption(label="Niveaux & Économie", value="levels", emoji="📈", description="XP, boutique, leaderboard"),
                 discord.SelectOption(label="Vocaux Temporaires", value="voice", emoji="🔊", description="Hubs vocaux personnalisables"),
                 discord.SelectOption(label="Aide Automatique", value="help", emoji="💡", description="FAQ et aide contextuelle"),
+                discord.SelectOption(label="Logs Unifiés", value="logs", emoji="📋", description="Salon unique de tous les logs · catégories"),
             ],
             custom_id="mpv2_module",
         )
@@ -3560,6 +3572,8 @@ class MainPanelV2(LayoutView):
             'levels': lambda: LevelSystemPanelV2(self.u, self.g),
             'prot': lambda: ProtPanelV2(self.u, self.g),
             'tickets': lambda: TicketMainPanelV2(self.u, self.g),
+            # Phase 3.8 : Logs Unifiés (nouvelle entrée)
+            'logs': lambda: LogsPanelV2(self.u, self.g),
         }
         # Tous les modules sont maintenant en V2 ! 🎉
         v1_panels: dict = {}
@@ -3578,6 +3592,200 @@ class MainPanelV2(LayoutView):
             await i.message.delete()
         except Exception:
             pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  📋 LOGS UNIFIÉS — Panel V2 (Phase 3.8)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class LogsPanelV2(LayoutView):
+    """Panneau Logs Unifiés : configurer le salon + catégories actives."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        chan_id = await ulogger2026.get_log_channel(self.g.id)
+        cats_enabled = await ulogger2026.get_enabled_categories(self.g.id)
+        all_cats = sorted(set(m["cat"] for m in ulogger2026.EVENT_META.values()))
+        log_ch = self.g.get_channel(chan_id) if chan_id else None
+
+        self.clear_items()
+
+        # Section header
+        items: list = []
+        if self.g.icon:
+            items.append(v2_section(
+                v2_title("📋 Logs Unifiés"),
+                v2_subtitle("Un seul salon pour TOUS les évènements du bot"),
+                accessory=v2_thumb(self.g.icon.url),
+            ))
+        else:
+            items.append(v2_title("📋 Logs Unifiés"))
+            items.append(v2_subtitle("Un seul salon pour TOUS les évènements du bot"))
+        items.append(v2_divider())
+
+        # État actuel
+        chan_status = (
+            f"🟢 {log_ch.mention}" if log_ch
+            else ("⚠️ Salon configuré mais introuvable" if chan_id else "🔴 _Non configuré_")
+        )
+        cats_status = "\n".join(
+            f"{'✅' if c in cats_enabled else '❌'} **{c}**"
+            for c in all_cats
+        ) or "_(aucune)_"
+
+        items.append(v2_body(
+            f"📍 **Salon de destination** · {chan_status}\n\n"
+            f"🎛️ **Catégories activées**\n{cats_status}"
+        ))
+        items.append(v2_divider())
+        items.append(v2_subtitle(
+            "💡 Les logs legacy (par exemple `mod_log_channel`) continuent à fonctionner en parallèle."
+        ))
+
+        # Boutons
+        b_chan = Button(label="📍 Changer le salon", style=discord.ButtonStyle.success, custom_id="logsv2_chan")
+        b_chan.callback = self._cb_set_channel
+
+        b_cats = Button(label="🎛️ Catégories", style=discord.ButtonStyle.primary, custom_id="logsv2_cats")
+        b_cats.callback = self._cb_categories
+
+        b_clear = Button(label="🚫 Désactiver", style=discord.ButtonStyle.danger, custom_id="logsv2_clear")
+        b_clear.callback = self._cb_disable
+
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2_back")
+        b_back.callback = self._cb_back
+
+        items.append(discord.ui.ActionRow(b_chan, b_cats, b_clear))
+        items.append(discord.ui.ActionRow(b_back))
+
+        self.add_item(v2_container(*items, color=Palette.INFO))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_set_channel(self, i):
+        async def _save_log_channel(guild_id: int, channel_id: int):
+            await ulogger2026.set_log_channel(guild_id, channel_id)
+
+        v = V2GenericChannelPicker(
+            self.u, self.g,
+            config_key="_unified_log_channel",  # ignored, save_fn handles it
+            return_panel_factory=lambda: LogsPanelV2(self.u, self.g),
+            title="📋 Salon de logs unifiés",
+            description="Choisis le salon où arriveront tous les évènements.",
+            color=0x3498DB,
+            save_fn=_save_log_channel,
+        )
+        await v.render_to(i, edit=True)
+
+    async def _cb_categories(self, i):
+        v = LogsCategoriesPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+    async def _cb_disable(self, i):
+        try:
+            await ulogger2026.set_log_channel(self.g.id, 0)
+        except Exception as ex:
+            print(f"[LogsPanelV2 disable] {ex}")
+        await self.render_to(i, edit=True)
+
+    async def _cb_back(self, i):
+        v = MainPanelV2(self.u, self.g)
+        await i.response.edit_message(view=v, embed=None, attachments=[])
+
+
+class LogsCategoriesPanelV2(LayoutView):
+    """Sous-panel : toggle des catégories de logs."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        cats_enabled = await ulogger2026.get_enabled_categories(self.g.id)
+        all_cats = sorted(set(m["cat"] for m in ulogger2026.EVENT_META.values()))
+
+        self.clear_items()
+        items: list = []
+        items.append(v2_title("🎛️ Catégories de logs"))
+        items.append(v2_subtitle("Coche/décoche les catégories à logger dans le salon unifié"))
+        items.append(v2_divider())
+
+        # Compter combien d'event types par catégorie
+        cat_counts = {}
+        for ev_type, meta in ulogger2026.EVENT_META.items():
+            cat_counts[meta["cat"]] = cat_counts.get(meta["cat"], 0) + 1
+
+        cat_emojis = {
+            "Modération": "🔨", "Sécurité": "🛡️", "Membres": "👥",
+            "Messages": "💬", "Vocal": "🎤", "Serveur": "🏷️",
+            "Tickets": "🎫", "Config": "⚙️",
+        }
+
+        lines = []
+        for c in all_cats:
+            emoji = cat_emojis.get(c, "📋")
+            count = cat_counts.get(c, 0)
+            state = "✅ Activée" if c in cats_enabled else "❌ Désactivée"
+            lines.append(f"{emoji} **{c}** · {count} types d'évènements · {state}")
+        items.append(v2_body("\n".join(lines)))
+        items.append(v2_divider())
+        items.append(v2_subtitle("Utilise le menu ci-dessous pour cocher/décocher"))
+
+        # Select multi avec defaults
+        opts = []
+        for c in all_cats:
+            opts.append(discord.SelectOption(
+                label=c,
+                value=c,
+                default=(c in cats_enabled),
+                emoji=cat_emojis.get(c, "📋"),
+                description=f"{cat_counts.get(c, 0)} types d'évènements",
+            ))
+        sel = Select(
+            placeholder="Catégories actives…",
+            min_values=0,
+            max_values=len(opts),
+            options=opts,
+        )
+        sel.callback = self._cb_select
+        items.append(discord.ui.ActionRow(sel))
+
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2cats_back")
+        b_back.callback = self._cb_back
+        items.append(discord.ui.ActionRow(b_back))
+
+        self.add_item(v2_container(*items, color=Palette.PRIMARY))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_select(self, i):
+        try:
+            chosen = set(i.data.get('values', []))
+            await ulogger2026.set_enabled_categories(self.g.id, chosen)
+        except Exception as ex:
+            print(f"[LogsCategoriesPanelV2 _cb_select] {ex}")
+        await self.render_to(i, edit=True)
+
+    async def _cb_back(self, i):
+        v = LogsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -9449,6 +9657,32 @@ _STM_ICON = 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/Steam_ico
 # Utilisé comme avatar de TOUS les webhooks — garantit un logo uniforme
 _BOT_AVATAR_URL = None  # Sera défini dans on_ready
 
+
+# Phase 3.8 : warnings APIs mortes (Twitter Nitter, TikTok Cloudflare) - une fois par session par guild
+_api_dead_warned: set[tuple[int, str]] = set()  # {(guild_id, "twitter"|"tiktok"|...)}
+
+
+async def _warn_api_dead(guild, platform: str, reason: str):
+    """Envoie UN seul warning par session/guild/plateforme dans le salon de logs unifié."""
+    key = (guild.id, platform)
+    if key in _api_dead_warned:
+        return
+    _api_dead_warned.add(key)
+    try:
+        await ulogger2026.log_event(
+            bot, guild, ulogger2026.EventType.BOT_INFO,
+            title_override=f"⚠️ API {platform.title()} indisponible",
+            description=(
+                f"**Les publications {platform} ne peuvent pas être détectées automatiquement.**\n\n"
+                f"📡 Cause : {reason}\n\n"
+                "💡 Solution : publie manuellement dans le salon configuré. "
+                "Le bot continuera de vérifier au cas où l'API revient."
+            ),
+            extra={"🛠️ Action": "Aucune (la détection auto est en panne)"},
+        )
+    except Exception as ex:
+        print(f"[_warn_api_dead] {platform}: {ex}")
+
 # Profils webhooks : avatar est TOUJOURS None → remplacé par l'avatar du bot dans webhook_send
 WEBHOOK_PROFILES = {
     # ─── Réseaux sociaux ───
@@ -9510,8 +9744,12 @@ async def get_webhook(channel, platform: str):
 async def webhook_send(channel, platform: str, embed=None, content=None, file=None, files=None, embeds=None, view=None):
     """Envoie un message via webhook avec le profil de la plateforme.
     Supporte: content, embed, embeds, file, files, view
-    Fallback automatique sur channel.send si webhook impossible."""
-    
+    Fallback automatique sur channel.send si webhook impossible.
+
+    Phase 3.8 : logging exhaustif des échecs pour traquer les publications fantômes.
+    """
+    chan_info = f"#{getattr(channel, 'name', '?')}/{getattr(channel, 'id', '?')}"
+
     def _build_kwargs(include_profile=True):
         kw = {}
         if content is not None: kw['content'] = content
@@ -9534,27 +9772,73 @@ async def webhook_send(channel, platform: str, embed=None, content=None, file=No
                     pass  # Bot pas encore prêt
             kw['wait'] = True
         return kw
-    
+
+    # Sanity check : au moins UN payload est requis pour envoyer
+    _kw_check = _build_kwargs(False)
+    if not _kw_check:
+        print(f"[webhook_send] {platform} {chan_info}: AUCUN payload (content/embed/file vide)")
+        return None
+
     wh = await get_webhook(channel, platform)
     if not wh:
-        return await channel.send(**_build_kwargs(False)) if _build_kwargs(False) else None
-    
+        # Pas de webhook dispo : fallback channel.send
+        try:
+            return await channel.send(**_build_kwargs(False))
+        except discord.Forbidden as ex:
+            print(f"[webhook_send] {platform} {chan_info}: FORBIDDEN (permissions manquantes) : {ex}")
+            return None
+        except discord.HTTPException as ex:
+            print(f"[webhook_send] {platform} {chan_info}: HTTPException fallback channel.send : {ex}")
+            return None
+        except Exception as ex:
+            print(f"[webhook_send] {platform} {chan_info}: erreur inattendue channel.send : {type(ex).__name__}: {ex}")
+            return None
+
     try:
         return await wh.send(**_build_kwargs(True))
-    except (discord.NotFound, discord.InvalidData):
+    except (discord.NotFound, discord.InvalidData) as ex:
+        print(f"[webhook_send] {platform} {chan_info}: webhook invalide ({type(ex).__name__}), recréation")
         cache_key = (channel.id, platform)
         _webhook_cache.pop(cache_key, None)
         try:
             wh = await channel.create_webhook(name=f"Bot-{platform}", reason=f"Recréation webhook {platform}")
             _webhook_cache[cache_key] = wh
             return await wh.send(**_build_kwargs(True))
-        except:
-            return await channel.send(**_build_kwargs(False)) if _build_kwargs(False) else None
-    except Exception as ex:
-        print(f"Erreur webhook {platform}: {ex}")
+        except discord.Forbidden:
+            print(f"[webhook_send] {platform} {chan_info}: FORBIDDEN à la recréation webhook, fallback channel.send")
+            try:
+                return await channel.send(**_build_kwargs(False))
+            except Exception as ex2:
+                print(f"[webhook_send] {platform} {chan_info}: fallback aussi échoué : {ex2}")
+                return None
+        except Exception as ex2:
+            print(f"[webhook_send] {platform} {chan_info}: recréation webhook échouée : {ex2}")
+            try:
+                return await channel.send(**_build_kwargs(False))
+            except Exception as ex3:
+                print(f"[webhook_send] {platform} {chan_info}: fallback aussi échoué : {ex3}")
+                return None
+    except discord.Forbidden as ex:
+        print(f"[webhook_send] {platform} {chan_info}: FORBIDDEN webhook.send : {ex}")
         try:
-            return await channel.send(**_build_kwargs(False)) if _build_kwargs(False) else None
-        except:
+            return await channel.send(**_build_kwargs(False))
+        except Exception as ex2:
+            print(f"[webhook_send] {platform} {chan_info}: fallback channel.send échoué : {ex2}")
+            return None
+    except discord.HTTPException as ex:
+        # Inclut 40062 (rate-limited), 50013 (perms), etc.
+        print(f"[webhook_send] {platform} {chan_info}: HTTPException status={getattr(ex, 'status', '?')} code={getattr(ex, 'code', '?')} : {ex}")
+        try:
+            return await channel.send(**_build_kwargs(False))
+        except Exception as ex2:
+            print(f"[webhook_send] {platform} {chan_info}: fallback channel.send échoué : {ex2}")
+            return None
+    except Exception as ex:
+        print(f"[webhook_send] {platform} {chan_info}: erreur inattendue webhook : {type(ex).__name__}: {ex}")
+        try:
+            return await channel.send(**_build_kwargs(False))
+        except Exception as ex2:
+            print(f"[webhook_send] {platform} {chan_info}: fallback channel.send échoué : {ex2}")
             return None
 
 async def webhook_edit(channel, platform: str, message_id: int, embed=None, content=None, view=discord.utils.MISSING):
@@ -24418,10 +24702,8 @@ async def configure_cmd(i: discord.Interaction):
         pass
 
     # ═══════════════ OWNER ONLY - Sécurité maximale ═══════════════
-    BOT_SUPER_OWNER = 781205382923288593  # GoRipe - Super Owner
-
     is_guild_owner = i.user.id == i.guild.owner_id
-    is_super_owner = i.user.id == BOT_SUPER_OWNER
+    is_super_owner = i.user.id == SUPER_OWNER_ID
 
     if not (is_guild_owner or is_super_owner):
         owner_mention = i.guild.owner.mention if i.guild.owner else "_Inconnu_"
@@ -24474,7 +24756,7 @@ logs_group = app_commands.Group(name="logs", description="📋 Logs unifiés du 
 @logs_group.command(name="setchannel", description="📍 Définir le salon unique où vont TOUS les logs")
 @app_commands.describe(salon="Salon de destination (laisser vide pour désactiver)")
 async def logs_setchannel(i: discord.Interaction, salon: discord.TextChannel = None):
-    if i.user.id != i.guild.owner_id and i.user.id != 781205382923288593:
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
         return await i.response.send_message(
             "⛔ Cette commande est réservée au propriétaire du serveur.", ephemeral=True,
         )
@@ -24521,7 +24803,7 @@ async def logs_setchannel(i: discord.Interaction, salon: discord.TextChannel = N
 
 @logs_group.command(name="status", description="📊 Voir la configuration actuelle des logs unifiés")
 async def logs_status(i: discord.Interaction):
-    if i.user.id != i.guild.owner_id and i.user.id != 781205382923288593:
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
         return await i.response.send_message(
             "⛔ Cette commande est réservée au propriétaire du serveur.", ephemeral=True,
         )
@@ -24596,7 +24878,7 @@ class LogsCategoriesSelect(Select):
 
 @logs_group.command(name="categories", description="🎛️ Choisir les catégories de logs à activer")
 async def logs_categories(i: discord.Interaction):
-    if i.user.id != i.guild.owner_id and i.user.id != 781205382923288593:
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
         return await i.response.send_message(
             "⛔ Cette commande est réservée au propriétaire du serveur.", ephemeral=True,
         )
@@ -25011,7 +25293,7 @@ async def direction_cmd(i: discord.Interaction, membre: discord.Member, duree: i
     allowed_role_id = c.get('direction_allowed_role', 0)
     allowed_user_id = c.get('direction_allowed_user', 0)
     is_owner = i.user.id == i.guild.owner_id
-    is_super = i.user.id == 781205382923288593
+    is_super = i.user.id == SUPER_OWNER_ID
     has_role = any(r.id == allowed_role_id for r in i.user.roles) if allowed_role_id else False
     is_user = i.user.id == allowed_user_id if allowed_user_id else False
 
@@ -25111,7 +25393,7 @@ async def undirection_cmd(i: discord.Interaction, membre: discord.Member, raison
     allowed_role_id = c.get('direction_allowed_role', 0)
     allowed_user_id = c.get('direction_allowed_user', 0)
     is_owner = i.user.id == i.guild.owner_id
-    is_super = i.user.id == 781205382923288593
+    is_super = i.user.id == SUPER_OWNER_ID
     has_role = any(r.id == allowed_role_id for r in i.user.roles) if allowed_role_id else False
     is_user = i.user.id == allowed_user_id if allowed_user_id else False
 
@@ -28201,6 +28483,9 @@ async def check_youtube_feeds(session, guild, data):
                 # Trop vieux -> record sans poster
                 if published_at and not _is_recent_iso(published_at, BACKFILL_MAX_AGE_DAYS):
                     try:
+                        # Note Phase 3.8 : pour YouTube, le 3e arg `username` reçoit le YouTube UC ID
+                        # (string "UCxxxxx"). C'est consistant et la dedup marche, juste sémantiquement
+                        # ce n'est pas un username humain.
                         await tracking2026.record_post(
                             guild.id, "youtube", channel_id, video_id,
                             channel_id=target_channel.id, message_id=0,
@@ -28546,6 +28831,15 @@ async def check_tiktok_feeds(session, guild, data):
 
                 if not video_ids:
                     print(f"[TIKTOK] @{username} : aucune video detectee (page contient probablement un challenge anti-bot)")
+                    # Phase 3.8 : warn UNE seule fois par session que TikTok scraping ne marche pas
+                    try:
+                        await _warn_api_dead(
+                            guild, "tiktok",
+                            "TikTok bloque le scraping HTML via Cloudflare. Pour une détection fiable, "
+                            "il faut une API payante (TikAPI.io) ou Playwright/Selenium.",
+                        )
+                    except Exception:
+                        pass
                     continue
                 
                 latest_video_id = video_ids[0]
@@ -28850,6 +29144,14 @@ async def check_twitter_feeds(session, guild, data):
 
             if not tweet_id:
                 print(f"[TWITTER] ⚠️ Aucune source disponible pour @{username}")
+                # Phase 3.8 : warn UNE seule fois par session que Nitter+Syndication sont morts
+                try:
+                    await _warn_api_dead(
+                        guild, "twitter",
+                        "Nitter instances down depuis 2024, Twitter Syndication 429 depuis cloud.",
+                    )
+                except Exception:
+                    pass
                 continue
 
             if not tweet_link:
@@ -30902,10 +31204,15 @@ async def leaderboard_cmd(i: discord.Interaction):
     await i.response.send_message(view=view)
 
 
-@bot.tree.command(name="testdeals", description="🎮 [Admin] Tester le système de promotions de jeux")
+@bot.tree.command(name="testdeals", description="🎮 [Owner] Tester le système de promotions de jeux")
 @app_commands.default_permissions(administrator=True)
 async def testdeals_cmd(i: discord.Interaction):
-    """Force la vérification des promotions de jeux"""
+    """Force la vérification des promotions de jeux (Owner-only)"""
+    # Phase 3.8 : owner-only même si admin
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message(
+            "⛔ Réservé au propriétaire du serveur.", ephemeral=True,
+        )
     await i.response.defer(ephemeral=True)
     
     c = await cfg(i.guild.id)
@@ -30969,10 +31276,15 @@ async def testdeals_cmd(i: discord.Interaction):
     except Exception as ex:
         await i.followup.send(f"❌ Erreur lors de la vérification: {str(ex)}")
 
-@bot.tree.command(name="cleardeals", description="🗑️ [Admin] Supprimer tous les deals postés et réinitialiser")
+@bot.tree.command(name="cleardeals", description="🗑️ [Owner] Supprimer tous les deals postés et réinitialiser")
 @app_commands.default_permissions(administrator=True)
 async def cleardeals_cmd(i: discord.Interaction):
-    """Supprime tous les deals postés et leurs messages"""
+    """Supprime tous les deals postés et leurs messages (Owner-only - destructif)"""
+    # Phase 3.8 : owner-only car opération destructive (supprime DB + messages Discord)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message(
+            "⛔ Réservé au propriétaire du serveur (opération destructive).", ephemeral=True,
+        )
     await i.response.defer(ephemeral=True)
     
     deleted = 0

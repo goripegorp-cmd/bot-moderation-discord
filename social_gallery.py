@@ -193,8 +193,9 @@ def build_gallery_view(
     else:
         # Chaque post = une Section avec thumbnail + texte propre
         for tp in posts:
-            title = (tp.post_title or 'Voir la publication').strip()[:90]
-            url = tp.post_url or 'https://discord.com'
+            # Phase 3.8 : TrackedPost utilise .title et .url (pas .post_title / .post_url)
+            title = (getattr(tp, 'title', None) or 'Voir la publication').strip()[:90]
+            url = getattr(tp, 'url', None) or 'https://discord.com'
 
             # Construction du body text avec icone par type
             type_icon = {
