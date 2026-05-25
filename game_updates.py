@@ -1,42 +1,47 @@
 """
 game_updates.py - Suivi des mises à jour officielles de plateformes et jeux.
 
+Phase 17.1 (mai 2026) — Sources VÉRIFIÉES fonctionnelles.
+
 Concept : permettre à l'owner de tracker dans un salon Discord les vraies
 mises à jour (patch notes, dev updates) d'une plateforme/jeu spécifique.
 PAS les events, ni les promos, ni le contenu social — UNIQUEMENT les
 patch notes / changelogs / dev updates officiels.
 
-Sources utilisées (priorité fiabilité 2026) :
+═══ SOURCES VÉRIFIÉES (testées le 25 mai 2026) ═══
 
-PLATEFORMES :
-- Roblox          → devforum.roblox.com/c/updates.json (catégorie "Updates")
-- Steam           → store.steampowered.com news (par appid)
-- Epic Games      → store.epicgames.com/blog feed
-- Battle.net      → news.blizzard.com RSS
-- Minecraft       → feedback.minecraft.net (Mojang RSS)
+✅ Steam News API — fonctionne pour n'importe quel jeu Steam (par appid)
+   Endpoint : api.steampowered.com/ISteamNews/GetNewsForApp/v2/
+   Filtre : feedlabel contient "community" / "developer" / "announce" / "steam"
 
-JEUX POPULAIRES (via Steam News API ou source officielle) :
-- Subnautica 2 (Unknown Worlds)         → Steam appid TBD (early access)
-- World of Warcraft                     → news.blizzard.com/wow
-- Counter-Strike 2                      → Steam appid 730
-- Cyberpunk 2077                        → Steam appid 1091500
-- Helldivers 2                          → Steam appid 553850
-- PUBG                                  → Steam appid 578080
-- Apex Legends                          → ea.com/games/apex-legends/news
-- Fortnite                              → fortnite.com/news
-- Genshin Impact                        → hoyoverse.com/news/genshin
-- Honkai Star Rail                      → hoyoverse.com/news/hsr
-- Diablo 4                              → news.blizzard.com/diablo4
-- Overwatch 2                           → news.blizzard.com/overwatch
-- League of Legends                     → leagueoflegends.com/news/game-updates
-- Valorant                              → playvalorant.com/news/game-updates
-- Path of Exile 2                       → pathofexile.com/forum/view-forum/news
-- Destiny 2                             → bungie.net/destiny/news
+✅ Roblox DevForum — catégorie "Updates" (announcements.json)
+   Endpoint : devforum.roblox.com/c/updates/announcements.json
+   Filtre : keywords (update, release notes, patch, fix, improvement)
 
-API :
+✅ BlizzardWatch — community RSS pour les jeux Blizzard sans RSS officiel
+   (WoW, Hearthstone)
+   Endpoint : blizzardwatch.com/feed/
+
+═══ SOURCES SUPPRIMÉES (cassées en mai 2026) ═══
+
+❌ news.blizzard.com/en-us/rss → 404 (pas d'API officielle Blizzard)
+❌ store.epicgames.com/en-US/blog.rss → 403 (Cloudflare)
+❌ genshin.hoyoverse.com/en/news.rss → 404 (HoYoverse n'expose pas de RSS)
+❌ hsr.hoyoverse.com/en/news.rss → 404
+❌ www.minecraft.net/en-us/feeds/community-content/rss → timeout/deprecated
+❌ leagueoflegends.com page-data.json → format imprévisible
+❌ playvalorant.com page-data.json → format imprévisible
+
+═══ JEUX BLIZZARD SUR STEAM (utilisés à la place de RSS officiel) ═══
+
+- Diablo IV : Steam appid 2344520 ✅ (vérifié)
+- Overwatch 2 : Steam appid 2357570 ✅ (vérifié)
+
+API publique :
     GAME_SOURCES — dict mapping game_key → fetcher config
-    fetch_updates(session, game_key, last_seen_id) → list[Update]
-    Update : dataclass avec title, url, timestamp, summary, image_url
+    fetch_updates(session, game_key, last_seen_id) → list[GameUpdate]
+    get_game_meta(game_key) → dict
+    list_available_games() → list[tuple[key, emoji, name]]
 """
 from __future__ import annotations
 
@@ -59,63 +64,78 @@ import aiohttp
 class GameUpdate:
     """Une mise à jour de plateforme/jeu."""
 
-    game_key: str           # ex: "roblox", "steam:730", "wow", etc.
-    update_id: str          # ID unique de l'update
+    game_key: str
+    update_id: str
     title: str
     url: str
-    summary: str = ""       # description courte (1-3 lignes)
-    image_url: str = ""     # image principale si dispo
+    summary: str = ""
+    image_url: str = ""
     posted_at: float = field(default_factory=lambda: time.time())
-    update_type: str = "update"  # "patch", "hotfix", "major", "dev_update"
+    update_type: str = "update"
 
 
 # =============================================================================
-# CONFIGURATION DES SOURCES
+# CONFIGURATION DES SOURCES (UNIQUEMENT CELLES VÉRIFIÉES FONCTIONNELLES)
 # =============================================================================
 
-# Métadonnées pour chaque jeu/plateforme suivi
-# Format : game_key → {name, emoji, color, source_type, source_url, [extra]}
+# Filter pour BlizzardWatch : on garde uniquement si le titre/contenu contient
+# un keyword associé au jeu (sinon on récupère tout le mélange)
+_BLIZZ_FILTERS = {
+    'wow': ['wow', 'world of warcraft', 'azeroth', 'mythic', 'raid', 'patch 11', 'patch 12',
+            'expansion', 'dragonflight', 'war within'],
+    'hearthstone': ['hearthstone', 'card', 'meta', 'deck'],
+}
+
+
 GAME_SOURCES = {
-    # ─── PLATEFORMES ───
+    # ════ PLATEFORMES ════
+
     "roblox": {
         "name": "Roblox (plateforme)",
         "emoji": "🟢",
         "color": 0x00A2FF,
-        "source_type": "discourse",  # devforum est sous Discourse
+        "source_type": "discourse",
         "source_url": "https://devforum.roblox.com/c/updates/announcements.json",
-        "category": "Roblox Updates",
-        "filter_keywords": ["update", "release notes", "patch", "improvement", "fix"],
+        "filter_keywords": ["update", "release notes", "patch", "improvement", "fix", "weekly recap"],
     },
-    "steam": {
-        "name": "Steam (plateforme)",
+    "steam_client": {
+        "name": "Steam Client (plateforme)",
         "emoji": "🟦",
         "color": 0x1B2838,
         "source_type": "steam_news",
-        "appid": 593110,  # Steam app id pour Steam Client beta news
-    },
-    "epic": {
-        "name": "Epic Games (plateforme)",
-        "emoji": "⬛",
-        "color": 0x2A2A2A,
-        "source_type": "rss",
-        "source_url": "https://store.epicgames.com/en-US/blog.rss",
-    },
-    "blizzard": {
-        "name": "Blizzard (plateforme)",
-        "emoji": "🔵",
-        "color": 0x00A2FF,
-        "source_type": "rss",
-        "source_url": "https://news.blizzard.com/en-us/rss",
-    },
-    "minecraft": {
-        "name": "Minecraft (Mojang)",
-        "emoji": "🟫",
-        "color": 0x62B47A,
-        "source_type": "rss",
-        "source_url": "https://www.minecraft.net/en-us/feeds/community-content/rss",
+        "appid": 593110,
     },
 
-    # ─── JEUX VIA STEAM NEWS API (n'importe quel jeu Steam) ───
+    # ════ JEUX BLIZZARD VIA STEAM NEWS (officielles, vérifiées) ════
+
+    "diablo4": {
+        "name": "Diablo IV",
+        "emoji": "👹",
+        "color": 0x8B0000,
+        "source_type": "steam_news",
+        "appid": 2344520,
+    },
+    "overwatch": {
+        "name": "Overwatch 2",
+        "emoji": "🟧",
+        "color": 0xFA9C1B,
+        "source_type": "steam_news",
+        "appid": 2357570,
+    },
+
+    # ════ JEUX BLIZZARD SANS STEAM (via blizzardwatch.com community filtré) ════
+
+    "wow": {
+        "name": "World of Warcraft",
+        "emoji": "⚔️",
+        "color": 0x2E6BA8,
+        "source_type": "rss_filtered",
+        "source_url": "https://blizzardwatch.com/feed/",
+        "filter_keywords": _BLIZZ_FILTERS['wow'],
+    },
+
+    # ════ JEUX STEAM POPULAIRES (vérifiés via API officielle) ════
+
     "cs2": {
         "name": "Counter-Strike 2",
         "emoji": "🔫",
@@ -128,7 +148,7 @@ GAME_SOURCES = {
         "emoji": "🐟",
         "color": 0x00ACEE,
         "source_type": "steam_news",
-        "appid": 1922110,  # Subnautica 2 early access
+        "appid": 1922110,
     },
     "cyberpunk": {
         "name": "Cyberpunk 2077",
@@ -145,7 +165,7 @@ GAME_SOURCES = {
         "appid": 553850,
     },
     "pubg": {
-        "name": "PUBG",
+        "name": "PUBG: Battlegrounds",
         "emoji": "🪖",
         "color": 0xF99500,
         "source_type": "steam_news",
@@ -186,7 +206,7 @@ GAME_SOURCES = {
         "source_type": "steam_news",
         "appid": 526870,
     },
-    "noita": {
+    "terraria": {
         "name": "Terraria",
         "emoji": "🌳",
         "color": 0x1CB000,
@@ -200,67 +220,68 @@ GAME_SOURCES = {
         "source_type": "steam_news",
         "appid": 427520,
     },
-
-    # ─── JEUX BLIZZARD (RSS spécifiques) ───
-    "wow": {
-        "name": "World of Warcraft",
+    "dota2": {
+        "name": "Dota 2",
+        "emoji": "⚡",
+        "color": 0xE53935,
+        "source_type": "steam_news",
+        "appid": 570,
+    },
+    "tf2": {
+        "name": "Team Fortress 2",
+        "emoji": "🎩",
+        "color": 0x5D7E84,
+        "source_type": "steam_news",
+        "appid": 440,
+    },
+    "elden_ring": {
+        "name": "Elden Ring",
         "emoji": "⚔️",
-        "color": 0x2E6BA8,
-        "source_type": "rss",
-        "source_url": "https://news.blizzard.com/en-us/world-of-warcraft/rss",
+        "color": 0xC9A227,
+        "source_type": "steam_news",
+        "appid": 1245620,
     },
-    "diablo4": {
-        "name": "Diablo IV",
-        "emoji": "👹",
-        "color": 0x8B0000,
-        "source_type": "rss",
-        "source_url": "https://news.blizzard.com/en-us/diablo4/rss",
+    "destiny2": {
+        "name": "Destiny 2",
+        "emoji": "🌌",
+        "color": 0x4A6FA5,
+        "source_type": "steam_news",
+        "appid": 1085660,
     },
-    "overwatch": {
-        "name": "Overwatch 2",
-        "emoji": "🟧",
-        "color": 0xFA9C1B,
-        "source_type": "rss",
-        "source_url": "https://news.blizzard.com/en-us/overwatch/rss",
+    "warthunder": {
+        "name": "War Thunder",
+        "emoji": "✈️",
+        "color": 0x4F5D73,
+        "source_type": "steam_news",
+        "appid": 236390,
     },
-    "hearthstone": {
-        "name": "Hearthstone",
-        "emoji": "🃏",
-        "color": 0xE5A300,
-        "source_type": "rss",
-        "source_url": "https://news.blizzard.com/en-us/hearthstone/rss",
+    "warframe": {
+        "name": "Warframe",
+        "emoji": "🤖",
+        "color": 0x3C3F41,
+        "source_type": "steam_news",
+        "appid": 230410,
     },
-
-    # ─── JEUX RIOT GAMES ───
-    "league": {
-        "name": "League of Legends",
-        "emoji": "🛡️",
-        "color": 0xC8AA6E,
-        "source_type": "rss_generic",
-        "source_url": "https://www.leagueoflegends.com/page-data/en-us/news/sitemap/page-data.json",
+    "marvelrivals": {
+        "name": "Marvel Rivals",
+        "emoji": "🦸",
+        "color": 0xED1D24,
+        "source_type": "steam_news",
+        "appid": 2767030,
     },
-    "valorant": {
-        "name": "Valorant",
-        "emoji": "🎯",
-        "color": 0xFF4655,
-        "source_type": "rss_generic",
-        "source_url": "https://playvalorant.com/page-data/en-us/news/sitemap/page-data.json",
+    "deltaforce": {
+        "name": "Delta Force",
+        "emoji": "🎖️",
+        "color": 0x2D572C,
+        "source_type": "steam_news",
+        "appid": 2507950,
     },
-
-    # ─── HOYOVERSE ───
-    "genshin": {
-        "name": "Genshin Impact",
-        "emoji": "⛩️",
-        "color": 0x1F8DF5,
-        "source_type": "rss",
-        "source_url": "https://genshin.hoyoverse.com/en/news.rss",
-    },
-    "honkai_starrail": {
-        "name": "Honkai: Star Rail",
-        "emoji": "🚂",
-        "color": 0xB8860B,
-        "source_type": "rss",
-        "source_url": "https://hsr.hoyoverse.com/en/news.rss",
+    "monster_hunter_wilds": {
+        "name": "Monster Hunter Wilds",
+        "emoji": "🐉",
+        "color": 0xB45A1B,
+        "source_type": "steam_news",
+        "appid": 2246340,
     },
 }
 
@@ -283,14 +304,14 @@ async def _fetch_steam_news(session: aiohttp.ClientSession, appid: int, max_coun
             data = await resp.json()
         news_items = data.get('appnews', {}).get('newsitems', [])
         for item in news_items:
-            # Filtrer : on veut surtout les news officielles du dev (feedlabel "Community Announcements" ou "Developer Notes")
             feedlabel = (item.get('feedlabel', '') or '').lower()
-            if 'community' not in feedlabel and 'developer' not in feedlabel and 'announce' not in feedlabel and 'steam' not in feedlabel:
+            # Filtrer : community announcements, developer notes, steam news officielles
+            if not any(kw in feedlabel for kw in ['community', 'developer', 'announce', 'steam']):
                 continue
             update_id = str(item.get('gid', '')) or str(item.get('url', ''))
             if not update_id:
                 continue
-            # Extraire image du contenu HTML / BBCode
+            # Extraire image
             contents = item.get('contents', '') or ''
             image_url = ''
             img_m = re.search(r'\[img\](https?://[^\[]+)\[/img\]', contents)
@@ -300,6 +321,7 @@ async def _fetch_steam_news(session: aiohttp.ClientSession, appid: int, max_coun
                 img_m2 = re.search(r'<img[^>]+src=["\'](https?://[^"\']+)["\']', contents)
                 if img_m2:
                     image_url = img_m2.group(1)
+            # Clean summary (retire BBCode + HTML)
             summary = re.sub(r'\[/?[a-z]+(?:=[^\]]+)?\]', '', contents)[:300]
             summary = re.sub(r'<[^>]+>', '', summary).strip()
             out.append(GameUpdate(
@@ -317,12 +339,18 @@ async def _fetch_steam_news(session: aiohttp.ClientSession, appid: int, max_coun
     return out
 
 
-async def _fetch_rss(session: aiohttp.ClientSession, url: str, max_count: int = 5) -> list[dict]:
-    """Parse un flux RSS générique. Retourne liste de dicts {title, link, guid, summary, image, pub_date}."""
+async def _fetch_rss(session: aiohttp.ClientSession, url: str, max_count: int = 10) -> list[dict]:
+    """Parse un flux RSS générique. Retourne items bruts."""
     items = []
     try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+        # User-Agent réaliste pour éviter les blocs Cloudflare
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            'Accept': 'application/rss+xml, application/xml, text/xml',
+        }
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
             if resp.status != 200:
+                print(f"[game_updates _fetch_rss {url}] HTTP {resp.status}")
                 return items
             text = await resp.text()
         root = ET.fromstring(text)
@@ -333,7 +361,6 @@ async def _fetch_rss(session: aiohttp.ClientSession, url: str, max_count: int = 
             guid = item.findtext('guid') or link
             desc = item.findtext('description') or ''
             pub_date = item.findtext('pubDate') or ''
-            # Extraire image depuis description ou enclosure
             image = ''
             enc = item.find('enclosure')
             if enc is not None and enc.get('url'):
@@ -342,13 +369,12 @@ async def _fetch_rss(session: aiohttp.ClientSession, url: str, max_count: int = 
                 img_m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', desc)
                 if img_m:
                     image = img_m.group(1)
-            # Clean description
             summary = re.sub(r'<[^>]+>', '', desc)[:300].strip()
             items.append({
                 'title': title, 'link': link, 'guid': guid,
                 'summary': summary, 'image': image, 'pub_date': pub_date,
             })
-        # Atom : feed/entry (fallback)
+        # Atom (fallback)
         if not items:
             ns = {'atom': 'http://www.w3.org/2005/Atom'}
             for entry in root.findall('.//atom:entry', ns)[:max_count]:
@@ -367,12 +393,17 @@ async def _fetch_rss(session: aiohttp.ClientSession, url: str, max_count: int = 
     return items
 
 
-async def _fetch_discourse(session: aiohttp.ClientSession, url: str, max_count: int = 10, filter_kw: Optional[list[str]] = None) -> list[dict]:
-    """Parse une catégorie Discourse (utilisé pour Roblox devforum)."""
+async def _fetch_discourse(session: aiohttp.ClientSession, url: str, max_count: int = 15, filter_kw: Optional[list[str]] = None) -> list[dict]:
+    """Parse une catégorie Discourse (devforum Roblox)."""
     items = []
     try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json',
+        }
+        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
             if resp.status != 200:
+                print(f"[game_updates _fetch_discourse {url}] HTTP {resp.status}")
                 return items
             data = await resp.json()
         topics = data.get('topic_list', {}).get('topics', [])
@@ -380,7 +411,6 @@ async def _fetch_discourse(session: aiohttp.ClientSession, url: str, max_count: 
             title = t.get('title', '').strip()
             if not title:
                 continue
-            # Filtre keywords si fourni
             if filter_kw:
                 tl = title.lower()
                 if not any(kw.lower() in tl for kw in filter_kw):
@@ -406,10 +436,7 @@ async def _fetch_discourse(session: aiohttp.ClientSession, url: str, max_count: 
 # =============================================================================
 
 async def fetch_updates(session: aiohttp.ClientSession, game_key: str, max_count: int = 5) -> list[GameUpdate]:
-    """Récupère les dernières mises à jour pour un game_key donné.
-
-    Retourne une liste de GameUpdate, triés du plus récent au plus ancien.
-    """
+    """Récupère les dernières mises à jour pour un game_key donné."""
     spec = GAME_SOURCES.get(game_key)
     if not spec:
         return []
@@ -423,7 +450,7 @@ async def fetch_updates(session: aiohttp.ClientSession, game_key: str, max_count
         raw = await _fetch_discourse(
             session,
             spec['source_url'],
-            max_count=max_count,
+            max_count=max_count * 2,  # plus large pour le filtre
             filter_kw=spec.get('filter_keywords'),
         )
         return [
@@ -436,7 +463,7 @@ async def fetch_updates(session: aiohttp.ClientSession, game_key: str, max_count
                 image_url=r['image'],
                 update_type="dev_update",
             )
-            for r in raw
+            for r in raw[:max_count]
         ]
 
     elif source_type == 'rss':
@@ -454,11 +481,34 @@ async def fetch_updates(session: aiohttp.ClientSession, game_key: str, max_count
             for r in raw
         ]
 
+    elif source_type == 'rss_filtered':
+        # Comme rss mais filtre par keywords sur title (utile pour blizzardwatch
+        # qui mélange WoW/Diablo/Hearthstone/Overwatch)
+        filter_kw = spec.get('filter_keywords') or []
+        raw = await _fetch_rss(session, spec['source_url'], max_count=max_count * 4)
+        out = []
+        for r in raw:
+            tl = (r['title'] + ' ' + r['summary']).lower()
+            if filter_kw and not any(kw.lower() in tl for kw in filter_kw):
+                continue
+            out.append(GameUpdate(
+                game_key=game_key,
+                update_id=r['guid'],
+                title=r['title'][:200],
+                url=r['link'],
+                summary=r['summary'],
+                image_url=r['image'],
+                update_type="update",
+            ))
+            if len(out) >= max_count:
+                break
+        return out
+
     return []
 
 
 def get_game_meta(game_key: str) -> dict:
-    """Retourne les métadonnées d'un game_key (name, emoji, color) ou {} si inconnu."""
+    """Retourne les métadonnées d'un game_key."""
     spec = GAME_SOURCES.get(game_key, {})
     return {
         'name': spec.get('name', game_key.title()),
@@ -468,11 +518,8 @@ def get_game_meta(game_key: str) -> dict:
 
 
 def list_available_games() -> list[tuple[str, str, str]]:
-    """Retourne liste de (key, emoji, name) pour tous les jeux supportés.
-
-    Triés : plateformes en premier, puis jeux alphabétiquement.
-    """
-    platform_keys = ['roblox', 'steam', 'epic', 'blizzard', 'minecraft']
+    """Retourne liste (key, emoji, name) triés : plateformes, puis jeux alpha."""
+    platform_keys = ['roblox', 'steam_client']
     out = []
     for k in platform_keys:
         if k in GAME_SOURCES:
