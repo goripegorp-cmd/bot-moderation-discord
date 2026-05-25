@@ -230,22 +230,6 @@ register_help(
     example="/config permissions",
 )
 
-register_help(
-    key="backup_intro",
-    title="Sauvegarde & restauration",
-    description=(
-        "Avant tout changement majeur, fais une sauvegarde :\n"
-        "- `/backup create` - exporte la config en JSON\n"
-        "- `/backup list` - voir les sauvegardes\n"
-        "- `/backup restore <id>` - restaure une sauvegarde\n\n"
-        "Les sauvegardes sont stockees pendant 30 jours."
-    ),
-    audiences=[Audience.HOST],
-    category="configuration",
-    icon="💾",
-    order=30,
-)
-
 
 # =============================================================================
 # RENDU UI (helpers pour Components V2)

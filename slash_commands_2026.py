@@ -26,7 +26,6 @@ from discord.ext import commands
 import permissions as perms_mod
 import protection_guards as guards_mod
 import community_features as comm_mod
-import backup_system as backup_mod
 import social_media as social_mod
 from vocabulary import Message as Msg, Status as S
 
@@ -404,76 +403,6 @@ async def prot_audit(interaction: discord.Interaction, limit: int = 10):
 
 
 # =============================================================================
-# /backup
-# =============================================================================
-
-backup_group = app_commands.Group(
-    name="backup",
-    description="Sauvegarder/restaurer la configuration (owner only)",
-)
-
-
-@backup_group.command(name="create", description="Crée une sauvegarde de la config actuelle")
-@_is_owner_check()
-@app_commands.describe(label="Libellé optionnel pour cette sauvegarde")
-async def backup_create(interaction: discord.Interaction, label: str = ""):
-    info = await backup_mod.create_backup(interaction.guild.id, label=label or None)
-    await interaction.response.send_message(
-        f"{S.DONE_ICON} Sauvegarde créée : `{info.backup_id}` ({info.size_bytes / 1024:.1f} KB)",
-        ephemeral=True,
-    )
-
-
-@backup_group.command(name="list", description="Liste les sauvegardes disponibles")
-@_is_owner_check()
-async def backup_list(interaction: discord.Interaction):
-    backups = await backup_mod.list_backups(interaction.guild.id)
-    if not backups:
-        return await interaction.response.send_message(
-            "_Aucune sauvegarde disponible._", ephemeral=True,
-        )
-    lines = ["**💾 Sauvegardes disponibles** :", ""]
-    for b in backups[:20]:
-        lines.append(backup_mod.format_backup_short(b))
-    await interaction.response.send_message("\n".join(lines)[:1900], ephemeral=True)
-
-
-@backup_group.command(name="restore", description="Restaure une sauvegarde par son ID")
-@_is_owner_check()
-@app_commands.describe(backup_id="ID de la sauvegarde (cf /backup list)")
-async def backup_restore(interaction: discord.Interaction, backup_id: str):
-    await interaction.response.defer(ephemeral=True)
-    report = await backup_mod.restore_backup(
-        interaction.guild.id, backup_id, auto_backup_before=True,
-    )
-    if report.success:
-        modules = ", ".join(report.restored_modules) or "—"
-        msg = (
-            f"{S.DONE_ICON} **Restauration OK** · modules : {modules}\n"
-            f"_Auto-backup pré-restore : `{report.pre_restore_backup_id}`_"
-        )
-    else:
-        errs = "; ".join(f"{k}: {v}" for k, v in report.errors.items())
-        msg = f"{S.ERROR_ICON} Échec : {errs}"
-    await interaction.followup.send(msg, ephemeral=True)
-
-
-@backup_group.command(name="delete", description="Supprime une sauvegarde par son ID")
-@_is_owner_check()
-@app_commands.describe(backup_id="ID de la sauvegarde")
-async def backup_delete(interaction: discord.Interaction, backup_id: str):
-    ok = await backup_mod.delete_backup(interaction.guild.id, backup_id)
-    if ok:
-        await interaction.response.send_message(
-            f"{S.DONE_ICON} Sauvegarde `{backup_id}` supprimée.", ephemeral=True,
-        )
-    else:
-        await interaction.response.send_message(
-            f"{S.ERROR_ICON} Sauvegarde `{backup_id}` introuvable.", ephemeral=True,
-        )
-
-
-# =============================================================================
 # /community
 # =============================================================================
 
@@ -542,7 +471,7 @@ def setup_all_commands(bot: discord.Client) -> None:
     tree = getattr(bot, "tree", None)
     if tree is None:
         return
-    for grp in (permissions_group, social_group, protection_group, backup_group, community_group):
+    for grp in (permissions_group, social_group, protection_group, community_group):
         try:
             tree.add_command(grp)
         except discord.app_commands.CommandAlreadyRegistered:
@@ -553,7 +482,6 @@ __all__ = [
     "permissions_group",
     "social_group",
     "protection_group",
-    "backup_group",
     "community_group",
     "setup_all_commands",
 ]

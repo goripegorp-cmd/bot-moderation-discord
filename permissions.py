@@ -60,8 +60,6 @@ COMMAND_CATEGORIES: dict[str, str] = {
     "config":       "configuration",
     "setup":        "configuration",
     "permissions":  "configuration",
-    "backup":       "configuration",
-    "restore":      "configuration",
 
     # --- Tickets ---
     "ticket_open":  "tickets",

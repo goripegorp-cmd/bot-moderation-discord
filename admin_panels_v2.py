@@ -10,7 +10,6 @@ Panneaux fournis :
     - SocialMediaPanelV2     - Abonnements reseaux sociaux
     - ProtectionPanelV2      - Politique de protection (soft/review/thresholds)
     - CommunityPanelV2       - Features communautaires (toggles)
-    - BackupPanelV2          - Sauvegarde / restauration
 
 Integration dans bot.py :
     from admin_panels_v2 import setup_admin_command, AdminMasterPanelV2
@@ -46,12 +45,6 @@ from community_features import (
     save_config as save_community_config,
     CommunityConfig,
 )
-import backup_system
-from backup_system import (
-    create_backup, list_backups, restore_backup, delete_backup,
-    BackupInfo, format_backup_short,
-)
-
 # Design system
 from ui_v2 import Palette
 from vocabulary import Action as A, Status as S, Module as Mod, Message as Msg
@@ -131,7 +124,6 @@ class AdminMasterPanelV2(_OwnerView):
 
         policy = await load_policy(self.guild.id)
         comm_cfg = await load_community_config(self.guild.id)
-        backups = await list_backups(self.guild.id)
 
         self.clear_items()
 
@@ -143,8 +135,6 @@ class AdminMasterPanelV2(_OwnerView):
         b_prot.callback = self._cb_prot
         b_comm = ui.Button(label=f"💬 {Mod.ENGAGEMENT}", style=discord.ButtonStyle.primary, custom_id="adm_comm")
         b_comm.callback = self._cb_comm
-        b_back = ui.Button(label=f"💾 {Mod.BACKUP}", style=discord.ButtonStyle.success, custom_id="adm_back")
-        b_back.callback = self._cb_backup
         b_close = ui.Button(label=A.CLOSE_ICON, style=discord.ButtonStyle.secondary, custom_id="adm_close")
         b_close.callback = self._cb_close
 
@@ -166,13 +156,12 @@ class AdminMasterPanelV2(_OwnerView):
                 ("📡 Réseaux sociaux", f"{len(social_subs)} abonnement(s) actif(s)"),
                 ("🛡️ Protection", " · ".join(protection_status)),
                 ("💬 Engagement", _summary_community(comm_cfg)),
-                ("💾 Sauvegardes", f"{len(backups)} disponible(s)"),
             ]),
             _divider(),
             _subtitle("Choisis un module ci-dessous pour le configurer."),
             _divider(),
             ui.ActionRow(b_perms, b_social, b_prot),
-            ui.ActionRow(b_comm, b_back, b_close),
+            ui.ActionRow(b_comm, b_close),
         ]
         self.add_item(_container(*items, color=Palette.PRIMARY))
 
@@ -192,9 +181,6 @@ class AdminMasterPanelV2(_OwnerView):
 
     async def _cb_comm(self, i: discord.Interaction):
         await CommunityPanelV2(self.owner, self.guild).render_to(i)
-
-    async def _cb_backup(self, i: discord.Interaction):
-        await BackupPanelV2(self.owner, self.guild).render_to(i)
 
     async def _cb_close(self, i: discord.Interaction):
         # Phase 3.9 fix : i.message.delete() sur ephemeral échoue silencieusement
@@ -1198,131 +1184,6 @@ class CommunityPanelV2(_OwnerView):
 
 
 # =============================================================================
-# BACKUP PANEL
-# =============================================================================
-
-class BackupPanelV2(_OwnerView):
-    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
-        backups = await list_backups(self.guild.id)
-
-        self.clear_items()
-
-        backups_lines = []
-        for b in backups[:10]:
-            backups_lines.append(format_backup_short(b))
-        backups_block = "\n".join(backups_lines) if backups_lines else "_Aucune sauvegarde_"
-
-        b_create = ui.Button(label="💾 Créer une sauvegarde", style=discord.ButtonStyle.success, custom_id="bck_create")
-        async def _create(i: discord.Interaction):
-            await i.response.defer(ephemeral=True)
-            info = await create_backup(self.guild.id, label=f"Manuel — {discord.utils.utcnow().strftime('%Y-%m-%d %H:%M')}")
-            await i.followup.send(
-                f"{S.DONE_ICON} Sauvegarde créée : `{info.backup_id}` ({info.size_bytes / 1024:.1f} KB)",
-                ephemeral=True,
-            )
-            await self.render_to(i, edit=False)
-        b_create.callback = _create
-
-        b_restore = ui.Button(
-            label="📥 Restaurer", style=discord.ButtonStyle.primary,
-            custom_id="bck_restore", disabled=(not backups),
-        )
-        async def _restore_open(i: discord.Interaction):
-            await BackupRestorePanel(self.owner, self.guild).render_to(i)
-        b_restore.callback = _restore_open
-
-        b_back = ui.Button(label=A.BACK_ICON, style=discord.ButtonStyle.secondary, custom_id="bck_back")
-        async def _back(i: discord.Interaction):
-            await AdminMasterPanelV2(self.owner, self.guild).render_to(i)
-        b_back.callback = _back
-
-        items = [
-            _title("💾 Sauvegardes"),
-            _subtitle("Sauvegarde la config avant tout changement majeur."),
-            _divider(),
-            _kv([
-                ("Total disponible", str(len(backups))),
-                ("Dernière en date", backups[0].created_at if backups else "—"),
-            ]),
-            _divider(),
-            _title("Sauvegardes (10 dernières)", level=3),
-            _body(backups_block),
-            _divider(),
-            ui.ActionRow(b_create, b_restore, b_back),
-        ]
-        self.add_item(_container(*items, color=Palette.SUCCESS))
-
-        if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
-
-
-class BackupRestorePanel(_OwnerView):
-    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
-        backups = await list_backups(self.guild.id)
-
-        self.clear_items()
-
-        if not backups:
-            items = [_title("📥 Restaurer"), _body("_Aucune sauvegarde disponible._")]
-        else:
-            options = []
-            for b in backups[:25]:
-                lbl = (b.label or b.backup_id)[:90]
-                options.append(discord.SelectOption(
-                    label=lbl, value=b.backup_id,
-                    description=f"il y a {int(b.age_days())}j · {b.size_bytes / 1024:.1f} KB",
-                ))
-            sel = ui.Select(placeholder="Sélectionne la sauvegarde à restaurer", options=options)
-            async def _on_sel(i: discord.Interaction):
-                target_id = sel.values[0]
-                v = _ConfirmView(
-                    self.owner, self.guild,
-                    on_confirm=lambda i2: self._do_restore(i2, target_id),
-                    warn_text=(
-                        f"Tu vas restaurer la sauvegarde `{target_id}`.\n"
-                        f"Une **auto-backup de l'état actuel** sera créée avant."
-                    ),
-                )
-                await i.response.edit_message(view=v, embed=None, attachments=[])
-            sel.callback = _on_sel
-            items = [
-                _title("📥 Restaurer une sauvegarde"),
-                _subtitle("Une auto-backup sera créée avant la restauration."),
-                _divider(),
-                ui.ActionRow(sel),
-            ]
-
-        b_back = ui.Button(label=A.BACK_ICON, style=discord.ButtonStyle.secondary, custom_id="bck_rest_back")
-        async def _back(i: discord.Interaction):
-            await BackupPanelV2(self.owner, self.guild).render_to(i)
-        b_back.callback = _back
-        items.append(_divider())
-        items.append(ui.ActionRow(b_back))
-        self.add_item(_container(*items, color=Palette.SUCCESS))
-
-        if edit:
-            await interaction.response.edit_message(view=self, embed=None, attachments=[])
-        else:
-            await interaction.response.send_message(view=self, ephemeral=True)
-
-    async def _do_restore(self, i: discord.Interaction, backup_id: str):
-        await i.response.defer(ephemeral=True)
-        report = await restore_backup(self.guild.id, backup_id, auto_backup_before=True)
-        if report.success:
-            mods = ", ".join(report.restored_modules) or "—"
-            msg = f"{S.DONE_ICON} Restauration OK · modules : {mods}"
-            if report.pre_restore_backup_id:
-                msg += f"\n_Auto-backup créée : `{report.pre_restore_backup_id}`_"
-        else:
-            errs = "; ".join(f"{k}: {v}" for k, v in report.errors.items())
-            msg = f"{S.ERROR_ICON} Erreurs : {errs}"
-        await i.followup.send(msg, ephemeral=True)
-        await BackupPanelV2(self.owner, self.guild).render_to(i, edit=False)
-
-
-# =============================================================================
 # COMMAND SETUP (a appeler depuis bot.py)
 # =============================================================================
 
@@ -1360,7 +1221,6 @@ __all__ = [
     "SocialMediaPanelV2",
     "ProtectionPanelV2",
     "CommunityPanelV2",
-    "BackupPanelV2",
     "set_social_manager",
     "setup_admin_command",
 ]

@@ -9,7 +9,7 @@ qui le guide a travers les etapes essentielles :
     Step 3 : Roles staff (qui peut moderer / configurer)
     Step 4 : Niveau de protection (Souple / Equilibre / Strict)
     Step 5 : Features communautaires a activer
-    Step 6 : Backup automatique + recap
+    Step 6 : Recap
 
 Chaque etape :
     - Resume ce qui a ete decide jusqu'ici
@@ -38,7 +38,6 @@ from vocabulary import Action as A, Status as S, Message as Msg
 import permissions as perms_mod
 import protection_guards as guards_mod
 import community_features as comm_mod
-import backup_system as backup_mod
 
 
 DATA_DIR = module_dir("setup")
@@ -240,17 +239,6 @@ async def apply_wizard_config(state: WizardState, guild: discord.Guild) -> dict:
         report["applied"].append("community")
     except Exception as ex:
         report["errors"].append(f"community: {ex}")
-
-    # 4. Backup initial
-    try:
-        info = await backup_mod.create_backup(
-            guild.id,
-            label=f"Setup initial — template {state.template or 'custom'}",
-        )
-        report["applied"].append("backup")
-        report["initial_backup_id"] = info.backup_id
-    except Exception as ex:
-        report["errors"].append(f"backup: {ex}")
 
     state.completed = True
     save_state(state)
@@ -692,13 +680,11 @@ class WizardStep6(_WizardView):
             report = await apply_wizard_config(self.state, self.guild)
             applied = ", ".join(report["applied"]) or "—"
             errs = "\n".join(f"- {e}" for e in report["errors"]) or "_aucune_"
-            backup_id = report.get("initial_backup_id", "—")
             msg = (
                 f"{S.DONE_ICON} **Configuration appliquée !**\n\n"
                 f"**Modules configurés** : {applied}\n"
-                f"**Backup initial créé** : `{backup_id}`\n"
                 f"**Erreurs** :\n{errs}\n\n"
-                f"_Tu peux affiner toutes les options via_ `/admin`."
+                f"_Tu peux affiner toutes les options via_ `/configure`."
             )
             await i.followup.send(msg, ephemeral=True)
             clear_state(self.guild.id)

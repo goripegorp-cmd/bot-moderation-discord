@@ -37,7 +37,6 @@ import permissions as perms2026
 import vocabulary as vocab2026
 import help_system as help2026
 import engagement as engage2026
-import backup_system as backup2026
 import social_media as social2026
 import protection_guards as guards2026
 import community_features as comm2026
@@ -868,6 +867,34 @@ async def db_init():
             role_id INTEGER,
             expires_at DATETIME
         )''')
+
+        # Phase 28.4 : Reaction Roles
+        await db.execute('''CREATE TABLE IF NOT EXISTS reaction_roles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            channel_id INTEGER,
+            message_id INTEGER,
+            emoji TEXT,
+            role_id INTEGER,
+            UNIQUE(message_id, emoji)
+        )''')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_rr_msg ON reaction_roles(message_id)')
+
+        # Phase 28.6 : Polls (sondages)
+        await db.execute('''CREATE TABLE IF NOT EXISTS polls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            channel_id INTEGER,
+            message_id INTEGER,
+            author_id INTEGER,
+            question TEXT,
+            options_json TEXT,
+            votes_json TEXT,
+            multi INTEGER DEFAULT 0,
+            ends_at DATETIME,
+            ended INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
         
         # Ajouter colonne message_count si elle n'existe pas
         async with db.execute('PRAGMA table_info(economy)') as cursor:
@@ -1260,6 +1287,26 @@ async def cfg(gid):
         'creator_links': {},               # { str(user_id): [ {platform, url, last_post_id} ] }
         # Phase 26.3 : logs configurables — exclusions de rôles par event_type
         'log_role_exclusions': {},         # { event_type_str: [role_id, ...] }
+        # Phase 28.2 : Anti-raid
+        'antiraid_enabled': False,
+        'antiraid_join_threshold': 5,        # nb de joins
+        'antiraid_join_window_sec': 10,      # dans cette fenêtre temporelle
+        'antiraid_min_account_age_days': 7,  # min âge compte (sinon suspect)
+        'antiraid_action': 'kick',           # 'kick' / 'ban' / 'lockdown'
+        'antiraid_log_channel': 0,
+        # Phase 28.3 : Welcome / Goodbye
+        'welcome_enabled': False,
+        'welcome_channel': 0,
+        'welcome_message': "👋 Bienvenue {user} sur **{guild}** ! Nous sommes maintenant **{count}** membres 🎉",
+        'goodbye_enabled': False,
+        'goodbye_channel': 0,
+        'goodbye_message': "😢 {user_name} a quitté le serveur. À bientôt peut-être !",
+        # Phase 28.5 : Anniversaires
+        'birthday_enabled': False,
+        'birthday_channel': 0,
+        'birthday_role': 0,                  # rôle donné le jour J
+        'birthday_message': "🎂 Joyeux anniversaire {user} ! 🎉 Toute l'équipe te souhaite une belle journée !",
+        'birthdays': {},                     # { str(user_id): "MM-DD" }
     }
     for k, v in defaults.items():
         if k not in data: data[k] = v
@@ -3758,6 +3805,10 @@ class MainPanelV2(LayoutView):
                     label="Progression", value="progression", emoji="📈",
                     description="Niveaux · XP · Pièces · Shop · Récompenses",
                 ),
+                discord.SelectOption(
+                    label="Permissions", value="permissions", emoji="🔐",
+                    description="Qui peut utiliser quelle commande (par rôle ou utilisateur)",
+                ),
             ],
             custom_id="mpv2_module",
         )
@@ -3804,6 +3855,7 @@ class MainPanelV2(LayoutView):
             'delegations':  lambda: DelegationsPanelV2(self.u, self.g),
             'creativite':   lambda: CentrePanelV2(self.u, self.g),
             'progression':  lambda: LevelSystemPanelV2(self.u, self.g),
+            'permissions':  lambda: PermissionsHubPanelV2(self.u, self.g),
         }
         if val in v2_panels:
             v = v2_panels[val]()
@@ -3905,12 +3957,16 @@ class SecurityPanelV2(LayoutView):
             items.append(v2_title("🛡️ Modération & Sécurité"))
             items.append(v2_subtitle("Sanctions · Protection · Immunités · AFK"))
 
+        # Phase 28.2 : anti-raid
+        antiraid_on = bool(c.get('antiraid_enabled', False))
+
         items.append(v2_divider())
         items.append(v2_body(
             f"🔨 **Modération** · `{inf_count}` infractions · {'🟢' if log_ch else '🔴'} logs\n"
             f"🚨 **Protection** · `{prot_on}/{prot_total}` filtres actifs\n"
             f"👑 **Immunités** · `{immune_roles_count}` rôles · `{immune_users_count}` utilisateurs\n"
-            f"💤 **AFK** · {('🔘 actif sur ' + afk_role.mention) if (afk_on and afk_role) else ('🔘 actif' if afk_on else '⚪ désactivé')}"
+            f"💤 **AFK** · {('🔘 actif sur ' + afk_role.mention) if (afk_on and afk_role) else ('🔘 actif' if afk_on else '⚪ désactivé')}\n"
+            f"⚔️ **Anti-Raid** · {'🟢 actif' if antiraid_on else '⚪ désactivé'}"
         ))
         items.append(v2_divider())
 
@@ -3923,10 +3979,12 @@ class SecurityPanelV2(LayoutView):
         b_immune.callback = self._cb_immune
         b_afk = Button(label="💤 AFK", style=discord.ButtonStyle.primary, custom_id="secv2_afk")
         b_afk.callback = self._cb_afk
+        b_antiraid = Button(label="⚔️ Anti-Raid", style=discord.ButtonStyle.danger, custom_id="secv2_raid")
+        b_antiraid.callback = self._cb_antiraid
         b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="secv2_back")
         b_back.callback = self._cb_back
 
-        items.append(discord.ui.ActionRow(b_mod, b_prot, b_immune, b_afk))
+        items.append(discord.ui.ActionRow(b_mod, b_prot, b_immune, b_afk, b_antiraid))
         items.append(discord.ui.ActionRow(b_back))
 
         self.add_item(v2_container(*items, color=Palette.DANGER))
@@ -3982,6 +4040,19 @@ class SecurityPanelV2(LayoutView):
             try:
                 if not i.response.is_done():
                     await i.response.send_message(f"❌ Erreur ouverture AFK : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+    async def _cb_antiraid(self, i):
+        # Phase 28.2 : Anti-Raid panel
+        try:
+            v = AntiRaidPanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[SecurityPanelV2 _cb_antiraid] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur ouverture Anti-Raid : `{ex}`", ephemeral=True)
             except Exception:
                 pass
 
@@ -4358,6 +4429,1135 @@ class _BoostMessageModal(Modal, title="📝 Message de boost"):
                     await i.followup.send(f"❌ Erreur sauvegarde : `{ex}`", ephemeral=True)
             except Exception:
                 pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 28 — NOUVEAUX PANELS V2
+#  · PermissionsHubPanelV2     · AntiRaidPanelV2
+#  · WelcomeGoodbyePanelV2     · ReactionRolesPanelV2
+#  · BirthdayConfigPanelV2
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import permissions as perms_mod
+
+
+class PermissionsHubPanelV2(LayoutView):
+    """Phase 28.1 — Hub de configuration des permissions par catégorie."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit: bool = True):
+        try:
+            config = await perms_mod.load_permissions(self.g.id)
+            cat_count = len(config.categories)
+            cmd_count = len(config.commands)
+            non_sanct = (
+                len(config.sanctionable.non_sanctionable_roles or [])
+                + len(config.sanctionable.non_sanctionable_users or [])
+            )
+        except Exception as ex:
+            print(f"[PermissionsHubPanelV2 load] {ex}")
+            cat_count = cmd_count = non_sanct = 0
+
+        self.clear_items()
+
+        b_cat = Button(label="📂 Catégories de commandes", style=discord.ButtonStyle.primary, custom_id="permh_cat")
+        b_cat.callback = self._cb_cat
+        b_sanct = Button(label="🛡️ Rôles non-sanctionnables", style=discord.ButtonStyle.secondary, custom_id="permh_sanct")
+        b_sanct.callback = self._cb_sanct
+        b_reset = Button(label="🔄 Reset tout", style=discord.ButtonStyle.danger, custom_id="permh_reset")
+        b_reset.callback = self._cb_reset
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="permh_back")
+        b_back.callback = self._cb_back
+
+        items = [
+            v2_title("🔐 Permissions des commandes"),
+            v2_subtitle("Définis qui peut utiliser quelle commande, par catégorie ou individuellement"),
+            v2_divider(),
+            v2_body(
+                f"**État actuel**\n"
+                f"• Catégories personnalisées : `{cat_count}`\n"
+                f"• Commandes personnalisées : `{cmd_count}`\n"
+                f"• Rôles non-sanctionnables : `{non_sanct}`"
+            ),
+            v2_body(
+                "**Comment ça marche :**\n"
+                "1. Chaque commande appartient à une **catégorie** (modération, tickets, etc.)\n"
+                "2. Tu définis qui peut utiliser chaque catégorie (par rôle ou utilisateur)\n"
+                "3. Les règles évaluées dans l'ordre : owner > deny user > allow user > deny rôle > allow rôle > défaut"
+            ),
+            v2_divider(),
+            discord.ui.ActionRow(b_cat, b_sanct),
+            discord.ui.ActionRow(b_reset, b_back),
+        ]
+        self.add_item(v2_container(*items, color=Palette.INFO))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_cat(self, i):
+        try:
+            v = PermissionsCategoryListPanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[PermissionsHubPanelV2 _cb_cat] {ex}")
+
+    async def _cb_sanct(self, i):
+        try:
+            v = PermissionsSanctionablePanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[PermissionsHubPanelV2 _cb_sanct] {ex}")
+
+    async def _cb_reset(self, i):
+        try:
+            await perms_mod.save_permissions(self.g.id, perms_mod.PermissionsConfig())
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[PermissionsHubPanelV2 _cb_reset] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+    async def _cb_back(self, i):
+        v = MainPanelV2(self.u, self.g)
+        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
+
+
+class PermissionsCategoryListPanelV2(LayoutView):
+    """Phase 28.1 — Liste des catégories + sélection pour configurer."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit: bool = True):
+        try:
+            config = await perms_mod.load_permissions(self.g.id)
+        except Exception:
+            config = perms_mod.PermissionsConfig()
+
+        cats = perms_mod.list_categories()
+
+        self.clear_items()
+        opts = []
+        for cat in cats[:25]:
+            rule = config.categories.get(cat)
+            mode = (rule.default if rule else "allow")
+            label = perms_mod.CATEGORY_LABELS.get(cat, cat)
+            emoji = {"allow": "✅", "deny": "❌", "mod_only": "🛡️"}.get(mode, "✅")
+            opts.append(discord.SelectOption(label=label[:80], value=cat, description=f"Défaut : {mode}", emoji=emoji))
+
+        sel = Select(placeholder="Choisis une catégorie à configurer…", options=opts)
+        sel.callback = self._cb_pick
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="permcl_back")
+        b_back.callback = self._cb_back
+
+        items = [
+            v2_title("📂 Catégories de commandes"),
+            v2_subtitle("Sélectionne une catégorie pour ajuster ses permissions"),
+            v2_divider(),
+            v2_body(
+                "• ✅ **allow** — tout le monde peut utiliser\n"
+                "• ❌ **deny** — personne ne peut\n"
+                "• 🛡️ **mod_only** — seuls les modérateurs (perm Discord)"
+            ),
+            v2_divider(),
+            discord.ui.ActionRow(sel),
+            discord.ui.ActionRow(b_back),
+        ]
+        self.add_item(v2_container(*items, color=Palette.INFO))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_pick(self, i):
+        try:
+            cat = i.data['values'][0]
+            v = PermissionsCategoryEditPanelV2(self.u, self.g, cat)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[PermissionsCategoryListPanelV2 _cb_pick] {ex}")
+
+    async def _cb_back(self, i):
+        v = PermissionsHubPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+class PermissionsCategoryEditPanelV2(LayoutView):
+    """Phase 28.1 — Édite la config d'UNE catégorie : default + allow/deny rôles."""
+
+    def __init__(self, u, g, category: str):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+        self.category = category
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def _get_rule(self):
+        config = await perms_mod.load_permissions(self.g.id)
+        rule = config.categories.get(self.category) or perms_mod.PermissionRule()
+        return config, rule
+
+    async def render_to(self, interaction, *, edit: bool = True):
+        config, rule = await self._get_rule()
+        label = perms_mod.CATEGORY_LABELS.get(self.category, self.category)
+
+        allow_roles = [self.g.get_role(rid) for rid in (rule.allow_roles or []) if self.g.get_role(rid)]
+        deny_roles = [self.g.get_role(rid) for rid in (rule.deny_roles or []) if self.g.get_role(rid)]
+        allow_str = ", ".join(r.mention for r in allow_roles[:5]) or "_aucun_"
+        deny_str = ", ".join(r.mention for r in deny_roles[:5]) or "_aucun_"
+
+        self.clear_items()
+
+        # Boutons changement de défaut
+        b_allow = Button(
+            label=("✅ Allow" + (" ✓" if rule.default == "allow" else "")),
+            style=(discord.ButtonStyle.success if rule.default == "allow" else discord.ButtonStyle.secondary),
+            custom_id="perme_allow",
+        )
+        b_allow.callback = lambda ix: self._set_default(ix, "allow")
+        b_deny = Button(
+            label=("❌ Deny" + (" ✓" if rule.default == "deny" else "")),
+            style=(discord.ButtonStyle.danger if rule.default == "deny" else discord.ButtonStyle.secondary),
+            custom_id="perme_deny",
+        )
+        b_deny.callback = lambda ix: self._set_default(ix, "deny")
+        b_mod = Button(
+            label=("🛡️ Mod only" + (" ✓" if rule.default == "mod_only" else "")),
+            style=(discord.ButtonStyle.primary if rule.default == "mod_only" else discord.ButtonStyle.secondary),
+            custom_id="perme_mod",
+        )
+        b_mod.callback = lambda ix: self._set_default(ix, "mod_only")
+
+        # Role selectors
+        allow_select = discord.ui.RoleSelect(
+            placeholder=f"✅ Rôles ALLOW · {len(allow_roles)} configurés",
+            min_values=0, max_values=10, custom_id="perme_allow_sel",
+        )
+        allow_select.callback = self._cb_allow_roles
+        deny_select = discord.ui.RoleSelect(
+            placeholder=f"❌ Rôles DENY · {len(deny_roles)} configurés",
+            min_values=0, max_values=10, custom_id="perme_deny_sel",
+        )
+        deny_select.callback = self._cb_deny_roles
+
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="perme_back")
+        b_back.callback = self._cb_back
+
+        items = [
+            v2_title(f"📂 {label}"),
+            v2_subtitle(f"Catégorie : `{self.category}`"),
+            v2_divider(),
+            v2_body(
+                f"**🎯 Défaut actuel** · `{rule.default}`\n"
+                f"**✅ Rôles ALLOW** · {allow_str}\n"
+                f"**❌ Rôles DENY** · {deny_str}"
+            ),
+            v2_divider(),
+            v2_subtitle("▼ Change le défaut"),
+            discord.ui.ActionRow(b_allow, b_deny, b_mod),
+            v2_divider(),
+            v2_subtitle("▼ Rôles avec accès garanti / refusé"),
+            discord.ui.ActionRow(allow_select),
+            discord.ui.ActionRow(deny_select),
+            discord.ui.ActionRow(b_back),
+        ]
+        self.add_item(v2_container(*items, color=Palette.INFO))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _set_default(self, i, mode):
+        try:
+            config, rule = await self._get_rule()
+            rule.default = mode
+            config.categories[self.category] = rule
+            await perms_mod.save_permissions(self.g.id, config)
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[PermissionsCategoryEditPanelV2 _set_default] {ex}")
+
+    async def _cb_allow_roles(self, i):
+        try:
+            ids = [int(rid) for rid in i.data.get('values', [])]
+            config, rule = await self._get_rule()
+            rule.allow_roles = ids
+            config.categories[self.category] = rule
+            await perms_mod.save_permissions(self.g.id, config)
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[PermissionsCategoryEditPanelV2 _cb_allow_roles] {ex}")
+
+    async def _cb_deny_roles(self, i):
+        try:
+            ids = [int(rid) for rid in i.data.get('values', [])]
+            config, rule = await self._get_rule()
+            rule.deny_roles = ids
+            config.categories[self.category] = rule
+            await perms_mod.save_permissions(self.g.id, config)
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[PermissionsCategoryEditPanelV2 _cb_deny_roles] {ex}")
+
+    async def _cb_back(self, i):
+        v = PermissionsCategoryListPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+class PermissionsSanctionablePanelV2(LayoutView):
+    """Phase 28.1 — Rôles/users qui ne peuvent JAMAIS être sanctionnés."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit: bool = True):
+        config = await perms_mod.load_permissions(self.g.id)
+        roles = [self.g.get_role(r) for r in (config.sanctionable.non_sanctionable_roles or []) if self.g.get_role(r)]
+        users = [self.g.get_member(u) for u in (config.sanctionable.non_sanctionable_users or []) if self.g.get_member(u)]
+
+        roles_str = ", ".join(r.mention for r in roles[:8]) or "_aucun_"
+        users_str = ", ".join(u.mention for u in users[:8]) or "_aucun_"
+
+        self.clear_items()
+
+        role_sel = discord.ui.RoleSelect(
+            placeholder=f"🛡️ Rôles immunisés · {len(roles)} configurés",
+            min_values=0, max_values=10, custom_id="permsa_roles",
+        )
+        role_sel.callback = self._cb_roles
+
+        user_sel = discord.ui.UserSelect(
+            placeholder=f"👤 Utilisateurs immunisés · {len(users)} configurés",
+            min_values=0, max_values=10, custom_id="permsa_users",
+        )
+        user_sel.callback = self._cb_users
+
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="permsa_back")
+        b_back.callback = self._cb_back
+
+        items = [
+            v2_title("🛡️ Rôles & utilisateurs non-sanctionnables"),
+            v2_subtitle("Ils ne pourront JAMAIS recevoir warn / mute / kick / ban auto"),
+            v2_divider(),
+            v2_body(
+                f"**🎭 Rôles** · {roles_str}\n"
+                f"**👤 Utilisateurs** · {users_str}"
+            ),
+            v2_divider(),
+            discord.ui.ActionRow(role_sel),
+            discord.ui.ActionRow(user_sel),
+            discord.ui.ActionRow(b_back),
+        ]
+        self.add_item(v2_container(*items, color=Palette.WARNING))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_roles(self, i):
+        try:
+            ids = [int(rid) for rid in i.data.get('values', [])]
+            config = await perms_mod.load_permissions(self.g.id)
+            config.sanctionable.non_sanctionable_roles = ids
+            await perms_mod.save_permissions(self.g.id, config)
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[PermissionsSanctionablePanelV2 _cb_roles] {ex}")
+
+    async def _cb_users(self, i):
+        try:
+            ids = [int(uid) for uid in i.data.get('values', [])]
+            config = await perms_mod.load_permissions(self.g.id)
+            config.sanctionable.non_sanctionable_users = ids
+            await perms_mod.save_permissions(self.g.id, config)
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[PermissionsSanctionablePanelV2 _cb_users] {ex}")
+
+    async def _cb_back(self, i):
+        v = PermissionsHubPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ⚔️ ANTI-RAID PANEL (Phase 28.2)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Cache des joins récents par guild (pour détection de raid)
+_recent_joins: dict[int, list[float]] = {}
+
+
+class AntiRaidPanelV2(LayoutView):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        enabled = bool(c.get('antiraid_enabled', False))
+        threshold = int(c.get('antiraid_join_threshold', 5))
+        window = int(c.get('antiraid_join_window_sec', 10))
+        min_age = int(c.get('antiraid_min_account_age_days', 7))
+        action = str(c.get('antiraid_action', 'kick'))
+        log_ch_id = int(c.get('antiraid_log_channel', 0) or 0)
+        log_ch = self.g.get_channel(log_ch_id) if log_ch_id else None
+
+        self.clear_items()
+
+        b_toggle = Button(
+            label=("🔘 Désactiver" if enabled else "⚪ Activer"),
+            style=(discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success),
+            custom_id="ar_toggle",
+        )
+        b_toggle.callback = self._cb_toggle
+
+        b_thresh = Button(label="⚙️ Seuils", style=discord.ButtonStyle.primary, custom_id="ar_thresh")
+        b_thresh.callback = self._cb_thresholds
+
+        b_action = Button(label="🎯 Action", style=discord.ButtonStyle.primary, custom_id="ar_action")
+        b_action.callback = self._cb_action
+
+        log_select = discord.ui.ChannelSelect(
+            placeholder=f"📢 Salon logs raid : {(log_ch.name if log_ch else 'aucun')}",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            min_values=0, max_values=1, custom_id="ar_log",
+        )
+        log_select.callback = self._cb_log_channel
+
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="ar_back")
+        b_back.callback = self._cb_back
+
+        pretty_action = {'kick': '👢 Kick auto', 'ban': '🔨 Ban auto', 'lockdown': '🔒 Lockdown serveur'}.get(action, action)
+
+        items = [
+            v2_title("⚔️ Anti-Raid"),
+            v2_subtitle("Détection automatique de raid (mass-join) + action immédiate"),
+            v2_divider(),
+            v2_body(
+                f"🔌 **État** · {'🟢 actif' if enabled else '⚪ désactivé'}\n"
+                f"📊 **Détection** · `{threshold}` joins en `{window}`s déclenche le raid\n"
+                f"👶 **Âge min compte** · `{min_age}` jours (sinon flag suspect)\n"
+                f"🎯 **Action auto** · {pretty_action}\n"
+                f"📢 **Salon logs** · {log_ch.mention if log_ch else '_non défini_'}"
+            ),
+            v2_divider(),
+            v2_body(
+                "**Comment ça marche :**\n"
+                f"• Quand `{threshold}` nouveaux membres rejoignent en `{window}`s → 🚨 RAID détecté\n"
+                f"• L'action `{action}` est appliquée à tous les nouveaux\n"
+                f"• Les comptes < `{min_age}`j sont flaggés en priorité"
+            ),
+            v2_divider(),
+            discord.ui.ActionRow(log_select),
+            discord.ui.ActionRow(b_toggle, b_thresh, b_action, b_back),
+        ]
+        self.add_item(v2_container(*items, color=Palette.DANGER))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_toggle(self, i):
+        try:
+            c = await cfg(self.g.id)
+            await db_set(self.g.id, 'antiraid_enabled', not bool(c.get('antiraid_enabled', False)))
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[AntiRaidPanelV2 _cb_toggle] {ex}")
+
+    async def _cb_thresholds(self, i):
+        try:
+            c = await cfg(self.g.id)
+            modal = _AntiRaidThresholdsModal(self.g, self.u)
+            modal.threshold.default = str(c.get('antiraid_join_threshold', 5))
+            modal.window.default = str(c.get('antiraid_join_window_sec', 10))
+            modal.min_age.default = str(c.get('antiraid_min_account_age_days', 7))
+            await i.response.send_modal(modal)
+        except Exception as ex:
+            print(f"[AntiRaidPanelV2 _cb_thresholds] {ex}")
+
+    async def _cb_action(self, i):
+        try:
+            v = _AntiRaidActionPickerV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[AntiRaidPanelV2 _cb_action] {ex}")
+
+    async def _cb_log_channel(self, i):
+        try:
+            vals = i.data.get('values', [])
+            ch_id = int(vals[0]) if vals else 0
+            await db_set(self.g.id, 'antiraid_log_channel', ch_id)
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[AntiRaidPanelV2 _cb_log_channel] {ex}")
+
+    async def _cb_back(self, i):
+        v = SecurityPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+class _AntiRaidThresholdsModal(Modal, title="⚙️ Seuils Anti-Raid"):
+    threshold = TextInput(label="Nb de joins pour déclencher (entier ≥ 2)", placeholder="5", max_length=3, required=True)
+    window = TextInput(label="Fenêtre temporelle en secondes (5-300)", placeholder="10", max_length=3, required=True)
+    min_age = TextInput(label="Âge minimum du compte en jours (0-365)", placeholder="7", max_length=3, required=True)
+
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+
+    async def on_submit(self, i):
+        try:
+            t = max(2, min(50, int(self.threshold.value.strip())))
+            w = max(5, min(300, int(self.window.value.strip())))
+            a = max(0, min(365, int(self.min_age.value.strip())))
+            await db_set(self.g.id, 'antiraid_join_threshold', t)
+            await db_set(self.g.id, 'antiraid_join_window_sec', w)
+            await db_set(self.g.id, 'antiraid_min_account_age_days', a)
+            await AntiRaidPanelV2(self.u, self.g).render_to(i, edit=True)
+        except Exception as ex:
+            try:
+                await i.response.send_message(f"❌ Valeurs invalides : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
+class _AntiRaidActionPickerV2(LayoutView):
+    def __init__(self, u, g):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        current = str(c.get('antiraid_action', 'kick'))
+
+        def style_for(val):
+            if current == val:
+                return discord.ButtonStyle.primary if val == 'lockdown' else discord.ButtonStyle.danger
+            return discord.ButtonStyle.secondary
+
+        b_kick = Button(label=("👢 Kick" + (" ✓" if current == 'kick' else "")), style=style_for('kick'))
+        b_kick.callback = lambda i: self._set(i, 'kick')
+        b_ban = Button(label=("🔨 Ban" + (" ✓" if current == 'ban' else "")), style=style_for('ban'))
+        b_ban.callback = lambda i: self._set(i, 'ban')
+        b_lock = Button(label=("🔒 Lockdown" + (" ✓" if current == 'lockdown' else "")), style=style_for('lockdown'))
+        b_lock.callback = lambda i: self._set(i, 'lockdown')
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary)
+        b_back.callback = self._cb_back
+
+        self.clear_items()
+        items = [
+            v2_title("🎯 Action quand raid détecté"),
+            v2_subtitle(f"Action actuelle : **{current}**"),
+            v2_divider(),
+            v2_body(
+                "• **👢 Kick** — expulse les nouveaux membres du raid (peuvent revenir)\n"
+                "• **🔨 Ban** — bannit définitivement (radical)\n"
+                "• **🔒 Lockdown** — élève le verification_level du serveur à HIGH pendant 10 min"
+            ),
+            v2_divider(),
+            discord.ui.ActionRow(b_kick, b_ban, b_lock),
+            discord.ui.ActionRow(b_back),
+        ]
+        self.add_item(v2_container(*items, color=Palette.DANGER))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _set(self, i, action):
+        try:
+            await db_set(self.g.id, 'antiraid_action', action)
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[_AntiRaidActionPickerV2 _set] {ex}")
+
+    async def _cb_back(self, i):
+        v = AntiRaidPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  👋 WELCOME / GOODBYE PANEL (Phase 28.3)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class WelcomeGoodbyePanelV2(LayoutView):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        w_on = bool(c.get('welcome_enabled', False))
+        g_on = bool(c.get('goodbye_enabled', False))
+        w_ch = self.g.get_channel(int(c.get('welcome_channel', 0) or 0))
+        g_ch = self.g.get_channel(int(c.get('goodbye_channel', 0) or 0))
+        w_msg = c.get('welcome_message', '') or ''
+        g_msg = c.get('goodbye_message', '') or ''
+
+        self.clear_items()
+
+        b_w_tog = Button(
+            label=("🔘 Welcome désactiver" if w_on else "⚪ Welcome activer"),
+            style=(discord.ButtonStyle.danger if w_on else discord.ButtonStyle.success),
+            custom_id="wg_w_tog",
+        )
+        b_w_tog.callback = lambda i: self._toggle(i, 'welcome_enabled')
+        b_w_msg = Button(label="📝 Modifier msg welcome", style=discord.ButtonStyle.primary, custom_id="wg_w_msg")
+        b_w_msg.callback = lambda i: self._edit_msg(i, 'welcome_message', "👋 Message Welcome")
+
+        b_g_tog = Button(
+            label=("🔘 Goodbye désactiver" if g_on else "⚪ Goodbye activer"),
+            style=(discord.ButtonStyle.danger if g_on else discord.ButtonStyle.success),
+            custom_id="wg_g_tog",
+        )
+        b_g_tog.callback = lambda i: self._toggle(i, 'goodbye_enabled')
+        b_g_msg = Button(label="📝 Modifier msg goodbye", style=discord.ButtonStyle.primary, custom_id="wg_g_msg")
+        b_g_msg.callback = lambda i: self._edit_msg(i, 'goodbye_message', "😢 Message Goodbye")
+
+        w_ch_select = discord.ui.ChannelSelect(
+            placeholder=f"📢 Salon welcome : {(w_ch.name if w_ch else 'aucun')}",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            min_values=0, max_values=1, custom_id="wg_w_ch",
+        )
+        w_ch_select.callback = lambda i: self._set_channel(i, 'welcome_channel')
+
+        g_ch_select = discord.ui.ChannelSelect(
+            placeholder=f"📢 Salon goodbye : {(g_ch.name if g_ch else 'aucun')}",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            min_values=0, max_values=1, custom_id="wg_g_ch",
+        )
+        g_ch_select.callback = lambda i: self._set_channel(i, 'goodbye_channel')
+
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="wg_back")
+        b_back.callback = self._cb_back
+
+        items = [
+            v2_title("👋 Welcome / Goodbye"),
+            v2_subtitle("Messages d'arrivée et de départ des membres"),
+            v2_divider(),
+            v2_body(
+                f"**👋 Welcome** · {'🟢' if w_on else '⚪'} · salon : {w_ch.mention if w_ch else '_aucun_'}\n"
+                f"```{w_msg[:200]}```\n"
+                f"**😢 Goodbye** · {'🟢' if g_on else '⚪'} · salon : {g_ch.mention if g_ch else '_aucun_'}\n"
+                f"```{g_msg[:200]}```"
+            ),
+            v2_body(
+                "**Variables disponibles :**\n"
+                "`{user}` mention · `{user_name}` pseudo · `{guild}` serveur · `{count}` nb membres"
+            ),
+            v2_divider(),
+            discord.ui.ActionRow(w_ch_select),
+            discord.ui.ActionRow(b_w_tog, b_w_msg),
+            v2_divider(),
+            discord.ui.ActionRow(g_ch_select),
+            discord.ui.ActionRow(b_g_tog, b_g_msg),
+            v2_divider(),
+            discord.ui.ActionRow(b_back),
+        ]
+        self.add_item(v2_container(*items, color=Palette.SUCCESS))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _toggle(self, i, key):
+        try:
+            c = await cfg(self.g.id)
+            await db_set(self.g.id, key, not bool(c.get(key, False)))
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[WelcomeGoodbyePanelV2 _toggle {key}] {ex}")
+
+    async def _edit_msg(self, i, key, title):
+        try:
+            c = await cfg(self.g.id)
+            modal = _WelcomeGoodbyeMsgModal(self.g, self.u, key, title)
+            modal.tpl.default = c.get(key, '')
+            await i.response.send_modal(modal)
+        except Exception as ex:
+            print(f"[WelcomeGoodbyePanelV2 _edit_msg {key}] {ex}")
+
+    async def _set_channel(self, i, key):
+        try:
+            vals = i.data.get('values', [])
+            ch_id = int(vals[0]) if vals else 0
+            await db_set(self.g.id, key, ch_id)
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[WelcomeGoodbyePanelV2 _set_channel {key}] {ex}")
+
+    async def _cb_back(self, i):
+        v = CentrePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+class _WelcomeGoodbyeMsgModal(Modal):
+    tpl = TextInput(
+        label="Message (utilise {user}, {guild}, {count}…)",
+        style=discord.TextStyle.paragraph,
+        max_length=1500, required=True,
+    )
+
+    def __init__(self, g, u, key, title):
+        super().__init__(title=title[:45])
+        self.g = g
+        self.u = u
+        self.key = key
+
+    async def on_submit(self, i):
+        try:
+            await db_set(self.g.id, self.key, self.tpl.value or '')
+            await WelcomeGoodbyePanelV2(self.u, self.g).render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[_WelcomeGoodbyeMsgModal on_submit] {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  🎫 REACTION ROLES PANEL (Phase 28.4)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class ReactionRolesPanelV2(LayoutView):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit: bool = True):
+        # Compter les messages reaction roles
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT message_id, channel_id, COUNT(*) FROM reaction_roles '
+                    'WHERE guild_id=? GROUP BY message_id LIMIT 25',
+                    (self.g.id,),
+                ) as cur:
+                    rows = await cur.fetchall()
+        except Exception as ex:
+            print(f"[ReactionRolesPanelV2 fetch] {ex}")
+            rows = []
+
+        lines = []
+        for msg_id, ch_id, count in rows[:10]:
+            ch = self.g.get_channel(int(ch_id))
+            lines.append(f"• Message `{msg_id}` dans {ch.mention if ch else '?'} · `{count}` rôle(s)")
+        listing = "\n".join(lines) if lines else "_Aucun message reaction roles configuré_"
+
+        self.clear_items()
+
+        b_create = Button(label="➕ Créer un message", style=discord.ButtonStyle.success, custom_id="rr_create")
+        b_create.callback = self._cb_create
+        b_delete = Button(
+            label="🗑️ Supprimer un message", style=discord.ButtonStyle.danger,
+            disabled=(not rows), custom_id="rr_delete",
+        )
+        b_delete.callback = self._cb_delete
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="rr_back")
+        b_back.callback = self._cb_back
+
+        items = [
+            v2_title("🎫 Reaction Roles"),
+            v2_subtitle("Membre clique un emoji → obtient un rôle automatiquement"),
+            v2_divider(),
+            v2_body(f"**Messages configurés ({len(rows)}) :**\n{listing}"),
+            v2_divider(),
+            v2_body(
+                "**Comment créer :**\n"
+                "1. Clique sur **➕ Créer un message**\n"
+                "2. Remplis : salon · titre · description · jusqu'à 5 paires emoji/rôle\n"
+                "3. Le bot poste le message — les membres cliquent les réactions pour obtenir le rôle"
+            ),
+            v2_divider(),
+            discord.ui.ActionRow(b_create, b_delete, b_back),
+        ]
+        self.add_item(v2_container(*items, color=Palette.PRIMARY))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_create(self, i):
+        try:
+            await i.response.send_modal(_ReactionRolesCreateModal(self.g, self.u))
+        except Exception as ex:
+            print(f"[ReactionRolesPanelV2 _cb_create] {ex}")
+
+    async def _cb_delete(self, i):
+        try:
+            v = _ReactionRolesDeletePanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[ReactionRolesPanelV2 _cb_delete] {ex}")
+
+    async def _cb_back(self, i):
+        v = CentrePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+class _ReactionRolesCreateModal(Modal, title="🎫 Nouveau Reaction Roles"):
+    channel_id = TextInput(label="ID du salon (clique droit → Copier ID)", max_length=22, required=True)
+    title_in = TextInput(label="Titre du message", max_length=100, required=True)
+    description = TextInput(label="Description", style=discord.TextStyle.paragraph, max_length=1500, required=False)
+    pairs = TextInput(
+        label="Paires emoji=rôle_id (une par ligne, max 5)",
+        style=discord.TextStyle.paragraph,
+        placeholder="🎮 = 1234567890\n🎨 = 1234567891",
+        max_length=500,
+        required=True,
+    )
+
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+
+    async def on_submit(self, i):
+        try:
+            # Parse channel
+            try:
+                ch_id = int(self.channel_id.value.strip())
+            except Exception:
+                return await i.response.send_message("❌ ID salon invalide.", ephemeral=True)
+            ch = self.g.get_channel(ch_id)
+            if not ch or not isinstance(ch, (discord.TextChannel, discord.Thread)):
+                return await i.response.send_message("❌ Salon introuvable.", ephemeral=True)
+
+            # Parse pairs
+            raw_pairs = []
+            for line in self.pairs.value.split('\n'):
+                line = line.strip()
+                if not line or '=' not in line:
+                    continue
+                emoji_str, role_str = line.split('=', 1)
+                emoji_str = emoji_str.strip()
+                role_str = role_str.strip()
+                try:
+                    role_id = int(role_str)
+                except Exception:
+                    continue
+                role = self.g.get_role(role_id)
+                if not role:
+                    continue
+                raw_pairs.append((emoji_str, role))
+            if not raw_pairs:
+                return await i.response.send_message("❌ Aucune paire emoji=rôle valide.", ephemeral=True)
+            raw_pairs = raw_pairs[:5]
+
+            # Build embed
+            desc_lines = [self.description.value or '']
+            desc_lines.append('')
+            for emoji, role in raw_pairs:
+                desc_lines.append(f"{emoji} · {role.mention}")
+            e = discord.Embed(
+                title=self.title_in.value[:256],
+                description="\n".join(desc_lines)[:4000],
+                color=0x5865F2,
+            )
+            e.set_footer(text="Clique sur un emoji pour obtenir le rôle correspondant")
+
+            await i.response.defer(ephemeral=True)
+            msg = await ch.send(embed=e)
+
+            # Add reactions + persist
+            async with get_db() as db:
+                for emoji, role in raw_pairs:
+                    try:
+                        await msg.add_reaction(emoji)
+                    except Exception as ex:
+                        print(f"[ReactionRoles add_reaction] {ex}")
+                        continue
+                    try:
+                        await db.execute(
+                            'INSERT OR REPLACE INTO reaction_roles(guild_id, channel_id, message_id, emoji, role_id) VALUES(?,?,?,?,?)',
+                            (self.g.id, ch.id, msg.id, emoji, role.id),
+                        )
+                    except Exception as ex:
+                        print(f"[ReactionRoles db insert] {ex}")
+                await db.commit()
+
+            await i.followup.send(
+                f"✅ Message reaction roles créé dans {ch.mention} avec `{len(raw_pairs)}` paire(s).",
+                ephemeral=True,
+            )
+        except Exception as ex:
+            print(f"[_ReactionRolesCreateModal on_submit] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+                else:
+                    await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
+class _ReactionRolesDeletePanelV2(LayoutView):
+    def __init__(self, u, g):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit: bool = True):
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT message_id, channel_id, COUNT(*) FROM reaction_roles '
+                    'WHERE guild_id=? GROUP BY message_id LIMIT 25',
+                    (self.g.id,),
+                ) as cur:
+                    rows = await cur.fetchall()
+        except Exception:
+            rows = []
+
+        self.clear_items()
+        if not rows:
+            items = [v2_title("🗑️ Supprimer Reaction Roles"), v2_body("_Aucun message_")]
+        else:
+            opts = []
+            for msg_id, ch_id, count in rows[:25]:
+                ch = self.g.get_channel(int(ch_id))
+                opts.append(discord.SelectOption(
+                    label=f"Message #{msg_id}"[:80],
+                    value=str(msg_id),
+                    description=f"{ch.name if ch else '?'} · {count} rôle(s)",
+                ))
+            sel = Select(placeholder="Choisis un message à supprimer…", options=opts)
+            sel.callback = self._cb_pick
+            items = [
+                v2_title("🗑️ Supprimer un message reaction roles"),
+                v2_subtitle("Supprime aussi les règles emoji=rôle"),
+                v2_divider(),
+                discord.ui.ActionRow(sel),
+            ]
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary)
+        b_back.callback = self._cb_back
+        items.append(discord.ui.ActionRow(b_back))
+        self.add_item(v2_container(*items, color=Palette.DANGER))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_pick(self, i):
+        try:
+            msg_id = int(i.data['values'][0])
+            async with get_db() as db:
+                await db.execute('DELETE FROM reaction_roles WHERE guild_id=? AND message_id=?', (self.g.id, msg_id))
+                await db.commit()
+            await i.response.send_message(f"🗑️ Message reaction roles `{msg_id}` supprimé de la base.", ephemeral=True)
+        except Exception as ex:
+            try:
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+    async def _cb_back(self, i):
+        v = ReactionRolesPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  🎂 BIRTHDAY PANEL (Phase 28.5)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class BirthdayConfigPanelV2(LayoutView):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        on = bool(c.get('birthday_enabled', False))
+        ch_id = int(c.get('birthday_channel', 0) or 0)
+        ch = self.g.get_channel(ch_id) if ch_id else None
+        role_id = int(c.get('birthday_role', 0) or 0)
+        role = self.g.get_role(role_id) if role_id else None
+        msg_tpl = c.get('birthday_message', '') or ''
+        bdays = c.get('birthdays', {}) or {}
+
+        # Anniversaires du mois courant
+        today = datetime.now(timezone.utc)
+        this_month = today.strftime('%m')
+        this_month_bdays = []
+        for uid_str, date_str in bdays.items():
+            try:
+                if str(date_str).startswith(this_month + '-'):
+                    member = self.g.get_member(int(uid_str))
+                    if member:
+                        this_month_bdays.append(f"• {member.mention} · `{date_str}`")
+            except Exception:
+                continue
+
+        self.clear_items()
+
+        b_toggle = Button(
+            label=("🔘 Désactiver" if on else "⚪ Activer"),
+            style=(discord.ButtonStyle.danger if on else discord.ButtonStyle.success),
+            custom_id="bd_toggle",
+        )
+        b_toggle.callback = self._cb_toggle
+
+        b_msg = Button(label="📝 Message", style=discord.ButtonStyle.primary, custom_id="bd_msg")
+        b_msg.callback = self._cb_msg
+
+        ch_sel = discord.ui.ChannelSelect(
+            placeholder=f"📢 Salon : {(ch.name if ch else 'aucun')}",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            min_values=0, max_values=1, custom_id="bd_ch",
+        )
+        ch_sel.callback = self._cb_channel
+
+        role_sel = discord.ui.RoleSelect(
+            placeholder=f"🎭 Rôle du jour : {(role.name if role else 'aucun')}",
+            min_values=0, max_values=1, custom_id="bd_role",
+        )
+        role_sel.callback = self._cb_role
+
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="bd_back")
+        b_back.callback = self._cb_back
+
+        list_block = "\n".join(this_month_bdays[:10]) if this_month_bdays else "_Aucun ce mois-ci_"
+
+        items = [
+            v2_title("🎂 Anniversaires"),
+            v2_subtitle("Le bot souhaite l'anniversaire des membres dans le salon configuré"),
+            v2_divider(),
+            v2_body(
+                f"🔌 **État** · {'🟢 actif' if on else '⚪ désactivé'}\n"
+                f"📢 **Salon** · {ch.mention if ch else '_non défini_'}\n"
+                f"🎭 **Rôle du jour** · {role.mention if role else '_aucun_'}\n"
+                f"📋 **Anniversaires enregistrés** · `{len(bdays)}`"
+            ),
+            v2_divider(),
+            v2_body(f"**🎂 Ce mois-ci :**\n{list_block}"),
+            v2_divider(),
+            v2_body(
+                "**Pour les membres :**\n"
+                "Utilisez **`/birthday set <JJ-MM>`** pour enregistrer votre date.\n"
+                "Variables du message : `{user}` `{user_name}` `{date}`"
+            ),
+            v2_divider(),
+            discord.ui.ActionRow(ch_sel),
+            discord.ui.ActionRow(role_sel),
+            discord.ui.ActionRow(b_toggle, b_msg, b_back),
+        ]
+        self.add_item(v2_container(*items, color=Palette.PREMIUM))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_toggle(self, i):
+        try:
+            c = await cfg(self.g.id)
+            await db_set(self.g.id, 'birthday_enabled', not bool(c.get('birthday_enabled', False)))
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[BirthdayConfigPanelV2 _cb_toggle] {ex}")
+
+    async def _cb_channel(self, i):
+        try:
+            vals = i.data.get('values', [])
+            await db_set(self.g.id, 'birthday_channel', int(vals[0]) if vals else 0)
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[BirthdayConfigPanelV2 _cb_channel] {ex}")
+
+    async def _cb_role(self, i):
+        try:
+            vals = i.data.get('values', [])
+            await db_set(self.g.id, 'birthday_role', int(vals[0]) if vals else 0)
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[BirthdayConfigPanelV2 _cb_role] {ex}")
+
+    async def _cb_msg(self, i):
+        try:
+            c = await cfg(self.g.id)
+            modal = _BirthdayMsgModal(self.g, self.u)
+            modal.tpl.default = c.get('birthday_message', '')
+            await i.response.send_modal(modal)
+        except Exception as ex:
+            print(f"[BirthdayConfigPanelV2 _cb_msg] {ex}")
+
+    async def _cb_back(self, i):
+        v = CentrePanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+class _BirthdayMsgModal(Modal, title="📝 Message d'anniversaire"):
+    tpl = TextInput(
+        label="Message (utilise {user}, {user_name}…)",
+        style=discord.TextStyle.paragraph,
+        max_length=1500, required=True,
+    )
+
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+
+    async def on_submit(self, i):
+        try:
+            await db_set(self.g.id, 'birthday_message', self.tpl.value or '')
+            await BirthdayConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[_BirthdayMsgModal on_submit] {ex}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -16085,6 +17285,13 @@ class CentrePanelV2(LayoutView):
         b_auto_react.callback = self._cb_auto_react
         b_mass_role = Button(label="🎭 Rôles en masse", style=discord.ButtonStyle.success, custom_id="cpnv2_mr")
         b_mass_role.callback = self._cb_mass_role
+        # Phase 28.3+ : nouveaux
+        b_welcome = Button(label="👋 Welcome/Goodbye", style=discord.ButtonStyle.success, custom_id="cpnv2_wg")
+        b_welcome.callback = self._cb_welcome
+        b_rr = Button(label="🎫 Reaction Roles", style=discord.ButtonStyle.success, custom_id="cpnv2_rr")
+        b_rr.callback = self._cb_rr
+        b_bday = Button(label="🎂 Anniversaires", style=discord.ButtonStyle.success, custom_id="cpnv2_bday")
+        b_bday.callback = self._cb_bday
         b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="cpnv2_back")
         b_back.callback = self._cb_back
 
@@ -16102,15 +17309,18 @@ class CentrePanelV2(LayoutView):
         items.append(v2_divider())
         items.append(v2_body(
             "📨 **Messages auto** — Envois récurrents programmés dans un salon\n"
-            "🎙️ **Vocaux auto** — Salon-hub qui crée un vocal perso quand un membre s'y connecte (nom + taille configurables)\n"
-            "📢 **Annonces** — Embeds personnalisés à publier dans tes salons\n"
-            "😄 **Auto-réactions** — Le bot réagit aux messages (bonjour → 👋)\n"
-            "🎭 **Rôles en masse** — Ajouter/retirer un rôle à tous les membres"
+            "🎙️ **Vocaux auto** — Salon-hub qui crée un vocal perso\n"
+            "📢 **Annonces** — Embeds personnalisés à publier\n"
+            "😄 **Auto-réactions** — Bot réagit aux messages (bonjour → 👋)\n"
+            "🎭 **Rôles en masse** — Ajouter/retirer un rôle à tous\n"
+            "👋 **Welcome/Goodbye** — Messages d'arrivée et de départ\n"
+            "🎫 **Reaction Roles** — Clique l'emoji = obtient le rôle\n"
+            "🎂 **Anniversaires** — Le bot souhaite l'anniversaire des membres"
         ))
         items.append(v2_divider())
         items.append(v2_subtitle("▼ Choisis une fonctionnalité ci-dessous"))
-        items.append(discord.ui.ActionRow(b_messages, b_voice, b_announce, b_auto_react))
-        items.append(discord.ui.ActionRow(b_mass_role, b_back))
+        items.append(discord.ui.ActionRow(b_messages, b_voice, b_announce, b_auto_react, b_mass_role))
+        items.append(discord.ui.ActionRow(b_welcome, b_rr, b_bday, b_back))
 
         self.add_item(v2_container(*items, color=Palette.PRIMARY))
 
@@ -16145,6 +17355,42 @@ class CentrePanelV2(LayoutView):
     async def _cb_voice(self, i):
         v = TempVoicePanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
+
+    async def _cb_welcome(self, i):
+        try:
+            v = WelcomeGoodbyePanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[CentrePanelV2 _cb_welcome] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+    async def _cb_rr(self, i):
+        try:
+            v = ReactionRolesPanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[CentrePanelV2 _cb_rr] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+    async def _cb_bday(self, i):
+        try:
+            v = BirthdayConfigPanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[CentrePanelV2 _cb_bday] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
 
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
@@ -27878,6 +29124,14 @@ async def on_ready():
     if not check_expired_restrictions.is_running():
         check_expired_restrictions.start()
 
+    # Phase 28.5 : tâche annonce anniversaires (1x/heure mais agit à 9h UTC)
+    if not birthday_announcer.is_running():
+        birthday_announcer.start()
+
+    # Phase 28.6 : auto-clôture des polls expirés
+    if not poll_closer.is_running():
+        poll_closer.start()
+
     print(f"✅ {bot.user.name} v28 prêt!")
     print(f"🌐 Serveurs: {len(bot.guilds)}")
     print(f"📢 Vérification feeds sociaux toutes les 5 minutes")
@@ -28038,6 +29292,46 @@ async def on_member_remove(m):
                 leave_e.set_thumbnail(url=m.display_avatar.url if m.display_avatar else None)
                 await webhook_send(ch, 'ticket', embed=leave_e)
     except: pass
+
+    # ═══ Phase 28.3 : Goodbye message ═══
+    try:
+        await _handle_goodbye(m)
+    except Exception as ex:
+        print(f"[goodbye] {ex}")
+
+
+async def _handle_goodbye(member):
+    """Phase 28.3 — envoie le message de goodbye."""
+    c = await cfg(member.guild.id)
+    if not c.get('goodbye_enabled', False):
+        return
+    ch_id = int(c.get('goodbye_channel', 0) or 0)
+    if not ch_id:
+        return
+    ch = member.guild.get_channel(ch_id)
+    if not ch:
+        return
+    perms = ch.permissions_for(member.guild.me)
+    if not (perms.send_messages and perms.embed_links):
+        return
+    tpl = c.get('goodbye_message', '') or ''
+    try:
+        text = tpl.format(
+            user=member.mention,
+            user_name=member.display_name,
+            guild=member.guild.name,
+            count=member.guild.member_count or 0,
+        )
+    except Exception as ex:
+        text = f"😢 {member.display_name} a quitté. _(erreur template: {ex})_"
+    e = discord.Embed(description=text, color=0xED4245, timestamp=datetime.now(timezone.utc))
+    e.set_author(name=f"😢 Au revoir", icon_url=member.display_avatar.url)
+    e.set_thumbnail(url=member.display_avatar.url)
+    e.set_footer(text=f"{member.guild.name} · {member.guild.member_count} membres", icon_url=(member.guild.icon.url if member.guild.icon else None))
+    try:
+        await ch.send(embed=e)
+    except Exception as ex:
+        print(f"[goodbye send] {ex}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -28332,6 +29626,135 @@ async def on_member_join(m):
 
     except Exception as ex:
         print(f"Erreur on_member_join: {ex}")
+
+    # ═══ Phase 28.2 : Anti-Raid (nouveau système configurable) ═══
+    try:
+        await _handle_antiraid_join(m)
+    except Exception as ex:
+        print(f"[antiraid_join] {ex}")
+
+    # ═══ Phase 28.3 : Welcome message ═══
+    try:
+        await _handle_welcome(m)
+    except Exception as ex:
+        print(f"[welcome] {ex}")
+
+
+async def _handle_antiraid_join(member):
+    """Phase 28.2 — détecte les raids et applique l'action configurée."""
+    c = await cfg(member.guild.id)
+    if not c.get('antiraid_enabled', False):
+        return
+
+    threshold = int(c.get('antiraid_join_threshold', 5))
+    window = int(c.get('antiraid_join_window_sec', 10))
+    min_age_days = int(c.get('antiraid_min_account_age_days', 7))
+    action = str(c.get('antiraid_action', 'kick'))
+
+    now_ts = time.time()
+    joins = _recent_joins.setdefault(member.guild.id, [])
+    # Purge anciens (garde uniquement les joins dans la fenêtre)
+    cutoff = now_ts - window
+    joins[:] = [entry for entry in joins if isinstance(entry, tuple) and entry[0] > cutoff]
+    joins.append((now_ts, member.id))
+
+    # Compte d'âge suspect ?
+    account_age_days = (datetime.now(timezone.utc) - member.created_at).days
+    is_suspect = account_age_days < min_age_days
+
+    if len(joins) < threshold:
+        return  # Pas encore raid
+
+    # ── Raid détecté ──
+    print(f"[ANTIRAID] guild={member.guild.id} {len(joins)} joins en {window}s → RAID")
+
+    # Récupérer les membres récents pour action
+    recent_member_ids = [mid for (_, mid) in joins[-threshold:]]
+    recent_members = []
+    for mid in recent_member_ids:
+        m = member.guild.get_member(mid)
+        if m and not m.bot and m.id != member.guild.owner_id:
+            recent_members.append(m)
+
+    # Appliquer l'action
+    applied = 0
+    failed = 0
+    for m in recent_members:
+        try:
+            if action == 'kick':
+                await m.kick(reason=f"Anti-Raid auto : {len(joins)} joins en {window}s")
+            elif action == 'ban':
+                await m.ban(reason=f"Anti-Raid auto : {len(joins)} joins en {window}s", delete_message_seconds=0)
+            elif action == 'lockdown':
+                # Lockdown = élève verification level
+                try:
+                    await member.guild.edit(verification_level=discord.VerificationLevel.highest, reason="Anti-Raid lockdown")
+                except Exception:
+                    pass
+                # Pas d'action sur le membre individuellement en lockdown mode
+                break
+            applied += 1
+        except Exception as ex:
+            print(f"[ANTIRAID action] {ex}")
+            failed += 1
+
+    # Log dans le salon dédié
+    log_ch_id = int(c.get('antiraid_log_channel', 0) or 0)
+    log_ch = member.guild.get_channel(log_ch_id) if log_ch_id else None
+    if log_ch:
+        try:
+            e = discord.Embed(
+                title="🚨 RAID DÉTECTÉ",
+                description=(
+                    f"**{len(joins)}** joins en `{window}`s (seuil : `{threshold}`)\n"
+                    f"**Action** : `{action}` appliquée à `{applied}`/`{len(recent_members)}` membres"
+                ),
+                color=0xE74C3C,
+                timestamp=datetime.now(timezone.utc),
+            )
+            e.add_field(name="🆕 Membres concernés", value="\n".join(f"• {m.mention} (`{m.id}`)" for m in recent_members[:10]) or "_aucun_", inline=False)
+            if is_suspect:
+                e.add_field(name="⚠️ Compte suspect", value=f"Le dernier compte a `{account_age_days}`j d'âge (seuil : `{min_age_days}`j)", inline=False)
+            await log_ch.send(embed=e)
+        except Exception as ex:
+            print(f"[ANTIRAID log] {ex}")
+
+    # Reset le tracker après action
+    _recent_joins[member.guild.id] = []
+
+
+async def _handle_welcome(member):
+    """Phase 28.3 — envoie le message de welcome."""
+    c = await cfg(member.guild.id)
+    if not c.get('welcome_enabled', False):
+        return
+    ch_id = int(c.get('welcome_channel', 0) or 0)
+    if not ch_id:
+        return
+    ch = member.guild.get_channel(ch_id)
+    if not ch:
+        return
+    perms = ch.permissions_for(member.guild.me)
+    if not (perms.send_messages and perms.embed_links):
+        return
+    tpl = c.get('welcome_message', '') or ''
+    try:
+        text = tpl.format(
+            user=member.mention,
+            user_name=member.display_name,
+            guild=member.guild.name,
+            count=member.guild.member_count or 0,
+        )
+    except Exception as ex:
+        text = f"👋 Bienvenue {member.mention} ! _(erreur template: {ex})_"
+    e = discord.Embed(description=text, color=0x57F287, timestamp=datetime.now(timezone.utc))
+    e.set_author(name=f"👋 Bienvenue", icon_url=member.display_avatar.url)
+    e.set_thumbnail(url=member.display_avatar.url)
+    e.set_footer(text=f"{member.guild.name} · {member.guild.member_count} membres", icon_url=(member.guild.icon.url if member.guild.icon else None))
+    try:
+        await ch.send(content=member.mention, embed=e)
+    except Exception as ex:
+        print(f"[welcome send] {ex}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -29798,6 +31221,466 @@ async def creator_list(i: discord.Interaction):
 
 
 bot.tree.add_command(creator_group)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  /birthday — Phase 28.5
+# ═══════════════════════════════════════════════════════════════════════════════
+
+birthday_group = app_commands.Group(name="birthday", description="🎂 Gère ta date d'anniversaire")
+
+
+def _validate_birthday(date_str: str):
+    """Valide un format JJ-MM et retourne 'MM-DD' (zero-padded) ou None."""
+    try:
+        date_str = (date_str or '').strip()
+        # Accepter JJ-MM, JJ/MM, JJ.MM
+        for sep in ['-', '/', '.']:
+            if sep in date_str:
+                parts = date_str.split(sep)
+                if len(parts) == 2:
+                    day = int(parts[0])
+                    month = int(parts[1])
+                    if 1 <= month <= 12 and 1 <= day <= 31:
+                        # Vérifier que le jour est valide pour ce mois
+                        from calendar import monthrange
+                        max_day = monthrange(2024, month)[1]
+                        if day <= max_day:
+                            return f"{month:02d}-{day:02d}"
+        return None
+    except Exception:
+        return None
+
+
+@birthday_group.command(name="set", description="🎂 Enregistre ta date d'anniversaire (JJ-MM)")
+@app_commands.describe(date="Format JJ-MM (ex: 15-04 pour le 15 avril)")
+async def birthday_set(i: discord.Interaction, date: str):
+    normalized = _validate_birthday(date)
+    if not normalized:
+        return await i.response.send_message(
+            "❌ Format invalide. Utilise `JJ-MM` (ex: `15-04` pour le 15 avril).",
+            ephemeral=True,
+        )
+    c = await cfg(i.guild.id)
+    bdays = dict(c.get('birthdays', {}) or {})
+    bdays[str(i.user.id)] = normalized
+    await db_set(i.guild.id, 'birthdays', bdays)
+
+    # Joli affichage
+    month_names = ['', 'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+                   'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
+    mm, dd = normalized.split('-')
+    pretty = f"{int(dd)} {month_names[int(mm)]}"
+
+    await i.response.send_message(
+        f"🎂 Ton anniversaire est enregistré : **{pretty}**\n"
+        f"Le serveur te souhaitera un joyeux anniversaire le jour J !",
+        ephemeral=True,
+    )
+
+
+@birthday_group.command(name="remove", description="🗑️ Retire ton anniversaire")
+async def birthday_remove(i: discord.Interaction):
+    c = await cfg(i.guild.id)
+    bdays = dict(c.get('birthdays', {}) or {})
+    if str(i.user.id) not in bdays:
+        return await i.response.send_message("ℹ️ Tu n'as pas d'anniversaire enregistré.", ephemeral=True)
+    bdays.pop(str(i.user.id), None)
+    await db_set(i.guild.id, 'birthdays', bdays)
+    await i.response.send_message("🗑️ Ton anniversaire a été retiré.", ephemeral=True)
+
+
+@birthday_group.command(name="list", description="📋 Voir les anniversaires de ce mois")
+async def birthday_list(i: discord.Interaction):
+    c = await cfg(i.guild.id)
+    bdays = c.get('birthdays', {}) or {}
+    this_month = datetime.now(timezone.utc).strftime('%m')
+
+    found = []
+    for uid_str, date_str in bdays.items():
+        if str(date_str).startswith(this_month + '-'):
+            try:
+                member = i.guild.get_member(int(uid_str))
+                if member:
+                    found.append((date_str, member))
+            except Exception:
+                continue
+
+    found.sort(key=lambda x: x[0])
+
+    if not found:
+        return await i.response.send_message(
+            "_Aucun anniversaire enregistré ce mois-ci._",
+            ephemeral=True,
+        )
+
+    month_names = ['', 'janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+                   'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
+    lines = [f"🎂 **Anniversaires de {month_names[int(this_month)]} :**\n"]
+    for date_str, member in found:
+        dd = date_str.split('-')[1]
+        lines.append(f"• `{int(dd):>2}` — {member.mention}")
+
+    await i.response.send_message("\n".join(lines), ephemeral=True)
+
+
+bot.tree.add_command(birthday_group)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  /poll — Phase 28.6 : sondages avancés
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_POLL_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
+
+
+class PollVoteView(View):
+    """Phase 28.6 : View persistante pour voter via boutons."""
+
+    def __init__(self, poll_id: int):
+        super().__init__(timeout=None)
+        self.poll_id = poll_id
+
+    async def _vote(self, i: discord.Interaction, option_idx: int):
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT options_json, votes_json, multi, ended FROM polls WHERE id=?',
+                    (self.poll_id,),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row:
+                return await i.response.send_message("❌ Sondage introuvable.", ephemeral=True)
+            options = json.loads(row[0]) if row[0] else []
+            votes = json.loads(row[1]) if row[1] else {}
+            multi = bool(row[2])
+            ended = bool(row[3])
+            if ended:
+                return await i.response.send_message("⏰ Ce sondage est terminé.", ephemeral=True)
+            if option_idx >= len(options):
+                return await i.response.send_message("❌ Option invalide.", ephemeral=True)
+
+            user_key = str(i.user.id)
+            cur_votes = votes.get(user_key, [])
+            if not isinstance(cur_votes, list):
+                cur_votes = [cur_votes] if cur_votes is not None else []
+
+            if multi:
+                # Multi-vote : toggle
+                if option_idx in cur_votes:
+                    cur_votes.remove(option_idx)
+                    msg = f"❌ Vote retiré pour : **{options[option_idx]}**"
+                else:
+                    cur_votes.append(option_idx)
+                    msg = f"✅ Vote ajouté pour : **{options[option_idx]}**"
+            else:
+                # Single-vote : replace
+                cur_votes = [option_idx]
+                msg = f"✅ Tu as voté pour : **{options[option_idx]}**"
+
+            if cur_votes:
+                votes[user_key] = cur_votes
+            else:
+                votes.pop(user_key, None)
+
+            async with get_db() as db:
+                await db.execute(
+                    'UPDATE polls SET votes_json=? WHERE id=?',
+                    (json.dumps(votes), self.poll_id),
+                )
+                await db.commit()
+
+            await i.response.send_message(msg, ephemeral=True)
+
+            # Refresh le message du sondage
+            try:
+                await _refresh_poll_message(self.poll_id)
+            except Exception as ex:
+                print(f"[PollVoteView refresh] {ex}")
+        except Exception as ex:
+            print(f"[PollVoteView _vote] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
+async def _refresh_poll_message(poll_id: int):
+    """Re-render l'embed du sondage avec les votes à jour."""
+    async with get_db() as db:
+        async with db.execute(
+            'SELECT guild_id, channel_id, message_id, question, options_json, votes_json, ended, ends_at, multi FROM polls WHERE id=?',
+            (poll_id,),
+        ) as cur:
+            row = await cur.fetchone()
+    if not row:
+        return
+    guild_id, channel_id, message_id, question, options_json, votes_json, ended, ends_at, multi = row
+    options = json.loads(options_json) if options_json else []
+    votes = json.loads(votes_json) if votes_json else {}
+
+    guild = bot.get_guild(int(guild_id))
+    if not guild:
+        return
+    channel = guild.get_channel(int(channel_id))
+    if not channel:
+        return
+    try:
+        msg = await channel.fetch_message(int(message_id))
+    except Exception:
+        return
+
+    # Compter votes par option
+    counts = [0] * len(options)
+    for u_votes in votes.values():
+        if isinstance(u_votes, list):
+            for idx in u_votes:
+                if 0 <= idx < len(options):
+                    counts[idx] += 1
+    total = sum(counts)
+
+    desc_lines = [f"**{question}**", ""]
+    for idx, opt in enumerate(options):
+        c = counts[idx]
+        pct = (c / total * 100) if total > 0 else 0
+        bar_len = int(round(pct / 5))
+        bar = '█' * bar_len + '░' * (20 - bar_len)
+        desc_lines.append(f"{_POLL_EMOJIS[idx]} **{opt}**\n`{bar}` `{c}` vote(s) · `{pct:.0f}%`")
+    desc_lines.append("")
+    desc_lines.append(f"📊 **Total** : `{total}` vote(s){'  ·  🔢 multi-choix' if multi else ''}")
+    if ended:
+        desc_lines.append("⏰ **Sondage terminé**")
+    elif ends_at:
+        desc_lines.append(f"⏰ Se termine <t:{int(datetime.fromisoformat(ends_at).timestamp())}:R>")
+
+    e = msg.embeds[0] if msg.embeds else discord.Embed()
+    e.description = "\n".join(desc_lines)[:4000]
+    e.color = 0x95A5A6 if ended else 0x5865F2
+
+    try:
+        await msg.edit(embed=e)
+    except Exception as ex:
+        print(f"[_refresh_poll_message edit] {ex}")
+
+
+@bot.tree.command(name="poll", description="📊 Crée un sondage avec 2 à 10 options")
+@app_commands.describe(
+    question="La question du sondage",
+    options="Les options séparées par |  (ex: oui|non|peut-être)",
+    duration_minutes="Durée en minutes (0 = pas de timer, défaut: 60)",
+    multi="Autoriser le vote multi-choix (par défaut: non)",
+)
+async def poll_cmd(
+    i: discord.Interaction,
+    question: str,
+    options: str,
+    duration_minutes: int = 60,
+    multi: bool = False,
+):
+    """Phase 28.6 : crée un sondage."""
+    try:
+        opts = [o.strip() for o in options.split('|') if o.strip()][:10]
+        if len(opts) < 2:
+            return await i.response.send_message(
+                "❌ Donne au moins **2** options, séparées par `|`. Ex : `oui|non|peut-être`",
+                ephemeral=True,
+            )
+
+        duration_minutes = max(0, min(10080, int(duration_minutes or 0)))  # max 7j
+        ends_at = None
+        if duration_minutes > 0:
+            ends_at = (datetime.now(timezone.utc) + timedelta(minutes=duration_minutes)).isoformat()
+
+        await i.response.defer()
+
+        # Build embed initial
+        desc_lines = [f"**{question}**", ""]
+        for idx, opt in enumerate(opts):
+            desc_lines.append(f"{_POLL_EMOJIS[idx]} **{opt}**\n`{'░' * 20}` `0` vote(s) · `0%`")
+        desc_lines.append("")
+        desc_lines.append(f"📊 **Total** : `0` vote(s){'  ·  🔢 multi-choix' if multi else ''}")
+        if ends_at:
+            desc_lines.append(f"⏰ Se termine <t:{int(datetime.fromisoformat(ends_at).timestamp())}:R>")
+
+        e = discord.Embed(
+            description="\n".join(desc_lines)[:4000],
+            color=0x5865F2,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_author(name=f"📊 Sondage de {i.user.display_name}", icon_url=i.user.display_avatar.url)
+        e.set_footer(text="Clique un bouton pour voter")
+
+        # Send placeholder
+        msg = await i.followup.send(embed=e)
+
+        # DB insert
+        async with get_db() as db:
+            cur = await db.execute(
+                'INSERT INTO polls(guild_id, channel_id, message_id, author_id, question, options_json, votes_json, multi, ends_at) '
+                'VALUES (?,?,?,?,?,?,?,?,?)',
+                (
+                    i.guild.id, i.channel.id, msg.id, i.user.id,
+                    question, json.dumps(opts), json.dumps({}),
+                    1 if multi else 0,
+                    ends_at,
+                ),
+            )
+            poll_id = cur.lastrowid
+            await db.commit()
+
+        # Create view with vote buttons (max 5 per row, so up to 10 buttons in 2 rows)
+        v = PollVoteView(poll_id)
+        for idx, opt in enumerate(opts):
+            b = Button(
+                label=f"{idx+1}. {opt[:60]}",
+                emoji=_POLL_EMOJIS[idx],
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"poll_{poll_id}_{idx}",
+            )
+            # Capture idx properly via default arg
+            b.callback = (lambda i_, idx=idx: v._vote(i_, idx))
+            v.add_item(b)
+
+        try:
+            await msg.edit(view=v)
+        except Exception as ex:
+            print(f"[poll edit view] {ex}")
+    except Exception as ex:
+        print(f"[/poll] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            else:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 28.5 : Task daily — annonce des anniversaires
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@tasks.loop(hours=1)
+async def birthday_announcer():
+    """Vérifie chaque heure si on est entre 9h et 10h UTC : si oui, annonce."""
+    try:
+        now_dt = datetime.now(timezone.utc)
+        # On annonce une fois par jour, entre 9h et 10h UTC
+        if now_dt.hour != 9:
+            return
+
+        today_str = now_dt.strftime('%m-%d')
+
+        for guild in bot.guilds:
+            try:
+                c = await cfg(guild.id)
+                if not c.get('birthday_enabled', False):
+                    continue
+                ch_id = int(c.get('birthday_channel', 0) or 0)
+                ch = guild.get_channel(ch_id) if ch_id else None
+                if not ch:
+                    continue
+                bdays = c.get('birthdays', {}) or {}
+
+                celebrants = []
+                for uid_str, date_str in bdays.items():
+                    if str(date_str) == today_str:
+                        try:
+                            member = guild.get_member(int(uid_str))
+                            if member:
+                                celebrants.append(member)
+                        except Exception:
+                            continue
+
+                if not celebrants:
+                    continue
+
+                tpl = c.get('birthday_message', '') or '🎂 Joyeux anniversaire {user} !'
+                role_id = int(c.get('birthday_role', 0) or 0)
+                bday_role = guild.get_role(role_id) if role_id else None
+
+                # Anniversaire de la veille → retirer le rôle d'hier
+                if bday_role:
+                    for m in guild.members:
+                        if bday_role in m.roles and str(m.id) not in bdays:
+                            try:
+                                await m.remove_roles(bday_role, reason="Anniversaire terminé")
+                            except Exception:
+                                pass
+                        elif bday_role in m.roles and bdays.get(str(m.id)) != today_str:
+                            try:
+                                await m.remove_roles(bday_role, reason="Anniversaire terminé")
+                            except Exception:
+                                pass
+
+                for member in celebrants:
+                    try:
+                        text = tpl.format(
+                            user=member.mention,
+                            user_name=member.display_name,
+                            date=today_str,
+                            guild=guild.name,
+                        )
+                    except Exception:
+                        text = f"🎂 Joyeux anniversaire {member.mention} !"
+
+                    e = discord.Embed(
+                        description=text,
+                        color=0xF1C40F,
+                        timestamp=now_dt,
+                    )
+                    e.set_author(name="🎂 Joyeux anniversaire !", icon_url=member.display_avatar.url)
+                    e.set_thumbnail(url=member.display_avatar.url)
+                    e.set_footer(text=guild.name, icon_url=(guild.icon.url if guild.icon else None))
+                    try:
+                        await ch.send(content=member.mention, embed=e)
+                    except Exception as ex:
+                        print(f"[birthday send] {ex}")
+
+                    # Donner le rôle du jour
+                    if bday_role:
+                        try:
+                            await member.add_roles(bday_role, reason="Anniversaire aujourd'hui")
+                        except Exception:
+                            pass
+            except Exception as ex:
+                print(f"[birthday_announcer guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[birthday_announcer] {ex}")
+
+
+@birthday_announcer.before_loop
+async def _birthday_announcer_wait():
+    await bot.wait_until_ready()
+
+
+# Phase 28.6 : auto-close polls expirés
+@tasks.loop(minutes=5)
+async def poll_closer():
+    try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT id FROM polls WHERE ended=0 AND ends_at IS NOT NULL AND ends_at < ?',
+                (now_iso,),
+            ) as cur:
+                rows = await cur.fetchall()
+        for (poll_id,) in rows:
+            try:
+                async with get_db() as db:
+                    await db.execute('UPDATE polls SET ended=1 WHERE id=?', (poll_id,))
+                    await db.commit()
+                await _refresh_poll_message(poll_id)
+            except Exception as ex:
+                print(f"[poll_closer poll={poll_id}] {ex}")
+    except Exception as ex:
+        print(f"[poll_closer] {ex}")
+
+
+@poll_closer.before_loop
+async def _poll_closer_wait():
+    await bot.wait_until_ready()
 
 
 async def check_mod_perm(i, cmd_key):
@@ -32967,11 +34850,51 @@ async def generate_detailed_stat_graph(guild, member, days):
 #                              📊 SUGGESTION VOTE TRACKING
 # ═══════════════════════════════════════════════════════════════════════════════
 
+async def _handle_reaction_role(payload, *, add: bool):
+    """Phase 28.4 — applique/retire un rôle quand emoji = match."""
+    try:
+        if payload.user_id == bot.user.id or not payload.guild_id:
+            return
+        emoji_str = str(payload.emoji)
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT role_id FROM reaction_roles WHERE guild_id=? AND message_id=? AND emoji=?',
+                (payload.guild_id, payload.message_id, emoji_str),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return
+        role_id = int(row[0])
+        guild = bot.get_guild(payload.guild_id)
+        if not guild:
+            return
+        role = guild.get_role(role_id)
+        if not role:
+            return
+        member = guild.get_member(payload.user_id)
+        if not member or member.bot:
+            return
+        try:
+            if add and role not in member.roles:
+                await member.add_roles(role, reason="Reaction Role")
+            elif not add and role in member.roles:
+                await member.remove_roles(role, reason="Reaction Role (retrait)")
+        except discord.Forbidden:
+            print(f"[ReactionRole] perm refusée sur {role.name}")
+        except Exception as ex:
+            print(f"[ReactionRole] {ex}")
+    except Exception as ex:
+        print(f"[_handle_reaction_role] {ex}")
+
+
 @bot.event
 async def on_raw_reaction_add(payload):
     if payload.user_id == bot.user.id:
         return
-    
+
+    # Phase 28.4 : Reaction Roles
+    await _handle_reaction_role(payload, add=True)
+
     # Vérifier si c'est une suggestion
     try:
         async with get_db() as db:
@@ -33026,7 +34949,10 @@ async def on_raw_reaction_add(payload):
 
 @bot.event
 async def on_raw_reaction_remove(payload):
-    await on_raw_reaction_add(payload)  # Même logique
+    # Phase 28.4 : Reaction Roles (retrait du rôle)
+    await _handle_reaction_role(payload, add=False)
+    # Re-utilise la logique add pour mettre à jour les couleurs de suggestion
+    await on_raw_reaction_add(payload)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              🎭 REALSY INACTIVITY TRACKING
@@ -37018,11 +38944,11 @@ async def cleardeals_cmd(i: discord.Interaction):
 #                    🆕 INTÉGRATION MODULES REDESIGN 2026
 # ═══════════════════════════════════════════════════════════════════════════════
 # Branche les slashs (tableau de bord owner + wizard + commandes granulaires).
-# Tous les modules (permissions, social, protection, community, backup) sont
+# Tous les modules (permissions, social, protection, community) sont
 # accessibles depuis :
 #   /admin   - dashboard V2 (tout en panneaux)
-#   /setup   - wizard d'installation guidée (6 étapes)
-#   /permissions, /social, /protection, /backup, /community - granular CLI
+#   /setup   - wizard d'installation guidée
+#   /permissions, /social, /protection, /community - granular CLI
 panels2026.setup_admin_command(bot)
 wizard2026.setup_setup_command(bot)
 slashcmds2026.setup_all_commands(bot)
