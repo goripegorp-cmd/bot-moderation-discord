@@ -54,6 +54,7 @@ import slash_commands_architecture as slashcmds_arch2026
 import unified_logger as ulogger2026
 import social_gallery as gallery2026
 import game_updates as gameupdates2026
+import delegations as delegations2026
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  🛡️ GESTION D'ERREURS GLOBALE - REND LES ERREURS VISIBLES AU LIEU DE SILENCIEUSES
@@ -3567,6 +3568,10 @@ class MainPanelV2(LayoutView):
                     label="Jeux & Concours", value="games", emoji="🎮",
                     description="Giveaways · Game deals",
                 ),
+                discord.SelectOption(
+                    label="Délégations", value="delegations", emoji="🔑",
+                    description="Déléguer la gestion d'un rôle à un utilisateur",
+                ),
             ],
             custom_id="mpv2_module",
         )
@@ -3610,6 +3615,7 @@ class MainPanelV2(LayoutView):
             'publications': lambda: AdsPanelV2(self.u, self.g),
             'logs':         lambda: LogsPanelV2(self.u, self.g),
             'games':        lambda: GamesPanelV2(self.u, self.g),
+            'delegations':  lambda: DelegationsPanelV2(self.u, self.g),
         }
         if val in v2_panels:
             v = v2_panels[val]()
@@ -3873,6 +3879,629 @@ class GamesPanelV2(LayoutView):
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
         await i.response.edit_message(view=v, embed=None, attachments=[])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  🔑 DÉLÉGATIONS — Owner crée des rôles délégués, managers utilisent /manage
+#  Phase 18
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class DelegationsPanelV2(LayoutView):
+    """Hub Délégations — l'owner liste/crée/configure les rôles délégués."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        delegations = delegations2026.list_delegations(c)
+
+        # Liste compacte
+        if delegations:
+            lines = []
+            for d in delegations[:8]:
+                role = self.g.get_role(d.get('role_id', 0))
+                manager = self.g.get_member(d.get('manager_user_id', 0))
+                emoji = d.get('emoji', '🔑')
+                name = d.get('name', '?')
+                role_txt = role.mention if role else "⚪ _rôle ?_"
+                manager_txt = manager.mention if manager else "⚪ _user ?_"
+                lines.append(f"{emoji} **{name}** · {role_txt} · 👤 {manager_txt}")
+            if len(delegations) > 8:
+                lines.append(f"_… +{len(delegations) - 8}_")
+            body_txt = "\n".join(lines)
+        else:
+            body_txt = "_Aucune délégation — clique ➕ Créer une délégation_"
+
+        self.clear_items()
+
+        items: list = []
+        if self.g.icon:
+            items.append(v2_section(
+                v2_title("🔑 Délégations"),
+                v2_subtitle(f"`{len(delegations)}` délégation(s) actives"),
+                accessory=v2_thumb(self.g.icon.url),
+            ))
+        else:
+            items.append(v2_title("🔑 Délégations"))
+            items.append(v2_subtitle(f"`{len(delegations)}` délégation(s) actives"))
+
+        items.append(v2_divider())
+        items.append(v2_body(
+            "Délègue la gestion d'un rôle à un utilisateur de confiance.\n"
+            "Le délégué utilisera ensuite `/manage` pour gérer SON rôle."
+        ))
+        items.append(v2_divider())
+        items.append(v2_title("Délégations configurées", level=3))
+        items.append(v2_body(body_txt))
+        items.append(v2_divider())
+
+        b_add = Button(label="➕ Créer", style=discord.ButtonStyle.success, custom_id="delv2_add")
+        b_add.callback = self._cb_add
+        b_edit = Button(label="✏️ Modifier", style=discord.ButtonStyle.primary,
+                        disabled=(not delegations), custom_id="delv2_edit")
+        b_edit.callback = self._cb_edit
+        b_remove = Button(label="🗑️ Retirer", style=discord.ButtonStyle.danger,
+                          disabled=(not delegations), custom_id="delv2_remove")
+        b_remove.callback = self._cb_remove
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="delv2_back")
+        b_back.callback = self._cb_back
+
+        items.append(discord.ui.ActionRow(b_add, b_edit, b_remove, b_back))
+
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_add(self, i):
+        try:
+            await i.response.send_modal(DelegationCreateModal(self.u, self.g))
+        except Exception as ex:
+            print(f"[DelegationsPanelV2 _cb_add] {ex}")
+
+    async def _cb_edit(self, i):
+        try:
+            c = await cfg(self.g.id)
+            delegations = delegations2026.list_delegations(c)
+            if not delegations:
+                return await i.response.send_message("❌ Aucune délégation.", ephemeral=True)
+            opts = []
+            for d in delegations[:25]:
+                role = self.g.get_role(d.get('role_id', 0))
+                opts.append(discord.SelectOption(
+                    label=d.get('name', '?')[:50],
+                    value=d.get('id', ''),
+                    description=(role.name[:50] if role else "rôle ?"),
+                    emoji=d.get('emoji', '🔑'),
+                ))
+            v = View(timeout=120)
+            sel = Select(placeholder="Choisir la délégation à modifier…", options=opts)
+
+            async def _on_pick(ix):
+                try:
+                    delegation_id = ix.data['values'][0]
+                    sub = DelegationConfigPanelV2(self.u, self.g, delegation_id)
+                    await sub.render_to(ix, edit=True)
+                except Exception as ex:
+                    print(f"[delegation edit pick] {ex}")
+                    try:
+                        await ix.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+                    except Exception:
+                        pass
+
+            sel.callback = _on_pick
+            v.add_item(sel)
+            await i.response.send_message("✏️ Quelle délégation modifier ?", view=v, ephemeral=True)
+        except Exception as ex:
+            print(f"[DelegationsPanelV2 _cb_edit] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+    async def _cb_remove(self, i):
+        try:
+            c = await cfg(self.g.id)
+            delegations = delegations2026.list_delegations(c)
+            if not delegations:
+                return await i.response.send_message("❌ Aucune délégation.", ephemeral=True)
+            opts = []
+            for d in delegations[:25]:
+                role = self.g.get_role(d.get('role_id', 0))
+                opts.append(discord.SelectOption(
+                    label=d.get('name', '?')[:50],
+                    value=d.get('id', ''),
+                    description=(role.name[:50] if role else "rôle ?"),
+                    emoji=d.get('emoji', '🔑'),
+                ))
+            v = View(timeout=120)
+            sel = Select(placeholder="Choisir la délégation à supprimer…", options=opts)
+
+            async def _on_pick(ix):
+                try:
+                    delegation_id = ix.data['values'][0]
+                    cc = await cfg(self.g.id)
+                    d_obj = delegations2026.get_delegation(cc, delegation_id)
+                    name = d_obj.get('name', '?') if d_obj else '?'
+                    delegations2026.remove_delegation(cc, delegation_id)
+                    await db_set(self.g.id, delegations2026.CONFIG_KEY, cc.get(delegations2026.CONFIG_KEY, []))
+                    await ix.response.send_message(
+                        f"🗑️ Délégation **{name}** supprimée.",
+                        ephemeral=True,
+                    )
+                    # Re-render
+                    new_v = DelegationsPanelV2(self.u, self.g)
+                    try:
+                        await ix.edit_original_response(view=new_v)
+                    except Exception:
+                        pass
+                except Exception as ex:
+                    print(f"[delegation remove pick] {ex}")
+                    try:
+                        await ix.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+                    except Exception:
+                        pass
+
+            sel.callback = _on_pick
+            v.add_item(sel)
+            await i.response.send_message("🗑️ Quelle délégation supprimer ?", view=v, ephemeral=True)
+        except Exception as ex:
+            print(f"[DelegationsPanelV2 _cb_remove] {ex}")
+
+    async def _cb_back(self, i):
+        v = MainPanelV2(self.u, self.g)
+        await i.response.edit_message(view=v, embed=None, attachments=[])
+
+
+class DelegationCreateModal(Modal):
+    """Modal de création d'une nouvelle délégation."""
+
+    def __init__(self, u, g):
+        super().__init__(title="🔑 Créer une délégation")
+        self.u = u
+        self.g = g
+        self.name_input = TextInput(
+            label="Nom de la délégation",
+            placeholder="Ex: Realsy, Staff Helper, Modo VIP…",
+            max_length=50,
+            required=True,
+        )
+        self.emoji_input = TextInput(
+            label="Emoji (optionnel)",
+            placeholder="🔑 (par défaut)",
+            max_length=4,
+            required=False,
+            default="🔑",
+        )
+        self.role_id_input = TextInput(
+            label="ID du rôle géré",
+            placeholder="Ex: 123456789012345678 — clic droit sur le rôle puis Copier l'ID",
+            max_length=20,
+            required=True,
+        )
+        self.manager_id_input = TextInput(
+            label="ID de l'utilisateur autorisé (manager)",
+            placeholder="Ex: 123456789012345678",
+            max_length=20,
+            required=True,
+        )
+        self.threshold_input = TextInput(
+            label="Seuil AFK en jours",
+            placeholder="14 (par défaut)",
+            max_length=3,
+            required=False,
+            default="14",
+        )
+        self.add_item(self.name_input)
+        self.add_item(self.emoji_input)
+        self.add_item(self.role_id_input)
+        self.add_item(self.manager_id_input)
+        self.add_item(self.threshold_input)
+
+    async def on_submit(self, i):
+        try:
+            await i.response.defer(ephemeral=True)
+
+            name = self.name_input.value.strip()
+            emoji = (self.emoji_input.value or "🔑").strip()
+            role_id_str = self.role_id_input.value.strip()
+            manager_id_str = self.manager_id_input.value.strip()
+            threshold_str = (self.threshold_input.value or "14").strip()
+
+            # Validations
+            if not name:
+                return await i.followup.send("❌ Nom requis.", ephemeral=True)
+            try:
+                role_id = int(role_id_str)
+            except ValueError:
+                return await i.followup.send("❌ ID rôle invalide (chiffres uniquement).", ephemeral=True)
+            role = self.g.get_role(role_id)
+            if not role:
+                return await i.followup.send(
+                    f"❌ Aucun rôle trouvé avec l'ID `{role_id}`. Vérifie en activant le mode développeur Discord et en faisant Copier l'ID sur le rôle.",
+                    ephemeral=True,
+                )
+            try:
+                manager_id = int(manager_id_str)
+            except ValueError:
+                return await i.followup.send("❌ ID utilisateur invalide.", ephemeral=True)
+            manager = self.g.get_member(manager_id)
+            if not manager:
+                return await i.followup.send(
+                    f"❌ Aucun membre trouvé avec l'ID `{manager_id}` sur ce serveur.",
+                    ephemeral=True,
+                )
+            try:
+                threshold = int(threshold_str)
+            except ValueError:
+                threshold = 14
+
+            # Création
+            c = await cfg(self.g.id)
+            new_d = delegations2026.add_delegation(
+                c,
+                name=name,
+                emoji=emoji,
+                role_id=role_id,
+                manager_user_id=manager_id,
+                activity_threshold_days=threshold,
+            )
+            await db_set(self.g.id, delegations2026.CONFIG_KEY, c.get(delegations2026.CONFIG_KEY, []))
+
+            await i.followup.send(
+                f"✅ Délégation **{new_d['name']}** créée !\n\n"
+                f"🎭 Rôle géré : {role.mention}\n"
+                f"👤 Manager : {manager.mention}\n"
+                f"📅 Seuil AFK : `{threshold}` jours\n\n"
+                f"💡 Le manager peut maintenant utiliser `/manage` pour accéder à son panel.",
+                ephemeral=True,
+            )
+
+            # Re-render le panel principal
+            try:
+                v = DelegationsPanelV2(self.u, self.g)
+                await i.edit_original_response(view=v)
+            except Exception:
+                pass
+
+        except Exception as ex:
+            print(f"[DelegationCreateModal on_submit] {ex}")
+            import traceback; traceback.print_exc()
+            try:
+                await i.followup.send(f"❌ Erreur : `{type(ex).__name__}: {ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
+class DelegationConfigPanelV2(LayoutView):
+    """Sous-panel : configuration détaillée d'une délégation."""
+
+    def __init__(self, u, g, delegation_id: str):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+        self.delegation_id = delegation_id
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        d = delegations2026.get_delegation(c, self.delegation_id)
+        if not d:
+            try:
+                await interaction.response.send_message("❌ Délégation introuvable.", ephemeral=True)
+            except Exception:
+                pass
+            return
+
+        role = self.g.get_role(d.get('role_id', 0))
+        manager = self.g.get_member(d.get('manager_user_id', 0))
+
+        self.clear_items()
+
+        items: list = [
+            v2_title(f"{d.get('emoji', '🔑')} {d.get('name', '?')}"),
+            v2_subtitle(f"Configuration de cette délégation"),
+            v2_divider(),
+            v2_body(
+                f"🎭 **Rôle géré** · {role.mention if role else '⚪ _rôle supprimé_'}\n"
+                f"👤 **Manager** · {manager.mention if manager else '⚪ _membre parti_'}\n"
+                f"📅 **Seuil AFK** · `{d.get('activity_threshold_days', 14)}` jours\n"
+                f"🆔 **ID** · `{d.get('id', '?')}`"
+            ),
+            v2_divider(),
+            v2_subtitle("Pour changer ces réglages, supprime puis recrée la délégation."),
+        ]
+
+        b_view = Button(label="👥 Voir les membres", style=discord.ButtonStyle.primary, custom_id="delcfg_view")
+        b_view.callback = self._cb_view_members
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="delcfg_back")
+        b_back.callback = self._cb_back
+
+        items.append(discord.ui.ActionRow(b_view, b_back))
+
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_view_members(self, i):
+        try:
+            c = await cfg(self.g.id)
+            d = delegations2026.get_delegation(c, self.delegation_id)
+            if not d:
+                return await i.response.send_message("❌ Délégation introuvable.", ephemeral=True)
+            v = DelegationMembersPanelV2(self.u, self.g, self.delegation_id, back_to_owner=True)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[DelegationConfigPanelV2 _cb_view_members] {ex}")
+
+    async def _cb_back(self, i):
+        v = DelegationsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+class DelegationMembersPanelV2(LayoutView):
+    """Panel : liste des membres avec le rôle + activité.
+
+    Utilisé par :
+    - L'owner depuis DelegationConfigPanelV2 (read-only)
+    - Le manager via /manage (read + actions : add/remove role, kick AFK)
+    """
+
+    def __init__(self, u, g, delegation_id: str, *, back_to_owner: bool = False):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+        self.delegation_id = delegation_id
+        self.back_to_owner = back_to_owner  # True = retour vers DelegationConfigPanelV2 (owner)
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        d = delegations2026.get_delegation(c, self.delegation_id)
+        if not d:
+            try:
+                await interaction.response.send_message("❌ Délégation introuvable.", ephemeral=True)
+            except Exception:
+                pass
+            return
+
+        role = self.g.get_role(d.get('role_id', 0))
+        threshold_days = d.get('activity_threshold_days', 14)
+
+        # Liste des membres avec le rôle + activité
+        members_lines = []
+        afk_count = 0
+        active_count = 0
+
+        if role:
+            # Récupérer les last_message pour les membres avec le rôle
+            members_with_role = [m for m in self.g.members if role in m.roles and not m.bot]
+            member_ids = [m.id for m in members_with_role]
+
+            # Fetch activity en une requête
+            last_activity = {}
+            if member_ids:
+                placeholders = ','.join('?' * len(member_ids))
+                try:
+                    async with get_db() as db:
+                        async with db.execute(
+                            f'SELECT user_id, last_message FROM activity_tracking '
+                            f'WHERE guild_id=? AND user_id IN ({placeholders})',
+                            (self.g.id, *member_ids),
+                        ) as cur:
+                            rows = await cur.fetchall()
+                            for uid, last_msg in rows:
+                                last_activity[uid] = last_msg
+                except Exception as ex:
+                    print(f"[DelegationMembersPanelV2 activity fetch] {ex}")
+
+            now_dt = now()
+            for m in members_with_role[:15]:
+                last_msg = last_activity.get(m.id)
+                if last_msg:
+                    try:
+                        last_dt = datetime.fromisoformat(last_msg.replace('Z', '+00:00'))
+                        days_ago = (now_dt - last_dt.replace(tzinfo=None) if last_dt.tzinfo is None else now_dt - last_dt).days
+                        if days_ago >= threshold_days:
+                            members_lines.append(f"💤 {m.mention} · _AFK `{days_ago}j`_")
+                            afk_count += 1
+                        else:
+                            members_lines.append(f"🟢 {m.mention} · `{days_ago}j`")
+                            active_count += 1
+                    except Exception:
+                        members_lines.append(f"⚪ {m.mention} · _?_")
+                else:
+                    members_lines.append(f"⚪ {m.mention} · _jamais actif_")
+                    afk_count += 1
+
+            if len(members_with_role) > 15:
+                members_lines.append(f"_… +{len(members_with_role) - 15}_")
+
+        members_block = "\n".join(members_lines) if members_lines else "_Aucun membre avec ce rôle_"
+
+        self.clear_items()
+
+        items: list = [
+            v2_title(f"{d.get('emoji', '🔑')} {d.get('name', '?')} — Membres"),
+            v2_subtitle(f"🎭 {role.name if role else '?'} · 🟢 `{active_count}` actifs · 💤 `{afk_count}` inactifs"),
+            v2_divider(),
+            v2_body(members_block),
+            v2_divider(),
+            v2_subtitle(f"Seuil AFK : `{threshold_days}` jours sans message"),
+        ]
+
+        # Boutons d'actions (seulement pour le manager ou owner)
+        b_add = Button(label="➕ Donner le rôle", style=discord.ButtonStyle.success, custom_id="delmem_add")
+        b_add.callback = self._cb_add_member
+        b_remove = Button(label="🗑️ Retirer le rôle", style=discord.ButtonStyle.danger, custom_id="delmem_remove")
+        b_remove.callback = self._cb_remove_member
+        b_refresh = Button(label="🔄 Actualiser", style=discord.ButtonStyle.secondary, custom_id="delmem_refresh")
+        b_refresh.callback = self._cb_refresh
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="delmem_back")
+        b_back.callback = self._cb_back
+
+        items.append(discord.ui.ActionRow(b_add, b_remove, b_refresh, b_back))
+
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_add_member(self, i):
+        try:
+            c = await cfg(self.g.id)
+            d = delegations2026.get_delegation(c, self.delegation_id)
+            if not d:
+                return await i.response.send_message("❌ Délégation introuvable.", ephemeral=True)
+            role = self.g.get_role(d.get('role_id', 0))
+            if not role:
+                return await i.response.send_message("❌ Le rôle géré a été supprimé.", ephemeral=True)
+
+            v = View(timeout=120)
+            user_select = discord.ui.UserSelect(
+                placeholder=f"Donner @{role.name} à...",
+                min_values=1, max_values=1,
+            )
+
+            async def _on_pick(ix):
+                try:
+                    user_id = int(ix.data['values'][0])
+                    member = self.g.get_member(user_id)
+                    if not member:
+                        return await ix.response.send_message("❌ Membre introuvable.", ephemeral=True)
+                    if role in member.roles:
+                        return await ix.response.send_message(
+                            f"⚠️ {member.mention} a déjà ce rôle.",
+                            ephemeral=True,
+                        )
+                    try:
+                        await member.add_roles(role, reason=f"Délégation {d.get('name', '?')} par {i.user}")
+                        await ix.response.send_message(
+                            f"✅ {role.mention} donné à {member.mention}",
+                            ephemeral=True,
+                        )
+                    except discord.Forbidden:
+                        await ix.response.send_message(
+                            "❌ Je n'ai pas les permissions pour donner ce rôle.",
+                            ephemeral=True,
+                        )
+                except Exception as ex:
+                    print(f"[delmem add pick] {ex}")
+                    try:
+                        await ix.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+                    except Exception:
+                        pass
+
+            user_select.callback = _on_pick
+            v.add_item(user_select)
+            await i.response.send_message(
+                f"➕ À qui donner le rôle **{role.name}** ?",
+                view=v,
+                ephemeral=True,
+            )
+        except Exception as ex:
+            print(f"[DelegationMembersPanelV2 _cb_add_member] {ex}")
+
+    async def _cb_remove_member(self, i):
+        try:
+            c = await cfg(self.g.id)
+            d = delegations2026.get_delegation(c, self.delegation_id)
+            if not d:
+                return await i.response.send_message("❌ Délégation introuvable.", ephemeral=True)
+            role = self.g.get_role(d.get('role_id', 0))
+            if not role:
+                return await i.response.send_message("❌ Le rôle géré a été supprimé.", ephemeral=True)
+
+            members_with_role = [m for m in self.g.members if role in m.roles and not m.bot]
+            if not members_with_role:
+                return await i.response.send_message(
+                    "❌ Aucun membre n'a ce rôle actuellement.",
+                    ephemeral=True,
+                )
+
+            v = View(timeout=120)
+            user_select = discord.ui.UserSelect(
+                placeholder=f"Retirer @{role.name} à...",
+                min_values=1, max_values=1,
+            )
+
+            async def _on_pick(ix):
+                try:
+                    user_id = int(ix.data['values'][0])
+                    member = self.g.get_member(user_id)
+                    if not member:
+                        return await ix.response.send_message("❌ Membre introuvable.", ephemeral=True)
+                    if role not in member.roles:
+                        return await ix.response.send_message(
+                            f"⚠️ {member.mention} n'a pas ce rôle.",
+                            ephemeral=True,
+                        )
+                    try:
+                        await member.remove_roles(role, reason=f"Délégation {d.get('name', '?')} par {i.user}")
+                        await ix.response.send_message(
+                            f"✅ {role.mention} retiré à {member.mention}",
+                            ephemeral=True,
+                        )
+                    except discord.Forbidden:
+                        await ix.response.send_message(
+                            "❌ Je n'ai pas les permissions.",
+                            ephemeral=True,
+                        )
+                except Exception as ex:
+                    print(f"[delmem remove pick] {ex}")
+                    try:
+                        await ix.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+                    except Exception:
+                        pass
+
+            user_select.callback = _on_pick
+            v.add_item(user_select)
+            await i.response.send_message(
+                f"🗑️ À qui retirer le rôle **{role.name}** ?",
+                view=v,
+                ephemeral=True,
+            )
+        except Exception as ex:
+            print(f"[DelegationMembersPanelV2 _cb_remove_member] {ex}")
+
+    async def _cb_refresh(self, i):
+        try:
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[DelegationMembersPanelV2 _cb_refresh] {ex}")
+
+    async def _cb_back(self, i):
+        if self.back_to_owner:
+            v = DelegationConfigPanelV2(self.u, self.g, self.delegation_id)
+        else:
+            # Pour le manager venant de /manage : retour à un message simple
+            try:
+                await i.response.edit_message(
+                    content="✅ Panel fermé.",
+                    view=None, embed=None, attachments=[],
+                )
+            except Exception:
+                pass
+            return
+        await v.render_to(i, edit=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -26488,6 +27117,86 @@ try:
     bot.tree.add_command(publish_group)
 except Exception as ex:
     print(f"[PUBLISH] Erreur enregistrement groupe : {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  🔑 /manage — Panel personnel pour les managers de délégations (Phase 18)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@bot.tree.command(name="manage", description="🔑 Accède à ton panel de gestion (délégations)")
+async def manage_cmd(i: discord.Interaction):
+    """Permet à un manager de délégation d'accéder à son panel.
+
+    Phase 18 : système où l'owner délègue la gestion d'un rôle à un user
+    de confiance. Ce user utilise /manage pour gérer SES membres.
+    """
+    try:
+        c = await cfg(i.guild.id)
+        user_delegations = delegations2026.get_delegations_for_user(c, i.user.id)
+
+        # Owner et admin ont accès à TOUTES les délégations
+        is_super = (i.user.id == i.guild.owner_id) or (i.user.id == SUPER_OWNER_ID) or i.user.guild_permissions.administrator
+        if is_super and not user_delegations:
+            user_delegations = delegations2026.list_delegations(c)
+
+        if not user_delegations:
+            return await i.response.send_message(
+                "⛔ Tu n'as aucune délégation à gérer.\n\n"
+                "Le propriétaire du serveur doit te désigner manager d'une délégation "
+                "via `/configure → 🔑 Délégations → ➕ Créer`.",
+                ephemeral=True,
+            )
+
+        # Si une seule délégation : aller direct sur son panel
+        if len(user_delegations) == 1:
+            d = user_delegations[0]
+            v = DelegationMembersPanelV2(i.user, i.guild, d['id'], back_to_owner=False)
+            return await v.render_to(i, edit=False)
+
+        # Plusieurs délégations : afficher un select
+        opts = []
+        for d in user_delegations[:25]:
+            role = i.guild.get_role(d.get('role_id', 0))
+            opts.append(discord.SelectOption(
+                label=d.get('name', '?')[:50],
+                value=d.get('id', ''),
+                description=(f"@{role.name}"[:50] if role else "rôle ?"),
+                emoji=d.get('emoji', '🔑'),
+            ))
+
+        v = View(timeout=300)
+        sel = Select(placeholder="Choisis la délégation à gérer…", options=opts)
+
+        async def _on_pick(ix):
+            try:
+                delegation_id = ix.data['values'][0]
+                sub_v = DelegationMembersPanelV2(i.user, i.guild, delegation_id, back_to_owner=False)
+                await sub_v.render_to(ix, edit=True)
+            except Exception as ex:
+                print(f"[/manage pick] {ex}")
+                try:
+                    await ix.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+                except Exception:
+                    pass
+
+        sel.callback = _on_pick
+        v.add_item(sel)
+
+        await i.response.send_message(
+            f"🔑 Tu gères **{len(user_delegations)}** délégation(s). Choisis-en une :",
+            view=v,
+            ephemeral=True,
+        )
+    except Exception as ex:
+        print(f"[/manage] {ex}")
+        import traceback; traceback.print_exc()
+        try:
+            await i.response.send_message(
+                f"❌ Erreur : `{type(ex).__name__}: {ex}`",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
 
 
 async def check_mod_perm(i, cmd_key):
