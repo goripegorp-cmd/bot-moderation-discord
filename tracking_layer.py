@@ -213,6 +213,30 @@ async def remove_record(
     return True
 
 
+async def rebind_channel(guild_id: int, platform: str, new_channel_id: int) -> int:
+    """Met a jour le channel_id de toutes les entries de cette plateforme.
+
+    Phase 3.7 : si l'owner change le salon configure pour cette plateforme,
+    on doit propager le nouveau channel_id aux entries existantes pour que
+    la galerie les retrouve correctement.
+
+    Retourne le nombre d'entries mises a jour.
+    """
+    await _load_guild(guild_id)
+    updated = 0
+    store = _cache.get(guild_id, {})
+    for tp in store.values():
+        if tp.platform != platform:
+            continue
+        if tp.discord_channel_id == new_channel_id:
+            continue
+        tp.discord_channel_id = new_channel_id
+        updated += 1
+    if updated > 0:
+        await _save_guild(guild_id)
+    return updated
+
+
 async def prune_old(guild_id: int, max_days: int = 180) -> int:
     """Supprime les annonces > max_days et marquees deleted, pour eviter la croissance infinie."""
     await _load_guild(guild_id)

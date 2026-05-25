@@ -51,6 +51,8 @@ import social_liveness as liveness2026
 import server_architect as architect2026
 import roles_panel as rolespanel2026
 import slash_commands_architecture as slashcmds_arch2026
+import unified_logger as ulogger2026
+import social_gallery as gallery2026
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  🛡️ GESTION D'ERREURS GLOBALE - REND LES ERREURS VISIBLES AU LIEU DE SILENCIEUSES
@@ -1894,7 +1896,43 @@ async def sanction(m, action, dur, reason, g):
     except: pass
 
 async def send_log(g, key, m, msg, reason, extra=None):
-    """Envoie un log détaillé dans le salon configuré"""
+    """Envoie un log détaillé dans le salon configuré.
+
+    Phase 3.7 : envoie également dans le salon unifié si configuré.
+    """
+    # ───── Salon unifié (Phase 3.7) ─────
+    try:
+        key_to_event = {
+            'anti_phishing':   ulogger2026.EventType.SEC_PHISHING,
+            'anti_scam':       ulogger2026.EventType.SEC_SCAM,
+            'anti_spam':       ulogger2026.EventType.SEC_SPAM,
+            'anti_raid':       ulogger2026.EventType.SEC_RAID,
+            'anti_compromised': ulogger2026.EventType.SEC_PHISHING,
+            'anti_qrcode':     ulogger2026.EventType.SEC_QRCODE,
+            'anti_link':       ulogger2026.EventType.SEC_LINK,
+            'anti_invite':     ulogger2026.EventType.SEC_INVITE,
+            'anti_badwords':   ulogger2026.EventType.SEC_BADWORD,
+            'anti_caps':       ulogger2026.EventType.SEC_MENTION,
+            'anti_image':      ulogger2026.EventType.SEC_IMAGE,
+            'anti_newaccount': ulogger2026.EventType.SEC_NEWACCOUNT,
+            'anti_alt':        ulogger2026.EventType.SEC_ALT,
+            'anti_nsfw':       ulogger2026.EventType.SEC_NSFW,
+        }
+        ev = key_to_event.get(key, ulogger2026.EventType.SEC_SPAM)
+        chan_for_log = msg.channel if msg and getattr(msg, 'channel', None) else None
+        content_preview = None
+        if msg and msg.content:
+            content_preview = re.sub(r'https?://\S+', '[LIEN CENSURÉ]', msg.content[:500])
+        await ulogger2026.log_security_event(
+            bot, g, ev, m,
+            channel=chan_for_log,
+            content_preview=content_preview,
+            reason=f"{reason}" + (f"\n{extra}" if extra else ""),
+        )
+    except Exception as ex:
+        print(f"[UNIFIED SEC LOG] {key}: {ex}")
+
+    # ───── Salon legacy (rétrocompat) ─────
     try:
         c = await cfg(g.id)
         ch = g.get_channel(c.get(f'log_{key}', 0))
@@ -6813,17 +6851,71 @@ class RaidActionSelect(View):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def send_mod_log(guild, action, mod, target, reason=None, duration=None, extra=None):
-    """Envoie un log de modération"""
+    """Envoie un log de modération.
+
+    Phase 3.7 : envoie AUSSI dans le salon unifié (ulogger2026) si configuré.
+    Le canal legacy `mod_log_channel` continue de fonctionner pour la rétrocompat.
+    """
+    # ───── Salon unifié (Phase 3.7) ─────
+    try:
+        action_to_event = {
+            'warn':        ulogger2026.EventType.MOD_WARN,
+            'unwarn':      ulogger2026.EventType.MOD_UNWARN,
+            'mute':        ulogger2026.EventType.MOD_MUTE,
+            'unmute':      ulogger2026.EventType.MOD_UNMUTE,
+            'kick':        ulogger2026.EventType.MOD_KICK,
+            'ban':         ulogger2026.EventType.MOD_BAN,
+            'unban':       ulogger2026.EventType.MOD_UNBAN,
+            'timeout':     ulogger2026.EventType.MOD_TIMEOUT,
+            'purge':       ulogger2026.EventType.MOD_PURGE,
+            'lock':        ulogger2026.EventType.MOD_LOCK,
+            'unlock':      ulogger2026.EventType.MOD_UNLOCK,
+            'slowmode':    ulogger2026.EventType.MOD_SLOWMODE,
+            'infractions': ulogger2026.EventType.COMMAND_EXEC,
+            'anti_raid':   ulogger2026.EventType.SEC_RAID,
+            'anti_alt':    ulogger2026.EventType.SEC_ALT,
+            'anti_newaccount': ulogger2026.EventType.SEC_NEWACCOUNT,
+        }
+        ev = action_to_event.get(action, ulogger2026.EventType.COMMAND_EXEC)
+        action_labels = {
+            'warn': "avertissement", 'unwarn': "retrait d'avertissement",
+            'mute': "mute", 'unmute': "unmute", 'kick': "expulsion",
+            'ban': "bannissement", 'unban': "débannissement",
+            'timeout': "timeout", 'purge': "purge de messages",
+        }
+        verb = action_labels.get(action, action)
+        try:
+            target_name = f"{target.mention} (`{target}`)" if target else "_cible inconnue_"
+        except Exception:
+            target_name = "_cible_"
+        desc = f"**{verb.capitalize()}** appliqué à {target_name}."
+        extra_dict = {}
+        if duration:
+            extra_dict["⏱️ Durée"] = duration
+        if extra:
+            extra_dict["ℹ️ Détail"] = str(extra)
+        await ulogger2026.log_event(
+            bot, guild, ev,
+            description=desc,
+            user=target,
+            moderator=mod,
+            reason=reason,
+            extra=extra_dict or None,
+        )
+    except Exception as ex:
+        print(f"[UNIFIED MOD LOG] {ex}")
+
+    # ───── Salon legacy (rétrocompat) ─────
     try:
         c = await cfg(guild.id)
         log_ch = guild.get_channel(c.get('mod_log_channel', 0))
         if not log_ch:
             return
-        
+
         colors = {'warn': 0xF39C12, 'unwarn': 0x2ECC71, 'mute': 0xE67E22, 'unmute': 0x2ECC71, 'kick': 0xE74C3C, 'ban': 0xC0392B, 'unban': 0x27AE60, 'infractions': 0x3498DB}
         emojis = {'warn': '⚠️', 'unwarn': '✅', 'mute': '🔇', 'unmute': '🔊', 'kick': '👢', 'ban': '🔨', 'unban': '🔓', 'infractions': '📋'}
         titles = {'warn': 'Avertissement', 'unwarn': 'Warn supprimé', 'mute': 'Mute', 'unmute': 'Unmute', 'kick': 'Expulsion', 'ban': 'Bannissement', 'unban': 'Débannissement', 'infractions': 'Consultation infractions'}
-        
+
         e = discord.Embed(
             color=colors.get(action, C.ORANGE),
             timestamp=now()
@@ -6831,14 +6923,14 @@ async def send_mod_log(guild, action, mod, target, reason=None, duration=None, e
         e.set_author(name=f"{emojis.get(action, '🔨')} {titles.get(action, action.upper())}", icon_url=guild.icon.url if guild.icon else None)
         e.add_field(name="👮 Modérateur", value=f"{mod.mention}\n`{mod.id}`", inline=True)
         e.add_field(name="👤 Membre", value=f"{target.mention}\n`{target.id}`", inline=True)
-        
+
         if duration:
             e.add_field(name="⏱️ Durée", value=duration, inline=True)
         if reason:
             e.add_field(name="📝 Raison", value=reason[:1024], inline=False)
         if extra:
             e.add_field(name="ℹ️ Info", value=extra, inline=False)
-        
+
         e.set_thumbnail(url=target.display_avatar.url)
         e.set_footer(text=f"ID cible: {target.id}")
         await webhook_send(log_ch, 'mod_log', embed=e)
@@ -23585,6 +23677,12 @@ async def on_member_remove(m):
             ''', (m.guild.id, today))
             await db.commit()
     except: pass
+
+    # ═══ Log unifié (Phase 3.7) ═══
+    try:
+        await ulogger2026.log_member_leave(bot, m.guild, m)
+    except Exception as ex:
+        print(f"[UNIFIED LOG member_leave] {ex}")
     
     try:
         async with get_db() as db:
@@ -23618,6 +23716,12 @@ async def on_member_join(m):
             ''', (m.guild.id, today))
             await db.commit()
     except: pass
+
+    # ═══ Log unifié (Phase 3.7) ═══
+    try:
+        await ulogger2026.log_member_join(bot, m.guild, m)
+    except Exception as ex:
+        print(f"[UNIFIED LOG member_join] {ex}")
     
     try:
         c = await cfg(m.guild.id)
@@ -23803,6 +23907,116 @@ async def on_member_join(m):
 
     except Exception as ex:
         print(f"Erreur on_member_join: {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  📋 LOG UNIFIÉ — Hooks d'événements (Phase 3.7)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@bot.event
+async def on_message_delete(message):
+    """Log la suppression d'un message (sauf bots et DMs)."""
+    try:
+        if message.author is None or message.author.bot or message.guild is None:
+            return
+        await ulogger2026.log_message_delete(bot, message.guild, message)
+    except Exception as ex:
+        print(f"[UNIFIED LOG on_message_delete] {ex}")
+
+
+@bot.event
+async def on_bulk_message_delete(messages):
+    """Log les suppressions en masse (purge)."""
+    try:
+        if not messages:
+            return
+        first = messages[0]
+        if first.guild is None:
+            return
+        await ulogger2026.log_event(
+            bot, first.guild, ulogger2026.EventType.MSG_BULK_DELETE,
+            description=f"🧹 **{len(messages)} messages** supprimés en masse dans {first.channel.mention if first.channel else '_salon inconnu_'}.",
+            channel=first.channel,
+            extra={"🧹 Quantité": str(len(messages))},
+        )
+    except Exception as ex:
+        print(f"[UNIFIED LOG on_bulk_message_delete] {ex}")
+
+
+@bot.event
+async def on_message_edit(before, after):
+    """Log les éditions de messages (skip bots, ignore embeds-only updates)."""
+    try:
+        if before.author is None or before.author.bot or before.guild is None:
+            return
+        # Ignore si contenu identique (Discord renvoie on_message_edit pour les previews d'embed)
+        if (before.content or "") == (after.content or ""):
+            return
+        await ulogger2026.log_event(
+            bot, before.guild, ulogger2026.EventType.MSG_EDIT,
+            description=(
+                f"✏️ Message de **{before.author}** édité dans "
+                f"{before.channel.mention if before.channel else '_salon inconnu_'}."
+            ),
+            user=before.author, channel=before.channel,
+            extra={
+                "📝 Avant": (before.content or "_(vide)_")[:900],
+                "✅ Après": (after.content or "_(vide)_")[:900],
+            },
+        )
+    except Exception as ex:
+        print(f"[UNIFIED LOG on_message_edit] {ex}")
+
+
+@bot.event
+async def on_guild_channel_create(channel):
+    try:
+        if channel.guild is None:
+            return
+        await ulogger2026.log_event(
+            bot, channel.guild, ulogger2026.EventType.CHAN_CREATE,
+            description=f"➕ Salon créé : {channel.mention} (`#{channel.name}`).",
+            channel=channel,
+        )
+    except Exception as ex:
+        print(f"[UNIFIED LOG chan_create] {ex}")
+
+
+@bot.event
+async def on_guild_channel_delete(channel):
+    try:
+        if channel.guild is None:
+            return
+        await ulogger2026.log_event(
+            bot, channel.guild, ulogger2026.EventType.CHAN_DELETE,
+            description=f"➖ Salon supprimé : `#{channel.name}` (`{channel.id}`).",
+        )
+    except Exception as ex:
+        print(f"[UNIFIED LOG chan_delete] {ex}")
+
+
+@bot.event
+async def on_guild_role_create(role):
+    try:
+        await ulogger2026.log_event(
+            bot, role.guild, ulogger2026.EventType.ROLE_CREATE,
+            description=f"🎭 Rôle créé : {role.mention} (`{role.name}`).",
+            extra={"🆔 ID": str(role.id)},
+        )
+    except Exception as ex:
+        print(f"[UNIFIED LOG role_create] {ex}")
+
+
+@bot.event
+async def on_guild_role_delete(role):
+    try:
+        await ulogger2026.log_event(
+            bot, role.guild, ulogger2026.EventType.ROLE_DELETE,
+            description=f"🎭 Rôle supprimé : `{role.name}` (`{role.id}`).",
+        )
+    except Exception as ex:
+        print(f"[UNIFIED LOG role_delete] {ex}")
+
 
 async def relay_discord_message(msg):
     """Relay un message vers les serveurs qui suivent ce salon"""
@@ -24249,6 +24463,301 @@ async def configure_cmd(i: discord.Interaction):
             )
         except Exception:
             pass
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  📋 /logs — Configuration du salon de logs unifié (Phase 3.7)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+logs_group = app_commands.Group(name="logs", description="📋 Logs unifiés du serveur")
+
+
+@logs_group.command(name="setchannel", description="📍 Définir le salon unique où vont TOUS les logs")
+@app_commands.describe(salon="Salon de destination (laisser vide pour désactiver)")
+async def logs_setchannel(i: discord.Interaction, salon: discord.TextChannel = None):
+    if i.user.id != i.guild.owner_id and i.user.id != 781205382923288593:
+        return await i.response.send_message(
+            "⛔ Cette commande est réservée au propriétaire du serveur.", ephemeral=True,
+        )
+    try:
+        if salon is None:
+            await ulogger2026.set_log_channel(i.guild.id, 0)
+            return await i.response.send_message(
+                "✅ Salon de logs unifié **désactivé**. Les logs legacy continuent de fonctionner.",
+                ephemeral=True,
+            )
+        # Vérifier que le bot peut écrire dedans
+        perms = salon.permissions_for(i.guild.me)
+        if not (perms.send_messages and perms.embed_links):
+            return await i.response.send_message(
+                f"❌ Je n'ai pas la permission d'écrire / d'envoyer des embeds dans {salon.mention}.",
+                ephemeral=True,
+            )
+        await ulogger2026.set_log_channel(i.guild.id, salon.id)
+        # Envoyer un message de test
+        try:
+            await ulogger2026.log_event(
+                bot, i.guild, ulogger2026.EventType.CONFIG_CHANGE,
+                description=(
+                    f"✅ Salon de logs unifié **activé** dans {salon.mention}.\n\n"
+                    "Tous les évènements (modération, sécurité, membres, messages, etc.) "
+                    "arriveront ici, différenciés par couleur et icône."
+                ),
+                moderator=i.user,
+            )
+        except Exception:
+            pass
+        await i.response.send_message(
+            f"✅ Salon de logs unifié défini sur {salon.mention}.\n"
+            "Tu peux filtrer les catégories avec `/logs categories`.",
+            ephemeral=True,
+        )
+    except Exception as ex:
+        print(f"[LOGS setchannel] {ex}")
+        try:
+            await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+@logs_group.command(name="status", description="📊 Voir la configuration actuelle des logs unifiés")
+async def logs_status(i: discord.Interaction):
+    if i.user.id != i.guild.owner_id and i.user.id != 781205382923288593:
+        return await i.response.send_message(
+            "⛔ Cette commande est réservée au propriétaire du serveur.", ephemeral=True,
+        )
+    try:
+        chan_id = await ulogger2026.get_log_channel(i.guild.id)
+        cats = await ulogger2026.get_enabled_categories(i.guild.id)
+        all_cats = sorted(set(m["cat"] for m in ulogger2026.EVENT_META.values()))
+        chan_txt = "🔴 _non configuré_"
+        if chan_id:
+            ch = i.guild.get_channel(chan_id)
+            chan_txt = ch.mention if ch else f"⚠️ `{chan_id}` (introuvable)"
+        e = discord.Embed(
+            title="📋 Logs unifiés — état actuel",
+            description=f"**Salon :** {chan_txt}",
+            color=0x3498DB,
+            timestamp=now(),
+        )
+        cats_txt = "\n".join(
+            f"{'✅' if c in cats else '❌'} **{c}**" for c in all_cats
+        )
+        e.add_field(name="🎛️ Catégories", value=cats_txt or "_aucune_", inline=False)
+        e.set_footer(text="/logs setchannel · /logs categories")
+        await i.response.send_message(embed=e, ephemeral=True)
+    except Exception as ex:
+        print(f"[LOGS status] {ex}")
+        try:
+            await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+class LogsCategoriesSelect(Select):
+    def __init__(self, current: set[str]):
+        all_cats = sorted(set(m["cat"] for m in ulogger2026.EVENT_META.values()))
+        opts = [
+            discord.SelectOption(
+                label=c, value=c,
+                default=(c in current),
+                emoji={
+                    "Modération": "🔨", "Sécurité": "🛡️", "Membres": "👥",
+                    "Messages": "💬", "Vocal": "🎤", "Serveur": "🏷️",
+                    "Tickets": "🎫", "Config": "⚙️",
+                }.get(c, "📋"),
+            )
+            for c in all_cats
+        ]
+        super().__init__(
+            placeholder="Catégories à logger…",
+            min_values=0,
+            max_values=len(opts),
+            options=opts,
+        )
+
+    async def callback(self, ix: discord.Interaction):
+        try:
+            chosen = set(self.values)
+            await ulogger2026.set_enabled_categories(ix.guild.id, chosen)
+            e = discord.Embed(
+                title="✅ Catégories de logs mises à jour",
+                description="\n".join(f"• **{c}**" for c in sorted(chosen)) or "_(aucune – logs désactivés)_",
+                color=0x2ECC71,
+                timestamp=now(),
+            )
+            await ix.response.edit_message(embed=e, view=None)
+        except Exception as ex:
+            print(f"[LOGS categories cb] {ex}")
+            try:
+                await ix.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
+@logs_group.command(name="categories", description="🎛️ Choisir les catégories de logs à activer")
+async def logs_categories(i: discord.Interaction):
+    if i.user.id != i.guild.owner_id and i.user.id != 781205382923288593:
+        return await i.response.send_message(
+            "⛔ Cette commande est réservée au propriétaire du serveur.", ephemeral=True,
+        )
+    try:
+        cats = await ulogger2026.get_enabled_categories(i.guild.id)
+        v = View(timeout=180)
+        v.add_item(LogsCategoriesSelect(cats))
+        e = discord.Embed(
+            title="🎛️ Catégories de logs",
+            description=(
+                "Choisis les catégories que tu veux logger dans le salon unifié.\n"
+                "Décoche celles que tu ne veux pas voir.\n\n"
+                "Les changements sont sauvegardés automatiquement."
+            ),
+            color=0x9B59B6,
+        )
+        await i.response.send_message(embed=e, view=v, ephemeral=True)
+    except Exception as ex:
+        print(f"[LOGS categories] {ex}")
+        try:
+            await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+try:
+    bot.tree.add_command(logs_group)
+except Exception as ex:
+    print(f"[LOGS] Erreur enregistrement groupe : {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  📢 /publications — Galerie sociale (Phase 3.7)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+publications_group = app_commands.Group(
+    name="publications",
+    description="📢 Gestion de la galerie des publications sociales",
+)
+
+
+@publications_group.command(name="refresh", description="🔄 Re-render la galerie d'une plateforme maintenant")
+@app_commands.describe(plateforme="Plateforme à rafraîchir")
+@app_commands.choices(plateforme=[
+    app_commands.Choice(name="🟢 Roblox UGC", value="roblox_ugc"),
+    app_commands.Choice(name="🔴 YouTube", value="youtube"),
+    app_commands.Choice(name="🟣 Twitch", value="twitch"),
+    app_commands.Choice(name="🎵 TikTok", value="tiktok"),
+    app_commands.Choice(name="🐦 Twitter", value="twitter"),
+    app_commands.Choice(name="🟠 Reddit", value="reddit"),
+    app_commands.Choice(name="🎮 RoSocial", value="rosocial"),
+])
+async def publications_refresh(i: discord.Interaction, plateforme: str):
+    if i.user.id != i.guild.owner_id and not i.user.guild_permissions.administrator:
+        return await i.response.send_message(
+            "⛔ Réservé aux admins / propriétaire.", ephemeral=True,
+        )
+    try:
+        await i.response.defer(ephemeral=True, thinking=True)
+    except Exception:
+        pass
+    try:
+        c = await cfg(i.guild.id)
+        key_to_channel = {
+            "roblox_ugc": "ads_roblox_channel",
+            "youtube":    "ads_youtube_channel",
+            "twitch":     "ads_twitch_channel",
+            "tiktok":     "ads_tiktok_channel",
+            "twitter":    "ads_twitter_channel",
+            "reddit":     "ads_reddit_channel",
+            "rosocial":   "ads_rosocial_channel",
+        }
+        chan_key = key_to_channel.get(plateforme)
+        chan_id = c.get(chan_key, 0) if chan_key else 0
+        if not chan_id:
+            return await i.followup.send(
+                f"❌ Aucun salon configuré pour `{plateforme}`. Utilise `/configure > 📢 Publicités` d'abord.",
+                ephemeral=True,
+            )
+        # Rebind et render
+        try:
+            await tracking2026.rebind_channel(i.guild.id, plateforme, chan_id)
+        except AttributeError:
+            pass
+        msg_id = await gallery2026.render(bot, i.guild.id, plateforme, chan_id)
+        ch = i.guild.get_channel(chan_id)
+        if msg_id and ch:
+            await i.followup.send(
+                f"✅ Galerie **{plateforme}** rafraîchie dans {ch.mention}.\n"
+                f"[Voir le message](https://discord.com/channels/{i.guild.id}/{chan_id}/{msg_id})",
+                ephemeral=True,
+            )
+        else:
+            await i.followup.send(
+                f"⚠️ Render terminé mais pas de message visible. Le salon n'est peut-être pas accessible.",
+                ephemeral=True,
+            )
+    except Exception as ex:
+        print(f"[PUBLICATIONS refresh] {ex}")
+        import traceback; traceback.print_exc()
+        try:
+            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+@publications_group.command(name="status", description="📊 Statistiques des publications trackées")
+async def publications_status(i: discord.Interaction):
+    if i.user.id != i.guild.owner_id and not i.user.guild_permissions.administrator:
+        return await i.response.send_message(
+            "⛔ Réservé aux admins / propriétaire.", ephemeral=True,
+        )
+    try:
+        await tracking2026._load_guild(i.guild.id)
+        store = tracking2026._cache.get(i.guild.id, {})
+        # Compter par plateforme
+        from collections import Counter
+        plat_counts = Counter()
+        plat_active = Counter()
+        for tp in store.values():
+            plat_counts[tp.platform] += 1
+            if not tp.deleted:
+                plat_active[tp.platform] += 1
+
+        plat_display = {
+            "youtube": "🔴 YouTube",   "twitch": "🟣 Twitch",
+            "tiktok":  "🎵 TikTok",    "twitter": "🐦 Twitter",
+            "reddit":  "🟠 Reddit",    "rosocial": "🎮 RoSocial",
+            "roblox_ugc": "🟢 Roblox UGC", "discord": "📡 Discord",
+            "instagram":  "📷 Instagram", "kick": "🟢 Kick",
+        }
+        lines = []
+        for plat in sorted(plat_counts.keys()):
+            disp = plat_display.get(plat, plat.title())
+            lines.append(
+                f"{disp} : **{plat_active[plat]}** actifs / **{plat_counts[plat]}** total"
+            )
+        if not lines:
+            lines = ["_(aucune publication trackée pour ce serveur)_"]
+
+        e = discord.Embed(
+            title="📊 Publications trackées",
+            description="\n".join(lines),
+            color=0x3498DB,
+            timestamp=now(),
+        )
+        e.set_footer(text="/publications refresh <plateforme> pour re-render")
+        await i.response.send_message(embed=e, ephemeral=True)
+    except Exception as ex:
+        print(f"[PUBLICATIONS status] {ex}")
+        try:
+            await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+try:
+    bot.tree.add_command(publications_group)
+except Exception as ex:
+    print(f"[PUBLICATIONS] Erreur enregistrement groupe : {ex}")
+
 
 async def check_mod_perm(i, cmd_key):
     """Vérifie si l'utilisateur a la permission pour cette commande de modération"""
@@ -28645,14 +29154,24 @@ async def check_roblox_ugc_feeds(session, guild, data):
             print(f"Erreur Roblox UGC feed {feed}: {ex}")
             continue
 
-    # Phase 3.1 : si au moins un nouvel item a ete enregistre, on (re)render
-    # la galerie pour ce salon (1 seul message qui s'auto-update).
-    if items_added:
+    # Phase 3.7 : on render TOUJOURS la galerie tant qu'il y a un channel configure,
+    # meme si pas de nouveaux items ce cycle (cas : items trackes au cycle precedent
+    # quand le channel n'etait pas configure, ou apres un changement de channel).
+    # La galerie liste les items du tracker - pas besoin de "new items" pour render.
+    try:
+        import social_gallery as gallery2026
+        # Phase 3.7 : si le channel a change, on rebind les entries existantes
         try:
-            import social_gallery as gallery2026
-            await gallery2026.render(bot, guild.id, "roblox_ugc", channel.id)
-        except Exception as ex:
-            print(f"[ROBLOX UGC] render gallery echoue : {ex}")
+            await tracking2026.rebind_channel(guild.id, "roblox_ugc", channel.id)
+        except AttributeError:
+            pass  # function pas encore deployee (rolling restart)
+        await gallery2026.render(bot, guild.id, "roblox_ugc", channel.id)
+        if items_added:
+            print(f"[ROBLOX UGC] {guild.id} : galerie mise a jour ({len(items)} items checkes)")
+    except Exception as ex:
+        import traceback
+        print(f"[ROBLOX UGC] render gallery echoue : {ex}")
+        traceback.print_exc()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #              🎮 SYSTÈME DE DEALS PERSISTANT (anti-doublon en DB)

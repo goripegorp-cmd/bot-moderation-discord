@@ -147,38 +147,86 @@ def _relative_time(epoch_seconds: float) -> str:
 
 
 def build_gallery_view(
-    guild_id: int, platform: str, channel_id: int
+    guild_id: int, platform: str, channel_id: int,
+    ignore_channel_filter: bool = True,
 ) -> ui.LayoutView:
-    """Construit la LayoutView contenant la galerie."""
-    posts = get_gallery_posts(guild_id, platform, channel_id, limit=MAX_ITEMS)
+    """Construit la LayoutView contenant la galerie.
+
+    Phase 3.7 : design plus pro avec V2 Components.
+    ignore_channel_filter=True : montre TOUS les items de cette plateforme
+    pour ce guild (gere les changements de channel_id).
+    """
+    if ignore_channel_filter:
+        # On filtre seulement par guild_id + platform (channel_id ignore)
+        store = tracking_layer._cache.get(guild_id, {})
+        matching = []
+        for tp in store.values():
+            if tp.platform != platform:
+                continue
+            if tp.deleted:
+                continue
+            matching.append(tp)
+        matching.sort(key=lambda t: t.posted_at, reverse=True)
+        posts = matching[:MAX_ITEMS]
+    else:
+        posts = get_gallery_posts(guild_id, platform, channel_id, limit=MAX_ITEMS)
     plat_info = PLATFORM_DISPLAY.get(platform, {"name": platform.title(), "icon": "📡", "color": 0x5865F2})
 
     view = ui.LayoutView(timeout=None)
 
     items = []
-    items.append(ui.TextDisplay(f"# {plat_info['icon']} Galerie {plat_info['name']}"))
+
+    # En-tete plus riche
+    header_text = (
+        f"# {plat_info['icon']} {plat_info['name']}\n"
+        f"-# Galerie des publications · {len(posts)} item(s) · plus récent en haut"
+    )
+    items.append(ui.TextDisplay(header_text))
+    items.append(ui.Separator())
+
     if not posts:
-        items.append(ui.TextDisplay("-# Aucune publication détectée pour le moment."))
+        items.append(ui.TextDisplay(
+            "📭 **Aucune publication détectée pour le moment.**\n"
+            "-# Le bot vérifie automatiquement les nouveaux contenus toutes les 5 minutes. "
+            "Patiente, ou ajoute des comptes/groupes à suivre."
+        ))
     else:
-        items.append(ui.TextDisplay(f"-# {len(posts)} publication(s) récente(s) · plus récente en haut"))
-        items.append(ui.Separator())
-
+        # Chaque post = une Section avec thumbnail + texte propre
         for tp in posts:
-            title_line = f"**[{(tp.post_title or 'Voir la publication')[:90]}]({tp.post_url or 'https://discord.com'})**"
-            time_line = f"-# {_relative_time(tp.posted_at)} · @{tp.username}"
-            text = f"{title_line}\n{time_line}"
+            title = (tp.post_title or 'Voir la publication').strip()[:90]
+            url = tp.post_url or 'https://discord.com'
 
-            if tp.post_url and _looks_like_image_url(_thumbnail_for(tp)):
+            # Construction du body text avec icone par type
+            type_icon = {
+                "video":     "🎥",
+                "live":      "🔴",
+                "short":     "📱",
+                "post":      "📝",
+                "tweet":     "🐦",
+                "ugc":       "🎨",
+            }.get(tp.post_type, "📄")
+
+            time_str = _relative_time(tp.posted_at)
+            text = (
+                f"### {type_icon} [{title}]({url})\n"
+                f"-# Par **@{tp.username}** · {time_str}"
+            )
+
+            thumb_url = _thumbnail_for(tp)
+            if _looks_like_image_url(thumb_url):
+                # Section avec thumbnail
                 items.append(ui.Section(
                     ui.TextDisplay(text),
-                    accessory=ui.Thumbnail(media=_thumbnail_for(tp)),
+                    accessory=ui.Thumbnail(media=thumb_url),
                 ))
             else:
                 items.append(ui.TextDisplay(text))
             items.append(ui.Separator())
 
+    # Footer
     items.append(ui.TextDisplay(
-        "-# 🔄 Mise à jour automatique · Clique sur un titre pour voir la publication"
+        "-# 🔄 Cette galerie se met à jour automatiquement · "
+        "Clique sur un titre pour voir la publication originale"
     ))
 
     container = ui.Container(*items, accent_color=discord.Color(plat_info["color"]))
@@ -191,16 +239,19 @@ def _thumbnail_for(tp: tracking_layer.TrackedPost) -> str:
     # YouTube : thumbnail standard via id
     if tp.platform == "youtube":
         return f"https://img.youtube.com/vi/{tp.post_id}/hqdefault.jpg"
-    # Roblox UGC : thumbnail via API API endpoint
+    # Roblox UGC : thumbnail via API endpoint
     if tp.platform == "roblox_ugc":
         # post_id format: "User_<id>_<item_id>_<type>" or "Group_<id>_<item_id>_<type>"
         parts = tp.post_id.split("_")
         if len(parts) >= 3:
             item_id = parts[2]
             return f"https://www.roblox.com/asset-thumbnail/image?assetId={item_id}&width=420&height=420&format=png"
-    # Tous les autres : on espere que tracking_layer a stocke l'URL d'image dans
-    # un futur champ. Pour l'instant on revoie None-equivalent (le check
-    # _looks_like_image_url filtrera).
+    # Twitch : icone generique sur cdn (les vrais thumbnails de vod necessitent l'API auth)
+    if tp.platform == "twitch":
+        # Generique : on retourne rien pour laisser TextDisplay seul
+        return ""
+    # TikTok / Twitter / Reddit / RoSocial : on n'a pas d'URL image fiable depuis
+    # tracking_layer (pas de champ image_url stocke). Retourne vide.
     return ""
 
 
