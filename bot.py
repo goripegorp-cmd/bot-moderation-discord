@@ -5630,44 +5630,49 @@ class ActionConfigPanelV2(LayoutView):
         current_action = c.get(ak, self._get_default_action())
         current_dur = c.get(dk, self._get_default_duration())
 
-        action_emoji = {'delete': '🗑️', 'mute': '🔇', 'kick': '👢', 'ban': '🔨'}.get(current_action, '⚡')
         name = self.key.replace('anti_', '').replace('_', ' ').title()
 
-        # Boutons d'action — l'action active a un style différent
-        def _btn(action, label, default_style):
+        # Phase 7 : radio button style propre
+        def _btn(action, label, danger_style=False):
             is_current = (current_action == action)
             return Button(
-                label=("✓ " + label if is_current else label),
-                style=(discord.ButtonStyle.success if is_current else default_style),
+                label=label,
+                style=(
+                    discord.ButtonStyle.success if is_current
+                    else (discord.ButtonStyle.danger if danger_style else discord.ButtonStyle.secondary)
+                ),
                 custom_id=f"acpv2_{self.key}_{action}",
             )
 
+        def _row(action, emoji, label, desc):
+            dot = "🔘" if current_action == action else "⚪"
+            return f"{dot} {emoji} **{label}** · {desc}"
+
         self.clear_items()
-        b_delete = _btn('delete', "🗑️ Supprimer", discord.ButtonStyle.secondary)
+        b_delete = _btn('delete', "🗑️ Supprimer")
         b_delete.callback = lambda i: self._set(i, 'delete')
-        b_mute = _btn('mute', "🔇 Mute", discord.ButtonStyle.primary)
+        b_mute = _btn('mute', "🔇 Mute")
         b_mute.callback = lambda i: self._set(i, 'mute')
-        b_kick = _btn('kick', "👢 Kick", discord.ButtonStyle.secondary)
+        b_kick = _btn('kick', "👢 Kick")
         b_kick.callback = lambda i: self._set(i, 'kick')
-        b_ban = _btn('ban', "🔨 Ban", discord.ButtonStyle.danger)
+        b_ban = _btn('ban', "🔨 Ban", danger_style=True)
         b_ban.callback = lambda i: self._set(i, 'ban')
-        b_dur = Button(label="⏱️ Durée Mute", style=discord.ButtonStyle.primary, custom_id=f"acpv2_{self.key}_dur")
+        b_dur = Button(label=f"⏱️ Durée mute · {current_dur} min", style=discord.ButtonStyle.primary, custom_id=f"acpv2_{self.key}_dur")
         b_dur.callback = self._cb_duration
         b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id=f"acpv2_{self.key}_back")
         b_back.callback = self._cb_back
 
         items: list = [
             v2_title(f"⚡ Sanction · {name}"),
-            v2_subtitle(f"Action actuelle · {action_emoji} `{current_action.upper()}`  ·  Durée mute · `{current_dur}` min"),
+            v2_subtitle(f"Action actuelle · `{current_action.upper()}`"),
             v2_divider(),
             v2_body(
-                "🗑️ **Supprimer** · Supprime le message uniquement\n"
-                "🔇 **Mute** · Rend muet + supprime\n"
-                "👢 **Kick** · Expulse du serveur\n"
-                "🔨 **Ban** · Bannit définitivement"
+                _row('delete', '🗑️', 'Supprimer', 'message seulement') + "\n"
+                + _row('mute', '🔇', 'Mute', 'muet + supprime') + "\n"
+                + _row('kick', '👢', 'Kick', 'expulse du serveur') + "\n"
+                + _row('ban', '🔨', 'Ban', 'bannissement définitif')
             ),
             v2_divider(),
-            v2_subtitle("Choisis l'action lors d'une violation"),
             discord.ui.ActionRow(b_delete, b_mute, b_kick, b_ban),
             discord.ui.ActionRow(b_dur, b_back),
         ]
@@ -10414,31 +10419,34 @@ class AdsLivePlatformV2(LayoutView):
         live_ch = self.g.get_channel(c.get(spec['live_key'], 0))
         feeds = c.get(spec['feeds_key'], [])
 
-        # Liste des feeds
+        def dot(x, fallback="_non défini_"):
+            return f"🔘 {x.mention}" if x else f"⚪ {fallback}"
+
+        # Phase 9 : liste compacte (max 6)
         feed_lines = []
-        for f in feeds[:8]:
+        for f in feeds[:6]:
             if isinstance(f, dict):
                 name = f.get('name', '?')
                 feed_ch_id = f.get('channel_id', 0)
                 feed_ch = self.g.get_channel(feed_ch_id) if feed_ch_id else None
                 salon_txt = f" → {feed_ch.mention}" if feed_ch else ""
-                feed_lines.append(f"📺 `{name}`{salon_txt}")
+                feed_lines.append(f"• `{name}`{salon_txt}")
             else:
-                feed_lines.append(f"📺 `{f}`")
-        if len(feeds) > 8:
-            feed_lines.append(f"_… + {len(feeds) - 8} autre(s)_")
-        feeds_block = "\n".join(feed_lines) if feed_lines else "_Aucune source configurée_"
+                feed_lines.append(f"• `{f}`")
+        if len(feeds) > 6:
+            feed_lines.append(f"_… +{len(feeds) - 6}_")
+        feeds_block = "\n".join(feed_lines) if feed_lines else "_Aucune source — clique ➕ Ajouter_"
 
         # Boutons
         self.clear_items()
-        b_chan = Button(label="📍 Salon vidéos", style=discord.ButtonStyle.primary, custom_id=f"adsv2_{spec['platform_id']}_chan")
+        b_chan = Button(label="📍 Vidéos", style=discord.ButtonStyle.primary, custom_id=f"adsv2_{spec['platform_id']}_chan")
         b_chan.callback = self._cb_chan
-        b_live = Button(label="🔴 Salon lives", style=discord.ButtonStyle.danger, custom_id=f"adsv2_{spec['platform_id']}_live")
+        b_live = Button(label="🔴 Lives", style=discord.ButtonStyle.primary, custom_id=f"adsv2_{spec['platform_id']}_live")
         b_live.callback = self._cb_live
         b_add = Button(label="➕ Ajouter", style=discord.ButtonStyle.success, custom_id=f"adsv2_{spec['platform_id']}_add")
         b_add.callback = self._cb_add
         b_remove = Button(
-            label="🗑️ Supprimer",
+            label="🗑️ Retirer",
             style=discord.ButtonStyle.danger,
             disabled=(not feeds),
             custom_id=f"adsv2_{spec['platform_id']}_remove",
@@ -10449,17 +10457,16 @@ class AdsLivePlatformV2(LayoutView):
 
         items: list = [
             v2_title(f"{spec['emoji']}  {spec['name']}"),
-            v2_subtitle(spec['desc']),
+            v2_subtitle(f"`{len(feeds)}` source(s) suivie(s)"),
             v2_divider(),
             v2_body(
-                f"📍 **Salon vidéos** · {ch.mention if ch else '🔴 _Non configuré_'}\n"
-                f"🔴 **Salon lives** · {live_ch.mention if live_ch else '🔴 _Non configuré_'}"
+                f"📍 **Vidéos** · {dot(ch)}\n"
+                f"🔴 **Lives** · {dot(live_ch)}"
             ),
             v2_divider(),
-            v2_title(f"📡 Sources suivies ({len(feeds)})", level=3),
+            v2_title("Sources suivies", level=3),
             v2_body(feeds_block),
             v2_divider(),
-            v2_subtitle("💡 Chaque source peut avoir son propre salon · Le salon lives détecte les streams en direct"),
             discord.ui.ActionRow(b_chan, b_live, b_add, b_remove, b_back),
         ]
 
@@ -11131,9 +11138,12 @@ class AdsSimplePlatformV2(LayoutView):
         ch = self.g.get_channel(c.get(spec['channel_key'], 0))
         feeds = c.get(spec['feeds_key'], [])
 
-        # Liste feeds
+        def dot(x, fallback="_non défini_"):
+            return f"🔘 {x.mention}" if x else f"⚪ {fallback}"
+
+        # Phase 9 : liste compacte (max 6)
         feed_lines = []
-        for f in feeds[:10]:
+        for f in feeds[:6]:
             label = spec['feed_label'](f)
             if isinstance(f, dict):
                 feed_ch_id = f.get('channel_id', 0)
@@ -11142,18 +11152,18 @@ class AdsSimplePlatformV2(LayoutView):
                 feed_lines.append(f"• `{label}`{salon_txt}")
             else:
                 feed_lines.append(f"• `{label}`")
-        if len(feeds) > 10:
-            feed_lines.append(f"_… + {len(feeds) - 10} autre(s)_")
-        feeds_block = "\n".join(feed_lines) if feed_lines else f"_Aucun {spec['feed_kind']} configuré_"
+        if len(feeds) > 6:
+            feed_lines.append(f"_… +{len(feeds) - 6}_")
+        feeds_block = "\n".join(feed_lines) if feed_lines else f"_Aucun {spec['feed_kind']} — clique ➕ Ajouter_"
 
         # Boutons
         self.clear_items()
-        b_chan = Button(label="📍 Salon par défaut", style=discord.ButtonStyle.primary, custom_id=f"adsv2s_{spec['platform_id']}_chan")
+        b_chan = Button(label="📍 Salon", style=discord.ButtonStyle.primary, custom_id=f"adsv2s_{spec['platform_id']}_chan")
         b_chan.callback = self._cb_chan
         b_add = Button(label="➕ Ajouter", style=discord.ButtonStyle.success, custom_id=f"adsv2s_{spec['platform_id']}_add")
         b_add.callback = self._cb_add
         b_remove = Button(
-            label="🗑️ Supprimer",
+            label="🗑️ Retirer",
             style=discord.ButtonStyle.danger,
             disabled=(not feeds),
             custom_id=f"adsv2s_{spec['platform_id']}_remove",
@@ -11164,11 +11174,11 @@ class AdsSimplePlatformV2(LayoutView):
 
         items: list = [
             v2_title(f"{spec['emoji']}  {spec['name']}"),
-            v2_subtitle(spec['desc']),
+            v2_subtitle(f"`{len(feeds)}` {spec['feed_kind']}(s) suivi(s)"),
             v2_divider(),
-            v2_body(f"📍 **Salon par défaut** · {ch.mention if ch else '🔴 _Non configuré_'}"),
+            v2_body(f"📍 **Salon** · {dot(ch)}"),
             v2_divider(),
-            v2_title(f"📡 {spec['feed_kind'].capitalize()}s suivis ({len(feeds)})", level=3),
+            v2_title("Sources suivies", level=3),
             v2_body(feeds_block),
             v2_divider(),
             discord.ui.ActionRow(b_chan, b_add, b_remove, b_back),
@@ -11626,28 +11636,36 @@ class AdsRobloxPanelV2(LayoutView):
         rblx_ch = self.g.get_channel(c.get('ads_roblox_channel', 0))
         feeds = c.get('ads_roblox_feeds', [])
 
-        # Séparer users et groups
+        def dot(x):
+            return f"🔘 {x.mention}" if x else "⚪ _non défini_"
+
+        # Phase 9 : séparer users et groups, max 4 chacun
         users_lines = []
         groups_lines = []
         for f in feeds:
             if isinstance(f, dict):
                 if f.get('type') == 'group':
-                    groups_lines.append(f"• `{f.get('group_name', '?')}` (ID: `{f.get('group_id', '?')}`)")
+                    groups_lines.append(f"• `{f.get('group_name', '?')}`")
                 else:
-                    users_lines.append(f"• `{f.get('username', '?')}` (ID: `{f.get('user_id', '?')}`)")
-        users_block = "\n".join(users_lines) if users_lines else "_Aucun_"
-        groups_block = "\n".join(groups_lines) if groups_lines else "_Aucun_"
+                    users_lines.append(f"• `{f.get('username', '?')}`")
+
+        users_block = "\n".join(users_lines[:4]) if users_lines else "_aucun_"
+        if len(users_lines) > 4:
+            users_block += f"\n_… +{len(users_lines) - 4}_"
+        groups_block = "\n".join(groups_lines[:4]) if groups_lines else "_aucun_"
+        if len(groups_lines) > 4:
+            groups_block += f"\n_… +{len(groups_lines) - 4}_"
 
         # Boutons
         self.clear_items()
         b_chan = Button(label="📍 Salon", style=discord.ButtonStyle.primary, custom_id="adsv2_rblx_chan")
         b_chan.callback = self._cb_chan
-        b_user = Button(label="👤 Ajouter Créateur", style=discord.ButtonStyle.success, custom_id="adsv2_rblx_user")
+        b_user = Button(label="👤 + Créateur", style=discord.ButtonStyle.success, custom_id="adsv2_rblx_user")
         b_user.callback = self._cb_user
-        b_group = Button(label="👥 Ajouter Groupe", style=discord.ButtonStyle.success, custom_id="adsv2_rblx_group")
+        b_group = Button(label="👥 + Groupe", style=discord.ButtonStyle.success, custom_id="adsv2_rblx_group")
         b_group.callback = self._cb_group
         b_remove = Button(
-            label="🗑️ Supprimer",
+            label="🗑️ Retirer",
             style=discord.ButtonStyle.danger,
             disabled=(not feeds),
             custom_id="adsv2_rblx_remove",
@@ -11658,17 +11676,15 @@ class AdsRobloxPanelV2(LayoutView):
 
         items: list = [
             v2_title("🟢  Roblox UGC"),
-            v2_subtitle("Nouvelles créations UGC de tes créateurs et groupes Roblox"),
+            v2_subtitle(f"`{len(users_lines)}` créateur(s) · `{len(groups_lines)}` groupe(s)"),
             v2_divider(),
-            v2_body(f"📍 **Salon** · {rblx_ch.mention if rblx_ch else '🔴 _Non configuré_'}"),
+            v2_body(f"📍 **Salon** · {dot(rblx_ch)}"),
             v2_divider(),
-            v2_title(f"👤 Créateurs suivis ({len(users_lines)})", level=3),
-            v2_body(users_block),
+            v2_body(
+                f"**👤 Créateurs**\n{users_block}\n\n"
+                f"**👥 Groupes**\n{groups_block}"
+            ),
             v2_divider(),
-            v2_title(f"👥 Groupes suivis ({len(groups_lines)})", level=3),
-            v2_body(groups_block),
-            v2_divider(),
-            v2_subtitle("💡 Vérification toutes les 10 minutes"),
             discord.ui.ActionRow(b_chan, b_user, b_group, b_remove, b_back),
         ]
 
@@ -12054,44 +12070,44 @@ class AdsDealsPanelV2(LayoutView):
         except Exception as ex:
             print(f"[DEALS-V2] Erreur count: {ex}")
 
-        # Boutons
+        def dot(x):
+            return f"🔘 {x.mention}" if x else "⚪ _non défini_"
+
+        # Phase 9 : compact + radio
         self.clear_items()
-        b_chan = Button(label="📍 Salon", style=discord.ButtonStyle.primary, custom_id="adsv2_deals_chan")
-        b_chan.callback = self._cb_chan
         b_toggle = Button(
-            label=("⏸️ Désactiver" if enabled else "▶️ Activer"),
+            label=("⚪ Désactiver" if enabled else "🔘 Activer"),
             style=(discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success),
             custom_id="adsv2_deals_toggle",
         )
         b_toggle.callback = self._cb_toggle
-        b_min = Button(label="🔻 Réduction min", style=discord.ButtonStyle.secondary, custom_id="adsv2_deals_min")
+        b_chan = Button(label="📍 Salon", style=discord.ButtonStyle.primary, custom_id="adsv2_deals_chan")
+        b_chan.callback = self._cb_chan
+        b_min = Button(label=f"🔻 Min `-{min_discount}%`", style=discord.ButtonStyle.primary, custom_id="adsv2_deals_min")
         b_min.callback = self._cb_min
         b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="adsv2_deals_back")
         b_back.callback = self._cb_back
 
+        state_line = f"🔘 **Système activé** · `{active_deals}` deal(s) actif(s)" if enabled else "⚪ **Système désactivé**"
+
         items: list = [
-            v2_title("🎯  Réductions Jeux Vidéo"),
-            v2_subtitle(f"{'🟢 Activé' if enabled else '🔴 Désactivé'}  ·  `{active_deals}` deal(s) actif(s)"),
+            v2_title("🎯  Game Deals"),
+            v2_subtitle("Promotions Steam · Epic · GOG · Humble · …"),
             v2_divider(),
-            v2_body(
-                "Reçois automatiquement les meilleures promotions !\n"
-                "Chaque jeu n'est publié **qu'une seule fois** et supprimé quand la promo expire."
-            ),
-            v2_divider(),
-            v2_body(
-                "🎮 **Steam** · **Epic Games** · **GOG**\n"
-                "🔵 **Ubisoft** · **EA/Origin** · **Battle.net**\n"
-                "🔑 **Humble** · **Fanatical** · **Green Man Gaming** · …"
-            ),
-            v2_divider(),
-            v2_body(
-                f"📍 **Salon** · {deals_ch.mention if deals_ch else '🔴 _Non configuré_'}\n"
-                f"🔻 **Réduction minimum** · `-{min_discount}%`"
-            ),
-            v2_divider(),
-            v2_subtitle("🔄 Vérification toutes les 30 min · Anti-doublon en base de données"),
-            discord.ui.ActionRow(b_chan, b_toggle, b_min, b_back),
+            v2_body(state_line),
         ]
+
+        if enabled:
+            items.append(v2_divider())
+            items.append(v2_body(
+                f"📍 **Salon** · {dot(deals_ch)}\n"
+                f"🔻 **Réduction minimum** · `-{min_discount}%`"
+            ))
+            items.append(v2_divider())
+            items.append(v2_subtitle("🔄 Check toutes les 30 min · 1 deal = 1 publication, supprimé à l'expiration"))
+
+        items.append(v2_divider())
+        items.append(discord.ui.ActionRow(b_toggle, b_chan, b_min, b_back))
 
         self.add_item(v2_container(*items, color=discord.Color(0xFF6B35)))
 
@@ -14451,46 +14467,52 @@ class GiveawayConditionsPanel(View):
             self.data['conditions']['condition_mode'] = 'OR'
 
     def embed(self):
-        e = discord.Embed(title="⚙️ Conditions de Participation", color=C.ORANGE)
-
+        # Phase 8 : embed propre style radio/checkbox
         conditions = self.data.get('conditions', {})
         mode = conditions.get('condition_mode', 'OR')
 
+        e = discord.Embed(
+            title="🎁 Création du cadeau",
+            color=0xF1C40F,
+        )
+
+        # Mode des conditions (clair)
         if mode == 'OR':
-            mode_txt = "🔀 **Mode : OU** — une seule condition suffit pour participer"
+            mode_line = "🔘 **Mode OU** — une seule condition suffit"
         else:
-            mode_txt = "🔗 **Mode : ET** — toutes les conditions doivent être remplies"
+            mode_line = "🔘 **Mode ET** — toutes les conditions requises"
 
-        e.description = f"{mode_txt}\n\nConfigurez les conditions pour participer au cadeau.\n**Laissez vide = tout le monde peut participer**"
+        # Construire chaque condition avec radio dot
+        def _cond_line(emoji, label, value_text, is_set):
+            dot = "🔘" if is_set else "⚪"
+            return f"{dot} {emoji} **{label}** · {value_text}"
 
-        # Messages minimum
+        lines = [mode_line, ""]
+
         min_msgs = conditions.get('min_messages', 0)
-        e.add_field(name="📝 Messages minimum", value=f"`{min_msgs}`" if min_msgs else "*Aucun*", inline=True)
+        lines.append(_cond_line('📝', 'Messages min', f'`{min_msgs}`' if min_msgs else '_aucun_', min_msgs > 0))
 
-        # Temps vocal minimum (en minutes)
         min_vocal = conditions.get('min_vocal_minutes', 0)
-        e.add_field(name="🎤 Vocal minimum", value=f"`{min_vocal} min`" if min_vocal else "*Aucun*", inline=True)
+        lines.append(_cond_line('🎤', 'Vocal min', f'`{min_vocal}` min' if min_vocal else '_aucun_', min_vocal > 0))
 
-        # Rôle requis
         role_id = conditions.get('required_role', 0)
         role = self.g.get_role(role_id) if role_id else None
-        e.add_field(name="🎭 Rôle requis", value=role.mention if role else "*Aucun*", inline=True)
+        lines.append(_cond_line('🎭', 'Rôle requis', role.mention if role else '_aucun_', bool(role)))
 
-        # Ancienneté minimum (en jours)
         min_days = conditions.get('min_account_days', 0)
-        e.add_field(name="📅 Ancienneté", value=f"`{min_days} jours`" if min_days else "*Aucun*", inline=True)
+        lines.append(_cond_line('📅', 'Ancienneté', f'`{min_days}` jours' if min_days else '_aucune_', min_days > 0))
 
-        # AFK check
-        no_afk = conditions.get('no_afk', False)
-        afk_days = conditions.get('afk_days', 7)
-        e.add_field(name="❌ Pas AFK", value=f"`{afk_days} jours`" if no_afk else "*Désactivé*", inline=True)
+        afk_days = conditions.get('afk_days', 0)
+        lines.append(_cond_line('❌', 'Pas AFK', f'`{afk_days}` jours' if afk_days > 0 else '_désactivé_', afk_days > 0))
 
-        # Rôle Ping
+        # Ping
         ping_role_id = self.data.get('ping_role', 0)
         ping_role = self.g.get_role(ping_role_id) if ping_role_id else None
-        e.add_field(name="🔔 Ping", value=ping_role.mention if ping_role else "*Aucun*", inline=True)
+        lines.append("")
+        lines.append(_cond_line('🔔', 'Notification', ping_role.mention if ping_role else '_aucun ping_', bool(ping_role)))
 
-        e.set_footer(text="💡 Cliquez sur Publier quand vous avez fini")
+        e.description = "\n".join(lines)
+        e.set_footer(text="💡 Conditions vides = tout le monde peut participer · ✅ Publier quand prêt")
         return e
 
     @discord.ui.button(label="📝 Messages min", style=discord.ButtonStyle.secondary, row=0)
