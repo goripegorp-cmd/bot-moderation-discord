@@ -3787,7 +3787,7 @@ class GamesPanelV2(LayoutView):
         items.append(v2_divider())
         items.append(v2_body(
             f"🎁 **Giveaways** · `{active_giveaways}` en cours\n"
-            f"🛒 **Deals** · {'🟢 actif' if deals_on else '🔴 désactivé'}"
+            f"🛒 **Deals** · {'🔘 actif' if deals_on else '⚪ désactivé'}"
             + (f" dans {deals_ch.mention}" if deals_ch else "")
         ))
         items.append(v2_divider())
@@ -4442,10 +4442,10 @@ class ProtDetailV2(LayoutView):
             except Exception:
                 return None
 
-        # Items de base : titre + status
+        # Items de base : titre + status (Phase 11 : radio dot)
         items: list = [
             v2_title(f"{self.prot[1]} {self.prot[2]}"),
-            v2_subtitle(f"État · {'🟢 ACTIVÉ' if on else '🔴 DÉSACTIVÉ'}"),
+            v2_subtitle(f"{'🔘 Activé' if on else '⚪ Désactivé'}"),
             v2_divider(),
         ]
 
@@ -4603,7 +4603,7 @@ class ProtDetailV2(LayoutView):
         # Salon de log (commun à toutes)
         log_ch = self.g.get_channel(c.get(f'log_{self.key}', 0))
         items.append(v2_divider())
-        items.append(v2_body(f"📜 **Salon de log** · {log_ch.mention if log_ch else '🔴 _Non configuré_'}"))
+        items.append(v2_body(f"📜 **Salon de log** · {log_ch.mention if log_ch else '⚪ _non configuré_'}"))
 
         # Boutons
         self.clear_items()
@@ -5790,17 +5790,18 @@ class AntiRaidConfigPanelV2(LayoutView):
         b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="arcv2_back")
         b_back.callback = self._cb_back
 
+        # Phase 11 : radio dots cohérents
         items: list = [
-            v2_title("⚔️ Configuration Anti-Raid"),
-            v2_subtitle("Protège ton serveur contre les attaques massives"),
+            v2_title("⚔️ Anti-Raid"),
+            v2_subtitle("Protection contre les attaques massives"),
             v2_divider(),
             v2_body(
-                f"👥 **Seuil détection** · `{join_threshold}` membres en `{join_interval}` sec\n"
-                f"📅 **Âge minimum** · `{min_age}` jours\n"
-                f"🤖 **Mode auto** · {'✅' if auto_mode else '❌'}\n"
-                f"🔒 **Bloquer invitations** · {'✅' if block_invites else '❌'}\n"
-                f"⚡ **Action** · {actions_label}\n"
-                f"🚨 **Lockdown** · {'⚠️ **ACTIF**' if lockdown else '✅ Inactif'}"
+                f"👥 **Seuil** · `{join_threshold}` membres en `{join_interval}` sec\n"
+                f"📅 **Âge minimum compte** · `{min_age}` jours\n"
+                f"{'🔘' if auto_mode else '⚪'} **Mode auto**\n"
+                f"{'🔘' if block_invites else '⚪'} **Bloquer invitations**\n"
+                f"⚡ **Action** · `{action.upper()}`\n"
+                f"{'🔴' if lockdown else '⚪'} **Lockdown** · {'⚠️ ACTIF' if lockdown else '_inactif_'}"
             ),
             v2_divider(),
             discord.ui.ActionRow(b_thresh, b_age, b_auto, b_action),
@@ -6039,60 +6040,52 @@ class AltConfigPanelV2(LayoutView):
         except Exception:
             suspected = confirmed = actioned = 0
 
+        # Phase 11 : radio dots + compact
         self.clear_items()
-        b_toggle = Button(
-            label=("⏸️ Désactiver" if enabled else "▶️ Activer"),
-            style=(discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success),
-            custom_id="alcv2_toggle",
-        )
+        if enabled:
+            b_toggle = Button(label="⚪ Désactiver", style=discord.ButtonStyle.danger, custom_id="alcv2_toggle")
+        else:
+            b_toggle = Button(label="🔘 Activer", style=discord.ButtonStyle.success, custom_id="alcv2_toggle")
         b_toggle.callback = self._cb_toggle
-        b_action = Button(label="⚡ Action (cycle)", style=discord.ButtonStyle.primary, custom_id="alcv2_action")
+        b_action = Button(label=f"⚡ Action · {action.upper()}", style=discord.ButtonStyle.primary, custom_id="alcv2_action")
         b_action.callback = self._cb_cycle_action
         b_auto = Button(
-            label=("🤖 Auto ON" if auto else "🤖 Auto OFF"),
-            style=(discord.ButtonStyle.success if auto else discord.ButtonStyle.danger),
+            label=("🔘 Auto" if auto else "⚪ Auto"),
+            style=(discord.ButtonStyle.success if auto else discord.ButtonStyle.secondary),
             custom_id="alcv2_auto",
         )
         b_auto.callback = self._cb_toggle_auto
-        b_conf = Button(label="📊 Confiance", style=discord.ButtonStyle.secondary, custom_id="alcv2_conf")
+        b_conf = Button(label=f"📊 Confiance · {min_conf}%", style=discord.ButtonStyle.primary, custom_id="alcv2_conf")
         b_conf.callback = self._cb_conf
         b_scan = Button(label="🔍 Scanner", style=discord.ButtonStyle.success, custom_id="alcv2_scan")
         b_scan.callback = self._cb_scan
-        b_view = Button(label="📋 Voir détections", style=discord.ButtonStyle.secondary, disabled=(not (suspected or confirmed)), custom_id="alcv2_view")
+        b_view = Button(label="📋 Détections", style=discord.ButtonStyle.secondary, disabled=(not (suspected or confirmed)), custom_id="alcv2_view")
         b_view.callback = self._cb_view
         b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="alcv2_back")
         b_back.callback = self._cb_back
 
         items: list = [
-            v2_title("👥 Configuration Anti-MultiCompte"),
-            v2_subtitle(f"{'🟢 Système actif' if enabled else '🔴 Système désactivé'}"),
+            v2_title("👥 Anti-MultiCompte"),
+            v2_subtitle(f"{'🔘 actif' if enabled else '⚪ désactivé'} · `{suspected}` suspect(s)"),
             v2_divider(),
-            v2_body(
-                "Détecte et gère les comptes secondaires (alts).\n\n"
-                "**Méthodes de détection :**\n"
-                "• 🖼️ Avatar identique\n"
-                "• 📝 Nom similaire\n"
-                "• ⏰ Compte créé après un ban\n"
-                "• 🔍 Comportement suspect"
-            ),
-            v2_divider(),
-            v2_body(
-                f"⚡ **Action** · {action_emoji} `{action.upper()}`\n"
-                f"🤖 **Action auto** · {'✅' if auto else '❌'}\n"
-                f"📊 **Confiance min.** · `{min_conf}%`"
-            ),
-            v2_divider(),
-            v2_title("📈 Statistiques", level=3),
-            v2_body(
-                f"⚠️ **Suspects** · `{suspected}`\n"
-                f"✅ **Confirmés** · `{confirmed}`\n"
-                f"⚡ **Sanctionnés** · `{actioned}`"
-            ),
-            v2_divider(),
-            v2_subtitle("💡 Utilise 'Scanner' pour analyser tous les membres"),
-            discord.ui.ActionRow(b_toggle, b_action, b_auto, b_conf),
-            discord.ui.ActionRow(b_scan, b_view, b_back),
         ]
+
+        if enabled:
+            items.append(v2_body(
+                f"⚡ **Action** · `{action.upper()}`\n"
+                f"{'🔘' if auto else '⚪'} **Action auto**\n"
+                f"📊 **Confiance minimum** · `{min_conf}%`"
+            ))
+            items.append(v2_divider())
+            items.append(v2_body(
+                f"⚠️ Suspects · `{suspected}`  ·  "
+                f"✅ Confirmés · `{confirmed}`  ·  "
+                f"⚡ Sanctionnés · `{actioned}`"
+            ))
+            items.append(v2_divider())
+
+        items.append(discord.ui.ActionRow(b_toggle, b_action, b_auto, b_conf))
+        items.append(discord.ui.ActionRow(b_scan, b_view, b_back))
 
         self.add_item(v2_container(*items, color=Palette.ACCENT))
 
@@ -8899,8 +8892,8 @@ class DirectionPanelV2(LayoutView):
             ),
             v2_divider(),
             v2_body(
-                f"👤 **Utilisateur autorisé** · {dir_user.mention if dir_user else '🔴 _Non configuré_'}\n"
-                f"🎭 **Rôle autorisé** · {dir_role.mention if dir_role else '🔴 _Non configuré_'}"
+                f"👤 **Utilisateur autorisé** · {dir_user.mention if dir_user else '⚪ _non configuré_'}\n"
+                f"🎭 **Rôle autorisé** · {dir_role.mention if dir_role else '⚪ _non configuré_'}"
             ),
             v2_divider(),
             v2_subtitle("🔒 /direction @membre [durée] [raison]"),
@@ -9117,10 +9110,10 @@ class RellSeasPanelV2(LayoutView):
             v2_subtitle("L'utilisateur autorisé reçoit auto le rôle Realsy et peut le donner"),
             v2_divider(),
             v2_body(
-                f"👤 **Utilisateur autorisé** · {rs_user.mention if rs_user else '🔴 _Non configuré_'}\n"
-                f"🎭 **Rôle Realsy** · {rs_role.mention if rs_role else '🔴 _Non configuré_'}\n"
-                f"⚠️ **Salon warn** · {warn_ch.mention if warn_ch else '🔴 _Non configuré_'}\n"
-                f"📜 **Salon logs** · {log_ch.mention if log_ch else '🔴 _Non configuré_'}"
+                f"👤 **Utilisateur autorisé** · {rs_user.mention if rs_user else '⚪ _non configuré_'}\n"
+                f"🎭 **Rôle Realsy** · {rs_role.mention if rs_role else '⚪ _non configuré_'}\n"
+                f"⚠️ **Salon warn** · {warn_ch.mention if warn_ch else '⚪ _non configuré_'}\n"
+                f"📜 **Salon logs** · {log_ch.mention if log_ch else '⚪ _non configuré_'}"
             ),
             v2_divider(),
             v2_subtitle("⏱️ 7 jours inactif = Warn  ·  14 jours = Rôle retiré"),
@@ -9369,7 +9362,7 @@ class SuggestionPanelV2(LayoutView):
             v2_body(
                 f"🎭 **Rôle autorisé** · {sugg_role.mention if sugg_role else '_Tout le monde_'}\n"
                 f"⏱️ **Cooldown** · `{sugg_cd}` {sugg_unit}\n"
-                f"📍 **Salon publication** · {sugg_ch.mention if sugg_ch else '🔴 _Non configuré_'}\n"
+                f"📍 **Salon publication** · {sugg_ch.mention if sugg_ch else '⚪ _non configuré_'}\n"
                 f"📌 **Salons commande** · {allowed_txt}"
             ),
             v2_divider(),
@@ -14333,7 +14326,8 @@ class GiveawayPanelV2(LayoutView):
         await v.render_to(i, edit=True)
 
     async def _cb_back(self, i):
-        v = CentrePanelV2(self.u, self.g)
+        # Phase 12 fix : GiveawayPanelV2 est accédé depuis GamesPanelV2 (pas CentrePanelV2)
+        v = GamesPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
 
 
@@ -15405,12 +15399,12 @@ class LevelSystemPanelV2(LayoutView):
         if self.g.icon:
             items.append(v2_section(
                 v2_title("📈 Niveaux & Économie"),
-                v2_subtitle(f"{'🟢 Système actif' if enabled else '🔴 Système désactivé'}"),
+                v2_subtitle(f"{'🔘 actif' if enabled else '⚪ désactivé'}"),
                 accessory=v2_thumb(self.g.icon.url),
             ))
         else:
             items.append(v2_title("📈 Niveaux & Économie"))
-            items.append(v2_subtitle(f"{'🟢 Système actif' if enabled else '🔴 Système désactivé'}"))
+            items.append(v2_subtitle(f"{'🔘 actif' if enabled else '⚪ désactivé'}"))
 
         items.append(v2_divider())
         items.append(v2_title("⚙️ Paramètres XP & Pièces", level=3))
@@ -16540,12 +16534,12 @@ class TempVoicePanelV2(LayoutView):
         if self.g.icon:
             items.append(v2_section(
                 v2_title("🔊 Vocaux Temporaires"),
-                v2_subtitle(f"{'🟢 Système actif' if enabled else '🔴 Système désactivé'} · `{active_hubs}` hub(s) · `{active_count}` vocaux actifs"),
+                v2_subtitle(f"{'🔘 actif' if enabled else '⚪ désactivé'} · `{active_hubs}` hub(s) · `{active_count}` vocaux actifs"),
                 accessory=v2_thumb(self.g.icon.url),
             ))
         else:
             items.append(v2_title("🔊 Vocaux Temporaires"))
-            items.append(v2_subtitle(f"{'🟢 Système actif' if enabled else '🔴 Système désactivé'} · `{active_hubs}` hub(s) · `{active_count}` vocaux actifs"))
+            items.append(v2_subtitle(f"{'🔘 actif' if enabled else '⚪ désactivé'} · `{active_hubs}` hub(s) · `{active_count}` vocaux actifs"))
 
         items.append(v2_divider())
         items.append(v2_body(
@@ -19958,8 +19952,8 @@ class StatPanelV2(LayoutView):
         items.append(v2_divider())
         items.append(v2_title("📍 Salons", level=3))
         items.append(v2_body(
-            f"📢 **Notifications** · {notif_ch.mention if notif_ch else '🔴 _Non configuré_'}\n"
-            f"🔄 **Récupération** · {recovery_ch.mention if recovery_ch else '🔴 _Non configuré_'}"
+            f"📢 **Notifications** · {notif_ch.mention if notif_ch else '⚪ _non configuré_'}\n"
+            f"🔄 **Récupération** · {recovery_ch.mention if recovery_ch else '⚪ _non configuré_'}"
         ))
         if top_afk_block != "_Aucune donnée AFK_":
             items.append(v2_divider())
@@ -20363,10 +20357,10 @@ class AfkRolePanelV2(LayoutView):
                 tracked_txt = "📡 **Tous les salons** (config vide = tout compte)"
 
             items.append(v2_body(
-                f"🎭 **Rôle surveillé** · {role.mention if role else '🔴 _Non défini_'}\n"
+                f"🎭 **Rôle surveillé** · {role.mention if role else '⚪ _non défini_'}\n"
                 f"📅 **Seuil d'inactivité** · `{days}` jours\n"
                 f"📺 **Salons d'activité** · {tracked_txt}\n"
-                f"📢 **Salon notifications** · {notif_ch.mention if notif_ch else '🔴 _Non défini_'}"
+                f"📢 **Salon notifications** · {notif_ch.mention if notif_ch else '⚪ _non défini_'}"
             ))
             items.append(v2_divider())
 
@@ -23325,7 +23319,7 @@ class PanelEditViewV2(LayoutView):
             staff_txt = staff_role.mention if staff_role else "_Rôle introuvable_"
         else:
             global_staff = self.g.get_role(c.get('ticket_staff', 0))
-            staff_txt = f"{global_staff.mention} _(global)_" if global_staff else "🔴 _Non configuré_"
+            staff_txt = f"{global_staff.mention} _(global)_" if global_staff else "⚪ _non configuré_"
 
         qs = pnl.get('questions', [])
         qs_block = "\n".join(f"• {q['title']}" for q in qs[:5]) if qs else "_Aucune question_"
