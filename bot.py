@@ -7889,15 +7889,18 @@ class ImmunePanelV2(LayoutView):
 
         total = len(rids) + len(uids) + len(chids)
 
-        roles_txt = ", ".join(f"<@&{r}>" for r in rids[:10]) if rids else "_Aucun_"
-        if len(rids) > 10:
-            roles_txt += f"\n_… + {len(rids) - 10} autres_"
-        users_txt = ", ".join(f"<@{u}>" for u in uids[:10]) if uids else "_Aucun_"
-        if len(uids) > 10:
-            users_txt += f"\n_… + {len(uids) - 10} autres_"
-        chans_txt = ", ".join(f"<#{c}>" for c in chids[:10]) if chids else "_Aucun_"
-        if len(chids) > 10:
-            chans_txt += f"\n_… + {len(chids) - 10} autres_"
+        # Phase 6 : affichage compact, 6 max par catégorie
+        def _list(items, fmt, label):
+            if not items:
+                return f"⚪ _aucun {label}_"
+            shown = ", ".join(fmt(x) for x in items[:6])
+            if len(items) > 6:
+                shown += f" *(+{len(items) - 6})*"
+            return shown
+
+        roles_txt = _list(rids, lambda r: f"<@&{r}>", "rôle")
+        users_txt = _list(uids, lambda u: f"<@{u}>", "utilisateur")
+        chans_txt = _list(chids, lambda c: f"<#{c}>", "salon")
 
         # Boutons
         self.clear_items()
@@ -7907,9 +7910,9 @@ class ImmunePanelV2(LayoutView):
         b_add_user.callback = self._cb_add_user
         b_add_chan = Button(label="➕ Salon", style=discord.ButtonStyle.success, custom_id="ipv2_add_chan")
         b_add_chan.callback = self._cb_add_chan
-        b_remove = Button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, disabled=(total == 0), custom_id="ipv2_remove")
+        b_remove = Button(label="🗑️ Retirer", style=discord.ButtonStyle.danger, disabled=(total == 0), custom_id="ipv2_remove")
         b_remove.callback = self._cb_remove
-        b_clear = Button(label="🗑️ Tout supprimer", style=discord.ButtonStyle.danger, disabled=(total == 0), custom_id="ipv2_clear")
+        b_clear = Button(label="🧹 Tout effacer", style=discord.ButtonStyle.danger, disabled=(total == 0), custom_id="ipv2_clear")
         b_clear.callback = self._cb_clear
         b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="ipv2_back")
         b_back.callback = self._cb_back
@@ -7918,29 +7921,25 @@ class ImmunePanelV2(LayoutView):
         if self.g.icon:
             items.append(v2_section(
                 v2_title("👑 Immunités"),
-                v2_subtitle(f"{total} élément(s) immunisé(s) au total"),
+                v2_subtitle(f"`{total}` élément(s) · bypass des filtres"),
                 accessory=v2_thumb(self.g.icon.url),
             ))
         else:
             items.append(v2_title("👑 Immunités"))
-            items.append(v2_subtitle(f"{total} élément(s) immunisé(s) au total"))
+            items.append(v2_subtitle(f"`{total}` élément(s) · bypass des filtres"))
 
         items.append(v2_divider())
         items.append(v2_body(
-            "✅ Bypass : liens, images, GIFs, invitations, majuscules\n"
-            "⚠️ **Phishing & Scams restent détectés**"
+            f"🎭 **Rôles** *(`{len(rids)}`)* · {roles_txt}\n"
+            f"👤 **Utilisateurs** *(`{len(uids)}`)* · {users_txt}\n"
+            f"📺 **Salons** *(`{len(chids)}`)* · {chans_txt}"
         ))
         items.append(v2_divider())
-        items.append(v2_title(f"🎭 Rôles ({len(rids)})", level=3))
-        items.append(v2_body(roles_txt))
+        items.append(v2_body(
+            "ℹ️ Les immunisés ignorent : liens, images, GIFs, invitations, majuscules.\n"
+            "⚠️ **Phishing & scams restent détectés** pour tout le monde."
+        ))
         items.append(v2_divider())
-        items.append(v2_title(f"👤 Utilisateurs ({len(uids)})", level=3))
-        items.append(v2_body(users_txt))
-        items.append(v2_divider())
-        items.append(v2_title(f"📺 Salons ({len(chids)})", level=3))
-        items.append(v2_body(chans_txt))
-        items.append(v2_divider())
-        items.append(v2_subtitle("👑 Les tickets sont automatiquement immunisés"))
         items.append(discord.ui.ActionRow(b_add_role, b_add_user, b_add_chan))
         items.append(discord.ui.ActionRow(b_remove, b_clear, b_back))
 
@@ -14322,6 +14321,83 @@ class GiveawayPanelV2(LayoutView):
         await v.render_to(i, edit=True)
 
 
+class GiveawayModePickerModal(Modal):
+    """Phase 6.1 : modal avec ui.RadioGroup (nouveauté discord.py 2.7 / Discord 2026).
+
+    Remplace l'ancien toggle "Mode AND/OR" par un vrai choix radio propre.
+    L'utilisateur voit les 2 options côte à côte avec leur description et
+    sélectionne celle qu'il veut. Plus clair qu'un toggle qui demande de
+    deviner l'état actuel.
+    """
+
+    def __init__(self, parent_view):
+        super().__init__(title="🔀 Mode des conditions")
+        self.parent_view = parent_view
+
+        current_mode = parent_view.data.get('conditions', {}).get('condition_mode', 'OR')
+
+        # ui.RadioGroup : nouveau composant discord.py 2.7
+        # Avec ui.Label pour un texte d'aide propre
+        try:
+            self.mode_group = discord.ui.RadioGroup(
+                custom_id="gw_mode_radio",
+                required=True,
+                options=[
+                    discord.RadioGroupOption(
+                        label="Mode OU (recommandé)",
+                        value="OR",
+                        description="Une seule condition suffit — large public",
+                        default=(current_mode == 'OR'),
+                    ),
+                    discord.RadioGroupOption(
+                        label="Mode ET (strict)",
+                        value="AND",
+                        description="Toutes les conditions doivent être remplies",
+                        default=(current_mode == 'AND'),
+                    ),
+                ],
+            )
+            self.label_wrapper = discord.ui.Label(
+                text="Mode de validation",
+                description="Comment les conditions doivent-elles s'appliquer ?",
+                component=self.mode_group,
+            )
+            self.add_item(self.label_wrapper)
+            self._uses_radio = True
+        except (AttributeError, TypeError) as ex:
+            # Fallback si discord.py n'est pas en 2.7+ : TextInput simple
+            print(f"[GiveawayModePickerModal] RadioGroup indisponible, fallback TextInput : {ex}")
+            self._uses_radio = False
+            self.text_fallback = TextInput(
+                label="Mode (tape OR ou AND)",
+                placeholder="OR = une seule suffit · AND = toutes requises",
+                default=current_mode,
+                max_length=3,
+            )
+            self.add_item(self.text_fallback)
+
+    async def on_submit(self, i):
+        try:
+            if self._uses_radio:
+                new_mode = (self.mode_group.value or 'OR').upper()
+            else:
+                new_mode = (self.text_fallback.value or 'OR').strip().upper()
+                if new_mode not in ('OR', 'AND'):
+                    return await i.response.send_message(
+                        "❌ Tape `OR` ou `AND`.", ephemeral=True,
+                    )
+            conditions = self.parent_view.data.get('conditions', {})
+            conditions['condition_mode'] = new_mode
+            self.parent_view.data['conditions'] = conditions
+            await i.response.edit_message(embed=self.parent_view.embed(), view=self.parent_view)
+        except Exception as ex:
+            print(f"[GiveawayModePickerModal on_submit] {ex}")
+            try:
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
 class GiveawayCreateModal(Modal):
     def __init__(self, u, g):
         super().__init__(title="🎁 Créer un Cadeau")
@@ -14438,13 +14514,11 @@ class GiveawayConditionsPanel(View):
     async def set_afk(self, i, b):
         await i.response.send_modal(GiveawayConditionModal(self, 'afk_days', "Jours AFK max (0 = désactivé)", "Ex: 7 (ou 0 pour désactiver)"))
 
-    @discord.ui.button(label="🔀 Mode AND/OR", style=discord.ButtonStyle.primary, row=1)
-    async def toggle_mode(self, i, b):
-        conditions = self.data.get('conditions', {})
-        current = conditions.get('condition_mode', 'OR')
-        conditions['condition_mode'] = 'AND' if current == 'OR' else 'OR'
-        self.data['conditions'] = conditions
-        await i.response.edit_message(embed=self.embed(), view=self)
+    @discord.ui.button(label="🔀 Mode des conditions", style=discord.ButtonStyle.primary, row=1)
+    async def pick_mode(self, i, b):
+        # Phase 6.1 : modal avec ui.RadioGroup (nouveauté discord.py 2.7 / Discord 2026)
+        # remplace le toggle ON/OFF par un vrai choix radio
+        await i.response.send_modal(GiveawayModePickerModal(self))
 
     @discord.ui.button(label="🔔 Rôle Ping", style=discord.ButtonStyle.secondary, row=2)
     async def set_ping_role(self, i, b):
