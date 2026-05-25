@@ -9139,33 +9139,138 @@ class ImmunePanelV2(LayoutView):
             await interaction.response.send_message(view=self, ephemeral=True)
 
     async def _cb_add_role(self, i):
-        total_roles = len([r for r in self.g.roles[1:] if not r.is_bot_managed()])
-        v = PaginatedImmuneRoleView(self.u, self.g)
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="👑 Ajouter un rôle immunisé",
-                description=f"📊 {total_roles} rôles disponibles",
-                color=0xF1C40F,
-            ),
-            view=v,
-            attachments=[],
-        )
+        # Phase 21 : RoleSelect natif (affiche TOUS les rôles via Discord)
+        try:
+            v = View(timeout=180)
+            role_select = discord.ui.RoleSelect(
+                placeholder="Choisir le(s) rôle(s) à immuniser…",
+                min_values=1, max_values=25,
+            )
+
+            async def _on_pick(ix):
+                try:
+                    role_ids = [int(rid) for rid in ix.data.get('values', [])]
+                    added = 0
+                    async with get_db() as db:
+                        for rid in role_ids:
+                            await db.execute(
+                                'INSERT OR IGNORE INTO immune_roles VALUES(?,?)',
+                                (self.g.id, rid),
+                            )
+                            added += 1
+                        await db.commit()
+                    mentions = ", ".join(f"<@&{r}>" for r in role_ids[:10])
+                    await ix.response.send_message(
+                        f"✅ {added} rôle(s) ajouté(s) aux immunisés : {mentions}",
+                        ephemeral=True,
+                    )
+                    try:
+                        new_panel = ImmunePanelV2(self.u, self.g)
+                        await new_panel.render_to(ix, edit=False)
+                    except Exception:
+                        pass
+                except Exception as ex:
+                    print(f"[immune add_role pick] {ex}")
+
+            role_select.callback = _on_pick
+            v.add_item(role_select)
+            await i.response.send_message(
+                "🎭 Sélectionne le(s) rôle(s) à immuniser :",
+                view=v, ephemeral=True,
+            )
+        except Exception as ex:
+            print(f"[_cb_add_role immune] {ex}")
 
     async def _cb_add_user(self, i):
-        await i.response.send_modal(AddImmuneUserModal(self.g, self.u))
+        # Phase 21 : picker natif Discord (affiche tous les users avec recherche)
+        try:
+            v = View(timeout=180)
+            user_select = discord.ui.UserSelect(
+                placeholder="Choisir l'utilisateur à immuniser…",
+                min_values=1, max_values=1,
+            )
+
+            async def _on_pick(ix):
+                try:
+                    uid = int(ix.data['values'][0])
+                    member = self.g.get_member(uid)
+                    async with get_db() as db:
+                        await db.execute(
+                            'INSERT OR IGNORE INTO immune_users VALUES(?,?)',
+                            (self.g.id, uid),
+                        )
+                        await db.commit()
+                    name = member.mention if member else f"`{uid}`"
+                    await ix.response.send_message(
+                        f"✅ {name} ajouté aux utilisateurs immunisés.",
+                        ephemeral=True,
+                    )
+                    # Re-render le panel parent
+                    try:
+                        new_panel = ImmunePanelV2(self.u, self.g)
+                        await ix.edit_original_response(view=new_panel)
+                    except Exception:
+                        pass
+                except Exception as ex:
+                    print(f"[immune add_user pick] {ex}")
+
+            user_select.callback = _on_pick
+            v.add_item(user_select)
+            await i.response.send_message(
+                "👤 Sélectionne l'utilisateur à ajouter aux immunisés :",
+                view=v, ephemeral=True,
+            )
+        except Exception as ex:
+            print(f"[_cb_add_user] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
 
     async def _cb_add_chan(self, i):
-        total_channels = len(list(self.g.text_channels))
-        v = PaginatedImmuneChannelView(self.u, self.g)
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="📺 Ajouter un salon immunisé",
-                description=f"Ce salon ignorera toutes les protections.\n\n📊 {total_channels} salons disponibles",
-                color=0xF1C40F,
-            ),
-            view=v,
-            attachments=[],
-        )
+        # Phase 21 : ChannelSelect natif (affiche TOUS les salons via Discord)
+        try:
+            v = View(timeout=180)
+            channel_select = discord.ui.ChannelSelect(
+                channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+                placeholder="Choisir le(s) salon(s) à immuniser…",
+                min_values=1, max_values=25,
+            )
+
+            async def _on_pick(ix):
+                try:
+                    chan_ids = [int(cid) for cid in ix.data.get('values', [])]
+                    added = 0
+                    async with get_db() as db:
+                        for cid in chan_ids:
+                            await db.execute(
+                                'INSERT OR IGNORE INTO immune_channels VALUES(?,?)',
+                                (self.g.id, cid),
+                            )
+                            added += 1
+                        await db.commit()
+                    mentions = ", ".join(f"<#{c}>" for c in chan_ids[:10])
+                    await ix.response.send_message(
+                        f"✅ {added} salon(s) ajouté(s) aux immunisés : {mentions}",
+                        ephemeral=True,
+                    )
+                    try:
+                        new_panel = ImmunePanelV2(self.u, self.g)
+                        await new_panel.render_to(ix, edit=False)
+                    except Exception:
+                        pass
+                except Exception as ex:
+                    print(f"[immune add_chan pick] {ex}")
+
+            channel_select.callback = _on_pick
+            v.add_item(channel_select)
+            await i.response.send_message(
+                "📺 Sélectionne le(s) salon(s) à immuniser :",
+                view=v, ephemeral=True,
+            )
+        except Exception as ex:
+            print(f"[_cb_add_chan immune] {ex}")
 
     async def _cb_remove(self, i):
         v = ImmuneRemoveViewV2(self.u, self.g)
@@ -10098,22 +10203,40 @@ class DirectionPanelV2(LayoutView):
             await interaction.response.send_message(view=self, ephemeral=True)
 
     async def _cb_user(self, i):
-        # Ouvre le modal V1 mais override la callback pour revenir V2
-        modal = DirectionUserModal(self.g, self.u)
-        # Patch on_submit pour revenir vers V2
-        original_submit = modal.on_submit
+        # Phase 21 : picker natif Discord au lieu de modal avec ID
+        try:
+            v = View(timeout=180)
+            user_select = discord.ui.UserSelect(
+                placeholder="Choisir l'utilisateur autorisé /direction…",
+                min_values=1, max_values=1,
+            )
 
-        async def v2_submit(interaction):
-            try:
-                user_id = int(modal.uid.value)
-                await db_set(self.g.id, 'direction_allowed_user', user_id)
-                new_panel = DirectionPanelV2(self.u, self.g)
-                await new_panel.render_to(interaction, edit=True)
-            except ValueError:
-                await interaction.response.send_message("❌ ID invalide", ephemeral=True)
+            async def _on_pick(ix):
+                try:
+                    uid = int(ix.data['values'][0])
+                    await db_set(self.g.id, 'direction_allowed_user', uid)
+                    member = self.g.get_member(uid)
+                    name = member.mention if member else f"`{uid}`"
+                    await ix.response.send_message(
+                        f"✅ {name} défini comme utilisateur autorisé pour `/direction`.",
+                        ephemeral=True,
+                    )
+                    try:
+                        new_panel = DirectionPanelV2(self.u, self.g)
+                        await new_panel.render_to(ix, edit=False)
+                    except Exception:
+                        pass
+                except Exception as ex:
+                    print(f"[direction user pick] {ex}")
 
-        modal.on_submit = v2_submit
-        await i.response.send_modal(modal)
+            user_select.callback = _on_pick
+            v.add_item(user_select)
+            await i.response.send_message(
+                "👤 Sélectionne l'utilisateur autorisé à utiliser `/direction` :",
+                view=v, ephemeral=True,
+            )
+        except Exception as ex:
+            print(f"[_cb_user direction] {ex}")
 
     async def _cb_role(self, i):
         # Phase 3.0k : V2 native picker
@@ -10318,19 +10441,40 @@ class RellSeasPanelV2(LayoutView):
             await interaction.response.send_message(view=self, ephemeral=True)
 
     async def _cb_user(self, i):
-        modal = RellSeasUserModal(self.g, self.u)
+        # Phase 21 : picker natif Discord (affiche tous les users)
+        try:
+            v = View(timeout=180)
+            user_select = discord.ui.UserSelect(
+                placeholder="Choisir l'utilisateur RellSeas…",
+                min_values=1, max_values=1,
+            )
 
-        async def v2_submit(interaction):
-            try:
-                user_id = int(modal.uid.value)
-                await db_set(self.g.id, 'rellseas_user', user_id)
-                new_panel = RellSeasPanelV2(self.u, self.g)
-                await new_panel.render_to(interaction, edit=True)
-            except ValueError:
-                await interaction.response.send_message("❌ ID invalide", ephemeral=True)
+            async def _on_pick(ix):
+                try:
+                    uid = int(ix.data['values'][0])
+                    await db_set(self.g.id, 'rellseas_user', uid)
+                    member = self.g.get_member(uid)
+                    name = member.mention if member else f"`{uid}`"
+                    await ix.response.send_message(
+                        f"✅ {name} défini comme utilisateur RellSeas.",
+                        ephemeral=True,
+                    )
+                    try:
+                        new_panel = RellSeasPanelV2(self.u, self.g)
+                        await new_panel.render_to(ix, edit=False)
+                    except Exception:
+                        pass
+                except Exception as ex:
+                    print(f"[rellseas user pick] {ex}")
 
-        modal.on_submit = v2_submit
-        await i.response.send_modal(modal)
+            user_select.callback = _on_pick
+            v.add_item(user_select)
+            await i.response.send_message(
+                "👤 Sélectionne l'utilisateur RellSeas :",
+                view=v, ephemeral=True,
+            )
+        except Exception as ex:
+            print(f"[_cb_user rellseas] {ex}")
 
     async def _cb_role(self, i):
         # Phase 3.0k : V2 native picker
@@ -14456,77 +14600,94 @@ class PaginatedAdsChannelMenu(Select):
             )
 
 class AdsFeedChannelPaginatedView(View):
-    """Sélecteur de salon paginé pour ajouter un feed (YouTube, Twitch, TikTok, etc.)
-    Supporte TOUS les salons du serveur avec pagination."""
+    """Phase 21 : converti en ChannelSelect natif Discord (affiche TOUS les salons).
+
+    Reste le même nom de classe pour compat — mais pagination supprimée car
+    le picker natif gère ça automatiquement via search Discord.
+    """
     def __init__(self, u, g, feed_data, feeds_config_key, page=0):
         super().__init__(timeout=180)
         self.u = u
         self.g = g
         self.feed_data = feed_data
-        self.feeds_config_key = feeds_config_key  # ex: 'ads_youtube_feeds'
-        self.page = page
-        self.channels = list(g.text_channels)
-        self.per_page = 23
-        self.max_page = max(0, (len(self.channels) - 1) // self.per_page)
+        self.feeds_config_key = feeds_config_key
         self._build()
 
     def _build(self):
         self.clear_items()
-        start = self.page * self.per_page
-        end = start + self.per_page
-        page_chs = self.channels[start:end]
+        # Phase 21 : ChannelSelect natif (Discord affiche TOUS les salons avec recherche)
+        select = discord.ui.ChannelSelect(
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            placeholder="Choisir le salon de publication…",
+            min_values=1, max_values=1,
+        )
+        select.callback = self._on_pick
+        self.add_item(select)
 
-        opts = []
-        if self.page == 0:
-            opts.append(discord.SelectOption(label="📍 Salon par défaut", value="0", description="Utiliser le salon par défaut configuré"))
+        # Option "salon par défaut" via bouton
+        default_btn = discord.ui.Button(
+            label="📍 Salon par défaut",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+        )
+        default_btn.callback = self._on_default
+        self.add_item(default_btn)
 
-        for ch in page_chs:
-            desc = ch.category.name[:50] if ch.category else "Sans catégorie"
-            opts.append(discord.SelectOption(label=f"# {ch.name}"[:25], value=str(ch.id), description=desc))
+    async def _on_pick(self, i):
+        try:
+            channel_id = int(i.data.get('values', ['0'])[0])
+            self.feed_data['channel_id'] = channel_id
+            await self._save_and_confirm(i, channel_id)
+        except Exception as ex:
+            print(f"[AdsFeedChannelPaginatedView _on_pick] {ex}")
+            try:
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
 
-        if opts:
-            select = AdsFeedChannelPaginatedSelect(self, opts)
-            self.add_item(select)
+    async def _on_default(self, i):
+        try:
+            # Pas de channel_id custom → utilisera ads_*_channel par défaut
+            await self._save_and_confirm(i, 0)
+        except Exception as ex:
+            print(f"[AdsFeedChannelPaginatedView _on_default] {ex}")
 
-        if self.max_page > 0:
-            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
-            prev_btn.callback = self._prev
-            self.add_item(prev_btn)
-            page_btn = discord.ui.Button(label=f"{self.page+1}/{self.max_page+1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
-            self.add_item(page_btn)
-            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
-            next_btn.callback = self._next
-            self.add_item(next_btn)
-
-    async def _prev(self, i):
-        self.page -= 1
-        self._build()
-        await i.response.edit_message(view=self)
-
-    async def _next(self, i):
-        self.page += 1
-        self._build()
-        await i.response.edit_message(view=self)
+    async def _save_and_confirm(self, i, channel_id: int):
+        c = await cfg(self.g.id)
+        feeds = c.get(self.feeds_config_key, []) or []
+        feeds.append(self.feed_data)
+        await db_set(self.g.id, self.feeds_config_key, feeds)
+        ch = self.g.get_channel(channel_id) if channel_id else None
+        salon_txt = ch.mention if ch else "salon par défaut"
+        name = (
+            self.feed_data.get('name')
+            or self.feed_data.get('username')
+            or self.feed_data.get('id', '?')
+        )
+        kw = self.feed_data.get('keyword_filter', '')
+        kw_note = f"\n🔍 Filtre actif : `{kw}`" if kw else ""
+        try:
+            await i.response.edit_message(
+                content=f"✅ **{name}** ajouté ! Publications dans {salon_txt}{kw_note}",
+                view=None,
+                embed=None,
+                attachments=[],
+            )
+        except discord.InteractionResponded:
+            await i.followup.send(
+                f"✅ **{name}** ajouté ! Publications dans {salon_txt}{kw_note}",
+                ephemeral=True,
+            )
 
 
 class AdsFeedChannelPaginatedSelect(Select):
+    """Legacy compat — n'est plus utilisé (Phase 21 utilise ChannelSelect natif)."""
     def __init__(self, parent, opts):
-        placeholder = f"Page {parent.page+1}/{parent.max_page+1} — Choisir un salon..."[:100]
-        super().__init__(placeholder=placeholder, options=opts)
+        super().__init__(placeholder="Choisir un salon...", options=opts)
         self.parent_view = parent
 
     async def callback(self, i):
-        channel_id = int(self.values[0])
-        if channel_id > 0:
-            self.parent_view.feed_data['channel_id'] = channel_id
-        c = await cfg(self.parent_view.g.id)
-        feeds = c.get(self.parent_view.feeds_config_key, [])
-        feeds.append(self.parent_view.feed_data)
-        await db_set(self.parent_view.g.id, self.parent_view.feeds_config_key, feeds)
-        ch = self.parent_view.g.get_channel(channel_id) if channel_id else None
-        salon_txt = ch.mention if ch else "salon par défaut"
-        name = self.parent_view.feed_data.get('name') or self.parent_view.feed_data.get('username') or self.parent_view.feed_data.get('id', '?')
-        await i.response.edit_message(content=f"✅ **{name}** ajouté ! Publications dans {salon_txt}", view=None)
+        pass  # Legacy
 
 
 # Anciennes classes gardées pour compatibilité
