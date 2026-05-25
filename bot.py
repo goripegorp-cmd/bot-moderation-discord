@@ -3937,25 +3937,60 @@ class SecurityPanelV2(LayoutView):
             await interaction.response.send_message(view=self, ephemeral=True)
 
     async def _cb_mod(self, i):
-        v = ModerationPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
+        try:
+            v = ModerationPanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[SecurityPanelV2 _cb_mod] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur ouverture Modération : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
 
     async def _cb_prot(self, i):
-        v = ProtPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
+        try:
+            v = ProtPanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[SecurityPanelV2 _cb_prot] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur ouverture Protection : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
 
     async def _cb_immune(self, i):
-        v = ImmunePanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
+        try:
+            v = ImmunePanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[SecurityPanelV2 _cb_immune] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur ouverture Immunités : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
 
     async def _cb_afk(self, i):
         # Phase 4.6 : accès au panel AFK depuis le hub Sécurité
-        v = AfkRolePanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
+        try:
+            v = AfkRolePanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[SecurityPanelV2 _cb_afk] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur ouverture AFK : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
 
     async def _cb_back(self, i):
-        v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(view=v, embed=None, attachments=[])
+        try:
+            v = MainPanelV2(self.u, self.g)
+            await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
+        except Exception as ex:
+            print(f"[SecurityPanelV2 _cb_back] {ex}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -4090,7 +4125,7 @@ class GamesPanelV2(LayoutView):
 
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(view=v, embed=None, attachments=[])
+        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -4211,10 +4246,18 @@ class BoostConfigPanelV2(LayoutView):
             await interaction.response.send_message(view=self, ephemeral=True)
 
     async def _cb_toggle(self, i):
-        c = await cfg(self.g.id)
-        new_val = not bool(c.get('boost_enabled', False))
-        await db_set(self.g.id, 'boost_enabled', new_val)
-        await self.render_to(i, edit=True)
+        try:
+            c = await cfg(self.g.id)
+            new_val = not bool(c.get('boost_enabled', False))
+            await db_set(self.g.id, 'boost_enabled', new_val)
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[BoostConfigPanelV2 _cb_toggle] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
 
     async def _cb_channel(self, i):
         try:
@@ -4230,17 +4273,33 @@ class BoostConfigPanelV2(LayoutView):
                 pass
 
     async def _cb_msg(self, i):
-        c = await cfg(self.g.id)
-        modal = _BoostMessageModal(self.g, self.u)
-        modal.tpl.default = c.get('boost_message', '')
-        await i.response.send_modal(modal)
+        try:
+            c = await cfg(self.g.id)
+            modal = _BoostMessageModal(self.g, self.u)
+            modal.tpl.default = c.get('boost_message', '')
+            await i.response.send_modal(modal)
+        except Exception as ex:
+            print(f"[BoostConfigPanelV2 _cb_msg] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
 
     async def _cb_reset(self, i):
-        await db_set(
-            self.g.id, 'boost_message',
-            "🎉 Merci {user} pour avoir boosté le serveur ! 💎\nLe serveur a maintenant **{count}** boost(s).",
-        )
-        await self.render_to(i, edit=True)
+        try:
+            await db_set(
+                self.g.id, 'boost_message',
+                "🎉 Merci {user} pour avoir boosté le serveur ! 💎\nLe serveur a maintenant **{count}** boost(s).",
+            )
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[BoostConfigPanelV2 _cb_reset] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur reset : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
 
     async def _cb_test(self, i):
         c = await cfg(self.g.id)
@@ -4287,8 +4346,18 @@ class _BoostMessageModal(Modal, title="📝 Message de boost"):
         self.u = u
 
     async def on_submit(self, i):
-        await db_set(self.g.id, 'boost_message', self.tpl.value or '')
-        await BoostConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+        try:
+            await db_set(self.g.id, 'boost_message', self.tpl.value or '')
+            await BoostConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[_BoostMessageModal on_submit] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur sauvegarde : `{ex}`", ephemeral=True)
+                else:
+                    await i.followup.send(f"❌ Erreur sauvegarde : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -4492,7 +4561,7 @@ class DelegationsPanelV2(LayoutView):
 
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(view=v, embed=None, attachments=[])
+        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
 
 
 class DelegationCreateModal(Modal):
@@ -5575,7 +5644,7 @@ class LogsPanelV2(LayoutView):
 
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(view=v, embed=None, attachments=[])
+        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
 
 
 class LogsCategoriesPanelV2(LayoutView):
@@ -11041,7 +11110,7 @@ class CommandsPanelV2(LayoutView):
 
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(view=v, embed=None, attachments=[])
+        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -12718,7 +12787,7 @@ class AdsPanelV2(LayoutView):
 
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(view=v, embed=None, attachments=[])
+        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -16432,7 +16501,7 @@ class MassRolePanelV2(LayoutView):
     async def _cb_back(self, i):
         v = CentrePanelV2(self.u, self.g)
         v._build()
-        await i.response.edit_message(view=v, embed=None, attachments=[])
+        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
 
 
 class MassRoleTargetSelect(View):
@@ -16882,7 +16951,7 @@ class AnnouncementPanelV2(LayoutView):
 
     async def _cb_back(self, i):
         v = CentrePanelV2(self.u, self.g)
-        await i.response.edit_message(view=v, embed=None, attachments=[])
+        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
 
 
 class AnnouncementCreateModal(Modal):
@@ -18536,7 +18605,7 @@ class LevelSystemPanelV2(LayoutView):
 
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(view=v, embed=None, attachments=[])
+        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
 
 
 class XPChannelsSelectPanel(View):
@@ -21500,7 +21569,7 @@ class AutoHelpPanelV2(LayoutView):
 
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(view=v, embed=None, attachments=[])
+        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
 
 
 class AutoHelpChannelSelect(View):
@@ -23110,7 +23179,7 @@ class StatPanelV2(LayoutView):
 
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(view=v, embed=None, attachments=[])
+        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
 
 
 class AfkRolePanel(View):
@@ -25609,7 +25678,7 @@ class ChanPanelV2(LayoutView):
 
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(view=v, embed=None, attachments=[])
+        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
 
 
 class _ChanPickerV2(LayoutView):
@@ -26124,7 +26193,7 @@ class TicketMainPanelV2(LayoutView):
 
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(view=v, embed=None, attachments=[])
+        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
 
 
 class TkStaffView(View):
