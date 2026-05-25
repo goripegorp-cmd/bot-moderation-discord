@@ -23480,103 +23480,150 @@ class PanelEditViewV2(LayoutView):
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
+    # Phase 16 : Helper de fallback erreur pour TOUS les boutons (pattern robuste)
+    async def _safe_error(self, i, ex):
+        """Envoie un message d'erreur safe selon l'état de l'interaction."""
+        print(f"[PanelEditViewV2] {type(ex).__name__}: {ex}")
+        import traceback; traceback.print_exc()
+        try:
+            if i.response.is_done():
+                await i.followup.send(f"❌ Erreur : `{type(ex).__name__}: {ex}`", ephemeral=True)
+            else:
+                await i.response.send_message(f"❌ Erreur : `{type(ex).__name__}: {ex}`", ephemeral=True)
+        except Exception:
+            pass
+
     async def _cb_cat(self, i):
-        cats = list(self.g.categories)
-        if not cats:
-            return await i.response.send_message("❌ Aucune catégorie sur ce serveur", ephemeral=True)
-        v = PanelCatPaginatedView(self.u, self.g, self.pid)
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="📁 Choisir la catégorie",
-                description=f"**{len(cats)} catégories** · Page 1/{v.max_page+1}",
-                color=0x9B59B6,
-            ),
-            view=v,
-            attachments=[],
-        )
+        try:
+            cats = list(self.g.categories)
+            if not cats:
+                return await i.response.send_message("❌ Aucune catégorie sur ce serveur", ephemeral=True)
+            v = PanelCatPaginatedView(self.u, self.g, self.pid)
+            await i.response.edit_message(
+                embed=discord.Embed(
+                    title="📁 Choisir la catégorie",
+                    description=f"**{len(cats)} catégories** · Page 1/{v.max_page+1}",
+                    color=0x9B59B6,
+                ),
+                view=v,
+                attachments=[],
+            )
+        except Exception as ex:
+            await self._safe_error(i, ex)
 
     async def _cb_staff(self, i):
-        # Phase 3.0k : V2 native picker avec save_fn nested (ticket_panels[pid].staff_role)
-        pid = self.pid
-        async def _save(guild_id, role_id):
-            c = await cfg(guild_id)
-            panels = c.get('ticket_panels', {}) or {}
-            if pid in panels:
-                panels[pid]['staff_role'] = role_id
-                await db_set(guild_id, 'ticket_panels', panels)
-        v = V2GenericRolePicker(
-            self.u, self.g,
-            return_panel_factory=lambda: PanelEditViewV2(self.u, self.g, self.pid),
-            title="👥 Rôle Staff du Panel",
-            description="Le rôle qui gère ce panel. Aucun = utilise le rôle staff global.",
-            color=0x9B59B6,
-            save_fn=_save,
-        )
-        await v.render_to(i, edit=True)
+        try:
+            # Phase 3.0k : V2 native picker avec save_fn nested (ticket_panels[pid].staff_role)
+            pid = self.pid
+            async def _save(guild_id, role_id):
+                c = await cfg(guild_id)
+                panels = c.get('ticket_panels', {}) or {}
+                if pid in panels:
+                    panels[pid]['staff_role'] = role_id
+                    await db_set(guild_id, 'ticket_panels', panels)
+            v = V2GenericRolePicker(
+                self.u, self.g,
+                return_panel_factory=lambda: PanelEditViewV2(self.u, self.g, self.pid),
+                title="👥 Rôle Staff du Panel",
+                description="Le rôle qui gère ce panel. Aucun = utilise le rôle staff global.",
+                color=0x9B59B6,
+                save_fn=_save,
+            )
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            await self._safe_error(i, ex)
 
     async def _cb_qs(self, i):
-        v = PanelQsView(self.u, self.g, self.pid)
-        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+        try:
+            v = PanelQsView(self.u, self.g, self.pid)
+            await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+        except Exception as ex:
+            await self._safe_error(i, ex)
 
     async def _cb_max(self, i):
-        await i.response.send_modal(SetMaxModal(self.u, self.g, self.pid))
+        try:
+            await i.response.send_modal(SetMaxModal(self.u, self.g, self.pid))
+        except Exception as ex:
+            await self._safe_error(i, ex)
 
     async def _cb_apparence(self, i):
         try:
             modal = PanelAppearanceModalSimple(self.u, self.g, self.pid)
             await i.response.send_modal(modal)
         except Exception as ex:
-            print(f"[V2 APPARENCE] {ex}")
-            try:
-                await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
-            except Exception:
-                pass
+            await self._safe_error(i, ex)
 
     async def _cb_welcome(self, i):
         try:
             modal = WelcomeMessageModalSimple(self.u, self.g, self.pid)
             await i.response.send_modal(modal)
         except Exception as ex:
-            print(f"[V2 WELCOME] {ex}")
-            try:
-                await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
-            except Exception:
-                pass
+            await self._safe_error(i, ex)
 
     async def _cb_blacklist(self, i):
-        v = PanelBlacklistView(self.u, self.g, self.pid)
-        await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+        try:
+            v = PanelBlacklistView(self.u, self.g, self.pid)
+            await i.response.edit_message(embed=await v.embed(), view=v, attachments=[])
+        except Exception as ex:
+            await self._safe_error(i, ex)
 
     async def _cb_send(self, i):
-        pnl = await self._get_panel()
-        c = await cfg(self.g.id)
-        if not pnl.get('category'):
-            return await i.response.send_message("❌ Configure la catégorie d'abord !", ephemeral=True)
-        if not pnl.get('staff_role') and not c.get('ticket_staff'):
-            return await i.response.send_message("❌ Configure le rôle Staff d'abord (panel ou global) !", ephemeral=True)
-        v = SendPanelPaginatedView(self.u, self.g, self.pid)
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="📤 Où envoyer le panel ?",
-                description=f"**{len(v.channels)} salons** · Page 1/{v.max_page+1}",
-                color=0x9B59B6,
-            ),
-            view=v,
-            attachments=[],
-        )
+        # Phase 16 : defer IMMÉDIAT + try/except complet
+        # L'utilisateur signalait "Échec de l'interaction" sur ce bouton
+        # parce qu'il y avait 2 await cfg() avant la réponse → timeout possible
+        try:
+            # Defer pour ack instantané (ephemeral car la source est déjà ephemeral)
+            try:
+                await i.response.defer()
+            except (discord.InteractionResponded, discord.NotFound):
+                pass
+
+            pnl = await self._get_panel()
+            c = await cfg(self.g.id)
+
+            # Validations
+            if not pnl.get('category'):
+                return await i.followup.send(
+                    "❌ Configure la catégorie d'abord !",
+                    ephemeral=True,
+                )
+            if not pnl.get('staff_role') and not c.get('ticket_staff'):
+                return await i.followup.send(
+                    "❌ Configure le rôle Staff d'abord (panel ou global) !",
+                    ephemeral=True,
+                )
+
+            v = SendPanelPaginatedView(self.u, self.g, self.pid)
+            await i.edit_original_response(
+                embed=discord.Embed(
+                    title="📤 Où envoyer le panel ?",
+                    description=f"**{len(v.channels)} salons** · Page 1/{v.max_page+1}",
+                    color=0x9B59B6,
+                ),
+                view=v,
+                attachments=[],
+            )
+        except Exception as ex:
+            await self._safe_error(i, ex)
 
     async def _cb_delete(self, i):
-        c = await cfg(self.g.id)
-        panels = c.get('ticket_panels', {})
-        if self.pid in panels:
-            del panels[self.pid]
-        await db_set(self.g.id, 'ticket_panels', panels)
-        v = TicketMainPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
+        try:
+            c = await cfg(self.g.id)
+            panels = c.get('ticket_panels', {})
+            if self.pid in panels:
+                del panels[self.pid]
+            await db_set(self.g.id, 'ticket_panels', panels)
+            v = TicketMainPanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            await self._safe_error(i, ex)
 
     async def _cb_back(self, i):
-        v = TicketMainPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
+        try:
+            v = TicketMainPanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            await self._safe_error(i, ex)
 
 
 class PanelEditView(View):
