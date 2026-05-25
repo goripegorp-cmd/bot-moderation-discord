@@ -53,6 +53,7 @@ import roles_panel as rolespanel2026
 import slash_commands_architecture as slashcmds_arch2026
 import unified_logger as ulogger2026
 import social_gallery as gallery2026
+import game_updates as gameupdates2026
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  🛡️ GESTION D'ERREURS GLOBALE - REND LES ERREURS VISIBLES AU LIEU DE SILENCIEUSES
@@ -3853,21 +3854,19 @@ class GamesPanelV2(LayoutView):
                 pass
 
     async def _cb_deals(self, i):
-        # Affiche un message info sur les deals (config via /configure si dispo)
+        # Phase 17 : navigation propre vers AdsDealsPanelV2 au lieu d'un message info
         try:
-            await i.response.edit_message(
-                content=(
-                    "🛒 **Game Deals**\n\n"
-                    "Pour configurer le système de deals (Epic Games, Steam, GOG…), utilise les commandes :\n"
-                    "• `/testdeals` — tester la détection\n"
-                    "• `/cleardeals` — nettoyer les deals postés\n\n"
-                    "Config du salon : dans la config publication legacy."
-                ),
-                view=None, embed=None, attachments=[],
-            )
-        except Exception:
+            v = AdsDealsPanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[GamesPanelV2 _cb_deals] {ex}")
+            import traceback; traceback.print_exc()
             try:
-                await i.response.defer()
+                if not i.response.is_done():
+                    await i.response.send_message(
+                        f"❌ Erreur : `{ex}`. Utilise `/configure > Réseaux Sociaux > Game Deals`.",
+                        ephemeral=True,
+                    )
             except Exception:
                 pass
 
@@ -10040,6 +10039,7 @@ WEBHOOK_PROFILES = {
     'rosocial': {'name': 'RoSocial'},
     'roblox_ugc': {'name': 'Roblox UGC'},
     'deals': {'name': 'Bons Plans'},
+    'game_updates': {'name': '🎮 Mises à jour'},
     # ─── Modération & Sécurité ───
     'mod_log': {'name': '🔨 Modération'},
     'protection': {'name': '🛡️ Protection'},
@@ -10377,6 +10377,7 @@ class AdsPanelV2(LayoutView):
                 discord.SelectOption(label="RoSocial", value="rosocial", emoji="🎮", description="Profils RoSocial"),
                 discord.SelectOption(label="Roblox UGC", value="roblox", emoji="🟢", description="Créateurs & groupes"),
                 discord.SelectOption(label="Game Deals", value="deals", emoji="🎯", description="Promos Steam, Epic, GOG"),
+                discord.SelectOption(label="Mises à jour", value="updates", emoji="🎮", description="Patch notes Roblox, Steam, Blizzard…"),
             ],
             custom_id="apv2_platform",
         )
@@ -10427,6 +10428,10 @@ class AdsPanelV2(LayoutView):
             return await v.render_to(interaction, edit=True)
         if val == 'deals':
             v = AdsDealsPanelV2(self.u, self.g)
+            return await v.render_to(interaction, edit=True)
+        # Phase 17 : Mises à jour de plateformes/jeux
+        if val == 'updates':
+            v = AdsGameUpdatesPanelV2(self.u, self.g)
             return await v.render_to(interaction, edit=True)
         # Fallback (ne devrait jamais arriver)
         await interaction.response.send_message(f"❌ Plateforme inconnue : {val}", ephemeral=True)
@@ -12216,6 +12221,295 @@ class AdsDealsPanelV2(LayoutView):
     async def _cb_back(self, i):
         v = AdsPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  🎮 MISES À JOUR DE PLATEFORMES / JEUX — Panel V2 (Phase 17)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class AdsGameUpdatesPanelV2(LayoutView):
+    """Configuration du suivi des mises à jour de plateformes et jeux."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        feeds = c.get('ads_updates_feeds', []) or []
+
+        def dot(x):
+            return f"🔘 {x.mention}" if x else "⚪ _non défini_"
+
+        # Liste compacte des feeds configurés
+        feed_lines = []
+        for f in feeds[:8]:
+            if not isinstance(f, dict):
+                continue
+            gk = f.get('game_key', '')
+            chid = f.get('channel_id', 0)
+            ch = self.g.get_channel(chid) if chid else None
+            meta = gameupdates2026.get_game_meta(gk)
+            feed_lines.append(
+                f"• {meta['emoji']} **{meta['name']}** → {ch.mention if ch else '⚪ _salon ?_'}"
+            )
+        if len(feeds) > 8:
+            feed_lines.append(f"_… +{len(feeds) - 8}_")
+        feeds_block = "\n".join(feed_lines) if feed_lines else "_Aucun suivi configuré — clique ➕ Ajouter_"
+
+        # Boutons
+        self.clear_items()
+        b_add = Button(label="➕ Ajouter", style=discord.ButtonStyle.success, custom_id="agupv2_add")
+        b_add.callback = self._cb_add
+        b_remove = Button(
+            label="🗑️ Retirer",
+            style=discord.ButtonStyle.danger,
+            disabled=(not feeds),
+            custom_id="agupv2_remove",
+        )
+        b_remove.callback = self._cb_remove
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="agupv2_back")
+        b_back.callback = self._cb_back
+
+        items: list = []
+        if self.g.icon:
+            items.append(v2_section(
+                v2_title("🎮 Mises à jour"),
+                v2_subtitle(f"`{len(feeds)}` plateforme(s)/jeu(x) suivi(s)"),
+                accessory=v2_thumb(self.g.icon.url),
+            ))
+        else:
+            items.append(v2_title("🎮 Mises à jour"))
+            items.append(v2_subtitle(f"`{len(feeds)}` plateforme(s)/jeu(x) suivi(s)"))
+
+        items.append(v2_divider())
+        items.append(v2_body(
+            "Suis les **vraies mises à jour officielles** (patch notes, dev updates) "
+            "de plateformes (Roblox, Steam, Epic, Blizzard…) et jeux populaires "
+            "(Subnautica 2, CS2, WoW, Genshin, Helldivers 2, …)."
+        ))
+        items.append(v2_divider())
+        items.append(v2_title("Sources suivies", level=3))
+        items.append(v2_body(feeds_block))
+        items.append(v2_divider())
+        items.append(v2_subtitle("🔄 Check toutes les 5 min · Dédup persistant · Pas d'événements ni de promos"))
+        items.append(discord.ui.ActionRow(b_add, b_remove, b_back))
+
+        self.add_item(v2_container(*items, color=Palette.INFO))
+
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_add(self, i):
+        try:
+            v = AddGameUpdateView(self.u, self.g)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[AdsGameUpdatesPanelV2 _cb_add] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+    async def _cb_remove(self, i):
+        try:
+            c = await cfg(self.g.id)
+            feeds = c.get('ads_updates_feeds', []) or []
+            if not feeds:
+                return await i.response.send_message("❌ Aucun suivi à retirer", ephemeral=True)
+            opts = []
+            for idx, f in enumerate(feeds[:25]):
+                if not isinstance(f, dict):
+                    continue
+                gk = f.get('game_key', '')
+                meta = gameupdates2026.get_game_meta(gk)
+                ch = self.g.get_channel(f.get('channel_id', 0))
+                label = f"{meta['name']}"[:50]
+                desc = (f"→ #{ch.name}" if ch else "salon ?")[:50]
+                opts.append(discord.SelectOption(label=label, value=str(idx), description=desc, emoji=meta['emoji']))
+
+            v = View(timeout=120)
+            sel = Select(placeholder="Choisir le suivi à retirer…", options=opts)
+
+            async def _on_remove(ix):
+                try:
+                    idx = int(ix.data['values'][0])
+                    cc = await cfg(self.g.id)
+                    ff = cc.get('ads_updates_feeds', []) or []
+                    if 0 <= idx < len(ff):
+                        removed = ff.pop(idx)
+                        await db_set(self.g.id, 'ads_updates_feeds', ff)
+                        meta = gameupdates2026.get_game_meta(removed.get('game_key', ''))
+                        await ix.response.send_message(
+                            f"✅ Suivi **{meta['name']}** retiré.",
+                            ephemeral=True,
+                        )
+                        # Re-render le panel
+                        new_v = AdsGameUpdatesPanelV2(self.u, self.g)
+                        try:
+                            await ix.edit_original_response(view=new_v)
+                        except Exception:
+                            pass
+                except Exception as ex:
+                    print(f"[remove update feed] {ex}")
+                    try:
+                        await ix.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+                    except Exception:
+                        pass
+
+            sel.callback = _on_remove
+            v.add_item(sel)
+            await i.response.send_message(
+                "🗑️ Quel suivi retirer ?",
+                view=v,
+                ephemeral=True,
+            )
+        except Exception as ex:
+            print(f"[AdsGameUpdatesPanelV2 _cb_remove] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+    async def _cb_back(self, i):
+        v = AdsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+class AddGameUpdateView(LayoutView):
+    """Sub-panel : choisir un jeu/plateforme puis un salon pour le suivi."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self.selected_game = None
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    def _build(self):
+        self.clear_items()
+        games = gameupdates2026.list_available_games()
+        # Discord limite à 25 options par Select
+        # Plateformes (5) + jeux (limité à 20)
+        opts = []
+        for key, emoji, name in games[:25]:
+            opts.append(discord.SelectOption(
+                label=name[:100],
+                value=key,
+                emoji=emoji,
+                default=(key == self.selected_game),
+            ))
+
+        sel = Select(
+            placeholder="🎮 Choisir une plateforme ou un jeu…",
+            options=opts,
+            custom_id="agu_pick_game",
+        )
+        sel.callback = self._on_pick_game
+
+        items = [
+            v2_title("➕ Ajouter un suivi"),
+            v2_subtitle("Étape 1 : choisir la plateforme ou le jeu"),
+            v2_divider(),
+            v2_body(
+                "Sélectionne dans la liste. Le bot suivra ensuite les mises à jour "
+                "officielles de cette source (patch notes, dev updates) et les "
+                "publiera dans le salon que tu choisiras à l'étape 2."
+            ),
+            v2_divider(),
+            discord.ui.ActionRow(sel),
+        ]
+
+        if self.selected_game:
+            meta = gameupdates2026.get_game_meta(self.selected_game)
+            items.append(v2_divider())
+            items.append(v2_body(f"✅ Sélectionné : {meta['emoji']} **{meta['name']}**"))
+            chan_sel = discord.ui.ChannelSelect(
+                channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+                placeholder="📍 Étape 2 : choisir le salon de publication…",
+                min_values=1, max_values=1,
+            )
+            chan_sel.callback = self._on_pick_channel
+            items.append(discord.ui.ActionRow(chan_sel))
+
+        b_back = Button(label="◀️ Annuler", style=discord.ButtonStyle.secondary, custom_id="agu_back")
+        b_back.callback = self._on_back
+        items.append(discord.ui.ActionRow(b_back))
+
+        self.add_item(v2_container(*items, color=Palette.INFO))
+
+    async def render_to(self, interaction, *, edit=True):
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _on_pick_game(self, i):
+        try:
+            self.selected_game = i.data.get('values', [None])[0]
+            self._build()
+            await i.response.edit_message(view=self, embed=None, attachments=[])
+        except Exception as ex:
+            print(f"[AddGameUpdateView _on_pick_game] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+    async def _on_pick_channel(self, i):
+        try:
+            channel_id = int(i.data.get('values', ['0'])[0])
+            if not self.selected_game or not channel_id:
+                return await i.response.send_message("❌ Sélection incomplète.", ephemeral=True)
+            c = await cfg(self.g.id)
+            feeds = c.get('ads_updates_feeds', []) or []
+            # Évite les doublons (même game_key + même channel)
+            for f in feeds:
+                if isinstance(f, dict) and f.get('game_key') == self.selected_game and f.get('channel_id') == channel_id:
+                    return await i.response.send_message(
+                        "⚠️ Ce suivi existe déjà.", ephemeral=True,
+                    )
+            feeds.append({'game_key': self.selected_game, 'channel_id': channel_id})
+            await db_set(self.g.id, 'ads_updates_feeds', feeds)
+            meta = gameupdates2026.get_game_meta(self.selected_game)
+            ch = self.g.get_channel(channel_id)
+            await i.response.send_message(
+                f"✅ Suivi ajouté : {meta['emoji']} **{meta['name']}** → {ch.mention if ch else 'salon ?'}\n"
+                "Les prochaines mises à jour officielles seront postées automatiquement.",
+                ephemeral=True,
+            )
+            # Re-render le panel
+            try:
+                v = AdsGameUpdatesPanelV2(self.u, self.g)
+                await i.edit_original_response(view=v)
+            except Exception:
+                pass
+        except Exception as ex:
+            print(f"[AddGameUpdateView _on_pick_channel] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+    async def _on_back(self, i):
+        try:
+            v = AdsGameUpdatesPanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[AddGameUpdateView _on_back] {ex}")
 
 
 class AdsDealsPanel(View):
@@ -23594,12 +23888,9 @@ class PanelEditViewV2(LayoutView):
                 )
 
             v = SendPanelPaginatedView(self.u, self.g, self.pid)
+            # Phase 17 : V2 LayoutView, plus d'embed (interdit en V2)
             await i.edit_original_response(
-                embed=discord.Embed(
-                    title="📤 Où envoyer le panel ?",
-                    description=f"**{len(v.channels)} salons** · Page 1/{v.max_page+1}",
-                    color=0x9B59B6,
-                ),
+                embed=None,
                 view=v,
                 attachments=[],
             )
@@ -24361,56 +24652,138 @@ class AddQModal(Modal, title="➕ Ajouter une question"):
         v = PanelQsView(self.u, self.g, self.pid)
         await i.response.edit_message(embed=await v.embed(), view=v)
 
-class SendPanelPaginatedView(View):
-    """Sélecteur de salon paginé pour envoyer un panel de tickets"""
+class SendPanelPaginatedView(LayoutView):
+    """Sélecteur de salon paginé pour envoyer un panel de tickets.
+
+    Phase 17 : converti de V1 View → V2 LayoutView pour éviter l'erreur
+    `embeds field cannot be used when using MessageFlags.IS_COMPONENTS_V2`.
+    Le panel parent (PanelEditViewV2) est V2, donc le child doit aussi être V2.
+    """
     def __init__(self, u, g, pid, page=0):
         super().__init__(timeout=180)
         self.u = u
         self.g = g
         self.pid = pid
         self.page = page
-        self.channels = list(g.text_channels)
+        # Phase 17 : filtre les salons accessibles + tri par nom
+        self.channels = sorted(
+            [c for c in g.text_channels if c.permissions_for(g.me).view_channel],
+            key=lambda c: (c.category.name if c.category else "ZZZ", c.position),
+        )
         self.per_page = 23
         self.max_page = max(0, (len(self.channels) - 1) // self.per_page)
         self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
 
     def _build(self):
         self.clear_items()
         start = self.page * self.per_page
         end = start + self.per_page
         page_chs = self.channels[start:end]
-        opts = [discord.SelectOption(label=f"# {c.name}"[:25], value=str(c.id), description=(c.category.name[:50] if c.category else "Sans catégorie")) for c in page_chs]
+        opts = [
+            discord.SelectOption(
+                label=f"# {c.name}"[:25],
+                value=str(c.id),
+                description=(c.category.name[:50] if c.category else "Sans catégorie"),
+            )
+            for c in page_chs
+        ]
+
+        items = [
+            v2_title("📤 Envoyer le panel"),
+            v2_subtitle(f"`{len(self.channels)}` salons accessibles · Page `{self.page+1}/{self.max_page+1}`"),
+            v2_divider(),
+            v2_body("Choisis le salon où le menu de création de tickets sera publié."),
+            v2_divider(),
+        ]
+
         if opts:
-            select = Select(placeholder=f"Page {self.page+1}/{self.max_page+1} — Envoyer dans...", options=opts)
+            select = Select(
+                placeholder=f"Page {self.page+1}/{self.max_page+1} — Choisir le salon...",
+                options=opts,
+                custom_id=f"sppv2_select_{self.page}",
+            )
             select.callback = self._select_cb
-            self.add_item(select)
+            items.append(discord.ui.ActionRow(select))
+        else:
+            items.append(v2_body("_Aucun salon accessible sur cette page._"))
+
+        # Navigation pagination
         if self.max_page > 0:
-            prev_btn = discord.ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=1)
+            prev_btn = Button(
+                label="◀️ Préc.",
+                style=discord.ButtonStyle.secondary,
+                disabled=(self.page == 0),
+                custom_id="sppv2_prev",
+            )
             prev_btn.callback = self._prev
-            self.add_item(prev_btn)
-            page_btn = discord.ui.Button(label=f"{self.page+1}/{self.max_page+1}", style=discord.ButtonStyle.secondary, disabled=True, row=1)
-            self.add_item(page_btn)
-            next_btn = discord.ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(self.page >= self.max_page), row=1)
+            page_btn = Button(
+                label=f"Page {self.page+1}/{self.max_page+1}",
+                style=discord.ButtonStyle.secondary,
+                disabled=True,
+                custom_id="sppv2_pg",
+            )
+            next_btn = Button(
+                label="Suiv. ▶️",
+                style=discord.ButtonStyle.secondary,
+                disabled=(self.page >= self.max_page),
+                custom_id="sppv2_next",
+            )
             next_btn.callback = self._next
-            self.add_item(next_btn)
-        back_btn = discord.ui.Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
+            items.append(discord.ui.ActionRow(prev_btn, page_btn, next_btn))
+
+        back_btn = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="sppv2_back")
         back_btn.callback = self._back
-        self.add_item(back_btn)
+        items.append(discord.ui.ActionRow(back_btn))
+
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+    async def render_to(self, interaction, *, edit=True):
+        """V2 render — sans embed (V2 messages ne peuvent pas avoir d'embed)."""
+        if edit:
+            await interaction.response.edit_message(view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
 
     async def _prev(self, i):
-        self.page -= 1
-        self._build()
-        await i.response.edit_message(embed=discord.Embed(title="📤 Où envoyer le panel?", description=f"**{len(self.channels)} salons** • Page {self.page+1}/{self.max_page+1}", color=C.PURPLE), view=self)
+        try:
+            self.page -= 1
+            self._build()
+            await i.response.edit_message(view=self, embed=None, attachments=[])
+        except Exception as ex:
+            print(f"[SendPanel _prev] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.defer()
+            except Exception:
+                pass
 
     async def _next(self, i):
-        self.page += 1
-        self._build()
-        await i.response.edit_message(embed=discord.Embed(title="📤 Où envoyer le panel?", description=f"**{len(self.channels)} salons** • Page {self.page+1}/{self.max_page+1}", color=C.PURPLE), view=self)
+        try:
+            self.page += 1
+            self._build()
+            await i.response.edit_message(view=self, embed=None, attachments=[])
+        except Exception as ex:
+            print(f"[SendPanel _next] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.defer()
+            except Exception:
+                pass
 
     async def _back(self, i):
-        # Phase 3.0h : retour vers V2 panel
-        v = PanelEditViewV2(self.u, self.g, self.pid)
-        await v.render_to(i, edit=True)
+        try:
+            v = PanelEditViewV2(self.u, self.g, self.pid)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[SendPanel _back] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
 
     async def _select_cb(self, i):
         # Phase 14 FIX : defer IMMÉDIAT pour éviter "Échec de l'interaction"
@@ -29410,7 +29783,10 @@ async def check_social_feeds():
                             
                                 # Réductions de jeux (vérifiée moins souvent via counter)
                                 await check_game_deals(session, guild, data)
-                            
+
+                                # Phase 17 : Mises à jour de plateformes/jeux
+                                await check_game_updates_feeds(session, guild, data)
+
                             except Exception as ex:
                                 print(f"Erreur feed {guild_id}: {ex}")
                                 continue
@@ -31226,6 +31602,90 @@ GAME_PLATFORMS = {
         'emoji': '🛒',
     },
 }
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  🎮 MISES À JOUR DE PLATEFORMES / JEUX (Phase 17)
+#
+#  Config : `ads_updates_feeds` = list[ {game_key, channel_id} ]
+#  Pour chaque feed configuré, vérifie les nouvelles mises à jour officielles
+#  (patch notes, dev updates, release notes) et les poste.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def check_game_updates_feeds(session, guild, data):
+    """Vérifie les mises à jour officielles des plateformes/jeux suivis.
+
+    Phase 17 : nouvelle feature demandée — tracker les vraies updates
+    (patch notes, changelogs, dev updates) sans le bruit (events, promos).
+    """
+    feeds = data.get('ads_updates_feeds', []) or []
+    if not feeds:
+        return
+
+    for feed in feeds:
+        try:
+            if not isinstance(feed, dict):
+                continue
+            game_key = feed.get('game_key', '')
+            channel_id = feed.get('channel_id', 0)
+            if not game_key or not channel_id:
+                continue
+
+            channel = guild.get_channel(channel_id)
+            if not channel:
+                continue
+
+            meta = gameupdates2026.get_game_meta(game_key)
+            updates = await gameupdates2026.fetch_updates(session, game_key, max_count=5)
+
+            for update in updates:
+                # Dedup persistant via tracking_layer
+                already = await tracking2026.was_posted(
+                    guild.id, "game_updates", game_key, update.update_id,
+                )
+                if already:
+                    continue
+
+                # Construit un embed riche
+                e = discord.Embed(
+                    color=meta.get('color', 0x5865F2),
+                    title=f"{meta['emoji']} {update.title}"[:256],
+                    url=update.url,
+                    description=update.summary[:1800] if update.summary else None,
+                )
+                e.set_author(name=f"MISE À JOUR · {meta['name']}", url=update.url)
+                if update.image_url:
+                    e.set_image(url=update.image_url)
+                e.add_field(name="🔗 Source", value=f"[**Lire l'article complet**]({update.url})", inline=False)
+                update_type_label = {
+                    'patch': '🔧 Patch',
+                    'hotfix': '🔥 Hotfix',
+                    'major': '🌟 Mise à jour majeure',
+                    'dev_update': '👨‍💻 Mise à jour développeurs',
+                    'update': '📦 Mise à jour',
+                }.get(update.update_type, '📦 Mise à jour')
+                e.set_footer(text=f"{update_type_label} · {meta['name']}")
+                e.timestamp = now()
+
+                msg = await webhook_send(channel, 'game_updates', embed=e)
+                try:
+                    await tracking2026.record_post(
+                        guild.id, "game_updates", game_key, update.update_id,
+                        channel_id=channel.id,
+                        message_id=getattr(msg, 'id', 0) or 0,
+                        post_type="update",
+                        title=update.title[:200],
+                        url=update.url,
+                        thumbnail_url=update.image_url,
+                        display_author=meta['name'],
+                    )
+                except Exception as ex:
+                    print(f"[game_updates record_post] {ex}")
+                await asyncio.sleep(1)
+
+        except Exception as ex:
+            print(f"[game_updates] feed {feed} erreur : {ex}")
+            continue
+
 
 async def check_game_deals(session, guild, data):
     """Vérifie les réductions de jeux — PERSISTANT, ne re-publie JAMAIS le même deal"""
