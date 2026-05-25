@@ -2525,7 +2525,16 @@ class TicketControlView(View):
             btn.style = discord.ButtonStyle.secondary
             await i.message.edit(view=self)
             await send_ticket_log(i.guild, 'claim', tk['user'], tk, extra=i.user.id)
-        except: await i.response.send_message("❌ Erreur", ephemeral=True)
+        except Exception as _tk_ex:
+            print(f"[ticket_btn] {type(_tk_ex).__name__}: {_tk_ex}")
+            import traceback; traceback.print_exc()
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
+                else:
+                    await i.followup.send(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
+            except Exception:
+                pass
     
     @discord.ui.button(label="➕ Ajouter Staff", style=discord.ButtonStyle.primary, custom_id="ticket_ctrl_add")
     async def add_staff(self, i, btn):
@@ -2554,7 +2563,16 @@ class TicketControlView(View):
                 return await i.response.send_message("❌ Aucun autre staff disponible", ephemeral=True)
             opts = [discord.SelectOption(label=f"@{m.display_name}"[:25], value=str(m.id)) for m in staffs]
             await i.response.send_message("👥 Choisir un staff:", view=AddStaffView(opts, i.channel.id), ephemeral=True)
-        except: await i.response.send_message("❌ Erreur", ephemeral=True)
+        except Exception as _tk_ex:
+            print(f"[ticket_btn] {type(_tk_ex).__name__}: {_tk_ex}")
+            import traceback; traceback.print_exc()
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
+                else:
+                    await i.followup.send(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
+            except Exception:
+                pass
     
     @discord.ui.button(label="🚫 Blacklist", style=discord.ButtonStyle.secondary, custom_id="ticket_ctrl_blacklist")
     async def blacklist_user(self, i, btn):
@@ -2695,7 +2713,16 @@ class AddStaffSelect(Select):
                 tk = await get_ticket(self.chid)
                 if tk:
                     await send_ticket_log(i.guild, 'add_staff', tk['user'], tk, extra=st.id)
-        except: await i.response.send_message("❌ Erreur", ephemeral=True)
+        except Exception as _tk_ex:
+            print(f"[ticket_btn] {type(_tk_ex).__name__}: {_tk_ex}")
+            import traceback; traceback.print_exc()
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
+                else:
+                    await i.followup.send(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
+            except Exception:
+                pass
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🏠 MAIN PANEL
@@ -24283,50 +24310,84 @@ class SendPanelPaginatedView(View):
         await v.render_to(i, edit=True)
 
     async def _select_cb(self, i):
-        ch = i.guild.get_channel(int(i.data['values'][0]))
-        if not ch:
-            return await i.response.send_message("❌ Salon introuvable", ephemeral=True)
-        c = await cfg(i.guild.id)
-        pnl = c.get('ticket_panels', {}).get(self.pid, {})
-        qs = pnl.get('questions', [])
-        mx = pnl.get('max', 1)
+        # Phase 14 FIX : defer IMMÉDIAT pour éviter "Échec de l'interaction"
+        # (ch.send peut prendre >3s, et l'interaction expire si on n'a pas ack)
+        try:
+            await i.response.defer(ephemeral=True)
+        except (discord.InteractionResponded, discord.NotFound):
+            pass
 
-        # Titre personnalisé ou par défaut
-        embed_title = pnl.get('embed_title', '').strip()
-        if not embed_title:
-            embed_title = f"🎫 {pnl.get('name', 'Support')}"
+        try:
+            ch = i.guild.get_channel(int(i.data['values'][0]))
+            if not ch:
+                return await i.followup.send("❌ Salon introuvable", ephemeral=True)
 
-        # Description personnalisée ou par défaut
-        embed_desc = pnl.get('embed_description', '').strip()
-        if not embed_desc:
-            embed_desc = "Cliquez sur le bouton ci-dessous pour créer un ticket."
+            # Vérifier les permissions du bot dans ce salon
+            perms = ch.permissions_for(i.guild.me)
+            if not (perms.send_messages and perms.embed_links):
+                return await i.followup.send(
+                    f"❌ Je n'ai pas les permissions pour envoyer un message ou des embeds dans {ch.mention}.\n"
+                    "Vérifie que le bot a `Envoyer des messages` et `Intégrer des liens`.",
+                    ephemeral=True,
+                )
 
-        auto_info = ""
-        if qs:
-            auto_info += f"\n\n📝 Vous devrez répondre à **{len(qs)}** question(s)."
-        auto_info += f"\n🔢 Maximum **{mx}** ticket(s) simultané(s)."
+            c = await cfg(i.guild.id)
+            pnl = c.get('ticket_panels', {}).get(self.pid, {})
+            qs = pnl.get('questions', [])
+            mx = pnl.get('max', 1)
 
-        full_desc = embed_desc + auto_info
-        emb = discord.Embed(title=embed_title, description=full_desc, color=C.BLURPLE)
+            embed_title = pnl.get('embed_title', '').strip() or f"🎫 {pnl.get('name', 'Support')}"
+            embed_desc = pnl.get('embed_description', '').strip() or "Cliquez sur le bouton ci-dessous pour créer un ticket."
 
-        embed_links = pnl.get('embed_links', '').strip()
-        if embed_links:
-            links_text = ""
-            for line in embed_links.split('\n'):
-                line = line.strip()
-                if '|' in line:
-                    parts = line.split('|', 1)
-                    link_text = parts[0].strip()
-                    link_url = parts[1].strip()
-                    if link_url.startswith('http'):
-                        links_text += f"[{link_text}]({link_url})\n"
-                elif line:
-                    links_text += f"{line}\n"
-            if links_text:
-                emb.add_field(name="🔗 Liens utiles", value=links_text.strip(), inline=False)
+            auto_info = ""
+            if qs:
+                auto_info += f"\n\n📝 Vous devrez répondre à **{len(qs)}** question(s)."
+            auto_info += f"\n🔢 Maximum **{mx}** ticket(s) simultané(s)."
 
-        await ch.send(embed=emb, view=TicketCreateView(self.pid))
-        await i.response.send_message(f"✅ Panel envoyé dans {ch.mention}!", ephemeral=True)
+            full_desc = embed_desc + auto_info
+            emb = discord.Embed(title=embed_title, description=full_desc, color=C.BLURPLE)
+
+            embed_links = pnl.get('embed_links', '').strip()
+            if embed_links:
+                links_text = ""
+                for line in embed_links.split('\n'):
+                    line = line.strip()
+                    if '|' in line:
+                        parts = line.split('|', 1)
+                        link_text = parts[0].strip()
+                        link_url = parts[1].strip()
+                        if link_url.startswith('http'):
+                            links_text += f"[{link_text}]({link_url})\n"
+                    elif line:
+                        links_text += f"{line}\n"
+                if links_text:
+                    emb.add_field(name="🔗 Liens utiles", value=links_text.strip(), inline=False)
+
+            sent_msg = await ch.send(embed=emb, view=TicketCreateView(self.pid))
+            jump_url = f"https://discord.com/channels/{i.guild.id}/{ch.id}/{sent_msg.id}"
+            await i.followup.send(
+                f"✅ Panel envoyé dans {ch.mention} !\n[Voir le message]({jump_url})",
+                ephemeral=True,
+            )
+        except discord.Forbidden as ex:
+            print(f"[SendPanel _select_cb] Forbidden : {ex}")
+            try:
+                await i.followup.send(
+                    f"❌ Permissions insuffisantes : `{ex}`",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+        except Exception as ex:
+            print(f"[SendPanel _select_cb] {type(ex).__name__} : {ex}")
+            import traceback; traceback.print_exc()
+            try:
+                await i.followup.send(
+                    f"❌ Erreur : `{type(ex).__name__}: {ex}`",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
 
 # Legacy compat
 SendPanelView = SendPanelPaginatedView
@@ -30125,18 +30186,26 @@ async def check_twitter_feeds(session, guild, data):
             continue
 
 async def check_rosocial_feeds(session, guild, data):
-    """Vérifie les nouveaux posts RoSocial"""
+    """Vérifie les nouveaux posts RoSocial.
+
+    Phase 14 : qualité égale Roblox UGC — extraction du vrai titre + image
+    du post, gallery render à la fin, données stockées dans tracking_layer
+    avec thumbnail_url + display_author.
+    """
     default_channel = guild.get_channel(data.get('ads_rosocial_channel', 0))
     feeds = data.get('ads_rosocial_feeds', [])
     if not feeds:
         return
-    
+
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8'
     }
-    
+
+    items_added = False
+    last_channel = None
+
     for feed in feeds:
         try:
             # Gérer le format dict ou string
@@ -30147,55 +30216,118 @@ async def check_rosocial_feeds(session, guild, data):
             else:
                 username = str(feed)
                 channel = default_channel
-            
+
             if not username or not channel:
                 continue
-            
+            last_channel = channel
+
             profile_url = f"https://rosocial.net/{username}"
-            
+
             # Récupérer la page du profil
             async with session.get(profile_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                 if resp.status != 200:
                     continue
                 html = await resp.text()
-            
-            import re
-            
+
             # Trouver le dernier post (plusieurs patterns)
             posts = re.findall(r'href="https://rosocial\.net/posts/(\d+)"', html)
             if not posts:
                 posts = re.findall(r'/posts/(\d+)', html)
             if not posts:
                 posts = re.findall(r'data-post-id="(\d+)"', html)
-            
             if not posts:
                 continue
-            
+
             latest_post_id = posts[0]
 
-            # Dedup persistant (Phase 1.8) - garde l'historique entre redemarrages
             if await tracking2026.was_posted(guild.id, "rosocial", username, latest_post_id):
                 continue
             cache_key = f"rs_{guild.id}_{username}"
-            posted_content[cache_key] = latest_post_id  # back-compat RAM
+            posted_content[cache_key] = latest_post_id
 
             post_url = f"https://rosocial.net/posts/{latest_post_id}"
 
-            # ═══════════════════════════════════════════════════════════════════════════════
-            #                    🎨 EMBED ROSOCIAL — FORMAT SIMPLE
-            # ═══════════════════════════════════════════════════════════════════════════════
+            # ═══════════════ PHASE 14 — Extraction du contenu réel du post ═══════════════
+            post_title = ""
+            post_image = ""
+            post_excerpt = ""
 
-            rs_avatar = await fetch_avatar_url('rosocial', username, session)
+            try:
+                async with session.get(post_url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp2:
+                    if resp2.status == 200:
+                        post_html = await resp2.text()
 
+                        # Titre — Open Graph d'abord, puis <title>, puis premier h1
+                        og_title_m = re.search(
+                            r'<meta\s+property=["\']og:title["\']\s+content=["\']([^"\']+)["\']',
+                            post_html,
+                        )
+                        if og_title_m:
+                            post_title = og_title_m.group(1).strip()
+                        else:
+                            title_m = re.search(r'<title>([^<]+)</title>', post_html)
+                            if title_m:
+                                post_title = title_m.group(1).strip()
+                                # Retirer le suffix " - RoSocial" si présent
+                                post_title = re.sub(r'\s*[-|·]\s*RoSocial.*$', '', post_title).strip()
+
+                        # Image — Open Graph image en priorité
+                        og_image_m = re.search(
+                            r'<meta\s+property=["\']og:image["\']\s+content=["\']([^"\']+)["\']',
+                            post_html,
+                        )
+                        if og_image_m:
+                            post_image = og_image_m.group(1).strip()
+                        else:
+                            # Cherche la première image dans le contenu du post
+                            img_m = re.search(
+                                r'<img[^>]+src=["\']([^"\']+\.(?:png|jpg|jpeg|webp|gif))["\']',
+                                post_html, re.IGNORECASE,
+                            )
+                            if img_m:
+                                post_image = img_m.group(1).strip()
+
+                        # Excerpt — description OG ou premier paragraphe
+                        og_desc_m = re.search(
+                            r'<meta\s+property=["\']og:description["\']\s+content=["\']([^"\']+)["\']',
+                            post_html,
+                        )
+                        if og_desc_m:
+                            post_excerpt = og_desc_m.group(1).strip()[:200]
+            except Exception as ex:
+                print(f"[RoSocial] extraction post {latest_post_id} échouée : {ex}")
+
+            # Fallbacks
+            if not post_title:
+                post_title = f"Nouveau post de {username}"
+            if not post_image:
+                # Essaye l'avatar du user comme dernier recours
+                try:
+                    post_image = await fetch_avatar_url('rosocial', username, session) or ""
+                except Exception:
+                    post_image = ""
+
+            # ═══════════════ EMBED INDIVIDUEL (riche) ═══════════════
             e = discord.Embed(color=0x00D4AA, url=post_url)
             e.set_author(name=f"ROSOCIAL • {username}", url=profile_url, icon_url=_RBX_ICON)
-            e.title = f"📝 Nouveau post de {username}"
-            e.description = f"**{username}** a publié un nouveau post sur RoSocial !\n\n📌 [**Voir le post**]({post_url}) • 👤 [**Profil**]({profile_url})"
+            e.title = post_title[:256]
 
-            if rs_avatar:
-                e.set_thumbnail(url=rs_avatar)
+            desc_parts = []
+            if post_excerpt:
+                desc_parts.append(f"*{post_excerpt}*")
+                desc_parts.append("")
+            desc_parts.append(f"📌 [**Voir le post**]({post_url}) · 👤 [**Profil**]({profile_url})")
+            e.description = "\n".join(desc_parts)
 
-            e.set_footer(text=f"RoSocial • {username}", icon_url=_RBX_ICON)
+            if post_image:
+                e.set_image(url=post_image)
+            else:
+                # Au moins l'avatar en thumbnail
+                rs_avatar = await fetch_avatar_url('rosocial', username, session)
+                if rs_avatar:
+                    e.set_thumbnail(url=rs_avatar)
+
+            e.set_footer(text=f"RoSocial • @{username}", icon_url=_RBX_ICON)
             e.timestamp = now()
 
             _rs_msg = await webhook_send(channel, 'rosocial', embed=e)
@@ -30205,16 +30337,32 @@ async def check_rosocial_feeds(session, guild, data):
                     channel_id=channel.id,
                     message_id=getattr(_rs_msg, 'id', 0) or 0,
                     post_type="post",
-                    title=f"Nouveau post de {username}",
+                    title=post_title[:200],
                     url=post_url,
+                    thumbnail_url=post_image,
+                    display_author=username,
                 )
-            except Exception:
-                pass
+                items_added = True
+                print(f"[RoSocial] {username} → {post_title} ({latest_post_id}) image={'✓' if post_image else '✗'}")
+            except Exception as ex:
+                print(f"[RoSocial] record_post échoué : {ex}")
             await asyncio.sleep(1)
 
         except Exception as ex:
             print(f"Erreur RoSocial feed {feed}: {ex}")
             continue
+
+    # Phase 14 : render la galerie RoSocial à la fin (même pattern que Roblox UGC)
+    if last_channel is not None:
+        try:
+            import social_gallery as gallery2026
+            try:
+                await tracking2026.rebind_channel(guild.id, "rosocial", last_channel.id)
+            except AttributeError:
+                pass
+            await gallery2026.render(bot, guild.id, "rosocial", last_channel.id)
+        except Exception as ex:
+            print(f"[RoSocial] gallery render échoué : {ex}")
 
 async def check_roblox_ugc_feeds(session, guild, data):
     """Vérifie les nouvelles créations UGC Roblox (utilisateurs ET groupes).
@@ -30289,75 +30437,85 @@ async def check_roblox_ugc_feeds(session, guild, data):
 
                 # Dedup persistant (Phase 1.8) - cle composite stockee comme post_id
                 _rblx_pid = f"{creator_type}_{creator_id}_{item_id}_{item_type}"
-                if await tracking2026.was_posted(guild.id, "roblox_ugc", str(creator_id), _rblx_pid):
+                # Phase 14 fix : utiliser creator_name comme username (pas creator_id numérique)
+                # pour que la galerie affiche "Par @SqueezieRoblox" au lieu de "Par @123456"
+                _username_key = (creator_name or str(creator_id)).strip()
+                if await tracking2026.was_posted(guild.id, "roblox_ugc", _username_key, _rblx_pid):
                     continue
                 cache_key = f"rblx_{guild.id}_{creator_type}_{creator_id}_{item_id}"
                 posted_content[cache_key] = True  # back-compat RAM
-                
-                # Récupérer les détails de l'item
+
+                # ═══════════════ NOM DE L'ITEM ═══════════════
+                # Phase 14 fix : utiliser item.get('name') du search direct en premier
+                # (toujours présent dans la réponse), fallback sur details, puis ID
+                item_name_from_search = item.get('name', '').strip()
+
+                # Récupérer les détails de l'item (best-effort, peut échouer en cloud)
                 if item_type == 'Asset':
                     details_url = f"https://economy.roblox.com/v2/assets/{item_id}/details"
                 else:
                     details_url = f"https://catalog.roblox.com/v1/catalog/items/{item_id}/details?itemType={item_type}"
-                
+
+                details = {}
                 try:
                     async with session.get(details_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp2:
                         if resp2.status == 200:
                             details = await resp2.json()
-                        else:
-                            details = {}
-                except:
-                    details = {}
-                
-                item_name = details.get('Name') or details.get('name') or f"Création #{item_id}"
-                item_price = details.get('PriceInRobux') or details.get('price') or 0
-                
-                # Date de création
-                created_date = details.get('Created') or details.get('created')
-                date_str = ""
-                if created_date:
-                    try:
-                        from datetime import datetime
-                        dt = datetime.fromisoformat(created_date.replace('Z', '+00:00'))
-                        date_str = dt.strftime("%d/%m/%Y à %H:%M")
-                    except:
-                        date_str = ""
-                
-                # URL de l'item
-                item_url = f"https://www.roblox.com/catalog/{item_id}"
-                
-                # ═══════════════════════════════════════════════════════════════════════════════
-                #                    🖼️ RÉCUPÉRATION DE L'IMAGE VIA THUMBNAILS API
-                # ═══════════════════════════════════════════════════════════════════════════════
-                thumb_url = None
+                except Exception:
+                    pass
+
+                # Priorité : search direct > details API > fallback générique
+                item_name = (
+                    item_name_from_search
+                    or details.get('Name')
+                    or details.get('name')
+                    or f"Création #{item_id}"
+                )
+                item_price = details.get('PriceInRobux') or details.get('price') or item.get('price', 0)
+
+                # URL de l'item — utiliser le slug si possible (URL propre)
+                # https://www.roblox.com/catalog/123/ItemName-en-slug
+                _slug = re.sub(r'[^a-zA-Z0-9]+', '-', item_name)[:50].strip('-') or 'item'
+                item_url = f"https://www.roblox.com/catalog/{item_id}/{_slug}"
+
+                # ═══════════════ IMAGE — Thumbnails API (méthode officielle 2026) ═══════════════
+                # L'API officielle de Roblox pour les thumbnails d'assets :
+                # https://thumbnails.roblox.com/v1/assets?assetIds=X&returnPolicy=PlaceHolder&size=420x420&format=Png&isCircular=false
+                # Renvoie un JSON avec { data: [{ imageUrl, state }] }
+                # state="Completed" = image prête, state="Pending"/"InReview" = pas encore
+                thumb_url = ""
                 try:
-                    thumb_api = f"https://thumbnails.roblox.com/v1/assets?assetIds={item_id}&returnPolicy=PlaceHolder&size=420x420&format=Png&isCircular=false"
+                    thumb_api = (
+                        f"https://thumbnails.roblox.com/v1/assets?"
+                        f"assetIds={item_id}&returnPolicy=PlaceHolder"
+                        f"&size=420x420&format=Png&isCircular=false"
+                    )
                     async with session.get(thumb_api, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as thumb_resp:
                         if thumb_resp.status == 200:
                             thumb_data = await thumb_resp.json()
                             thumb_list = thumb_data.get('data', [])
-                            if thumb_list and thumb_list[0].get('imageUrl'):
-                                thumb_url = thumb_list[0]['imageUrl']
-                except:
-                    pass
-                
-                # Fallback si l'API ne retourne rien
-                if not thumb_url:
-                    thumb_url = f"https://rbxcdn.com/asset-thumbnail/image?assetId={item_id}&width=420&height=420&format=Png"
-                
-                # Phase 3.1 : on enregistre dans tracking_layer (sans envoyer
-                # de message individuel) - la galerie sera rendue a la fin
-                # de la boucle pour ce salon.
+                            if thumb_list:
+                                first = thumb_list[0]
+                                # On accepte tous les états sauf Blocked
+                                if first.get('state') != 'Blocked' and first.get('imageUrl'):
+                                    thumb_url = first['imageUrl']
+                except Exception as ex:
+                    print(f"[ROBLOX UGC] thumbnail API échoué {item_id}: {ex}")
+
+                # Phase 14 : enregistre TOUT (nom, URL avec slug, thumbnail résolue, créateur)
                 try:
                     await tracking2026.record_post(
-                        guild.id, "roblox_ugc", str(creator_id), _rblx_pid,
+                        guild.id, "roblox_ugc", _username_key, _rblx_pid,
                         channel_id=channel.id,
-                        message_id=0,  # pas de message individuel, c'est la galerie qui s'affiche
+                        message_id=0,
                         post_type="ugc",
                         title=item_name[:200],
                         url=item_url,
+                        thumbnail_url=thumb_url,
+                        display_author=creator_name,
                     )
                     items_added = True
+                    print(f"[ROBLOX UGC] {creator_name} → {item_name} ({item_id}) thumb={'✓' if thumb_url else '✗'}")
                 except Exception as ex:
                     print(f"[ROBLOX UGC] record_post echoue : {ex}")
 

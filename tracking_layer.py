@@ -57,6 +57,12 @@ class TrackedPost:
     url: str = ""
     posted_at: float = field(default_factory=lambda: time.time())
     deleted: bool = False  # True si on a supprime le message Discord
+    # Phase 14 : URL d'image résolue à la capture (fiable, plus de 404 sur les
+    # patterns deprecated). Vide = la galerie tentera de deviner.
+    thumbnail_url: str = ""
+    # Phase 14 : nom d'affichage propre du créateur/auteur (différent de username
+    # qui est utilisé pour le dedup). Optionnel.
+    display_author: str = ""
 
     @property
     def key(self) -> str:
@@ -87,11 +93,18 @@ async def _load_guild(guild_id: int) -> None:
             try:
                 raw = json.loads(path.read_text(encoding="utf-8"))
                 store: dict[str, TrackedPost] = {}
+                # Phase 14 : robust loading — filtre les champs inconnus du JSON
+                # (pour gérer rolling updates où les anciens JSON ont moins de
+                # champs ou les nouveaux JSON ont plus de champs que la dataclass)
+                valid_fields = set(TrackedPost.__dataclass_fields__.keys())
                 for d in raw:
                     try:
-                        tp = TrackedPost(**d)
+                        if not isinstance(d, dict):
+                            continue
+                        filtered = {k: v for k, v in d.items() if k in valid_fields}
+                        tp = TrackedPost(**filtered)
                         store[tp.key] = tp
-                    except (KeyError, TypeError):
+                    except (KeyError, TypeError, ValueError):
                         continue
                 _cache[guild_id] = store
             except (json.JSONDecodeError, OSError):
@@ -147,8 +160,15 @@ async def record_post(
     post_type: str = "post",
     title: str = "",
     url: str = "",
+    thumbnail_url: str = "",
+    display_author: str = "",
 ) -> TrackedPost:
-    """Enregistre une nouvelle annonce."""
+    """Enregistre une nouvelle annonce.
+
+    Phase 14 : ajout de `thumbnail_url` et `display_author` pour les
+    galleries (Roblox UGC, RoSocial) qui ont besoin d'une image fiable
+    + nom d'affichage propre du créateur.
+    """
     await _load_guild(guild_id)
     tp = TrackedPost(
         guild_id=guild_id,
@@ -160,6 +180,8 @@ async def record_post(
         post_type=post_type,
         title=title[:200] if title else "",
         url=url,
+        thumbnail_url=thumbnail_url or "",
+        display_author=display_author or "",
     )
     _cache.setdefault(guild_id, {})[tp.key] = tp
     await _save_guild(guild_id)

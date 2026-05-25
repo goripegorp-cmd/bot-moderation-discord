@@ -193,9 +193,19 @@ def build_gallery_view(
     else:
         # Chaque post = une Section avec thumbnail + texte propre
         for tp in posts:
-            # Phase 3.8 : TrackedPost utilise .title et .url (pas .post_title / .post_url)
+            # Phase 14 : utilise title et url propres + display_author (nom au lieu d'ID)
             title = (getattr(tp, 'title', None) or 'Voir la publication').strip()[:90]
             url = getattr(tp, 'url', None) or 'https://discord.com'
+
+            # Auteur : utilise display_author si dispo (nom propre du créateur),
+            # sinon fallback sur username (qui peut être numeric pour anciennes données)
+            display_author = (getattr(tp, 'display_author', '') or '').strip()
+            author_text = display_author or tp.username
+            # Si l'auteur ressemble à un nombre (ancien tracking par creator_id), on cache le @
+            if author_text.isdigit():
+                author_text = f"_créateur #{author_text}_"
+            else:
+                author_text = f"@{author_text}"
 
             # Construction du body text avec icone par type
             type_icon = {
@@ -210,10 +220,14 @@ def build_gallery_view(
             time_str = _relative_time(tp.posted_at)
             text = (
                 f"### {type_icon} [{title}]({url})\n"
-                f"-# Par **@{tp.username}** · {time_str}"
+                f"-# Par **{author_text}** · {time_str}"
             )
 
-            thumb_url = _thumbnail_for(tp)
+            # Phase 14 : thumbnail_url stocké au record time est prioritaire sur le devine
+            thumb_url = (getattr(tp, 'thumbnail_url', '') or '').strip()
+            if not thumb_url:
+                thumb_url = _thumbnail_for(tp)
+
             if _looks_like_image_url(thumb_url):
                 # Section avec thumbnail
                 items.append(ui.Section(
