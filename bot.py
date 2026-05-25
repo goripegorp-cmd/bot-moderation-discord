@@ -28028,44 +28028,82 @@ async def check_mod_perm(i, cmd_key):
 #                              ⚠️ WARN / UNWARN
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="warn", description="⚠️ Avertir un membre")
+def _format_warn_id(infraction_id: int, created_dt=None) -> str:
+    """Phase 22 : génère un ID unique formaté pour chaque infraction.
+
+    Format : W-YYMMDD-NNNN (warn id 1234 du 25/05/2026 → W-260525-1234)
+    Lisible par l'humain, traçable, non-incrémentaire.
+    """
+    if created_dt is None:
+        created_dt = now()
+    try:
+        date_str = created_dt.strftime("%y%m%d")
+    except Exception:
+        date_str = now().strftime("%y%m%d")
+    return f"W-{date_str}-{infraction_id:04d}"
+
+
+@bot.tree.command(name="warn", description="⚠️ Avertir un membre (crée une fiche, aucun rôle attribué)")
 @app_commands.describe(membre="Le membre à avertir", raison="La raison de l'avertissement")
 async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
     if not await check_mod_perm(i, 'mod_warn_role'):
         return await i.response.send_message("❌ Vous n'avez pas la permission", ephemeral=True)
-    
+
     if membre.id == i.user.id:
         return await i.response.send_message("❌ Vous ne pouvez pas vous warn vous-même", ephemeral=True)
-    
+
     if membre.bot:
         return await i.response.send_message("❌ Vous ne pouvez pas warn un bot", ephemeral=True)
-    
+
     if membre.top_role >= i.user.top_role and i.user.id != i.guild.owner_id:
         return await i.response.send_message("❌ Vous ne pouvez pas warn ce membre", ephemeral=True)
-    
-    # Enregistrer l'infraction
+
+    # Phase 22 : enregistrement dans la fiche d'infractions (aucun rôle attribué)
     async with get_db() as db:
-        await db.execute(
+        cur = await db.execute(
             'INSERT INTO infractions(guild_id, user_id, mod_id, type, reason, duration) VALUES(?,?,?,?,?,?)',
             (i.guild.id, membre.id, i.user.id, 'warn', raison, '')
         )
+        infraction_id = cur.lastrowid
         await db.commit()
-        # Compter les warns
-        async with db.execute('SELECT COUNT(*) FROM infractions WHERE guild_id=? AND user_id=? AND type="warn"', (i.guild.id, membre.id)) as c:
+        async with db.execute(
+            'SELECT COUNT(*) FROM infractions WHERE guild_id=? AND user_id=? AND type="warn"',
+            (i.guild.id, membre.id),
+        ) as c:
             warn_count = (await c.fetchone())[0]
-    
-    # Créer l'embed
-    e = discord.Embed(title="⚠️ Avertissement", color=C.YELLOW, timestamp=now())
-    e.add_field(name="👤 Membre", value=f"{membre.mention}\n`{membre.id}`", inline=True)
+
+    # ID formaté de la fiche
+    warn_id_str = _format_warn_id(infraction_id)
+
+    # Embed propre — fiche d'infraction
+    e = discord.Embed(
+        title=f"⚠️ Avertissement enregistré",
+        description=(
+            f"**Fiche #{warn_id_str}** créée sur le serveur.\n"
+            f"_Aucun rôle attribué — seule la fiche est enregistrée._"
+        ),
+        color=C.YELLOW,
+        timestamp=now(),
+    )
+    e.add_field(name="👤 Membre fiché", value=f"{membre.mention}\n`{membre.id}`", inline=True)
     e.add_field(name="👮 Modérateur", value=f"{i.user.mention}", inline=True)
-    e.add_field(name="📊 Total warns", value=str(warn_count), inline=True)
+    e.add_field(name="📊 Total warns", value=f"`{warn_count}`", inline=True)
     e.add_field(name="📝 Raison", value=raison, inline=False)
+    e.add_field(
+        name="🆔 ID de la fiche",
+        value=f"`{warn_id_str}` — utilise `/infractions` pour voir la fiche complète",
+        inline=False,
+    )
     e.set_thumbnail(url=membre.display_avatar.url)
-    
+    e.set_footer(text=f"DB id: {infraction_id} · pas de rôle attribué")
+
     await i.response.send_message(embed=e)
-    
-    # Log
-    await send_mod_log(i.guild, 'warn', i.user, membre, raison, extra=f"Total warns: {warn_count}")
+
+    # Log unifié
+    await send_mod_log(
+        i.guild, 'warn', i.user, membre, raison,
+        extra=f"Fiche {warn_id_str} · Total warns: {warn_count}",
+    )
 
 @bot.tree.command(name="unwarn", description="✅ Supprimer un avertissement d'un membre")
 @app_commands.describe(membre="Le membre dont vous voulez supprimer un warn")
@@ -28418,44 +28456,61 @@ async def undirection_cmd(i: discord.Interaction, membre: discord.Member, raison
 #                              📋 INFRACTIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="infractions", description="📋 Voir les infractions d'un membre")
-@app_commands.describe(membre="Le membre dont vous voulez voir les infractions")
+@bot.tree.command(name="infractions", description="📋 Voir la fiche d'infractions d'un membre")
+@app_commands.describe(membre="Le membre dont vous voulez voir la fiche")
 async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
     if not await check_mod_perm(i, 'mod_infractions_role'):
         return await i.response.send_message("❌ Vous n'avez pas la permission", ephemeral=True)
-    
-    # Récupérer les infractions (sans ORDER BY created_at pour éviter erreur si colonne n'existe pas)
+
+    # Phase 22 : fiche complète avec id, date, modérateur
     async with get_db() as db:
         async with db.execute(
-            'SELECT type, reason, duration, mod_id FROM infractions WHERE guild_id=? AND user_id=? ORDER BY id DESC',
+            'SELECT id, type, reason, duration, mod_id, created_at '
+            'FROM infractions WHERE guild_id=? AND user_id=? ORDER BY id DESC',
             (i.guild.id, membre.id)
         ) as c:
             rows = await c.fetchall()
-    
-    # Calculer le temps sur le serveur
+
+    # Stats serveur
     joined = membre.joined_at
     if joined:
         days_on_server = (now() - joined.replace(tzinfo=timezone.utc)).days
         time_on_server = f"{days_on_server} jour(s)"
     else:
         time_on_server = "Inconnu"
-    
-    # Compter les types
-    warns = sum(1 for r in rows if r[0] == 'warn')
-    mutes = sum(1 for r in rows if r[0] == 'mute')
-    
-    # ─── Construction du LayoutView V2 ───
+
+    warns = sum(1 for r in rows if r[1] == 'warn')
+    mutes = sum(1 for r in rows if r[1] == 'mute')
+    other = len(rows) - warns - mutes
+
+    # Niveau de "ficheté" basé sur le total d'infractions
+    if len(rows) == 0:
+        level_emoji = "🟢"
+        level_label = "Aucune infraction"
+    elif len(rows) <= 2:
+        level_emoji = "🟡"
+        level_label = "Membre signalé"
+    elif len(rows) <= 5:
+        level_emoji = "🟠"
+        level_label = "Membre récidiviste"
+    else:
+        level_emoji = "🔴"
+        level_label = "Membre très fiché"
+
+    # ─── LayoutView V2 — vraie fiche ───
     items: list = [
         v2_section(
-            v2_title(f"📋 Infractions de {membre.display_name}"),
-            v2_body(f"{membre.mention} · ID `{membre.id}`"),
+            v2_title(f"📋 Fiche d'infractions"),
+            v2_body(f"**{membre.display_name}** · {membre.mention}\n`{membre.id}`"),
             accessory=v2_thumb(membre.display_avatar.url),
         ),
         v2_divider(),
         v2_body(
+            f"{level_emoji} **Statut** · {level_label}\n"
             f"📅 **Sur le serveur** · `{time_on_server}`\n"
-            f"📊 **Total infractions** · `{len(rows)}`\n"
-            f"⚠️ **Warns** · `{warns}`  ·  🔇 **Mutes** · `{mutes}`"
+            f"📊 **Total** · `{len(rows)}` infraction(s)\n"
+            f"⚠️ Warns · `{warns}`  ·  🔇 Mutes · `{mutes}`"
+            + (f"  ·  📋 Autre · `{other}`" if other else "")
         ),
     ]
 
@@ -28466,23 +28521,51 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
             f"🔇 **Mute actif** — fin <t:{int(membre.timed_out_until.timestamp())}:R>"
         ))
 
-    # Historique des infractions
+    # Historique détaillé avec ID formaté
     items.append(v2_divider())
     if rows:
+        items.append(v2_title(f"📜 Historique ({min(10, len(rows))} dernières)", level=3))
         inf_lines = []
-        for j, (typ, reason, duration, mod_id) in enumerate(rows[:10], 1):
-            emoji = "⚠️" if typ == "warn" else "🔇"
-            dur_txt = f" · `{duration}`" if duration else ""
-            reason_short = (reason[:60] + "…") if reason and len(reason) > 60 else (reason or "_Aucune raison_")
-            inf_lines.append(f"`{j:>2}.` {emoji} **{typ.upper()}**{dur_txt}\n     ↳ {reason_short}")
-        items.append(v2_title("📜 Historique (10 dernières)", level=3))
-        items.append(v2_body("\n".join(inf_lines)))
+        for (infr_id, typ, reason, duration, mod_id, created_at) in rows[:10]:
+            emoji = {'warn': '⚠️', 'mute': '🔇', 'kick': '👢', 'ban': '🔨'}.get(typ, '📋')
+            # Formater l'ID
+            try:
+                if created_at:
+                    created_dt = datetime.fromisoformat(str(created_at).replace('Z', '+00:00'))
+                    if created_dt.tzinfo is None:
+                        created_dt = created_dt.replace(tzinfo=timezone.utc)
+                else:
+                    created_dt = now()
+            except Exception:
+                created_dt = now()
+            fiche_id = _format_warn_id(infr_id, created_dt)
+            # Modérateur
+            mod_member = i.guild.get_member(mod_id) if mod_id else None
+            mod_txt = mod_member.mention if mod_member else f"<@{mod_id}>" if mod_id else "_inconnu_"
+            # Reason
+            reason_clean = reason or "_Aucune raison_"
+            if len(reason_clean) > 100:
+                reason_clean = reason_clean[:100] + "…"
+            # Date relative
+            date_rel = f"<t:{int(created_dt.timestamp())}:R>"
+            dur_txt = f" · ⏱️ `{duration}`" if duration else ""
+
+            inf_lines.append(
+                f"**`{fiche_id}`** {emoji} {typ.upper()}{dur_txt}\n"
+                f"   ↳ {reason_clean}\n"
+                f"   🛡️ {mod_txt} · {date_rel}"
+            )
+        items.append(v2_body("\n\n".join(inf_lines)))
+
+        if len(rows) > 10:
+            items.append(v2_body(f"_… +{len(rows) - 10} infraction(s) plus anciennes_"))
     else:
-        items.append(v2_title("📜 Historique", level=3))
-        items.append(v2_body("✅ _Aucune infraction enregistrée_"))
+        items.append(v2_body("✅ _Casier vierge — aucune infraction enregistrée_"))
 
     items.append(v2_divider())
-    items.append(v2_subtitle(f"Demandé par {i.user.display_name} · {now().strftime('%d/%m/%Y %H:%M')}"))
+    items.append(v2_subtitle(
+        f"Consulté par {i.user.display_name} · {now().strftime('%d/%m/%Y %H:%M')}"
+    ))
 
     view = LayoutView(timeout=None)
     view.add_item(v2_container(*items, color=Palette.INFO))
