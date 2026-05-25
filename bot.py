@@ -3794,12 +3794,12 @@ class MainPanelV2(LayoutView):
                     description="Giveaways · Game deals",
                 ),
                 discord.SelectOption(
-                    label="Distribution", value="delegations", emoji="🔑",
-                    description="Déléguer la gestion d'un rôle à un utilisateur",
+                    label="Rôles délégués", value="delegations", emoji="🔑",
+                    description="Confie la gestion d'un rôle à un membre via /manage",
                 ),
                 discord.SelectOption(
-                    label="Créativité", value="creativite", emoji="🎨",
-                    description="Messages auto · Vocaux temp · Annonces · Auto-réactions · Rôles masse",
+                    label="Animations & Accueil", value="creativite", emoji="🎨",
+                    description="Welcome · Goodbye · Anniversaires · Boost · Reaction Roles · Auto-vocaux · etc.",
                 ),
                 discord.SelectOption(
                     label="Progression", value="progression", emoji="📈",
@@ -5246,10 +5246,10 @@ class _ReactionRolesCreateModal(Modal, title="🎫 Nouveau Reaction Roles"):
     title_in = TextInput(label="Titre du message", max_length=100, required=True)
     description = TextInput(label="Description", style=discord.TextStyle.paragraph, max_length=1500, required=False)
     pairs = TextInput(
-        label="Paires emoji=rôle_id (une par ligne, max 5)",
+        label="Paires emoji=rôle_id (une par ligne, max 20)",
         style=discord.TextStyle.paragraph,
         placeholder="🎮 = 1234567890\n🎨 = 1234567891",
-        max_length=500,
+        max_length=2000,
         required=True,
     )
 
@@ -5288,7 +5288,7 @@ class _ReactionRolesCreateModal(Modal, title="🎫 Nouveau Reaction Roles"):
                 raw_pairs.append((emoji_str, role))
             if not raw_pairs:
                 return await i.response.send_message("❌ Aucune paire emoji=rôle valide.", ephemeral=True)
-            raw_pairs = raw_pairs[:5]
+            raw_pairs = raw_pairs[:20]  # Discord supporte 20 réactions max par message
 
             # Build embed
             desc_lines = [self.description.value or '']
@@ -29128,9 +29128,13 @@ async def on_ready():
     if not birthday_announcer.is_running():
         birthday_announcer.start()
 
-    # Phase 28.6 : auto-clôture des polls expirés
+    # Phase 28.6 : auto-clôture des polls expirés + restauration des views
     if not poll_closer.is_running():
         poll_closer.start()
+    try:
+        await restore_active_polls()
+    except Exception as ex:
+        print(f"[on_ready restore_active_polls] {ex}")
 
     print(f"✅ {bot.user.name} v28 prêt!")
     print(f"🌐 Serveurs: {len(bot.guilds)}")
@@ -29686,9 +29690,19 @@ async def _handle_antiraid_join(member):
             elif action == 'ban':
                 await m.ban(reason=f"Anti-Raid auto : {len(joins)} joins en {window}s", delete_message_seconds=0)
             elif action == 'lockdown':
-                # Lockdown = élève verification level
+                # Lockdown = élève verification level + auto-restore après 10 min
                 try:
+                    previous_level = member.guild.verification_level
                     await member.guild.edit(verification_level=discord.VerificationLevel.highest, reason="Anti-Raid lockdown")
+                    # Schedule restoration
+                    async def _restore_lockdown(guild, prev):
+                        try:
+                            await asyncio.sleep(600)  # 10 minutes
+                            await guild.edit(verification_level=prev, reason="Anti-Raid lockdown terminé")
+                            print(f"[ANTIRAID] guild={guild.id} lockdown restauré à {prev}")
+                        except Exception as ex:
+                            print(f"[ANTIRAID restore] {ex}")
+                    asyncio.create_task(_restore_lockdown(member.guild, previous_level))
                 except Exception:
                     pass
                 # Pas d'action sur le membre individuellement en lockdown mode
@@ -31334,6 +31348,47 @@ bot.tree.add_command(birthday_group)
 _POLL_EMOJIS = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣', '🔟']
 
 
+def _build_poll_view(poll_id: int, options: list) -> 'PollVoteView':
+    """Construit un PollVoteView avec ses boutons (capture idx correctement)."""
+    v = PollVoteView(poll_id)
+    for idx, opt in enumerate(options[:10]):
+        b = Button(
+            label=f"{idx+1}. {opt[:60]}",
+            emoji=_POLL_EMOJIS[idx],
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"poll_{poll_id}_{idx}",
+        )
+        # closure-safe via default arg
+        b.callback = (lambda i_, idx=idx, view=v: view._vote(i_, idx))
+        v.add_item(b)
+    return v
+
+
+async def restore_active_polls():
+    """Phase 28.6 — restaure les boutons des sondages actifs au boot."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT id, options_json FROM polls WHERE ended=0'
+            ) as cur:
+                rows = await cur.fetchall()
+        count = 0
+        for poll_id, options_json in rows:
+            try:
+                opts = json.loads(options_json) if options_json else []
+                if not opts:
+                    continue
+                v = _build_poll_view(int(poll_id), opts)
+                bot.add_view(v)
+                count += 1
+            except Exception as ex:
+                print(f"[restore_active_polls poll_id={poll_id}] {ex}")
+        if count:
+            print(f"[POLLS] {count} sondage(s) actif(s) restauré(s)")
+    except Exception as ex:
+        print(f"[restore_active_polls] {ex}")
+
+
 class PollVoteView(View):
     """Phase 28.6 : View persistante pour voter via boutons."""
 
@@ -31494,12 +31549,27 @@ async def poll_cmd(
 
         await i.response.defer()
 
-        # Build embed initial
+        # 1. DB insert d'abord (pour avoir poll_id)
+        async with get_db() as db:
+            cur = await db.execute(
+                'INSERT INTO polls(guild_id, channel_id, message_id, author_id, question, options_json, votes_json, multi, ends_at) '
+                'VALUES (?,?,?,?,?,?,?,?,?)',
+                (
+                    i.guild.id, i.channel.id, 0, i.user.id,
+                    question, json.dumps(opts), json.dumps({}),
+                    1 if multi else 0,
+                    ends_at,
+                ),
+            )
+            poll_id = cur.lastrowid
+            await db.commit()
+
+        # 2. Build embed initial
         desc_lines = [f"**{question}**", ""]
         for idx, opt in enumerate(opts):
             desc_lines.append(f"{_POLL_EMOJIS[idx]} **{opt}**\n`{'░' * 20}` `0` vote(s) · `0%`")
         desc_lines.append("")
-        desc_lines.append(f"📊 **Total** : `0` vote(s){'  ·  🔢 multi-choix' if multi else ''}")
+        desc_lines.append(f"📊 **Total** : `0` vote(s){' · 🔢 multi-choix' if multi else ''}")
         if ends_at:
             desc_lines.append(f"⏰ Se termine <t:{int(datetime.fromisoformat(ends_at).timestamp())}:R>")
 
@@ -31511,41 +31581,16 @@ async def poll_cmd(
         e.set_author(name=f"📊 Sondage de {i.user.display_name}", icon_url=i.user.display_avatar.url)
         e.set_footer(text="Clique un bouton pour voter")
 
-        # Send placeholder
-        msg = await i.followup.send(embed=e)
+        # 3. Build view AVANT l'envoi (pas de race)
+        v = _build_poll_view(poll_id, opts)
 
-        # DB insert
+        # 4. Envoi en UN appel (embed + view ensemble)
+        msg = await i.followup.send(embed=e, view=v)
+
+        # 5. Mise à jour message_id dans la DB
         async with get_db() as db:
-            cur = await db.execute(
-                'INSERT INTO polls(guild_id, channel_id, message_id, author_id, question, options_json, votes_json, multi, ends_at) '
-                'VALUES (?,?,?,?,?,?,?,?,?)',
-                (
-                    i.guild.id, i.channel.id, msg.id, i.user.id,
-                    question, json.dumps(opts), json.dumps({}),
-                    1 if multi else 0,
-                    ends_at,
-                ),
-            )
-            poll_id = cur.lastrowid
+            await db.execute('UPDATE polls SET message_id=? WHERE id=?', (msg.id, poll_id))
             await db.commit()
-
-        # Create view with vote buttons (max 5 per row, so up to 10 buttons in 2 rows)
-        v = PollVoteView(poll_id)
-        for idx, opt in enumerate(opts):
-            b = Button(
-                label=f"{idx+1}. {opt[:60]}",
-                emoji=_POLL_EMOJIS[idx],
-                style=discord.ButtonStyle.secondary,
-                custom_id=f"poll_{poll_id}_{idx}",
-            )
-            # Capture idx properly via default arg
-            b.callback = (lambda i_, idx=idx: v._vote(i_, idx))
-            v.add_item(b)
-
-        try:
-            await msg.edit(view=v)
-        except Exception as ex:
-            print(f"[poll edit view] {ex}")
     except Exception as ex:
         print(f"[/poll] {ex}")
         try:
@@ -31600,15 +31645,11 @@ async def birthday_announcer():
                 role_id = int(c.get('birthday_role', 0) or 0)
                 bday_role = guild.get_role(role_id) if role_id else None
 
-                # Anniversaire de la veille → retirer le rôle d'hier
+                # Anniversaire de la veille → retirer le rôle des non-célébrants
+                # (utilise role.members pour ne pas itérer tous les membres du serveur)
                 if bday_role:
-                    for m in guild.members:
-                        if bday_role in m.roles and str(m.id) not in bdays:
-                            try:
-                                await m.remove_roles(bday_role, reason="Anniversaire terminé")
-                            except Exception:
-                                pass
-                        elif bday_role in m.roles and bdays.get(str(m.id)) != today_str:
+                    for m in list(bday_role.members):
+                        if bdays.get(str(m.id)) != today_str:
                             try:
                                 await m.remove_roles(bday_role, reason="Anniversaire terminé")
                             except Exception:
@@ -34887,35 +34928,24 @@ async def _handle_reaction_role(payload, *, add: bool):
         print(f"[_handle_reaction_role] {ex}")
 
 
-@bot.event
-async def on_raw_reaction_add(payload):
-    if payload.user_id == bot.user.id:
-        return
-
-    # Phase 28.4 : Reaction Roles
-    await _handle_reaction_role(payload, add=True)
-
-    # Vérifier si c'est une suggestion
+async def _update_suggestion_colors(payload):
+    """Refresh la couleur de l'embed d'une suggestion en fonction des votes."""
     try:
         async with get_db() as db:
             async with db.execute('SELECT id FROM suggestions WHERE message_id=?', (payload.message_id,)) as c:
                 if not await c.fetchone():
                     return
-        
-        # Mettre à jour la couleur de l'embed
+
         channel = bot.get_channel(payload.channel_id)
         if not channel:
             return
-        
         msg = await channel.fetch_message(payload.message_id)
-        
-        # Compter les votes
+
         votes = {"✅": 0, "🟠": 0, "❌": 0}
         for reaction in msg.reactions:
             if reaction.emoji in votes:
-                votes[reaction.emoji] = max(0, reaction.count - 1)  # -1 pour le bot, min 0
-        
-        # Déterminer la couleur
+                votes[reaction.emoji] = max(0, reaction.count - 1)
+
         total = sum(votes.values())
         if total == 0:
             color = C.BLURPLE
@@ -34927,32 +34957,44 @@ async def on_raw_reaction_add(payload):
             color = C.ORANGE
         else:
             color = C.BLURPLE
-        
-        # Mettre à jour l'embed
+
         if msg.embeds:
             old_embed = msg.embeds[0]
             new_embed = discord.Embed(
                 title=old_embed.title,
                 description=old_embed.description,
                 color=color,
-                timestamp=old_embed.timestamp
+                timestamp=old_embed.timestamp,
             )
             for field in old_embed.fields:
                 new_embed.add_field(name=field.name, value=field.value, inline=field.inline)
             if old_embed.thumbnail:
                 new_embed.set_thumbnail(url=old_embed.thumbnail.url)
             new_embed.set_footer(text=f"✅ {votes['✅']} | 🟠 {votes['🟠']} | ❌ {votes['❌']}")
-            
             await msg.edit(embed=new_embed)
-    except:
+    except Exception:
         pass
+
+
+@bot.event
+async def on_raw_reaction_add(payload):
+    if payload.user_id == bot.user.id:
+        return
+
+    # Phase 28.4 : Reaction Roles
+    await _handle_reaction_role(payload, add=True)
+
+    # Suggestions : refresh couleur
+    await _update_suggestion_colors(payload)
 
 @bot.event
 async def on_raw_reaction_remove(payload):
-    # Phase 28.4 : Reaction Roles (retrait du rôle)
+    if payload.user_id == bot.user.id:
+        return
+    # Phase 28.4 : Reaction Roles (retrait du rôle uniquement, PAS add)
     await _handle_reaction_role(payload, add=False)
-    # Re-utilise la logique add pour mettre à jour les couleurs de suggestion
-    await on_raw_reaction_add(payload)
+    # Suggestions : refresh couleur SANS re-ajouter le rôle
+    await _update_suggestion_colors(payload)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              🎭 REALSY INACTIVITY TRACKING
