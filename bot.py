@@ -9947,7 +9947,25 @@ _BOT_AVATAR_URL = None  # Sera défini dans on_ready
 # Phase 15 : warnings APIs mortes — PERSISTÉS sur disque (24h cooldown)
 # Avant : set RAM qui se vidait à chaque redémarrage → spam de warnings après chaque push
 # Maintenant : JSON sur disque, warning au max 1× par 24h par (guild, platform)
-_api_warning_state_path = module_dir("api_warnings") / "state.json"
+# On utilise le même répertoire que la DB (DB_PATH) pour la persistance Railway
+def _api_warning_state_file_path():
+    """Retourne le chemin du fichier JSON de persistance des warnings."""
+    from pathlib import Path
+    if os.path.exists('/data'):
+        d = Path('/data/api_warnings')
+    else:
+        d = Path('./data/api_warnings')
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except (OSError, PermissionError):
+        d = Path('/tmp/api_warnings')
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+    return d / "state.json"
+
+
 _api_warning_cooldown_seconds = 24 * 3600  # 24h
 _api_warning_state: dict[str, float] = {}  # key = "guild_id:platform" → timestamp
 _api_warning_state_loaded = False
@@ -9958,8 +9976,9 @@ def _load_api_warning_state():
     if _api_warning_state_loaded:
         return
     try:
-        if _api_warning_state_path.exists():
-            with open(_api_warning_state_path, encoding='utf-8') as f:
+        p = _api_warning_state_file_path()
+        if p.exists():
+            with open(p, encoding='utf-8') as f:
                 _api_warning_state = json.load(f) or {}
     except Exception as ex:
         print(f"[_load_api_warning_state] {ex}")
@@ -9969,7 +9988,8 @@ def _load_api_warning_state():
 
 def _save_api_warning_state():
     try:
-        _api_warning_state_path.write_text(
+        p = _api_warning_state_file_path()
+        p.write_text(
             json.dumps(_api_warning_state, indent=2),
             encoding='utf-8',
         )
