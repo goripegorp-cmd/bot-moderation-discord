@@ -75,6 +75,104 @@ class GameUpdate:
 
 
 # =============================================================================
+# FILTRE STRICT : "mises à jour" uniquement, pas d'événements/promos
+# =============================================================================
+
+# Phase 17.2 — l'utilisateur veut UNIQUEMENT les mises à jour (patch notes,
+# hotfixes, dev updates), PAS les events / promos / tournois.
+
+# Mots-clés POSITIFS — au moins UN doit être présent dans title ou summary
+_UPDATE_POSITIVE_KEYWORDS = [
+    # Patches
+    'patch', 'patch notes', 'patch note',
+    'hotfix', 'hot fix',
+    # Updates
+    'update', 'updated', 'mise à jour', 'mise a jour',
+    'version', ' v.', 'ver.', 'build',
+    # Notes
+    'release notes', 'changelog', 'change log',
+    # Dev
+    'dev update', 'developer update', 'developer notes', 'dev notes',
+    'dev blog', 'devblog', 'devnotes',
+    # Bug fixes
+    'bug fix', 'bug fixes', 'fixes', 'bugfix',
+    # Roblox specifics
+    'release notes', 'weekly recap',
+    # Season / content updates
+    'season ', 'season 1', 'season 2', 'season 3', 'season 4', 'season 5',
+    'season 6', 'season 7', 'season 8', 'season 9', 'season 10',
+    'chapter ', 'expansion ', 'new content',
+    # Steam-specific
+    'steam beta', 'steam client',
+]
+
+# Mots-clés NÉGATIFS — si présent, on REJETTE même si match positif
+# Phase 17.2 affiné : retiré "major"/"cup"/"deal"/"championship"/"finals" qui causaient
+# des faux positifs sur "Major Update" / "Cup Mode" / "we dealt with" / "Championship season"
+_UPDATE_NEGATIVE_KEYWORDS = [
+    # Events e-sports (très spécifiques pour éviter faux positifs)
+    'tournament', 'esports', 'esport', 'pro league',
+    'iem ', 'esl ', 'blast premier', 'dreamhack',
+    'qualifier',
+    # Promos (clairs)
+    'sale', 'discount', 'free weekend', 'free trial',
+    '% off', ' on sale',
+    # Twitch (spécifique)
+    'twitch drop', 'twitch drops', 'twitch reward',
+    # Contests
+    'contest', 'giveaway', 'sweepstake', 'raffle',
+    # Community/fan content (pas une vraie update)
+    'community spotlight', 'fan art', 'fan-art', 'cosplay',
+    'screenshot of the week', 'artwork of the week',
+    # Marketing
+    'now available on', 'coming soon to', 'pre-order', 'preorder',
+    'wishlist now', 'launch trailer', 'reveal trailer',
+    'announcement trailer',
+    # Recap qui ne sont pas dev (Roblox "Weekly Recap" géré en exception)
+    'recap of the week',
+]
+
+
+def _is_real_update(title: str, summary: str = "") -> bool:
+    """Filtre strict : retourne True UNIQUEMENT si c'est une vraie mise à jour.
+
+    Phase 17.2 : pour respecter la demande "que ce soit bien les mises à jour
+    et pas les actualités". Combine match positif + reject négatif.
+
+    Règles :
+    1. Title vide → REJET
+    2. Exception Roblox "Weekly Recap" → ACCEPT (format officiel updates)
+    3. Match keyword NÉGATIF (events/promos/etc.) → REJET (priorité)
+    4. Match keyword POSITIF (patch/update/hotfix) → ACCEPTER
+    5. Aucun match → REJET (par défaut on est strict)
+    """
+    text = f"{title} {summary}".lower().strip()
+    if not text:
+        return False
+
+    # Exception : Roblox "Weekly Recap" = update officielle plateforme
+    if 'weekly recap' in text:
+        # Vérifie qu'il n'y a pas un keyword négatif fort
+        for neg in ['tournament', 'esports', 'sale', 'giveaway', 'contest']:
+            if neg in text:
+                return False
+        return True
+
+    # 1. Reject si keyword négatif (priorité)
+    for neg in _UPDATE_NEGATIVE_KEYWORDS:
+        if neg in text:
+            return False
+
+    # 2. Accept si keyword positif
+    for pos in _UPDATE_POSITIVE_KEYWORDS:
+        if pos in text:
+            return True
+
+    # 3. Par défaut : strict, on rejette
+    return False
+
+
+# =============================================================================
 # CONFIGURATION DES SOURCES (UNIQUEMENT CELLES VÉRIFIÉES FONCTIONNELLES)
 # =============================================================================
 
@@ -291,10 +389,15 @@ GAME_SOURCES = {
 # =============================================================================
 
 async def _fetch_steam_news(session: aiohttp.ClientSession, appid: int, max_count: int = 5) -> list[GameUpdate]:
-    """Fetch news Steam pour un appid donné via Steam News API officielle."""
+    """Fetch news Steam pour un appid donné via Steam News API officielle.
+
+    Phase 17.2 : fetch large (15 items) puis filtre _is_real_update() pour
+    ne garder QUE les vraies mises à jour (patch/hotfix/update).
+    """
+    # On demande 15 items pour avoir de la marge après filtrage
     url = (
         f"https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/"
-        f"?appid={appid}&count={max_count}&maxlength=400&format=json"
+        f"?appid={appid}&count=15&maxlength=400&format=json"
     )
     out = []
     try:
@@ -304,15 +407,27 @@ async def _fetch_steam_news(session: aiohttp.ClientSession, appid: int, max_coun
             data = await resp.json()
         news_items = data.get('appnews', {}).get('newsitems', [])
         for item in news_items:
+            if len(out) >= max_count:
+                break
             feedlabel = (item.get('feedlabel', '') or '').lower()
-            # Filtrer : community announcements, developer notes, steam news officielles
+            # Première passe : feedlabel doit être officiel
             if not any(kw in feedlabel for kw in ['community', 'developer', 'announce', 'steam']):
                 continue
             update_id = str(item.get('gid', '')) or str(item.get('url', ''))
             if not update_id:
                 continue
-            # Extraire image
+
+            title = item.get('title', 'Sans titre')
             contents = item.get('contents', '') or ''
+            # Clean summary (retire BBCode + HTML)
+            summary = re.sub(r'\[/?[a-z]+(?:=[^\]]+)?\]', '', contents)[:300]
+            summary = re.sub(r'<[^>]+>', '', summary).strip()
+
+            # Phase 17.2 : filtre strict — uniquement les vraies updates
+            if not _is_real_update(title, summary):
+                continue
+
+            # Extraire image
             image_url = ''
             img_m = re.search(r'\[img\](https?://[^\[]+)\[/img\]', contents)
             if img_m:
@@ -321,18 +436,27 @@ async def _fetch_steam_news(session: aiohttp.ClientSession, appid: int, max_coun
                 img_m2 = re.search(r'<img[^>]+src=["\'](https?://[^"\']+)["\']', contents)
                 if img_m2:
                     image_url = img_m2.group(1)
-            # Clean summary (retire BBCode + HTML)
-            summary = re.sub(r'\[/?[a-z]+(?:=[^\]]+)?\]', '', contents)[:300]
-            summary = re.sub(r'<[^>]+>', '', summary).strip()
+
+            # Determiner le type d'update
+            tl = title.lower()
+            if 'hotfix' in tl or 'hot fix' in tl:
+                update_type = "hotfix"
+            elif 'patch' in tl or 'release notes' in tl:
+                update_type = "patch"
+            elif 'dev' in tl and ('update' in tl or 'note' in tl):
+                update_type = "dev_update"
+            else:
+                update_type = "update"
+
             out.append(GameUpdate(
                 game_key=f"steam:{appid}",
                 update_id=update_id,
-                title=item.get('title', 'Sans titre')[:200],
+                title=title[:200],
                 url=item.get('url', f'https://store.steampowered.com/news/app/{appid}'),
                 summary=summary,
                 image_url=image_url,
                 posted_at=float(item.get('date', time.time())),
-                update_type="patch",
+                update_type=update_type,
             ))
     except Exception as ex:
         print(f"[game_updates _fetch_steam_news appid={appid}] {ex}")
@@ -436,7 +560,11 @@ async def _fetch_discourse(session: aiohttp.ClientSession, url: str, max_count: 
 # =============================================================================
 
 async def fetch_updates(session: aiohttp.ClientSession, game_key: str, max_count: int = 5) -> list[GameUpdate]:
-    """Récupère les dernières mises à jour pour un game_key donné."""
+    """Récupère les dernières mises à jour pour un game_key donné.
+
+    Phase 17.2 : tous les fetchers passent par _is_real_update() pour
+    filtrer strictement (UNIQUEMENT patches/hotfixes/updates, pas d'événements).
+    """
     spec = GAME_SOURCES.get(game_key)
     if not spec:
         return []
@@ -444,17 +572,23 @@ async def fetch_updates(session: aiohttp.ClientSession, game_key: str, max_count
     source_type = spec.get('source_type')
 
     if source_type == 'steam_news':
+        # _fetch_steam_news applique déjà _is_real_update en interne
         return await _fetch_steam_news(session, spec['appid'], max_count=max_count)
 
     elif source_type == 'discourse':
+        # Fetch large + filtre par keywords source + filtre _is_real_update
         raw = await _fetch_discourse(
             session,
             spec['source_url'],
-            max_count=max_count * 2,  # plus large pour le filtre
+            max_count=max_count * 4,  # large pour avoir de la marge
             filter_kw=spec.get('filter_keywords'),
         )
-        return [
-            GameUpdate(
+        out = []
+        for r in raw:
+            # Phase 17.2 : double filtre — keywords source + filtre update strict
+            if not _is_real_update(r['title'], r['summary']):
+                continue
+            out.append(GameUpdate(
                 game_key=game_key,
                 update_id=r['guid'],
                 title=r['title'][:200],
@@ -462,14 +596,18 @@ async def fetch_updates(session: aiohttp.ClientSession, game_key: str, max_count
                 summary=r['summary'],
                 image_url=r['image'],
                 update_type="dev_update",
-            )
-            for r in raw[:max_count]
-        ]
+            ))
+            if len(out) >= max_count:
+                break
+        return out
 
     elif source_type == 'rss':
-        raw = await _fetch_rss(session, spec['source_url'], max_count=max_count)
-        return [
-            GameUpdate(
+        raw = await _fetch_rss(session, spec['source_url'], max_count=max_count * 4)
+        out = []
+        for r in raw:
+            if not _is_real_update(r['title'], r['summary']):
+                continue
+            out.append(GameUpdate(
                 game_key=game_key,
                 update_id=r['guid'],
                 title=r['title'][:200],
@@ -477,19 +615,23 @@ async def fetch_updates(session: aiohttp.ClientSession, game_key: str, max_count
                 summary=r['summary'],
                 image_url=r['image'],
                 update_type="update",
-            )
-            for r in raw
-        ]
+            ))
+            if len(out) >= max_count:
+                break
+        return out
 
     elif source_type == 'rss_filtered':
-        # Comme rss mais filtre par keywords sur title (utile pour blizzardwatch
-        # qui mélange WoW/Diablo/Hearthstone/Overwatch)
+        # Filtre KW source (game keywords) + filtre _is_real_update strict
         filter_kw = spec.get('filter_keywords') or []
-        raw = await _fetch_rss(session, spec['source_url'], max_count=max_count * 4)
+        raw = await _fetch_rss(session, spec['source_url'], max_count=max_count * 6)
         out = []
         for r in raw:
-            tl = (r['title'] + ' ' + r['summary']).lower()
-            if filter_kw and not any(kw.lower() in tl for kw in filter_kw):
+            text = (r['title'] + ' ' + r['summary']).lower()
+            # 1. Doit matcher au moins UN keyword du jeu (ex: 'wow' pour WoW)
+            if filter_kw and not any(kw.lower() in text for kw in filter_kw):
+                continue
+            # 2. ET doit être une vraie update (pas event/promo)
+            if not _is_real_update(r['title'], r['summary']):
                 continue
             out.append(GameUpdate(
                 game_key=game_key,
