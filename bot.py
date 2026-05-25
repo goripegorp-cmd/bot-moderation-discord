@@ -31203,6 +31203,13 @@ async def check_youtube_feeds(session, guild, data):
                         message_id=getattr(_yt_msg, 'id', 0) or 0,
                         post_type="video", title=title, url=video_url,
                     )
+                    # Phase 19 : prune auto — garde max 5 posts récents
+                    try:
+                        await tracking2026.prune_to_max(
+                            bot, guild.id, "youtube", target_channel.id, max_keep=5,
+                        )
+                    except Exception:
+                        pass
                 except Exception:
                     pass
                 await asyncio.sleep(1)
@@ -31589,6 +31596,13 @@ async def check_tiktok_feeds(session, guild, data):
                         message_id=getattr(_tk_msg, 'id', 0) or 0,
                         post_type="video", title=video_title or "", url=video_url,
                     )
+                    # Phase 19 : prune auto — garde max 5 posts récents
+                    try:
+                        await tracking2026.prune_to_max(
+                            bot, guild.id, "tiktok", target_channel.id, max_keep=5,
+                        )
+                    except Exception:
+                        pass
                 except Exception:
                     pass
                 await asyncio.sleep(2)
@@ -31698,6 +31712,13 @@ async def check_reddit_feeds(session, guild, data):
                     message_id=getattr(_rd_msg, 'id', 0) or 0,
                     post_type="post", title=(title or "")[:200], url=link or "",
                 )
+                # Phase 19 : prune auto — garde max 5 posts récents
+                try:
+                    await tracking2026.prune_to_max(
+                        bot, guild.id, "reddit", channel.id, max_keep=5,
+                    )
+                except Exception:
+                    pass
             except Exception:
                 pass
             await asyncio.sleep(1)
@@ -31876,6 +31897,13 @@ async def check_twitter_feeds(session, guild, data):
                     title=(tweet_text or "")[:200],
                     url=tweet_link,
                 )
+                # Phase 19 : prune auto — garde max 5 posts récents
+                try:
+                    await tracking2026.prune_to_max(
+                        bot, guild.id, "twitter", channel.id, max_keep=5,
+                    )
+                except Exception:
+                    pass
             except Exception:
                 pass
             await asyncio.sleep(1)
@@ -32221,6 +32249,13 @@ async def check_rosocial_feeds(session, guild, data):
                     display_author=username,
                 )
                 items_added = True
+                # Phase 19 : prune auto — garde max 5 posts récents
+                try:
+                    await tracking2026.prune_to_max(
+                        bot, guild.id, "rosocial", channel.id, max_keep=5,
+                    )
+                except Exception:
+                    pass
                 print(f"[RoSocial] {username} → {post_title} ({latest_post_id}) image={'✓' if post_image else '✗'}")
             except Exception as ex:
                 print(f"[RoSocial] record_post échoué : {ex}")
@@ -32898,6 +32933,13 @@ async def check_game_updates_feeds(session, guild, data):
                         thumbnail_url=update.image_url,
                         display_author=meta['name'],
                     )
+                    # Phase 19 : prune auto — garde max 5 updates récentes
+                    try:
+                        await tracking2026.prune_to_max(
+                            bot, guild.id, "game_updates", channel.id, max_keep=5,
+                        )
+                    except Exception:
+                        pass
                 except Exception as ex:
                     print(f"[game_updates record_post] {ex}")
                 await asyncio.sleep(1)

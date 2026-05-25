@@ -299,6 +299,74 @@ async def rebind_channel(guild_id: int, platform: str, new_channel_id: int) -> i
     return updated
 
 
+async def prune_to_max(
+    bot,
+    guild_id: int,
+    platform: str,
+    channel_id: int,
+    max_keep: int = 5,
+    *,
+    delete_message_func=None,
+) -> int:
+    """Phase 19 : garde au max `max_keep` posts non-deleted pour ce (platform, channel).
+
+    Supprime les plus anciens dans Discord + marque deleted dans tracker.
+    Retourne le nombre de posts effectivement supprimés.
+
+    `delete_message_func` (optionnel) : async func(channel, message_id) → None.
+    Si non fourni, utilise bot.get_channel(channel_id).fetch_message(...).delete().
+    """
+    await _load_guild(guild_id)
+    store = _cache.get(guild_id, {})
+    candidates = []
+    for tp in store.values():
+        if tp.platform != platform:
+            continue
+        if tp.discord_channel_id != channel_id:
+            continue
+        if tp.deleted:
+            continue
+        if not tp.discord_message_id:
+            # Posts sans message_id réel (ex: galerie Roblox UGC) — skip
+            continue
+        candidates.append(tp)
+
+    # Plus récent en premier
+    candidates.sort(key=lambda t: t.posted_at, reverse=True)
+
+    # Garde les max_keep premiers, supprime le reste
+    to_delete = candidates[max_keep:]
+    if not to_delete:
+        return 0
+
+    deleted_count = 0
+    chan = None
+    try:
+        chan = bot.get_channel(channel_id)
+    except Exception:
+        chan = None
+
+    for tp in to_delete:
+        try:
+            if delete_message_func is not None:
+                await delete_message_func(chan, tp.discord_message_id)
+            elif chan is not None:
+                try:
+                    msg = await chan.fetch_message(tp.discord_message_id)
+                    await msg.delete()
+                except Exception:
+                    pass  # message peut-être déjà supprimé manuellement
+            tp.deleted = True
+            deleted_count += 1
+        except Exception as ex:
+            print(f"[tracking_layer prune_to_max] {tp.key}: {ex}")
+
+    if deleted_count > 0:
+        await _save_guild(guild_id)
+
+    return deleted_count
+
+
 async def prune_old(guild_id: int, max_days: int = 180) -> int:
     """Supprime les annonces > max_days et marquees deleted, pour eviter la croissance infinie."""
     await _load_guild(guild_id)

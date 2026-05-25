@@ -45,8 +45,10 @@ import tracking_layer
 
 
 DATA_DIR = module_dir("social_galleries")
-MAX_ITEMS = 10            # max posts visibles dans la galerie
-RENDER_DEBOUNCE_SECONDS = 5  # eviter spam d'edits si 10 posts arrivent en 1s
+# Phase 19 : max 5 items par galerie pour optimiser ressources + lisibilité
+# Quand un nouveau post arrive, les anciens >5 sortent automatiquement
+MAX_ITEMS = 5
+RENDER_DEBOUNCE_SECONDS = 5  # eviter spam d'edits si plusieurs posts arrivent en 1s
 
 
 _io_lock = asyncio.Lock()
