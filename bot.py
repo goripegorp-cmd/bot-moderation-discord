@@ -1249,6 +1249,17 @@ async def cfg(gid):
         'badwords_sanction_action': 'mute',  # 'mute' / 'kick' / 'ban'
         'badwords_sanction_duration': 60,  # minutes (utilisé seulement pour mute)
         'badwords_strikes': {},            # { str(user_id): {"count": int, "last_at": float} }
+        # Phase 26.1 : messages de boost serveur
+        'boost_enabled': False,
+        'boost_channel': 0,
+        'boost_message': "🎉 Merci {user} pour avoir boosté le serveur ! 💎\nLe serveur a maintenant **{count}** boost(s).",
+        # Phase 26.2 : Spotlight créateurs (role-gated)
+        'creator_role': 0,                 # rôle "créateur de contenu"
+        'creator_channel': 0,              # salon destination
+        'creator_keyword': '',             # filtre mot-clé (optionnel)
+        'creator_links': {},               # { str(user_id): [ {platform, url, last_post_id} ] }
+        # Phase 26.3 : logs configurables — exclusions de rôles par event_type
+        'log_role_exclusions': {},         # { event_type_str: [role_id, ...] }
     }
     for k, v in defaults.items():
         if k not in data: data[k] = v
@@ -3743,6 +3754,10 @@ class MainPanelV2(LayoutView):
                     label="Créativité", value="creativite", emoji="🎨",
                     description="Messages auto · Vocaux temp · Annonces · Auto-réactions · Rôles masse",
                 ),
+                discord.SelectOption(
+                    label="Progression", value="progression", emoji="📈",
+                    description="Niveaux · XP · Pièces · Shop · Récompenses",
+                ),
             ],
             custom_id="mpv2_module",
         )
@@ -3788,6 +3803,7 @@ class MainPanelV2(LayoutView):
             'games':        lambda: GamesPanelV2(self.u, self.g),
             'delegations':  lambda: DelegationsPanelV2(self.u, self.g),
             'creativite':   lambda: CentrePanelV2(self.u, self.g),
+            'progression':  lambda: LevelSystemPanelV2(self.u, self.g),
         }
         if val in v2_panels:
             v = v2_panels[val]()
@@ -3977,24 +3993,33 @@ class GamesPanelV2(LayoutView):
         deals_on = c.get('ads_deals_enabled', False)
         deals_ch = self.g.get_channel(c.get('ads_deals_channel', 0))
 
+        # Phase 26.1 : boost
+        boost_on = c.get('boost_enabled', False)
+        boost_ch = self.g.get_channel(c.get('boost_channel', 0))
+        boost_count = self.g.premium_subscription_count or 0
+
         self.clear_items()
         items: list = []
 
         if self.g.icon:
             items.append(v2_section(
                 v2_title("🎮 Jeux & Concours"),
-                v2_subtitle("Giveaways · Game deals"),
+                v2_subtitle("Giveaways · Game deals · Boost messages"),
                 accessory=v2_thumb(self.g.icon.url),
             ))
         else:
             items.append(v2_title("🎮 Jeux & Concours"))
-            items.append(v2_subtitle("Giveaways · Game deals"))
+            items.append(v2_subtitle("Giveaways · Game deals · Boost messages"))
 
         items.append(v2_divider())
         items.append(v2_body(
             f"🎁 **Giveaways** · `{active_giveaways}` en cours\n"
             f"🛒 **Deals** · {'🔘 actif' if deals_on else '⚪ désactivé'}"
             + (f" dans {deals_ch.mention}" if deals_ch else "")
+            + "\n"
+            f"💎 **Boost messages** · {'🔘 actif' if boost_on else '⚪ désactivé'}"
+            + (f" dans {boost_ch.mention}" if boost_ch else "")
+            + f" · `{boost_count}` boost(s) actuel(s)"
         ))
         items.append(v2_divider())
 
@@ -4002,10 +4027,12 @@ class GamesPanelV2(LayoutView):
         b_give.callback = self._cb_giveaways
         b_deals = Button(label="🛒 Game Deals", style=discord.ButtonStyle.primary, custom_id="gamev2_deals")
         b_deals.callback = self._cb_deals
+        b_boost = Button(label="💎 Boost messages", style=discord.ButtonStyle.success, custom_id="gamev2_boost")
+        b_boost.callback = self._cb_boost
         b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="gamev2_back")
         b_back.callback = self._cb_back
 
-        items.append(discord.ui.ActionRow(b_give, b_deals))
+        items.append(discord.ui.ActionRow(b_give, b_deals, b_boost))
         items.append(discord.ui.ActionRow(b_back))
 
         self.add_item(v2_container(*items, color=Palette.SUCCESS))
@@ -4048,9 +4075,220 @@ class GamesPanelV2(LayoutView):
             except Exception:
                 pass
 
+    async def _cb_boost(self, i):
+        # Phase 26.1 : panel boost messages
+        try:
+            v = BoostConfigPanelV2(self.u, self.g)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[GamesPanelV2 _cb_boost] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
         await i.response.edit_message(view=v, embed=None, attachments=[])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  💎 BOOST CONFIG PANEL (Phase 26.1)
+#  Configuration des messages affichés quand un membre boost le serveur.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class BoostConfigPanelV2(LayoutView):
+    """Panel : Boost messages serveur."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        enabled = bool(c.get('boost_enabled', False))
+        ch_id = int(c.get('boost_channel', 0) or 0)
+        ch = self.g.get_channel(ch_id) if ch_id else None
+        msg_tpl = c.get('boost_message', '') or ''
+        boost_count = self.g.premium_subscription_count or 0
+        boosters = [m for m in self.g.members if m.premium_since][:5]
+
+        # Preview du message rendu
+        preview_user = self.u.mention
+        try:
+            preview = msg_tpl.format(
+                user=preview_user,
+                user_name=self.u.display_name,
+                count=boost_count,
+                guild=self.g.name,
+                total_boosters=len([m for m in self.g.members if m.premium_since]),
+            )
+        except Exception as ex:
+            preview = f"_(template invalide : {ex})_"
+        if len(preview) > 600:
+            preview = preview[:600] + " …"
+
+        # ── Boutons ──
+        self.clear_items()
+
+        b_toggle = Button(
+            label=("🔘 Désactiver" if enabled else "⚪ Activer"),
+            style=(discord.ButtonStyle.danger if enabled else discord.ButtonStyle.success),
+            custom_id="bcv2_toggle",
+        )
+        b_toggle.callback = self._cb_toggle
+
+        b_msg = Button(label="📝 Modifier message", style=discord.ButtonStyle.primary, custom_id="bcv2_msg")
+        b_msg.callback = self._cb_msg
+
+        b_reset = Button(label="♻️ Message par défaut", style=discord.ButtonStyle.secondary, custom_id="bcv2_reset")
+        b_reset.callback = self._cb_reset
+
+        b_test = Button(
+            label="🧪 Tester maintenant",
+            style=discord.ButtonStyle.secondary,
+            disabled=(not enabled or not ch),
+            custom_id="bcv2_test",
+        )
+        b_test.callback = self._cb_test
+
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="bcv2_back")
+        b_back.callback = self._cb_back
+
+        # ── Channel select (native picker) ──
+        ch_select = discord.ui.ChannelSelect(
+            placeholder=("📢 Salon : " + (ch.name if ch else "non défini")),
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            min_values=0,
+            max_values=1,
+            custom_id="bcv2_chsel",
+        )
+        ch_select.callback = self._cb_channel
+
+        # ── Contenu ──
+        boosters_str = ", ".join(b.mention for b in boosters) if boosters else "_aucun_"
+        info_block = (
+            f"💎 **Boost actuel** · `{boost_count}` boost(s)\n"
+            f"👑 **Boosters récents** · {boosters_str}\n"
+            f"📢 **Salon configuré** · {ch.mention if ch else '_non défini_'}\n"
+            f"🔌 **État** · {'🟢 actif' if enabled else '⚪ désactivé'}"
+        )
+
+        msg_help = (
+            "**Variables disponibles dans le message :**\n"
+            "• `{user}` — mention du booster\n"
+            "• `{user_name}` — pseudo affiché\n"
+            "• `{count}` — nombre total de boosts\n"
+            "• `{guild}` — nom du serveur\n"
+            "• `{total_boosters}` — nombre de membres qui boostent"
+        )
+
+        items = [
+            v2_title("💎 Messages de boost"),
+            v2_subtitle("Annonce quand un membre boost le serveur avec Nitro"),
+            v2_divider(),
+            v2_body(info_block),
+            v2_divider(),
+            v2_body(f"**📝 Template du message :**\n```\n{msg_tpl[:500]}\n```"),
+            v2_body(f"**👀 Aperçu rendu :**\n{preview}"),
+            v2_divider(),
+            v2_body(msg_help),
+            v2_divider(),
+            discord.ui.ActionRow(ch_select),
+            discord.ui.ActionRow(b_toggle, b_msg, b_reset, b_test),
+            discord.ui.ActionRow(b_back),
+        ]
+        self.add_item(v2_container(*items, color=Palette.SUCCESS))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_toggle(self, i):
+        c = await cfg(self.g.id)
+        new_val = not bool(c.get('boost_enabled', False))
+        await db_set(self.g.id, 'boost_enabled', new_val)
+        await self.render_to(i, edit=True)
+
+    async def _cb_channel(self, i):
+        try:
+            vals = i.data.get('values', [])
+            ch_id = int(vals[0]) if vals else 0
+            await db_set(self.g.id, 'boost_channel', ch_id)
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[BoostConfigPanelV2 _cb_channel] {ex}")
+            try:
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+    async def _cb_msg(self, i):
+        c = await cfg(self.g.id)
+        modal = _BoostMessageModal(self.g, self.u)
+        modal.tpl.default = c.get('boost_message', '')
+        await i.response.send_modal(modal)
+
+    async def _cb_reset(self, i):
+        await db_set(
+            self.g.id, 'boost_message',
+            "🎉 Merci {user} pour avoir boosté le serveur ! 💎\nLe serveur a maintenant **{count}** boost(s).",
+        )
+        await self.render_to(i, edit=True)
+
+    async def _cb_test(self, i):
+        c = await cfg(self.g.id)
+        ch_id = int(c.get('boost_channel', 0) or 0)
+        ch = self.g.get_channel(ch_id)
+        if not ch:
+            return await i.response.send_message("❌ Aucun salon configuré.", ephemeral=True)
+        tpl = c.get('boost_message', '') or ''
+        try:
+            text = tpl.format(
+                user=i.user.mention,
+                user_name=i.user.display_name,
+                count=self.g.premium_subscription_count or 0,
+                guild=self.g.name,
+                total_boosters=len([m for m in self.g.members if m.premium_since]),
+            )
+        except Exception as ex:
+            return await i.response.send_message(f"❌ Template invalide : `{ex}`", ephemeral=True)
+        try:
+            await ch.send(f"🧪 **[TEST]** {text}")
+            await i.response.send_message(f"✅ Test envoyé dans {ch.mention}.", ephemeral=True)
+        except discord.Forbidden:
+            await i.response.send_message(f"❌ Le bot n'a pas la permission d'écrire dans {ch.mention}.", ephemeral=True)
+        except Exception as ex:
+            await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+
+    async def _cb_back(self, i):
+        v = GamesPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+class _BoostMessageModal(Modal, title="📝 Message de boost"):
+    tpl = TextInput(
+        label="Template (utilise {user}, {count}, etc.)",
+        style=discord.TextStyle.paragraph,
+        placeholder="🎉 Merci {user} pour le boost ! Nous avons {count} boost(s) 💎",
+        max_length=1500,
+        required=True,
+    )
+
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+
+    async def on_submit(self, i):
+        await db_set(self.g.id, 'boost_message', self.tpl.value or '')
+        await BoostConfigPanelV2(self.u, self.g).render_to(i, edit=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -5275,12 +5513,16 @@ class LogsPanelV2(LayoutView):
             b_chan.callback = self._cb_set_channel
             b_cats = Button(label="🎛️ Catégories", style=discord.ButtonStyle.primary, custom_id="logsv2_cats")
             b_cats.callback = self._cb_categories
+            b_events = Button(label="🔍 Détail par évènement", style=discord.ButtonStyle.primary, custom_id="logsv2_evts")
+            b_events.callback = self._cb_events
+            b_excl = Button(label="🛡️ Rôles épargnés", style=discord.ButtonStyle.primary, custom_id="logsv2_excl")
+            b_excl.callback = self._cb_exclusions
             b_clear = Button(label="⚪ Désactiver", style=discord.ButtonStyle.danger, custom_id="logsv2_clear")
             b_clear.callback = self._cb_disable
             b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2_back")
             b_back.callback = self._cb_back
-            items.append(discord.ui.ActionRow(b_chan, b_cats, b_clear))
-            items.append(discord.ui.ActionRow(b_back))
+            items.append(discord.ui.ActionRow(b_chan, b_cats, b_events, b_excl))
+            items.append(discord.ui.ActionRow(b_clear, b_back))
         else:
             b_chan = Button(label="📍 Définir le salon", style=discord.ButtonStyle.success, custom_id="logsv2_chan")
             b_chan.callback = self._cb_set_channel
@@ -5312,6 +5554,16 @@ class LogsPanelV2(LayoutView):
 
     async def _cb_categories(self, i):
         v = LogsCategoriesPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+    async def _cb_events(self, i):
+        # Phase 26.3 : toggle par event-type précis
+        v = LogsEventsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+    async def _cb_exclusions(self, i):
+        # Phase 26.3 : rôles épargnés par event
+        v = LogsExclusionsPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
 
     async def _cb_disable(self, i):
@@ -5409,6 +5661,272 @@ class LogsCategoriesPanelV2(LayoutView):
     async def _cb_back(self, i):
         v = LogsPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  📋 Phase 26.3 : LogsEventsPanelV2 — toggle individuel par event_type
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class LogsEventsPanelV2(LayoutView):
+    """Phase 26.3 — toggle individuel par event_type (en plus des catégories).
+
+    Permet de désactiver précisément certains événements (ex: 'msg.delete' uniquement)
+    sans toucher à la catégorie entière.
+    """
+
+    def __init__(self, u, g, category: str = None):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+        self.category = category  # filtre par catégorie ; None = toutes
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit: bool = True):
+        all_cats = sorted(set(m["cat"] for m in ulogger2026.EVENT_META.values()))
+        disabled = await ulogger2026.get_disabled_events(self.g.id)
+
+        # Si aucune catégorie choisie : afficher select catégorie
+        self.clear_items()
+        items = [
+            v2_title("🔍 Détail par évènement"),
+            v2_subtitle("Active/désactive chaque type d'évènement individuellement"),
+            v2_divider(),
+        ]
+
+        if self.category is None:
+            # Étape 1 : choix de la catégorie
+            opts = []
+            cat_emojis = {
+                "Modération": "🔨", "Sécurité": "🛡️", "Membres": "👥",
+                "Messages": "💬", "Vocal": "🎤", "Serveur": "🏷️",
+                "Tickets": "🎫", "Config": "⚙️",
+            }
+            for c in all_cats:
+                count = sum(1 for m in ulogger2026.EVENT_META.values() if m["cat"] == c)
+                opts.append(discord.SelectOption(
+                    label=c, value=c, emoji=cat_emojis.get(c, "📋"),
+                    description=f"{count} types d'évènements",
+                ))
+            sel = Select(placeholder="Choisis une catégorie…", options=opts[:25])
+            sel.callback = self._cb_pick_cat
+            items.append(v2_body("Étape 1 : choisis la catégorie à détailler."))
+            items.append(discord.ui.ActionRow(sel))
+        else:
+            # Étape 2 : toggles des events de la catégorie
+            ev_items = [(ev, meta) for ev, meta in ulogger2026.EVENT_META.items() if meta["cat"] == self.category]
+            ev_items.sort(key=lambda x: x[1]["label"])
+
+            # Construire le multi-select avec defaults selon disabled
+            sel_opts = []
+            for ev, meta in ev_items[:25]:
+                value = ev.value
+                is_enabled = value not in disabled
+                sel_opts.append(discord.SelectOption(
+                    label=meta["label"][:80],
+                    value=value,
+                    description=f"`{value}`"[:90],
+                    emoji=meta["icon"],
+                    default=is_enabled,
+                ))
+            sel = Select(
+                placeholder=f"Évènements actifs dans « {self.category} »…",
+                min_values=0, max_values=len(sel_opts),
+                options=sel_opts,
+            )
+            sel.callback = self._cb_pick_events
+
+            items.append(v2_body(
+                f"**Catégorie :** {self.category}\n"
+                f"Coche/décoche pour activer ou désactiver chaque type.\n"
+                f"_Si la catégorie est désactivée globalement (`Catégories`), tout est skippé peu importe ces toggles._"
+            ))
+            items.append(v2_divider())
+            items.append(discord.ui.ActionRow(sel))
+
+            b_change_cat = Button(label="↩️ Changer de catégorie", style=discord.ButtonStyle.secondary)
+            b_change_cat.callback = self._cb_change_cat
+            items.append(discord.ui.ActionRow(b_change_cat))
+
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2_evts_back")
+        b_back.callback = self._cb_back
+        items.append(discord.ui.ActionRow(b_back))
+
+        self.add_item(v2_container(*items, color=Palette.PRIMARY))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_pick_cat(self, i):
+        try:
+            cat = i.data['values'][0]
+            self.category = cat
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[LogsEventsPanelV2 _cb_pick_cat] {ex}")
+
+    async def _cb_pick_events(self, i):
+        try:
+            chosen = set(i.data.get('values', []))
+            disabled = await ulogger2026.get_disabled_events(self.g.id)
+
+            # Tous les events de la catégorie courante
+            cat_events = {
+                ev.value for ev, meta in ulogger2026.EVENT_META.items()
+                if meta["cat"] == self.category
+            }
+            # On retire de disabled tous ceux de cette catégorie, puis on ajoute ceux non cochés
+            new_disabled = set(disabled) - cat_events
+            for ev_value in cat_events:
+                if ev_value not in chosen:
+                    new_disabled.add(ev_value)
+
+            await ulogger2026.set_disabled_events(self.g.id, new_disabled)
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[LogsEventsPanelV2 _cb_pick_events] {ex}")
+
+    async def _cb_change_cat(self, i):
+        self.category = None
+        await self.render_to(i, edit=True)
+
+    async def _cb_back(self, i):
+        v = LogsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  🛡️ Phase 26.3 : LogsExclusionsPanelV2 — rôles épargnés par event
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class LogsExclusionsPanelV2(LayoutView):
+    """Phase 26.3 — pour chaque event_type, choisir les rôles épargnés.
+
+    Si un membre concerné (user ou modérateur) a l'un des rôles épargnés,
+    le log n'est PAS envoyé. Utile pour ne pas pister les actions du staff.
+    """
+
+    def __init__(self, u, g, selected_event: str = None):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+        self.selected_event = selected_event  # ex: 'msg.delete'
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit: bool = True):
+        exclusions = await ulogger2026.get_role_exclusions(self.g.id)
+
+        self.clear_items()
+        items = [
+            v2_title("🛡️ Rôles épargnés des logs"),
+            v2_subtitle("Choisis quels rôles ne doivent JAMAIS apparaître dans tel ou tel log"),
+            v2_divider(),
+        ]
+
+        if not self.selected_event:
+            # Étape 1 : choisir un event
+            opts = []
+            for ev, meta in list(ulogger2026.EVENT_META.items())[:25]:
+                excl_count = len(exclusions.get(ev.value, []) or [])
+                desc = f"{meta['cat']}"
+                if excl_count:
+                    desc += f" · {excl_count} rôle(s) épargné(s)"
+                opts.append(discord.SelectOption(
+                    label=f"{meta['label']}"[:80],
+                    value=ev.value,
+                    description=desc[:90],
+                    emoji=meta["icon"],
+                ))
+
+            sel = Select(placeholder="Choisis un type d'évènement…", options=opts)
+            sel.callback = self._cb_pick_event
+
+            # Résumé : combien d'events ont des exclusions
+            with_excl = sum(1 for v in exclusions.values() if v)
+            items.append(v2_body(
+                f"**Statut :** `{with_excl}` type(s) d'évènements ont des rôles épargnés.\n\n"
+                f"_Cas d'usage : si tu mets le rôle Owner épargné sur `msg.delete`, "
+                f"quand tu supprimes un message, ça n'apparaît pas dans les logs._"
+            ))
+            items.append(v2_divider())
+            items.append(discord.ui.ActionRow(sel))
+        else:
+            # Étape 2 : RoleSelect pour cet event
+            meta = ulogger2026.EVENT_META.get(_resolve_event_type(self.selected_event), {})
+            current_role_ids = exclusions.get(self.selected_event, []) or []
+            current_roles = [self.g.get_role(rid) for rid in current_role_ids if self.g.get_role(rid)]
+
+            current_str = ", ".join(r.mention for r in current_roles) if current_roles else "_aucun_"
+
+            items.append(v2_body(
+                f"**Évènement :** {meta.get('icon', '📋')} {meta.get('label', self.selected_event)}\n"
+                f"`{self.selected_event}`\n\n"
+                f"**Rôles actuellement épargnés :** {current_str}"
+            ))
+            items.append(v2_divider())
+
+            role_sel = discord.ui.RoleSelect(
+                placeholder="Choisis les rôles épargnés (multi)…",
+                min_values=0,
+                max_values=10,
+                custom_id="logsv2_excl_roles",
+            )
+            role_sel.callback = self._cb_pick_roles
+            items.append(discord.ui.ActionRow(role_sel))
+
+            b_change = Button(label="↩️ Autre évènement", style=discord.ButtonStyle.secondary)
+            b_change.callback = self._cb_change_event
+            items.append(discord.ui.ActionRow(b_change))
+
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2_excl_back")
+        b_back.callback = self._cb_back
+        items.append(discord.ui.ActionRow(b_back))
+
+        self.add_item(v2_container(*items, color=Palette.PRIMARY))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_pick_event(self, i):
+        try:
+            ev_value = i.data['values'][0]
+            self.selected_event = ev_value
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[LogsExclusionsPanelV2 _cb_pick_event] {ex}")
+
+    async def _cb_pick_roles(self, i):
+        try:
+            role_ids = [int(rid) for rid in i.data.get('values', [])]
+            exclusions = await ulogger2026.get_role_exclusions(self.g.id)
+            exclusions[self.selected_event] = role_ids
+            await ulogger2026.set_role_exclusions(self.g.id, exclusions)
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[LogsExclusionsPanelV2 _cb_pick_roles] {ex}")
+
+    async def _cb_change_event(self, i):
+        self.selected_event = None
+        await self.render_to(i, edit=True)
+
+    async def _cb_back(self, i):
+        v = LogsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+def _resolve_event_type(value: str):
+    """Retourne l'EventType pour une valeur 'msg.delete' etc."""
+    for ev in ulogger2026.EventType:
+        if ev.value == value:
+            return ev
+    return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -12135,6 +12653,7 @@ class AdsPanelV2(LayoutView):
                 discord.SelectOption(label="Roblox UGC", value="roblox", emoji="🟢", description="Créateurs & groupes"),
                 discord.SelectOption(label="Game Deals", value="deals", emoji="🎯", description="Promos Steam, Epic, GOG"),
                 discord.SelectOption(label="Mises à jour", value="updates", emoji="🎮", description="Patch notes Roblox, Steam, Blizzard…"),
+                discord.SelectOption(label="Spotlight Créateurs", value="creators", emoji="🎬", description="Membres avec rôle créateur · auto-pub vidéos/lives"),
             ],
             custom_id="apv2_platform",
         )
@@ -12190,12 +12709,208 @@ class AdsPanelV2(LayoutView):
         if val == 'updates':
             v = AdsGameUpdatesPanelV2(self.u, self.g)
             return await v.render_to(interaction, edit=True)
+        # Phase 26.2 : Spotlight Créateurs
+        if val == 'creators':
+            v = CreatorSpotlightPanelV2(self.u, self.g)
+            return await v.render_to(interaction, edit=True)
         # Fallback (ne devrait jamais arriver)
         await interaction.response.send_message(f"❌ Plateforme inconnue : {val}", ephemeral=True)
 
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
         await i.response.edit_message(view=v, embed=None, attachments=[])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  🎬 SPOTLIGHT CRÉATEURS (Phase 26.2)
+#  Membres avec un rôle "Créateur" enregistrent leur YouTube/Twitch.
+#  Les nouvelles vidéos/lives (filtre keyword optionnel) sont auto-publiées
+#  dans un salon dédié.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class CreatorSpotlightPanelV2(LayoutView):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        role_id = int(c.get('creator_role', 0) or 0)
+        ch_id = int(c.get('creator_channel', 0) or 0)
+        keyword = (c.get('creator_keyword', '') or '').strip()
+        links = c.get('creator_links', {}) or {}
+
+        role = self.g.get_role(role_id) if role_id else None
+        ch = self.g.get_channel(ch_id) if ch_id else None
+
+        # Compter créateurs / liens
+        total_creators = len(links)
+        total_links = sum(len(v) for v in links.values() if isinstance(v, list))
+
+        # Liste des créateurs récents (jusqu'à 5)
+        creators_lines = []
+        for uid_str, link_list in list(links.items())[:5]:
+            try:
+                uid = int(uid_str)
+                member = self.g.get_member(uid)
+                name = member.mention if member else f"`{uid}`"
+            except Exception:
+                continue
+            platforms = ", ".join(sorted({l.get('platform', '?') for l in (link_list or [])}))
+            creators_lines.append(f"• {name} · {platforms} · `{len(link_list)}` lien(s)")
+        if total_creators > 5:
+            creators_lines.append(f"_… + {total_creators - 5} autre(s)_")
+        creators_block = "\n".join(creators_lines) if creators_lines else "_Aucun créateur enregistré_"
+
+        # ── Boutons ──
+        self.clear_items()
+
+        role_select = discord.ui.RoleSelect(
+            placeholder=f"🎭 Rôle créateur : {(role.name if role else 'aucun')}",
+            min_values=0, max_values=1,
+            custom_id="cspv2_role",
+        )
+        role_select.callback = self._cb_role
+
+        ch_select = discord.ui.ChannelSelect(
+            placeholder=f"📢 Salon publication : {(ch.name if ch else 'aucun')}",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            min_values=0, max_values=1,
+            custom_id="cspv2_ch",
+        )
+        ch_select.callback = self._cb_channel
+
+        b_keyword = Button(label="🔎 Filtre mot-clé", style=discord.ButtonStyle.primary, custom_id="cspv2_kw")
+        b_keyword.callback = self._cb_keyword
+
+        b_list = Button(
+            label=f"📋 Voir tous ({total_creators})", style=discord.ButtonStyle.primary,
+            disabled=(total_creators == 0), custom_id="cspv2_list",
+        )
+        b_list.callback = self._cb_list
+
+        b_clear = Button(
+            label="🧹 Vider", style=discord.ButtonStyle.danger,
+            disabled=(total_creators == 0), custom_id="cspv2_clear",
+        )
+        b_clear.callback = self._cb_clear
+
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="cspv2_back")
+        b_back.callback = self._cb_back
+
+        # ── Contenu ──
+        info_block = (
+            f"🎭 **Rôle créateur** · {role.mention if role else '_non défini_'}\n"
+            f"📢 **Salon publication** · {ch.mention if ch else '_non défini_'}\n"
+            f"🔎 **Filtre mot-clé** · {(f'`{keyword}`' if keyword else '_aucun (tout passe)_')}\n"
+            f"👥 **Créateurs** · `{total_creators}` membres · `{total_links}` lien(s) total"
+        )
+        usage_block = (
+            "**Comment ça marche :**\n"
+            f"1. Tu définis ici un **rôle** (ex: `🎬 Créateur`), un **salon** de publication, et un **filtre** optionnel.\n"
+            f"2. Tout membre **ayant ce rôle** peut enregistrer ses chaînes via `/creator add`.\n"
+            f"3. Le bot **polle** les chaînes inscrites toutes les ~5 minutes.\n"
+            f"4. Une nouvelle vidéo/live → si elle contient le **mot-clé**, elle est postée dans le salon."
+        )
+
+        items = [
+            v2_title("🎬 Spotlight Créateurs"),
+            v2_subtitle("Mets en avant le contenu de tes membres créateurs"),
+            v2_divider(),
+            v2_body(info_block),
+            v2_divider(),
+            v2_body(f"**📋 Créateurs enregistrés :**\n{creators_block}"),
+            v2_divider(),
+            v2_body(usage_block),
+            v2_divider(),
+            discord.ui.ActionRow(role_select),
+            discord.ui.ActionRow(ch_select),
+            discord.ui.ActionRow(b_keyword, b_list, b_clear),
+            discord.ui.ActionRow(b_back),
+        ]
+        self.add_item(v2_container(*items, color=Palette.ACCENT))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_role(self, i):
+        try:
+            vals = i.data.get('values', [])
+            rid = int(vals[0]) if vals else 0
+            await db_set(self.g.id, 'creator_role', rid)
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+
+    async def _cb_channel(self, i):
+        try:
+            vals = i.data.get('values', [])
+            cid = int(vals[0]) if vals else 0
+            await db_set(self.g.id, 'creator_channel', cid)
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+
+    async def _cb_keyword(self, i):
+        c = await cfg(self.g.id)
+        modal = _CreatorKeywordModal(self.g, self.u)
+        modal.kw.default = c.get('creator_keyword', '')
+        await i.response.send_modal(modal)
+
+    async def _cb_list(self, i):
+        c = await cfg(self.g.id)
+        links = c.get('creator_links', {}) or {}
+        if not links:
+            return await i.response.send_message("_Aucun créateur enregistré._", ephemeral=True)
+
+        lines = []
+        for uid_str, link_list in links.items():
+            try:
+                uid = int(uid_str)
+            except Exception:
+                continue
+            member = self.g.get_member(uid)
+            name = member.mention if member else f"`User#{uid}`"
+            lines.append(f"**{name}**")
+            for entry in (link_list or [])[:10]:
+                lines.append(f"  • {entry.get('platform', '?')} · `{entry.get('id', entry.get('url', '?'))}`")
+
+        txt = "\n".join(lines)
+        if len(txt) > 1900:
+            txt = txt[:1900] + "\n…"
+        await i.response.send_message(f"📋 **Créateurs et leurs liens :**\n{txt}", ephemeral=True)
+
+    async def _cb_clear(self, i):
+        await db_set(self.g.id, 'creator_links', {})
+        await self.render_to(i, edit=True)
+
+    async def _cb_back(self, i):
+        v = AdsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+class _CreatorKeywordModal(Modal, title="🔎 Filtre mot-clé"):
+    kw = TextInput(
+        label="Mot-clé (laisse vide = tout passe)",
+        placeholder="ex: MMORPG, Abylumis, gameplay…",
+        max_length=80,
+        required=False,
+    )
+
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+
+    async def on_submit(self, i):
+        await db_set(self.g.id, 'creator_keyword', (self.kw.value or '').strip())
+        await CreatorSpotlightPanelV2(self.u, self.g).render_to(i, edit=True)
 
 
 # ─────────────────────────────── YOUTUBE ───────────────────────────────
@@ -17734,12 +18449,12 @@ class LevelSystemPanelV2(LayoutView):
         items: list = []
         if self.g.icon:
             items.append(v2_section(
-                v2_title("📈 Niveaux & Économie"),
+                v2_title("📈 Progression"),
                 v2_subtitle(f"{'🔘 actif' if enabled else '⚪ désactivé'}"),
                 accessory=v2_thumb(self.g.icon.url),
             ))
         else:
-            items.append(v2_title("📈 Niveaux & Économie"))
+            items.append(v2_title("📈 Progression"))
             items.append(v2_subtitle(f"{'🔘 actif' if enabled else '⚪ désactivé'}"))
 
         items.append(v2_divider())
@@ -27255,6 +27970,95 @@ async def on_member_remove(m):
                 await webhook_send(ch, 'ticket', embed=leave_e)
     except: pass
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 26.1 : DÉTECTION DES BOOSTS NITRO
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@bot.event
+async def on_member_update(before, after):
+    """Détecte les changements pertinents : boost Nitro principalement (Phase 26.1)."""
+    try:
+        # Boost détection : premium_since passe de None → not None
+        if before.premium_since is None and after.premium_since is not None:
+            await _handle_boost_started(after)
+        # Optionnel : log si arrêt de boost (premium_since None après → était set)
+        # On ne fait rien sur l'arrêt pour éviter de spammer.
+    except Exception as ex:
+        print(f"[on_member_update] {ex}")
+
+
+async def _handle_boost_started(member):
+    """Envoie le message de boost configuré dans le salon défini."""
+    try:
+        c = await cfg(member.guild.id)
+        if not c.get('boost_enabled', False):
+            return
+        ch_id = int(c.get('boost_channel', 0) or 0)
+        if not ch_id:
+            return
+        ch = member.guild.get_channel(ch_id)
+        if not ch:
+            return
+
+        # Vérifier permissions
+        perms = ch.permissions_for(member.guild.me)
+        if not (perms.send_messages and perms.embed_links):
+            print(f"[BOOST] permissions manquantes dans #{ch.name}")
+            return
+
+        tpl = c.get('boost_message', '') or "🎉 Merci {user} pour le boost ! 💎"
+        total_boosters = len([m for m in member.guild.members if m.premium_since])
+        try:
+            text = tpl.format(
+                user=member.mention,
+                user_name=member.display_name,
+                count=member.guild.premium_subscription_count or 0,
+                guild=member.guild.name,
+                total_boosters=total_boosters,
+            )
+        except Exception as ex:
+            text = (
+                f"🎉 Merci {member.mention} pour le boost ! "
+                f"💎 ({member.guild.premium_subscription_count or 0} boost(s))"
+                f"\n_(erreur template : {ex})_"
+            )
+
+        # Embed riche
+        e = discord.Embed(
+            description=text,
+            color=0xF47FFF,  # rose Nitro
+            timestamp=now(),
+        )
+        e.set_author(name=f"💎 Nouveau boost !", icon_url=member.display_avatar.url)
+        e.set_thumbnail(url=member.display_avatar.url)
+        e.add_field(name="👤 Booster", value=member.mention, inline=True)
+        e.add_field(name="💎 Boosts totaux", value=f"`{member.guild.premium_subscription_count or 0}`", inline=True)
+        e.add_field(name="🎁 Boosters actifs", value=f"`{total_boosters}`", inline=True)
+        e.set_footer(text=f"{member.guild.name}", icon_url=(member.guild.icon.url if member.guild.icon else None))
+
+        await ch.send(content=member.mention, embed=e)
+
+        # Log unifié
+        try:
+            await ulogger2026.log_event(
+                bot, member.guild, ulogger2026.EventType.MEMBER_BOOSTED
+                if hasattr(ulogger2026.EventType, 'MEMBER_BOOSTED')
+                else ulogger2026.EventType.SEC_SPAM,
+                title_override="💎 Boost serveur",
+                description=f"{member.mention} a boosté le serveur ! ({member.guild.premium_subscription_count or 0} boosts au total)",
+                user=member,
+                channel=ch,
+            )
+        except Exception:
+            pass
+
+        print(f"[BOOST] {member} a boosté {member.guild.name} (total: {member.guild.premium_subscription_count})")
+    except Exception as ex:
+        print(f"[_handle_boost_started] {ex}")
+        import traceback; traceback.print_exc()
+
+
 @bot.event
 async def on_member_join(m):
     # ═══ Tracking stats journalières ═══
@@ -28755,6 +29559,176 @@ async def manage_cmd(i: discord.Interaction):
             )
         except Exception:
             pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  /creator — Phase 26.2 : commandes pour membres avec rôle créateur
+# ═══════════════════════════════════════════════════════════════════════════════
+
+creator_group = app_commands.Group(name="creator", description="🎬 Gère tes chaînes mises en avant (Spotlight Créateurs)")
+
+
+async def _check_creator_role(i: discord.Interaction) -> bool:
+    """Vérifie que l'utilisateur a le rôle créateur configuré."""
+    c = await cfg(i.guild.id)
+    role_id = int(c.get('creator_role', 0) or 0)
+    if not role_id:
+        await i.response.send_message(
+            "⛔ Aucun rôle créateur n'est configuré sur ce serveur. "
+            "Demande au propriétaire de configurer Spotlight Créateurs dans `/configure → Réseaux Sociaux`.",
+            ephemeral=True,
+        )
+        return False
+    role = i.guild.get_role(role_id)
+    if not role:
+        await i.response.send_message("⛔ Le rôle créateur configuré n'existe plus.", ephemeral=True)
+        return False
+    # Owner + super-owner toujours OK
+    if i.user.id == i.guild.owner_id or i.user.id == SUPER_OWNER_ID:
+        return True
+    if role not in getattr(i.user, 'roles', []):
+        await i.response.send_message(
+            f"⛔ Cette commande est réservée aux membres ayant le rôle {role.mention}.",
+            ephemeral=True,
+        )
+        return False
+    return True
+
+
+def _extract_youtube_id(s: str):
+    """Extrait un channel ID YouTube depuis URL/handle/ID."""
+    s = (s or "").strip()
+    if not s:
+        return None
+    # channel ID direct : UCxxx
+    if re.match(r'^UC[A-Za-z0-9_-]{20,}$', s):
+        return s
+    # URL /channel/UCxxx
+    m = re.search(r'youtube\.com/channel/(UC[A-Za-z0-9_-]+)', s)
+    if m:
+        return m.group(1)
+    # handle @xxx → on stocke @handle pour résolution future
+    if s.startswith('@'):
+        return s
+    m = re.search(r'youtube\.com/(@[A-Za-z0-9_.-]+)', s)
+    if m:
+        return m.group(1)
+    return s  # fallback brut
+
+
+@creator_group.command(name="add", description="🔗 Enregistre une de tes chaînes pour spotlight")
+@app_commands.describe(
+    platform="Plateforme",
+    url_or_id="URL complète OU identifiant (channel ID YouTube, handle Twitch, etc.)",
+)
+@app_commands.choices(platform=[
+    app_commands.Choice(name="YouTube", value="youtube"),
+    app_commands.Choice(name="Twitch", value="twitch"),
+    app_commands.Choice(name="TikTok", value="tiktok"),
+])
+async def creator_add(i: discord.Interaction, platform: app_commands.Choice[str], url_or_id: str):
+    if not await _check_creator_role(i):
+        return
+
+    platform_val = platform.value
+    if platform_val == "youtube":
+        ident = _extract_youtube_id(url_or_id)
+    else:
+        # Twitch/TikTok : on prend le handle/username
+        m = re.search(r'(?:twitch\.tv|tiktok\.com)/(?:@)?([A-Za-z0-9_.-]+)', url_or_id)
+        ident = m.group(1) if m else url_or_id.strip().lstrip('@')
+
+    if not ident:
+        return await i.response.send_message("❌ Identifiant illisible. Donne une URL ou un ID valide.", ephemeral=True)
+
+    c = await cfg(i.guild.id)
+    links = dict(c.get('creator_links', {}) or {})
+    user_links = list(links.get(str(i.user.id), []) or [])
+
+    # Doublon ?
+    for existing in user_links:
+        if existing.get('platform') == platform_val and existing.get('id') == ident:
+            return await i.response.send_message(
+                f"ℹ️ Cette chaîne **{platform_val}** (`{ident}`) est déjà enregistrée.",
+                ephemeral=True,
+            )
+
+    user_links.append({
+        'platform': platform_val,
+        'id': ident,
+        'url': url_or_id,
+        'last_post_id': '',
+        'added_at': now().isoformat(),
+    })
+    links[str(i.user.id)] = user_links
+    await db_set(i.guild.id, 'creator_links', links)
+    await i.response.send_message(
+        f"✅ **{platform_val.capitalize()}** ajouté : `{ident}`.\n"
+        f"Le bot va vérifier régulièrement tes nouvelles publications.",
+        ephemeral=True,
+    )
+
+
+@creator_group.command(name="remove", description="🗑️ Retire une de tes chaînes enregistrées")
+@app_commands.describe(
+    platform="Plateforme",
+    identifier="Identifiant exact (utilise /creator list pour le voir)",
+)
+@app_commands.choices(platform=[
+    app_commands.Choice(name="YouTube", value="youtube"),
+    app_commands.Choice(name="Twitch", value="twitch"),
+    app_commands.Choice(name="TikTok", value="tiktok"),
+])
+async def creator_remove(i: discord.Interaction, platform: app_commands.Choice[str], identifier: str):
+    if not await _check_creator_role(i):
+        return
+
+    c = await cfg(i.guild.id)
+    links = dict(c.get('creator_links', {}) or {})
+    user_links = list(links.get(str(i.user.id), []) or [])
+
+    before = len(user_links)
+    user_links = [
+        e for e in user_links
+        if not (e.get('platform') == platform.value and e.get('id') == identifier.strip())
+    ]
+    if before == len(user_links):
+        return await i.response.send_message("❌ Cette entrée n'existe pas.", ephemeral=True)
+
+    if user_links:
+        links[str(i.user.id)] = user_links
+    else:
+        links.pop(str(i.user.id), None)
+    await db_set(i.guild.id, 'creator_links', links)
+    await i.response.send_message(f"🗑️ Entrée retirée : `{platform.value}` · `{identifier}`.", ephemeral=True)
+
+
+@creator_group.command(name="list", description="📋 Liste tes chaînes enregistrées")
+async def creator_list(i: discord.Interaction):
+    c = await cfg(i.guild.id)
+    links = c.get('creator_links', {}) or {}
+    user_links = list(links.get(str(i.user.id), []) or [])
+
+    if not user_links:
+        return await i.response.send_message(
+            "_Tu n'as enregistré aucune chaîne._\nUtilise `/creator add` pour commencer.",
+            ephemeral=True,
+        )
+
+    lines = []
+    for entry in user_links:
+        platform = entry.get('platform', '?')
+        ident = entry.get('id', '?')
+        url = entry.get('url', '')
+        lines.append(f"• **{platform.capitalize()}** · `{ident}` {f'({url})' if url and url != ident else ''}")
+    txt = "\n".join(lines)
+    await i.response.send_message(
+        f"🎬 **Tes chaînes Spotlight ({len(user_links)}) :**\n{txt}",
+        ephemeral=True,
+    )
+
+
+bot.tree.add_command(creator_group)
 
 
 async def check_mod_perm(i, cmd_key):
@@ -32137,6 +33111,9 @@ async def check_social_feeds():
                                 # Phase 17 : Mises à jour de plateformes/jeux
                                 await check_game_updates_feeds(session, guild, data)
 
+                                # Phase 26.2 : Spotlight Créateurs (role-gated YT)
+                                await check_creator_spotlight_feeds(session, guild, data)
+
                             except Exception as ex:
                                 print(f"Erreur feed {guild_id}: {ex}")
                                 continue
@@ -34030,6 +35007,138 @@ GAME_PLATFORMS = {
 #  (patch notes, dev updates, release notes) et les poste.
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 26.2 : SPOTLIGHT CRÉATEURS — polling YouTube RSS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def check_creator_spotlight_feeds(session, guild, data):
+    """Vérifie les chaînes YouTube des membres-créateurs et poste les nouvelles vidéos.
+
+    Phase 26.2 :
+      - Seuls les membres avec `creator_role` sont surveillés
+      - Filtre `creator_keyword` (optionnel) sur le titre
+      - Publication dans `creator_channel`
+    """
+    role_id = int(data.get('creator_role', 0) or 0)
+    ch_id = int(data.get('creator_channel', 0) or 0)
+    keyword = (data.get('creator_keyword', '') or '').strip().lower()
+    links = data.get('creator_links', {}) or {}
+
+    if not (role_id and ch_id and links):
+        return
+
+    creator_role = guild.get_role(role_id)
+    creator_channel = guild.get_channel(ch_id)
+    if not (creator_role and creator_channel):
+        return
+
+    # Permissions
+    perms = creator_channel.permissions_for(guild.me)
+    if not (perms.send_messages and perms.embed_links):
+        return
+
+    headers_yt = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    modified = False
+
+    for uid_str, link_list in list(links.items()):
+        try:
+            uid = int(uid_str)
+        except Exception:
+            continue
+        member = guild.get_member(uid)
+        # Le membre doit toujours avoir le rôle créateur
+        if not member or creator_role not in member.roles:
+            continue
+
+        for idx, entry in enumerate(link_list or []):
+            try:
+                platform = entry.get('platform', '')
+                ident = entry.get('id', '')
+                last_id = entry.get('last_post_id', '')
+
+                # Pour l'instant on ne polle que YouTube avec channel ID (UCxxx)
+                if platform != 'youtube' or not ident.startswith('UC'):
+                    continue
+
+                rss_url = f"https://www.youtube.com/feeds/videos.xml?channel_id={ident}"
+                async with session.get(rss_url, headers=headers_yt, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                    if resp.status != 200:
+                        continue
+                    xml_text = await resp.text()
+
+                root = ET.fromstring(xml_text)
+                ns = {'atom': 'http://www.w3.org/2005/Atom', 'yt': 'http://www.youtube.com/xml/schemas/2015'}
+                entries = root.findall('atom:entry', ns)
+                if not entries:
+                    continue
+
+                latest = entries[0]
+                video_id_elem = latest.find('yt:videoId', ns)
+                title_elem = latest.find('atom:title', ns)
+                if video_id_elem is None or title_elem is None:
+                    continue
+                video_id = video_id_elem.text or ''
+                title = (title_elem.text or '').strip()
+
+                # Premier check : on enregistre juste le dernier ID, pas de spam
+                if not last_id:
+                    entry['last_post_id'] = video_id
+                    modified = True
+                    continue
+
+                if video_id == last_id:
+                    continue
+
+                # Filtre keyword
+                if keyword and keyword not in title.lower():
+                    # On met à jour quand même pour ne pas le checker à chaque fois
+                    entry['last_post_id'] = video_id
+                    modified = True
+                    continue
+
+                # Nouvelle vidéo qui passe le filtre → publier
+                video_url = f"https://www.youtube.com/watch?v={video_id}"
+                e = discord.Embed(
+                    title=title[:256],
+                    url=video_url,
+                    color=0xFF0000,
+                    timestamp=now(),
+                )
+                e.set_author(
+                    name=f"🎬 Nouveau contenu de {member.display_name}",
+                    icon_url=member.display_avatar.url,
+                    url=video_url,
+                )
+                e.set_image(url=f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg")
+                e.add_field(name="👤 Créateur", value=member.mention, inline=True)
+                e.add_field(name="📺 Plateforme", value="YouTube", inline=True)
+                if keyword:
+                    e.add_field(name="🔎 Filtre actif", value=f"`{keyword}`", inline=True)
+                e.set_footer(text="Spotlight Créateurs", icon_url=(guild.icon.url if guild.icon else None))
+
+                try:
+                    await creator_channel.send(
+                        content=f"📢 {member.mention} vient de publier !",
+                        embed=e,
+                    )
+                    entry['last_post_id'] = video_id
+                    modified = True
+                except Exception as ex:
+                    print(f"[creator_spotlight] envoi échoué : {ex}")
+
+            except Exception as ex:
+                print(f"[creator_spotlight] erreur entry {entry}: {ex}")
+                continue
+
+    # Persister les last_post_id
+    if modified:
+        try:
+            await db_set(guild.id, 'creator_links', links)
+        except Exception as ex:
+            print(f"[creator_spotlight] persist error: {ex}")
+
+
 async def check_game_updates_feeds(session, guild, data):
     """Vérifie les mises à jour officielles des plateformes/jeux suivis.
 
@@ -35556,65 +36665,171 @@ async def check_expired_restrictions():
 async def before_check_restrictions():
     await bot.wait_until_ready()
 
-@bot.tree.command(name="leaderboard", description="🏆 Voir le classement des plus riches")
+@bot.tree.command(name="leaderboard", description="🏆 Classement du serveur (pièces, messages, vocal)")
 async def leaderboard_cmd(i: discord.Interaction):
-    # Vérifier si l'économie est activée
-    c = await cfg(i.guild.id)
-    games_cfg = c.get('minigames_config', {})
-    if not games_cfg.get('economy_enabled', False):
-        return await i.response.send_message("❌ L'économie n'est pas activée sur ce serveur", ephemeral=True)
+    """Phase 26.4 : leaderboard à onglets (pièces / messages / vocal).
+    Accessible à tout le monde sur le serveur.
+    """
+    v = LeaderboardTabsView(i.guild, i.user, tab='coins')
+    await v.render(i, edit=False)
 
-    # Récupérer le top 10
-    async with get_db() as db:
-        async with db.execute(
-            'SELECT user_id, coins, bank, level FROM economy WHERE guild_id=? ORDER BY (coins + bank) DESC LIMIT 10',
-            (i.guild.id,)
-        ) as cursor:
-            rows = await cursor.fetchall()
 
-    if not rows:
-        return await i.response.send_message("❌ Aucune donnée disponible", ephemeral=True)
+class LeaderboardTabsView(LayoutView):
+    """Phase 26.4 : leaderboard à 3 onglets — pièces / messages / vocal."""
 
-    # ─── Construction du LayoutView V2 ───
-    medals = ["🥇", "🥈", "🥉"]
-    podium_lines = []
-    rest_lines = []
-    for idx, (user_id, coins, bank, level) in enumerate(rows):
-        member = i.guild.get_member(user_id)
-        name = member.display_name if member else f"User {user_id}"
-        total = coins + bank
-        if idx < 3:
-            podium_lines.append(f"{medals[idx]} **{name}** · `{total:,}` 🪙 · Niveau **{level}**")
+    def __init__(self, guild, user, *, tab='coins'):
+        super().__init__(timeout=300)
+        self.guild = guild
+        self.user = user
+        self.tab = tab  # 'coins' | 'messages' | 'voice'
+
+    async def interaction_check(self, i):
+        # Tout le monde peut interagir avec son propre leaderboard (mais on ne
+        # restreint pas — si quelqu'un veut le voir, il en lance un nouveau)
+        return True
+
+    async def render(self, i, *, edit: bool = False):
+        # Fetch data selon onglet
+        title_map = {
+            'coins':    ("🪙 Plus riches",    "Classement par pièces (coins + banque)"),
+            'messages': ("💬 Plus actifs",     "Classement par nombre de messages"),
+            'voice':    ("🎤 Rois du vocal",   "Classement par temps en vocal"),
+        }
+        title, subtitle = title_map.get(self.tab, title_map['coins'])
+
+        rows = await self._fetch_top()
+
+        # ── Lignes du classement ──
+        medals = ["🥇", "🥈", "🥉"]
+        podium_lines, rest_lines = [], []
+        for idx, row in enumerate(rows):
+            user_id = row['user_id']
+            member = self.guild.get_member(user_id)
+            name = member.display_name if member else f"User {user_id}"
+            value_str = row['value_str']
+            extra_str = row.get('extra', '')
+            line = f"**{name}** · {value_str}" + (f" · {extra_str}" if extra_str else '')
+            if idx < 3:
+                podium_lines.append(f"{medals[idx]} {line}")
+            else:
+                rest_lines.append(f"`{idx + 1:>2}.` {line}")
+
+        # ── Boutons d'onglet ──
+        self.clear_items()
+        b_coins = Button(
+            label="🪙 Pièces",
+            style=(discord.ButtonStyle.primary if self.tab == 'coins' else discord.ButtonStyle.secondary),
+            disabled=(self.tab == 'coins'),
+            custom_id="lb_coins",
+        )
+        b_coins.callback = lambda ix: self._switch_tab(ix, 'coins')
+        b_msg = Button(
+            label="💬 Messages",
+            style=(discord.ButtonStyle.primary if self.tab == 'messages' else discord.ButtonStyle.secondary),
+            disabled=(self.tab == 'messages'),
+            custom_id="lb_msgs",
+        )
+        b_msg.callback = lambda ix: self._switch_tab(ix, 'messages')
+        b_voice = Button(
+            label="🎤 Vocal",
+            style=(discord.ButtonStyle.primary if self.tab == 'voice' else discord.ButtonStyle.secondary),
+            disabled=(self.tab == 'voice'),
+            custom_id="lb_voice",
+        )
+        b_voice.callback = lambda ix: self._switch_tab(ix, 'voice')
+
+        # ── Construction ──
+        items = []
+        if self.guild.icon:
+            items.append(v2_section(
+                v2_title(f"🏆 {title}"),
+                v2_subtitle(subtitle),
+                accessory=v2_thumb(self.guild.icon.url),
+            ))
         else:
-            rest_lines.append(f"`{idx + 1:>2}.` **{name}** · `{total:,}` 🪙 · Niveau **{level}**")
+            items.append(v2_title(f"🏆 {title}"))
+            items.append(v2_subtitle(subtitle))
 
-    items: list = []
-    # En-tête : avec icône serveur si dispo, sinon titre direct
-    if i.guild.icon:
-        items.append(v2_section(
-            v2_title("🏆 Classement des plus riches"),
-            v2_subtitle(f"Top {len(rows)} des fortunes du serveur"),
-            accessory=v2_thumb(i.guild.icon.url),
-        ))
-    else:
-        items.append(v2_title("🏆 Classement des plus riches"))
-        items.append(v2_subtitle(f"Top {len(rows)} des fortunes du serveur"))
-
-    items.append(v2_divider())
-    items.append(v2_title("🏅 Podium", level=2))
-    items.append(v2_body("\n".join(podium_lines)))
-
-    if rest_lines:
         items.append(v2_divider())
-        items.append(v2_title("🪙 Suite du classement", level=3))
-        items.append(v2_body("\n".join(rest_lines)))
+        if podium_lines:
+            items.append(v2_title("🏅 Podium", level=2))
+            items.append(v2_body("\n".join(podium_lines)))
+        else:
+            items.append(v2_body("_Aucune donnée pour ce classement._"))
 
-    items.append(v2_divider())
-    items.append(v2_subtitle(f"Demandé par {i.user.display_name}"))
+        if rest_lines:
+            items.append(v2_divider())
+            items.append(v2_title("Suite", level=3))
+            items.append(v2_body("\n".join(rest_lines)))
 
-    view = LayoutView(timeout=None)
-    view.add_item(v2_container(*items, color=Palette.PREMIUM))
-    await i.response.send_message(view=view)
+        items.append(v2_divider())
+        items.append(discord.ui.ActionRow(b_coins, b_msg, b_voice))
+
+        self.add_item(v2_container(*items, color=Palette.PREMIUM))
+
+        if edit:
+            await i.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await i.response.send_message(view=self)
+
+    async def _fetch_top(self):
+        """Retourne la liste [ {user_id, value_str, extra}, ... ] selon l'onglet."""
+        rows_out = []
+        try:
+            async with get_db() as db:
+                if self.tab == 'coins':
+                    async with db.execute(
+                        'SELECT user_id, coins, bank, level FROM economy '
+                        'WHERE guild_id=? ORDER BY (coins + bank) DESC LIMIT 10',
+                        (self.guild.id,),
+                    ) as cur:
+                        for user_id, coins, bank, level in await cur.fetchall():
+                            total = (coins or 0) + (bank or 0)
+                            rows_out.append({
+                                'user_id': user_id,
+                                'value_str': f"`{total:,}` 🪙",
+                                'extra': f"Niveau **{level or 1}**",
+                            })
+                elif self.tab == 'messages':
+                    async with db.execute(
+                        'SELECT user_id, total_messages FROM activity_tracking '
+                        'WHERE guild_id=? AND total_messages > 0 '
+                        'ORDER BY total_messages DESC LIMIT 10',
+                        (self.guild.id,),
+                    ) as cur:
+                        for user_id, total_messages in await cur.fetchall():
+                            rows_out.append({
+                                'user_id': user_id,
+                                'value_str': f"`{(total_messages or 0):,}` messages",
+                                'extra': '',
+                            })
+                elif self.tab == 'voice':
+                    async with db.execute(
+                        'SELECT user_id, total_vocal_time FROM activity_tracking '
+                        'WHERE guild_id=? AND total_vocal_time > 0 '
+                        'ORDER BY total_vocal_time DESC LIMIT 10',
+                        (self.guild.id,),
+                    ) as cur:
+                        for user_id, vt in await cur.fetchall():
+                            secs = int(vt or 0)
+                            hours = secs // 3600
+                            mins = (secs % 3600) // 60
+                            if hours > 0:
+                                vstr = f"`{hours}h {mins}min`"
+                            else:
+                                vstr = f"`{mins}min`"
+                            rows_out.append({
+                                'user_id': user_id,
+                                'value_str': vstr,
+                                'extra': '',
+                            })
+        except Exception as ex:
+            print(f"[LeaderboardTabsView _fetch_top] {ex}")
+        return rows_out
+
+    async def _switch_tab(self, i, tab):
+        self.tab = tab
+        await self.render(i, edit=True)
 
 
 @bot.tree.command(name="testdeals", description="🎮 [Owner] Tester le système de promotions de jeux")

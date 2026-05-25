@@ -237,6 +237,79 @@ async def set_enabled_categories(guild_id: int, categories: set[str]) -> None:
 
 
 # =============================================================================
+# PHASE 26.3 : EXCLUSIONS PAR EVENEMENT + EVENEMENTS DESACTIVES PRECISEMENT
+# =============================================================================
+
+async def get_disabled_events(guild_id: int) -> set[str]:
+    """Liste des event_type DESACTIVES specifiquement (en plus des categories)."""
+    p = _cfg_path(guild_id)
+    if not p.exists():
+        return set()
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return set(data.get("disabled_events", []) or [])
+    except Exception:
+        return set()
+
+
+async def set_disabled_events(guild_id: int, events: set[str]) -> None:
+    """Persiste la liste des event_type desactives."""
+    p = _cfg_path(guild_id)
+    try:
+        data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except Exception:
+        data = {}
+    data["disabled_events"] = sorted(events)
+    data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+async def get_role_exclusions(guild_id: int) -> dict:
+    """Retourne { event_type_str: [role_id, ...] } — roles epargnes pour chaque event."""
+    p = _cfg_path(guild_id)
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        raw = data.get("role_exclusions", {}) or {}
+        # Sanitize : convertir les role_id en int
+        out = {}
+        for k, v in raw.items():
+            if isinstance(v, list):
+                out[str(k)] = [int(x) for x in v if str(x).lstrip('-').isdigit()]
+        return out
+    except Exception:
+        return {}
+
+
+async def set_role_exclusions(guild_id: int, exclusions: dict) -> None:
+    """Persiste { event_type_str: [role_id, ...] }."""
+    p = _cfg_path(guild_id)
+    try:
+        data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except Exception:
+        data = {}
+    sanitized = {}
+    for k, v in (exclusions or {}).items():
+        if isinstance(v, list):
+            sanitized[str(k)] = [int(x) for x in v if str(x).lstrip('-').isdigit()]
+    data["role_exclusions"] = sanitized
+    data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _user_has_excluded_role(user, excluded_role_ids: list[int]) -> bool:
+    """True si l'utilisateur a au moins l'un des roles dans la liste d'exclusion."""
+    if not user or not excluded_role_ids:
+        return False
+    try:
+        user_role_ids = {r.id for r in getattr(user, 'roles', []) or []}
+        return any(int(rid) in user_role_ids for rid in excluded_role_ids)
+    except Exception:
+        return False
+
+
+# =============================================================================
 # BUILD EVENT VIEW
 # =============================================================================
 
@@ -347,6 +420,25 @@ async def log_event(
             enabled = await get_enabled_categories(guild.id)
             if meta["cat"] not in enabled:
                 return None
+
+        # Phase 26.3 : event-type desactive specifiquement ?
+        try:
+            disabled = await get_disabled_events(guild.id)
+            if event_type.value in disabled:
+                return None
+        except Exception:
+            pass
+
+        # Phase 26.3 : roles epargnes ?
+        try:
+            exclusions = await get_role_exclusions(guild.id)
+            excluded_ids = exclusions.get(event_type.value, []) or []
+            if excluded_ids:
+                # Si user OU moderator a un role epargne, on skippe le log
+                if _user_has_excluded_role(user, excluded_ids) or _user_has_excluded_role(moderator, excluded_ids):
+                    return None
+        except Exception:
+            pass
 
         embed = build_log_embed(
             event_type,
