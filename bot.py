@@ -3448,7 +3448,26 @@ class MainPanel(View):
     
     @discord.ui.button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger, row=1)
     async def close(self, i, b):
-        await i.message.delete()
+        # Phase 3.9 fix : i.message.delete() ne marche PAS sur les messages éphémères
+        # et ne ack pas l'interaction → "Échec de l'interaction"
+        # Pattern bulletproof : edit_message (ack + clear UI), fallback defer
+        try:
+            await i.response.edit_message(
+                content="✅ Configuration fermée. Tu peux fermer ce message via *Dismiss*.",
+                embed=None, embeds=[], view=None, attachments=[],
+            )
+        except discord.InteractionResponded:
+            try:
+                await i.edit_original_response(content="✅ Fermé", embed=None, view=None)
+            except Exception:
+                pass
+        except Exception as ex:
+            print(f"[V1 close] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.defer()
+            except Exception:
+                pass
 
 
 class MainPanelV2(LayoutView):
@@ -3588,10 +3607,25 @@ class MainPanelV2(LayoutView):
             await i.response.edit_message(embed=emb, view=v, attachments=[])
 
     async def _close(self, i):
+        # Phase 3.9 fix : i.message.delete() échoue silencieusement sur ephemeral
+        # et cause "Échec de l'interaction". Pattern bulletproof :
         try:
-            await i.message.delete()
-        except Exception:
-            pass
+            await i.response.edit_message(
+                content="✅ Configuration fermée. Tu peux fermer ce message via *Dismiss*.",
+                embed=None, embeds=[], view=None, attachments=[],
+            )
+        except discord.InteractionResponded:
+            try:
+                await i.edit_original_response(content="✅ Fermé", embed=None, view=None)
+            except Exception:
+                pass
+        except Exception as ex:
+            print(f"[MainPanelV2 _close] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.defer()
+            except Exception:
+                pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

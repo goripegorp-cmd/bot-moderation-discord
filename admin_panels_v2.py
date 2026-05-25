@@ -197,10 +197,26 @@ class AdminMasterPanelV2(_OwnerView):
         await BackupPanelV2(self.owner, self.guild).render_to(i)
 
     async def _cb_close(self, i: discord.Interaction):
+        # Phase 3.9 fix : i.message.delete() sur ephemeral échoue silencieusement
+        # ET ne ack pas l'interaction → "Échec de l'interaction" en rouge.
+        # Pattern bulletproof : edit_message (ack + clear UI) en premier.
         try:
-            await i.message.delete()
-        except (discord.NotFound, discord.HTTPException):
-            await i.response.defer()
+            await i.response.edit_message(
+                content="✅ Configuration fermée. Tu peux fermer ce message via *Dismiss*.",
+                embed=None, embeds=[], view=None, attachments=[],
+            )
+        except discord.InteractionResponded:
+            try:
+                await i.edit_original_response(content="✅ Fermé", embed=None, view=None)
+            except Exception:
+                pass
+        except Exception as ex:
+            print(f"[AdminMasterPanelV2 _cb_close] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.defer()
+            except Exception:
+                pass
 
 
 def _summary_community(cfg: CommunityConfig) -> str:
