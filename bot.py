@@ -116,6 +116,22 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 #  👑 SUPER-OWNER — accès illimité partout (Phase 3.8 : extracté en constante)
 # ═══════════════════════════════════════════════════════════════════════════════
 SUPER_OWNER_ID = 781205382923288593  # GoRipe
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  🔍 KEYWORD FILTER — Phase 20 (filtre par mot-clé pour streams/vidéos)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _matches_keyword_filter(title: str, keyword_filter: str) -> bool:
+    """True si le titre contient le mot-clé filtre (case-insensitive).
+
+    Si keyword_filter est vide → toujours True (pas de filtre).
+    """
+    if not keyword_filter:
+        return True
+    if not title:
+        return False
+    return keyword_filter.lower().strip() in title.lower()
 spam_tracker = {}
 voice_join_tracker = {}  # {(guild_id, user_id): datetime} - pour tracker le temps en vocal
 
@@ -4438,13 +4454,23 @@ class DelegationThresholdModal(Modal):
                 c, self.delegation_id, activity_threshold_days=threshold,
             )
             await db_set(self.g.id, delegations2026.CONFIG_KEY, c.get(delegations2026.CONFIG_KEY, []))
+            # Re-render le panel parent (le modal était attaché à un message ephemeral du panel)
             v = DelegationConfigPanelV2(self.u, self.g, self.delegation_id)
-            await v.render_to(i, edit=True)
+            try:
+                await v.render_to(i, edit=True)
+            except discord.InteractionResponded:
+                # Si déjà répondu pour une raison X, fallback simple
+                try:
+                    await i.followup.send(f"✅ Seuil mis à `{threshold}` jours.", ephemeral=True)
+                except Exception:
+                    pass
         except Exception as ex:
             print(f"[DelegationThresholdModal] {ex}")
             try:
                 if not i.response.is_done():
                     await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+                else:
+                    await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
             except Exception:
                 pass
 
@@ -11817,25 +11843,42 @@ class AdsYouTubePanel(View):
 class AdsYouTubeAddModal(Modal, title="➕ Ajouter une chaîne YouTube"):
     name = TextInput(label="Nom de la chaîne", placeholder="Ex: MrBeast", max_length=50)
     channel_id = TextInput(label="ID de la chaîne YouTube", placeholder="UCX6OQ3DkcsbYNE6H8uQQuVA", max_length=30)
-    
+    # Phase 20 : filtre mot-clé optionnel
+    keyword_filter = TextInput(
+        label="Mot-clé filtre (optionnel)",
+        placeholder="Ex: [RellSeas] — ne poste que si le titre contient ce mot",
+        max_length=50,
+        required=False,
+    )
+
     def __init__(self, g, u):
         super().__init__()
         self.g = g
         self.u = u
-    
+
     async def on_submit(self, i):
         c = await cfg(self.g.id)
         feeds = c.get('ads_youtube_feeds', [])
-        
+
         # Vérifier si déjà ajouté
         for f in feeds:
             if isinstance(f, dict) and f.get('id') == self.channel_id.value:
                 return await i.response.send_message("❌ Cette chaîne est déjà ajoutée!", ephemeral=True)
-        
+
         # Demander le salon (paginé)
-        new_feed = {'name': self.name.value, 'id': self.channel_id.value}
+        new_feed = {
+            'name': self.name.value,
+            'id': self.channel_id.value,
+        }
+        kw = (self.keyword_filter.value or '').strip()
+        if kw:
+            new_feed['keyword_filter'] = kw
         v = AdsFeedChannelPaginatedView(self.u, self.g, new_feed, 'ads_youtube_feeds')
-        await i.response.send_message("📍 Dans quel salon publier les vidéos de cette chaîne ?", view=v, ephemeral=True)
+        kw_note = f"\n🔍 Filtre actif : titre doit contenir **`{kw}`**" if kw else ""
+        await i.response.send_message(
+            f"📍 Dans quel salon publier les vidéos de cette chaîne ?{kw_note}",
+            view=v, ephemeral=True,
+        )
 
 class AdsYouTubeChannelSelectView(View):
     def __init__(self, u, g, opts, feed_data):
@@ -11949,29 +11992,41 @@ class AdsTwitchPanel(View):
 
 class AdsTwitchAddModal(Modal, title="➕ Ajouter un streamer Twitch"):
     username = TextInput(label="Nom d'utilisateur Twitch", placeholder="Ex: ninja", max_length=30)
-    
+    # Phase 20 : filtre mot-clé optionnel
+    keyword_filter = TextInput(
+        label="Mot-clé filtre (optionnel)",
+        placeholder="Ex: [RellSeas] — ne poste que si le titre contient ce mot",
+        max_length=50,
+        required=False,
+    )
+
     def __init__(self, g, u):
         super().__init__()
         self.g = g
         self.u = u
-    
+
     async def on_submit(self, i):
         c = await cfg(self.g.id)
         feeds = c.get('ads_twitch_feeds', [])
-        
+
         username = self.username.value.lower().strip()
-        
-        # Vérifier si déjà ajouté
+
         for f in feeds:
             if isinstance(f, dict) and f.get('username') == username:
                 return await i.response.send_message("❌ Ce streamer est déjà ajouté!", ephemeral=True)
             elif isinstance(f, str) and f == username:
                 return await i.response.send_message("❌ Ce streamer est déjà ajouté!", ephemeral=True)
-        
-        # Demander le salon (paginé)
+
         new_feed = {'username': username}
+        kw = (self.keyword_filter.value or '').strip()
+        if kw:
+            new_feed['keyword_filter'] = kw
         v = AdsFeedChannelPaginatedView(self.u, self.g, new_feed, 'ads_twitch_feeds')
-        await i.response.send_message("📍 Dans quel salon publier les lives de ce streamer ?", view=v, ephemeral=True)
+        kw_note = f"\n🔍 Filtre actif : titre du stream doit contenir **`{kw}`**" if kw else ""
+        await i.response.send_message(
+            f"📍 Dans quel salon publier les lives de ce streamer ?{kw_note}",
+            view=v, ephemeral=True,
+        )
 
 class AdsTwitchChannelSelectView(View):
     def __init__(self, u, g, opts, feed_data):
@@ -12084,29 +12139,41 @@ class AdsTikTokPanel(View):
 
 class AdsTikTokAddModal(Modal, title="➕ Ajouter un créateur TikTok"):
     username = TextInput(label="Nom d'utilisateur TikTok (sans @)", placeholder="Ex: khaby.lame", max_length=50)
-    
+    # Phase 20 : filtre mot-clé optionnel
+    keyword_filter = TextInput(
+        label="Mot-clé filtre (optionnel)",
+        placeholder="Ex: [RellSeas] — ne poste que si le titre contient ce mot",
+        max_length=50,
+        required=False,
+    )
+
     def __init__(self, g, u):
         super().__init__()
         self.g = g
         self.u = u
-    
+
     async def on_submit(self, i):
         c = await cfg(self.g.id)
         feeds = c.get('ads_tiktok_feeds', [])
-        
+
         username = self.username.value.lower().strip().lstrip('@')
-        
-        # Vérifier si déjà ajouté
+
         for f in feeds:
             if isinstance(f, dict) and f.get('username') == username:
                 return await i.response.send_message("❌ Ce créateur est déjà ajouté!", ephemeral=True)
             elif isinstance(f, str) and f == username:
                 return await i.response.send_message("❌ Ce créateur est déjà ajouté!", ephemeral=True)
-        
-        # Demander le salon (paginé)
+
         new_feed = {'username': username}
+        kw = (self.keyword_filter.value or '').strip()
+        if kw:
+            new_feed['keyword_filter'] = kw
         v = AdsFeedChannelPaginatedView(self.u, self.g, new_feed, 'ads_tiktok_feeds')
-        await i.response.send_message(f"📍 Dans quel salon publier les vidéos de **@{username}** ?", view=v, ephemeral=True)
+        kw_note = f"\n🔍 Filtre actif : titre doit contenir **`{kw}`**" if kw else ""
+        await i.response.send_message(
+            f"📍 Dans quel salon publier les vidéos de **@{username}** ?{kw_note}",
+            view=v, ephemeral=True,
+        )
 
 class AdsTikTokChannelSelectView(View):
     def __init__(self, u, g, opts, feed_data):
@@ -23671,6 +23738,67 @@ async def send_compact_afk_notification(channel, members, days, recovery_mention
 #                           🔄 TÂCHE AUTOMATIQUE INACTIVITÉ
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  🧹 CLEANUP AUTO DES DB ANCIENNES (Phase 20)
+#
+#  Pour éviter que les tables grossissent indéfiniment (RAM + disque) :
+#  - member_activity : prune > 30 jours (lots de writes, juste pour stats)
+#  - security_logs : prune > 90 jours (audit trail mais pas éternel)
+#  - posted_deals expirés : déjà géré ailleurs
+#  - tracking_layer : prune_old(180j) pour les entries deleted
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@tasks.loop(hours=24)
+async def cleanup_old_db_data():
+    """Tâche journalière qui nettoie les données anciennes pour libérer ressources."""
+    if not bot.is_ready():
+        return
+    try:
+        deleted_total = 0
+        async with get_db() as db:
+            # 1. member_activity > 30 jours
+            try:
+                cur = await db.execute(
+                    "DELETE FROM member_activity WHERE created_at < datetime('now', '-30 days')"
+                )
+                deleted_total += cur.rowcount or 0
+                await db.commit()
+            except Exception as ex:
+                print(f"[cleanup member_activity] {ex}")
+
+            # 2. security_logs > 90 jours
+            try:
+                cur = await db.execute(
+                    "DELETE FROM security_logs WHERE created_at < datetime('now', '-90 days')"
+                )
+                deleted_total += cur.rowcount or 0
+                await db.commit()
+            except Exception as ex:
+                print(f"[cleanup security_logs] {ex}")
+
+            # 3. posted_deals expirés > 30 jours
+            try:
+                cur = await db.execute(
+                    "DELETE FROM posted_deals WHERE expired=1 AND last_seen < datetime('now', '-30 days')"
+                )
+                deleted_total += cur.rowcount or 0
+                await db.commit()
+            except Exception as ex:
+                print(f"[cleanup posted_deals] {ex}")
+
+        # 4. tracking_layer : prune les entries deleted > 180j (par guild)
+        try:
+            for guild in bot.guilds:
+                pruned = await tracking2026.prune_old(guild.id, max_days=180)
+                deleted_total += pruned
+        except Exception as ex:
+            print(f"[cleanup tracking_layer] {ex}")
+
+        print(f"[cleanup_old_db_data] {deleted_total} ligne(s) supprimées au total")
+    except Exception as ex:
+        print(f"[cleanup_old_db_data] erreur globale : {ex}")
+
+
 @tasks.loop(hours=24)
 async def check_afk_automatic():
     """Vérifie automatiquement l'inactivité des membres chaque jour"""
@@ -26128,7 +26256,11 @@ async def on_ready():
     # Lancer la tâche de vérification AFK automatique
     if not check_afk_automatic.is_running():
         check_afk_automatic.start()
-    
+
+    # Phase 20 : tâche journalière de cleanup DB
+    if not cleanup_old_db_data.is_running():
+        cleanup_old_db_data.start()
+
     # Lancer la tâche des giveaways
     if not check_giveaways.is_running():
         check_giveaways.start()
@@ -31167,6 +31299,12 @@ async def check_youtube_feeds(session, guild, data):
                         pass
                     continue
 
+                # Phase 20 : filtre mot-clé
+                kw_filter = feed.get('keyword_filter', '') if isinstance(feed, dict) else ''
+                if kw_filter and not _matches_keyword_filter(title, kw_filter):
+                    print(f"[YouTube] {channel_name} : '{title[:60]}' skip (filtre '{kw_filter}' non match)")
+                    continue
+
                 posts_to_publish.append((video_id, title, description, video_url))
 
             # Plus ancien en premier (le plus recent finit en bas du salon)
@@ -31325,9 +31463,13 @@ async def check_twitch_feeds(session, guild, data):
                 except Exception:
                     pass
             
-            if is_live:
+            # Phase 20 : filtre par mot-clé sur le titre du stream
+            kw_filter = feed_item.get('keyword_filter', '') if isinstance(feed_item, dict) else ''
+            keyword_matches = _matches_keyword_filter(stream_title or '', kw_filter)
+
+            if is_live and keyword_matches:
                 mark_live_still_active(cache_key)
-                
+
                 if await should_announce_live(cache_key):
                     stream_url = f"https://www.twitch.tv/{username}"
                     e = discord.Embed(color=0x9146FF, url=stream_url)
@@ -31350,6 +31492,10 @@ async def check_twitch_feeds(session, guild, data):
                     _live_msg = await webhook_send(notif_channel, 'twitch_live', embed=e)
                     await mark_live_announced(cache_key, guild.id, 'twitch', username, message_id=_live_msg.id if _live_msg else 0, live_channel_id=notif_channel.id)
             else:
+                # Phase 20 : si live mais keyword absent du titre → considéré comme ended
+                # (déclenche delete du message s'il avait été posté)
+                if is_live and not keyword_matches:
+                    print(f"[Twitch] {username} live mais titre ne match pas filtre '{kw_filter}' → close")
                 await check_live_ended(cache_key, guild.id, 'twitch', username)
             
             await asyncio.sleep(1)
@@ -31398,18 +31544,29 @@ async def check_tiktok_feeds(session, guild, data):
                             # TikTok live détection via JSON-LD ou métadonnées
                             is_live = '"isLiveBroadcast":true' in html or '"liveRoom"' in html or 'LiveRoom' in html
                             
-                            if is_live:
+                            # Phase 20 : extraire le titre AVANT la vérif is_live pour pouvoir filtrer
+                            live_title_early = None
+                            try:
+                                tm = re.search(r'"title"\s*:\s*"([^"]{2,200})"', html)
+                                if tm:
+                                    live_title_early = tm.group(1).encode().decode('unicode_escape', errors='ignore')
+                            except Exception:
+                                pass
+                            kw_filter_tk = feed_item.get('keyword_filter', '') if isinstance(feed_item, dict) else ''
+                            keyword_matches_tk = _matches_keyword_filter(live_title_early or '', kw_filter_tk)
+
+                            if is_live and keyword_matches_tk:
                                 mark_live_still_active(live_cache_key)
 
                                 if await should_announce_live(live_cache_key):
                                     tiktok_live_url = f"https://www.tiktok.com/@{username}/live"
 
                                     # Extraire le titre du live et la cover
-                                    live_title = None
+                                    live_title = live_title_early
                                     live_cover = None
                                     try:
                                         title_m = re.search(r'"title"\s*:\s*"([^"]{2,200})"', html)
-                                        if title_m:
+                                        if title_m and not live_title:
                                             live_title = title_m.group(1).encode().decode('unicode_escape', errors='ignore')
                                         cover_m = re.search(r'"cover"\s*:\s*\{[^}]*"url_list"\s*:\s*\["([^"]+)"', html)
                                         if cover_m:
@@ -31451,6 +31608,9 @@ async def check_tiktok_feeds(session, guild, data):
                                     _live_msg = await webhook_send(live_channel, 'tiktok_live', embed=e)
                                     await mark_live_announced(live_cache_key, guild.id, 'tiktok', username, message_id=_live_msg.id if _live_msg else 0, live_channel_id=live_channel.id)
                             else:
+                                # Phase 20 : si live mais keyword absent → considéré ended
+                                if is_live and not keyword_matches_tk:
+                                    print(f"[TikTok] @{username} live mais titre ne match pas '{kw_filter_tk}' → close")
                                 await check_live_ended(live_cache_key, guild.id, 'tiktok', username)
                 except:
                     pass  # Erreur réseau → ne PAS toucher au cache
@@ -31550,7 +31710,13 @@ async def check_tiktok_feeds(session, guild, data):
                     valid_descs = [d for d in all_descs if not any(kw in d.lower() for kw in ['abonné', 'follower', 'following', 'j\'aime', 'likes'])]
                     if valid_descs:
                         video_title = valid_descs[0][:200]
-                
+
+                # Phase 20 : filtre mot-clé
+                kw_filter_tk_vid = feed_item.get('keyword_filter', '') if isinstance(feed_item, dict) else ''
+                if kw_filter_tk_vid and not _matches_keyword_filter(video_title or '', kw_filter_tk_vid):
+                    print(f"[TikTok] @{username} vidéo skip (filtre '{kw_filter_tk_vid}' non match)")
+                    continue
+
                 video_url = f"https://www.tiktok.com/@{username}/video/{latest_video_id}"
 
                 tk_avatar = await fetch_avatar_url('tiktok', username, session)
