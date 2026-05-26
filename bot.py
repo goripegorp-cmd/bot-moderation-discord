@@ -53452,12 +53452,14 @@ async def alliance_category_cmd(
             c = await cfg(i.guild.id)
             cur_id = int(c.get('alliance_category', 0) or 0)
             cur_cat = i.guild.get_channel(cur_id) if cur_id else None
+            cur_label = (
+                cur_cat.mention if cur_cat
+                else "_Aucune configurée_ (le bot créera `🤝 Alliances` à la 1re alliance)"
+            )
             return await _safe_followup(
                 i,
                 content=(
-                    f"🤝 **Catégorie alliances actuelle :** "
-                    f"{cur_cat.mention if cur_cat else '_Aucune configurée_ (le bot créera "
-                    f"`🤝 Alliances` à la 1re alliance)_'}\n\n"
+                    f"🤝 **Catégorie alliances actuelle :** {cur_label}\n\n"
                     f"_Pour la changer : `/alliance_category category:#ta-catégorie`._"
                 ),
             )
