@@ -1463,6 +1463,30 @@ async def db_init():
             PRIMARY KEY (guild_id, user_id, month)
         )''')
 
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 47.3 — Persistent message cleanup (survie aux redémarrages)
+        # delete_after natif Discord meurt si le bot crash → messages restent.
+        # Cette table garde la trace de tous les messages a supprimer + un loop
+        # 5 min + boot recovery rattrapent les orphelins.
+        # ═══════════════════════════════════════════════════════════════════
+        await db.execute('''CREATE TABLE IF NOT EXISTS event_message_cleanup (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            channel_id INTEGER,
+            message_id INTEGER,
+            expires_at DATETIME,
+            reason TEXT,
+            deleted INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_msg_cleanup_expires "
+                "ON event_message_cleanup(deleted, expires_at)"
+            )
+        except Exception:
+            pass
+
         # Indexes Phase 47
         for _p47_idx in [
             "CREATE INDEX IF NOT EXISTS idx_season_progress_season ON season_progress(season_id, points DESC)",
@@ -9339,8 +9363,13 @@ async def personal_event_dispatcher():
                             embed=intro_embed,
                             view=v,
                             allowed_mentions=discord.AllowedMentions(users=[target], roles=False, everyone=False),
-                            delete_after=600,  # 10 min
+                            delete_after=600,  # 10 min (natif)
                         )
+                        # Phase 47.3 : backup persistant DB pour survivre aux restarts bot
+                        try:
+                            await _register_for_cleanup(ch_msg, 600, 'personal_event')
+                        except Exception as _ex:
+                            print(f"[personal event register cleanup] {_ex}")
                         async with get_db() as db:
                             await db.execute(
                                 'UPDATE personal_events_log SET channel_id=?, channel_message_id=? WHERE id=?',
@@ -35098,6 +35127,15 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready _run_failsafe_once boot] {ex}")
 
+    # Phase 47.3 : persistent cleanup des messages d'events expirés
+    if not persistent_msg_cleaner.is_running():
+        persistent_msg_cleaner.start()
+    # Boot recovery : supprimer tous les messages expirés pendant le downtime
+    try:
+        await _run_persistent_cleanup_once()
+    except Exception as ex:
+        print(f"[on_ready _run_persistent_cleanup_once boot] {ex}")
+
     # Phase 46 : Game Night vocal hebdo + failsafe
     if not game_night_dispatcher.is_running():
         game_night_dispatcher.start()
@@ -45867,11 +45905,12 @@ async def _notify_achievement_unlock(guild_id: int, user_id: int, ach):
                 )
                 pub.set_thumbnail(url=member.display_avatar.url)
                 pub.set_footer(text="Hauts faits · /achievements")
-                await ch.send(
+                ach_msg = await ch.send(
                     embed=pub,
                     allowed_mentions=discord.AllowedMentions.none(),  # TOS-safe
                     delete_after=LIFETIME_ACH,
                 )
+                await _register_for_cleanup(ach_msg, LIFETIME_ACH, 'achievement_public')
         except Exception as ex:
             print(f"[_notify_achievement_unlock public ach={ach.id}] {ex}")
 
@@ -46763,6 +46802,111 @@ def _schedule_delete(message, delay_seconds: int):
         asyncio.create_task(_schedule_msg_delete(message, delay_seconds))
     except Exception as ex:
         print(f"[_schedule_delete] {ex}")
+
+
+# ─── Phase 47.3 : delete persistant (survit aux redémarrages bot) ─────────────
+
+
+async def _register_for_cleanup(message, delay_seconds: int, reason: str = 'event'):
+    """Enregistre un message en DB pour suppression différée garantie.
+
+    À utiliser EN PLUS du delete_after natif Discord. Si le bot redémarre
+    pendant l'attente, le loop persistent_msg_cleaner prend le relais.
+
+    À appeler systématiquement après chaque send() avec delete_after sur
+    un message d'event (> 1h surtout).
+    """
+    if message is None:
+        return
+    try:
+        expires_at = (datetime.now(timezone.utc) + timedelta(seconds=int(delay_seconds))).isoformat()
+        guild_id = message.guild.id if message.guild else 0
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO event_message_cleanup(guild_id, channel_id, message_id, expires_at, reason) "
+                "VALUES(?,?,?,?,?)",
+                (guild_id, message.channel.id, message.id, expires_at, reason),
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[_register_for_cleanup] {ex}")
+
+
+async def _send_and_register(channel, delay_seconds: int, reason: str = 'event', **send_kwargs):
+    """Send + delete_after + register en DB. Helper one-shot pour les events.
+
+    Usage : msg = await _send_and_register(channel, 3600, 'daily_riddle', embed=e, view=v)
+    """
+    try:
+        # Forcer delete_after natif aussi (rapide si bot reste up)
+        send_kwargs['delete_after'] = delay_seconds
+        msg = await channel.send(**send_kwargs)
+        # Backup persistant DB
+        await _register_for_cleanup(msg, delay_seconds, reason)
+        return msg
+    except Exception as ex:
+        print(f"[_send_and_register reason={reason}] {ex}")
+        return None
+
+
+async def _run_persistent_cleanup_once():
+    """Scan tous les messages expirés et tente la suppression. Appelé au boot
+    et toutes les 5 min via persistent_msg_cleaner.
+    """
+    try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, guild_id, channel_id, message_id FROM event_message_cleanup "
+                "WHERE deleted=0 AND expires_at < ? LIMIT 100",
+                (now_iso,),
+            ) as cur:
+                rows = await cur.fetchall()
+        if not rows:
+            return
+        deleted_count = 0
+        for rid, gid, ch_id, msg_id in rows:
+            try:
+                guild = bot.get_guild(int(gid)) if gid else None
+                ch = guild.get_channel(int(ch_id)) if guild else None
+                if ch and msg_id:
+                    try:
+                        msg = await ch.fetch_message(int(msg_id))
+                        if msg:
+                            await msg.delete()
+                            deleted_count += 1
+                    except (discord.NotFound, discord.Forbidden):
+                        # Déjà supprimé OU pas la perm → marque deleted=1 pour éviter retry
+                        pass
+                    except Exception as ex:
+                        print(f"[_run_persistent_cleanup_once msg={msg_id}] {ex}")
+            except Exception:
+                pass
+            # Marker deleted=1 quoi qu'il arrive (sinon boucle infinie)
+            try:
+                async with get_db() as db:
+                    await db.execute(
+                        "UPDATE event_message_cleanup SET deleted=1 WHERE id=?",
+                        (rid,),
+                    )
+                    await db.commit()
+            except Exception:
+                pass
+        if deleted_count:
+            print(f"[PERSIST CLEANUP] deleted {deleted_count} expired event msgs")
+    except Exception as ex:
+        print(f"[_run_persistent_cleanup_once] {ex}")
+
+
+@tasks.loop(minutes=5)
+async def persistent_msg_cleaner():
+    """Loop persistente : nettoie les messages d'events expirés toutes les 5 min."""
+    await _run_persistent_cleanup_once()
+
+
+@persistent_msg_cleaner.before_loop
+async def _persistent_cleanup_wait():
+    await bot.wait_until_ready()
 
 
 async def _p41_open_daily(i: discord.Interaction):
@@ -48254,6 +48398,8 @@ async def _post_daily_riddle(guild) -> bool:
                 allowed_mentions=discord.AllowedMentions.none(),
                 delete_after=LIFETIME,
             )
+            # Phase 47.3 : backup persistant DB
+            await _register_for_cleanup(msg, LIFETIME, 'daily_riddle')
         except Exception as ex:
             print(f"[_post_daily_riddle send] {ex}")
             return False
@@ -48821,6 +48967,7 @@ async def _post_evening_ritual(guild) -> bool:
                 allowed_mentions=discord.AllowedMentions.none(),
                 delete_after=LIFETIME,
             )
+            await _register_for_cleanup(msg, LIFETIME, 'evening_ritual')
         except Exception as ex:
             print(f"[_post_evening_ritual send] {ex}")
             return False
@@ -48899,11 +49046,12 @@ async def _post_morning_recap(guild) -> bool:
             timestamp=datetime.now(timezone.utc),
         )
         try:
-            await ch.send(
+            msg_recap = await ch.send(
                 embed=e,
                 allowed_mentions=discord.AllowedMentions.none(),
                 delete_after=LIFETIME,
             )
+            await _register_for_cleanup(msg_recap, LIFETIME, 'morning_recap')
         except Exception as ex:
             print(f"[_post_morning_recap send] {ex}")
             return False
@@ -49029,12 +49177,13 @@ async def _start_tag_royale(guild) -> bool:
         )
         e.set_footer(text=f"Tag Royale #{tr_id} · Niveau 1/4")
         try:
-            await ch.send(
+            tr_msg = await ch.send(
                 content=f"🔗 {starter.mention} — c'est à toi !",
                 embed=e,
                 allowed_mentions=discord.AllowedMentions(users=[starter], roles=False, everyone=False),
                 delete_after=LIFETIME_START,
             )
+            await _register_for_cleanup(tr_msg, LIFETIME_START, 'tag_royale_start')
         except Exception as ex:
             print(f"[_start_tag_royale send] {ex}")
             return False
@@ -49107,7 +49256,7 @@ async def _check_tag_royale_chain(msg):
             try:
                 # Annonce victoire — reste affichée 1h pour célébrer puis se supprime
                 LIFETIME_WIN = 3600
-                await msg.channel.send(
+                win_msg = await msg.channel.send(
                     embed=discord.Embed(
                         title="🎊 TAG ROYALE — RÉUSSI !",
                         description=(
@@ -49121,6 +49270,7 @@ async def _check_tag_royale_chain(msg):
                     allowed_mentions=discord.AllowedMentions.none(),
                     delete_after=LIFETIME_WIN,
                 )
+                await _register_for_cleanup(win_msg, LIFETIME_WIN, 'tag_royale_win')
             except Exception:
                 pass
             return
@@ -49128,7 +49278,7 @@ async def _check_tag_royale_chain(msg):
         # Sinon, niveau suivant (auto-delete 2h)
         try:
             LIFETIME_LVL = 2 * 3600
-            await msg.channel.send(
+            lvl_msg = await msg.channel.send(
                 embed=discord.Embed(
                     title=f"🔗 Tag Royale — Niveau {new_level}/4",
                     description=(
@@ -49143,6 +49293,7 @@ async def _check_tag_royale_chain(msg):
                 allowed_mentions=discord.AllowedMentions(users=new_mentions, roles=False, everyone=False),
                 delete_after=LIFETIME_LVL,
             )
+            await _register_for_cleanup(lvl_msg, LIFETIME_LVL, 'tag_royale_level')
         except Exception:
             pass
     except Exception as ex:
@@ -49172,7 +49323,7 @@ async def tag_royale_timeout_checker():
                 try:
                     # Reste affiché 30 min puis se purge
                     LIFETIME_BROKEN = 30 * 60
-                    await ch.send(
+                    broken_msg = await ch.send(
                         embed=discord.Embed(
                             title="💔 Tag Royale — Chaîne brisée",
                             description=(
@@ -49185,6 +49336,7 @@ async def tag_royale_timeout_checker():
                         allowed_mentions=discord.AllowedMentions.none(),
                         delete_after=LIFETIME_BROKEN,
                     )
+                    await _register_for_cleanup(broken_msg, LIFETIME_BROKEN, 'tag_royale_broken')
                 except Exception:
                     pass
     except Exception as ex:
@@ -49287,11 +49439,12 @@ async def server_anniversary_checker():
                 e.set_footer(text=f"Anniversaire {today.year}")
 
                 try:
-                    await ch.send(
+                    msg_anniv = await ch.send(
                         embed=e,
                         allowed_mentions=discord.AllowedMentions.none(),
                         delete_after=LIFETIME_ANNIV,
                     )
+                    await _register_for_cleanup(msg_anniv, LIFETIME_ANNIV, 'anniversary')
                 except Exception:
                     pass
 
@@ -50161,7 +50314,7 @@ async def _apply_voice_spotlight(guild) -> bool:
             if hub_ch and await _is_chatty_channel(hub_ch):
                 count = len([m for m in vc.members if not m.bot])
                 LIFETIME_SPOT = 15 * 60
-                await hub_ch.send(
+                spot_msg = await hub_ch.send(
                     embed=discord.Embed(
                         description=(
                             f"⭐ **Vocal en scène : <#{vc.id}>**\n"
@@ -50173,6 +50326,7 @@ async def _apply_voice_spotlight(guild) -> bool:
                     allowed_mentions=discord.AllowedMentions.none(),
                     delete_after=LIFETIME_SPOT,
                 )
+                await _register_for_cleanup(spot_msg, LIFETIME_SPOT, 'voice_spotlight')
         except Exception:
             pass
 
@@ -50445,12 +50599,13 @@ async def _post_compliment_of_the_day(guild) -> bool:
         )
         e.set_footer(text="1 compliment / membre / jour")
         try:
-            await ch.send(
+            msg_compl = await ch.send(
                 embed=e,
                 view=ComplimentOpenView(),
                 allowed_mentions=discord.AllowedMentions.none(),
                 delete_after=LIFETIME_COMPL,
             )
+            await _register_for_cleanup(msg_compl, LIFETIME_COMPL, 'compliment')
         except Exception as ex:
             print(f"[_post_compliment_of_the_day send] {ex}")
             return False
@@ -51468,7 +51623,7 @@ async def _start_game_night(guild) -> bool:
             hub_ch = guild.get_channel(hub_id) if hub_id else None
             if hub_ch and await _is_chatty_channel(hub_ch):
                 LIFETIME_ANNOUNCE = int((ends_at - datetime.now(timezone.utc)).total_seconds()) + 600
-                await hub_ch.send(
+                gn_announce_msg = await hub_ch.send(
                     embed=discord.Embed(
                         title="🎮 GAME NIGHT — Ça commence !",
                         description=(
@@ -51484,6 +51639,7 @@ async def _start_game_night(guild) -> bool:
                     allowed_mentions=discord.AllowedMentions.none(),
                     delete_after=LIFETIME_ANNOUNCE,
                 )
+                await _register_for_cleanup(gn_announce_msg, LIFETIME_ANNOUNCE, 'game_night_announce')
         except Exception as ex:
             print(f"[_start_game_night announce] {ex}")
 
