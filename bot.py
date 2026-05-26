@@ -40,6 +40,8 @@ import engagement as engage2026
 import social_media as social2026
 # Phase 41 : moteur d'engagement quotidien (quests, achievements, pets, wheel, confessions)
 import engagement41 as eng41
+# Phase 42 : nouveaux events (world boss, voice chaos, daily riddles)
+import events42 as ev42
 import protection_guards as guards2026
 import community_features as comm2026
 import admin_panels_v2 as panels2026
@@ -1175,6 +1177,59 @@ async def db_init():
             channel_id INTEGER,
             sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             flagged INTEGER DEFAULT 0
+        )''')
+
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 42 — World Boss + Daily Riddle + Voice Chaos
+        # ═══════════════════════════════════════════════════════════════════
+
+        # World Bosses en cours / passés
+        await db.execute('''CREATE TABLE IF NOT EXISTS world_bosses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            boss_id TEXT,
+            hp INTEGER,
+            max_hp INTEGER,
+            arena_channel_id INTEGER,
+            arena_message_id INTEGER,
+            started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            ends_at DATETIME,
+            ended INTEGER DEFAULT 0,
+            victory INTEGER DEFAULT 0
+        )''')
+
+        # Attaquants d'un world boss (un par user)
+        await db.execute('''CREATE TABLE IF NOT EXISTS world_boss_attackers (
+            world_boss_id INTEGER,
+            user_id INTEGER,
+            damage_dealt INTEGER DEFAULT 0,
+            attacks_count INTEGER DEFAULT 0,
+            last_attack_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (world_boss_id, user_id)
+        )''')
+
+        # Daily Riddles : 1 énigme/jour/guild
+        await db.execute('''CREATE TABLE IF NOT EXISTS daily_riddles_log (
+            guild_id INTEGER,
+            day TEXT,                               -- 'YYYY-MM-DD' Europe/Paris
+            riddle_id TEXT,
+            channel_id INTEGER,
+            message_id INTEGER,
+            first_winner_id INTEGER,
+            winner_at DATETIME,
+            answered_count INTEGER DEFAULT 0,
+            PRIMARY KEY (guild_id, day)
+        )''')
+
+        # Voice Chaos : log des chaos appliqués pour éviter de re-frapper le même vocal
+        await db.execute('''CREATE TABLE IF NOT EXISTS voice_chaos_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            voice_channel_id INTEGER,
+            action_id TEXT,
+            original_name TEXT,
+            applied_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            reverted INTEGER DEFAULT 0
         )''')
 
         # Migration : ajoute colonnes manquantes à player_event_stats si DB existe déjà
@@ -34522,6 +34577,15 @@ async def on_ready():
         bot.add_view(EngagementHubView())
     except Exception as ex:
         print(f"[on_ready add_view EngagementHubView] {ex}")
+    # Phase 42 — Views persistantes : World Boss + Daily Riddle
+    try:
+        bot.add_view(WorldBossAttackView())
+    except Exception as ex:
+        print(f"[on_ready add_view WorldBossAttackView] {ex}")
+    try:
+        bot.add_view(RiddleAnswerView())
+    except Exception as ex:
+        print(f"[on_ready add_view RiddleAnswerView] {ex}")
     try:
         async with get_db() as db:
             async with db.execute('SELECT data FROM guild_config') as c:
@@ -34638,6 +34702,16 @@ async def on_ready():
         await restore_active_comebacks()
     except Exception as ex:
         print(f"[on_ready restore_active_comebacks] {ex}")
+
+    # Phase 42 : World Boss hebdo + Voice Chaos + Daily Riddle
+    if not world_boss_scheduler.is_running():
+        world_boss_scheduler.start()
+    if not world_boss_timeout_checker.is_running():
+        world_boss_timeout_checker.start()
+    if not voice_chaos_dispatcher.is_running():
+        voice_chaos_dispatcher.start()
+    if not daily_riddle_dispatcher.is_running():
+        daily_riddle_dispatcher.start()
 
     print(f"✅ {bot.user.name} v28 prêt!")
     print(f"🌐 Serveurs: {len(bot.guilds)}")
@@ -46818,6 +46892,1041 @@ async def _track_reaction_p41(payload):
         await _update_quest_progress(payload.guild_id, payload.user_id, 'reactions_given', 1)
     except Exception as ex:
         print(f"[_track_reaction_p41] {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 42 — WORLD BOSS HEBDO + DAILY RIDDLE + VOICE CHAOS
+#  Vrais events interactifs, anti-spam, protection vocaux fondateurs
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── ANTI-SPAM GLOBAL : 1 event majeur en cours max ────────────────────────────
+
+
+async def _has_any_major_event_running(guild_id: int) -> bool:
+    """Retourne True si un boss raid / treasure / quiz / world boss est actif."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT 1 FROM events WHERE guild_id=? AND ended=0 LIMIT 1',
+                (guild_id,),
+            ) as cur:
+                if await cur.fetchone():
+                    return True
+            async with db.execute(
+                'SELECT 1 FROM world_bosses WHERE guild_id=? AND ended=0 LIMIT 1',
+                (guild_id,),
+            ) as cur:
+                if await cur.fetchone():
+                    return True
+    except Exception:
+        pass
+    return False
+
+
+# ─── VOICE PROTECTION (fondateurs / staff) ─────────────────────────────────────
+
+
+async def _get_protected_voice_channels(guild_id: int) -> set:
+    """Set des IDs de vocaux protégés contre Voice Chaos."""
+    try:
+        c = await cfg(guild_id)
+        protected = c.get('voice_protected_channels', []) or []
+        return {int(x) for x in protected if x}
+    except Exception:
+        return set()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# WORLD BOSS HEBDO
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class WorldBossAttackView(View):
+    """View persistante pour attaquer un World Boss. Plusieurs membres en
+    parallèle. Custom IDs stables — survie aux restarts.
+    """
+
+    def __init__(self):
+        super().__init__(timeout=None)
+        b = Button(
+            label="⚔️ Attaquer le World Boss",
+            style=discord.ButtonStyle.danger,
+            custom_id="wb_attack",
+        )
+        b.callback = self._on_attack
+        self.add_item(b)
+        b2 = Button(
+            label="📊 Voir le top des attaquants",
+            style=discord.ButtonStyle.secondary,
+            custom_id="wb_top",
+        )
+        b2.callback = self._on_top
+        self.add_item(b2)
+
+    async def _on_attack(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if not i.guild:
+                return await _safe_followup(i, content="❌ Serveur uniquement.")
+            # Récupérer le world boss actif
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT id, boss_id, hp, max_hp FROM world_bosses '
+                    'WHERE guild_id=? AND ended=0 ORDER BY started_at DESC LIMIT 1',
+                    (i.guild.id,),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row:
+                return await _safe_followup(i, content="ℹ️ Aucun World Boss actif.")
+            wb_id, boss_id, hp, max_hp = row
+            boss = ev42.get_world_boss(boss_id)
+            if not boss:
+                return await _safe_followup(i, content="❌ Boss inconnu.")
+            if hp <= 0:
+                return await _safe_followup(i, content="✅ Le boss est déjà mort !")
+
+            # Cooldown 10s par user pour éviter le spam
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT last_attack_at FROM world_boss_attackers '
+                    'WHERE world_boss_id=? AND user_id=?',
+                    (wb_id, i.user.id),
+                ) as cur:
+                    arow = await cur.fetchone()
+            if arow and arow[0]:
+                try:
+                    last_dt = datetime.fromisoformat(arow[0]) if 'T' in str(arow[0]) else \
+                              datetime.strptime(arow[0], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                    elapsed = (datetime.now(timezone.utc) - last_dt).total_seconds()
+                    if elapsed < 10:
+                        return await _safe_followup(
+                            i,
+                            content=f"⏱️ Trop rapide ! Attends `{int(10 - elapsed)}`s.",
+                        )
+                except Exception:
+                    pass
+
+            # Calcul dégâts : 80-180 + bonus classe + bonus pet
+            base = random.randint(80, 180)
+            # Bonus pet dragon
+            try:
+                pet_bonus = await _apply_pet_bonus(i.guild.id, i.user.id, 'boss_damage')
+            except Exception:
+                pet_bonus = 0.0
+            damage = int(base * (1.0 + pet_bonus))
+
+            # Apply phase buff : double damage if low HP
+            hp_ratio = hp / max(1, max_hp)
+            if hp_ratio < 0.33:
+                damage = int(damage * 1.5)  # phase finale = +50% damage taken par le boss
+
+            new_hp = max(0, hp - damage)
+            async with get_db() as db:
+                await db.execute(
+                    'UPDATE world_bosses SET hp=? WHERE id=?',
+                    (new_hp, wb_id),
+                )
+                await db.execute(
+                    'INSERT INTO world_boss_attackers(world_boss_id, user_id, damage_dealt, attacks_count, last_attack_at) '
+                    'VALUES(?,?,?,1,CURRENT_TIMESTAMP) '
+                    'ON CONFLICT(world_boss_id, user_id) DO UPDATE SET '
+                    'damage_dealt=damage_dealt+?, attacks_count=attacks_count+1, last_attack_at=CURRENT_TIMESTAMP',
+                    (wb_id, i.user.id, damage, damage),
+                )
+                await db.commit()
+
+            # Track stats Phase 41 : événement participé + pet XP
+            try:
+                await _incr_stat_p41(i.guild.id, i.user.id, 'events_participated', 1)
+                await _give_pet_xp(i.guild.id, i.user.id, 5)
+            except Exception:
+                pass
+
+            # Si HP = 0 : victoire collective
+            if new_hp <= 0:
+                await _end_world_boss(i.guild, wb_id, victory=True)
+                return await _safe_followup(
+                    i,
+                    content=(
+                        f"⚡ **COUP FATAL !** Tu as infligé `{damage}` dégâts.\n"
+                        f"💀 **{boss['title']}** est vaincu — le serveur a triomphé !"
+                    ),
+                )
+
+            phase_msg = ""
+            if new_hp < max_hp * 0.33:
+                phase_msg = "\n🔥 _Phase finale ! Le boss enrage._"
+            elif new_hp < max_hp * 0.66:
+                phase_msg = "\n⚡ _Le boss change de phase._"
+
+            await _safe_followup(
+                i,
+                content=(
+                    f"⚔️ Tu infliges `{damage}` dégâts à **{boss['title']}** !\n"
+                    f"🩸 HP : `{new_hp}/{max_hp}` ({(new_hp/max_hp*100):.0f}%){phase_msg}"
+                ),
+            )
+
+            # Update arena message embed (HP bar)
+            try:
+                await _refresh_world_boss_message(i.guild, wb_id)
+            except Exception as ex:
+                print(f"[_refresh_world_boss_message] {ex}")
+        except Exception as ex:
+            print(f"[WorldBossAttackView _on_attack] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_top(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if not i.guild:
+                return await _safe_followup(i, content="❌ Serveur uniquement.")
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT id, boss_id FROM world_bosses '
+                    'WHERE guild_id=? AND ended=0 ORDER BY started_at DESC LIMIT 1',
+                    (i.guild.id,),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row:
+                return await _safe_followup(i, content="ℹ️ Aucun World Boss actif.")
+            wb_id, boss_id = row
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT user_id, damage_dealt, attacks_count FROM world_boss_attackers '
+                    'WHERE world_boss_id=? ORDER BY damage_dealt DESC LIMIT 10',
+                    (wb_id,),
+                ) as cur:
+                    rows = await cur.fetchall()
+            if not rows:
+                return await _safe_followup(i, content="ℹ️ Aucun attaquant pour le moment.")
+            lines = ["🏆 **Top 10 des attaquants :**", ""]
+            medals = ["🥇", "🥈", "🥉"] + ["🔹"] * 7
+            for idx, (uid, dmg, atks) in enumerate(rows):
+                member = i.guild.get_member(uid)
+                name = member.display_name if member else f"ID:{uid}"
+                lines.append(f"{medals[idx]} **{name}** — `{dmg}` dégâts ({atks} attaques)")
+            await _safe_followup(i, content="\n".join(lines))
+        except Exception as ex:
+            print(f"[WorldBossAttackView _on_top] {ex}")
+
+
+async def _build_world_boss_embed(guild, wb_id: int) -> Optional[discord.Embed]:
+    """Construit l'embed status du world boss."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT boss_id, hp, max_hp, started_at, ends_at FROM world_bosses WHERE id=?',
+                (wb_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return None
+        boss_id, hp, max_hp, started_at, ends_at = row
+        boss = ev42.get_world_boss(boss_id)
+        if not boss:
+            return None
+        # Top 3 attackers
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT user_id, damage_dealt FROM world_boss_attackers '
+                'WHERE world_boss_id=? ORDER BY damage_dealt DESC LIMIT 3',
+                (wb_id,),
+            ) as cur:
+                top = await cur.fetchall()
+        top_str = "\n".join(
+            f"{['🥇','🥈','🥉'][i]} <@{uid}> — `{dmg}`"
+            for i, (uid, dmg) in enumerate(top)
+        ) or "_Personne n'a encore attaqué._"
+        ratio = hp / max(1, max_hp)
+        bar_len = 20
+        filled = int(ratio * bar_len)
+        bar = "█" * filled + "░" * (bar_len - filled)
+        phase_label = "Éveil cosmique"
+        if ratio < 0.33:
+            phase_label = "💀 Dernier souffle"
+        elif ratio < 0.66:
+            phase_label = "⚡ Fureur stellaire"
+
+        e = discord.Embed(
+            title=f"{boss['image_emoji']} {boss['title']}",
+            description=(
+                f"_{boss['description']}_\n\n"
+                f"**Phase :** {phase_label}\n"
+                f"**HP :** `{hp}` / `{max_hp}`\n"
+                f"`{bar}` {ratio*100:.0f}%\n\n"
+                f"**Top 3 attaquants :**\n{top_str}"
+            ),
+            color=boss['color'],
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text="World Boss — clique '⚔️ Attaquer' pour participer ! Cooldown 10s/attaque")
+        return e
+    except Exception as ex:
+        print(f"[_build_world_boss_embed] {ex}")
+        return None
+
+
+async def _refresh_world_boss_message(guild, wb_id: int):
+    """Update le message d'arène avec le nouvel HP."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT arena_channel_id, arena_message_id FROM world_bosses WHERE id=?',
+                (wb_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return
+        ch_id, msg_id = row
+        if not ch_id or not msg_id:
+            return
+        ch = guild.get_channel(int(ch_id))
+        if not ch:
+            return
+        try:
+            msg = await ch.fetch_message(int(msg_id))
+        except Exception:
+            return
+        embed = await _build_world_boss_embed(guild, wb_id)
+        if embed:
+            try:
+                await msg.edit(embed=embed)
+            except Exception:
+                pass
+    except Exception as ex:
+        print(f"[_refresh_world_boss_message] {ex}")
+
+
+async def _start_world_boss(guild) -> dict:
+    """Démarre un World Boss dans le serveur.
+
+    Conditions :
+    - event_enabled = True (cfg)
+    - PAS d'event majeur en cours
+    - Heures actives respectées
+    - Catégorie events_category configurée
+
+    Retourne {'ok': bool, 'error': str?, 'wb_id': int?}.
+    """
+    try:
+        c = await cfg(guild.id)
+        if not c.get('event_enabled', False):
+            return {'ok': False, 'error': 'events désactivés'}
+        if await _has_any_major_event_running(guild.id):
+            return {'ok': False, 'error': 'un event majeur est déjà en cours'}
+
+        # Trouver le salon où poster : on utilise event_arena_category si dispo,
+        # sinon on crée un salon dédié temporaire dans la catégorie events.
+        cat_id = int(c.get('event_arena_category', 0) or 0)
+        category = guild.get_channel(cat_id) if cat_id else None
+        if not isinstance(category, discord.CategoryChannel):
+            category = None
+
+        # Choisir un boss
+        boss = ev42.random_world_boss()
+
+        # Créer le salon arena (visible et écrivable par @everyone)
+        try:
+            arena_ch = await guild.create_text_channel(
+                name=f"🌍-world-boss-{boss['id']}"[:90],
+                category=category,
+                reason="World Boss event",
+                overwrites={
+                    guild.default_role: discord.PermissionOverwrite(
+                        view_channel=True, send_messages=True, read_message_history=True,
+                    ),
+                    guild.me: discord.PermissionOverwrite(
+                        view_channel=True, send_messages=True, manage_messages=True,
+                        manage_channels=True, embed_links=True,
+                    ),
+                },
+            )
+        except discord.Forbidden:
+            return {'ok': False, 'error': 'permission manage_channels refusée'}
+        except Exception as ex:
+            return {'ok': False, 'error': f'erreur création salon : {ex}'}
+
+        ends_at = datetime.now(timezone.utc) + timedelta(minutes=90)
+        # Insérer en DB
+        async with get_db() as db:
+            cur = await db.execute(
+                'INSERT INTO world_bosses(guild_id, boss_id, hp, max_hp, arena_channel_id, ends_at) '
+                'VALUES(?,?,?,?,?,?)',
+                (guild.id, boss['id'], boss['max_hp'], boss['max_hp'], arena_ch.id, ends_at.isoformat()),
+            )
+            wb_id = cur.lastrowid
+            await db.commit()
+
+        # Construire et envoyer l'embed + view
+        embed = await _build_world_boss_embed(guild, wb_id)
+        view = WorldBossAttackView()
+        ping_str = await _get_event_mention(guild, 'boss_raid')  # réutilise le role notif boss_raid
+        try:
+            msg = await arena_ch.send(
+                content=(
+                    f"🌍 **UN WORLD BOSS APPARAÎT !**\n"
+                    f"Coordonnez vos attaques — il faut **plusieurs joueurs** pour le vaincre.\n"
+                    + (f"{ping_str}\n" if ping_str else "")
+                    + "_Pas envie d'être ping ? `/notify niveau:🔕 Aucun`._"
+                ),
+                embed=embed,
+                view=view,
+                allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False),
+            )
+            async with get_db() as db:
+                await db.execute(
+                    'UPDATE world_bosses SET arena_message_id=? WHERE id=?',
+                    (msg.id, wb_id),
+                )
+                await db.commit()
+        except Exception as ex:
+            print(f"[_start_world_boss send arena] {ex}")
+            return {'ok': False, 'error': f'erreur envoi : {ex}'}
+
+        print(f"[WORLD BOSS] guild={guild.id} boss={boss['id']} wb_id={wb_id}")
+        return {'ok': True, 'wb_id': wb_id, 'boss_id': boss['id']}
+    except Exception as ex:
+        print(f"[_start_world_boss] {ex}")
+        return {'ok': False, 'error': str(ex)}
+
+
+async def _end_world_boss(guild, wb_id: int, victory: bool, reason: str = ""):
+    """Termine un world boss : distribue les récompenses, supprime le salon."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT boss_id, arena_channel_id FROM world_bosses WHERE id=? AND ended=0',
+                (wb_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return
+        boss_id, ch_id = row
+        boss = ev42.get_world_boss(boss_id)
+        if not boss:
+            return
+
+        # Récupérer les attaquants triés
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT user_id, damage_dealt FROM world_boss_attackers '
+                'WHERE world_boss_id=? ORDER BY damage_dealt DESC',
+                (wb_id,),
+            ) as cur:
+                attackers = await cur.fetchall()
+
+        # Distribuer les récompenses
+        if victory:
+            for idx, (uid, dmg) in enumerate(attackers):
+                reward = boss['victory_reward_coins'] if idx < 3 else boss['participation_reward_coins']
+                try:
+                    await add_coins(guild.id, uid, reward)
+                except Exception:
+                    pass
+            # Achievement worldboss_kill pour le top 1
+            if attackers:
+                try:
+                    await _unlock_achievement(guild.id, attackers[0][0], 'worldboss_kill')
+                except Exception:
+                    pass
+        else:
+            # Défaite : consolation pour tous les attaquants
+            for uid, dmg in attackers:
+                try:
+                    await add_coins(guild.id, uid, boss['participation_reward_coins'] // 2)
+                except Exception:
+                    pass
+
+        # Marquer ended
+        async with get_db() as db:
+            await db.execute(
+                'UPDATE world_bosses SET ended=1, victory=? WHERE id=?',
+                (1 if victory else 0, wb_id),
+            )
+            await db.commit()
+
+        # Annoncer la fin + supprimer le salon dans 5 min
+        ch = guild.get_channel(int(ch_id))
+        if ch:
+            try:
+                final_msg = (
+                    f"🎉 **VICTOIRE !** Le **{boss['title']}** a été vaincu par votre coordination !\n"
+                    f"💰 Récompenses distribuées (top 3 : `{boss['victory_reward_coins']}` 🪙, "
+                    f"autres : `{boss['participation_reward_coins']}` 🪙).\n"
+                    f"🗑️ Ce salon sera supprimé dans 5 minutes."
+                ) if victory else (
+                    f"💀 **DÉFAITE.** Le **{boss['title']}** s'enfuit dans les ombres.\n"
+                    f"📜 Vous recevez tous une petite consolation.\n"
+                    f"_Réessayez la semaine prochaine !_\n"
+                    f"🗑️ Salon supprimé dans 5 minutes."
+                )
+                await ch.send(final_msg)
+
+                async def _cleanup_arena():
+                    await asyncio.sleep(300)
+                    try:
+                        await ch.delete(reason="World Boss event ended")
+                    except Exception:
+                        pass
+                asyncio.create_task(_cleanup_arena())
+            except Exception as ex:
+                print(f"[_end_world_boss send final] {ex}")
+        print(f"[WORLD BOSS END] guild={guild.id} wb_id={wb_id} victory={victory}")
+    except Exception as ex:
+        print(f"[_end_world_boss] {ex}")
+
+
+@tasks.loop(minutes=30)
+async def world_boss_scheduler():
+    """Phase 42 : déclenche un World Boss tous les samedis 21h-21h30 Europe/Paris.
+
+    Tourne toutes les 30 min, check si on est samedi 21h-21h30 ET qu'aucun
+    world boss n'a déjà été lancé cette semaine.
+    """
+    try:
+        from zoneinfo import ZoneInfo as _ZI
+        tz = _ZI('Europe/Paris')
+    except Exception:
+        tz = timezone.utc
+    now_local = datetime.now(tz)
+    # Samedi (weekday=5) et 21h-22h
+    if now_local.weekday() != 5 or now_local.hour != 21:
+        return
+    try:
+        for guild in bot.guilds:
+            try:
+                c = await cfg(guild.id)
+                if not c.get('event_enabled', False):
+                    continue
+                if not c.get('world_boss_enabled', True):
+                    continue
+                # Pas 2× la même semaine
+                week_start = (now_local - timedelta(days=now_local.weekday())).strftime('%Y-%m-%d')
+                async with get_db() as db:
+                    async with db.execute(
+                        'SELECT 1 FROM world_bosses WHERE guild_id=? AND DATE(started_at) >= ? LIMIT 1',
+                        (guild.id, week_start),
+                    ) as cur:
+                        if await cur.fetchone():
+                            continue
+                # Pas si un autre event majeur en cours
+                if await _has_any_major_event_running(guild.id):
+                    continue
+                result = await _start_world_boss(guild)
+                if result.get('ok'):
+                    print(f"[world_boss_scheduler] guild={guild.id} lancé")
+            except Exception as ex:
+                print(f"[world_boss_scheduler guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[world_boss_scheduler] {ex}")
+
+
+@world_boss_scheduler.before_loop
+async def _world_boss_wait():
+    await bot.wait_until_ready()
+
+
+@tasks.loop(minutes=5)
+async def world_boss_timeout_checker():
+    """Termine les world boss expirés (90 min)."""
+    try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT id, guild_id FROM world_bosses WHERE ended=0 AND ends_at < ?',
+                (now_iso,),
+            ) as cur:
+                rows = await cur.fetchall()
+        for wb_id, gid in rows:
+            guild = bot.get_guild(int(gid))
+            if guild:
+                await _end_world_boss(guild, wb_id, victory=False, reason="timeout")
+    except Exception as ex:
+        print(f"[world_boss_timeout_checker] {ex}")
+
+
+@world_boss_timeout_checker.before_loop
+async def _wb_timeout_wait():
+    await bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# VOICE CHAOS — perturbation aléatoire des vocaux en soirée
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def _apply_voice_chaos(guild) -> bool:
+    """Applique une action de chaos à un vocal aléatoire du serveur.
+
+    Garanties :
+    - Skip les vocaux protégés (cfg voice_protected_channels)
+    - Skip les vocaux vides (au moins 1 membre humain dedans)
+    - Skip les vocaux déjà touchés dans les dernières 2h
+    - Effet temporaire et toujours réversible
+    """
+    try:
+        c = await cfg(guild.id)
+        if not c.get('voice_chaos_enabled', True):
+            return False
+
+        protected = await _get_protected_voice_channels(guild.id)
+
+        # Trouver les vocaux candidats : non protégés, avec >=1 humain dedans
+        candidates = []
+        for vc in guild.voice_channels:
+            if vc.id in protected:
+                continue
+            # Skip les vocaux temporaires hubs (créés par le bot)
+            name_low = (vc.name or '').lower()
+            if any(kw in name_low for kw in ('staff', 'admin', 'mod-', 'fondateur', 'founder', 'private', 'privé')):
+                continue
+            # Au moins 1 membre humain
+            humans = [m for m in vc.members if not m.bot]
+            if not humans:
+                continue
+            # Le bot doit pouvoir manage_channels (pour rename)
+            try:
+                perms = vc.permissions_for(guild.me)
+                if not perms.manage_channels:
+                    continue
+            except Exception:
+                continue
+            candidates.append(vc)
+
+        if not candidates:
+            return False
+
+        # Skip les vocaux déjà chaos < 2h
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT voice_channel_id FROM voice_chaos_log '
+                'WHERE guild_id=? AND applied_at > datetime("now", "-2 hours")',
+                (guild.id,),
+            ) as cur:
+                recent_chaos = {int(r[0]) for r in await cur.fetchall()}
+        candidates = [vc for vc in candidates if vc.id not in recent_chaos]
+        if not candidates:
+            return False
+
+        vc = random.choice(candidates)
+        allow_aggressive = bool(c.get('voice_chaos_aggressive', False))
+        action = ev42.random_voice_chaos(allow_aggressive=allow_aggressive)
+
+        original_name = vc.name
+
+        if action['kind'] == 'rename':
+            new_name = action['rename_pattern'].format(original=original_name[:60])
+            try:
+                await vc.edit(name=new_name[:100], reason=f"Voice Chaos: {action['name']}")
+            except Exception as ex:
+                print(f"[voice_chaos rename] {ex}")
+                return False
+
+            # Log + programmation du revert
+            async with get_db() as db:
+                cur = await db.execute(
+                    'INSERT INTO voice_chaos_log(guild_id, voice_channel_id, action_id, original_name) '
+                    'VALUES(?,?,?,?)',
+                    (guild.id, vc.id, action['id'], original_name),
+                )
+                log_id = cur.lastrowid
+                await db.commit()
+
+            duration = int(action.get('duration_seconds', 300) or 300)
+
+            async def _revert():
+                await asyncio.sleep(duration)
+                try:
+                    vc2 = guild.get_channel(vc.id)
+                    if vc2:
+                        try:
+                            await vc2.edit(name=original_name[:100], reason="Voice Chaos revert")
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                try:
+                    async with get_db() as db:
+                        await db.execute(
+                            'UPDATE voice_chaos_log SET reverted=1 WHERE id=?',
+                            (log_id,),
+                        )
+                        await db.commit()
+                except Exception:
+                    pass
+
+            asyncio.create_task(_revert())
+            print(f"[VOICE CHAOS] guild={guild.id} vc={vc.id} action={action['id']} -> {new_name}")
+            return True
+
+        # 'shuffle' kind : non implémenté pour éviter de déranger
+        return False
+    except Exception as ex:
+        print(f"[_apply_voice_chaos] {ex}")
+        return False
+
+
+@tasks.loop(minutes=45)
+async def voice_chaos_dispatcher():
+    """Phase 42 : chaque 45min entre 19h-23h FR, ~40% de chance de chaos vocal.
+
+    Concrètement : 1-2 chaos par soirée en moyenne.
+    """
+    try:
+        from zoneinfo import ZoneInfo as _ZI
+        tz = _ZI('Europe/Paris')
+    except Exception:
+        tz = timezone.utc
+    h = datetime.now(tz).hour
+    if not (19 <= h < 23):
+        return
+    if random.random() > 0.4:
+        return
+    try:
+        for guild in bot.guilds:
+            try:
+                await _apply_voice_chaos(guild)
+            except Exception as ex:
+                print(f"[voice_chaos_dispatcher guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[voice_chaos_dispatcher] {ex}")
+
+
+@voice_chaos_dispatcher.before_loop
+async def _voice_chaos_wait():
+    await bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DAILY RIDDLE — énigme matinale
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class RiddleAnswerView(View):
+    """View persistante pour répondre à l'énigme du jour. 4 boutons options."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+        for idx in range(4):
+            b = Button(
+                label=f"Option {chr(65 + idx)}",
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"riddle_ans_{idx}",
+            )
+            b.callback = self._make_callback(idx)
+            self.add_item(b)
+
+    def _make_callback(self, idx: int):
+        async def _cb(i: discord.Interaction):
+            if not await _safe_defer(i):
+                return
+            try:
+                if not i.guild:
+                    return await _safe_followup(i, content="❌ Serveur uniquement.")
+                # Récupérer le riddle du jour
+                day = _today_str_p41()
+                async with get_db() as db:
+                    async with db.execute(
+                        'SELECT riddle_id, first_winner_id, answered_count FROM daily_riddles_log '
+                        'WHERE guild_id=? AND day=?',
+                        (i.guild.id, day),
+                    ) as cur:
+                        row = await cur.fetchone()
+                if not row:
+                    return await _safe_followup(i, content="❌ Pas d'énigme active aujourd'hui.")
+                riddle_id, first_winner, answered = row
+                riddle = ev42.get_riddle(riddle_id)
+                if not riddle:
+                    return await _safe_followup(i, content="❌ Énigme inconnue.")
+
+                if first_winner and first_winner == i.user.id:
+                    return await _safe_followup(i, content="✅ Tu as déjà gagné aujourd'hui !")
+
+                is_correct = (idx == riddle['answer_idx'])
+
+                # Marquer la réponse
+                async with get_db() as db:
+                    if is_correct and not first_winner:
+                        # Premier à trouver !
+                        await db.execute(
+                            'UPDATE daily_riddles_log SET first_winner_id=?, winner_at=CURRENT_TIMESTAMP, '
+                            'answered_count=answered_count+1 WHERE guild_id=? AND day=?',
+                            (i.user.id, i.guild.id, day),
+                        )
+                        await db.commit()
+                        # Reward jackpot 500 🪙
+                        try:
+                            await add_coins(i.guild.id, i.user.id, 500)
+                        except Exception:
+                            pass
+                        # Achievement quiz_correct
+                        try:
+                            await _incr_stat_p41(i.guild.id, i.user.id, 'quiz_correct', 1)
+                        except Exception:
+                            pass
+                        return await _safe_followup(
+                            i,
+                            content=(
+                                f"🎉 **BRAVO !** Tu es le premier à trouver !\n"
+                                f"💰 **+500** 🪙\n\n"
+                                f"_Explication :_ {riddle['explanation']}"
+                            ),
+                        )
+                    else:
+                        await db.execute(
+                            'UPDATE daily_riddles_log SET answered_count=answered_count+1 '
+                            'WHERE guild_id=? AND day=?',
+                            (i.guild.id, day),
+                        )
+                        await db.commit()
+
+                if is_correct:
+                    # Bonne réponse mais trop tard
+                    try:
+                        await add_coins(i.guild.id, i.user.id, 50)
+                    except Exception:
+                        pass
+                    try:
+                        await _incr_stat_p41(i.guild.id, i.user.id, 'quiz_correct', 1)
+                    except Exception:
+                        pass
+                    return await _safe_followup(
+                        i,
+                        content=(
+                            f"✅ Bonne réponse ! Mais quelqu'un a été plus rapide.\n"
+                            f"💰 **+50** 🪙 (consolation)\n\n"
+                            f"_Explication :_ {riddle['explanation']}"
+                        ),
+                    )
+                else:
+                    return await _safe_followup(
+                        i,
+                        content=f"❌ Mauvaise réponse. Réfléchis bien — tu peux re-tenter !",
+                    )
+            except Exception as ex:
+                print(f"[RiddleAnswerView idx={idx}] {ex}")
+                await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+        return _cb
+
+
+async def _post_daily_riddle(guild) -> bool:
+    """Poste l'énigme du jour dans le salon hub (ou un salon chatty)."""
+    try:
+        c = await cfg(guild.id)
+        if not c.get('event_enabled', False):
+            return False
+        if not c.get('daily_riddle_enabled', True):
+            return False
+
+        day = _today_str_p41()
+        # Déjà posté aujourd'hui ?
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT 1 FROM daily_riddles_log WHERE guild_id=? AND day=?',
+                (guild.id, day),
+            ) as cur:
+                if await cur.fetchone():
+                    return False
+
+        # Trouver un salon : hub_channel > 1er salon chatty
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        ch = guild.get_channel(hub_id) if hub_id else None
+        if ch and not await _is_chatty_channel(ch):
+            ch = None
+        if not ch:
+            # Fallback : 1er salon chatty avec "general" ou "chat" dans le nom
+            for cand in guild.text_channels:
+                if not await _is_chatty_channel(cand):
+                    continue
+                name_low = (cand.name or '').lower()
+                if any(kw in name_low for kw in ('general', 'général', 'chat', 'discussion')):
+                    ch = cand
+                    break
+            if not ch:
+                for cand in guild.text_channels:
+                    if await _is_chatty_channel(cand):
+                        ch = cand
+                        break
+        if not ch:
+            return False
+
+        riddle = ev42.random_riddle()
+        options_str = "\n".join(
+            f"{chr(65 + idx)}. {opt}" for idx, opt in enumerate(riddle['options'])
+        )
+        e = discord.Embed(
+            title="🧠 Énigme du jour",
+            description=(
+                f"{riddle['question']}\n\n"
+                f"**Choix :**\n{options_str}\n\n"
+                f"🎁 **Premier à trouver : +500 🪙**\n"
+                f"_Les bonnes réponses suivantes : +50 🪙 chacune._"
+            ),
+            color=0x9B59B6,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text=f"Énigme du {day} · Clique sur la lettre de la bonne réponse")
+
+        view = RiddleAnswerView()
+        try:
+            msg = await ch.send(embed=e, view=view, allowed_mentions=discord.AllowedMentions.none())
+        except Exception as ex:
+            print(f"[_post_daily_riddle send] {ex}")
+            return False
+
+        # Logger en DB
+        try:
+            async with get_db() as db:
+                await db.execute(
+                    'INSERT INTO daily_riddles_log(guild_id, day, riddle_id, channel_id, message_id) '
+                    'VALUES(?,?,?,?,?)',
+                    (guild.id, day, riddle['id'], ch.id, msg.id),
+                )
+                await db.commit()
+        except Exception as ex:
+            print(f"[_post_daily_riddle db log] {ex}")
+
+        print(f"[DAILY RIDDLE] guild={guild.id} riddle={riddle['id']} ch={ch.id}")
+        return True
+    except Exception as ex:
+        print(f"[_post_daily_riddle] {ex}")
+        return False
+
+
+@tasks.loop(minutes=30)
+async def daily_riddle_dispatcher():
+    """Phase 42 : poste l'énigme du jour entre 10h-11h Europe/Paris."""
+    try:
+        from zoneinfo import ZoneInfo as _ZI
+        tz = _ZI('Europe/Paris')
+    except Exception:
+        tz = timezone.utc
+    h = datetime.now(tz).hour
+    if h != 10:
+        return
+    try:
+        for guild in bot.guilds:
+            try:
+                await _post_daily_riddle(guild)
+            except Exception as ex:
+                print(f"[daily_riddle_dispatcher guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[daily_riddle_dispatcher] {ex}")
+
+
+@daily_riddle_dispatcher.before_loop
+async def _daily_riddle_wait():
+    await bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMANDS PHASE 42 (owner only)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@bot.tree.command(
+    name="voice_protect",
+    description="🛡️ [Owner] Protéger un vocal contre les events Voice Chaos",
+)
+@app_commands.describe(
+    action="Ajouter / retirer / lister",
+    channel="Salon vocal à protéger (pour add/remove)",
+)
+@app_commands.choices(action=[
+    app_commands.Choice(name="➕ Ajouter (protéger)", value="add"),
+    app_commands.Choice(name="➖ Retirer (déprotéger)", value="remove"),
+    app_commands.Choice(name="📋 Liste", value="list"),
+])
+async def voice_protect_cmd(
+    i: discord.Interaction,
+    action: app_commands.Choice[str],
+    channel: Optional[discord.VoiceChannel] = None,
+):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        c = await cfg(i.guild.id)
+        protected = list(c.get('voice_protected_channels', []) or [])
+        if action.value == 'list':
+            if not protected:
+                return await _safe_followup(i, content="🛡️ Aucun vocal protégé pour l'instant.")
+            lines = ["🛡️ **Vocaux protégés du Voice Chaos :**"]
+            for vc_id in protected:
+                vc = i.guild.get_channel(int(vc_id))
+                lines.append(f"• {vc.mention if vc else f'`{vc_id}` (supprimé)'}")
+            return await _safe_followup(i, content="\n".join(lines))
+        if not channel:
+            return await _safe_followup(i, content="❌ Précise un salon vocal.")
+        if action.value == 'add':
+            if channel.id in protected:
+                return await _safe_followup(i, content=f"⚠️ {channel.mention} est déjà protégé.")
+            protected.append(channel.id)
+            await db_set(i.guild.id, 'voice_protected_channels', protected)
+            return await _safe_followup(i, content=f"✅ {channel.mention} est maintenant **protégé** du Voice Chaos.")
+        if action.value == 'remove':
+            if channel.id not in protected:
+                return await _safe_followup(i, content=f"⚠️ {channel.mention} n'était pas protégé.")
+            protected = [x for x in protected if x != channel.id]
+            await db_set(i.guild.id, 'voice_protected_channels', protected)
+            return await _safe_followup(i, content=f"✅ {channel.mention} **n'est plus** protégé.")
+    except Exception as ex:
+        print(f"[/voice_protect] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="world_boss_force",
+    description="⚔️ [Owner] Forcer le lancement d'un World Boss maintenant",
+)
+async def world_boss_force_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        result = await _start_world_boss(i.guild)
+        if result.get('ok'):
+            await _safe_followup(i, content=f"✅ World Boss `{result['boss_id']}` lancé !")
+        else:
+            await _safe_followup(i, content=f"❌ Échec : {result.get('error')}")
+    except Exception as ex:
+        print(f"[/world_boss_force] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="riddle_force",
+    description="🧠 [Owner] Forcer l'énigme du jour maintenant",
+)
+async def riddle_force_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        ok = await _post_daily_riddle(i.guild)
+        if ok:
+            await _safe_followup(i, content="✅ Énigme postée !")
+        else:
+            await _safe_followup(i, content="ℹ️ Énigme du jour déjà postée, ou pas de salon hub configuré.")
+    except Exception as ex:
+        print(f"[/riddle_force] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
 if __name__ == "__main__":
