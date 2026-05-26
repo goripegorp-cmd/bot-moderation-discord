@@ -111,6 +111,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from collections import defaultdict
 from functools import wraps
+from typing import Optional
 
 load_dotenv()
 TOKEN = os.getenv('BOT_TOKEN')
@@ -6429,8 +6430,9 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
             # Phase 39 : ping les rôles de notification
             ping_str = await _get_event_mention(guild, 'boss_raid')
             # Phase 40 : mentions individuelles des inactifs (wake-up ciblé)
+            # ⚠️ TOS Discord : on cap à 3 mentions max pour rester en règle
             try:
-                wakeup_line = await _build_wakeup_mention_line(guild, max_count=15)
+                wakeup_line = await _build_wakeup_mention_line(guild, max_count=3)
             except Exception as ex:
                 print(f"[event start wakeup line] {ex}")
                 wakeup_line = ""
@@ -6451,6 +6453,9 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
                     (arena_channel.id, arena_msg.id, event_id),
                 )
                 await db.commit()
+            # Phase 40.1 : Note — pour le boss raid, pas d'echo nécessaire car
+            # tous les autres salons sont masqués → l'arène est LE seul salon
+            # visible, les actifs la voient forcément.
         except Exception as ex:
             print(f"[event start send arena] {ex}")
 
@@ -7665,8 +7670,9 @@ async def _start_treasure_hunt(guild, triggered_by_id: int, *, manual: bool = Fa
         try:
             ping_str = await _get_event_mention(guild, 'treasure_hunt')
             # Phase 40 : mentions individuelles des inactifs (wake-up ciblé)
+            # ⚠️ TOS Discord : on cap à 3 mentions max pour rester en règle
             try:
-                wakeup_line = await _build_wakeup_mention_line(guild, max_count=10)
+                wakeup_line = await _build_wakeup_mention_line(guild, max_count=3)
             except Exception as ex:
                 print(f"[treasure wakeup line] {ex}")
                 wakeup_line = ""
@@ -7685,6 +7691,12 @@ async def _start_treasure_hunt(guild, triggered_by_id: int, *, manual: bool = Fa
                     (arena_channel.id, arena_msg.id, event_id),
                 )
                 await db.commit()
+            # Phase 40.1 : echo discret dans les salons actifs pour atteindre
+            # les actifs qui ne sont pas dans le rôle notif (sans @mention)
+            try:
+                await _post_event_echo(guild, arena_channel, 'treasure_hunt')
+            except Exception as ex:
+                print(f"[treasure echo] {ex}")
         except Exception as ex:
             print(f"[treasure intro] {ex}")
 
@@ -7939,8 +7951,9 @@ async def _start_quiz(guild, triggered_by_id: int, *, manual: bool = False) -> d
         try:
             ping_str = await _get_event_mention(guild, 'quiz')
             # Phase 40 : mentions individuelles des inactifs (wake-up ciblé)
+            # ⚠️ TOS Discord : on cap à 3 mentions max pour rester en règle
             try:
-                wakeup_line = await _build_wakeup_mention_line(guild, max_count=10)
+                wakeup_line = await _build_wakeup_mention_line(guild, max_count=3)
             except Exception as ex:
                 print(f"[quiz wakeup line] {ex}")
                 wakeup_line = ""
@@ -7959,6 +7972,11 @@ async def _start_quiz(guild, triggered_by_id: int, *, manual: bool = False) -> d
                     (arena_channel.id, arena_msg.id, event_id),
                 )
                 await db.commit()
+            # Phase 40.1 : echo discret dans les salons actifs (atteint les actifs sans ping)
+            try:
+                await _post_event_echo(guild, arena_channel, 'quiz')
+            except Exception as ex:
+                print(f"[quiz echo] {ex}")
         except Exception as ex:
             print(f"[quiz intro] {ex}")
 
@@ -9503,18 +9521,113 @@ async def _log_wakeup_mentions(guild_id: int, member_ids: list[int]):
         print(f"[_log_wakeup_mentions] {ex}")
 
 
-async def _build_wakeup_mention_line(guild, max_count: int = 12) -> str:
+async def _build_wakeup_mention_line(guild, max_count: int = 3) -> str:
     """Phase 40 : construit la ligne de mentions wake-up à inclure dans un event.
+
+    ⚠️ TOS Discord : interdiction du mass-mention. On cap STRICTEMENT à 3 max
+    par défaut pour rester en règle avec l'anti-mass-mention de Discord.
+    Cooldown 48h par membre via wakeup_log.
 
     Retourne "" si aucun candidat (pas de wake-up nécessaire).
     """
-    candidates = await _get_wakeup_candidates(guild, max_count=max_count)
+    # Hard cap : jamais plus de 3 mentions individuelles dans 1 message
+    safe_max = min(max_count, 3)
+    candidates = await _get_wakeup_candidates(guild, max_count=safe_max)
     if not candidates:
         return ""
     # Logger pour le cooldown 48h
     await _log_wakeup_mentions(guild.id, [m.id for m in candidates])
     mentions = " ".join(m.mention for m in candidates)
     return f"\n\n🔔 **On t'attend !** {mentions}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 40.1 — ECHO DISCRET DANS LES SALONS ACTIFS
+#  Pour atteindre les ACTIFS qui n'ont pas le rôle notif sans les ping (TOS safe)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def _get_top_active_channels(guild, limit: int = 3) -> list:
+    """Renvoie les N salons texte les plus actifs des dernières 24h.
+
+    Utilisé pour poster un echo discret (sans mention) d'un event en cours.
+    Permet aux actifs qui discutent dans ces salons de voir l'event arriver.
+    """
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT channel_id, COUNT(*) AS msgs FROM member_activity "
+                "WHERE guild_id=? AND activity_type='message' AND created_at > ? "
+                "GROUP BY channel_id ORDER BY msgs DESC LIMIT ?",
+                (guild.id, cutoff, limit * 3),  # marge pour filtrer
+            ) as cur:
+                rows = await cur.fetchall()
+        out = []
+        for ch_id, _msgs in rows:
+            ch = guild.get_channel(int(ch_id))
+            if not ch or not isinstance(ch, discord.TextChannel):
+                continue
+            # Ne pas poster dans des salons restreints ou en lockdown
+            perms = ch.permissions_for(guild.me)
+            if not (perms.send_messages and perms.embed_links):
+                continue
+            # Skip les salons systèmes (welcome, rules, etc.)
+            if any(kw in (ch.name or '').lower() for kw in ('rules', 'règles', 'welcome', 'bienvenue', 'annonces')):
+                continue
+            out.append(ch)
+            if len(out) >= limit:
+                break
+        return out
+    except Exception as ex:
+        print(f"[_get_top_active_channels] {ex}")
+        return []
+
+
+async def _post_event_echo(guild, arena_channel, event_kind: str, exclude_channel_ids: set = None) -> None:
+    """Phase 40.1 : poste un echo DISCRET (sans mention) dans les 2 salons les
+    plus actifs pour informer les actifs qu'un event vient de se lancer.
+
+    ⚠️ AUCUN @mention dans ces messages — TOS safe, juste un lien clickable.
+    Auto-delete après 30 min pour ne pas polluer.
+    """
+    try:
+        excl = exclude_channel_ids or set()
+        if arena_channel:
+            excl.add(arena_channel.id)
+        channels = await _get_top_active_channels(guild, limit=2)
+        # Filtrer
+        channels = [c for c in channels if c.id not in excl]
+        if not channels:
+            return
+
+        kind_labels = {
+            'boss_raid': ('⚔️', 'Un **Boss Raid** vient de commencer !'),
+            'treasure_hunt': ('💎', 'Une **Chasse au Trésor** vient de démarrer !'),
+            'quiz': ('🎓', 'Un **Quiz communautaire** vient de démarrer !'),
+        }
+        emoji, label = kind_labels.get(event_kind, ('🚨', "Un **événement** vient de commencer !"))
+        arena_link = f"<#{arena_channel.id}>" if arena_channel else "le salon dédié"
+
+        content = (
+            f"{emoji} {label}\n"
+            f"➡️ Rejoins-nous dans {arena_link} pour participer !\n"
+            f"_Ce message disparaît dans 30 min._"
+        )
+        for ch in channels:
+            try:
+                await ch.send(
+                    content=content,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=1800,  # 30 min
+                )
+            except discord.Forbidden:
+                continue
+            except Exception as ex:
+                print(f"[event echo ch={ch.id}] {ex}")
+                continue
+    except Exception as ex:
+        print(f"[_post_event_echo] {ex}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
