@@ -1391,11 +1391,15 @@ async def cfg(gid):
         # Phase 31 : extensions du système d'événements
         'event_combo_enabled': True,           # combos communautaires actifs
         'event_progressive_enabled': True,     # difficulté progressive
-        'event_tier_roles_enabled': False,     # créer/donner les rôles de rang auto
+        'event_tier_roles_enabled': False,     # créer/donner les rôles de rang auto (event-based)
         'event_shop_enabled': True,            # boutique d'événement active
         'event_shop_seed_week': 0,             # numéro de semaine du shop courant
         'event_last_duration_min': 0,          # durée du dernier event (pour progressive)
         'event_last_victory': False,
+        # Phase 32 : types d'événements activés (auto-scheduler choisit aléatoirement parmi)
+        'event_type_boss_enabled': True,
+        'event_type_treasure_enabled': True,
+        'event_type_quiz_enabled': True,
     }
     for k, v in defaults.items():
         if k not in data: data[k] = v
@@ -5800,12 +5804,28 @@ class EventConfigPanelV2(LayoutView):
         b_toggle.callback = self._cb_toggle
 
         b_start = Button(
-            label="⚔️ Lancer un Boss Raid maintenant",
+            label="⚔️ Lancer un Boss Raid",
             style=discord.ButtonStyle.danger,
             disabled=active,
             custom_id="evt_start_now",
         )
         b_start.callback = self._cb_start_now
+
+        b_start_treasure = Button(
+            label="💎 Lancer une Chasse",
+            style=discord.ButtonStyle.danger,
+            disabled=active,
+            custom_id="evt_start_treasure",
+        )
+        b_start_treasure.callback = self._cb_start_treasure
+
+        b_start_quiz = Button(
+            label="🎓 Lancer un Quiz",
+            style=discord.ButtonStyle.danger,
+            disabled=active,
+            custom_id="evt_start_quiz",
+        )
+        b_start_quiz.callback = self._cb_start_quiz
 
         b_stop = Button(
             label="🛑 Stopper l'événement en cours",
@@ -5897,7 +5917,8 @@ class EventConfigPanelV2(LayoutView):
         items.append(v2_body(how_it_works))
         items.append(v2_divider())
         items.append(discord.ui.ActionRow(log_select))
-        items.append(discord.ui.ActionRow(b_toggle, b_settings, b_start, b_stop))
+        items.append(discord.ui.ActionRow(b_toggle, b_settings, b_stop))
+        items.append(discord.ui.ActionRow(b_start, b_start_treasure, b_start_quiz))
         items.append(discord.ui.ActionRow(b_combo, b_prog, b_tier))
         items.append(discord.ui.ActionRow(b_back))
 
@@ -5962,26 +5983,34 @@ class EventConfigPanelV2(LayoutView):
             print(f"[EventConfigPanelV2 _cb_settings] {ex}")
 
     async def _cb_start_now(self, i):
+        await self._launch_event(i, 'boss_raid', "⚔️ Boss Raid")
+
+    async def _cb_start_treasure(self, i):
+        await self._launch_event(i, 'treasure_hunt', "💎 Chasse au Trésor")
+
+    async def _cb_start_quiz(self, i):
+        await self._launch_event(i, 'quiz', "🎓 Quiz")
+
+    async def _launch_event(self, i, event_type: str, pretty_name: str):
         try:
             await i.response.defer(ephemeral=True)
-            result = await _start_boss_raid(self.g, self.u.id, manual=True)
+            result = await _start_any_event(self.g, self.u.id, event_type, manual=True)
             if result.get('ok'):
                 await i.followup.send(
-                    f"⚔️ **Boss Raid lancé !** Arène : <#{result['arena_channel_id']}>",
+                    f"{pretty_name} **lancé !** Arène : <#{result['arena_channel_id']}>",
                     ephemeral=True,
                 )
             else:
                 await i.followup.send(
-                    f"❌ Impossible de lancer l'event : `{result.get('error', '?')}`",
+                    f"❌ Impossible : `{result.get('error', '?')}`",
                     ephemeral=True,
                 )
-            # Re-render
             try:
                 await self.render_to(i, edit=False)
             except Exception:
                 pass
         except Exception as ex:
-            print(f"[EventConfigPanelV2 _cb_start_now] {ex}")
+            print(f"[EventConfigPanelV2 _launch_event {event_type}] {ex}")
             try:
                 await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
             except Exception:
@@ -6056,6 +6085,13 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
         me = guild.me
         if not (me.guild_permissions.manage_channels and me.guild_permissions.manage_roles):
             return {"ok": False, "error": "Le bot n'a pas les permissions manage_channels + manage_roles"}
+
+        # Phase 32 : Reset des rangs d'événement (tout le monde repart à 0)
+        if bool(c.get('event_tier_roles_enabled', False)):
+            try:
+                await _strip_event_ranks(guild)
+            except Exception as ex:
+                print(f"[event start strip ranks] {ex}")
 
         difficulty = int(c.get('event_difficulty', 100) or 100)
         duration_min = int(c.get('event_duration_min', 30) or 30)
@@ -6186,6 +6222,79 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
         print(f"[_start_boss_raid] {ex}")
         import traceback; traceback.print_exc()
         return {"ok": False, "error": str(ex)}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 32 — Helper commun : préparation de l'arène (snapshot + masquage)
+#  Utilisé par TOUS les types d'événements pour garantir restauration EXACTE.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def _setup_arena(guild, event_id: int, arena_name: str):
+    """Snapshot + masquage + création arène. Retourne le salon arène ou None si erreur."""
+    everyone_role = guild.default_role
+
+    # 1. Snapshot
+    async with get_db() as db:
+        for ch in guild.channels:
+            if isinstance(ch, discord.CategoryChannel):
+                continue
+            try:
+                had_overwrite = 1 if everyone_role in ch.overwrites else 0
+                if had_overwrite:
+                    overw = ch.overwrites[everyone_role]
+                    allow_val, deny_val = overw.pair()
+                    allow_int, deny_int = allow_val.value, deny_val.value
+                else:
+                    allow_int, deny_int = 0, 0
+                await db.execute(
+                    'INSERT OR REPLACE INTO event_channel_snapshots(event_id, channel_id, had_overwrite, allow_value, deny_value) '
+                    'VALUES (?,?,?,?,?)',
+                    (event_id, ch.id, had_overwrite, allow_int, deny_int),
+                )
+            except Exception as ex:
+                print(f"[_setup_arena snapshot ch={ch.id}] {ex}")
+        await db.commit()
+
+    # 2. Créer l'arène
+    arena_overwrites = {
+        everyone_role: discord.PermissionOverwrite(
+            view_channel=True, send_messages=True,
+            read_message_history=True, add_reactions=True,
+        ),
+        guild.me: discord.PermissionOverwrite(
+            view_channel=True, send_messages=True,
+            manage_messages=True, embed_links=True,
+        ),
+    }
+    try:
+        arena_channel = await guild.create_text_channel(
+            name=arena_name[:90],
+            overwrites=arena_overwrites,
+            reason=f"Event {event_id} arena",
+        )
+        try:
+            await arena_channel.edit(position=0)
+        except Exception:
+            pass
+    except Exception as ex:
+        print(f"[_setup_arena create channel] {ex}")
+        return None
+
+    # 3. Masquer tous les autres salons
+    for ch in guild.channels:
+        if isinstance(ch, discord.CategoryChannel) or ch.id == arena_channel.id:
+            continue
+        try:
+            overw = ch.overwrites_for(everyone_role)
+            overw.view_channel = False
+            await ch.set_permissions(everyone_role, overwrite=overw, reason=f"Event {event_id} mask")
+        except discord.Forbidden:
+            continue
+        except Exception as ex:
+            print(f"[_setup_arena mask ch={ch.id}] {ex}")
+            continue
+
+    return arena_channel
 
 
 def _build_boss_embed(boss: dict, participants: list[dict], ends_at_dt: datetime, guild) -> discord.Embed:
@@ -6656,10 +6765,12 @@ async def _end_active_event(guild, *, victory: bool, reason: str = ""):
         except Exception as ex:
             print(f"[badges/ranks check] {ex}")
 
-        # Cleanup cache
+        # Cleanup cache (toutes les structures runtime)
         _active_events_cache.pop(guild.id, None)
         _recent_attacks_log.pop(event_id, None)
         _event_combo_count.pop(event_id, None)
+        _treasure_pool.pop(event_id, None)
+        _quiz_state.pop(event_id, None)
         print(f"[EVENT END] guild={guild.id} event={event_id} victory={victory}")
     except Exception as ex:
         print(f"[_end_active_event] {ex}")
@@ -6775,69 +6886,754 @@ async def _check_badges_and_ranks(guild, participants: list, victory: bool, tier
                     except Exception:
                         pass  # DM fermés
 
-            # 8. Tier role (si activé)
-            if tier_roles_enabled:
-                kills = int(inv.get('kills', 0))
-                new_tier = events2026.rank_for_kills(kills)
-                if new_tier and new_tier['key'] != current_rank_key:
-                    role = await _get_or_create_tier_role(guild, new_tier)
-                    if role:
-                        # Retirer les autres tiers
-                        for t in events2026.RANK_TIERS:
-                            if t['key'] != new_tier['key']:
-                                other_role = discord.utils.get(guild.roles, name=t['name'])
-                                if other_role and other_role in member.roles:
-                                    try:
-                                        await member.remove_roles(other_role, reason="Tier supérieur atteint")
-                                    except Exception:
-                                        pass
-                        # Donner le nouveau
-                        if role not in member.roles:
-                            try:
-                                await member.add_roles(role, reason=f"Rang {new_tier['name']} atteint")
-                            except Exception:
-                                pass
-                        # Persister la clé
-                        async with get_db() as db:
-                            await db.execute(
-                                'UPDATE player_event_stats SET rank_key=? WHERE guild_id=? AND user_id=?',
-                                (new_tier['key'], guild.id, uid),
-                            )
-                            await db.commit()
-                        # Notifier
-                        try:
-                            await member.send(
-                                f"⬆️ **Promotion sur {guild.name} !** Tu es maintenant {new_tier['name']} !"
-                            )
-                        except Exception:
-                            pass
         except Exception as ex:
             print(f"[badges check user={uid}] {ex}")
 
+    # ─── Phase 32 : Distribution des rangs ÉVÈNEMENT (temporaires) ───
+    if tier_roles_enabled and participants:
+        try:
+            await _grant_event_ranks(guild, sorted_p, victory)
+        except Exception as ex:
+            print(f"[event ranks grant] {ex}")
 
-async def _get_or_create_tier_role(guild, tier: dict):
-    """Récupère ou crée un rôle Discord pour ce tier."""
-    role = discord.utils.get(guild.roles, name=tier['name'])
+
+async def _get_or_create_event_role(guild, role_spec: dict):
+    """Récupère ou crée un rôle Discord pour un rang d'événement."""
+    role = discord.utils.get(guild.roles, name=role_spec['name'])
     if role:
         return role
     try:
         role = await guild.create_role(
-            name=tier['name'],
-            color=discord.Color(tier['color']),
+            name=role_spec['name'],
+            color=discord.Color(role_spec['color']),
             mentionable=False,
             hoist=True,
-            reason=f"Auto tier role pour {tier['key']}",
+            reason=f"Auto event-rank role pour {role_spec['key']}",
         )
         return role
     except discord.Forbidden:
-        print(f"[tier role create] perm refusée pour {tier['name']}")
+        print(f"[event rank role create] perm refusée pour {role_spec['name']}")
         return None
     except Exception as ex:
-        print(f"[tier role create] {ex}")
+        print(f"[event rank role create] {ex}")
         return None
+
+
+async def _strip_event_ranks(guild):
+    """Phase 32 : retire les rôles de rang d'événement à TOUS les membres qui en ont.
+
+    Appelé au début de chaque nouvel événement pour que tout le monde reparte de 0.
+    Conservation : coins, gear, badges, stats lifetime (jamais touchés).
+    """
+    for role_spec in events2026.EVENT_RANK_ROLES:
+        role = discord.utils.get(guild.roles, name=role_spec['name'])
+        if not role:
+            continue
+        # Itérer sur role.members (cheap, pas d'API call)
+        for m in list(role.members):
+            try:
+                await m.remove_roles(role, reason="Nouvel événement — rangs réinitialisés")
+            except Exception:
+                continue
+
+
+async def _grant_event_ranks(guild, sorted_participants: list, victory: bool):
+    """Phase 32 : donne les rôles aux top combattants de l'event qui vient de finir.
+
+    sorted_participants : participants triés par damage desc
+    Top 1 → Champion, Top 2 → Vice, Top 3 → Troisième, Top 4-10 → Combattant.
+    Les rôles sont temporaires : ils seront retirés au prochain event.
+    """
+    if not sorted_participants:
+        return
+    for idx, p in enumerate(sorted_participants):
+        rank = idx + 1
+        if rank > 10:
+            break
+        uid = p['user_id']
+        member = guild.get_member(uid)
+        if not member:
+            continue
+        role_spec = events2026.event_role_for_rank(rank)
+        if not role_spec:
+            continue
+        role = await _get_or_create_event_role(guild, role_spec)
+        if not role:
+            continue
+        try:
+            if role not in member.roles:
+                await member.add_roles(role, reason=f"Rang #{rank} du dernier événement")
+        except Exception as ex:
+            print(f"[grant event rank user={uid}] {ex}")
 
 
 # ─────────────────────────── BACKGROUND TASKS ───────────────────────────
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 32 — TREASURE HUNT (chasse au trésor)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Cache : event_id → list of {treasure_msg_id, treasure_data, claimed_by}
+_treasure_pool: dict[int, list[dict]] = {}
+
+
+class TreasureClaimView(View):
+    """Bouton pour réclamer un trésor — premier arrivé, premier servi."""
+
+    def __init__(self, event_id: int, treasure_idx: int):
+        super().__init__(timeout=None)
+        self.event_id = event_id
+        self.treasure_idx = treasure_idx
+        b_claim = Button(
+            label="💎 Récupérer !",
+            style=discord.ButtonStyle.success,
+            custom_id=f"treasure_{event_id}_{treasure_idx}",
+        )
+        b_claim.callback = self._on_claim
+        self.add_item(b_claim)
+
+    async def _on_claim(self, i: discord.Interaction):
+        try:
+            pool = _treasure_pool.get(self.event_id, [])
+            if self.treasure_idx >= len(pool):
+                return await i.response.send_message("❌ Ce trésor n'existe plus.", ephemeral=True)
+            tr = pool[self.treasure_idx]
+            if tr.get('claimed_by'):
+                claimer = i.guild.get_member(int(tr['claimed_by']))
+                return await i.response.send_message(
+                    f"⚠️ Déjà réclamé par {claimer.mention if claimer else 'quelqu'un'}.",
+                    ephemeral=True,
+                )
+            if i.user.bot:
+                return await i.response.send_message("🤖 Les bots ne peuvent pas réclamer.", ephemeral=True)
+
+            tr['claimed_by'] = i.user.id
+
+            # Distribuer la loot immédiatement
+            coins = int(tr.get('coins', 0))
+            try:
+                await add_coins(i.guild.id, i.user.id, coins)
+            except Exception:
+                pass
+            gear_msg = ""
+            if tr.get('gear'):
+                gear = tr['gear']
+                inv = await _get_or_create_inventory(i.guild.id, i.user.id)
+                slot = gear.get('slot', 'weapon')
+                cur_gear = inv.get(slot, {}) or {}
+                rank_order = {"commune": 0, "rare": 1, "épique": 2, "légendaire": 3}
+                if rank_order.get(gear.get('rarity', 'commune'), 0) >= rank_order.get(cur_gear.get('rarity', 'commune'), 0):
+                    inv[slot] = {
+                        'name': gear['name'], 'rarity': gear['rarity'],
+                        'emoji': gear.get('emoji', ''),
+                        'atk': gear.get('atk', 0), 'def': gear.get('def', 0),
+                    }
+                    await _save_inventory(i.guild.id, i.user.id, inv)
+                    gear_msg = f"\n+ {events2026.RARITY_EMOJIS.get(gear['rarity'], '')} **{gear['emoji']} {gear['name']}** ({gear['rarity']}) — équipé !"
+                else:
+                    gear_msg = f"\n+ {events2026.RARITY_EMOJIS.get(gear['rarity'], '')} **{gear['emoji']} {gear['name']}** ({gear['rarity']})"
+
+            # Compter comme une "participation" (pour distribuer ranks event)
+            now_ts = time.time()
+            async with get_db() as db:
+                await db.execute(
+                    'INSERT INTO event_participants(event_id, user_id, damage_dealt, attacks_count, last_attack_ts) '
+                    'VALUES (?,?,?,1,?) '
+                    'ON CONFLICT(event_id, user_id) DO UPDATE SET '
+                    'damage_dealt = damage_dealt + ?, attacks_count = attacks_count + 1, last_attack_ts = ?',
+                    (self.event_id, i.user.id, coins, now_ts, coins, now_ts),
+                )
+                await db.commit()
+
+            # Désactiver le bouton sur le message
+            for child in self.children:
+                child.disabled = True
+                child.label = f"✅ Récupéré par {i.user.display_name[:30]}"
+            try:
+                await i.message.edit(view=self)
+            except Exception:
+                pass
+
+            await i.response.send_message(
+                f"💎 Tu as récupéré **{tr.get('name', 'Trésor')}** !\n+`{coins}` 🪙{gear_msg}",
+                ephemeral=True,
+            )
+        except Exception as ex:
+            print(f"[TreasureClaimView _on_claim] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
+async def _start_treasure_hunt(guild, triggered_by_id: int, *, manual: bool = False) -> dict:
+    """Lance une chasse au trésor."""
+    try:
+        c = await cfg(guild.id)
+        async with get_db() as db:
+            async with db.execute('SELECT id FROM events WHERE guild_id=? AND ended=0', (guild.id,)) as cur:
+                if await cur.fetchone():
+                    return {"ok": False, "error": "Un événement est déjà en cours"}
+
+        me = guild.me
+        if not (me.guild_permissions.manage_channels and me.guild_permissions.manage_roles):
+            return {"ok": False, "error": "Permissions manquantes"}
+
+        if bool(c.get('event_tier_roles_enabled', False)):
+            try:
+                await _strip_event_ranks(guild)
+            except Exception:
+                pass
+
+        duration_min = int(c.get('event_duration_min', 30) or 30)
+        arena_name = "💎-chasse-au-trésor"
+        ends_at_dt = datetime.now(timezone.utc) + timedelta(minutes=duration_min)
+
+        # Créer event en DB
+        async with get_db() as db:
+            cur = await db.execute(
+                'INSERT INTO events(guild_id, event_type, boss_json, arena_channel_id, ends_at, triggered_by) '
+                'VALUES (?,?,?,?,?,?)',
+                (guild.id, 'treasure_hunt', json.dumps({"type": "treasure_hunt"}), 0, ends_at_dt.isoformat(), triggered_by_id),
+            )
+            event_id = cur.lastrowid
+            await db.commit()
+
+        arena_channel = await _setup_arena(guild, event_id, arena_name)
+        if not arena_channel:
+            return {"ok": False, "error": "Création arène échouée"}
+
+        # Intro
+        intro_embed = discord.Embed(
+            title="💎 CHASSE AU TRÉSOR !",
+            description=(
+                f"_Des trésors apparaîtront ici toutes les ~{max(1, duration_min // 10)} minutes._\n\n"
+                f"⚠️ **Premier arrivé, premier servi !**\n"
+                f"Clique sur **💎 Récupérer !** dès qu'un trésor apparaît.\n\n"
+                f"⏰ Se termine <t:{int(ends_at_dt.timestamp())}:R>"
+            ),
+            color=0xF1C40F,
+            timestamp=datetime.now(timezone.utc),
+        )
+        intro_embed.set_footer(text=f"{guild.name} · Chasse au Trésor", icon_url=(guild.icon.url if guild.icon else None))
+        try:
+            arena_msg = await arena_channel.send(content="🚨 **CHASSE AU TRÉSOR LANCÉE !**", embed=intro_embed)
+            async with get_db() as db:
+                await db.execute(
+                    'UPDATE events SET arena_channel_id=?, arena_message_id=? WHERE id=?',
+                    (arena_channel.id, arena_msg.id, event_id),
+                )
+                await db.commit()
+        except Exception as ex:
+            print(f"[treasure intro] {ex}")
+
+        _active_events_cache[guild.id] = {
+            "event_id": event_id, "arena_channel_id": arena_channel.id,
+            "arena_message_id": arena_msg.id if 'arena_msg' in locals() else 0,
+            "type": "treasure_hunt",
+        }
+        _treasure_pool[event_id] = []
+
+        # Calculer combien de trésors et l'intervalle
+        nb_treasures = max(5, min(20, duration_min // 2))
+        interval_sec = (duration_min * 60) / nb_treasures
+
+        # Lancer le spawner en task
+        asyncio.create_task(_treasure_spawner(guild, event_id, arena_channel.id, nb_treasures, interval_sec))
+
+        await db_set(guild.id, 'event_last_run', datetime.now(timezone.utc).isoformat())
+        print(f"[EVENT TREASURE START] guild={guild.id} event={event_id} {nb_treasures} trésors")
+        return {"ok": True, "event_id": event_id, "arena_channel_id": arena_channel.id}
+    except Exception as ex:
+        print(f"[_start_treasure_hunt] {ex}")
+        import traceback; traceback.print_exc()
+        return {"ok": False, "error": str(ex)}
+
+
+async def _treasure_spawner(guild, event_id: int, arena_ch_id: int, nb_treasures: int, interval_sec: float):
+    """Spawn N trésors à intervalle régulier dans l'arène."""
+    for idx in range(nb_treasures):
+        try:
+            # Vérifier que l'event est toujours actif
+            async with get_db() as db:
+                async with db.execute('SELECT ended FROM events WHERE id=?', (event_id,)) as cur:
+                    row = await cur.fetchone()
+            if not row or row[0]:
+                break  # event terminé
+
+            await asyncio.sleep(interval_sec)
+
+            arena = guild.get_channel(arena_ch_id)
+            if not arena:
+                break
+
+            tr = events2026.random_treasure()
+            tr['idx'] = idx
+            tr['claimed_by'] = None
+
+            pool = _treasure_pool.setdefault(event_id, [])
+            pool.append(tr)
+
+            # Embed du trésor
+            color = events2026.RARITY_COLORS.get(
+                tr.get('gear', {}).get('rarity', 'commune') if tr.get('gear') else 'commune',
+                0xF1C40F,
+            )
+            desc = f"_{tr.get('name', 'Trésor')}_\n\n💰 Récompense : `{tr['coins']}` 🪙"
+            if tr.get('gear'):
+                g = tr['gear']
+                desc += f"\n🎁 Équipement : **{g['emoji']} {g['name']}** ({g['rarity']})"
+            desc += "\n\n⚡ **Premier arrivé, premier servi !**"
+
+            e = discord.Embed(
+                title=f"{tr['emoji']} Un {tr['name']} apparaît !",
+                description=desc,
+                color=color,
+            )
+            e.set_footer(text=f"Trésor #{idx + 1}/{nb_treasures}")
+
+            view = TreasureClaimView(event_id, idx)
+            try:
+                await arena.send(embed=e, view=view)
+            except Exception as ex:
+                print(f"[treasure spawn idx={idx}] {ex}")
+        except Exception as ex:
+            print(f"[_treasure_spawner idx={idx}] {ex}")
+            continue
+
+    # À la fin de tous les spawns : laisser quelques secondes puis terminer l'event
+    await asyncio.sleep(30)
+    try:
+        # Vérifier si event toujours actif
+        async with get_db() as db:
+            async with db.execute('SELECT ended FROM events WHERE id=?', (event_id,)) as cur:
+                row = await cur.fetchone()
+        if row and not row[0]:
+            await _end_active_event(guild, victory=True, reason="Tous les trésors ont été distribués !")
+    except Exception as ex:
+        print(f"[treasure end] {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 32 — QUIZ COMMUNAUTAIRE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Cache : event_id → {question_idx, answers_received, scores, current_msg_id}
+_quiz_state: dict[int, dict] = {}
+
+
+class QuizAnswerView(View):
+    """View pour les 4 réponses d'une question quiz."""
+
+    def __init__(self, event_id: int, q_idx: int, correct: int):
+        super().__init__(timeout=None)
+        self.event_id = event_id
+        self.q_idx = q_idx
+        self.correct = correct
+        for i in range(4):
+            letter = chr(ord('A') + i)
+            b = Button(
+                label=letter,
+                style=discord.ButtonStyle.primary,
+                custom_id=f"quiz_{event_id}_{q_idx}_{i}",
+            )
+            b.callback = (lambda ix, ans=i: self._on_answer(ix, ans))
+            self.add_item(b)
+
+    async def _on_answer(self, i: discord.Interaction, ans_idx: int):
+        try:
+            state = _quiz_state.get(self.event_id)
+            if not state or state.get('question_idx') != self.q_idx:
+                return await i.response.send_message("⏰ La question est passée !", ephemeral=True)
+            if state.get('locked', False):
+                return await i.response.send_message("✅ Quelqu'un a déjà répondu juste !", ephemeral=True)
+            if i.user.bot:
+                return await i.response.send_message("🤖 Les bots ne peuvent pas répondre.", ephemeral=True)
+
+            answers = state.setdefault('answers_received', {})
+            if i.user.id in answers:
+                return await i.response.send_message("⚠️ Tu as déjà répondu à cette question.", ephemeral=True)
+            answers[i.user.id] = ans_idx
+
+            if ans_idx == self.correct:
+                # Bonne réponse — premier à trouver
+                state['locked'] = True
+                scores = state.setdefault('scores', {})
+                bonus = 100 if not scores else 50  # premier ou les suivants
+                # Bonus pour le 1er
+                first_bonus = 100 if not scores else 0
+                scores[i.user.id] = scores.get(i.user.id, 0) + 100 + first_bonus
+
+                # Compter en participation
+                now_ts = time.time()
+                async with get_db() as db:
+                    await db.execute(
+                        'INSERT INTO event_participants(event_id, user_id, damage_dealt, attacks_count, last_attack_ts) '
+                        'VALUES (?,?,100,1,?) '
+                        'ON CONFLICT(event_id, user_id) DO UPDATE SET '
+                        'damage_dealt = damage_dealt + 100, attacks_count = attacks_count + 1, last_attack_ts = ?',
+                        (self.event_id, i.user.id, now_ts, now_ts),
+                    )
+                    await db.commit()
+
+                # Coins
+                try:
+                    await add_coins(i.guild.id, i.user.id, 100 + first_bonus)
+                except Exception:
+                    pass
+
+                await i.response.send_message(
+                    f"✅ **Bonne réponse !** +`{100 + first_bonus}` 🪙",
+                    ephemeral=True,
+                )
+
+                # Désactiver les boutons et marquer la bonne
+                for idx_b, child in enumerate(self.children):
+                    child.disabled = True
+                    if idx_b == self.correct:
+                        child.style = discord.ButtonStyle.success
+                        child.label = f"{chr(ord('A') + idx_b)} ✓"
+                    elif idx_b == ans_idx:
+                        pass
+                    else:
+                        child.style = discord.ButtonStyle.secondary
+                try:
+                    await i.message.edit(view=self)
+                except Exception:
+                    pass
+            else:
+                await i.response.send_message(
+                    f"❌ Mauvaise réponse. La bonne était **{chr(ord('A') + self.correct)}**.",
+                    ephemeral=True,
+                )
+        except Exception as ex:
+            print(f"[QuizAnswerView _on_answer] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
+async def _start_quiz(guild, triggered_by_id: int, *, manual: bool = False) -> dict:
+    """Lance un événement quiz."""
+    try:
+        c = await cfg(guild.id)
+        async with get_db() as db:
+            async with db.execute('SELECT id FROM events WHERE guild_id=? AND ended=0', (guild.id,)) as cur:
+                if await cur.fetchone():
+                    return {"ok": False, "error": "Un événement est déjà en cours"}
+
+        me = guild.me
+        if not (me.guild_permissions.manage_channels and me.guild_permissions.manage_roles):
+            return {"ok": False, "error": "Permissions manquantes"}
+
+        if bool(c.get('event_tier_roles_enabled', False)):
+            try:
+                await _strip_event_ranks(guild)
+            except Exception:
+                pass
+
+        duration_min = int(c.get('event_duration_min', 30) or 30)
+        nb_questions = 10
+        arena_name = "🎓-quiz-communautaire"
+        ends_at_dt = datetime.now(timezone.utc) + timedelta(minutes=duration_min)
+
+        async with get_db() as db:
+            cur = await db.execute(
+                'INSERT INTO events(guild_id, event_type, boss_json, arena_channel_id, ends_at, triggered_by) '
+                'VALUES (?,?,?,?,?,?)',
+                (guild.id, 'quiz', json.dumps({"type": "quiz", "questions": nb_questions}), 0, ends_at_dt.isoformat(), triggered_by_id),
+            )
+            event_id = cur.lastrowid
+            await db.commit()
+
+        arena_channel = await _setup_arena(guild, event_id, arena_name)
+        if not arena_channel:
+            return {"ok": False, "error": "Création arène échouée"}
+
+        intro_embed = discord.Embed(
+            title="🎓 QUIZ COMMUNAUTAIRE !",
+            description=(
+                f"**{nb_questions}** questions vont être posées.\n\n"
+                f"⚡ **Le premier à cliquer la bonne réponse** gagne `200` 🪙\n"
+                f"Les suivants : `100` 🪙 par bonne réponse.\n\n"
+                f"⏰ Première question dans **10 secondes** !"
+            ),
+            color=0x3498DB,
+            timestamp=datetime.now(timezone.utc),
+        )
+        intro_embed.set_footer(text=f"{guild.name} · Quiz", icon_url=(guild.icon.url if guild.icon else None))
+        try:
+            arena_msg = await arena_channel.send(embed=intro_embed)
+            async with get_db() as db:
+                await db.execute(
+                    'UPDATE events SET arena_channel_id=?, arena_message_id=? WHERE id=?',
+                    (arena_channel.id, arena_msg.id, event_id),
+                )
+                await db.commit()
+        except Exception as ex:
+            print(f"[quiz intro] {ex}")
+
+        _active_events_cache[guild.id] = {
+            "event_id": event_id, "arena_channel_id": arena_channel.id,
+            "arena_message_id": arena_msg.id if 'arena_msg' in locals() else 0,
+            "type": "quiz",
+        }
+        _quiz_state[event_id] = {"question_idx": -1, "answers_received": {}, "scores": {}, "locked": False}
+
+        # Lancer le runner
+        asyncio.create_task(_quiz_runner(guild, event_id, arena_channel.id, nb_questions))
+
+        await db_set(guild.id, 'event_last_run', datetime.now(timezone.utc).isoformat())
+        print(f"[EVENT QUIZ START] guild={guild.id} event={event_id} {nb_questions} questions")
+        return {"ok": True, "event_id": event_id, "arena_channel_id": arena_channel.id}
+    except Exception as ex:
+        print(f"[_start_quiz] {ex}")
+        import traceback; traceback.print_exc()
+        return {"ok": False, "error": str(ex)}
+
+
+async def _quiz_runner(guild, event_id: int, arena_ch_id: int, nb_questions: int):
+    """Loop : pose chaque question, attend 30s, passe à la suivante."""
+    await asyncio.sleep(10)  # délai initial
+
+    questions = events2026.get_quiz_set(nb_questions)
+    arena = guild.get_channel(arena_ch_id)
+    if not arena:
+        return
+
+    for q_idx, q in enumerate(questions):
+        try:
+            async with get_db() as db:
+                async with db.execute('SELECT ended FROM events WHERE id=?', (event_id,)) as cur:
+                    row = await cur.fetchone()
+            if not row or row[0]:
+                break
+
+            # Update state
+            state = _quiz_state.setdefault(event_id, {})
+            state['question_idx'] = q_idx
+            state['answers_received'] = {}
+            state['locked'] = False
+
+            # Embed de la question
+            letters = ['A', 'B', 'C', 'D']
+            choices = "\n".join(f"**{letters[i]}.** {ans}" for i, ans in enumerate(q['a']))
+            e = discord.Embed(
+                title=f"❓ Question {q_idx + 1}/{nb_questions}",
+                description=f"**{q['q']}**\n\n{choices}\n\n⏱️ Tu as **30 secondes** pour répondre !",
+                color=0x3498DB,
+            )
+            view = QuizAnswerView(event_id, q_idx, q['c'])
+            await arena.send(embed=e, view=view)
+
+            # Attendre 30s
+            await asyncio.sleep(30)
+        except Exception as ex:
+            print(f"[_quiz_runner q={q_idx}] {ex}")
+            continue
+
+    # Fin du quiz
+    try:
+        async with get_db() as db:
+            async with db.execute('SELECT ended FROM events WHERE id=?', (event_id,)) as cur:
+                row = await cur.fetchone()
+        if row and not row[0]:
+            await _end_active_event(guild, victory=True, reason="Quiz terminé — bravo aux participants !")
+    except Exception as ex:
+        print(f"[quiz end] {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 32 — Dispatch (boss / treasure / quiz)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def _start_any_event(guild, triggered_by_id: int, event_type: str, *, manual: bool = False) -> dict:
+    """Dispatch vers le bon starter selon le type."""
+    if event_type == 'boss_raid':
+        return await _start_boss_raid(guild, triggered_by_id, manual=manual)
+    elif event_type == 'treasure_hunt':
+        return await _start_treasure_hunt(guild, triggered_by_id, manual=manual)
+    elif event_type == 'quiz':
+        return await _start_quiz(guild, triggered_by_id, manual=manual)
+    else:
+        return {"ok": False, "error": f"Type inconnu : {event_type}"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 32 — EVENT SHOP (rotation hebdomadaire d'équipement à acheter)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _current_shop_week() -> int:
+    """Numéro de semaine ISO actuel (pour stabilité du seed)."""
+    return datetime.now(timezone.utc).isocalendar().week + datetime.now(timezone.utc).year * 100
+
+
+async def _get_event_shop_items(guild_id: int) -> list[dict]:
+    """Retourne 6 items du shop (avec rotation hebdo basée sur seed)."""
+    week = _current_shop_week()
+    return events2026.generate_shop_rotation(seed=week)
+
+
+class EventShopPanelV2(LayoutView):
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit: bool = True):
+        items = await _get_event_shop_items(self.g.id)
+        try:
+            eco = await get_user_economy(self.g.id, self.u.id)
+            coins = (eco.get('coins', 0) or 0) + (eco.get('bank', 0) or 0)
+        except Exception:
+            coins = 0
+
+        self.clear_items()
+
+        lines = ["**🛒 Boutique d'événement (rotation hebdomadaire)**\n"]
+        for idx, it in enumerate(items):
+            rarity = it.get('rarity', 'commune')
+            rar_emoji = events2026.RARITY_EMOJIS.get(rarity, '')
+            stat = f"`+{it.get('atk', 0)}` ATK" if it.get('atk', 0) else f"`+{it.get('def', 0)}` DEF"
+            lines.append(
+                f"{rar_emoji} {it['emoji']} **{it['name']}** ({rarity}) · {stat} · `{it['price']:,}` 🪙"
+            )
+
+        items_block = "\n".join(lines)
+
+        # Boutons d'achat (max 5 par row, 6 items → 2 rows)
+        buttons = []
+        for idx, it in enumerate(items[:6]):
+            can_afford = coins >= it['price']
+            b = Button(
+                label=f"{idx+1}. Acheter",
+                style=(discord.ButtonStyle.success if can_afford else discord.ButtonStyle.secondary),
+                disabled=(not can_afford),
+                custom_id=f"evshop_buy_{idx}",
+            )
+            b.callback = (lambda i, idx_local=idx: self._cb_buy(i, idx_local, items))
+            buttons.append(b)
+
+        b_close = Button(label="◀️ Fermer", style=discord.ButtonStyle.secondary, custom_id="evshop_close")
+        b_close.callback = self._cb_close
+
+        content = [
+            v2_title("🛒 Boutique d'événement"),
+            v2_subtitle(f"Tu as `{coins:,}` 🪙 — rotation hebdomadaire"),
+            v2_divider(),
+            v2_body(items_block),
+            v2_body(
+                "_Les armes/armures achetés ici remplacent ton équipement "
+                "uniquement si la rareté est supérieure._\n"
+                "_Le shop change chaque semaine !_"
+            ),
+            v2_divider(),
+            discord.ui.ActionRow(*buttons[:3]),
+            discord.ui.ActionRow(*buttons[3:6]) if len(buttons) > 3 else None,
+            discord.ui.ActionRow(b_close),
+        ]
+        content = [c for c in content if c is not None]
+        self.add_item(v2_container(*content, color=Palette.PRIMARY))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_buy(self, i, idx: int, items: list):
+        try:
+            if idx >= len(items):
+                return await i.response.send_message("❌ Item invalide.", ephemeral=True)
+            it = items[idx]
+            price = int(it['price'])
+
+            # Vérifier coins
+            eco = await get_user_economy(self.g.id, self.u.id)
+            coins = (eco.get('coins', 0) or 0) + (eco.get('bank', 0) or 0)
+            if coins < price:
+                return await i.response.send_message(f"❌ Pas assez de pièces (tu as `{coins:,}`, prix `{price:,}`).", ephemeral=True)
+
+            # Débiter
+            try:
+                await add_coins(self.g.id, self.u.id, -price)
+            except Exception as ex:
+                return await i.response.send_message(f"❌ Erreur transaction : `{ex}`", ephemeral=True)
+
+            # Mettre à jour shop_spent
+            try:
+                async with get_db() as db:
+                    await db.execute(
+                        'INSERT INTO player_event_stats(guild_id, user_id, shop_spent) VALUES(?,?,?) '
+                        'ON CONFLICT(guild_id, user_id) DO UPDATE SET shop_spent = shop_spent + ?',
+                        (self.g.id, self.u.id, price, price),
+                    )
+                    await db.commit()
+            except Exception:
+                pass
+
+            # Équiper si rareté supérieure
+            inv = await _get_or_create_inventory(self.g.id, self.u.id)
+            slot = it.get('slot', 'weapon')
+            cur_gear = inv.get(slot, {}) or {}
+            rank_order = {"commune": 0, "rare": 1, "épique": 2, "légendaire": 3}
+            equipped_msg = ""
+            if rank_order.get(it.get('rarity', 'commune'), 0) >= rank_order.get(cur_gear.get('rarity', 'commune'), 0):
+                inv[slot] = {
+                    'name': it['name'], 'rarity': it['rarity'],
+                    'emoji': it.get('emoji', ''),
+                    'atk': it.get('atk', 0), 'def': it.get('def', 0),
+                }
+                await _save_inventory(self.g.id, self.u.id, inv)
+                equipped_msg = " — équipé immédiatement !"
+            else:
+                equipped_msg = f" — _gardé en réserve (équipement actuel est {cur_gear.get('rarity', 'commune')})._"
+
+            await i.response.send_message(
+                f"✅ **Achat réussi !**\n{it['emoji']} **{it['name']}** ({it['rarity']}) · `-{price:,}` 🪙{equipped_msg}",
+                ephemeral=True,
+            )
+            # Re-render le panel
+            try:
+                await self.render_to(i, edit=False)
+            except Exception:
+                pass
+        except Exception as ex:
+            print(f"[EventShopPanelV2 _cb_buy] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+    async def _cb_close(self, i):
+        try:
+            await i.response.edit_message(content="🛒 Boutique fermée.", view=None, embed=None)
+        except Exception:
+            pass
+
+
+@bot.tree.command(name="event_shop", description="🛒 Boutique d'équipements (rotation hebdomadaire)")
+async def event_shop_cmd(i: discord.Interaction):
+    try:
+        c = await cfg(i.guild.id)
+        if not bool(c.get('event_shop_enabled', True)):
+            return await i.response.send_message("_La boutique est désactivée sur ce serveur._", ephemeral=True)
+        v = EventShopPanelV2(i.user, i.guild)
+        await v.render_to(i, edit=False)
+    except Exception as ex:
+        print(f"[/event_shop] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
 
 @tasks.loop(minutes=2)
 async def event_timeout_checker():
@@ -6886,10 +7682,21 @@ async def event_auto_scheduler():
                         if await cur.fetchone():
                             continue
 
-                # Lancer !
-                result = await _start_boss_raid(guild, bot.user.id, manual=False)
+                # Lancer (type aléatoire parmi ceux activés) !
+                enabled_types = []
+                if bool(c.get('event_type_boss_enabled', True)):
+                    enabled_types.append('boss_raid')
+                if bool(c.get('event_type_treasure_enabled', True)):
+                    enabled_types.append('treasure_hunt')
+                if bool(c.get('event_type_quiz_enabled', True)):
+                    enabled_types.append('quiz')
+                if not enabled_types:
+                    continue
+                import random as _r
+                chosen_type = _r.choice(enabled_types)
+                result = await _start_any_event(guild, bot.user.id, chosen_type, manual=False)
                 if result.get('ok'):
-                    print(f"[EVENT AUTO] guild={guild.id} déclenché")
+                    print(f"[EVENT AUTO] guild={guild.id} type={chosen_type} déclenché")
             except Exception as ex:
                 print(f"[event_auto_scheduler guild={guild.id}] {ex}")
     except Exception as ex:
@@ -6909,15 +7716,20 @@ async def _evt_auto_wait():
 # ─────────────────────────── RESTAURATION AU BOOT ───────────────────────────
 
 async def restore_active_events():
-    """Au boot du bot : restore les BossAttackView des events actifs."""
+    """Au boot du bot : restore les views (boss/treasure/quiz) des events actifs."""
     try:
         async with get_db() as db:
-            async with db.execute('SELECT id FROM events WHERE ended=0') as cur:
+            async with db.execute('SELECT id, event_type FROM events WHERE ended=0') as cur:
                 rows = await cur.fetchall()
-        for (event_id,) in rows:
+        for event_id, event_type in rows:
             try:
-                v = BossAttackView(int(event_id))
-                bot.add_view(v)
+                if event_type == 'boss_raid' or not event_type:
+                    bot.add_view(BossAttackView(int(event_id)))
+                # Treasure / Quiz : les views sont attachées à des messages spécifiques
+                # qui contiennent leur custom_id. Au reboot, on ne peut pas restaurer
+                # les boutons sans relancer le spawner / runner. Solution : on les ignore
+                # (le timeout_checker terminera l'event).
+                # Note : boss raid persiste car le bouton est sur UN message stable.
             except Exception as ex:
                 print(f"[restore_active_events event_id={event_id}] {ex}")
         if rows:

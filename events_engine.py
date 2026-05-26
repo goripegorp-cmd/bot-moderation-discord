@@ -396,8 +396,9 @@ def check_badge_unlocks(stats: dict, already_unlocked: set, event_context: dict 
     return out
 
 
-# Rangs de progression — donnent un rôle Discord auto si configuré
-# Chaque tier a un seuil de kills + un nom de rôle + couleur
+# Rangs de progression — uniquement pour AFFICHAGE des badges/jalons (PAS de rôle Discord)
+# Le système ROLE est désormais event-based (cf EVENT_RANK_ROLES) pour donner à
+# chaque membre une chance de top 1 à chaque nouvel événement.
 RANK_TIERS = [
     {"min_kills": 1,   "name": "🥉 Chasseur Bronze",   "color": 0xCD7F32, "key": "bronze"},
     {"min_kills": 10,  "name": "🥈 Chasseur Argent",   "color": 0xC0C0C0, "key": "silver"},
@@ -417,6 +418,25 @@ def rank_for_kills(kills: int) -> Optional[dict]:
         else:
             break
     return result
+
+
+# ─── RANGS DE L'ÉVÉNEMENT (TEMPORAIRES — reset à chaque nouvel event) ───
+# Chaque participant reçoit potentiellement UN rôle, perdu au prochain event.
+# Cela donne à chaque membre une chance d'être au sommet à chaque nouveau raid.
+EVENT_RANK_ROLES = [
+    {"key": "champion",   "name": "🥇 Champion du Raid",      "color": 0xFFD700, "min_rank": 1, "max_rank": 1},
+    {"key": "vice",       "name": "🥈 Vice-Champion du Raid", "color": 0xC0C0C0, "min_rank": 2, "max_rank": 2},
+    {"key": "third",      "name": "🥉 Troisième du Raid",     "color": 0xCD7F32, "min_rank": 3, "max_rank": 3},
+    {"key": "combatant",  "name": "🎖️ Combattant Valeureux",   "color": 0x95A5A6, "min_rank": 4, "max_rank": 10},
+]
+
+
+def event_role_for_rank(rank: int) -> Optional[dict]:
+    """Retourne le role event correspondant au classement (1=top)."""
+    for er in EVENT_RANK_ROLES:
+        if er["min_rank"] <= rank <= er["max_rank"]:
+            return er
+    return None
 
 
 # =============================================================================
@@ -480,6 +500,61 @@ def random_treasure() -> dict:
     return template
 
 
+# Questions de quiz (FR) — variées en thèmes et difficulté
+QUIZ_QUESTIONS = [
+    # Géographie
+    {"q": "Quelle est la capitale de l'Australie ?", "a": ["Sydney", "Canberra", "Melbourne", "Perth"], "c": 1},
+    {"q": "Quel est le plus long fleuve du monde ?", "a": ["Amazone", "Nil", "Yangtsé", "Mississippi"], "c": 1},
+    {"q": "Combien y a-t-il de continents ?", "a": ["5", "6", "7", "8"], "c": 2},
+    {"q": "Quel pays a la forme d'une botte ?", "a": ["Espagne", "Italie", "Grèce", "Portugal"], "c": 1},
+    {"q": "Quelle est la monnaie du Japon ?", "a": ["Yen", "Won", "Yuan", "Bath"], "c": 0},
+    # Sciences
+    {"q": "Quel est le plus grand organe du corps humain ?", "a": ["Foie", "Cerveau", "Peau", "Cœur"], "c": 2},
+    {"q": "Combien de planètes dans le système solaire ?", "a": ["7", "8", "9", "10"], "c": 1},
+    {"q": "Quelle est la formule chimique de l'eau ?", "a": ["O2", "H2O", "CO2", "H2O2"], "c": 1},
+    {"q": "Qui a inventé l'ampoule électrique ?", "a": ["Edison", "Tesla", "Newton", "Einstein"], "c": 0},
+    {"q": "Quel est l'animal le plus rapide ?", "a": ["Lion", "Guépard", "Faucon", "Gazelle"], "c": 2},  # faucon pèlerin
+    # Culture générale
+    {"q": "Qui a peint La Joconde ?", "a": ["Picasso", "Van Gogh", "Léonard de Vinci", "Monet"], "c": 2},
+    {"q": "En quelle année a commencé la WW1 ?", "a": ["1912", "1914", "1916", "1918"], "c": 1},
+    {"q": "Quel est le sommet le plus haut du monde ?", "a": ["K2", "Mont Blanc", "Everest", "Kilimandjaro"], "c": 2},
+    {"q": "Qui a écrit 'Les Misérables' ?", "a": ["Hugo", "Zola", "Balzac", "Dumas"], "c": 0},
+    {"q": "Combien d'os dans le corps humain adulte ?", "a": ["186", "206", "226", "246"], "c": 1},
+    # Gaming / Pop culture
+    {"q": "Quelle entreprise a créé Minecraft à l'origine ?", "a": ["Microsoft", "Mojang", "Notch Studios", "Sony"], "c": 1},
+    {"q": "Combien de Pokémon dans la 1ère génération ?", "a": ["100", "150", "151", "152"], "c": 2},
+    {"q": "Quel est le jeu le plus vendu de l'histoire ?", "a": ["Tetris", "Minecraft", "GTA V", "Wii Sports"], "c": 1},
+    {"q": "Dans Mario, quel est le frère de Mario ?", "a": ["Wario", "Luigi", "Yoshi", "Toad"], "c": 1},
+    {"q": "Quel studio développe les Zelda ?", "a": ["Nintendo EAD", "Game Freak", "Square Enix", "Capcom"], "c": 0},
+    # Math / Logique
+    {"q": "Combien font 7 × 8 ?", "a": ["54", "56", "58", "64"], "c": 1},
+    {"q": "Quel est le résultat de 15² ?", "a": ["205", "215", "225", "235"], "c": 2},
+    {"q": "Combien y a-t-il de minutes dans 3 heures ?", "a": ["120", "150", "180", "210"], "c": 2},
+    {"q": "Quel chiffre romain représente 50 ?", "a": ["X", "L", "C", "D"], "c": 1},
+    # Discord / Tech
+    {"q": "En quelle année Discord a-t-il été créé ?", "a": ["2012", "2015", "2017", "2019"], "c": 1},
+    {"q": "Quel langage utilise discord.py ?", "a": ["JavaScript", "Python", "C++", "Java"], "c": 1},
+    {"q": "Quelle entreprise possède YouTube ?", "a": ["Meta", "Google", "Microsoft", "Amazon"], "c": 1},
+    {"q": "Quel est le bouton vert dans une UI Discord ?", "a": ["Success", "Primary", "Danger", "Link"], "c": 0},
+    # Sport
+    {"q": "Combien de joueurs dans une équipe de football ?", "a": ["10", "11", "12", "13"], "c": 1},
+    {"q": "Combien de pays organisent les JO ?", "a": ["1 par édition", "2", "3", "Tous"], "c": 0},
+    {"q": "Quel sport pratique-t-on à Wimbledon ?", "a": ["Golf", "Tennis", "Cricket", "Polo"], "c": 1},
+    # FR / Langue
+    {"q": "Combien de lettres dans l'alphabet français ?", "a": ["24", "25", "26", "27"], "c": 2},
+    {"q": "Quel est le pluriel de 'cheval' ?", "a": ["chevals", "chevaux", "chevaies", "chevalles"], "c": 1},
+    # Cuisine / Vie quotidienne
+    {"q": "Quel ingrédient principal dans le pesto ?", "a": ["Persil", "Basilic", "Menthe", "Coriandre"], "c": 1},
+    {"q": "Combien de degrés bout l'eau (au niveau de la mer) ?", "a": ["90°C", "95°C", "100°C", "105°C"], "c": 2},
+]
+
+
+def get_quiz_set(n: int = 10) -> list[dict]:
+    """Retourne N questions aléatoires uniques pour un quiz."""
+    n = max(1, min(n, len(QUIZ_QUESTIONS)))
+    return random.sample(QUIZ_QUESTIONS, n)
+
+
 # =============================================================================
 # PHASE 31 : DIFFICULTÉ PROGRESSIVE
 # =============================================================================
@@ -539,16 +614,16 @@ def generate_shop_rotation(seed: int = None) -> list[dict]:
 
 __all__ = [
     # Catalogues
-    "BOSS_CATALOG", "WEAPONS", "ARMOR", "TREASURE_CATALOG",
-    "BADGE_CATALOG", "RANK_TIERS", "COMBO_THRESHOLDS",
+    "BOSS_CATALOG", "WEAPONS", "ARMOR", "TREASURE_CATALOG", "QUIZ_QUESTIONS",
+    "BADGE_CATALOG", "RANK_TIERS", "EVENT_RANK_ROLES", "COMBO_THRESHOLDS",
     "RARITY_COLORS", "RARITY_EMOJIS",
     # Generators
     "random_weapon", "random_armor", "random_boss", "random_treasure",
-    "generate_shop_rotation",
+    "generate_shop_rotation", "get_quiz_set",
     # Helpers
     "hp_bar", "calc_damage", "serialize_overwrites", "compute_rewards",
     "check_badge_unlocks", "get_badge_by_id",
-    "rank_for_kills",
+    "rank_for_kills", "event_role_for_rank",
     "check_combo",
     "adjust_difficulty",
 ]
