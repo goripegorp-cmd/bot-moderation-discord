@@ -1307,6 +1307,55 @@ async def db_init():
         )''')
 
         # ═══════════════════════════════════════════════════════════════════
+        # Phase 45 — Camouflage de salon + Vocal Spotlight + Compliment
+        # TOUJOURS réversible. Backup garanti via DB + failsafe loop.
+        # ═══════════════════════════════════════════════════════════════════
+
+        # Channel camouflage : 1 ligne par camouflage actif/historique
+        await db.execute('''CREATE TABLE IF NOT EXISTS channel_camouflage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            channel_id INTEGER,
+            original_name TEXT,
+            original_topic TEXT,
+            applied_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME,
+            reverted INTEGER DEFAULT 0
+        )''')
+
+        # Voice spotlight : 1 ligne par spotlight
+        await db.execute('''CREATE TABLE IF NOT EXISTS voice_spotlight (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            voice_channel_id INTEGER,
+            original_name TEXT,
+            applied_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME,
+            reverted INTEGER DEFAULT 0
+        )''')
+
+        # Compliment du jour : tracking pour cooldown 1/jour/user
+        await db.execute('''CREATE TABLE IF NOT EXISTS compliments_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            day TEXT,
+            from_user_hash TEXT,             -- HMAC anonyme
+            to_user_id INTEGER,
+            sent_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+
+        # Indexes Phase 45 (idempotent)
+        for _p45_idx in [
+            "CREATE INDEX IF NOT EXISTS idx_camouflage_active ON channel_camouflage(guild_id, reverted, expires_at)",
+            "CREATE INDEX IF NOT EXISTS idx_spotlight_active ON voice_spotlight(guild_id, reverted, expires_at)",
+            "CREATE INDEX IF NOT EXISTS idx_compliments_day ON compliments_log(guild_id, day, from_user_hash)",
+        ]:
+            try:
+                await db.execute(_p45_idx)
+            except Exception:
+                pass
+
+        # ═══════════════════════════════════════════════════════════════════
         # Phase 44 — INDEXES pour les requêtes hot path
         # Tous IF NOT EXISTS, idempotents, créés une seule fois au boot
         # ═══════════════════════════════════════════════════════════════════
@@ -34735,6 +34784,11 @@ async def on_ready():
         bot.add_view(DailyQuestPushView())
     except Exception as ex:
         print(f"[on_ready add_view DailyQuestPushView] {ex}")
+    # Phase 45 — Compliment persistent view
+    try:
+        bot.add_view(ComplimentOpenView())
+    except Exception as ex:
+        print(f"[on_ready add_view ComplimentOpenView] {ex}")
     try:
         async with get_db() as db:
             async with db.execute('SELECT data FROM guild_config') as c:
@@ -34879,6 +34933,21 @@ async def on_ready():
         daily_quest_push_dispatcher.start()
     if not db_optimizer_task.is_running():
         db_optimizer_task.start()
+
+    # Phase 45 : Camouflage de salon + Vocal Spotlight + Compliment + failsafe
+    if not channel_camouflage_dispatcher.is_running():
+        channel_camouflage_dispatcher.start()
+    if not voice_spotlight_dispatcher.is_running():
+        voice_spotlight_dispatcher.start()
+    if not reversibles_failsafe.is_running():
+        reversibles_failsafe.start()
+    if not compliment_dispatcher.is_running():
+        compliment_dispatcher.start()
+    # Boot recovery : revert immédiatement tout camouflage/spotlight orphelin
+    try:
+        await _run_failsafe_once()
+    except Exception as ex:
+        print(f"[on_ready _run_failsafe_once boot] {ex}")
 
     print(f"✅ {bot.user.name} v28 prêt!")
     print(f"🌐 Serveurs: {len(bot.guilds)}")
@@ -49511,11 +49580,611 @@ async def _db_optimizer_wait():
     await bot.wait_until_ready()
 
 
-# ─── HOOK on_message pour Tag Royale ──────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 45 — CAMOUFLAGE DE SALON + VOCAL SUR SCÈNE + COMPLIMENT
+#  Tous réversibles, jamais 2 simultanés, backup auto en DB + failsafe loop
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
-# On wire dans on_message déjà existant via une fonction async appelée — voir
-# patch ci-dessous au boot.
+# Décorations thématiques (préfixe nom + topic alternatif)
+_CAMOUFLAGE_THEMES = [
+    {"emoji": "☕", "name_prefix": "☕", "topic": "On parle autour d'un café virtuel ☕"},
+    {"emoji": "🌙", "name_prefix": "🌙", "topic": "Ambiance feutrée du soir 🌙"},
+    {"emoji": "🎭", "name_prefix": "🎭", "topic": "Aujourd'hui, c'est jour de comédie 🎭"},
+    {"emoji": "✨", "name_prefix": "✨", "topic": "Quelque chose de magique flotte dans l'air ✨"},
+    {"emoji": "🌿", "name_prefix": "🌿", "topic": "Pause nature — respire un coup 🌿"},
+    {"emoji": "🔥", "name_prefix": "🔥", "topic": "L'ambiance est chaude ici 🔥"},
+    {"emoji": "💫", "name_prefix": "💫", "topic": "Étoiles filantes — fais un vœu 💫"},
+    {"emoji": "🎨", "name_prefix": "🎨", "topic": "Le serveur prend des couleurs 🎨"},
+    {"emoji": "🪐", "name_prefix": "🪐", "topic": "Voyage interplanétaire en cours 🪐"},
+    {"emoji": "🌊", "name_prefix": "🌊", "topic": "Vagues calmes — laisse-toi porter 🌊"},
+]
+
+
+# ─── CHANNEL CAMOUFLAGE ────────────────────────────────────────────────────────
+
+
+async def _has_active_camouflage(guild_id: int) -> bool:
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT 1 FROM channel_camouflage WHERE guild_id=? AND reverted=0 LIMIT 1',
+                (guild_id,),
+            ) as cur:
+                return await cur.fetchone() is not None
+    except Exception:
+        return False
+
+
+async def _revert_camouflage(camouflage_id: int):
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT guild_id, channel_id, original_name, original_topic, reverted '
+                'FROM channel_camouflage WHERE id=?',
+                (camouflage_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return
+        gid, ch_id, orig_name, orig_topic, reverted = row
+        if reverted:
+            return
+        guild = bot.get_guild(int(gid))
+        ch = guild.get_channel(int(ch_id)) if guild else None
+        if ch and isinstance(ch, discord.TextChannel):
+            try:
+                await ch.edit(
+                    name=(orig_name or ch.name)[:100],
+                    topic=orig_topic if orig_topic is not None else None,
+                    reason="Camouflage Phase 45 revert",
+                )
+            except Exception as ex:
+                print(f"[_revert_camouflage edit] {ex}")
+        async with get_db() as db:
+            await db.execute('UPDATE channel_camouflage SET reverted=1 WHERE id=?', (camouflage_id,))
+            await db.commit()
+        print(f"[CAMOUFLAGE REVERT] id={camouflage_id} guild={gid} ch={ch_id}")
+    except Exception as ex:
+        print(f"[_revert_camouflage] {ex}")
+
+
+async def _apply_camouflage(guild) -> bool:
+    """Applique un camouflage à UN salon chatty. 1h durée, revert auto + failsafe."""
+    try:
+        c = await cfg(guild.id)
+        if not c.get('event_enabled', False):
+            return False
+        if not c.get('camouflage_enabled', True):
+            return False
+        if await _has_active_camouflage(guild.id):
+            return False
+
+        # Trouver un salon chatty avec activité récente
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT channel_id, COUNT(*) FROM member_activity "
+                "WHERE guild_id=? AND activity_type='message' "
+                "AND datetime(created_at) > datetime('now', '-24 hours') "
+                "GROUP BY channel_id HAVING COUNT(*) > 5 "
+                "ORDER BY COUNT(*) DESC LIMIT 10",
+                (guild.id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        candidates = []
+        for ch_id, _ in rows:
+            ch = guild.get_channel(int(ch_id))
+            if not ch or not isinstance(ch, discord.TextChannel):
+                continue
+            if not await _is_chatty_channel(ch):
+                continue
+            try:
+                if not ch.permissions_for(guild.me).manage_channels:
+                    continue
+            except Exception:
+                continue
+            if any(ch.name.startswith(t["emoji"]) for t in _CAMOUFLAGE_THEMES):
+                continue
+            candidates.append(ch)
+        if not candidates:
+            return False
+
+        ch = random.choice(candidates)
+        theme = random.choice(_CAMOUFLAGE_THEMES)
+
+        original_name = ch.name
+        original_topic = ch.topic or ""
+        new_name = f"{theme['name_prefix']}-{original_name}"[:100]
+        new_topic = theme["topic"]
+
+        # DB backup-first
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+        async with get_db() as db:
+            cur = await db.execute(
+                'INSERT INTO channel_camouflage(guild_id, channel_id, original_name, original_topic, expires_at) '
+                'VALUES(?,?,?,?,?)',
+                (guild.id, ch.id, original_name, original_topic, expires_at.isoformat()),
+            )
+            camouflage_id = cur.lastrowid
+            await db.commit()
+
+        try:
+            await ch.edit(name=new_name, topic=new_topic, reason=f"Camouflage Phase 45 theme={theme['emoji']}")
+        except Exception as ex:
+            print(f"[_apply_camouflage edit] {ex}")
+            async with get_db() as db:
+                await db.execute('UPDATE channel_camouflage SET reverted=1 WHERE id=?', (camouflage_id,))
+                await db.commit()
+            return False
+
+        async def _scheduled_revert():
+            await asyncio.sleep(3600)
+            await _revert_camouflage(camouflage_id)
+        asyncio.create_task(_scheduled_revert())
+
+        print(f"[CAMOUFLAGE APPLY] id={camouflage_id} guild={guild.id} ch={ch.id} theme={theme['emoji']}")
+        return True
+    except Exception as ex:
+        print(f"[_apply_camouflage] {ex}")
+        return False
+
+
+@tasks.loop(hours=4)
+async def channel_camouflage_dispatcher():
+    """Toutes les 4h en heures actives FR, ~50% chance de camoufler 1 salon."""
+    try:
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+            tz = _ZI('Europe/Paris')
+        except Exception:
+            tz = timezone.utc
+        h = datetime.now(tz).hour
+        if h < 9 or h >= 23:
+            return
+        if random.random() > 0.5:
+            return
+        for guild in bot.guilds:
+            try:
+                await _apply_camouflage(guild)
+            except Exception as ex:
+                print(f"[channel_camouflage_dispatcher guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[channel_camouflage_dispatcher] {ex}")
+
+
+@channel_camouflage_dispatcher.before_loop
+async def _camouflage_wait():
+    await bot.wait_until_ready()
+
+
+# ─── VOCAL SUR SCÈNE ───────────────────────────────────────────────────────────
+
+
+async def _has_active_spotlight(guild_id: int) -> bool:
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT 1 FROM voice_spotlight WHERE guild_id=? AND reverted=0 LIMIT 1',
+                (guild_id,),
+            ) as cur:
+                return await cur.fetchone() is not None
+    except Exception:
+        return False
+
+
+async def _revert_spotlight(spotlight_id: int):
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT guild_id, voice_channel_id, original_name, reverted FROM voice_spotlight WHERE id=?',
+                (spotlight_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return
+        gid, ch_id, orig_name, reverted = row
+        if reverted:
+            return
+        guild = bot.get_guild(int(gid))
+        vc = guild.get_channel(int(ch_id)) if guild else None
+        if vc and isinstance(vc, discord.VoiceChannel) and orig_name:
+            try:
+                await vc.edit(name=orig_name[:100], reason="Voice Spotlight Phase 45 revert")
+            except Exception as ex:
+                print(f"[_revert_spotlight edit] {ex}")
+        async with get_db() as db:
+            await db.execute('UPDATE voice_spotlight SET reverted=1 WHERE id=?', (spotlight_id,))
+            await db.commit()
+        print(f"[SPOTLIGHT REVERT] id={spotlight_id} guild={gid}")
+    except Exception as ex:
+        print(f"[_revert_spotlight] {ex}")
+
+
+async def _apply_voice_spotlight(guild) -> bool:
+    """Met 1 vocal en scène pour 15 min. Réversible garanti."""
+    try:
+        c = await cfg(guild.id)
+        if not c.get('event_enabled', False):
+            return False
+        if not c.get('voice_spotlight_enabled', True):
+            return False
+        if await _has_active_spotlight(guild.id):
+            return False
+
+        protected = await _get_protected_voice_channels(guild.id)
+
+        candidates = []
+        for vc in guild.voice_channels:
+            if vc.id in protected:
+                continue
+            name_low = (vc.name or '').lower()
+            if any(kw in name_low for kw in ('staff', 'admin', 'mod-', 'fondateur', 'founder', 'private', 'privé')):
+                continue
+            humans = [m for m in vc.members if not m.bot]
+            if len(humans) < 2:
+                continue
+            try:
+                if not vc.permissions_for(guild.me).manage_channels:
+                    continue
+            except Exception:
+                continue
+            if (vc.name or '').startswith('⭐'):
+                continue
+            candidates.append(vc)
+        if not candidates:
+            return False
+
+        vc = random.choice(candidates)
+        original_name = vc.name
+        new_name = f"⭐-{original_name}"[:100]
+
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+        async with get_db() as db:
+            cur = await db.execute(
+                'INSERT INTO voice_spotlight(guild_id, voice_channel_id, original_name, expires_at) '
+                'VALUES(?,?,?,?)',
+                (guild.id, vc.id, original_name, expires_at.isoformat()),
+            )
+            spotlight_id = cur.lastrowid
+            await db.commit()
+
+        try:
+            await vc.edit(name=new_name, reason="Voice Spotlight Phase 45")
+        except Exception as ex:
+            print(f"[_apply_voice_spotlight edit] {ex}")
+            async with get_db() as db:
+                await db.execute('UPDATE voice_spotlight SET reverted=1 WHERE id=?', (spotlight_id,))
+                await db.commit()
+            return False
+
+        # Annonce discrète dans le hub
+        try:
+            hub_id = int(c.get('hub_channel', 0) or 0)
+            hub_ch = guild.get_channel(hub_id) if hub_id else None
+            if hub_ch and await _is_chatty_channel(hub_ch):
+                count = len([m for m in vc.members if not m.bot])
+                await hub_ch.send(
+                    embed=discord.Embed(
+                        description=(
+                            f"⭐ **Vocal en scène : <#{vc.id}>**\n"
+                            f"{count} membre(s) sont en train de discuter. Allez les voir !\n"
+                            f"_Mise en avant 15 min — auto-revert._"
+                        ),
+                        color=0xFFD700,
+                    ),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+        except Exception:
+            pass
+
+        async def _scheduled_revert():
+            await asyncio.sleep(900)
+            await _revert_spotlight(spotlight_id)
+        asyncio.create_task(_scheduled_revert())
+
+        print(f"[SPOTLIGHT APPLY] id={spotlight_id} guild={guild.id} vc={vc.id}")
+        return True
+    except Exception as ex:
+        print(f"[_apply_voice_spotlight] {ex}")
+        return False
+
+
+@tasks.loop(hours=3)
+async def voice_spotlight_dispatcher():
+    """Toutes les 3h en soirée FR (17h-23h), ~40% chance de mettre 1 vocal en scène."""
+    try:
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+            tz = _ZI('Europe/Paris')
+        except Exception:
+            tz = timezone.utc
+        h = datetime.now(tz).hour
+        if h < 17 or h >= 23:
+            return
+        if random.random() > 0.4:
+            return
+        for guild in bot.guilds:
+            try:
+                await _apply_voice_spotlight(guild)
+            except Exception as ex:
+                print(f"[voice_spotlight_dispatcher guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[voice_spotlight_dispatcher] {ex}")
+
+
+@voice_spotlight_dispatcher.before_loop
+async def _spotlight_wait():
+    await bot.wait_until_ready()
+
+
+# ─── FAILSAFE LOOP : revert tout orphelin (crash recovery, restart) ───────────
+
+
+async def _run_failsafe_once():
+    """Scan une fois les camouflage/spotlight expirés et restaure tout.
+    Appelable au boot ET depuis la loop périodique.
+    """
+    try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT id FROM channel_camouflage WHERE reverted=0 AND expires_at < ?',
+                (now_iso,),
+            ) as cur:
+                rows = await cur.fetchall()
+        for (cam_id,) in rows:
+            await _revert_camouflage(int(cam_id))
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT id FROM voice_spotlight WHERE reverted=0 AND expires_at < ?',
+                (now_iso,),
+            ) as cur:
+                rows = await cur.fetchall()
+        for (sp_id,) in rows:
+            await _revert_spotlight(int(sp_id))
+    except Exception as ex:
+        print(f"[_run_failsafe_once] {ex}")
+
+
+@tasks.loop(minutes=10)
+async def reversibles_failsafe():
+    """Toutes les 10 min, scan tous les camouflage/spotlight expirés non-revert
+    et les restaure. Couvre crash, restart, edge cases.
+    """
+    await _run_failsafe_once()
+
+
+@reversibles_failsafe.before_loop
+async def _failsafe_wait():
+    await bot.wait_until_ready()
+
+
+# ─── COMPLIMENT DU JOUR ────────────────────────────────────────────────────────
+
+
+class ComplimentSelectView(View):
+    """Select avec 8 membres actifs random pour envoyer un compliment."""
+
+    def __init__(self, guild_id: int, sender_id: int, candidates: list):
+        super().__init__(timeout=300)
+        self.guild_id = guild_id
+        self.sender_id = sender_id
+        opts = []
+        for m in candidates[:8]:
+            opts.append(discord.SelectOption(
+                label=m.display_name[:80],
+                value=str(m.id),
+                description=f"Envoyer un compliment anonyme à {m.display_name[:50]}",
+            ))
+        if opts:
+            sel = Select(placeholder="Choisis un membre à complimenter…", options=opts)
+            sel.callback = self._on_pick
+            self.add_item(sel)
+
+    async def _on_pick(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if i.user.id != self.sender_id:
+                return await _safe_followup(i, content="🔒 Pas pour toi.")
+            target_id = int(i.data['values'][0])
+            if target_id == i.user.id:
+                return await _safe_followup(i, content="❌ Tu ne peux pas te complimenter toi-même.")
+
+            day = _today_str_p41()
+            secret = f"compl_{self.guild_id}_{TOKEN[:16] if TOKEN else 'noseed'}"
+            user_hash = _hmac_p41.new(secret.encode(), f"{i.user.id}".encode(), 'sha256').hexdigest()[:16]
+
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT COUNT(*) FROM compliments_log WHERE guild_id=? AND day=? AND from_user_hash=?',
+                    (self.guild_id, day, user_hash),
+                ) as cur:
+                    cnt = (await cur.fetchone())[0]
+            if cnt >= 1:
+                return await _safe_followup(i, content="🌸 Tu as déjà envoyé un compliment aujourd'hui. Reviens demain !")
+
+            guild = bot.get_guild(self.guild_id)
+            if not guild:
+                return await _safe_followup(i, content="❌ Serveur introuvable.")
+            target = guild.get_member(target_id)
+            if not target:
+                return await _safe_followup(i, content="❌ Membre introuvable.")
+            try:
+                await target.send(
+                    embed=discord.Embed(
+                        title="✨ Tu as fait sourire quelqu'un aujourd'hui",
+                        description=(
+                            f"Un membre **anonyme** de **{guild.name}** t'a envoyé un compliment.\n\n"
+                            f"_Pas de qui, juste de la gentillesse._\n\n"
+                            f"💝 Tu fais partie des gens qui rendent ce serveur agréable."
+                        ),
+                        color=0xFF69B4,
+                    ),
+                )
+            except discord.Forbidden:
+                pass
+            except Exception as ex:
+                print(f"[ComplimentSelectView send DM] {ex}")
+
+            async with get_db() as db:
+                await db.execute(
+                    'INSERT INTO compliments_log(guild_id, day, from_user_hash, to_user_id) VALUES(?,?,?,?)',
+                    (self.guild_id, day, user_hash, target_id),
+                )
+                await db.commit()
+
+            await _safe_followup(
+                i,
+                content=f"💝 Compliment envoyé **anonymement** à {target.display_name}. _Personne ne saura que c'est toi._",
+            )
+        except Exception as ex:
+            print(f"[ComplimentSelectView _on_pick] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+class ComplimentOpenView(View):
+    """View persistante : 1 bouton 'Envoyer un compliment'."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+        b = Button(
+            label="💝 Envoyer un compliment anonyme",
+            style=discord.ButtonStyle.success,
+            custom_id="compliment_open",
+        )
+        b.callback = self._on_open
+        self.add_item(b)
+
+    async def _on_open(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if not i.guild:
+                return await _safe_followup(i, content="❌ Serveur uniquement.")
+            day = _today_str_p41()
+            secret = f"compl_{i.guild.id}_{TOKEN[:16] if TOKEN else 'noseed'}"
+            user_hash = _hmac_p41.new(secret.encode(), f"{i.user.id}".encode(), 'sha256').hexdigest()[:16]
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT COUNT(*) FROM compliments_log WHERE guild_id=? AND day=? AND from_user_hash=?',
+                    (i.guild.id, day, user_hash),
+                ) as cur:
+                    cnt = (await cur.fetchone())[0]
+            if cnt >= 1:
+                return await _safe_followup(i, content="🌸 Tu as déjà envoyé un compliment aujourd'hui.")
+
+            # 8 membres actifs random (hors soi-même, hors bots)
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT user_id FROM activity_tracking "
+                    "WHERE guild_id=? AND user_id != ? AND last_message IS NOT NULL "
+                    "AND datetime(last_message) > datetime('now', '-7 days') "
+                    "ORDER BY RANDOM() LIMIT 20",
+                    (i.guild.id, i.user.id),
+                ) as cur:
+                    rows = await cur.fetchall()
+            candidates = []
+            for (uid,) in rows:
+                m = i.guild.get_member(int(uid))
+                if m and not m.bot:
+                    candidates.append(m)
+                if len(candidates) >= 8:
+                    break
+            if not candidates:
+                return await _safe_followup(i, content="ℹ️ Pas assez de membres actifs pour proposer une sélection.")
+
+            await _safe_followup(
+                i,
+                content="💝 Choisis quelqu'un à complimenter (anonymement) :",
+                view=ComplimentSelectView(i.guild.id, i.user.id, candidates),
+            )
+        except Exception as ex:
+            print(f"[ComplimentOpenView _on_open] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _post_compliment_of_the_day(guild) -> bool:
+    try:
+        c = await cfg(guild.id)
+        if not c.get('event_enabled', False):
+            return False
+        if not c.get('compliment_enabled', True):
+            return False
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        ch = guild.get_channel(hub_id) if hub_id else None
+        if ch and not await _is_chatty_channel(ch):
+            ch = None
+        if not ch:
+            for cand in guild.text_channels:
+                if not await _is_chatty_channel(cand):
+                    continue
+                if any(kw in (cand.name or '').lower() for kw in ('general', 'général', 'chat')):
+                    ch = cand
+                    break
+            if not ch:
+                for cand in guild.text_channels:
+                    if await _is_chatty_channel(cand):
+                        ch = cand
+                        break
+        if not ch:
+            return False
+
+        e = discord.Embed(
+            title="💝 Compliment du jour",
+            description=(
+                "Qui dans le serveur t'a fait sourire récemment ?\n\n"
+                "Clique pour envoyer un message **100% anonyme** à un membre.\n"
+                "_Personne ne saura que c'est toi — pas même les admins._\n\n"
+                "💫 Un petit geste, ça fait beaucoup."
+            ),
+            color=0xFF69B4,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text="1 compliment / membre / jour")
+        try:
+            await ch.send(embed=e, view=ComplimentOpenView(), allowed_mentions=discord.AllowedMentions.none())
+        except Exception as ex:
+            print(f"[_post_compliment_of_the_day send] {ex}")
+            return False
+        return True
+    except Exception as ex:
+        print(f"[_post_compliment_of_the_day] {ex}")
+        return False
+
+
+@tasks.loop(minutes=30)
+async def compliment_dispatcher():
+    """Poste le panneau Compliment du jour à 19h FR (1×/jour)."""
+    try:
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+            tz = _ZI('Europe/Paris')
+        except Exception:
+            tz = timezone.utc
+        h = datetime.now(tz).hour
+        if h != 19:
+            return
+        day = _today_str_p41()
+        for guild in bot.guilds:
+            try:
+                key_day = f"compliment_panel_posted_{day}"
+                if (await cfg(guild.id)).get(key_day, False):
+                    continue
+                ok = await _post_compliment_of_the_day(guild)
+                if ok:
+                    await db_set(guild.id, key_day, True)
+            except Exception as ex:
+                print(f"[compliment_dispatcher guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[compliment_dispatcher] {ex}")
+
+
+@compliment_dispatcher.before_loop
+async def _compliment_wait():
+    await bot.wait_until_ready()
 
 
 if __name__ == "__main__":
