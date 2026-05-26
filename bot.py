@@ -45,6 +45,7 @@ import events42 as ev42
 # Phase 47 : moteur long terme (saisons, prestige, factions, weekly/monthly)
 import engagement47 as eng47
 import lore49 as lore  # Phase 49 : lore évolutif + NPCs + missions
+import roblox50 as rblx  # Phase 50 : speedrun + studio tips + matchmaking + game updates
 import protection_guards as guards2026
 import community_features as comm2026
 import admin_panels_v2 as panels2026
@@ -1545,6 +1546,114 @@ async def db_init():
             counted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (mission_id, step_index, user_id)
         )''')
+
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 50 — ROBLOX SPÉCIALISÉ : Speedrun + Studio Tips + Matchmaking
+        # ═══════════════════════════════════════════════════════════════════
+        # Soumissions speedrun (pending review staff)
+        await db.execute('''CREATE TABLE IF NOT EXISTS speedrun_submissions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            user_id INTEGER,
+            category_id TEXT,
+            time_seconds REAL,
+            video_url TEXT,
+            notes TEXT,
+            status TEXT DEFAULT 'pending',
+            reviewed_by INTEGER,
+            reviewed_at DATETIME,
+            submitted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_speedrun_lb "
+                "ON speedrun_submissions(guild_id, category_id, status, time_seconds ASC)"
+            )
+        except Exception:
+            pass
+
+        # Catégories speedrun custom (l'owner peut en ajouter)
+        await db.execute('''CREATE TABLE IF NOT EXISTS speedrun_categories_custom (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            cat_id TEXT,
+            name TEXT,
+            description TEXT,
+            target_seconds INTEGER,
+            active INTEGER DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+
+        # Matchmaking parties (annoncer qu'on joue, d'autres rejoignent)
+        await db.execute('''CREATE TABLE IF NOT EXISTS matchmaking_parties (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            host_id INTEGER,
+            game_id TEXT,
+            game_name TEXT,
+            place_id INTEGER DEFAULT 0,
+            channel_id INTEGER,
+            message_id INTEGER,
+            max_players INTEGER DEFAULT 8,
+            status TEXT DEFAULT 'open',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_party_open "
+                "ON matchmaking_parties(guild_id, status, expires_at)"
+            )
+        except Exception:
+            pass
+
+        await db.execute('''CREATE TABLE IF NOT EXISTS matchmaking_party_members (
+            party_id INTEGER,
+            user_id INTEGER,
+            joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (party_id, user_id)
+        )''')
+
+        # Catalogue jeux Roblox (owner-managed)
+        await db.execute('''CREATE TABLE IF NOT EXISTS roblox_games (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            game_id TEXT,
+            name TEXT,
+            place_id INTEGER DEFAULT 0,
+            description TEXT,
+            image_url TEXT,
+            active INTEGER DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+
+        # Updates de jeu (annonces owner avec thread feedback)
+        await db.execute('''CREATE TABLE IF NOT EXISTS game_updates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            game_id TEXT,
+            title TEXT,
+            content TEXT,
+            posted_by INTEGER,
+            posted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            message_id INTEGER,
+            thread_id INTEGER
+        )''')
+
+        # Studio tips déjà postés (anti-repeat 60j)
+        await db.execute('''CREATE TABLE IF NOT EXISTS studio_tip_posts_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            tip_id INTEGER,
+            posted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_tip_log_guild_at "
+                "ON studio_tip_posts_log(guild_id, posted_at DESC)"
+            )
+        except Exception:
+            pass
 
         # Marketplace : annonces de vente entre joueurs
         await db.execute('''CREATE TABLE IF NOT EXISTS marketplace_listings (
@@ -35090,6 +35199,32 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready mission_step persist] {ex}")
 
+    # Phase 50 : re-attacher les MatchmakingJoinView actifs + SpeedrunReviewView pending
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id FROM matchmaking_parties WHERE status='open' "
+                "AND (expires_at IS NULL OR datetime(expires_at)>datetime('now'))",
+            ) as cur:
+                rows = await cur.fetchall()
+        for r in rows:
+            try:
+                bot.add_view(MatchmakingJoinView(int(r[0])))
+            except Exception:
+                pass
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id FROM speedrun_submissions WHERE status='pending'",
+            ) as cur:
+                rows = await cur.fetchall()
+        for r in rows:
+            try:
+                bot.add_view(SpeedrunReviewView(int(r[0])))
+            except Exception:
+                pass
+    except Exception as ex:
+        print(f"[on_ready phase50 persist] {ex}")
+
     # Phase 42 — Views persistantes : World Boss + Daily Riddle
     try:
         bot.add_view(WorldBossAttackView())
@@ -35299,6 +35434,9 @@ async def on_ready():
         npc_chatter_task.start()
     if not missions_runner_task.is_running():
         missions_runner_task.start()
+    # Phase 50 : Studio Tip daily (9h FR)
+    if not daily_studio_tip_task.is_running():
+        daily_studio_tip_task.start()
     # Boot recovery : supprimer tous les messages expirés pendant le downtime
     try:
         await _run_persistent_cleanup_once()
@@ -47668,6 +47806,16 @@ class EngagementHubView(View):
         b9.callback = self._on_mission
         self.add_item(b9)
 
+        # Phase 50 : Roblox sub-panel (Speedrun / Matchmaking / Tips / Updates)
+        b10 = Button(
+            label="🎮 Roblox",
+            style=discord.ButtonStyle.primary,
+            custom_id="hub_roblox",
+            row=4,
+        )
+        b10.callback = self._on_roblox
+        self.add_item(b10)
+
     async def _on_quests(self, i: discord.Interaction):
         await _p41_open_daily(i)
 
@@ -47698,6 +47846,10 @@ class EngagementHubView(View):
     async def _on_mission(self, i: discord.Interaction):
         # Phase 49 : affiche la mission en cours et sa progression
         await _open_mission_panel(i)
+
+    async def _on_roblox(self, i: discord.Interaction):
+        # Phase 50 : ouvre le sub-hub Roblox (Speedrun / Matchmaking / Tips / Updates)
+        await _open_roblox_panel(i)
 
 
 # ─── COMMANDES /hub + /hub_setup ───────────────────────────────────────────────
@@ -56450,6 +56602,1014 @@ async def npc_force_post_cmd(i: discord.Interaction, npc: str, context: str = "i
             await _safe_followup(i, content=f"✅ {npc} a parlé ({context}).")
         else:
             await _safe_followup(i, content=f"❌ NPC ou context inconnu. NPCs : forgeron/sage/gardien.")
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 50 — ROBLOX SPÉCIALISÉ : Speedrun + Studio Tips + Matchmaking + Updates
+#  Le serveur est Roblox-centric — features spécifiques à cette niche.
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── STUDIO TIP DAILY (1x/jour à 9h FR) ──────────────────────────────────────
+
+
+async def _recently_posted_tip_ids(guild_id: int, days: int = 60) -> list:
+    """Retourne la liste des tip_ids postés dans les X derniers jours."""
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT tip_id FROM studio_tip_posts_log WHERE guild_id=? AND posted_at>?",
+                (guild_id, cutoff),
+            ) as cur:
+                rows = await cur.fetchall()
+        return [int(r[0]) for r in rows]
+    except Exception:
+        return []
+
+
+async def _post_studio_tip(channel) -> bool:
+    """Poste un tip aléatoire (non-dup sur 60j)."""
+    if not channel or not channel.guild:
+        return False
+    try:
+        exclude = await _recently_posted_tip_ids(channel.guild.id, days=60)
+        tip = rblx.pick_random_tip(exclude_ids=exclude)
+        if not tip:
+            return False
+        LIFETIME = 22 * 3600
+        e = discord.Embed(
+            title=f"💡 Tip Roblox Studio — {tip['title']}",
+            description=tip["content"],
+            color=0x00A2FF,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text=f"Catégorie : {tip.get('category', '?')}  ·  Tip #{tip['id']}/{len(rblx.STUDIO_TIPS)}")
+        try:
+            msg = await channel.send(
+                embed=e,
+                allowed_mentions=discord.AllowedMentions.none(),
+                delete_after=LIFETIME,
+            )
+            try:
+                await _register_for_cleanup(msg, LIFETIME, 'studio_tip')
+            except Exception:
+                pass
+        except Exception as ex:
+            print(f"[_post_studio_tip send] {ex}")
+            return False
+        try:
+            async with get_db() as db:
+                await db.execute(
+                    "INSERT INTO studio_tip_posts_log(guild_id, tip_id) VALUES(?,?)",
+                    (channel.guild.id, int(tip["id"])),
+                )
+                await db.commit()
+        except Exception:
+            pass
+        return True
+    except Exception as ex:
+        print(f"[_post_studio_tip] {ex}")
+        return False
+
+
+@tasks.loop(hours=24)
+async def daily_studio_tip_task():
+    """Une fois par jour à 9h FR, poste un tip Studio dans le hub."""
+    try:
+        # Check timing : ne poster qu'entre 8h et 11h FR
+        try:
+            from zoneinfo import ZoneInfo
+            h = datetime.now(ZoneInfo("Europe/Paris")).hour
+        except Exception:
+            h = datetime.now(timezone.utc).hour
+        if not (8 <= h < 11):
+            return
+        for guild in bot.guilds:
+            try:
+                c = await cfg(guild.id)
+                if not c.get('event_enabled', False):
+                    continue
+                hub_id = int(c.get('hub_channel', 0) or 0)
+                if not hub_id:
+                    continue
+                hub_ch = guild.get_channel(hub_id)
+                if not hub_ch or not await _is_chatty_channel(hub_ch):
+                    continue
+                await _post_studio_tip(hub_ch)
+                print(f"[daily_studio_tip] guild={guild.id} posted")
+            except Exception as ex:
+                print(f"[daily_studio_tip guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[daily_studio_tip_task] {ex}")
+
+
+@daily_studio_tip_task.before_loop
+async def _studio_tip_wait():
+    await bot.wait_until_ready()
+
+
+# ─── SPEEDRUN — Helpers + Modal + Views ──────────────────────────────────────
+
+
+async def _get_all_speedrun_categories(guild_id: int) -> list:
+    """Retourne categories built-in + custom de la guild."""
+    cats = list(rblx.DEFAULT_SPEEDRUN_CATEGORIES)
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT cat_id, name, description, target_seconds, active "
+                "FROM speedrun_categories_custom WHERE guild_id=? AND active=1",
+                (guild_id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        for r in rows:
+            cats.append({
+                "id": r[0], "name": r[1], "description": r[2] or "",
+                "target_seconds": int(r[3] or 0), "active": bool(r[4]),
+            })
+    except Exception:
+        pass
+    return cats
+
+
+async def _get_speedrun_leaderboard(guild_id: int, category_id: str,
+                                     period: str = "all", limit: int = 10) -> list:
+    """Retourne le top N approved par category. period: 'week', 'month', 'all'."""
+    try:
+        clauses = ["guild_id=?", "category_id=?", "status='approved'"]
+        params: list = [guild_id, category_id]
+        if period == "week":
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+            clauses.append("submitted_at>?")
+            params.append(cutoff)
+        elif period == "month":
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+            clauses.append("submitted_at>?")
+            params.append(cutoff)
+        where = " AND ".join(clauses)
+        async with get_db() as db:
+            async with db.execute(
+                f"SELECT user_id, MIN(time_seconds) AS best, video_url "
+                f"FROM speedrun_submissions WHERE {where} "
+                f"GROUP BY user_id ORDER BY best ASC LIMIT ?",
+                (*params, limit),
+            ) as cur:
+                rows = await cur.fetchall()
+        return [{"user_id": int(r[0]), "time": float(r[1]), "video_url": r[2]} for r in rows]
+    except Exception as ex:
+        print(f"[_get_speedrun_leaderboard] {ex}")
+        return []
+
+
+class SpeedrunSubmitModal(Modal):
+    """Modal pour soumettre un speedrun (catégorie pré-sélectionnée)."""
+
+    def __init__(self, category: dict):
+        super().__init__(title=f"🏁 Soumettre : {category['name'][:30]}")
+        self.category = category
+        self.time_input = TextInput(
+            label="Ton temps (format mm:ss.ms ou ss.ms)",
+            placeholder="Exemple : 1:23.456  ou  45.678",
+            max_length=20,
+            required=True,
+        )
+        self.video_input = TextInput(
+            label="URL vidéo proof (YouTube/Twitch/Streamable)",
+            placeholder="https://www.youtube.com/watch?v=...",
+            max_length=300,
+            required=True,
+        )
+        self.notes_input = TextInput(
+            label="Notes (optionnel)",
+            placeholder="Stratégie utilisée, configuration, etc.",
+            style=discord.TextStyle.paragraph,
+            max_length=500,
+            required=False,
+        )
+        self.add_item(self.time_input)
+        self.add_item(self.video_input)
+        self.add_item(self.notes_input)
+
+    async def on_submit(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if not i.guild:
+                return await _safe_followup(i, content="❌ Serveur uniquement.")
+            # Parser le temps
+            raw = self.time_input.value.strip().replace(",", ".")
+            try:
+                if ":" in raw:
+                    mm, ss = raw.split(":")
+                    seconds = int(mm) * 60 + float(ss)
+                else:
+                    seconds = float(raw)
+                if seconds <= 0 or seconds > 86400:
+                    raise ValueError("temps hors range")
+            except Exception:
+                return await _safe_followup(
+                    i, content="❌ Temps invalide. Format : `1:23.456` ou `45.678`.",
+                )
+            # Validation URL basique
+            url = self.video_input.value.strip()
+            if not url.startswith(("http://", "https://")):
+                return await _safe_followup(i, content="❌ URL doit commencer par http:// ou https://")
+            notes = self.notes_input.value.strip()
+
+            # Insert pending
+            async with get_db() as db:
+                cur = await db.execute(
+                    "INSERT INTO speedrun_submissions"
+                    "(guild_id, user_id, category_id, time_seconds, video_url, notes) "
+                    "VALUES(?, ?, ?, ?, ?, ?)",
+                    (i.guild.id, i.user.id, self.category["id"], seconds, url, notes),
+                )
+                sub_id = cur.lastrowid
+                await db.commit()
+
+            # Notifier le canal de logs (modlogs ou équivalent) avec review buttons
+            c = await cfg(i.guild.id)
+            log_id = int(c.get('mod_log_channel', 0) or c.get('hub_channel', 0) or 0)
+            log_ch = i.guild.get_channel(log_id) if log_id else None
+            if log_ch:
+                try:
+                    review_e = discord.Embed(
+                        title=f"🏁 Nouvelle soumission speedrun #{sub_id}",
+                        description=(
+                            f"**Catégorie :** {self.category['name']}\n"
+                            f"**Joueur :** {i.user.mention}\n"
+                            f"**Temps :** `{rblx.format_time(seconds)}`\n"
+                            f"**Vidéo :** {url}\n"
+                            f"**Notes :** {notes or '_aucune_'}"
+                        ),
+                        color=0xF1C40F,
+                        timestamp=datetime.now(timezone.utc),
+                    )
+                    review_e.set_footer(text="Staff : approuve ou rejette pour publier au leaderboard")
+                    await log_ch.send(
+                        embed=review_e,
+                        view=SpeedrunReviewView(int(sub_id)),
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                except Exception as ex:
+                    print(f"[speedrun review post] {ex}")
+
+            await _safe_followup(
+                i,
+                content=(
+                    f"✅ **Soumission envoyée !** (ID #{sub_id})\n"
+                    f"Catégorie : **{self.category['name']}**\n"
+                    f"Temps : `{rblx.format_time(seconds)}`\n\n"
+                    f"_Le staff va vérifier ta vidéo et approuver. Tu seras notifié._"
+                ),
+            )
+        except Exception as ex:
+            print(f"[SpeedrunSubmitModal on_submit] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+class SpeedrunReviewView(View):
+    """View staff-only : ✅ Approuver / ❌ Rejeter une soumission speedrun."""
+
+    def __init__(self, submission_id: int):
+        super().__init__(timeout=None)
+        self.sub_id = submission_id
+        approve = Button(
+            label="✅ Approuver",
+            style=discord.ButtonStyle.success,
+            custom_id=f"spr_approve_{submission_id}",
+        )
+        approve.callback = self._approve
+        reject = Button(
+            label="❌ Rejeter",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"spr_reject_{submission_id}",
+        )
+        reject.callback = self._reject
+        self.add_item(approve)
+        self.add_item(reject)
+
+    async def _check_staff(self, i: discord.Interaction) -> bool:
+        if not i.guild:
+            return False
+        # Owner ou perms manage_messages
+        if i.user.id == i.guild.owner_id or i.user.id == SUPER_OWNER_ID:
+            return True
+        try:
+            perms = i.channel.permissions_for(i.user)
+            return perms.manage_messages
+        except Exception:
+            return False
+
+    async def _approve(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if not await self._check_staff(i):
+                return await _safe_followup(i, content="🔒 Staff uniquement.")
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT user_id, category_id, time_seconds FROM speedrun_submissions "
+                    "WHERE id=? AND status='pending'",
+                    (self.sub_id,),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row:
+                return await _safe_followup(i, content="⏱️ Déjà traité ou inexistant.")
+            uid, cat_id, t_sec = int(row[0]), row[1], float(row[2])
+            async with get_db() as db:
+                await db.execute(
+                    "UPDATE speedrun_submissions SET status='approved', "
+                    "reviewed_by=?, reviewed_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (i.user.id, self.sub_id),
+                )
+                await db.commit()
+            # Reward au runner : 500 🪙 par approbation
+            try:
+                await add_coins(i.guild.id, uid, 500)
+            except Exception:
+                pass
+            # DM le runner si possible
+            try:
+                runner = i.guild.get_member(uid)
+                if runner:
+                    await runner.send(
+                        f"🎉 Ton speedrun **#{self.sub_id}** sur `{cat_id}` "
+                        f"(`{rblx.format_time(t_sec)}`) a été **approuvé** ! "
+                        f"+500 🪙 et tu es au leaderboard."
+                    )
+            except Exception:
+                pass
+            await _safe_followup(i, content=f"✅ Soumission #{self.sub_id} approuvée. Runner notifié +500 🪙.")
+        except Exception as ex:
+            print(f"[SpeedrunReviewView approve] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _reject(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if not await self._check_staff(i):
+                return await _safe_followup(i, content="🔒 Staff uniquement.")
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT user_id FROM speedrun_submissions WHERE id=? AND status='pending'",
+                    (self.sub_id,),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row:
+                return await _safe_followup(i, content="⏱️ Déjà traité ou inexistant.")
+            uid = int(row[0])
+            async with get_db() as db:
+                await db.execute(
+                    "UPDATE speedrun_submissions SET status='rejected', "
+                    "reviewed_by=?, reviewed_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (i.user.id, self.sub_id),
+                )
+                await db.commit()
+            try:
+                runner = i.guild.get_member(uid)
+                if runner:
+                    await runner.send(
+                        f"❌ Ton speedrun #{self.sub_id} a été **rejeté** par le staff. "
+                        f"Tu peux contacter le staff pour comprendre, ou re-soumettre."
+                    )
+            except Exception:
+                pass
+            await _safe_followup(i, content=f"❌ Soumission #{self.sub_id} rejetée.")
+        except Exception as ex:
+            print(f"[SpeedrunReviewView reject] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+class SpeedrunCategorySelectView(View):
+    """View ephemeral : choisir une catégorie puis ouvrir le SpeedrunSubmitModal."""
+
+    def __init__(self, categories: list):
+        super().__init__(timeout=300)
+        # Max 25 options sur un Select
+        options = []
+        for c in categories[:25]:
+            options.append(discord.SelectOption(
+                label=c["name"][:100],
+                value=c["id"],
+                description=(c.get("description") or "")[:100],
+            ))
+        if not options:
+            return
+        select = Select(
+            placeholder="Choisis ta catégorie de speedrun…",
+            options=options,
+            custom_id="speedrun_cat_select",
+        )
+        select.callback = self._on_select
+        self.add_item(select)
+        self.categories = categories
+
+    async def _on_select(self, i: discord.Interaction):
+        try:
+            chosen_id = i.data["values"][0]
+            cat = None
+            for c in self.categories:
+                if c["id"] == chosen_id:
+                    cat = c
+                    break
+            if not cat:
+                return await i.response.send_message("❌ Catégorie inconnue.", ephemeral=True)
+            modal = SpeedrunSubmitModal(cat)
+            await i.response.send_modal(modal)
+        except Exception as ex:
+            print(f"[SpeedrunCategorySelectView] {ex}")
+
+
+async def _open_speedrun_panel(i: discord.Interaction):
+    """Sous-panel speedrun : leaderboard + bouton soumettre."""
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        categories = await _get_all_speedrun_categories(i.guild.id)
+        if not categories:
+            return await _safe_followup(i, content="❌ Aucune catégorie configurée. Owner : `/speedrun_cat_add`.")
+        # Top 3 toutes catégories all-time
+        lines = []
+        for c in categories[:6]:
+            lb = await _get_speedrun_leaderboard(i.guild.id, c["id"], period="all", limit=3)
+            if not lb:
+                lines.append(f"{c['name']}\n_Pas encore de record._")
+                continue
+            top_lines = []
+            medals = ["🥇", "🥈", "🥉"]
+            for idx, r in enumerate(lb):
+                m = i.guild.get_member(r["user_id"])
+                mname = m.display_name if m else f"User {r['user_id']}"
+                top_lines.append(f"{medals[idx]} `{rblx.format_time(r['time'])}` — **{mname}**")
+            lines.append(f"{c['name']}\n" + "\n".join(top_lines))
+        e = discord.Embed(
+            title="🏁 Speedrun — Leaderboards",
+            description=(
+                "Records all-time par catégorie. **Soumets ta vidéo proof** "
+                "via le bouton ci-dessous, le staff vérifie, +500 🪙 si approuvé.\n\n"
+                + "\n\n".join(lines)
+            ),
+            color=0x00A2FF,
+        )
+        e.set_footer(text=f"{len(categories)} catégorie(s) actives")
+        v = SpeedrunCategorySelectView(categories)
+        await _safe_followup(i, embed=e, view=v)
+    except Exception as ex:
+        print(f"[_open_speedrun_panel] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── MATCHMAKING PARTIES — héberger une session de jeu ───────────────────────
+
+
+class MatchmakingJoinView(View):
+    """View persistante : bouton 'Rejoindre la party' + 'Quitter'."""
+
+    def __init__(self, party_id: int):
+        super().__init__(timeout=None)
+        self.party_id = party_id
+        join = Button(
+            label="🎮 Rejoindre",
+            style=discord.ButtonStyle.success,
+            custom_id=f"party_join_{party_id}",
+        )
+        join.callback = self._join
+        leave = Button(
+            label="👋 Quitter",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"party_leave_{party_id}",
+        )
+        leave.callback = self._leave
+        close = Button(
+            label="🔒 Fermer (host)",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"party_close_{party_id}",
+        )
+        close.callback = self._close
+        self.add_item(join)
+        self.add_item(leave)
+        self.add_item(close)
+
+    async def _join(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if not i.guild:
+                return await _safe_followup(i, content="❌ Serveur uniquement.")
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT host_id, game_name, place_id, max_players, status "
+                    "FROM matchmaking_parties WHERE id=?",
+                    (self.party_id,),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row:
+                return await _safe_followup(i, content="⏱️ Party introuvable.")
+            host_id, game_name, place_id, max_p, status = row
+            if status != "open":
+                return await _safe_followup(i, content="🔒 Cette party est fermée.")
+            # Compter membres
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT COUNT(*) FROM matchmaking_party_members WHERE party_id=?",
+                    (self.party_id,),
+                ) as cur:
+                    count = int((await cur.fetchone() or [0])[0])
+            if count >= int(max_p):
+                return await _safe_followup(i, content=f"❌ Party pleine ({count}/{max_p}).")
+            # Insert (idempotent)
+            try:
+                async with get_db() as db:
+                    cur = await db.execute(
+                        "INSERT INTO matchmaking_party_members(party_id, user_id) VALUES(?,?) "
+                        "ON CONFLICT(party_id, user_id) DO NOTHING",
+                        (self.party_id, i.user.id),
+                    )
+                    await db.commit()
+            except Exception:
+                pass
+            link = f"https://www.roblox.com/games/{place_id}" if place_id else None
+            if link:
+                await _safe_followup(
+                    i,
+                    content=f"✅ Tu as rejoint la party **{game_name}** !\n🔗 Lien : {link}",
+                )
+            else:
+                await _safe_followup(
+                    i,
+                    content=f"✅ Tu as rejoint la party **{game_name}** ! Le host te donnera le lien.",
+                )
+        except Exception as ex:
+            print(f"[MatchmakingJoinView join] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _leave(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            async with get_db() as db:
+                await db.execute(
+                    "DELETE FROM matchmaking_party_members WHERE party_id=? AND user_id=?",
+                    (self.party_id, i.user.id),
+                )
+                await db.commit()
+            await _safe_followup(i, content="👋 Tu as quitté la party.")
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _close(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT host_id FROM matchmaking_parties WHERE id=?",
+                    (self.party_id,),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row:
+                return await _safe_followup(i, content="⏱️ Party inexistante.")
+            host_id = int(row[0])
+            if i.user.id != host_id and i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+                return await _safe_followup(i, content="🔒 Seul le host peut fermer.")
+            async with get_db() as db:
+                await db.execute(
+                    "UPDATE matchmaking_parties SET status='closed' WHERE id=?",
+                    (self.party_id,),
+                )
+                await db.commit()
+            await _safe_followup(i, content="🔒 Party fermée.")
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _get_active_roblox_games(guild_id: int) -> list:
+    """Retourne les jeux Roblox actifs pour cette guild."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT game_id, name, place_id, description, image_url "
+                "FROM roblox_games WHERE guild_id=? AND active=1",
+                (guild_id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        if not rows:
+            return list(rblx.DEFAULT_MATCHMAKING_GAMES)
+        return [
+            {"id": r[0], "name": r[1], "place_id": int(r[2] or 0),
+             "description": r[3] or "", "image_url": r[4] or ""}
+            for r in rows
+        ]
+    except Exception:
+        return list(rblx.DEFAULT_MATCHMAKING_GAMES)
+
+
+class MatchmakingGameSelectView(View):
+    """View ephemeral : choix du jeu pour lancer une party."""
+
+    def __init__(self, games: list):
+        super().__init__(timeout=300)
+        options = []
+        for g in games[:25]:
+            options.append(discord.SelectOption(
+                label=g["name"][:100],
+                value=g["id"],
+                description=(g.get("description") or "")[:100],
+            ))
+        if not options:
+            return
+        select = Select(
+            placeholder="Choisis le jeu pour ta party…",
+            options=options,
+            custom_id="party_game_select",
+        )
+        select.callback = self._on_select
+        self.add_item(select)
+        self.games = games
+
+    async def _on_select(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            chosen_id = i.data["values"][0]
+            game = next((g for g in self.games if g["id"] == chosen_id), None)
+            if not game:
+                return await _safe_followup(i, content="❌ Jeu inconnu.")
+            # Créer la party
+            c = await cfg(i.guild.id)
+            hub_id = int(c.get('hub_channel', 0) or 0)
+            hub_ch = i.guild.get_channel(hub_id) if hub_id else i.channel
+            if not hub_ch or not await _is_chatty_channel(hub_ch):
+                return await _safe_followup(i, content="❌ Hub non configuré.")
+            expires_at = (datetime.now(timezone.utc) + timedelta(hours=2)).isoformat()
+            async with get_db() as db:
+                cur = await db.execute(
+                    "INSERT INTO matchmaking_parties"
+                    "(guild_id, host_id, game_id, game_name, place_id, channel_id, max_players, expires_at) "
+                    "VALUES(?, ?, ?, ?, ?, ?, 8, ?)",
+                    (i.guild.id, i.user.id, game["id"], game["name"],
+                     int(game.get("place_id") or 0), hub_ch.id, expires_at),
+                )
+                party_id = cur.lastrowid
+                await db.commit()
+            # Host auto-joined
+            try:
+                async with get_db() as db:
+                    await db.execute(
+                        "INSERT INTO matchmaking_party_members(party_id, user_id) VALUES(?,?)",
+                        (party_id, i.user.id),
+                    )
+                    await db.commit()
+            except Exception:
+                pass
+            link = f"https://www.roblox.com/games/{game['place_id']}" if game.get("place_id") else None
+            e = discord.Embed(
+                title=f"🎮 Party ouverte : {game['name']}",
+                description=(
+                    f"**Host :** {i.user.mention}\n"
+                    f"**Jeu :** {game['name']}\n"
+                    f"**Max players :** 8\n"
+                    f"**Description :** {game.get('description', '_aucune_')}\n\n"
+                    + (f"🔗 **Lien jeu :** {link}\n\n" if link else "")
+                    + f"_Clique **Rejoindre** pour participer. La party expire dans 2h._"
+                ),
+                color=0x00A2FF,
+                timestamp=datetime.now(timezone.utc),
+            )
+            if game.get("image_url"):
+                e.set_thumbnail(url=game["image_url"])
+            e.set_footer(text=f"Party #{party_id}  ·  Phase 50 Matchmaking")
+            LIFETIME_PARTY = 2 * 3600
+            party_msg = await hub_ch.send(
+                content=f"🎮 {i.user.mention} lance une party sur **{game['name']}** !",
+                embed=e,
+                view=MatchmakingJoinView(int(party_id)),
+                allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+                delete_after=LIFETIME_PARTY,
+            )
+            try:
+                await _register_for_cleanup(party_msg, LIFETIME_PARTY, 'matchmaking_party')
+            except Exception:
+                pass
+            # Update message_id
+            async with get_db() as db:
+                await db.execute(
+                    "UPDATE matchmaking_parties SET message_id=? WHERE id=?",
+                    (party_msg.id, party_id),
+                )
+                await db.commit()
+            await _safe_followup(i, content=f"✅ Party lancée ! ID #{party_id}")
+        except Exception as ex:
+            print(f"[MatchmakingGameSelectView] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _open_matchmaking_panel(i: discord.Interaction):
+    """Sous-panel matchmaking : voir parties ouvertes + créer la sienne."""
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        # Lister les parties ouvertes
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, host_id, game_name, max_players, expires_at "
+                "FROM matchmaking_parties WHERE guild_id=? AND status='open' "
+                "AND (expires_at IS NULL OR datetime(expires_at)>datetime('now')) "
+                "ORDER BY created_at DESC LIMIT 5",
+                (i.guild.id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        lines = []
+        for r in rows:
+            pid, hid, gname, maxp, exp = r
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT COUNT(*) FROM matchmaking_party_members WHERE party_id=?",
+                    (pid,),
+                ) as cur:
+                    count = int((await cur.fetchone() or [0])[0])
+            host = i.guild.get_member(int(hid))
+            hname = host.display_name if host else f"User {hid}"
+            lines.append(f"`#{pid}` 🎮 **{gname}** — host **{hname}** — `{count}/{maxp}`")
+        e = discord.Embed(
+            title="🎮 Matchmaking — Jouons ensemble",
+            description=(
+                "**Parties actuellement ouvertes :**\n" +
+                ("\n".join(lines) if lines else "_Aucune party ouverte. Lance la tienne !_") +
+                "\n\n_Une party expire après 2h. Le host peut la fermer plus tôt._"
+            ),
+            color=0x00A2FF,
+        )
+        games = await _get_active_roblox_games(i.guild.id)
+        v = MatchmakingGameSelectView(games) if games else None
+        await _safe_followup(i, embed=e, view=v)
+    except Exception as ex:
+        print(f"[_open_matchmaking_panel] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── GAME UPDATES — Owner posts update + thread feedback ─────────────────────
+
+
+async def _post_game_update(guild, game_id: str, title: str, content: str, posted_by_id: int) -> Optional[int]:
+    """Poste un update de jeu + crée un thread pour le feedback."""
+    try:
+        c = await cfg(guild.id)
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        hub_ch = guild.get_channel(hub_id) if hub_id else None
+        if not hub_ch:
+            return None
+        games = await _get_active_roblox_games(guild.id)
+        game = next((g for g in games if g["id"] == game_id), None)
+        game_name = game["name"] if game else game_id
+
+        e = discord.Embed(
+            title=f"📢 Update : {title}",
+            description=content[:4000],
+            color=0xFFD700,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_author(name=f"🎮 {game_name}")
+        if game and game.get("image_url"):
+            e.set_thumbnail(url=game["image_url"])
+        e.set_footer(text="Réagis ⭐ pour noter cet update · Donne ton feedback dans le thread")
+        try:
+            msg = await hub_ch.send(
+                embed=e,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            # Réactions de vote
+            for emoji in ["⭐", "🔥", "👌", "🤔", "💀"]:
+                try:
+                    await msg.add_reaction(emoji)
+                except Exception:
+                    pass
+            # Thread feedback
+            thread = None
+            try:
+                thread = await msg.create_thread(
+                    name=f"💬 Feedback {title}"[:90],
+                    auto_archive_duration=10080,  # 7 jours
+                )
+            except Exception as ex:
+                print(f"[_post_game_update thread] {ex}")
+            # Save DB
+            async with get_db() as db:
+                cur = await db.execute(
+                    "INSERT INTO game_updates(guild_id, game_id, title, content, posted_by, message_id, thread_id) "
+                    "VALUES(?, ?, ?, ?, ?, ?, ?)",
+                    (guild.id, game_id, title, content, posted_by_id, msg.id, thread.id if thread else None),
+                )
+                upd_id = cur.lastrowid
+                await db.commit()
+            print(f"[GAME UPDATE] guild={guild.id} game={game_id} upd_id={upd_id}")
+            return int(upd_id)
+        except Exception as ex:
+            print(f"[_post_game_update send] {ex}")
+            return None
+    except Exception as ex:
+        print(f"[_post_game_update] {ex}")
+        return None
+
+
+# ─── ROBLOX SUB-HUB (4 boutons : Speedrun / Matchmaking / Tips / Updates) ───
+
+
+class RobloxSubHubView(View):
+    """Sous-panel ephemeral : 4 boutons pour les features Roblox."""
+
+    def __init__(self):
+        super().__init__(timeout=300)
+        b1 = Button(label="🏁 Speedrun", style=discord.ButtonStyle.primary, row=0)
+        b1.callback = self._on_speedrun
+        self.add_item(b1)
+        b2 = Button(label="🎮 Matchmaking", style=discord.ButtonStyle.success, row=0)
+        b2.callback = self._on_matchmaking
+        self.add_item(b2)
+        b3 = Button(label="💡 Tip Studio", style=discord.ButtonStyle.secondary, row=0)
+        b3.callback = self._on_tip
+        self.add_item(b3)
+        b4 = Button(label="📢 Derniers updates", style=discord.ButtonStyle.secondary, row=0)
+        b4.callback = self._on_updates
+        self.add_item(b4)
+
+    async def _on_speedrun(self, i: discord.Interaction):
+        await _open_speedrun_panel(i)
+
+    async def _on_matchmaking(self, i: discord.Interaction):
+        await _open_matchmaking_panel(i)
+
+    async def _on_tip(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            tip = rblx.pick_random_tip()
+            e = discord.Embed(
+                title=f"💡 {tip['title']}",
+                description=tip["content"],
+                color=0x00A2FF,
+            )
+            e.set_footer(text=f"Catégorie : {tip.get('category', '?')}  ·  Tip #{tip['id']}/{len(rblx.STUDIO_TIPS)}")
+            await _safe_followup(i, embed=e)
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_updates(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if not i.guild:
+                return await _safe_followup(i, content="❌ Serveur uniquement.")
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT id, game_id, title, posted_at, message_id "
+                    "FROM game_updates WHERE guild_id=? ORDER BY posted_at DESC LIMIT 5",
+                    (i.guild.id,),
+                ) as cur:
+                    rows = await cur.fetchall()
+            if not rows:
+                return await _safe_followup(
+                    i,
+                    content="_Aucun update encore posté. L'owner peut en poster via `/game_update`._",
+                )
+            lines = []
+            for r in rows:
+                uid, gid, title, posted, mid = r
+                lines.append(f"📢 **{title}** _(jeu : `{gid}`)_ — <t:{int(datetime.fromisoformat((posted or '').replace('Z', '+00:00') if 'T' in str(posted) else str(posted) + '+00:00').timestamp()) if posted else 0}:R>")
+            e = discord.Embed(
+                title="📢 Derniers updates de jeu",
+                description="\n".join(lines),
+                color=0xFFD700,
+            )
+            await _safe_followup(i, embed=e)
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _open_roblox_panel(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        e = discord.Embed(
+            title="🎮 Roblox — Panel central",
+            description=(
+                "Tout ce qui touche à nos jeux Roblox :\n\n"
+                "🏁 **Speedrun** — soumets ton record, vois les leaderboards\n"
+                "🎮 **Matchmaking** — lance/rejoins une party pour jouer ensemble\n"
+                "💡 **Tip Studio** — un conseil dev random parmi 60+\n"
+                "📢 **Derniers updates** — les 5 derniers updates de jeu\n"
+            ),
+            color=0x00A2FF,
+        )
+        await _safe_followup(i, embed=e, view=RobloxSubHubView())
+    except Exception as ex:
+        print(f"[_open_roblox_panel] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── SLASH COMMANDS OWNER — gestion Roblox ───────────────────────────────────
+
+
+@bot.tree.command(
+    name="game_add",
+    description="🎮 [Owner] Ajouter un jeu Roblox au catalogue",
+)
+@app_commands.describe(
+    game_id="ID unique du jeu (ex: main_obby, escape_simulator)",
+    name="Nom affiché du jeu",
+    place_id="Place ID Roblox (chiffres, optionnel)",
+    description="Description courte (optionnel)",
+    image_url="URL image (optionnel)",
+)
+async def game_add_cmd(i: discord.Interaction, game_id: str, name: str,
+                       place_id: Optional[int] = 0, description: Optional[str] = "",
+                       image_url: Optional[str] = ""):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO roblox_games(guild_id, game_id, name, place_id, description, image_url) "
+                "VALUES(?, ?, ?, ?, ?, ?)",
+                (i.guild.id, game_id, name, int(place_id or 0), description or "", image_url or ""),
+            )
+            await db.commit()
+        await _safe_followup(
+            i,
+            content=f"✅ Jeu **{name}** (`{game_id}`) ajouté au catalogue.",
+        )
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="game_update",
+    description="📢 [Owner] Poster une annonce d'update de jeu (avec thread feedback)",
+)
+@app_commands.describe(
+    game_id="ID du jeu (depuis /game_add)",
+    title="Titre de l'update (ex: 'v1.5 — Nouvelles maps')",
+    content="Contenu détaillé (markdown supporté, max 4000 caractères)",
+)
+async def game_update_cmd(i: discord.Interaction, game_id: str, title: str, content: str):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        upd_id = await _post_game_update(i.guild, game_id, title, content, i.user.id)
+        if upd_id:
+            await _safe_followup(i, content=f"✅ Update posté ! ID #{upd_id}. Thread feedback créé.")
+        else:
+            await _safe_followup(i, content="❌ Échec post update — vérifier hub_channel.")
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="speedrun_cat_add",
+    description="🏁 [Owner] Ajouter une catégorie speedrun custom",
+)
+@app_commands.describe(
+    cat_id="ID unique (ex: 'glitchless_any')",
+    name="Nom affiché (ex: '🏃 Glitchless Any%')",
+    description="Règles courtes",
+    target_seconds="Temps cible en secondes",
+)
+async def speedrun_cat_add_cmd(i: discord.Interaction, cat_id: str, name: str,
+                                description: str = "", target_seconds: int = 300):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO speedrun_categories_custom(guild_id, cat_id, name, description, target_seconds) "
+                "VALUES(?, ?, ?, ?, ?)",
+                (i.guild.id, cat_id, name, description, int(target_seconds)),
+            )
+            await db.commit()
+        await _safe_followup(i, content=f"✅ Catégorie **{name}** (`{cat_id}`) ajoutée.")
     except Exception as ex:
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
