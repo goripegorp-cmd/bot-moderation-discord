@@ -556,6 +556,194 @@ def get_quiz_set(n: int = 10) -> list[dict]:
 
 
 # =============================================================================
+# PHASE 33 : ÉVÉNEMENTS PERSONNELS (un seul membre concerné)
+# =============================================================================
+
+# Conseils que le bot peut donner aux joueurs (rotation)
+HELP_TIPS = [
+    "Sais-tu que tu peux taper `/badges` pour voir tes badges et ton rang ?",
+    "Pense à `/inventory` pour voir ton équipement actuel — il booste tes dégâts !",
+    "La boutique d'événement (`/event_shop`) change toutes les semaines. Va y jeter un œil !",
+    "Tu peux déclencher un duel contre un autre membre avec `/duel @membre` — combat 1v1.",
+    "Pour voir l'événement en cours, utilise `/event` à tout moment.",
+    "Plus tu participes aux Boss Raids, plus tu débloques de badges et de rangs.",
+    "Astuce : équipe-toi avant un raid pour faire plus de dégâts !",
+    "Le classement du serveur est visible avec `/leaderboard` (pièces · messages · vocal).",
+    "Tu peux configurer ton anniversaire avec `/birthday set JJ-MM` pour être souhaité le jour J.",
+    "En vocal, tu gagnes des pièces et de l'XP — pense à passer du temps avec la commu !",
+]
+
+
+# Devinettes simples (FR)
+PERSONAL_RIDDLES = [
+    {"q": "Je grandis sans me nourrir, et je meurs si je bois. Qui suis-je ?",
+     "a": ["Le feu", "L'eau", "Le vent", "La glace"], "c": 0},
+    {"q": "Plus on en prend, plus on en laisse. Qu'est-ce que c'est ?",
+     "a": ["Des photos", "Des empreintes", "Des souvenirs", "Des mots"], "c": 1},
+    {"q": "Je n'ai pas de bouche mais je parle. Qu'est-ce que c'est ?",
+     "a": ["Un écho", "Un livre", "Le vent", "Un téléphone"], "c": 0},
+    {"q": "Plus je sèche, plus je deviens humide. Qu'est-ce que c'est ?",
+     "a": ["Une éponge", "Une serviette", "Un mouchoir", "Une plante"], "c": 1},
+    {"q": "Je tombe mais ne me casse jamais. Quand je me casse, je ne tombe plus.",
+     "a": ["Un cheveu", "La nuit", "Une feuille", "Une étoile"], "c": 1},
+    {"q": "Quel mot de 4 lettres contient 7 jours ?",
+     "a": ["Sept", "Lune", "Année", "Hier"], "c": 0},  # "Sept" — astuce
+    {"q": "Je commence par la lettre E mais ne contient qu'une lettre.",
+     "a": ["Enveloppe", "Email", "Étoile", "Encre"], "c": 0},
+]
+
+
+def random_personal_event() -> dict:
+    """Génère un événement personnel aléatoire pondéré."""
+    types = [
+        {"id": "gift",   "weight": 30},
+        {"id": "math",   "weight": 25},
+        {"id": "riddle", "weight": 25},
+        {"id": "tip",    "weight": 20},
+    ]
+    chosen = _weighted_choice(types)["id"]
+
+    if chosen == "gift":
+        coins = random.choice([50, 75, 100, 125, 150, 200, 250, 300, 500])
+        return {
+            "type": "gift",
+            "title": "🎁 Cadeau Surprise !",
+            "description": f"Le bot t'offre **{coins}** 🪙 ! Clique sur le bouton pour l'accepter.",
+            "coins": coins,
+        }
+
+    if chosen == "math":
+        a = random.randint(5, 50)
+        b = random.randint(5, 50)
+        op = random.choice(['+', '-', '×'])
+        if op == '+':
+            correct = a + b
+        elif op == '-':
+            correct = a - b
+        else:
+            correct = a * b
+        # 3 mauvaises réponses
+        bad = set()
+        while len(bad) < 3:
+            offset = random.choice([-10, -5, -2, -1, 1, 2, 5, 10])
+            v = correct + offset
+            if v != correct:
+                bad.add(v)
+        all_answers = list(bad) + [correct]
+        random.shuffle(all_answers)
+        correct_idx = all_answers.index(correct)
+        return {
+            "type": "math",
+            "title": "🧮 Énigme Mathématique",
+            "description": f"Combien font **{a} {op} {b}** ?",
+            "answers": [str(x) for x in all_answers],
+            "correct_idx": correct_idx,
+            "reward": random.choice([100, 150, 200, 250]),
+        }
+
+    if chosen == "riddle":
+        r = dict(random.choice(PERSONAL_RIDDLES))
+        return {
+            "type": "riddle",
+            "title": "❓ Devinette",
+            "description": r["q"],
+            "answers": r["a"],
+            "correct_idx": r["c"],
+            "reward": random.choice([150, 200, 250, 300]),
+        }
+
+    if chosen == "tip":
+        return {
+            "type": "tip",
+            "title": "💡 Conseil du Bot",
+            "description": random.choice(HELP_TIPS),
+            "coins": random.choice([25, 50, 75]),
+        }
+
+    # fallback
+    return {"type": "gift", "title": "🎁 Cadeau", "description": "Cadeau !", "coins": 50}
+
+
+# =============================================================================
+# PHASE 33 : SYSTÈME DE DUEL PvP
+# =============================================================================
+
+def simulate_duel(challenger_inv: dict, opponent_inv: dict) -> dict:
+    """Simule un duel 1v1 entre deux joueurs avec leurs inventaires.
+
+    Retourne :
+    {
+        "winner": "challenger" | "opponent" | "draw",
+        "challenger_hp": int (HP final),
+        "opponent_hp": int,
+        "rounds": [ {round, c_dmg, o_dmg, c_crit, o_crit}, ... ],
+    }
+    """
+    c_max_hp = 100 + (challenger_inv.get('armor', {}).get('def', 0) or 0) * 5
+    o_max_hp = 100 + (opponent_inv.get('armor', {}).get('def', 0) or 0) * 5
+    c_hp = c_max_hp
+    o_hp = o_max_hp
+
+    rounds = []
+    for round_idx in range(1, 8):  # max 7 rounds
+        if c_hp <= 0 or o_hp <= 0:
+            break
+        # Challenger attaque
+        c_dmg, c_crit = calc_damage(challenger_inv.get('weapon'))
+        c_dmg -= (opponent_inv.get('armor', {}).get('def', 0) or 0) // 2
+        c_dmg = max(1, c_dmg)
+        o_hp = max(0, o_hp - c_dmg)
+        # Opponent attaque (si encore vivant)
+        if o_hp > 0:
+            o_dmg, o_crit = calc_damage(opponent_inv.get('weapon'))
+            o_dmg -= (challenger_inv.get('armor', {}).get('def', 0) or 0) // 2
+            o_dmg = max(1, o_dmg)
+            c_hp = max(0, c_hp - o_dmg)
+        else:
+            o_dmg, o_crit = 0, False
+
+        rounds.append({
+            "round": round_idx,
+            "c_dmg": c_dmg, "o_dmg": o_dmg,
+            "c_crit": c_crit, "o_crit": o_crit,
+            "c_hp": c_hp, "o_hp": o_hp,
+        })
+
+    if c_hp > o_hp:
+        winner = "challenger"
+    elif o_hp > c_hp:
+        winner = "opponent"
+    else:
+        winner = "draw"
+
+    return {
+        "winner": winner,
+        "challenger_hp": c_hp,
+        "opponent_hp": o_hp,
+        "challenger_max_hp": c_max_hp,
+        "opponent_max_hp": o_max_hp,
+        "rounds": rounds,
+    }
+
+
+def get_help_footer(context: str = "general") -> str:
+    """Retourne un message d'aide pertinent selon le contexte.
+
+    context : "general", "event_end", "duel_end", "inventory", "shop"
+    """
+    base = "💡 **Commandes utiles** : "
+    if context == "event_end":
+        return base + "`/badges` (tes exploits) · `/inventory` (équipement) · `/event_shop` (boutique) · `/duel @membre` (combat 1v1)"
+    if context == "duel_end":
+        return base + "`/duel @membre [mise]` à nouveau · `/inventory` (équipement) · `/event_shop` (s'équiper)"
+    if context == "inventory":
+        return base + "`/event_shop` pour acheter du gear · `/event` pour rejoindre l'event · `/duel @membre` pour défier"
+    if context == "shop":
+        return base + "`/inventory` (voir ton stuff) · `/event` (rejoindre l'arène) · `/badges` (ton profil)"
+    return base + "`/event` · `/inventory` · `/badges` · `/event_shop` · `/duel @membre` · `/leaderboard`"
+
+
+# =============================================================================
 # PHASE 31 : DIFFICULTÉ PROGRESSIVE
 # =============================================================================
 
@@ -617,13 +805,16 @@ __all__ = [
     "BOSS_CATALOG", "WEAPONS", "ARMOR", "TREASURE_CATALOG", "QUIZ_QUESTIONS",
     "BADGE_CATALOG", "RANK_TIERS", "EVENT_RANK_ROLES", "COMBO_THRESHOLDS",
     "RARITY_COLORS", "RARITY_EMOJIS",
+    "HELP_TIPS", "PERSONAL_RIDDLES",
     # Generators
     "random_weapon", "random_armor", "random_boss", "random_treasure",
-    "generate_shop_rotation", "get_quiz_set",
+    "generate_shop_rotation", "get_quiz_set", "random_personal_event",
     # Helpers
     "hp_bar", "calc_damage", "serialize_overwrites", "compute_rewards",
     "check_badge_unlocks", "get_badge_by_id",
     "rank_for_kills", "event_role_for_rank",
     "check_combo",
     "adjust_difficulty",
+    "simulate_duel",
+    "get_help_footer",
 ]

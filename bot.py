@@ -56,6 +56,7 @@ import game_updates as gameupdates2026
 import delegations as delegations2026
 import compromised_detector as compromised2026
 import events_engine as events2026
+import random
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  🛡️ GESTION D'ERREURS GLOBALE - REND LES ERREURS VISIBLES AU LIEU DE SILENCIEUSES
@@ -965,8 +966,48 @@ async def db_init():
             top1_count INTEGER DEFAULT 0,
             shop_spent INTEGER DEFAULT 0,
             rank_key TEXT DEFAULT '',
+            duels_won INTEGER DEFAULT 0,
+            duels_lost INTEGER DEFAULT 0,
+            personal_events_completed INTEGER DEFAULT 0,
             PRIMARY KEY (guild_id, user_id)
         )''')
+
+        # Phase 33 : événements personnels lancés (anti-spam)
+        await db.execute('''CREATE TABLE IF NOT EXISTS personal_events_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            user_id INTEGER,
+            event_type TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            claimed INTEGER DEFAULT 0
+        )''')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_personal_events_user ON personal_events_log(guild_id, user_id, created_at)')
+
+        # Phase 33 : historique des duels
+        await db.execute('''CREATE TABLE IF NOT EXISTS duels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            challenger_id INTEGER,
+            opponent_id INTEGER,
+            bet_amount INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'pending',
+            winner_id INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            resolved_at DATETIME
+        )''')
+
+        # Migration : ajoute colonnes manquantes à player_event_stats si DB existe déjà
+        try:
+            async with db.execute('PRAGMA table_info(player_event_stats)') as cur:
+                cols = [r[1] for r in await cur.fetchall()]
+            if 'duels_won' not in cols:
+                await db.execute('ALTER TABLE player_event_stats ADD COLUMN duels_won INTEGER DEFAULT 0')
+            if 'duels_lost' not in cols:
+                await db.execute('ALTER TABLE player_event_stats ADD COLUMN duels_lost INTEGER DEFAULT 0')
+            if 'personal_events_completed' not in cols:
+                await db.execute('ALTER TABLE player_event_stats ADD COLUMN personal_events_completed INTEGER DEFAULT 0')
+        except Exception:
+            pass
         
         # Ajouter colonne message_count si elle n'existe pas
         async with db.execute('PRAGMA table_info(economy)') as cursor:
@@ -1400,6 +1441,16 @@ async def cfg(gid):
         'event_type_boss_enabled': True,
         'event_type_treasure_enabled': True,
         'event_type_quiz_enabled': True,
+        # Phase 33 : événements personnels (DM-style via ping+button → ephemeral)
+        'personal_events_enabled': True,
+        'personal_events_interval_min': 30,  # toutes les N min, possibilité d'en lancer un
+        'personal_events_per_user_cooldown_h': 4,  # même user pas plus d'1/4h
+        'personal_events_max_per_hour': 10,  # rate-limit global serveur
+        # Phase 33 : PvP duels
+        'pvp_enabled': True,
+        'pvp_min_kills_required': 0,  # minimum kills lifetime pour pouvoir dueler
+        'pvp_cooldown_min': 60,        # 1 duel par user par heure
+        'pvp_max_bet': 5000,            # mise max en coins
     }
     for k, v in defaults.items():
         if k not in data: data[k] = v
@@ -7628,6 +7679,735 @@ async def event_shop_cmd(i: discord.Interaction):
         await v.render_to(i, edit=False)
     except Exception as ex:
         print(f"[/event_shop] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 33 — ÉVÉNEMENTS PERSONNELS (un seul membre, ephemeral)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Cache : (guild_id, user_id) → timestamp dernier envoi
+_personal_event_last: dict[tuple[int, int], float] = {}
+# Cache global serveur : guild_id → list[timestamp]
+_personal_event_hourly: dict[int, list[float]] = {}
+
+
+class PersonalEventOpenView(View):
+    """View persistante : ping en channel + bouton qui ouvre l'event en EPHEMERAL.
+
+    Seul l'utilisateur ciblé peut cliquer (vérification dans le callback).
+    """
+
+    def __init__(self, target_user_id: int, event_data: dict, event_log_id: int):
+        super().__init__(timeout=3600)  # expire après 1h
+        self.target_user_id = target_user_id
+        self.event_data = event_data
+        self.event_log_id = event_log_id
+        b = Button(
+            label="🎯 Ouvrir mon événement",
+            style=discord.ButtonStyle.success,
+            custom_id=f"pe_open_{event_log_id}",
+        )
+        b.callback = self._on_open
+        self.add_item(b)
+
+    async def _on_open(self, i: discord.Interaction):
+        try:
+            if i.user.id != self.target_user_id:
+                return await i.response.send_message(
+                    "🔒 Cet événement personnel n'est pas pour toi !",
+                    ephemeral=True,
+                )
+
+            ev_type = self.event_data.get('type', 'gift')
+
+            if ev_type == 'gift':
+                # Reward immédiat
+                coins = int(self.event_data.get('coins', 50))
+                try:
+                    await add_coins(i.guild.id, i.user.id, coins)
+                except Exception:
+                    pass
+                e = discord.Embed(
+                    title=self.event_data.get('title', '🎁 Cadeau'),
+                    description=(
+                        f"🎉 **Tu reçois `{coins}` 🪙 !**\n\n"
+                        f"_Profite bien et reviens plus tard pour d'autres cadeaux..._"
+                    ),
+                    color=0x57F287,
+                )
+                e.set_footer(text=events2026.get_help_footer("event_end"))
+                await i.response.send_message(embed=e, ephemeral=True)
+                # Désactiver le bouton sur le message channel
+                self._disable_buttons("✅ Récupéré")
+                try:
+                    await i.message.edit(view=self)
+                except Exception:
+                    pass
+                await self._mark_completed(i.guild.id, i.user.id)
+                return
+
+            if ev_type == 'tip':
+                coins = int(self.event_data.get('coins', 50))
+                try:
+                    await add_coins(i.guild.id, i.user.id, coins)
+                except Exception:
+                    pass
+                e = discord.Embed(
+                    title=self.event_data.get('title', '💡 Conseil'),
+                    description=(
+                        f"{self.event_data.get('description', '')}\n\n"
+                        f"_Merci d'avoir lu !_ **+`{coins}` 🪙**"
+                    ),
+                    color=0x3498DB,
+                )
+                e.set_footer(text=events2026.get_help_footer("event_end"))
+                await i.response.send_message(embed=e, ephemeral=True)
+                self._disable_buttons("✅ Lu")
+                try:
+                    await i.message.edit(view=self)
+                except Exception:
+                    pass
+                await self._mark_completed(i.guild.id, i.user.id)
+                return
+
+            if ev_type in ('math', 'riddle'):
+                # Embed avec 4 boutons réponses
+                answers = self.event_data.get('answers', [])
+                correct_idx = int(self.event_data.get('correct_idx', 0))
+                reward = int(self.event_data.get('reward', 100))
+                v = _PersonalQuestionView(
+                    target_user_id=self.target_user_id,
+                    answers=answers,
+                    correct_idx=correct_idx,
+                    reward=reward,
+                    parent_view=self,
+                )
+                e = discord.Embed(
+                    title=self.event_data.get('title', '❓'),
+                    description=(
+                        f"**{self.event_data.get('description', '')}**\n\n"
+                        f"_Choisis la bonne réponse. Récompense : `{reward}` 🪙_"
+                    ),
+                    color=0xF1C40F,
+                )
+                await i.response.send_message(embed=e, view=v, ephemeral=True)
+                return
+
+            await i.response.send_message("❌ Type d'événement inconnu.", ephemeral=True)
+        except Exception as ex:
+            print(f"[PersonalEventOpenView _on_open] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+    def _disable_buttons(self, label: str = "✅ Terminé"):
+        for child in self.children:
+            child.disabled = True
+            child.label = label
+
+    async def _mark_completed(self, guild_id: int, user_id: int):
+        try:
+            async with get_db() as db:
+                await db.execute(
+                    'UPDATE personal_events_log SET claimed=1 WHERE id=?',
+                    (self.event_log_id,),
+                )
+                await db.execute(
+                    'INSERT INTO player_event_stats(guild_id, user_id, personal_events_completed) VALUES(?,?,1) '
+                    'ON CONFLICT(guild_id, user_id) DO UPDATE SET personal_events_completed = personal_events_completed + 1',
+                    (guild_id, user_id),
+                )
+                await db.commit()
+        except Exception:
+            pass
+
+
+class _PersonalQuestionView(View):
+    """View interne pour les questions personnelles (math/riddle)."""
+
+    def __init__(self, target_user_id: int, answers: list, correct_idx: int, reward: int, parent_view):
+        super().__init__(timeout=120)
+        self.target_user_id = target_user_id
+        self.correct_idx = correct_idx
+        self.reward = reward
+        self.parent_view = parent_view
+        self.answered = False
+        for idx, ans in enumerate(answers[:4]):
+            b = Button(
+                label=f"{chr(ord('A') + idx)}. {ans[:60]}",
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"peq_{idx}",
+            )
+            b.callback = (lambda ix, idx_local=idx: self._on_answer(ix, idx_local))
+            self.add_item(b)
+
+    async def _on_answer(self, i: discord.Interaction, idx: int):
+        try:
+            if i.user.id != self.target_user_id:
+                return await i.response.send_message("🔒 Pas pour toi !", ephemeral=True)
+            if self.answered:
+                return await i.response.send_message("⚠️ Tu as déjà répondu.", ephemeral=True)
+            self.answered = True
+
+            if idx == self.correct_idx:
+                # Bonne réponse
+                try:
+                    await add_coins(i.guild.id, i.user.id, self.reward)
+                except Exception:
+                    pass
+                # Style victorieux
+                for c_idx, child in enumerate(self.children):
+                    child.disabled = True
+                    if c_idx == self.correct_idx:
+                        child.style = discord.ButtonStyle.success
+                        child.label = f"{chr(ord('A') + c_idx)} ✓"
+
+                e = discord.Embed(
+                    title="✅ Bonne réponse !",
+                    description=(
+                        f"Tu remportes **`{self.reward}` 🪙** !\n\n"
+                        f"{events2026.get_help_footer('event_end')}"
+                    ),
+                    color=0x57F287,
+                )
+                await i.response.edit_message(embed=e, view=self)
+            else:
+                # Mauvaise
+                for c_idx, child in enumerate(self.children):
+                    child.disabled = True
+                    if c_idx == idx:
+                        child.style = discord.ButtonStyle.danger
+                        child.label = f"{chr(ord('A') + c_idx)} ✗"
+                    elif c_idx == self.correct_idx:
+                        child.style = discord.ButtonStyle.success
+                        child.label = f"{chr(ord('A') + c_idx)} ✓"
+
+                consolation = 25  # consolation
+                try:
+                    await add_coins(i.guild.id, i.user.id, consolation)
+                except Exception:
+                    pass
+
+                e = discord.Embed(
+                    title="❌ Mauvaise réponse",
+                    description=(
+                        f"Mais merci d'avoir participé ! Tu reçois `{consolation}` 🪙 quand même.\n\n"
+                        f"{events2026.get_help_footer('event_end')}"
+                    ),
+                    color=0xED4245,
+                )
+                await i.response.edit_message(embed=e, view=self)
+
+            # Marquer comme completed
+            if self.parent_view:
+                try:
+                    self.parent_view._disable_buttons("✅ Répondu")
+                    # Note : on ne peut pas edit le parent message ici depuis l'ephemeral
+                    await self.parent_view._mark_completed(i.guild.id, i.user.id)
+                except Exception:
+                    pass
+        except Exception as ex:
+            print(f"[_PersonalQuestionView _on_answer] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
+@tasks.loop(minutes=15)
+async def personal_event_dispatcher():
+    """Phase 33 — toutes les 15 min, possibilité d'envoyer un event perso.
+
+    Choisit un membre actif récent et lui propose un événement personnel.
+    """
+    try:
+        for guild in bot.guilds:
+            try:
+                c = await cfg(guild.id)
+                if not c.get('personal_events_enabled', True):
+                    continue
+                interval_min = int(c.get('personal_events_interval_min', 30) or 30)
+                # Probabilité : sur 15min, on lance une fois tous les `interval_min` min
+                if interval_min <= 0:
+                    continue
+                # Décide si on tire cet event maintenant (probabiliste)
+                if random.random() > (15 / interval_min):
+                    continue
+
+                # Rate limit serveur
+                max_per_hour = int(c.get('personal_events_max_per_hour', 10) or 10)
+                hourly = _personal_event_hourly.setdefault(guild.id, [])
+                now_ts = time.time()
+                hourly[:] = [t for t in hourly if (now_ts - t) < 3600]
+                if len(hourly) >= max_per_hour:
+                    continue
+
+                # Trouver un membre actif (dernier message < 30 min)
+                async with get_db() as db:
+                    async with db.execute(
+                        'SELECT user_id, last_message FROM activity_tracking '
+                        'WHERE guild_id=? AND last_message IS NOT NULL '
+                        'ORDER BY last_message DESC LIMIT 30',
+                        (guild.id,),
+                    ) as cur:
+                        rows = await cur.fetchall()
+
+                candidates = []
+                cooldown_h = int(c.get('personal_events_per_user_cooldown_h', 4) or 4)
+                cooldown_s = cooldown_h * 3600
+                for user_id, last_msg in rows:
+                    try:
+                        last_dt = datetime.fromisoformat(last_msg) if 'T' in last_msg else datetime.strptime(last_msg, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                        if (datetime.now(timezone.utc) - last_dt).total_seconds() > 1800:
+                            continue  # pas actif depuis 30 min
+                        # Cooldown user
+                        last_pe = _personal_event_last.get((guild.id, user_id), 0)
+                        if now_ts - last_pe < cooldown_s:
+                            continue
+                        member = guild.get_member(user_id)
+                        if member and not member.bot:
+                            candidates.append(member)
+                    except Exception:
+                        continue
+
+                if not candidates:
+                    continue
+
+                target = random.choice(candidates)
+
+                # Trouver le salon où il a posté en dernier (pour la visibilité)
+                # Fallback : premier salon où le bot peut écrire
+                target_channel = None
+                async with get_db() as db:
+                    async with db.execute(
+                        'SELECT channel_id FROM member_activity WHERE guild_id=? AND user_id=? AND activity_type=\'message\' '
+                        'ORDER BY created_at DESC LIMIT 1',
+                        (guild.id, target.id),
+                    ) as cur:
+                        r = await cur.fetchone()
+                if r:
+                    target_channel = guild.get_channel(int(r[0]))
+                if not target_channel:
+                    # Trouver n'importe quel salon writable
+                    for ch in guild.text_channels:
+                        if ch.permissions_for(guild.me).send_messages and ch.permissions_for(target).read_messages:
+                            target_channel = ch
+                            break
+                if not target_channel:
+                    continue
+
+                # Générer l'event
+                ev_data = events2026.random_personal_event()
+
+                # Log en DB
+                async with get_db() as db:
+                    cur = await db.execute(
+                        'INSERT INTO personal_events_log(guild_id, user_id, event_type) VALUES(?,?,?)',
+                        (guild.id, target.id, ev_data.get('type', 'gift')),
+                    )
+                    log_id = cur.lastrowid
+                    await db.commit()
+
+                # Envoyer le ping
+                v = PersonalEventOpenView(target.id, ev_data, log_id)
+                try:
+                    await target_channel.send(
+                        content=(
+                            f"🎯 {target.mention} — un événement personnel t'attend !\n"
+                            f"_Clique sur le bouton ci-dessous pour l'ouvrir (seul toi peux le voir)._"
+                        ),
+                        view=v,
+                        allowed_mentions=discord.AllowedMentions(users=[target], roles=False, everyone=False),
+                    )
+                    _personal_event_last[(guild.id, target.id)] = now_ts
+                    hourly.append(now_ts)
+                    print(f"[PERSONAL EVENT] guild={guild.id} user={target.id} type={ev_data.get('type')}")
+                except Exception as ex:
+                    print(f"[personal event send] {ex}")
+            except Exception as ex:
+                print(f"[personal_event_dispatcher guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[personal_event_dispatcher] {ex}")
+
+
+@personal_event_dispatcher.before_loop
+async def _personal_event_dispatcher_wait():
+    await bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 33 — PvP DUELS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Cache cooldown : (guild_id, user_id) → timestamp dernier duel
+_duel_cooldowns: dict[tuple[int, int], float] = {}
+
+
+class DuelChallengeView(View):
+    """View pour le destinataire d'un duel : Accepter ou Refuser."""
+
+    def __init__(self, challenger_id: int, opponent_id: int, bet: int, duel_id: int):
+        super().__init__(timeout=300)  # expire après 5min
+        self.challenger_id = challenger_id
+        self.opponent_id = opponent_id
+        self.bet = bet
+        self.duel_id = duel_id
+
+        b_accept = Button(
+            label="⚔️ Accepter le duel",
+            style=discord.ButtonStyle.success,
+            custom_id=f"duel_acc_{duel_id}",
+        )
+        b_accept.callback = self._on_accept
+        self.add_item(b_accept)
+
+        b_refuse = Button(
+            label="🏃 Refuser",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"duel_ref_{duel_id}",
+        )
+        b_refuse.callback = self._on_refuse
+        self.add_item(b_refuse)
+
+    async def interaction_check(self, i):
+        if i.user.id != self.opponent_id:
+            await i.response.send_message(
+                "🔒 Seul le défié peut répondre à ce duel.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def _on_refuse(self, i: discord.Interaction):
+        try:
+            async with get_db() as db:
+                await db.execute('UPDATE duels SET status=?, resolved_at=CURRENT_TIMESTAMP WHERE id=?', ('refused', self.duel_id))
+                await db.commit()
+            for child in self.children:
+                child.disabled = True
+            await i.response.edit_message(
+                content=f"🏃 <@{self.opponent_id}> a **refusé** le duel.",
+                view=self,
+            )
+        except Exception as ex:
+            print(f"[DuelChallengeView _on_refuse] {ex}")
+
+    async def _on_accept(self, i: discord.Interaction):
+        try:
+            # Vérifier que les deux ont les coins pour la mise
+            challenger = i.guild.get_member(self.challenger_id)
+            if not challenger:
+                return await i.response.send_message("❌ Le challenger n'est plus sur le serveur.", ephemeral=True)
+
+            if self.bet > 0:
+                try:
+                    eco_c = await get_user_economy(i.guild.id, self.challenger_id)
+                    eco_o = await get_user_economy(i.guild.id, self.opponent_id)
+                    coins_c = (eco_c.get('coins', 0) or 0) + (eco_c.get('bank', 0) or 0)
+                    coins_o = (eco_o.get('coins', 0) or 0) + (eco_o.get('bank', 0) or 0)
+                    if coins_c < self.bet:
+                        return await i.response.send_message(
+                            f"❌ Le challenger n'a plus assez de pièces (`{coins_c}` < `{self.bet}`). Duel annulé.",
+                            ephemeral=True,
+                        )
+                    if coins_o < self.bet:
+                        return await i.response.send_message(
+                            f"❌ Tu n'as pas assez de pièces (`{coins_o}` < `{self.bet}`).",
+                            ephemeral=True,
+                        )
+                except Exception:
+                    pass
+
+            # Désactiver les boutons
+            for child in self.children:
+                child.disabled = True
+            try:
+                await i.response.edit_message(
+                    content=f"⚔️ <@{self.opponent_id}> **accepte** le duel ! Combat en cours...",
+                    view=self,
+                )
+            except Exception:
+                pass
+
+            # Mettre à jour le statut
+            async with get_db() as db:
+                await db.execute('UPDATE duels SET status=? WHERE id=?', ('in_progress', self.duel_id))
+                await db.commit()
+
+            # Charger inventaires
+            inv_c = await _get_or_create_inventory(i.guild.id, self.challenger_id)
+            inv_o = await _get_or_create_inventory(i.guild.id, self.opponent_id)
+
+            # Simulation
+            result = events2026.simulate_duel(inv_c, inv_o)
+
+            # Déterminer gagnant + transferts
+            if result['winner'] == 'challenger':
+                winner_id, loser_id = self.challenger_id, self.opponent_id
+            elif result['winner'] == 'opponent':
+                winner_id, loser_id = self.opponent_id, self.challenger_id
+            else:
+                winner_id = None
+                loser_id = None
+
+            # Transferts coins
+            reward_winner = 100  # bonus victoire
+            if winner_id and loser_id and self.bet > 0:
+                try:
+                    await add_coins(i.guild.id, loser_id, -self.bet)
+                    await add_coins(i.guild.id, winner_id, self.bet + reward_winner)
+                except Exception:
+                    pass
+            elif winner_id:
+                try:
+                    await add_coins(i.guild.id, winner_id, reward_winner)
+                except Exception:
+                    pass
+
+            # Stats
+            try:
+                async with get_db() as db:
+                    if winner_id:
+                        await db.execute(
+                            'INSERT INTO player_event_stats(guild_id, user_id, duels_won) VALUES(?,?,1) '
+                            'ON CONFLICT(guild_id, user_id) DO UPDATE SET duels_won = duels_won + 1',
+                            (i.guild.id, winner_id),
+                        )
+                        await db.execute(
+                            'INSERT INTO player_event_stats(guild_id, user_id, duels_lost) VALUES(?,?,1) '
+                            'ON CONFLICT(guild_id, user_id) DO UPDATE SET duels_lost = duels_lost + 1',
+                            (i.guild.id, loser_id),
+                        )
+                    await db.execute(
+                        'UPDATE duels SET status=?, winner_id=?, resolved_at=CURRENT_TIMESTAMP WHERE id=?',
+                        ('resolved', winner_id or 0, self.duel_id),
+                    )
+                    await db.commit()
+            except Exception:
+                pass
+
+            # Embed recap
+            challenger_member = i.guild.get_member(self.challenger_id)
+            opponent_member = i.guild.get_member(self.opponent_id)
+            c_name = challenger_member.display_name if challenger_member else "?"
+            o_name = opponent_member.display_name if opponent_member else "?"
+
+            recap_lines = []
+            for r in result['rounds']:
+                c_crit = " 🌟" if r.get('c_crit') else ""
+                o_crit = " 🌟" if r.get('o_crit') else ""
+                recap_lines.append(
+                    f"**R{r['round']}** · {c_name} inflige `{r['c_dmg']}`{c_crit} | "
+                    f"{o_name} inflige `{r['o_dmg']}`{o_crit} | "
+                    f"HP : `{r['c_hp']}` vs `{r['o_hp']}`"
+                )
+
+            if winner_id:
+                winner_member = i.guild.get_member(winner_id)
+                if self.bet > 0:
+                    outcome = f"🏆 **{winner_member.display_name if winner_member else '?'}** remporte `{self.bet + reward_winner}` 🪙 !"
+                else:
+                    outcome = f"🏆 **{winner_member.display_name if winner_member else '?'}** remporte `{reward_winner}` 🪙 bonus !"
+            else:
+                outcome = "🤝 **Match nul** — personne ne gagne."
+
+            e = discord.Embed(
+                title=f"⚔️ Duel : {c_name} vs {o_name}",
+                description="\n".join(recap_lines) + f"\n\n{outcome}",
+                color=0xE74C3C if winner_id == self.opponent_id else (0x57F287 if winner_id == self.challenger_id else 0x95A5A6),
+                timestamp=datetime.now(timezone.utc),
+            )
+            e.set_footer(text=events2026.get_help_footer("duel_end"))
+
+            try:
+                await i.followup.send(embed=e)
+            except Exception:
+                try:
+                    await i.channel.send(embed=e)
+                except Exception:
+                    pass
+        except Exception as ex:
+            print(f"[DuelChallengeView _on_accept] {ex}")
+            import traceback; traceback.print_exc()
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur duel : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
+@bot.tree.command(name="duel", description="⚔️ Défie un autre membre en combat 1v1")
+@app_commands.describe(
+    membre="Le membre à défier",
+    mise="Mise en pièces (optionnel, max configuré)",
+)
+async def duel_cmd(i: discord.Interaction, membre: discord.Member, mise: int = 0):
+    try:
+        c = await cfg(i.guild.id)
+        if not c.get('pvp_enabled', True):
+            return await i.response.send_message("_Les duels PvP sont désactivés sur ce serveur._", ephemeral=True)
+
+        if membre.id == i.user.id:
+            return await i.response.send_message("❌ Tu ne peux pas te défier toi-même.", ephemeral=True)
+        if membre.bot:
+            return await i.response.send_message("🤖 Tu ne peux pas défier un bot.", ephemeral=True)
+
+        # Min kills requis
+        min_kills = int(c.get('pvp_min_kills_required', 0) or 0)
+        if min_kills > 0:
+            inv = await _get_or_create_inventory(i.guild.id, i.user.id)
+            if int(inv.get('kills', 0)) < min_kills:
+                return await i.response.send_message(
+                    f"⛔ Il faut au moins `{min_kills}` boss vaincu(s) pour pouvoir défier (tu as `{inv.get('kills', 0)}`).",
+                    ephemeral=True,
+                )
+
+        # Cooldown
+        cooldown_min = int(c.get('pvp_cooldown_min', 60) or 60)
+        key = (i.guild.id, i.user.id)
+        last = _duel_cooldowns.get(key, 0)
+        now_ts = time.time()
+        if now_ts - last < cooldown_min * 60:
+            remaining_min = int((cooldown_min * 60 - (now_ts - last)) / 60) + 1
+            return await i.response.send_message(
+                f"⏱️ Patiente encore `{remaining_min}` min avant ton prochain duel.",
+                ephemeral=True,
+            )
+
+        # Mise
+        max_bet = int(c.get('pvp_max_bet', 5000) or 5000)
+        mise = max(0, min(max_bet, int(mise or 0)))
+        if mise > 0:
+            try:
+                eco = await get_user_economy(i.guild.id, i.user.id)
+                coins = (eco.get('coins', 0) or 0) + (eco.get('bank', 0) or 0)
+                if coins < mise:
+                    return await i.response.send_message(
+                        f"❌ Tu n'as pas assez de pièces (`{coins}` < `{mise}`).",
+                        ephemeral=True,
+                    )
+            except Exception:
+                pass
+
+        # Créer le duel en DB
+        async with get_db() as db:
+            cur = await db.execute(
+                'INSERT INTO duels(guild_id, challenger_id, opponent_id, bet_amount, status) VALUES(?,?,?,?,?)',
+                (i.guild.id, i.user.id, membre.id, mise, 'pending'),
+            )
+            duel_id = cur.lastrowid
+            await db.commit()
+
+        _duel_cooldowns[key] = now_ts
+
+        view = DuelChallengeView(i.user.id, membre.id, mise, duel_id)
+
+        bet_str = f" · Mise : `{mise}` 🪙" if mise > 0 else " · Sans mise"
+        e = discord.Embed(
+            title="⚔️ Défi de duel !",
+            description=(
+                f"{i.user.mention} **défie** {membre.mention} en combat 1v1 !{bet_str}\n\n"
+                f"_Le combat se fait avec les équipements actuels des deux combattants._\n"
+                f"_Réponds dans les 5 minutes._"
+            ),
+            color=0xE67E22,
+        )
+        e.set_footer(text=f"💡 Cooldown : 1 duel par {cooldown_min}min · {events2026.get_help_footer('duel_end')}")
+        await i.response.send_message(
+            content=f"{membre.mention} — quelqu'un te défie !",
+            embed=e,
+            view=view,
+            allowed_mentions=discord.AllowedMentions(users=[membre], roles=False, everyone=False),
+        )
+    except Exception as ex:
+        print(f"[/duel] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 33 — /help (aide globale)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@bot.tree.command(name="help", description="📖 Aide complète : toutes les commandes disponibles")
+async def help_cmd(i: discord.Interaction):
+    try:
+        e = discord.Embed(
+            title="📖 Aide — Toutes les commandes",
+            description="_Voici les commandes que tu peux utiliser sur ce serveur._",
+            color=0x5865F2,
+        )
+
+        e.add_field(
+            name="🎪 Événements",
+            value=(
+                "• `/event` — voir l'événement en cours\n"
+                "• `/inventory` — ton équipement et tes stats\n"
+                "• `/badges` — tes badges et ton rang\n"
+                "• `/event_shop` — boutique d'équipements (rotation hebdo)\n"
+                "• `/duel @membre [mise]` — défier un membre en combat 1v1\n"
+                "• `/leaderboard` — classement (pièces · messages · vocal)"
+            ),
+            inline=False,
+        )
+
+        e.add_field(
+            name="📈 Progression",
+            value=(
+                "• `/level` — voir ton niveau et ton XP\n"
+                "• `/shop` — boutique de rôles personnalisés\n"
+                "• `/birthday set JJ-MM` — déclarer ton anniversaire\n"
+                "• `/birthday list` — voir les anniversaires du mois"
+            ),
+            inline=False,
+        )
+
+        e.add_field(
+            name="🎬 Spotlight Créateurs",
+            value=(
+                "• `/creator add youtube <id>` — enregistrer ta chaîne\n"
+                "• `/creator list` — voir tes chaînes\n"
+                "• `/creator remove` — retirer une chaîne"
+            ),
+            inline=False,
+        )
+
+        e.add_field(
+            name="💬 Communauté",
+            value=(
+                "• `/poll question options=A|B|C` — créer un sondage avancé\n"
+                "• `/warn @membre raison` — avertir (mod uniquement)\n"
+                "• `/mute @membre durée raison` — mute (mod uniquement)"
+            ),
+            inline=False,
+        )
+
+        e.add_field(
+            name="💡 Astuces générales",
+            value=(
+                "• Sois actif pour recevoir des **événements personnels** aléatoires (cadeaux, devinettes...)\n"
+                "• Participe aux **Boss Raids** pour gagner des coins, gear et badges\n"
+                "• Achète de l'équipement avant un raid pour faire plus de dégâts\n"
+                "• Garde tes coins pour les défis de duel"
+            ),
+            inline=False,
+        )
+
+        e.set_footer(text=f"{i.guild.name} · {events2026.get_help_footer('general')}", icon_url=(i.guild.icon.url if i.guild.icon else None))
+        await i.response.send_message(embed=e, ephemeral=True)
+    except Exception as ex:
+        print(f"[/help] {ex}")
         try:
             if not i.response.is_done():
                 await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
@@ -31319,6 +32099,9 @@ async def on_ready():
         event_timeout_checker.start()
     if not event_auto_scheduler.is_running():
         event_auto_scheduler.start()
+    # Phase 33 : événements personnels aléatoires
+    if not personal_event_dispatcher.is_running():
+        personal_event_dispatcher.start()
     try:
         await restore_active_events()
     except Exception as ex:
