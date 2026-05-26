@@ -1232,6 +1232,59 @@ async def db_init():
             reverted INTEGER DEFAULT 0
         )''')
 
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 43 — Vrais events originaux (Trésor Flash, Rituel, Tag Royale)
+        # ═══════════════════════════════════════════════════════════════════
+
+        # Trésor Flash : pop random, fenêtre 60s, premier qui clique gagne
+        await db.execute('''CREATE TABLE IF NOT EXISTS flash_treasures (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            channel_id INTEGER,
+            message_id INTEGER,
+            reward_coins INTEGER,
+            spawned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME,
+            grabbed_by INTEGER,
+            grabbed_at DATETIME,
+            ended INTEGER DEFAULT 0
+        )''')
+
+        # Rituel du Soir : récap des emojis par jour
+        await db.execute('''CREATE TABLE IF NOT EXISTS evening_rituals (
+            guild_id INTEGER,
+            day TEXT,                       -- 'YYYY-MM-DD'
+            message_id INTEGER,
+            channel_id INTEGER,
+            counts_json TEXT DEFAULT '{}',  -- {"sun": 12, "ok": 5, ...}
+            participants_json TEXT DEFAULT '[]',  -- liste user_ids déjà cliqué
+            posted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            recap_posted INTEGER DEFAULT 0,
+            PRIMARY KEY (guild_id, day)
+        )''')
+
+        # Tag Royale : chaîne d'invitation hebdomadaire
+        await db.execute('''CREATE TABLE IF NOT EXISTS tag_royale (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            channel_id INTEGER,
+            started_user_id INTEGER,
+            current_level INTEGER DEFAULT 1,
+            chain_users_json TEXT DEFAULT '[]',  -- IDs participants
+            started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_action_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            ended INTEGER DEFAULT 0,
+            success INTEGER DEFAULT 0
+        )''')
+
+        # Anniversaire serveur : éviter de relancer 2× la même année
+        await db.execute('''CREATE TABLE IF NOT EXISTS server_anniversaries (
+            guild_id INTEGER,
+            year_celebrated INTEGER,  -- ex: 2026 si on a célébré l'an 2026
+            celebrated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (guild_id, year_celebrated)
+        )''')
+
         # Migration : ajoute colonnes manquantes à player_event_stats si DB existe déjà
         try:
             async with db.execute('PRAGMA table_info(player_event_stats)') as cur:
@@ -34586,6 +34639,15 @@ async def on_ready():
         bot.add_view(RiddleAnswerView())
     except Exception as ex:
         print(f"[on_ready add_view RiddleAnswerView] {ex}")
+    # Phase 43 — Views persistantes : Flash Treasure + Evening Ritual
+    try:
+        bot.add_view(FlashTreasureView())
+    except Exception as ex:
+        print(f"[on_ready add_view FlashTreasureView] {ex}")
+    try:
+        bot.add_view(EveningRitualView())
+    except Exception as ex:
+        print(f"[on_ready add_view EveningRitualView] {ex}")
     try:
         async with get_db() as db:
             async with db.execute('SELECT data FROM guild_config') as c:
@@ -34712,6 +34774,18 @@ async def on_ready():
         voice_chaos_dispatcher.start()
     if not daily_riddle_dispatcher.is_running():
         daily_riddle_dispatcher.start()
+
+    # Phase 43 : Trésor Flash + Rituel du Soir + Tag Royale + Anniversaire
+    if not flash_treasure_dispatcher.is_running():
+        flash_treasure_dispatcher.start()
+    if not evening_ritual_dispatcher.is_running():
+        evening_ritual_dispatcher.start()
+    if not tag_royale_starter.is_running():
+        tag_royale_starter.start()
+    if not tag_royale_timeout_checker.is_running():
+        tag_royale_timeout_checker.start()
+    if not server_anniversary_checker.is_running():
+        server_anniversary_checker.start()
 
     print(f"✅ {bot.user.name} v28 prêt!")
     print(f"🌐 Serveurs: {len(bot.guilds)}")
@@ -35677,6 +35751,13 @@ async def on_message(msg):
         await _track_message_p41(msg)
     except Exception as ex:
         print(f"[_track_message_p41] {ex}")
+
+    # ═══════════════ Phase 43 : Tag Royale chain progression ═══════════════
+    try:
+        if msg.mentions:
+            await _check_tag_royale_chain(msg)
+    except Exception as ex:
+        print(f"[_check_tag_royale_chain] {ex}")
 
     # ═══════════════ Phase 23 : DÉTECTION COMPTES PIRATÉS ═══════════════
     try:
@@ -47927,6 +48008,1003 @@ async def riddle_force_cmd(i: discord.Interaction):
     except Exception as ex:
         print(f"[/riddle_force] {ex}")
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 43 — VRAIS EVENTS ORIGINAUX
+#  Trésor Flash · Rituel du Soir · Tag Royale · Anniversaire Serveur
+#  + Hub button "🌍 Events en cours"
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── TRÉSOR FLASH ──────────────────────────────────────────────────────────────
+
+
+class FlashTreasureView(View):
+    """View persistante : 1 bouton 'Saisir'. Premier-arrivé-premier-servi."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+        b = Button(
+            label="🤚 Saisir",
+            style=discord.ButtonStyle.success,
+            custom_id="flash_grab",
+        )
+        b.callback = self._on_grab
+        self.add_item(b)
+
+    async def _on_grab(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if not i.guild or not i.message:
+                return await _safe_followup(i, content="❌ Erreur contexte.")
+            # Récupérer le flash treasure lié à ce message
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT id, reward_coins, grabbed_by, ended, expires_at '
+                    'FROM flash_treasures WHERE message_id=? AND guild_id=?',
+                    (i.message.id, i.guild.id),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row:
+                return await _safe_followup(i, content="❌ Trésor introuvable.")
+            tid, reward, grabbed_by, ended, expires_at = row
+            if grabbed_by or ended:
+                return await _safe_followup(i, content="✋ Trop tard — quelqu'un a déjà saisi !")
+
+            # Check expiration
+            try:
+                expires_dt = datetime.fromisoformat(expires_at) if 'T' in str(expires_at) else \
+                             datetime.strptime(expires_at, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                if datetime.now(timezone.utc) > expires_dt:
+                    return await _safe_followup(i, content="⏱️ Trésor expiré.")
+            except Exception:
+                pass
+
+            # Update atomic via WHERE grabbed_by IS NULL
+            async with get_db() as db:
+                cur = await db.execute(
+                    'UPDATE flash_treasures SET grabbed_by=?, grabbed_at=CURRENT_TIMESTAMP, ended=1 '
+                    'WHERE id=? AND grabbed_by IS NULL',
+                    (i.user.id, tid),
+                )
+                await db.commit()
+                rc = cur.rowcount
+            if rc == 0:
+                return await _safe_followup(i, content="✋ Trop tard !")
+
+            # Donner les coins
+            try:
+                await add_coins(i.guild.id, i.user.id, int(reward))
+            except Exception:
+                pass
+
+            # Update le message d'origine : désactiver bouton + griser
+            try:
+                disabled_view = View(timeout=1)
+                disabled_btn = Button(
+                    label=f"✋ Saisi par {i.user.display_name[:30]}",
+                    style=discord.ButtonStyle.secondary,
+                    custom_id="flash_grabbed_done",
+                    disabled=True,
+                )
+                disabled_view.add_item(disabled_btn)
+                await i.message.edit(view=disabled_view)
+            except Exception:
+                pass
+
+            await _safe_followup(
+                i,
+                content=(
+                    f"⚡ **Tu as saisi le trésor !**\n"
+                    f"💰 **+{reward}** 🪙 ajoutés à ton solde."
+                ),
+            )
+            print(f"[FLASH TREASURE GRAB] guild={i.guild.id} user={i.user.id} reward={reward}")
+        except Exception as ex:
+            print(f"[FlashTreasureView _on_grab] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _spawn_flash_treasure(guild) -> bool:
+    """Pop un trésor flash dans un salon actif aléatoire (chatty).
+
+    Fenêtre 60 secondes. Premier qui clique gagne 100-500 🪙.
+    Le message est discret pour créer l'effet surveillance.
+    """
+    try:
+        c = await cfg(guild.id)
+        if not c.get('event_enabled', False):
+            return False
+        if not c.get('flash_treasure_enabled', True):
+            return False
+
+        # Trouver un salon actif chatty
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT channel_id, COUNT(*) FROM member_activity '
+                'WHERE guild_id=? AND activity_type=\'message\' '
+                'AND datetime(created_at) > datetime("now", "-1 hour") '
+                'GROUP BY channel_id ORDER BY COUNT(*) DESC LIMIT 10',
+                (guild.id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        candidates = []
+        for ch_id, _ in rows:
+            ch = guild.get_channel(int(ch_id))
+            if ch and await _is_chatty_channel(ch):
+                candidates.append(ch)
+        if not candidates:
+            return False
+
+        ch = random.choice(candidates)
+        reward = random.randint(100, 500)
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=60)
+
+        e = discord.Embed(
+            description=(
+                f"💎 **Quelque chose brille dans ce salon...**\n"
+                f"Cliquez vite — la fenêtre se ferme dans **60 secondes**."
+            ),
+            color=0xF1C40F,
+        )
+        e.set_footer(text="Trésor Flash · Premier arrivé, premier servi")
+
+        view = FlashTreasureView()
+        try:
+            msg = await ch.send(
+                embed=e,
+                view=view,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except Exception as ex:
+            print(f"[_spawn_flash_treasure send] {ex}")
+            return False
+
+        # Insérer en DB
+        async with get_db() as db:
+            await db.execute(
+                'INSERT INTO flash_treasures(guild_id, channel_id, message_id, reward_coins, expires_at) '
+                'VALUES(?,?,?,?,?)',
+                (guild.id, ch.id, msg.id, reward, expires_at.isoformat()),
+            )
+            await db.commit()
+
+        # Auto-cleanup après 90s : si pas saisi → message "Personne n'a saisi"
+        async def _flash_cleanup(msg_id, ch_id, reward):
+            await asyncio.sleep(75)
+            try:
+                async with get_db() as db:
+                    async with db.execute(
+                        'SELECT id, grabbed_by FROM flash_treasures WHERE message_id=?',
+                        (msg_id,),
+                    ) as cur:
+                        row = await cur.fetchone()
+                if not row:
+                    return
+                tid, grabbed_by = row
+                if grabbed_by:
+                    return  # déjà saisi, rien à faire
+                # Marquer ended
+                async with get_db() as db:
+                    await db.execute(
+                        'UPDATE flash_treasures SET ended=1 WHERE id=?',
+                        (tid,),
+                    )
+                    await db.commit()
+                # Désactiver le bouton + édit le message
+                ch_obj = guild.get_channel(int(ch_id))
+                if ch_obj:
+                    try:
+                        old_msg = await ch_obj.fetch_message(msg_id)
+                        if old_msg:
+                            disabled_view = View(timeout=1)
+                            disabled_btn = Button(
+                                label="💨 Trésor envolé",
+                                style=discord.ButtonStyle.secondary,
+                                custom_id="flash_expired",
+                                disabled=True,
+                            )
+                            disabled_view.add_item(disabled_btn)
+                            new_e = discord.Embed(
+                                description=f"💨 **Personne n'a saisi le trésor à temps.** ({reward} 🪙 perdus)",
+                                color=0x95A5A6,
+                            )
+                            await old_msg.edit(embed=new_e, view=disabled_view)
+                    except Exception:
+                        pass
+            except Exception as ex:
+                print(f"[_flash_cleanup] {ex}")
+        asyncio.create_task(_flash_cleanup(msg.id, ch.id, reward))
+
+        print(f"[FLASH TREASURE] guild={guild.id} ch={ch.id} reward={reward}")
+        return True
+    except Exception as ex:
+        print(f"[_spawn_flash_treasure] {ex}")
+        return False
+
+
+@tasks.loop(minutes=45)
+async def flash_treasure_dispatcher():
+    """Toutes les 45 min, 70% chance de pop un trésor flash quelque part."""
+    try:
+        # Heures actives Europe/Paris
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+            tz = _ZI('Europe/Paris')
+        except Exception:
+            tz = timezone.utc
+        h = datetime.now(tz).hour
+        if h < 9 or h >= 23:
+            return
+        if random.random() > 0.7:
+            return
+        for guild in bot.guilds:
+            try:
+                await _spawn_flash_treasure(guild)
+            except Exception as ex:
+                print(f"[flash_treasure_dispatcher guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[flash_treasure_dispatcher] {ex}")
+
+
+@flash_treasure_dispatcher.before_loop
+async def _flash_treasure_wait():
+    await bot.wait_until_ready()
+
+
+# ─── RITUEL DU SOIR ────────────────────────────────────────────────────────────
+
+
+_RITUAL_EMOJIS = [
+    ('sun', '☀️ Super journée'),
+    ('ok', '🙂 Ça va'),
+    ('meh', '😐 Bof'),
+    ('rain', '🌧️ Dur'),
+    ('tired', '😴 Fatigué'),
+    ('magic', '💫 Magique'),
+]
+
+
+class EveningRitualView(View):
+    """View persistante : 6 boutons emoji pour exprimer son humeur du jour."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+        for idx, (key, label) in enumerate(_RITUAL_EMOJIS):
+            b = Button(
+                label=label,
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"ritual_{key}",
+                row=idx // 3,
+            )
+            b.callback = self._make_cb(key, label)
+            self.add_item(b)
+
+    def _make_cb(self, key: str, label: str):
+        async def _cb(i: discord.Interaction):
+            if not await _safe_defer(i):
+                return
+            try:
+                if not i.guild:
+                    return await _safe_followup(i, content="❌ Serveur uniquement.")
+                day = _today_str_p41()
+                async with get_db() as db:
+                    async with db.execute(
+                        'SELECT counts_json, participants_json FROM evening_rituals '
+                        'WHERE guild_id=? AND day=?',
+                        (i.guild.id, day),
+                    ) as cur:
+                        row = await cur.fetchone()
+                if not row:
+                    return await _safe_followup(i, content="❌ Rituel non lancé aujourd'hui.")
+                counts = {}
+                participants = []
+                try:
+                    counts = json.loads(row[0] or '{}')
+                    participants = json.loads(row[1] or '[]')
+                except Exception:
+                    pass
+                if i.user.id in participants:
+                    return await _safe_followup(i, content="🌙 Tu as déjà partagé ton humeur aujourd'hui.")
+                # Incrémenter
+                counts[key] = counts.get(key, 0) + 1
+                participants.append(i.user.id)
+                async with get_db() as db:
+                    await db.execute(
+                        'UPDATE evening_rituals SET counts_json=?, participants_json=? '
+                        'WHERE guild_id=? AND day=?',
+                        (json.dumps(counts), json.dumps(participants), i.guild.id, day),
+                    )
+                    await db.commit()
+                # Donner 5 coins
+                try:
+                    await add_coins(i.guild.id, i.user.id, 5)
+                except Exception:
+                    pass
+                await _safe_followup(
+                    i,
+                    content=(
+                        f"🌙 Merci d'avoir partagé : **{label}**.\n"
+                        f"💰 **+5** 🪙 — bonne nuit !\n"
+                        f"_Récap du serveur demain matin._"
+                    ),
+                )
+            except Exception as ex:
+                print(f"[EveningRitualView {key}] {ex}")
+                await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+        return _cb
+
+
+async def _post_evening_ritual(guild) -> bool:
+    """Poste le message rituel du soir dans le hub channel."""
+    try:
+        c = await cfg(guild.id)
+        if not c.get('event_enabled', False):
+            return False
+        if not c.get('evening_ritual_enabled', True):
+            return False
+
+        day = _today_str_p41()
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT 1 FROM evening_rituals WHERE guild_id=? AND day=?',
+                (guild.id, day),
+            ) as cur:
+                if await cur.fetchone():
+                    return False  # déjà posté
+
+        # Salon : hub_channel > fallback chatty
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        ch = guild.get_channel(hub_id) if hub_id else None
+        if ch and not await _is_chatty_channel(ch):
+            ch = None
+        if not ch:
+            for cand in guild.text_channels:
+                if not await _is_chatty_channel(cand):
+                    continue
+                if any(kw in (cand.name or '').lower() for kw in ('general', 'général', 'chat', 'discussion')):
+                    ch = cand
+                    break
+            if not ch:
+                for cand in guild.text_channels:
+                    if await _is_chatty_channel(cand):
+                        ch = cand
+                        break
+        if not ch:
+            return False
+
+        e = discord.Embed(
+            title="🌙 Rituel du soir",
+            description=(
+                "**Comment était votre journée ?**\n\n"
+                "Clique sur le bouton qui correspond le mieux. Ton vote reste **anonyme**, "
+                "mais le récap demain matin te dira combien d'autres ont voté pareil.\n\n"
+                "💰 **+5 🪙** pour participer."
+            ),
+            color=0x5865F2,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text=f"Rituel du soir — {day}")
+
+        view = EveningRitualView()
+        try:
+            msg = await ch.send(embed=e, view=view, allowed_mentions=discord.AllowedMentions.none())
+        except Exception as ex:
+            print(f"[_post_evening_ritual send] {ex}")
+            return False
+
+        async with get_db() as db:
+            await db.execute(
+                'INSERT INTO evening_rituals(guild_id, day, message_id, channel_id) VALUES(?,?,?,?)',
+                (guild.id, day, msg.id, ch.id),
+            )
+            await db.commit()
+
+        print(f"[EVENING RITUAL] guild={guild.id} ch={ch.id}")
+        return True
+    except Exception as ex:
+        print(f"[_post_evening_ritual] {ex}")
+        return False
+
+
+async def _post_morning_recap(guild) -> bool:
+    """Poste le récap du rituel d'hier dans le hub channel."""
+    try:
+        yesterday = _yesterday_str_p41()
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT counts_json, channel_id, recap_posted FROM evening_rituals '
+                'WHERE guild_id=? AND day=?',
+                (guild.id, yesterday),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return False
+        counts_json, ch_id, recap_posted = row
+        if recap_posted:
+            return False
+        try:
+            counts = json.loads(counts_json or '{}')
+        except Exception:
+            counts = {}
+        if not counts:
+            # Marquer quand même comme recap_posted pour ne pas re-tenter
+            async with get_db() as db:
+                await db.execute(
+                    'UPDATE evening_rituals SET recap_posted=1 WHERE guild_id=? AND day=?',
+                    (guild.id, yesterday),
+                )
+                await db.commit()
+            return False
+
+        total = sum(counts.values())
+        # Construire la ligne récap par emoji
+        lines = []
+        for key, label in _RITUAL_EMOJIS:
+            n = counts.get(key, 0)
+            pct = (n / total * 100) if total else 0
+            lines.append(f"{label} — `{n}` ({pct:.0f}%)")
+        # Mood dominant
+        mood_top = max(counts.items(), key=lambda kv: kv[1])[0] if counts else None
+        mood_label = next((lbl for k, lbl in _RITUAL_EMOJIS if k == mood_top), "—")
+
+        ch = guild.get_channel(int(ch_id)) if ch_id else None
+        if not ch or not await _is_chatty_channel(ch):
+            return False
+
+        e = discord.Embed(
+            title=f"☀️ Bonjour ! Récap d'hier ({yesterday})",
+            description=(
+                f"**{total}** membre(s) ont partagé leur humeur hier soir.\n"
+                f"Humeur dominante : **{mood_label}**\n\n"
+                f"{chr(10).join(lines)}\n\n"
+                f"_Pensez à participer ce soir au prochain Rituel !_"
+            ),
+            color=0xFFA500,
+            timestamp=datetime.now(timezone.utc),
+        )
+        try:
+            await ch.send(embed=e, allowed_mentions=discord.AllowedMentions.none())
+        except Exception as ex:
+            print(f"[_post_morning_recap send] {ex}")
+            return False
+        async with get_db() as db:
+            await db.execute(
+                'UPDATE evening_rituals SET recap_posted=1 WHERE guild_id=? AND day=?',
+                (guild.id, yesterday),
+            )
+            await db.commit()
+        return True
+    except Exception as ex:
+        print(f"[_post_morning_recap] {ex}")
+        return False
+
+
+@tasks.loop(minutes=30)
+async def evening_ritual_dispatcher():
+    """22h FR : rituel du soir | 9h FR : récap d'hier."""
+    try:
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+            tz = _ZI('Europe/Paris')
+        except Exception:
+            tz = timezone.utc
+        h = datetime.now(tz).hour
+        if h == 22:
+            for guild in bot.guilds:
+                try:
+                    await _post_evening_ritual(guild)
+                except Exception as ex:
+                    print(f"[ritual evening guild={guild.id}] {ex}")
+        elif h == 9:
+            for guild in bot.guilds:
+                try:
+                    await _post_morning_recap(guild)
+                except Exception as ex:
+                    print(f"[ritual morning guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[evening_ritual_dispatcher] {ex}")
+
+
+@evening_ritual_dispatcher.before_loop
+async def _ritual_wait():
+    await bot.wait_until_ready()
+
+
+# ─── TAG ROYALE (chaîne d'invitation hebdo) ────────────────────────────────────
+
+
+async def _start_tag_royale(guild) -> bool:
+    """Lance un Tag Royale en taggant un membre random actif."""
+    try:
+        c = await cfg(guild.id)
+        if not c.get('event_enabled', False):
+            return False
+        if not c.get('tag_royale_enabled', True):
+            return False
+
+        # Pas 2× la même semaine
+        week_start = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT 1 FROM tag_royale WHERE guild_id=? AND started_at > ? LIMIT 1',
+                (guild.id, week_start),
+            ) as cur:
+                if await cur.fetchone():
+                    return False
+
+        # Choisir un membre actif récent (catégorie 'active' ou 'very_active')
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT user_id FROM activity_tracking '
+                'WHERE guild_id=? AND last_message IS NOT NULL '
+                'AND datetime(last_message) > datetime("now", "-3 days") '
+                'ORDER BY total_messages DESC LIMIT 50',
+                (guild.id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        candidates = []
+        for (uid,) in rows:
+            m = guild.get_member(int(uid))
+            if m and not m.bot:
+                candidates.append(m)
+        if len(candidates) < 5:
+            return False  # pas assez de monde
+
+        starter = random.choice(candidates)
+
+        # Salon : on cherche un chatty channel (top active)
+        ch = None
+        for cand_ch in await _get_top_active_channels(guild, limit=3):
+            ch = cand_ch
+            break
+        if not ch:
+            return False
+
+        chain_users = [starter.id]
+        async with get_db() as db:
+            cur = await db.execute(
+                'INSERT INTO tag_royale(guild_id, channel_id, started_user_id, current_level, chain_users_json) '
+                'VALUES(?,?,?,1,?)',
+                (guild.id, ch.id, starter.id, json.dumps(chain_users)),
+            )
+            tr_id = cur.lastrowid
+            await db.commit()
+
+        # Annoncer
+        e = discord.Embed(
+            title="🔗 TAG ROYALE — La chaîne d'amitié",
+            description=(
+                f"{starter.mention} a été choisi(e) par le destin !\n\n"
+                f"**🎯 Ta mission :** mentionner **3 autres membres** dans ce salon dans les **prochaines 60 minutes**.\n\n"
+                f"Si tu réussis, ces 3 membres devront à leur tour tag 3 autres → "
+                f"si la chaîne dure **4 niveaux** (donc ~81 personnes), **TOUT LE MONDE gagne 200 🪙 !**\n\n"
+                f"⚠️ Si la chaîne reste 1h sans nouveau tag, c'est PERDU pour tous.\n\n"
+                f"_Active une vraie cohésion entre membres._"
+            ),
+            color=0xE91E63,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text=f"Tag Royale #{tr_id} · Niveau 1/4")
+        try:
+            await ch.send(
+                content=f"🔗 {starter.mention} — c'est à toi !",
+                embed=e,
+                allowed_mentions=discord.AllowedMentions(users=[starter], roles=False, everyone=False),
+            )
+        except Exception as ex:
+            print(f"[_start_tag_royale send] {ex}")
+            return False
+
+        print(f"[TAG ROYALE START] guild={guild.id} starter={starter.id} tr_id={tr_id}")
+        return True
+    except Exception as ex:
+        print(f"[_start_tag_royale] {ex}")
+        return False
+
+
+async def _check_tag_royale_chain(msg):
+    """Hook on_message : si un participant tague 3+ membres dans le salon courant,
+    fait avancer la chaîne ou la déclare terminée.
+    """
+    try:
+        if msg.author.bot or not msg.guild:
+            return
+        if not msg.mentions:
+            return
+        # Récupérer Tag Royale actif dans ce channel
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT id, current_level, chain_users_json, last_action_at FROM tag_royale '
+                'WHERE guild_id=? AND channel_id=? AND ended=0',
+                (msg.guild.id, msg.channel.id),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return
+        tr_id, current_level, chain_json, last_action_at = row
+        try:
+            chain_users = json.loads(chain_json or '[]')
+        except Exception:
+            chain_users = []
+        # L'auteur doit être dans la chaîne pour pouvoir continuer
+        if msg.author.id not in chain_users:
+            return
+        # On compte les nouvelles mentions (humains, hors auteur, hors déjà-chaîne)
+        new_mentions = [m for m in msg.mentions if not m.bot and m.id != msg.author.id and m.id not in chain_users]
+        if len(new_mentions) < 3:
+            return
+        # Garder seulement les 3 premiers
+        new_mentions = new_mentions[:3]
+        new_chain = chain_users + [m.id for m in new_mentions]
+        new_level = current_level + 1
+
+        async with get_db() as db:
+            await db.execute(
+                'UPDATE tag_royale SET current_level=?, chain_users_json=?, last_action_at=CURRENT_TIMESTAMP '
+                'WHERE id=?',
+                (new_level, json.dumps(new_chain), tr_id),
+            )
+            await db.commit()
+
+        if new_level >= 4:
+            # Chaîne complète → distribuer le jackpot à TOUS les participants
+            async with get_db() as db:
+                await db.execute(
+                    'UPDATE tag_royale SET ended=1, success=1 WHERE id=?',
+                    (tr_id,),
+                )
+                await db.commit()
+            jackpot = 200
+            for uid in new_chain:
+                try:
+                    await add_coins(msg.guild.id, uid, jackpot)
+                except Exception:
+                    pass
+            try:
+                await msg.channel.send(
+                    embed=discord.Embed(
+                        title="🎊 TAG ROYALE — RÉUSSI !",
+                        description=(
+                            f"La chaîne a atteint **4 niveaux** ({len(new_chain)} participants).\n"
+                            f"💰 **+{jackpot}** 🪙 à chacun !\n\n"
+                            f"_Solidarité du serveur récompensée._"
+                        ),
+                        color=0x2ECC71,
+                    ),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except Exception:
+                pass
+            return
+
+        # Sinon, niveau suivant
+        try:
+            await msg.channel.send(
+                embed=discord.Embed(
+                    title=f"🔗 Tag Royale — Niveau {new_level}/4",
+                    description=(
+                        f"**{msg.author.display_name}** a relayé la chaîne !\n\n"
+                        f"À vous maintenant {', '.join(m.mention for m in new_mentions)} — vous avez **1 heure** "
+                        f"pour tag 3 autres membres chacun dans ce salon.\n\n"
+                        f"_Plus que **{4 - new_level}** niveau(x) pour le jackpot !_"
+                    ),
+                    color=0xE91E63,
+                ),
+                allowed_mentions=discord.AllowedMentions(users=new_mentions, roles=False, everyone=False),
+            )
+        except Exception:
+            pass
+    except Exception as ex:
+        print(f"[_check_tag_royale_chain] {ex}")
+
+
+@tasks.loop(minutes=15)
+async def tag_royale_timeout_checker():
+    """Vérifie les chaînes Tag Royale et coupe celles inactives > 1h."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, guild_id, channel_id FROM tag_royale "
+                "WHERE ended=0 AND datetime(last_action_at) < datetime('now', '-1 hour')"
+            ) as cur:
+                rows = await cur.fetchall()
+        for tr_id, gid, ch_id in rows:
+            async with get_db() as db:
+                await db.execute(
+                    'UPDATE tag_royale SET ended=1, success=0 WHERE id=?',
+                    (tr_id,),
+                )
+                await db.commit()
+            guild = bot.get_guild(int(gid))
+            ch = guild.get_channel(int(ch_id)) if guild else None
+            if ch:
+                try:
+                    await ch.send(
+                        embed=discord.Embed(
+                            title="💔 Tag Royale — Chaîne brisée",
+                            description=(
+                                f"Personne n'a relancé la chaîne dans l'heure. Le jackpot s'envole !\n"
+                                f"_Rendez-vous la semaine prochaine._"
+                            ),
+                            color=0x95A5A6,
+                        ),
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                except Exception:
+                    pass
+    except Exception as ex:
+        print(f"[tag_royale_timeout_checker] {ex}")
+
+
+@tag_royale_timeout_checker.before_loop
+async def _tag_royale_timeout_wait():
+    await bot.wait_until_ready()
+
+
+@tasks.loop(hours=1)
+async def tag_royale_starter():
+    """1× par semaine (dimanche 18h FR), lance un nouveau Tag Royale."""
+    try:
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+            tz = _ZI('Europe/Paris')
+        except Exception:
+            tz = timezone.utc
+        now_local = datetime.now(tz)
+        # Dimanche (weekday=6) à 18h
+        if now_local.weekday() != 6 or now_local.hour != 18:
+            return
+        for guild in bot.guilds:
+            try:
+                await _start_tag_royale(guild)
+            except Exception as ex:
+                print(f"[tag_royale_starter guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[tag_royale_starter] {ex}")
+
+
+@tag_royale_starter.before_loop
+async def _tag_royale_starter_wait():
+    await bot.wait_until_ready()
+
+
+# ─── ANNIVERSAIRE DU SERVEUR ───────────────────────────────────────────────────
+
+
+@tasks.loop(hours=6)
+async def server_anniversary_checker():
+    """Toutes les 6h, check si c'est l'anniversaire d'un serveur → mega event."""
+    try:
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+            tz = _ZI('Europe/Paris')
+        except Exception:
+            tz = timezone.utc
+        today = datetime.now(tz).date()
+        for guild in bot.guilds:
+            try:
+                # Date de création du serveur
+                created = guild.created_at.date()
+                if created.month != today.month or created.day != today.day:
+                    continue
+                years_old = today.year - created.year
+                if years_old < 1:
+                    continue
+                # Déjà célébré cette année ?
+                async with get_db() as db:
+                    async with db.execute(
+                        'SELECT 1 FROM server_anniversaries WHERE guild_id=? AND year_celebrated=?',
+                        (guild.id, today.year),
+                    ) as cur:
+                        if await cur.fetchone():
+                            continue
+                # Célébrer !
+                ch = None
+                hub_id = int((await cfg(guild.id)).get('hub_channel', 0) or 0)
+                if hub_id:
+                    cand = guild.get_channel(hub_id)
+                    if cand and await _is_chatty_channel(cand):
+                        ch = cand
+                if not ch:
+                    for cand in guild.text_channels:
+                        if await _is_chatty_channel(cand):
+                            ch = cand
+                            break
+                if not ch:
+                    continue
+
+                e = discord.Embed(
+                    title=f"🎂 JOYEUX ANNIVERSAIRE {guild.name} !",
+                    description=(
+                        f"**{guild.name}** fête ses **{years_old} an{'s' if years_old > 1 else ''}** aujourd'hui !\n\n"
+                        f"🎉 Pour célébrer :\n"
+                        f"💰 **+500 🪙 offerts à tous les membres**\n"
+                        f"💎 **Trésors flash boostés** (x3 fréquence pendant 24h)\n"
+                        f"🌟 **Achievement spécial** débloqué : Survivant de l'an {years_old}\n\n"
+                        f"_Merci d'être là._"
+                    ),
+                    color=0xFFD700,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                e.set_footer(text=f"Anniversaire {today.year}")
+
+                try:
+                    await ch.send(embed=e, allowed_mentions=discord.AllowedMentions.none())
+                except Exception:
+                    pass
+
+                # Donner 500 🪙 à tous les membres humains actifs des 30 derniers jours
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT DISTINCT user_id FROM activity_tracking "
+                        "WHERE guild_id=? AND datetime(last_message) > datetime('now', '-30 days')",
+                        (guild.id,),
+                    ) as cur:
+                        active_rows = await cur.fetchall()
+                bonus = 500
+                for (uid,) in active_rows:
+                    try:
+                        await add_coins(guild.id, int(uid), bonus)
+                    except Exception:
+                        pass
+
+                # Marquer en DB
+                async with get_db() as db:
+                    await db.execute(
+                        'INSERT OR IGNORE INTO server_anniversaries(guild_id, year_celebrated) VALUES(?,?)',
+                        (guild.id, today.year),
+                    )
+                    await db.commit()
+
+                print(f"[ANNIVERSARY] guild={guild.id} year={today.year} bonus={bonus} members={len(active_rows)}")
+            except Exception as ex:
+                print(f"[server_anniversary_checker guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[server_anniversary_checker] {ex}")
+
+
+@server_anniversary_checker.before_loop
+async def _anniv_wait():
+    await bot.wait_until_ready()
+
+
+# ─── HUB BUTTON : Events en cours (6ème bouton hub) ───────────────────────────
+
+
+async def _p43_open_events_live(i: discord.Interaction):
+    """Affiche un panel des events en cours / à venir."""
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        lines = ["🌍 **Événements en cours / à venir**", ""]
+
+        # Boss raid / treasure / quiz actif ?
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT id, ends_at FROM events WHERE guild_id=? AND ended=0 LIMIT 1',
+                (i.guild.id,),
+            ) as cur:
+                ev = await cur.fetchone()
+        if ev:
+            lines.append("⚔️ **Boss / Trésor / Quiz** en cours — vérifie tes salons !")
+
+        # World boss actif ?
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT id, boss_id, ends_at FROM world_bosses WHERE guild_id=? AND ended=0 LIMIT 1',
+                (i.guild.id,),
+            ) as cur:
+                wb = await cur.fetchone()
+        if wb:
+            lines.append(f"🌍 **World Boss** `{wb[1]}` en cours — rejoins l'arène !")
+
+        # Tag Royale actif ?
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT id, current_level, channel_id FROM tag_royale WHERE guild_id=? AND ended=0 LIMIT 1',
+                (i.guild.id,),
+            ) as cur:
+                tr = await cur.fetchone()
+        if tr:
+            ch_link = f"<#{tr[2]}>" if tr[2] else "salon inconnu"
+            lines.append(f"🔗 **Tag Royale** niveau {tr[1]}/4 — chaîne en cours dans {ch_link}")
+
+        # Trésor flash actif ?
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT channel_id, expires_at FROM flash_treasures "
+                "WHERE guild_id=? AND ended=0 AND datetime(expires_at) > datetime('now') LIMIT 1",
+                (i.guild.id,),
+            ) as cur:
+                ft = await cur.fetchone()
+        if ft:
+            lines.append(f"💎 **Trésor Flash** dans <#{ft[0]}> — fonce !")
+
+        # Énigme du jour
+        day = _today_str_p41()
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT first_winner_id, channel_id FROM daily_riddles_log WHERE guild_id=? AND day=?',
+                (i.guild.id, day),
+            ) as cur:
+                r = await cur.fetchone()
+        if r:
+            winner_id, ch_id = r
+            if winner_id:
+                lines.append(f"🧠 **Énigme du jour** — résolue ! Mais tu peux quand même y répondre pour des consolations dans <#{ch_id}>")
+            else:
+                lines.append(f"🧠 **Énigme du jour** disponible dans <#{ch_id}> — premier à trouver gagne **500 🪙** !")
+
+        # Si rien :
+        if len(lines) == 2:
+            lines.append("_Aucun event majeur en cours pour l'instant._")
+            lines.append("")
+            lines.append("**Prochaine fenêtre :**")
+            try:
+                from zoneinfo import ZoneInfo as _ZI
+                tz = _ZI('Europe/Paris')
+            except Exception:
+                tz = timezone.utc
+            now_local = datetime.now(tz)
+            h = now_local.hour
+            if 9 <= h < 23:
+                lines.append("💎 **Trésor Flash** possible dans les prochaines minutes (chaque ~45 min, 70% chance)")
+            if h < 22:
+                lines.append(f"🌙 **Rituel du soir** à 22h00 (dans `{22 - h}h{60 - now_local.minute:02d}` env.)")
+            elif h < 24:
+                lines.append("🌙 **Rituel du soir** lancé ce soir, check le salon hub !")
+
+        lines.append("")
+        lines.append("_Reviens régulièrement — un event peut spawn à tout moment._")
+
+        e = discord.Embed(
+            description="\n".join(lines),
+            color=0x5865F2,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text="Hub d'engagement · Events en cours")
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        print(f"[_p43_open_events_live] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# Inject le 6ème bouton dans EngagementHubView (monkey-patch propre)
+_original_hub_init = EngagementHubView.__init__
+
+
+def _patched_hub_init(self):
+    _original_hub_init(self)
+    b6 = Button(
+        label="🌍 Events en cours",
+        style=discord.ButtonStyle.primary,
+        custom_id="hub_events_live",
+        row=2,
+    )
+    b6.callback = self._on_events_live
+    self.add_item(b6)
+
+
+async def _hub_on_events_live(self, i: discord.Interaction):
+    await _p43_open_events_live(i)
+
+
+EngagementHubView.__init__ = _patched_hub_init
+EngagementHubView._on_events_live = _hub_on_events_live
+
+
+# ─── HOOK on_message pour Tag Royale ──────────────────────────────────────────
+
+
+# On wire dans on_message déjà existant via une fonction async appelée — voir
+# patch ci-dessous au boot.
 
 
 if __name__ == "__main__":
