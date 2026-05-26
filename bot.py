@@ -2040,6 +2040,75 @@ async def db_init():
             PRIMARY KEY (tournament_id, user_id)
         )''')
 
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 60 — ÉCONOMIE : Heist + Banque + Crafting + Loots uniques
+        # ═══════════════════════════════════════════════════════════════════
+        # Heist events
+        await db.execute('''CREATE TABLE IF NOT EXISTS heists (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            status TEXT DEFAULT 'recruiting',
+            pool_total INTEGER DEFAULT 0,
+            channel_id INTEGER,
+            message_id INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            resolved_at DATETIME
+        )''')
+        await db.execute('''CREATE TABLE IF NOT EXISTS heist_participants (
+            heist_id INTEGER,
+            user_id INTEGER,
+            role TEXT,
+            joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            payout INTEGER DEFAULT 0,
+            PRIMARY KEY (heist_id, user_id)
+        )''')
+
+        # Banque avec intérêts
+        await db.execute('''CREATE TABLE IF NOT EXISTS user_bank_deposits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            user_id INTEGER,
+            amount INTEGER,
+            deposited_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            withdrawn INTEGER DEFAULT 0,
+            withdrawn_at DATETIME
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_bank_user "
+                "ON user_bank_deposits(guild_id, user_id, withdrawn)"
+            )
+        except Exception:
+            pass
+
+        # Loots uniques (1 exemplaire max au monde, possédable, tradable)
+        await db.execute('''CREATE TABLE IF NOT EXISTS unique_loots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            name TEXT,
+            description TEXT,
+            rarity TEXT DEFAULT 'legendary',
+            current_owner_id INTEGER,
+            obtained_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            event_kind TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_unique_loot_owner "
+                "ON unique_loots(guild_id, current_owner_id)"
+            )
+        except Exception:
+            pass
+
+        await db.execute('''CREATE TABLE IF NOT EXISTS unique_loot_history (
+            loot_id INTEGER,
+            owner_id INTEGER,
+            acquired_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            released_at DATETIME,
+            PRIMARY KEY (loot_id, owner_id, acquired_at)
+        )''')
+
         # Marketplace : annonces de vente entre joueurs
         await db.execute('''CREATE TABLE IF NOT EXISTS marketplace_listings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35699,6 +35768,21 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready phase59 persist] {ex}")
 
+    # Phase 60 : re-attacher HeistJoinView recruiting
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id FROM heists WHERE status='recruiting'",
+            ) as cur:
+                rows = await cur.fetchall()
+        for r in rows:
+            try:
+                bot.add_view(HeistJoinView(int(r[0])))
+            except Exception:
+                pass
+    except Exception as ex:
+        print(f"[on_ready phase60 persist] {ex}")
+
     # Phase 42 — Views persistantes : World Boss + Daily Riddle
     try:
         bot.add_view(WorldBossAttackView())
@@ -49143,6 +49227,42 @@ async def _end_world_boss(guild, wb_id: int, victory: bool, reason: str = ""):
                 )
         except Exception as ex:
             print(f"[world_boss phase57 hook] {ex}")
+
+        # Phase 60 : drop unique loot pour le top damager (1% chance)
+        try:
+            if victory and attackers:
+                top_uid = int(attackers[0][0])
+                loot = await _maybe_drop_unique_loot(guild.id, top_uid, 'world_boss', drop_chance=0.10)
+                if loot:
+                    top_member = guild.get_member(top_uid)
+                    c = await cfg(guild.id)
+                    hub_id = int(c.get('hub_channel', 0) or 0)
+                    hub_ch = guild.get_channel(hub_id) if hub_id else None
+                    if hub_ch and top_member:
+                        action = "vole" if loot.get("stolen_from") else "obtient"
+                        LIFETIME = 6 * 3600
+                        e = discord.Embed(
+                            title=f"💎 LOOT UNIQUE OBTENU !",
+                            description=(
+                                f"**{top_member.mention}** {action} :\n\n"
+                                f"# {loot['name']}\n\n"
+                                f"_{loot['desc']}_\n\n"
+                                f"_1 seul exemplaire au monde. Visible dans `/loots`._"
+                            ),
+                            color=0xFFD700,
+                            timestamp=datetime.now(timezone.utc),
+                        )
+                        try:
+                            msg = await hub_ch.send(
+                                embed=e,
+                                allowed_mentions=discord.AllowedMentions.none(),
+                                delete_after=LIFETIME,
+                            )
+                            await _register_for_cleanup(msg, LIFETIME, 'unique_loot_drop')
+                        except Exception:
+                            pass
+        except Exception as ex:
+            print(f"[world_boss phase60 loot] {ex}")
         # Phase 51 : Faction war scoring
         try:
             if victory:
@@ -60938,6 +61058,538 @@ async def narrative_choices_resolver_task():
 @narrative_choices_resolver_task.before_loop
 async def _narrative_resolver_wait():
     await bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 60 — ÉCONOMIE ADDICTIVE : Heist + Banque + Loots uniques
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── HEIST EVENT (10 places, rôles asymétriques, payout proportionnel) ───────
+
+
+HEIST_ROLES = [
+    {"id": "cerveau",     "label": "🧠 Cerveau",      "desc": "Planifie le coup. +25% du payout.",     "share": 1.25},
+    {"id": "hacker",      "label": "💻 Hacker",        "desc": "Désactive l'alarme. +15%.",             "share": 1.15},
+    {"id": "conducteur",  "label": "🚗 Conducteur",    "desc": "L'évasion. +10%.",                       "share": 1.10},
+    {"id": "mule",        "label": "🎒 Mule",          "desc": "Porte le butin. +5%.",                  "share": 1.05},
+    {"id": "garde",       "label": "🛡️ Garde",         "desc": "Couvre l'équipe. +5%.",                 "share": 1.05},
+]
+
+
+class HeistJoinView(View):
+    """View persistante : Select pour choisir son rôle + bouton lancer."""
+
+    def __init__(self, heist_id: int):
+        super().__init__(timeout=None)
+        self.hid = heist_id
+        options = [
+            discord.SelectOption(
+                label=r["label"][:100], value=r["id"], description=r["desc"][:100],
+            ) for r in HEIST_ROLES
+        ]
+        select = Select(
+            placeholder="Choisis ton rôle pour le braquage…",
+            options=options,
+            custom_id=f"heist_role_{heist_id}",
+        )
+        select.callback = self._on_role
+        self.add_item(select)
+        b_launch = Button(
+            label="🚨 Lancer le braquage maintenant",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"heist_launch_{heist_id}",
+        )
+        b_launch.callback = self._launch
+        self.add_item(b_launch)
+
+    async def _on_role(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT status FROM heists WHERE id=?", (self.hid,),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row or row[0] != 'recruiting':
+                return await _safe_followup(i, content="⏱️ Braquage déjà lancé / inexistant.")
+            role_id = i.data["values"][0]
+            # Vérifier mise minimale (50 🪙 par participant)
+            stake = 50
+            try:
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT coins FROM economy WHERE guild_id=? AND user_id=?",
+                        (i.guild.id, i.user.id),
+                    ) as cur:
+                        b_row = await cur.fetchone()
+                bal = int(b_row[0]) if b_row else 0
+            except Exception:
+                bal = 0
+            if bal < stake:
+                return await _safe_followup(i, content=f"❌ Solde min : {stake} 🪙 pour participer.")
+            # Anti-multi : un user max 1 rôle
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT 1 FROM heist_participants WHERE heist_id=? AND user_id=?",
+                    (self.hid, i.user.id),
+                ) as cur:
+                    if await cur.fetchone():
+                        return await _safe_followup(i, content="⏱️ Tu participes déjà.")
+            # Insert participant + débit mise
+            try:
+                await add_coins(i.guild.id, i.user.id, -stake)
+            except Exception:
+                pass
+            async with get_db() as db:
+                await db.execute(
+                    "INSERT INTO heist_participants(heist_id, user_id, role) VALUES(?,?,?)",
+                    (self.hid, i.user.id, role_id),
+                )
+                await db.execute(
+                    "UPDATE heists SET pool_total = pool_total + ? WHERE id=?",
+                    (stake, self.hid),
+                )
+                await db.commit()
+            await _safe_followup(
+                i,
+                content=f"✅ Tu rejoins le braquage en tant que `{role_id}` ! Mise : {stake} 🪙.",
+            )
+        except Exception as ex:
+            print(f"[HeistJoinView role] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _launch(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT status, pool_total, channel_id FROM heists WHERE id=?",
+                    (self.hid,),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row or row[0] != 'recruiting':
+                return await _safe_followup(i, content="⏱️ Déjà lancé / inexistant.")
+            pool, channel_id = int(row[1]), int(row[2])
+            # Au moins 3 participants
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT user_id, role FROM heist_participants WHERE heist_id=?",
+                    (self.hid,),
+                ) as cur:
+                    parts = await cur.fetchall()
+            if len(parts) < 3:
+                return await _safe_followup(i, content=f"❌ Min 3 participants ({len(parts)} actuels).")
+            # Success rate : 50% base + 10% par participant max 90%
+            success_rate = min(0.90, 0.50 + 0.10 * len(parts))
+            success = random.random() < success_rate
+            # Pot = pool_total × 2 si success, sinon 0
+            total_payout = pool * 2 if success else 0
+            shares_total = 0.0
+            role_map = {r["id"]: r for r in HEIST_ROLES}
+            for uid, role_id in parts:
+                role = role_map.get(role_id, {"share": 1.0})
+                shares_total += float(role["share"])
+            # Distribute proportionnellement
+            payouts = []
+            for uid, role_id in parts:
+                role = role_map.get(role_id, {"share": 1.0})
+                user_share = float(role["share"]) / shares_total
+                user_payout = int(total_payout * user_share) if success else 0
+                payouts.append((int(uid), role_id, user_payout))
+                if user_payout > 0:
+                    try:
+                        await add_coins(i.guild.id, int(uid), user_payout)
+                    except Exception:
+                        pass
+            async with get_db() as db:
+                for uid, role_id, payout in payouts:
+                    await db.execute(
+                        "UPDATE heist_participants SET payout=? WHERE heist_id=? AND user_id=?",
+                        (payout, self.hid, uid),
+                    )
+                await db.execute(
+                    "UPDATE heists SET status=?, resolved_at=CURRENT_TIMESTAMP WHERE id=?",
+                    ('success' if success else 'failed', self.hid),
+                )
+                await db.commit()
+            # Announce
+            guild = i.guild
+            ch = guild.get_channel(channel_id) if guild else None
+            if ch:
+                lines = []
+                for uid, role_id, payout in payouts:
+                    m = guild.get_member(uid)
+                    mname = m.display_name if m else f"User {uid}"
+                    role_lbl = role_map.get(role_id, {}).get("label", role_id)
+                    lines.append(f"{role_lbl} — **{mname}** : `{payout:,}` 🪙")
+                LIFETIME = 12 * 3600
+                if success:
+                    title = f"💰 BRAQUAGE RÉUSSI !"
+                    desc = (
+                        f"_L'équipe s'enfuit avec **{total_payout:,} 🪙** du coffre de la banque._\n\n"
+                        f"**Taux de réussite :** `{int(success_rate*100)}%` ({len(parts)} participants)\n\n"
+                        f"**Partage du butin :**\n" + "\n".join(lines)
+                    )
+                    color = 0x2ECC71
+                else:
+                    title = f"🚨 BRAQUAGE RATÉ !"
+                    desc = (
+                        f"_La police a coincé l'équipe avant l'évasion. **Tout est perdu.**_\n\n"
+                        f"**Mises perdues :** `{pool:,} 🪙`\n"
+                        f"**Taux échec :** `{int((1-success_rate)*100)}%`\n\n"
+                        f"_Bonne chance la prochaine fois._"
+                    )
+                    color = 0xE74C3C
+                e = discord.Embed(title=title, description=desc, color=color,
+                                  timestamp=datetime.now(timezone.utc))
+                e.set_footer(text=f"Heist #{self.hid}")
+                try:
+                    msg = await ch.send(
+                        embed=e,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                        delete_after=LIFETIME,
+                    )
+                    await _register_for_cleanup(msg, LIFETIME, 'heist_result')
+                except Exception:
+                    pass
+            await _safe_followup(i, content=f"🚨 Braquage résolu — {'SUCCESS' if success else 'FAILED'}.")
+        except Exception as ex:
+            print(f"[HeistJoinView launch] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="heist_start",
+    description="🚨 [Owner] Lance un événement Braquage collectif (50 🪙 mise/joueur)",
+)
+async def heist_start_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        c = await cfg(i.guild.id)
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        hub_ch = i.guild.get_channel(hub_id) if hub_id else None
+        if not hub_ch:
+            return await _safe_followup(i, content="❌ Hub non configuré.")
+        async with get_db() as db:
+            cur = await db.execute(
+                "INSERT INTO heists(guild_id, channel_id) VALUES(?, ?)",
+                (i.guild.id, hub_ch.id),
+            )
+            hid = cur.lastrowid
+            await db.commit()
+        e = discord.Embed(
+            title=f"🚨 BRAQUAGE COLLECTIF — #{hid}",
+            description=(
+                "_La banque du serveur abrite un coffre. La porte est laissée entrouverte._\n\n"
+                "**Recrutement ouvert.** Min 3 joueurs, max 10.\n"
+                "**Mise par joueur :** `50 🪙`\n\n"
+                "**Rôles disponibles** (chacun a un share différent du butin) :\n"
+                + "\n".join(f"{r['label']} — _{r['desc']}_" for r in HEIST_ROLES) +
+                "\n\n_Si succès : pool × 2 distribué par share._\n"
+                "_Si échec : mises perdues._\n\n"
+                "**Choisis ton rôle ci-dessous. L'owner ou n'importe quel participant peut lancer.**"
+            ),
+            color=0xE67E22,
+            timestamp=datetime.now(timezone.utc),
+        )
+        msg = await hub_ch.send(
+            embed=e,
+            view=HeistJoinView(int(hid)),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        async with get_db() as db:
+            await db.execute("UPDATE heists SET message_id=? WHERE id=?", (msg.id, hid))
+            await db.commit()
+        await _safe_followup(i, content=f"✅ Braquage #{hid} ouvert.")
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── BANQUE AVEC INTÉRÊTS ───────────────────────────────────────────────────
+
+
+@bot.tree.command(
+    name="bank_deposit",
+    description="🏦 Déposer des coins à la banque (1%/jour d'intérêts, max 30j)",
+)
+@app_commands.describe(montant="Coins à déposer (min 100)")
+async def bank_deposit_cmd(i: discord.Interaction, montant: int):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        if montant < 100:
+            return await _safe_followup(i, content="❌ Dépôt min 100 🪙.")
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT coins FROM economy WHERE guild_id=? AND user_id=?",
+                    (i.guild.id, i.user.id),
+                ) as cur:
+                    row = await cur.fetchone()
+            bal = int(row[0]) if row else 0
+        except Exception:
+            bal = 0
+        if bal < montant:
+            return await _safe_followup(i, content=f"❌ Solde insuffisant ({bal} 🪙).")
+        try:
+            await add_coins(i.guild.id, i.user.id, -montant)
+        except Exception:
+            pass
+        async with get_db() as db:
+            cur = await db.execute(
+                "INSERT INTO user_bank_deposits(guild_id, user_id, amount) VALUES(?,?,?)",
+                (i.guild.id, i.user.id, montant),
+            )
+            did = cur.lastrowid
+            await db.commit()
+        await _safe_followup(
+            i,
+            content=(
+                f"✅ **Dépôt #{did}** : `{montant:,}` 🪙 placés à la banque.\n"
+                f"💰 Tu recevras **1% / jour** pendant 30 jours.\n"
+                f"_Retrait via `/bank_withdraw deposit_id:{did}` quand tu veux._"
+            ),
+        )
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="bank_withdraw",
+    description="🏦 Retirer un dépôt de la banque (calcul intérêts auto)",
+)
+@app_commands.describe(deposit_id="ID du dépôt à retirer")
+async def bank_withdraw_cmd(i: discord.Interaction, deposit_id: int):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT user_id, amount, deposited_at, withdrawn FROM user_bank_deposits "
+                "WHERE id=? AND guild_id=?",
+                (deposit_id, i.guild.id),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return await _safe_followup(i, content="❌ Dépôt inexistant.")
+        if int(row[0]) != i.user.id:
+            return await _safe_followup(i, content="🔒 Pas ton dépôt.")
+        if int(row[3]) == 1:
+            return await _safe_followup(i, content="⏱️ Déjà retiré.")
+        amount = int(row[1])
+        # Calcul intérêts : 1%/jour, capped à 30j
+        try:
+            dep_at = row[2]
+            dt = datetime.fromisoformat(str(dep_at).replace('Z', '+00:00')) \
+                if 'T' in str(dep_at) \
+                else datetime.strptime(str(dep_at), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+            days = min(30, max(0, (datetime.now(timezone.utc) - dt).days))
+        except Exception:
+            days = 0
+        interest = int(amount * 0.01 * days)
+        total = amount + interest
+        try:
+            await add_coins(i.guild.id, i.user.id, total)
+        except Exception:
+            pass
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE user_bank_deposits SET withdrawn=1, withdrawn_at=CURRENT_TIMESTAMP WHERE id=?",
+                (deposit_id,),
+            )
+            await db.commit()
+        await _safe_followup(
+            i,
+            content=(
+                f"✅ **Retrait #{deposit_id} :** `{total:,}` 🪙\n"
+                f"_(principal {amount:,} + intérêts {interest:,} sur {days} jours)_"
+            ),
+        )
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="bank_status",
+    description="🏦 Voir tes dépôts actifs et leurs intérêts cumulés",
+)
+async def bank_status_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, amount, deposited_at FROM user_bank_deposits "
+                "WHERE guild_id=? AND user_id=? AND withdrawn=0 ORDER BY deposited_at DESC",
+                (i.guild.id, i.user.id),
+            ) as cur:
+                rows = await cur.fetchall()
+        if not rows:
+            return await _safe_followup(
+                i,
+                content="_Aucun dépôt actif. Utilise `/bank_deposit montant:100` pour commencer._",
+            )
+        lines = []
+        total_principal = 0
+        total_interest = 0
+        for did, amt, dep_at in rows:
+            try:
+                dt = datetime.fromisoformat(str(dep_at).replace('Z', '+00:00')) \
+                    if 'T' in str(dep_at) \
+                    else datetime.strptime(str(dep_at), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                days = min(30, max(0, (datetime.now(timezone.utc) - dt).days))
+            except Exception:
+                days = 0
+            interest = int(int(amt) * 0.01 * days)
+            total_principal += int(amt)
+            total_interest += interest
+            lines.append(f"`#{did}` `{int(amt):,}` 🪙 +`{interest:,}` 🪙 ({days}/30 jours)")
+        e = discord.Embed(
+            title="🏦 Tes dépôts actifs",
+            description=(
+                "\n".join(lines) +
+                f"\n\n💰 **Total principal :** `{total_principal:,}` 🪙\n"
+                f"💎 **Intérêts cumulés :** `{total_interest:,}` 🪙\n"
+                f"**Si tu retires tout maintenant :** `{total_principal + total_interest:,}` 🪙"
+            ),
+            color=0x3498DB,
+        )
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── LOOTS UNIQUES (drop random pendant events) ──────────────────────────────
+
+
+async def _maybe_drop_unique_loot(guild_id: int, user_id: int, event_kind: str, drop_chance: float = 0.01):
+    """Pendant un event, X% chance qu'un user drop un loot unique."""
+    if random.random() > drop_chance:
+        return None
+    # Pool de loots uniques possibles (par event_kind)
+    loot_pool = {
+        "world_boss": [
+            ("⚔️ L'Épée Brisée du Premier Colosse", "Une lame qui a vu trois siècles. Légendaire."),
+            ("🛡️ Le Bouclier du Gardien", "Aucune flèche ne l'a jamais traversé."),
+            ("💎 Le Cristal de l'Arc Ancien", "Brille même dans l'obscurité totale."),
+        ],
+        "boss_raid": [
+            ("🗡️ La Dague d'Ombre", "Trouvée dans le sang du Boss tombé."),
+            ("📜 Le Parchemin Maudit", "Personne n'ose le lire."),
+        ],
+        "treasure": [
+            ("🏆 La Couronne Oubliée", "Belle. Trop belle."),
+            ("💍 L'Anneau du Mendiant", "Plus précieux qu'il n'en a l'air."),
+        ],
+    }
+    pool = loot_pool.get(event_kind, [])
+    if not pool:
+        return None
+    name, desc = random.choice(pool)
+    # Insert (1 seul exemplaire au monde par name)
+    try:
+        async with get_db() as db:
+            # Check si ce loot existe déjà
+            async with db.execute(
+                "SELECT id, current_owner_id FROM unique_loots WHERE guild_id=? AND name=?",
+                (guild_id, name),
+            ) as cur:
+                existing = await cur.fetchone()
+        if existing:
+            # Loot existe déjà → transfer (l'ancien owner perd, le nouveau gagne)
+            loot_id, old_owner = int(existing[0]), int(existing[1] or 0)
+            if old_owner == user_id:
+                return None  # Déjà à toi
+            async with get_db() as db:
+                await db.execute(
+                    "UPDATE unique_loot_history SET released_at=CURRENT_TIMESTAMP "
+                    "WHERE loot_id=? AND owner_id=? AND released_at IS NULL",
+                    (loot_id, old_owner),
+                )
+                await db.execute(
+                    "INSERT INTO unique_loot_history(loot_id, owner_id) VALUES(?, ?)",
+                    (loot_id, user_id),
+                )
+                await db.execute(
+                    "UPDATE unique_loots SET current_owner_id=?, obtained_at=CURRENT_TIMESTAMP "
+                    "WHERE id=?",
+                    (user_id, loot_id),
+                )
+                await db.commit()
+            return {"id": loot_id, "name": name, "desc": desc, "stolen_from": old_owner, "new": False}
+        else:
+            # Nouveau loot
+            async with get_db() as db:
+                cur = await db.execute(
+                    "INSERT INTO unique_loots(guild_id, name, description, current_owner_id, event_kind) "
+                    "VALUES(?, ?, ?, ?, ?)",
+                    (guild_id, name, desc, user_id, event_kind),
+                )
+                loot_id = cur.lastrowid
+                await db.execute(
+                    "INSERT INTO unique_loot_history(loot_id, owner_id) VALUES(?, ?)",
+                    (loot_id, user_id),
+                )
+                await db.commit()
+            return {"id": int(loot_id), "name": name, "desc": desc, "stolen_from": None, "new": True}
+    except Exception as ex:
+        print(f"[_maybe_drop_unique_loot] {ex}")
+        return None
+
+
+@bot.tree.command(
+    name="loots",
+    description="💎 Voir tes loots uniques (1 exemplaire au monde chacun)",
+)
+async def loots_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, name, description, rarity, event_kind, obtained_at FROM unique_loots "
+                "WHERE guild_id=? AND current_owner_id=? ORDER BY obtained_at DESC",
+                (i.guild.id, i.user.id),
+            ) as cur:
+                rows = await cur.fetchall()
+        if not rows:
+            return await _safe_followup(
+                i,
+                content=(
+                    "_Tu ne possèdes aucun loot unique._\n\n"
+                    "_Les loots uniques drop pendant les events majeurs (World Boss, Boss Raid, Treasure) "
+                    "avec ~1% de chance. **1 seul exemplaire au monde** par item — si quelqu'un d'autre le re-drop, il te le vole._"
+                ),
+            )
+        lines = []
+        for r in rows:
+            lid, name, desc, rarity, event_kind, obt = r
+            lines.append(f"💎 `#{lid}` **{name}** — _{desc}_")
+        e = discord.Embed(
+            title=f"💎 Tes loots uniques ({len(rows)})",
+            description="\n\n".join(lines),
+            color=0xFFD700,
+        )
+        e.set_footer(text="Phase 60 · Loots uniques · 1 exemplaire au monde par item")
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
