@@ -1478,6 +1478,15 @@ async def db_init():
             PRIMARY KEY (guild_id, event_kind)
         )''')
 
+        # Préférences de notifications par membre (Phase 48.2)
+        await db.execute('''CREATE TABLE IF NOT EXISTS user_notif_prefs (
+            guild_id INTEGER,
+            user_id INTEGER,
+            prefs_json TEXT DEFAULT '{}',
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (guild_id, user_id)
+        )''')
+
         # Marketplace : annonces de vente entre joueurs
         await db.execute('''CREATE TABLE IF NOT EXISTS marketplace_listings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -8714,13 +8723,21 @@ async def _quiz_runner(guild, event_id: int, arena_ch_id: int, nb_questions: int
 async def _start_any_event(guild, triggered_by_id: int, event_type: str, *, manual: bool = False) -> dict:
     """Dispatch vers le bon starter selon le type."""
     if event_type == 'boss_raid':
-        return await _start_boss_raid(guild, triggered_by_id, manual=manual)
+        result = await _start_boss_raid(guild, triggered_by_id, manual=manual)
     elif event_type == 'treasure_hunt':
-        return await _start_treasure_hunt(guild, triggered_by_id, manual=manual)
+        result = await _start_treasure_hunt(guild, triggered_by_id, manual=manual)
     elif event_type == 'quiz':
-        return await _start_quiz(guild, triggered_by_id, manual=manual)
+        result = await _start_quiz(guild, triggered_by_id, manual=manual)
     else:
         return {"ok": False, "error": f"Type inconnu : {event_type}"}
+    # Phase 48.2 : track engagement analytics
+    if result and result.get('ok'):
+        try:
+            # Forward ref — function defined later in file (Phase 48.1)
+            await _track_event_engagement(guild.id, event_type, 'start')
+        except Exception:
+            pass
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -32501,7 +32518,10 @@ async def send_compact_afk_notification(channel, members, days, recovery_mention
 
 @tasks.loop(hours=24)
 async def cleanup_old_db_data():
-    """Tâche journalière qui nettoie les données anciennes pour libérer ressources."""
+    """Tâche journalière qui nettoie les données anciennes pour libérer ressources.
+
+    Phase 48.2 : @before_loop ajouté pour ne pas démarrer avant que le bot soit prêt.
+    """
     if not bot.is_ready():
         return
     try:
@@ -32548,6 +32568,11 @@ async def cleanup_old_db_data():
         print(f"[cleanup_old_db_data] {deleted_total} ligne(s) supprimées au total")
     except Exception as ex:
         print(f"[cleanup_old_db_data] erreur globale : {ex}")
+
+
+@cleanup_old_db_data.before_loop
+async def _cleanup_old_db_wait():
+    await bot.wait_until_ready()
 
 
 @tasks.loop(hours=24)
@@ -54950,6 +54975,424 @@ async def marketplace_expire_cleaner():
 @marketplace_expire_cleaner.before_loop
 async def _mkt_expire_wait():
     await bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 48.2 — /profile unifié + Notifications granulaires + Anim drops + Quiet hours
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── /profile : tout ton statut en 1 écran ───────────────────────────────────
+
+
+@bot.tree.command(
+    name="profile",
+    description="📋 Voir ton profil complet (level, prestige, saison, factions, pet, alliance, stats)",
+)
+@app_commands.describe(membre="Profil d'un autre membre (optionnel)")
+async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] = None):
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        target = membre or i.user
+        gid = i.guild.id
+        uid = target.id
+
+        # Récupérer toutes les données en parallèle conceptuel
+        # Économy (level + xp + coins)
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT coins, bank, xp, level FROM economy WHERE guild_id=? AND user_id=?",
+                (gid, uid),
+            ) as cur:
+                eco = await cur.fetchone()
+        coins = int(eco[0]) if eco else 0
+        bank = int(eco[1]) if eco and eco[1] else 0
+        xp = int(eco[2]) if eco and eco[2] else 0
+        level = int(eco[3]) if eco and eco[3] else 0
+
+        # Prestige
+        prestige_rank = await _get_user_prestige(gid, uid)
+        prestige_def = eng47.get_prestige_def(prestige_rank)
+
+        # Saison
+        season_prog = await _get_season_progress(gid, uid)
+        season_id = season_prog['season_id']
+        season_pts = season_prog['points']
+        season_tier = eng47.get_tier_by_points(season_pts)
+
+        # Factions (top 2)
+        factions = await _get_user_factions(gid, uid)
+        factions_top = sorted(factions, key=lambda f: -f['points'])[:2]
+
+        # Pet actif
+        pet = await _get_active_pet(gid, uid)
+
+        # Alliance
+        alliance = await _get_user_alliance(gid, uid)
+
+        # Streak + stats
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT current_streak, best_streak, quests_done_total FROM user_streaks WHERE guild_id=? AND user_id=?",
+                (gid, uid),
+            ) as cur:
+                streak_row = await cur.fetchone()
+        cur_streak = int(streak_row[0]) if streak_row else 0
+        best_streak = int(streak_row[1]) if streak_row else 0
+
+        stats = await _get_user_stats41(gid, uid)
+
+        # Achievements unlocked count
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM achievements_unlocked WHERE guild_id=? AND user_id=?",
+                (gid, uid),
+            ) as cur:
+                ach_count = int((await cur.fetchone() or [0])[0])
+
+        # Build embed
+        color = prestige_def.get('color', 0x5865F2) or 0x5865F2
+        e = discord.Embed(
+            title=f"📋 Profil de {target.display_name}",
+            color=color,
+            timestamp=datetime.now(timezone.utc),
+        )
+        if target.display_avatar:
+            e.set_thumbnail(url=target.display_avatar.url)
+
+        # Section : Identité
+        prestige_str = f"{prestige_def['emoji']} **{prestige_def['name']}**" if prestige_rank > 0 else "_Sans prestige_"
+        e.add_field(
+            name="🏅 Identité",
+            value=(
+                f"**Level :** `{level}` · XP : `{xp}`\n"
+                f"**Prestige :** {prestige_str}\n"
+                f"💰 **Solde :** `{coins}` 🪙" + (f" · Banque : `{bank}` 🪙" if bank else "")
+            ),
+            inline=False,
+        )
+
+        # Section : Saison
+        next_tier = None
+        for t in eng47.SEASON_PASS_TIERS:
+            if t['tier'] > season_tier:
+                next_tier = t
+                break
+        if next_tier:
+            remaining = next_tier['points'] - season_pts
+            season_progress = f"⏭️ Prochain palier (`{next_tier['label']}`) dans `{remaining:,}` pts"
+        else:
+            season_progress = "🌟 Palier max atteint !"
+        e.add_field(
+            name=f"📆 Pass de Saison",
+            value=(
+                f"`{season_id}` · Palier `{season_tier}/20`\n"
+                f"**Points :** `{season_pts:,}`\n"
+                f"{season_progress}"
+            ),
+            inline=False,
+        )
+
+        # Section : Factions (top 2)
+        if factions_top:
+            lines = []
+            for fd in factions_top:
+                f = fd['faction']
+                tier_def = fd['tier']
+                lines.append(f"{f['emoji']} **{f['name']}** : {tier_def['emoji']} {tier_def['name']} (`{fd['points']:,}` pts)")
+            e.add_field(name="🏰 Renommées (top 2)", value="\n".join(lines), inline=False)
+
+        # Section : Pet
+        if pet:
+            e.add_field(
+                name="🐾 Compagnon actif",
+                value=(
+                    f"{pet['form_label']} — **{pet['custom_name']}** (Lv. {pet['level']})\n"
+                    f"_{pet['description']}_"
+                ),
+                inline=False,
+            )
+
+        # Section : Alliance
+        if alliance:
+            ally_role = "👑 Chef" if alliance.get('my_role') == 'leader' else "👤 Membre"
+            e.add_field(
+                name="🤝 Alliance",
+                value=(
+                    f"{alliance['emoji']} **{alliance['name']}** ({ally_role})\n"
+                    f"📍 <#{alliance['channel_id']}>"
+                ),
+                inline=False,
+            )
+
+        # Section : Stats clés
+        msgs = int(stats.get('messages', 0) or 0)
+        events_won = int(stats.get('events_won', 0) or 0)
+        bosses = int(stats.get('bosses_won', 0) or 0)
+        e.add_field(
+            name="📊 Stats",
+            value=(
+                f"💬 Messages : `{msgs:,}`\n"
+                f"🏆 Events gagnés : `{events_won}`\n"
+                f"⚔️ Boss vaincus : `{bosses}`\n"
+                f"🏅 Achievements : `{ach_count}` / `{len(eng41.ACHIEVEMENTS)}`\n"
+                f"🔥 Streak actuel : `{cur_streak}` jour(s) · Record `{best_streak}`"
+            ),
+            inline=False,
+        )
+
+        e.set_footer(text="Phase 48.2 · Profil unifié · /profile [membre]")
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        print(f"[/profile] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── NOTIFICATIONS GRANULAIRES ───────────────────────────────────────────────
+
+
+# Catégories disponibles pour notif opt-in
+_NOTIF_CATEGORIES = [
+    ('boss_raid',  '⚔️', 'Boss Raids'),
+    ('world_boss', '🌍', 'World Boss (hebdo)'),
+    ('treasure',   '💎', 'Trésor / Flash'),
+    ('quiz',       '🧠', 'Quiz / Énigme'),
+    ('game_night', '🎮', 'Game Night (vendredi)'),
+    ('tag_royale', '🔗', 'Tag Royale'),
+    ('marketplace','🛒', 'Marketplace'),
+    ('alliance',   '🤝', 'Alliance (toujours actif)'),
+]
+
+
+async def _get_notif_prefs(guild_id: int, user_id: int) -> dict:
+    """Retourne le dict des préférences notif d'un user (défaut = tout activé)."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT prefs_json FROM user_notif_prefs WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+        if row and row[0]:
+            try:
+                return json.loads(row[0])
+            except Exception:
+                pass
+    except Exception:
+        pass
+    # Defaut : tout activé sauf marketplace
+    return {cat: (cat != 'marketplace') for cat, _, _ in _NOTIF_CATEGORIES}
+
+
+async def _set_notif_pref(guild_id: int, user_id: int, category: str, value: bool):
+    prefs = await _get_notif_prefs(guild_id, user_id)
+    prefs[category] = bool(value)
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO user_notif_prefs(guild_id, user_id, prefs_json) VALUES(?,?,?) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET prefs_json=?",
+                (guild_id, user_id, json.dumps(prefs), json.dumps(prefs)),
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[_set_notif_pref] {ex}")
+
+
+async def _member_wants_notif(guild_id: int, user_id: int, category: str) -> bool:
+    """Helper public — l'auto-promote l'utilise pour filtrer les pings."""
+    prefs = await _get_notif_prefs(guild_id, user_id)
+    return prefs.get(category, True)
+
+
+class NotifPrefsView(View):
+    """View ephemeral : 8 boutons toggle on/off pour chaque catégorie."""
+
+    def __init__(self, guild_id: int, user_id: int, prefs: dict):
+        super().__init__(timeout=300)
+        self.guild_id = guild_id
+        self.user_id = user_id
+        self.prefs = prefs
+        for cat, emoji, label in _NOTIF_CATEGORIES:
+            enabled = prefs.get(cat, True)
+            b = Button(
+                label=f"{label}",
+                emoji=emoji,
+                style=discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary,
+            )
+            b.callback = self._make_cb(cat)
+            self.add_item(b)
+
+    def _make_cb(self, cat: str):
+        async def _cb(i: discord.Interaction):
+            if not await _safe_defer(i):
+                return
+            try:
+                if i.user.id != self.user_id:
+                    return await _safe_followup(i, content="🔒 Pas pour toi.")
+                current = self.prefs.get(cat, True)
+                await _set_notif_pref(self.guild_id, self.user_id, cat, not current)
+                new_val = not current
+                self.prefs[cat] = new_val
+                label = next((l for c, _, l in _NOTIF_CATEGORIES if c == cat), cat)
+                state = "✅ Activé" if new_val else "🔕 Désactivé"
+                await _safe_followup(i, content=f"{state} : **{label}**")
+            except Exception as ex:
+                print(f"[NotifPrefsView] {ex}")
+        return _cb
+
+
+@bot.tree.command(
+    name="notifs",
+    description="🔔 Choisir précisément les types d'events qui te notifient",
+)
+async def notifs_cmd(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        prefs = await _get_notif_prefs(i.guild.id, i.user.id)
+
+        lines = ["🔔 **Tes préférences de notifications**\n"]
+        for cat, emoji, label in _NOTIF_CATEGORIES:
+            enabled = prefs.get(cat, True)
+            state = "✅" if enabled else "🔕"
+            lines.append(f"{state} {emoji} {label}")
+        lines.append("")
+        lines.append("_Click un bouton pour basculer ON/OFF._")
+        e = discord.Embed(description="\n".join(lines), color=0x3498DB)
+        e.set_footer(text="Phase 48.2 · Notifications personnalisées")
+        await _safe_followup(i, embed=e, view=NotifPrefsView(i.guild.id, i.user.id, prefs))
+    except Exception as ex:
+        print(f"[/notifs] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── CÉLÉBRATION drops rares (légendaire / mythique) ─────────────────────────
+
+
+# Couleurs arc-en-ciel pour les drops mythiques
+_RAINBOW_COLORS = [0xFF0000, 0xFF7F00, 0xFFFF00, 0x00FF00, 0x0000FF, 0x4B0082, 0x9400D3]
+
+
+async def _celebrate_rare_drop(channel, member: discord.Member, item_name: str, rarity: str = 'legendary'):
+    """Phase 48.2 — célébration visuelle pour les drops rares.
+
+    Style 'léger' : embed coloré + footer chrono + auto-delete.
+    Pas d'animation séquentielle (choix utilisateur).
+    """
+    if not channel or not member:
+        return
+    try:
+        # Couleur selon rareté
+        if rarity == 'mythic':
+            color = random.choice(_RAINBOW_COLORS)
+            badge = "✨ MYTHIQUE ✨"
+            border = "▰" * 20
+        elif rarity == 'legendary':
+            color = 0xFFD700  # or
+            badge = "🌟 LÉGENDAIRE 🌟"
+            border = "▰" * 18
+        elif rarity == 'divine':
+            color = 0xFF1493
+            badge = "💎 DIVIN 💎"
+            border = "▰" * 22
+        else:
+            color = 0x9B59B6
+            badge = "💜 RARE 💜"
+            border = "▰" * 16
+
+        LIFETIME = 10 * 60  # 10 min visible
+        e = discord.Embed(
+            title=f"{badge}",
+            description=(
+                f"{border}\n\n"
+                f"🎊 **{member.display_name}** vient d'obtenir\n"
+                f"# {item_name}\n\n"
+                f"_Drop rare. Bravo !_\n\n"
+                f"{border}\n\n"
+                f"{_chrono_footer(LIFETIME, prefix='⏱️ Se supprime')}"
+            ),
+            color=color,
+            timestamp=datetime.now(timezone.utc),
+        )
+        if member.display_avatar:
+            e.set_thumbnail(url=member.display_avatar.url)
+        e.set_footer(text="Drop célébré · Phase 48.2")
+        try:
+            msg = await channel.send(
+                embed=e,
+                allowed_mentions=discord.AllowedMentions.none(),
+                delete_after=LIFETIME,
+            )
+            await _register_for_cleanup(msg, LIFETIME, 'rare_drop_celebration')
+        except Exception as ex:
+            print(f"[_celebrate_rare_drop send] {ex}")
+    except Exception as ex:
+        print(f"[_celebrate_rare_drop] {ex}")
+
+
+# ─── QUIET HOURS — commande owner pour personnaliser ─────────────────────────
+
+
+@bot.tree.command(
+    name="quiet_hours",
+    description="🌙 [Owner] Configurer les heures calmes (pas d'event auto pendant cette plage)",
+)
+@app_commands.describe(
+    start="Heure de début des events (0-23, défaut 10)",
+    end="Heure de fin des events (1-24, défaut 23)",
+)
+async def quiet_hours_cmd(i: discord.Interaction, start: Optional[int] = None, end: Optional[int] = None):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        c = await cfg(i.guild.id)
+        cur_start = int(c.get('event_active_hours_start', 10) or 10)
+        cur_end = int(c.get('event_active_hours_end', 23) or 23)
+
+        if start is None and end is None:
+            quiet_str = (
+                f"de {cur_end}h à {cur_start}h" if cur_end > cur_start
+                else f"de {cur_end}h à minuit puis 0h à {cur_start}h"
+            )
+            return await _safe_followup(
+                i,
+                content=(
+                    f"🌙 **Heures actives actuelles :** {cur_start}h - {cur_end}h (Europe/Paris)\n"
+                    f"💤 **Mode calme :** {quiet_str}\n\n"
+                    f"_Pour changer : `/quiet_hours start:9 end:23`._"
+                ),
+            )
+        new_start = int(start if start is not None else cur_start)
+        new_end = int(end if end is not None else cur_end)
+        if not (0 <= new_start <= 23) or not (1 <= new_end <= 24):
+            return await _safe_followup(i, content="❌ start: 0-23, end: 1-24.")
+        if new_start == new_end:
+            return await _safe_followup(i, content="❌ start et end ne peuvent pas être identiques.")
+
+        await db_set(i.guild.id, 'event_active_hours_start', new_start)
+        await db_set(i.guild.id, 'event_active_hours_end', new_end)
+        await _safe_followup(
+            i,
+            content=(
+                f"✅ Heures actives : **{new_start}h - {new_end}h** (Europe/Paris)\n"
+                f"💤 Mode calme appliqué hors de cette plage."
+            ),
+        )
+    except Exception as ex:
+        print(f"[/quiet_hours] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
 if __name__ == "__main__":
