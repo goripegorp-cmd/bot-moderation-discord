@@ -46,6 +46,7 @@ import events42 as ev42
 import engagement47 as eng47
 import lore49 as lore  # Phase 49 : lore évolutif + NPCs + missions
 import roblox50 as rblx  # Phase 50 : speedrun + studio tips + matchmaking + game updates
+import competitive51 as cpt  # Phase 51 : bingo + prediction market + faction wars
 import protection_guards as guards2026
 import community_features as comm2026
 import admin_panels_v2 as panels2026
@@ -1654,6 +1655,101 @@ async def db_init():
             )
         except Exception:
             pass
+
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 51 — COMPÉTITIF : Bingo + Prediction Market + Faction Wars
+        # ═══════════════════════════════════════════════════════════════════
+        # Bingo cards (1 carte/user/mois, cells_json = liste des 25 IDs de défis)
+        await db.execute('''CREATE TABLE IF NOT EXISTS bingo_cards (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            user_id INTEGER,
+            month_year TEXT,
+            cells_json TEXT,
+            checked_cells_json TEXT DEFAULT '[]',
+            completed_lines_json TEXT DEFAULT '[]',
+            full_card_completed INTEGER DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        try:
+            await db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_bingo_user_month "
+                "ON bingo_cards(guild_id, user_id, month_year)"
+            )
+        except Exception:
+            pass
+
+        # Predictions (owner crée, members parient, owner résout)
+        await db.execute('''CREATE TABLE IF NOT EXISTS predictions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            title TEXT,
+            description TEXT,
+            deadline DATETIME,
+            status TEXT DEFAULT 'open',
+            outcome TEXT,
+            total_yes_pool INTEGER DEFAULT 0,
+            total_no_pool INTEGER DEFAULT 0,
+            channel_id INTEGER,
+            message_id INTEGER,
+            created_by INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            resolved_at DATETIME
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_pred_status "
+                "ON predictions(guild_id, status, deadline)"
+            )
+        except Exception:
+            pass
+
+        await db.execute('''CREATE TABLE IF NOT EXISTS prediction_bets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            prediction_id INTEGER,
+            user_id INTEGER,
+            choice TEXT,
+            amount INTEGER,
+            placed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            paid_out INTEGER DEFAULT 0
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_pred_bets_user "
+                "ON prediction_bets(prediction_id, user_id)"
+            )
+        except Exception:
+            pass
+
+        # Faction wars (objectif compétitif par saison)
+        await db.execute('''CREATE TABLE IF NOT EXISTS faction_wars (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            season_id TEXT,
+            objective_kind TEXT,
+            title TEXT,
+            description TEXT,
+            status TEXT DEFAULT 'active',
+            started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            ended_at DATETIME,
+            winner_faction TEXT
+        )''')
+        try:
+            await db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_faction_war_season "
+                "ON faction_wars(guild_id, season_id, objective_kind)"
+            )
+        except Exception:
+            pass
+
+        await db.execute('''CREATE TABLE IF NOT EXISTS faction_war_scores (
+            war_id INTEGER,
+            faction_id TEXT,
+            score INTEGER DEFAULT 0,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (war_id, faction_id)
+        )''')
 
         # Marketplace : annonces de vente entre joueurs
         await db.execute('''CREATE TABLE IF NOT EXISTS marketplace_listings (
@@ -7955,6 +8051,16 @@ async def _end_active_event(guild, *, victory: bool, reason: str = ""):
             )
         except Exception as ex:
             print(f"[boss_raid mission track] {ex}")
+
+        # Phase 51 : Faction war scoring (1 pt par victoire pour chaque participant)
+        try:
+            if victory:
+                for p in participants:
+                    await _bump_faction_war_score(guild.id, int(p["user_id"]), 'events_won', 1)
+                    # Boss damage tracking aussi
+                    await _bump_faction_war_score(guild.id, int(p["user_id"]), 'boss_damage', int(p.get("damage", 0)))
+        except Exception as ex:
+            print(f"[boss_raid faction war] {ex}")
 
         # ─── Restauration des permissions ───
         for snap in snapshots:
@@ -35225,6 +35331,22 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready phase50 persist] {ex}")
 
+    # Phase 51 : re-attacher les PredictionBetView + PredictionResolveView open
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id FROM predictions WHERE status='open'",
+            ) as cur:
+                rows = await cur.fetchall()
+        for r in rows:
+            try:
+                bot.add_view(PredictionBetView(int(r[0])))
+                bot.add_view(PredictionResolveView(int(r[0])))
+            except Exception:
+                pass
+    except Exception as ex:
+        print(f"[on_ready phase51 persist] {ex}")
+
     # Phase 42 — Views persistantes : World Boss + Daily Riddle
     try:
         bot.add_view(WorldBossAttackView())
@@ -47816,6 +47938,16 @@ class EngagementHubView(View):
         b10.callback = self._on_roblox
         self.add_item(b10)
 
+        # Phase 51 : Compétitions sub-panel (Bingo / Predictions / Faction War)
+        b11 = Button(
+            label="🏆 Compétitions",
+            style=discord.ButtonStyle.danger,
+            custom_id="hub_competitions",
+            row=4,
+        )
+        b11.callback = self._on_competitions
+        self.add_item(b11)
+
     async def _on_quests(self, i: discord.Interaction):
         await _p41_open_daily(i)
 
@@ -47850,6 +47982,10 @@ class EngagementHubView(View):
     async def _on_roblox(self, i: discord.Interaction):
         # Phase 50 : ouvre le sub-hub Roblox (Speedrun / Matchmaking / Tips / Updates)
         await _open_roblox_panel(i)
+
+    async def _on_competitions(self, i: discord.Interaction):
+        # Phase 51 : ouvre le sub-hub Compétitions (Bingo / Predictions / Faction War)
+        await _open_competitions_panel(i)
 
 
 # ─── COMMANDES /hub + /hub_setup ───────────────────────────────────────────────
@@ -48477,6 +48613,19 @@ async def _end_world_boss(guild, wb_id: int, victory: bool, reason: str = ""):
             )
         except Exception as ex:
             print(f"[world_boss mission track] {ex}")
+        # Phase 51 : Faction war scoring
+        try:
+            if victory:
+                for uid in participants_ids:
+                    await _bump_faction_war_score(guild.id, uid, 'events_won', 1)
+                # Damage tracking
+                for a in (attackers or []):
+                    try:
+                        await _bump_faction_war_score(guild.id, int(a[0]), 'boss_damage', int(a[1] or 0))
+                    except Exception:
+                        pass
+        except Exception as ex:
+            print(f"[world_boss faction war] {ex}")
 
         # Annoncer la fin + supprimer le salon dans 5 min
         ch = guild.get_channel(int(ch_id))
@@ -57610,6 +57759,1017 @@ async def speedrun_cat_add_cmd(i: discord.Interaction, cat_id: str, name: str,
             )
             await db.commit()
         await _safe_followup(i, content=f"✅ Catégorie **{name}** (`{cat_id}`) ajoutée.")
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 51 — COMPÉTITIF : Bingo mensuel + Prediction Market + Faction Wars
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── BINGO MENSUEL ───────────────────────────────────────────────────────────
+
+
+def _current_month_year() -> str:
+    """Retourne 'YYYY-MM' du mois actuel en France."""
+    try:
+        from zoneinfo import ZoneInfo
+        dt = datetime.now(ZoneInfo("Europe/Paris"))
+    except Exception:
+        dt = datetime.now(timezone.utc)
+    return dt.strftime("%Y-%m")
+
+
+async def _get_or_create_bingo_card(guild_id: int, user_id: int) -> dict:
+    """Retourne la carte bingo du user pour le mois actuel. Crée si absente."""
+    month = _current_month_year()
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, cells_json, checked_cells_json, completed_lines_json, full_card_completed "
+                "FROM bingo_cards WHERE guild_id=? AND user_id=? AND month_year=?",
+                (guild_id, user_id, month),
+            ) as cur:
+                row = await cur.fetchone()
+        if row:
+            return {
+                "id": int(row[0]),
+                "cells": json.loads(row[1] or "[]"),
+                "checked": set(json.loads(row[2] or "[]")),
+                "completed_lines": json.loads(row[3] or "[]"),
+                "full_card": bool(row[4]),
+                "month_year": month,
+            }
+        # Créer une nouvelle carte (seed = guild_id + user_id + month → unique mais déterministe)
+        seed_str = f"{guild_id}-{user_id}-{month}"
+        seed = abs(hash(seed_str)) % (2**31)
+        cells = cpt.generate_bingo_card_seeded(seed)
+        cells_json = json.dumps([c["id"] for c in cells])
+        async with get_db() as db:
+            cur = await db.execute(
+                "INSERT INTO bingo_cards(guild_id, user_id, month_year, cells_json) "
+                "VALUES(?, ?, ?, ?)",
+                (guild_id, user_id, month, cells_json),
+            )
+            cid = cur.lastrowid
+            await db.commit()
+        return {
+            "id": int(cid),
+            "cells": [c["id"] for c in cells],
+            "checked": set(),
+            "completed_lines": [],
+            "full_card": False,
+            "month_year": month,
+        }
+    except Exception as ex:
+        print(f"[_get_or_create_bingo_card] {ex}")
+        return {"id": 0, "cells": [], "checked": set(), "completed_lines": [], "full_card": False, "month_year": month}
+
+
+async def _eval_bingo_cell(guild_id: int, user_id: int, challenge: dict) -> bool:
+    """Évalue si un défi est complété pour ce mois.
+
+    Lit les stats du user et compare au goal_count.
+    """
+    try:
+        gk = challenge.get("goal_kind", "")
+        goal = int(challenge.get("goal_count", 1))
+        # Mois en cours
+        month = _current_month_year()
+        # Cutoff pour stats du mois
+        try:
+            from zoneinfo import ZoneInfo
+            now_dt = datetime.now(ZoneInfo("Europe/Paris"))
+        except Exception:
+            now_dt = datetime.now(timezone.utc)
+        month_start = now_dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+
+        if gk == "messages":
+            try:
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT COUNT(*) FROM member_activity WHERE guild_id=? AND user_id=? "
+                        "AND activity_type='message' AND created_at>?",
+                        (guild_id, user_id, month_start),
+                    ) as cur:
+                        c = int((await cur.fetchone() or [0])[0])
+                return c >= goal
+            except Exception:
+                return False
+
+        elif gk == "quests_done":
+            try:
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT quests_done_total FROM user_streaks WHERE guild_id=? AND user_id=?",
+                        (guild_id, user_id),
+                    ) as cur:
+                        row = await cur.fetchone()
+                return int(row[0] if row else 0) >= goal
+            except Exception:
+                return False
+
+        elif gk == "events_won":
+            try:
+                stats = await _get_user_stats41(guild_id, user_id)
+                won = int(stats.get('events_won', 0) or 0)
+                return won >= goal
+            except Exception:
+                return False
+
+        elif gk == "reactions_given":
+            try:
+                stats = await _get_user_stats41(guild_id, user_id)
+                rc = int(stats.get('reactions_given', 0) or 0)
+                return rc >= goal
+            except Exception:
+                return False
+
+        elif gk == "achievements_unlocked":
+            try:
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT COUNT(*) FROM achievements_unlocked WHERE guild_id=? AND user_id=?",
+                        (guild_id, user_id),
+                    ) as cur:
+                        c = int((await cur.fetchone() or [0])[0])
+                return c >= goal
+            except Exception:
+                return False
+
+        elif gk == "level_reached":
+            try:
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT level FROM economy WHERE guild_id=? AND user_id=?",
+                        (guild_id, user_id),
+                    ) as cur:
+                        row = await cur.fetchone()
+                return int(row[0] if row else 0) >= goal
+            except Exception:
+                return False
+
+        elif gk == "pet_level":
+            try:
+                pet = await _get_active_pet(guild_id, user_id)
+                if not pet:
+                    return False
+                return int(pet.get('level', 0) or 0) >= goal
+            except Exception:
+                return False
+
+        elif gk == "prestige":
+            try:
+                pr = await _get_user_prestige(guild_id, user_id)
+                return int(pr) >= goal
+            except Exception:
+                return False
+
+        elif gk == "alliance_joined":
+            try:
+                al = await _get_user_alliance(guild_id, user_id)
+                return al is not None
+            except Exception:
+                return False
+
+        elif gk == "confession_sent":
+            # Simple count via tabou confessions
+            try:
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT COUNT(*) FROM confessions WHERE guild_id=? AND user_hash=? AND created_at>?",
+                        (guild_id, _hmac_user_hash(guild_id, user_id), month_start),
+                    ) as cur:
+                        c = int((await cur.fetchone() or [0])[0])
+                return c >= goal
+            except Exception:
+                return False
+
+        elif gk == "wheel_spins":
+            try:
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT COUNT(*) FROM wheel_spins WHERE guild_id=? AND user_id=? AND created_at>?",
+                        (guild_id, user_id, month_start),
+                    ) as cur:
+                        c = int((await cur.fetchone() or [0])[0])
+                return c >= goal
+            except Exception:
+                return False
+
+        elif gk == "mission_steps":
+            try:
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT COUNT(DISTINCT mission_id || '-' || step_index) "
+                        "FROM mission_step_progress WHERE user_id=? AND counted_at>?",
+                        (user_id, month_start),
+                    ) as cur:
+                        c = int((await cur.fetchone() or [0])[0])
+                return c >= goal
+            except Exception:
+                return False
+
+        elif gk == "days_active":
+            try:
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT COUNT(DISTINCT DATE(created_at)) FROM member_activity "
+                        "WHERE guild_id=? AND user_id=? AND created_at>?",
+                        (guild_id, user_id, month_start),
+                    ) as cur:
+                        c = int((await cur.fetchone() or [0])[0])
+                return c >= goal
+            except Exception:
+                return False
+
+        return False
+    except Exception as ex:
+        print(f"[_eval_bingo_cell {challenge.get('id')}] {ex}")
+        return False
+
+
+async def _refresh_bingo_card(guild_id: int, user_id: int) -> dict:
+    """Re-évalue les 25 cellules + détecte nouvelles lignes complétées + payouts."""
+    try:
+        card = await _get_or_create_bingo_card(guild_id, user_id)
+        new_checked = set(card["checked"])
+        challenges_by_id = {c["id"]: c for c in cpt.BINGO_CHALLENGES}
+
+        for idx, cell_id in enumerate(card["cells"]):
+            if idx in new_checked:
+                continue
+            ch = challenges_by_id.get(cell_id)
+            if not ch:
+                continue
+            if await _eval_bingo_cell(guild_id, user_id, ch):
+                new_checked.add(idx)
+
+        prev_lines = set(card["completed_lines"])
+        completed = cpt.get_completed_lines(new_checked)
+        new_lines = [l for l in completed if l not in prev_lines]
+
+        # Reward 200 🪙 par nouvelle ligne
+        for _ in new_lines:
+            try:
+                await add_coins(guild_id, user_id, 200)
+            except Exception:
+                pass
+
+        # Reward full card 1500 🪙 + badge
+        full_now = (len(new_checked) >= 25)
+        if full_now and not card["full_card"]:
+            try:
+                await add_coins(guild_id, user_id, 1500)
+            except Exception:
+                pass
+
+        # Persister
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE bingo_cards SET checked_cells_json=?, completed_lines_json=?, "
+                "full_card_completed=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                (json.dumps(sorted(new_checked)), json.dumps(completed),
+                 1 if full_now else 0, card["id"]),
+            )
+            await db.commit()
+
+        card["checked"] = new_checked
+        card["completed_lines"] = completed
+        card["full_card"] = full_now
+        card["new_lines_just_completed"] = new_lines
+        return card
+    except Exception as ex:
+        print(f"[_refresh_bingo_card] {ex}")
+        return await _get_or_create_bingo_card(guild_id, user_id)
+
+
+def _bingo_card_visual(card: dict) -> str:
+    """Génère un rendu visuel ASCII de la carte (5×5) avec ✓ pour les checkées."""
+    challenges_by_id = {c["id"]: c for c in cpt.BINGO_CHALLENGES}
+    lines = []
+    for row in range(5):
+        row_cells = []
+        for col in range(5):
+            idx = row * 5 + col
+            cell_id = card["cells"][idx] if idx < len(card["cells"]) else None
+            ch = challenges_by_id.get(cell_id) if cell_id else None
+            if not ch:
+                row_cells.append("`???`")
+                continue
+            checked = idx in card["checked"]
+            mark = "✅" if checked else "▫️"
+            row_cells.append(f"{mark}")
+        lines.append(" ".join(row_cells))
+    return "\n".join(lines)
+
+
+async def _open_bingo_panel(i: discord.Interaction):
+    """Affiche la carte bingo du user pour le mois en cours."""
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        card = await _refresh_bingo_card(i.guild.id, i.user.id)
+        challenges_by_id = {c["id"]: c for c in cpt.BINGO_CHALLENGES}
+
+        visual = _bingo_card_visual(card)
+
+        # Liste des défis avec statut
+        detail_lines = []
+        for idx, cell_id in enumerate(card["cells"]):
+            ch = challenges_by_id.get(cell_id)
+            if not ch:
+                continue
+            checked = idx in card["checked"]
+            mark = "✅" if checked else "▫️"
+            detail_lines.append(f"{mark} `[{idx:02d}]` {ch['title']}")
+
+        # Si beaucoup, on tronque à 15 par embed (Discord 4000 chars max)
+        details = "\n".join(detail_lines[:25])
+
+        e = discord.Embed(
+            title=f"🎲 Bingo Mensuel — {card['month_year']}",
+            description=(
+                f"```\n{visual}\n```\n\n"
+                f"**{len(card['checked'])}/25 défis complétés**\n"
+                f"**{len(card['completed_lines'])}/12 lignes complétées**\n"
+                f"_+200 🪙 par nouvelle ligne · +1500 🪙 + badge si carte pleine_\n\n"
+                f"**Défis :**\n{details}"
+            ),
+            color=0xE91E63 if card["full_card"] else 0x9B59B6,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text=f"Carte #{card['id']} · Refresh auto à chaque ouverture")
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        print(f"[_open_bingo_panel] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── PREDICTION MARKET ───────────────────────────────────────────────────────
+
+
+class PredictionBetModal(Modal):
+    """Modal pour parier sur une prédiction (choix + amount)."""
+
+    def __init__(self, prediction_id: int, choice: str):
+        super().__init__(title=f"🎲 Parier : {choice.upper()}")
+        self.prediction_id = prediction_id
+        self.choice = choice  # 'yes' ou 'no'
+        self.amount_input = TextInput(
+            label=f"Montant à parier sur '{choice.upper()}' (en 🪙)",
+            placeholder="50",
+            max_length=10,
+            required=True,
+        )
+        self.add_item(self.amount_input)
+
+    async def on_submit(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            try:
+                amount = int(self.amount_input.value.strip())
+                if amount < 10 or amount > 100000:
+                    raise ValueError
+            except Exception:
+                return await _safe_followup(i, content="❌ Montant invalide (10-100000).")
+            # Check status & deadline
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT status, deadline FROM predictions WHERE id=?",
+                    (self.prediction_id,),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row:
+                return await _safe_followup(i, content="⏱️ Prédiction inexistante.")
+            status, deadline = row[0], row[1]
+            if status != "open":
+                return await _safe_followup(i, content="🔒 Prédiction fermée.")
+            if deadline:
+                try:
+                    dl = datetime.fromisoformat(str(deadline).replace('Z', '+00:00')) \
+                        if 'T' in str(deadline) \
+                        else datetime.strptime(str(deadline), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                    if datetime.now(timezone.utc) > dl:
+                        return await _safe_followup(i, content="⏱️ Deadline dépassée.")
+                except Exception:
+                    pass
+            # Check user balance
+            try:
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT coins FROM economy WHERE guild_id=? AND user_id=?",
+                        (i.guild.id, i.user.id),
+                    ) as cur:
+                        row = await cur.fetchone()
+                bal = int(row[0]) if row else 0
+            except Exception:
+                bal = 0
+            if bal < amount:
+                return await _safe_followup(i, content=f"❌ Solde insuffisant ({bal} 🪙).")
+            # Débiter + placer le bet
+            try:
+                await add_coins(i.guild.id, i.user.id, -amount)
+            except Exception:
+                return await _safe_followup(i, content="❌ Erreur débit.")
+            async with get_db() as db:
+                await db.execute(
+                    "INSERT INTO prediction_bets(prediction_id, user_id, choice, amount) "
+                    "VALUES(?, ?, ?, ?)",
+                    (self.prediction_id, i.user.id, self.choice, amount),
+                )
+                col = "total_yes_pool" if self.choice == "yes" else "total_no_pool"
+                await db.execute(
+                    f"UPDATE predictions SET {col} = {col} + ? WHERE id=?",
+                    (amount, self.prediction_id),
+                )
+                await db.commit()
+            await _safe_followup(
+                i,
+                content=(
+                    f"✅ Pari placé : **{amount:,} 🪙** sur **{self.choice.upper()}**.\n"
+                    f"_Tu seras payé si tu as raison, proportionnel à l'autre pool._"
+                ),
+            )
+        except Exception as ex:
+            print(f"[PredictionBetModal] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+class PredictionBetView(View):
+    """View persistante : bouton 'YES' / 'NO' pour parier."""
+
+    def __init__(self, prediction_id: int):
+        super().__init__(timeout=None)
+        self.prediction_id = prediction_id
+        yes = Button(
+            label="✅ Parier OUI",
+            style=discord.ButtonStyle.success,
+            custom_id=f"pred_bet_yes_{prediction_id}",
+        )
+        yes.callback = self._on_yes
+        no = Button(
+            label="❌ Parier NON",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"pred_bet_no_{prediction_id}",
+        )
+        no.callback = self._on_no
+        view_pools = Button(
+            label="📊 Pools actuels",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"pred_pools_{prediction_id}",
+        )
+        view_pools.callback = self._on_pools
+        self.add_item(yes)
+        self.add_item(no)
+        self.add_item(view_pools)
+
+    async def _on_yes(self, i: discord.Interaction):
+        try:
+            await i.response.send_modal(PredictionBetModal(self.prediction_id, "yes"))
+        except Exception as ex:
+            print(f"[PredictionBetView yes] {ex}")
+
+    async def _on_no(self, i: discord.Interaction):
+        try:
+            await i.response.send_modal(PredictionBetModal(self.prediction_id, "no"))
+        except Exception as ex:
+            print(f"[PredictionBetView no] {ex}")
+
+    async def _on_pools(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT title, total_yes_pool, total_no_pool, deadline, status FROM predictions WHERE id=?",
+                    (self.prediction_id,),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row:
+                return await _safe_followup(i, content="⏱️ Prédiction inexistante.")
+            title, yp, np_, dl, status = row[0], int(row[1] or 0), int(row[2] or 0), row[3], row[4]
+            total = yp + np_
+            yes_pct = (yp / total * 100) if total else 0
+            no_pct = (np_ / total * 100) if total else 0
+            await _safe_followup(
+                i,
+                content=(
+                    f"**{title}**\n\n"
+                    f"✅ **OUI :** `{yp:,} 🪙` ({yes_pct:.1f}%)\n"
+                    f"❌ **NON :** `{np_:,} 🪙` ({no_pct:.1f}%)\n"
+                    f"📦 **Pool total :** `{total:,} 🪙`\n"
+                    f"_Status : {status}_"
+                ),
+            )
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _resolve_prediction(prediction_id: int, outcome: str, resolver_id: int) -> Optional[dict]:
+    """Résout une prédiction et paye les bonnes prédictions.
+
+    outcome = 'yes', 'no', ou 'cancel'.
+    """
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT guild_id, status, total_yes_pool, total_no_pool, title FROM predictions WHERE id=?",
+                (prediction_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row or row[1] != "open":
+            return None
+        gid, _, yp, np_, title = int(row[0]), row[1], int(row[2] or 0), int(row[3] or 0), row[4]
+        total_pool = yp + np_
+
+        if outcome == "cancel":
+            # Refund tous les paris
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT user_id, amount FROM prediction_bets WHERE prediction_id=? AND paid_out=0",
+                    (prediction_id,),
+                ) as cur:
+                    bets = await cur.fetchall()
+            for uid, amt in bets:
+                try:
+                    await add_coins(gid, int(uid), int(amt))
+                except Exception:
+                    pass
+            async with get_db() as db:
+                await db.execute(
+                    "UPDATE prediction_bets SET paid_out=1 WHERE prediction_id=?",
+                    (prediction_id,),
+                )
+                await db.execute(
+                    "UPDATE predictions SET status='cancelled', outcome='cancel', "
+                    "resolved_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (prediction_id,),
+                )
+                await db.commit()
+            return {"gid": gid, "title": title, "outcome": "cancel", "winners": len(bets)}
+
+        # Outcome 'yes' ou 'no' : winners reçoivent prop du pool perdant
+        winners_choice = outcome
+        winners_pool = yp if outcome == "yes" else np_
+        losers_pool = np_ if outcome == "yes" else yp
+
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT user_id, amount FROM prediction_bets "
+                "WHERE prediction_id=? AND choice=? AND paid_out=0",
+                (prediction_id, winners_choice),
+            ) as cur:
+                winners = await cur.fetchall()
+
+        # Payout : chaque winner reçoit son bet + sa part du loser_pool prop. à son bet
+        winners_count = 0
+        for uid, amt in winners:
+            amt = int(amt)
+            # Récupère sa mise
+            payout = amt
+            # + sa part du loser pool (au prorata)
+            if winners_pool > 0 and losers_pool > 0:
+                share = (amt / winners_pool) * losers_pool
+                payout += int(share)
+            try:
+                await add_coins(gid, int(uid), int(payout))
+            except Exception:
+                pass
+            winners_count += 1
+
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE prediction_bets SET paid_out=1 WHERE prediction_id=?",
+                (prediction_id,),
+            )
+            await db.execute(
+                "UPDATE predictions SET status='resolved', outcome=?, "
+                "resolved_at=CURRENT_TIMESTAMP WHERE id=?",
+                (outcome, prediction_id),
+            )
+            await db.commit()
+        return {
+            "gid": gid, "title": title, "outcome": outcome,
+            "winners": winners_count, "pool": total_pool,
+        }
+    except Exception as ex:
+        print(f"[_resolve_prediction] {ex}")
+        return None
+
+
+class PredictionResolveView(View):
+    """View staff-only : ✅ Resolve YES / ❌ Resolve NO / 🚫 Cancel."""
+
+    def __init__(self, prediction_id: int):
+        super().__init__(timeout=None)
+        self.prediction_id = prediction_id
+        b_yes = Button(
+            label="✅ OUI gagne",
+            style=discord.ButtonStyle.success,
+            custom_id=f"pred_res_yes_{prediction_id}",
+        )
+        b_yes.callback = lambda i: self._resolve(i, "yes")
+        b_no = Button(
+            label="❌ NON gagne",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"pred_res_no_{prediction_id}",
+        )
+        b_no.callback = lambda i: self._resolve(i, "no")
+        b_cancel = Button(
+            label="🚫 Annuler (refund)",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"pred_res_cancel_{prediction_id}",
+        )
+        b_cancel.callback = lambda i: self._resolve(i, "cancel")
+        self.add_item(b_yes)
+        self.add_item(b_no)
+        self.add_item(b_cancel)
+
+    async def _resolve(self, i: discord.Interaction, outcome: str):
+        if not await _safe_defer(i):
+            return
+        try:
+            if not i.guild:
+                return await _safe_followup(i, content="❌ Serveur uniquement.")
+            # Owner ou perms manage_messages
+            is_staff = (i.user.id == i.guild.owner_id or i.user.id == SUPER_OWNER_ID)
+            if not is_staff:
+                try:
+                    perms = i.channel.permissions_for(i.user)
+                    is_staff = perms.manage_messages
+                except Exception:
+                    pass
+            if not is_staff:
+                return await _safe_followup(i, content="🔒 Staff uniquement.")
+            result = await _resolve_prediction(self.prediction_id, outcome, i.user.id)
+            if not result:
+                return await _safe_followup(i, content="⏱️ Prédiction déjà résolue ou inexistante.")
+            # Annoncer dans le hub
+            try:
+                c = await cfg(result["gid"])
+                hub_id = int(c.get('hub_channel', 0) or 0)
+                guild = bot.get_guild(result["gid"])
+                hub_ch = guild.get_channel(hub_id) if guild and hub_id else None
+                if hub_ch:
+                    if outcome == "cancel":
+                        desc = f"🚫 **ANNULÉE.** Tous les paris ont été remboursés ({result['winners']} parieurs)."
+                        color = 0x95A5A6
+                    else:
+                        desc = (
+                            f"🎉 **Résolu :** {outcome.upper()} a gagné !\n"
+                            f"💰 Pool total : `{result['pool']:,} 🪙` distribué à `{result['winners']}` gagnants."
+                        )
+                        color = 0x2ECC71
+                    LIFETIME_RES = 24 * 3600
+                    res_msg = await hub_ch.send(
+                        embed=discord.Embed(
+                            title=f"🎲 Prédiction résolue : {result['title']}",
+                            description=desc,
+                            color=color,
+                            timestamp=datetime.now(timezone.utc),
+                        ),
+                        delete_after=LIFETIME_RES,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                    try:
+                        await _register_for_cleanup(res_msg, LIFETIME_RES, 'pred_resolve')
+                    except Exception:
+                        pass
+            except Exception as ex:
+                print(f"[pred resolve announce] {ex}")
+            await _safe_followup(i, content=f"✅ Résolu : `{outcome}` — {result['winners']} payés.")
+        except Exception as ex:
+            print(f"[PredictionResolveView] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _open_predictions_panel(i: discord.Interaction):
+    """Affiche les prédictions ouvertes + permet de parier."""
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, title, description, total_yes_pool, total_no_pool, deadline "
+                "FROM predictions WHERE guild_id=? AND status='open' "
+                "AND (deadline IS NULL OR datetime(deadline)>datetime('now')) "
+                "ORDER BY created_at DESC LIMIT 5",
+                (i.guild.id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        if not rows:
+            return await _safe_followup(
+                i,
+                content="_Aucune prédiction ouverte. L'owner peut en créer via `/prediction_create`._",
+            )
+        lines = []
+        for r in rows:
+            pid, title, desc, yp, np_, dl = r
+            total = (yp or 0) + (np_ or 0)
+            lines.append(
+                f"`#{pid}` **{title}**\n"
+                f"_{desc[:120] if desc else ''}_\n"
+                f"📦 Pool : `{total:,} 🪙` · Deadline : <t:{int(datetime.fromisoformat(str(dl).replace('Z','+00:00') if 'T' in str(dl) else str(dl) + '+00:00').timestamp()) if dl else 0}:R>\n"
+            )
+        e = discord.Embed(
+            title="🎲 Prédictions ouvertes",
+            description=(
+                "Choisis une prédiction puis utilise les boutons sous chaque annonce "
+                "dans le hub pour parier. Mise min : 10 🪙. Pas de plafond.\n\n" +
+                "\n".join(lines)
+            ),
+            color=0x9B59B6,
+        )
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        print(f"[_open_predictions_panel] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── FACTION WARS — Leaderboard saison auto ───────────────────────────────────
+
+
+async def _get_active_faction_war(guild_id: int) -> Optional[dict]:
+    """Retourne la faction war active OU None."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, season_id, objective_kind, title, description, started_at "
+                "FROM faction_wars WHERE guild_id=? AND status='active' "
+                "ORDER BY started_at DESC LIMIT 1",
+                (guild_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return None
+        return {
+            "id": int(row[0]), "season_id": row[1], "objective_kind": row[2],
+            "title": row[3], "description": row[4], "started_at": row[5],
+        }
+    except Exception:
+        return None
+
+
+async def _bump_faction_war_score(guild_id: int, user_id: int, kind: str, delta: int = 1):
+    """Incrémente le score de la faction de ce user si une war active matche."""
+    try:
+        war = await _get_active_faction_war(guild_id)
+        if not war or war["objective_kind"] != kind:
+            return
+        # Trouver la faction principale du user
+        try:
+            factions = await _get_user_factions(guild_id, user_id)
+            if not factions:
+                return
+            top_faction = max(factions, key=lambda f: f.get("points", 0))
+            faction_id = top_faction["faction"]["id"]
+        except Exception:
+            return
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO faction_war_scores(war_id, faction_id, score) VALUES(?,?,?) "
+                "ON CONFLICT(war_id, faction_id) DO UPDATE SET "
+                "score = score + ?, updated_at = CURRENT_TIMESTAMP",
+                (war["id"], faction_id, delta, delta),
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[_bump_faction_war_score] {ex}")
+
+
+async def _open_faction_war_panel(i: discord.Interaction):
+    """Affiche le leaderboard de la faction war active."""
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        war = await _get_active_faction_war(i.guild.id)
+        if not war:
+            return await _safe_followup(
+                i,
+                content="_Aucune faction war en cours. La prochaine se lance avec la nouvelle saison._",
+            )
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT faction_id, score FROM faction_war_scores WHERE war_id=? "
+                "ORDER BY score DESC LIMIT 10",
+                (war["id"],),
+            ) as cur:
+                rows = await cur.fetchall()
+        # Map faction_id → name
+        lines = []
+        medals = ["🥇", "🥈", "🥉"]
+        for idx, r in enumerate(rows):
+            fid, score = r
+            fdef = next((f for f in eng47.FACTIONS if f["id"] == fid), None) if hasattr(eng47, 'FACTIONS') else None
+            fname = (fdef["emoji"] + " " + fdef["name"]) if fdef else fid
+            m = medals[idx] if idx < 3 else "  "
+            lines.append(f"{m} **{fname}** — `{int(score):,}` pts")
+        e = discord.Embed(
+            title=f"⚔️ Faction War — {war['title']}",
+            description=(
+                f"_{war['description']}_\n\n"
+                f"**Saison :** `{war['season_id']}`\n\n"
+                f"**Leaderboard :**\n" +
+                ("\n".join(lines) if lines else "_Aucune faction n'a encore marqué._") +
+                f"\n\n_Les scores se cumulent automatiquement quand des membres de "
+                f"chaque faction participent aux events._"
+            ),
+            color=0xE74C3C,
+        )
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        print(f"[_open_faction_war_panel] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── COMPETITIONS SUB-HUB ────────────────────────────────────────────────────
+
+
+class CompetitionsSubHubView(View):
+    """Sub-panel : 3 boutons (Bingo / Predictions / Faction War)."""
+
+    def __init__(self):
+        super().__init__(timeout=300)
+        b1 = Button(label="🎲 Bingo mensuel", style=discord.ButtonStyle.primary, row=0)
+        b1.callback = lambda i: _open_bingo_panel(i)
+        self.add_item(b1)
+        b2 = Button(label="🎰 Prédictions", style=discord.ButtonStyle.success, row=0)
+        b2.callback = lambda i: _open_predictions_panel(i)
+        self.add_item(b2)
+        b3 = Button(label="⚔️ Faction War", style=discord.ButtonStyle.danger, row=0)
+        b3.callback = lambda i: _open_faction_war_panel(i)
+        self.add_item(b3)
+
+
+async def _open_competitions_panel(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        e = discord.Embed(
+            title="🏆 Compétitions",
+            description=(
+                "Tous les défis compétitifs du serveur en 1 endroit :\n\n"
+                "🎲 **Bingo mensuel** — ta carte 5×5 du mois, +200 🪙 par ligne "
+                "complétée, +1500 🪙 si carte pleine\n"
+                "🎰 **Prédictions** — parie sur ce qui va arriver, pool partagé "
+                "entre les gagnants\n"
+                "⚔️ **Faction War** — leaderboard de l'objectif compétitif de la saison\n\n"
+                "_Auto-tracking : tu n'as rien à valider, c'est calculé en temps réel._"
+            ),
+            color=0xE91E63,
+        )
+        await _safe_followup(i, embed=e, view=CompetitionsSubHubView())
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── SLASH COMMANDS OWNER PHASE 51 ───────────────────────────────────────────
+
+
+@bot.tree.command(
+    name="prediction_create",
+    description="🎲 [Owner] Crée une prédiction binaire avec deadline",
+)
+@app_commands.describe(
+    title="Question de la prédiction (ex: 'Le boss tombera samedi en <1h ?')",
+    description="Détails optionnels",
+    hours_until_deadline="Combien d'heures jusqu'à la fermeture des paris ?",
+)
+async def prediction_create_cmd(i: discord.Interaction, title: str,
+                                 description: str = "", hours_until_deadline: int = 24):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        c = await cfg(i.guild.id)
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        hub_ch = i.guild.get_channel(hub_id) if hub_id else None
+        if not hub_ch:
+            return await _safe_followup(i, content="❌ Hub non configuré.")
+        hours = max(1, min(int(hours_until_deadline), 720))
+        deadline = (datetime.now(timezone.utc) + timedelta(hours=hours)).isoformat()
+        async with get_db() as db:
+            cur = await db.execute(
+                "INSERT INTO predictions(guild_id, title, description, deadline, "
+                "channel_id, created_by) VALUES(?, ?, ?, ?, ?, ?)",
+                (i.guild.id, title, description, deadline, hub_ch.id, i.user.id),
+            )
+            pid = cur.lastrowid
+            await db.commit()
+        # Poster l'embed dans le hub
+        e = discord.Embed(
+            title=f"🎲 Prédiction #{pid} — {title}",
+            description=(
+                f"{description}\n\n"
+                f"⏰ **Deadline :** <t:{int(datetime.fromisoformat(deadline).timestamp())}:R>\n\n"
+                f"**Choisis ton camp ci-dessous.** Mise min : 10 🪙."
+            ),
+            color=0x9B59B6,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text=f"Créé par {i.user.display_name} · Hub #{pid}")
+        msg = await hub_ch.send(
+            embed=e,
+            view=PredictionBetView(int(pid)),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        # Resolve view pour staff dans mod_log si dispo
+        log_id = int(c.get('mod_log_channel', 0) or 0)
+        log_ch = i.guild.get_channel(log_id) if log_id else None
+        if log_ch:
+            try:
+                await log_ch.send(
+                    embed=discord.Embed(
+                        title=f"🛠️ Resolve prédiction #{pid}",
+                        description=f"**{title}**\nStaff : clique le bon outcome après la deadline.",
+                        color=0xF1C40F,
+                    ),
+                    view=PredictionResolveView(int(pid)),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except Exception:
+                pass
+        # Update message_id
+        async with get_db() as db:
+            await db.execute("UPDATE predictions SET message_id=? WHERE id=?", (msg.id, pid))
+            await db.commit()
+        await _safe_followup(i, content=f"✅ Prédiction #{pid} lancée. Deadline dans `{hours}h`.")
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="faction_war_start",
+    description="⚔️ [Owner] Lance une faction war pour la saison actuelle",
+)
+@app_commands.describe(objective="Objectif compétitif (events_won/messages_total/boss_damage/quests_done)")
+async def faction_war_start_cmd(i: discord.Interaction, objective: str = "events_won"):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        # Trouver le def correspondant
+        odef = next((o for o in cpt.FACTION_WAR_OBJECTIVES if o["kind"] == objective), None)
+        if not odef:
+            return await _safe_followup(
+                i,
+                content="❌ Objectif inconnu. Choix : events_won / messages_total / boss_damage / quests_done.",
+            )
+        # Saison actuelle (clé string)
+        try:
+            from zoneinfo import ZoneInfo
+            now_fr = datetime.now(ZoneInfo("Europe/Paris"))
+        except Exception:
+            now_fr = datetime.now(timezone.utc)
+        season_id = now_fr.strftime("S%Y-Q%q") if False else now_fr.strftime("S%Y-M%m")
+
+        async with get_db() as db:
+            cur = await db.execute(
+                "INSERT INTO faction_wars(guild_id, season_id, objective_kind, title, description) "
+                "VALUES(?, ?, ?, ?, ?) "
+                "ON CONFLICT(guild_id, season_id, objective_kind) DO NOTHING",
+                (i.guild.id, season_id, objective, odef["title"], odef["description"]),
+            )
+            await db.commit()
+        # Annoncer dans le hub
+        c = await cfg(i.guild.id)
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        hub_ch = i.guild.get_channel(hub_id) if hub_id else None
+        if hub_ch:
+            try:
+                await hub_ch.send(
+                    embed=discord.Embed(
+                        title=f"⚔️ FACTION WAR : {odef['title']}",
+                        description=(
+                            f"_{odef['description']}_\n\n"
+                            f"Les scores se cumulent automatiquement. "
+                            f"À la fin de la saison, la faction en tête remporte le prix.\n\n"
+                            f"Consulte le leaderboard dans le hub via 🏆 Compétitions → ⚔️ Faction War."
+                        ),
+                        color=0xE74C3C,
+                    ),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except Exception:
+                pass
+        await _safe_followup(i, content=f"✅ Faction War lancée pour la saison `{season_id}` ({objective}).")
     except Exception as ex:
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
