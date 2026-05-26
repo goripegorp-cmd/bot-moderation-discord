@@ -7098,7 +7098,8 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
             # Phase 40 : mentions individuelles des inactifs (wake-up ciblé)
             # ⚠️ TOS Discord : on cap à 3 mentions max pour rester en règle
             try:
-                wakeup_line = await _build_wakeup_mention_line(guild, max_count=3)
+                # Phase 48.4.A : smart mention — respecte opt-out + affinité
+                wakeup_line = await _build_wakeup_mention_line_smart(guild, 'boss_raid', max_count=3)
             except Exception as ex:
                 print(f"[event start wakeup line] {ex}")
                 wakeup_line = ""
@@ -7107,7 +7108,7 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
                     f"🚨 **UN BOSS APPARAÎT !** Tous les membres : préparez-vous au combat !"
                     + (f"\n{ping_str}" if ping_str else "")
                     + wakeup_line
-                    + "\n_💡 Pas envie d'être ping ? Utilise `/notify niveau:🔕 Aucun`._"
+                    + "\n_💡 Pas envie d'être ping ? `/notifs` pour choisir précisément quoi recevoir._"
                 ),
                 embed=embed,
                 view=view,
@@ -8335,10 +8336,10 @@ async def _start_treasure_hunt(guild, triggered_by_id: int, *, manual: bool = Fa
         intro_embed.set_footer(text=f"{guild.name} · Chasse au Trésor", icon_url=(guild.icon.url if guild.icon else None))
         try:
             ping_str = await _get_event_mention(guild, 'treasure_hunt')
-            # Phase 40 : mentions individuelles des inactifs (wake-up ciblé)
+            # Phase 48.4.A : smart mention — respecte opt-out + affinité par event_kind
             # ⚠️ TOS Discord : on cap à 3 mentions max pour rester en règle
             try:
-                wakeup_line = await _build_wakeup_mention_line(guild, max_count=3)
+                wakeup_line = await _build_wakeup_mention_line_smart(guild, 'treasure', max_count=3)
             except Exception as ex:
                 print(f"[treasure wakeup line] {ex}")
                 wakeup_line = ""
@@ -8616,10 +8617,10 @@ async def _start_quiz(guild, triggered_by_id: int, *, manual: bool = False) -> d
         intro_embed.set_footer(text=f"{guild.name} · Quiz", icon_url=(guild.icon.url if guild.icon else None))
         try:
             ping_str = await _get_event_mention(guild, 'quiz')
-            # Phase 40 : mentions individuelles des inactifs (wake-up ciblé)
+            # Phase 48.4.A : smart mention — respecte opt-out + affinité par event_kind
             # ⚠️ TOS Discord : on cap à 3 mentions max pour rester en règle
             try:
-                wakeup_line = await _build_wakeup_mention_line(guild, max_count=3)
+                wakeup_line = await _build_wakeup_mention_line_smart(guild, 'quiz', max_count=3)
             except Exception as ex:
                 print(f"[quiz wakeup line] {ex}")
                 wakeup_line = ""
@@ -48034,17 +48035,23 @@ async def _start_world_boss(guild) -> dict:
         embed = await _build_world_boss_embed(guild, wb_id)
         view = WorldBossAttackView()
         ping_str = await _get_event_mention(guild, 'boss_raid')  # réutilise le role notif boss_raid
+        # Phase 48.4.A : smart mention pour wake-up dormants spécifiquement intéressés
+        try:
+            wakeup_line = await _build_wakeup_mention_line_smart(guild, 'world_boss', max_count=3)
+        except Exception:
+            wakeup_line = ""
         try:
             msg = await arena_ch.send(
                 content=(
                     f"🌍 **UN WORLD BOSS APPARAÎT !**\n"
                     f"Coordonnez vos attaques — il faut **plusieurs joueurs** pour le vaincre.\n"
                     + (f"{ping_str}\n" if ping_str else "")
-                    + "_Pas envie d'être ping ? `/notify niveau:🔕 Aucun`._"
+                    + wakeup_line
+                    + "\n_Pas envie d'être ping ? `/notifs` pour choisir précisément quoi recevoir._"
                 ),
                 embed=embed,
                 view=view,
-                allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False),
+                allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=False),
             )
             async with get_db() as db:
                 await db.execute(
@@ -51805,7 +51812,13 @@ async def _start_game_night(guild) -> bool:
             hub_ch = guild.get_channel(hub_id) if hub_id else None
             if hub_ch and await _is_chatty_channel(hub_ch):
                 LIFETIME_ANNOUNCE = int((ends_at - datetime.now(timezone.utc)).total_seconds()) + 600
+                # Phase 48.4.A : smart mention pour ramener les dormants intéressés par Game Night
+                try:
+                    wakeup_line = await _build_wakeup_mention_line_smart(guild, 'game_night', max_count=3)
+                except Exception:
+                    wakeup_line = ""
                 gn_announce_msg = await hub_ch.send(
+                    content=wakeup_line if wakeup_line else None,
                     embed=discord.Embed(
                         title="🎮 GAME NIGHT — Ça commence !",
                         description=(
@@ -51818,7 +51831,7 @@ async def _start_game_night(guild) -> bool:
                         ),
                         color=0xE91E63,
                     ),
-                    allowed_mentions=discord.AllowedMentions.none(),
+                    allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
                     delete_after=LIFETIME_ANNOUNCE,
                 )
                 await _register_for_cleanup(gn_announce_msg, LIFETIME_ANNOUNCE, 'game_night_announce')
@@ -54309,13 +54322,16 @@ async def _build_wakeup_mention_line_smart(guild, event_kind: str, max_count: in
         if not all_candidates:
             return ""
         # Phase 48.3 : filter out les users qui ont opt-out de ce kind
+        # Phase 48.4.A : FAIL-CLOSED — si la lecture des prefs échoue, on SKIP le user
+        # (prudent : mieux vaut ne pas ping que pinger malgré opt-out — risque TOS)
         filtered = []
         for m in all_candidates:
             try:
                 if await _member_wants_notif(guild.id, m.id, event_kind):
                     filtered.append(m)
-            except Exception:
-                filtered.append(m)  # en cas d'erreur, on garde (fail-open)
+            except Exception as _ex:
+                print(f"[smart_mention opt-out check fail-closed user={m.id}] {_ex}")
+                # On SKIP ce user pour éviter de violer un opt-out qu'on n'a pas pu lire
         if not filtered:
             return ""
         # Score chaque candidat restant pour ce kind
@@ -54372,6 +54388,8 @@ async def auto_promote_dying_events():
                 for kind, started, parts in rows:
                     if started > 0 and (parts / started) < 1.0:
                         dying.append(kind)
+                # Phase 48.4.A : log de vie même si rien à faire (debug visibility)
+                print(f"[auto_promote SCAN] guild={guild.id} rows={len(rows)} dying={len(dying)}")
                 if not dying:
                     continue
 
