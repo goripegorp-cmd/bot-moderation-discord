@@ -51,9 +51,10 @@ import setup_wizard as wizard2026
 import slash_commands_2026 as slashcmds2026
 import tracking_layer as tracking2026
 import social_liveness as liveness2026
-import server_architect as architect2026
+# Phase 46.1 : modules backup/architecture supprimés (server_architect,
+# architecture_builder, custom_blueprint, slash_commands_architecture) → libère
+# ~3600 lignes. Le serveur reste géré manuellement par l'owner.
 import roles_panel as rolespanel2026
-import slash_commands_architecture as slashcmds_arch2026
 import unified_logger as ulogger2026
 import social_gallery as gallery2026
 import game_updates as gameupdates2026
@@ -35994,6 +35995,12 @@ async def on_message(msg):
     except Exception as ex:
         print(f"[_check_tag_royale_chain] {ex}")
 
+    # ═══════════════ Phase 46.2 : Game Night emoji storm tracking ═══════════════
+    try:
+        await _check_game_night_emoji_storm(msg)
+    except Exception as ex:
+        print(f"[_check_game_night_emoji_storm] {ex}")
+
     # ═══════════════ Phase 23 : DÉTECTION COMPTES PIRATÉS ═══════════════
     try:
         await _check_compromised_account(msg)
@@ -41131,6 +41138,12 @@ async def on_raw_reaction_add(payload):
     except Exception as ex:
         print(f"[_track_reaction_p41] {ex}")
 
+    # Phase 46.2 : Game Night sync_react tracking
+    try:
+        await _check_game_night_sync_react(payload)
+    except Exception as ex:
+        print(f"[_check_game_night_sync_react] {ex}")
+
 @bot.event
 async def on_raw_reaction_remove(payload):
     if payload.user_id == bot.user.id:
@@ -45138,7 +45151,7 @@ async def cleardeals_cmd(i: discord.Interaction):
 panels2026.setup_admin_command(bot)
 wizard2026.setup_setup_command(bot)
 slashcmds2026.setup_all_commands(bot)
-slashcmds_arch2026.setup_architecture_commands(bot)
+# Phase 46.1 : slash_commands_architecture supprimé (système backup/rebuild retiré)
 
 
 # ─── Phase 3.0g : commande /ping minimale pour tester la liveness ───
@@ -51398,111 +51411,387 @@ async def _end_game_night(gn_id: int):
         print(f"[_end_game_night] {ex}")
 
 
+# ─── Phase 46.2 : Vrais events interactifs 2026 ─────────────────────────────
+# Compteurs en mémoire pour les events live (pas besoin de DB pour ces courts)
+
+_gn_event_state: dict = {}  # event_msg_id -> {kind, gn_id, ...state}
+
+
+class GameNightSpeedClickView(View):
+    """Speed click : premier à cliquer dans la fenêtre temporelle gagne tout."""
+
+    def __init__(self, msg_id: int, button_label: str = "💥 GO !"):
+        super().__init__(timeout=None)
+        b = Button(
+            label=button_label[:80],
+            style=discord.ButtonStyle.success,
+            custom_id=f"gn_speed_{msg_id}",
+        )
+        b.callback = self._on_click
+        self.add_item(b)
+
+    async def _on_click(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if not i.message:
+                return await _safe_followup(i, content="❌ Erreur.")
+            state = _gn_event_state.get(i.message.id)
+            if not state or state.get('kind') != 'speed_click':
+                return await _safe_followup(i, content="❌ Event expiré.")
+            if state.get('winner'):
+                return await _safe_followup(i, content="✋ Trop tard ! Déjà gagné.")
+            # Race-safe : on capture le winner
+            state['winner'] = i.user.id
+            try:
+                await add_coins(i.guild.id, i.user.id, int(state['reward']))
+            except Exception:
+                pass
+            # Désactiver le bouton + édit
+            try:
+                disabled = View(timeout=1)
+                db = Button(
+                    label=f"🏆 Gagné par {i.user.display_name[:30]}",
+                    style=discord.ButtonStyle.secondary,
+                    disabled=True,
+                )
+                disabled.add_item(db)
+                new_e = discord.Embed(
+                    title=state.get('title', '⚡ Speed Click'),
+                    description=(
+                        f"🏆 **{i.user.display_name}** a été le plus rapide !\n"
+                        f"💰 **+{state['reward']} 🪙** remportés."
+                    ),
+                    color=0x2ECC71,
+                )
+                await i.message.edit(embed=new_e, view=disabled)
+            except Exception:
+                pass
+            await _safe_followup(i, content=f"⚡ Bien joué ! **+{state['reward']} 🪙** gagnés.")
+        except Exception as ex:
+            print(f"[GameNightSpeedClickView] {ex}")
+
+
+class GameNightThresholdView(View):
+    """Threshold click : N personnes différentes cliquent en T sec → tout le monde gagne."""
+
+    def __init__(self, msg_id: int, button_label: str = "✋ J'en suis"):
+        super().__init__(timeout=None)
+        b = Button(
+            label=button_label[:80],
+            style=discord.ButtonStyle.primary,
+            custom_id=f"gn_thresh_{msg_id}",
+        )
+        b.callback = self._on_click
+        self.add_item(b)
+
+    async def _on_click(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if not i.message:
+                return await _safe_followup(i, content="❌ Erreur.")
+            state = _gn_event_state.get(i.message.id)
+            if not state or state.get('kind') != 'threshold_click':
+                return await _safe_followup(i, content="❌ Event expiré.")
+            if state.get('completed'):
+                return await _safe_followup(i, content="🎉 L'objectif est déjà atteint, merci d'avoir participé !")
+
+            participants = state.setdefault('participants', set())
+            if i.user.id in participants:
+                return await _safe_followup(i, content=f"✅ Tu as déjà participé. Continuons à attendre les autres ! ({len(participants)}/{state['threshold']})")
+
+            participants.add(i.user.id)
+            count = len(participants)
+            threshold = state['threshold']
+
+            # Update le message pour montrer la progression
+            try:
+                bar = "█" * count + "░" * max(0, threshold - count)
+                if count < threshold:
+                    new_e = discord.Embed(
+                        title=state['title'],
+                        description=(
+                            f"{state['original_desc']}\n\n"
+                            f"**Progression :** `{count}/{threshold}` participants\n"
+                            f"`{bar}`"
+                        ),
+                        color=0xE91E63,
+                    )
+                    await i.message.edit(embed=new_e)
+                else:
+                    # Objectif atteint !
+                    state['completed'] = True
+                    # Distribute coins to all participants
+                    for uid in participants:
+                        try:
+                            await add_coins(i.guild.id, uid, int(state['reward']))
+                        except Exception:
+                            pass
+                    disabled = View(timeout=1)
+                    db = Button(
+                        label=f"🎉 Objectif atteint ({count}/{threshold})",
+                        style=discord.ButtonStyle.success,
+                        disabled=True,
+                    )
+                    disabled.add_item(db)
+                    new_e = discord.Embed(
+                        title=f"🎉 {state['title']} — RÉUSSI !",
+                        description=(
+                            f"**{count} participants** ont relevé le défi.\n"
+                            f"💰 **+{state['reward']} 🪙** à chacun !"
+                        ),
+                        color=0x2ECC71,
+                    )
+                    await i.message.edit(embed=new_e, view=disabled)
+            except Exception as ex:
+                print(f"[GameNightThresholdView update] {ex}")
+
+            if state.get('completed'):
+                await _safe_followup(i, content=f"🎉 **OBJECTIF ATTEINT !** +{state['reward']} 🪙 pour toi.")
+            else:
+                await _safe_followup(i, content=f"✅ Participation enregistrée ! ({count}/{threshold})")
+        except Exception as ex:
+            print(f"[GameNightThresholdView] {ex}")
+
+
 async def _post_game_night_prompt(gn_id: int):
-    """Poste un mini-jeu random dans le chat de la Game Night."""
+    """Poste un VRAI event interactif random dans le chat Game Night."""
     try:
         async with get_db() as db:
             async with db.execute(
-                "SELECT text_channel_id FROM game_nights WHERE id=? AND ended=0",
+                "SELECT text_channel_id, guild_id FROM game_nights WHERE id=? AND ended=0",
                 (gn_id,),
             ) as cur:
                 row = await cur.fetchone()
         if not row:
             return
-        tc_id = row[0]
+        tc_id, guild_id = row
         if not tc_id:
             return
-        # Trouver le guild via DB
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT guild_id FROM game_nights WHERE id=?",
-                (gn_id,),
-            ) as cur:
-                grow = await cur.fetchone()
-        if not grow:
-            return
-        guild = bot.get_guild(int(grow[0]))
+        guild = bot.get_guild(int(guild_id))
         if not guild:
             return
         tc = guild.get_channel(int(tc_id))
         if not tc:
             return
 
-        prompts = ev42.random_game_night_prompts(1)
-        if not prompts:
+        events = ev42.random_game_night_events(1)
+        if not events:
             return
-        p = prompts[0]
-        title = f"{p['emoji']} {p['title']}"
-        if p['kind'] == 'vote':
-            opts = p.get('options', [])
-            desc_lines = ["Vote en cliquant un bouton :"]
-            class _VoteView(View):
-                def __init__(self):
-                    super().__init__(timeout=600)
-                    for idx, label in enumerate(opts):
-                        b = Button(label=label[:80], style=discord.ButtonStyle.primary)
-                        b.callback = self._make_cb(idx)
-                        self.add_item(b)
-                def _make_cb(self, idx):
-                    async def _cb(ii: discord.Interaction):
-                        if not await _safe_defer(ii):
-                            return
+        ev = events[0]
+        kind = ev.get('kind')
+        duration = int(ev.get('duration', 60))
+        msg = None
+
+        # ─── SPEED CLICK ────────────────────────────────────────────────
+        if kind == 'speed_click':
+            embed = discord.Embed(
+                title=ev['title'],
+                description=ev['description'] + f"\n\n{_chrono_footer(duration)}",
+                color=0xF1C40F,
+            )
+            # On envoie d'abord pour avoir l'ID
+            try:
+                msg = await tc.send(
+                    embed=embed,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=duration + 30,  # marge avant cleanup
+                )
+                view = GameNightSpeedClickView(msg.id, ev.get('button_label', '💥 GO !'))
+                await msg.edit(view=view)
+                bot.add_view(view, message_id=msg.id)
+                _gn_event_state[msg.id] = {
+                    'kind': 'speed_click',
+                    'gn_id': gn_id,
+                    'title': ev['title'],
+                    'reward': ev['reward_coins'],
+                    'winner': None,
+                }
+                # Cleanup state après expire
+                async def _cleanup_speed(mid):
+                    await asyncio.sleep(duration + 60)
+                    _gn_event_state.pop(mid, None)
+                asyncio.create_task(_cleanup_speed(msg.id))
+            except Exception as ex:
+                print(f"[gn speed_click] {ex}")
+
+        # ─── THRESHOLD CLICK ────────────────────────────────────────────
+        elif kind == 'threshold_click':
+            embed = discord.Embed(
+                title=ev['title'],
+                description=ev['description'] + f"\n\n**Progression :** `0/{ev['threshold']}` participants\n\n{_chrono_footer(duration)}",
+                color=0xE91E63,
+            )
+            try:
+                msg = await tc.send(
+                    embed=embed,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=duration + 30,
+                )
+                view = GameNightThresholdView(msg.id, ev.get('button_label', '✋ J\'en suis'))
+                await msg.edit(view=view)
+                bot.add_view(view, message_id=msg.id)
+                _gn_event_state[msg.id] = {
+                    'kind': 'threshold_click',
+                    'gn_id': gn_id,
+                    'title': ev['title'],
+                    'original_desc': ev['description'],
+                    'threshold': ev['threshold'],
+                    'reward': ev['reward_coins'],
+                    'participants': set(),
+                    'completed': False,
+                }
+                async def _cleanup_thresh(mid):
+                    await asyncio.sleep(duration + 60)
+                    _gn_event_state.pop(mid, None)
+                asyncio.create_task(_cleanup_thresh(msg.id))
+            except Exception as ex:
+                print(f"[gn threshold_click] {ex}")
+
+        # ─── EMOJI STORM (tracking via on_message hook) ─────────────────
+        elif kind == 'emoji_storm':
+            embed = discord.Embed(
+                title=ev['title'],
+                description=ev['description'] + f"\n\n{_chrono_footer(duration)}",
+                color=0xFF6B35,
+            )
+            try:
+                msg = await tc.send(
+                    embed=embed,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=duration + 30,
+                )
+                _gn_event_state[msg.id] = {
+                    'kind': 'emoji_storm',
+                    'gn_id': gn_id,
+                    'channel_id': tc.id,
+                    'trigger_emoji': ev['trigger_emoji'],
+                    'threshold': ev['threshold'],
+                    'reward': ev['reward_coins'],
+                    'participants': set(),
+                    'completed': False,
+                    'title': ev['title'],
+                }
+                # Programmer le check final
+                async def _check_storm(mid, gid, dur):
+                    await asyncio.sleep(dur)
+                    state = _gn_event_state.get(mid)
+                    if not state or state.get('completed'):
+                        return
+                    participants = state.get('participants', set())
+                    count = len(participants)
+                    if count >= state['threshold']:
+                        state['completed'] = True
+                        for uid in participants:
+                            try:
+                                await add_coins(gid, uid, int(state['reward']))
+                            except Exception:
+                                pass
                         try:
-                            await _safe_followup(ii, content=f"✅ Vote enregistré : **{opts[idx]}**")
+                            guild2 = bot.get_guild(gid)
+                            ch2 = guild2.get_channel(state['channel_id']) if guild2 else None
+                            if ch2:
+                                await ch2.send(
+                                    embed=discord.Embed(
+                                        title=f"🌪️ Tempête réussie !",
+                                        description=(
+                                            f"**{count} personnes** ont participé.\n"
+                                            f"💰 **+{state['reward']} 🪙** à chacun !"
+                                        ),
+                                        color=0x2ECC71,
+                                    ),
+                                    delete_after=120,
+                                    allowed_mentions=discord.AllowedMentions.none(),
+                                )
                         except Exception:
                             pass
-                    return _cb
-            LIFETIME = 12 * 60
-            embed = discord.Embed(
-                title=title,
-                description="\n".join(desc_lines) + f"\n\n{_chrono_footer(LIFETIME)}",
-                color=0xE91E63,
-            )
-            try:
-                await tc.send(embed=embed, view=_VoteView(), delete_after=LIFETIME, allowed_mentions=discord.AllowedMentions.none())
-            except Exception:
-                pass
-        elif p['kind'] == 'debate':
-            LIFETIME = 12 * 60
-            embed = discord.Embed(
-                title=title,
-                description=p.get('prompt', '') + f"\n\n{_chrono_footer(LIFETIME)}",
-                color=0xE91E63,
-            )
-            try:
-                await tc.send(embed=embed, delete_after=LIFETIME, allowed_mentions=discord.AllowedMentions.none())
-            except Exception:
-                pass
-        elif p['kind'] == 'riddle':
-            LIFETIME = 12 * 60
-            embed = discord.Embed(
-                title=title,
-                description=(
-                    p.get('question', '')
-                    + f"\n\n_Réponse révélée dans 5 min._\n\n{_chrono_footer(LIFETIME)}"
-                ),
-                color=0xE91E63,
-            )
-            try:
-                msg = await tc.send(embed=embed, delete_after=LIFETIME, allowed_mentions=discord.AllowedMentions.none())
-                # Spoiler answer après 5 min
-                async def _reveal():
-                    await asyncio.sleep(300)
-                    try:
-                        await tc.send(
-                            embed=discord.Embed(
-                                description=f"💡 **Réponse à *{p['title']}* :** ||{p.get('answer', '?')}||",
-                                color=0x95A5A6,
-                            ),
-                            delete_after=420,
-                            allowed_mentions=discord.AllowedMentions.none(),
-                        )
-                    except Exception:
-                        pass
-                asyncio.create_task(_reveal())
-            except Exception:
-                pass
+                    _gn_event_state.pop(mid, None)
+                asyncio.create_task(_check_storm(msg.id, guild.id, duration))
+            except Exception as ex:
+                print(f"[gn emoji_storm] {ex}")
 
+        # ─── SYNC REACT (tracking via on_raw_reaction_add hook) ─────────
+        elif kind == 'sync_react':
+            embed = discord.Embed(
+                title=ev['title'],
+                description=ev['description'] + f"\n\n{_chrono_footer(duration)}",
+                color=0xE91E63,
+            )
+            try:
+                msg = await tc.send(
+                    embed=embed,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=duration + 30,
+                )
+                _gn_event_state[msg.id] = {
+                    'kind': 'sync_react',
+                    'gn_id': gn_id,
+                    'channel_id': tc.id,
+                    'target_emoji': ev['target_emoji'],
+                    'threshold': ev['threshold'],
+                    'reward': ev['reward_coins'],
+                    'participants': set(),
+                    'completed': False,
+                    'title': ev['title'],
+                }
+                async def _check_sync(mid, gid, dur):
+                    await asyncio.sleep(dur)
+                    state = _gn_event_state.get(mid)
+                    if not state or state.get('completed'):
+                        return
+                    participants = state.get('participants', set())
+                    count = len(participants)
+                    if count >= state['threshold']:
+                        state['completed'] = True
+                        for uid in participants:
+                            try:
+                                await add_coins(gid, uid, int(state['reward']))
+                            except Exception:
+                                pass
+                        try:
+                            guild2 = bot.get_guild(gid)
+                            ch2 = guild2.get_channel(state['channel_id']) if guild2 else None
+                            if ch2:
+                                await ch2.send(
+                                    embed=discord.Embed(
+                                        title=f"🤝 Synchronisation réussie !",
+                                        description=(
+                                            f"**{count} membres** réagi en simultané.\n"
+                                            f"💰 **+{state['reward']} 🪙** à chacun !"
+                                        ),
+                                        color=0x2ECC71,
+                                    ),
+                                    delete_after=120,
+                                    allowed_mentions=discord.AllowedMentions.none(),
+                                )
+                        except Exception:
+                            pass
+                    _gn_event_state.pop(mid, None)
+                asyncio.create_task(_check_sync(msg.id, guild.id, duration))
+            except Exception as ex:
+                print(f"[gn sync_react] {ex}")
+
+        # ─── Autres kinds (narratif, encourage l'interaction libre) ─────
+        else:
+            # guess_number, color_vote_live, prediction, chain_continue,
+            # identity_secret, power_move, rapid_fire → embed narratif simple
+            embed = discord.Embed(
+                title=ev['title'],
+                description=ev['description'] + f"\n\n{_chrono_footer(duration)}",
+                color=0x9B59B6,
+            )
+            embed.set_footer(text="Game Night · Discutez dans le chat ou réagissez !")
+            try:
+                await tc.send(
+                    embed=embed,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=duration + 30,
+                )
+            except Exception as ex:
+                print(f"[gn fallback {kind}] {ex}")
+
+        # Increment counter DB
         async with get_db() as db:
             await db.execute(
                 "UPDATE game_nights SET prompts_sent = prompts_sent + 1 WHERE id=?",
@@ -51511,6 +51800,50 @@ async def _post_game_night_prompt(gn_id: int):
             await db.commit()
     except Exception as ex:
         print(f"[_post_game_night_prompt] {ex}")
+
+
+# Hook on_message pour emoji_storm (intégré au handler existant via fonction)
+async def _check_game_night_emoji_storm(msg):
+    """Si un message est posté dans un chan game-night ET contient un trigger_emoji
+    actif, le compter dans les participants de l'event storm.
+    """
+    try:
+        if msg.author.bot or not msg.guild:
+            return
+        for state_msg_id, state in list(_gn_event_state.items()):
+            if state.get('kind') != 'emoji_storm':
+                continue
+            if state.get('channel_id') != msg.channel.id:
+                continue
+            if state.get('completed'):
+                continue
+            trigger = state.get('trigger_emoji')
+            if not trigger or trigger not in (msg.content or ''):
+                continue
+            state.setdefault('participants', set()).add(msg.author.id)
+    except Exception as ex:
+        print(f"[_check_game_night_emoji_storm] {ex}")
+
+
+async def _check_game_night_sync_react(payload):
+    """Hook on_raw_reaction_add pour sync_react events."""
+    try:
+        if payload.user_id == bot.user.id or not payload.guild_id:
+            return
+        state = _gn_event_state.get(payload.message_id)
+        if not state or state.get('kind') != 'sync_react':
+            return
+        if state.get('completed'):
+            return
+        target = state.get('target_emoji')
+        if not target:
+            return
+        # Match emoji
+        em = str(payload.emoji)
+        if target in em or em in target:
+            state.setdefault('participants', set()).add(payload.user_id)
+    except Exception as ex:
+        print(f"[_check_game_night_sync_react] {ex}")
 
 
 @tasks.loop(minutes=30)

@@ -308,48 +308,264 @@ def random_voice_chaos(allow_aggressive: bool = False) -> dict:
 
 
 # =============================================================================
-# GAME NIGHT PROMPTS — mini-jeux/sondages pour vendredi soir 21h-23h30
+# GAME NIGHT EVENTS — vrais événements interactifs 2026
+# Pas des prompts "tu préfères" : des vrais mécanismes de jeu live multijoueur
 # =============================================================================
 
-GAME_NIGHT_PROMPTS = [
-    {"emoji": "🎬", "title": "Tu préfères : films ou séries ?", "kind": "vote", "options": ["🎬 Films", "📺 Séries"]},
-    {"emoji": "🍕", "title": "Tu préfères : sucré ou salé ?", "kind": "vote", "options": ["🍬 Sucré", "🧂 Salé"]},
-    {"emoji": "🌅", "title": "Tu préfères : matin ou soir ?", "kind": "vote", "options": ["🌅 Matin", "🌙 Soir"]},
-    {"emoji": "🏖️", "title": "Tu préfères : plage ou montagne ?", "kind": "vote", "options": ["🏖️ Plage", "⛰️ Montagne"]},
-    {"emoji": "🐱", "title": "Tu préfères : chat ou chien ?", "kind": "vote", "options": ["🐱 Chat", "🐶 Chien"]},
-    {"emoji": "📚", "title": "Tu préfères : livre ou film ?", "kind": "vote", "options": ["📚 Livre", "🎬 Film"]},
-    {"emoji": "☕", "title": "Tu préfères : café ou thé ?", "kind": "vote", "options": ["☕ Café", "🍵 Thé"]},
-    {"emoji": "🎮", "title": "Plate-forme préférée ?", "kind": "vote", "options": ["🖥️ PC", "🎮 Console", "📱 Mobile"]},
-    {"emoji": "🌍", "title": "Continent rêvé ?", "kind": "vote", "options": ["🇪🇺 Europe", "🌏 Asie", "🌎 Amériques", "🌍 Afrique"]},
-    {"emoji": "💭", "title": "Si tu avais un super-pouvoir ?", "kind": "debate", "prompt": "Vole, téléportation, lecture pensées, invisibilité... que choisis-tu et pourquoi ?"},
-    {"emoji": "🎵", "title": "Genre musical préféré ?", "kind": "vote", "options": ["🎸 Rock", "🎤 Pop", "🎧 Électro", "🎹 Classique", "🎤 Rap"]},
-    {"emoji": "💸", "title": "1M€ — tu fais quoi en premier ?", "kind": "debate", "prompt": "Investissement, voyage, achat, don ? Racontez !"},
-    {"emoji": "🎂", "title": "Ton meilleur souvenir d'enfance ?", "kind": "debate", "prompt": "Un mot, une scène, une émotion — partagez."},
-    {"emoji": "🚀", "title": "Si tu voyageais dans le temps : passé ou futur ?", "kind": "vote", "options": ["⏪ Passé", "⏩ Futur"]},
-    {"emoji": "🔮", "title": "Devinette express", "kind": "riddle", "question": "Qu'est-ce qui monte et descend mais ne bouge pas ?", "answer": "Un escalier"},
-    {"emoji": "🎯", "title": "Quel est ton hobby caché ?", "kind": "debate", "prompt": "Quelque chose que personne ne sait sur toi !"},
-    {"emoji": "🌟", "title": "Une personne célèbre à rencontrer ?", "kind": "debate", "prompt": "Vivant ou mort — qui et pourquoi ?"},
-    {"emoji": "🎨", "title": "Couleur préférée ?", "kind": "vote", "options": ["🔴 Rouge", "🔵 Bleu", "🟢 Vert", "🟡 Jaune", "🟣 Violet", "⚫ Noir"]},
-    {"emoji": "🍔", "title": "Plat ultime ?", "kind": "debate", "prompt": "Si tu ne pouvais manger qu'UN seul plat à vie..."},
-    {"emoji": "📅", "title": "Saison préférée ?", "kind": "vote", "options": ["🌸 Printemps", "☀️ Été", "🍂 Automne", "❄️ Hiver"]},
-    {"emoji": "🎭", "title": "Tu préfères : faire rire ou faire pleurer (au cinéma) ?", "kind": "vote", "options": ["😂 Rire", "😭 Émouvoir"]},
-    {"emoji": "💡", "title": "L'invention la plus utile selon toi ?", "kind": "debate", "prompt": "Roue, électricité, internet, smartphone... ou autre ?"},
-    {"emoji": "🦄", "title": "Animal mythique préféré ?", "kind": "vote", "options": ["🦄 Licorne", "🐉 Dragon", "🧚 Fée", "👻 Fantôme"]},
-    {"emoji": "🎤", "title": "Tu chantes sous la douche ?", "kind": "vote", "options": ["🎤 Oui souvent", "🤫 Jamais", "😅 Parfois"]},
-    {"emoji": "📖", "title": "Anecdote bizarre que tu connais", "kind": "debate", "prompt": "Le truc inutile mais cool que tu as appris cette semaine !"},
-    {"emoji": "🌧️", "title": "Tu préfères : pluie ou neige ?", "kind": "vote", "options": ["🌧️ Pluie", "❄️ Neige"]},
-    {"emoji": "🎲", "title": "Quel jeu de société tu kiffes ?", "kind": "debate", "prompt": "Loup-garou, Mille Bornes, Monopoly... ton préféré ?"},
-    {"emoji": "🧠", "title": "Devinette logique", "kind": "riddle", "question": "Plus on en partage, plus on en a. Qu'est-ce ?", "answer": "Le bonheur (ou un sourire)"},
-    {"emoji": "🌃", "title": "Ville rêvée pour vivre ?", "kind": "debate", "prompt": "Paris, Tokyo, NYC, ou un coin secret ?"},
-    {"emoji": "🐺", "title": "Animal totem ?", "kind": "vote", "options": ["🦅 Aigle", "🐺 Loup", "🦊 Renard", "🦁 Lion", "🐢 Tortue"]},
+# kinds disponibles (chacun est géré par bot.py avec une view dédiée) :
+#   - speed_click      : 1er à cliquer un bouton dans X secondes → jackpot
+#   - threshold_click  : il faut N personnes différentes qui cliquent en T sec → bonus pour TOUS
+#   - emoji_storm      : "envoyez tous l'emoji X dans 15s" — minimum N participants
+#   - guess_number     : le bot a choisi un nombre 1-100, premier proche gagne
+#   - color_vote_live  : sondage couleur avec barre en temps réel
+#   - prediction       : "combien de messages dans #general dans 30 min ?" → ranges
+#   - chain_continue   : le bot pose le début d'une histoire, les membres ajoutent 1 phrase
+#   - identity_secret  : 1 membre random reçoit en DM un mot secret, doit faire deviner via emojis
+#   - power_move       : 1 membre random reçoit le pouvoir de "doubler" un autre membre (donner +50 coins)
+#   - sync_react       : objectif collectif "5 personnes réagissent dans 30s" → tout le monde gagne
+#   - rapid_fire       : 5 mini-questions à la suite, points cumulés en 60s
+
+GAME_NIGHT_EVENTS = [
+    # ─── SPEED CLICK : 1er à cliquer dans 20s → gros gain ───
+    {
+        "id": "speed_click_jackpot",
+        "kind": "speed_click",
+        "emoji": "⚡",
+        "title": "⚡ JACKPOT FLASH",
+        "description": "Premier à cliquer **maintenant** ! Disponible 20 secondes.",
+        "duration": 20,
+        "reward_coins": 400,
+        "button_label": "💥 GO !",
+    },
+    {
+        "id": "speed_click_double",
+        "kind": "speed_click",
+        "emoji": "🔥",
+        "title": "🔥 Double or rien",
+        "description": "Premier clic = +200 🪙. Mais attention, dans **15 secondes** seulement.",
+        "duration": 15,
+        "reward_coins": 200,
+        "button_label": "🎯 Prendre",
+    },
+
+    # ─── THRESHOLD CLICK : N personnes en T secondes → tout le monde gagne ───
+    {
+        "id": "threshold_5_60s",
+        "kind": "threshold_click",
+        "emoji": "🤝",
+        "title": "🤝 Tous ensemble — 5 clics en 60 sec",
+        "description": "Si **5 personnes différentes** cliquent dans la minute, **TOUT LE MONDE** dans le chat gagne 80 🪙.",
+        "duration": 60,
+        "threshold": 5,
+        "reward_coins": 80,
+        "button_label": "✋ J'en suis",
+    },
+    {
+        "id": "threshold_10_120s",
+        "kind": "threshold_click",
+        "emoji": "🌊",
+        "title": "🌊 La Vague — 10 clics en 2 min",
+        "description": "**10 personnes différentes** doivent cliquer en 2 minutes. Si réussi, **TOUS** les cliquers gagnent 150 🪙.",
+        "duration": 120,
+        "threshold": 10,
+        "reward_coins": 150,
+        "button_label": "🌊 Rejoindre la vague",
+    },
+
+    # ─── EMOJI STORM : envoyez tous un emoji en X sec ───
+    {
+        "id": "emoji_storm_fire",
+        "kind": "emoji_storm",
+        "emoji": "🔥",
+        "title": "🔥 Tempête de feu — postez 🔥 maintenant",
+        "description": "Postez **🔥** dans ce chat dans les **20 secondes**. Si on dépasse 5 réponses, **tous les participants** gagnent 60 🪙.",
+        "duration": 20,
+        "trigger_emoji": "🔥",
+        "threshold": 5,
+        "reward_coins": 60,
+    },
+    {
+        "id": "emoji_storm_heart",
+        "kind": "emoji_storm",
+        "emoji": "❤️",
+        "title": "❤️ Vague d'amour — postez ❤️",
+        "description": "Postez **❤️** dans les **15 secondes**. À partir de 3 participants : tous gagnent 50 🪙.",
+        "duration": 15,
+        "trigger_emoji": "❤️",
+        "threshold": 3,
+        "reward_coins": 50,
+    },
+    {
+        "id": "emoji_storm_thunder",
+        "kind": "emoji_storm",
+        "emoji": "⚡",
+        "title": "⚡ Coup de tonnerre — postez ⚡",
+        "description": "Postez **⚡** dans les **15 secondes**. Bonus collectif si on atteint 4 personnes.",
+        "duration": 15,
+        "trigger_emoji": "⚡",
+        "threshold": 4,
+        "reward_coins": 70,
+    },
+
+    # ─── GUESS NUMBER : bot pense un nombre, premier proche gagne ───
+    {
+        "id": "guess_number_classic",
+        "kind": "guess_number",
+        "emoji": "🎯",
+        "title": "🎯 Devine le nombre — 1 à 100",
+        "description": "Le bot a un nombre entre **1 et 100** en tête. Postez votre devinette dans le chat. Le plus proche dans **90 secondes** gagne **300 🪙**.",
+        "duration": 90,
+        "range_min": 1,
+        "range_max": 100,
+        "reward_coins": 300,
+    },
+
+    # ─── COLOR VOTE LIVE : sondage avec barre temps réel ───
+    {
+        "id": "color_vote_mood",
+        "kind": "color_vote_live",
+        "emoji": "🎨",
+        "title": "🎨 Couleur du moment du serveur",
+        "description": "Quelle couleur représente l'ambiance là maintenant ? Vote en cliquant. Résultat live.",
+        "duration": 120,
+        "options": [
+            {"emoji": "🔴", "label": "Énergique", "color": 0xE74C3C},
+            {"emoji": "🟡", "label": "Joyeuse", "color": 0xF1C40F},
+            {"emoji": "🟢", "label": "Apaisée", "color": 0x2ECC71},
+            {"emoji": "🔵", "label": "Mélancolique", "color": 0x3498DB},
+            {"emoji": "🟣", "label": "Mystérieuse", "color": 0x9B59B6},
+        ],
+        "reward_coins": 25,
+    },
+
+    # ─── PREDICTION : ranges sur futur événement ───
+    {
+        "id": "prediction_msgs",
+        "kind": "prediction",
+        "emoji": "🔮",
+        "title": "🔮 Prédiction — messages dans 20 min",
+        "description": "Combien de messages seront postés sur le serveur dans les **20 prochaines minutes** ? Vote ton range. Les vainqueurs touchent 200 🪙.",
+        "duration": 120,
+        "result_after": 1200,  # 20 min
+        "metric": "messages_count",
+        "ranges": ["0-10", "11-30", "31-60", "61-100", "100+"],
+        "reward_coins": 200,
+    },
+
+    # ─── CHAIN STORY : continue l'histoire 1 phrase à la fois ───
+    {
+        "id": "chain_dark_forest",
+        "kind": "chain_continue",
+        "emoji": "📖",
+        "title": "📖 Histoire collective — La forêt obscure",
+        "description": (
+            "Continuons cette histoire ensemble — postez **UNE phrase** dans le chat pour ajouter à l'histoire.\n\n"
+            "*« Marie pénétra dans la forêt. L'air était lourd, et au loin... »*\n\n"
+            "Au bout de **3 minutes**, le bot relit toute l'histoire."
+        ),
+        "duration": 180,
+        "opener": "Marie pénétra dans la forêt. L'air était lourd, et au loin...",
+        "reward_coins": 100,
+    },
+    {
+        "id": "chain_alien",
+        "kind": "chain_continue",
+        "emoji": "👽",
+        "title": "👽 Histoire collective — Le visiteur",
+        "description": (
+            "Une phrase par personne pour continuer cette histoire :\n\n"
+            "*« Le 12 mars 2026, je trouvais une lettre étrange dans ma boîte aux lettres. Elle disait simplement... »*"
+        ),
+        "duration": 180,
+        "opener": "Le 12 mars 2026, je trouvais une lettre étrange dans ma boîte aux lettres. Elle disait simplement...",
+        "reward_coins": 100,
+    },
+
+    # ─── IDENTITY SECRET : un membre reçoit un mot, fait deviner via emojis ───
+    {
+        "id": "identity_emoji_charades",
+        "kind": "identity_secret",
+        "emoji": "🎭",
+        "title": "🎭 Charades à l'emoji",
+        "description": (
+            "Un membre random reçoit en DM un **mot secret**. Il doit le faire deviner aux autres "
+            "en postant uniquement des **emojis** dans le chat (zéro mot !).\n\n"
+            "Premier à deviner gagne **150 🪙**."
+        ),
+        "duration": 180,
+        "word_pool": ["Pizza", "Lion", "Tour Eiffel", "Téléphone", "Pirate", "Dragon", "Plage", "Voiture", "Spider-Man", "Sushi"],
+        "reward_coins": 150,
+    },
+
+    # ─── POWER MOVE : 1 membre choisi reçoit un pouvoir ───
+    {
+        "id": "power_double_coins",
+        "kind": "power_move",
+        "emoji": "✨",
+        "title": "✨ Pouvoir éclair — la générosité",
+        "description": (
+            "Le bot a choisi un membre random qui vient de recevoir en DM **100 🪙 à donner** à un autre membre. "
+            "Le pouvoir expire dans 5 min."
+        ),
+        "duration": 300,
+        "power_coins": 100,
+    },
+
+    # ─── SYNC REACT : objectif collectif réagir en simultané ───
+    {
+        "id": "sync_react_5",
+        "kind": "sync_react",
+        "emoji": "🤝",
+        "title": "🤝 Synchronisation — 5 ❤️ en 30 sec",
+        "description": "Réagissez **❤️** à ce message ! Si on atteint **5 réactions** différentes dans 30 secondes, **TOUS** les participants gagnent 70 🪙.",
+        "duration": 30,
+        "target_emoji": "❤️",
+        "threshold": 5,
+        "reward_coins": 70,
+    },
+
+    # ─── RAPID FIRE : 3 questions express ───
+    {
+        "id": "rapid_fire_culture",
+        "kind": "rapid_fire",
+        "emoji": "🚀",
+        "title": "🚀 Rapid Fire — Culture express",
+        "description": "3 questions à la suite, **30 sec chacune**. Premier à répondre correctement = +50 🪙 par question.",
+        "questions": [
+            {"q": "Capitale de l'Australie ?", "a": "Canberra"},
+            {"q": "Combien de continents ?", "a": "7"},
+            {"q": "Année du premier homme sur la Lune ?", "a": "1969"},
+        ],
+        "duration_per_q": 30,
+        "reward_coins": 50,
+    },
+    {
+        "id": "rapid_fire_geo",
+        "kind": "rapid_fire",
+        "emoji": "🌍",
+        "title": "🌍 Rapid Fire — Géographie",
+        "description": "3 questions, 30 sec chacune. Bonne réponse = +50 🪙.",
+        "questions": [
+            {"q": "Plus grand océan ?", "a": "Pacifique"},
+            {"q": "Pays avec le plus d'habitants en 2025 ?", "a": "Inde"},
+            {"q": "Sommet le plus haut d'Europe ?", "a": "Elbrouz"},
+        ],
+        "duration_per_q": 30,
+        "reward_coins": 50,
+    },
 ]
 
 
-def random_game_night_prompts(n: int = 10) -> list:
-    """Tire N prompts random sans doublons pour une soirée."""
-    pool = list(GAME_NIGHT_PROMPTS)
+def random_game_night_events(n: int = 10) -> list:
+    """Tire N events random sans doublons d'IDs pour une soirée."""
+    pool = list(GAME_NIGHT_EVENTS)
     random.shuffle(pool)
     return pool[:min(n, len(pool))]
+
+
+# Alias legacy (au cas où du code l'utiliserait encore)
+GAME_NIGHT_PROMPTS = GAME_NIGHT_EVENTS
+random_game_night_prompts = random_game_night_events
 
 
 # =============================================================================
@@ -360,5 +576,7 @@ __all__ = [
     'WORLD_BOSSES', 'random_world_boss', 'get_world_boss',
     'DAILY_RIDDLES', 'random_riddle', 'get_riddle',
     'VOICE_CHAOS_ACTIONS', 'random_voice_chaos',
+    'GAME_NIGHT_EVENTS', 'random_game_night_events',
+    # Legacy aliases (compat)
     'GAME_NIGHT_PROMPTS', 'random_game_night_prompts',
 ]
