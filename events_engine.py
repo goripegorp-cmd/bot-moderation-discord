@@ -112,36 +112,46 @@ BOSS_CATALOG = [
 
 WEAPONS = [
     # Communes
-    {"name": "Bâton de bois",      "atk": 5,  "rarity": "commune",    "emoji": "🪵", "weight": 30},
-    {"name": "Couteau rouillé",    "atk": 7,  "rarity": "commune",    "emoji": "🔪", "weight": 30},
-    {"name": "Massue grossière",   "atk": 8,  "rarity": "commune",    "emoji": "🏏", "weight": 25},
+    {"name": "Bâton de bois",         "atk": 5,  "rarity": "commune",    "emoji": "🪵", "weight": 30},
+    {"name": "Couteau rouillé",       "atk": 7,  "rarity": "commune",    "emoji": "🔪", "weight": 30},
+    {"name": "Massue grossière",      "atk": 8,  "rarity": "commune",    "emoji": "🏏", "weight": 25},
     # Rares
-    {"name": "Épée d'acier",       "atk": 12, "rarity": "rare",       "emoji": "⚔️", "weight": 15},
-    {"name": "Arc elfique",        "atk": 14, "rarity": "rare",       "emoji": "🏹", "weight": 15},
-    {"name": "Hache de guerre",    "atk": 15, "rarity": "rare",       "emoji": "🪓", "weight": 12},
+    {"name": "Épée d'acier",          "atk": 12, "rarity": "rare",       "emoji": "⚔️", "weight": 15},
+    {"name": "Arc elfique",           "atk": 14, "rarity": "rare",       "emoji": "🏹", "weight": 15},
+    {"name": "Hache de guerre",       "atk": 15, "rarity": "rare",       "emoji": "🪓", "weight": 12},
     # Épiques
-    {"name": "Lame enflammée",     "atk": 22, "rarity": "épique",     "emoji": "🔥", "weight": 6},
-    {"name": "Foudre de Zeus",     "atk": 24, "rarity": "épique",     "emoji": "⚡", "weight": 5},
+    {"name": "Lame enflammée",        "atk": 22, "rarity": "épique",     "emoji": "🔥", "weight": 6},
+    {"name": "Foudre de Zeus",        "atk": 24, "rarity": "épique",     "emoji": "⚡", "weight": 5},
     # Légendaires
-    {"name": "Excalibur",          "atk": 40, "rarity": "légendaire", "emoji": "🗡️", "weight": 2},
-    {"name": "Mjölnir",            "atk": 45, "rarity": "légendaire", "emoji": "🔨", "weight": 1},
+    {"name": "Excalibur",             "atk": 40, "rarity": "légendaire", "emoji": "🗡️", "weight": 2},
+    {"name": "Mjölnir",               "atk": 45, "rarity": "légendaire", "emoji": "🔨", "weight": 1},
+    # Mythiques (Phase 39 — rarissimes, demandent des années de farm)
+    {"name": "Aurora Stellaria",      "atk": 60, "rarity": "mythique",   "emoji": "🌌", "weight": 1},
+    {"name": "Lame du Néant",         "atk": 65, "rarity": "mythique",   "emoji": "🕳️", "weight": 1},
+    # Divines (Phase 39 — quasi inaccessibles, drop super rare)
+    {"name": "Lame du Créateur",      "atk": 100, "rarity": "divine",    "emoji": "👁️", "weight": 1},
 ]
 
 ARMOR = [
     # Communes
-    {"name": "Tunique de coton",   "def": 2,  "rarity": "commune",    "emoji": "👕", "weight": 30},
-    {"name": "Cuir tanné",         "def": 4,  "rarity": "commune",    "emoji": "🦺", "weight": 30},
-    {"name": "Maille rouillée",    "def": 5,  "rarity": "commune",    "emoji": "⛓️", "weight": 25},
+    {"name": "Tunique de coton",      "def": 2,  "rarity": "commune",    "emoji": "👕", "weight": 30},
+    {"name": "Cuir tanné",            "def": 4,  "rarity": "commune",    "emoji": "🦺", "weight": 30},
+    {"name": "Maille rouillée",       "def": 5,  "rarity": "commune",    "emoji": "⛓️", "weight": 25},
     # Rares
-    {"name": "Cuirasse d'acier",   "def": 8,  "rarity": "rare",       "emoji": "🛡️", "weight": 15},
-    {"name": "Robe enchantée",     "def": 9,  "rarity": "rare",       "emoji": "🧥", "weight": 15},
-    {"name": "Armure de chevalier","def": 11, "rarity": "rare",       "emoji": "🪖", "weight": 12},
+    {"name": "Cuirasse d'acier",      "def": 8,  "rarity": "rare",       "emoji": "🛡️", "weight": 15},
+    {"name": "Robe enchantée",        "def": 9,  "rarity": "rare",       "emoji": "🧥", "weight": 15},
+    {"name": "Armure de chevalier",   "def": 11, "rarity": "rare",       "emoji": "🪖", "weight": 12},
     # Épiques
-    {"name": "Armure dragonique",  "def": 18, "rarity": "épique",     "emoji": "🐲", "weight": 6},
-    {"name": "Cape céleste",       "def": 16, "rarity": "épique",     "emoji": "🪶", "weight": 6},
+    {"name": "Armure dragonique",     "def": 18, "rarity": "épique",     "emoji": "🐲", "weight": 6},
+    {"name": "Cape céleste",          "def": 16, "rarity": "épique",     "emoji": "🪶", "weight": 6},
     # Légendaires
-    {"name": "Armure divine",      "def": 30, "rarity": "légendaire", "emoji": "✨", "weight": 2},
-    {"name": "Égide d'Athéna",     "def": 35, "rarity": "légendaire", "emoji": "🛡️", "weight": 1},
+    {"name": "Armure divine",         "def": 30, "rarity": "légendaire", "emoji": "✨", "weight": 2},
+    {"name": "Égide d'Athéna",        "def": 35, "rarity": "légendaire", "emoji": "🛡️", "weight": 1},
+    # Mythiques
+    {"name": "Cuirasse du Phénix",    "def": 50, "rarity": "mythique",   "emoji": "🔥", "weight": 1},
+    {"name": "Manteau d'Éternité",    "def": 55, "rarity": "mythique",   "emoji": "♾️", "weight": 1},
+    # Divines
+    {"name": "Égide Cosmique",        "def": 80, "rarity": "divine",     "emoji": "🌠", "weight": 1},
 ]
 
 RARITY_COLORS = {
@@ -149,6 +159,8 @@ RARITY_COLORS = {
     "rare":       0x3498DB,
     "épique":     0x9B59B6,
     "légendaire": 0xF1C40F,
+    "mythique":   0xE74C3C,
+    "divine":     0xFFFFFF,
 }
 
 RARITY_EMOJIS = {
@@ -156,6 +168,18 @@ RARITY_EMOJIS = {
     "rare":       "🔵",
     "épique":     "🟣",
     "légendaire": "🟡",
+    "mythique":   "🔴",
+    "divine":     "🌟",
+}
+
+# Phase 39 : ordre numérique des raretés (utilisé pour comparaisons + soft cap)
+RARITY_ORDER = {
+    "commune":    0,
+    "rare":       1,
+    "épique":     2,
+    "légendaire": 3,
+    "mythique":   4,
+    "divine":     5,
 }
 
 
@@ -271,24 +295,32 @@ def serialize_overwrites(overwrites: dict) -> dict:
 # REWARDS
 # =============================================================================
 
-def compute_rewards(participants: list[dict], boss_max_hp: int, victory: bool, coin_multiplier: float = 1.0) -> list[dict]:
+def compute_rewards(
+    participants: list[dict],
+    boss_max_hp: int,
+    victory: bool,
+    coin_multiplier: float = 1.0,
+    player_inventories: Optional[dict] = None,
+) -> list[dict]:
     """Calcule les récompenses pour chaque participant.
 
     participants : [{"user_id": int, "damage": int, "attacks": int}, ...]
+    player_inventories : Phase 39 — optionnel : {user_id: {"weapon": {...}, "armor": {...}}}
+                         Permet d'appliquer le soft cap (moins de chance de drop de la même rareté).
     Retourne : [{"user_id": int, "coins": int, "gear": Optional[dict]}, ...]
     """
     if not participants:
         return []
 
+    player_inventories = player_inventories or {}
+
     rewards = []
-    # Trier par dégâts décroissants
     sorted_parts = sorted(participants, key=lambda p: p.get("damage", 0), reverse=True)
     top_3_ids = {p["user_id"] for p in sorted_parts[:3]}
 
     for p in participants:
         dmg = p.get("damage", 0)
         atks = p.get("attacks", 0)
-        # Base coins : proportionnels aux dégâts
         if victory:
             base_coins = int(50 + (dmg / boss_max_hp) * 500)
         else:
@@ -296,17 +328,49 @@ def compute_rewards(participants: list[dict], boss_max_hp: int, victory: bool, c
         coins = int(base_coins * coin_multiplier)
 
         gear = None
-        # Drop gear (top 3 ont une chance accrue)
         if victory:
             drop_chance = 0.5 if p["user_id"] in top_3_ids else 0.2
             if random.random() < drop_chance:
                 # 50/50 weapon ou armor
-                if random.random() < 0.5:
-                    gear = random_weapon(rarity_bias=2.0 if p["user_id"] in top_3_ids else 1.0)
-                    gear["slot"] = "weapon"
-                else:
-                    gear = random_armor(rarity_bias=2.0 if p["user_id"] in top_3_ids else 1.0)
-                    gear["slot"] = "armor"
+                slot = "weapon" if random.random() < 0.5 else "armor"
+                rarity_bias = 2.0 if p["user_id"] in top_3_ids else 1.0
+
+                # Phase 39 : SOFT CAP — si le joueur a déjà la même rareté ou plus,
+                # on RÉDUIT massivement la chance de drop de rareté équivalente.
+                # Force la diversité et la rareté des hauts tiers.
+                inv = player_inventories.get(p["user_id"], {})
+                current = inv.get(slot, {}) or {}
+                current_rarity = current.get("rarity", "commune")
+                current_order = RARITY_ORDER.get(current_rarity, 0)
+
+                # On essaie de générer un gear plusieurs fois, en respectant le soft cap
+                for attempt in range(5):
+                    candidate = random_weapon(rarity_bias=rarity_bias) if slot == "weapon" else random_armor(rarity_bias=rarity_bias)
+                    cand_rarity = candidate.get("rarity", "commune")
+                    cand_order = RARITY_ORDER.get(cand_rarity, 0)
+
+                    # Soft cap : si le candidat est de rareté égale ou inférieure
+                    # à ce que le joueur a déjà, on a 80% de chance de re-tirer
+                    # (donc on essaie de drop quelque chose de mieux)
+                    if cand_order <= current_order and current_order > 0:
+                        if random.random() < 0.80:
+                            continue  # re-tirage
+                    # Si le candidat est supérieur, on accepte mais avec soft cap
+                    # sur les hauts tiers (mythique/divine ont chacun 60% de drop)
+                    if cand_order >= 4:  # mythique ou divine
+                        if random.random() > 0.40:  # 60% chance de rejet → reroll
+                            continue
+                    gear = candidate
+                    gear["slot"] = slot
+                    break
+
+                if not gear:
+                    # Fallback : tirage simple
+                    if slot == "weapon":
+                        gear = random_weapon()
+                    else:
+                        gear = random_armor()
+                    gear["slot"] = slot
 
         rewards.append({
             "user_id": p["user_id"],
@@ -1121,7 +1185,7 @@ __all__ = [
     # Catalogues
     "BOSS_CATALOG", "WEAPONS", "ARMOR", "TREASURE_CATALOG", "QUIZ_QUESTIONS",
     "BADGE_CATALOG", "RANK_TIERS", "EVENT_RANK_ROLES", "COMBO_THRESHOLDS",
-    "RARITY_COLORS", "RARITY_EMOJIS",
+    "RARITY_COLORS", "RARITY_EMOJIS", "RARITY_ORDER",
     "HELP_TIPS", "PERSONAL_RIDDLES",
     "SPEED_REACT_EMOJIS", "MYSTERY_BOX_TYPES", "DAILY_SPARKS",
     "CLASSES", "VOICE_ZONES",

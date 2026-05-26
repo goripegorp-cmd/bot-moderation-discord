@@ -1496,6 +1496,10 @@ async def cfg(gid):
         'event_type_boss_enabled': True,
         'event_type_treasure_enabled': True,
         'event_type_quiz_enabled': True,
+        # Phase 39 : notifications événements (2 tiers opt-in)
+        # Les rôles sont auto-créés à la 1ère utilisation de /notify
+        'notify_role_important_id': 0,  # ping seulement pour boss raids
+        'notify_role_all_id': 0,        # ping pour TOUS les events
         # Phase 33 : événements personnels (DM-style via ping+button → ephemeral)
         'personal_events_enabled': True,
         'personal_events_interval_min': 20,  # Phase 35: 30→20 (plus fréquent)
@@ -6401,10 +6405,17 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
         try:
             view = BossAttackView(event_id)
             embed = _build_boss_embed(boss, [], ends_at_dt, guild)
+            # Phase 39 : ping les rôles de notification
+            ping_str = await _get_event_mention(guild, 'boss_raid')
             arena_msg = await arena_channel.send(
-                content="🚨 **UN BOSS APPARAÎT !** Tous les membres : préparez-vous au combat !",
+                content=(
+                    f"🚨 **UN BOSS APPARAÎT !** Tous les membres : préparez-vous au combat !"
+                    + (f"\n{ping_str}" if ping_str else "")
+                    + "\n_💡 Pas envie d'être ping ? Utilise `/notify niveau:🔕 Aucun`._"
+                ),
                 embed=embed,
                 view=view,
+                allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False),
             )
             async with get_db() as db:
                 await db.execute(
@@ -7093,7 +7104,23 @@ async def _end_active_event(guild, *, victory: bool, reason: str = ""):
         c = await cfg(guild.id)
         coin_mult = float(c.get('event_coin_multiplier', 1.0) or 1.0)
         boss_max_hp = int(boss.get('max_hp', 1000))
-        rewards = events2026.compute_rewards(participants, boss_max_hp, victory, coin_mult)
+
+        # Phase 39 : charger les inventaires actuels pour le soft cap
+        player_inventories_for_rewards = {}
+        for p in participants:
+            try:
+                inv_p = await _get_or_create_inventory(guild.id, p['user_id'])
+                player_inventories_for_rewards[p['user_id']] = {
+                    'weapon': inv_p.get('weapon', {}),
+                    'armor': inv_p.get('armor', {}),
+                }
+            except Exception:
+                pass
+
+        rewards = events2026.compute_rewards(
+            participants, boss_max_hp, victory, coin_mult,
+            player_inventories=player_inventories_for_rewards,
+        )
 
         # Appliquer rewards : add coins via économy, équiper le gear si meilleur
         reward_lines = []
@@ -7308,7 +7335,9 @@ async def _check_badges_and_ranks(guild, participants: list, victory: bool, tier
                 inv = await _get_or_create_inventory(guild.id, uid)
                 weapon = inv.get('weapon', {}) or {}
                 armor = inv.get('armor', {}) or {}
-                has_legendary = (weapon.get('rarity') == 'légendaire') or (armor.get('rarity') == 'légendaire')
+                # Phase 39 : "has_legendary" inclut désormais mythique/divine aussi
+                hi_rarities = ('légendaire', 'mythique', 'divine')
+                has_legendary = (weapon.get('rarity') in hi_rarities) or (armor.get('rarity') in hi_rarities)
 
                 # 4. Crit streak in-mem
                 crit_streak = _crit_streaks.get((guild.id, uid), 0)
@@ -7506,7 +7535,7 @@ class TreasureClaimView(View):
                 inv = await _get_or_create_inventory(i.guild.id, i.user.id)
                 slot = gear.get('slot', 'weapon')
                 cur_gear = inv.get(slot, {}) or {}
-                rank_order = {"commune": 0, "rare": 1, "épique": 2, "légendaire": 3}
+                rank_order = events2026.RARITY_ORDER
                 if rank_order.get(gear.get('rarity', 'commune'), 0) >= rank_order.get(cur_gear.get('rarity', 'commune'), 0):
                     inv[slot] = {
                         'name': gear['name'], 'rarity': gear['rarity'],
@@ -7606,7 +7635,12 @@ async def _start_treasure_hunt(guild, triggered_by_id: int, *, manual: bool = Fa
         )
         intro_embed.set_footer(text=f"{guild.name} · Chasse au Trésor", icon_url=(guild.icon.url if guild.icon else None))
         try:
-            arena_msg = await arena_channel.send(content="🚨 **CHASSE AU TRÉSOR LANCÉE !**", embed=intro_embed)
+            ping_str = await _get_event_mention(guild, 'treasure_hunt')
+            arena_msg = await arena_channel.send(
+                content=(f"🚨 **CHASSE AU TRÉSOR LANCÉE !**" + (f"\n{ping_str}" if ping_str else "")),
+                embed=intro_embed,
+                allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False),
+            )
             async with get_db() as db:
                 await db.execute(
                     'UPDATE events SET arena_channel_id=?, arena_message_id=? WHERE id=?',
@@ -7865,7 +7899,12 @@ async def _start_quiz(guild, triggered_by_id: int, *, manual: bool = False) -> d
         )
         intro_embed.set_footer(text=f"{guild.name} · Quiz", icon_url=(guild.icon.url if guild.icon else None))
         try:
-            arena_msg = await arena_channel.send(embed=intro_embed)
+            ping_str = await _get_event_mention(guild, 'quiz')
+            arena_msg = await arena_channel.send(
+                content=(f"🎓 **QUIZ COMMUNAUTAIRE !**" + (f"\n{ping_str}" if ping_str else "")),
+                embed=intro_embed,
+                allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False),
+            )
             async with get_db() as db:
                 await db.execute(
                     'UPDATE events SET arena_channel_id=?, arena_message_id=? WHERE id=?',
@@ -8088,7 +8127,7 @@ class EventShopPanelV2(LayoutView):
             inv = await _get_or_create_inventory(self.g.id, self.u.id)
             slot = it.get('slot', 'weapon')
             cur_gear = inv.get(slot, {}) or {}
-            rank_order = {"commune": 0, "rare": 1, "épique": 2, "légendaire": 3}
+            rank_order = events2026.RARITY_ORDER
             equipped_msg = ""
             if rank_order.get(it.get('rarity', 'commune'), 0) >= rank_order.get(cur_gear.get('rarity', 'commune'), 0):
                 inv[slot] = {
@@ -9179,6 +9218,199 @@ async def vocal_optin_cmd(i: discord.Interaction):
             pass
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 39 — SMART PING SYSTEM (2 tiers opt-in)
+#  Solution au problème du chicken-and-egg : les membres ont besoin de pings
+#  pour voir les events, mais ne s'inscrivent pas s'ils ne savent pas.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def _ensure_notify_role(guild, tier: str) -> Optional[discord.Role]:
+    """Récupère ou crée le rôle de notification pour ce tier.
+
+    tier : 'important' (boss raids only) ou 'all' (tous les events)
+    """
+    try:
+        c = await cfg(guild.id)
+        key = f'notify_role_{tier}_id'
+        role_id = int(c.get(key, 0) or 0)
+        if role_id:
+            role = guild.get_role(role_id)
+            if role:
+                return role
+            # Role configuré mais supprimé → reset et recréer
+            await db_set(guild.id, key, 0)
+
+        # Créer le rôle
+        if tier == 'important':
+            role_name = "🔔 Événements Important"
+            color = 0xE74C3C
+            reason = "Auto-créé par /notify (Phase 39 - notifications importantes)"
+        else:
+            role_name = "📢 Tous les Événements"
+            color = 0x3498DB
+            reason = "Auto-créé par /notify (Phase 39 - notifications complètes)"
+
+        # Chercher d'abord si un rôle avec ce nom existe déjà
+        existing = discord.utils.get(guild.roles, name=role_name)
+        if existing:
+            await db_set(guild.id, key, existing.id)
+            return existing
+
+        try:
+            role = await guild.create_role(
+                name=role_name,
+                color=discord.Color(color),
+                mentionable=True,
+                hoist=False,
+                reason=reason,
+            )
+            await db_set(guild.id, key, role.id)
+            return role
+        except discord.Forbidden:
+            print(f"[_ensure_notify_role {tier}] perm refusée")
+            return None
+        except Exception as ex:
+            print(f"[_ensure_notify_role {tier}] {ex}")
+            return None
+    except Exception as ex:
+        print(f"[_ensure_notify_role outer] {ex}")
+        return None
+
+
+async def _get_event_mention(guild, event_type: str) -> str:
+    """Phase 39 : retourne la string de mention appropriée pour ce type d'event.
+
+    event_type : 'boss_raid' / 'treasure_hunt' / 'quiz' / 'mystery_box'
+    Pour boss_raid : ping @Important + @All
+    Pour autres : ping @All uniquement
+    """
+    try:
+        mentions = []
+        c = await cfg(guild.id)
+        all_role_id = int(c.get('notify_role_all_id', 0) or 0)
+        important_role_id = int(c.get('notify_role_important_id', 0) or 0)
+
+        if event_type == 'boss_raid':
+            # Big event → ping les 2 tiers
+            if important_role_id:
+                role = guild.get_role(important_role_id)
+                if role:
+                    mentions.append(role.mention)
+            if all_role_id:
+                role = guild.get_role(all_role_id)
+                if role:
+                    mentions.append(role.mention)
+        else:
+            # Light event → ping seulement le tier "all"
+            if all_role_id:
+                role = guild.get_role(all_role_id)
+                if role:
+                    mentions.append(role.mention)
+
+        return " ".join(mentions) if mentions else ""
+    except Exception as ex:
+        print(f"[_get_event_mention] {ex}")
+        return ""
+
+
+@bot.tree.command(
+    name="notify",
+    description="🔔 Active/désactive les notifications pour les événements"
+)
+@app_commands.describe(niveau="Niveau de notifications souhaité")
+@app_commands.choices(niveau=[
+    app_commands.Choice(name="🔔 Important — seulement les gros raids", value="important"),
+    app_commands.Choice(name="📢 Tous les événements — pings complets", value="all"),
+    app_commands.Choice(name="🔕 Aucun — désactiver toutes les notifs", value="off"),
+])
+async def notify_cmd(i: discord.Interaction, niveau: app_commands.Choice[str]):
+    try:
+        await i.response.defer(ephemeral=True)
+        choice = niveau.value
+        guild = i.guild
+        member = i.user
+
+        if choice == 'off':
+            # Retirer les 2 rôles si présents
+            c = await cfg(guild.id)
+            removed = []
+            for tier in ('important', 'all'):
+                rid = int(c.get(f'notify_role_{tier}_id', 0) or 0)
+                if rid:
+                    role = guild.get_role(rid)
+                    if role and role in member.roles:
+                        try:
+                            await member.remove_roles(role, reason="Désactivation notifications /notify")
+                            removed.append(role.name)
+                        except Exception:
+                            pass
+            if removed:
+                msg = f"🔕 **Notifications désactivées.**\nRôles retirés : {', '.join(removed)}"
+            else:
+                msg = "🔕 Tu n'avais aucun rôle de notification actif."
+            return await i.followup.send(msg, ephemeral=True)
+
+        # Activer un tier
+        target_role = await _ensure_notify_role(guild, choice)
+        if not target_role:
+            return await i.followup.send(
+                "❌ Le bot n'a pas la permission **Gérer les rôles** pour créer le rôle de notification.\n"
+                "Demande à un admin de donner cette permission au bot.",
+                ephemeral=True,
+            )
+
+        # Si on prend "important", retirer "all" (mutually exclusive — un seul tier à la fois)
+        # Et si on prend "all", retirer "important"
+        other_tier = 'all' if choice == 'important' else 'important'
+        c = await cfg(guild.id)
+        other_role_id = int(c.get(f'notify_role_{other_tier}_id', 0) or 0)
+        if other_role_id:
+            other_role = guild.get_role(other_role_id)
+            if other_role and other_role in member.roles:
+                try:
+                    await member.remove_roles(other_role, reason="Changement de tier notifications")
+                except Exception:
+                    pass
+
+        if target_role in member.roles:
+            return await i.followup.send(
+                f"ℹ️ Tu as déjà le rôle {target_role.mention}.",
+                ephemeral=True,
+            )
+        try:
+            await member.add_roles(target_role, reason=f"Activation notifications {choice} via /notify")
+        except discord.Forbidden:
+            return await i.followup.send(
+                "❌ Le bot n'a pas la permission d'ajouter ce rôle (vérifier la hiérarchie).",
+                ephemeral=True,
+            )
+
+        if choice == 'important':
+            await i.followup.send(
+                f"🔔 **Notifications activées : {target_role.mention}**\n\n"
+                f"Tu seras ping **uniquement** quand un **Boss Raid** démarre.\n"
+                f"_Pas de spam — juste les gros événements importants._\n\n"
+                f"💡 Pour tout recevoir : `/notify niveau:📢 Tous les événements`\n"
+                f"💡 Pour désactiver : `/notify niveau:🔕 Aucun`",
+                ephemeral=True,
+            )
+        else:  # all
+            await i.followup.send(
+                f"📢 **Notifications activées : {target_role.mention}**\n\n"
+                f"Tu seras ping pour **TOUS les événements** :\n"
+                f"⚔️ Boss Raids · 💎 Chasses au trésor · 🎓 Quiz · 📦 Mystery Boxes\n\n"
+                f"_Tu peux désactiver à tout moment avec `/notify niveau:🔕 Aucun`._",
+                ephemeral=True,
+            )
+    except Exception as ex:
+        print(f"[/notify] {ex}")
+        try:
+            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
 @bot.tree.command(name="help", description="📖 Aide complète : toutes les commandes disponibles")
 async def help_cmd(i: discord.Interaction):
     try:
@@ -9196,7 +9428,10 @@ async def help_cmd(i: discord.Interaction):
                 "• `/badges` — tes badges et ton rang\n"
                 "• `/event_shop` — boutique d'équipements (rotation hebdo)\n"
                 "• `/duel @membre [mise]` — défier un membre en combat 1v1\n"
-                "• `/leaderboard` — classement (pièces · messages · vocal)"
+                "• `/leaderboard` — classement (pièces · messages · vocal)\n"
+                "• `/notify` — gère tes notifications d'événements (🔔/📢/🔕)\n"
+                "• `/class choose` — choisis ta classe (Tank/DPS/Healer/Mage/Rogue/Bard)\n"
+                "• `/vocal_optin` — autorise le bot à te déplacer entre vocaux pendant un raid"
             ),
             inline=False,
         )
@@ -9433,7 +9668,7 @@ class MysteryBoxView(View):
                     inv = await _get_or_create_inventory(i.guild.id, i.user.id)
                     slot = gear.get('slot', 'weapon')
                     cur_g = inv.get(slot, {}) or {}
-                    rank_order = {"commune": 0, "rare": 1, "épique": 2, "légendaire": 3}
+                    rank_order = events2026.RARITY_ORDER
                     if rank_order.get(gear.get('rarity', 'commune'), 0) >= rank_order.get(cur_g.get('rarity', 'commune'), 0):
                         inv[slot] = {
                             'name': gear['name'], 'rarity': gear['rarity'],
@@ -9526,7 +9761,15 @@ async def _drop_mystery_box(guild) -> bool:
         # Envoyer avec auto-delete 5 min
         v = MysteryBoxView()
         try:
-            msg = await ch.send(embed=e, view=v)
+            # Phase 39 : ping le rôle "all" si configuré
+            ping_str = await _get_event_mention(guild, 'mystery_box')
+            send_content = ping_str if ping_str else None
+            msg = await ch.send(
+                content=send_content,
+                embed=e,
+                view=v,
+                allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False),
+            )
         except Exception as ex:
             print(f"[MysteryBox send] {ex}")
             # En cas d'erreur, on déférence l'unmask
