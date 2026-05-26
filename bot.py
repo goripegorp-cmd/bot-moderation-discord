@@ -2223,6 +2223,38 @@ async def db_init():
             triggered_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )''')
 
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 64 — SÉCURITÉ + OWNER : Alt detection + Toxicity + Auto slow
+        # ═══════════════════════════════════════════════════════════════════
+        await db.execute('''CREATE TABLE IF NOT EXISTS alt_detection_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            new_user_id INTEGER,
+            similar_to_user_id INTEGER,
+            reason TEXT,
+            confidence REAL,
+            detected_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+
+        await db.execute('''CREATE TABLE IF NOT EXISTS user_toxicity_scores (
+            guild_id INTEGER,
+            user_id INTEGER,
+            score INTEGER DEFAULT 0,
+            last_warning_at DATETIME,
+            staff_notified INTEGER DEFAULT 0,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (guild_id, user_id)
+        )''')
+
+        await db.execute('''CREATE TABLE IF NOT EXISTS auto_slow_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            channel_id INTEGER,
+            slow_delay INTEGER,
+            triggered_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            cleared_at DATETIME
+        )''')
+
         # Marketplace : annonces de vente entre joueurs
         await db.execute('''CREATE TABLE IF NOT EXISTS marketplace_listings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36683,6 +36715,12 @@ async def on_member_join(m):
     except Exception as ex:
         print(f"[onboarding_dm schedule] {ex}")
 
+    # ═══ Phase 64 : alt detection heuristic ═══
+    try:
+        await _check_alt_account(m)
+    except Exception as ex:
+        print(f"[_check_alt_account] {ex}")
+
     # ═══ Phase 49 : NPC greeting (proba 30% pour pas spammer) ═══
     try:
         if random.random() < 0.30:
@@ -37182,6 +37220,16 @@ async def on_message(msg):
         await _check_easter_eggs(msg)
     except Exception as ex:
         print(f"[_check_easter_eggs] {ex}")
+
+    # ═══════════════ Phase 64 : toxicity score + auto slow mode ═══════════════
+    try:
+        await _track_toxicity(msg)
+    except Exception as ex:
+        print(f"[_track_toxicity] {ex}")
+    try:
+        await _check_auto_slow_mode(msg)
+    except Exception as ex:
+        print(f"[_check_auto_slow_mode] {ex}")
 
     # ═══════════════ Phase 43 : Tag Royale chain progression ═══════════════
     try:
@@ -61198,6 +61246,324 @@ async def narrative_choices_resolver_task():
 @narrative_choices_resolver_task.before_loop
 async def _narrative_resolver_wait():
     await bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 64 — SÉCURITÉ + OWNER AVANCÉ : Alt detection + Toxicity + Slow auto + Journey
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── ALT DETECTION (heuristique légère sur on_member_join) ──────────────────
+
+
+_TOXIC_WORDS = {
+    "ftg", "fdp", "pute", "salope", "connard", "enculé", "encule",
+    "nique", "bitch", "fuck", "shit", "wtf", "tg", "ntm",
+}
+
+
+async def _check_alt_account(member: discord.Member):
+    """Check si un nouveau membre ressemble suspectement à un membre existant.
+
+    Heuristique :
+    - Compte créé < 7 jours
+    - Username similar (≥80%) à un membre banni récent OU à un membre actuel
+    """
+    if not member.guild or member.bot:
+        return
+    try:
+        # Skip si compte créé > 7 jours (probablement pas un alt)
+        if member.created_at and (datetime.now(timezone.utc) - member.created_at).days > 7:
+            return
+        # Récupérer un échantillon de membres pour comparaison
+        from difflib import SequenceMatcher
+        my_name = (member.name or "").lower()
+        if not my_name or len(my_name) < 3:
+            return
+        candidates = []
+        for other in list(member.guild.members)[:200]:
+            if other.bot or other.id == member.id:
+                continue
+            other_name = (other.name or "").lower()
+            if not other_name or len(other_name) < 3:
+                continue
+            ratio = SequenceMatcher(None, my_name, other_name).ratio()
+            if ratio >= 0.80:
+                candidates.append((other, ratio))
+        if not candidates:
+            return
+        # Pick le top candidat
+        candidates.sort(key=lambda x: -x[1])
+        top, ratio = candidates[0]
+        # Log
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO alt_detection_log"
+                "(guild_id, new_user_id, similar_to_user_id, reason, confidence) "
+                "VALUES(?, ?, ?, ?, ?)",
+                (member.guild.id, member.id, top.id,
+                 f"username similar (ratio={ratio:.2f}) + account < 7 days", ratio),
+            )
+            await db.commit()
+        # DM owner si confiance > 0.9
+        if ratio >= 0.90:
+            try:
+                owner = member.guild.owner
+                if owner:
+                    await owner.send(
+                        embed=discord.Embed(
+                            title="🚨 Alt detection — Nouveau membre suspect",
+                            description=(
+                                f"**Nouveau :** {member.mention} (`{member.name}`)\n"
+                                f"**Similaire à :** {top.mention} (`{top.name}`)\n"
+                                f"**Similarité :** `{ratio:.2f}` ({int(ratio*100)}%)\n"
+                                f"**Compte créé il y a :** `{(datetime.now(timezone.utc) - member.created_at).days}` jours\n\n"
+                                f"_Pas auto-banni. Vérifie manuellement si besoin._"
+                            ),
+                            color=0xE74C3C,
+                            timestamp=datetime.now(timezone.utc),
+                        ),
+                    )
+            except Exception:
+                pass
+        print(f"[ALT DETECT] guild={member.guild.id} new={member.id} similar={top.id} ratio={ratio:.2f}")
+    except Exception as ex:
+        print(f"[_check_alt_account] {ex}")
+
+
+# ─── ANTI-TOXICITY PASSIVE (score, alerte staff si trop) ─────────────────────
+
+
+async def _track_toxicity(msg):
+    """Compte les mots toxiques par user. Alerte staff si seuil dépassé."""
+    if not msg.guild or msg.author.bot:
+        return
+    try:
+        content_lower = (msg.content or "").lower()
+        toxic_count = sum(1 for word in _TOXIC_WORDS if word in content_lower)
+        if toxic_count == 0:
+            return
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO user_toxicity_scores(guild_id, user_id, score) VALUES(?,?,?) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                "score = score + ?, updated_at=CURRENT_TIMESTAMP",
+                (msg.guild.id, msg.author.id, toxic_count, toxic_count),
+            )
+            await db.commit()
+        # Check seuil : 10 points = staff alert
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT score, staff_notified FROM user_toxicity_scores "
+                "WHERE guild_id=? AND user_id=?",
+                (msg.guild.id, msg.author.id),
+            ) as cur:
+                row = await cur.fetchone()
+        if row and int(row[0]) >= 10 and int(row[1]) == 0:
+            # Notifier staff
+            c = await cfg(msg.guild.id)
+            log_id = int(c.get('mod_log_channel', 0) or 0)
+            log_ch = msg.guild.get_channel(log_id) if log_id else None
+            if log_ch:
+                try:
+                    await log_ch.send(
+                        embed=discord.Embed(
+                            title="⚠️ Toxicité user élevée",
+                            description=(
+                                f"**{msg.author.mention}** a accumulé `{int(row[0])}` "
+                                f"signaux toxiques sur ses messages.\n\n"
+                                f"_Pas auto-sanction. Surveillance staff recommandée._"
+                            ),
+                            color=0xF39C12,
+                            timestamp=datetime.now(timezone.utc),
+                        ),
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                except Exception:
+                    pass
+            async with get_db() as db:
+                await db.execute(
+                    "UPDATE user_toxicity_scores SET staff_notified=1 WHERE guild_id=? AND user_id=?",
+                    (msg.guild.id, msg.author.id),
+                )
+                await db.commit()
+    except Exception as ex:
+        print(f"[_track_toxicity] {ex}")
+
+
+# ─── SLOW MODE AUTO-DYNAMIQUE ────────────────────────────────────────────────
+
+
+_channel_msg_rates: dict = {}  # channel_id → [timestamps des derniers msgs]
+
+
+async def _check_auto_slow_mode(msg):
+    """Active slow mode si > 30 msgs/min dans un channel."""
+    if not msg.guild or msg.author.bot:
+        return
+    try:
+        cid = msg.channel.id
+        now_ts = datetime.now(timezone.utc).timestamp()
+        timestamps = _channel_msg_rates.setdefault(cid, [])
+        # Purge old (> 60s)
+        timestamps = [t for t in timestamps if t > now_ts - 60]
+        timestamps.append(now_ts)
+        _channel_msg_rates[cid] = timestamps[-100:]  # garde max 100 last
+        # Si > 30 msgs/min, activer slow 5s
+        if len(timestamps) > 30:
+            # Check si déjà en slow
+            if msg.channel.slowmode_delay > 0:
+                return
+            try:
+                await msg.channel.edit(slowmode_delay=5, reason="Auto-slow : > 30 msgs/min")
+                async with get_db() as db:
+                    await db.execute(
+                        "INSERT INTO auto_slow_log(guild_id, channel_id, slow_delay) VALUES(?,?,?)",
+                        (msg.guild.id, cid, 5),
+                    )
+                    await db.commit()
+                # Schedule lift après 2 min de calme
+                async def _lift_slow(ch_id):
+                    await asyncio.sleep(120)
+                    try:
+                        # Check si toujours bas
+                        now_ts2 = datetime.now(timezone.utc).timestamp()
+                        rt = _channel_msg_rates.get(ch_id, [])
+                        rt = [t for t in rt if t > now_ts2 - 60]
+                        if len(rt) < 10:
+                            ch_obj = msg.guild.get_channel(ch_id)
+                            if ch_obj and ch_obj.slowmode_delay > 0:
+                                await ch_obj.edit(slowmode_delay=0, reason="Auto-slow : calme revenu")
+                                async with get_db() as db:
+                                    await db.execute(
+                                        "UPDATE auto_slow_log SET cleared_at=CURRENT_TIMESTAMP "
+                                        "WHERE channel_id=? AND cleared_at IS NULL",
+                                        (ch_id,),
+                                    )
+                                    await db.commit()
+                    except Exception:
+                        pass
+                asyncio.create_task(_lift_slow(cid))
+                print(f"[AUTO SLOW] channel={cid} 5s activé")
+            except discord.Forbidden:
+                pass
+            except Exception as ex:
+                print(f"[auto_slow edit] {ex}")
+    except Exception as ex:
+        print(f"[_check_auto_slow_mode] {ex}")
+
+
+# ─── MEMBER JOURNEY (slash owner) ────────────────────────────────────────────
+
+
+@bot.tree.command(
+    name="admin_journey",
+    description="📜 [Owner] Voir le parcours complet d'un membre depuis son arrivée",
+)
+@app_commands.describe(membre="Le membre à explorer")
+async def admin_journey_cmd(i: discord.Interaction, membre: discord.Member):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        gid = i.guild.id
+        # Joined date
+        joined = membre.joined_at
+        days_in = (datetime.now(timezone.utc) - joined).days if joined else 0
+        # First message
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT MIN(created_at) FROM member_activity WHERE guild_id=? AND user_id=? "
+                "AND activity_type='message'",
+                (gid, membre.id),
+            ) as cur:
+                row = await cur.fetchone()
+        first_msg = row[0] if row and row[0] else "_Jamais_"
+        # Total messages
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM member_activity WHERE guild_id=? AND user_id=? "
+                "AND activity_type='message'",
+                (gid, membre.id),
+            ) as cur:
+                total_msgs = int((await cur.fetchone() or [0])[0])
+        # Level + coins
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT level, xp, coins FROM economy WHERE guild_id=? AND user_id=?",
+                (gid, membre.id),
+            ) as cur:
+                row = await cur.fetchone()
+        level = int(row[0]) if row else 0
+        xp = int(row[1]) if row else 0
+        coins = int(row[2]) if row else 0
+        # Achievements count
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM achievements_unlocked WHERE guild_id=? AND user_id=?",
+                (gid, membre.id),
+            ) as cur:
+                ach_count = int((await cur.fetchone() or [0])[0])
+        # Class
+        cls = await _get_user_class(gid, membre.id)
+        cls_str = f"{cls['emoji']} {cls['name']}" if cls else "_Aucune_"
+        # Titles
+        titles = await _get_user_titles(gid, membre.id)
+        # Ladder
+        ladder = await _get_ladder_rating(gid, membre.id)
+        # Shoutouts received
+        shouts = await _count_shoutouts_received(gid, membre.id)
+        # Toxicity score
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT score FROM user_toxicity_scores WHERE guild_id=? AND user_id=?",
+                (gid, membre.id),
+            ) as cur:
+                row = await cur.fetchone()
+        tox_score = int(row[0]) if row else 0
+        # Alt detection
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT confidence FROM alt_detection_log WHERE guild_id=? AND new_user_id=? "
+                "ORDER BY detected_at DESC LIMIT 1",
+                (gid, membre.id),
+            ) as cur:
+                row = await cur.fetchone()
+        alt_warning = f"⚠️ Alt suspect ({float(row[0]):.2f})" if row else "✅ Aucune alerte"
+
+        e = discord.Embed(
+            title=f"📜 Journey : {membre.display_name}",
+            description=(
+                f"**Compte créé :** <t:{int(membre.created_at.timestamp())}:R>\n"
+                f"**Rejoint serveur :** {joined.strftime('%Y-%m-%d') if joined else '?'} (`{days_in}` j)\n"
+                f"**1er message :** `{first_msg}`\n\n"
+                f"## 📊 Stats\n"
+                f"💬 Messages : `{total_msgs:,}`\n"
+                f"🎚️ Level : `{level}` · XP : `{xp:,}` · 🪙 : `{coins:,}`\n"
+                f"🏅 Achievements : `{ach_count}`\n"
+                f"💝 Shoutouts reçus : `{shouts}`\n\n"
+                f"## ⚔️ Profil\n"
+                f"**Classe RP :** {cls_str}\n"
+                f"**Titres :** `{len(titles)}` ({', '.join(t['title'][:30] for t in titles[:3])})\n"
+                f"**Ladder :** {_rating_division(ladder['rating'])} `{ladder['rating']}` "
+                f"(W:{ladder['wins']} L:{ladder['losses']})\n\n"
+                f"## 🚨 Sécurité\n"
+                f"**Toxicity score :** `{tox_score}`\n"
+                f"**Alt detection :** {alt_warning}"
+            ),
+            color=0x3498DB,
+            timestamp=datetime.now(timezone.utc),
+        )
+        if membre.display_avatar:
+            e.set_thumbnail(url=membre.display_avatar.url)
+        e.set_footer(text=f"User ID : {membre.id} · Phase 64 Member Journey")
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        print(f"[admin_journey_cmd] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
