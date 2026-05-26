@@ -1918,6 +1918,55 @@ async def db_init():
         except Exception:
             pass
 
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 58 — PONT ROBLOX RÉEL : Update Voting + Achievements + Stats
+        # ═══════════════════════════════════════════════════════════════════
+        await db.execute('''CREATE TABLE IF NOT EXISTS update_votes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            title TEXT,
+            options_json TEXT,
+            status TEXT DEFAULT 'open',
+            deadline DATETIME,
+            channel_id INTEGER,
+            message_id INTEGER,
+            winning_option TEXT,
+            created_by INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            resolved_at DATETIME
+        )''')
+
+        await db.execute('''CREATE TABLE IF NOT EXISTS update_vote_ballots (
+            update_vote_id INTEGER,
+            user_id INTEGER,
+            option_id TEXT,
+            placed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (update_vote_id, user_id)
+        )''')
+
+        await db.execute('''CREATE TABLE IF NOT EXISTS achievement_broadcasts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            user_id INTEGER,
+            game_id TEXT,
+            achievement_name TEXT,
+            description TEXT,
+            posted_by INTEGER,
+            posted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+
+        await db.execute('''CREATE TABLE IF NOT EXISTS game_stats_panels (
+            guild_id INTEGER,
+            game_id TEXT,
+            channel_id INTEGER,
+            message_id INTEGER,
+            players_online INTEGER DEFAULT 0,
+            visits_total INTEGER DEFAULT 0,
+            favorites INTEGER DEFAULT 0,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (guild_id, game_id)
+        )''')
+
         # Marketplace : annonces de vente entre joueurs
         await db.execute('''CREATE TABLE IF NOT EXISTS marketplace_listings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35536,6 +35585,22 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready phase57 persist] {ex}")
 
+    # Phase 58 : re-attacher UpdateVoteView open
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, options_json FROM update_votes WHERE status='open'",
+            ) as cur:
+                rows = await cur.fetchall()
+        for uv_id, options_json in rows:
+            try:
+                opts = json.loads(options_json or "[]")
+                bot.add_view(UpdateVoteView(int(uv_id), opts))
+            except Exception:
+                pass
+    except Exception as ex:
+        print(f"[on_ready phase58 persist] {ex}")
+
     # Phase 42 — Views persistantes : World Boss + Daily Riddle
     try:
         bot.add_view(WorldBossAttackView())
@@ -35764,6 +35829,9 @@ async def on_ready():
     # Phase 57 : narrative choices resolver
     if not narrative_choices_resolver_task.is_running():
         narrative_choices_resolver_task.start()
+    # Phase 58 : update votes resolver
+    if not update_votes_resolver_task.is_running():
+        update_votes_resolver_task.start()
     # Boot recovery : supprimer tous les messages expirés pendant le downtime
     # Phase 55 : boucle jusqu'à plus rien à supprimer (par batch de 500)
     try:
@@ -60771,6 +60839,399 @@ async def narrative_choices_resolver_task():
 
 @narrative_choices_resolver_task.before_loop
 async def _narrative_resolver_wait():
+    await bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 58 — PONT ROBLOX RÉEL : Update Voting + Achievements + Game Stats
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class UpdateVoteView(View):
+    """View persistante : boutons pour voter une option d'update."""
+
+    def __init__(self, update_vote_id: int, options: list):
+        super().__init__(timeout=None)
+        self.uv_id = update_vote_id
+        for opt in options[:5]:
+            b = Button(
+                label=opt.get("label", "?")[:80],
+                style=discord.ButtonStyle.primary,
+                custom_id=f"update_vote_{update_vote_id}_{opt['id']}",
+            )
+            b.callback = self._make_cb(opt["id"])
+            self.add_item(b)
+        view_btn = Button(
+            label="📊 Voir résultats",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"update_vote_view_{update_vote_id}",
+        )
+        view_btn.callback = self._view_results
+        self.add_item(view_btn)
+
+    def _make_cb(self, option_id: str):
+        async def _cb(i: discord.Interaction):
+            if not await _safe_defer(i):
+                return
+            try:
+                async with get_db() as db:
+                    await db.execute(
+                        "INSERT INTO update_vote_ballots(update_vote_id, user_id, option_id) "
+                        "VALUES(?,?,?) ON CONFLICT(update_vote_id, user_id) DO UPDATE SET "
+                        "option_id=?, placed_at=CURRENT_TIMESTAMP",
+                        (self.uv_id, i.user.id, option_id, option_id),
+                    )
+                    await db.commit()
+                await _safe_followup(i, content=f"✅ Vote enregistré pour `{option_id}`.")
+            except Exception as ex:
+                await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+        return _cb
+
+    async def _view_results(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT option_id, COUNT(*) AS c FROM update_vote_ballots "
+                    "WHERE update_vote_id=? GROUP BY option_id ORDER BY c DESC",
+                    (self.uv_id,),
+                ) as cur:
+                    rows = await cur.fetchall()
+            total = sum(int(r[1]) for r in rows) or 1
+            lines = [f"`{r[0]}` — `{r[1]}` votes ({r[1]/total*100:.0f}%)" for r in rows]
+            await _safe_followup(
+                i,
+                content="📊 **Résultats actuels :**\n" + ("\n".join(lines) if lines else "_Aucun vote_"),
+            )
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="update_vote",
+    description="📊 [Owner] Lance un vote sur la prochaine feature à implémenter",
+)
+@app_commands.describe(
+    titre="Question (ex: 'Quelle feature pour la v2 ?')",
+    option1="Option 1",
+    option2="Option 2",
+    option3="Option 3 (optionnel)",
+    option4="Option 4 (optionnel)",
+    jours="Durée du vote en jours (défaut 5)",
+)
+async def update_vote_cmd(i: discord.Interaction, titre: str,
+                          option1: str, option2: str,
+                          option3: Optional[str] = None,
+                          option4: Optional[str] = None,
+                          jours: int = 5):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        c = await cfg(i.guild.id)
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        hub_ch = i.guild.get_channel(hub_id) if hub_id else None
+        if not hub_ch:
+            return await _safe_followup(i, content="❌ Hub non configuré.")
+        opts = [
+            {"id": "opt_1", "label": option1},
+            {"id": "opt_2", "label": option2},
+        ]
+        if option3:
+            opts.append({"id": "opt_3", "label": option3})
+        if option4:
+            opts.append({"id": "opt_4", "label": option4})
+        deadline = (datetime.now(timezone.utc) + timedelta(days=max(1, min(jours, 30)))).isoformat()
+        async with get_db() as db:
+            cur = await db.execute(
+                "INSERT INTO update_votes(guild_id, title, options_json, deadline, channel_id, created_by) "
+                "VALUES(?, ?, ?, ?, ?, ?)",
+                (i.guild.id, titre, json.dumps(opts), deadline, hub_ch.id, i.user.id),
+            )
+            uv_id = cur.lastrowid
+            await db.commit()
+        e = discord.Embed(
+            title=f"🗳️ Vote sur la prochaine update : {titre}",
+            description=(
+                "**Quelle option voulez-vous voir implémentée en priorité ?**\n\n"
+                + "\n".join(f"• **{o['label']}**" for o in opts) +
+                f"\n\n⏰ Deadline : <t:{int(datetime.fromisoformat(deadline).timestamp())}:R>\n"
+                f"_1 vote par membre. Tu peux changer d'avis jusqu'à la fermeture._"
+            ),
+            color=0x00A2FF,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text=f"Vote #{uv_id} · Lancé par {i.user.display_name}")
+        msg = await hub_ch.send(
+            embed=e,
+            view=UpdateVoteView(int(uv_id), opts),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        async with get_db() as db:
+            await db.execute("UPDATE update_votes SET message_id=? WHERE id=?", (msg.id, uv_id))
+            await db.commit()
+        await _safe_followup(i, content=f"✅ Vote #{uv_id} lancé. Deadline dans `{jours}j`.")
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="achievement_post",
+    description="🏆 [Owner] Annonce un achievement exceptionnel d'un membre dans le hub",
+)
+@app_commands.describe(
+    membre="Le membre qui a réalisé l'exploit",
+    achievement="Nom de l'achievement (ex: 'Premier à tuer le Boss Final')",
+    description="Détail (optionnel)",
+    game_id="ID du jeu Roblox (optionnel)",
+)
+async def achievement_post_cmd(i: discord.Interaction, membre: discord.Member,
+                                achievement: str, description: Optional[str] = None,
+                                game_id: Optional[str] = None):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        c = await cfg(i.guild.id)
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        hub_ch = i.guild.get_channel(hub_id) if hub_id else None
+        if not hub_ch:
+            return await _safe_followup(i, content="❌ Hub non configuré.")
+        async with get_db() as db:
+            cur = await db.execute(
+                "INSERT INTO achievement_broadcasts"
+                "(guild_id, user_id, game_id, achievement_name, description, posted_by) "
+                "VALUES(?, ?, ?, ?, ?, ?)",
+                (i.guild.id, membre.id, game_id or "", achievement, description or "", i.user.id),
+            )
+            ab_id = cur.lastrowid
+            await db.commit()
+        LIFETIME = 24 * 3600
+        e = discord.Embed(
+            title=f"🏆 EXPLOIT : {achievement}",
+            description=(
+                f"**{membre.mention} vient de réaliser :**\n"
+                f"# {achievement}\n\n"
+                + (f"_{description}_\n\n" if description else "")
+                + (f"🎮 Jeu : `{game_id}`\n\n" if game_id else "")
+                + "_Bravo ! Ton nom est dans les livres._"
+            ),
+            color=0xFFD700,
+            timestamp=datetime.now(timezone.utc),
+        )
+        if membre.display_avatar:
+            e.set_thumbnail(url=membre.display_avatar.url)
+        e.set_footer(text=f"Achievement #{ab_id} · Posté par {i.user.display_name}")
+        msg = await hub_ch.send(
+            content=membre.mention,
+            embed=e,
+            allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+            delete_after=LIFETIME,
+        )
+        try:
+            await _register_for_cleanup(msg, LIFETIME, 'achievement_broadcast')
+        except Exception:
+            pass
+        # Reward 200 🪙 au membre
+        try:
+            await add_coins(i.guild.id, membre.id, 200)
+        except Exception:
+            pass
+        await _safe_followup(i, content=f"✅ Achievement #{ab_id} annoncé. +200 🪙 à {membre.mention}.")
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="game_stats_set",
+    description="📊 [Owner] Met à jour le panneau Game Stats live (joueurs/visites/fav)",
+)
+@app_commands.describe(
+    game_id="ID du jeu (depuis /game_add)",
+    players_online="Nb joueurs en ligne",
+    visits_total="Total visites",
+    favorites="Nb favorites",
+)
+async def game_stats_set_cmd(i: discord.Interaction, game_id: str,
+                              players_online: int = 0, visits_total: int = 0,
+                              favorites: int = 0):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        c = await cfg(i.guild.id)
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        hub_ch = i.guild.get_channel(hub_id) if hub_id else None
+        if not hub_ch:
+            return await _safe_followup(i, content="❌ Hub non configuré.")
+        # Get game
+        games = await _get_active_roblox_games(i.guild.id)
+        game = next((g for g in games if g["id"] == game_id), None)
+        game_name = game["name"] if game else game_id
+        # Get existing panel or create
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT channel_id, message_id FROM game_stats_panels "
+                "WHERE guild_id=? AND game_id=?",
+                (i.guild.id, game_id),
+            ) as cur:
+                row = await cur.fetchone()
+        e = discord.Embed(
+            title=f"📊 Stats live — {game_name}",
+            description=(
+                f"🟢 **Joueurs en ligne :** `{players_online}`\n"
+                f"👁️ **Visites totales :** `{visits_total:,}`\n"
+                f"⭐ **Favorites :** `{favorites:,}`\n\n"
+                + (f"🔗 [Jouer maintenant](https://www.roblox.com/games/{game['place_id']})\n" if game and game.get("place_id") else "")
+                + f"_Dernière maj : <t:{int(datetime.now(timezone.utc).timestamp())}:R>_"
+            ),
+            color=0x00A2FF,
+            timestamp=datetime.now(timezone.utc),
+        )
+        if game and game.get("image_url"):
+            e.set_thumbnail(url=game["image_url"])
+        e.set_footer(text="Game Stats Live · Mis à jour via /game_stats_set")
+        # Edit existing OR send new
+        msg = None
+        if row and row[1]:
+            try:
+                old_ch = i.guild.get_channel(int(row[0]))
+                if old_ch:
+                    old_msg = await old_ch.fetch_message(int(row[1]))
+                    await old_msg.edit(embed=e)
+                    msg = old_msg
+            except Exception:
+                msg = None
+        if not msg:
+            msg = await hub_ch.send(embed=e, allowed_mentions=discord.AllowedMentions.none())
+            try:
+                await msg.pin()
+            except Exception:
+                pass
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO game_stats_panels"
+                "(guild_id, game_id, channel_id, message_id, players_online, visits_total, favorites) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(guild_id, game_id) DO UPDATE SET "
+                "channel_id=?, message_id=?, players_online=?, visits_total=?, favorites=?, "
+                "updated_at=CURRENT_TIMESTAMP",
+                (i.guild.id, game_id, msg.channel.id, msg.id, players_online, visits_total, favorites,
+                 msg.channel.id, msg.id, players_online, visits_total, favorites),
+            )
+            await db.commit()
+        await _safe_followup(i, content=f"✅ Panel `{game_id}` mis à jour.")
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _resolve_update_vote(uv_id: int):
+    """Résout un update vote (pick le winner)."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT guild_id, title, options_json, channel_id, status FROM update_votes WHERE id=?",
+                (uv_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row or row[4] != 'open':
+            return
+        gid, title, options_json, channel_id, _ = int(row[0]), row[1], row[2], int(row[3] or 0), row[4]
+        opts = json.loads(options_json or "[]")
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT option_id, COUNT(*) AS c FROM update_vote_ballots "
+                "WHERE update_vote_id=? GROUP BY option_id ORDER BY c DESC",
+                (uv_id,),
+            ) as cur:
+                results = await cur.fetchall()
+        if not results:
+            winner_id = None
+        else:
+            top_count = results[0][1]
+            top = [r[0] for r in results if r[1] == top_count]
+            winner_id = random.choice(top)
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE update_votes SET status='resolved', winning_option=?, "
+                "resolved_at=CURRENT_TIMESTAMP WHERE id=?",
+                (winner_id, uv_id),
+            )
+            await db.commit()
+        # Annoncer
+        guild = bot.get_guild(gid)
+        ch = guild.get_channel(channel_id) if guild else None
+        winning_opt = next((o for o in opts if o["id"] == winner_id), None)
+        if ch and winning_opt:
+            try:
+                total = sum(int(r[1]) for r in results) or 1
+                LIFETIME = 24 * 3600
+                lines = []
+                for r in results:
+                    opt = next((o for o in opts if o["id"] == r[0]), None)
+                    if opt:
+                        pct = (int(r[1]) / total) * 100
+                        mark = "👑 " if r[0] == winner_id else ""
+                        lines.append(f"{mark}**{opt['label']}** — `{r[1]}` votes ({pct:.0f}%)")
+                e = discord.Embed(
+                    title=f"🗳️ Vote terminé : {title}",
+                    description=(
+                        f"**Gagnant : {winning_opt['label']}**\n\n"
+                        f"_Cette feature/option sera priorisée pour le développement._\n\n"
+                        f"**Résultats :**\n" + "\n".join(lines)
+                    ),
+                    color=0x00A2FF,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                msg = await ch.send(
+                    embed=e,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=LIFETIME,
+                )
+                try:
+                    await _register_for_cleanup(msg, LIFETIME, 'update_vote_resolved')
+                except Exception:
+                    pass
+            except Exception as ex:
+                print(f"[update vote resolve announce] {ex}")
+        print(f"[UPDATE VOTE RESOLVED] uv_id={uv_id} winner={winner_id}")
+    except Exception as ex:
+        print(f"[_resolve_update_vote] {ex}")
+
+
+@tasks.loop(hours=1)
+async def update_votes_resolver_task():
+    """Résout les update votes dont la deadline est passée."""
+    try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id FROM update_votes WHERE status='open' AND deadline < ?",
+                (now_iso,),
+            ) as cur:
+                rows = await cur.fetchall()
+        for r in rows:
+            try:
+                await _resolve_update_vote(int(r[0]))
+                await asyncio.sleep(2)
+            except Exception as ex:
+                print(f"[update votes resolver uv={r[0]}] {ex}")
+    except Exception as ex:
+        print(f"[update_votes_resolver_task] {ex}")
+
+
+@update_votes_resolver_task.before_loop
+async def _update_votes_resolver_wait():
     await bot.wait_until_ready()
 
 
