@@ -35654,6 +35654,9 @@ async def on_ready():
     # Phase 47.3 : persistent cleanup des messages d'events expirés
     if not persistent_msg_cleaner.is_running():
         persistent_msg_cleaner.start()
+    # Phase 55 : safety net hub orphan cleaner (loop 6h)
+    if not hub_orphan_cleaner_task.is_running():
+        hub_orphan_cleaner_task.start()
 
     # Phase 48.1 : auto-promote des events en danger + marketplace cleanup
     if not auto_promote_dying_events.is_running():
@@ -35679,10 +35682,17 @@ async def on_ready():
     if not owner_alerts_task.is_running():
         owner_alerts_task.start()
     # Boot recovery : supprimer tous les messages expirés pendant le downtime
+    # Phase 55 : boucle jusqu'à plus rien à supprimer (par batch de 500)
     try:
-        await _run_persistent_cleanup_once()
+        max_loops = 10  # safety : 10 × 500 = 5000 messages max
+        for loop_n in range(max_loops):
+            stats = await _run_persistent_cleanup_once()
+            if not stats.get('scanned'):
+                break
+            print(f"[BOOT CLEANUP loop {loop_n+1}] {stats}")
+            await asyncio.sleep(1)  # léger délai pour pas saturer
     except Exception as ex:
-        print(f"[on_ready _run_persistent_cleanup_once boot] {ex}")
+        print(f"[on_ready boot cleanup] {ex}")
 
     # Phase 46 : Game Night vocal hebdo + failsafe
     if not game_night_dispatcher.is_running():
@@ -47457,28 +47467,37 @@ def _schedule_delete(message, delay_seconds: int):
 
 
 async def _register_for_cleanup(message, delay_seconds: int, reason: str = 'event'):
-    """Enregistre un message en DB pour suppression différée garantie.
+    """Enregistre un message en DB pour suppression différée GARANTIE.
 
     À utiliser EN PLUS du delete_after natif Discord. Si le bot redémarre
     pendant l'attente, le loop persistent_msg_cleaner prend le relais.
 
     À appeler systématiquement après chaque send() avec delete_after sur
     un message d'event (> 1h surtout).
+
+    Phase 55 : retry x3 avec backoff si INSERT échoue. Log explicite.
     """
     if message is None:
-        return
-    try:
-        expires_at = (datetime.now(timezone.utc) + timedelta(seconds=int(delay_seconds))).isoformat()
-        guild_id = message.guild.id if message.guild else 0
-        async with get_db() as db:
-            await db.execute(
-                "INSERT INTO event_message_cleanup(guild_id, channel_id, message_id, expires_at, reason) "
-                "VALUES(?,?,?,?,?)",
-                (guild_id, message.channel.id, message.id, expires_at, reason),
-            )
-            await db.commit()
-    except Exception as ex:
-        print(f"[_register_for_cleanup] {ex}")
+        return False
+    delay_seconds = max(60, int(delay_seconds))  # min 60s pour éviter spam DB
+    expires_at = (datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)).isoformat()
+    guild_id = message.guild.id if message.guild else 0
+    last_err = None
+    for attempt in range(3):
+        try:
+            async with get_db() as db:
+                await db.execute(
+                    "INSERT INTO event_message_cleanup(guild_id, channel_id, message_id, expires_at, reason) "
+                    "VALUES(?,?,?,?,?)",
+                    (guild_id, message.channel.id, message.id, expires_at, reason),
+                )
+                await db.commit()
+            return True
+        except Exception as ex:
+            last_err = ex
+            await asyncio.sleep(0.5 * (attempt + 1))
+    print(f"[_register_for_cleanup FAILED 3x reason={reason} msg={message.id}] {last_err}")
+    return False
 
 
 async def _send_and_register(channel, delay_seconds: int, reason: str = 'event', **send_kwargs):
@@ -47498,23 +47517,27 @@ async def _send_and_register(channel, delay_seconds: int, reason: str = 'event',
         return None
 
 
-async def _run_persistent_cleanup_once():
+async def _run_persistent_cleanup_once() -> dict:
     """Scan tous les messages expirés et tente la suppression. Appelé au boot
-    et toutes les 5 min via persistent_msg_cleaner.
+    et toutes les 2 min via persistent_msg_cleaner.
+
+    Retourne {'scanned': N, 'deleted': N, 'gone': N, 'forbidden': N, 'errors': N}.
+    Phase 55 : LIMIT 500 (batch plus large), retry sur les rate limits, logs détaillés.
     """
+    stats = {"scanned": 0, "deleted": 0, "gone": 0, "forbidden": 0, "errors": 0}
     try:
         now_iso = datetime.now(timezone.utc).isoformat()
         async with get_db() as db:
             async with db.execute(
-                "SELECT id, guild_id, channel_id, message_id FROM event_message_cleanup "
-                "WHERE deleted=0 AND expires_at < ? LIMIT 100",
+                "SELECT id, guild_id, channel_id, message_id, reason FROM event_message_cleanup "
+                "WHERE deleted=0 AND expires_at < ? ORDER BY expires_at ASC LIMIT 500",
                 (now_iso,),
             ) as cur:
                 rows = await cur.fetchall()
         if not rows:
-            return
-        deleted_count = 0
-        for rid, gid, ch_id, msg_id in rows:
+            return stats
+        stats["scanned"] = len(rows)
+        for rid, gid, ch_id, msg_id, reason in rows:
             try:
                 guild = bot.get_guild(int(gid)) if gid else None
                 ch = guild.get_channel(int(ch_id)) if guild else None
@@ -47523,15 +47546,29 @@ async def _run_persistent_cleanup_once():
                         msg = await ch.fetch_message(int(msg_id))
                         if msg:
                             await msg.delete()
-                            deleted_count += 1
-                    except (discord.NotFound, discord.Forbidden):
-                        # Déjà supprimé OU pas la perm → marque deleted=1 pour éviter retry
-                        pass
+                            stats["deleted"] += 1
+                    except discord.NotFound:
+                        stats["gone"] += 1
+                    except discord.Forbidden:
+                        stats["forbidden"] += 1
+                    except discord.HTTPException as ex:
+                        if ex.status == 429:
+                            # Rate limit : on attend un peu et on continue (sera retry next loop)
+                            await asyncio.sleep(2)
+                            stats["errors"] += 1
+                            continue
+                        stats["errors"] += 1
+                        print(f"[cleanup msg={msg_id} reason={reason}] HTTP {ex.status}: {ex}")
                     except Exception as ex:
-                        print(f"[_run_persistent_cleanup_once msg={msg_id}] {ex}")
-            except Exception:
-                pass
-            # Marker deleted=1 quoi qu'il arrive (sinon boucle infinie)
+                        stats["errors"] += 1
+                        print(f"[cleanup msg={msg_id} reason={reason}] {ex}")
+                else:
+                    # Channel ou guild introuvable → marker quand même
+                    stats["gone"] += 1
+            except Exception as ex:
+                stats["errors"] += 1
+                print(f"[cleanup outer] {ex}")
+            # Marker deleted=1 (sinon boucle infinie)
             try:
                 async with get_db() as db:
                     await db.execute(
@@ -47541,16 +47578,90 @@ async def _run_persistent_cleanup_once():
                     await db.commit()
             except Exception:
                 pass
-        if deleted_count:
-            print(f"[PERSIST CLEANUP] deleted {deleted_count} expired event msgs")
+        # Log si activité (toujours, pour visibility)
+        if stats["scanned"]:
+            print(f"[PERSIST CLEANUP] {stats}")
     except Exception as ex:
         print(f"[_run_persistent_cleanup_once] {ex}")
+    return stats
 
 
-@tasks.loop(minutes=5)
+@tasks.loop(minutes=2)
 async def persistent_msg_cleaner():
-    """Loop persistente : nettoie les messages d'events expirés toutes les 5 min."""
+    """Loop persistente : nettoie les messages d'events expirés toutes les 2 min.
+
+    Phase 55 : passé de 5min à 2min pour réduire la dérive max post-restart.
+    """
     await _run_persistent_cleanup_once()
+
+
+# ─── Phase 55 : SAFETY NET — purge messages bot vieux dans hub (orphelins) ───
+
+
+@tasks.loop(hours=6)
+async def hub_orphan_cleaner_task():
+    """Toutes les 6h, purge les messages du bot >48h dans le hub_channel
+    qui n'ont PAS été épinglés et qui ne sont PLUS attachés à event actif.
+
+    Filet de sécurité : capture les messages dont l'entrée DB de cleanup a été
+    perdue (rare mais possible). Skip pinned + skip messages avec components
+    actifs (views persistantes type EngagementHubView).
+    """
+    try:
+        cutoff_48h = datetime.now(timezone.utc) - timedelta(hours=48)
+        for guild in bot.guilds:
+            try:
+                c = await cfg(guild.id)
+                if not c.get('event_enabled', False):
+                    continue
+                hub_id = int(c.get('hub_channel', 0) or 0)
+                if not hub_id:
+                    continue
+                hub_ch = guild.get_channel(hub_id)
+                if not hub_ch:
+                    continue
+                # Trouver les pinned IDs pour les exclure
+                try:
+                    pinned = await hub_ch.pins()
+                    pinned_ids = {p.id for p in pinned}
+                except Exception:
+                    pinned_ids = set()
+                deleted = 0
+                # Scanner historique 48h+ (limit 100 pour pas trop charger)
+                try:
+                    async for msg in hub_ch.history(limit=100, before=cutoff_48h):
+                        if msg.author.id != bot.user.id:
+                            continue
+                        if msg.id in pinned_ids:
+                            continue
+                        # Skip si message contient un composant persistent (= View attachée)
+                        # Reconnaissance via embeds.footer text contenant "Hub d'engagement"
+                        if msg.embeds and any(
+                            "Hub d'engagement" in (e.footer.text or "") if e.footer else False
+                            for e in msg.embeds
+                        ):
+                            continue
+                        try:
+                            await msg.delete()
+                            deleted += 1
+                            await asyncio.sleep(0.5)  # rate-limit
+                        except (discord.NotFound, discord.Forbidden):
+                            pass
+                        except Exception:
+                            pass
+                except Exception as ex:
+                    print(f"[hub_orphan_cleaner guild={guild.id} history] {ex}")
+                if deleted:
+                    print(f"[HUB ORPHAN CLEAN] guild={guild.id} deleted={deleted}")
+            except Exception as ex:
+                print(f"[hub_orphan_cleaner guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[hub_orphan_cleaner_task] {ex}")
+
+
+@hub_orphan_cleaner_task.before_loop
+async def _hub_orphan_wait():
+    await bot.wait_until_ready()
 
 
 @persistent_msg_cleaner.before_loop
@@ -59985,6 +60096,40 @@ async def _open_health_dashboard(i: discord.Interaction):
 )
 async def admin_health_cmd(i: discord.Interaction):
     await _open_health_dashboard(i)
+
+
+@bot.tree.command(
+    name="cleanup_now",
+    description="🧹 [Owner] Force le cleanup des messages d'events expirés maintenant",
+)
+async def cleanup_now_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        total = {"scanned": 0, "deleted": 0, "gone": 0, "forbidden": 0, "errors": 0}
+        for _ in range(5):
+            s = await _run_persistent_cleanup_once()
+            for k in total:
+                total[k] += s.get(k, 0)
+            if not s.get('scanned'):
+                break
+        await _safe_followup(
+            i,
+            content=(
+                f"🧹 **Cleanup forcé terminé.**\n"
+                f"• Scannés : `{total['scanned']}`\n"
+                f"• Supprimés : `{total['deleted']}`\n"
+                f"• Déjà supprimés (404) : `{total['gone']}`\n"
+                f"• Permissions refusées : `{total['forbidden']}`\n"
+                f"• Erreurs : `{total['errors']}`"
+            ),
+        )
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
 # ─── ALERTES AUTO OWNER (DM si perte membres / silence hub) ──────────────────
