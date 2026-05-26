@@ -57,6 +57,10 @@ import delegations as delegations2026
 import compromised_detector as compromised2026
 import events_engine as events2026
 import random
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None  # fallback gracieux
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  🛡️ GESTION D'ERREURS GLOBALE - REND LES ERREURS VISIBLES AU LIEU DE SILENCIEUSES
@@ -1443,13 +1447,17 @@ async def cfg(gid):
         'birthdays': {},                     # { str(user_id): "MM-DD" }
         # Phase 30 : Système d'événements
         'event_enabled': False,
-        'event_auto_interval_hours': 24,      # auto-trigger tous les N heures (0 = manuel uniquement)
+        'event_auto_interval_hours': 6,       # auto-trigger tous les N heures (0 = manuel uniquement) - Phase 35: 24h→6h
         'event_difficulty': 100,              # 50-500, 100 = normal
         'event_duration_min': 30,             # boss s'enfuit après N minutes
         'event_coin_multiplier': 1.0,         # multiplicateur récompenses
         'event_arena_channel_name': '⚔️-arène-du-boss',  # nom du salon créé
         'event_log_channel': 0,                # logs des events (recap)
         'event_last_run': '',                  # ISO timestamp dernière event
+        # Phase 35 : plages horaires actives (timezone France par défaut)
+        'event_active_hours_start': 10,       # début fenêtre active (heure locale TZ)
+        'event_active_hours_end': 23,         # fin fenêtre active (exclusive)
+        'event_timezone': 'Europe/Paris',     # TZ pour calcul des heures actives
         # Phase 31 : extensions du système d'événements
         'event_combo_enabled': True,           # combos communautaires actifs
         'event_progressive_enabled': True,     # difficulté progressive
@@ -1464,9 +1472,9 @@ async def cfg(gid):
         'event_type_quiz_enabled': True,
         # Phase 33 : événements personnels (DM-style via ping+button → ephemeral)
         'personal_events_enabled': True,
-        'personal_events_interval_min': 30,  # toutes les N min, possibilité d'en lancer un
+        'personal_events_interval_min': 20,  # Phase 35: 30→20 (plus fréquent)
         'personal_events_per_user_cooldown_h': 4,  # même user pas plus d'1/4h
-        'personal_events_max_per_hour': 10,  # rate-limit global serveur
+        'personal_events_max_per_hour': 15,  # Phase 35: 10→15 (plus de débit serveur)
         # Phase 33 : PvP duels
         'pvp_enabled': True,
         'pvp_min_kills_required': 0,  # minimum kills lifetime pour pouvoir dueler
@@ -5758,6 +5766,41 @@ _event_combo_count: dict[int, int] = {}
 _crit_streaks: dict[tuple[int, int], int] = {}
 
 
+def _is_event_active_time(c: dict) -> bool:
+    """Phase 35 : retourne True si on est dans la fenêtre horaire active (TZ configurée).
+
+    Par défaut : 10h-23h Europe/Paris.
+    Pendant la nuit, aucun event auto n'est lancé (les gens dorment).
+    """
+    try:
+        start_h = int(c.get('event_active_hours_start', 10) or 10)
+        end_h = int(c.get('event_active_hours_end', 23) or 23)
+        tz_name = c.get('event_timezone', 'Europe/Paris') or 'Europe/Paris'
+
+        # Fallback si zoneinfo indispo : utiliser UTC + offset estimé
+        if ZoneInfo is None:
+            hour = datetime.now(timezone.utc).hour
+            # Approximation : France = UTC+1 ou UTC+2 selon saison ; on prend +2 (été)
+            hour = (hour + 2) % 24
+        else:
+            try:
+                tz = ZoneInfo(tz_name)
+                hour = datetime.now(tz).hour
+            except Exception:
+                hour = datetime.now(timezone.utc).hour
+
+        # Plage normale : start <= hour < end
+        if start_h <= end_h:
+            return start_h <= hour < end_h
+        else:
+            # Plage qui traverse minuit (ex: 22h-6h)
+            return hour >= start_h or hour < end_h
+    except Exception as ex:
+        print(f"[_is_event_active_time] {ex}")
+        # En cas d'erreur, on autorise (fail-open) pour ne pas casser le système
+        return True
+
+
 async def _get_or_create_inventory(guild_id: int, user_id: int) -> dict:
     """Retourne l'inventaire d'un joueur (en crée un par défaut si absent)."""
     async with get_db() as db:
@@ -5925,8 +5968,16 @@ class EventConfigPanelV2(LayoutView):
         prog_on = bool(c.get('event_progressive_enabled', True))
         tier_on = bool(c.get('event_tier_roles_enabled', False))
 
+        # Phase 35 : plages horaires
+        active_start = int(c.get('event_active_hours_start', 10) or 10)
+        active_end = int(c.get('event_active_hours_end', 23) or 23)
+        tz_name = c.get('event_timezone', 'Europe/Paris') or 'Europe/Paris'
+        in_active_window = _is_event_active_time(c)
+        window_status = "🟢 en cours" if in_active_window else "🌙 nuit (events suspendus)"
+
         config_block = (
             f"🔌 **État système** · {'🟢 actif' if enabled else '⚪ désactivé'}\n"
+            f"🌙 **Plage horaire** · `{active_start:02d}h-{active_end:02d}h` ({tz_name}) · {window_status}\n"
             f"⏰ **Auto toutes les** · `{interval}` h ({'manuel uniquement' if interval == 0 else next_run_str})\n"
             f"⚔️ **Difficulté** · {diff_str} (`{difficulty}`) {'· auto-scale 🟢' if prog_on else ''}\n"
             f"⏱️ **Durée d'un boss** · `{duration}` min\n"
@@ -5976,6 +6027,14 @@ class EventConfigPanelV2(LayoutView):
         )
         b_tier.callback = self._cb_toggle_tier
 
+        # Phase 35 : éditeur de plage horaire
+        b_hours = Button(
+            label="🌙 Plage horaire",
+            style=discord.ButtonStyle.primary,
+            custom_id="evt_hours",
+        )
+        b_hours.callback = self._cb_hours
+
         items = [
             v2_title("🎪 Événements communautaires"),
             v2_subtitle("Boss Raids · combos · rangs · badges · loot épique"),
@@ -5989,7 +6048,7 @@ class EventConfigPanelV2(LayoutView):
         items.append(v2_body(how_it_works))
         items.append(v2_divider())
         items.append(discord.ui.ActionRow(log_select))
-        items.append(discord.ui.ActionRow(b_toggle, b_settings, b_stop))
+        items.append(discord.ui.ActionRow(b_toggle, b_settings, b_hours, b_stop))
         items.append(discord.ui.ActionRow(b_start, b_start_treasure, b_start_quiz))
         items.append(discord.ui.ActionRow(b_combo, b_prog, b_tier))
         items.append(discord.ui.ActionRow(b_back))
@@ -6032,6 +6091,17 @@ class EventConfigPanelV2(LayoutView):
             await self.render_to(i, edit=True)
         except Exception as ex:
             print(f"[EventConfigPanelV2 _cb_toggle_tier] {ex}")
+
+    async def _cb_hours(self, i):
+        try:
+            c = await cfg(self.g.id)
+            modal = _EventHoursModal(self.g, self.u)
+            modal.start_hour.default = str(int(c.get('event_active_hours_start', 10) or 10))
+            modal.end_hour.default = str(int(c.get('event_active_hours_end', 23) or 23))
+            modal.tz.default = c.get('event_timezone', 'Europe/Paris')
+            await i.response.send_modal(modal)
+        except Exception as ex:
+            print(f"[EventConfigPanelV2 _cb_hours] {ex}")
 
     async def _cb_log_channel(self, i):
         try:
@@ -6133,6 +6203,47 @@ class _EventSettingsModal(Modal, title="⚙️ Réglages des événements"):
             await db_set(self.g.id, 'event_duration_min', dur)
             await db_set(self.g.id, 'event_coin_multiplier', mult)
             await db_set(self.g.id, 'event_arena_channel_name', arena)
+            await EventConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+        except Exception as ex:
+            try:
+                await i.response.send_message(f"❌ Valeurs invalides : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
+class _EventHoursModal(Modal, title="🌙 Plages horaires d'événements"):
+    """Phase 35 : configure les heures où les events auto peuvent se lancer."""
+    start_hour = TextInput(label="Heure de DÉBUT (0-23)", placeholder="10", max_length=2, required=True)
+    end_hour = TextInput(label="Heure de FIN (0-23, exclusive)", placeholder="23", max_length=2, required=True)
+    tz = TextInput(
+        label="Fuseau horaire (ex: Europe/Paris)",
+        placeholder="Europe/Paris",
+        max_length=50,
+        required=True,
+    )
+
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+
+    async def on_submit(self, i):
+        try:
+            sh = max(0, min(23, int(self.start_hour.value.strip())))
+            eh = max(0, min(23, int(self.end_hour.value.strip())))
+            tz_val = (self.tz.value or 'Europe/Paris').strip()
+            # Valider la TZ si zoneinfo dispo
+            if ZoneInfo is not None:
+                try:
+                    ZoneInfo(tz_val)
+                except Exception:
+                    return await i.response.send_message(
+                        f"❌ Fuseau horaire invalide : `{tz_val}`. Exemples valides : `Europe/Paris`, `Europe/London`, `UTC`, `America/New_York`",
+                        ephemeral=True,
+                    )
+            await db_set(self.g.id, 'event_active_hours_start', sh)
+            await db_set(self.g.id, 'event_active_hours_end', eh)
+            await db_set(self.g.id, 'event_timezone', tz_val)
             await EventConfigPanelV2(self.u, self.g).render_to(i, edit=True)
         except Exception as ex:
             try:
@@ -7078,18 +7189,26 @@ class TreasureClaimView(View):
 
     async def _on_claim(self, i: discord.Interaction):
         try:
+            # ACK immédiat pour éviter "Échec de l'interaction"
+            try:
+                await i.response.defer(ephemeral=True)
+            except discord.InteractionResponded:
+                pass
+            except Exception:
+                pass
+
             pool = _treasure_pool.get(self.event_id, [])
             if self.treasure_idx >= len(pool):
-                return await i.response.send_message("❌ Ce trésor n'existe plus.", ephemeral=True)
+                return await i.followup.send("❌ Ce trésor n'existe plus.", ephemeral=True)
             tr = pool[self.treasure_idx]
             if tr.get('claimed_by'):
                 claimer = i.guild.get_member(int(tr['claimed_by']))
-                return await i.response.send_message(
+                return await i.followup.send(
                     f"⚠️ Déjà réclamé par {claimer.mention if claimer else 'un autre membre'}.",
                     ephemeral=True,
                 )
             if i.user.bot:
-                return await i.response.send_message("🤖 Les bots ne peuvent pas réclamer.", ephemeral=True)
+                return await i.followup.send("🤖 Les bots ne peuvent pas réclamer.", ephemeral=True)
 
             tr['claimed_by'] = i.user.id
 
@@ -7138,15 +7257,18 @@ class TreasureClaimView(View):
             except Exception:
                 pass
 
-            await i.response.send_message(
-                f"💎 Tu as récupéré **{tr.get('name', 'Trésor')}** !\n+`{coins}` 🪙{gear_msg}",
+            await i.followup.send(
+                f"💎 Tu as récupéré **{tr.get('name', 'Trésor')}** !\n+`{coins}` 🪙{gear_msg}\n\n_{events2026.get_help_footer('event_end')}_",
                 ephemeral=True,
             )
         except Exception as ex:
             print(f"[TreasureClaimView _on_claim] {ex}")
             try:
-                if not i.response.is_done():
-                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+                try:
+                    await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+                except Exception:
+                    if not i.response.is_done():
+                        await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
             except Exception:
                 pass
 
@@ -7327,17 +7449,25 @@ class QuizAnswerView(View):
 
     async def _on_answer(self, i: discord.Interaction, ans_idx: int):
         try:
+            # ACK immédiat pour éviter "Échec de l'interaction"
+            try:
+                await i.response.defer(ephemeral=True)
+            except discord.InteractionResponded:
+                pass
+            except Exception:
+                pass
+
             state = _quiz_state.get(self.event_id)
             if not state or state.get('question_idx') != self.q_idx:
-                return await i.response.send_message("⏰ La question est passée !", ephemeral=True)
+                return await i.followup.send("⏰ La question est passée !", ephemeral=True)
             if state.get('locked', False):
-                return await i.response.send_message("✅ Quelqu'un a déjà répondu juste !", ephemeral=True)
+                return await i.followup.send("✅ Quelqu'un a déjà répondu juste !", ephemeral=True)
             if i.user.bot:
-                return await i.response.send_message("🤖 Les bots ne peuvent pas répondre.", ephemeral=True)
+                return await i.followup.send("🤖 Les bots ne peuvent pas répondre.", ephemeral=True)
 
             answers = state.setdefault('answers_received', {})
             if i.user.id in answers:
-                return await i.response.send_message("⚠️ Tu as déjà répondu à cette question.", ephemeral=True)
+                return await i.followup.send("⚠️ Tu as déjà répondu à cette question.", ephemeral=True)
             answers[i.user.id] = ans_idx
 
             if ans_idx == self.correct:
@@ -7367,7 +7497,7 @@ class QuizAnswerView(View):
                 except Exception:
                     pass
 
-                await i.response.send_message(
+                await i.followup.send(
                     f"✅ **Bonne réponse !** +`{100 + first_bonus}` 🪙",
                     ephemeral=True,
                 )
@@ -7387,15 +7517,18 @@ class QuizAnswerView(View):
                 except Exception:
                     pass
             else:
-                await i.response.send_message(
+                await i.followup.send(
                     f"❌ Mauvaise réponse. La bonne était **{chr(ord('A') + self.correct)}**.",
                     ephemeral=True,
                 )
         except Exception as ex:
             print(f"[QuizAnswerView _on_answer] {ex}")
             try:
-                if not i.response.is_done():
-                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+                try:
+                    await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+                except Exception:
+                    if not i.response.is_done():
+                        await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
             except Exception:
                 pass
 
@@ -7632,8 +7765,16 @@ class EventShopPanelV2(LayoutView):
 
     async def _cb_buy(self, i, idx: int, items: list):
         try:
+            # ACK immédiat (defer) — beaucoup de DB ops
+            try:
+                await i.response.defer(ephemeral=True)
+            except discord.InteractionResponded:
+                pass
+            except Exception:
+                pass
+
             if idx >= len(items):
-                return await i.response.send_message("❌ Item invalide.", ephemeral=True)
+                return await i.followup.send("❌ Item invalide.", ephemeral=True)
             it = items[idx]
             price = int(it['price'])
 
@@ -7641,13 +7782,13 @@ class EventShopPanelV2(LayoutView):
             eco = await get_user_economy(self.g.id, self.u.id)
             coins = (eco.get('coins', 0) or 0) + (eco.get('bank', 0) or 0)
             if coins < price:
-                return await i.response.send_message(f"❌ Pas assez de pièces (tu as `{coins:,}`, prix `{price:,}`).", ephemeral=True)
+                return await i.followup.send(f"❌ Pas assez de pièces (tu as `{coins:,}`, prix `{price:,}`).", ephemeral=True)
 
             # Débiter
             try:
                 await add_coins(self.g.id, self.u.id, -price)
             except Exception as ex:
-                return await i.response.send_message(f"❌ Erreur transaction : `{ex}`", ephemeral=True)
+                return await i.followup.send(f"❌ Erreur transaction : `{ex}`", ephemeral=True)
 
             # Mettre à jour shop_spent
             try:
@@ -7678,20 +7819,18 @@ class EventShopPanelV2(LayoutView):
             else:
                 equipped_msg = f" — _gardé en réserve (équipement actuel est {cur_gear.get('rarity', 'commune')})._"
 
-            await i.response.send_message(
-                f"✅ **Achat réussi !**\n{it['emoji']} **{it['name']}** ({it['rarity']}) · `-{price:,}` 🪙{equipped_msg}",
+            await i.followup.send(
+                f"✅ **Achat réussi !**\n{it['emoji']} **{it['name']}** ({it['rarity']}) · `-{price:,}` 🪙{equipped_msg}\n\n_{events2026.get_help_footer('shop')}_",
                 ephemeral=True,
             )
-            # Re-render le panel
-            try:
-                await self.render_to(i, edit=False)
-            except Exception:
-                pass
         except Exception as ex:
             print(f"[EventShopPanelV2 _cb_buy] {ex}")
             try:
-                if not i.response.is_done():
-                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+                try:
+                    await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+                except Exception:
+                    if not i.response.is_done():
+                        await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
             except Exception:
                 pass
 
@@ -8006,11 +8145,12 @@ class _PersonalQuestionView(View):
                 pass
 
 
-@tasks.loop(minutes=15)
+@tasks.loop(minutes=10)
 async def personal_event_dispatcher():
-    """Phase 33 — toutes les 15 min, possibilité d'envoyer un event perso.
+    """Phase 33 — toutes les 10 min, possibilité d'envoyer un event perso.
 
     Choisit un membre actif récent et lui propose un événement personnel.
+    Phase 35 : passé de 15min → 10min checks pour plus de fréquence.
     """
     try:
         for guild in bot.guilds:
@@ -8018,12 +8158,15 @@ async def personal_event_dispatcher():
                 c = await cfg(guild.id)
                 if not c.get('personal_events_enabled', True):
                     continue
-                interval_min = int(c.get('personal_events_interval_min', 30) or 30)
-                # Probabilité : sur 15min, on lance une fois tous les `interval_min` min
+                # Phase 35 : respecter les heures actives (pas la nuit)
+                if not _is_event_active_time(c):
+                    continue
+                interval_min = int(c.get('personal_events_interval_min', 20) or 20)
+                # Probabilité : sur 10min, on lance une fois tous les `interval_min` min
                 if interval_min <= 0:
                     continue
                 # Décide si on tire cet event maintenant (probabiliste)
-                if random.random() > (15 / interval_min):
+                if random.random() > (10 / interval_min):
                     continue
 
                 # Rate limit serveur
@@ -8232,10 +8375,18 @@ class DuelChallengeView(View):
 
     async def _on_accept(self, i: discord.Interaction):
         try:
+            # ACK immédiat (defer) — combat = beaucoup de DB ops
+            try:
+                await i.response.defer()
+            except discord.InteractionResponded:
+                pass
+            except Exception:
+                pass
+
             # Vérifier que les deux ont les coins pour la mise
             challenger = i.guild.get_member(self.challenger_id)
             if not challenger:
-                return await i.response.send_message("❌ Le challenger n'est plus sur le serveur.", ephemeral=True)
+                return await i.followup.send("❌ Le challenger n'est plus sur le serveur.", ephemeral=True)
 
             if self.bet > 0:
                 try:
@@ -8244,12 +8395,12 @@ class DuelChallengeView(View):
                     coins_c = (eco_c.get('coins', 0) or 0) + (eco_c.get('bank', 0) or 0)
                     coins_o = (eco_o.get('coins', 0) or 0) + (eco_o.get('bank', 0) or 0)
                     if coins_c < self.bet:
-                        return await i.response.send_message(
+                        return await i.followup.send(
                             f"❌ Le challenger n'a plus assez de pièces (`{coins_c}` < `{self.bet}`). Duel annulé.",
                             ephemeral=True,
                         )
                     if coins_o < self.bet:
-                        return await i.response.send_message(
+                        return await i.followup.send(
                             f"❌ Tu n'as pas assez de pièces (`{coins_o}` < `{self.bet}`).",
                             ephemeral=True,
                         )
@@ -8260,12 +8411,21 @@ class DuelChallengeView(View):
             for child in self.children:
                 child.disabled = True
             try:
-                await i.response.edit_message(
+                # On a deferred, on edit l'original response
+                await i.edit_original_response(
                     content=f"⚔️ <@{self.opponent_id}> **accepte** le duel ! Combat en cours...",
                     view=self,
                 )
             except Exception:
-                pass
+                # Fallback : message du callback du View est l'original
+                try:
+                    if i.message:
+                        await i.message.edit(
+                            content=f"⚔️ <@{self.opponent_id}> **accepte** le duel ! Combat en cours...",
+                            view=self,
+                        )
+                except Exception:
+                    pass
 
             # Mettre à jour le statut
             async with get_db() as db:
@@ -8368,8 +8528,11 @@ class DuelChallengeView(View):
             print(f"[DuelChallengeView _on_accept] {ex}")
             import traceback; traceback.print_exc()
             try:
-                if not i.response.is_done():
-                    await i.response.send_message(f"❌ Erreur duel : `{ex}`", ephemeral=True)
+                try:
+                    await i.followup.send(f"❌ Erreur duel : `{ex}`", ephemeral=True)
+                except Exception:
+                    if not i.response.is_done():
+                        await i.response.send_message(f"❌ Erreur duel : `{ex}`", ephemeral=True)
             except Exception:
                 pass
 
@@ -8573,7 +8736,10 @@ async def event_auto_scheduler():
                 c = await cfg(guild.id)
                 if not c.get('event_enabled', False):
                     continue
-                interval_h = int(c.get('event_auto_interval_hours', 24) or 24)
+                # Phase 35 : pas d'event pendant la nuit (par défaut 10h-23h FR)
+                if not _is_event_active_time(c):
+                    continue
+                interval_h = int(c.get('event_auto_interval_hours', 6) or 6)
                 if interval_h <= 0:
                     continue  # manuel uniquement
 
