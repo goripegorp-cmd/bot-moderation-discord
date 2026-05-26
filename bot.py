@@ -1464,6 +1464,42 @@ async def db_init():
         )''')
 
         # ═══════════════════════════════════════════════════════════════════
+        # Phase 48.1 — Analytics + Marketplace + Mention intelligente
+        # ═══════════════════════════════════════════════════════════════════
+
+        # Engagement par type d'event : pour tracker quels jeux marchent
+        await db.execute('''CREATE TABLE IF NOT EXISTS event_engagement (
+            guild_id INTEGER,
+            event_kind TEXT,
+            count_started INTEGER DEFAULT 0,
+            count_participations INTEGER DEFAULT 0,
+            count_completions INTEGER DEFAULT 0,
+            last_run_at DATETIME,
+            PRIMARY KEY (guild_id, event_kind)
+        )''')
+
+        # Marketplace : annonces de vente entre joueurs
+        await db.execute('''CREATE TABLE IF NOT EXISTS marketplace_listings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            seller_id INTEGER,
+            kind TEXT,
+            payload_json TEXT,
+            price INTEGER,
+            status TEXT DEFAULT 'active',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME,
+            buyer_id INTEGER,
+            sold_at DATETIME
+        )''')
+
+        # Index pour les listings actifs
+        try:
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_marketplace_active ON marketplace_listings(guild_id, status, created_at DESC)")
+        except Exception:
+            pass
+
+        # ═══════════════════════════════════════════════════════════════════
         # Phase 47.3 — Persistent message cleanup (survie aux redémarrages)
         # delete_after natif Discord meurt si le bot crash → messages restent.
         # Cette table garde la trace de tous les messages a supprimer + un loop
@@ -35132,6 +35168,12 @@ async def on_ready():
     # Phase 47.3 : persistent cleanup des messages d'events expirés
     if not persistent_msg_cleaner.is_running():
         persistent_msg_cleaner.start()
+
+    # Phase 48.1 : auto-promote des events en danger + marketplace cleanup
+    if not auto_promote_dying_events.is_running():
+        auto_promote_dying_events.start()
+    if not marketplace_expire_cleaner.is_running():
+        marketplace_expire_cleaner.start()
     # Boot recovery : supprimer tous les messages expirés pendant le downtime
     try:
         await _run_persistent_cleanup_once()
@@ -54335,6 +54377,579 @@ async def monthly_cmd(i: discord.Interaction):
     except Exception as ex:
         print(f"[/monthly] {ex}")
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 48.1 — ANALYTICS + MENTION INTELLIGENTE + MARKETPLACE P2P
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── ANALYTICS : tracker l'engagement par type d'event ────────────────────────
+
+
+async def _track_event_engagement(guild_id: int, event_kind: str, action: str = 'start'):
+    """Incrémente le compteur pour ce type d'event.
+
+    action :
+      - 'start'        → +1 count_started (event lancé)
+      - 'participate'  → +1 count_participations (un joueur a interagi)
+      - 'complete'     → +1 count_completions (event terminé avec succès)
+    """
+    if not event_kind:
+        return
+    field = {
+        'start': 'count_started',
+        'participate': 'count_participations',
+        'complete': 'count_completions',
+    }.get(action)
+    if not field:
+        return
+    try:
+        async with get_db() as db:
+            await db.execute(
+                f"INSERT INTO event_engagement(guild_id, event_kind, {field}, last_run_at) "
+                f"VALUES(?,?,1,CURRENT_TIMESTAMP) "
+                f"ON CONFLICT(guild_id, event_kind) DO UPDATE SET "
+                f"{field}={field}+1, last_run_at=CURRENT_TIMESTAMP",
+                (guild_id, event_kind),
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[_track_event_engagement {event_kind} {action}] {ex}")
+
+
+@bot.tree.command(
+    name="event_stats",
+    description="📊 [Owner] Voir les stats d'engagement de tous les events du serveur",
+)
+async def event_stats_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT event_kind, count_started, count_participations, count_completions, last_run_at "
+                "FROM event_engagement WHERE guild_id=? ORDER BY count_started DESC",
+                (i.guild.id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        if not rows:
+            return await _safe_followup(i, content="📊 Aucune donnée d'engagement encore. Reviens dans quelques jours.")
+
+        # Build tableau
+        lines = ["📊 **Engagement par type d'event**\n"]
+        dying = []  # events à faible participation
+        for kind, started, parts, completed, last_run in rows:
+            avg_participation = (parts / max(1, started)) if started else 0
+            complete_rate = (completed / max(1, started) * 100) if started else 0
+            health = "🟢" if avg_participation >= 3 else ("🟡" if avg_participation >= 1 else "🔴")
+            lines.append(
+                f"{health} **{kind}** — `{started}` lancés · "
+                f"`{parts}` particip. (~{avg_participation:.1f}/event) · "
+                f"`{completed}` terminés ({complete_rate:.0f}%)"
+            )
+            if started >= 5 and avg_participation < 1.0:
+                dying.append(kind)
+
+        if dying:
+            lines.append("")
+            lines.append("⚠️ **Events en danger :**")
+            for k in dying:
+                lines.append(f"   • `{k}` : très peu de participation, le bot va l'auto-promouvoir.")
+
+        e = discord.Embed(
+            description="\n".join(lines),
+            color=0x3498DB,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text="Phase 48.1 · Analytics · Auto-promotion activée sur events à faible engagement")
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        print(f"[/event_stats] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── MENTION INTELLIGENTE : préférences réelles des joueurs ──────────────────
+
+
+_EVENT_KIND_TO_METRICS = {
+    'boss_raid':   ['bosses_won', 'events_won'],
+    'world_boss':  ['bosses_won', 'world_boss_attacks'],
+    'treasure':    ['treasures_found'],
+    'flash_treasure': ['treasures_found'],
+    'quiz':        ['quiz_correct'],
+    'daily_riddle': ['quiz_correct'],
+    'duel':        ['duels_won'],
+    'game_night':  ['events_participated'],
+}
+
+
+async def _get_user_event_affinity(guild_id: int, user_id: int, event_kind: str) -> int:
+    """Renvoie un score d'affinité (0-100) du membre pour ce type d'event.
+    Plus le score est haut, plus la mention est pertinente.
+    """
+    try:
+        metrics = _EVENT_KIND_TO_METRICS.get(event_kind, [])
+        if not metrics:
+            return 50  # neutre si type inconnu
+        stats = await _get_user_stats41(guild_id, user_id)
+        score = 0
+        for m in metrics:
+            val = int(stats.get(m, 0) or 0)
+            # Mapping logarithmique : 0 → 0, 1 → 20, 5 → 40, 20 → 60, 100 → 80, 500 → 100
+            if val >= 500:
+                score += 100
+            elif val >= 100:
+                score += 80
+            elif val >= 20:
+                score += 60
+            elif val >= 5:
+                score += 40
+            elif val >= 1:
+                score += 20
+        return min(100, score // max(1, len(metrics)))
+    except Exception:
+        return 50
+
+
+async def _build_wakeup_mention_line_smart(guild, event_kind: str, max_count: int = 3) -> str:
+    """Phase 48.1 : remplace _build_wakeup_mention_line par une version qui ne
+    mentionne QUE les inactifs ayant une affinité élevée pour ce type d'event.
+
+    Cap 3 mentions max (TOS Discord respect).
+    """
+    try:
+        all_candidates = await _get_wakeup_candidates(guild, max_count=20)
+        if not all_candidates:
+            return ""
+        # Score chaque candidat pour ce kind
+        scored = []
+        for m in all_candidates:
+            score = await _get_user_event_affinity(guild.id, m.id, event_kind)
+            scored.append((score, m))
+        # Tri descendant par score, max_count meilleurs
+        scored.sort(key=lambda x: -x[0])
+        chosen = [m for score, m in scored[:max_count] if score >= 30]  # min 30 d'affinité
+        if not chosen:
+            # Fallback : si personne avec affinité, prendre 1 random pour pas que ce soit vide
+            chosen = [scored[0][1]] if scored else []
+        if not chosen:
+            return ""
+        await _log_wakeup_mentions(guild.id, [m.id for m in chosen])
+        mentions = " ".join(m.mention for m in chosen)
+        return f"\n\n🎯 **Spécialement pour vous :** {mentions}"
+    except Exception as ex:
+        print(f"[_build_wakeup_mention_line_smart] {ex}")
+        return ""
+
+
+# ─── AUTO-PROMOTE des events morts ────────────────────────────────────────────
+
+
+@tasks.loop(hours=6)
+async def auto_promote_dying_events():
+    """Toutes les 6h, scan les events à faible engagement et boost leur visibilité.
+
+    Stratégie : si un event_kind a count_started >= 5 mais participations/start < 1.0
+    sur la dernière semaine → on ping un message dans le hub channel pour le rappeler.
+    """
+    try:
+        for guild in bot.guilds:
+            try:
+                c = await cfg(guild.id)
+                if not c.get('event_enabled', False):
+                    continue
+                hub_id = int(c.get('hub_channel', 0) or 0)
+                if not hub_id:
+                    continue
+                hub_ch = guild.get_channel(hub_id)
+                if not hub_ch or not await _is_chatty_channel(hub_ch):
+                    continue
+
+                # Identifier les events morts (>5 starts, <1 participation/event)
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT event_kind, count_started, count_participations "
+                        "FROM event_engagement WHERE guild_id=? AND count_started >= 5",
+                        (guild.id,),
+                    ) as cur:
+                        rows = await cur.fetchall()
+                dying = []
+                for kind, started, parts in rows:
+                    if started > 0 and (parts / started) < 1.0:
+                        dying.append(kind)
+                if not dying:
+                    continue
+
+                # On promote 1 seul à la fois (anti-spam)
+                target_kind = random.choice(dying)
+                msg_map = {
+                    'boss_raid':      "⚔️ Les Boss Raids manquent de combattants ! Rejoins le prochain.",
+                    'world_boss':     "🌍 Le World Boss attend des héros — samedi 21h.",
+                    'treasure':       "💎 Les chasses au trésor commencent dans peu — préparez-vous !",
+                    'flash_treasure': "💎 Des Trésors Flash apparaissent dans nos salons actifs — sois prêt à les saisir.",
+                    'quiz':           "🎓 Les Quiz cherchent des cerveaux ! Le prochain est imminent.",
+                    'daily_riddle':   "🧠 L'énigme du jour t'attend dans le hub — premier à trouver gagne gros.",
+                    'duel':           "⚔️ Défie un autre membre en duel — `/duel`.",
+                    'game_night':     "🎮 La Game Night du vendredi t'attend — 21h, vocal + chat éphémères.",
+                }
+                content = msg_map.get(target_kind, f"🎯 L'event **{target_kind}** revient bientôt !")
+
+                # Mention intelligente des inactifs avec affinité
+                wakeup_line = await _build_wakeup_mention_line_smart(guild, target_kind, max_count=3)
+
+                LIFETIME_PROMO = 30 * 60  # 30 min
+                try:
+                    promo_msg = await hub_ch.send(
+                        embed=discord.Embed(
+                            title="🔥 Un event te recherche !",
+                            description=(
+                                f"{content}\n\n"
+                                + (wakeup_line if wakeup_line else "")
+                                + f"\n\n{_chrono_footer(LIFETIME_PROMO)}"
+                            ),
+                            color=0xE67E22,
+                        ),
+                        allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+                        delete_after=LIFETIME_PROMO,
+                    )
+                    await _register_for_cleanup(promo_msg, LIFETIME_PROMO, 'auto_promote')
+                    print(f"[AUTO_PROMOTE] guild={guild.id} kind={target_kind}")
+                except Exception as ex:
+                    print(f"[auto_promote send guild={guild.id}] {ex}")
+            except Exception as ex:
+                print(f"[auto_promote_dying_events guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[auto_promote_dying_events] {ex}")
+
+
+@auto_promote_dying_events.before_loop
+async def _auto_promote_wait():
+    await bot.wait_until_ready()
+
+
+# ─── MARKETPLACE P2P (vente de pets entre joueurs) ────────────────────────────
+
+
+class MarketplaceBuyView(View):
+    """View persistante : 1 bouton 'Acheter' par listing."""
+
+    def __init__(self, listing_id: int, price: int):
+        super().__init__(timeout=None)
+        b = Button(
+            label=f"🛒 Acheter ({price} 🪙)",
+            style=discord.ButtonStyle.success,
+            custom_id=f"mkt_buy_{listing_id}",
+        )
+        b.callback = self._on_buy
+        self.add_item(b)
+
+    async def _on_buy(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if not i.message or not i.guild:
+                return await _safe_followup(i, content="❌ Erreur contexte.")
+            # Récupérer le listing par message_id via le custom_id
+            cid = next((c.custom_id for c in self.children if hasattr(c, 'custom_id') and c.custom_id), '')
+            if not cid.startswith('mkt_buy_'):
+                return await _safe_followup(i, content="❌ Listing introuvable.")
+            try:
+                listing_id = int(cid.replace('mkt_buy_', ''))
+            except Exception:
+                return await _safe_followup(i, content="❌ Listing invalide.")
+
+            # Atomic transaction
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT seller_id, kind, payload_json, price, status FROM marketplace_listings "
+                    "WHERE id=? AND guild_id=?",
+                    (listing_id, i.guild.id),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row:
+                return await _safe_followup(i, content="❌ Annonce introuvable.")
+            seller_id, kind, payload_json, price, status = row
+            if status != 'active':
+                return await _safe_followup(i, content="✋ Cette annonce n'est plus disponible.")
+            if seller_id == i.user.id:
+                return await _safe_followup(i, content="❌ Tu ne peux pas acheter ta propre annonce.")
+
+            # Check buyer balance
+            buyer_balance = await _get_balance_p41(i.guild.id, i.user.id)
+            if buyer_balance < int(price):
+                return await _safe_followup(
+                    i,
+                    content=f"❌ Solde insuffisant. Il te faut **{price}** 🪙 (tu as `{buyer_balance}`).",
+                )
+
+            # Atomic claim : UPDATE WHERE status='active' garantit 1 seul acheteur
+            async with get_db() as db:
+                cur = await db.execute(
+                    "UPDATE marketplace_listings SET status='sold', buyer_id=?, sold_at=CURRENT_TIMESTAMP "
+                    "WHERE id=? AND status='active'",
+                    (i.user.id, listing_id),
+                )
+                await db.commit()
+                rc = cur.rowcount
+            if rc == 0:
+                return await _safe_followup(i, content="✋ Trop tard — quelqu'un l'a acheté avant toi.")
+
+            # Transfer atomique des coins
+            try:
+                await add_coins(i.guild.id, i.user.id, -int(price))
+                await add_coins(i.guild.id, seller_id, int(price))
+            except Exception as ex:
+                print(f"[mkt_buy coins transfer] {ex}")
+
+            # Transfer item selon kind
+            try:
+                payload = json.loads(payload_json) if payload_json else {}
+            except Exception:
+                payload = {}
+
+            if kind == 'pet':
+                pet_id = payload.get('pet_id')
+                if pet_id:
+                    async with get_db() as db:
+                        # Vérifier que le seller a toujours le pet (anti-bug)
+                        async with db.execute(
+                            "SELECT level, xp, custom_name FROM user_pets "
+                            "WHERE guild_id=? AND user_id=? AND pet_id=?",
+                            (i.guild.id, seller_id, pet_id),
+                        ) as cur:
+                            pet_row = await cur.fetchone()
+                        if pet_row:
+                            level, xp, custom_name = pet_row
+                            # Transfer : supprimer chez seller, créer chez buyer (avec level/xp gardés)
+                            await db.execute(
+                                "DELETE FROM user_pets WHERE guild_id=? AND user_id=? AND pet_id=?",
+                                (i.guild.id, seller_id, pet_id),
+                            )
+                            await db.execute(
+                                "INSERT INTO user_pets(guild_id, user_id, pet_id, custom_name, level, xp, is_active) "
+                                "VALUES(?,?,?,?,?,?,0) "
+                                "ON CONFLICT(guild_id, user_id, pet_id) DO UPDATE SET "
+                                "level = MAX(level, excluded.level), xp = MAX(xp, excluded.xp)",
+                                (i.guild.id, i.user.id, pet_id, custom_name, level, xp),
+                            )
+                            await db.commit()
+
+            # Disable button + edit message
+            try:
+                disabled_view = View(timeout=1)
+                disabled_btn = Button(
+                    label=f"✅ Vendu à {i.user.display_name[:25]}",
+                    style=discord.ButtonStyle.secondary,
+                    disabled=True,
+                )
+                disabled_view.add_item(disabled_btn)
+                if i.message:
+                    await i.message.edit(view=disabled_view)
+            except Exception:
+                pass
+
+            # DM le vendeur
+            try:
+                seller = i.guild.get_member(int(seller_id))
+                if seller:
+                    await seller.send(
+                        embed=discord.Embed(
+                            title="💰 Vente confirmée !",
+                            description=(
+                                f"**{i.user.display_name}** a acheté ton annonce sur **{i.guild.name}**.\n"
+                                f"💰 +`{price}` 🪙 ajoutés à ton solde."
+                            ),
+                            color=0x2ECC71,
+                        ),
+                    )
+            except Exception:
+                pass
+
+            await _safe_followup(
+                i,
+                content=(
+                    f"✅ **Achat confirmé !**\n"
+                    f"💰 -`{price}` 🪙 débités\n"
+                    f"🎁 Item reçu — vérifie ton profil"
+                ),
+            )
+        except Exception as ex:
+            print(f"[MarketplaceBuyView _on_buy] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="sell_pet",
+    description="🛒 Vendre un de tes pets sur le marketplace (annonce publique)",
+)
+@app_commands.describe(pet="Pet à vendre", price="Prix de vente en 🪙")
+@app_commands.choices(pet=[
+    app_commands.Choice(name=f"{p['emoji']} {p['name']}", value=p['id'])
+    for p in eng41.PETS
+])
+async def sell_pet_cmd(i: discord.Interaction, pet: app_commands.Choice[str], price: int):
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        if price < 50 or price > 100000:
+            return await _safe_followup(i, content="❌ Prix entre 50 et 100 000 🪙.")
+
+        # Vérif pet possédé
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT custom_name, level, is_active FROM user_pets "
+                "WHERE guild_id=? AND user_id=? AND pet_id=?",
+                (i.guild.id, i.user.id, pet.value),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return await _safe_followup(i, content="❌ Tu ne possèdes pas ce pet.")
+        custom_name, level, is_active = row
+        if is_active:
+            return await _safe_followup(
+                i,
+                content="❌ Tu ne peux pas vendre ton pet ACTIF. Désactive-le d'abord via `/pet action:setactive`.",
+            )
+
+        pet_def = eng41.get_pet(pet.value)
+        if not pet_def:
+            return await _safe_followup(i, content="❌ Pet inconnu.")
+
+        # Insérer le listing
+        expires = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+        payload = {'pet_id': pet.value, 'custom_name': custom_name, 'level': level}
+        async with get_db() as db:
+            cur = await db.execute(
+                "INSERT INTO marketplace_listings(guild_id, seller_id, kind, payload_json, price, expires_at) "
+                "VALUES(?,?,?,?,?,?)",
+                (i.guild.id, i.user.id, 'pet', json.dumps(payload), int(price), expires),
+            )
+            listing_id = cur.lastrowid
+            await db.commit()
+
+        # Poster dans le hub channel
+        c = await cfg(i.guild.id)
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        hub_ch = i.guild.get_channel(hub_id) if hub_id else None
+        if hub_ch and await _is_chatty_channel(hub_ch):
+            try:
+                e = discord.Embed(
+                    title="🛒 Nouvelle annonce Marketplace",
+                    description=(
+                        f"**Vendeur :** {i.user.mention}\n"
+                        f"**Objet :** {pet_def['emoji']} **{custom_name}** _({pet_def['name']})_ — Lv. {level}\n"
+                        f"**Prix :** `{price}` 🪙\n\n"
+                        f"_Annonce expire dans 7 jours._"
+                    ),
+                    color=0xF1C40F,
+                )
+                e.set_footer(text="Marketplace P2P · Click 'Acheter' pour acquérir")
+                mkt_msg = await hub_ch.send(
+                    embed=e,
+                    view=MarketplaceBuyView(listing_id, int(price)),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+                await _register_for_cleanup(mkt_msg, 7 * 24 * 3600, 'marketplace_listing')
+            except Exception as ex:
+                print(f"[sell_pet post hub] {ex}")
+
+        await _safe_followup(
+            i,
+            content=(
+                f"✅ Annonce créée !\n"
+                f"**{pet_def['emoji']} {custom_name}** (Lv. {level}) en vente pour `{price}` 🪙.\n"
+                f"_Tu seras notifié en DM dès qu'un acheteur clique._"
+            ),
+        )
+    except Exception as ex:
+        print(f"[/sell_pet] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="marketplace",
+    description="🛒 Voir les annonces actives sur le marketplace",
+)
+async def marketplace_cmd(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, seller_id, kind, payload_json, price, created_at "
+                "FROM marketplace_listings "
+                "WHERE guild_id=? AND status='active' "
+                "ORDER BY created_at DESC LIMIT 10",
+                (i.guild.id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        if not rows:
+            return await _safe_followup(i, content="🛒 Aucune annonce active. Pour vendre : `/sell_pet`")
+
+        e = discord.Embed(
+            title="🛒 Marketplace — Annonces actives",
+            description="10 dernières annonces. Clique le bouton sur le message original pour acheter.",
+            color=0xF1C40F,
+        )
+        for lid, seller_id, kind, payload_json, price, created in rows[:10]:
+            try:
+                payload = json.loads(payload_json) if payload_json else {}
+            except Exception:
+                payload = {}
+            seller = i.guild.get_member(int(seller_id))
+            seller_name = seller.display_name if seller else f"User#{seller_id}"
+
+            if kind == 'pet':
+                pet_id = payload.get('pet_id', '?')
+                pet_def = eng41.get_pet(pet_id) or {'emoji': '🐾', 'name': pet_id}
+                item_desc = f"{pet_def['emoji']} {payload.get('custom_name', pet_def.get('name', '?'))} — Lv. {payload.get('level', 1)}"
+            else:
+                item_desc = f"Item type `{kind}`"
+
+            e.add_field(
+                name=f"#{lid} · {item_desc}",
+                value=f"💰 `{price}` 🪙 · Vendeur : {seller_name}",
+                inline=False,
+            )
+
+        e.set_footer(text="Trouve l'annonce dans le hub pour cliquer 'Acheter'")
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        print(f"[/marketplace] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── Cleanup auto des listings expirés ────────────────────────────────────────
+
+
+@tasks.loop(hours=12)
+async def marketplace_expire_cleaner():
+    """Marque comme 'expired' les listings actifs > 7 jours."""
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE marketplace_listings SET status='expired' "
+                "WHERE status='active' AND datetime(expires_at) < datetime('now')",
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[marketplace_expire_cleaner] {ex}")
+
+
+@marketplace_expire_cleaner.before_loop
+async def _mkt_expire_wait():
+    await bot.wait_until_ready()
 
 
 if __name__ == "__main__":
