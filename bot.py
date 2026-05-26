@@ -7001,7 +7001,7 @@ class TreasureClaimView(View):
             if tr.get('claimed_by'):
                 claimer = i.guild.get_member(int(tr['claimed_by']))
                 return await i.response.send_message(
-                    f"⚠️ Déjà réclamé par {claimer.mention if claimer else 'quelqu'un'}.",
+                    f"⚠️ Déjà réclamé par {claimer.mention if claimer else 'un autre membre'}.",
                     ephemeral=True,
                 )
             if i.user.bot:
