@@ -60986,40 +60986,9 @@ class ClassSelectView(View):
             await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-@bot.tree.command(
-    name="class",
-    description="⚔️ Choisir ta classe RP (Guerrier / Mage / Voleur / Soigneur / Rôdeur)",
-)
-async def class_cmd(i: discord.Interaction):
-    if not await _safe_defer(i):
-        return
-    try:
-        if not i.guild:
-            return await _safe_followup(i, content="❌ Serveur uniquement.")
-        cur_class = await _get_user_class(i.guild.id, i.user.id)
-        desc_lines = [
-            "**Ta classe définit ton identité dans le récit du serveur.**\n",
-            "Bonus passifs sur certains events selon ta classe.\n",
-        ]
-        if cur_class:
-            desc_lines.append(
-                f"\n**Classe actuelle :** {cur_class['emoji']} **{cur_class['title_long']}**\n"
-                f"_{cur_class['description']}_\n"
-                f"**Passive :** {cur_class['passive']}\n"
-            )
-        desc_lines.append("\n**Toutes les classes :**\n")
-        for c in lore_v.PLAYER_CLASSES:
-            cur_mark = " ← actuelle" if cur_class and cur_class["id"] == c["id"] else ""
-            desc_lines.append(f"{c['emoji']} **{c['name']}**{cur_mark} — _{c['passive']}_")
-        e = discord.Embed(
-            title="⚔️ Classes RP",
-            description="\n".join(desc_lines),
-            color=cur_class.get("color", 0x9B59B6) if cur_class else 0x9B59B6,
-        )
-        await _safe_followup(i, embed=e, view=ClassSelectView())
-    except Exception as ex:
-        print(f"[class_cmd] {ex}")
-        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+# HOTFIX Phase 65.1 : la slash /class (Phase 57) était en conflit avec class_group
+# (L10651, déjà existant). Slash supprimée — accès via bouton hub "🎖️ Ma classe RP"
+# dans le sub-hub Outils (Phase 65). _open_class_panel reste l'helper utilisé.
 
 
 # ─── NARRATIVE CHOICES (votes collectifs 48h) ────────────────────────────────
@@ -63334,71 +63303,9 @@ class DuelAcceptView(View):
             await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-@bot.tree.command(
-    name="duel",
-    description="⚔️ Défier un membre en duel avec mise (Ladder Elo PvP)",
-)
-@app_commands.describe(
-    adversaire="Le membre que tu défies",
-    mise="Coins misés par chaque joueur (0 OK, min 10 sinon)",
-)
-async def duel_cmd(i: discord.Interaction, adversaire: discord.Member, mise: int = 0):
-    if not i.guild:
-        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
-    if not await _safe_defer(i):
-        return
-    try:
-        if adversaire.id == i.user.id or adversaire.bot:
-            return await _safe_followup(i, content="❌ Pas toi-même / pas un bot.")
-        if mise < 0 or (mise > 0 and mise < 10):
-            return await _safe_followup(i, content="❌ Mise 0 ou ≥10.")
-        # Check balance challenger
-        try:
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT coins FROM economy WHERE guild_id=? AND user_id=?",
-                    (i.guild.id, i.user.id),
-                ) as cur:
-                    row = await cur.fetchone()
-            bal = int(row[0]) if row else 0
-        except Exception:
-            bal = 0
-        if bal < mise:
-            return await _safe_followup(i, content=f"❌ Solde insuffisant ({bal} 🪙).")
-        # Create duel pending
-        async with get_db() as db:
-            cur = await db.execute(
-                "INSERT INTO pvp_duels(guild_id, challenger_id, challenged_id, stake_amount, channel_id) "
-                "VALUES(?, ?, ?, ?, ?)",
-                (i.guild.id, i.user.id, adversaire.id, mise, i.channel.id),
-            )
-            did = cur.lastrowid
-            await db.commit()
-        r_ch = await _get_ladder_rating(i.guild.id, i.user.id)
-        r_cd = await _get_ladder_rating(i.guild.id, adversaire.id)
-        e = discord.Embed(
-            title=f"⚔️ Duel proposé — #{did}",
-            description=(
-                f"**Challenger :** {i.user.mention} ({_rating_division(r_ch['rating'])} `{r_ch['rating']}`)\n"
-                f"**Challenged :** {adversaire.mention} ({_rating_division(r_cd['rating'])} `{r_cd['rating']}`)\n"
-                f"**Mise :** `{mise}` 🪙 chacun (winner prend tout, +Elo)\n\n"
-                f"_{adversaire.display_name}, accepte ou refuse ci-dessous._"
-            ),
-            color=0xE74C3C,
-            timestamp=datetime.now(timezone.utc),
-        )
-        msg = await i.channel.send(
-            content=adversaire.mention,
-            embed=e,
-            view=DuelAcceptView(int(did)),
-            allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
-        )
-        async with get_db() as db:
-            await db.execute("UPDATE pvp_duels SET message_id=? WHERE id=?", (msg.id, did))
-            await db.commit()
-        await _safe_followup(i, content=f"✅ Duel #{did} proposé.")
-    except Exception as ex:
-        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+# HOTFIX Phase 65.1 : la slash /duel (Phase 59) était en conflit avec /duel existant
+# (L10466). Slash supprimée — accès via bouton hub "⚔️ PvP / Duel" → "⚔️ Défier"
+# avec UserSelect dans le sub-hub Outils (Phase 65). Logique préservée.
 
 
 @bot.tree.command(
