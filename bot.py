@@ -49,6 +49,7 @@ import roblox50 as rblx  # Phase 50 : speedrun + studio tips + matchmaking + gam
 import competitive51 as cpt  # Phase 51 : bingo + prediction market + faction wars
 import social52 as soc  # Phase 52 : shoutouts + mentor + confess replies
 import ambient53 as amb  # Phase 53 : heures dorées + recap DM + conversation starters
+import lore57 as lore_v  # Phase 57 : lore vivant — choix narratifs + classes RP + crossover NPCs
 import protection_guards as guards2026
 import community_features as comm2026
 import admin_panels_v2 as panels2026
@@ -1859,6 +1860,63 @@ async def db_init():
             day TEXT,
             PRIMARY KEY (guild_id, user_id, day)
         )''')
+
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 57 — LORE VIVANT : Choix narratifs + Classes RP + Mémoires
+        # ═══════════════════════════════════════════════════════════════════
+        await db.execute('''CREATE TABLE IF NOT EXISTS narrative_votes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            choice_id TEXT,
+            chapter_link TEXT,
+            status TEXT DEFAULT 'open',
+            deadline DATETIME,
+            channel_id INTEGER,
+            message_id INTEGER,
+            outcome_id TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            resolved_at DATETIME
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_narr_votes_open "
+                "ON narrative_votes(guild_id, status, deadline)"
+            )
+        except Exception:
+            pass
+
+        await db.execute('''CREATE TABLE IF NOT EXISTS narrative_vote_ballots (
+            narrative_vote_id INTEGER,
+            user_id INTEGER,
+            option_id TEXT,
+            placed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (narrative_vote_id, user_id)
+        )''')
+
+        # Classe RP de chaque membre (1 par guild+user)
+        await db.execute('''CREATE TABLE IF NOT EXISTS player_class_choice (
+            guild_id INTEGER,
+            user_id INTEGER,
+            class_id TEXT,
+            chosen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (guild_id, user_id)
+        )''')
+
+        # Mémoires du serveur (événements importants)
+        await db.execute('''CREATE TABLE IF NOT EXISTS lore_memories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            kind TEXT,
+            detail TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_lore_memories_guild "
+                "ON lore_memories(guild_id, created_at DESC)"
+            )
+        except Exception:
+            pass
 
         # Marketplace : annonces de vente entre joueurs
         await db.execute('''CREATE TABLE IF NOT EXISTS marketplace_listings (
@@ -35461,6 +35519,23 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready phase51 persist] {ex}")
 
+    # Phase 57 : re-attacher les NarrativeChoiceView open
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, choice_id FROM narrative_votes WHERE status='open'",
+            ) as cur:
+                rows = await cur.fetchall()
+        for nv_id, choice_id in rows:
+            try:
+                choice = lore_v.get_narrative_choice(choice_id)
+                if choice:
+                    bot.add_view(NarrativeChoiceView(int(nv_id), choice))
+            except Exception:
+                pass
+    except Exception as ex:
+        print(f"[on_ready phase57 persist] {ex}")
+
     # Phase 42 — Views persistantes : World Boss + Daily Riddle
     try:
         bot.add_view(WorldBossAttackView())
@@ -35686,6 +35761,9 @@ async def on_ready():
     # Phase 54 : alertes auto owner
     if not owner_alerts_task.is_running():
         owner_alerts_task.start()
+    # Phase 57 : narrative choices resolver
+    if not narrative_choices_resolver_task.is_running():
+        narrative_choices_resolver_task.start()
     # Boot recovery : supprimer tous les messages expirés pendant le downtime
     # Phase 55 : boucle jusqu'à plus rien à supprimer (par batch de 500)
     try:
@@ -48874,6 +48952,31 @@ async def _end_world_boss(guild, wb_id: int, victory: bool, reason: str = ""):
             )
         except Exception as ex:
             print(f"[world_boss mission track] {ex}")
+
+        # Phase 57 : lore memory + 50% chance narrative choice après victoire
+        try:
+            if victory:
+                # Mémoire : first_kill du top damager
+                if attackers:
+                    top_uid = int(attackers[0][0])
+                    top_member = guild.get_member(top_uid)
+                    top_name = top_member.display_name if top_member else f"User {top_uid}"
+                    await _add_lore_memory(
+                        guild.id, "first_kill",
+                        f"{boss['title']} (top damage : {top_name})"
+                    )
+                # 50% chance narrative choice
+                if random.random() < 0.50:
+                    await asyncio.sleep(30)  # léger délai pour pas spammer
+                    await _start_narrative_choice(guild)
+            else:
+                # Défaite : memory pour que les NPCs en parlent
+                await _add_lore_memory(
+                    guild.id, "boss_defeat",
+                    f"la chute contre {boss['title']}"
+                )
+        except Exception as ex:
+            print(f"[world_boss phase57 hook] {ex}")
         # Phase 51 : Faction war scoring
         try:
             if victory:
@@ -60252,6 +60355,445 @@ async def owner_alerts_task():
 @owner_alerts_task.before_loop
 async def _owner_alerts_wait():
     await bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 57 — LORE VIVANT : Choix narratifs + Classes RP + Crossover NPCs + Mémoires
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── HELPERS LORE MEMORIES ───────────────────────────────────────────────────
+
+
+async def _add_lore_memory(guild_id: int, kind: str, detail: str):
+    """Ajoute une mémoire au serveur. Les NPCs s'en souviennent."""
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO lore_memories(guild_id, kind, detail) VALUES(?,?,?)",
+                (guild_id, kind, detail[:300]),
+            )
+            await db.commit()
+        print(f"[LORE MEMORY] guild={guild_id} kind={kind} detail={detail[:60]}")
+    except Exception as ex:
+        print(f"[_add_lore_memory] {ex}")
+
+
+async def _pick_recent_lore_memory(guild_id: int, days: int = 90) -> Optional[dict]:
+    """Pick une mémoire random des X derniers jours."""
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT kind, detail FROM lore_memories WHERE guild_id=? AND created_at>? "
+                "ORDER BY RANDOM() LIMIT 1",
+                (guild_id, cutoff),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return None
+        return {"kind": row[0], "detail": row[1]}
+    except Exception:
+        return None
+
+
+# ─── CROSSOVER NPC LINES (NPCs se citent entre eux) ──────────────────────────
+
+
+async def _recent_npc_speakers(guild_id: int, hours: int = 24) -> list:
+    """Retourne la liste des npc_ids ayant parlé dans les X dernières heures."""
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT DISTINCT npc_id FROM npc_posts_log WHERE guild_id=? AND posted_at>?",
+                (guild_id, cutoff),
+            ) as cur:
+                rows = await cur.fetchall()
+        return [r[0] for r in rows]
+    except Exception:
+        return []
+
+
+async def _maybe_npc_crossover_line(guild_id: int, speaker_id: str) -> Optional[str]:
+    """30% chance qu'un NPC cite un autre NPC qui a parlé récemment."""
+    if random.random() > 0.30:
+        return None
+    recent = await _recent_npc_speakers(guild_id, hours=24)
+    return lore_v.pick_crossover_line(speaker_id, recent)
+
+
+# ─── CLASSES RP ──────────────────────────────────────────────────────────────
+
+
+async def _get_user_class(guild_id: int, user_id: int) -> Optional[dict]:
+    """Retourne la classe choisie par un user (ou None)."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT class_id FROM player_class_choice WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return None
+        return lore_v.get_player_class(row[0])
+    except Exception:
+        return None
+
+
+class ClassSelectView(View):
+    """View ephemeral : Select pour choisir sa classe RP."""
+
+    def __init__(self):
+        super().__init__(timeout=300)
+        options = [
+            discord.SelectOption(
+                label=f"{c['emoji']} {c['name']}",
+                value=c["id"],
+                description=c["passive"][:100],
+            )
+            for c in lore_v.PLAYER_CLASSES
+        ]
+        select = Select(
+            placeholder="Choisis ta classe RP…",
+            options=options,
+            custom_id="class_select",
+        )
+        select.callback = self._on_select
+        self.add_item(select)
+
+    async def _on_select(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if not i.guild:
+                return await _safe_followup(i, content="❌ Serveur uniquement.")
+            class_id = i.data["values"][0]
+            class_def = lore_v.get_player_class(class_id)
+            if not class_def:
+                return await _safe_followup(i, content="❌ Classe inconnue.")
+            async with get_db() as db:
+                await db.execute(
+                    "INSERT INTO player_class_choice(guild_id, user_id, class_id) "
+                    "VALUES(?,?,?) "
+                    "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                    "class_id=?, chosen_at=CURRENT_TIMESTAMP",
+                    (i.guild.id, i.user.id, class_id, class_id),
+                )
+                await db.commit()
+            await _safe_followup(
+                i,
+                content=(
+                    f"✅ Tu es maintenant **{class_def['emoji']} {class_def['title_long']}** !\n\n"
+                    f"_{class_def['description']}_\n\n"
+                    f"**Passive :** {class_def['passive']}\n\n"
+                    f"_Visible dans `/profile`. Tu peux changer de classe quand tu veux._"
+                ),
+            )
+        except Exception as ex:
+            print(f"[ClassSelectView] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="class",
+    description="⚔️ Choisir ta classe RP (Guerrier / Mage / Voleur / Soigneur / Rôdeur)",
+)
+async def class_cmd(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        cur_class = await _get_user_class(i.guild.id, i.user.id)
+        desc_lines = [
+            "**Ta classe définit ton identité dans le récit du serveur.**\n",
+            "Bonus passifs sur certains events selon ta classe.\n",
+        ]
+        if cur_class:
+            desc_lines.append(
+                f"\n**Classe actuelle :** {cur_class['emoji']} **{cur_class['title_long']}**\n"
+                f"_{cur_class['description']}_\n"
+                f"**Passive :** {cur_class['passive']}\n"
+            )
+        desc_lines.append("\n**Toutes les classes :**\n")
+        for c in lore_v.PLAYER_CLASSES:
+            cur_mark = " ← actuelle" if cur_class and cur_class["id"] == c["id"] else ""
+            desc_lines.append(f"{c['emoji']} **{c['name']}**{cur_mark} — _{c['passive']}_")
+        e = discord.Embed(
+            title="⚔️ Classes RP",
+            description="\n".join(desc_lines),
+            color=cur_class.get("color", 0x9B59B6) if cur_class else 0x9B59B6,
+        )
+        await _safe_followup(i, embed=e, view=ClassSelectView())
+    except Exception as ex:
+        print(f"[class_cmd] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── NARRATIVE CHOICES (votes collectifs 48h) ────────────────────────────────
+
+
+class NarrativeChoiceView(View):
+    """View persistante : 2 boutons (option A / option B) pour vote 48h."""
+
+    def __init__(self, narrative_vote_id: int, choice: dict):
+        super().__init__(timeout=None)
+        self.nv_id = narrative_vote_id
+        for opt in choice["options"][:5]:  # max 5 options Discord
+            b = Button(
+                label=opt["label"][:80],
+                style=discord.ButtonStyle.primary,
+                custom_id=f"narrative_{narrative_vote_id}_{opt['id']}",
+            )
+            b.callback = self._make_cb(opt["id"])
+            self.add_item(b)
+
+    def _make_cb(self, option_id: str):
+        async def _cb(i: discord.Interaction):
+            if not await _safe_defer(i):
+                return
+            try:
+                if not i.guild:
+                    return await _safe_followup(i, content="❌ Serveur uniquement.")
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT status, deadline FROM narrative_votes WHERE id=?",
+                        (self.nv_id,),
+                    ) as cur:
+                        row = await cur.fetchone()
+                if not row or row[0] != 'open':
+                    return await _safe_followup(i, content="⏱️ Vote fermé.")
+                # Vote (upsert : 1 vote / user)
+                async with get_db() as db:
+                    await db.execute(
+                        "INSERT INTO narrative_vote_ballots(narrative_vote_id, user_id, option_id) "
+                        "VALUES(?,?,?) ON CONFLICT(narrative_vote_id, user_id) DO UPDATE SET "
+                        "option_id=?, placed_at=CURRENT_TIMESTAMP",
+                        (self.nv_id, i.user.id, option_id, option_id),
+                    )
+                    await db.commit()
+                await _safe_followup(
+                    i,
+                    content=(
+                        f"✅ Vote enregistré pour **{option_id}**. Tu peux changer "
+                        f"d'avis tant que le vote est ouvert."
+                    ),
+                )
+            except Exception as ex:
+                print(f"[NarrativeChoiceView] {ex}")
+                await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+        return _cb
+
+
+async def _start_narrative_choice(guild, choice_id: Optional[str] = None) -> Optional[int]:
+    """Lance un vote narratif. Si choice_id None, pick selon chapitre actuel."""
+    try:
+        c = await cfg(guild.id)
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        hub_ch = guild.get_channel(hub_id) if hub_id else None
+        if not hub_ch or not await _is_chatty_channel(hub_ch):
+            return None
+        # Pick choice
+        choice = None
+        if choice_id:
+            choice = lore_v.get_narrative_choice(choice_id)
+        else:
+            state = await _get_lore_state(guild.id)
+            choice = lore_v.pick_narrative_choice_for_chapter(state["chapter"]["id"])
+        if not choice:
+            return None
+        # Anti-dup : si on a un narrative vote open récent (24h), skip
+        cutoff_24h = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM narrative_votes WHERE guild_id=? AND status='open' "
+                "AND created_at>? LIMIT 1",
+                (guild.id, cutoff_24h),
+            ) as cur:
+                if await cur.fetchone():
+                    return None
+        # Create vote
+        deadline = (datetime.now(timezone.utc) + timedelta(hours=48)).isoformat()
+        async with get_db() as db:
+            cur = await db.execute(
+                "INSERT INTO narrative_votes(guild_id, choice_id, chapter_link, deadline, channel_id) "
+                "VALUES(?, ?, ?, ?, ?)",
+                (guild.id, choice["id"], choice.get("chapter_link"), deadline, hub_ch.id),
+            )
+            nv_id = cur.lastrowid
+            await db.commit()
+        # Post embed
+        e = discord.Embed(
+            title=f"🌀 Choix narratif — {choice['title']}",
+            description=(
+                f"{choice['context']}\n\n"
+                f"**Vote 48h. Tout le monde peut voter (1 par membre).**\n"
+                f"_Tu peux changer d'avis jusqu'à la fermeture._\n\n"
+                + "\n".join(f"• {o['label']}" for o in choice["options"]) +
+                f"\n\n⏰ <t:{int(datetime.fromisoformat(deadline).timestamp())}:R>"
+            ),
+            color=0x9B59B6,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text=f"Choix narratif #{nv_id} · Le résultat oriente le récit du serveur")
+        view = NarrativeChoiceView(int(nv_id), choice)
+        msg = await hub_ch.send(
+            embed=e,
+            view=view,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE narrative_votes SET message_id=? WHERE id=?",
+                (msg.id, nv_id),
+            )
+            await db.commit()
+        print(f"[NARRATIVE START] guild={guild.id} nv_id={nv_id} choice={choice['id']}")
+        return int(nv_id)
+    except Exception as ex:
+        print(f"[_start_narrative_choice] {ex}")
+        return None
+
+
+async def _resolve_narrative_choice(narrative_vote_id: int) -> Optional[dict]:
+    """Résout un vote narratif : compte les ballots, pick winner, save."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT guild_id, choice_id, channel_id, status FROM narrative_votes WHERE id=?",
+                (narrative_vote_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row or row[3] != 'open':
+            return None
+        gid, choice_id, channel_id, _ = int(row[0]), row[1], int(row[2] or 0), row[3]
+        choice = lore_v.get_narrative_choice(choice_id)
+        if not choice:
+            return None
+        # Compter les votes par option
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT option_id, COUNT(*) AS c FROM narrative_vote_ballots "
+                "WHERE narrative_vote_id=? GROUP BY option_id ORDER BY c DESC",
+                (narrative_vote_id,),
+            ) as cur:
+                results = await cur.fetchall()
+        if not results:
+            outcome_id = None
+        else:
+            # Tie-break : pick l'option ayant le plus de votes ; égalité = random
+            top_count = results[0][1]
+            top_options = [r[0] for r in results if r[1] == top_count]
+            outcome_id = random.choice(top_options)
+        # Save
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE narrative_votes SET status='resolved', outcome_id=?, "
+                "resolved_at=CURRENT_TIMESTAMP WHERE id=?",
+                (outcome_id, narrative_vote_id),
+            )
+            await db.commit()
+        # Save dans lore_memories pour que les NPCs s'en souviennent
+        winning_opt = next((o for o in choice["options"] if o["id"] == outcome_id), None)
+        if winning_opt:
+            await _add_lore_memory(
+                gid, "narrative_choice_result",
+                f"{choice['title']} → {winning_opt['label']}"
+            )
+        # Annoncer dans le hub
+        guild = bot.get_guild(gid)
+        ch = guild.get_channel(channel_id) if guild else None
+        if ch and winning_opt:
+            try:
+                total_votes = sum(r[1] for r in results)
+                vote_lines = []
+                for r in results:
+                    opt = next((o for o in choice["options"] if o["id"] == r[0]), None)
+                    if opt:
+                        pct = (r[1] / total_votes * 100) if total_votes else 0
+                        mark = "👑 " if r[0] == outcome_id else ""
+                        vote_lines.append(f"{mark}{opt['label']} — `{r[1]}` votes ({pct:.0f}%)")
+                LIFETIME = 12 * 3600
+                e = discord.Embed(
+                    title=f"📜 Vote résolu : {choice['title']}",
+                    description=(
+                        f"**Résultat : {winning_opt['label']}**\n\n"
+                        f"{winning_opt['consequence']}\n\n"
+                        f"**Détail des votes :**\n" + "\n".join(vote_lines) +
+                        f"\n\n_Ce choix reste dans la mémoire du serveur. Les NPCs s'en souviendront._"
+                    ),
+                    color=0x9B59B6,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                e.set_footer(text=f"Vote #{narrative_vote_id} · Phase 57 Lore vivant")
+                msg = await ch.send(
+                    embed=e,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=LIFETIME,
+                )
+                try:
+                    await _register_for_cleanup(msg, LIFETIME, 'narrative_resolved')
+                except Exception:
+                    pass
+            except Exception as ex:
+                print(f"[narrative resolve announce] {ex}")
+        print(f"[NARRATIVE RESOLVED] nv_id={narrative_vote_id} outcome={outcome_id}")
+        return {"outcome_id": outcome_id, "choice": choice, "winning_opt": winning_opt}
+    except Exception as ex:
+        print(f"[_resolve_narrative_choice] {ex}")
+        return None
+
+
+@tasks.loop(hours=1)
+async def narrative_choices_resolver_task():
+    """Toutes les heures, résout les votes narratifs dont la deadline est passée."""
+    try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id FROM narrative_votes WHERE status='open' AND deadline < ?",
+                (now_iso,),
+            ) as cur:
+                rows = await cur.fetchall()
+        for r in rows:
+            try:
+                await _resolve_narrative_choice(int(r[0]))
+                await asyncio.sleep(2)
+            except Exception as ex:
+                print(f"[narrative resolver nv={r[0]}] {ex}")
+    except Exception as ex:
+        print(f"[narrative_choices_resolver_task] {ex}")
+
+
+@narrative_choices_resolver_task.before_loop
+async def _narrative_resolver_wait():
+    await bot.wait_until_ready()
+
+
+@bot.tree.command(
+    name="narrative_force",
+    description="🌀 [Owner] Force le lancement d'un vote narratif maintenant",
+)
+@app_commands.describe(choice_id="ID de la narrative choice (ex: mage_prisoner). Vide = pick auto selon chapitre.")
+async def narrative_force_cmd(i: discord.Interaction, choice_id: Optional[str] = None):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        nv_id = await _start_narrative_choice(i.guild, choice_id)
+        if nv_id:
+            await _safe_followup(i, content=f"✅ Vote narratif #{nv_id} lancé. Deadline dans 48h.")
+        else:
+            await _safe_followup(i, content="⚠️ Vote non lancé (déjà un en cours, ou choice/hub manquant).")
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
 async def _maybe_greet_user_today(msg) -> None:
