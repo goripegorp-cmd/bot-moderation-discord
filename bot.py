@@ -11323,6 +11323,8 @@ async def _drop_mystery_box(guild) -> bool:
                 await _re_mask_channel_after_light_event(guild, ch.id)
         asyncio.create_task(_cleanup())
 
+        try: await _track_event_engagement(guild.id, 'mystery_box', 'start')
+        except Exception: pass
         print(f"[MYSTERY BOX] guild={guild.id} dropped in #{ch.name}{' (temp unmask)' if unmasked else ''}")
         return True
     except Exception as ex:
@@ -46416,6 +46418,26 @@ async def _do_wheel_spin(i: discord.Interaction):
     except Exception:
         pass
 
+    # Phase 48.3 : célébration publique pour drops mythiques/legendaires
+    try:
+        if reward.get('type') == 'item' and reward.get('amount') in ('mythic', 'legendary', 'divine'):
+            # Trouver un salon public pour célébrer (hub ou général chatty)
+            c = await cfg(i.guild.id)
+            hub_id = int(c.get('hub_channel', 0) or 0)
+            celebrate_ch = i.guild.get_channel(hub_id) if hub_id else None
+            if not celebrate_ch or not await _is_chatty_channel(celebrate_ch):
+                # Fallback : un salon chatty quelconque
+                for cand in i.guild.text_channels:
+                    if await _is_chatty_channel(cand):
+                        celebrate_ch = cand
+                        break
+            if celebrate_ch:
+                rarity_lbl = reward.get('amount', 'rare')
+                item_lbl = reward.get('label', f'Item {rarity_lbl}')
+                await _celebrate_rare_drop(celebrate_ch, i.user, f"Daily Wheel — {item_lbl}", rarity_lbl)
+    except Exception as ex:
+        print(f"[wheel celebrate rare drop] {ex}")
+
     color = 0xF1C40F if reward.get('rare') else 0x5865F2
     e = discord.Embed(description="\n".join(lines), color=color)
     e.set_footer(text="Daily Wheel · Reviens demain pour un nouveau spin")
@@ -46820,6 +46842,36 @@ async def _safe_followup(i: discord.Interaction, **kwargs) -> bool:
     except Exception as ex:
         print(f"[_safe_followup] {ex}")
         return False
+
+
+# ─── Phase 48.3 : Cache TTL 60s pour hot path (alliance + pet + stats) ───────
+# Réduit le load DB d'un facteur 10x sur les fonctions appelées à chaque message.
+
+import time as _time_p48
+
+_HOT_CACHE_TTL = 60.0
+_cache_user_alliance: dict = {}   # (gid, uid) → (timestamp, dict|None)
+_cache_active_pet: dict = {}      # (gid, uid) → (timestamp, dict|None)
+_cache_user_stats: dict = {}      # (gid, uid) → (timestamp, dict)
+
+
+def _invalidate_alliance_cache(guild_id: int, user_id: int = None):
+    """Appelé quand on modifie une alliance (add/leave/dissolve)."""
+    if user_id is not None:
+        _cache_user_alliance.pop((guild_id, user_id), None)
+    else:
+        # Invalidate all entries for this guild
+        for key in list(_cache_user_alliance.keys()):
+            if key[0] == guild_id:
+                _cache_user_alliance.pop(key, None)
+
+
+def _invalidate_pet_cache(guild_id: int, user_id: int):
+    _cache_active_pet.pop((guild_id, user_id), None)
+
+
+def _invalidate_stats_cache(guild_id: int, user_id: int):
+    _cache_user_stats.pop((guild_id, user_id), None)
 
 
 # ─── Phase 45.1 : helpers anti-pollution (auto-delete + chrono visuel) ───────
@@ -47972,6 +48024,8 @@ async def _start_world_boss(guild) -> dict:
             print(f"[_start_world_boss send arena] {ex}")
             return {'ok': False, 'error': f'erreur envoi : {ex}'}
 
+        try: await _track_event_engagement(guild.id, 'world_boss', 'start')
+        except Exception: pass
         print(f"[WORLD BOSS] guild={guild.id} boss={boss['id']} wb_id={wb_id}")
         return {'ok': True, 'wb_id': wb_id, 'boss_id': boss['id']}
     except Exception as ex:
@@ -48018,6 +48072,25 @@ async def _end_world_boss(guild, wb_id: int, victory: bool, reason: str = ""):
                     await _unlock_achievement(guild.id, attackers[0][0], 'worldboss_kill')
                 except Exception:
                     pass
+                # Phase 48.3 : célébration publique pour le top 1 attaquant
+                try:
+                    top_member = guild.get_member(int(attackers[0][0]))
+                    c = await cfg(guild.id)
+                    hub_id = int(c.get('hub_channel', 0) or 0)
+                    celebrate_ch = guild.get_channel(hub_id) if hub_id else None
+                    if not celebrate_ch or not await _is_chatty_channel(celebrate_ch):
+                        for cand in guild.text_channels:
+                            if await _is_chatty_channel(cand):
+                                celebrate_ch = cand
+                                break
+                    if celebrate_ch and top_member:
+                        await _celebrate_rare_drop(
+                            celebrate_ch, top_member,
+                            f"🌍 Slayer du {boss['title']} — Top Damage",
+                            'legendary',
+                        )
+                except Exception as ex:
+                    print(f"[world_boss celebrate top] {ex}")
         else:
             # Défaite : consolation pour tous les attaquants
             for uid, dmg in attackers:
@@ -48485,6 +48558,8 @@ async def _post_daily_riddle(guild) -> bool:
         except Exception as ex:
             print(f"[_post_daily_riddle db log] {ex}")
 
+        try: await _track_event_engagement(guild.id, 'daily_riddle', 'start')
+        except Exception: pass
         print(f"[DAILY RIDDLE] guild={guild.id} riddle={riddle['id']} ch={ch.id}")
         return True
     except Exception as ex:
@@ -48856,6 +48931,8 @@ async def _spawn_flash_treasure(guild) -> bool:
                 print(f"[_flash_cleanup] {ex}")
         asyncio.create_task(_flash_cleanup(msg.id, ch.id, reward))
 
+        try: await _track_event_engagement(guild.id, 'flash_treasure', 'start')
+        except Exception: pass
         print(f"[FLASH TREASURE] guild={guild.id} ch={ch.id} reward={reward}")
         return True
     except Exception as ex:
@@ -49048,6 +49125,8 @@ async def _post_evening_ritual(guild) -> bool:
             )
             await db.commit()
 
+        try: await _track_event_engagement(guild.id, 'evening_ritual', 'start')
+        except Exception: pass
         print(f"[EVENING RITUAL] guild={guild.id} ch={ch.id}")
         return True
     except Exception as ex:
@@ -49257,6 +49336,8 @@ async def _start_tag_royale(guild) -> bool:
             print(f"[_start_tag_royale send] {ex}")
             return False
 
+        try: await _track_event_engagement(guild.id, 'tag_royale', 'start')
+        except Exception: pass
         print(f"[TAG ROYALE START] guild={guild.id} starter={starter.id} tr_id={tr_id}")
         return True
     except Exception as ex:
@@ -51729,6 +51810,8 @@ async def _start_game_night(guild) -> bool:
         except Exception:
             pass
 
+        try: await _track_event_engagement(guild.id, 'game_night', 'start')
+        except Exception: pass
         print(f"[GAME NIGHT START] guild={guild.id} gn_id={gn_id}")
         return True
     except Exception as ex:
@@ -52766,151 +52849,8 @@ async def _post_game_night_prompt(gn_id: int):
         elif kind == 'quiz_survivor':
             await _gn_start_quiz_survivor(gn_id, guild, tc, ev, duration)
 
-        # ─── (legacy) GUESS NUMBER — gardé en deadcode au cas où on rev voudrait
-        elif kind == 'guess_number':
-            target_number = random.randint(int(ev['range_min']), int(ev['range_max']))
-            embed = discord.Embed(
-                title=ev['title'],
-                description=ev['description'] + f"\n\n{_chrono_footer(duration)}",
-                color=0xF1C40F,
-            )
-            try:
-                msg = await tc.send(
-                    embed=embed,
-                    allowed_mentions=discord.AllowedMentions.none(),
-                    delete_after=duration + 30,
-                )
-                _gn_event_state[msg.id] = {
-                    'kind': 'guess_number',
-                    'gn_id': gn_id,
-                    'channel_id': tc.id,
-                    'target': target_number,
-                    'range_min': ev['range_min'],
-                    'range_max': ev['range_max'],
-                    'reward': ev['reward_coins'],
-                    'consolation': ev.get('consolation_coins', 50),
-                    'guesses': {},  # user_id → distance
-                    'completed': False,
-                    'title': ev['title'],
-                }
-                async def _gn_resolve(mid, gid, dur, target):
-                    await asyncio.sleep(dur)
-                    state = _gn_event_state.get(mid)
-                    if not state or state.get('completed'):
-                        return
-                    state['completed'] = True
-                    if not state['guesses']:
-                        _gn_event_state.pop(mid, None)
-                        return
-                    # Trier par distance (la plus petite gagne)
-                    sorted_guesses = sorted(state['guesses'].items(), key=lambda kv: kv[1])
-                    winner_id, winner_dist = sorted_guesses[0]
-                    try:
-                        await add_coins(gid, winner_id, int(state['reward']))
-                    except Exception:
-                        pass
-                    # 2e et 3e proches : consolation
-                    for uid, _dist in sorted_guesses[1:3]:
-                        try:
-                            await add_coins(gid, uid, int(state['consolation']))
-                        except Exception:
-                            pass
-                    try:
-                        guild2 = bot.get_guild(gid)
-                        ch2 = guild2.get_channel(state['channel_id']) if guild2 else None
-                        winner = guild2.get_member(winner_id) if guild2 else None
-                        if ch2:
-                            await ch2.send(
-                                embed=discord.Embed(
-                                    title=f"🎯 Le nombre était **{target}**",
-                                    description=(
-                                        f"🏆 Gagnant : **{winner.display_name if winner else 'Inconnu'}** "
-                                        f"(écart de `{winner_dist}`)\n"
-                                        f"💰 **+{state['reward']} 🪙**"
-                                    ),
-                                    color=0x2ECC71,
-                                ),
-                                delete_after=120,
-                                allowed_mentions=discord.AllowedMentions.none(),
-                            )
-                    except Exception:
-                        pass
-                    _gn_event_state.pop(mid, None)
-                asyncio.create_task(_gn_resolve(msg.id, guild.id, duration, target_number))
-            except Exception as ex:
-                print(f"[gn guess_number] {ex}")
-
-        # ─── MATH EXPRESS (calcul mental, 1er bonne réponse dans chat) ──
-        elif kind == 'math_express':
-            difficulty = ev.get('difficulty', 'easy')
-            if difficulty == 'easy':
-                a, b = random.randint(2, 20), random.randint(2, 20)
-                op = random.choice(['+', '-', '*'])
-                if op == '+':
-                    answer = a + b
-                elif op == '-':
-                    answer = a - b
-                else:
-                    answer = a * b
-                question = f"{a} {op} {b}"
-            else:
-                # medium : 3 nombres
-                a, b, c = random.randint(2, 15), random.randint(2, 15), random.randint(2, 10)
-                if random.random() < 0.5:
-                    question = f"({a} + {b}) × {c}"
-                    answer = (a + b) * c
-                else:
-                    question = f"{a} × {b} - {c}"
-                    answer = a * b - c
-
-            embed = discord.Embed(
-                title=ev['title'],
-                description=(
-                    f"**Question :** `{question} = ?`\n\n"
-                    f"_Postez la réponse en chiffre dans le chat._\n\n"
-                    f"{_chrono_footer(duration)}"
-                ),
-                color=0x9B59B6,
-            )
-            try:
-                msg = await tc.send(
-                    embed=embed,
-                    allowed_mentions=discord.AllowedMentions.none(),
-                    delete_after=duration + 30,
-                )
-                _gn_event_state[msg.id] = {
-                    'kind': 'math_express',
-                    'gn_id': gn_id,
-                    'channel_id': tc.id,
-                    'question': question,
-                    'answer': answer,
-                    'reward': ev['reward_coins'],
-                    'winner': None,
-                    'completed': False,
-                    'title': ev['title'],
-                }
-                async def _gn_math_timeout(mid, dur):
-                    await asyncio.sleep(dur)
-                    state = _gn_event_state.get(mid)
-                    if state and not state.get('completed'):
-                        state['completed'] = True
-                        try:
-                            guild2 = bot.get_guild(guild.id)
-                            ch2 = guild2.get_channel(state['channel_id']) if guild2 else None
-                            if ch2:
-                                await ch2.send(
-                                    embed=discord.Embed(
-                                        description=f"⏱️ Personne n'a trouvé. La réponse était **{state['answer']}**.",
-                                        color=0x95A5A6,
-                                    ),
-                                    delete_after=60,
-                                )
-                        except Exception:
-                            pass
-                    _gn_event_state.pop(mid, None)
-                asyncio.create_task(_gn_math_timeout(msg.id, duration))
-            except Exception as ex:
-                print(f"[gn math_express] {ex}")
+        # Phase 48.3 : branches dispatch deadcode supprimées (guess_number, math_express)
+        # — ces kinds ne sont plus dans le catalogue events42.GAME_NIGHT_EVENTS
 
         # ─── ANAGRAMME (mot mélangé dans chat) ──────────────────────────
         elif kind == 'anagramme':
@@ -52972,127 +52912,8 @@ async def _post_game_night_prompt(gn_id: int):
             except Exception as ex:
                 print(f"[gn anagramme] {ex}")
 
-        # ─── SPEED SEQUENCE (reproduire séquence d'emojis) ──────────────
-        elif kind == 'speed_sequence':
-            length = int(ev.get('length', 3))
-            pool = ev.get('emoji_pool', ['🔥', '💧', '⚡', '🌟', '❤️'])
-            sequence = [random.choice(pool) for _ in range(length)]
-            sequence_str = ''.join(sequence)
-            embed = discord.Embed(
-                title=ev['title'],
-                description=(
-                    f"**Séquence à reproduire :**\n# {sequence_str}\n\n"
-                    f"_Poste exactement cette séquence dans le chat ({length} emojis collés)._\n\n"
-                    f"{_chrono_footer(duration)}"
-                ),
-                color=0xE67E22,
-            )
-            try:
-                msg = await tc.send(
-                    embed=embed,
-                    allowed_mentions=discord.AllowedMentions.none(),
-                    delete_after=duration + 30,
-                )
-                _gn_event_state[msg.id] = {
-                    'kind': 'speed_sequence',
-                    'gn_id': gn_id,
-                    'channel_id': tc.id,
-                    'sequence': sequence_str,
-                    'reward': ev['reward_coins'],
-                    'winner': None,
-                    'completed': False,
-                    'title': ev['title'],
-                }
-                async def _gn_seq_timeout(mid, dur):
-                    await asyncio.sleep(dur)
-                    state = _gn_event_state.get(mid)
-                    if state and not state.get('completed'):
-                        state['completed'] = True
-                        try:
-                            guild2 = bot.get_guild(guild.id)
-                            ch2 = guild2.get_channel(state['channel_id']) if guild2 else None
-                            if ch2:
-                                await ch2.send(
-                                    embed=discord.Embed(
-                                        description=f"⏱️ Personne n'a reproduit la séquence à temps.",
-                                        color=0x95A5A6,
-                                    ),
-                                    delete_after=60,
-                                )
-                        except Exception:
-                            pass
-                    _gn_event_state.pop(mid, None)
-                asyncio.create_task(_gn_seq_timeout(msg.id, duration))
-            except Exception as ex:
-                print(f"[gn speed_sequence] {ex}")
-
-        # ─── MOTS INTERDITS (survivre N min sans utiliser ces mots) ─────
-        elif kind == 'mots_interdits':
-            ban_words = random.choice(ev['ban_pools'])
-            embed = discord.Embed(
-                title=ev['title'],
-                description=(
-                    f"⚠️ **Mots INTERDITS pendant {duration//60} minutes :**\n"
-                    f"# {' · '.join(f'`{w}`' for w in ban_words)}\n\n"
-                    f"Si tu utilises l'un de ces mots dans le chat, **tu es éliminé**.\n"
-                    f"Les survivants gagnent **{ev['reward_coins']} 🪙**.\n\n"
-                    f"_Postez librement, le bot surveille._\n\n"
-                    f"{_chrono_footer(duration)}"
-                ),
-                color=0xE74C3C,
-            )
-            try:
-                msg = await tc.send(
-                    embed=embed,
-                    allowed_mentions=discord.AllowedMentions.none(),
-                    delete_after=duration + 30,
-                )
-                _gn_event_state[msg.id] = {
-                    'kind': 'mots_interdits',
-                    'gn_id': gn_id,
-                    'channel_id': tc.id,
-                    'ban_words': [w.lower() for w in ban_words],
-                    'reward': ev['reward_coins'],
-                    'participants': set(),   # user_ids ayant posté pendant l'event
-                    'eliminated': set(),
-                    'completed': False,
-                    'title': ev['title'],
-                }
-                async def _gn_motsint_resolve(mid, gid, dur):
-                    await asyncio.sleep(dur)
-                    state = _gn_event_state.get(mid)
-                    if not state or state.get('completed'):
-                        return
-                    state['completed'] = True
-                    survivors = state['participants'] - state['eliminated']
-                    for uid in survivors:
-                        try:
-                            await add_coins(gid, uid, int(state['reward']))
-                        except Exception:
-                            pass
-                    try:
-                        guild2 = bot.get_guild(gid)
-                        ch2 = guild2.get_channel(state['channel_id']) if guild2 else None
-                        if ch2:
-                            await ch2.send(
-                                embed=discord.Embed(
-                                    title="🤐 Mots Interdits — Résultats",
-                                    description=(
-                                        f"**Survivants :** `{len(survivors)}` (gagnent {state['reward']} 🪙 chacun)\n"
-                                        f"**Éliminés :** `{len(state['eliminated'])}`\n"
-                                        f"**Mots interdits :** {' · '.join(state['ban_words'])}"
-                                    ),
-                                    color=0x2ECC71,
-                                ),
-                                delete_after=120,
-                                allowed_mentions=discord.AllowedMentions.none(),
-                            )
-                    except Exception:
-                        pass
-                    _gn_event_state.pop(mid, None)
-                asyncio.create_task(_gn_motsint_resolve(msg.id, guild.id, duration))
-            except Exception as ex:
-                print(f"[gn mots_interdits] {ex}")
+        # Phase 48.3 : branches dispatch deadcode supprimées (speed_sequence, mots_interdits)
+        # — ces kinds ne sont plus dans le catalogue events42.GAME_NIGHT_EVENTS
 
         # ─── Fallback : kind inconnu, juste poster l'embed ─────────────
         else:
@@ -53126,8 +52947,9 @@ async def _post_game_night_prompt(gn_id: int):
 async def _check_game_night_emoji_storm(msg):
     """Hook universel on_message pour les mini-jeux Game Night basés sur le chat.
 
-    Détecte : emoji_storm, guess_number, math_express, anagramme, speed_sequence,
-    mots_interdits.
+    Détecte : emoji_storm, anagramme.
+    (Phase 48.3 : branches deadcode pour guess_number/math_express/speed_sequence/mots_interdits
+    supprimées — ces kinds ne sont plus dans events42.GAME_NIGHT_EVENTS.)
     """
     try:
         if msg.author.bot or not msg.guild:
@@ -53146,57 +52968,8 @@ async def _check_game_night_emoji_storm(msg):
                 if trigger and trigger in content:
                     state.setdefault('participants', set()).add(msg.author.id)
 
-            # ─── GUESS NUMBER ──
-            elif kind == 'guess_number':
-                # Parser un nombre du message
-                try:
-                    # Tolérant : prendre le premier int dans le contenu
-                    import re as _re
-                    m = _re.search(r'\b(\d{1,4})\b', content)
-                    if m:
-                        guess = int(m.group(1))
-                        rmin = state['range_min']
-                        rmax = state['range_max']
-                        if rmin <= guess <= rmax:
-                            dist = abs(guess - state['target'])
-                            # On garde la meilleure devinette par user
-                            prev = state['guesses'].get(msg.author.id)
-                            if prev is None or dist < prev:
-                                state['guesses'][msg.author.id] = dist
-                except Exception:
-                    pass
-
-            # ─── MATH EXPRESS (premier qui répond correct gagne) ──
-            elif kind == 'math_express':
-                try:
-                    import re as _re
-                    m = _re.search(r'-?\d+', content.replace(' ', ''))
-                    if m:
-                        ans = int(m.group(0))
-                        if ans == int(state['answer']):
-                            state['completed'] = True
-                            state['winner'] = msg.author.id
-                            try:
-                                await add_coins(msg.guild.id, msg.author.id, int(state['reward']))
-                            except Exception:
-                                pass
-                            try:
-                                await msg.channel.send(
-                                    embed=discord.Embed(
-                                        title=f"🏆 {msg.author.display_name} a trouvé !",
-                                        description=(
-                                            f"`{state['question']} = {state['answer']}` ✅\n"
-                                            f"💰 **+{state['reward']} 🪙**"
-                                        ),
-                                        color=0x2ECC71,
-                                    ),
-                                    delete_after=90,
-                                    allowed_mentions=discord.AllowedMentions.none(),
-                                )
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
+            # Phase 48.3 : branches deadcode supprimées (guess_number, math_express)
+            # — ces kinds ne sont plus dans le catalogue events42.GAME_NIGHT_EVENTS
 
             # ─── ANAGRAMME (premier qui poste le mot correct) ──
             elif kind == 'anagramme':
@@ -53224,58 +52997,8 @@ async def _check_game_night_emoji_storm(msg):
                     except Exception:
                         pass
 
-            # ─── SPEED SEQUENCE (premier qui reproduit la séquence) ──
-            elif kind == 'speed_sequence':
-                seq = state.get('sequence', '')
-                # On compare strict : content == sequence (peut contenir espaces avant/après)
-                if seq and content.replace(' ', '') == seq.replace(' ', ''):
-                    state['completed'] = True
-                    state['winner'] = msg.author.id
-                    try:
-                        await add_coins(msg.guild.id, msg.author.id, int(state['reward']))
-                    except Exception:
-                        pass
-                    try:
-                        await msg.channel.send(
-                            embed=discord.Embed(
-                                title=f"🎼 {msg.author.display_name} a reproduit la séquence !",
-                                description=(
-                                    f"Séquence : {seq}\n"
-                                    f"💰 **+{state['reward']} 🪙**"
-                                ),
-                                color=0x2ECC71,
-                            ),
-                            delete_after=90,
-                            allowed_mentions=discord.AllowedMentions.none(),
-                        )
-                    except Exception:
-                        pass
-
-            # ─── MOTS INTERDITS (track participants + éliminations) ──
-            elif kind == 'mots_interdits':
-                # Ajouter au pool des participants (a posté pendant l'event)
-                state.setdefault('participants', set()).add(msg.author.id)
-                # Check si message contient un mot interdit
-                lower = content.lower()
-                ban_words = state.get('ban_words', [])
-                eliminated = state.setdefault('eliminated', set())
-                if msg.author.id in eliminated:
-                    continue  # déjà sorti
-                for w in ban_words:
-                    # Match strict mot entier (avec frontières \b équivalent)
-                    import re as _re
-                    pattern = r'\b' + _re.escape(w) + r'\b'
-                    if _re.search(pattern, lower):
-                        eliminated.add(msg.author.id)
-                        try:
-                            await msg.channel.send(
-                                content=f"💀 {msg.author.mention} est éliminé (a utilisé `{w}`).",
-                                allowed_mentions=discord.AllowedMentions(users=[msg.author], roles=False, everyone=False),
-                                delete_after=30,
-                            )
-                        except Exception:
-                            pass
-                        break
+            # Phase 48.3 : branches deadcode supprimées (speed_sequence, mots_interdits)
+            # — ces kinds ne sont plus dans le catalogue events42.GAME_NIGHT_EVENTS
     except Exception as ex:
         print(f"[_check_game_night_emoji_storm] {ex}")
 
@@ -54544,8 +54267,8 @@ async def _get_user_event_affinity(guild_id: int, user_id: int, event_kind: str)
 
 
 async def _build_wakeup_mention_line_smart(guild, event_kind: str, max_count: int = 3) -> str:
-    """Phase 48.1 : remplace _build_wakeup_mention_line par une version qui ne
-    mentionne QUE les inactifs ayant une affinité élevée pour ce type d'event.
+    """Phase 48.1 : mention que les inactifs avec affinité élevée pour ce type d'event.
+    Phase 48.3 : RESPECTE les préférences notif granulaires (skip si opted-out).
 
     Cap 3 mentions max (TOS Discord respect).
     """
@@ -54553,16 +54276,24 @@ async def _build_wakeup_mention_line_smart(guild, event_kind: str, max_count: in
         all_candidates = await _get_wakeup_candidates(guild, max_count=20)
         if not all_candidates:
             return ""
-        # Score chaque candidat pour ce kind
-        scored = []
+        # Phase 48.3 : filter out les users qui ont opt-out de ce kind
+        filtered = []
         for m in all_candidates:
+            try:
+                if await _member_wants_notif(guild.id, m.id, event_kind):
+                    filtered.append(m)
+            except Exception:
+                filtered.append(m)  # en cas d'erreur, on garde (fail-open)
+        if not filtered:
+            return ""
+        # Score chaque candidat restant pour ce kind
+        scored = []
+        for m in filtered:
             score = await _get_user_event_affinity(guild.id, m.id, event_kind)
             scored.append((score, m))
-        # Tri descendant par score, max_count meilleurs
         scored.sort(key=lambda x: -x[0])
-        chosen = [m for score, m in scored[:max_count] if score >= 30]  # min 30 d'affinité
+        chosen = [m for score, m in scored[:max_count] if score >= 30]
         if not chosen:
-            # Fallback : si personne avec affinité, prendre 1 random pour pas que ce soit vide
             chosen = [scored[0][1]] if scored else []
         if not chosen:
             return ""
