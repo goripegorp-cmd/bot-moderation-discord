@@ -946,6 +946,27 @@ async def db_init():
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (guild_id, user_id)
         )''')
+
+        # Phase 31 : badges débloqués par joueur
+        await db.execute('''CREATE TABLE IF NOT EXISTS player_badges (
+            guild_id INTEGER,
+            user_id INTEGER,
+            badge_id TEXT,
+            unlocked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (guild_id, user_id, badge_id)
+        )''')
+
+        # Phase 31 : stats étendues par joueur (compteurs spéciaux)
+        await db.execute('''CREATE TABLE IF NOT EXISTS player_event_stats (
+            guild_id INTEGER,
+            user_id INTEGER,
+            raids_participated INTEGER DEFAULT 0,
+            final_blows INTEGER DEFAULT 0,
+            top1_count INTEGER DEFAULT 0,
+            shop_spent INTEGER DEFAULT 0,
+            rank_key TEXT DEFAULT '',
+            PRIMARY KEY (guild_id, user_id)
+        )''')
         
         # Ajouter colonne message_count si elle n'existe pas
         async with db.execute('PRAGMA table_info(economy)') as cursor:
@@ -1367,6 +1388,14 @@ async def cfg(gid):
         'event_arena_channel_name': '⚔️-arène-du-boss',  # nom du salon créé
         'event_log_channel': 0,                # logs des events (recap)
         'event_last_run': '',                  # ISO timestamp dernière event
+        # Phase 31 : extensions du système d'événements
+        'event_combo_enabled': True,           # combos communautaires actifs
+        'event_progressive_enabled': True,     # difficulté progressive
+        'event_tier_roles_enabled': False,     # créer/donner les rôles de rang auto
+        'event_shop_enabled': True,            # boutique d'événement active
+        'event_shop_seed_week': 0,             # numéro de semaine du shop courant
+        'event_last_duration_min': 0,          # durée du dernier event (pour progressive)
+        'event_last_victory': False,
     }
     for k, v in defaults.items():
         if k not in data: data[k] = v
@@ -5644,6 +5673,13 @@ class _BirthdayMsgModal(Modal, title="📝 Message d'anniversaire"):
 _active_events_cache: dict[int, dict] = {}
 # Rate-limit des attaques : { (guild_id, user_id): last_ts }
 _attack_cooldown: dict[tuple[int, int], float] = {}
+# Phase 31 : historique attaques récentes par event (pour combos)
+# { event_id: [(timestamp, user_id), ...] } — purgé > 10s
+_recent_attacks_log: dict[int, list[tuple]] = {}
+# Phase 31 : compteurs in-memory pour combos par event
+_event_combo_count: dict[int, int] = {}
+# Phase 31 : crit streaks par (guild, user)
+_crit_streaks: dict[tuple[int, int], int] = {}
 
 
 async def _get_or_create_inventory(guild_id: int, user_id: int) -> dict:
@@ -5792,34 +5828,65 @@ class EventConfigPanelV2(LayoutView):
         b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="evt_back")
         b_back.callback = self._cb_back
 
+        # Phase 31 : toggles avancés
+        combo_on = bool(c.get('event_combo_enabled', True))
+        prog_on = bool(c.get('event_progressive_enabled', True))
+        tier_on = bool(c.get('event_tier_roles_enabled', False))
+
         config_block = (
             f"🔌 **État système** · {'🟢 actif' if enabled else '⚪ désactivé'}\n"
             f"⏰ **Auto toutes les** · `{interval}` h ({'manuel uniquement' if interval == 0 else next_run_str})\n"
-            f"⚔️ **Difficulté** · {diff_str} (`{difficulty}`)\n"
-            f"⏱️ **Durée d'un boss** · `{duration}` min (le boss s'enfuit après)\n"
+            f"⚔️ **Difficulté** · {diff_str} (`{difficulty}`) {'· auto-scale 🟢' if prog_on else ''}\n"
+            f"⏱️ **Durée d'un boss** · `{duration}` min\n"
             f"💰 **Multiplicateur coins** · `×{coin_mult:.1f}`\n"
             f"🏟️ **Nom de l'arène** · `{arena_name}`\n"
-            f"📜 **Salon récap** · {log_ch.mention if log_ch else '_aucun_'}"
+            f"📜 **Salon récap** · {log_ch.mention if log_ch else '_aucun_'}\n"
+            f"\n**Extensions :**\n"
+            f"💥 **Combos communautaires** · {'🟢 actifs' if combo_on else '⚪ désactivés'}\n"
+            f"📈 **Difficulté progressive** · {'🟢 active' if prog_on else '⚪ désactivée'}\n"
+            f"👑 **Rôles de rang auto** · {'🟢 actifs' if tier_on else '⚪ désactivés'}"
         )
 
         how_it_works = (
             "**Comment ça marche :**\n"
-            "1. Le bot **sauvegarde** la visibilité de TOUS les salons\n"
+            "1. Le bot **sauvegarde** la visibilité de TOUS les salons en base\n"
             "2. Tous les salons deviennent invisibles pour `@everyone` (admins/owner gardent l'accès)\n"
             "3. Une arène est créée avec le boss + bouton **⚔️ Attaquer**\n"
             "4. Les membres collaborent pour vaincre le boss avant la fin du timer\n"
-            "5. Récompenses : pièces 🪙 + équipement aléatoire 🎁\n"
-            "6. Tout est **restauré** à l'identique\n\n"
-            "**Sécurité pendant l'event :**\n"
-            "• Le filtre badwords reste actif\n"
-            "• `@everyone`/`@here` sont auto-supprimés et ne comptent pas comme attaque\n"
-            "• Limite : 1 attaque par membre toutes les 5 secondes\n"
-            "• L'owner peut stopper l'event à tout moment"
+            "5. Récompenses : pièces 🪙 + équipement aléatoire 🎁 + badges 🏅\n"
+            "6. Tout est **restauré exactement** à l'identique\n\n"
+            "**Extensions Phase 31 :**\n"
+            "• 💥 **Combos** : si 3/5/10 joueurs attaquent ensemble → bonus dégâts ×1.5/×2/×3\n"
+            "• 📈 **Progressive** : si vaincu trop vite → +20% difficulté · si raté → -15%\n"
+            "• 👑 **Rangs** : 6 tiers de Bronze à Mythique selon les kills (rôles auto)\n"
+            "• 🏅 **15 badges** débloquables par exploits (voir `/badges`)"
         )
+
+        # Phase 31 : 3 nouveaux toggles
+        b_combo = Button(
+            label=("💥 Combos " + ("ON" if combo_on else "OFF")),
+            style=(discord.ButtonStyle.success if combo_on else discord.ButtonStyle.secondary),
+            custom_id="evt_combo_tog",
+        )
+        b_combo.callback = self._cb_toggle_combo
+
+        b_prog = Button(
+            label=("📈 Progressive " + ("ON" if prog_on else "OFF")),
+            style=(discord.ButtonStyle.success if prog_on else discord.ButtonStyle.secondary),
+            custom_id="evt_prog_tog",
+        )
+        b_prog.callback = self._cb_toggle_progressive
+
+        b_tier = Button(
+            label=("👑 Rangs auto " + ("ON" if tier_on else "OFF")),
+            style=(discord.ButtonStyle.success if tier_on else discord.ButtonStyle.secondary),
+            custom_id="evt_tier_tog",
+        )
+        b_tier.callback = self._cb_toggle_tier
 
         items = [
             v2_title("🎪 Événements communautaires"),
-            v2_subtitle("Boss Raids · combats live · arène temporaire · récompenses"),
+            v2_subtitle("Boss Raids · combos · rangs · badges · loot épique"),
             v2_divider(),
         ]
         if active:
@@ -5831,6 +5898,7 @@ class EventConfigPanelV2(LayoutView):
         items.append(v2_divider())
         items.append(discord.ui.ActionRow(log_select))
         items.append(discord.ui.ActionRow(b_toggle, b_settings, b_start, b_stop))
+        items.append(discord.ui.ActionRow(b_combo, b_prog, b_tier))
         items.append(discord.ui.ActionRow(b_back))
 
         self.add_item(v2_container(*items, color=Palette.DANGER))
@@ -5847,6 +5915,30 @@ class EventConfigPanelV2(LayoutView):
             await self.render_to(i, edit=True)
         except Exception as ex:
             print(f"[EventConfigPanelV2 _cb_toggle] {ex}")
+
+    async def _cb_toggle_combo(self, i):
+        try:
+            c = await cfg(self.g.id)
+            await db_set(self.g.id, 'event_combo_enabled', not bool(c.get('event_combo_enabled', True)))
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[EventConfigPanelV2 _cb_toggle_combo] {ex}")
+
+    async def _cb_toggle_progressive(self, i):
+        try:
+            c = await cfg(self.g.id)
+            await db_set(self.g.id, 'event_progressive_enabled', not bool(c.get('event_progressive_enabled', True)))
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[EventConfigPanelV2 _cb_toggle_progressive] {ex}")
+
+    async def _cb_toggle_tier(self, i):
+        try:
+            c = await cfg(self.g.id)
+            await db_set(self.g.id, 'event_tier_roles_enabled', not bool(c.get('event_tier_roles_enabled', False)))
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[EventConfigPanelV2 _cb_toggle_tier] {ex}")
 
     async def _cb_log_channel(self, i):
         try:
@@ -5984,20 +6076,28 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
             await db.commit()
 
         # ─── 1. Sauvegarder les permissions @everyone de chaque salon ───
+        # CRITIQUE : on doit pouvoir RESTAURER EXACTEMENT l'état d'origine.
+        # On détecte l'overwrite via `ch.overwrites` (dict) qui est l'API
+        # définitive — pas via `overwrites_for()` qui crée un objet vide si absent.
         async with get_db() as db:
+            everyone_role = guild.default_role
             for ch in guild.channels:
-                # On ne touche pas aux catégories
+                # On ne touche pas aux catégories (gérées via héritage)
                 if isinstance(ch, discord.CategoryChannel):
                     continue
                 try:
-                    everyone_role = guild.default_role
-                    overw = ch.overwrites_for(everyone_role)
-                    had_overwrite = 1 if overw != discord.PermissionOverwrite() else 0
-                    allow_val, deny_val = overw.pair()
+                    # Détection robuste : @everyone est-il dans le dict des overwrites ?
+                    had_overwrite = 1 if everyone_role in ch.overwrites else 0
+                    if had_overwrite:
+                        overw = ch.overwrites[everyone_role]
+                        allow_val, deny_val = overw.pair()
+                        allow_int, deny_int = allow_val.value, deny_val.value
+                    else:
+                        allow_int, deny_int = 0, 0
                     await db.execute(
                         'INSERT OR REPLACE INTO event_channel_snapshots(event_id, channel_id, had_overwrite, allow_value, deny_value) '
                         'VALUES (?,?,?,?,?)',
-                        (event_id, ch.id, had_overwrite, allow_val.value, deny_val.value),
+                        (event_id, ch.id, had_overwrite, allow_int, deny_int),
                     )
                 except Exception as ex:
                     print(f"[event start snapshot ch={ch.id}] {ex}")
@@ -6213,9 +6313,37 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
         inv = await _get_or_create_inventory(i.guild.id, i.user.id)
         damage, is_crit = events2026.calc_damage(inv.get('weapon'), inv.get('hp', 100))
 
+        # ─── Phase 31 : Crit streaks ───
+        crit_key = (i.guild.id, i.user.id)
+        if is_crit:
+            _crit_streaks[crit_key] = _crit_streaks.get(crit_key, 0) + 1
+        else:
+            _crit_streaks[crit_key] = 0
+
+        # ─── Phase 31 : Combos communautaires ───
+        c_evt = await cfg(i.guild.id)
+        combo_enabled = bool(c_evt.get('event_combo_enabled', True))
+        combo_msg = None
+        if combo_enabled:
+            log = _recent_attacks_log.setdefault(event_id, [])
+            log.append((now_ts, i.user.id))
+            # Purge > 10s
+            cutoff = now_ts - 10
+            log[:] = [(t, u) for (t, u) in log if t >= cutoff]
+            combo = events2026.check_combo(log, now_ts)
+            if combo:
+                # Bonus damage du combo (appliqué à ce coup)
+                bonus = int(damage * (combo['multiplier'] - 1.0))
+                damage += bonus
+                combo_msg = f"{combo['emoji']} **{combo['name']}** activé ! Bonus `+{bonus}` dégâts !"
+                _event_combo_count[event_id] = _event_combo_count.get(event_id, 0) + 1
+                # On clear le log pour ne pas re-déclencher en chaîne sur le même flux
+                _recent_attacks_log[event_id] = []
+
         # Appliquer les dégâts au boss
         new_hp = max(0, int(boss.get('current_hp', 0)) - damage)
         boss['current_hp'] = new_hp
+        final_blow = (new_hp == 0)
 
         async with get_db() as db:
             await db.execute(
@@ -6236,12 +6364,36 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
         inv['total_damage'] = inv.get('total_damage', 0) + damage
         await _save_inventory(i.guild.id, i.user.id, inv)
 
+        # Compteur final_blows si c'est le coup fatal
+        if final_blow:
+            try:
+                async with get_db() as db:
+                    await db.execute(
+                        'INSERT INTO player_event_stats(guild_id, user_id, final_blows) VALUES(?,?,1) '
+                        'ON CONFLICT(guild_id, user_id) DO UPDATE SET final_blows = final_blows + 1',
+                        (i.guild.id, i.user.id),
+                    )
+                    await db.commit()
+            except Exception:
+                pass
+
         # Réponse immédiate à l'attaque
         crit_str = " 🌟 **CRITIQUE !**" if is_crit else ""
         await i.response.send_message(
             f"⚔️ Tu infliges `{damage}` dégâts au boss !{crit_str}",
             ephemeral=True,
         )
+
+        # Annonce du combo dans l'arène (si déclenché)
+        if combo_msg:
+            try:
+                cache = _active_events_cache.get(i.guild.id, {})
+                arena_id = int(cache.get('arena_channel_id', 0) or 0)
+                arena_ch = i.guild.get_channel(arena_id) if arena_id else i.channel
+                if arena_ch:
+                    await arena_ch.send(combo_msg, delete_after=30)
+            except Exception:
+                pass
 
         # Refresh embed
         try:
@@ -6466,12 +6618,223 @@ async def _end_active_event(guild, *, victory: bool, reason: str = ""):
             except Exception:
                 pass
 
+        # ─── Phase 31 : Difficulté progressive ───
+        try:
+            duration_used_sec = None
+            async with get_db() as db:
+                async with db.execute('SELECT started_at, ends_at FROM events WHERE id=?', (event_id,)) as cur:
+                    r = await cur.fetchone()
+                    if r and r[0]:
+                        try:
+                            sa = datetime.fromisoformat(r[0]) if 'T' in (r[0] or '') else None
+                            if sa is None:
+                                sa = datetime.strptime(r[0], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                            duration_used_sec = (datetime.now(timezone.utc) - sa).total_seconds()
+                        except Exception:
+                            pass
+
+            duration_max_min = int(c.get('event_duration_min', 30) or 30)
+            fast_kill = bool(victory and duration_used_sec is not None and duration_used_sec < (duration_max_min * 60 * 0.5))
+            failure = not victory
+
+            if bool(c.get('event_progressive_enabled', True)):
+                cur_diff = int(c.get('event_difficulty', 100) or 100)
+                new_diff = events2026.adjust_difficulty(cur_diff, fast_kill, failure)
+                if new_diff != cur_diff:
+                    await db_set(guild.id, 'event_difficulty', new_diff)
+                    print(f"[EVENT PROGRESSIVE] guild={guild.id} diff {cur_diff} → {new_diff} (fast_kill={fast_kill}, failure={failure})")
+
+            await db_set(guild.id, 'event_last_duration_min', int((duration_used_sec or 0) / 60))
+            await db_set(guild.id, 'event_last_victory', bool(victory))
+        except Exception as ex:
+            print(f"[event progressive] {ex}")
+
+        # ─── Phase 31 : Badges + tier roles + stats étendues ───
+        try:
+            tier_roles_enabled = bool(c.get('event_tier_roles_enabled', False))
+            await _check_badges_and_ranks(guild, participants, victory, tier_roles_enabled, event_id)
+        except Exception as ex:
+            print(f"[badges/ranks check] {ex}")
+
         # Cleanup cache
         _active_events_cache.pop(guild.id, None)
+        _recent_attacks_log.pop(event_id, None)
+        _event_combo_count.pop(event_id, None)
         print(f"[EVENT END] guild={guild.id} event={event_id} victory={victory}")
     except Exception as ex:
         print(f"[_end_active_event] {ex}")
         import traceback; traceback.print_exc()
+
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Phase 31 : Vérification badges + rangs + compteurs stats
+# ───────────────────────────────────────────────────────────────────────────────
+
+async def _check_badges_and_ranks(guild, participants: list, victory: bool, tier_roles_enabled: bool, event_id: int):
+    """Pour chaque participant : vérifie les badges débloqués + applique le tier role."""
+    if not participants:
+        return
+
+    # Détermine le #1 (top damager)
+    sorted_p = sorted(participants, key=lambda p: p.get('damage', 0), reverse=True)
+    top1_uid = sorted_p[0]['user_id'] if sorted_p else None
+
+    combos_total = _event_combo_count.get(event_id, 0)
+
+    for p in participants:
+        uid = p['user_id']
+        member = guild.get_member(uid)
+        if not member:
+            continue
+
+        try:
+            # 1. Update raids_participated + top1_count si applicable
+            async with get_db() as db:
+                if uid == top1_uid and victory:
+                    await db.execute(
+                        'INSERT INTO player_event_stats(guild_id, user_id, raids_participated, top1_count) VALUES(?,?,1,1) '
+                        'ON CONFLICT(guild_id, user_id) DO UPDATE SET raids_participated = raids_participated + 1, top1_count = top1_count + 1',
+                        (guild.id, uid),
+                    )
+                else:
+                    await db.execute(
+                        'INSERT INTO player_event_stats(guild_id, user_id, raids_participated) VALUES(?,?,1) '
+                        'ON CONFLICT(guild_id, user_id) DO UPDATE SET raids_participated = raids_participated + 1',
+                        (guild.id, uid),
+                    )
+                await db.commit()
+
+                # 2. Charger stats consolidées
+                async with db.execute(
+                    'SELECT raids_participated, final_blows, top1_count, shop_spent, rank_key FROM player_event_stats WHERE guild_id=? AND user_id=?',
+                    (guild.id, uid),
+                ) as cur:
+                    row = await cur.fetchone()
+                raids = (row[0] if row else 0) or 0
+                final_blows = (row[1] if row else 0) or 0
+                top1_count = (row[2] if row else 0) or 0
+                shop_spent = (row[3] if row else 0) or 0
+                current_rank_key = (row[4] if row else '') or ''
+
+                # 3. Charger inventaire (pour kills, total_damage, has_legendary)
+                inv = await _get_or_create_inventory(guild.id, uid)
+                weapon = inv.get('weapon', {}) or {}
+                armor = inv.get('armor', {}) or {}
+                has_legendary = (weapon.get('rarity') == 'légendaire') or (armor.get('rarity') == 'légendaire')
+
+                # 4. Crit streak in-mem
+                crit_streak = _crit_streaks.get((guild.id, uid), 0)
+
+                # 5. Liste des badges déjà débloqués
+                async with db.execute(
+                    'SELECT badge_id FROM player_badges WHERE guild_id=? AND user_id=?',
+                    (guild.id, uid),
+                ) as cur:
+                    already = {r[0] for r in await cur.fetchall()}
+
+            # 6. Calcul des nouveaux badges
+            stats = {
+                'kills': int(inv.get('kills', 0)),
+                'total_damage': int(inv.get('total_damage', 0)),
+                'raids_participated': raids,
+                'top1_count': top1_count,
+                'final_blows': final_blows,
+                'crits_streak': crit_streak,
+                'has_legendary': has_legendary,
+                'shop_spent': shop_spent,
+                'combos_in_battle': combos_total,
+                'lucky_drop_under_100': False,  # à calculer plus précisément si besoin
+            }
+            new_badges = events2026.check_badge_unlocks(stats, already)
+
+            # 7. Persister les nouveaux + notifier le joueur
+            if new_badges:
+                async with get_db() as db:
+                    for bid in new_badges:
+                        try:
+                            await db.execute(
+                                'INSERT OR IGNORE INTO player_badges(guild_id, user_id, badge_id) VALUES(?,?,?)',
+                                (guild.id, uid, bid),
+                            )
+                        except Exception:
+                            pass
+                    await db.commit()
+
+                # DM si possible
+                badge_lines = []
+                for bid in new_badges:
+                    b = events2026.get_badge_by_id(bid)
+                    if b:
+                        badge_lines.append(f"{b['emoji']} **{b['name']}** — _{b['desc']}_")
+                if badge_lines:
+                    try:
+                        await member.send(
+                            f"🎉 **Nouveaux badges débloqués sur {guild.name} !**\n\n" +
+                            "\n".join(badge_lines)
+                        )
+                    except Exception:
+                        pass  # DM fermés
+
+            # 8. Tier role (si activé)
+            if tier_roles_enabled:
+                kills = int(inv.get('kills', 0))
+                new_tier = events2026.rank_for_kills(kills)
+                if new_tier and new_tier['key'] != current_rank_key:
+                    role = await _get_or_create_tier_role(guild, new_tier)
+                    if role:
+                        # Retirer les autres tiers
+                        for t in events2026.RANK_TIERS:
+                            if t['key'] != new_tier['key']:
+                                other_role = discord.utils.get(guild.roles, name=t['name'])
+                                if other_role and other_role in member.roles:
+                                    try:
+                                        await member.remove_roles(other_role, reason="Tier supérieur atteint")
+                                    except Exception:
+                                        pass
+                        # Donner le nouveau
+                        if role not in member.roles:
+                            try:
+                                await member.add_roles(role, reason=f"Rang {new_tier['name']} atteint")
+                            except Exception:
+                                pass
+                        # Persister la clé
+                        async with get_db() as db:
+                            await db.execute(
+                                'UPDATE player_event_stats SET rank_key=? WHERE guild_id=? AND user_id=?',
+                                (new_tier['key'], guild.id, uid),
+                            )
+                            await db.commit()
+                        # Notifier
+                        try:
+                            await member.send(
+                                f"⬆️ **Promotion sur {guild.name} !** Tu es maintenant {new_tier['name']} !"
+                            )
+                        except Exception:
+                            pass
+        except Exception as ex:
+            print(f"[badges check user={uid}] {ex}")
+
+
+async def _get_or_create_tier_role(guild, tier: dict):
+    """Récupère ou crée un rôle Discord pour ce tier."""
+    role = discord.utils.get(guild.roles, name=tier['name'])
+    if role:
+        return role
+    try:
+        role = await guild.create_role(
+            name=tier['name'],
+            color=discord.Color(tier['color']),
+            mentionable=False,
+            hoist=True,
+            reason=f"Auto tier role pour {tier['key']}",
+        )
+        return role
+    except discord.Forbidden:
+        print(f"[tier role create] perm refusée pour {tier['name']}")
+        return None
+    except Exception as ex:
+        print(f"[tier role create] {ex}")
+        return None
 
 
 # ─────────────────────────── BACKGROUND TASKS ───────────────────────────
@@ -32863,6 +33226,77 @@ async def inventory_cmd(i: discord.Interaction):
         await i.response.send_message(embed=e, ephemeral=True)
     except Exception as ex:
         print(f"[/inventory] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+@bot.tree.command(name="badges", description="🏅 Affiche tes badges et ton rang")
+async def badges_cmd(i: discord.Interaction):
+    """Phase 31 — affiche les badges débloqués + rang actuel."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT badge_id, unlocked_at FROM player_badges WHERE guild_id=? AND user_id=? ORDER BY unlocked_at DESC',
+                (i.guild.id, i.user.id),
+            ) as cur:
+                rows = await cur.fetchall()
+        inv = await _get_or_create_inventory(i.guild.id, i.user.id)
+        kills = int(inv.get('kills', 0))
+        rank = events2026.rank_for_kills(kills)
+
+        e = discord.Embed(
+            title=f"🏅 Profil de {i.user.display_name}",
+            color=(rank['color'] if rank else 0x5865F2),
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_thumbnail(url=i.user.display_avatar.url)
+        e.add_field(
+            name="🎖️ Rang actuel",
+            value=(rank['name'] if rank else "_Aucun rang (vainc 1 boss pour Bronze)_"),
+            inline=False,
+        )
+        e.add_field(name="💀 Boss vaincus", value=f"`{kills}`", inline=True)
+        e.add_field(name="📊 Dégâts cumulés", value=f"`{int(inv.get('total_damage', 0)):,}`", inline=True)
+        e.add_field(name="🏅 Badges", value=f"`{len(rows)}` / `{len(events2026.BADGE_CATALOG)}`", inline=True)
+
+        if rows:
+            unlocked_lines = []
+            unlocked_set = set()
+            for badge_id, _ in rows[:15]:
+                b = events2026.get_badge_by_id(badge_id)
+                if b:
+                    unlocked_lines.append(f"{b['emoji']} **{b['name']}** — _{b['desc']}_")
+                    unlocked_set.add(badge_id)
+            e.add_field(
+                name=f"✅ Badges débloqués ({len(rows)})",
+                value="\n".join(unlocked_lines) or "_Aucun_",
+                inline=False,
+            )
+            # Badges restants à débloquer (vue motivante)
+            remaining = [b for b in events2026.BADGE_CATALOG if b['id'] not in unlocked_set]
+            if remaining:
+                rem_lines = [f"{b['emoji']} **{b['name']}** — _{b['desc']}_" for b in remaining[:5]]
+                e.add_field(
+                    name=f"🎯 À débloquer ({len(remaining)} restants)",
+                    value="\n".join(rem_lines),
+                    inline=False,
+                )
+        else:
+            e.add_field(
+                name="🎯 Objectifs",
+                value="\n".join(
+                    f"{b['emoji']} **{b['name']}** — _{b['desc']}_"
+                    for b in events2026.BADGE_CATALOG[:5]
+                ),
+                inline=False,
+            )
+        e.set_footer(text=f"{i.guild.name} · Participe aux Boss Raids pour débloquer plus !", icon_url=(i.guild.icon.url if i.guild.icon else None))
+        await i.response.send_message(embed=e, ephemeral=True)
+    except Exception as ex:
+        print(f"[/badges] {ex}")
         try:
             if not i.response.is_done():
                 await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)

@@ -319,10 +319,236 @@ def compute_rewards(participants: list[dict], boss_max_hp: int, victory: bool, c
     return rewards
 
 
+# =============================================================================
+# PHASE 31 : BADGES & RANGS
+# =============================================================================
+
+# Badges débloqués selon des conditions sur les stats du joueur
+# (kills, total_damage, etc.) ou des événements spéciaux pendant les combats.
+BADGE_CATALOG = [
+    # Kills milestones
+    {"id": "first_blood", "name": "Premier Sang",         "emoji": "🩸", "desc": "Vaincre ton premier boss"},
+    {"id": "veteran",     "name": "Vétéran",              "emoji": "🎖️", "desc": "Vaincre 5 boss"},
+    {"id": "slayer",      "name": "Tueur de Légendes",    "emoji": "🏆", "desc": "Vaincre 25 boss"},
+    {"id": "myth",        "name": "Mythique",             "emoji": "👑", "desc": "Vaincre 100 boss"},
+    # Damage milestones
+    {"id": "puncher",     "name": "Frappeur",             "emoji": "👊", "desc": "Infliger 10 000 dégâts cumulés"},
+    {"id": "warrior",     "name": "Guerrier",             "emoji": "⚔️", "desc": "Infliger 100 000 dégâts cumulés"},
+    {"id": "destroyer",   "name": "Destructeur",          "emoji": "💥", "desc": "Infliger 1 000 000 dégâts cumulés"},
+    # Combat exploits
+    {"id": "critical",    "name": "Maître du Critique",   "emoji": "🌟", "desc": "Réussir 3 critiques d'affilée"},
+    {"id": "final_blow",  "name": "Coup de Grâce",        "emoji": "💀", "desc": "Porter le coup fatal sur 5 boss"},
+    {"id": "top_damager", "name": "Champion",             "emoji": "🥇", "desc": "Finir #1 en dégâts sur 10 raids"},
+    {"id": "team_player", "name": "Esprit d'Équipe",      "emoji": "🤝", "desc": "Participer à 20 raids"},
+    # Equipment
+    {"id": "collector",   "name": "Collectionneur",       "emoji": "🎁", "desc": "Posséder un équipement légendaire"},
+    {"id": "shopper",     "name": "Magnat",               "emoji": "💰", "desc": "Dépenser 10 000 pièces en boutique d'événement"},
+    # Special / Rare
+    {"id": "combo_master","name": "Maître des Combos",    "emoji": "🔥", "desc": "Déclencher 5 combos en une bataille"},
+    {"id": "lucky",       "name": "Chanceux",             "emoji": "🍀", "desc": "Obtenir un loot épique avec moins de 100 dégâts"},
+]
+
+
+def get_badge_by_id(badge_id: str) -> Optional[dict]:
+    for b in BADGE_CATALOG:
+        if b["id"] == badge_id:
+            return b
+    return None
+
+
+def check_badge_unlocks(stats: dict, already_unlocked: set, event_context: dict = None) -> list[str]:
+    """Retourne les ids de badges à débloquer pour ce joueur.
+
+    stats : {"kills": int, "total_damage": int, "raids_participated": int,
+             "top1_count": int, "final_blows": int, "crits_streak": int,
+             "has_legendary": bool, "shop_spent": int, "combos_in_battle": int,
+             "lucky_drop_under_100": bool}
+    already_unlocked : set de badge_ids déjà acquis
+    event_context : optionnel, infos de l'event courant
+
+    Le check est défensif : si une stat manque, on ignore le badge correspondant.
+    """
+    out = []
+    s = stats or {}
+
+    def _unlock(badge_id: str, condition: bool):
+        if condition and badge_id not in already_unlocked:
+            out.append(badge_id)
+
+    _unlock("first_blood",  int(s.get("kills", 0)) >= 1)
+    _unlock("veteran",      int(s.get("kills", 0)) >= 5)
+    _unlock("slayer",       int(s.get("kills", 0)) >= 25)
+    _unlock("myth",         int(s.get("kills", 0)) >= 100)
+
+    _unlock("puncher",      int(s.get("total_damage", 0)) >= 10_000)
+    _unlock("warrior",      int(s.get("total_damage", 0)) >= 100_000)
+    _unlock("destroyer",    int(s.get("total_damage", 0)) >= 1_000_000)
+
+    _unlock("critical",     int(s.get("crits_streak", 0)) >= 3)
+    _unlock("final_blow",   int(s.get("final_blows", 0)) >= 5)
+    _unlock("top_damager",  int(s.get("top1_count", 0)) >= 10)
+    _unlock("team_player",  int(s.get("raids_participated", 0)) >= 20)
+    _unlock("collector",    bool(s.get("has_legendary", False)))
+    _unlock("shopper",      int(s.get("shop_spent", 0)) >= 10_000)
+    _unlock("combo_master", int(s.get("combos_in_battle", 0)) >= 5)
+    _unlock("lucky",        bool(s.get("lucky_drop_under_100", False)))
+
+    return out
+
+
+# Rangs de progression — donnent un rôle Discord auto si configuré
+# Chaque tier a un seuil de kills + un nom de rôle + couleur
+RANK_TIERS = [
+    {"min_kills": 1,   "name": "🥉 Chasseur Bronze",   "color": 0xCD7F32, "key": "bronze"},
+    {"min_kills": 10,  "name": "🥈 Chasseur Argent",   "color": 0xC0C0C0, "key": "silver"},
+    {"min_kills": 30,  "name": "🥇 Chasseur Or",       "color": 0xFFD700, "key": "gold"},
+    {"min_kills": 75,  "name": "💎 Chasseur Platine",  "color": 0x9B59B6, "key": "platinum"},
+    {"min_kills": 150, "name": "🌟 Chasseur Diamant",  "color": 0x5DADE2, "key": "diamond"},
+    {"min_kills": 300, "name": "👑 Chasseur Mythique", "color": 0xE74C3C, "key": "mythic"},
+]
+
+
+def rank_for_kills(kills: int) -> Optional[dict]:
+    """Retourne le tier le plus élevé atteint pour `kills` (None si <1)."""
+    result = None
+    for tier in RANK_TIERS:
+        if kills >= tier["min_kills"]:
+            result = tier
+        else:
+            break
+    return result
+
+
+# =============================================================================
+# PHASE 31 : COMBOS COMMUNAUTAIRES
+# =============================================================================
+
+# Si N joueurs attaquent dans la même fenêtre de T secondes → COMBO bonus
+COMBO_THRESHOLDS = [
+    {"players": 3, "window_sec": 2.0, "name": "TRIPLE FRAPPE",  "emoji": "💥", "multiplier": 1.5},
+    {"players": 5, "window_sec": 3.0, "name": "BARRAGE",        "emoji": "⚡", "multiplier": 2.0},
+    {"players": 10, "window_sec": 5.0, "name": "FUREUR COLLECTIVE", "emoji": "🌪️", "multiplier": 3.0},
+]
+
+
+def check_combo(recent_attacks: list[tuple], now_ts: float) -> Optional[dict]:
+    """Vérifie si un combo est déclenché.
+
+    recent_attacks : list de (timestamp, user_id) des attaques récentes
+    now_ts : timestamp actuel
+    Retourne le combo déclenché (le plus haut) ou None.
+    """
+    if not recent_attacks:
+        return None
+
+    # Test du plus impressionnant au plus simple
+    for combo in reversed(COMBO_THRESHOLDS):
+        cutoff = now_ts - combo["window_sec"]
+        recent = [(t, u) for (t, u) in recent_attacks if t >= cutoff]
+        unique_users = {u for (_, u) in recent}
+        if len(unique_users) >= combo["players"]:
+            return dict(combo)
+    return None
+
+
+# =============================================================================
+# PHASE 31 : NOUVEAUX TYPES D'ÉVÉNEMENTS
+# =============================================================================
+
+# Trésors (chasse au trésor)
+TREASURE_CATALOG = [
+    {"name": "Coffre en bois",      "emoji": "📦", "coins_min": 30,  "coins_max": 80,  "gear_chance": 0.10, "weight": 30},
+    {"name": "Coffre en fer",       "emoji": "🗃️", "coins_min": 80,  "coins_max": 200, "gear_chance": 0.20, "weight": 20},
+    {"name": "Coffre doré",         "emoji": "📜", "coins_min": 200, "coins_max": 500, "gear_chance": 0.35, "weight": 10},
+    {"name": "Gemme rare",          "emoji": "💎", "coins_min": 500, "coins_max": 1000,"gear_chance": 0.50, "weight": 5},
+    {"name": "Relique légendaire",  "emoji": "🏺", "coins_min": 1000,"coins_max": 2500,"gear_chance": 0.80, "weight": 2},
+]
+
+
+def random_treasure() -> dict:
+    """Génère un trésor aléatoire pondéré + sa loot."""
+    template = dict(_weighted_choice(TREASURE_CATALOG))
+    template["coins"] = random.randint(template["coins_min"], template["coins_max"])
+    template["gear"] = None
+    if random.random() < template["gear_chance"]:
+        if random.random() < 0.5:
+            template["gear"] = random_weapon(rarity_bias=1.5)
+            template["gear"]["slot"] = "weapon"
+        else:
+            template["gear"] = random_armor(rarity_bias=1.5)
+            template["gear"]["slot"] = "armor"
+    return template
+
+
+# =============================================================================
+# PHASE 31 : DIFFICULTÉ PROGRESSIVE
+# =============================================================================
+
+def adjust_difficulty(current_diff: int, last_event_was_fast_kill: bool, last_event_was_failure: bool) -> int:
+    """Ajuste la difficulté pour le prochain boss.
+
+    - Kill en moins de moitié du temps → +20% difficulté (max 500)
+    - Boss enfui → -15% difficulté (min 50)
+    - Sinon → pas de changement
+    """
+    new_diff = current_diff
+    if last_event_was_fast_kill:
+        new_diff = int(current_diff * 1.20)
+    elif last_event_was_failure:
+        new_diff = int(current_diff * 0.85)
+    return max(50, min(500, new_diff))
+
+
+# =============================================================================
+# PHASE 31 : SHOP D'ÉVÉNEMENT (rotation)
+# =============================================================================
+
+def generate_shop_rotation(seed: int = None) -> list[dict]:
+    """Génère une sélection de 6 items pour le shop (3 armes + 3 armures).
+
+    Utilise un seed pour stabilité par semaine. À appeler avec le numéro de semaine
+    pour que tous les membres voient le même shop pendant 7 jours.
+    """
+    rng = random.Random(seed) if seed is not None else random
+
+    def pick(catalog, n):
+        # Plus la rareté est haute, plus le prix monte
+        picked = []
+        seen = set()
+        attempts = 0
+        while len(picked) < n and attempts < 50:
+            attempts += 1
+            it = dict(_weighted_choice(catalog))
+            if it["name"] in seen:
+                continue
+            seen.add(it["name"])
+            rarity_mult = {"commune": 1, "rare": 3, "épique": 8, "légendaire": 25}.get(it.get("rarity", "commune"), 1)
+            stat_value = it.get("atk", 0) + it.get("def", 0)
+            it["price"] = max(50, stat_value * 50 * rarity_mult)
+            picked.append(it)
+        return picked
+
+    weapons = pick(WEAPONS, 3)
+    armors = pick(ARMOR, 3)
+    for w in weapons:
+        w["slot"] = "weapon"
+    for a in armors:
+        a["slot"] = "armor"
+    return weapons + armors
+
+
 __all__ = [
-    "BOSS_CATALOG", "WEAPONS", "ARMOR", "RARITY_COLORS", "RARITY_EMOJIS",
-    "random_weapon", "random_armor", "random_boss",
-    "hp_bar", "calc_damage",
-    "serialize_overwrites",
-    "compute_rewards",
+    # Catalogues
+    "BOSS_CATALOG", "WEAPONS", "ARMOR", "TREASURE_CATALOG",
+    "BADGE_CATALOG", "RANK_TIERS", "COMBO_THRESHOLDS",
+    "RARITY_COLORS", "RARITY_EMOJIS",
+    # Generators
+    "random_weapon", "random_armor", "random_boss", "random_treasure",
+    "generate_shop_rotation",
+    # Helpers
+    "hp_bar", "calc_damage", "serialize_overwrites", "compute_rewards",
+    "check_badge_unlocks", "get_badge_by_id",
+    "rank_for_kills",
+    "check_combo",
+    "adjust_difficulty",
 ]
