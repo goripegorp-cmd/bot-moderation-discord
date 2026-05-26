@@ -1021,6 +1021,32 @@ async def db_init():
             resolved_at DATETIME
         )''')
 
+        # Phase 37 : classes choisies par les joueurs
+        await db.execute('''CREATE TABLE IF NOT EXISTS player_classes (
+            guild_id INTEGER,
+            user_id INTEGER,
+            class_id TEXT,
+            chosen_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (guild_id, user_id)
+        )''')
+
+        # Phase 37 : opt-in pour déplacement vocal automatique
+        await db.execute('''CREATE TABLE IF NOT EXISTS player_voice_optin (
+            guild_id INTEGER,
+            user_id INTEGER,
+            opted_in INTEGER DEFAULT 0,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (guild_id, user_id)
+        )''')
+
+        # Phase 37 : zones vocales par event (3 vocaux temporaires)
+        await db.execute('''CREATE TABLE IF NOT EXISTS event_voice_zones (
+            event_id INTEGER,
+            zone_id TEXT,
+            channel_id INTEGER,
+            PRIMARY KEY (event_id, zone_id)
+        )''')
+
         # Migration : ajoute colonnes manquantes à player_event_stats si DB existe déjà
         try:
             async with db.execute('PRAGMA table_info(player_event_stats)') as cur:
@@ -6389,17 +6415,81 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
         except Exception as ex:
             print(f"[event start send arena] {ex}")
 
+        # Phase 37 : créer les 3 zones vocales temporaires
+        voice_zones_map = {}  # zone_id → channel_id
+        try:
+            arena_category = arena_channel.category
+            for zone_spec in events2026.VOICE_ZONES:
+                try:
+                    overwrites = {
+                        guild.default_role: discord.PermissionOverwrite(
+                            view_channel=True, connect=True, speak=True,
+                        ),
+                        guild.me: discord.PermissionOverwrite(
+                            view_channel=True, connect=True, speak=True, move_members=True,
+                        ),
+                    }
+                    vc = await guild.create_voice_channel(
+                        name=zone_spec['name'][:90],
+                        overwrites=overwrites,
+                        category=arena_category,
+                        reason=f"Boss Raid event {event_id} — voice zone",
+                    )
+                    voice_zones_map[zone_spec['id']] = vc.id
+                    # Persister en DB
+                    async with get_db() as db:
+                        await db.execute(
+                            'INSERT OR REPLACE INTO event_voice_zones(event_id, zone_id, channel_id) VALUES(?,?,?)',
+                            (event_id, zone_spec['id'], vc.id),
+                        )
+                        await db.commit()
+                except discord.Forbidden:
+                    print(f"[event start voice zone {zone_spec['id']}] perm refusée")
+                    break
+                except Exception as ex:
+                    print(f"[event start voice zone {zone_spec['id']}] {ex}")
+                    continue
+        except Exception as ex:
+            print(f"[event start voice zones global] {ex}")
+
         # Cache
         _active_events_cache[guild.id] = {
             "event_id": event_id,
             "arena_channel_id": arena_channel.id,
             "arena_message_id": arena_msg.id if 'arena_msg' in locals() else 0,
+            "voice_zones": voice_zones_map,  # Phase 37
         }
 
         # Marquer last_run
         await db_set(guild.id, 'event_last_run', datetime.now(timezone.utc).isoformat())
 
-        print(f"[EVENT START] guild={guild.id} event={event_id} boss={boss.get('name')} HP={boss.get('max_hp')}")
+        # Phase 37 : ajout d'un message explicatif sur les zones dans l'arène
+        if voice_zones_map and arena_channel:
+            try:
+                zones_lines = []
+                for zone_spec in events2026.VOICE_ZONES:
+                    if zone_spec['id'] in voice_zones_map:
+                        ch_id = voice_zones_map[zone_spec['id']]
+                        zones_lines.append(
+                            f"• <#{ch_id}> — {zone_spec['description']}"
+                        )
+                if zones_lines:
+                    zones_embed = discord.Embed(
+                        title="🎤 Zones vocales actives — Rejoins une zone pour des bonus !",
+                        description="\n".join(zones_lines) + (
+                            "\n\n_Toutes les ~5 minutes, le boss attaque une zone aléatoire !_\n"
+                            "_Active `/vocal_optin` pour que le bot te déplace automatiquement vers une zone safe._"
+                        ),
+                        color=0x5865F2,
+                    )
+                    await arena_channel.send(embed=zones_embed)
+            except Exception as ex:
+                print(f"[event start zones embed] {ex}")
+
+        # Phase 37 : lancer la task des phase attacks
+        asyncio.create_task(_boss_phase_attacks(guild, event_id))
+
+        print(f"[EVENT START] guild={guild.id} event={event_id} boss={boss.get('name')} HP={boss.get('max_hp')} voice_zones={len(voice_zones_map)}")
         return {"ok": True, "event_id": event_id, "arena_channel_id": arena_channel.id}
     except Exception as ex:
         print(f"[_start_boss_raid] {ex}")
@@ -6568,6 +6658,154 @@ class BossAttackView(View):
             print(f"[BossAttackView _on_inv] {ex}")
 
 
+async def _boss_phase_attacks(guild, event_id: int):
+    """Phase 37 — toutes les 5 min, le boss attaque une zone aléatoire.
+
+    Les membres opted-in sont automatiquement déplacés vers une zone safe.
+    Les membres non opted-in reçoivent une notification dans l'arène.
+    """
+    try:
+        await asyncio.sleep(300)  # 5 min avant la première phase
+
+        while True:
+            # Check event toujours actif
+            async with get_db() as db:
+                async with db.execute('SELECT ended FROM events WHERE id=?', (event_id,)) as cur:
+                    row = await cur.fetchone()
+            if not row or row[0]:
+                break  # event terminé
+
+            cache = _active_events_cache.get(guild.id, {})
+            if cache.get('event_id') != event_id:
+                break  # event change
+            voice_zones = cache.get('voice_zones', {})
+            if not voice_zones:
+                break  # pas de zones, skip
+            arena_id = cache.get('arena_channel_id')
+            arena = guild.get_channel(int(arena_id)) if arena_id else None
+
+            # Choisir zone ciblée
+            zone_ids = list(voice_zones.keys())
+            targeted_zone_id = random.choice(zone_ids)
+            targeted_zone = events2026.get_voice_zone(targeted_zone_id)
+            targeted_ch_id = voice_zones[targeted_zone_id]
+            targeted_ch = guild.get_channel(int(targeted_ch_id))
+
+            # Choisir zone safe (différente de la cible)
+            safe_zone_ids = [z for z in zone_ids if z != targeted_zone_id]
+            safe_zone_id = random.choice(safe_zone_ids) if safe_zone_ids else None
+            safe_ch_id = voice_zones.get(safe_zone_id) if safe_zone_id else None
+            safe_ch = guild.get_channel(int(safe_ch_id)) if safe_ch_id else None
+
+            # Annoncer l'attaque
+            if arena and targeted_ch:
+                attack_emoji = random.choice(['⚡', '🔥', '❄️', '💀', '🌪️'])
+                attack_name = random.choice(['souffle de feu', 'tornade', 'rayon glaciaire', 'frappe titanesque', 'cri funeste'])
+                warning_embed = discord.Embed(
+                    title=f"{attack_emoji} Le boss prépare une attaque !",
+                    description=(
+                        f"**Cible : {targeted_ch.mention}**\n\n"
+                        f"_Le boss lance un {attack_name} sur cette zone dans **30 secondes** !_\n\n"
+                        f"➡️ Quitte cette zone pour éviter les dégâts.\n"
+                        + (f"💡 Zone safe suggérée : {safe_ch.mention}" if safe_ch else "")
+                    ),
+                    color=0xE74C3C,
+                )
+                try:
+                    warn_msg = await arena.send(embed=warning_embed)
+                except Exception:
+                    warn_msg = None
+
+                # Déplacer les opt-in après 25s
+                await asyncio.sleep(25)
+                if targeted_ch and safe_ch:
+                    moved = 0
+                    notified = 0
+                    for m in list(targeted_ch.members):
+                        if m.bot:
+                            continue
+                        opted_in = await _get_voice_optin(guild.id, m.id)
+                        if opted_in:
+                            try:
+                                await m.move_to(safe_ch, reason=f"Auto-move phase attack event {event_id}")
+                                moved += 1
+                            except Exception:
+                                pass
+                        else:
+                            try:
+                                # DM rapide ou ping arena
+                                if arena:
+                                    await arena.send(
+                                        f"⚠️ {m.mention} — quitte {targeted_ch.mention} ou prends `{30}` dégâts !",
+                                        delete_after=30,
+                                        allowed_mentions=discord.AllowedMentions(users=[m]),
+                                    )
+                                    notified += 1
+                            except Exception:
+                                pass
+
+                    # 5s plus tard, applique les dégâts aux retardataires
+                    await asyncio.sleep(5)
+                    refresh_ch = guild.get_channel(int(targeted_ch_id))
+                    damage_dealt = 30
+                    casualties = []
+                    if refresh_ch:
+                        for m in list(refresh_ch.members):
+                            if m.bot:
+                                continue
+                            # Apply damage : retire un peu de HP de l'inventaire
+                            try:
+                                inv = await _get_or_create_inventory(guild.id, m.id)
+                                # Class Tank prend moins
+                                pc = await _get_player_class(guild.id, m.id)
+                                cls = events2026.get_class(pc)
+                                dmg = damage_dealt
+                                if cls and cls.get('id') == 'tank':
+                                    dmg = int(dmg * 0.5)
+                                # Zone bonus
+                                zone_data = events2026.get_voice_zone(targeted_zone_id)
+                                dmg = int(dmg * (zone_data.get('dmg_taken_mult', 1.0) if zone_data else 1.0))
+                                inv['hp'] = max(0, int(inv.get('hp', 100)) - dmg)
+                                await _save_inventory(guild.id, m.id, inv)
+                                casualties.append((m, dmg))
+                            except Exception:
+                                pass
+
+                    # Régénération pour la zone soin
+                    soin_ch_id = voice_zones.get('soin')
+                    if soin_ch_id:
+                        soin_ch = guild.get_channel(int(soin_ch_id))
+                        if soin_ch:
+                            for m in list(soin_ch.members):
+                                if m.bot:
+                                    continue
+                                try:
+                                    inv = await _get_or_create_inventory(guild.id, m.id)
+                                    inv['hp'] = min(int(inv.get('max_hp', 100)),
+                                                    int(inv.get('hp', 100)) + 25)
+                                    await _save_inventory(guild.id, m.id, inv)
+                                except Exception:
+                                    pass
+
+                    # Recap
+                    if arena and casualties:
+                        cas_str = ", ".join(f"{m.mention} (`-{d}` PV)" for m, d in casualties[:5])
+                        try:
+                            await arena.send(
+                                f"{attack_emoji} L'attaque touche : {cas_str}"
+                                + (f"\n_+{moved} déplacement(s) auto · {len(casualties)} touché(s) · Soin actif_" if moved else f"\n_{len(casualties)} touché(s) · Soin actif_"),
+                                delete_after=60,
+                            )
+                        except Exception:
+                            pass
+
+            # Attendre 5 min pour la prochaine phase
+            await asyncio.sleep(300)
+    except Exception as ex:
+        print(f"[_boss_phase_attacks event={event_id}] {ex}")
+        import traceback; traceback.print_exc()
+
+
 async def _handle_boss_attack(i: discord.Interaction, event_id: int):
     """Gère un clic sur le bouton Attaquer."""
     try:
@@ -6611,7 +6849,20 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
 
         # Charger / créer participant
         inv = await _get_or_create_inventory(i.guild.id, i.user.id)
-        damage, is_crit = events2026.calc_damage(inv.get('weapon'), inv.get('hp', 100))
+
+        # Phase 37 : intégration classe + zone vocale + Bard aura
+        player_class_id = await _get_player_class(i.guild.id, i.user.id)
+        voice_zone_id = _get_user_voice_zone(i.guild, i.user.id)
+        allies_count, _ = _count_voice_allies(i.guild, i.user.id)
+        bard_in_voice = await _detect_bard_in_voice(i.guild, i.user.id)
+
+        damage, is_crit, is_double, dmg_details = events2026.calc_damage_v2(
+            weapon=inv.get('weapon'),
+            player_class_id=player_class_id,
+            voice_zone_id=voice_zone_id,
+            allies_in_same_voice=allies_count,
+            bard_in_same_voice=bard_in_voice,
+        )
 
         # ─── Phase 31 : Crit streaks ───
         crit_key = (i.guild.id, i.user.id)
@@ -6679,8 +6930,21 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
 
         # Réponse immédiate à l'attaque
         crit_str = " 🌟 **CRITIQUE !**" if is_crit else ""
+        double_str = " ⚡ **DOUBLE FRAPPE !**" if is_double else ""
+        # Bonus visuels
+        bonus_parts = []
+        if voice_zone_id == "offensive":
+            bonus_parts.append("⚔️ Zone Offensive (+40%)")
+        elif voice_zone_id == "defense":
+            bonus_parts.append("🛡️ Zone Défense (−30%)")
+        elif voice_zone_id == "soin":
+            bonus_parts.append("🩹 Zone Soin (−15%)")
+        if bard_in_voice and player_class_id != 'bard':
+            bonus_parts.append(f"🎤 Aura Bard")
+        bonus_str = ("\n_" + " · ".join(bonus_parts) + "_") if bonus_parts else ""
+
         await i.followup.send(
-            f"⚔️ Tu infliges `{damage}` dégâts au boss !{crit_str}",
+            f"⚔️ Tu infliges `{damage}` dégâts au boss !{crit_str}{double_str}{bonus_str}",
             ephemeral=True,
         )
 
@@ -6900,6 +7164,24 @@ async def _end_active_event(guild, *, victory: bool, reason: str = ""):
             timestamp=datetime.now(timezone.utc),
         )
         recap_embed.set_author(name=f"⚔️ Fin du Boss Raid", icon_url=(guild.icon.url if guild.icon else None))
+
+        # ─── Phase 37 : Supprimer les zones vocales temporaires ───
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT channel_id FROM event_voice_zones WHERE event_id=?',
+                    (event_id,),
+                ) as cur:
+                    voice_zone_rows = await cur.fetchall()
+            for (vc_id,) in voice_zone_rows:
+                vc = guild.get_channel(int(vc_id))
+                if vc:
+                    try:
+                        await vc.delete(reason=f"Event {event_id} terminé — cleanup voice zone")
+                    except Exception as ex:
+                        print(f"[event end delete voice_zone={vc_id}] {ex}")
+        except Exception as ex:
+            print(f"[event end voice zones cleanup] {ex}")
 
         # ─── Supprimer le salon arène (le contenu sera perdu mais c'est temporaire par design) ───
         arena_ch = guild.get_channel(arena_ch_id) if arena_ch_id else None
@@ -8679,6 +8961,212 @@ async def duel_cmd(i: discord.Interaction, membre: discord.Member, mise: int = 0
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 33 — /help (aide globale)
 # ═══════════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 37 — CLASSES + VOCAL OPT-IN
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def _get_player_class(guild_id: int, user_id: int) -> Optional[str]:
+    """Retourne l'id de classe du joueur ou None."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT class_id FROM player_classes WHERE guild_id=? AND user_id=?',
+                (guild_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
+async def _get_voice_optin(guild_id: int, user_id: int) -> bool:
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT opted_in FROM player_voice_optin WHERE guild_id=? AND user_id=?',
+                (guild_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+        return bool(row[0]) if row else False
+    except Exception:
+        return False
+
+
+def _get_user_voice_zone(guild, user_id: int) -> Optional[str]:
+    """Retourne l'id de la zone vocale (offensive/defense/soin) où se trouve
+    le membre, ou None s'il n'est dans aucune zone d'un event actif."""
+    try:
+        cache = _active_events_cache.get(guild.id, {})
+        zones = cache.get('voice_zones', {})  # {zone_id: channel_id}
+        if not zones:
+            return None
+        member = guild.get_member(user_id)
+        if not member or not member.voice or not member.voice.channel:
+            return None
+        ch_id = member.voice.channel.id
+        for zone_id, zone_ch_id in zones.items():
+            if int(zone_ch_id) == ch_id:
+                return zone_id
+        return None
+    except Exception:
+        return None
+
+
+def _count_voice_allies(guild, user_id: int) -> tuple[int, bool]:
+    """Compte les alliés dans le même vocal que user_id. Retourne (count, has_bard).
+    Si le user lui-même est dans un vocal, on regarde ses voisins."""
+    try:
+        member = guild.get_member(user_id)
+        if not member or not member.voice or not member.voice.channel:
+            return 0, False
+        vch = member.voice.channel
+        allies = [m for m in vch.members if m.id != user_id and not m.bot]
+        has_bard = False
+        # Note : le bard's aura nécessite de check leur classe. Pour rester perf,
+        # on fait ça async ailleurs. Ici on retourne juste le count.
+        return len(allies), has_bard
+    except Exception:
+        return 0, False
+
+
+async def _detect_bard_in_voice(guild, user_id: int) -> bool:
+    """Détecte si un Bard est dans le même vocal que user_id (autre que lui)."""
+    try:
+        member = guild.get_member(user_id)
+        if not member or not member.voice or not member.voice.channel:
+            return False
+        vch = member.voice.channel
+        for m in vch.members:
+            if m.id == user_id or m.bot:
+                continue
+            ally_class = await _get_player_class(guild.id, m.id)
+            if ally_class == 'bard':
+                return True
+        return False
+    except Exception:
+        return False
+
+
+# ─── Slash /class ───
+
+class_group = app_commands.Group(name="class", description="🛡️ Système de classes (Tank/DPS/Healer/Mage/Rogue/Bard)")
+
+
+@class_group.command(name="choose", description="Choisis ta classe (modifie ton rôle pendant les events)")
+@app_commands.describe(classe="La classe que tu veux jouer")
+@app_commands.choices(classe=[
+    app_commands.Choice(name="🛡️ Tank — +50% PV, encaisse pour les alliés", value="tank"),
+    app_commands.Choice(name="⚔️ DPS — +30% dégâts purs", value="dps"),
+    app_commands.Choice(name="🩹 Healer — peut soigner (-20% dégâts)", value="healer"),
+    app_commands.Choice(name="🔮 Mage — critiques 25% (vs 10%)", value="mage"),
+    app_commands.Choice(name="🗡️ Rogue — 30% chance d'attaquer 2x", value="rogue"),
+    app_commands.Choice(name="🎤 Bard — +15% dégâts pour alliés en même vocal", value="bard"),
+])
+async def class_choose(i: discord.Interaction, classe: app_commands.Choice[str]):
+    try:
+        await i.response.defer(ephemeral=True)
+        class_id = classe.value
+        cls = events2026.get_class(class_id)
+        if not cls:
+            return await i.followup.send("❌ Classe inconnue.", ephemeral=True)
+        async with get_db() as db:
+            await db.execute(
+                'INSERT INTO player_classes(guild_id, user_id, class_id) VALUES(?,?,?) '
+                'ON CONFLICT(guild_id, user_id) DO UPDATE SET class_id=?, chosen_at=CURRENT_TIMESTAMP',
+                (i.guild.id, i.user.id, class_id, class_id),
+            )
+            await db.commit()
+        e = discord.Embed(
+            title=f"{cls['emoji']} Tu es maintenant {cls['name']} !",
+            description=(
+                f"{cls['description']}\n\n"
+                f"_Cette classe modifie automatiquement tes stats pendant les Boss Raids et les Duels._\n\n"
+                f"💡 Tu peux changer de classe à tout moment avec `/class choose`.\n"
+                f"💡 Vois ta classe et tes stats avec `/class info`."
+            ),
+            color=cls.get('color', 0x5865F2),
+        )
+        await i.followup.send(embed=e, ephemeral=True)
+    except Exception as ex:
+        print(f"[/class choose] {ex}")
+        try:
+            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+@class_group.command(name="info", description="Voir ta classe actuelle et toutes les classes disponibles")
+async def class_info(i: discord.Interaction):
+    try:
+        await i.response.defer(ephemeral=True)
+        current = await _get_player_class(i.guild.id, i.user.id)
+        current_cls = events2026.get_class(current)
+
+        e = discord.Embed(
+            title="🛡️ Système de Classes",
+            description=(
+                f"**Ta classe actuelle** : {current_cls['name'] if current_cls else '_aucune_'}\n"
+                f"_{current_cls['description'] if current_cls else 'Choisis-en une avec `/class choose` !'}_"
+            ),
+            color=(current_cls.get('color', 0x5865F2) if current_cls else 0x5865F2),
+        )
+        for cls in events2026.CLASSES:
+            marker = "  ✅" if cls['id'] == current else ""
+            e.add_field(
+                name=f"{cls['name']}{marker}",
+                value=cls['description'],
+                inline=False,
+            )
+        e.set_footer(text="💡 Change de classe à tout moment avec /class choose")
+        await i.followup.send(embed=e, ephemeral=True)
+    except Exception as ex:
+        print(f"[/class info] {ex}")
+        try:
+            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+bot.tree.add_command(class_group)
+
+
+@bot.tree.command(name="vocal_optin", description="🎤 Activer/désactiver le déplacement vocal automatique pendant les raids")
+async def vocal_optin_cmd(i: discord.Interaction):
+    try:
+        await i.response.defer(ephemeral=True)
+        current = await _get_voice_optin(i.guild.id, i.user.id)
+        new_val = not current
+        async with get_db() as db:
+            await db.execute(
+                'INSERT INTO player_voice_optin(guild_id, user_id, opted_in) VALUES(?,?,?) '
+                'ON CONFLICT(guild_id, user_id) DO UPDATE SET opted_in=?, updated_at=CURRENT_TIMESTAMP',
+                (i.guild.id, i.user.id, 1 if new_val else 0, 1 if new_val else 0),
+            )
+            await db.commit()
+        if new_val:
+            await i.followup.send(
+                "✅ **Déplacement vocal automatique : ACTIVÉ**\n\n"
+                "Pendant un Boss Raid, si tu es dans une zone vocale et que le boss attaque cette zone, "
+                "le bot pourra te déplacer automatiquement vers une zone safe pour te protéger.\n\n"
+                "_Tu peux désactiver à tout moment avec `/vocal_optin`._",
+                ephemeral=True,
+            )
+        else:
+            await i.followup.send(
+                "🔘 **Déplacement vocal automatique : DÉSACTIVÉ**\n\n"
+                "Le bot ne te déplacera plus. Il t'enverra une notification à la place.\n"
+                "_Réactive avec `/vocal_optin`._",
+                ephemeral=True,
+            )
+    except Exception as ex:
+        print(f"[/vocal_optin] {ex}")
+        try:
+            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
 
 @bot.tree.command(name="help", description="📖 Aide complète : toutes les commandes disponibles")
 async def help_cmd(i: discord.Interaction):

@@ -844,6 +844,194 @@ def targeting_weight(category: str) -> int:
     }.get(category, 10)
 
 
+# =============================================================================
+# PHASE 37 — SYSTÈME DE CLASSES (6 classes)
+# Chaque membre peut choisir une classe qui modifie son rôle pendant les events.
+# =============================================================================
+
+CLASSES = [
+    {
+        "id": "tank",
+        "name": "🛡️ Tank",
+        "emoji": "🛡️",
+        "color": 0x95A5A6,
+        "description": "Encaisse les coups. +50% PV, peut absorber 20% des dégâts d'un allié.",
+        "hp_mult": 1.5,
+        "dmg_mult": 0.85,
+        "ability": "shield",
+        "ability_desc": "Protège un allié pendant 1 phase",
+    },
+    {
+        "id": "dps",
+        "name": "⚔️ DPS",
+        "emoji": "⚔️",
+        "color": 0xE74C3C,
+        "description": "Tueur de boss. +30% dégâts purs sur le boss.",
+        "hp_mult": 1.0,
+        "dmg_mult": 1.30,
+        "ability": None,
+    },
+    {
+        "id": "healer",
+        "name": "🩹 Healer",
+        "emoji": "🩹",
+        "color": 0x2ECC71,
+        "description": "Soigneur. Dégâts -20% mais peut soigner un allié pour +25 PV.",
+        "hp_mult": 1.0,
+        "dmg_mult": 0.80,
+        "ability": "heal",
+        "ability_desc": "Soigne +25 PV à un allié (cooldown 60s)",
+    },
+    {
+        "id": "mage",
+        "name": "🔮 Mage",
+        "emoji": "🔮",
+        "color": 0x9B59B6,
+        "description": "Critiques massifs. Chance de critique 25% au lieu de 10%.",
+        "hp_mult": 1.0,
+        "dmg_mult": 1.0,
+        "crit_chance": 0.25,  # vs 0.10 défaut
+        "ability": None,
+    },
+    {
+        "id": "rogue",
+        "name": "🗡️ Rogue",
+        "emoji": "🗡️",
+        "color": 0xF39C12,
+        "description": "Furtif et rapide. 30% chance d'enchaîner 2 attaques d'un coup.",
+        "hp_mult": 1.0,
+        "dmg_mult": 1.0,
+        "double_attack_chance": 0.30,
+        "ability": None,
+    },
+    {
+        "id": "bard",
+        "name": "🎤 Bard",
+        "emoji": "🎤",
+        "color": 0x1ABC9C,
+        "description": "Soutien vocal. +15% dégâts à tous les alliés dans le MÊME vocal.",
+        "hp_mult": 1.0,
+        "dmg_mult": 0.90,
+        "vocal_aura": 0.15,
+        "ability": None,
+    },
+]
+
+
+def get_class(class_id: Optional[str]) -> Optional[dict]:
+    """Retourne la classe par id (ou None)."""
+    if not class_id:
+        return None
+    for c in CLASSES:
+        if c["id"] == class_id:
+            return c
+    return None
+
+
+# =============================================================================
+# PHASE 37 — ZONES VOCALES (lors d'un raid)
+# 3 sous-vocaux créés pendant un boss raid avec des bonus/malus distincts.
+# =============================================================================
+
+VOICE_ZONES = [
+    {
+        "id": "offensive",
+        "name": "⚔️ Zone Offensive",
+        "color": 0xE74C3C,
+        "dmg_mult": 1.40,        # +40% dégâts infligés
+        "dmg_taken_mult": 1.20,  # +20% dégâts subis du boss
+        "description": "+40% dégâts au boss, mais +20% dégâts subis lors des phases.",
+    },
+    {
+        "id": "defense",
+        "name": "🛡️ Zone Défense",
+        "color": 0x3498DB,
+        "dmg_mult": 0.70,        # -30% dégâts infligés
+        "dmg_taken_mult": 0.60,  # -40% dégâts subis du boss
+        "description": "−30% dégâts au boss, mais −40% dégâts subis lors des phases.",
+    },
+    {
+        "id": "soin",
+        "name": "🩹 Zone Soin",
+        "color": 0x2ECC71,
+        "dmg_mult": 0.85,
+        "dmg_taken_mult": 0.80,
+        "regen_per_phase": 25,   # +25 PV à chaque phase passée ici
+        "description": "−15% dégâts mais régénère +25 PV à chaque phase.",
+    },
+]
+
+
+def get_voice_zone(zone_id: Optional[str]) -> Optional[dict]:
+    if not zone_id:
+        return None
+    for z in VOICE_ZONES:
+        if z["id"] == zone_id:
+            return z
+    return None
+
+
+# =============================================================================
+# PHASE 37 — CALCUL DE DÉGÂTS AVANCÉ (avec classe + vocal + bard aura)
+# =============================================================================
+
+def calc_damage_v2(
+    weapon: Optional[dict],
+    player_class_id: Optional[str] = None,
+    voice_zone_id: Optional[str] = None,
+    allies_in_same_voice: int = 0,
+    bard_in_same_voice: bool = False,
+) -> tuple[int, bool, bool, dict]:
+    """Calcul de dégâts avec toutes les modifications Phase 37.
+
+    Retourne (final_damage, is_crit, is_double_attack, details_dict).
+    details_dict contient le breakdown pour affichage.
+    """
+    base = random.randint(10, 25)
+    weapon_atk = (weapon or {}).get("atk", 0) if weapon else 0
+
+    pc = get_class(player_class_id) or {}
+    zone = get_voice_zone(voice_zone_id) or {}
+
+    crit_chance = pc.get("crit_chance", 0.10)
+    dmg_mult_class = pc.get("dmg_mult", 1.0)
+    dmg_mult_zone = zone.get("dmg_mult", 1.0)
+
+    # Bard aura : +15% par allié dans le même vocal (max 3)
+    bard_bonus_mult = 1.0
+    if bard_in_same_voice:
+        bard_bonus_mult += 0.15 * min(3, max(0, allies_in_same_voice))
+
+    raw = base + weapon_atk
+    after_class = raw * dmg_mult_class
+    after_zone = after_class * dmg_mult_zone
+    after_bard = after_zone * bard_bonus_mult
+
+    is_crit = random.random() < crit_chance
+    after_crit = after_bard * (2 if is_crit else 1)
+
+    # Rogue : double attaque
+    is_double = False
+    if pc.get("double_attack_chance", 0) > 0 and random.random() < pc["double_attack_chance"]:
+        is_double = True
+        # Deuxième coup ajouté
+        after_crit *= 1.85  # un peu moins que ×2 pour équilibrer
+
+    final = int(round(after_crit))
+
+    details = {
+        "base": base,
+        "weapon_atk": weapon_atk,
+        "class_mult": dmg_mult_class,
+        "zone_mult": dmg_mult_zone,
+        "bard_mult": bard_bonus_mult,
+        "crit": is_crit,
+        "double": is_double,
+        "final": final,
+    }
+    return final, is_crit, is_double, details
+
+
 def random_event_intent(category: str) -> str:
     """Choisit un type d'event personnel selon le profil du membre.
 
@@ -936,12 +1124,15 @@ __all__ = [
     "RARITY_COLORS", "RARITY_EMOJIS",
     "HELP_TIPS", "PERSONAL_RIDDLES",
     "SPEED_REACT_EMOJIS", "MYSTERY_BOX_TYPES", "DAILY_SPARKS",
+    "CLASSES", "VOICE_ZONES",
     # Generators
     "random_weapon", "random_armor", "random_boss", "random_treasure",
     "generate_shop_rotation", "get_quiz_set", "random_personal_event",
     "random_mystery_box", "random_daily_spark",
     # Targeting
     "categorize_member_activity", "targeting_weight", "random_event_intent",
+    # Phase 37
+    "get_class", "get_voice_zone", "calc_damage_v2",
     # Helpers
     "hp_bar", "calc_damage", "serialize_overwrites", "compute_rewards",
     "check_badge_unlocks", "get_badge_by_id",
