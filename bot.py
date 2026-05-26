@@ -1967,6 +1967,79 @@ async def db_init():
             PRIMARY KEY (guild_id, game_id)
         )''')
 
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 59 — COMPÉTITIF : Ladder Elo + Duels 1v1 + Tournaments + Titles
+        # ═══════════════════════════════════════════════════════════════════
+        await db.execute('''CREATE TABLE IF NOT EXISTS ladder_ratings (
+            guild_id INTEGER,
+            user_id INTEGER,
+            rating INTEGER DEFAULT 1000,
+            wins INTEGER DEFAULT 0,
+            losses INTEGER DEFAULT 0,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (guild_id, user_id)
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ladder_rating "
+                "ON ladder_ratings(guild_id, rating DESC)"
+            )
+        except Exception:
+            pass
+
+        await db.execute('''CREATE TABLE IF NOT EXISTS pvp_duels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            challenger_id INTEGER,
+            challenged_id INTEGER,
+            stake_amount INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'pending',
+            winner_id INTEGER,
+            channel_id INTEGER,
+            message_id INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            resolved_at DATETIME
+        )''')
+
+        await db.execute('''CREATE TABLE IF NOT EXISTS user_titles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            user_id INTEGER,
+            title TEXT,
+            awarded_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            awarded_by INTEGER,
+            equipped INTEGER DEFAULT 0
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_user_titles_uid "
+                "ON user_titles(guild_id, user_id)"
+            )
+        except Exception:
+            pass
+
+        await db.execute('''CREATE TABLE IF NOT EXISTS tournaments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            title TEXT,
+            category TEXT,
+            max_players INTEGER DEFAULT 8,
+            status TEXT DEFAULT 'recruiting',
+            winner_id INTEGER,
+            channel_id INTEGER,
+            message_id INTEGER,
+            created_by INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+
+        await db.execute('''CREATE TABLE IF NOT EXISTS tournament_participants (
+            tournament_id INTEGER,
+            user_id INTEGER,
+            joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            eliminated_round INTEGER DEFAULT 0,
+            PRIMARY KEY (tournament_id, user_id)
+        )''')
+
         # Marketplace : annonces de vente entre joueurs
         await db.execute('''CREATE TABLE IF NOT EXISTS marketplace_listings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35601,6 +35674,31 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready phase58 persist] {ex}")
 
+    # Phase 59 : re-attacher DuelAcceptView pending + TournamentJoinView recruiting
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id FROM pvp_duels WHERE status='pending'",
+            ) as cur:
+                rows = await cur.fetchall()
+        for r in rows:
+            try:
+                bot.add_view(DuelAcceptView(int(r[0])))
+            except Exception:
+                pass
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id FROM tournaments WHERE status='recruiting'",
+            ) as cur:
+                rows = await cur.fetchall()
+        for r in rows:
+            try:
+                bot.add_view(TournamentJoinView(int(r[0])))
+            except Exception:
+                pass
+    except Exception as ex:
+        print(f"[on_ready phase59 persist] {ex}")
+
     # Phase 42 — Views persistantes : World Boss + Daily Riddle
     try:
         bot.add_view(WorldBossAttackView())
@@ -60840,6 +60938,565 @@ async def narrative_choices_resolver_task():
 @narrative_choices_resolver_task.before_loop
 async def _narrative_resolver_wait():
     await bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 59 — COMPÉTITIF SÉRIEUX : Ladder Elo + Duels 1v1 + Tournaments + Titles
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── LADDER ELO ──────────────────────────────────────────────────────────────
+
+
+def _elo_expected(rating_a: int, rating_b: int) -> float:
+    """Probabilité que A batte B selon la formule Elo."""
+    return 1.0 / (1.0 + 10 ** ((rating_b - rating_a) / 400.0))
+
+
+def _elo_update(rating: int, expected: float, score: float, k: int = 32) -> int:
+    """Nouveau rating après un match. score=1 si gagné, 0 si perdu."""
+    return int(round(rating + k * (score - expected)))
+
+
+async def _get_ladder_rating(guild_id: int, user_id: int) -> dict:
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT rating, wins, losses FROM ladder_ratings WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return {"rating": 1000, "wins": 0, "losses": 0}
+        return {"rating": int(row[0]), "wins": int(row[1]), "losses": int(row[2])}
+    except Exception:
+        return {"rating": 1000, "wins": 0, "losses": 0}
+
+
+async def _apply_duel_result(guild_id: int, winner_id: int, loser_id: int):
+    """Met à jour les ratings Elo après un duel."""
+    try:
+        w = await _get_ladder_rating(guild_id, winner_id)
+        l = await _get_ladder_rating(guild_id, loser_id)
+        exp_w = _elo_expected(w["rating"], l["rating"])
+        new_w = _elo_update(w["rating"], exp_w, 1.0)
+        new_l = _elo_update(l["rating"], 1 - exp_w, 0.0)
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO ladder_ratings(guild_id, user_id, rating, wins, losses) "
+                "VALUES(?,?,?,1,0) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                "rating=?, wins=wins+1, updated_at=CURRENT_TIMESTAMP",
+                (guild_id, winner_id, new_w, new_w),
+            )
+            await db.execute(
+                "INSERT INTO ladder_ratings(guild_id, user_id, rating, wins, losses) "
+                "VALUES(?,?,?,0,1) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                "rating=?, losses=losses+1, updated_at=CURRENT_TIMESTAMP",
+                (guild_id, loser_id, new_l, new_l),
+            )
+            await db.commit()
+        return {"new_w": new_w, "new_l": new_l, "old_w": w["rating"], "old_l": l["rating"]}
+    except Exception as ex:
+        print(f"[_apply_duel_result] {ex}")
+        return None
+
+
+def _rating_division(rating: int) -> str:
+    if rating >= 1800:
+        return "💎 Diamant"
+    if rating >= 1500:
+        return "🥇 Or"
+    if rating >= 1200:
+        return "🥈 Argent"
+    if rating >= 900:
+        return "🥉 Bronze"
+    return "⚪ Non classé"
+
+
+# ─── DUEL 1V1 ────────────────────────────────────────────────────────────────
+
+
+class DuelAcceptView(View):
+    """View persistante : challenged peut accepter ou refuser le duel."""
+
+    def __init__(self, duel_id: int):
+        super().__init__(timeout=None)
+        self.did = duel_id
+        b_a = Button(
+            label="✅ Accepter le duel",
+            style=discord.ButtonStyle.success,
+            custom_id=f"duel_accept_{duel_id}",
+        )
+        b_a.callback = self._accept
+        b_r = Button(
+            label="❌ Refuser",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"duel_refuse_{duel_id}",
+        )
+        b_r.callback = self._refuse
+        self.add_item(b_a)
+        self.add_item(b_r)
+
+    async def _accept(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT challenger_id, challenged_id, stake_amount, status FROM pvp_duels WHERE id=?",
+                    (self.did,),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row or row[3] != 'pending':
+                return await _safe_followup(i, content="⏱️ Duel inexistant ou déjà traité.")
+            ch_id, cd_id, stake = int(row[0]), int(row[1]), int(row[2])
+            if i.user.id != cd_id:
+                return await _safe_followup(i, content="🔒 Ce duel n'est pas pour toi.")
+            # Vérifier que les 2 ont assez de coins
+            try:
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT user_id, coins FROM economy WHERE guild_id=? AND user_id IN (?,?)",
+                        (i.guild.id, ch_id, cd_id),
+                    ) as cur:
+                        bal = {int(r[0]): int(r[1] or 0) for r in await cur.fetchall()}
+            except Exception:
+                bal = {}
+            if bal.get(ch_id, 0) < stake or bal.get(cd_id, 0) < stake:
+                async with get_db() as db:
+                    await db.execute(
+                        "UPDATE pvp_duels SET status='cancelled' WHERE id=?",
+                        (self.did,),
+                    )
+                    await db.commit()
+                return await _safe_followup(i, content="❌ Un des deux n'a plus assez de coins. Duel annulé.")
+            # Débiter les 2
+            try:
+                await add_coins(i.guild.id, ch_id, -stake)
+                await add_coins(i.guild.id, cd_id, -stake)
+            except Exception:
+                pass
+            async with get_db() as db:
+                await db.execute(
+                    "UPDATE pvp_duels SET status='active' WHERE id=?",
+                    (self.did,),
+                )
+                await db.commit()
+            await _safe_followup(
+                i,
+                content=(
+                    f"⚔️ **Duel accepté !** Les {stake} 🪙 sont mis en jeu de chaque côté.\n\n"
+                    f"_Les 2 joueurs jouent leur match (irl, dans le jeu Roblox, etc.). "
+                    f"Le perdant doit reporter via `/duel_report duel_id:{self.did} winner:@gagnant`._"
+                ),
+            )
+        except Exception as ex:
+            print(f"[DuelAcceptView accept] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _refuse(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT challenged_id, status FROM pvp_duels WHERE id=?", (self.did,),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row or int(row[0]) != i.user.id or row[1] != 'pending':
+                return await _safe_followup(i, content="🔒 Pas pour toi ou déjà traité.")
+            async with get_db() as db:
+                await db.execute(
+                    "UPDATE pvp_duels SET status='refused' WHERE id=?", (self.did,),
+                )
+                await db.commit()
+            await _safe_followup(i, content="❌ Duel refusé.")
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="duel",
+    description="⚔️ Défier un membre en duel avec mise (Ladder Elo PvP)",
+)
+@app_commands.describe(
+    adversaire="Le membre que tu défies",
+    mise="Coins misés par chaque joueur (0 OK, min 10 sinon)",
+)
+async def duel_cmd(i: discord.Interaction, adversaire: discord.Member, mise: int = 0):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        if adversaire.id == i.user.id or adversaire.bot:
+            return await _safe_followup(i, content="❌ Pas toi-même / pas un bot.")
+        if mise < 0 or (mise > 0 and mise < 10):
+            return await _safe_followup(i, content="❌ Mise 0 ou ≥10.")
+        # Check balance challenger
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT coins FROM economy WHERE guild_id=? AND user_id=?",
+                    (i.guild.id, i.user.id),
+                ) as cur:
+                    row = await cur.fetchone()
+            bal = int(row[0]) if row else 0
+        except Exception:
+            bal = 0
+        if bal < mise:
+            return await _safe_followup(i, content=f"❌ Solde insuffisant ({bal} 🪙).")
+        # Create duel pending
+        async with get_db() as db:
+            cur = await db.execute(
+                "INSERT INTO pvp_duels(guild_id, challenger_id, challenged_id, stake_amount, channel_id) "
+                "VALUES(?, ?, ?, ?, ?)",
+                (i.guild.id, i.user.id, adversaire.id, mise, i.channel.id),
+            )
+            did = cur.lastrowid
+            await db.commit()
+        r_ch = await _get_ladder_rating(i.guild.id, i.user.id)
+        r_cd = await _get_ladder_rating(i.guild.id, adversaire.id)
+        e = discord.Embed(
+            title=f"⚔️ Duel proposé — #{did}",
+            description=(
+                f"**Challenger :** {i.user.mention} ({_rating_division(r_ch['rating'])} `{r_ch['rating']}`)\n"
+                f"**Challenged :** {adversaire.mention} ({_rating_division(r_cd['rating'])} `{r_cd['rating']}`)\n"
+                f"**Mise :** `{mise}` 🪙 chacun (winner prend tout, +Elo)\n\n"
+                f"_{adversaire.display_name}, accepte ou refuse ci-dessous._"
+            ),
+            color=0xE74C3C,
+            timestamp=datetime.now(timezone.utc),
+        )
+        msg = await i.channel.send(
+            content=adversaire.mention,
+            embed=e,
+            view=DuelAcceptView(int(did)),
+            allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+        )
+        async with get_db() as db:
+            await db.execute("UPDATE pvp_duels SET message_id=? WHERE id=?", (msg.id, did))
+            await db.commit()
+        await _safe_followup(i, content=f"✅ Duel #{did} proposé.")
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="duel_report",
+    description="⚔️ Reporter le gagnant d'un duel actif (perdant valide)",
+)
+@app_commands.describe(duel_id="ID du duel", gagnant="Membre qui a gagné")
+async def duel_report_cmd(i: discord.Interaction, duel_id: int, gagnant: discord.Member):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT challenger_id, challenged_id, stake_amount, status FROM pvp_duels WHERE id=?",
+                (duel_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row or row[3] != 'active':
+            return await _safe_followup(i, content="⏱️ Duel inexistant ou pas actif.")
+        ch_id, cd_id, stake = int(row[0]), int(row[1]), int(row[2])
+        # Le reporter doit être le PERDANT (par fair-play) ou owner/staff
+        is_staff = (i.user.id == i.guild.owner_id or i.user.id == SUPER_OWNER_ID)
+        if not is_staff:
+            try:
+                perms = i.channel.permissions_for(i.user)
+                is_staff = perms.manage_messages
+            except Exception:
+                pass
+        # Valid reporter : un des 2 participants ou staff
+        if i.user.id not in (ch_id, cd_id) and not is_staff:
+            return await _safe_followup(i, content="🔒 Seuls les participants ou le staff peuvent reporter.")
+        if gagnant.id not in (ch_id, cd_id):
+            return await _safe_followup(i, content="❌ Le gagnant doit être un des participants.")
+        loser_id = cd_id if gagnant.id == ch_id else ch_id
+        # Payout : winner reçoit 2 * stake
+        try:
+            await add_coins(i.guild.id, gagnant.id, stake * 2)
+        except Exception:
+            pass
+        # Apply Elo
+        elo_result = await _apply_duel_result(i.guild.id, gagnant.id, loser_id)
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE pvp_duels SET status='resolved', winner_id=?, "
+                "resolved_at=CURRENT_TIMESTAMP WHERE id=?",
+                (gagnant.id, duel_id),
+            )
+            await db.commit()
+        msg = f"🏆 **{gagnant.mention} gagne le duel #{duel_id} !**"
+        if stake > 0:
+            msg += f"\n💰 +`{stake * 2}` 🪙 (les 2 mises)"
+        if elo_result:
+            delta_w = elo_result['new_w'] - elo_result['old_w']
+            delta_l = elo_result['new_l'] - elo_result['old_l']
+            msg += f"\n📈 Elo : **{gagnant.display_name}** {elo_result['old_w']} → `{elo_result['new_w']}` (+{delta_w})"
+            loser = i.guild.get_member(loser_id)
+            lname = loser.display_name if loser else f"User {loser_id}"
+            msg += f"\n📉 Elo : **{lname}** {elo_result['old_l']} → `{elo_result['new_l']}` ({delta_l})"
+        await _safe_followup(i, content=msg)
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="pvp_top",
+    description="📊 Voir le top 10 du Ladder Elo PvP",
+)
+async def pvp_top_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT user_id, rating, wins, losses FROM ladder_ratings "
+                "WHERE guild_id=? AND (wins+losses)>0 ORDER BY rating DESC LIMIT 10",
+                (i.guild.id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        if not rows:
+            return await _safe_followup(i, content="_Personne n'a encore fait de duel._")
+        lines = []
+        medals = ["🥇", "🥈", "🥉"]
+        for idx, r in enumerate(rows):
+            m = i.guild.get_member(int(r[0]))
+            mname = m.display_name if m else f"User {r[0]}"
+            mark = medals[idx] if idx < 3 else f"`{idx+1:02d}`"
+            wr = (int(r[2]) / max(1, int(r[2]) + int(r[3]))) * 100
+            lines.append(
+                f"{mark} **{mname}** — {_rating_division(int(r[1]))} `{int(r[1])}` "
+                f"(W:{int(r[2])} L:{int(r[3])} · {wr:.0f}% WR)"
+            )
+        my = await _get_ladder_rating(i.guild.id, i.user.id)
+        e = discord.Embed(
+            title="📊 Ladder Elo PvP — Top 10",
+            description=(
+                "\n".join(lines) +
+                f"\n\n**Toi :** {_rating_division(my['rating'])} `{my['rating']}` "
+                f"(W:{my['wins']} L:{my['losses']})\n\n"
+                f"_Lance un duel via `/duel @membre mise:50` pour grimper._"
+            ),
+            color=0xE74C3C,
+        )
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── TITRES PERMANENTS ───────────────────────────────────────────────────────
+
+
+@bot.tree.command(
+    name="award_title",
+    description="🎖️ [Owner] Attribuer un titre permanent à un membre",
+)
+@app_commands.describe(
+    membre="Le membre à honorer",
+    titre="Titre (ex: 'Premier à tuer le Boss Final')",
+)
+async def award_title_cmd(i: discord.Interaction, membre: discord.Member, titre: str):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        async with get_db() as db:
+            cur = await db.execute(
+                "INSERT INTO user_titles(guild_id, user_id, title, awarded_by, equipped) "
+                "VALUES(?, ?, ?, ?, 1)",
+                (i.guild.id, membre.id, titre[:200], i.user.id),
+            )
+            tid = cur.lastrowid
+            await db.commit()
+        # Annonce dans le hub
+        c = await cfg(i.guild.id)
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        hub_ch = i.guild.get_channel(hub_id) if hub_id else None
+        if hub_ch and await _is_chatty_channel(hub_ch):
+            LIFETIME = 12 * 3600
+            e = discord.Embed(
+                title=f"🎖️ TITRE ATTRIBUÉ",
+                description=(
+                    f"**{membre.mention}** reçoit le titre permanent :\n\n"
+                    f"# 🏛️ {titre}\n\n"
+                    f"_Ce titre apparaît dans son `/profile` pour toujours._"
+                ),
+                color=0xFFD700,
+                timestamp=datetime.now(timezone.utc),
+            )
+            if membre.display_avatar:
+                e.set_thumbnail(url=membre.display_avatar.url)
+            msg = await hub_ch.send(
+                content=membre.mention,
+                embed=e,
+                allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+                delete_after=LIFETIME,
+            )
+            try:
+                await _register_for_cleanup(msg, LIFETIME, 'title_award')
+            except Exception:
+                pass
+        await _safe_followup(i, content=f"✅ Titre #{tid} attribué à {membre.mention}.")
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _get_user_titles(guild_id: int, user_id: int) -> list:
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, title, equipped FROM user_titles WHERE guild_id=? AND user_id=? "
+                "ORDER BY awarded_at DESC",
+                (guild_id, user_id),
+            ) as cur:
+                rows = await cur.fetchall()
+        return [{"id": int(r[0]), "title": r[1], "equipped": bool(r[2])} for r in rows]
+    except Exception:
+        return []
+
+
+# ─── TOURNAMENTS (8 places, single-elim simple) ──────────────────────────────
+
+
+class TournamentJoinView(View):
+    """View persistante : Rejoindre / Quitter un tournament."""
+
+    def __init__(self, tournament_id: int):
+        super().__init__(timeout=None)
+        self.tid = tournament_id
+        b_j = Button(
+            label="🏆 Rejoindre",
+            style=discord.ButtonStyle.success,
+            custom_id=f"tourn_join_{tournament_id}",
+        )
+        b_j.callback = self._join
+        b_l = Button(
+            label="👋 Quitter",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"tourn_leave_{tournament_id}",
+        )
+        b_l.callback = self._leave
+        self.add_item(b_j)
+        self.add_item(b_l)
+
+    async def _join(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT max_players, status FROM tournaments WHERE id=?",
+                    (self.tid,),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row or row[1] != 'recruiting':
+                return await _safe_followup(i, content="⏱️ Tournoi fermé / inexistant.")
+            max_p = int(row[0])
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT COUNT(*) FROM tournament_participants WHERE tournament_id=?",
+                    (self.tid,),
+                ) as cur:
+                    count = int((await cur.fetchone() or [0])[0])
+            if count >= max_p:
+                return await _safe_followup(i, content=f"❌ Plein ({count}/{max_p}).")
+            try:
+                async with get_db() as db:
+                    await db.execute(
+                        "INSERT INTO tournament_participants(tournament_id, user_id) VALUES(?,?) "
+                        "ON CONFLICT(tournament_id, user_id) DO NOTHING",
+                        (self.tid, i.user.id),
+                    )
+                    await db.commit()
+            except Exception:
+                pass
+            await _safe_followup(i, content=f"✅ Tu as rejoint le tournoi #{self.tid}.")
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _leave(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            async with get_db() as db:
+                await db.execute(
+                    "DELETE FROM tournament_participants WHERE tournament_id=? AND user_id=?",
+                    (self.tid, i.user.id),
+                )
+                await db.commit()
+            await _safe_followup(i, content="👋 Tu as quitté le tournoi.")
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="tournament_create",
+    description="🏆 [Owner] Créer un tournoi (8 places, single-elim)",
+)
+@app_commands.describe(
+    titre="Nom du tournoi",
+    categorie="Catégorie (ex: 'Speedrun Obby', 'Boss Solo')",
+    max_places="Nombre max de participants (4 / 8 / 16, défaut 8)",
+)
+async def tournament_create_cmd(i: discord.Interaction, titre: str,
+                                  categorie: str, max_places: int = 8):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        max_p = max(4, min(int(max_places), 16))
+        c = await cfg(i.guild.id)
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        hub_ch = i.guild.get_channel(hub_id) if hub_id else None
+        if not hub_ch:
+            return await _safe_followup(i, content="❌ Hub non configuré.")
+        async with get_db() as db:
+            cur = await db.execute(
+                "INSERT INTO tournaments(guild_id, title, category, max_players, channel_id, created_by) "
+                "VALUES(?, ?, ?, ?, ?, ?)",
+                (i.guild.id, titre, categorie, max_p, hub_ch.id, i.user.id),
+            )
+            tid = cur.lastrowid
+            await db.commit()
+        e = discord.Embed(
+            title=f"🏆 TOURNOI : {titre}",
+            description=(
+                f"**Catégorie :** {categorie}\n"
+                f"**Places :** `{max_p}` max\n\n"
+                f"Format **single-elim** : rounds successifs jusqu'à 1 gagnant.\n"
+                f"L'owner gère les matchs IRL/in-game et reporte via `/tournament_advance`.\n\n"
+                f"_Rejoins ci-dessous tant qu'il reste de la place._"
+            ),
+            color=0xFFD700,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text=f"Tournoi #{tid}")
+        msg = await hub_ch.send(
+            embed=e,
+            view=TournamentJoinView(int(tid)),
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        async with get_db() as db:
+            await db.execute("UPDATE tournaments SET message_id=? WHERE id=?", (msg.id, tid))
+            await db.commit()
+        await _safe_followup(i, content=f"✅ Tournoi #{tid} créé.")
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
