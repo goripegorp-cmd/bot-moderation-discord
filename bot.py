@@ -50555,8 +50555,59 @@ async def _get_alliance_members(alliance_id: int) -> list:
         return []
 
 
+async def _ensure_alliance_category(guild) -> Optional[discord.CategoryChannel]:
+    """Phase 47.2 : Retourne (ou crée) LA catégorie unique '🤝 Alliances' qui
+    regroupe TOUS les salons d'équipes/clans du serveur.
+
+    Si l'owner a configuré `cfg.alliance_category` explicitement, on l'utilise.
+    Sinon le bot crée une catégorie "🤝 Alliances" la première fois.
+    """
+    try:
+        c = await cfg(guild.id)
+        cat_id = int(c.get('alliance_category', 0) or 0)
+        if cat_id:
+            cat = guild.get_channel(cat_id)
+            if isinstance(cat, discord.CategoryChannel):
+                return cat
+
+        # Chercher par nom existant
+        existing = discord.utils.get(guild.categories, name="🤝 Alliances")
+        if existing:
+            await db_set(guild.id, 'alliance_category', existing.id)
+            return existing
+
+        # Créer la catégorie (cachée à @everyone par défaut — chaque salon d'alliance
+        # définit ses propres overwrites pour permettre à ses membres de voir)
+        try:
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                guild.me: discord.PermissionOverwrite(
+                    view_channel=True, manage_channels=True, manage_permissions=True,
+                    send_messages=True, embed_links=True,
+                ),
+            }
+            cat = await guild.create_category(
+                name="🤝 Alliances",
+                overwrites=overwrites,
+                reason="Phase 47.2 : catégorie centrale des alliances",
+            )
+            await db_set(guild.id, 'alliance_category', cat.id)
+            return cat
+        except discord.Forbidden:
+            print(f"[_ensure_alliance_category] Permission refusée guild={guild.id}")
+            return None
+        except Exception as ex:
+            print(f"[_ensure_alliance_category create] {ex}")
+            return None
+    except Exception as ex:
+        print(f"[_ensure_alliance_category] {ex}")
+        return None
+
+
 async def _create_alliance(guild, leader: discord.Member, name: str, emoji: str) -> dict:
     """Crée une alliance : rôle Discord + salon texte privé + entrées DB.
+
+    Phase 47.2 : tous les salons sont dans la catégorie unique "🤝 Alliances".
 
     Retourne {'ok': bool, 'error'?, 'alliance_id'?, 'role'?, 'channel'?}.
     """
@@ -50584,12 +50635,9 @@ async def _create_alliance(guild, leader: discord.Member, name: str, emoji: str)
                 if await cur.fetchone():
                     return {'ok': False, 'error': f'Une alliance "{name}" existe déjà.'}
 
-        # Trouver une catégorie pour le salon (use event_arena_category si dispo)
-        c = await cfg(guild.id)
-        cat_id = int(c.get('alliance_category', 0) or c.get('event_arena_category', 0) or 0)
-        category = guild.get_channel(cat_id) if cat_id else None
-        if not isinstance(category, discord.CategoryChannel):
-            category = None
+        # Phase 47.2 : catégorie centrale unique
+        category = await _ensure_alliance_category(guild)
+        # Si pas dispo (perms refusées), on continue sans catégorie (salon à la racine)
 
         # Créer le rôle
         try:
@@ -51858,16 +51906,342 @@ async def _post_game_night_prompt(gn_id: int):
             except Exception as ex:
                 print(f"[gn sync_react] {ex}")
 
-        # ─── Autres kinds (narratif, encourage l'interaction libre) ─────
+        # ─── GUESS NUMBER (devinette nombre dans chat) ──────────────────
+        elif kind == 'guess_number':
+            target_number = random.randint(int(ev['range_min']), int(ev['range_max']))
+            embed = discord.Embed(
+                title=ev['title'],
+                description=ev['description'] + f"\n\n{_chrono_footer(duration)}",
+                color=0xF1C40F,
+            )
+            try:
+                msg = await tc.send(
+                    embed=embed,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=duration + 30,
+                )
+                _gn_event_state[msg.id] = {
+                    'kind': 'guess_number',
+                    'gn_id': gn_id,
+                    'channel_id': tc.id,
+                    'target': target_number,
+                    'range_min': ev['range_min'],
+                    'range_max': ev['range_max'],
+                    'reward': ev['reward_coins'],
+                    'consolation': ev.get('consolation_coins', 50),
+                    'guesses': {},  # user_id → distance
+                    'completed': False,
+                    'title': ev['title'],
+                }
+                async def _gn_resolve(mid, gid, dur, target):
+                    await asyncio.sleep(dur)
+                    state = _gn_event_state.get(mid)
+                    if not state or state.get('completed'):
+                        return
+                    state['completed'] = True
+                    if not state['guesses']:
+                        _gn_event_state.pop(mid, None)
+                        return
+                    # Trier par distance (la plus petite gagne)
+                    sorted_guesses = sorted(state['guesses'].items(), key=lambda kv: kv[1])
+                    winner_id, winner_dist = sorted_guesses[0]
+                    try:
+                        await add_coins(gid, winner_id, int(state['reward']))
+                    except Exception:
+                        pass
+                    # 2e et 3e proches : consolation
+                    for uid, _dist in sorted_guesses[1:3]:
+                        try:
+                            await add_coins(gid, uid, int(state['consolation']))
+                        except Exception:
+                            pass
+                    try:
+                        guild2 = bot.get_guild(gid)
+                        ch2 = guild2.get_channel(state['channel_id']) if guild2 else None
+                        winner = guild2.get_member(winner_id) if guild2 else None
+                        if ch2:
+                            await ch2.send(
+                                embed=discord.Embed(
+                                    title=f"🎯 Le nombre était **{target}**",
+                                    description=(
+                                        f"🏆 Gagnant : **{winner.display_name if winner else 'Inconnu'}** "
+                                        f"(écart de `{winner_dist}`)\n"
+                                        f"💰 **+{state['reward']} 🪙**"
+                                    ),
+                                    color=0x2ECC71,
+                                ),
+                                delete_after=120,
+                                allowed_mentions=discord.AllowedMentions.none(),
+                            )
+                    except Exception:
+                        pass
+                    _gn_event_state.pop(mid, None)
+                asyncio.create_task(_gn_resolve(msg.id, guild.id, duration, target_number))
+            except Exception as ex:
+                print(f"[gn guess_number] {ex}")
+
+        # ─── MATH EXPRESS (calcul mental, 1er bonne réponse dans chat) ──
+        elif kind == 'math_express':
+            difficulty = ev.get('difficulty', 'easy')
+            if difficulty == 'easy':
+                a, b = random.randint(2, 20), random.randint(2, 20)
+                op = random.choice(['+', '-', '*'])
+                if op == '+':
+                    answer = a + b
+                elif op == '-':
+                    answer = a - b
+                else:
+                    answer = a * b
+                question = f"{a} {op} {b}"
+            else:
+                # medium : 3 nombres
+                a, b, c = random.randint(2, 15), random.randint(2, 15), random.randint(2, 10)
+                if random.random() < 0.5:
+                    question = f"({a} + {b}) × {c}"
+                    answer = (a + b) * c
+                else:
+                    question = f"{a} × {b} - {c}"
+                    answer = a * b - c
+
+            embed = discord.Embed(
+                title=ev['title'],
+                description=(
+                    f"**Question :** `{question} = ?`\n\n"
+                    f"_Postez la réponse en chiffre dans le chat._\n\n"
+                    f"{_chrono_footer(duration)}"
+                ),
+                color=0x9B59B6,
+            )
+            try:
+                msg = await tc.send(
+                    embed=embed,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=duration + 30,
+                )
+                _gn_event_state[msg.id] = {
+                    'kind': 'math_express',
+                    'gn_id': gn_id,
+                    'channel_id': tc.id,
+                    'question': question,
+                    'answer': answer,
+                    'reward': ev['reward_coins'],
+                    'winner': None,
+                    'completed': False,
+                    'title': ev['title'],
+                }
+                async def _gn_math_timeout(mid, dur):
+                    await asyncio.sleep(dur)
+                    state = _gn_event_state.get(mid)
+                    if state and not state.get('completed'):
+                        state['completed'] = True
+                        try:
+                            guild2 = bot.get_guild(guild.id)
+                            ch2 = guild2.get_channel(state['channel_id']) if guild2 else None
+                            if ch2:
+                                await ch2.send(
+                                    embed=discord.Embed(
+                                        description=f"⏱️ Personne n'a trouvé. La réponse était **{state['answer']}**.",
+                                        color=0x95A5A6,
+                                    ),
+                                    delete_after=60,
+                                )
+                        except Exception:
+                            pass
+                    _gn_event_state.pop(mid, None)
+                asyncio.create_task(_gn_math_timeout(msg.id, duration))
+            except Exception as ex:
+                print(f"[gn math_express] {ex}")
+
+        # ─── ANAGRAMME (mot mélangé dans chat) ──────────────────────────
+        elif kind == 'anagramme':
+            word = random.choice(ev['word_pool'])
+            letters = list(word)
+            random.shuffle(letters)
+            scrambled = ''.join(letters)
+            # Si scrambled == word (très rare), reshuffle
+            if scrambled == word:
+                random.shuffle(letters)
+                scrambled = ''.join(letters)
+
+            embed = discord.Embed(
+                title=ev['title'],
+                description=(
+                    f"**Mot mélangé :** `{scrambled}`\n\n"
+                    f"_Trouve le mot original ({len(word)} lettres) et poste-le dans le chat._\n\n"
+                    f"{_chrono_footer(duration)}"
+                ),
+                color=0x3498DB,
+            )
+            try:
+                msg = await tc.send(
+                    embed=embed,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=duration + 30,
+                )
+                _gn_event_state[msg.id] = {
+                    'kind': 'anagramme',
+                    'gn_id': gn_id,
+                    'channel_id': tc.id,
+                    'word': word,
+                    'scrambled': scrambled,
+                    'reward': ev['reward_coins'],
+                    'winner': None,
+                    'completed': False,
+                    'title': ev['title'],
+                }
+                async def _gn_anag_timeout(mid, dur):
+                    await asyncio.sleep(dur)
+                    state = _gn_event_state.get(mid)
+                    if state and not state.get('completed'):
+                        state['completed'] = True
+                        try:
+                            guild2 = bot.get_guild(guild.id)
+                            ch2 = guild2.get_channel(state['channel_id']) if guild2 else None
+                            if ch2:
+                                await ch2.send(
+                                    embed=discord.Embed(
+                                        description=f"⏱️ Personne n'a trouvé. Le mot était **{state['word']}**.",
+                                        color=0x95A5A6,
+                                    ),
+                                    delete_after=60,
+                                )
+                        except Exception:
+                            pass
+                    _gn_event_state.pop(mid, None)
+                asyncio.create_task(_gn_anag_timeout(msg.id, duration))
+            except Exception as ex:
+                print(f"[gn anagramme] {ex}")
+
+        # ─── SPEED SEQUENCE (reproduire séquence d'emojis) ──────────────
+        elif kind == 'speed_sequence':
+            length = int(ev.get('length', 3))
+            pool = ev.get('emoji_pool', ['🔥', '💧', '⚡', '🌟', '❤️'])
+            sequence = [random.choice(pool) for _ in range(length)]
+            sequence_str = ''.join(sequence)
+            embed = discord.Embed(
+                title=ev['title'],
+                description=(
+                    f"**Séquence à reproduire :**\n# {sequence_str}\n\n"
+                    f"_Poste exactement cette séquence dans le chat ({length} emojis collés)._\n\n"
+                    f"{_chrono_footer(duration)}"
+                ),
+                color=0xE67E22,
+            )
+            try:
+                msg = await tc.send(
+                    embed=embed,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=duration + 30,
+                )
+                _gn_event_state[msg.id] = {
+                    'kind': 'speed_sequence',
+                    'gn_id': gn_id,
+                    'channel_id': tc.id,
+                    'sequence': sequence_str,
+                    'reward': ev['reward_coins'],
+                    'winner': None,
+                    'completed': False,
+                    'title': ev['title'],
+                }
+                async def _gn_seq_timeout(mid, dur):
+                    await asyncio.sleep(dur)
+                    state = _gn_event_state.get(mid)
+                    if state and not state.get('completed'):
+                        state['completed'] = True
+                        try:
+                            guild2 = bot.get_guild(guild.id)
+                            ch2 = guild2.get_channel(state['channel_id']) if guild2 else None
+                            if ch2:
+                                await ch2.send(
+                                    embed=discord.Embed(
+                                        description=f"⏱️ Personne n'a reproduit la séquence à temps.",
+                                        color=0x95A5A6,
+                                    ),
+                                    delete_after=60,
+                                )
+                        except Exception:
+                            pass
+                    _gn_event_state.pop(mid, None)
+                asyncio.create_task(_gn_seq_timeout(msg.id, duration))
+            except Exception as ex:
+                print(f"[gn speed_sequence] {ex}")
+
+        # ─── MOTS INTERDITS (survivre N min sans utiliser ces mots) ─────
+        elif kind == 'mots_interdits':
+            ban_words = random.choice(ev['ban_pools'])
+            embed = discord.Embed(
+                title=ev['title'],
+                description=(
+                    f"⚠️ **Mots INTERDITS pendant {duration//60} minutes :**\n"
+                    f"# {' · '.join(f'`{w}`' for w in ban_words)}\n\n"
+                    f"Si tu utilises l'un de ces mots dans le chat, **tu es éliminé**.\n"
+                    f"Les survivants gagnent **{ev['reward_coins']} 🪙**.\n\n"
+                    f"_Postez librement, le bot surveille._\n\n"
+                    f"{_chrono_footer(duration)}"
+                ),
+                color=0xE74C3C,
+            )
+            try:
+                msg = await tc.send(
+                    embed=embed,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=duration + 30,
+                )
+                _gn_event_state[msg.id] = {
+                    'kind': 'mots_interdits',
+                    'gn_id': gn_id,
+                    'channel_id': tc.id,
+                    'ban_words': [w.lower() for w in ban_words],
+                    'reward': ev['reward_coins'],
+                    'participants': set(),   # user_ids ayant posté pendant l'event
+                    'eliminated': set(),
+                    'completed': False,
+                    'title': ev['title'],
+                }
+                async def _gn_motsint_resolve(mid, gid, dur):
+                    await asyncio.sleep(dur)
+                    state = _gn_event_state.get(mid)
+                    if not state or state.get('completed'):
+                        return
+                    state['completed'] = True
+                    survivors = state['participants'] - state['eliminated']
+                    for uid in survivors:
+                        try:
+                            await add_coins(gid, uid, int(state['reward']))
+                        except Exception:
+                            pass
+                    try:
+                        guild2 = bot.get_guild(gid)
+                        ch2 = guild2.get_channel(state['channel_id']) if guild2 else None
+                        if ch2:
+                            await ch2.send(
+                                embed=discord.Embed(
+                                    title="🤐 Mots Interdits — Résultats",
+                                    description=(
+                                        f"**Survivants :** `{len(survivors)}` (gagnent {state['reward']} 🪙 chacun)\n"
+                                        f"**Éliminés :** `{len(state['eliminated'])}`\n"
+                                        f"**Mots interdits :** {' · '.join(state['ban_words'])}"
+                                    ),
+                                    color=0x2ECC71,
+                                ),
+                                delete_after=120,
+                                allowed_mentions=discord.AllowedMentions.none(),
+                            )
+                    except Exception:
+                        pass
+                    _gn_event_state.pop(mid, None)
+                asyncio.create_task(_gn_motsint_resolve(msg.id, guild.id, duration))
+            except Exception as ex:
+                print(f"[gn mots_interdits] {ex}")
+
+        # ─── Fallback : kind inconnu, juste poster l'embed ─────────────
         else:
-            # guess_number, color_vote_live, prediction, chain_continue,
-            # identity_secret, power_move, rapid_fire → embed narratif simple
             embed = discord.Embed(
                 title=ev['title'],
                 description=ev['description'] + f"\n\n{_chrono_footer(duration)}",
                 color=0x9B59B6,
             )
-            embed.set_footer(text="Game Night · Discutez dans le chat ou réagissez !")
+            embed.set_footer(text="Game Night · Mini-jeu")
             try:
                 await tc.send(
                     embed=embed,
@@ -51888,25 +52262,160 @@ async def _post_game_night_prompt(gn_id: int):
         print(f"[_post_game_night_prompt] {ex}")
 
 
-# Hook on_message pour emoji_storm (intégré au handler existant via fonction)
+# Hook on_message pour TOUS les mini-jeux chat-based (Phase 47.1)
 async def _check_game_night_emoji_storm(msg):
-    """Si un message est posté dans un chan game-night ET contient un trigger_emoji
-    actif, le compter dans les participants de l'event storm.
+    """Hook universel on_message pour les mini-jeux Game Night basés sur le chat.
+
+    Détecte : emoji_storm, guess_number, math_express, anagramme, speed_sequence,
+    mots_interdits.
     """
     try:
         if msg.author.bot or not msg.guild:
             return
+        content = (msg.content or '').strip()
         for state_msg_id, state in list(_gn_event_state.items()):
-            if state.get('kind') != 'emoji_storm':
+            kind = state.get('kind')
+            if state.get('completed'):
                 continue
             if state.get('channel_id') != msg.channel.id:
                 continue
-            if state.get('completed'):
-                continue
-            trigger = state.get('trigger_emoji')
-            if not trigger or trigger not in (msg.content or ''):
-                continue
-            state.setdefault('participants', set()).add(msg.author.id)
+
+            # ─── EMOJI STORM ──
+            if kind == 'emoji_storm':
+                trigger = state.get('trigger_emoji')
+                if trigger and trigger in content:
+                    state.setdefault('participants', set()).add(msg.author.id)
+
+            # ─── GUESS NUMBER ──
+            elif kind == 'guess_number':
+                # Parser un nombre du message
+                try:
+                    # Tolérant : prendre le premier int dans le contenu
+                    import re as _re
+                    m = _re.search(r'\b(\d{1,4})\b', content)
+                    if m:
+                        guess = int(m.group(1))
+                        rmin = state['range_min']
+                        rmax = state['range_max']
+                        if rmin <= guess <= rmax:
+                            dist = abs(guess - state['target'])
+                            # On garde la meilleure devinette par user
+                            prev = state['guesses'].get(msg.author.id)
+                            if prev is None or dist < prev:
+                                state['guesses'][msg.author.id] = dist
+                except Exception:
+                    pass
+
+            # ─── MATH EXPRESS (premier qui répond correct gagne) ──
+            elif kind == 'math_express':
+                try:
+                    import re as _re
+                    m = _re.search(r'-?\d+', content.replace(' ', ''))
+                    if m:
+                        ans = int(m.group(0))
+                        if ans == int(state['answer']):
+                            state['completed'] = True
+                            state['winner'] = msg.author.id
+                            try:
+                                await add_coins(msg.guild.id, msg.author.id, int(state['reward']))
+                            except Exception:
+                                pass
+                            try:
+                                await msg.channel.send(
+                                    embed=discord.Embed(
+                                        title=f"🏆 {msg.author.display_name} a trouvé !",
+                                        description=(
+                                            f"`{state['question']} = {state['answer']}` ✅\n"
+                                            f"💰 **+{state['reward']} 🪙**"
+                                        ),
+                                        color=0x2ECC71,
+                                    ),
+                                    delete_after=90,
+                                    allowed_mentions=discord.AllowedMentions.none(),
+                                )
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+            # ─── ANAGRAMME (premier qui poste le mot correct) ──
+            elif kind == 'anagramme':
+                word_target = state.get('word', '').upper()
+                if word_target and content.strip().upper() == word_target:
+                    state['completed'] = True
+                    state['winner'] = msg.author.id
+                    try:
+                        await add_coins(msg.guild.id, msg.author.id, int(state['reward']))
+                    except Exception:
+                        pass
+                    try:
+                        await msg.channel.send(
+                            embed=discord.Embed(
+                                title=f"🔤 {msg.author.display_name} a trouvé !",
+                                description=(
+                                    f"Mot original : **{word_target}**\n"
+                                    f"💰 **+{state['reward']} 🪙**"
+                                ),
+                                color=0x2ECC71,
+                            ),
+                            delete_after=90,
+                            allowed_mentions=discord.AllowedMentions.none(),
+                        )
+                    except Exception:
+                        pass
+
+            # ─── SPEED SEQUENCE (premier qui reproduit la séquence) ──
+            elif kind == 'speed_sequence':
+                seq = state.get('sequence', '')
+                # On compare strict : content == sequence (peut contenir espaces avant/après)
+                if seq and content.replace(' ', '') == seq.replace(' ', ''):
+                    state['completed'] = True
+                    state['winner'] = msg.author.id
+                    try:
+                        await add_coins(msg.guild.id, msg.author.id, int(state['reward']))
+                    except Exception:
+                        pass
+                    try:
+                        await msg.channel.send(
+                            embed=discord.Embed(
+                                title=f"🎼 {msg.author.display_name} a reproduit la séquence !",
+                                description=(
+                                    f"Séquence : {seq}\n"
+                                    f"💰 **+{state['reward']} 🪙**"
+                                ),
+                                color=0x2ECC71,
+                            ),
+                            delete_after=90,
+                            allowed_mentions=discord.AllowedMentions.none(),
+                        )
+                    except Exception:
+                        pass
+
+            # ─── MOTS INTERDITS (track participants + éliminations) ──
+            elif kind == 'mots_interdits':
+                # Ajouter au pool des participants (a posté pendant l'event)
+                state.setdefault('participants', set()).add(msg.author.id)
+                # Check si message contient un mot interdit
+                lower = content.lower()
+                ban_words = state.get('ban_words', [])
+                eliminated = state.setdefault('eliminated', set())
+                if msg.author.id in eliminated:
+                    continue  # déjà sorti
+                for w in ban_words:
+                    # Match strict mot entier (avec frontières \b équivalent)
+                    import re as _re
+                    pattern = r'\b' + _re.escape(w) + r'\b'
+                    if _re.search(pattern, lower):
+                        eliminated.add(msg.author.id)
+                        try:
+                            await msg.channel.send(
+                                content=f"💀 {msg.author.mention} est éliminé (a utilisé `{w}`).",
+                                allowed_mentions=discord.AllowedMentions(users=[msg.author], roles=False, everyone=False),
+                                delete_after=30,
+                            )
+                        except Exception:
+                            pass
+                        break
     except Exception as ex:
         print(f"[_check_game_night_emoji_storm] {ex}")
 
@@ -52763,6 +53272,71 @@ EngagementHubView._on_factions = _hub_on_factions
 
 
 # ─── SLASH COMMANDS ────────────────────────────────────────────────────────────
+
+
+@bot.tree.command(
+    name="alliance_category",
+    description="🛠️ [Owner] Choisir/voir la catégorie qui regroupe les alliances",
+)
+@app_commands.describe(
+    category="Catégorie à utiliser pour TOUS les salons d'alliances (laisse vide pour voir la conf actuelle)",
+)
+async def alliance_category_cmd(
+    i: discord.Interaction,
+    category: Optional[discord.CategoryChannel] = None,
+):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        if category is None:
+            c = await cfg(i.guild.id)
+            cur_id = int(c.get('alliance_category', 0) or 0)
+            cur_cat = i.guild.get_channel(cur_id) if cur_id else None
+            return await _safe_followup(
+                i,
+                content=(
+                    f"🤝 **Catégorie alliances actuelle :** "
+                    f"{cur_cat.mention if cur_cat else '_Aucune configurée_ (le bot créera "
+                    f"`🤝 Alliances` à la 1re alliance)_'}\n\n"
+                    f"_Pour la changer : `/alliance_category category:#ta-catégorie`._"
+                ),
+            )
+
+        await db_set(i.guild.id, 'alliance_category', category.id)
+        # Optionnel : déplacer les salons d'alliances existants dans cette catégorie
+        moved = 0
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT channel_id FROM alliances WHERE guild_id=? AND dissolved=0",
+                    (i.guild.id,),
+                ) as cur:
+                    rows = await cur.fetchall()
+            for (ch_id,) in rows:
+                ch = i.guild.get_channel(int(ch_id))
+                if ch and isinstance(ch, discord.TextChannel) and ch.category_id != category.id:
+                    try:
+                        await ch.edit(category=category, reason="Migration alliance_category")
+                        moved += 1
+                    except Exception:
+                        pass
+        except Exception as ex:
+            print(f"[/alliance_category migrate] {ex}")
+        await _safe_followup(
+            i,
+            content=(
+                f"✅ Catégorie alliances : {category.mention}.\n"
+                + (f"📦 {moved} salon(s) existant(s) déplacé(s) dans cette catégorie.\n" if moved else "")
+                + "_Les nouvelles alliances créeront leur salon ici._"
+            ),
+        )
+    except Exception as ex:
+        print(f"[/alliance_category] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
 @bot.tree.command(

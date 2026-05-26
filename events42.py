@@ -342,7 +342,7 @@ GAME_NIGHT_EVENTS = [
         "kind": "speed_click",
         "emoji": "🔥",
         "title": "🔥 Double or rien",
-        "description": "Premier clic = +200 🪙. Mais attention, dans **15 secondes** seulement.",
+        "description": "Premier clic = +200 🪙. **15 secondes** seulement.",
         "duration": 15,
         "reward_coins": 200,
         "button_label": "🎯 Prendre",
@@ -354,7 +354,7 @@ GAME_NIGHT_EVENTS = [
         "kind": "threshold_click",
         "emoji": "🤝",
         "title": "🤝 Tous ensemble — 5 clics en 60 sec",
-        "description": "Si **5 personnes différentes** cliquent dans la minute, **TOUT LE MONDE** dans le chat gagne 80 🪙.",
+        "description": "Si **5 personnes différentes** cliquent dans la minute, **TOUT LE MONDE** gagne 80 🪙.",
         "duration": 60,
         "threshold": 5,
         "reward_coins": 80,
@@ -365,7 +365,7 @@ GAME_NIGHT_EVENTS = [
         "kind": "threshold_click",
         "emoji": "🌊",
         "title": "🌊 La Vague — 10 clics en 2 min",
-        "description": "**10 personnes différentes** doivent cliquer en 2 minutes. Si réussi, **TOUS** les cliquers gagnent 150 🪙.",
+        "description": "**10 personnes différentes** en 2 minutes. **TOUS** les cliquers gagnent 150 🪙.",
         "duration": 120,
         "threshold": 10,
         "reward_coins": 150,
@@ -377,8 +377,8 @@ GAME_NIGHT_EVENTS = [
         "id": "emoji_storm_fire",
         "kind": "emoji_storm",
         "emoji": "🔥",
-        "title": "🔥 Tempête de feu — postez 🔥 maintenant",
-        "description": "Postez **🔥** dans ce chat dans les **20 secondes**. Si on dépasse 5 réponses, **tous les participants** gagnent 60 🪙.",
+        "title": "🔥 Tempête de feu — postez 🔥",
+        "description": "Postez **🔥** dans le chat dans **20 secondes**. À partir de 5 participants, tous gagnent 60 🪙.",
         "duration": 20,
         "trigger_emoji": "🔥",
         "threshold": 5,
@@ -389,7 +389,7 @@ GAME_NIGHT_EVENTS = [
         "kind": "emoji_storm",
         "emoji": "❤️",
         "title": "❤️ Vague d'amour — postez ❤️",
-        "description": "Postez **❤️** dans les **15 secondes**. À partir de 3 participants : tous gagnent 50 🪙.",
+        "description": "Postez **❤️** dans **15 sec**. À partir de 3 personnes : tous gagnent 50 🪙.",
         "duration": 15,
         "trigger_emoji": "❤️",
         "threshold": 3,
@@ -400,158 +400,118 @@ GAME_NIGHT_EVENTS = [
         "kind": "emoji_storm",
         "emoji": "⚡",
         "title": "⚡ Coup de tonnerre — postez ⚡",
-        "description": "Postez **⚡** dans les **15 secondes**. Bonus collectif si on atteint 4 personnes.",
+        "description": "Postez **⚡** dans **15 sec**. Bonus collectif si on atteint 4 personnes.",
         "duration": 15,
         "trigger_emoji": "⚡",
         "threshold": 4,
         "reward_coins": 70,
     },
 
-    # ─── GUESS NUMBER : bot pense un nombre, premier proche gagne ───
-    {
-        "id": "guess_number_classic",
-        "kind": "guess_number",
-        "emoji": "🎯",
-        "title": "🎯 Devine le nombre — 1 à 100",
-        "description": "Le bot a un nombre entre **1 et 100** en tête. Postez votre devinette dans le chat. Le plus proche dans **90 secondes** gagne **300 🪙**.",
-        "duration": 90,
-        "range_min": 1,
-        "range_max": 100,
-        "reward_coins": 300,
-    },
-
-    # ─── COLOR VOTE LIVE : sondage avec barre temps réel ───
-    {
-        "id": "color_vote_mood",
-        "kind": "color_vote_live",
-        "emoji": "🎨",
-        "title": "🎨 Couleur du moment du serveur",
-        "description": "Quelle couleur représente l'ambiance là maintenant ? Vote en cliquant. Résultat live.",
-        "duration": 120,
-        "options": [
-            {"emoji": "🔴", "label": "Énergique", "color": 0xE74C3C},
-            {"emoji": "🟡", "label": "Joyeuse", "color": 0xF1C40F},
-            {"emoji": "🟢", "label": "Apaisée", "color": 0x2ECC71},
-            {"emoji": "🔵", "label": "Mélancolique", "color": 0x3498DB},
-            {"emoji": "🟣", "label": "Mystérieuse", "color": 0x9B59B6},
-        ],
-        "reward_coins": 25,
-    },
-
-    # ─── PREDICTION : ranges sur futur événement ───
-    {
-        "id": "prediction_msgs",
-        "kind": "prediction",
-        "emoji": "🔮",
-        "title": "🔮 Prédiction — messages dans 20 min",
-        "description": "Combien de messages seront postés sur le serveur dans les **20 prochaines minutes** ? Vote ton range. Les vainqueurs touchent 200 🪙.",
-        "duration": 120,
-        "result_after": 1200,  # 20 min
-        "metric": "messages_count",
-        "ranges": ["0-10", "11-30", "31-60", "61-100", "100+"],
-        "reward_coins": 200,
-    },
-
-    # ─── CHAIN STORY : continue l'histoire 1 phrase à la fois ───
-    {
-        "id": "chain_dark_forest",
-        "kind": "chain_continue",
-        "emoji": "📖",
-        "title": "📖 Histoire collective — La forêt obscure",
-        "description": (
-            "Continuons cette histoire ensemble — postez **UNE phrase** dans le chat pour ajouter à l'histoire.\n\n"
-            "*« Marie pénétra dans la forêt. L'air était lourd, et au loin... »*\n\n"
-            "Au bout de **3 minutes**, le bot relit toute l'histoire."
-        ),
-        "duration": 180,
-        "opener": "Marie pénétra dans la forêt. L'air était lourd, et au loin...",
-        "reward_coins": 100,
-    },
-    {
-        "id": "chain_alien",
-        "kind": "chain_continue",
-        "emoji": "👽",
-        "title": "👽 Histoire collective — Le visiteur",
-        "description": (
-            "Une phrase par personne pour continuer cette histoire :\n\n"
-            "*« Le 12 mars 2026, je trouvais une lettre étrange dans ma boîte aux lettres. Elle disait simplement... »*"
-        ),
-        "duration": 180,
-        "opener": "Le 12 mars 2026, je trouvais une lettre étrange dans ma boîte aux lettres. Elle disait simplement...",
-        "reward_coins": 100,
-    },
-
-    # ─── IDENTITY SECRET : un membre reçoit un mot, fait deviner via emojis ───
-    {
-        "id": "identity_emoji_charades",
-        "kind": "identity_secret",
-        "emoji": "🎭",
-        "title": "🎭 Charades à l'emoji",
-        "description": (
-            "Un membre random reçoit en DM un **mot secret**. Il doit le faire deviner aux autres "
-            "en postant uniquement des **emojis** dans le chat (zéro mot !).\n\n"
-            "Premier à deviner gagne **150 🪙**."
-        ),
-        "duration": 180,
-        "word_pool": ["Pizza", "Lion", "Tour Eiffel", "Téléphone", "Pirate", "Dragon", "Plage", "Voiture", "Spider-Man", "Sushi"],
-        "reward_coins": 150,
-    },
-
-    # ─── POWER MOVE : 1 membre choisi reçoit un pouvoir ───
-    {
-        "id": "power_double_coins",
-        "kind": "power_move",
-        "emoji": "✨",
-        "title": "✨ Pouvoir éclair — la générosité",
-        "description": (
-            "Le bot a choisi un membre random qui vient de recevoir en DM **100 🪙 à donner** à un autre membre. "
-            "Le pouvoir expire dans 5 min."
-        ),
-        "duration": 300,
-        "power_coins": 100,
-    },
-
-    # ─── SYNC REACT : objectif collectif réagir en simultané ───
+    # ─── SYNC REACT : réactions simultanées sur le message ───
     {
         "id": "sync_react_5",
         "kind": "sync_react",
         "emoji": "🤝",
         "title": "🤝 Synchronisation — 5 ❤️ en 30 sec",
-        "description": "Réagissez **❤️** à ce message ! Si on atteint **5 réactions** différentes dans 30 secondes, **TOUS** les participants gagnent 70 🪙.",
+        "description": "Réagissez **❤️** à ce message. 5 réactions en 30 sec → **TOUS** gagnent 70 🪙.",
         "duration": 30,
         "target_emoji": "❤️",
         "threshold": 5,
         "reward_coins": 70,
     },
 
-    # ─── RAPID FIRE : 3 questions express ───
+    # ─── GUESS NUMBER : devinette mathématique chat ───
     {
-        "id": "rapid_fire_culture",
-        "kind": "rapid_fire",
-        "emoji": "🚀",
-        "title": "🚀 Rapid Fire — Culture express",
-        "description": "3 questions à la suite, **30 sec chacune**. Premier à répondre correctement = +50 🪙 par question.",
-        "questions": [
-            {"q": "Capitale de l'Australie ?", "a": "Canberra"},
-            {"q": "Combien de continents ?", "a": "7"},
-            {"q": "Année du premier homme sur la Lune ?", "a": "1969"},
-        ],
-        "duration_per_q": 30,
-        "reward_coins": 50,
+        "id": "guess_number_classic",
+        "kind": "guess_number",
+        "emoji": "🎯",
+        "title": "🎯 Devine le nombre (1 à 100)",
+        "description": "Le bot pense à un nombre **entre 1 et 100**. Postez votre devinette dans le chat. Le plus PROCHE dans 90 sec gagne **300 🪙**.",
+        "duration": 90,
+        "range_min": 1,
+        "range_max": 100,
+        "reward_coins": 300,
+        "consolation_coins": 50,  # 2e et 3e plus proches
+    },
+
+    # ─── MATH EXPRESS : calcul mental ───
+    {
+        "id": "math_express_easy",
+        "kind": "math_express",
+        "emoji": "🧮",
+        "title": "🧮 Math Express",
+        "description": "Le bot pose un calcul. Premier à poster la bonne réponse dans le chat gagne **150 🪙**.",
+        "duration": 45,
+        "difficulty": "easy",  # 2 nombres, +/-/×
+        "reward_coins": 150,
     },
     {
-        "id": "rapid_fire_geo",
-        "kind": "rapid_fire",
-        "emoji": "🌍",
-        "title": "🌍 Rapid Fire — Géographie",
-        "description": "3 questions, 30 sec chacune. Bonne réponse = +50 🪙.",
-        "questions": [
-            {"q": "Plus grand océan ?", "a": "Pacifique"},
-            {"q": "Pays avec le plus d'habitants en 2025 ?", "a": "Inde"},
-            {"q": "Sommet le plus haut d'Europe ?", "a": "Elbrouz"},
+        "id": "math_express_medium",
+        "kind": "math_express",
+        "emoji": "🔢",
+        "title": "🔢 Math Mental — Niveau 2",
+        "description": "Calcul plus dur. Premier à répondre dans le chat → **250 🪙**.",
+        "duration": 60,
+        "difficulty": "medium",  # 3 nombres, parenthèses
+        "reward_coins": 250,
+    },
+
+    # ─── ANAGRAMME : reconstituer un mot ───
+    {
+        "id": "anagramme_facile",
+        "kind": "anagramme",
+        "emoji": "🔤",
+        "title": "🔤 Anagramme — trouve le mot",
+        "description": "Le bot mélange les lettres d'un mot. Postez le mot dans le chat. Premier gagne **200 🪙**.",
+        "duration": 60,
+        "word_pool": [
+            "DRAGON", "PIRATE", "PLANETE", "DISCORD", "VOYAGE", "MUSIQUE",
+            "MAGIQUE", "VICTOIRE", "AVENTURE", "MONTAGNE", "OCEAN", "TRESOR",
+            "BATAILLE", "ETOILE", "ROYAUME", "CHATEAU", "GARDIEN", "MYSTERE",
         ],
-        "duration_per_q": 30,
-        "reward_coins": 50,
+        "reward_coins": 200,
+    },
+
+    # ─── SPEED SEQUENCE : reproduire séquence d'emojis ───
+    {
+        "id": "speed_seq_3",
+        "kind": "speed_sequence",
+        "emoji": "🎼",
+        "title": "🎼 Speed Sequence",
+        "description": "Reproduis exactement la séquence d'emojis dans le chat. Premier à la reproduire gagne **180 🪙**.",
+        "duration": 30,
+        "length": 3,
+        "emoji_pool": ["🔥", "💧", "⚡", "🌟", "❤️", "🎯", "🌈", "💎", "🎵", "🚀"],
+        "reward_coins": 180,
+    },
+    {
+        "id": "speed_seq_5",
+        "kind": "speed_sequence",
+        "emoji": "🎶",
+        "title": "🎶 Speed Sequence — Hard",
+        "description": "Séquence de **5 emojis** à reproduire. Premier gagne **350 🪙**.",
+        "duration": 40,
+        "length": 5,
+        "emoji_pool": ["🔥", "💧", "⚡", "🌟", "❤️", "🎯", "🌈", "💎", "🎵", "🚀", "🍀", "🎲"],
+        "reward_coins": 350,
+    },
+
+    # ─── MOTS INTERDITS : pendant N min, ne pas utiliser ces mots ───
+    {
+        "id": "mots_interdits_3",
+        "kind": "mots_interdits",
+        "emoji": "🤐",
+        "title": "🤐 Mots Interdits",
+        "description": "Pendant **3 minutes**, ne pas utiliser certains mots dans le chat. Le bot annonce les mots interdits. Ceux qui survivent gagnent **120 🪙**.",
+        "duration": 180,
+        "ban_pools": [
+            ["mais", "donc", "et"],
+            ["alors", "puis", "ensuite"],
+            ["chose", "truc", "machin"],
+            ["bot", "discord", "serveur"],
+            ["oui", "non", "peut-etre"],
+        ],
+        "reward_coins": 120,
     },
 ]
 
