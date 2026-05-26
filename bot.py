@@ -44,6 +44,7 @@ import engagement41 as eng41
 import events42 as ev42
 # Phase 47 : moteur long terme (saisons, prestige, factions, weekly/monthly)
 import engagement47 as eng47
+import lore49 as lore  # Phase 49 : lore évolutif + NPCs + missions
 import protection_guards as guards2026
 import community_features as comm2026
 import admin_panels_v2 as panels2026
@@ -1485,6 +1486,64 @@ async def db_init():
             prefs_json TEXT DEFAULT '{}',
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (guild_id, user_id)
+        )''')
+
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 49 — LORE ÉVOLUTIF + NPCs + MISSIONS
+        # ═══════════════════════════════════════════════════════════════════
+        # État du lore par serveur (chapitre actuellement actif)
+        await db.execute('''CREATE TABLE IF NOT EXISTS lore_state (
+            guild_id INTEGER PRIMARY KEY,
+            current_chapter_order INTEGER DEFAULT 1,
+            last_advanced_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+
+        # Log des prises de parole des NPCs (anti-spam : 1 NPC parle pas plus de X fois/jour)
+        await db.execute('''CREATE TABLE IF NOT EXISTS npc_posts_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            npc_id TEXT,
+            context TEXT,
+            posted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_npc_posts_guild_at "
+                "ON npc_posts_log(guild_id, posted_at DESC)"
+            )
+        except Exception:
+            pass
+
+        # Missions scénarisées en cours / passées
+        await db.execute('''CREATE TABLE IF NOT EXISTS missions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            template_id TEXT,
+            current_step INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'active',
+            started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            ended_at DATETIME,
+            step_message_id INTEGER,
+            step_channel_id INTEGER,
+            step_started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            current_progress INTEGER DEFAULT 0
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_missions_guild_status "
+                "ON missions(guild_id, status)"
+            )
+        except Exception:
+            pass
+
+        # Progression par participant et par étape (unique user_id par step)
+        await db.execute('''CREATE TABLE IF NOT EXISTS mission_step_progress (
+            mission_id INTEGER,
+            step_index INTEGER,
+            user_id INTEGER,
+            counted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (mission_id, step_index, user_id)
         )''')
 
         # Marketplace : annonces de vente entre joueurs
@@ -7777,6 +7836,16 @@ async def _end_active_event(guild, *, victory: bool, reason: str = ""):
                 (event_id,),
             ) as cur:
                 snapshots = await cur.fetchall()
+
+        # Phase 49 : tracking pour les missions actives (event_kind = 'boss_raid')
+        # Hors du `with get_db()` car le tracker ouvre son propre context DB
+        try:
+            await _track_event_completion_for_missions(
+                guild.id, 'boss_raid', victory,
+                [int(p["user_id"]) for p in participants],
+            )
+        except Exception as ex:
+            print(f"[boss_raid mission track] {ex}")
 
         # ─── Restauration des permissions ───
         for snap in snapshots:
@@ -34998,6 +35067,29 @@ async def on_ready():
         bot.add_view(EngagementHubView())
     except Exception as ex:
         print(f"[on_ready add_view EngagementHubView] {ex}")
+
+    # Phase 49 : re-attacher les MissionStepClickView actifs au boot
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, template_id, current_step FROM missions WHERE status='active'",
+            ) as cur:
+                rows = await cur.fetchall()
+        for mid, tid, step_idx in rows:
+            try:
+                tmpl = lore.get_mission_template(tid)
+                if not tmpl:
+                    continue
+                if step_idx >= len(tmpl["steps"]):
+                    continue
+                step = tmpl["steps"][step_idx]
+                if step.get("goal_kind") == "button_click":
+                    bot.add_view(MissionStepClickView(int(mid), int(step_idx), step.get("button_label", "Participer")))
+            except Exception as ex:
+                print(f"[on_ready mission persist mid={mid}] {ex}")
+    except Exception as ex:
+        print(f"[on_ready mission_step persist] {ex}")
+
     # Phase 42 — Views persistantes : World Boss + Daily Riddle
     try:
         bot.add_view(WorldBossAttackView())
@@ -35202,6 +35294,11 @@ async def on_ready():
         auto_promote_dying_events.start()
     if not marketplace_expire_cleaner.is_running():
         marketplace_expire_cleaner.start()
+    # Phase 49 : NPC chatter (toutes les 6h) + missions runner (daily)
+    if not npc_chatter_task.is_running():
+        npc_chatter_task.start()
+    if not missions_runner_task.is_running():
+        missions_runner_task.start()
     # Boot recovery : supprimer tous les messages expirés pendant le downtime
     try:
         await _run_persistent_cleanup_once()
@@ -35730,6 +35827,33 @@ async def on_member_join(m):
     except Exception as ex:
         print(f"[onboarding_dm schedule] {ex}")
 
+    # ═══ Phase 49 : NPC greeting (proba 30% pour pas spammer) ═══
+    try:
+        if random.random() < 0.30:
+            c2 = await cfg(m.guild.id)
+            hub_id2 = int(c2.get('hub_channel', 0) or 0)
+            hub_ch2 = m.guild.get_channel(hub_id2) if hub_id2 else None
+            if hub_ch2 and await _is_chatty_channel(hub_ch2):
+                # pick un NPC qui n'a pas accueilli quelqu'un dans les 6 dernières heures
+                npc_choices = []
+                for npc_id in lore.NPCS:
+                    if not await _npc_recently_posted(m.guild.id, npc_id, hours=6):
+                        npc_choices.append(npc_id)
+                if npc_choices:
+                    chosen = random.choice(npc_choices)
+                    npc = lore.get_npc(chosen)
+                    line = lore.pick_npc_line(chosen, 'new_member')
+                    if npc and line:
+                        # Replace mention "_un nouveau_" par le mention du membre quand cohérent
+                        await _post_npc_line(
+                            hub_ch2, chosen, 'new_member',
+                            line=line,
+                            extra_desc=f"👋 Bienvenue {m.mention} dans la guilde !",
+                            ttl_seconds=2 * 3600,
+                        )
+    except Exception as ex:
+        print(f"[npc greeting member_join] {ex}")
+
 
 async def _handle_antiraid_join(member):
     """Phase 28.2 — détecte les raids et applique l'action configurée."""
@@ -36178,6 +36302,12 @@ async def on_message(msg):
         await _track_message_p41(msg)
     except Exception as ex:
         print(f"[_track_message_p41] {ex}")
+
+    # ═══════════════ Phase 49 : tracking missions actives ═══════════════
+    try:
+        await _track_message_for_missions(msg)
+    except Exception as ex:
+        print(f"[_track_message_for_missions] {ex}")
 
     # ═══════════════ Phase 43 : Tag Royale chain progression ═══════════════
     try:
@@ -41328,6 +41458,12 @@ async def on_raw_reaction_add(payload):
         await _track_reaction_p41(payload)
     except Exception as ex:
         print(f"[_track_reaction_p41] {ex}")
+
+    # Phase 49 : tracking missions (étapes reactions_unique)
+    try:
+        await _track_reaction_for_missions(payload)
+    except Exception as ex:
+        print(f"[_track_reaction_for_missions] {ex}")
 
     # Phase 46.2 : Game Night sync_react tracking
     try:
@@ -47513,6 +47649,25 @@ class EngagementHubView(View):
         b7.callback = self._on_notifs
         self.add_item(b7)
 
+        # Phase 49 : Histoire du serveur + Mission en cours
+        b8 = Button(
+            label="📖 Histoire du serveur",
+            style=discord.ButtonStyle.secondary,
+            custom_id="hub_lore",
+            row=3,
+        )
+        b8.callback = self._on_lore
+        self.add_item(b8)
+
+        b9 = Button(
+            label="🎯 Mission en cours",
+            style=discord.ButtonStyle.success,
+            custom_id="hub_mission",
+            row=3,
+        )
+        b9.callback = self._on_mission
+        self.add_item(b9)
+
     async def _on_quests(self, i: discord.Interaction):
         await _p41_open_daily(i)
 
@@ -47535,6 +47690,14 @@ class EngagementHubView(View):
     async def _on_notifs(self, i: discord.Interaction):
         # Phase 48.3.5 : ouvre le panel notifs granulaires
         await notifs_cmd.callback(i)
+
+    async def _on_lore(self, i: discord.Interaction):
+        # Phase 49 : affiche l'histoire du serveur (chapitre actuel + récap)
+        await _open_lore_panel(i)
+
+    async def _on_mission(self, i: discord.Interaction):
+        # Phase 49 : affiche la mission en cours et sa progression
+        await _open_mission_panel(i)
 
 
 # ─── COMMANDES /hub + /hub_setup ───────────────────────────────────────────────
@@ -47561,12 +47724,14 @@ async def hub_cmd(i: discord.Interaction):
                 "🐾 **Compagnon** — adopte et fais évoluer ton pet\n"
                 "🤫 **Confession** — message anonyme dans le salon dédié\n"
                 "👤 **Mon profil** — level, prestige, saison, factions, stats\n"
-                "🔔 **Mes notifications** — choisis quels events te pingent\n\n"
+                "🔔 **Mes notifications** — choisis quels events te pingent\n"
+                "📖 **Histoire du serveur** — chapitre actuel + récit qui évolue\n"
+                "🎯 **Mission en cours** — aventure collective 5 étapes du mois\n\n"
                 "_Le staff peut épingler ce panneau dans un salon avec `/hub_setup`._"
             ),
             color=0x5865F2,
         )
-        e.set_footer(text="Hub d'engagement · Phase 48.3.5")
+        e.set_footer(text="Hub d'engagement · Phase 49")
         await _safe_followup(i, embed=e, view=EngagementHubView())
     except Exception as ex:
         print(f"[/hub] {ex}")
@@ -47596,7 +47761,9 @@ async def hub_setup_cmd(i: discord.Interaction, channel: discord.TextChannel):
                 "🐾 **Mon compagnon** — adopte un pet, fais-le évoluer, bonus passifs\n"
                 "🤫 **Confession anonyme** — envoie un message 100% anonyme\n"
                 "👤 **Mon profil** — level, prestige, saison, factions, alliance, stats\n"
-                "🔔 **Mes notifications** — choisis quels events te pingent (granulaire)\n\n"
+                "🔔 **Mes notifications** — choisis quels events te pingent (granulaire)\n"
+                "📖 **Histoire du serveur** — chapitre du lore qui évolue après chaque World Boss\n"
+                "🎯 **Mission en cours** — quête collective mensuelle en 5 étapes\n\n"
                 "_Clique simplement sur un bouton ci-dessous. Tout est éphémère (toi seul vois la réponse)._"
             ),
             color=0x5865F2,
@@ -48146,6 +48313,19 @@ async def _end_world_boss(guild, wb_id: int, victory: bool, reason: str = ""):
             )
             await db.commit()
 
+        # Phase 49 : NPC réactions + avancer le lore + tracking mission
+        try:
+            await _post_npc_world_boss_reaction(guild, victory)
+        except Exception as ex:
+            print(f"[world_boss npc reaction] {ex}")
+        try:
+            participants_ids = [int(a[0]) for a in attackers] if attackers else []
+            await _track_event_completion_for_missions(
+                guild.id, 'world_boss', victory, participants_ids,
+            )
+        except Exception as ex:
+            print(f"[world_boss mission track] {ex}")
+
         # Annoncer la fin + supprimer le salon dans 5 min
         ch = guild.get_channel(int(ch_id))
         if ch:
@@ -48465,6 +48645,13 @@ class RiddleAnswerView(View):
                             await _incr_stat_p41(i.guild.id, i.user.id, 'quiz_correct', 1)
                         except Exception:
                             pass
+                        # Phase 49 : tracking mission active (event_kind='daily_riddle')
+                        try:
+                            await _track_event_completion_for_missions(
+                                i.guild.id, 'daily_riddle', True, [i.user.id],
+                            )
+                        except Exception as ex:
+                            print(f"[riddle mission track] {ex}")
                         return await _safe_followup(
                             i,
                             content=(
@@ -55173,6 +55360,1097 @@ async def quiet_hours_cmd(i: discord.Interaction, start: Optional[int] = None, e
         )
     except Exception as ex:
         print(f"[/quiet_hours] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 49 — LORE ÉVOLUTIF + NPCs + MISSIONS SCÉNARISÉES
+#  Le serveur devient un MONDE avec un récit, des personnages persistants
+#  (Borek le Forgeron / Lyra la Sage / Tarik le Gardien) et des missions
+#  mensuelles 5-étapes liées au lore.
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── HELPERS LORE STATE ──────────────────────────────────────────────────────
+
+
+async def _get_lore_state(guild_id: int) -> dict:
+    """Retourne {chapter_order, chapter, last_advanced_at}. Auto-init si absent."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT current_chapter_order, last_advanced_at FROM lore_state WHERE guild_id=?",
+                (guild_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            # Auto-init au chapitre 1
+            async with get_db() as db:
+                await db.execute(
+                    "INSERT INTO lore_state(guild_id, current_chapter_order) VALUES(?, 1) "
+                    "ON CONFLICT(guild_id) DO NOTHING",
+                    (guild_id,),
+                )
+                await db.commit()
+            order = 1
+            last_at = datetime.now(timezone.utc).isoformat()
+        else:
+            order = int(row[0]) if row[0] else 1
+            last_at = row[1]
+        chapter = lore.get_chapter_by_order(order) or lore.get_first_chapter()
+        return {"chapter_order": order, "chapter": chapter, "last_advanced_at": last_at}
+    except Exception as ex:
+        print(f"[_get_lore_state] {ex}")
+        return {"chapter_order": 1, "chapter": lore.get_first_chapter(), "last_advanced_at": None}
+
+
+async def _advance_lore(guild_id: int) -> Optional[dict]:
+    """Passe au chapitre suivant. Retourne le nouveau chapitre ou None si fin du cycle."""
+    try:
+        state = await _get_lore_state(guild_id)
+        next_chapter = lore.get_next_chapter(state["chapter_order"])
+        if not next_chapter:
+            # Fin du cycle — on revient au chapitre 1 (renaissance)
+            next_chapter = lore.get_first_chapter()
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE lore_state SET current_chapter_order=?, "
+                "last_advanced_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP "
+                "WHERE guild_id=?",
+                (next_chapter["order"], guild_id),
+            )
+            await db.commit()
+        return next_chapter
+    except Exception as ex:
+        print(f"[_advance_lore] {ex}")
+        return None
+
+
+# ─── HELPERS NPC ─────────────────────────────────────────────────────────────
+
+
+async def _npc_recently_posted(guild_id: int, npc_id: str, hours: int = 24) -> bool:
+    """True si ce NPC a déjà parlé dans les X dernières heures."""
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM npc_posts_log WHERE guild_id=? AND npc_id=? AND posted_at>? LIMIT 1",
+                (guild_id, npc_id, cutoff),
+            ) as cur:
+                row = await cur.fetchone()
+        return row is not None
+    except Exception:
+        return False
+
+
+async def _log_npc_post(guild_id: int, npc_id: str, context: str):
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO npc_posts_log(guild_id, npc_id, context) VALUES(?,?,?)",
+                (guild_id, npc_id, context),
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[_log_npc_post] {ex}")
+
+
+async def _post_npc_line(channel, npc_id: str, context: str, line: Optional[str] = None,
+                         extra_desc: str = "", ttl_seconds: int = 30 * 60) -> bool:
+    """Poste un embed signé par un NPC. Retourne True si envoyé.
+
+    Si `line` est None, on pick au random selon le context.
+    """
+    if not channel or not channel.guild:
+        return False
+    npc = lore.get_npc(npc_id)
+    if not npc:
+        return False
+    if line is None:
+        line = lore.pick_npc_line(npc_id, context)
+        if not line:
+            return False
+    try:
+        e = discord.Embed(
+            title=f"{npc['emoji']} {npc['name']}",
+            description=f"_{line}_" + (f"\n\n{extra_desc}" if extra_desc else ""),
+            color=npc.get("color", 0x95A5A6),
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text=npc.get("footer", npc["name"]))
+        msg = await channel.send(
+            embed=e,
+            allowed_mentions=discord.AllowedMentions.none(),
+            delete_after=ttl_seconds,
+        )
+        # Persistent cleanup (survit aux restarts)
+        try:
+            await _register_for_cleanup(msg, ttl_seconds, f"npc_{npc_id}")
+        except Exception:
+            pass
+        await _log_npc_post(channel.guild.id, npc_id, context)
+        return True
+    except Exception as ex:
+        print(f"[_post_npc_line {npc_id} {context}] {ex}")
+        return False
+
+
+def _npc_context_for_time() -> str:
+    """Pick un context selon l'heure FR (morning/evening/idle)."""
+    try:
+        from zoneinfo import ZoneInfo
+        h = datetime.now(ZoneInfo("Europe/Paris")).hour
+    except Exception:
+        h = datetime.now(timezone.utc).hour
+    if 8 <= h < 11:
+        return "morning"
+    if 20 <= h < 23:
+        return "evening"
+    return "idle"
+
+
+# ─── TASK : NPC CHATTER (un NPC parle 1x toutes les 6h dans le hub) ─────────
+
+
+@tasks.loop(hours=6)
+async def npc_chatter_task():
+    """Chaque 6h, un NPC random poste une phrase contextuelle dans le hub."""
+    try:
+        for guild in bot.guilds:
+            try:
+                c = await cfg(guild.id)
+                if not c.get('event_enabled', False):
+                    continue
+                # Respect quiet hours
+                if not await _is_event_active_hour(guild.id):
+                    continue
+                hub_id = int(c.get('hub_channel', 0) or 0)
+                if not hub_id:
+                    continue
+                hub_ch = guild.get_channel(hub_id)
+                if not hub_ch or not await _is_chatty_channel(hub_ch):
+                    continue
+                # Détection silence : si pas de message dans le hub depuis 6h+ → context "silence"
+                ctx = _npc_context_for_time()
+                try:
+                    cutoff = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
+                    async with get_db() as db:
+                        async with db.execute(
+                            "SELECT 1 FROM member_activity WHERE guild_id=? AND channel_id=? "
+                            "AND activity_type='message' AND created_at>? LIMIT 1",
+                            (guild.id, hub_ch.id, cutoff),
+                        ) as cur:
+                            row = await cur.fetchone()
+                    if not row:
+                        ctx = "silence"
+                except Exception:
+                    pass
+
+                # Pick un NPC qui n'a pas parlé depuis 24h
+                available = []
+                for npc_id in lore.NPCS:
+                    if not await _npc_recently_posted(guild.id, npc_id, hours=24):
+                        if lore.NPC_LINES.get(npc_id, {}).get(ctx):
+                            available.append(npc_id)
+                if not available:
+                    continue
+                chosen_npc = random.choice(available)
+                await _post_npc_line(hub_ch, chosen_npc, ctx, ttl_seconds=4 * 3600)
+                print(f"[npc_chatter] guild={guild.id} npc={chosen_npc} ctx={ctx}")
+            except Exception as ex:
+                print(f"[npc_chatter guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[npc_chatter_task] {ex}")
+
+
+@npc_chatter_task.before_loop
+async def _npc_chatter_wait():
+    await bot.wait_until_ready()
+
+
+# ─── HOOK NPC REACTION APRÈS WORLD BOSS ──────────────────────────────────────
+
+
+async def _post_npc_world_boss_reaction(guild, victory: bool):
+    """Après un world boss, 1-2 NPCs commentent + on avance le lore si victoire."""
+    try:
+        c = await cfg(guild.id)
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        hub_ch = guild.get_channel(hub_id) if hub_id else None
+        if not hub_ch or not await _is_chatty_channel(hub_ch):
+            return
+
+        # 1) Récupérer le chapitre actuel pour la flavor
+        state = await _get_lore_state(guild.id)
+        chapter = state["chapter"]
+        flavor = chapter.get("if_victorious" if victory else "if_defeated", "")
+        ctx = "world_boss_victory" if victory else "world_boss_defeat"
+
+        # 2) Poster une réaction NPC (1-2 NPCs random)
+        npcs_to_post = random.sample(list(lore.NPCS.keys()), k=min(2, len(lore.NPCS)))
+        for npc_id in npcs_to_post:
+            await _post_npc_line(hub_ch, npc_id, ctx, ttl_seconds=2 * 3600)
+            await asyncio.sleep(2)  # léger délai entre les 2 NPCs
+
+        # 3) Sur victoire, on poste une transition narrative ET on avance le chapitre
+        if victory:
+            try:
+                next_chapter = await _advance_lore(guild.id)
+                if next_chapter:
+                    e = discord.Embed(
+                        title=f"📖 Nouveau chapitre : {next_chapter['emoji']} {next_chapter['title']}",
+                        description=(
+                            f"_{flavor}_\n\n"
+                            f"**{next_chapter['subtitle']}**\n\n"
+                            f"{next_chapter['intro']}"
+                        ),
+                        color=next_chapter.get("color", 0x9B59B6),
+                        timestamp=datetime.now(timezone.utc),
+                    )
+                    e.set_footer(text=f"Histoire du serveur · Chapitre {next_chapter['order']}")
+                    LIFETIME = 12 * 3600
+                    msg = await hub_ch.send(
+                        embed=e,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                        delete_after=LIFETIME,
+                    )
+                    try:
+                        await _register_for_cleanup(msg, LIFETIME, 'lore_chapter_advance')
+                    except Exception:
+                        pass
+                    print(f"[LORE ADVANCE] guild={guild.id} → chapter {next_chapter['order']} ({next_chapter['id']})")
+            except Exception as ex:
+                print(f"[_post_npc_world_boss_reaction advance] {ex}")
+    except Exception as ex:
+        print(f"[_post_npc_world_boss_reaction] {ex}")
+
+
+# ─── MISSIONS — HELPERS DB ───────────────────────────────────────────────────
+
+
+async def _get_active_mission(guild_id: int) -> Optional[dict]:
+    """Retourne la mission active (status='active') ou None."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, template_id, current_step, started_at, step_message_id, "
+                "step_channel_id, step_started_at, current_progress "
+                "FROM missions WHERE guild_id=? AND status='active' "
+                "ORDER BY started_at DESC LIMIT 1",
+                (guild_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return None
+        template = lore.get_mission_template(row[1])
+        if not template:
+            return None
+        return {
+            "id": int(row[0]),
+            "template_id": row[1],
+            "template": template,
+            "current_step": int(row[2]),
+            "started_at": row[3],
+            "step_message_id": int(row[4]) if row[4] else None,
+            "step_channel_id": int(row[5]) if row[5] else None,
+            "step_started_at": row[6],
+            "current_progress": int(row[7] or 0),
+            "current_step_def": template["steps"][int(row[2])] if int(row[2]) < len(template["steps"]) else None,
+        }
+    except Exception as ex:
+        print(f"[_get_active_mission] {ex}")
+        return None
+
+
+async def _add_mission_participant(mission_id: int, step_index: int, user_id: int) -> bool:
+    """Ajoute un user_id unique à mission_step_progress. Retourne True si ajouté (pas un dup)."""
+    try:
+        async with get_db() as db:
+            cur = await db.execute(
+                "INSERT INTO mission_step_progress(mission_id, step_index, user_id) "
+                "VALUES(?,?,?) "
+                "ON CONFLICT(mission_id, step_index, user_id) DO NOTHING",
+                (mission_id, step_index, user_id),
+            )
+            await db.commit()
+            return (cur.rowcount or 0) > 0
+    except Exception as ex:
+        print(f"[_add_mission_participant] {ex}")
+        return False
+
+
+async def _bump_mission_progress(mission_id: int, delta: int = 1):
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE missions SET current_progress = current_progress + ? WHERE id=?",
+                (delta, mission_id),
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[_bump_mission_progress] {ex}")
+
+
+async def _count_mission_participants(mission_id: int, step_index: int) -> int:
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM mission_step_progress WHERE mission_id=? AND step_index=?",
+                (mission_id, step_index),
+            ) as cur:
+                row = await cur.fetchone()
+        return int(row[0]) if row else 0
+    except Exception:
+        return 0
+
+
+async def _advance_mission_step(mission_id: int) -> Optional[dict]:
+    """Passe à l'étape suivante. Retourne la nouvelle étape ou None si mission finie."""
+    try:
+        mission = await _get_active_mission_by_id(mission_id)
+        if not mission:
+            return None
+        template = mission["template"]
+        next_idx = mission["current_step"] + 1
+        if next_idx >= len(template["steps"]):
+            # Mission terminée — finalize
+            await _finalize_mission(mission_id)
+            return None
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE missions SET current_step=?, step_started_at=CURRENT_TIMESTAMP, "
+                "current_progress=0, step_message_id=NULL, step_channel_id=NULL "
+                "WHERE id=?",
+                (next_idx, mission_id),
+            )
+            await db.commit()
+        return template["steps"][next_idx]
+    except Exception as ex:
+        print(f"[_advance_mission_step] {ex}")
+        return None
+
+
+async def _get_active_mission_by_id(mission_id: int) -> Optional[dict]:
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, template_id, current_step, guild_id FROM missions "
+                "WHERE id=? AND status='active'",
+                (mission_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return None
+        template = lore.get_mission_template(row[1])
+        return {
+            "id": int(row[0]),
+            "template_id": row[1],
+            "template": template,
+            "current_step": int(row[2]),
+            "guild_id": int(row[3]),
+        }
+    except Exception:
+        return None
+
+
+async def _finalize_mission(mission_id: int):
+    """Mission terminée — distribuer final_reward, marquer status='completed'."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT template_id, guild_id FROM missions WHERE id=?",
+                (mission_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return
+        template = lore.get_mission_template(row[0])
+        guild_id = int(row[1])
+        if not template:
+            return
+        final = template.get("final_reward", {})
+        min_steps = int(final.get("min_steps_participated", 4))
+
+        # Trouver les users qui ont participé à au moins min_steps étapes
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT user_id, COUNT(DISTINCT step_index) AS steps "
+                "FROM mission_step_progress WHERE mission_id=? "
+                "GROUP BY user_id HAVING steps >= ?",
+                (mission_id, min_steps),
+            ) as cur:
+                eligible = await cur.fetchall()
+
+        # Distribuer le final reward
+        coins = int(final.get("coins", 0))
+        for uid, _ in eligible:
+            if coins > 0:
+                try:
+                    await add_coins(guild_id, int(uid), coins)
+                except Exception:
+                    pass
+
+        # Marquer la mission terminée
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE missions SET status='completed', ended_at=CURRENT_TIMESTAMP WHERE id=?",
+                (mission_id,),
+            )
+            await db.commit()
+
+        # Annoncer la fin dans le hub
+        try:
+            guild = bot.get_guild(guild_id)
+            if guild:
+                c = await cfg(guild_id)
+                hub_id = int(c.get('hub_channel', 0) or 0)
+                hub_ch = guild.get_channel(hub_id) if hub_id else None
+                if hub_ch and await _is_chatty_channel(hub_ch):
+                    e = discord.Embed(
+                        title=f"🏆 Mission terminée : {template['title']}",
+                        description=(
+                            f"**Récompense bonus distribuée à `{len(eligible)}` héros** "
+                            f"(participants à au moins {min_steps}/{len(template['steps'])} étapes) :\n"
+                            f"💰 **+{coins:,} 🪙** chacun\n"
+                            f"🎖️ Badge : **{final.get('badge', 'Héros de Mission')}**\n\n"
+                            f"_Une nouvelle mission arrivera bientôt…_"
+                        ),
+                        color=0xF1C40F,
+                        timestamp=datetime.now(timezone.utc),
+                    )
+                    e.set_footer(text=f"Mission · {template['id']}")
+                    LIFETIME = 24 * 3600
+                    msg = await hub_ch.send(
+                        embed=e,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                        delete_after=LIFETIME,
+                    )
+                    try:
+                        await _register_for_cleanup(msg, LIFETIME, 'mission_complete')
+                    except Exception:
+                        pass
+        except Exception as ex:
+            print(f"[_finalize_mission announce] {ex}")
+        print(f"[MISSION COMPLETE] mid={mission_id} eligible={len(eligible)}")
+    except Exception as ex:
+        print(f"[_finalize_mission] {ex}")
+
+
+async def _post_mission_step(guild, mission: dict, step_index: int):
+    """Poste/repost l'étape en cours dans le hub, avec view si button_click."""
+    try:
+        c = await cfg(guild.id)
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        hub_ch = guild.get_channel(hub_id) if hub_id else None
+        if not hub_ch or not await _is_chatty_channel(hub_ch):
+            return
+
+        template = mission["template"]
+        step = template["steps"][step_index]
+        progress_count = await _count_mission_participants(mission["id"], step_index)
+
+        # Pour goal_kind = messages_total / messages_keyword on utilise current_progress
+        # Pour les autres kinds (unique_participants, button_click, reactions_unique, event_wins,
+        # event_participations) on compte les participants uniques
+        gk = step.get("goal_kind", "")
+        goal = int(step.get("goal_count", 1))
+        if gk in ("messages_total", "messages_keyword", "event_wins", "event_participations"):
+            # current_progress (compteur cumulatif)
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT current_progress FROM missions WHERE id=?",
+                    (mission["id"],),
+                ) as cur:
+                    row = await cur.fetchone()
+            current = int(row[0]) if row and row[0] else 0
+        else:
+            # unique_participants / button_click / reactions_unique → count distinct user_id
+            current = progress_count
+
+        bar_filled = int((min(current, goal) / max(goal, 1)) * 20)
+        bar = "█" * bar_filled + "░" * (20 - bar_filled)
+        pct = int((min(current, goal) / max(goal, 1)) * 100)
+
+        chapter_link_str = ""
+        if template.get("lore_link"):
+            ch = lore.get_chapter_by_id(template["lore_link"])
+            if ch:
+                chapter_link_str = f"\n📖 _Lié au chapitre : {ch['emoji']} **{ch['title']}**_"
+
+        e = discord.Embed(
+            title=f"🎯 {template['title']} — Étape {step_index + 1}/{len(template['steps'])}",
+            description=(
+                f"**{step['title']}**\n\n"
+                f"{step['description']}\n\n"
+                f"**Progression :** `{current}/{goal}` `{pct}%`\n"
+                f"`{bar}`\n\n"
+                f"💰 Récompense par participant : **{step.get('reward_coins_per_user', 0)} 🪙**"
+                f"{chapter_link_str}"
+            ),
+            color=0x3498DB,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text=f"Mission · {template['title']}")
+
+        view = None
+        if gk == "button_click":
+            view = MissionStepClickView(mission["id"], step_index, step.get("button_label", "Participer"))
+
+        try:
+            sent = await hub_ch.send(
+                embed=e,
+                view=view,
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+            # Update mission DB with new step_message_id pour edit ultérieur
+            async with get_db() as db:
+                await db.execute(
+                    "UPDATE missions SET step_message_id=?, step_channel_id=? WHERE id=?",
+                    (sent.id, hub_ch.id, mission["id"]),
+                )
+                await db.commit()
+        except Exception as ex:
+            print(f"[_post_mission_step send] {ex}")
+    except Exception as ex:
+        print(f"[_post_mission_step] {ex}")
+
+
+async def _start_new_mission(guild) -> Optional[int]:
+    """Lance une nouvelle mission liée au chapitre actuel. Retourne mission_id ou None."""
+    try:
+        # 1 seule mission active à la fois
+        existing = await _get_active_mission(guild.id)
+        if existing:
+            print(f"[_start_new_mission] mission déjà active gid={guild.id} mid={existing['id']}")
+            return None
+
+        state = await _get_lore_state(guild.id)
+        template = lore.pick_random_mission_for_chapter(state["chapter"]["id"])
+        async with get_db() as db:
+            cur = await db.execute(
+                "INSERT INTO missions(guild_id, template_id, current_step, status) "
+                "VALUES(?, ?, 0, 'active')",
+                (guild.id, template["id"]),
+            )
+            mid = cur.lastrowid
+            await db.commit()
+
+        # Annonce intro de la mission
+        c = await cfg(guild.id)
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        hub_ch = guild.get_channel(hub_id) if hub_id else None
+        if hub_ch and await _is_chatty_channel(hub_ch):
+            chapter_link_str = ""
+            if template.get("lore_link"):
+                ch = lore.get_chapter_by_id(template["lore_link"])
+                if ch:
+                    chapter_link_str = f"\n\n📖 _Cette mission est liée au chapitre **{ch['emoji']} {ch['title']}**._"
+            e = discord.Embed(
+                title=f"🎯 NOUVELLE MISSION : {template['title']}",
+                description=(
+                    f"{template['intro']}\n\n"
+                    f"**5 étapes à compléter ensemble.**\n"
+                    f"Chaque étape débloque la suivante quand l'objectif collectif est atteint.\n"
+                    f"_Plus tu participes, plus tu gagnes._\n"
+                    f"{chapter_link_str}"
+                ),
+                color=0x9B59B6,
+                timestamp=datetime.now(timezone.utc),
+            )
+            e.set_footer(text=f"Mission lancée · ID #{mid}")
+            try:
+                intro_msg = await hub_ch.send(
+                    embed=e,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except Exception as ex:
+                print(f"[_start_new_mission intro] {ex}")
+
+        # Poster la première étape
+        mission_full = await _get_active_mission(guild.id)
+        if mission_full:
+            await _post_mission_step(guild, mission_full, 0)
+        print(f"[MISSION START] guild={guild.id} mid={mid} template={template['id']}")
+        return int(mid)
+    except Exception as ex:
+        print(f"[_start_new_mission] {ex}")
+        return None
+
+
+# ─── MISSION TRACKING (on_message hook) ──────────────────────────────────────
+
+
+async def _track_message_for_missions(msg):
+    """Si une mission est active et que l'étape track les messages, increment."""
+    try:
+        if not msg.guild or msg.author.bot:
+            return
+        mission = await _get_active_mission(msg.guild.id)
+        if not mission or not mission.get("current_step_def"):
+            return
+        step = mission["current_step_def"]
+        step_idx = mission["current_step"]
+        gk = step.get("goal_kind", "")
+
+        # On veut que le message soit dans le hub (sinon ça ne compte pas)
+        c = await cfg(msg.guild.id)
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        if msg.channel.id != hub_id:
+            return
+
+        progressed = False
+        if gk == "messages_total":
+            await _bump_mission_progress(mission["id"], 1)
+            progressed = True
+        elif gk == "messages_keyword":
+            kw = step.get("goal_keyword", "").lower()
+            if kw and kw in (msg.content or "").lower():
+                await _bump_mission_progress(mission["id"], 1)
+                progressed = True
+        elif gk == "unique_participants":
+            added = await _add_mission_participant(mission["id"], step_idx, msg.author.id)
+            if added:
+                progressed = True
+
+        if progressed:
+            await _check_mission_step_advance(msg.guild, mission["id"])
+    except Exception as ex:
+        print(f"[_track_message_for_missions] {ex}")
+
+
+async def _track_reaction_for_missions(payload):
+    """Pour les étapes 'reactions_unique', track les user_ids qui réagissent au step_message."""
+    try:
+        if not payload.guild_id or payload.user_id == bot.user.id:
+            return
+        guild = bot.get_guild(payload.guild_id)
+        if not guild:
+            return
+        mission = await _get_active_mission(guild.id)
+        if not mission or not mission.get("current_step_def"):
+            return
+        step = mission["current_step_def"]
+        if step.get("goal_kind") != "reactions_unique":
+            return
+        if mission.get("step_message_id") != payload.message_id:
+            return
+        added = await _add_mission_participant(mission["id"], mission["current_step"], payload.user_id)
+        if added:
+            await _check_mission_step_advance(guild, mission["id"])
+    except Exception as ex:
+        print(f"[_track_reaction_for_missions] {ex}")
+
+
+async def _track_event_completion_for_missions(guild_id: int, event_kind: str, victory: bool, participants: list):
+    """Hook appelé après un event (boss/treasure/quiz/world_boss).
+
+    - event_wins : si victory, increment current_progress
+    - event_participations : pour chaque participant unique, +1
+    """
+    try:
+        guild = bot.get_guild(guild_id)
+        if not guild:
+            return
+        mission = await _get_active_mission(guild_id)
+        if not mission or not mission.get("current_step_def"):
+            return
+        step = mission["current_step_def"]
+        gk = step.get("goal_kind", "")
+        kinds_filter = step.get("goal_kinds", [])
+        if kinds_filter and event_kind not in kinds_filter:
+            return
+        progressed = False
+        if gk == "event_wins":
+            if victory:
+                await _bump_mission_progress(mission["id"], 1)
+                progressed = True
+        elif gk == "event_participations":
+            step_idx = mission["current_step"]
+            for uid in (participants or []):
+                try:
+                    if await _add_mission_participant(mission["id"], step_idx, int(uid)):
+                        progressed = True
+                except Exception:
+                    pass
+        if progressed:
+            await _check_mission_step_advance(guild, mission["id"])
+    except Exception as ex:
+        print(f"[_track_event_completion_for_missions] {ex}")
+
+
+async def _check_mission_step_advance(guild, mission_id: int):
+    """Check si l'étape actuelle est complète. Si oui : distribute rewards + advance."""
+    try:
+        mission = await _get_active_mission(guild.id)
+        if not mission or mission["id"] != mission_id or not mission.get("current_step_def"):
+            return
+        step = mission["current_step_def"]
+        goal = int(step.get("goal_count", 1))
+        gk = step.get("goal_kind", "")
+
+        # Calcul progression actuelle
+        if gk in ("messages_total", "messages_keyword", "event_wins"):
+            current = int(mission.get("current_progress", 0))
+        else:
+            current = await _count_mission_participants(mission_id, mission["current_step"])
+
+        if current < goal:
+            return  # étape pas finie
+
+        # Étape complétée ! Distribuer coins per_user à tous les participants
+        coins_per = int(step.get("reward_coins_per_user", 0))
+        if coins_per > 0:
+            try:
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT DISTINCT user_id FROM mission_step_progress "
+                        "WHERE mission_id=? AND step_index=?",
+                        (mission_id, mission["current_step"]),
+                    ) as cur:
+                        rows = await cur.fetchall()
+                for r in rows:
+                    try:
+                        await add_coins(guild.id, int(r[0]), coins_per)
+                    except Exception:
+                        pass
+            except Exception as ex:
+                print(f"[step rewards] {ex}")
+
+        # Annoncer la complétion + passer à l'étape suivante
+        try:
+            c = await cfg(guild.id)
+            hub_id = int(c.get('hub_channel', 0) or 0)
+            hub_ch = guild.get_channel(hub_id) if hub_id else None
+            if hub_ch and await _is_chatty_channel(hub_ch):
+                e = discord.Embed(
+                    title=f"✅ Étape {mission['current_step'] + 1} complétée !",
+                    description=(
+                        f"**{step['title']}** — l'objectif est atteint !\n"
+                        f"💰 **+{coins_per} 🪙** distribués à chaque participant.\n\n"
+                        f"_Étape suivante imminente…_"
+                    ),
+                    color=0x2ECC71,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                e.set_footer(text=f"Mission · {mission['template']['title']}")
+                LIFETIME = 6 * 3600
+                msg = await hub_ch.send(
+                    embed=e,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=LIFETIME,
+                )
+                try:
+                    await _register_for_cleanup(msg, LIFETIME, 'mission_step_complete')
+                except Exception:
+                    pass
+        except Exception as ex:
+            print(f"[step complete announce] {ex}")
+
+        # Avancer
+        next_step = await _advance_mission_step(mission_id)
+        if next_step:
+            mission_after = await _get_active_mission(guild.id)
+            if mission_after:
+                await asyncio.sleep(3)
+                await _post_mission_step(guild, mission_after, mission_after["current_step"])
+        # Si next_step None, _advance_mission_step a appelé _finalize_mission
+    except Exception as ex:
+        print(f"[_check_mission_step_advance] {ex}")
+
+
+# ─── VIEW : bouton click participation à une étape ───────────────────────────
+
+
+class MissionStepClickView(View):
+    """View persistante : 1 bouton 'Participer' pour les étapes goal_kind=button_click.
+
+    custom_id = f"mission_click_{mission_id}_{step_index}" — stable et unique.
+    """
+
+    def __init__(self, mission_id: int, step_index: int, button_label: str):
+        super().__init__(timeout=None)
+        self.mission_id = mission_id
+        self.step_index = step_index
+        b = Button(
+            label=button_label,
+            style=discord.ButtonStyle.primary,
+            custom_id=f"mission_click_{mission_id}_{step_index}",
+        )
+        b.callback = self._on_click
+        self.add_item(b)
+
+    async def _on_click(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if not i.guild:
+                return await _safe_followup(i, content="❌ Serveur uniquement.")
+            mission = await _get_active_mission(i.guild.id)
+            if not mission or mission["id"] != self.mission_id:
+                return await _safe_followup(i, content="⏱️ Cette mission n'est plus active.")
+            if mission["current_step"] != self.step_index:
+                return await _safe_followup(i, content="⏱️ Cette étape est déjà terminée — patiente la prochaine.")
+            added = await _add_mission_participant(self.mission_id, self.step_index, i.user.id)
+            if not added:
+                return await _safe_followup(i, content="✅ Tu as déjà participé à cette étape — merci !")
+            await _safe_followup(i, content=f"✅ Participation enregistrée ! Continue l'aventure.")
+            await _check_mission_step_advance(i.guild, self.mission_id)
+        except Exception as ex:
+            print(f"[MissionStepClickView] {ex}")
+            try:
+                await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+            except Exception:
+                pass
+
+
+# ─── TASK : MISSIONS RUNNER (1x/jour, lance une nouvelle mission si conditions) ─
+
+
+@tasks.loop(hours=24)
+async def missions_runner_task():
+    """Chaque jour, vérifie si on doit lancer une nouvelle mission.
+
+    Condition : pas de mission active ET (1er du mois OU dernière mission > 30j).
+    """
+    try:
+        for guild in bot.guilds:
+            try:
+                c = await cfg(guild.id)
+                if not c.get('event_enabled', False):
+                    continue
+                hub_id = int(c.get('hub_channel', 0) or 0)
+                if not hub_id:
+                    continue
+                hub_ch = guild.get_channel(hub_id)
+                if not hub_ch or not await _is_chatty_channel(hub_ch):
+                    continue
+
+                # Si une mission est déjà active, on ne fait rien
+                existing = await _get_active_mission(guild.id)
+                if existing:
+                    continue
+
+                # On lance le 1er du mois OU si dernière mission > 30j
+                try:
+                    from zoneinfo import ZoneInfo
+                    now_fr = datetime.now(ZoneInfo("Europe/Paris"))
+                except Exception:
+                    now_fr = datetime.now(timezone.utc)
+                is_first_of_month = now_fr.day == 1
+                should_start = is_first_of_month
+                if not should_start:
+                    try:
+                        async with get_db() as db:
+                            async with db.execute(
+                                "SELECT ended_at FROM missions WHERE guild_id=? AND status='completed' "
+                                "ORDER BY ended_at DESC LIMIT 1",
+                                (guild.id,),
+                            ) as cur:
+                                row = await cur.fetchone()
+                        if row and row[0]:
+                            last_end = datetime.fromisoformat(row[0].replace('Z', '+00:00')) \
+                                if 'T' in str(row[0]) \
+                                else datetime.strptime(row[0], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                            if (datetime.now(timezone.utc) - last_end).days >= 30:
+                                should_start = True
+                        else:
+                            # Aucune mission complétée encore → lancer une première après 7j d'activité du serveur
+                            should_start = True
+                    except Exception:
+                        pass
+
+                if should_start:
+                    await _start_new_mission(guild)
+            except Exception as ex:
+                print(f"[missions_runner guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[missions_runner_task] {ex}")
+
+
+@missions_runner_task.before_loop
+async def _missions_runner_wait():
+    await bot.wait_until_ready()
+
+
+# ─── HUB BUTTONS : 📖 Histoire + 🎯 Mission ──────────────────────────────────
+
+
+async def _open_lore_panel(i: discord.Interaction):
+    """Affiche le chapitre actuel + résumé des précédents."""
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        state = await _get_lore_state(i.guild.id)
+        chapter = state["chapter"]
+        # Construire un mini-récap des chapitres précédents
+        prev_lines = []
+        for c in lore.LORE_CHAPTERS:
+            if c["order"] < chapter["order"]:
+                prev_lines.append(f"~~{c['emoji']} **{c['title']}**~~ _(passé)_")
+            elif c["order"] == chapter["order"]:
+                prev_lines.append(f"📍 {c['emoji']} **{c['title']}** _(en cours)_")
+            else:
+                prev_lines.append(f"❓ {c['emoji']} ??? _(à venir)_")
+        e = discord.Embed(
+            title=f"📖 L'Histoire de la Guilde",
+            description=(
+                f"**Chapitre actuel :** {chapter['emoji']} **{chapter['title']}**\n"
+                f"_{chapter['subtitle']}_\n\n"
+                f"{chapter['intro']}\n\n"
+                f"**Tous les chapitres :**\n" + "\n".join(prev_lines)
+            ),
+            color=chapter.get("color", 0x9B59B6),
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text=f"Chapitre {chapter['order']}/{len(lore.LORE_CHAPTERS)} · L'histoire avance après chaque World Boss vaincu")
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        print(f"[_open_lore_panel] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _open_mission_panel(i: discord.Interaction):
+    """Affiche la mission active (si existe) ou un message d'attente."""
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        mission = await _get_active_mission(i.guild.id)
+        if not mission:
+            e = discord.Embed(
+                title="🎯 Mission en cours",
+                description=(
+                    "_Aucune mission en cours._\n\n"
+                    "Les missions sont des aventures collectives en 5 étapes qui se "
+                    "lancent automatiquement chaque mois (ou après 30 jours sans mission).\n\n"
+                    "**Comment ça marche ?**\n"
+                    "1. Une mission a 5 étapes successives.\n"
+                    "2. Chaque étape a un objectif collectif (messages, participants, victoires…).\n"
+                    "3. Tu gagnes des coins à chaque étape où tu participes.\n"
+                    "4. Si tu participes à 4 étapes ou plus, tu gagnes un **gros bonus final** + un **badge unique**."
+                ),
+                color=0x95A5A6,
+            )
+            return await _safe_followup(i, embed=e)
+
+        template = mission["template"]
+        step_idx = mission["current_step"]
+        step = template["steps"][step_idx] if step_idx < len(template["steps"]) else None
+        if not step:
+            return await _safe_followup(i, content="⏱️ Mission en transition…")
+
+        gk = step.get("goal_kind", "")
+        goal = int(step.get("goal_count", 1))
+        if gk in ("messages_total", "messages_keyword", "event_wins"):
+            current = int(mission.get("current_progress", 0))
+        else:
+            current = await _count_mission_participants(mission["id"], step_idx)
+
+        bar_filled = int((min(current, goal) / max(goal, 1)) * 20)
+        bar = "█" * bar_filled + "░" * (20 - bar_filled)
+
+        e = discord.Embed(
+            title=f"🎯 {template['title']}",
+            description=(
+                f"_{template['intro']}_\n\n"
+                f"**Étape {step_idx + 1}/{len(template['steps'])} : {step['title']}**\n"
+                f"{step['description']}\n\n"
+                f"**Progression :** `{current}/{goal}`\n"
+                f"`{bar}`\n\n"
+                f"💰 Récompense par participant : **{step.get('reward_coins_per_user', 0)} 🪙**\n"
+                f"🏆 Bonus final si tu participes à ≥4 étapes : **+{template.get('final_reward', {}).get('coins', 0):,} 🪙** + badge"
+            ),
+            color=0x3498DB,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text=f"Mission · ID #{mission['id']}")
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        print(f"[_open_mission_panel] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── SLASH COMMANDS OWNER DEBUG ──────────────────────────────────────────────
+
+
+@bot.tree.command(
+    name="lore_advance",
+    description="📖 [Owner] Force l'avancement du chapitre de lore (debug)",
+)
+async def lore_advance_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        new_ch = await _advance_lore(i.guild.id)
+        if new_ch:
+            await _safe_followup(
+                i,
+                content=f"✅ Lore avancé au chapitre {new_ch['order']} : **{new_ch['emoji']} {new_ch['title']}**",
+            )
+        else:
+            await _safe_followup(i, content="❌ Échec de l'avancement.")
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="mission_force_start",
+    description="🎯 [Owner] Force le démarrage d'une nouvelle mission (debug)",
+)
+async def mission_force_start_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        mid = await _start_new_mission(i.guild)
+        if mid:
+            await _safe_followup(i, content=f"✅ Mission lancée : ID #{mid}")
+        else:
+            await _safe_followup(i, content="⚠️ Une mission est déjà active OU hub non configuré.")
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="npc_force_post",
+    description="🎭 [Owner] Force un NPC à parler maintenant (debug)",
+)
+@app_commands.describe(
+    npc="Quel NPC ? (forgeron / sage / gardien)",
+    context="Quel context ? (idle / morning / evening / silence / world_boss_pre / etc.)",
+)
+async def npc_force_post_cmd(i: discord.Interaction, npc: str, context: str = "idle"):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        c = await cfg(i.guild.id)
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        hub_ch = i.guild.get_channel(hub_id) if hub_id else None
+        if not hub_ch:
+            return await _safe_followup(i, content="❌ Hub non configuré.")
+        ok = await _post_npc_line(hub_ch, npc, context, ttl_seconds=2 * 3600)
+        if ok:
+            await _safe_followup(i, content=f"✅ {npc} a parlé ({context}).")
+        else:
+            await _safe_followup(i, content=f"❌ NPC ou context inconnu. NPCs : forgeron/sage/gardien.")
+    except Exception as ex:
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
