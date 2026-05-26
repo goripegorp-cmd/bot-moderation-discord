@@ -47438,10 +47438,11 @@ class PetBuySelectView(View):
 
 
 class EngagementHubView(View):
-    """Panneau persistant : 5 boutons pour accéder à tout sans commande.
+    """Panneau persistant : 7 boutons pour accéder à tout sans commande.
 
     Custom IDs stables, callbacks utilisent i.user.id directement (pas de state).
     1 instance globale via bot.add_view au boot.
+    Phase 48.3.5 : ajout boutons Mon Profil + Mes notifs (zéro commande).
     """
 
     def __init__(self):
@@ -47492,6 +47493,25 @@ class EngagementHubView(View):
         b5.callback = self._on_confess
         self.add_item(b5)
 
+        # Phase 48.3.5 : 2 nouveaux boutons pour exposer Profile + Notifs
+        b6 = Button(
+            label="👤 Mon profil",
+            style=discord.ButtonStyle.primary,
+            custom_id="hub_profile",
+            row=2,
+        )
+        b6.callback = self._on_profile
+        self.add_item(b6)
+
+        b7 = Button(
+            label="🔔 Mes notifications",
+            style=discord.ButtonStyle.secondary,
+            custom_id="hub_notifs",
+            row=3,
+        )
+        b7.callback = self._on_notifs
+        self.add_item(b7)
+
     async def _on_quests(self, i: discord.Interaction):
         await _p41_open_daily(i)
 
@@ -47506,6 +47526,14 @@ class EngagementHubView(View):
 
     async def _on_confess(self, i: discord.Interaction):
         await _p41_open_confession(i)
+
+    async def _on_profile(self, i: discord.Interaction):
+        # Phase 48.3.5 : ouvre le profil unifié de l'auteur via le hub
+        await profile_cmd.callback(i)
+
+    async def _on_notifs(self, i: discord.Interaction):
+        # Phase 48.3.5 : ouvre le panel notifs granulaires
+        await notifs_cmd.callback(i)
 
 
 # ─── COMMANDES /hub + /hub_setup ───────────────────────────────────────────────
@@ -47530,12 +47558,14 @@ async def hub_cmd(i: discord.Interaction):
                 "🎰 **Daily Wheel** — spin gratuit chaque jour\n"
                 "🏆 **Hauts faits** — débloque 50+ achievements\n"
                 "🐾 **Compagnon** — adopte et fais évoluer ton pet\n"
-                "🤫 **Confession** — message anonyme dans le salon dédié\n\n"
+                "🤫 **Confession** — message anonyme dans le salon dédié\n"
+                "👤 **Mon profil** — level, prestige, saison, factions, stats\n"
+                "🔔 **Mes notifications** — choisis quels events te pingent\n\n"
                 "_Le staff peut épingler ce panneau dans un salon avec `/hub_setup`._"
             ),
             color=0x5865F2,
         )
-        e.set_footer(text="Hub d'engagement · Phase 41")
+        e.set_footer(text="Hub d'engagement · Phase 48.3.5")
         await _safe_followup(i, embed=e, view=EngagementHubView())
     except Exception as ex:
         print(f"[/hub] {ex}")
@@ -47563,7 +47593,9 @@ async def hub_setup_cmd(i: discord.Interaction, channel: discord.TextChannel):
                 "🎰 **Daily Wheel** — 1 spin gratuit par jour, jackpot mythique possible\n"
                 "🏆 **Mes hauts faits** — 50+ achievements à débloquer\n"
                 "🐾 **Mon compagnon** — adopte un pet, fais-le évoluer, bonus passifs\n"
-                "🤫 **Confession anonyme** — envoie un message 100% anonyme\n\n"
+                "🤫 **Confession anonyme** — envoie un message 100% anonyme\n"
+                "👤 **Mon profil** — level, prestige, saison, factions, alliance, stats\n"
+                "🔔 **Mes notifications** — choisis quels events te pingent (granulaire)\n\n"
                 "_Clique simplement sur un bouton ci-dessous. Tout est éphémère (toi seul vois la réponse)._"
             ),
             color=0x5865F2,
