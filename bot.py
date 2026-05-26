@@ -10703,11 +10703,16 @@ async def _post_event_echo(guild, arena_channel, event_kind: str, exclude_channe
         )
         for ch in channels:
             try:
-                await ch.send(
+                echo_msg = await ch.send(
                     content=content,
                     allowed_mentions=discord.AllowedMentions.none(),
                     delete_after=1800,  # 30 min
                 )
+                # Phase 56 : register pour cleanup garanti même si bot crash
+                try:
+                    await _register_for_cleanup(echo_msg, 1800, f'event_echo_{event_kind}')
+                except Exception:
+                    pass
             except discord.Forbidden:
                 continue
             except Exception as ex:
