@@ -420,43 +420,7 @@ GAME_NIGHT_EVENTS = [
         "reward_coins": 70,
     },
 
-    # ─── GUESS NUMBER : devinette mathématique chat ───
-    {
-        "id": "guess_number_classic",
-        "kind": "guess_number",
-        "emoji": "🎯",
-        "title": "🎯 Devine le nombre (1 à 100)",
-        "description": "Le bot pense à un nombre **entre 1 et 100**. Postez votre devinette dans le chat. Le plus PROCHE dans 90 sec gagne **300 🪙**.",
-        "duration": 90,
-        "range_min": 1,
-        "range_max": 100,
-        "reward_coins": 300,
-        "consolation_coins": 50,  # 2e et 3e plus proches
-    },
-
-    # ─── MATH EXPRESS : calcul mental ───
-    {
-        "id": "math_express_easy",
-        "kind": "math_express",
-        "emoji": "🧮",
-        "title": "🧮 Math Express",
-        "description": "Le bot pose un calcul. Premier à poster la bonne réponse dans le chat gagne **150 🪙**.",
-        "duration": 45,
-        "difficulty": "easy",  # 2 nombres, +/-/×
-        "reward_coins": 150,
-    },
-    {
-        "id": "math_express_medium",
-        "kind": "math_express",
-        "emoji": "🔢",
-        "title": "🔢 Math Mental — Niveau 2",
-        "description": "Calcul plus dur. Premier à répondre dans le chat → **250 🪙**.",
-        "duration": 60,
-        "difficulty": "medium",  # 3 nombres, parenthèses
-        "reward_coins": 250,
-    },
-
-    # ─── ANAGRAMME : reconstituer un mot ───
+    # ─── ANAGRAMME : reconstituer un mot (gardé) ───
     {
         "id": "anagramme_facile",
         "kind": "anagramme",
@@ -472,46 +436,76 @@ GAME_NIGHT_EVENTS = [
         "reward_coins": 200,
     },
 
-    # ─── SPEED SEQUENCE : reproduire séquence d'emojis ───
+    # ─── 🔍 DÉTECTIVE EXPRESS : enquête sur 4 suspects via 3 indices RÉELS ───
+    # Le bot pick 4 membres actifs random. Indices basés sur les VRAIES stats du
+    # coupable (messages, alliance, level). Premier à identifier le bon suspect gagne.
     {
-        "id": "speed_seq_3",
-        "kind": "speed_sequence",
-        "emoji": "🎼",
-        "title": "🎼 Speed Sequence",
-        "description": "Reproduis exactement la séquence d'emojis dans le chat. Premier à la reproduire gagne **180 🪙**.",
-        "duration": 30,
-        "length": 3,
-        "emoji_pool": ["🔥", "💧", "⚡", "🌟", "❤️", "🎯", "🌈", "💎", "🎵", "🚀"],
-        "reward_coins": 180,
-    },
-    {
-        "id": "speed_seq_5",
-        "kind": "speed_sequence",
-        "emoji": "🎶",
-        "title": "🎶 Speed Sequence — Hard",
-        "description": "Séquence de **5 emojis** à reproduire. Premier gagne **350 🪙**.",
-        "duration": 40,
-        "length": 5,
-        "emoji_pool": ["🔥", "💧", "⚡", "🌟", "❤️", "🎯", "🌈", "💎", "🎵", "🚀", "🍀", "🎲"],
-        "reward_coins": 350,
+        "id": "detective_express",
+        "kind": "detective_express",
+        "emoji": "🔍",
+        "title": "🔍 Détective Express — Trouve le coupable",
+        "description": (
+            "**4 suspects** dans le serveur, 1 seul est coupable. Le bot va donner **3 indices** "
+            "basés sur les vraies stats du coupable (messages, alliance, niveau...). À toi de "
+            "déduire et de cliquer le bon suspect en premier. Gagne **400 🪙**."
+        ),
+        "duration": 180,
+        "reward_coins": 400,
+        "consolation_coins": 75,  # 2e clic
     },
 
-    # ─── MOTS INTERDITS : pendant N min, ne pas utiliser ces mots ───
+    # ─── ♟️ MASTERMIND / CODE SECRET : devine la combinaison via feedback ───
+    # Code de 4 couleurs parmi 6. Tu proposes via boutons, le bot répond
+    # "X bien placés, Y présents mais mal placés". Premier à trouver gagne.
     {
-        "id": "mots_interdits_3",
-        "kind": "mots_interdits",
-        "emoji": "🤐",
-        "title": "🤐 Mots Interdits",
-        "description": "Pendant **3 minutes**, ne pas utiliser certains mots dans le chat. Le bot annonce les mots interdits. Ceux qui survivent gagnent **120 🪙**.",
-        "duration": 180,
-        "ban_pools": [
-            ["mais", "donc", "et"],
-            ["alors", "puis", "ensuite"],
-            ["chose", "truc", "machin"],
-            ["bot", "discord", "serveur"],
-            ["oui", "non", "peut-etre"],
+        "id": "mastermind",
+        "kind": "mastermind",
+        "emoji": "♟️",
+        "title": "♟️ Mastermind — Code Secret",
+        "description": (
+            "Le bot a généré un **code secret de 4 couleurs** parmi 6 (🔴🟡🟢🔵🟣⚫).\n"
+            "Tu peux essayer **plusieurs combinaisons**. À chaque essai, le bot te dit combien "
+            "sont **bien placées** et combien sont **présentes mais mal placées**.\n"
+            "Maximum 8 essais. Premier à trouver le code exact gagne **500 🪙**."
+        ),
+        "duration": 600,  # 10 min
+        "reward_coins": 500,
+    },
+
+    # ─── 🏆 QUIZ SURVIVOR : élimination Battle Royale ───
+    # 5 questions à la suite, 30s chacune. Mauvaise réponse = éliminé.
+    # Dernier debout = jackpot. Top 3 consolation.
+    {
+        "id": "quiz_survivor",
+        "kind": "quiz_survivor",
+        "emoji": "🏆",
+        "title": "🏆 Quiz Survivor — Battle Royale",
+        "description": (
+            "**5 questions à élimination**. À chaque question, tu as **30 secondes** pour "
+            "cliquer la bonne réponse. Mauvaise réponse → **ÉLIMINÉ** pour les suivantes.\n\n"
+            "**Survivant final = 800 🪙**. Top 3 = consolation 150 🪙."
+        ),
+        "duration": 240,
+        "reward_coins": 800,
+        "consolation_coins": 150,
+        # Pool de questions (catégories variées)
+        "questions": [
+            {"q": "Quel est l'océan le plus profond ?", "options": ["Atlantique", "Pacifique", "Indien", "Arctique"], "answer_idx": 1},
+            {"q": "Quelle planète est la plus chaude ?", "options": ["Mercure", "Vénus", "Mars", "Jupiter"], "answer_idx": 1},
+            {"q": "En quelle année est tombé le mur de Berlin ?", "options": ["1987", "1989", "1991", "1993"], "answer_idx": 1},
+            {"q": "Quel est l'élément chimique de symbole Au ?", "options": ["Argent", "Aluminium", "Or", "Argon"], "answer_idx": 2},
+            {"q": "Qui a peint la Joconde ?", "options": ["Michel-Ange", "Léonard de Vinci", "Raphaël", "Donatello"], "answer_idx": 1},
+            {"q": "Quel pays compte le plus de fuseaux horaires ?", "options": ["Russie", "USA", "Chine", "France"], "answer_idx": 3},
+            {"q": "Quelle est la capitale de l'Australie ?", "options": ["Sydney", "Melbourne", "Canberra", "Perth"], "answer_idx": 2},
+            {"q": "Combien de cordes un violon a-t-il ?", "options": ["3", "4", "5", "6"], "answer_idx": 1},
+            {"q": "Qui a inventé le téléphone ?", "options": ["Edison", "Bell", "Tesla", "Marconi"], "answer_idx": 1},
+            {"q": "Quel est le plus long fleuve du monde ?", "options": ["Amazone", "Nil", "Yangzi Jiang", "Mississippi"], "answer_idx": 1},
+            {"q": "En quelle année a été créé Discord ?", "options": ["2013", "2015", "2017", "2019"], "answer_idx": 1},
+            {"q": "Quelle est la langue la plus parlée dans le monde ?", "options": ["Anglais", "Mandarin", "Espagnol", "Hindi"], "answer_idx": 1},
+            {"q": "Quel est le plus grand désert du monde ?", "options": ["Sahara", "Antarctique", "Gobi", "Arabie"], "answer_idx": 1},
+            {"q": "Combien d'os dans le corps humain adulte ?", "options": ["156", "206", "256", "306"], "answer_idx": 1},
+            {"q": "Qui a écrit Les Misérables ?", "options": ["Zola", "Hugo", "Balzac", "Dumas"], "answer_idx": 1},
         ],
-        "reward_coins": 120,
     },
 ]
 

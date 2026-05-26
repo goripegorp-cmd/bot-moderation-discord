@@ -34957,11 +34957,12 @@ async def on_ready():
         bot.add_view(DailyQuestPushView())
     except Exception as ex:
         print(f"[on_ready add_view DailyQuestPushView] {ex}")
-    # Phase 45 — Compliment persistent view
-    try:
-        bot.add_view(ComplimentOpenView())
-    except Exception as ex:
-        print(f"[on_ready add_view ComplimentOpenView] {ex}")
+    # Phase 48 : Compliment du jour DÉSACTIVÉ (système Saint-Valentin retiré)
+    # Code conservé en mémoire pour ne pas casser, mais view + dispatcher inactifs.
+    # try:
+    #     bot.add_view(ComplimentOpenView())
+    # except Exception as ex:
+    #     print(f"[on_ready add_view ComplimentOpenView] {ex}")
     # Phase 46 — Alliance invite persistent view (DM)
     try:
         bot.add_view(AllianceInviteAcceptView())
@@ -35119,8 +35120,9 @@ async def on_ready():
         voice_spotlight_dispatcher.start()
     if not reversibles_failsafe.is_running():
         reversibles_failsafe.start()
-    if not compliment_dispatcher.is_running():
-        compliment_dispatcher.start()
+    # Phase 48 : Compliment du jour DÉSACTIVÉ (système Saint-Valentin retiré)
+    # if not compliment_dispatcher.is_running():
+    #     compliment_dispatcher.start()
     # Boot recovery : revert immédiatement tout camouflage/spotlight orphelin
     try:
         await _run_failsafe_once()
@@ -51845,6 +51847,629 @@ class GameNightThresholdView(View):
             print(f"[GameNightThresholdView] {ex}")
 
 
+# ─── 🔍 DÉTECTIVE EXPRESS ────────────────────────────────────────────────────
+
+
+class DetectiveSuspectView(View):
+    """4 boutons suspects. Premier à cliquer le BON suspect gagne."""
+
+    def __init__(self, msg_id: int, suspects: list):
+        super().__init__(timeout=None)
+        self.msg_id = msg_id
+        for idx, sus in enumerate(suspects):
+            b = Button(
+                label=f"{idx+1}. {sus['name'][:30]}",
+                style=discord.ButtonStyle.primary,
+                custom_id=f"det_susp_{msg_id}_{idx}",
+            )
+            b.callback = self._make_cb(idx)
+            self.add_item(b)
+
+    def _make_cb(self, idx: int):
+        async def _cb(i: discord.Interaction):
+            if not await _safe_defer(i):
+                return
+            try:
+                if not i.message:
+                    return await _safe_followup(i, content="❌ Erreur.")
+                state = _gn_event_state.get(i.message.id)
+                if not state or state.get('kind') != 'detective_express':
+                    return await _safe_followup(i, content="❌ Event expiré.")
+                if state.get('completed'):
+                    return await _safe_followup(i, content="✋ Quelqu'un a déjà résolu l'énigme !")
+                if i.user.id in state.get('voters', set()):
+                    return await _safe_followup(i, content="🔒 Tu as déjà voté.")
+                state.setdefault('voters', set()).add(i.user.id)
+
+                correct_idx = state['culprit_idx']
+                culprit = state['suspects'][correct_idx]
+                if idx == correct_idx:
+                    state['completed'] = True
+                    try:
+                        await add_coins(i.guild.id, i.user.id, int(state['reward']))
+                    except Exception:
+                        pass
+                    # Disabled view
+                    disabled = View(timeout=1)
+                    db = Button(
+                        label=f"🏆 Résolu par {i.user.display_name[:30]}",
+                        style=discord.ButtonStyle.success, disabled=True,
+                    )
+                    disabled.add_item(db)
+                    new_e = discord.Embed(
+                        title="🔍 Enquête résolue !",
+                        description=(
+                            f"🏆 **{i.user.display_name}** a démasqué **{culprit['name']}** !\n"
+                            f"💰 **+{state['reward']} 🪙**"
+                        ),
+                        color=0x2ECC71,
+                    )
+                    try:
+                        await i.message.edit(embed=new_e, view=disabled)
+                    except Exception:
+                        pass
+                    await _safe_followup(i, content=f"🎉 BRAVO ! Tu as trouvé : **{culprit['name']}** — +{state['reward']} 🪙")
+                else:
+                    # 2e/3e plus rapides = consolation
+                    consolation = int(state.get('consolation', 75))
+                    try:
+                        await add_coins(i.guild.id, i.user.id, consolation)
+                    except Exception:
+                        pass
+                    await _safe_followup(
+                        i,
+                        content=(
+                            f"❌ Mauvais suspect ({state['suspects'][idx]['name']}). "
+                            f"+{consolation} 🪙 pour ta tentative."
+                        ),
+                    )
+            except Exception as ex:
+                print(f"[DetectiveSuspectView] {ex}")
+        return _cb
+
+
+async def _build_detective_clue(guild, member, stats: dict) -> str:
+    """Génère un indice basé sur les VRAIES stats du membre."""
+    # On retourne une description sans révéler le nom
+    candidates = []
+    msgs = int(stats.get('messages', 0) or 0)
+    if msgs > 500:
+        candidates.append(f"a envoyé **plus de 500 messages**")
+    elif msgs > 100:
+        candidates.append(f"a envoyé **plus de 100 messages**")
+    elif msgs > 30:
+        candidates.append(f"a envoyé **plus de 30 messages**")
+
+    level = await _get_user_level(guild.id, member.id)
+    if level >= 20:
+        candidates.append(f"a un niveau **supérieur à 20** ({level} env.)")
+    elif level >= 5:
+        candidates.append(f"a un niveau **supérieur à 5**")
+
+    # Alliance ?
+    alliance = await _get_user_alliance(guild.id, member.id)
+    if alliance:
+        candidates.append(f"fait partie d'une **alliance** ({alliance['emoji']})")
+    else:
+        candidates.append(f"n'est **dans aucune alliance**")
+
+    # Bosses
+    bosses = int(stats.get('bosses_won', 0) or 0)
+    if bosses > 5:
+        candidates.append(f"a vaincu **plus de 5 boss**")
+    elif bosses > 0:
+        candidates.append(f"a déjà **vaincu au moins un boss**")
+
+    # Quiz
+    quiz = int(stats.get('quiz_correct', 0) or 0)
+    if quiz > 20:
+        candidates.append(f"a répondu correctement à **plus de 20 quiz**")
+
+    # Treasures
+    treas = int(stats.get('treasures_found', 0) or 0)
+    if treas > 10:
+        candidates.append(f"a trouvé **plus de 10 trésors**")
+
+    # Pets
+    pets = int(stats.get('pets_owned', 0) or 0)
+    if pets > 0:
+        candidates.append(f"possède **au moins un pet**")
+
+    if not candidates:
+        candidates.append("a une activité récente sur le serveur")
+    return random.choice(candidates)
+
+
+async def _gn_start_detective(gn_id: int, guild, tc, ev: dict, duration: int):
+    """Démarre une enquête Détective Express."""
+    try:
+        # Trouver 4 membres actifs random
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT user_id FROM activity_tracking "
+                "WHERE guild_id=? AND last_message IS NOT NULL "
+                "AND datetime(last_message) > datetime('now', '-14 days') "
+                "ORDER BY RANDOM() LIMIT 30",
+                (guild.id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        candidates = []
+        for (uid,) in rows:
+            m = guild.get_member(int(uid))
+            if m and not m.bot:
+                candidates.append(m)
+            if len(candidates) >= 4:
+                break
+        if len(candidates) < 4:
+            print(f"[gn detective] pas assez de candidats ({len(candidates)})")
+            return
+
+        suspects = []
+        for m in candidates[:4]:
+            stats = await _get_user_stats41(guild.id, m.id)
+            suspects.append({
+                'id': m.id, 'name': m.display_name, 'stats': stats,
+            })
+
+        # Choisir le coupable + 3 indices vrais pour lui
+        culprit_idx = random.randint(0, 3)
+        culprit = suspects[culprit_idx]
+        culprit_member = guild.get_member(culprit['id'])
+        clues = []
+        for _ in range(3):
+            clue = await _build_detective_clue(guild, culprit_member, culprit['stats'])
+            if clue not in clues:
+                clues.append(clue)
+        # S'il en manque (clues identiques), fallback
+        while len(clues) < 3:
+            clues.append("a une activité variée sur le serveur")
+
+        clue_text = "\n".join(f"**Indice {i+1}** : Le coupable {c}." for i, c in enumerate(clues))
+
+        susp_text = "\n".join(f"**{i+1}.** {s['name']}" for i, s in enumerate(suspects))
+
+        embed = discord.Embed(
+            title=ev['title'],
+            description=(
+                f"_Un mystère s'est produit sur le serveur. Identifie le coupable avec les indices ci-dessous._\n\n"
+                f"**Suspects :**\n{susp_text}\n\n"
+                f"**Indices :**\n{clue_text}\n\n"
+                f"_Premier à cliquer le bon suspect gagne **{ev['reward_coins']} 🪙**._\n\n"
+                f"{_chrono_footer(duration)}"
+            ),
+            color=0x9B59B6,
+        )
+        try:
+            msg = await tc.send(
+                embed=embed,
+                allowed_mentions=discord.AllowedMentions.none(),
+                delete_after=duration + 30,
+            )
+            view = DetectiveSuspectView(msg.id, suspects)
+            await msg.edit(view=view)
+            bot.add_view(view, message_id=msg.id)
+            _gn_event_state[msg.id] = {
+                'kind': 'detective_express',
+                'gn_id': gn_id,
+                'channel_id': tc.id,
+                'suspects': suspects,
+                'culprit_idx': culprit_idx,
+                'reward': ev['reward_coins'],
+                'consolation': ev.get('consolation_coins', 75),
+                'voters': set(),
+                'completed': False,
+            }
+            async def _cleanup(mid):
+                await asyncio.sleep(duration + 60)
+                state = _gn_event_state.pop(mid, None)
+                if state and not state.get('completed'):
+                    # Reveal answer
+                    try:
+                        await tc.send(
+                            embed=discord.Embed(
+                                description=f"🔍 Personne n'a trouvé. Le coupable était **{culprit['name']}**.",
+                                color=0x95A5A6,
+                            ),
+                            delete_after=60,
+                            allowed_mentions=discord.AllowedMentions.none(),
+                        )
+                    except Exception:
+                        pass
+            asyncio.create_task(_cleanup(msg.id))
+        except Exception as ex:
+            print(f"[gn detective_express] {ex}")
+    except Exception as ex:
+        print(f"[_gn_start_detective] {ex}")
+
+
+# ─── ♟️ MASTERMIND ────────────────────────────────────────────────────────────
+
+
+_MASTERMIND_COLORS = ['🔴', '🟡', '🟢', '🔵', '🟣', '⚫']
+
+
+class MastermindView(View):
+    """4 selects pour proposer une combinaison + bouton 'Tester'."""
+
+    def __init__(self, msg_id: int):
+        super().__init__(timeout=None)
+        # 4 Select pour chaque slot
+        for slot in range(4):
+            opts = [
+                discord.SelectOption(label=f"Slot {slot+1} : {c}", value=str(c_idx), emoji=c)
+                for c_idx, c in enumerate(_MASTERMIND_COLORS)
+            ]
+            sel = Select(
+                placeholder=f"Couleur slot {slot+1}…",
+                options=opts,
+                custom_id=f"mm_sel_{msg_id}_{slot}",
+                row=slot,
+            )
+            sel.callback = self._make_select_cb(slot)
+            self.add_item(sel)
+
+        b_test = Button(
+            label="🔍 Tester ma combinaison",
+            style=discord.ButtonStyle.success,
+            custom_id=f"mm_test_{msg_id}",
+            row=4,
+        )
+        b_test.callback = self._on_test
+        self.add_item(b_test)
+
+    def _make_select_cb(self, slot: int):
+        async def _cb(i: discord.Interaction):
+            if not await _safe_defer(i):
+                return
+            try:
+                state = _gn_event_state.get(i.message.id) if i.message else None
+                if not state or state.get('kind') != 'mastermind':
+                    return await _safe_followup(i, content="❌ Event expiré.")
+                # Stocker le choix temporaire par user
+                state.setdefault('pending', {}).setdefault(i.user.id, [None, None, None, None])
+                state['pending'][i.user.id][slot] = int(i.data['values'][0])
+                colors_str = ' '.join(
+                    _MASTERMIND_COLORS[c] if c is not None else '⬜'
+                    for c in state['pending'][i.user.id]
+                )
+                await _safe_followup(i, content=f"Slot {slot+1} → {_MASTERMIND_COLORS[int(i.data['values'][0])]}. Ta combinaison : {colors_str}")
+            except Exception as ex:
+                print(f"[MastermindView select] {ex}")
+        return _cb
+
+    async def _on_test(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            state = _gn_event_state.get(i.message.id) if i.message else None
+            if not state or state.get('kind') != 'mastermind':
+                return await _safe_followup(i, content="❌ Event expiré.")
+            if state.get('completed'):
+                return await _safe_followup(i, content="✋ Quelqu'un a déjà trouvé le code !")
+            pending = state.get('pending', {}).get(i.user.id)
+            if not pending or any(c is None for c in pending):
+                return await _safe_followup(i, content="❌ Choisis une couleur pour les 4 slots d'abord.")
+
+            # Limite d'essais par user (max 8)
+            attempts = state.setdefault('attempts', {}).setdefault(i.user.id, 0)
+            if attempts >= 8:
+                return await _safe_followup(i, content="❌ Tu as utilisé tes 8 essais.")
+            state['attempts'][i.user.id] = attempts + 1
+
+            secret = state['secret']
+            guess = list(pending)
+            # Calcul Mastermind : bien placés (correct color + position) + présents mal placés
+            well_placed = sum(1 for a, b in zip(guess, secret) if a == b)
+            # Pour les "présents mais mal placés" :
+            from collections import Counter as _Counter
+            secret_remain = _Counter(s for s, g in zip(secret, guess) if s != g)
+            guess_remain = [g for g, s in zip(guess, secret) if g != s]
+            present_mis = 0
+            for g in guess_remain:
+                if secret_remain[g] > 0:
+                    present_mis += 1
+                    secret_remain[g] -= 1
+
+            colors_str = ' '.join(_MASTERMIND_COLORS[c] for c in guess)
+
+            if well_placed == 4:
+                # Trouvé !
+                state['completed'] = True
+                try:
+                    await add_coins(i.guild.id, i.user.id, int(state['reward']))
+                except Exception:
+                    pass
+                solution_str = ' '.join(_MASTERMIND_COLORS[c] for c in secret)
+                disabled = View(timeout=1)
+                db = Button(
+                    label=f"🏆 Code trouvé par {i.user.display_name[:30]}",
+                    style=discord.ButtonStyle.success, disabled=True,
+                )
+                disabled.add_item(db)
+                try:
+                    new_e = discord.Embed(
+                        title="♟️ CODE CRACKÉ !",
+                        description=(
+                            f"🏆 **{i.user.display_name}** a trouvé le code en **{state['attempts'][i.user.id]} essai(s)** !\n"
+                            f"Code : {solution_str}\n"
+                            f"💰 **+{state['reward']} 🪙**"
+                        ),
+                        color=0x2ECC71,
+                    )
+                    await i.message.edit(embed=new_e, view=disabled)
+                except Exception:
+                    pass
+                return await _safe_followup(
+                    i,
+                    content=f"🎉 **TROUVÉ !** Code : {solution_str} en {state['attempts'][i.user.id]} essai(s).",
+                )
+            else:
+                return await _safe_followup(
+                    i,
+                    content=(
+                        f"🎯 Essai #{state['attempts'][i.user.id]}/8 : {colors_str}\n"
+                        f"✅ **{well_placed}** bien placés · 🟨 **{present_mis}** présents mais mal placés"
+                    ),
+                )
+        except Exception as ex:
+            print(f"[MastermindView test] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _gn_start_mastermind(gn_id: int, guild, tc, ev: dict, duration: int):
+    """Démarre un Mastermind."""
+    try:
+        # Code : 4 couleurs (peut avoir doublons)
+        secret = [random.randint(0, len(_MASTERMIND_COLORS) - 1) for _ in range(4)]
+        embed = discord.Embed(
+            title=ev['title'],
+            description=ev['description'] + f"\n\n{_chrono_footer(duration)}",
+            color=0xE91E63,
+        )
+        embed.add_field(
+            name="Comment jouer ?",
+            value=(
+                "1. Choisis une couleur pour chaque **slot** (4 selects).\n"
+                "2. Clique **🔍 Tester ma combinaison**.\n"
+                "3. Le bot te dit combien sont **bien placées** (✅) et combien sont "
+                "**présentes mais mal placées** (🟨).\n"
+                "4. Affine et réessaie jusqu'à 8 fois.\n"
+                "_Chaque joueur a ses propres essais (8 max)._"
+            ),
+            inline=False,
+        )
+        try:
+            msg = await tc.send(
+                embed=embed,
+                allowed_mentions=discord.AllowedMentions.none(),
+                delete_after=duration + 30,
+            )
+            view = MastermindView(msg.id)
+            await msg.edit(view=view)
+            bot.add_view(view, message_id=msg.id)
+            _gn_event_state[msg.id] = {
+                'kind': 'mastermind',
+                'gn_id': gn_id,
+                'channel_id': tc.id,
+                'secret': secret,
+                'reward': ev['reward_coins'],
+                'attempts': {},
+                'pending': {},
+                'completed': False,
+            }
+            async def _cleanup(mid):
+                await asyncio.sleep(duration + 60)
+                state = _gn_event_state.pop(mid, None)
+                if state and not state.get('completed'):
+                    solution_str = ' '.join(_MASTERMIND_COLORS[c] for c in state['secret'])
+                    try:
+                        await tc.send(
+                            embed=discord.Embed(
+                                description=f"♟️ Personne n'a trouvé. Code : {solution_str}",
+                                color=0x95A5A6,
+                            ),
+                            delete_after=60,
+                            allowed_mentions=discord.AllowedMentions.none(),
+                        )
+                    except Exception:
+                        pass
+            asyncio.create_task(_cleanup(msg.id))
+        except Exception as ex:
+            print(f"[gn mastermind] {ex}")
+    except Exception as ex:
+        print(f"[_gn_start_mastermind] {ex}")
+
+
+# ─── 🏆 QUIZ SURVIVOR ─────────────────────────────────────────────────────────
+
+
+class SurvivorAnswerView(View):
+    """4 boutons (A/B/C/D) pour une question Survivor."""
+
+    def __init__(self, msg_id: int, q_idx: int):
+        super().__init__(timeout=None)
+        labels = ['A', 'B', 'C', 'D']
+        for idx in range(4):
+            b = Button(
+                label=labels[idx],
+                style=discord.ButtonStyle.primary,
+                custom_id=f"surv_{msg_id}_{q_idx}_{idx}",
+            )
+            b.callback = self._make_cb(idx)
+            self.add_item(b)
+
+    def _make_cb(self, idx: int):
+        async def _cb(i: discord.Interaction):
+            if not await _safe_defer(i):
+                return
+            try:
+                state = _gn_event_state.get(i.message.id) if i.message else None
+                if not state or state.get('kind') != 'quiz_survivor':
+                    return await _safe_followup(i, content="❌ Event expiré.")
+
+                eliminated = state.setdefault('eliminated', set())
+                if i.user.id in eliminated:
+                    return await _safe_followup(i, content="💀 Tu es éliminé pour cette manche.")
+
+                current_q_idx = state.get('current_q_idx', -1)
+                if current_q_idx < 0:
+                    return await _safe_followup(i, content="❌ Pas de question active.")
+                answered = state.setdefault('answered_q', {}).setdefault(current_q_idx, set())
+                if i.user.id in answered:
+                    return await _safe_followup(i, content="✅ Tu as déjà répondu à cette question.")
+                answered.add(i.user.id)
+
+                correct = state['questions'][current_q_idx]['answer_idx']
+                if idx == correct:
+                    state.setdefault('alive', set()).add(i.user.id)
+                    return await _safe_followup(i, content="✅ Bonne réponse ! Tu passes à la suite.")
+                else:
+                    eliminated.add(i.user.id)
+                    return await _safe_followup(i, content=f"💀 **ÉLIMINÉ !** La bonne réponse était {chr(65+correct)}.")
+            except Exception as ex:
+                print(f"[SurvivorAnswerView] {ex}")
+        return _cb
+
+
+async def _gn_start_quiz_survivor(gn_id: int, guild, tc, ev: dict, duration: int):
+    """Démarre un Quiz Survivor — 5 questions à élimination."""
+    try:
+        all_qs = list(ev['questions'])
+        random.shuffle(all_qs)
+        chosen_qs = all_qs[:5]
+
+        # Annonce de départ
+        intro = discord.Embed(
+            title=ev['title'],
+            description=(
+                f"{ev['description']}\n\n"
+                f"**5 questions vont être posées dans 10 secondes. Soyez prêts !**\n\n"
+                f"{_chrono_footer(duration)}"
+            ),
+            color=0xE74C3C,
+        )
+        try:
+            intro_msg = await tc.send(
+                embed=intro,
+                allowed_mentions=discord.AllowedMentions.none(),
+                delete_after=240,
+            )
+            await _register_for_cleanup(intro_msg, 240, 'quiz_survivor_intro')
+        except Exception:
+            return
+
+        # State partagé
+        state_root = {
+            'kind': 'quiz_survivor',
+            'gn_id': gn_id,
+            'channel_id': tc.id,
+            'questions': chosen_qs,
+            'current_q_idx': -1,
+            'eliminated': set(),
+            'alive': set(),
+            'answered_q': {},
+            'reward': ev['reward_coins'],
+            'consolation': ev.get('consolation_coins', 150),
+        }
+
+        async def _run_survivor():
+            try:
+                await asyncio.sleep(10)
+                for q_idx, q in enumerate(chosen_qs):
+                    state_root['current_q_idx'] = q_idx
+                    opts_str = "\n".join(f"**{chr(65+i)}.** {opt}" for i, opt in enumerate(q['options']))
+                    embed = discord.Embed(
+                        title=f"🏆 Question {q_idx+1}/5",
+                        description=(
+                            f"**{q['q']}**\n\n{opts_str}\n\n"
+                            f"_30 secondes pour répondre._\n\n"
+                            f"_Éliminés actuels : `{len(state_root['eliminated'])}`_"
+                        ),
+                        color=0xE91E63,
+                    )
+                    try:
+                        q_msg = await tc.send(
+                            embed=embed,
+                            allowed_mentions=discord.AllowedMentions.none(),
+                            delete_after=60,
+                        )
+                        view = SurvivorAnswerView(q_msg.id, q_idx)
+                        await q_msg.edit(view=view)
+                        bot.add_view(view, message_id=q_msg.id)
+                        _gn_event_state[q_msg.id] = state_root
+                        await asyncio.sleep(30)
+                    except Exception as ex:
+                        print(f"[survivor q{q_idx}] {ex}")
+                        continue
+
+                # Fin : distribuer prix
+                state_root['current_q_idx'] = -1
+                alive = state_root['alive'] - state_root['eliminated']
+                # Compter les réponses justes par user
+                survivor_counts = {}
+                for q_idx in range(len(chosen_qs)):
+                    correct = chosen_qs[q_idx]['answer_idx']
+                    answers = state_root.get('answered_q', {}).get(q_idx, set())
+                    # Tous ceux non éliminés à ce stade et qui ont répondu = bonne réponse
+                    # (l'élimination se fait sur mauvaise réponse, donc les non-éliminés ici ont bon)
+                    pass  # simplification : on prend juste alive
+
+                if alive:
+                    # 1 winner = celui avec le moins d'éliminations (alive)
+                    # Plusieurs alive ? On donne le full reward au premier, consolation aux autres
+                    winners = list(alive)
+                    main_winner = winners[0]  # arbitraire (rapidité du dernier round non trackée)
+                    try:
+                        await add_coins(guild.id, main_winner, int(state_root['reward']))
+                    except Exception:
+                        pass
+                    for uid in winners[1:4]:  # top 2-3-4 consolation
+                        try:
+                            await add_coins(guild.id, uid, int(state_root['consolation']))
+                        except Exception:
+                            pass
+                    winners_names = []
+                    for uid in winners[:5]:
+                        m = guild.get_member(uid)
+                        winners_names.append(m.display_name if m else f"User#{uid}")
+                    try:
+                        final_msg = await tc.send(
+                            embed=discord.Embed(
+                                title="🏆 Quiz Survivor — Résultats",
+                                description=(
+                                    f"**Survivants :** {', '.join(winners_names) or 'Aucun'}\n"
+                                    f"💰 Gagnant : **{winners_names[0] if winners_names else '?'}** "
+                                    f"reçoit **{state_root['reward']} 🪙**\n"
+                                    f"Top survivants : **{state_root['consolation']} 🪙** chacun"
+                                ),
+                                color=0x2ECC71,
+                            ),
+                            delete_after=300,
+                            allowed_mentions=discord.AllowedMentions.none(),
+                        )
+                        await _register_for_cleanup(final_msg, 300, 'quiz_survivor_end')
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        await tc.send(
+                            embed=discord.Embed(
+                                description="🏆 Aucun survivant ! Personne n'a réussi le Quiz Survivor.",
+                                color=0x95A5A6,
+                            ),
+                            delete_after=120,
+                            allowed_mentions=discord.AllowedMentions.none(),
+                        )
+                    except Exception:
+                        pass
+            except Exception as ex:
+                print(f"[_run_survivor] {ex}")
+
+        asyncio.create_task(_run_survivor())
+    except Exception as ex:
+        print(f"[_gn_start_quiz_survivor] {ex}")
+
+
 async def _post_game_night_prompt(gn_id: int):
     """Poste un VRAI event interactif random dans le chat Game Night."""
     try:
@@ -52062,7 +52687,19 @@ async def _post_game_night_prompt(gn_id: int):
             except Exception as ex:
                 print(f"[gn sync_react] {ex}")
 
-        # ─── GUESS NUMBER (devinette nombre dans chat) ──────────────────
+        # ─── 🔍 DÉTECTIVE EXPRESS (4 suspects + 3 indices basés sur stats réelles) ───
+        elif kind == 'detective_express':
+            await _gn_start_detective(gn_id, guild, tc, ev, duration)
+
+        # ─── ♟️ MASTERMIND ────────────────────────────────────────────────
+        elif kind == 'mastermind':
+            await _gn_start_mastermind(gn_id, guild, tc, ev, duration)
+
+        # ─── 🏆 QUIZ SURVIVOR ─────────────────────────────────────────────
+        elif kind == 'quiz_survivor':
+            await _gn_start_quiz_survivor(gn_id, guild, tc, ev, duration)
+
+        # ─── (legacy) GUESS NUMBER — gardé en deadcode au cas où on rev voudrait
         elif kind == 'guess_number':
             target_number = random.randint(int(ev['range_min']), int(ev['range_max']))
             embed = discord.Embed(
