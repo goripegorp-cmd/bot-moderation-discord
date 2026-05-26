@@ -2137,6 +2137,44 @@ async def db_init():
             PRIMARY KEY (guild_id, day)
         )''')
 
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 62 — VOIX + SAISONS IRL
+        # ═══════════════════════════════════════════════════════════════════
+        await db.execute('''CREATE TABLE IF NOT EXISTS voice_activity_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            user_id INTEGER,
+            channel_id INTEGER,
+            joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            left_at DATETIME,
+            duration_seconds INTEGER DEFAULT 0
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_voice_log_user "
+                "ON voice_activity_log(guild_id, user_id, joined_at DESC)"
+            )
+        except Exception:
+            pass
+
+        await db.execute('''CREATE TABLE IF NOT EXISTS thematic_voices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            host_id INTEGER,
+            channel_id INTEGER,
+            theme TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            closed_at DATETIME
+        )''')
+
+        await db.execute('''CREATE TABLE IF NOT EXISTS irl_seasons_active (
+            guild_id INTEGER,
+            season_id TEXT,
+            started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            ended_at DATETIME,
+            PRIMARY KEY (guild_id, season_id)
+        )''')
+
         # Marketplace : annonces de vente entre joueurs
         await db.execute('''CREATE TABLE IF NOT EXISTS marketplace_listings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36045,6 +36083,11 @@ async def on_ready():
     # Phase 61 : daily meta (streak collectif + météo)
     if not daily_meta_task.is_running():
         daily_meta_task.start()
+    # Phase 62 : vocaux thématiques cleanup + IRL season check
+    if not thematic_voice_cleanup_task.is_running():
+        thematic_voice_cleanup_task.start()
+    if not irl_season_check_task.is_running():
+        irl_season_check_task.start()
     # Phase 61 : AdventClaimView persistante (custom_id stable)
     try:
         bot.add_view(AdventClaimView())
@@ -61093,6 +61136,328 @@ async def narrative_choices_resolver_task():
 
 @narrative_choices_resolver_task.before_loop
 async def _narrative_resolver_wait():
+    await bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 62 — VOIX + SAISONS IRL : Voice tracking + Thematic voices + Halloween/Noël/Été
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── VOICE ACTIVITY TRACKING (via on_voice_state_update) ─────────────────────
+
+
+_voice_session_starts: dict = {}  # (guild_id, user_id) → datetime du join
+
+
+async def _track_voice_state(member, before, after):
+    """Hook on_voice_state_update : log les durées de présence vocale."""
+    if not member.guild or member.bot:
+        return
+    try:
+        key = (member.guild.id, member.id)
+        # Si on quitte un vocal (before.channel != None, after.channel = None ou autre)
+        if before.channel and (not after.channel or after.channel.id != before.channel.id):
+            start = _voice_session_starts.pop(key, None)
+            if start:
+                duration = int((datetime.now(timezone.utc) - start).total_seconds())
+                if duration > 30:  # ignorer connexions de < 30s (anti-spam)
+                    try:
+                        async with get_db() as db:
+                            await db.execute(
+                                "INSERT INTO voice_activity_log"
+                                "(guild_id, user_id, channel_id, joined_at, left_at, duration_seconds) "
+                                "VALUES(?, ?, ?, ?, CURRENT_TIMESTAMP, ?)",
+                                (member.guild.id, member.id, before.channel.id,
+                                 start.isoformat(), duration),
+                            )
+                            await db.commit()
+                    except Exception as ex:
+                        print(f"[voice_log] {ex}")
+        # Si on rejoint un vocal (before.channel = None ou autre, after.channel != None)
+        if after.channel and (not before.channel or before.channel.id != after.channel.id):
+            _voice_session_starts[key] = datetime.now(timezone.utc)
+    except Exception as ex:
+        print(f"[_track_voice_state] {ex}")
+
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    try:
+        await _track_voice_state(member, before, after)
+    except Exception as ex:
+        print(f"[on_voice_state_update] {ex}")
+
+
+@bot.tree.command(
+    name="voice_top",
+    description="🎙️ Top 10 des plus actifs en vocal cette semaine",
+)
+async def voice_top_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT user_id, SUM(duration_seconds) AS total FROM voice_activity_log "
+                "WHERE guild_id=? AND joined_at>? GROUP BY user_id "
+                "ORDER BY total DESC LIMIT 10",
+                (i.guild.id, cutoff),
+            ) as cur:
+                rows = await cur.fetchall()
+        if not rows:
+            return await _safe_followup(i, content="_Personne n'a passé de temps en vocal cette semaine._")
+        lines = []
+        medals = ["🥇", "🥈", "🥉"]
+        for idx, r in enumerate(rows):
+            m = i.guild.get_member(int(r[0]))
+            mname = m.display_name if m else f"User {r[0]}"
+            total_s = int(r[1])
+            hours = total_s // 3600
+            mins = (total_s % 3600) // 60
+            mark = medals[idx] if idx < 3 else f"`{idx+1:02d}`"
+            lines.append(f"{mark} **{mname}** — `{hours}h{mins:02d}m`")
+        e = discord.Embed(
+            title="🎙️ Top 10 vocal cette semaine",
+            description="\n".join(lines) + "\n\n_Continue à passer du temps en vocal pour grimper._",
+            color=0x9B59B6,
+        )
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── VOCAUX THÉMATIQUES (temporaires) ────────────────────────────────────────
+
+
+VOICE_THEMES = [
+    {"id": "calm",    "label": "🌙 Discussion calme",    "user_limit": 6},
+    {"id": "gaming",  "label": "🎮 Gaming Hype",          "user_limit": 10},
+    {"id": "study",   "label": "📚 Étude/Concentration",  "user_limit": 8},
+    {"id": "chill",   "label": "☕ Chill",                "user_limit": 8},
+    {"id": "events",  "label": "🎉 Événement spécial",    "user_limit": 20},
+]
+
+
+@bot.tree.command(
+    name="voice_theme",
+    description="🎙️ Créer un vocal temporaire avec un thème (auto-supprimé quand vide 5min)",
+)
+@app_commands.describe(theme="Thème du vocal (calm/gaming/study/chill/events)")
+async def voice_theme_cmd(i: discord.Interaction, theme: str):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        theme_def = next((t for t in VOICE_THEMES if t["id"] == theme), None)
+        if not theme_def:
+            return await _safe_followup(
+                i,
+                content=f"❌ Thème inconnu. Choix : {', '.join(t['id'] for t in VOICE_THEMES)}.",
+            )
+        try:
+            vc = await i.guild.create_voice_channel(
+                name=theme_def["label"][:90],
+                user_limit=theme_def["user_limit"],
+                reason=f"Vocal thématique créé par {i.user}",
+            )
+        except discord.Forbidden:
+            return await _safe_followup(i, content="❌ Pas la permission de créer un vocal.")
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO thematic_voices(guild_id, host_id, channel_id, theme) "
+                "VALUES(?,?,?,?)",
+                (i.guild.id, i.user.id, vc.id, theme),
+            )
+            await db.commit()
+        await _safe_followup(
+            i,
+            content=(
+                f"✅ Vocal **{theme_def['label']}** créé : <#{vc.id}>\n"
+                f"_Limite : {theme_def['user_limit']} joueurs. Auto-supprimé après 5 min vide._"
+            ),
+        )
+    except Exception as ex:
+        print(f"[voice_theme] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@tasks.loop(minutes=5)
+async def thematic_voice_cleanup_task():
+    """Supprime les vocaux thématiques vides depuis >5 min."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, guild_id, channel_id FROM thematic_voices WHERE closed_at IS NULL",
+            ) as cur:
+                rows = await cur.fetchall()
+        for tv_id, gid, ch_id in rows:
+            try:
+                guild = bot.get_guild(int(gid))
+                ch = guild.get_channel(int(ch_id)) if guild else None
+                if not ch:
+                    # Channel déjà supprimé manuellement
+                    async with get_db() as db:
+                        await db.execute(
+                            "UPDATE thematic_voices SET closed_at=CURRENT_TIMESTAMP WHERE id=?",
+                            (tv_id,),
+                        )
+                        await db.commit()
+                    continue
+                # Si vide → delete
+                if len(ch.members) == 0:
+                    try:
+                        await ch.delete(reason="Vocal thématique vide depuis >5 min")
+                    except Exception:
+                        pass
+                    async with get_db() as db:
+                        await db.execute(
+                            "UPDATE thematic_voices SET closed_at=CURRENT_TIMESTAMP WHERE id=?",
+                            (tv_id,),
+                        )
+                        await db.commit()
+            except Exception as ex:
+                print(f"[thematic voice cleanup id={tv_id}] {ex}")
+    except Exception as ex:
+        print(f"[thematic_voice_cleanup_task] {ex}")
+
+
+@thematic_voice_cleanup_task.before_loop
+async def _thematic_voice_cleanup_wait():
+    await bot.wait_until_ready()
+
+
+# ─── SAISONS IRL (auto-detect dates) ─────────────────────────────────────────
+
+
+IRL_SEASONS = [
+    {"id": "halloween", "name": "🎃 Halloween", "start": (10, 25), "end": (11, 5),
+     "color": 0xFF8C00, "intro": "Les ombres s'allongent. Quelque chose se cache dans les recoins du serveur..."},
+    {"id": "christmas", "name": "🎄 Noël",      "start": (12, 15), "end": (12, 31),
+     "color": 0x16A085, "intro": "La guilde s'illumine. Le Père Hiver passe par ici."},
+    {"id": "summer",    "name": "🏖️ Été",        "start": (7, 1),   "end": (8, 31),
+     "color": 0xF1C40F, "intro": "Le soleil tape. Tout le monde ralentit. Multiplicateurs vacances activés."},
+    {"id": "newyear",   "name": "🎆 Nouvel An",  "start": (12, 31), "end": (1, 2),
+     "color": 0xFFD700, "intro": "Une nouvelle année commence. Que vos résolutions tiennent."},
+]
+
+
+def _current_irl_season(now_dt: datetime) -> Optional[dict]:
+    """Retourne la saison IRL en cours (None si aucune)."""
+    month, day = now_dt.month, now_dt.day
+    for s in IRL_SEASONS:
+        sm, sd = s["start"]
+        em, ed = s["end"]
+        # Cas standard
+        if sm <= em:
+            if (month, day) >= (sm, sd) and (month, day) <= (em, ed):
+                return s
+        else:
+            # Cas wrap-around (ex: Nouvel An déc → janvier)
+            if (month, day) >= (sm, sd) or (month, day) <= (em, ed):
+                return s
+    return None
+
+
+@tasks.loop(hours=24)
+async def irl_season_check_task():
+    """Une fois par jour, check si on entre/sort d'une saison IRL et notifie."""
+    try:
+        try:
+            from zoneinfo import ZoneInfo
+            now_fr = datetime.now(ZoneInfo("Europe/Paris"))
+        except Exception:
+            now_fr = datetime.now(timezone.utc)
+        if now_fr.hour != 9:  # check à 9h
+            return
+        cur_season = _current_irl_season(now_fr)
+        for guild in bot.guilds:
+            try:
+                c = await cfg(guild.id)
+                if not c.get('event_enabled', False):
+                    continue
+                # End : toutes les saisons actives qui ne sont plus actuelles
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT season_id FROM irl_seasons_active WHERE guild_id=? AND ended_at IS NULL",
+                        (guild.id,),
+                    ) as cur:
+                        active = [r[0] for r in await cur.fetchall()]
+                # Fermer les saisons qui ne sont plus actuelles
+                for sid in active:
+                    if not cur_season or cur_season["id"] != sid:
+                        async with get_db() as db:
+                            await db.execute(
+                                "UPDATE irl_seasons_active SET ended_at=CURRENT_TIMESTAMP "
+                                "WHERE guild_id=? AND season_id=?",
+                                (guild.id, sid),
+                            )
+                            await db.commit()
+                        # Annonce fin
+                        ended_def = next((s for s in IRL_SEASONS if s["id"] == sid), None)
+                        if ended_def:
+                            hub_id = int(c.get('hub_channel', 0) or 0)
+                            hub_ch = guild.get_channel(hub_id) if hub_id else None
+                            if hub_ch:
+                                LIFETIME = 12 * 3600
+                                try:
+                                    msg = await hub_ch.send(
+                                        embed=discord.Embed(
+                                            title=f"📅 Fin de la saison : {ended_def['name']}",
+                                            description="_Une saison se termine. Une autre arrivera bientôt._",
+                                            color=ended_def["color"],
+                                        ),
+                                        delete_after=LIFETIME,
+                                        allowed_mentions=discord.AllowedMentions.none(),
+                                    )
+                                    await _register_for_cleanup(msg, LIFETIME, 'season_end')
+                                except Exception:
+                                    pass
+                # Start : nouvelle saison qui n'était pas dans active
+                if cur_season and cur_season["id"] not in active:
+                    async with get_db() as db:
+                        await db.execute(
+                            "INSERT INTO irl_seasons_active(guild_id, season_id) VALUES(?, ?) "
+                            "ON CONFLICT(guild_id, season_id) DO NOTHING",
+                            (guild.id, cur_season["id"]),
+                        )
+                        await db.commit()
+                    # Annonce début
+                    hub_id = int(c.get('hub_channel', 0) or 0)
+                    hub_ch = guild.get_channel(hub_id) if hub_id else None
+                    if hub_ch:
+                        LIFETIME = 12 * 3600
+                        try:
+                            msg = await hub_ch.send(
+                                embed=discord.Embed(
+                                    title=f"📅 NOUVELLE SAISON : {cur_season['name']}",
+                                    description=f"_{cur_season['intro']}_\n\n_La saison court jusqu'à la date de fin._",
+                                    color=cur_season["color"],
+                                    timestamp=datetime.now(timezone.utc),
+                                ),
+                                delete_after=LIFETIME,
+                                allowed_mentions=discord.AllowedMentions.none(),
+                            )
+                            await _register_for_cleanup(msg, LIFETIME, 'season_start')
+                        except Exception:
+                            pass
+                        # Add lore memory
+                        try:
+                            await _add_lore_memory(guild.id, "season_ended", cur_season["name"])
+                        except Exception:
+                            pass
+            except Exception as ex:
+                print(f"[irl_season guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[irl_season_check_task] {ex}")
+
+
+@irl_season_check_task.before_loop
+async def _irl_season_check_wait():
     await bot.wait_until_ready()
 
 
