@@ -48,6 +48,7 @@ import lore49 as lore  # Phase 49 : lore évolutif + NPCs + missions
 import roblox50 as rblx  # Phase 50 : speedrun + studio tips + matchmaking + game updates
 import competitive51 as cpt  # Phase 51 : bingo + prediction market + faction wars
 import social52 as soc  # Phase 52 : shoutouts + mentor + confess replies
+import ambient53 as amb  # Phase 53 : heures dorées + recap DM + conversation starters
 import protection_guards as guards2026
 import community_features as comm2026
 import admin_panels_v2 as panels2026
@@ -1816,6 +1817,48 @@ async def db_init():
             )
         except Exception:
             pass
+
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 53 — AMBIANCE : Heures dorées + Recap DM + Conversation starters
+        # ═══════════════════════════════════════════════════════════════════
+        # Recap DMs envoyés (anti-doublon dimanche)
+        await db.execute('''CREATE TABLE IF NOT EXISTS weekly_recap_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            user_id INTEGER,
+            week_key TEXT,
+            sent_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        try:
+            await db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_recap_unique "
+                "ON weekly_recap_log(guild_id, user_id, week_key)"
+            )
+        except Exception:
+            pass
+
+        # Conversation starters log (anti-spam)
+        await db.execute('''CREATE TABLE IF NOT EXISTS conv_starter_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            content TEXT,
+            posted_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_conv_starter_at "
+                "ON conv_starter_log(guild_id, posted_at DESC)"
+            )
+        except Exception:
+            pass
+
+        # Greeting daily log (1 par jour par user)
+        await db.execute('''CREATE TABLE IF NOT EXISTS daily_greeting_log (
+            guild_id INTEGER,
+            user_id INTEGER,
+            day TEXT,
+            PRIMARY KEY (guild_id, user_id, day)
+        )''')
 
         # Marketplace : annonces de vente entre joueurs
         await db.execute('''CREATE TABLE IF NOT EXISTS marketplace_listings (
@@ -35625,6 +35668,13 @@ async def on_ready():
     # Phase 50 : Studio Tip daily (9h FR)
     if not daily_studio_tip_task.is_running():
         daily_studio_tip_task.start()
+    # Phase 53 : ambiance passive
+    if not golden_hour_announce_task.is_running():
+        golden_hour_announce_task.start()
+    if not weekly_recap_task.is_running():
+        weekly_recap_task.start()
+    if not conv_starter_task.is_running():
+        conv_starter_task.start()
     # Boot recovery : supprimer tous les messages expirés pendant le downtime
     try:
         await _run_persistent_cleanup_once()
@@ -36640,6 +36690,12 @@ async def on_message(msg):
         await _track_mentor_interaction(msg.guild.id, msg.author.id)
     except Exception as ex:
         print(f"[_track_mentor_interaction] {ex}")
+
+    # ═══════════════ Phase 53 : greeting réaction au 1er msg du jour ═══════════════
+    try:
+        await _maybe_greet_user_today(msg)
+    except Exception as ex:
+        print(f"[_maybe_greet_user_today] {ex}")
 
     # ═══════════════ Phase 43 : Tag Royale chain progression ═══════════════
     try:
@@ -59380,6 +59436,418 @@ async def _open_social_panel(i: discord.Interaction):
         await _safe_followup(i, embed=e, view=SocialSubHubView())
     except Exception as ex:
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 53 — AMBIANCE PASSIVE : Heures dorées + Recap hebdo DM + Conv starters
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── HEURES DORÉES (dimanche 18h-20h FR ×2 multiplier) ───────────────────────
+
+
+def _is_golden_hour_now() -> bool:
+    """True si on est actuellement en plage des heures dorées."""
+    try:
+        from zoneinfo import ZoneInfo
+        now_fr = datetime.now(ZoneInfo("Europe/Paris"))
+    except Exception:
+        now_fr = datetime.now(timezone.utc)
+    return (
+        now_fr.weekday() == amb.GOLDEN_HOUR_DEFAULT_DAY
+        and amb.GOLDEN_HOUR_DEFAULT_START <= now_fr.hour < amb.GOLDEN_HOUR_DEFAULT_END
+    )
+
+
+@tasks.loop(minutes=15)
+async def golden_hour_announce_task():
+    """Au début et à la fin de la golden hour, annonce dans le hub."""
+    try:
+        try:
+            from zoneinfo import ZoneInfo
+            now_fr = datetime.now(ZoneInfo("Europe/Paris"))
+        except Exception:
+            now_fr = datetime.now(timezone.utc)
+        if now_fr.weekday() != amb.GOLDEN_HOUR_DEFAULT_DAY:
+            return
+        # Détection précise : entre 18:00-18:14 → annonce début ;
+        # entre 19:45-19:59 → annonce fin
+        is_start_window = (now_fr.hour == amb.GOLDEN_HOUR_DEFAULT_START and now_fr.minute < 15)
+        is_end_window = (now_fr.hour == amb.GOLDEN_HOUR_DEFAULT_END - 1 and now_fr.minute >= 45)
+        if not is_start_window and not is_end_window:
+            return
+        for guild in bot.guilds:
+            try:
+                c = await cfg(guild.id)
+                if not c.get('event_enabled', False):
+                    continue
+                hub_id = int(c.get('hub_channel', 0) or 0)
+                if not hub_id:
+                    continue
+                hub_ch = guild.get_channel(hub_id)
+                if not hub_ch or not await _is_chatty_channel(hub_ch):
+                    continue
+                if is_start_window:
+                    LIFETIME = 2 * 3600
+                    e = discord.Embed(
+                        title="🌅 LES HEURES DORÉES COMMENCENT !",
+                        description=(
+                            f"_Pendant les 2 prochaines heures, **tout ce que vous faites compte double**._\n\n"
+                            f"• Coins gagnés ×{amb.GOLDEN_HOUR_MULTIPLIER}\n"
+                            f"• XP gagnée ×{amb.GOLDEN_HOUR_MULTIPLIER}\n"
+                            f"• Bonus mentor ×{amb.GOLDEN_HOUR_MULTIPLIER}\n\n"
+                            f"_Active sur tous les events qui démarrent maintenant._\n"
+                            f"_Profitez-en !_"
+                        ),
+                        color=0xFFD700,
+                        timestamp=datetime.now(timezone.utc),
+                    )
+                    e.set_footer(text=f"Heures dorées · Termine à {amb.GOLDEN_HOUR_DEFAULT_END}h FR")
+                    try:
+                        msg = await hub_ch.send(
+                            embed=e,
+                            allowed_mentions=discord.AllowedMentions.none(),
+                            delete_after=LIFETIME,
+                        )
+                        await _register_for_cleanup(msg, LIFETIME, 'golden_hour_start')
+                    except Exception:
+                        pass
+                elif is_end_window:
+                    LIFETIME = 30 * 60
+                    e = discord.Embed(
+                        title="🌇 Les heures dorées se terminent dans 15 min",
+                        description=(
+                            "_Profitez encore du multiplicateur ×2 pendant ce quart d'heure._\n\n"
+                            "_La prochaine session sera dimanche prochain._"
+                        ),
+                        color=0xF39C12,
+                    )
+                    try:
+                        msg = await hub_ch.send(
+                            embed=e,
+                            allowed_mentions=discord.AllowedMentions.none(),
+                            delete_after=LIFETIME,
+                        )
+                        await _register_for_cleanup(msg, LIFETIME, 'golden_hour_end')
+                    except Exception:
+                        pass
+            except Exception as ex:
+                print(f"[golden_hour guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[golden_hour_announce_task] {ex}")
+
+
+@golden_hour_announce_task.before_loop
+async def _golden_hour_wait():
+    await bot.wait_until_ready()
+
+
+# ─── RECAP HEBDO DM (dimanche 21h FR) ────────────────────────────────────────
+
+
+def _current_week_key() -> str:
+    """Retourne 'YYYY-WW' pour la semaine actuelle."""
+    try:
+        from zoneinfo import ZoneInfo
+        dt = datetime.now(ZoneInfo("Europe/Paris"))
+    except Exception:
+        dt = datetime.now(timezone.utc)
+    iso_year, iso_week, _ = dt.isocalendar()
+    return f"{iso_year}-W{iso_week:02d}"
+
+
+async def _build_user_recap_dm(guild_id: int, user_id: int) -> Optional[discord.Embed]:
+    """Construit l'embed récap hebdo perso d'un user."""
+    try:
+        week_start = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        # Messages
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM member_activity WHERE guild_id=? AND user_id=? "
+                "AND activity_type='message' AND created_at>?",
+                (guild_id, user_id, week_start),
+            ) as cur:
+                msgs = int((await cur.fetchone() or [0])[0])
+        # Si vraiment 0 message, skip
+        if msgs == 0:
+            return None
+        # Quêtes
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT COUNT(*) FROM daily_quests WHERE guild_id=? AND user_id=? "
+                    "AND completed=1 AND date>=date('now', '-7 days')",
+                    (guild_id, user_id),
+                ) as cur:
+                    quests = int((await cur.fetchone() or [0])[0])
+        except Exception:
+            quests = 0
+        # Achievements unlocked this week
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT COUNT(*) FROM achievements_unlocked WHERE guild_id=? AND user_id=? "
+                    "AND unlocked_at>?",
+                    (guild_id, user_id, week_start),
+                ) as cur:
+                    ach = int((await cur.fetchone() or [0])[0])
+        except Exception:
+            ach = 0
+        # Coins gagnés (approximation = coins - bank)
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT coins, xp, level FROM economy WHERE guild_id=? AND user_id=?",
+                    (guild_id, user_id),
+                ) as cur:
+                    row = await cur.fetchone()
+            coins, xp, level = (int(row[0] or 0), int(row[1] or 0), int(row[2] or 0)) if row else (0, 0, 0)
+        except Exception:
+            coins, xp, level = 0, 0, 0
+        # Shoutouts reçus
+        try:
+            sh_received = await _count_shoutouts_received(guild_id, user_id, days=7)
+        except Exception:
+            sh_received = 0
+        # Events gagnés
+        try:
+            stats = await _get_user_stats41(guild_id, user_id)
+            events_won = int(stats.get('events_won', 0) or 0)
+        except Exception:
+            events_won = 0
+
+        guild = bot.get_guild(guild_id)
+        guild_name = guild.name if guild else "Serveur"
+
+        e = discord.Embed(
+            title=f"📊 Ta semaine sur {guild_name}",
+            description=(
+                f"Voici ce que tu as fait cette semaine :\n\n"
+                f"💬 **Messages :** `{msgs:,}`\n"
+                f"📜 **Quêtes complétées :** `{quests}`\n"
+                f"🏆 **Events gagnés (total) :** `{events_won}`\n"
+                f"🏅 **Hauts faits débloqués cette semaine :** `{ach}`\n"
+                f"💝 **Shoutouts reçus :** `{sh_received}`\n"
+                f"💰 **Solde actuel :** `{coins:,}` 🪙\n"
+                f"🎚️ **Level actuel :** `{level}`\n\n"
+                f"_Continue comme ça la semaine prochaine ! Le hub t'attend._"
+            ),
+            color=0x5865F2,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text="Recap hebdo · Désactivable via /notifs")
+        return e
+    except Exception as ex:
+        print(f"[_build_user_recap_dm] {ex}")
+        return None
+
+
+@tasks.loop(hours=1)
+async def weekly_recap_task():
+    """Dimanche entre 21h-22h FR, envoie un recap DM à chaque actif de la semaine."""
+    try:
+        try:
+            from zoneinfo import ZoneInfo
+            now_fr = datetime.now(ZoneInfo("Europe/Paris"))
+        except Exception:
+            now_fr = datetime.now(timezone.utc)
+        if now_fr.weekday() != 6:  # dimanche
+            return
+        if now_fr.hour != 21:
+            return
+        week_key = _current_week_key()
+        for guild in bot.guilds:
+            try:
+                c = await cfg(guild.id)
+                if not c.get('event_enabled', False):
+                    continue
+                # Trouve tous les users actifs cette semaine
+                cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT DISTINCT user_id FROM member_activity WHERE guild_id=? "
+                        "AND activity_type='message' AND created_at>?",
+                        (guild.id, cutoff),
+                    ) as cur:
+                        active_uids = [int(r[0]) for r in await cur.fetchall()]
+                count = 0
+                for uid in active_uids:
+                    try:
+                        # Anti-dup : déjà envoyé cette semaine ?
+                        async with get_db() as db:
+                            async with db.execute(
+                                "SELECT 1 FROM weekly_recap_log WHERE guild_id=? AND user_id=? AND week_key=?",
+                                (guild.id, uid, week_key),
+                            ) as cur:
+                                if await cur.fetchone():
+                                    continue
+                        # Respect notif prefs (catégorie 'recap')
+                        # On utilise la cat 'alliance' comme fallback recap (toujours actif) car pas de cat 'recap'
+                        member = guild.get_member(uid)
+                        if not member or member.bot:
+                            continue
+                        # Build + envoyer DM
+                        e = await _build_user_recap_dm(guild.id, uid)
+                        if not e:
+                            continue
+                        try:
+                            await member.send(embed=e)
+                            async with get_db() as db:
+                                await db.execute(
+                                    "INSERT OR IGNORE INTO weekly_recap_log(guild_id, user_id, week_key) "
+                                    "VALUES(?, ?, ?)",
+                                    (guild.id, uid, week_key),
+                                )
+                                await db.commit()
+                            count += 1
+                            await asyncio.sleep(1)  # rate-limit DM
+                        except discord.Forbidden:
+                            # DM fermé, on log juste
+                            async with get_db() as db:
+                                await db.execute(
+                                    "INSERT OR IGNORE INTO weekly_recap_log(guild_id, user_id, week_key) "
+                                    "VALUES(?, ?, ?)",
+                                    (guild.id, uid, week_key),
+                                )
+                                await db.commit()
+                    except Exception as ex:
+                        print(f"[weekly_recap user={uid}] {ex}")
+                print(f"[weekly_recap] guild={guild.id} sent={count}")
+            except Exception as ex:
+                print(f"[weekly_recap guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[weekly_recap_task] {ex}")
+
+
+@weekly_recap_task.before_loop
+async def _weekly_recap_wait():
+    await bot.wait_until_ready()
+
+
+# ─── CONVERSATION STARTERS (anti-silence dans le hub) ────────────────────────
+
+
+@tasks.loop(hours=1)
+async def conv_starter_task():
+    """Si le hub est mort depuis >3h pendant la plage active, poste une question."""
+    try:
+        for guild in bot.guilds:
+            try:
+                c = await cfg(guild.id)
+                if not c.get('event_enabled', False):
+                    continue
+                if not await _is_event_active_hour(guild.id):
+                    continue
+                hub_id = int(c.get('hub_channel', 0) or 0)
+                if not hub_id:
+                    continue
+                hub_ch = guild.get_channel(hub_id)
+                if not hub_ch or not await _is_chatty_channel(hub_ch):
+                    continue
+                # Check last message dans hub
+                cutoff_3h = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT 1 FROM member_activity WHERE guild_id=? AND channel_id=? "
+                        "AND activity_type='message' AND created_at>? LIMIT 1",
+                        (guild.id, hub_ch.id, cutoff_3h),
+                    ) as cur:
+                        if await cur.fetchone():
+                            continue  # Y a eu de l'activité récemment
+                # Check qu'on n'a pas déjà posté un starter dans les 6h
+                cutoff_6h = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT 1 FROM conv_starter_log WHERE guild_id=? AND posted_at>? LIMIT 1",
+                        (guild.id, cutoff_6h),
+                    ) as cur:
+                        if await cur.fetchone():
+                            continue
+                starter = amb.pick_random_starter()
+                LIFETIME = 6 * 3600
+                e = discord.Embed(
+                    title="💬 On se motive ?",
+                    description=starter,
+                    color=0x9B59B6,
+                )
+                e.set_footer(text="_Une question lancée par le bot pour redémarrer la discussion._")
+                try:
+                    msg = await hub_ch.send(
+                        embed=e,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                        delete_after=LIFETIME,
+                    )
+                    await _register_for_cleanup(msg, LIFETIME, 'conv_starter')
+                    async with get_db() as db:
+                        await db.execute(
+                            "INSERT INTO conv_starter_log(guild_id, content) VALUES(?,?)",
+                            (guild.id, starter[:200]),
+                        )
+                        await db.commit()
+                    print(f"[conv_starter] guild={guild.id} posted")
+                except Exception as ex:
+                    print(f"[conv_starter send] {ex}")
+            except Exception as ex:
+                print(f"[conv_starter guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[conv_starter_task] {ex}")
+
+
+@conv_starter_task.before_loop
+async def _conv_starter_wait():
+    await bot.wait_until_ready()
+
+
+# ─── GREETING JOURNALIER (1er message du jour) ───────────────────────────────
+
+
+async def _maybe_greet_user_today(msg) -> None:
+    """À la 1ère activité du jour d'un user, ajoute une ☀️ réaction (silencieux)."""
+    if not msg.guild or msg.author.bot:
+        return
+    try:
+        try:
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("Europe/Paris")).strftime("%Y-%m-%d")
+        except Exception:
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        # Déjà greeté aujourd'hui ?
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM daily_greeting_log WHERE guild_id=? AND user_id=? AND day=?",
+                (msg.guild.id, msg.author.id, today),
+            ) as cur:
+                if await cur.fetchone():
+                    return
+        # Mark + react
+        async with get_db() as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO daily_greeting_log(guild_id, user_id, day) VALUES(?,?,?)",
+                (msg.guild.id, msg.author.id, today),
+            )
+            await db.commit()
+        # Réaction discrète selon l'heure
+        try:
+            from zoneinfo import ZoneInfo
+            h = datetime.now(ZoneInfo("Europe/Paris")).hour
+        except Exception:
+            h = datetime.now(timezone.utc).hour
+        if 5 <= h < 11:
+            emoji = "☀️"
+        elif 11 <= h < 17:
+            emoji = "👋"
+        elif 17 <= h < 22:
+            emoji = "🌆"
+        else:
+            emoji = "🌙"
+        try:
+            await msg.add_reaction(emoji)
+        except Exception:
+            pass
+    except Exception as ex:
+        print(f"[_maybe_greet_user_today] {ex}")
 
 
 @bot.tree.command(
