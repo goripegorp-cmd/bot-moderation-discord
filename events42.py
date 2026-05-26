@@ -308,6 +308,51 @@ def random_voice_chaos(allow_aggressive: bool = False) -> dict:
 
 
 # =============================================================================
+# GAME NIGHT PROMPTS — mini-jeux/sondages pour vendredi soir 21h-23h30
+# =============================================================================
+
+GAME_NIGHT_PROMPTS = [
+    {"emoji": "🎬", "title": "Tu préfères : films ou séries ?", "kind": "vote", "options": ["🎬 Films", "📺 Séries"]},
+    {"emoji": "🍕", "title": "Tu préfères : sucré ou salé ?", "kind": "vote", "options": ["🍬 Sucré", "🧂 Salé"]},
+    {"emoji": "🌅", "title": "Tu préfères : matin ou soir ?", "kind": "vote", "options": ["🌅 Matin", "🌙 Soir"]},
+    {"emoji": "🏖️", "title": "Tu préfères : plage ou montagne ?", "kind": "vote", "options": ["🏖️ Plage", "⛰️ Montagne"]},
+    {"emoji": "🐱", "title": "Tu préfères : chat ou chien ?", "kind": "vote", "options": ["🐱 Chat", "🐶 Chien"]},
+    {"emoji": "📚", "title": "Tu préfères : livre ou film ?", "kind": "vote", "options": ["📚 Livre", "🎬 Film"]},
+    {"emoji": "☕", "title": "Tu préfères : café ou thé ?", "kind": "vote", "options": ["☕ Café", "🍵 Thé"]},
+    {"emoji": "🎮", "title": "Plate-forme préférée ?", "kind": "vote", "options": ["🖥️ PC", "🎮 Console", "📱 Mobile"]},
+    {"emoji": "🌍", "title": "Continent rêvé ?", "kind": "vote", "options": ["🇪🇺 Europe", "🌏 Asie", "🌎 Amériques", "🌍 Afrique"]},
+    {"emoji": "💭", "title": "Si tu avais un super-pouvoir ?", "kind": "debate", "prompt": "Vole, téléportation, lecture pensées, invisibilité... que choisis-tu et pourquoi ?"},
+    {"emoji": "🎵", "title": "Genre musical préféré ?", "kind": "vote", "options": ["🎸 Rock", "🎤 Pop", "🎧 Électro", "🎹 Classique", "🎤 Rap"]},
+    {"emoji": "💸", "title": "1M€ — tu fais quoi en premier ?", "kind": "debate", "prompt": "Investissement, voyage, achat, don ? Racontez !"},
+    {"emoji": "🎂", "title": "Ton meilleur souvenir d'enfance ?", "kind": "debate", "prompt": "Un mot, une scène, une émotion — partagez."},
+    {"emoji": "🚀", "title": "Si tu voyageais dans le temps : passé ou futur ?", "kind": "vote", "options": ["⏪ Passé", "⏩ Futur"]},
+    {"emoji": "🔮", "title": "Devinette express", "kind": "riddle", "question": "Qu'est-ce qui monte et descend mais ne bouge pas ?", "answer": "Un escalier"},
+    {"emoji": "🎯", "title": "Quel est ton hobby caché ?", "kind": "debate", "prompt": "Quelque chose que personne ne sait sur toi !"},
+    {"emoji": "🌟", "title": "Une personne célèbre à rencontrer ?", "kind": "debate", "prompt": "Vivant ou mort — qui et pourquoi ?"},
+    {"emoji": "🎨", "title": "Couleur préférée ?", "kind": "vote", "options": ["🔴 Rouge", "🔵 Bleu", "🟢 Vert", "🟡 Jaune", "🟣 Violet", "⚫ Noir"]},
+    {"emoji": "🍔", "title": "Plat ultime ?", "kind": "debate", "prompt": "Si tu ne pouvais manger qu'UN seul plat à vie..."},
+    {"emoji": "📅", "title": "Saison préférée ?", "kind": "vote", "options": ["🌸 Printemps", "☀️ Été", "🍂 Automne", "❄️ Hiver"]},
+    {"emoji": "🎭", "title": "Tu préfères : faire rire ou faire pleurer (au cinéma) ?", "kind": "vote", "options": ["😂 Rire", "😭 Émouvoir"]},
+    {"emoji": "💡", "title": "L'invention la plus utile selon toi ?", "kind": "debate", "prompt": "Roue, électricité, internet, smartphone... ou autre ?"},
+    {"emoji": "🦄", "title": "Animal mythique préféré ?", "kind": "vote", "options": ["🦄 Licorne", "🐉 Dragon", "🧚 Fée", "👻 Fantôme"]},
+    {"emoji": "🎤", "title": "Tu chantes sous la douche ?", "kind": "vote", "options": ["🎤 Oui souvent", "🤫 Jamais", "😅 Parfois"]},
+    {"emoji": "📖", "title": "Anecdote bizarre que tu connais", "kind": "debate", "prompt": "Le truc inutile mais cool que tu as appris cette semaine !"},
+    {"emoji": "🌧️", "title": "Tu préfères : pluie ou neige ?", "kind": "vote", "options": ["🌧️ Pluie", "❄️ Neige"]},
+    {"emoji": "🎲", "title": "Quel jeu de société tu kiffes ?", "kind": "debate", "prompt": "Loup-garou, Mille Bornes, Monopoly... ton préféré ?"},
+    {"emoji": "🧠", "title": "Devinette logique", "kind": "riddle", "question": "Plus on en partage, plus on en a. Qu'est-ce ?", "answer": "Le bonheur (ou un sourire)"},
+    {"emoji": "🌃", "title": "Ville rêvée pour vivre ?", "kind": "debate", "prompt": "Paris, Tokyo, NYC, ou un coin secret ?"},
+    {"emoji": "🐺", "title": "Animal totem ?", "kind": "vote", "options": ["🦅 Aigle", "🐺 Loup", "🦊 Renard", "🦁 Lion", "🐢 Tortue"]},
+]
+
+
+def random_game_night_prompts(n: int = 10) -> list:
+    """Tire N prompts random sans doublons pour une soirée."""
+    pool = list(GAME_NIGHT_PROMPTS)
+    random.shuffle(pool)
+    return pool[:min(n, len(pool))]
+
+
+# =============================================================================
 # EXPORTS
 # =============================================================================
 
@@ -315,4 +360,5 @@ __all__ = [
     'WORLD_BOSSES', 'random_world_boss', 'get_world_boss',
     'DAILY_RIDDLES', 'random_riddle', 'get_riddle',
     'VOICE_CHAOS_ACTIONS', 'random_voice_chaos',
+    'GAME_NIGHT_PROMPTS', 'random_game_night_prompts',
 ]

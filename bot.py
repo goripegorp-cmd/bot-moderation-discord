@@ -1344,6 +1344,68 @@ async def db_init():
             sent_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )''')
 
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 46 — Alliances + Game Night
+        # ═══════════════════════════════════════════════════════════════════
+
+        # Alliances (groupes 2-8 membres, role+channel dynamiques)
+        await db.execute('''CREATE TABLE IF NOT EXISTS alliances (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            name TEXT,
+            emoji TEXT,
+            role_id INTEGER,
+            channel_id INTEGER,
+            leader_id INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            dissolved INTEGER DEFAULT 0,
+            UNIQUE(guild_id, name)
+        )''')
+
+        # Membres d'alliance
+        await db.execute('''CREATE TABLE IF NOT EXISTS alliance_members (
+            alliance_id INTEGER,
+            user_id INTEGER,
+            joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            role TEXT DEFAULT 'member',  -- 'leader' | 'member'
+            PRIMARY KEY (alliance_id, user_id)
+        )''')
+
+        # Invitations en attente
+        await db.execute('''CREATE TABLE IF NOT EXISTS alliance_invites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            alliance_id INTEGER,
+            invited_user_id INTEGER,
+            invited_by INTEGER,
+            sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME,
+            status TEXT DEFAULT 'pending'  -- pending | accepted | refused | expired
+        )''')
+
+        # Game Nights : tracking pour cleanup salons + éviter double creation
+        await db.execute('''CREATE TABLE IF NOT EXISTS game_nights (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            voice_channel_id INTEGER,
+            text_channel_id INTEGER,
+            started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            ends_at DATETIME,
+            ended INTEGER DEFAULT 0,
+            prompts_sent INTEGER DEFAULT 0
+        )''')
+
+        # Indexes Phase 46
+        for _p46_idx in [
+            "CREATE INDEX IF NOT EXISTS idx_alliances_active ON alliances(guild_id, dissolved)",
+            "CREATE INDEX IF NOT EXISTS idx_alliance_members_user ON alliance_members(user_id)",
+            "CREATE INDEX IF NOT EXISTS idx_alliance_invites_user ON alliance_invites(invited_user_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_game_nights_active ON game_nights(guild_id, ended)",
+        ]:
+            try:
+                await db.execute(_p46_idx)
+            except Exception:
+                pass
+
         # Indexes Phase 45 (idempotent)
         for _p45_idx in [
             "CREATE INDEX IF NOT EXISTS idx_camouflage_active ON channel_camouflage(guild_id, reverted, expires_at)",
@@ -34789,6 +34851,11 @@ async def on_ready():
         bot.add_view(ComplimentOpenView())
     except Exception as ex:
         print(f"[on_ready add_view ComplimentOpenView] {ex}")
+    # Phase 46 — Alliance invite persistent view (DM)
+    try:
+        bot.add_view(AllianceInviteAcceptView())
+    except Exception as ex:
+        print(f"[on_ready add_view AllianceInviteAcceptView] {ex}")
     try:
         async with get_db() as db:
             async with db.execute('SELECT data FROM guild_config') as c:
@@ -34948,6 +35015,12 @@ async def on_ready():
         await _run_failsafe_once()
     except Exception as ex:
         print(f"[on_ready _run_failsafe_once boot] {ex}")
+
+    # Phase 46 : Game Night vocal hebdo + failsafe
+    if not game_night_dispatcher.is_running():
+        game_night_dispatcher.start()
+    if not game_night_failsafe.is_running():
+        game_night_failsafe.start()
 
     print(f"✅ {bot.user.name} v28 prêt!")
     print(f"🌐 Serveurs: {len(bot.guilds)}")
@@ -50317,6 +50390,1198 @@ async def compliment_dispatcher():
 
 @compliment_dispatcher.before_loop
 async def _compliment_wait():
+    await bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 46 — ALLIANCES (rôle + salon dynamiques) + GAME NIGHT (vocal éphémère)
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# Limites strictes pour ne pas spammer Discord
+_ALLIANCE_MAX_PER_GUILD = 10
+_ALLIANCE_MAX_MEMBERS = 8
+_ALLIANCE_MIN_MEMBERS = 2  # 2 pour fonctionner
+
+
+# ─── HELPERS ALLIANCES ─────────────────────────────────────────────────────────
+
+
+async def _get_user_alliance(guild_id: int, user_id: int) -> Optional[dict]:
+    """Retourne {id, name, emoji, role_id, channel_id, leader_id, role} ou None."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT a.id, a.name, a.emoji, a.role_id, a.channel_id, a.leader_id, am.role "
+                "FROM alliances a JOIN alliance_members am ON am.alliance_id = a.id "
+                "WHERE a.guild_id=? AND am.user_id=? AND a.dissolved=0 LIMIT 1",
+                (guild_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return None
+        return {
+            'id': row[0], 'name': row[1], 'emoji': row[2],
+            'role_id': row[3], 'channel_id': row[4], 'leader_id': row[5],
+            'my_role': row[6],
+        }
+    except Exception as ex:
+        print(f"[_get_user_alliance] {ex}")
+        return None
+
+
+async def _count_alliances(guild_id: int) -> int:
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM alliances WHERE guild_id=? AND dissolved=0",
+                (guild_id,),
+            ) as cur:
+                return int((await cur.fetchone())[0])
+    except Exception:
+        return 0
+
+
+async def _get_alliance_members(alliance_id: int) -> list:
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT user_id, role, joined_at FROM alliance_members WHERE alliance_id=?",
+                (alliance_id,),
+            ) as cur:
+                return [{'user_id': r[0], 'role': r[1], 'joined_at': r[2]} for r in await cur.fetchall()]
+    except Exception:
+        return []
+
+
+async def _create_alliance(guild, leader: discord.Member, name: str, emoji: str) -> dict:
+    """Crée une alliance : rôle Discord + salon texte privé + entrées DB.
+
+    Retourne {'ok': bool, 'error'?, 'alliance_id'?, 'role'?, 'channel'?}.
+    """
+    try:
+        # Limites
+        if await _count_alliances(guild.id) >= _ALLIANCE_MAX_PER_GUILD:
+            return {'ok': False, 'error': f'Limite {_ALLIANCE_MAX_PER_GUILD} alliances/serveur atteinte.'}
+        if await _get_user_alliance(guild.id, leader.id):
+            return {'ok': False, 'error': 'Tu es déjà dans une alliance.'}
+
+        name = (name or '').strip()
+        emoji = (emoji or '').strip()
+        if not (3 <= len(name) <= 30):
+            return {'ok': False, 'error': 'Nom : 3 à 30 caractères.'}
+        if not emoji:
+            emoji = '⚔️'
+        emoji = emoji[:4]  # cap au cas où
+
+        # Unicité du nom
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM alliances WHERE guild_id=? AND LOWER(name)=LOWER(?) AND dissolved=0",
+                (guild.id, name),
+            ) as cur:
+                if await cur.fetchone():
+                    return {'ok': False, 'error': f'Une alliance "{name}" existe déjà.'}
+
+        # Trouver une catégorie pour le salon (use event_arena_category si dispo)
+        c = await cfg(guild.id)
+        cat_id = int(c.get('alliance_category', 0) or c.get('event_arena_category', 0) or 0)
+        category = guild.get_channel(cat_id) if cat_id else None
+        if not isinstance(category, discord.CategoryChannel):
+            category = None
+
+        # Créer le rôle
+        try:
+            role = await guild.create_role(
+                name=f"{emoji} {name}",
+                colour=discord.Colour(random.randint(0x444444, 0xFFFFFF)),
+                mentionable=False,
+                hoist=False,
+                reason=f"Alliance {name} créée par {leader}",
+            )
+        except discord.Forbidden:
+            return {'ok': False, 'error': 'Permission manage_roles refusée.'}
+        except Exception as ex:
+            return {'ok': False, 'error': f'Erreur création rôle : {ex}'}
+
+        # Créer le salon texte privé (visible uniquement par le rôle alliance)
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            role: discord.PermissionOverwrite(
+                view_channel=True, send_messages=True, read_message_history=True,
+                embed_links=True, attach_files=True,
+            ),
+            guild.me: discord.PermissionOverwrite(
+                view_channel=True, send_messages=True, manage_channels=True,
+                manage_messages=True, embed_links=True,
+            ),
+        }
+        try:
+            ch_name = f"{emoji}-{name.lower().replace(' ', '-')}"[:90]
+            channel = await guild.create_text_channel(
+                name=ch_name,
+                category=category,
+                overwrites=overwrites,
+                topic=f"Salon privé de l'alliance {emoji} {name}",
+                reason=f"Alliance {name} créée par {leader}",
+            )
+        except Exception as ex:
+            # Cleanup rôle
+            try:
+                await role.delete(reason="Rollback création alliance")
+            except Exception:
+                pass
+            return {'ok': False, 'error': f'Erreur création salon : {ex}'}
+
+        # INSERT en DB
+        try:
+            async with get_db() as db:
+                cur = await db.execute(
+                    "INSERT INTO alliances(guild_id, name, emoji, role_id, channel_id, leader_id) "
+                    "VALUES(?,?,?,?,?,?)",
+                    (guild.id, name, emoji, role.id, channel.id, leader.id),
+                )
+                alliance_id = cur.lastrowid
+                await db.execute(
+                    "INSERT INTO alliance_members(alliance_id, user_id, role) VALUES(?,?,?)",
+                    (alliance_id, leader.id, 'leader'),
+                )
+                await db.commit()
+        except Exception as ex:
+            # Cleanup
+            try: await channel.delete(reason="Rollback DB error")
+            except Exception: pass
+            try: await role.delete(reason="Rollback DB error")
+            except Exception: pass
+            return {'ok': False, 'error': f'Erreur DB : {ex}'}
+
+        # Assigner le rôle au leader
+        try:
+            await leader.add_roles(role, reason=f"Leader alliance {name}")
+        except Exception as ex:
+            print(f"[_create_alliance add_role leader] {ex}")
+
+        # Welcome message dans le salon
+        try:
+            await channel.send(
+                embed=discord.Embed(
+                    title=f"{emoji} Bienvenue dans l'alliance **{name}** !",
+                    description=(
+                        f"Salon privé créé pour vous.\n\n"
+                        f"👑 **Chef :** {leader.mention}\n"
+                        f"👥 **Capacité :** {_ALLIANCE_MEMBERS_INIT_TEXT()}\n\n"
+                        f"_Le chef peut inviter des membres via le hub d'engagement_ → 🤝 **Mes alliances**."
+                    ),
+                    color=0x9B59B6,
+                ),
+                allowed_mentions=discord.AllowedMentions(users=[leader], roles=False, everyone=False),
+            )
+        except Exception:
+            pass
+
+        return {'ok': True, 'alliance_id': alliance_id, 'role': role, 'channel': channel}
+    except Exception as ex:
+        print(f"[_create_alliance] {ex}")
+        return {'ok': False, 'error': str(ex)}
+
+
+def _ALLIANCE_MEMBERS_INIT_TEXT():
+    return f"1 / {_ALLIANCE_MAX_MEMBERS}"
+
+
+async def _add_member_to_alliance(guild, alliance: dict, member: discord.Member) -> dict:
+    """Ajoute un membre à une alliance : rôle Discord + DB."""
+    try:
+        # Check capacité
+        members = await _get_alliance_members(alliance['id'])
+        if len(members) >= _ALLIANCE_MAX_MEMBERS:
+            return {'ok': False, 'error': f'Alliance pleine ({_ALLIANCE_MAX_MEMBERS} max).'}
+        if any(m['user_id'] == member.id for m in members):
+            return {'ok': False, 'error': 'Ce membre est déjà dans l\'alliance.'}
+        if await _get_user_alliance(guild.id, member.id):
+            return {'ok': False, 'error': 'Ce membre est déjà dans une autre alliance.'}
+
+        role = guild.get_role(int(alliance['role_id']))
+        if not role:
+            return {'ok': False, 'error': 'Rôle alliance introuvable (resync nécessaire).'}
+
+        # Assigner le rôle
+        try:
+            await member.add_roles(role, reason=f"Rejoint alliance {alliance['name']}")
+        except discord.Forbidden:
+            return {'ok': False, 'error': 'Permission manage_roles refusée.'}
+        except Exception as ex:
+            return {'ok': False, 'error': f'Erreur add_role : {ex}'}
+
+        # DB
+        async with get_db() as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO alliance_members(alliance_id, user_id, role) VALUES(?,?,?)",
+                (alliance['id'], member.id, 'member'),
+            )
+            await db.commit()
+
+        # Notif dans le salon
+        try:
+            ch = guild.get_channel(int(alliance['channel_id']))
+            if ch:
+                await ch.send(
+                    embed=discord.Embed(
+                        description=f"🎉 {member.mention} rejoint l'alliance **{alliance['emoji']} {alliance['name']}** !",
+                        color=0x2ECC71,
+                    ),
+                    allowed_mentions=discord.AllowedMentions(users=[member], roles=False, everyone=False),
+                )
+        except Exception:
+            pass
+
+        return {'ok': True}
+    except Exception as ex:
+        print(f"[_add_member_to_alliance] {ex}")
+        return {'ok': False, 'error': str(ex)}
+
+
+async def _leave_alliance(guild, member: discord.Member, alliance: dict) -> dict:
+    """Quitte une alliance. Si leader → soit transfère, soit dissout."""
+    try:
+        members = await _get_alliance_members(alliance['id'])
+        is_leader = (member.id == int(alliance['leader_id']))
+        remaining = [m for m in members if m['user_id'] != member.id]
+
+        # Retirer le rôle
+        role = guild.get_role(int(alliance['role_id']))
+        if role:
+            try:
+                await member.remove_roles(role, reason=f"Quitte alliance {alliance['name']}")
+            except Exception:
+                pass
+
+        # Si dernier membre → dissolution complète
+        if len(remaining) == 0:
+            return await _dissolve_alliance(guild, alliance)
+
+        # Si leader → transférer à un autre membre (le plus ancien)
+        if is_leader:
+            # Trier remaining par joined_at ascendant
+            remaining_sorted = sorted(remaining, key=lambda m: m['joined_at'] or '')
+            new_leader_id = remaining_sorted[0]['user_id']
+            async with get_db() as db:
+                await db.execute(
+                    "UPDATE alliances SET leader_id=? WHERE id=?",
+                    (new_leader_id, alliance['id']),
+                )
+                await db.execute(
+                    "UPDATE alliance_members SET role='leader' WHERE alliance_id=? AND user_id=?",
+                    (alliance['id'], new_leader_id),
+                )
+                await db.execute(
+                    "DELETE FROM alliance_members WHERE alliance_id=? AND user_id=?",
+                    (alliance['id'], member.id),
+                )
+                await db.commit()
+            # Annonce dans le salon
+            try:
+                ch = guild.get_channel(int(alliance['channel_id']))
+                new_leader = guild.get_member(new_leader_id)
+                if ch and new_leader:
+                    await ch.send(
+                        embed=discord.Embed(
+                            description=(
+                                f"👋 {member.display_name} quitte l'alliance.\n"
+                                f"👑 {new_leader.mention} est promu chef !"
+                            ),
+                            color=0xF1C40F,
+                        ),
+                        allowed_mentions=discord.AllowedMentions(users=[new_leader], roles=False, everyone=False),
+                    )
+            except Exception:
+                pass
+            return {'ok': True, 'transferred_to': new_leader_id}
+
+        # Membre simple : juste DELETE de alliance_members
+        async with get_db() as db:
+            await db.execute(
+                "DELETE FROM alliance_members WHERE alliance_id=? AND user_id=?",
+                (alliance['id'], member.id),
+            )
+            await db.commit()
+
+        try:
+            ch = guild.get_channel(int(alliance['channel_id']))
+            if ch:
+                await ch.send(
+                    embed=discord.Embed(
+                        description=f"👋 {member.display_name} quitte l'alliance.",
+                        color=0x95A5A6,
+                    ),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+        except Exception:
+            pass
+
+        return {'ok': True}
+    except Exception as ex:
+        print(f"[_leave_alliance] {ex}")
+        return {'ok': False, 'error': str(ex)}
+
+
+async def _dissolve_alliance(guild, alliance: dict) -> dict:
+    """Dissout une alliance : supprime rôle + salon + DB."""
+    try:
+        # Marquer DB dissolved
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE alliances SET dissolved=1 WHERE id=?",
+                (alliance['id'],),
+            )
+            await db.execute(
+                "DELETE FROM alliance_members WHERE alliance_id=?",
+                (alliance['id'],),
+            )
+            await db.commit()
+        # Supprimer salon
+        ch = guild.get_channel(int(alliance['channel_id']))
+        if ch:
+            try:
+                await ch.delete(reason=f"Alliance {alliance['name']} dissoute")
+            except Exception as ex:
+                print(f"[_dissolve_alliance channel delete] {ex}")
+        # Supprimer rôle
+        role = guild.get_role(int(alliance['role_id']))
+        if role:
+            try:
+                await role.delete(reason=f"Alliance {alliance['name']} dissoute")
+            except Exception as ex:
+                print(f"[_dissolve_alliance role delete] {ex}")
+        return {'ok': True, 'dissolved': True}
+    except Exception as ex:
+        print(f"[_dissolve_alliance] {ex}")
+        return {'ok': False, 'error': str(ex)}
+
+
+# ─── VIEWS ALLIANCES ───────────────────────────────────────────────────────────
+
+
+class AllianceCreateModal(Modal):
+    """Modal pour créer une alliance."""
+
+    def __init__(self):
+        super().__init__(title="🤝 Créer une alliance")
+        self.name_input = TextInput(
+            label="Nom de l'alliance",
+            placeholder="Les Loups Argentés",
+            min_length=3,
+            max_length=30,
+            required=True,
+        )
+        self.add_item(self.name_input)
+        self.emoji_input = TextInput(
+            label="Emoji représentatif (1 emoji)",
+            placeholder="⚔️ / 🐺 / 🔥 / ✨ ...",
+            min_length=1,
+            max_length=4,
+            required=True,
+        )
+        self.add_item(self.emoji_input)
+
+    async def on_submit(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if not i.guild:
+                return await _safe_followup(i, content="❌ Serveur uniquement.")
+            result = await _create_alliance(
+                i.guild, i.user,
+                self.name_input.value, self.emoji_input.value,
+            )
+            if not result.get('ok'):
+                return await _safe_followup(i, content=f"❌ {result.get('error', 'Erreur inconnue')}")
+            ch = result.get('channel')
+            await _safe_followup(
+                i,
+                content=(
+                    f"🎉 **Alliance créée !** {self.emoji_input.value} **{self.name_input.value}**\n"
+                    f"📍 Salon privé : {ch.mention if ch else '?'}\n"
+                    f"_Tu peux maintenant inviter jusqu'à {_ALLIANCE_MAX_MEMBERS - 1} autres membres._"
+                ),
+            )
+        except Exception as ex:
+            print(f"[AllianceCreateModal] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+class AllianceInviteAcceptView(View):
+    """View persistante DM : 'Accepter' / 'Refuser' une invitation alliance."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+        b1 = Button(
+            label="✅ Accepter l'invitation",
+            style=discord.ButtonStyle.success,
+            custom_id="alliance_invite_accept",
+        )
+        b1.callback = self._on_accept
+        self.add_item(b1)
+        b2 = Button(
+            label="❌ Refuser",
+            style=discord.ButtonStyle.secondary,
+            custom_id="alliance_invite_refuse",
+        )
+        b2.callback = self._on_refuse
+        self.add_item(b2)
+
+    async def _on_accept(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            # Trouver l'invitation pending la plus récente pour ce user
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT id, alliance_id FROM alliance_invites "
+                    "WHERE invited_user_id=? AND status='pending' "
+                    "ORDER BY sent_at DESC LIMIT 1",
+                    (i.user.id,),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row:
+                return await _safe_followup(i, content="❌ Aucune invitation en attente.")
+            invite_id, alliance_id = row
+            # Récupérer l'alliance
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT id, guild_id, name, emoji, role_id, channel_id, leader_id "
+                    "FROM alliances WHERE id=? AND dissolved=0",
+                    (alliance_id,),
+                ) as cur:
+                    arow = await cur.fetchone()
+            if not arow:
+                async with get_db() as db:
+                    await db.execute(
+                        "UPDATE alliance_invites SET status='expired' WHERE id=?",
+                        (invite_id,),
+                    )
+                    await db.commit()
+                return await _safe_followup(i, content="❌ Cette alliance n'existe plus.")
+            alliance = {
+                'id': arow[0], 'guild_id': arow[1], 'name': arow[2], 'emoji': arow[3],
+                'role_id': arow[4], 'channel_id': arow[5], 'leader_id': arow[6],
+            }
+            guild = bot.get_guild(int(alliance['guild_id']))
+            if not guild:
+                return await _safe_followup(i, content="❌ Serveur introuvable.")
+            member = guild.get_member(i.user.id)
+            if not member:
+                return await _safe_followup(i, content="❌ Tu n'es plus membre du serveur.")
+
+            result = await _add_member_to_alliance(guild, alliance, member)
+            if not result.get('ok'):
+                return await _safe_followup(i, content=f"❌ {result.get('error')}")
+
+            async with get_db() as db:
+                await db.execute(
+                    "UPDATE alliance_invites SET status='accepted' WHERE id=?",
+                    (invite_id,),
+                )
+                await db.commit()
+
+            await _safe_followup(
+                i,
+                content=(
+                    f"🎉 **Bienvenue dans l'alliance {alliance['emoji']} {alliance['name']} !**\n"
+                    f"📍 Salon privé : <#{alliance['channel_id']}>"
+                ),
+            )
+        except Exception as ex:
+            print(f"[AllianceInviteAcceptView _on_accept] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_refuse(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            async with get_db() as db:
+                await db.execute(
+                    "UPDATE alliance_invites SET status='refused' "
+                    "WHERE invited_user_id=? AND status='pending'",
+                    (i.user.id,),
+                )
+                await db.commit()
+            await _safe_followup(i, content="❌ Invitation refusée.")
+        except Exception as ex:
+            print(f"[AllianceInviteAcceptView _on_refuse] {ex}")
+
+
+class AllianceInviteSelectView(View):
+    """View ephemeral : Select de membres random pour inviter."""
+
+    def __init__(self, guild_id: int, alliance_id: int, leader_id: int, candidates: list):
+        super().__init__(timeout=300)
+        self.guild_id = guild_id
+        self.alliance_id = alliance_id
+        self.leader_id = leader_id
+        opts = []
+        for m in candidates[:25]:
+            opts.append(discord.SelectOption(
+                label=m.display_name[:80],
+                value=str(m.id),
+                description=f"Inviter {m.display_name[:50]} dans l'alliance",
+            ))
+        if opts:
+            sel = Select(placeholder="Choisis un membre à inviter…", options=opts)
+            sel.callback = self._on_pick
+            self.add_item(sel)
+
+    async def _on_pick(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if i.user.id != self.leader_id:
+                return await _safe_followup(i, content="🔒 Seul le chef peut inviter.")
+            target_id = int(i.data['values'][0])
+            guild = bot.get_guild(self.guild_id)
+            if not guild:
+                return await _safe_followup(i, content="❌ Serveur introuvable.")
+            target = guild.get_member(target_id)
+            if not target or target.bot:
+                return await _safe_followup(i, content="❌ Membre introuvable.")
+            if await _get_user_alliance(self.guild_id, target.id):
+                return await _safe_followup(i, content="ℹ️ Ce membre est déjà dans une alliance.")
+            # Récupérer l'alliance
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT name, emoji FROM alliances WHERE id=?",
+                    (self.alliance_id,),
+                ) as cur:
+                    arow = await cur.fetchone()
+            if not arow:
+                return await _safe_followup(i, content="❌ Alliance introuvable.")
+            name, emoji = arow
+
+            # Créer invitation DB
+            expires = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+            async with get_db() as db:
+                await db.execute(
+                    "INSERT INTO alliance_invites(alliance_id, invited_user_id, invited_by, expires_at) "
+                    "VALUES(?,?,?,?)",
+                    (self.alliance_id, target.id, self.leader_id, expires),
+                )
+                await db.commit()
+
+            # DM au target
+            try:
+                await target.send(
+                    embed=discord.Embed(
+                        title=f"🤝 Invitation alliance — {emoji} {name}",
+                        description=(
+                            f"**{i.user.display_name}** t'invite à rejoindre l'alliance "
+                            f"{emoji} **{name}** sur **{guild.name}**.\n\n"
+                            f"_Tu auras accès à un salon privé partagé entre les membres._\n"
+                            f"_Tu peux toujours quitter plus tard._\n\n"
+                            f"⏰ Cette invitation expire dans 7 jours."
+                        ),
+                        color=0x9B59B6,
+                    ),
+                    view=AllianceInviteAcceptView(),
+                )
+                await _safe_followup(
+                    i,
+                    content=f"✉️ Invitation envoyée à **{target.display_name}** en DM.",
+                )
+            except discord.Forbidden:
+                await _safe_followup(
+                    i,
+                    content=f"⚠️ DMs fermés pour {target.display_name}. Invitation enregistrée — il/elle pourra l'accepter via le hub.",
+                )
+        except Exception as ex:
+            print(f"[AllianceInviteSelectView _on_pick] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+class AllianceMembershipView(View):
+    """View ephemeral pour un membre déjà dans une alliance."""
+
+    def __init__(self, guild_id: int, alliance: dict):
+        super().__init__(timeout=300)
+        self.guild_id = guild_id
+        self.alliance = alliance
+        is_leader = alliance.get('my_role') == 'leader'
+
+        if is_leader:
+            b_inv = Button(
+                label="➕ Inviter un membre",
+                style=discord.ButtonStyle.success,
+            )
+            b_inv.callback = self._on_invite
+            self.add_item(b_inv)
+
+        b_leave = Button(
+            label="🚪 Quitter l'alliance",
+            style=discord.ButtonStyle.danger,
+        )
+        b_leave.callback = self._on_leave
+        self.add_item(b_leave)
+
+        if alliance.get('channel_id'):
+            b_goto = Button(
+                label="📍 Aller au salon",
+                style=discord.ButtonStyle.link,
+                url=f"https://discord.com/channels/{guild_id}/{alliance['channel_id']}",
+            )
+            self.add_item(b_goto)
+
+    async def _on_invite(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            guild = bot.get_guild(self.guild_id)
+            if not guild:
+                return await _safe_followup(i, content="❌ Serveur introuvable.")
+            # 25 membres actifs random sans alliance
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT a.user_id FROM activity_tracking a "
+                    "WHERE a.guild_id=? AND a.user_id != ? AND a.last_message IS NOT NULL "
+                    "AND datetime(a.last_message) > datetime('now', '-7 days') "
+                    "AND NOT EXISTS (SELECT 1 FROM alliance_members am JOIN alliances al "
+                    "                ON am.alliance_id=al.id WHERE am.user_id=a.user_id AND al.dissolved=0) "
+                    "ORDER BY RANDOM() LIMIT 30",
+                    (self.guild_id, i.user.id),
+                ) as cur:
+                    rows = await cur.fetchall()
+            candidates = []
+            for (uid,) in rows:
+                m = guild.get_member(int(uid))
+                if m and not m.bot:
+                    candidates.append(m)
+                if len(candidates) >= 25:
+                    break
+            if not candidates:
+                return await _safe_followup(i, content="ℹ️ Pas de candidats disponibles (tous déjà en alliance ou inactifs).")
+            await _safe_followup(
+                i,
+                content="Choisis qui inviter :",
+                view=AllianceInviteSelectView(self.guild_id, self.alliance['id'], i.user.id, candidates),
+            )
+        except Exception as ex:
+            print(f"[AllianceMembershipView _on_invite] {ex}")
+
+    async def _on_leave(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            guild = bot.get_guild(self.guild_id)
+            if not guild:
+                return await _safe_followup(i, content="❌ Serveur introuvable.")
+            member = guild.get_member(i.user.id)
+            if not member:
+                return await _safe_followup(i, content="❌ Membre introuvable.")
+            result = await _leave_alliance(guild, member, self.alliance)
+            if result.get('dissolved'):
+                return await _safe_followup(
+                    i,
+                    content=f"💔 Tu étais le dernier membre. L'alliance **{self.alliance['name']}** est dissoute (salon + rôle supprimés).",
+                )
+            if result.get('transferred_to'):
+                new_l = guild.get_member(result['transferred_to'])
+                return await _safe_followup(
+                    i,
+                    content=f"👋 Tu as quitté l'alliance. **{new_l.display_name if new_l else '?'}** est le nouveau chef.",
+                )
+            if result.get('ok'):
+                return await _safe_followup(i, content=f"👋 Tu as quitté l'alliance **{self.alliance['name']}**.")
+            return await _safe_followup(i, content=f"❌ {result.get('error', 'Erreur')}")
+        except Exception as ex:
+            print(f"[AllianceMembershipView _on_leave] {ex}")
+
+
+class AllianceNoMemberView(View):
+    """View ephemeral pour un membre SANS alliance : créer ou voir invitations."""
+
+    def __init__(self, guild_id: int, user_id: int):
+        super().__init__(timeout=300)
+        self.guild_id = guild_id
+        self.user_id = user_id
+        b_create = Button(label="➕ Créer une alliance", style=discord.ButtonStyle.success)
+        b_create.callback = self._on_create
+        self.add_item(b_create)
+        b_invites = Button(label="📬 Mes invitations", style=discord.ButtonStyle.secondary)
+        b_invites.callback = self._on_invites
+        self.add_item(b_invites)
+
+    async def _on_create(self, i: discord.Interaction):
+        try:
+            if i.user.id != self.user_id:
+                if not i.response.is_done():
+                    return await i.response.send_message("🔒 Pas pour toi.", ephemeral=True)
+                return await _safe_followup(i, content="🔒 Pas pour toi.")
+            if i.response.is_done():
+                return await _safe_followup(i, content="⚠️ Re-clique '🤝 Mes alliances' depuis le hub pour ouvrir le formulaire.")
+            await i.response.send_modal(AllianceCreateModal())
+        except Exception as ex:
+            print(f"[AllianceNoMemberView _on_create] {ex}")
+
+    async def _on_invites(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT ai.alliance_id, a.name, a.emoji, ai.invited_by, ai.expires_at "
+                    "FROM alliance_invites ai JOIN alliances a ON a.id=ai.alliance_id "
+                    "WHERE ai.invited_user_id=? AND ai.status='pending' AND a.dissolved=0 "
+                    "ORDER BY ai.sent_at DESC LIMIT 10",
+                    (i.user.id,),
+                ) as cur:
+                    rows = await cur.fetchall()
+            if not rows:
+                return await _safe_followup(i, content="📬 Aucune invitation en attente.")
+            lines = ["**📬 Invitations en attente :**", ""]
+            for aid, name, emoji, by, exp in rows:
+                guild = bot.get_guild(self.guild_id)
+                inviter = guild.get_member(int(by)) if guild else None
+                lines.append(f"• {emoji} **{name}** — invité par {inviter.mention if inviter else 'inconnu'}")
+            lines.append("")
+            lines.append("_Pour les accepter, vérifie tes DMs._")
+            await _safe_followup(i, content="\n".join(lines))
+        except Exception as ex:
+            print(f"[AllianceNoMemberView _on_invites] {ex}")
+
+
+async def _p46_open_alliances(i: discord.Interaction):
+    """Helper appelé par le hub button 🤝 Mes alliances."""
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        alliance = await _get_user_alliance(i.guild.id, i.user.id)
+        if alliance:
+            # Membre actif : afficher l'alliance + boutons gestion
+            members = await _get_alliance_members(alliance['id'])
+            member_lines = []
+            for m in members:
+                mem = i.guild.get_member(int(m['user_id']))
+                if not mem:
+                    continue
+                role_emoji = "👑" if m['role'] == 'leader' else "👤"
+                member_lines.append(f"{role_emoji} {mem.mention}")
+            e = discord.Embed(
+                title=f"{alliance['emoji']} {alliance['name']}",
+                description=(
+                    f"**Membres ({len(members)}/{_ALLIANCE_MAX_MEMBERS}) :**\n"
+                    + "\n".join(member_lines)
+                    + f"\n\n📍 **Salon privé :** <#{alliance['channel_id']}>"
+                ),
+                color=0x9B59B6,
+            )
+            await _safe_followup(i, embed=e, view=AllianceMembershipView(i.guild.id, alliance))
+            return
+        # Pas dans une alliance : proposer création / voir invitations
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM alliance_invites WHERE invited_user_id=? AND status='pending'",
+                (i.user.id,),
+            ) as cur:
+                pending = int((await cur.fetchone())[0])
+
+        cnt = await _count_alliances(i.guild.id)
+        e = discord.Embed(
+            title="🤝 Alliances du serveur",
+            description=(
+                f"Les alliances sont des **groupes permanents de {_ALLIANCE_MIN_MEMBERS}-{_ALLIANCE_MAX_MEMBERS} membres**.\n\n"
+                f"Chaque alliance a :\n"
+                f"• Un **rôle Discord** dédié (couleur unique)\n"
+                f"• Un **salon privé** partagé\n"
+                f"• Des bonus collectifs pendant les events\n\n"
+                f"**Sur ce serveur :** {cnt} / {_ALLIANCE_MAX_PER_GUILD} alliances\n"
+                + (f"📬 **Tu as {pending} invitation(s) en attente** — clique 'Mes invitations'\n" if pending else "")
+                + "\n_Tu n'es dans aucune alliance pour l'instant._"
+            ),
+            color=0x9B59B6,
+        )
+        await _safe_followup(i, embed=e, view=AllianceNoMemberView(i.guild.id, i.user.id))
+    except Exception as ex:
+        print(f"[_p46_open_alliances] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── Patch hub : ajout du 7ème bouton "🤝 Mes alliances" ───────────────────────
+
+
+_original_hub_init_p45 = EngagementHubView.__init__
+
+
+def _patched_hub_init_p46(self):
+    _original_hub_init_p45(self)
+    b7 = Button(
+        label="🤝 Mes alliances",
+        style=discord.ButtonStyle.primary,
+        custom_id="hub_alliances",
+        row=2,
+    )
+    b7.callback = self._on_alliances
+    self.add_item(b7)
+
+
+async def _hub_on_alliances(self, i: discord.Interaction):
+    await _p46_open_alliances(i)
+
+
+EngagementHubView.__init__ = _patched_hub_init_p46
+EngagementHubView._on_alliances = _hub_on_alliances
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GAME NIGHT — vendredi 21h FR, salons vocal + texte éphémères, mini-jeux
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def _has_active_game_night(guild_id: int) -> bool:
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM game_nights WHERE guild_id=? AND ended=0 LIMIT 1",
+                (guild_id,),
+            ) as cur:
+                return await cur.fetchone() is not None
+    except Exception:
+        return False
+
+
+async def _start_game_night(guild) -> bool:
+    """Crée 2 salons éphémères (vocal + texte) pour une Game Night."""
+    try:
+        c = await cfg(guild.id)
+        if not c.get('event_enabled', False):
+            return False
+        if not c.get('game_night_enabled', True):
+            return False
+        if await _has_active_game_night(guild.id):
+            return False
+
+        # Catégorie : utilise event_arena_category
+        cat_id = int(c.get('event_arena_category', 0) or 0)
+        category = guild.get_channel(cat_id) if cat_id else None
+        if not isinstance(category, discord.CategoryChannel):
+            category = None
+
+        overwrites_vc = {
+            guild.default_role: discord.PermissionOverwrite(
+                view_channel=True, connect=True, speak=True,
+            ),
+            guild.me: discord.PermissionOverwrite(
+                view_channel=True, connect=True, speak=True, manage_channels=True,
+            ),
+        }
+        overwrites_text = {
+            guild.default_role: discord.PermissionOverwrite(
+                view_channel=True, send_messages=True, read_message_history=True,
+            ),
+            guild.me: discord.PermissionOverwrite(
+                view_channel=True, send_messages=True, manage_messages=True,
+                manage_channels=True, embed_links=True,
+            ),
+        }
+
+        try:
+            vc = await guild.create_voice_channel(
+                name="🎮 Game Night",
+                category=category,
+                overwrites=overwrites_vc,
+                reason="Game Night Phase 46",
+            )
+            tc = await guild.create_text_channel(
+                name="🎮-game-night",
+                category=category,
+                overwrites=overwrites_text,
+                topic="Mini-jeux de la Game Night du vendredi !",
+                reason="Game Night Phase 46",
+            )
+        except discord.Forbidden:
+            print(f"[_start_game_night] Permission denied guild={guild.id}")
+            return False
+        except Exception as ex:
+            print(f"[_start_game_night create_channels] {ex}")
+            return False
+
+        ends_at = datetime.now(timezone.utc) + timedelta(hours=2, minutes=30)
+        async with get_db() as db:
+            cur = await db.execute(
+                "INSERT INTO game_nights(guild_id, voice_channel_id, text_channel_id, ends_at) VALUES(?,?,?,?)",
+                (guild.id, vc.id, tc.id, ends_at.isoformat()),
+            )
+            gn_id = cur.lastrowid
+            await db.commit()
+
+        # Annonce dans le hub
+        try:
+            hub_id = int(c.get('hub_channel', 0) or 0)
+            hub_ch = guild.get_channel(hub_id) if hub_id else None
+            if hub_ch and await _is_chatty_channel(hub_ch):
+                LIFETIME_ANNOUNCE = int((ends_at - datetime.now(timezone.utc)).total_seconds()) + 600
+                await hub_ch.send(
+                    embed=discord.Embed(
+                        title="🎮 GAME NIGHT — Ça commence !",
+                        description=(
+                            f"**Salons créés pour la soirée :**\n"
+                            f"🎙️ Vocal : <#{vc.id}>\n"
+                            f"💬 Chat : <#{tc.id}>\n\n"
+                            f"Le bot lancera des **mini-jeux** dans le chat toutes les 12 min.\n"
+                            f"Rejoins le vocal pour en profiter à fond !\n\n"
+                            f"{_chrono_footer(int((ends_at - datetime.now(timezone.utc)).total_seconds()), prefix='⏱️ Termine')}"
+                        ),
+                        color=0xE91E63,
+                    ),
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=LIFETIME_ANNOUNCE,
+                )
+        except Exception as ex:
+            print(f"[_start_game_night announce] {ex}")
+
+        # Welcome dans le chat texte
+        try:
+            await tc.send(
+                embed=discord.Embed(
+                    title="🎮 Game Night — Bienvenue !",
+                    description=(
+                        "Le bot va poster des mini-jeux dans ce chat toutes les ~12 minutes.\n"
+                        "Réagissez avec les boutons ou répondez avec vos avis !\n\n"
+                        f"_Soirée jusqu'à 23h30 — les 2 salons seront supprimés ensuite._"
+                    ),
+                    color=0xE91E63,
+                ),
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except Exception:
+            pass
+
+        print(f"[GAME NIGHT START] guild={guild.id} gn_id={gn_id}")
+        return True
+    except Exception as ex:
+        print(f"[_start_game_night] {ex}")
+        return False
+
+
+async def _end_game_night(gn_id: int):
+    """Termine une Game Night : supprime les 2 salons + marque ended."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT guild_id, voice_channel_id, text_channel_id, ended FROM game_nights WHERE id=?",
+                (gn_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return
+        gid, vc_id, tc_id, ended = row
+        if ended:
+            return
+        guild = bot.get_guild(int(gid))
+        if guild:
+            for ch_id in (vc_id, tc_id):
+                ch = guild.get_channel(int(ch_id)) if ch_id else None
+                if ch:
+                    try:
+                        await ch.delete(reason="Game Night terminée")
+                    except Exception:
+                        pass
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE game_nights SET ended=1 WHERE id=?",
+                (gn_id,),
+            )
+            await db.commit()
+        print(f"[GAME NIGHT END] gn_id={gn_id}")
+    except Exception as ex:
+        print(f"[_end_game_night] {ex}")
+
+
+async def _post_game_night_prompt(gn_id: int):
+    """Poste un mini-jeu random dans le chat de la Game Night."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT text_channel_id FROM game_nights WHERE id=? AND ended=0",
+                (gn_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return
+        tc_id = row[0]
+        if not tc_id:
+            return
+        # Trouver le guild via DB
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT guild_id FROM game_nights WHERE id=?",
+                (gn_id,),
+            ) as cur:
+                grow = await cur.fetchone()
+        if not grow:
+            return
+        guild = bot.get_guild(int(grow[0]))
+        if not guild:
+            return
+        tc = guild.get_channel(int(tc_id))
+        if not tc:
+            return
+
+        prompts = ev42.random_game_night_prompts(1)
+        if not prompts:
+            return
+        p = prompts[0]
+        title = f"{p['emoji']} {p['title']}"
+        if p['kind'] == 'vote':
+            opts = p.get('options', [])
+            desc_lines = ["Vote en cliquant un bouton :"]
+            class _VoteView(View):
+                def __init__(self):
+                    super().__init__(timeout=600)
+                    for idx, label in enumerate(opts):
+                        b = Button(label=label[:80], style=discord.ButtonStyle.primary)
+                        b.callback = self._make_cb(idx)
+                        self.add_item(b)
+                def _make_cb(self, idx):
+                    async def _cb(ii: discord.Interaction):
+                        if not await _safe_defer(ii):
+                            return
+                        try:
+                            await _safe_followup(ii, content=f"✅ Vote enregistré : **{opts[idx]}**")
+                        except Exception:
+                            pass
+                    return _cb
+            LIFETIME = 12 * 60
+            embed = discord.Embed(
+                title=title,
+                description="\n".join(desc_lines) + f"\n\n{_chrono_footer(LIFETIME)}",
+                color=0xE91E63,
+            )
+            try:
+                await tc.send(embed=embed, view=_VoteView(), delete_after=LIFETIME, allowed_mentions=discord.AllowedMentions.none())
+            except Exception:
+                pass
+        elif p['kind'] == 'debate':
+            LIFETIME = 12 * 60
+            embed = discord.Embed(
+                title=title,
+                description=p.get('prompt', '') + f"\n\n{_chrono_footer(LIFETIME)}",
+                color=0xE91E63,
+            )
+            try:
+                await tc.send(embed=embed, delete_after=LIFETIME, allowed_mentions=discord.AllowedMentions.none())
+            except Exception:
+                pass
+        elif p['kind'] == 'riddle':
+            LIFETIME = 12 * 60
+            embed = discord.Embed(
+                title=title,
+                description=(
+                    p.get('question', '')
+                    + f"\n\n_Réponse révélée dans 5 min._\n\n{_chrono_footer(LIFETIME)}"
+                ),
+                color=0xE91E63,
+            )
+            try:
+                msg = await tc.send(embed=embed, delete_after=LIFETIME, allowed_mentions=discord.AllowedMentions.none())
+                # Spoiler answer après 5 min
+                async def _reveal():
+                    await asyncio.sleep(300)
+                    try:
+                        await tc.send(
+                            embed=discord.Embed(
+                                description=f"💡 **Réponse à *{p['title']}* :** ||{p.get('answer', '?')}||",
+                                color=0x95A5A6,
+                            ),
+                            delete_after=420,
+                            allowed_mentions=discord.AllowedMentions.none(),
+                        )
+                    except Exception:
+                        pass
+                asyncio.create_task(_reveal())
+            except Exception:
+                pass
+
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE game_nights SET prompts_sent = prompts_sent + 1 WHERE id=?",
+                (gn_id,),
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[_post_game_night_prompt] {ex}")
+
+
+@tasks.loop(minutes=30)
+async def game_night_dispatcher():
+    """Vendredi 21h FR : start. 23h30 FR : end. Pendant : ~12 prompts toutes les 12-15min."""
+    try:
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+            tz = _ZI('Europe/Paris')
+        except Exception:
+            tz = timezone.utc
+        now_local = datetime.now(tz)
+        if now_local.weekday() != 4:  # vendredi
+            return
+        if now_local.hour == 21:
+            for guild in bot.guilds:
+                try:
+                    await _start_game_night(guild)
+                except Exception as ex:
+                    print(f"[game_night_dispatcher start guild={guild.id}] {ex}")
+        elif now_local.hour == 23 and now_local.minute >= 30:
+            # End all active
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT id FROM game_nights WHERE ended=0",
+                ) as cur:
+                    rows = await cur.fetchall()
+            for (gn_id,) in rows:
+                await _end_game_night(int(gn_id))
+        else:
+            # Pendant la soirée : prompt random toutes les 12-15 min
+            # On tire 50% chance par tick de 30min (donc ~1 prompt par tick en moyenne sur les 5 ticks)
+            if 21 <= now_local.hour < 23 and random.random() < 0.6:
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT id FROM game_nights WHERE ended=0",
+                    ) as cur:
+                        rows = await cur.fetchall()
+                for (gn_id,) in rows:
+                    try:
+                        await _post_game_night_prompt(int(gn_id))
+                    except Exception as ex:
+                        print(f"[game_night prompt gn={gn_id}] {ex}")
+    except Exception as ex:
+        print(f"[game_night_dispatcher] {ex}")
+
+
+@game_night_dispatcher.before_loop
+async def _gn_wait():
+    await bot.wait_until_ready()
+
+
+@tasks.loop(hours=1)
+async def game_night_failsafe():
+    """Failsafe : si une Game Night n'a pas été terminée (>3h), force end."""
+    try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id FROM game_nights WHERE ended=0 AND ends_at < ?",
+                (now_iso,),
+            ) as cur:
+                rows = await cur.fetchall()
+        for (gn_id,) in rows:
+            await _end_game_night(int(gn_id))
+    except Exception as ex:
+        print(f"[game_night_failsafe] {ex}")
+
+
+@game_night_failsafe.before_loop
+async def _gn_failsafe_wait():
     await bot.wait_until_ready()
 
 
