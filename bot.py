@@ -2175,6 +2175,54 @@ async def db_init():
             PRIMARY KEY (guild_id, season_id)
         )''')
 
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 63 — ORIGINALITÉS : Capsules + Hall of Fame + Whispers + ...
+        # ═══════════════════════════════════════════════════════════════════
+        await db.execute('''CREATE TABLE IF NOT EXISTS time_capsules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            author_id INTEGER,
+            message TEXT,
+            unlock_date TEXT,
+            status TEXT DEFAULT 'sealed',
+            channel_id INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            opened_at DATETIME
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_capsule_unlock "
+                "ON time_capsules(guild_id, status, unlock_date)"
+            )
+        except Exception:
+            pass
+
+        await db.execute('''CREATE TABLE IF NOT EXISTS hall_of_fame_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            category TEXT,
+            record TEXT,
+            user_id INTEGER,
+            detail TEXT,
+            achieved_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            added_by INTEGER
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_hof_cat "
+                "ON hall_of_fame_records(guild_id, category)"
+            )
+        except Exception:
+            pass
+
+        await db.execute('''CREATE TABLE IF NOT EXISTS easter_eggs_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            user_id INTEGER,
+            trigger_word TEXT,
+            triggered_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+
         # Marketplace : annonces de vente entre joueurs
         await db.execute('''CREATE TABLE IF NOT EXISTS marketplace_listings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36088,6 +36136,13 @@ async def on_ready():
         thematic_voice_cleanup_task.start()
     if not irl_season_check_task.is_running():
         irl_season_check_task.start()
+    # Phase 63 : capsule unlock + npc whisper + anniversary
+    if not capsule_unlock_task.is_running():
+        capsule_unlock_task.start()
+    if not npc_whisper_task.is_running():
+        npc_whisper_task.start()
+    if not server_anniversary_task.is_running():
+        server_anniversary_task.start()
     # Phase 61 : AdventClaimView persistante (custom_id stable)
     try:
         bot.add_view(AdventClaimView())
@@ -37121,6 +37176,12 @@ async def on_message(msg):
         await _maybe_greet_user_today(msg)
     except Exception as ex:
         print(f"[_maybe_greet_user_today] {ex}")
+
+    # ═══════════════ Phase 63 : easter eggs réactifs ═══════════════
+    try:
+        await _check_easter_eggs(msg)
+    except Exception as ex:
+        print(f"[_check_easter_eggs] {ex}")
 
     # ═══════════════ Phase 43 : Tag Royale chain progression ═══════════════
     try:
@@ -61137,6 +61198,431 @@ async def narrative_choices_resolver_task():
 @narrative_choices_resolver_task.before_loop
 async def _narrative_resolver_wait():
     await bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 63 — ORIGINALITÉS : Time Capsule + Hall of Fame + Whispers + Anniversaire + Easter eggs
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── TIME CAPSULE (messages futurs scellés) ──────────────────────────────────
+
+
+@bot.tree.command(
+    name="capsule_create",
+    description="📦 Sceller un message à toi-même ou au serveur dans le futur (1 mois / 6 mois / 1 an)",
+)
+@app_commands.describe(
+    message="Ce que tu veux dire dans le futur",
+    duree="Quand l'ouvrir ? (1mois / 6mois / 1an)",
+)
+async def capsule_create_cmd(i: discord.Interaction, message: str, duree: str = "1mois"):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        days_map = {"1mois": 30, "6mois": 180, "1an": 365}
+        days = days_map.get(duree)
+        if not days:
+            return await _safe_followup(i, content="❌ Durée invalide. Choix : `1mois`, `6mois`, `1an`.")
+        unlock = (datetime.now(timezone.utc) + timedelta(days=days)).strftime("%Y-%m-%d")
+        c = await cfg(i.guild.id)
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        async with get_db() as db:
+            cur = await db.execute(
+                "INSERT INTO time_capsules(guild_id, author_id, message, unlock_date, channel_id) "
+                "VALUES(?, ?, ?, ?, ?)",
+                (i.guild.id, i.user.id, message[:1500], unlock, hub_id),
+            )
+            cid = cur.lastrowid
+            await db.commit()
+        await _safe_followup(
+            i,
+            content=(
+                f"📦 **Capsule #{cid} scellée.**\n"
+                f"Elle sera ouverte publiquement le **{unlock}** dans le hub.\n\n"
+                f"_Ton message reste secret jusqu'à cette date._"
+            ),
+        )
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@tasks.loop(hours=12)
+async def capsule_unlock_task():
+    """Toutes les 12h, ouvre les capsules dont la date est atteinte."""
+    try:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, guild_id, author_id, message, channel_id, created_at "
+                "FROM time_capsules WHERE status='sealed' AND unlock_date <= ?",
+                (today,),
+            ) as cur:
+                rows = await cur.fetchall()
+        for cid, gid, author_id, message, ch_id, created_at in rows:
+            try:
+                guild = bot.get_guild(int(gid))
+                ch = guild.get_channel(int(ch_id)) if guild else None
+                if not ch:
+                    async with get_db() as db:
+                        await db.execute(
+                            "UPDATE time_capsules SET status='expired', opened_at=CURRENT_TIMESTAMP WHERE id=?",
+                            (cid,),
+                        )
+                        await db.commit()
+                    continue
+                author = guild.get_member(int(author_id))
+                aname = author.display_name if author else f"User {author_id}"
+                LIFETIME = 7 * 24 * 3600  # 7 jours visible
+                e = discord.Embed(
+                    title=f"📦 CAPSULE TEMPORELLE OUVERTE — #{cid}",
+                    description=(
+                        f"_Scellée par **{aname}** le `{created_at}`._\n\n"
+                        f"# Message :\n\n{message}\n\n"
+                        f"_— Voici ce que {aname} disait à ce moment-là. Le temps passe vite._"
+                    ),
+                    color=0xE91E63,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                e.set_footer(text=f"Time Capsule #{cid} · Visible 7 jours")
+                if author and author.display_avatar:
+                    e.set_thumbnail(url=author.display_avatar.url)
+                try:
+                    msg = await ch.send(
+                        embed=e,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                        delete_after=LIFETIME,
+                    )
+                    await _register_for_cleanup(msg, LIFETIME, 'capsule_opened')
+                except Exception:
+                    pass
+                async with get_db() as db:
+                    await db.execute(
+                        "UPDATE time_capsules SET status='opened', opened_at=CURRENT_TIMESTAMP WHERE id=?",
+                        (cid,),
+                    )
+                    await db.commit()
+                print(f"[CAPSULE OPENED] cid={cid} gid={gid} author={author_id}")
+            except Exception as ex:
+                print(f"[capsule unlock id={cid}] {ex}")
+    except Exception as ex:
+        print(f"[capsule_unlock_task] {ex}")
+
+
+@capsule_unlock_task.before_loop
+async def _capsule_unlock_wait():
+    await bot.wait_until_ready()
+
+
+# ─── HALL OF FAME ────────────────────────────────────────────────────────────
+
+
+@bot.tree.command(
+    name="hall_of_fame_add",
+    description="🏛️ [Owner] Ajouter un exploit indélébile au Hall of Fame",
+)
+@app_commands.describe(
+    categorie="Catégorie (ex: 'speedrun', 'world_boss', 'achievement')",
+    record="Description du record (ex: 'Speedrun Obby Master < 30s')",
+    membre="Le membre concerné",
+    detail="Détail (ex: '23.456s')",
+)
+async def hof_add_cmd(i: discord.Interaction, categorie: str, record: str,
+                      membre: discord.Member, detail: str = ""):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        async with get_db() as db:
+            cur = await db.execute(
+                "INSERT INTO hall_of_fame_records"
+                "(guild_id, category, record, user_id, detail, added_by) "
+                "VALUES(?, ?, ?, ?, ?, ?)",
+                (i.guild.id, categorie, record[:200], membre.id, detail[:200], i.user.id),
+            )
+            hid = cur.lastrowid
+            await db.commit()
+        await _safe_followup(
+            i,
+            content=f"✅ Record #{hid} ajouté au Hall of Fame : **{record}** par {membre.mention}.",
+        )
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="hall_of_fame",
+    description="🏛️ Voir le Hall of Fame du serveur (exploits permanents)",
+)
+async def hall_of_fame_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, category, record, user_id, detail, achieved_at FROM hall_of_fame_records "
+                "WHERE guild_id=? ORDER BY achieved_at DESC LIMIT 25",
+                (i.guild.id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        if not rows:
+            return await _safe_followup(
+                i,
+                content="_Le Hall of Fame est vide pour l'instant. Les premiers exploits feront l'histoire._",
+            )
+        lines = []
+        for r in rows:
+            hid, cat, rec, uid, detail, achieved = r
+            m = i.guild.get_member(int(uid))
+            mname = m.display_name if m else f"User {uid}"
+            line = f"🏛️ `{cat}` — **{rec}**\n   par **{mname}**"
+            if detail:
+                line += f" · _{detail}_"
+            lines.append(line)
+        e = discord.Embed(
+            title=f"🏛️ Hall of Fame — {i.guild.name}",
+            description="\n\n".join(lines),
+            color=0xFFD700,
+        )
+        e.set_footer(text="Records permanents · Phase 63")
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── WHISPERS NPC (1x/semaine random NPC chuchote un teaser) ─────────────────
+
+
+NPC_WHISPERS = [
+    "_Le mage que vous cherchez se cache là où la rivière fait son coude._",
+    "_J'ai vu une ombre traverser le ciel cette nuit. Quelqu'un d'autre l'a vue ?_",
+    "_Le trésor n'est jamais là où on pense. Cherchez là où personne ne regarde._",
+    "_Trois noms doivent tomber avant que le quatrième se révèle._",
+    "_Si vous entendez un chuchotement la nuit, n'écoutez pas. Mais souvenez-vous._",
+    "_Le seigneur ne dort plus. C'est un fait. Mais qui l'a réveillé ?_",
+    "_Une porte s'ouvre quelque part. Trouvez-la avant qu'elle se referme._",
+    "_Le passé reviendra. Pas tout entier. Juste la partie qui fait mal._",
+]
+
+
+@tasks.loop(hours=24)
+async def npc_whisper_task():
+    """Une fois par semaine (mercredi 22h FR), un NPC chuchote un teaser."""
+    try:
+        try:
+            from zoneinfo import ZoneInfo
+            now_fr = datetime.now(ZoneInfo("Europe/Paris"))
+        except Exception:
+            now_fr = datetime.now(timezone.utc)
+        # Mercredi (2) à 22h FR
+        if now_fr.weekday() != 2 or now_fr.hour != 22:
+            return
+        for guild in bot.guilds:
+            try:
+                c = await cfg(guild.id)
+                if not c.get('event_enabled', False):
+                    continue
+                hub_id = int(c.get('hub_channel', 0) or 0)
+                if not hub_id:
+                    continue
+                hub_ch = guild.get_channel(hub_id)
+                if not hub_ch or not await _is_chatty_channel(hub_ch):
+                    continue
+                whisper = random.choice(NPC_WHISPERS)
+                npc_id = random.choice(list(lore.NPCS.keys()))
+                npc = lore.get_npc(npc_id)
+                if not npc:
+                    continue
+                LIFETIME = 48 * 3600
+                e = discord.Embed(
+                    description=f"{npc['emoji']} **{npc['name']} chuchote :**\n\n{whisper}",
+                    color=npc.get("color", 0x95A5A6),
+                    timestamp=datetime.now(timezone.utc),
+                )
+                e.set_footer(text=f"Whisper · {npc['name']}")
+                try:
+                    msg = await hub_ch.send(
+                        embed=e,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                        delete_after=LIFETIME,
+                    )
+                    await _register_for_cleanup(msg, LIFETIME, 'npc_whisper')
+                    await _log_npc_post(guild.id, npc_id, 'whisper')
+                except Exception:
+                    pass
+                print(f"[NPC WHISPER] guild={guild.id} npc={npc_id}")
+            except Exception as ex:
+                print(f"[npc_whisper guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[npc_whisper_task] {ex}")
+
+
+@npc_whisper_task.before_loop
+async def _npc_whisper_wait():
+    await bot.wait_until_ready()
+
+
+# ─── ANNIVERSAIRE SERVEUR ────────────────────────────────────────────────────
+
+
+@tasks.loop(hours=24)
+async def server_anniversary_task():
+    """Vérifie chaque jour si c'est l'anniversaire d'un serveur (guild.created_at)."""
+    try:
+        try:
+            from zoneinfo import ZoneInfo
+            today = datetime.now(ZoneInfo("Europe/Paris"))
+        except Exception:
+            today = datetime.now(timezone.utc)
+        if today.hour != 10:  # check à 10h
+            return
+        for guild in bot.guilds:
+            try:
+                if not guild.created_at:
+                    continue
+                ca = guild.created_at
+                if today.month != ca.month or today.day != ca.day:
+                    continue
+                years = today.year - ca.year
+                if years < 1:
+                    continue
+                c = await cfg(guild.id)
+                if not c.get('event_enabled', False):
+                    continue
+                hub_id = int(c.get('hub_channel', 0) or 0)
+                hub_ch = guild.get_channel(hub_id) if hub_id else None
+                if not hub_ch or not await _is_chatty_channel(hub_ch):
+                    continue
+                LIFETIME = 24 * 3600
+                # Count actifs cette année
+                year_start = today.replace(month=1, day=1, hour=0, minute=0, second=0).isoformat()
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT COUNT(DISTINCT user_id) FROM member_activity "
+                        "WHERE guild_id=? AND created_at>?",
+                        (guild.id, year_start),
+                    ) as cur:
+                        active_count = int((await cur.fetchone() or [0])[0])
+                e = discord.Embed(
+                    title=f"🎂 ANNIVERSAIRE DU SERVEUR — {years} an{'s' if years > 1 else ''} !",
+                    description=(
+                        f"**{guild.name}** fête ses **{years} an{'s' if years > 1 else ''}** aujourd'hui.\n\n"
+                        f"📊 Cette année :\n"
+                        f"• `{active_count}` membres actifs\n"
+                        f"• `{guild.member_count}` membres au total\n\n"
+                        f"_Merci à chacun d'être là. Sans vous, ce serveur n'existerait pas._"
+                    ),
+                    color=0xFFD700,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                e.set_footer(text=f"Anniversaire · {guild.created_at.strftime('%Y-%m-%d')}")
+                try:
+                    msg = await hub_ch.send(
+                        embed=e,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                        delete_after=LIFETIME,
+                    )
+                    await _register_for_cleanup(msg, LIFETIME, 'anniversary')
+                except Exception:
+                    pass
+                # Add HoF record automatique
+                try:
+                    async with get_db() as db:
+                        await db.execute(
+                            "INSERT INTO hall_of_fame_records"
+                            "(guild_id, category, record, user_id, detail, added_by) "
+                            "VALUES(?, 'anniversary', ?, ?, ?, ?)",
+                            (guild.id, f"An {years}", guild.owner_id or 0,
+                             f"{active_count} actifs / {guild.member_count} membres", 0),
+                        )
+                        await db.commit()
+                except Exception:
+                    pass
+                print(f"[ANNIVERSARY] guild={guild.id} {years} ans")
+            except Exception as ex:
+                print(f"[anniversary guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[server_anniversary_task] {ex}")
+
+
+@server_anniversary_task.before_loop
+async def _anniversary_wait():
+    await bot.wait_until_ready()
+
+
+# ─── EASTER EGGS (mots magiques cachés) ──────────────────────────────────────
+
+
+EASTER_EGGS = {
+    "konami":      "_*la guilde entend un son ancien...* Code activé. +100 🪙 pour ta curiosité._",
+    "open sesame": "_*la porte secrète s'ouvre légèrement.* Tu as trouvé un easter egg ! +100 🪙._",
+    "abracadabra": "_*la magie scintille.* Lyra te sourit de loin. +100 🪙._",
+    "il était une fois": "_*le conte commence.* Tu connais le début. Continueras-tu l'histoire ? +50 🪙._",
+    "il etait une fois": "_*le conte commence.* Tu connais le début. Continueras-tu l'histoire ? +50 🪙._",
+}
+
+
+async def _check_easter_eggs(msg) -> None:
+    """Hook on_message : détecte les mots magiques et récompense."""
+    if not msg.guild or msg.author.bot:
+        return
+    try:
+        content_lower = (msg.content or "").lower().strip()
+        for trigger, response in EASTER_EGGS.items():
+            if trigger in content_lower:
+                # Anti-spam : 1 fois par user par easter egg par jour
+                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT 1 FROM easter_eggs_log WHERE guild_id=? AND user_id=? "
+                        "AND trigger_word=? AND DATE(triggered_at)=?",
+                        (msg.guild.id, msg.author.id, trigger, today),
+                    ) as cur:
+                        if await cur.fetchone():
+                            return  # Déjà fait aujourd'hui
+                # Log + reward
+                async with get_db() as db:
+                    await db.execute(
+                        "INSERT INTO easter_eggs_log(guild_id, user_id, trigger_word) VALUES(?,?,?)",
+                        (msg.guild.id, msg.author.id, trigger),
+                    )
+                    await db.commit()
+                # Reward
+                reward = 100 if trigger in ("konami", "open sesame", "abracadabra") else 50
+                try:
+                    await add_coins(msg.guild.id, msg.author.id, reward)
+                except Exception:
+                    pass
+                # Réponse mystérieuse en réponse au message
+                try:
+                    LIFETIME = 60
+                    em = discord.Embed(
+                        description=response,
+                        color=0x9B59B6,
+                    )
+                    em.set_footer(text="🥚 Easter egg trouvé")
+                    reply = await msg.reply(
+                        embed=em,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                        delete_after=LIFETIME,
+                    )
+                    try:
+                        await _register_for_cleanup(reply, LIFETIME, 'easter_egg')
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                print(f"[EASTER EGG] guild={msg.guild.id} user={msg.author.id} trigger={trigger}")
+                return  # 1 easter egg max par message
+    except Exception as ex:
+        print(f"[_check_easter_eggs] {ex}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
