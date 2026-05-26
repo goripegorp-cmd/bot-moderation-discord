@@ -8,7 +8,7 @@ except ModuleNotFoundError:
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
-from discord.ui import View, Select, Modal, TextInput, Button, LayoutView
+from discord.ui import View, Select, Modal, TextInput, Button, LayoutView, UserSelect
 
 # ─── Helpers Components V2 (design system) ───
 from ui_v2 import (
@@ -48721,6 +48721,16 @@ class EngagementHubView(View):
         b12.callback = self._on_social
         self.add_item(b12)
 
+        # Phase 65 : Sub-hub "🧰 Outils" — regroupe tout ce qui était slash members
+        b13 = Button(
+            label="🧰 Outils",
+            style=discord.ButtonStyle.secondary,
+            custom_id="hub_tools",
+            row=4,
+        )
+        b13.callback = self._on_tools
+        self.add_item(b13)
+
     async def _on_quests(self, i: discord.Interaction):
         await _p41_open_daily(i)
 
@@ -48763,6 +48773,10 @@ class EngagementHubView(View):
     async def _on_social(self, i: discord.Interaction):
         # Phase 52 : ouvre le sub-hub Social (Shoutouts / Mentorat)
         await _open_social_panel(i)
+
+    async def _on_tools(self, i: discord.Interaction):
+        # Phase 65 : ouvre le sub-hub Outils (regroupe tout ce qui était slash)
+        await _open_tools_panel(i)
 
 
 # ─── COMMANDES /hub + /hub_setup ───────────────────────────────────────────────
@@ -64222,6 +64236,1014 @@ async def faction_war_start_cmd(i: discord.Interaction, objective: str = "events
             except Exception:
                 pass
         await _safe_followup(i, content=f"✅ Faction War lancée pour la saison `{season_id}` ({objective}).")
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 65 — TOUT EN BOUTONS : Sub-hub "🧰 Outils" + UserSelect pour actions @user
+#  Tous les slash members deviennent des boutons pour ne plus perturber les members.
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── SUB-HUB OUTILS (8 boutons regroupant tout) ──────────────────────────────
+
+
+class ToolsSubHubView(View):
+    """Sub-panel ephemeral : 8 boutons pour les features perso."""
+
+    def __init__(self):
+        super().__init__(timeout=300)
+        # Row 0 : Économie
+        b1 = Button(label="🏦 Banque", style=discord.ButtonStyle.success, row=0)
+        b1.callback = lambda i: _open_bank_panel(i)
+        self.add_item(b1)
+        b2 = Button(label="💎 Mes loots", style=discord.ButtonStyle.primary, row=0)
+        b2.callback = lambda i: _open_loots_panel(i)
+        self.add_item(b2)
+        # Row 1 : Compétitif perso
+        b3 = Button(label="⚔️ PvP / Duel", style=discord.ButtonStyle.danger, row=1)
+        b3.callback = lambda i: _open_pvp_panel(i)
+        self.add_item(b3)
+        b4 = Button(label="🎖️ Ma classe RP", style=discord.ButtonStyle.primary, row=1)
+        b4.callback = lambda i: _open_class_panel(i)
+        self.add_item(b4)
+        # Row 2 : Outils sociaux
+        b5 = Button(label="💝 Faire un Shoutout", style=discord.ButtonStyle.success, row=2)
+        b5.callback = lambda i: _open_shoutout_make_panel(i)
+        self.add_item(b5)
+        b6 = Button(label="🎓 Inviter un apprenti", style=discord.ButtonStyle.primary, row=2)
+        b6.callback = lambda i: _open_mentor_invite_panel(i)
+        self.add_item(b6)
+        # Row 3 : Originalités
+        b7 = Button(label="📦 Time Capsule", style=discord.ButtonStyle.secondary, row=3)
+        b7.callback = lambda i: _open_capsule_panel(i)
+        self.add_item(b7)
+        b8 = Button(label="🏛️ Hall of Fame", style=discord.ButtonStyle.secondary, row=3)
+        b8.callback = lambda i: _open_hof_panel(i)
+        self.add_item(b8)
+        # Row 4 : Stats
+        b9 = Button(label="🎙️ Top vocal", style=discord.ButtonStyle.secondary, row=4)
+        b9.callback = lambda i: _open_voice_top_panel(i)
+        self.add_item(b9)
+        b10 = Button(label="📅 Météo serveur", style=discord.ButtonStyle.secondary, row=4)
+        b10.callback = lambda i: _open_weather_panel(i)
+        self.add_item(b10)
+
+
+async def _open_tools_panel(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        e = discord.Embed(
+            title="🧰 Outils & Récompenses",
+            description=(
+                "Tous tes outils perso en 1 clic — **sans commandes à mémoriser** :\n\n"
+                "## 💰 Économie\n"
+                "🏦 **Banque** — dépôts avec intérêts 1%/jour (max 30j)\n"
+                "💎 **Mes loots** — items uniques que tu possèdes\n\n"
+                "## ⚔️ Compétitif\n"
+                "⚔️ **PvP / Duel** — défier un membre, voir le ladder Elo\n"
+                "🎖️ **Ma classe RP** — Guerrier / Mage / Voleur / Soigneur / Rôdeur\n\n"
+                "## 💝 Social\n"
+                "💝 **Shoutout** — remercier publiquement un membre\n"
+                "🎓 **Mentor** — parrainer un nouveau (≥30j + level ≥5 requis)\n\n"
+                "## 📦 Originalités\n"
+                "📦 **Time Capsule** — message à toi-même dans 1mois / 6mois / 1an\n"
+                "🏛️ **Hall of Fame** — records permanents du serveur\n\n"
+                "## 📊 Stats\n"
+                "🎙️ **Top vocal** · 📅 **Météo serveur**"
+            ),
+            color=0x95A5A6,
+        )
+        e.set_footer(text="Phase 65 · Tout via boutons · Aucune commande nécessaire")
+        await _safe_followup(i, embed=e, view=ToolsSubHubView())
+    except Exception as ex:
+        print(f"[_open_tools_panel] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── 🏦 BANQUE (panel avec boutons Modal) ────────────────────────────────────
+
+
+class BankDepositModal(Modal):
+    def __init__(self):
+        super().__init__(title="🏦 Déposer à la banque")
+        self.amount = TextInput(
+            label="Montant à déposer (min 100 🪙)",
+            placeholder="100",
+            max_length=10,
+            required=True,
+        )
+        self.add_item(self.amount)
+
+    async def on_submit(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            try:
+                amt = int(self.amount.value.strip())
+                if amt < 100:
+                    raise ValueError
+            except Exception:
+                return await _safe_followup(i, content="❌ Montant invalide (min 100).")
+            try:
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT coins FROM economy WHERE guild_id=? AND user_id=?",
+                        (i.guild.id, i.user.id),
+                    ) as cur:
+                        row = await cur.fetchone()
+                bal = int(row[0]) if row else 0
+            except Exception:
+                bal = 0
+            if bal < amt:
+                return await _safe_followup(i, content=f"❌ Solde insuffisant ({bal} 🪙).")
+            try:
+                await add_coins(i.guild.id, i.user.id, -amt)
+            except Exception:
+                pass
+            async with get_db() as db:
+                cur = await db.execute(
+                    "INSERT INTO user_bank_deposits(guild_id, user_id, amount) VALUES(?,?,?)",
+                    (i.guild.id, i.user.id, amt),
+                )
+                did = cur.lastrowid
+                await db.commit()
+            await _safe_followup(
+                i,
+                content=(
+                    f"✅ **Dépôt #{did}** : `{amt:,}` 🪙 placés. "
+                    f"💰 +1%/jour pendant 30 jours."
+                ),
+            )
+        except Exception as ex:
+            print(f"[BankDepositModal] {ex}")
+            try:
+                await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+            except Exception:
+                pass
+
+
+class BankWithdrawSelectView(View):
+    """View ephemeral : Select pour choisir quel dépôt retirer."""
+
+    def __init__(self, deposits: list):
+        super().__init__(timeout=300)
+        if not deposits:
+            return
+        options = []
+        for d in deposits[:25]:
+            options.append(discord.SelectOption(
+                label=f"#{d['id']} : {d['amount']} 🪙 + {d['interest']} intérêts",
+                value=str(d["id"]),
+                description=f"{d['days']}/30 jours · Total : {d['total']} 🪙",
+            ))
+        select = Select(placeholder="Choisis le dépôt à retirer…", options=options)
+        select.callback = self._on_select
+        self.add_item(select)
+
+    async def _on_select(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            did = int(i.data["values"][0])
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT user_id, amount, deposited_at, withdrawn FROM user_bank_deposits "
+                    "WHERE id=? AND guild_id=?",
+                    (did, i.guild.id),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row or int(row[0]) != i.user.id or int(row[3]) == 1:
+                return await _safe_followup(i, content="⏱️ Dépôt inexistant ou déjà retiré.")
+            amount = int(row[1])
+            try:
+                dt = datetime.fromisoformat(str(row[2]).replace('Z', '+00:00')) \
+                    if 'T' in str(row[2]) \
+                    else datetime.strptime(str(row[2]), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                days = min(30, max(0, (datetime.now(timezone.utc) - dt).days))
+            except Exception:
+                days = 0
+            interest = int(amount * 0.01 * days)
+            total = amount + interest
+            try:
+                await add_coins(i.guild.id, i.user.id, total)
+            except Exception:
+                pass
+            async with get_db() as db:
+                await db.execute(
+                    "UPDATE user_bank_deposits SET withdrawn=1, withdrawn_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (did,),
+                )
+                await db.commit()
+            await _safe_followup(
+                i,
+                content=f"✅ Retiré : `{total:,}` 🪙 (principal {amount:,} + intérêts {interest:,} sur {days}j).",
+            )
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+class BankPanelView(View):
+    def __init__(self, has_deposits: bool):
+        super().__init__(timeout=300)
+        b_dep = Button(label="📥 Déposer", style=discord.ButtonStyle.success)
+        b_dep.callback = self._deposit
+        self.add_item(b_dep)
+        b_wit = Button(
+            label="📤 Retirer un dépôt",
+            style=discord.ButtonStyle.primary,
+            disabled=not has_deposits,
+        )
+        b_wit.callback = self._withdraw
+        self.add_item(b_wit)
+
+    async def _deposit(self, i: discord.Interaction):
+        try:
+            await i.response.send_modal(BankDepositModal())
+        except Exception as ex:
+            print(f"[BankPanelView _deposit] {ex}")
+
+    async def _withdraw(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT id, amount, deposited_at FROM user_bank_deposits "
+                    "WHERE guild_id=? AND user_id=? AND withdrawn=0 ORDER BY deposited_at DESC LIMIT 25",
+                    (i.guild.id, i.user.id),
+                ) as cur:
+                    rows = await cur.fetchall()
+            if not rows:
+                return await _safe_followup(i, content="_Aucun dépôt à retirer._")
+            deposits = []
+            for r in rows:
+                try:
+                    dt = datetime.fromisoformat(str(r[2]).replace('Z', '+00:00')) \
+                        if 'T' in str(r[2]) \
+                        else datetime.strptime(str(r[2]), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                    days = min(30, max(0, (datetime.now(timezone.utc) - dt).days))
+                except Exception:
+                    days = 0
+                interest = int(int(r[1]) * 0.01 * days)
+                deposits.append({
+                    "id": int(r[0]), "amount": int(r[1]), "days": days,
+                    "interest": interest, "total": int(r[1]) + interest,
+                })
+            await _safe_followup(
+                i,
+                content="📤 Choisis le dépôt à retirer :",
+                view=BankWithdrawSelectView(deposits),
+            )
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _open_bank_panel(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, amount, deposited_at FROM user_bank_deposits "
+                "WHERE guild_id=? AND user_id=? AND withdrawn=0 ORDER BY deposited_at DESC",
+                (i.guild.id, i.user.id),
+            ) as cur:
+                rows = await cur.fetchall()
+        total_p = 0
+        total_i = 0
+        lines = []
+        for did, amt, dep_at in rows:
+            try:
+                dt = datetime.fromisoformat(str(dep_at).replace('Z', '+00:00')) \
+                    if 'T' in str(dep_at) \
+                    else datetime.strptime(str(dep_at), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                days = min(30, max(0, (datetime.now(timezone.utc) - dt).days))
+            except Exception:
+                days = 0
+            interest = int(int(amt) * 0.01 * days)
+            total_p += int(amt)
+            total_i += interest
+            lines.append(f"`#{did}` `{int(amt):,}` 🪙 +`{interest:,}` ({days}/30 j)")
+        e = discord.Embed(
+            title="🏦 Ta banque",
+            description=(
+                ("**Dépôts actifs :**\n" + "\n".join(lines) +
+                 f"\n\n💰 Total principal : `{total_p:,}` 🪙"
+                 f"\n💎 Intérêts cumulés : `{total_i:,}` 🪙"
+                 f"\n🏆 **Si tu retires tout :** `{total_p + total_i:,}` 🪙"
+                 if rows else "_Aucun dépôt actif._")
+                + "\n\n_Dépose pour gagner 1%/jour pendant 30 jours max._"
+            ),
+            color=0x3498DB,
+        )
+        await _safe_followup(i, embed=e, view=BankPanelView(bool(rows)))
+    except Exception as ex:
+        print(f"[_open_bank_panel] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── 💎 LOOTS (réutilise logique existante) ──────────────────────────────────
+
+
+async def _open_loots_panel(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, name, description, obtained_at FROM unique_loots "
+                "WHERE guild_id=? AND current_owner_id=? ORDER BY obtained_at DESC",
+                (i.guild.id, i.user.id),
+            ) as cur:
+                rows = await cur.fetchall()
+        if not rows:
+            e = discord.Embed(
+                title="💎 Mes loots uniques",
+                description=(
+                    "_Aucun loot unique pour le moment._\n\n"
+                    "_Les loots uniques drop pendant les events majeurs (~10% pour top damager world boss). "
+                    "**1 seul exemplaire au monde par item** — si quelqu'un re-drop, il te le vole._"
+                ),
+                color=0x95A5A6,
+            )
+        else:
+            lines = [f"💎 `#{r[0]}` **{r[1]}** — _{r[2]}_" for r in rows]
+            e = discord.Embed(
+                title=f"💎 Mes loots uniques ({len(rows)})",
+                description="\n\n".join(lines),
+                color=0xFFD700,
+            )
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── ⚔️ PVP (Top + Mes stats + Défier via UserSelect) ────────────────────────
+
+
+class DuelMiseSelectView(View):
+    """View ephemeral : choisir la mise du duel."""
+
+    def __init__(self, target_id: int):
+        super().__init__(timeout=180)
+        self.target_id = target_id
+        for amt in (0, 10, 50, 100, 500):
+            b = Button(
+                label=f"{amt} 🪙" if amt else "Sans mise",
+                style=discord.ButtonStyle.primary if amt else discord.ButtonStyle.secondary,
+            )
+            b.callback = self._make_cb(amt)
+            self.add_item(b)
+
+    def _make_cb(self, amount: int):
+        async def _cb(i: discord.Interaction):
+            if not await _safe_defer(i):
+                return
+            try:
+                target = i.guild.get_member(self.target_id)
+                if not target:
+                    return await _safe_followup(i, content="❌ Cible introuvable.")
+                if target.bot or target.id == i.user.id:
+                    return await _safe_followup(i, content="❌ Cible invalide.")
+                if amount > 0:
+                    try:
+                        async with get_db() as db:
+                            async with db.execute(
+                                "SELECT coins FROM economy WHERE guild_id=? AND user_id=?",
+                                (i.guild.id, i.user.id),
+                            ) as cur:
+                                row = await cur.fetchone()
+                        bal = int(row[0]) if row else 0
+                    except Exception:
+                        bal = 0
+                    if bal < amount:
+                        return await _safe_followup(i, content=f"❌ Solde insuffisant ({bal} 🪙).")
+                async with get_db() as db:
+                    cur = await db.execute(
+                        "INSERT INTO pvp_duels(guild_id, challenger_id, challenged_id, stake_amount, channel_id) "
+                        "VALUES(?, ?, ?, ?, ?)",
+                        (i.guild.id, i.user.id, target.id, amount, i.channel.id),
+                    )
+                    did = cur.lastrowid
+                    await db.commit()
+                r_ch = await _get_ladder_rating(i.guild.id, i.user.id)
+                r_cd = await _get_ladder_rating(i.guild.id, target.id)
+                e = discord.Embed(
+                    title=f"⚔️ Duel proposé — #{did}",
+                    description=(
+                        f"**Challenger :** {i.user.mention} ({_rating_division(r_ch['rating'])} `{r_ch['rating']}`)\n"
+                        f"**Challenged :** {target.mention} ({_rating_division(r_cd['rating'])} `{r_cd['rating']}`)\n"
+                        f"**Mise :** `{amount}` 🪙 chacun\n\n"
+                        f"_{target.display_name}, accepte ou refuse ci-dessous._"
+                    ),
+                    color=0xE74C3C,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                msg = await i.channel.send(
+                    content=target.mention,
+                    embed=e,
+                    view=DuelAcceptView(int(did)),
+                    allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+                )
+                async with get_db() as db:
+                    await db.execute("UPDATE pvp_duels SET message_id=? WHERE id=?", (msg.id, did))
+                    await db.commit()
+                await _safe_followup(i, content=f"✅ Duel #{did} proposé à {target.mention}.")
+            except Exception as ex:
+                print(f"[DuelMiseSelectView] {ex}")
+                await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+        return _cb
+
+
+class DuelTargetSelectView(View):
+    """View ephemeral : UserSelect pour choisir l'adversaire du duel."""
+
+    def __init__(self):
+        super().__init__(timeout=300)
+        us = UserSelect(
+            placeholder="Choisis l'adversaire du duel…",
+            min_values=1, max_values=1,
+        )
+        us.callback = self._on_select
+        self.add_item(us)
+
+    async def _on_select(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            target = i.data["resolved"]["users"]
+            target_id = int(list(target.keys())[0])
+            target_member = i.guild.get_member(target_id)
+            if not target_member or target_member.bot or target_id == i.user.id:
+                return await _safe_followup(i, content="❌ Cible invalide.")
+            await _safe_followup(
+                i,
+                content=f"⚔️ Tu défies **{target_member.display_name}**. Choisis la mise :",
+                view=DuelMiseSelectView(target_id),
+            )
+        except Exception as ex:
+            print(f"[DuelTargetSelectView] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+class PvPPanelView(View):
+    def __init__(self):
+        super().__init__(timeout=300)
+        b1 = Button(label="📊 Top 10 Ladder", style=discord.ButtonStyle.primary)
+        b1.callback = self._top
+        self.add_item(b1)
+        b2 = Button(label="⚔️ Défier un membre", style=discord.ButtonStyle.danger)
+        b2.callback = self._duel
+        self.add_item(b2)
+
+    async def _top(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT user_id, rating, wins, losses FROM ladder_ratings "
+                    "WHERE guild_id=? AND (wins+losses)>0 ORDER BY rating DESC LIMIT 10",
+                    (i.guild.id,),
+                ) as cur:
+                    rows = await cur.fetchall()
+            if not rows:
+                return await _safe_followup(i, content="_Personne n'a encore dueléé._")
+            medals = ["🥇", "🥈", "🥉"]
+            lines = []
+            for idx, r in enumerate(rows):
+                m = i.guild.get_member(int(r[0]))
+                mname = m.display_name if m else f"User {r[0]}"
+                mark = medals[idx] if idx < 3 else f"`{idx+1:02d}`"
+                wr = (int(r[2]) / max(1, int(r[2]) + int(r[3]))) * 100
+                lines.append(
+                    f"{mark} **{mname}** — {_rating_division(int(r[1]))} `{int(r[1])}` "
+                    f"(W:{int(r[2])} L:{int(r[3])} · {wr:.0f}%)"
+                )
+            my = await _get_ladder_rating(i.guild.id, i.user.id)
+            e = discord.Embed(
+                title="📊 Top 10 Ladder Elo",
+                description=(
+                    "\n".join(lines) +
+                    f"\n\n**Toi :** {_rating_division(my['rating'])} `{my['rating']}` "
+                    f"(W:{my['wins']} L:{my['losses']})"
+                ),
+                color=0xE74C3C,
+            )
+            await _safe_followup(i, embed=e)
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _duel(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            await _safe_followup(
+                i,
+                content="⚔️ **Défier un membre** — choisis ton adversaire ci-dessous :",
+                view=DuelTargetSelectView(),
+            )
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _open_pvp_panel(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        my = await _get_ladder_rating(i.guild.id, i.user.id)
+        total = my["wins"] + my["losses"]
+        wr = (my["wins"] / total * 100) if total else 0
+        e = discord.Embed(
+            title=f"⚔️ PvP — Ton statut",
+            description=(
+                f"**Ton rating :** {_rating_division(my['rating'])} `{my['rating']}`\n"
+                f"**Victoires :** `{my['wins']}` · **Défaites :** `{my['losses']}`\n"
+                f"**Win Rate :** `{wr:.1f}%`\n\n"
+                f"_Défie un membre pour gagner ou perdre du rating Elo. "
+                f"Les duels peuvent être avec mise (winner prend tout)._"
+            ),
+            color=0xE74C3C,
+        )
+        await _safe_followup(i, embed=e, view=PvPPanelView())
+    except Exception as ex:
+        print(f"[_open_pvp_panel] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── 🎖️ CLASSE RP (réutilise ClassSelectView Phase 57) ──────────────────────
+
+
+async def _open_class_panel(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        cur_class = await _get_user_class(i.guild.id, i.user.id)
+        desc_lines = ["**Ta classe RP définit ton identité dans le récit.**\n"]
+        if cur_class:
+            desc_lines.append(
+                f"\n**Classe actuelle :** {cur_class['emoji']} **{cur_class['title_long']}**\n"
+                f"_{cur_class['description']}_\n"
+                f"**Passive :** {cur_class['passive']}\n"
+            )
+        desc_lines.append("\n**Toutes les classes :**\n")
+        for c in lore_v.PLAYER_CLASSES:
+            mark = " ← actuelle" if cur_class and cur_class["id"] == c["id"] else ""
+            desc_lines.append(f"{c['emoji']} **{c['name']}**{mark} — _{c['passive']}_")
+        e = discord.Embed(
+            title="🎖️ Classes RP",
+            description="\n".join(desc_lines),
+            color=cur_class.get("color", 0x9B59B6) if cur_class else 0x9B59B6,
+        )
+        await _safe_followup(i, embed=e, view=ClassSelectView())
+    except Exception as ex:
+        print(f"[_open_class_panel] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── 💝 SHOUTOUT (UserSelect → Catégorie Select → Modal raison) ──────────────
+
+
+class ShoutoutReasonModal(Modal):
+    def __init__(self, target_id: int, category_id: str):
+        super().__init__(title="💝 Pourquoi ce shoutout ?")
+        self.target_id = target_id
+        self.category_id = category_id
+        self.reason = TextInput(
+            label="Raison (1-2 phrases)",
+            placeholder="Ex: m'a aidé sur un build difficile…",
+            max_length=300,
+            required=True,
+        )
+        self.add_item(self.reason)
+
+    async def on_submit(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            target = i.guild.get_member(self.target_id)
+            if not target or target.bot:
+                return await _safe_followup(i, content="❌ Cible invalide.")
+            cat = soc.get_shoutout_category(self.category_id)
+            if not cat:
+                return await _safe_followup(i, content="❌ Catégorie inconnue.")
+            sid = await _add_shoutout(i.guild.id, i.user.id, target.id, self.category_id, self.reason.value)
+            if not sid:
+                return await _safe_followup(i, content="⏱️ Déjà fait dans la dernière heure.")
+            # Public embed dans le hub
+            c = await cfg(i.guild.id)
+            hub_id = int(c.get('hub_channel', 0) or 0)
+            hub_ch = i.guild.get_channel(hub_id) if hub_id else None
+            if hub_ch and await _is_chatty_channel(hub_ch):
+                try:
+                    received_all = await _count_shoutouts_received(i.guild.id, target.id)
+                    LIFETIME = 6 * 3600
+                    e = discord.Embed(
+                        title=f"💝 Shoutout : {cat['label']}",
+                        description=(
+                            f"**De :** {i.user.mention}\n"
+                            f"**Pour :** {target.mention}\n\n"
+                            f"💬 _{self.reason.value[:300]}_\n\n"
+                            f"🎖️ {target.display_name} : **{received_all}** shoutout(s)."
+                            + (" 🌟 Badge **Cœur d'or** !" if received_all == 10 else "")
+                        ),
+                        color=cat["color"],
+                        timestamp=datetime.now(timezone.utc),
+                    )
+                    if target.display_avatar:
+                        e.set_thumbnail(url=target.display_avatar.url)
+                    msg = await hub_ch.send(
+                        embed=e,
+                        allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+                        delete_after=LIFETIME,
+                    )
+                    await _register_for_cleanup(msg, LIFETIME, 'shoutout')
+                except Exception:
+                    pass
+            try:
+                await add_coins(i.guild.id, target.id, 50)
+            except Exception:
+                pass
+            await _safe_followup(i, content=f"✅ Shoutout envoyé à {target.mention} ! +50 🪙 pour lui.")
+        except Exception as ex:
+            print(f"[ShoutoutReasonModal] {ex}")
+            try:
+                await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+            except Exception:
+                pass
+
+
+class ShoutoutCategorySelectView(View):
+    def __init__(self, target_id: int):
+        super().__init__(timeout=300)
+        self.target_id = target_id
+        options = [
+            discord.SelectOption(label=c["label"], value=c["id"])
+            for c in soc.SHOUTOUT_CATEGORIES
+        ]
+        select = Select(placeholder="Catégorie du shoutout…", options=options)
+        select.callback = self._on_select
+        self.add_item(select)
+
+    async def _on_select(self, i: discord.Interaction):
+        try:
+            cat_id = i.data["values"][0]
+            await i.response.send_modal(ShoutoutReasonModal(self.target_id, cat_id))
+        except Exception as ex:
+            print(f"[ShoutoutCategorySelectView] {ex}")
+
+
+class ShoutoutTargetSelectView(View):
+    def __init__(self):
+        super().__init__(timeout=300)
+        us = UserSelect(placeholder="Choisis qui remercier…", min_values=1, max_values=1)
+        us.callback = self._on_select
+        self.add_item(us)
+
+    async def _on_select(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            target_resolved = i.data["resolved"]["users"]
+            target_id = int(list(target_resolved.keys())[0])
+            target = i.guild.get_member(target_id)
+            if not target or target.bot or target_id == i.user.id:
+                return await _safe_followup(i, content="❌ Cible invalide (pas toi-même, pas un bot).")
+            await _safe_followup(
+                i,
+                content=f"💝 Choisis la catégorie du shoutout pour **{target.display_name}** :",
+                view=ShoutoutCategorySelectView(target_id),
+            )
+        except Exception as ex:
+            print(f"[ShoutoutTargetSelectView] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _open_shoutout_make_panel(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        await _safe_followup(
+            i,
+            content="💝 **Remercier un membre** — choisis qui :",
+            view=ShoutoutTargetSelectView(),
+        )
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── 🎓 MENTOR INVITE (UserSelect → confirm) ─────────────────────────────────
+
+
+class MentorInviteTargetView(View):
+    def __init__(self):
+        super().__init__(timeout=300)
+        us = UserSelect(placeholder="Choisis ton futur apprenti (≤7j sur serveur)…",
+                        min_values=1, max_values=1)
+        us.callback = self._on_select
+        self.add_item(us)
+
+    async def _on_select(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            target_resolved = i.data["resolved"]["users"]
+            target_id = int(list(target_resolved.keys())[0])
+            target = i.guild.get_member(target_id)
+            if not target or target.bot or target_id == i.user.id:
+                return await _safe_followup(i, content="❌ Cible invalide.")
+            mem = i.user if isinstance(i.user, discord.Member) else i.guild.get_member(i.user.id)
+            if not await _is_eligible_as_mentor(i.guild.id, i.user.id, mem):
+                return await _safe_followup(
+                    i,
+                    content=f"❌ Tu n'es pas éligible mentor (≥{soc.MENTOR_MIN_DAYS}j + level ≥{soc.MENTOR_MIN_LEVEL} + pas d'apprenti actuel).",
+                )
+            if not await _is_eligible_as_apprentice(i.guild.id, target.id, target):
+                return await _safe_followup(
+                    i,
+                    content=f"❌ {target.display_name} doit être ≤{soc.APPRENTICE_MAX_DAYS}j sur le serveur et sans mentor.",
+                )
+            async with get_db() as db:
+                cur = await db.execute(
+                    "INSERT INTO mentorships(guild_id, mentor_id, apprentice_id, status) "
+                    "VALUES(?, ?, ?, 'pending')",
+                    (i.guild.id, i.user.id, target.id),
+                )
+                mid = cur.lastrowid
+                await db.commit()
+            try:
+                await target.send(
+                    embed=discord.Embed(
+                        title=f"🎓 {i.user.display_name} propose de te mentorer !",
+                        description=(
+                            f"Sur **{i.guild.name}**, un ancien propose de t'accompagner.\n\n"
+                            f"• +{soc.APPRENTICE_INTERACTION_BONUS_COINS} 🪙/jour pour toi (interactions communes)\n"
+                            f"• +{soc.MENTOR_INTERACTION_BONUS_COINS} 🪙/jour pour lui\n"
+                            f"• Durée : {soc.MENTORSHIP_DURATION_DAYS} jours\n\n"
+                            f"Accepte ou refuse ci-dessous."
+                        ),
+                        color=0x3498DB,
+                    ),
+                    view=MentorAcceptView(int(mid)),
+                )
+                await _safe_followup(i, content=f"✅ Invitation envoyée en DM à {target.mention}.")
+            except discord.Forbidden:
+                c = await cfg(i.guild.id)
+                hub_id = int(c.get('hub_channel', 0) or 0)
+                hub_ch = i.guild.get_channel(hub_id) if hub_id else None
+                if hub_ch:
+                    await hub_ch.send(
+                        content=target.mention,
+                        embed=discord.Embed(
+                            title=f"🎓 {i.user.display_name} propose de te mentorer",
+                            description=f"Accepte ci-dessous {target.mention}.",
+                            color=0x3498DB,
+                        ),
+                        view=MentorAcceptView(int(mid)),
+                        allowed_mentions=discord.AllowedMentions(users=True),
+                    )
+                    await _safe_followup(i, content=f"⚠️ DM fermé, invitation postée dans le hub.")
+                else:
+                    await _safe_followup(i, content="❌ DM fermé + hub non configuré.")
+        except Exception as ex:
+            print(f"[MentorInviteTargetView] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _open_mentor_invite_panel(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        await _safe_followup(
+            i,
+            content="🎓 **Inviter un apprenti** — choisis le nouveau membre :",
+            view=MentorInviteTargetView(),
+        )
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── 📦 TIME CAPSULE (Modal create + display mes capsules) ───────────────────
+
+
+class CapsuleCreateModal(Modal):
+    def __init__(self, duree: str):
+        super().__init__(title=f"📦 Time Capsule — {duree}")
+        self.duree = duree
+        self.msg_input = TextInput(
+            label="Message à sceller (publié dans le futur)",
+            placeholder="Ce que tu veux dire au serveur dans le futur…",
+            style=discord.TextStyle.paragraph,
+            max_length=1500,
+            required=True,
+        )
+        self.add_item(self.msg_input)
+
+    async def on_submit(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            days_map = {"1mois": 30, "6mois": 180, "1an": 365}
+            days = days_map.get(self.duree, 30)
+            unlock = (datetime.now(timezone.utc) + timedelta(days=days)).strftime("%Y-%m-%d")
+            c = await cfg(i.guild.id)
+            hub_id = int(c.get('hub_channel', 0) or 0)
+            async with get_db() as db:
+                cur = await db.execute(
+                    "INSERT INTO time_capsules(guild_id, author_id, message, unlock_date, channel_id) "
+                    "VALUES(?, ?, ?, ?, ?)",
+                    (i.guild.id, i.user.id, self.msg_input.value[:1500], unlock, hub_id),
+                )
+                cid = cur.lastrowid
+                await db.commit()
+            await _safe_followup(
+                i,
+                content=(
+                    f"📦 **Capsule #{cid} scellée.** Ouverture publique le **{unlock}** "
+                    f"(dans {days} jours)."
+                ),
+            )
+        except Exception as ex:
+            print(f"[CapsuleCreateModal] {ex}")
+            try:
+                await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+            except Exception:
+                pass
+
+
+class CapsulePanelView(View):
+    def __init__(self):
+        super().__init__(timeout=300)
+        for label, duree in [("📅 1 mois", "1mois"), ("📆 6 mois", "6mois"), ("🗓️ 1 an", "1an")]:
+            b = Button(label=label, style=discord.ButtonStyle.primary)
+            b.callback = self._make_cb(duree)
+            self.add_item(b)
+
+    def _make_cb(self, duree: str):
+        async def _cb(i: discord.Interaction):
+            try:
+                await i.response.send_modal(CapsuleCreateModal(duree))
+            except Exception as ex:
+                print(f"[CapsulePanelView] {ex}")
+        return _cb
+
+
+async def _open_capsule_panel(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, unlock_date, status FROM time_capsules "
+                "WHERE guild_id=? AND author_id=? ORDER BY created_at DESC LIMIT 10",
+                (i.guild.id, i.user.id),
+            ) as cur:
+                rows = await cur.fetchall()
+        lines = []
+        for cid, unlock, status in rows:
+            icon = "🔒" if status == 'sealed' else "📂"
+            lines.append(f"{icon} `#{cid}` — Ouverture **{unlock}** ({status})")
+        e = discord.Embed(
+            title="📦 Time Capsule",
+            description=(
+                "_Envoie un message au serveur dans le futur._\n"
+                "_Il restera scellé jusqu'à la date d'ouverture._\n\n"
+                "**Tes capsules :**\n" + ("\n".join(lines) if lines else "_Aucune._") +
+                "\n\n**Choisis une durée pour en sceller une nouvelle :**"
+            ),
+            color=0xE91E63,
+        )
+        await _safe_followup(i, embed=e, view=CapsulePanelView())
+    except Exception as ex:
+        print(f"[_open_capsule_panel] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── 🏛️ HALL OF FAME (read-only display) ────────────────────────────────────
+
+
+async def _open_hof_panel(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, category, record, user_id, detail, achieved_at FROM hall_of_fame_records "
+                "WHERE guild_id=? ORDER BY achieved_at DESC LIMIT 25",
+                (i.guild.id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        if not rows:
+            return await _safe_followup(
+                i,
+                content="_Le Hall of Fame est vide pour l'instant. Les premiers exploits feront l'histoire._",
+            )
+        lines = []
+        for r in rows:
+            hid, cat, rec, uid, detail, _ = r
+            m = i.guild.get_member(int(uid))
+            mname = m.display_name if m else f"User {uid}"
+            line = f"🏛️ `{cat}` — **{rec}**\n   par **{mname}**"
+            if detail:
+                line += f" · _{detail}_"
+            lines.append(line)
+        e = discord.Embed(
+            title=f"🏛️ Hall of Fame — {i.guild.name}",
+            description="\n\n".join(lines),
+            color=0xFFD700,
+        )
+        e.set_footer(text="Records permanents · Indélébiles")
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── 🎙️ TOP VOCAL ───────────────────────────────────────────────────────────
+
+
+async def _open_voice_top_panel(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT user_id, SUM(duration_seconds) AS total FROM voice_activity_log "
+                "WHERE guild_id=? AND joined_at>? GROUP BY user_id "
+                "ORDER BY total DESC LIMIT 10",
+                (i.guild.id, cutoff),
+            ) as cur:
+                rows = await cur.fetchall()
+        if not rows:
+            return await _safe_followup(i, content="_Personne en vocal cette semaine._")
+        medals = ["🥇", "🥈", "🥉"]
+        lines = []
+        for idx, r in enumerate(rows):
+            m = i.guild.get_member(int(r[0]))
+            mname = m.display_name if m else f"User {r[0]}"
+            total_s = int(r[1])
+            hours = total_s // 3600
+            mins = (total_s % 3600) // 60
+            mark = medals[idx] if idx < 3 else f"`{idx+1:02d}`"
+            lines.append(f"{mark} **{mname}** — `{hours}h{mins:02d}m`")
+        e = discord.Embed(
+            title="🎙️ Top 10 vocal — Cette semaine",
+            description="\n".join(lines),
+            color=0x9B59B6,
+        )
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── 📅 MÉTÉO SERVEUR ───────────────────────────────────────────────────────
+
+
+async def _open_weather_panel(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT current_streak, best_streak FROM server_streak WHERE guild_id=?",
+                (i.guild.id,),
+            ) as cur:
+                row = await cur.fetchone()
+        cur_s = int(row[0]) if row else 0
+        best_s = int(row[1]) if row else 0
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT day, weather, activity_score FROM server_weather_log "
+                "WHERE guild_id=? ORDER BY day DESC LIMIT 7",
+                (i.guild.id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        history = "\n".join(f"`{r[0]}` {r[1]} ({int(r[2])} msgs)" for r in rows) if rows else "_Pas encore de données._"
+        e = discord.Embed(
+            title="📅 Météo & Streak serveur",
+            description=(
+                f"🔥 **Streak actuel :** `{cur_s}` jours\n"
+                f"🏆 **Record :** `{best_s}` jours\n\n"
+                f"**7 derniers jours :**\n{history}"
+            ),
+            color=0x3498DB,
+        )
+        await _safe_followup(i, embed=e)
     except Exception as ex:
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
