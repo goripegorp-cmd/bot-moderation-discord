@@ -978,10 +978,31 @@ async def db_init():
             guild_id INTEGER,
             user_id INTEGER,
             event_type TEXT,
+            event_data_json TEXT DEFAULT '{}',
+            dm_channel_id INTEGER DEFAULT 0,
+            dm_message_id INTEGER DEFAULT 0,
+            channel_id INTEGER DEFAULT 0,
+            channel_message_id INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             claimed INTEGER DEFAULT 0
         )''')
         await db.execute('CREATE INDEX IF NOT EXISTS idx_personal_events_user ON personal_events_log(guild_id, user_id, created_at)')
+        # Migration : colonnes ajoutées en Phase 34 (refonte DM)
+        try:
+            async with db.execute('PRAGMA table_info(personal_events_log)') as cur:
+                cols = [r[1] for r in await cur.fetchall()]
+            if 'event_data_json' not in cols:
+                await db.execute("ALTER TABLE personal_events_log ADD COLUMN event_data_json TEXT DEFAULT '{}'")
+            if 'dm_channel_id' not in cols:
+                await db.execute("ALTER TABLE personal_events_log ADD COLUMN dm_channel_id INTEGER DEFAULT 0")
+            if 'dm_message_id' not in cols:
+                await db.execute("ALTER TABLE personal_events_log ADD COLUMN dm_message_id INTEGER DEFAULT 0")
+            if 'channel_id' not in cols:
+                await db.execute("ALTER TABLE personal_events_log ADD COLUMN channel_id INTEGER DEFAULT 0")
+            if 'channel_message_id' not in cols:
+                await db.execute("ALTER TABLE personal_events_log ADD COLUMN channel_message_id INTEGER DEFAULT 0")
+        except Exception:
+            pass
 
         # Phase 33 : historique des duels
         await db.execute('''CREATE TABLE IF NOT EXISTS duels (
@@ -6439,6 +6460,14 @@ class BossAttackView(View):
 async def _handle_boss_attack(i: discord.Interaction, event_id: int):
     """Gère un clic sur le bouton Attaquer."""
     try:
+        # ACK immédiat pour éviter "Échec de l'interaction" (Discord 3s timeout)
+        try:
+            await i.response.defer(ephemeral=True)
+        except discord.InteractionResponded:
+            pass
+        except Exception:
+            pass
+
         # Charger l'event
         async with get_db() as db:
             async with db.execute(
@@ -6447,11 +6476,11 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
             ) as cur:
                 row = await cur.fetchone()
         if not row:
-            return await i.response.send_message("❌ Cet événement n'existe plus.", ephemeral=True)
+            return await i.followup.send("❌ Cet événement n'existe plus.", ephemeral=True)
         boss = json.loads(row[0]) if row[0] else {}
         ended = bool(row[1])
         if ended:
-            return await i.response.send_message("⏰ Cet événement est déjà terminé.", ephemeral=True)
+            return await i.followup.send("⏰ Cet événement est déjà terminé.", ephemeral=True)
 
         # Rate-limit 5s
         key = (i.guild.id, i.user.id)
@@ -6459,7 +6488,7 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
         last = _attack_cooldown.get(key, 0)
         if now_ts - last < 5:
             remaining = 5 - (now_ts - last)
-            return await i.response.send_message(
+            return await i.followup.send(
                 f"⏱️ Attends encore `{remaining:.1f}s` avant ta prochaine attaque !",
                 ephemeral=True,
             )
@@ -6467,7 +6496,7 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
 
         # Anti-bot / anti-self-attack
         if i.user.bot:
-            return await i.response.send_message("🤖 Les bots ne peuvent pas attaquer.", ephemeral=True)
+            return await i.followup.send("🤖 Les bots ne peuvent pas attaquer.", ephemeral=True)
 
         # Charger / créer participant
         inv = await _get_or_create_inventory(i.guild.id, i.user.id)
@@ -6539,7 +6568,7 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
 
         # Réponse immédiate à l'attaque
         crit_str = " 🌟 **CRITIQUE !**" if is_crit else ""
-        await i.response.send_message(
+        await i.followup.send(
             f"⚔️ Tu infliges `{damage}` dégâts au boss !{crit_str}",
             ephemeral=True,
         )
@@ -6568,8 +6597,12 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
         print(f"[_handle_boss_attack] {ex}")
         import traceback; traceback.print_exc()
         try:
-            if not i.response.is_done():
-                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            # Tente followup d'abord (defer fait), sinon response
+            try:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
         except Exception:
             pass
 
@@ -7696,16 +7729,69 @@ _personal_event_last: dict[tuple[int, int], float] = {}
 _personal_event_hourly: dict[int, list[float]] = {}
 
 
-class PersonalEventOpenView(View):
-    """View persistante : ping en channel + bouton qui ouvre l'event en EPHEMERAL.
+async def _delete_personal_event_message(log_id: int):
+    """Supprime le message original (DM ou channel) d'un event personnel terminé."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT dm_channel_id, dm_message_id, channel_id, channel_message_id FROM personal_events_log WHERE id=?',
+                (log_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return
+        dm_ch_id, dm_msg_id, ch_id, ch_msg_id = row
 
-    Seul l'utilisateur ciblé peut cliquer (vérification dans le callback).
+        # DM en priorité
+        if dm_ch_id and dm_msg_id:
+            try:
+                dm_ch = bot.get_channel(int(dm_ch_id)) or await bot.fetch_channel(int(dm_ch_id))
+                if dm_ch:
+                    msg = await dm_ch.fetch_message(int(dm_msg_id))
+                    await msg.delete()
+                    return
+            except Exception as ex:
+                print(f"[_delete_personal_event_message DM] {ex}")
+
+        # Fallback channel
+        if ch_id and ch_msg_id:
+            try:
+                ch = bot.get_channel(int(ch_id))
+                if ch:
+                    msg = await ch.fetch_message(int(ch_msg_id))
+                    await msg.delete()
+            except Exception as ex:
+                print(f"[_delete_personal_event_message channel] {ex}")
+    except Exception as ex:
+        print(f"[_delete_personal_event_message] {ex}")
+
+
+async def _mark_personal_event_completed(guild_id: int, user_id: int, log_id: int):
+    """Marque l'event comme terminé + incrémente stats."""
+    try:
+        async with get_db() as db:
+            await db.execute('UPDATE personal_events_log SET claimed=1 WHERE id=?', (log_id,))
+            await db.execute(
+                'INSERT INTO player_event_stats(guild_id, user_id, personal_events_completed) VALUES(?,?,1) '
+                'ON CONFLICT(guild_id, user_id) DO UPDATE SET personal_events_completed = personal_events_completed + 1',
+                (guild_id, user_id),
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[_mark_personal_event_completed] {ex}")
+
+
+class PersonalEventOpenView(View):
+    """View PERSISTANTE (timeout=None) pour les événements personnels.
+
+    Persistance complète :
+    - custom_id contient le log_id qui suffit à reconstruire l'event
+    - À chaque clic, on relit la DB pour obtenir le contenu
+    - Survit aux restarts du bot
     """
 
-    def __init__(self, target_user_id: int, event_data: dict, event_log_id: int):
-        super().__init__(timeout=3600)  # expire après 1h
-        self.target_user_id = target_user_id
-        self.event_data = event_data
+    def __init__(self, event_log_id: int = 0):
+        super().__init__(timeout=None)
         self.event_log_id = event_log_id
         b = Button(
             label="🎯 Ouvrir mon événement",
@@ -7716,134 +7802,141 @@ class PersonalEventOpenView(View):
         self.add_item(b)
 
     async def _on_open(self, i: discord.Interaction):
+        # ACK immédiat avec defer pour éviter timeout (DB queries après)
         try:
-            if i.user.id != self.target_user_id:
-                return await i.response.send_message(
+            await i.response.defer(ephemeral=True)
+        except Exception:
+            pass
+
+        try:
+            # Récupérer event depuis DB
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT user_id, event_type, event_data_json, claimed FROM personal_events_log WHERE id=?',
+                    (self.event_log_id,),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row:
+                return await i.followup.send("❌ Cet événement n'existe plus.", ephemeral=True)
+            target_uid, ev_type, ev_data_json, claimed = row
+
+            if i.user.id != int(target_uid):
+                return await i.followup.send(
                     "🔒 Cet événement personnel n'est pas pour toi !",
                     ephemeral=True,
                 )
+            if claimed:
+                return await i.followup.send(
+                    "⚠️ Tu as déjà récupéré cet événement.",
+                    ephemeral=True,
+                )
 
-            ev_type = self.event_data.get('type', 'gift')
+            try:
+                ev_data = json.loads(ev_data_json) if ev_data_json else {}
+            except Exception:
+                ev_data = {}
 
+            # Détecter si on est en DM ou en channel guild
+            in_dm = (i.guild is None)
+            guild_id = i.user.mutual_guilds[0].id if (in_dm and i.user.mutual_guilds) else (i.guild.id if i.guild else 0)
+            if in_dm:
+                # Récupérer le guild_id depuis la DB
+                async with get_db() as db:
+                    async with db.execute(
+                        'SELECT guild_id FROM personal_events_log WHERE id=?', (self.event_log_id,),
+                    ) as cur:
+                        r2 = await cur.fetchone()
+                    if r2:
+                        guild_id = int(r2[0])
+
+            # Type : gift et tip → reward direct
             if ev_type == 'gift':
-                # Reward immédiat
-                coins = int(self.event_data.get('coins', 50))
+                coins = int(ev_data.get('coins', 50))
                 try:
-                    await add_coins(i.guild.id, i.user.id, coins)
+                    await add_coins(guild_id, i.user.id, coins)
                 except Exception:
                     pass
                 e = discord.Embed(
-                    title=self.event_data.get('title', '🎁 Cadeau'),
-                    description=(
-                        f"🎉 **Tu reçois `{coins}` 🪙 !**\n\n"
-                        f"_Profite bien et reviens plus tard pour d'autres cadeaux..._"
-                    ),
+                    title=ev_data.get('title', '🎁 Cadeau'),
+                    description=f"🎉 **Tu reçois `{coins}` 🪙 !**",
                     color=0x57F287,
                 )
                 e.set_footer(text=events2026.get_help_footer("event_end"))
-                await i.response.send_message(embed=e, ephemeral=True)
-                # Désactiver le bouton sur le message channel
-                self._disable_buttons("✅ Récupéré")
-                try:
-                    await i.message.edit(view=self)
-                except Exception:
-                    pass
-                await self._mark_completed(i.guild.id, i.user.id)
+                await i.followup.send(embed=e, ephemeral=True)
+                await _mark_personal_event_completed(guild_id, i.user.id, self.event_log_id)
+                # Supprime le message original (DM ou channel)
+                asyncio.create_task(_delete_personal_event_message(self.event_log_id))
                 return
 
             if ev_type == 'tip':
-                coins = int(self.event_data.get('coins', 50))
+                coins = int(ev_data.get('coins', 50))
                 try:
-                    await add_coins(i.guild.id, i.user.id, coins)
+                    await add_coins(guild_id, i.user.id, coins)
                 except Exception:
                     pass
                 e = discord.Embed(
-                    title=self.event_data.get('title', '💡 Conseil'),
+                    title=ev_data.get('title', '💡 Conseil'),
                     description=(
-                        f"{self.event_data.get('description', '')}\n\n"
+                        f"{ev_data.get('description', '')}\n\n"
                         f"_Merci d'avoir lu !_ **+`{coins}` 🪙**"
                     ),
                     color=0x3498DB,
                 )
                 e.set_footer(text=events2026.get_help_footer("event_end"))
-                await i.response.send_message(embed=e, ephemeral=True)
-                self._disable_buttons("✅ Lu")
-                try:
-                    await i.message.edit(view=self)
-                except Exception:
-                    pass
-                await self._mark_completed(i.guild.id, i.user.id)
+                await i.followup.send(embed=e, ephemeral=True)
+                await _mark_personal_event_completed(guild_id, i.user.id, self.event_log_id)
+                asyncio.create_task(_delete_personal_event_message(self.event_log_id))
                 return
 
             if ev_type in ('math', 'riddle'):
-                # Embed avec 4 boutons réponses
-                answers = self.event_data.get('answers', [])
-                correct_idx = int(self.event_data.get('correct_idx', 0))
-                reward = int(self.event_data.get('reward', 100))
+                answers = ev_data.get('answers', [])
+                correct_idx = int(ev_data.get('correct_idx', 0))
+                reward = int(ev_data.get('reward', 100))
                 v = _PersonalQuestionView(
-                    target_user_id=self.target_user_id,
+                    log_id=self.event_log_id,
+                    target_user_id=i.user.id,
+                    guild_id=guild_id,
                     answers=answers,
                     correct_idx=correct_idx,
                     reward=reward,
-                    parent_view=self,
                 )
                 e = discord.Embed(
-                    title=self.event_data.get('title', '❓'),
+                    title=ev_data.get('title', '❓'),
                     description=(
-                        f"**{self.event_data.get('description', '')}**\n\n"
+                        f"**{ev_data.get('description', '')}**\n\n"
                         f"_Choisis la bonne réponse. Récompense : `{reward}` 🪙_"
                     ),
                     color=0xF1C40F,
                 )
-                await i.response.send_message(embed=e, view=v, ephemeral=True)
+                await i.followup.send(embed=e, view=v, ephemeral=True)
                 return
 
-            await i.response.send_message("❌ Type d'événement inconnu.", ephemeral=True)
+            await i.followup.send("❌ Type d'événement inconnu.", ephemeral=True)
         except Exception as ex:
             print(f"[PersonalEventOpenView _on_open] {ex}")
+            import traceback; traceback.print_exc()
             try:
-                if not i.response.is_done():
-                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
             except Exception:
                 pass
 
-    def _disable_buttons(self, label: str = "✅ Terminé"):
-        for child in self.children:
-            child.disabled = True
-            child.label = label
-
-    async def _mark_completed(self, guild_id: int, user_id: int):
-        try:
-            async with get_db() as db:
-                await db.execute(
-                    'UPDATE personal_events_log SET claimed=1 WHERE id=?',
-                    (self.event_log_id,),
-                )
-                await db.execute(
-                    'INSERT INTO player_event_stats(guild_id, user_id, personal_events_completed) VALUES(?,?,1) '
-                    'ON CONFLICT(guild_id, user_id) DO UPDATE SET personal_events_completed = personal_events_completed + 1',
-                    (guild_id, user_id),
-                )
-                await db.commit()
-        except Exception:
-            pass
-
 
 class _PersonalQuestionView(View):
-    """View interne pour les questions personnelles (math/riddle)."""
+    """View pour répondre aux questions math/riddle (timeout court car ephemeral)."""
 
-    def __init__(self, target_user_id: int, answers: list, correct_idx: int, reward: int, parent_view):
-        super().__init__(timeout=120)
+    def __init__(self, log_id: int, target_user_id: int, guild_id: int, answers: list, correct_idx: int, reward: int):
+        super().__init__(timeout=180)  # 3 min pour répondre
+        self.log_id = log_id
         self.target_user_id = target_user_id
+        self.guild_id = guild_id
         self.correct_idx = correct_idx
         self.reward = reward
-        self.parent_view = parent_view
         self.answered = False
         for idx, ans in enumerate(answers[:4]):
             b = Button(
-                label=f"{chr(ord('A') + idx)}. {ans[:60]}",
+                label=f"{chr(ord('A') + idx)}. {str(ans)[:60]}",
                 style=discord.ButtonStyle.secondary,
-                custom_id=f"peq_{idx}",
+                custom_id=f"peq_{log_id}_{idx}",
             )
             b.callback = (lambda ix, idx_local=idx: self._on_answer(ix, idx_local))
             self.add_item(b)
@@ -7857,12 +7950,10 @@ class _PersonalQuestionView(View):
             self.answered = True
 
             if idx == self.correct_idx:
-                # Bonne réponse
                 try:
-                    await add_coins(i.guild.id, i.user.id, self.reward)
+                    await add_coins(self.guild_id, i.user.id, self.reward)
                 except Exception:
                     pass
-                # Style victorieux
                 for c_idx, child in enumerate(self.children):
                     child.disabled = True
                     if c_idx == self.correct_idx:
@@ -7879,7 +7970,11 @@ class _PersonalQuestionView(View):
                 )
                 await i.response.edit_message(embed=e, view=self)
             else:
-                # Mauvaise
+                consolation = 25
+                try:
+                    await add_coins(self.guild_id, i.user.id, consolation)
+                except Exception:
+                    pass
                 for c_idx, child in enumerate(self.children):
                     child.disabled = True
                     if c_idx == idx:
@@ -7888,12 +7983,6 @@ class _PersonalQuestionView(View):
                     elif c_idx == self.correct_idx:
                         child.style = discord.ButtonStyle.success
                         child.label = f"{chr(ord('A') + c_idx)} ✓"
-
-                consolation = 25  # consolation
-                try:
-                    await add_coins(i.guild.id, i.user.id, consolation)
-                except Exception:
-                    pass
 
                 e = discord.Embed(
                     title="❌ Mauvaise réponse",
@@ -7905,14 +7994,9 @@ class _PersonalQuestionView(View):
                 )
                 await i.response.edit_message(embed=e, view=self)
 
-            # Marquer comme completed
-            if self.parent_view:
-                try:
-                    self.parent_view._disable_buttons("✅ Répondu")
-                    # Note : on ne peut pas edit le parent message ici depuis l'ephemeral
-                    await self.parent_view._mark_completed(i.guild.id, i.user.id)
-                except Exception:
-                    pass
+            # Mark completed + delete original message
+            await _mark_personal_event_completed(self.guild_id, i.user.id, self.log_id)
+            asyncio.create_task(_delete_personal_event_message(self.log_id))
         except Exception as ex:
             print(f"[_PersonalQuestionView _on_answer] {ex}")
             try:
@@ -7983,55 +8067,101 @@ async def personal_event_dispatcher():
 
                 target = random.choice(candidates)
 
-                # Trouver le salon où il a posté en dernier (pour la visibilité)
-                # Fallback : premier salon où le bot peut écrire
-                target_channel = None
-                async with get_db() as db:
-                    async with db.execute(
-                        'SELECT channel_id FROM member_activity WHERE guild_id=? AND user_id=? AND activity_type=\'message\' '
-                        'ORDER BY created_at DESC LIMIT 1',
-                        (guild.id, target.id),
-                    ) as cur:
-                        r = await cur.fetchone()
-                if r:
-                    target_channel = guild.get_channel(int(r[0]))
-                if not target_channel:
-                    # Trouver n'importe quel salon writable
-                    for ch in guild.text_channels:
-                        if ch.permissions_for(guild.me).send_messages and ch.permissions_for(target).read_messages:
-                            target_channel = ch
-                            break
-                if not target_channel:
-                    continue
-
                 # Générer l'event
                 ev_data = events2026.random_personal_event()
 
-                # Log en DB
+                # Log en DB avec event_data_json (pour persistance)
                 async with get_db() as db:
                     cur = await db.execute(
-                        'INSERT INTO personal_events_log(guild_id, user_id, event_type) VALUES(?,?,?)',
-                        (guild.id, target.id, ev_data.get('type', 'gift')),
+                        'INSERT INTO personal_events_log(guild_id, user_id, event_type, event_data_json) VALUES(?,?,?,?)',
+                        (guild.id, target.id, ev_data.get('type', 'gift'), json.dumps(ev_data)),
                     )
                     log_id = cur.lastrowid
                     await db.commit()
 
-                # Envoyer le ping
-                v = PersonalEventOpenView(target.id, ev_data, log_id)
+                # Construire l'embed d'intro (envoyé en DM ou channel)
+                intro_embed = discord.Embed(
+                    title=ev_data.get('title', '🎯 Événement personnel'),
+                    description=(
+                        f"Bonjour {target.mention} ! Tu as été choisi pour un événement personnel sur **{guild.name}**.\n\n"
+                        f"_{ev_data.get('description', '')[:200]}_\n\n"
+                        f"Clique sur **🎯 Ouvrir mon événement** pour participer !"
+                    ),
+                    color=0x5865F2,
+                )
+                intro_embed.set_footer(text=f"💡 Cet événement n'apparaît qu'ici — il disparaîtra une fois terminé.")
+
+                v = PersonalEventOpenView(log_id)
+                # Enregistrer la view persistante pour qu'elle survive aux restarts
                 try:
-                    await target_channel.send(
-                        content=(
-                            f"🎯 {target.mention} — un événement personnel t'attend !\n"
-                            f"_Clique sur le bouton ci-dessous pour l'ouvrir (seul toi peux le voir)._"
-                        ),
-                        view=v,
-                        allowed_mentions=discord.AllowedMentions(users=[target], roles=False, everyone=False),
-                    )
+                    bot.add_view(v)
+                except Exception:
+                    pass
+
+                # ── 1. Essayer en DM (privé, propre) ──
+                sent_dm = False
+                try:
+                    dm_msg = await target.send(embed=intro_embed, view=v)
+                    # Stocker l'ID du DM en base
+                    async with get_db() as db:
+                        await db.execute(
+                            'UPDATE personal_events_log SET dm_channel_id=?, dm_message_id=? WHERE id=?',
+                            (dm_msg.channel.id, dm_msg.id, log_id),
+                        )
+                        await db.commit()
+                    sent_dm = True
                     _personal_event_last[(guild.id, target.id)] = now_ts
                     hourly.append(now_ts)
-                    print(f"[PERSONAL EVENT] guild={guild.id} user={target.id} type={ev_data.get('type')}")
+                    print(f"[PERSONAL EVENT DM] guild={guild.id} user={target.id} type={ev_data.get('type')}")
+                except discord.Forbidden:
+                    pass  # DMs fermées — fallback en channel
                 except Exception as ex:
-                    print(f"[personal event send] {ex}")
+                    print(f"[personal event DM] {ex}")
+
+                # ── 2. Fallback channel SI DM fermé (avec auto-delete) ──
+                if not sent_dm:
+                    # Trouver son salon actif
+                    target_channel = None
+                    async with get_db() as db:
+                        async with db.execute(
+                            'SELECT channel_id FROM member_activity WHERE guild_id=? AND user_id=? AND activity_type=\'message\' '
+                            'ORDER BY created_at DESC LIMIT 1',
+                            (guild.id, target.id),
+                        ) as cur:
+                            r = await cur.fetchone()
+                    if r:
+                        target_channel = guild.get_channel(int(r[0]))
+                    if not target_channel:
+                        for ch in guild.text_channels:
+                            if ch.permissions_for(guild.me).send_messages and ch.permissions_for(target).read_messages:
+                                target_channel = ch
+                                break
+                    if not target_channel:
+                        continue
+
+                    try:
+                        ch_msg = await target_channel.send(
+                            content=(
+                                f"🎯 {target.mention} — un événement personnel t'attend !\n"
+                                f"_Ce message disparaîtra dans 10 minutes._ "
+                                f"_💡 Active tes DMs pour recevoir ces événements en privé._"
+                            ),
+                            embed=intro_embed,
+                            view=v,
+                            allowed_mentions=discord.AllowedMentions(users=[target], roles=False, everyone=False),
+                            delete_after=600,  # 10 min
+                        )
+                        async with get_db() as db:
+                            await db.execute(
+                                'UPDATE personal_events_log SET channel_id=?, channel_message_id=? WHERE id=?',
+                                (target_channel.id, ch_msg.id, log_id),
+                            )
+                            await db.commit()
+                        _personal_event_last[(guild.id, target.id)] = now_ts
+                        hourly.append(now_ts)
+                        print(f"[PERSONAL EVENT CHAN] guild={guild.id} user={target.id} type={ev_data.get('type')}")
+                    except Exception as ex:
+                        print(f"[personal event channel send] {ex}")
             except Exception as ex:
                 print(f"[personal_event_dispatcher guild={guild.id}] {ex}")
     except Exception as ex:
@@ -8509,13 +8639,35 @@ async def restore_active_events():
                 # qui contiennent leur custom_id. Au reboot, on ne peut pas restaurer
                 # les boutons sans relancer le spawner / runner. Solution : on les ignore
                 # (le timeout_checker terminera l'event).
-                # Note : boss raid persiste car le bouton est sur UN message stable.
             except Exception as ex:
                 print(f"[restore_active_events event_id={event_id}] {ex}")
         if rows:
             print(f"[EVENTS] {len(rows)} événement(s) actif(s) restauré(s)")
     except Exception as ex:
         print(f"[restore_active_events] {ex}")
+
+
+async def restore_active_personal_events():
+    """Au boot : restore les PersonalEventOpenView persistantes pour les events non-claim."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT id FROM personal_events_log WHERE claimed=0 '
+                'AND datetime(created_at) > datetime("now", "-7 days")',
+            ) as cur:
+                rows = await cur.fetchall()
+        count = 0
+        for (log_id,) in rows:
+            try:
+                v = PersonalEventOpenView(int(log_id))
+                bot.add_view(v)
+                count += 1
+            except Exception as ex:
+                print(f"[restore_active_personal_events log_id={log_id}] {ex}")
+        if count:
+            print(f"[PERSONAL EVENTS] {count} event(s) personnel(s) restauré(s)")
+    except Exception as ex:
+        print(f"[restore_active_personal_events] {ex}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -32106,6 +32258,10 @@ async def on_ready():
         await restore_active_events()
     except Exception as ex:
         print(f"[on_ready restore_active_events] {ex}")
+    try:
+        await restore_active_personal_events()
+    except Exception as ex:
+        print(f"[on_ready restore_active_personal_events] {ex}")
 
     print(f"✅ {bot.user.name} v28 prêt!")
     print(f"🌐 Serveurs: {len(bot.guilds)}")
