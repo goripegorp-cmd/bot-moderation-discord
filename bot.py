@@ -35675,6 +35675,9 @@ async def on_ready():
         weekly_recap_task.start()
     if not conv_starter_task.is_running():
         conv_starter_task.start()
+    # Phase 54 : alertes auto owner
+    if not owner_alerts_task.is_running():
+        owner_alerts_task.start()
     # Boot recovery : supprimer tous les messages expirés pendant le downtime
     try:
         await _run_persistent_cleanup_once()
@@ -59801,6 +59804,304 @@ async def _conv_starter_wait():
 
 
 # ─── GREETING JOURNALIER (1er message du jour) ───────────────────────────────
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 54 — OWNER OBSERVABILITÉ : Health Dashboard + Alertes auto
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── HEALTH DASHBOARD (panel owner avec stats clés) ──────────────────────────
+
+
+async def _compute_health_metrics(guild) -> dict:
+    """Calcule les métriques santé du serveur."""
+    try:
+        gid = guild.id
+        m = {}
+        # Membres totaux
+        m["member_count"] = guild.member_count or 0
+        # Nouveaux membres 7j / 30j
+        async with get_db() as db:
+            try:
+                async with db.execute(
+                    "SELECT SUM(new_members), SUM(leaves) FROM daily_guild_stats "
+                    "WHERE guild_id=? AND date >= date('now', '-7 days')",
+                    (gid,),
+                ) as cur:
+                    r = await cur.fetchone()
+                m["new_7d"] = int(r[0] or 0) if r else 0
+                m["leaves_7d"] = int(r[1] or 0) if r else 0
+            except Exception:
+                m["new_7d"] = 0
+                m["leaves_7d"] = 0
+            try:
+                async with db.execute(
+                    "SELECT SUM(new_members), SUM(leaves) FROM daily_guild_stats "
+                    "WHERE guild_id=? AND date >= date('now', '-30 days')",
+                    (gid,),
+                ) as cur:
+                    r = await cur.fetchone()
+                m["new_30d"] = int(r[0] or 0) if r else 0
+                m["leaves_30d"] = int(r[1] or 0) if r else 0
+            except Exception:
+                m["new_30d"] = 0
+                m["leaves_30d"] = 0
+        # Messages 7j / 30j
+        cutoff_7d = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        cutoff_30d = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT COUNT(*) FROM member_activity WHERE guild_id=? "
+                    "AND activity_type='message' AND created_at>?",
+                    (gid, cutoff_7d),
+                ) as cur:
+                    m["msgs_7d"] = int((await cur.fetchone() or [0])[0])
+                async with db.execute(
+                    "SELECT COUNT(*) FROM member_activity WHERE guild_id=? "
+                    "AND activity_type='message' AND created_at>?",
+                    (gid, cutoff_30d),
+                ) as cur:
+                    m["msgs_30d"] = int((await cur.fetchone() or [0])[0])
+                # Top 5 actifs 7j
+                async with db.execute(
+                    "SELECT user_id, COUNT(*) AS c FROM member_activity WHERE guild_id=? "
+                    "AND activity_type='message' AND created_at>? "
+                    "GROUP BY user_id ORDER BY c DESC LIMIT 5",
+                    (gid, cutoff_7d),
+                ) as cur:
+                    m["top_active"] = [(int(r[0]), int(r[1])) for r in await cur.fetchall()]
+                # Users à risque : level >=5 mais aucun message en 7j
+                async with db.execute(
+                    "SELECT e.user_id FROM economy e WHERE e.guild_id=? AND e.level>=5 "
+                    "AND e.user_id NOT IN (SELECT DISTINCT user_id FROM member_activity "
+                    "WHERE guild_id=? AND created_at>?) LIMIT 10",
+                    (gid, gid, cutoff_7d),
+                ) as cur:
+                    m["at_risk"] = [int(r[0]) for r in await cur.fetchall()]
+                # Events actifs
+                async with db.execute(
+                    "SELECT COUNT(*) FROM events WHERE guild_id=? AND ended=0",
+                    (gid,),
+                ) as cur:
+                    m["events_active"] = int((await cur.fetchone() or [0])[0])
+                # Missions actives
+                async with db.execute(
+                    "SELECT COUNT(*) FROM missions WHERE guild_id=? AND status='active'",
+                    (gid,),
+                ) as cur:
+                    m["missions_active"] = int((await cur.fetchone() or [0])[0])
+                # Predictions ouvertes
+                async with db.execute(
+                    "SELECT COUNT(*) FROM predictions WHERE guild_id=? AND status='open'",
+                    (gid,),
+                ) as cur:
+                    m["predictions_open"] = int((await cur.fetchone() or [0])[0])
+                # Alliance count
+                try:
+                    async with db.execute(
+                        "SELECT COUNT(*) FROM alliances WHERE guild_id=?",
+                        (gid,),
+                    ) as cur:
+                        m["alliances"] = int((await cur.fetchone() or [0])[0])
+                except Exception:
+                    m["alliances"] = 0
+        except Exception as ex:
+            print(f"[health metrics] {ex}")
+        # Net flow 7j et 30j
+        m["net_7d"] = m["new_7d"] - m["leaves_7d"]
+        m["net_30d"] = m["new_30d"] - m["leaves_30d"]
+        return m
+    except Exception as ex:
+        print(f"[_compute_health_metrics] {ex}")
+        return {}
+
+
+async def _open_health_dashboard(i: discord.Interaction):
+    """Slash /admin_health → panel owner avec stats santé."""
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        m = await _compute_health_metrics(i.guild)
+
+        # Top actifs formatés
+        top_lines = []
+        for idx, (uid, count) in enumerate(m.get("top_active", [])[:5]):
+            member = i.guild.get_member(uid)
+            mname = member.display_name if member else f"User {uid}"
+            top_lines.append(f"`{idx+1}.` **{mname}** — `{count}` msgs")
+
+        # At risk
+        risk_lines = []
+        for uid in m.get("at_risk", [])[:5]:
+            member = i.guild.get_member(uid)
+            mname = member.display_name if member else f"User {uid}"
+            risk_lines.append(f"⚠️ {mname}")
+
+        # Tendance net
+        net_7d = m.get("net_7d", 0)
+        trend = "📈" if net_7d > 0 else ("📉" if net_7d < 0 else "➡️")
+
+        e = discord.Embed(
+            title=f"📊 Health Dashboard — {i.guild.name}",
+            description=(
+                f"## 👥 Membres\n"
+                f"**Total :** `{m.get('member_count', 0)}`\n"
+                f"**7 derniers jours :** +`{m.get('new_7d', 0)}` / -`{m.get('leaves_7d', 0)}` (net {trend} `{net_7d:+d}`)\n"
+                f"**30 derniers jours :** +`{m.get('new_30d', 0)}` / -`{m.get('leaves_30d', 0)}` (net `{m.get('net_30d', 0):+d}`)\n\n"
+                f"## 💬 Activité\n"
+                f"**Messages 7j :** `{m.get('msgs_7d', 0):,}` ({int(m.get('msgs_7d', 0)/7)}/jour)\n"
+                f"**Messages 30j :** `{m.get('msgs_30d', 0):,}` ({int(m.get('msgs_30d', 0)/30)}/jour)\n\n"
+                f"## 🏆 Top 5 actifs (7j)\n"
+                + ("\n".join(top_lines) if top_lines else "_Aucun_") +
+                f"\n\n## ⚠️ Membres à risque (level≥5, 0 msg 7j)\n"
+                + ("\n".join(risk_lines) if risk_lines else "_Aucun, parfait !_") +
+                f"\n\n## 🎯 Systèmes actifs\n"
+                f"⚔️ Events en cours : `{m.get('events_active', 0)}`\n"
+                f"🎯 Missions actives : `{m.get('missions_active', 0)}`\n"
+                f"🎲 Prédictions ouvertes : `{m.get('predictions_open', 0)}`\n"
+                f"🤝 Alliances : `{m.get('alliances', 0)}`\n"
+            ),
+            color=0x57F287 if net_7d >= 0 else 0xE74C3C,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text="Phase 54 · Owner Dashboard · Re-clique pour rafraîchir")
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        print(f"[_open_health_dashboard] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="admin_health",
+    description="📊 [Owner] Dashboard santé du serveur (stats, top actifs, members à risque)",
+)
+async def admin_health_cmd(i: discord.Interaction):
+    await _open_health_dashboard(i)
+
+
+# ─── ALERTES AUTO OWNER (DM si perte membres / silence hub) ──────────────────
+
+
+async def _send_owner_alert(guild, title: str, description: str, color: int = 0xE74C3C):
+    """Envoie un DM d'alerte à l'owner du serveur."""
+    try:
+        owner = guild.owner
+        if not owner:
+            return
+        e = discord.Embed(
+            title=f"🚨 {title}",
+            description=description + f"\n\n_Alerte automatique de **{guild.name}**._",
+            color=color,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text="Phase 54 · Alertes auto owner")
+        try:
+            await owner.send(embed=e)
+            print(f"[owner_alert] guild={guild.id} sent: {title}")
+        except discord.Forbidden:
+            print(f"[owner_alert] DM fermé owner={owner.id}")
+        except Exception as ex:
+            print(f"[owner_alert send] {ex}")
+    except Exception as ex:
+        print(f"[_send_owner_alert] {ex}")
+
+
+# Cache pour ne pas spam la même alerte 2x dans la même journée
+_owner_alert_log: dict = {}  # {(guild_id, alert_key): date_str}
+
+
+def _alert_already_sent_today(guild_id: int, alert_key: str) -> bool:
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return _owner_alert_log.get((guild_id, alert_key)) == today
+
+
+def _mark_alert_sent(guild_id: int, alert_key: str):
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    _owner_alert_log[(guild_id, alert_key)] = today
+
+
+@tasks.loop(hours=4)
+async def owner_alerts_task():
+    """Toutes les 4h, check les conditions d'alerte et DM owner si déclenché."""
+    try:
+        for guild in bot.guilds:
+            try:
+                c = await cfg(guild.id)
+                if not c.get('event_enabled', False):
+                    continue
+
+                # 1) Perte nette ≥5 membres dans les dernières 24h
+                if not _alert_already_sent_today(guild.id, "member_loss"):
+                    async with get_db() as db:
+                        async with db.execute(
+                            "SELECT SUM(new_members), SUM(leaves) FROM daily_guild_stats "
+                            "WHERE guild_id=? AND date >= date('now', '-1 days')",
+                            (guild.id,),
+                        ) as cur:
+                            r = await cur.fetchone()
+                    if r:
+                        new = int(r[0] or 0)
+                        leaves = int(r[1] or 0)
+                        net = new - leaves
+                        if net <= -5:
+                            await _send_owner_alert(
+                                guild,
+                                "Perte nette de membres",
+                                (
+                                    f"Le serveur a perdu **{abs(net)} membres net** "
+                                    f"dans les dernières 24h ({new} arrivés / {leaves} partis).\n\n"
+                                    f"💡 _Vérifie les logs de modération, les bans récents, "
+                                    f"ou si un raid a été repoussé. C'est peut-être aussi normal "
+                                    f"(post-pic d'audience)._"
+                                ),
+                                color=0xE74C3C,
+                            )
+                            _mark_alert_sent(guild.id, "member_loss")
+
+                # 2) Silence du hub : aucun message dans hub depuis 24h+
+                hub_id = int(c.get('hub_channel', 0) or 0)
+                if hub_id and not _alert_already_sent_today(guild.id, "hub_silence"):
+                    hub_ch = guild.get_channel(hub_id)
+                    if hub_ch:
+                        cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+                        async with get_db() as db:
+                            async with db.execute(
+                                "SELECT 1 FROM member_activity WHERE guild_id=? AND channel_id=? "
+                                "AND activity_type='message' AND created_at>? LIMIT 1",
+                                (guild.id, hub_ch.id, cutoff),
+                            ) as cur:
+                                row = await cur.fetchone()
+                        if not row:
+                            await _send_owner_alert(
+                                guild,
+                                "Hub silencieux depuis 24h",
+                                (
+                                    f"Aucun message dans <#{hub_id}> depuis **24h+**.\n\n"
+                                    f"💡 _Tu peux :_\n"
+                                    f"• _Lancer un event manuellement_\n"
+                                    f"• _Vérifier que les tasks d'engagement tournent_\n"
+                                    f"• _Forcer un NPC à parler via `/npc_force_post`_"
+                                ),
+                                color=0xF39C12,
+                            )
+                            _mark_alert_sent(guild.id, "hub_silence")
+            except Exception as ex:
+                print(f"[owner_alerts guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[owner_alerts_task] {ex}")
+
+
+@owner_alerts_task.before_loop
+async def _owner_alerts_wait():
+    await bot.wait_until_ready()
 
 
 async def _maybe_greet_user_today(msg) -> None:
