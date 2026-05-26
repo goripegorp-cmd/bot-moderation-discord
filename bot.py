@@ -703,8 +703,13 @@ def validate_config_value(key, value):
 
 async def db_init():
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("PRAGMA journal_mode=WAL")
-        await db.execute("PRAGMA synchronous=NORMAL")
+        # ═══ Phase 44 : PRAGMA d'optimisation pour gros volume ═══
+        await db.execute("PRAGMA journal_mode=WAL")          # write-ahead log
+        await db.execute("PRAGMA synchronous=NORMAL")        # fsync moins fréquent
+        await db.execute("PRAGMA cache_size=-64000")         # 64 MB cache mémoire
+        await db.execute("PRAGMA temp_store=MEMORY")         # tables temp en RAM
+        await db.execute("PRAGMA mmap_size=268435456")       # 256 MB memory map
+        await db.execute("PRAGMA busy_timeout=5000")         # wait 5s avant lock fail
         await db.execute('CREATE TABLE IF NOT EXISTS guild_config(guild_id INTEGER PRIMARY KEY, data TEXT DEFAULT "{}")')
         await db.execute('CREATE TABLE IF NOT EXISTS immune_roles(guild_id INTEGER, role_id INTEGER, PRIMARY KEY(guild_id, role_id))')
         await db.execute('CREATE TABLE IF NOT EXISTS immune_users(guild_id INTEGER, user_id INTEGER, PRIMARY KEY(guild_id, user_id))')
@@ -1284,6 +1289,83 @@ async def db_init():
             celebrated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (guild_id, year_celebrated)
         )''')
+
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 44 — Daily Quest Push (proactif en DM) + tracking pushes
+        # ═══════════════════════════════════════════════════════════════════
+
+        # 1 ligne par (guild, user, day) pour tracker les pushes envoyés
+        await db.execute('''CREATE TABLE IF NOT EXISTS daily_quest_pushes (
+            guild_id INTEGER,
+            user_id INTEGER,
+            day TEXT,                          -- 'YYYY-MM-DD'
+            status TEXT DEFAULT 'pushed',      -- pushed / opened / later / done
+            pushed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_action_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            retry_after DATETIME,              -- pour 'later' : quand re-push possible
+            PRIMARY KEY (guild_id, user_id, day)
+        )''')
+
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 44 — INDEXES pour les requêtes hot path
+        # Tous IF NOT EXISTS, idempotents, créés une seule fois au boot
+        # ═══════════════════════════════════════════════════════════════════
+
+        _idx_statements = [
+            # activity_tracking : ORDER BY last_message DESC sur 200-500 rows
+            "CREATE INDEX IF NOT EXISTS idx_activity_tracking_last "
+            "ON activity_tracking(guild_id, last_message DESC)",
+            # member_activity : très hot (1 INSERT par message + SELECT par channel)
+            "CREATE INDEX IF NOT EXISTS idx_member_activity_guild_created "
+            "ON member_activity(guild_id, activity_type, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_member_activity_user_ch "
+            "ON member_activity(guild_id, user_id, channel_id, created_at DESC)",
+            # wakeup_log : SELECT par guild + cooldown 48h
+            "CREATE INDEX IF NOT EXISTS idx_wakeup_log_guild "
+            "ON wakeup_log(guild_id, last_mentioned_at)",
+            # comeback_dms : SELECT par guild + cooldown 7j
+            "CREATE INDEX IF NOT EXISTS idx_comeback_dms_guild "
+            "ON comeback_dms(guild_id, last_dm_at)",
+            # events : SELECT WHERE guild_id AND ended=0
+            "CREATE INDEX IF NOT EXISTS idx_events_guild_ended "
+            "ON events(guild_id, ended)",
+            # world_boss_attackers : ORDER BY damage_dealt DESC
+            "CREATE INDEX IF NOT EXISTS idx_wb_attackers_dmg "
+            "ON world_boss_attackers(world_boss_id, damage_dealt DESC)",
+            # world_bosses : WHERE guild_id AND ended=0
+            "CREATE INDEX IF NOT EXISTS idx_world_bosses_guild_ended "
+            "ON world_bosses(guild_id, ended)",
+            # flash_treasures : lookup par message_id + cleanup par ended/expires_at
+            "CREATE INDEX IF NOT EXISTS idx_flash_treasures_msg "
+            "ON flash_treasures(message_id)",
+            "CREATE INDEX IF NOT EXISTS idx_flash_treasures_ended "
+            "ON flash_treasures(guild_id, ended, expires_at)",
+            # daily_quest_progress : WHERE guild_id, user_id, day (PK couvre)
+            # mais une vue par day pour cleanup :
+            "CREATE INDEX IF NOT EXISTS idx_daily_quest_day "
+            "ON daily_quest_progress(day)",
+            # voice_chaos_log : cooldown 2h par vocal
+            "CREATE INDEX IF NOT EXISTS idx_voice_chaos_guild_at "
+            "ON voice_chaos_log(guild_id, applied_at)",
+            # achievements_unlocked : WHERE guild_id AND user_id (PK couvre)
+            # daily_riddles_log : SELECT par day
+            "CREATE INDEX IF NOT EXISTS idx_daily_riddles_day "
+            "ON daily_riddles_log(day)",
+            # tag_royale : WHERE guild_id AND ended=0 AND last_action_at
+            "CREATE INDEX IF NOT EXISTS idx_tag_royale_ended "
+            "ON tag_royale(guild_id, ended, last_action_at)",
+            # confessions : cleanup par sent_at
+            "CREATE INDEX IF NOT EXISTS idx_confessions_sent "
+            "ON confessions(guild_id, sent_at)",
+            # daily_quest_pushes : cleanup par day
+            "CREATE INDEX IF NOT EXISTS idx_quest_pushes_day "
+            "ON daily_quest_pushes(day)",
+        ]
+        for stmt in _idx_statements:
+            try:
+                await db.execute(stmt)
+            except Exception as ex:
+                print(f"[DB INDEX] {stmt[:60]}... → {ex}")
 
         # Migration : ajoute colonnes manquantes à player_event_stats si DB existe déjà
         try:
@@ -34648,6 +34730,11 @@ async def on_ready():
         bot.add_view(EveningRitualView())
     except Exception as ex:
         print(f"[on_ready add_view EveningRitualView] {ex}")
+    # Phase 44 — Daily Quest Push (DM persistent view)
+    try:
+        bot.add_view(DailyQuestPushView())
+    except Exception as ex:
+        print(f"[on_ready add_view DailyQuestPushView] {ex}")
     try:
         async with get_db() as db:
             async with db.execute('SELECT data FROM guild_config') as c:
@@ -34786,6 +34873,12 @@ async def on_ready():
         tag_royale_timeout_checker.start()
     if not server_anniversary_checker.is_running():
         server_anniversary_checker.start()
+
+    # Phase 44 : Daily Quest push proactif + DB optimizer
+    if not daily_quest_push_dispatcher.is_running():
+        daily_quest_push_dispatcher.start()
+    if not db_optimizer_task.is_running():
+        db_optimizer_task.start()
 
     print(f"✅ {bot.user.name} v28 prêt!")
     print(f"🌐 Serveurs: {len(bot.guilds)}")
@@ -48998,6 +49091,424 @@ async def _hub_on_events_live(self, i: discord.Interaction):
 
 EngagementHubView.__init__ = _patched_hub_init
 EngagementHubView._on_events_live = _hub_on_events_live
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 44 — DAILY QUEST PUSH PROACTIF + OPTIMISATION DB
+#  Le bot propose les quêtes en DM aux actifs — pas besoin de connaître /daily
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class DailyQuestPushView(View):
+    """View persistante envoyée en DM : 'Voir mes quêtes' / 'Plus tard'."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+        b1 = Button(
+            label="📋 Voir mes quêtes",
+            style=discord.ButtonStyle.success,
+            custom_id="qpush_open",
+        )
+        b1.callback = self._on_open
+        self.add_item(b1)
+        b2 = Button(
+            label="⏰ Plus tard",
+            style=discord.ButtonStyle.secondary,
+            custom_id="qpush_later",
+        )
+        b2.callback = self._on_later
+        self.add_item(b2)
+        b3 = Button(
+            label="🔕 Pas intéressé aujourd'hui",
+            style=discord.ButtonStyle.secondary,
+            custom_id="qpush_skip",
+        )
+        b3.callback = self._on_skip
+        self.add_item(b3)
+
+    async def _on_open(self, i: discord.Interaction):
+        """Ouvre le panel quêtes directement depuis le DM."""
+        if not await _safe_defer(i):
+            return
+        try:
+            # Trouver le guild_id de la session : on parse depuis le message contenu
+            # ou on prend un guild partagé. Plus robuste : DB lookup.
+            day = _today_str_p41()
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT guild_id FROM daily_quest_pushes WHERE user_id=? AND day=? ORDER BY pushed_at DESC LIMIT 1',
+                    (i.user.id, day),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row:
+                return await _safe_followup(i, content="❌ Aucun serveur trouvé pour tes quêtes.")
+            guild_id = int(row[0])
+            # Mark 'opened'
+            async with get_db() as db:
+                await db.execute(
+                    'UPDATE daily_quest_pushes SET status=?, last_action_at=CURRENT_TIMESTAMP '
+                    'WHERE guild_id=? AND user_id=? AND day=?',
+                    ('opened', guild_id, i.user.id, day),
+                )
+                await db.commit()
+            # Réutiliser _p41_open_daily : il a besoin d'un interaction avec guild context.
+            # En DM, i.guild est None. On bricole : on construit un message inline.
+            quests = await _ensure_today_quests(guild_id, i.user.id)
+            guild = bot.get_guild(guild_id)
+            guild_name = guild.name if guild else "le serveur"
+
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT current_streak, best_streak FROM user_streaks WHERE guild_id=? AND user_id=?',
+                    (guild_id, i.user.id),
+                ) as cur:
+                    streak_row = await cur.fetchone()
+            cur_streak = int(streak_row[0]) if streak_row else 0
+            best_streak = int(streak_row[1]) if streak_row else 0
+
+            e = discord.Embed(
+                title=f"📜 Tes quêtes du jour — {guild_name}",
+                description=(
+                    f"🔥 **Streak :** `{cur_streak}` jour{'s' if cur_streak != 1 else ''} "
+                    f"· Record : `{best_streak}`\n\n"
+                ),
+                color=0x5865F2,
+            )
+            for q in quests:
+                status_icon = "✅" if q['claimed'] else ("🎁" if q['completed'] else "⏳")
+                diff_emoji = {'easy': '🟢', 'medium': '🟡', 'hard': '🔴'}.get(q['difficulty'], '⚪')
+                bar = _make_progress_bar(q['progress'], q['target'])
+                e.add_field(
+                    name=f"{status_icon} {diff_emoji} {q['emoji']} {q['title']}",
+                    value=(
+                        f"{q['description']}\n{bar} `{q['progress']}/{q['target']}`\n"
+                        f"🪙 `{q['reward_coins']}` · ⭐ `{q['reward_xp']}` XP"
+                    ),
+                    inline=False,
+                )
+            e.set_footer(text=f"Reviens sur {guild_name} pour faire avancer tes quêtes !")
+            await _safe_followup(i, embed=e, view=DailyQuestView(guild_id, i.user.id))
+        except Exception as ex:
+            print(f"[DailyQuestPushView _on_open] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_later(self, i: discord.Interaction):
+        """Cooldown 6h avant re-push."""
+        if not await _safe_defer(i):
+            return
+        try:
+            day = _today_str_p41()
+            retry_after = (datetime.now(timezone.utc) + timedelta(hours=6)).isoformat()
+            async with get_db() as db:
+                await db.execute(
+                    'UPDATE daily_quest_pushes SET status=?, retry_after=?, last_action_at=CURRENT_TIMESTAMP '
+                    'WHERE user_id=? AND day=?',
+                    ('later', retry_after, i.user.id, day),
+                )
+                await db.commit()
+            await _safe_followup(
+                i,
+                content="⏰ Compris, je te rappellerai dans 6h. _Bonne journée !_",
+            )
+        except Exception as ex:
+            print(f"[DailyQuestPushView _on_later] {ex}")
+
+    async def _on_skip(self, i: discord.Interaction):
+        """Skip pour la journée entière."""
+        if not await _safe_defer(i):
+            return
+        try:
+            day = _today_str_p41()
+            async with get_db() as db:
+                await db.execute(
+                    'UPDATE daily_quest_pushes SET status=?, last_action_at=CURRENT_TIMESTAMP '
+                    'WHERE user_id=? AND day=?',
+                    ('done', i.user.id, day),
+                )
+                await db.commit()
+            await _safe_followup(
+                i,
+                content="🔕 Pas de souci. Plus de notifs aujourd'hui — tu peux toujours ouvrir le hub quand tu veux.",
+            )
+        except Exception as ex:
+            print(f"[DailyQuestPushView _on_skip] {ex}")
+
+
+async def _push_daily_quest_to_member(guild, member) -> bool:
+    """Envoie un DM à un membre pour lui proposer ses quêtes du jour.
+
+    Retourne True si envoyé, False si skipped (DM fermé, déjà push, etc.).
+    """
+    try:
+        c = await cfg(guild.id)
+        if not c.get('event_enabled', False):
+            return False
+        if not c.get('daily_quest_push_enabled', True):
+            return False
+
+        day = _today_str_p41()
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT status, retry_after FROM daily_quest_pushes '
+                'WHERE guild_id=? AND user_id=? AND day=?',
+                (guild.id, member.id, day),
+            ) as cur:
+                row = await cur.fetchone()
+
+        if row:
+            status, retry_after = row
+            # Si déjà 'opened' ou 'done' → ne pas re-push
+            if status in ('opened', 'done'):
+                return False
+            # Si 'later' → check retry_after
+            if status == 'later' and retry_after:
+                try:
+                    ra_dt = datetime.fromisoformat(retry_after)
+                    if datetime.now(timezone.utc) < ra_dt:
+                        return False
+                except Exception:
+                    pass
+
+        # Vérifier que le membre a déjà 1+ message d'historique (filtrer les fantômes
+        # qui n'ont jamais parlé)
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT total_messages FROM activity_tracking WHERE guild_id=? AND user_id=?',
+                (guild.id, member.id),
+            ) as cur:
+                ar = await cur.fetchone()
+        if not ar or int(ar[0] or 0) < 3:
+            return False
+
+        # Ensure quests exist
+        quests = await _ensure_today_quests(guild.id, member.id)
+        if not quests:
+            return False
+        # Skip si TOUTES déjà claim
+        if all(q['claimed'] for q in quests):
+            return False
+
+        e = discord.Embed(
+            title=f"📜 Tes 3 quêtes du jour sur {guild.name}",
+            description=(
+                f"Salut {member.display_name} ! Voici tes défis du jour :\n\n"
+                + "\n".join(
+                    f"{q['emoji']} **{q['title']}** — {q['description']}\n"
+                    f"🪙 `{q['reward_coins']}` · ⭐ `{q['reward_xp']}` XP"
+                    for q in quests
+                )
+                + f"\n\nMaintiens ton streak quotidien pour des bonus croissants ! "
+                f"Tu peux ignorer ce message si pas envie aujourd'hui."
+            ),
+            color=0x5865F2,
+        )
+        e.set_footer(text=f"{guild.name} · Tu peux désactiver ces rappels avec /notify niveau:🔕")
+
+        try:
+            await member.send(embed=e, view=DailyQuestPushView())
+        except discord.Forbidden:
+            # DM fermé → marquer 'done' pour ne pas re-tenter aujourd'hui
+            async with get_db() as db:
+                await db.execute(
+                    'INSERT INTO daily_quest_pushes(guild_id, user_id, day, status) '
+                    'VALUES(?,?,?,?) '
+                    'ON CONFLICT(guild_id, user_id, day) DO UPDATE SET status=?',
+                    (guild.id, member.id, day, 'done', 'done'),
+                )
+                await db.commit()
+            return False
+        except Exception as ex:
+            print(f"[_push_daily_quest_to_member send] {ex}")
+            return False
+
+        # Insérer ou update le statut 'pushed'
+        async with get_db() as db:
+            await db.execute(
+                'INSERT INTO daily_quest_pushes(guild_id, user_id, day, status, pushed_at, last_action_at) '
+                'VALUES(?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) '
+                'ON CONFLICT(guild_id, user_id, day) DO UPDATE SET '
+                'status=?, pushed_at=CURRENT_TIMESTAMP, last_action_at=CURRENT_TIMESTAMP, retry_after=NULL',
+                (guild.id, member.id, day, 'pushed', 'pushed'),
+            )
+            await db.commit()
+        print(f"[QUEST PUSH] guild={guild.id} user={member.id}")
+        return True
+    except Exception as ex:
+        print(f"[_push_daily_quest_to_member] {ex}")
+        return False
+
+
+@tasks.loop(hours=2)
+async def daily_quest_push_dispatcher():
+    """Toutes les 2h en heures actives FR, push DM à quelques actifs sans
+    quêtes ouvertes.
+
+    Cap: max 30 pushes/guild/tick pour éviter le rate-limit Discord.
+    Cible : membres avec total_messages >= 3, dernière activité < 7j, pas déjà push aujourd'hui.
+    """
+    try:
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+            tz = _ZI('Europe/Paris')
+        except Exception:
+            tz = timezone.utc
+        h = datetime.now(tz).hour
+        if h < 10 or h >= 22:
+            return
+
+        day = _today_str_p41()
+        MAX_PUSHES_PER_GUILD_PER_TICK = 30
+
+        for guild in bot.guilds:
+            try:
+                c = await cfg(guild.id)
+                if not c.get('event_enabled', False):
+                    continue
+                if not c.get('daily_quest_push_enabled', True):
+                    continue
+
+                # Trouver les membres actifs récents sans push aujourd'hui
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT a.user_id FROM activity_tracking a "
+                        "WHERE a.guild_id=? AND a.total_messages >= 3 "
+                        "AND datetime(a.last_message) > datetime('now', '-7 days') "
+                        "AND NOT EXISTS ("
+                        "  SELECT 1 FROM daily_quest_pushes p "
+                        "  WHERE p.guild_id=a.guild_id AND p.user_id=a.user_id AND p.day=? "
+                        "  AND (p.status IN ('opened','done') OR "
+                        "       (p.status='later' AND p.retry_after > datetime('now')) OR "
+                        "       (p.status='pushed'))"
+                        ") "
+                        "ORDER BY RANDOM() LIMIT ?",
+                        (guild.id, day, MAX_PUSHES_PER_GUILD_PER_TICK),
+                    ) as cur:
+                        rows = await cur.fetchall()
+                count_sent = 0
+                for (uid,) in rows:
+                    member = guild.get_member(int(uid))
+                    if not member or member.bot:
+                        continue
+                    sent = await _push_daily_quest_to_member(guild, member)
+                    if sent:
+                        count_sent += 1
+                    # Petite pause pour éviter rate-limit DM
+                    await asyncio.sleep(0.5)
+                if count_sent:
+                    print(f"[daily_quest_push_dispatcher] guild={guild.id} sent={count_sent}")
+            except Exception as ex:
+                print(f"[daily_quest_push_dispatcher guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[daily_quest_push_dispatcher] {ex}")
+
+
+@daily_quest_push_dispatcher.before_loop
+async def _qpush_wait():
+    await bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# OPTIMISATION DB — cleanup automatique + ANALYZE + VACUUM hebdo
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@tasks.loop(hours=24)
+async def db_optimizer_task():
+    """Nettoyage des vieilles données + ANALYZE pour stats SQLite.
+
+    VACUUM tourne 1×/semaine (lundi 4h).
+
+    Politique de rétention :
+    - member_activity : 30 jours (déjà très volumineux)
+    - daily_quest_progress : 7 jours
+    - daily_quest_pushes : 7 jours
+    - voice_chaos_log : 7 jours
+    - wakeup_log : 14 jours
+    - flash_treasures ended : 7 jours
+    - daily_riddles_log : 30 jours
+    - confessions : 90 jours
+    - world_bosses ended : 30 jours
+    - world_boss_attackers : suit world_bosses
+    - tag_royale ended : 30 jours
+    - evening_rituals : 30 jours
+    - personal_events_log : 14 jours (si table existe)
+    """
+    try:
+        cleanup_stmts = [
+            ("member_activity",          "DELETE FROM member_activity WHERE datetime(created_at) < datetime('now', '-30 days')"),
+            ("daily_quest_progress",     "DELETE FROM daily_quest_progress WHERE day < strftime('%Y-%m-%d', 'now', '-7 days')"),
+            ("daily_quest_pushes",       "DELETE FROM daily_quest_pushes WHERE day < strftime('%Y-%m-%d', 'now', '-7 days')"),
+            ("voice_chaos_log",          "DELETE FROM voice_chaos_log WHERE datetime(applied_at) < datetime('now', '-7 days')"),
+            ("wakeup_log",               "DELETE FROM wakeup_log WHERE datetime(last_mentioned_at) < datetime('now', '-14 days')"),
+            ("flash_treasures_ended",    "DELETE FROM flash_treasures WHERE ended=1 AND datetime(spawned_at) < datetime('now', '-7 days')"),
+            ("daily_riddles_log",        "DELETE FROM daily_riddles_log WHERE day < strftime('%Y-%m-%d', 'now', '-30 days')"),
+            ("confessions",              "DELETE FROM confessions WHERE datetime(sent_at) < datetime('now', '-90 days')"),
+            ("world_boss_attackers",     "DELETE FROM world_boss_attackers WHERE world_boss_id IN (SELECT id FROM world_bosses WHERE ended=1 AND datetime(started_at) < datetime('now', '-30 days'))"),
+            ("world_bosses_ended",       "DELETE FROM world_bosses WHERE ended=1 AND datetime(started_at) < datetime('now', '-30 days')"),
+            ("tag_royale_ended",         "DELETE FROM tag_royale WHERE ended=1 AND datetime(started_at) < datetime('now', '-30 days')"),
+            ("evening_rituals_old",      "DELETE FROM evening_rituals WHERE day < strftime('%Y-%m-%d', 'now', '-30 days')"),
+            ("personal_events_log_old",  "DELETE FROM personal_events_log WHERE datetime(created_at) < datetime('now', '-14 days')"),
+            ("comeback_dms_old_claimed", "DELETE FROM comeback_dms WHERE claimed=1 AND datetime(claimed_at) < datetime('now', '-30 days')"),
+            ("comeback_dms_old_unclaimed", "DELETE FROM comeback_dms WHERE claimed=0 AND datetime(last_dm_at) < datetime('now', '-30 days')"),
+        ]
+        total_deleted = 0
+        for name, stmt in cleanup_stmts:
+            try:
+                async with get_db() as db:
+                    cur = await db.execute(stmt)
+                    await db.commit()
+                    rc = cur.rowcount
+                if rc and rc > 0:
+                    total_deleted += rc
+                    print(f"[DB OPTIMIZER] {name}: deleted {rc} rows")
+            except Exception as ex:
+                # Table peut ne pas exister sur certaines installs — pas grave
+                if 'no such table' not in str(ex).lower():
+                    print(f"[DB OPTIMIZER] {name} error: {ex}")
+
+        # ANALYZE pour mettre à jour les stats du query planner
+        try:
+            async with get_db() as db:
+                await db.execute("ANALYZE")
+                await db.commit()
+        except Exception as ex:
+            print(f"[DB OPTIMIZER ANALYZE] {ex}")
+
+        # PRAGMA optimize : run par SQLite quand utile
+        try:
+            async with get_db() as db:
+                await db.execute("PRAGMA optimize")
+        except Exception as ex:
+            print(f"[DB OPTIMIZER PRAGMA] {ex}")
+
+        # VACUUM : 1× par semaine (lundi 4h)
+        try:
+            try:
+                from zoneinfo import ZoneInfo as _ZI
+                tz = _ZI('Europe/Paris')
+            except Exception:
+                tz = timezone.utc
+            now_local = datetime.now(tz)
+            if now_local.weekday() == 0 and 3 <= now_local.hour <= 5:
+                # VACUUM est exclusif et bloquant — on le fait à 4h du mat
+                async with get_db() as db:
+                    await db.execute("VACUUM")
+                    await db.commit()
+                print(f"[DB OPTIMIZER] VACUUM executed")
+        except Exception as ex:
+            print(f"[DB OPTIMIZER VACUUM] {ex}")
+
+        if total_deleted:
+            print(f"[DB OPTIMIZER] total deleted = {total_deleted}")
+    except Exception as ex:
+        print(f"[db_optimizer_task] {ex}")
+
+
+@db_optimizer_task.before_loop
+async def _db_optimizer_wait():
+    await bot.wait_until_ready()
 
 
 # ─── HOOK on_message pour Tag Royale ──────────────────────────────────────────
