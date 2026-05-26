@@ -47,6 +47,7 @@ import engagement47 as eng47
 import lore49 as lore  # Phase 49 : lore évolutif + NPCs + missions
 import roblox50 as rblx  # Phase 50 : speedrun + studio tips + matchmaking + game updates
 import competitive51 as cpt  # Phase 51 : bingo + prediction market + faction wars
+import social52 as soc  # Phase 52 : shoutouts + mentor + confess replies
 import protection_guards as guards2026
 import community_features as comm2026
 import admin_panels_v2 as panels2026
@@ -1750,6 +1751,71 @@ async def db_init():
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (war_id, faction_id)
         )''')
+
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 52 — SOCIAL : Shoutouts + Mentor + Confess Replies
+        # ═══════════════════════════════════════════════════════════════════
+        # Shoutouts entre membres
+        await db.execute('''CREATE TABLE IF NOT EXISTS shoutouts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            from_user_id INTEGER,
+            to_user_id INTEGER,
+            category TEXT,
+            reason TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_shoutouts_to "
+                "ON shoutouts(guild_id, to_user_id, created_at DESC)"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_shoutouts_from "
+                "ON shoutouts(guild_id, from_user_id, created_at DESC)"
+            )
+        except Exception:
+            pass
+
+        # Mentorat (relation mentor → apprenti)
+        await db.execute('''CREATE TABLE IF NOT EXISTS mentorships (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            mentor_id INTEGER,
+            apprentice_id INTEGER,
+            status TEXT DEFAULT 'pending',
+            started_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            ended_at DATETIME,
+            interactions_count INTEGER DEFAULT 0
+        )''')
+        try:
+            await db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_mentorship_active_app "
+                "ON mentorships(guild_id, apprentice_id) WHERE status='active'"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mentorship_mentor "
+                "ON mentorships(guild_id, mentor_id, status)"
+            )
+        except Exception:
+            pass
+
+        # Confess replies (réponses publiques avec identité)
+        await db.execute('''CREATE TABLE IF NOT EXISTS confession_replies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            confession_id INTEGER,
+            guild_id INTEGER,
+            replier_id INTEGER,
+            content TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_confess_replies "
+                "ON confession_replies(confession_id, created_at)"
+            )
+        except Exception:
+            pass
 
         # Marketplace : annonces de vente entre joueurs
         await db.execute('''CREATE TABLE IF NOT EXISTS marketplace_listings (
@@ -36569,6 +36635,12 @@ async def on_message(msg):
     except Exception as ex:
         print(f"[_track_message_for_missions] {ex}")
 
+    # ═══════════════ Phase 52 : mentor interaction bonus daily ═══════════════
+    try:
+        await _track_mentor_interaction(msg.guild.id, msg.author.id)
+    except Exception as ex:
+        print(f"[_track_mentor_interaction] {ex}")
+
     # ═══════════════ Phase 43 : Tag Royale chain progression ═══════════════
     try:
         if msg.mentions:
@@ -47948,6 +48020,16 @@ class EngagementHubView(View):
         b11.callback = self._on_competitions
         self.add_item(b11)
 
+        # Phase 52 : Social sub-panel (Shoutouts / Mentorat)
+        b12 = Button(
+            label="💝 Social",
+            style=discord.ButtonStyle.success,
+            custom_id="hub_social",
+            row=4,
+        )
+        b12.callback = self._on_social
+        self.add_item(b12)
+
     async def _on_quests(self, i: discord.Interaction):
         await _p41_open_daily(i)
 
@@ -47986,6 +48068,10 @@ class EngagementHubView(View):
     async def _on_competitions(self, i: discord.Interaction):
         # Phase 51 : ouvre le sub-hub Compétitions (Bingo / Predictions / Faction War)
         await _open_competitions_panel(i)
+
+    async def _on_social(self, i: discord.Interaction):
+        # Phase 52 : ouvre le sub-hub Social (Shoutouts / Mentorat)
+        await _open_social_panel(i)
 
 
 # ─── COMMANDES /hub + /hub_setup ───────────────────────────────────────────────
@@ -58708,6 +58794,590 @@ async def prediction_create_cmd(i: discord.Interaction, title: str,
             await db.execute("UPDATE predictions SET message_id=? WHERE id=?", (msg.id, pid))
             await db.commit()
         await _safe_followup(i, content=f"✅ Prédiction #{pid} lancée. Deadline dans `{hours}h`.")
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 52 — SOCIAL : Shoutouts + Mentor/Apprenti + Confessions Replies
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── SHOUTOUTS ───────────────────────────────────────────────────────────────
+
+
+async def _add_shoutout(guild_id: int, from_uid: int, to_uid: int,
+                        category: str, reason: str) -> Optional[int]:
+    """Enregistre un shoutout. Retourne l'ID. None si auto-shoutout/dup récent."""
+    if from_uid == to_uid:
+        return None
+    # Anti-spam : 1 shoutout/heure de from → to
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM shoutouts WHERE guild_id=? AND from_user_id=? "
+                "AND to_user_id=? AND created_at>? LIMIT 1",
+                (guild_id, from_uid, to_uid, cutoff),
+            ) as cur:
+                if await cur.fetchone():
+                    return None
+    except Exception:
+        pass
+    try:
+        async with get_db() as db:
+            cur = await db.execute(
+                "INSERT INTO shoutouts(guild_id, from_user_id, to_user_id, category, reason) "
+                "VALUES(?, ?, ?, ?, ?)",
+                (guild_id, from_uid, to_uid, category, reason[:300]),
+            )
+            sid = cur.lastrowid
+            await db.commit()
+        return int(sid)
+    except Exception as ex:
+        print(f"[_add_shoutout] {ex}")
+        return None
+
+
+async def _count_shoutouts_received(guild_id: int, user_id: int,
+                                     days: Optional[int] = None) -> int:
+    try:
+        params = [guild_id, user_id]
+        sql = "SELECT COUNT(*) FROM shoutouts WHERE guild_id=? AND to_user_id=?"
+        if days:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+            sql += " AND created_at>?"
+            params.append(cutoff)
+        async with get_db() as db:
+            async with db.execute(sql, params) as cur:
+                row = await cur.fetchone()
+        return int(row[0]) if row else 0
+    except Exception:
+        return 0
+
+
+async def _open_shoutout_panel(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        received_all = await _count_shoutouts_received(i.guild.id, i.user.id)
+        received_week = await _count_shoutouts_received(i.guild.id, i.user.id, days=7)
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT to_user_id, COUNT(*) AS c FROM shoutouts WHERE guild_id=? "
+                "AND created_at>? GROUP BY to_user_id ORDER BY c DESC LIMIT 10",
+                (i.guild.id, cutoff),
+            ) as cur:
+                rows = await cur.fetchall()
+        lines = []
+        medals = ["🥇", "🥈", "🥉"]
+        for idx, r in enumerate(rows):
+            m = i.guild.get_member(int(r[0]))
+            mname = m.display_name if m else f"User {r[0]}"
+            mark = medals[idx] if idx < 3 else f"`{idx+1:02d}`"
+            lines.append(f"{mark} **{mname}** — `{int(r[1])}` shoutouts")
+        e = discord.Embed(
+            title="💝 Shoutouts — Tableau des bienveillants",
+            description=(
+                f"**Toi cette semaine :** `{received_week}` shoutouts reçus\n"
+                f"**Toi total :** `{received_all}`"
+                + (" 🎖️ **Badge Cœur d'or débloqué !**" if received_all >= 10 else "")
+                + "\n\n**Top 10 cette semaine :**\n"
+                + ("\n".join(lines) if lines else "_Personne n'a encore été remercié cette semaine._")
+                + "\n\n_Utilise_ `/shoutout @user catégorie raison` _pour remercier quelqu'un._"
+            ),
+            color=0xFEE75C,
+        )
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        print(f"[_open_shoutout_panel] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="shoutout",
+    description="💝 Remercie un membre publiquement (gain de visibilité pour lui)",
+)
+@app_commands.describe(
+    membre="Le membre à remercier",
+    categorie="Type (helpful/creative/friendly/playmate/mentor/moderator)",
+    raison="Pourquoi (1 phrase)",
+)
+async def shoutout_cmd(i: discord.Interaction, membre: discord.Member,
+                        categorie: str, raison: str):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        if membre.bot:
+            return await _safe_followup(i, content="❌ Pas les bots !")
+        cat = soc.get_shoutout_category(categorie)
+        if not cat:
+            return await _safe_followup(
+                i,
+                content="❌ Catégorie inconnue. Choix : helpful, creative, friendly, playmate, mentor, moderator.",
+            )
+        sid = await _add_shoutout(i.guild.id, i.user.id, membre.id, categorie, raison)
+        if not sid:
+            return await _safe_followup(i, content="⏱️ Déjà fait à cette personne dans la dernière heure.")
+        c = await cfg(i.guild.id)
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        hub_ch = i.guild.get_channel(hub_id) if hub_id else None
+        if hub_ch and await _is_chatty_channel(hub_ch):
+            try:
+                received_all = await _count_shoutouts_received(i.guild.id, membre.id)
+                LIFETIME = 6 * 3600
+                e = discord.Embed(
+                    title=f"💝 Shoutout : {cat['label']}",
+                    description=(
+                        f"**De :** {i.user.mention}\n"
+                        f"**Pour :** {membre.mention}\n\n"
+                        f"💬 _{raison[:300]}_\n\n"
+                        f"🎖️ {membre.display_name} a maintenant **{received_all}** shoutout(s) reçu(s)."
+                        + (" 🌟 Badge **Cœur d'or** !" if received_all == 10 else "")
+                    ),
+                    color=cat["color"],
+                    timestamp=datetime.now(timezone.utc),
+                )
+                e.set_thumbnail(url=membre.display_avatar.url if membre.display_avatar else None)
+                msg = await hub_ch.send(
+                    embed=e,
+                    allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+                    delete_after=LIFETIME,
+                )
+                try:
+                    await _register_for_cleanup(msg, LIFETIME, 'shoutout')
+                except Exception:
+                    pass
+            except Exception as ex:
+                print(f"[shoutout post] {ex}")
+        try:
+            await add_coins(i.guild.id, membre.id, 50)
+        except Exception:
+            pass
+        await _safe_followup(i, content=f"✅ Shoutout envoyé à {membre.mention} ! +50 🪙 pour lui.")
+    except Exception as ex:
+        print(f"[shoutout_cmd] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── MENTOR ELIGIBILITY HELPERS ──────────────────────────────────────────────
+
+
+async def _is_eligible_as_mentor(guild_id: int, user_id: int, member: Optional[discord.Member]) -> bool:
+    if not member or not member.joined_at:
+        return False
+    days_since_join = (datetime.now(timezone.utc) - member.joined_at).days
+    if days_since_join < soc.MENTOR_MIN_DAYS:
+        return False
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT level FROM economy WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+        if int(row[0] if row else 0) < soc.MENTOR_MIN_LEVEL:
+            return False
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM mentorships WHERE guild_id=? AND mentor_id=? AND status='active' LIMIT 1",
+                (guild_id, user_id),
+            ) as cur:
+                if await cur.fetchone():
+                    return False
+    except Exception:
+        pass
+    return True
+
+
+async def _is_eligible_as_apprentice(guild_id: int, user_id: int, member: Optional[discord.Member]) -> bool:
+    if not member or not member.joined_at:
+        return False
+    days_since_join = (datetime.now(timezone.utc) - member.joined_at).days
+    if days_since_join > soc.APPRENTICE_MAX_DAYS:
+        return False
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM mentorships WHERE guild_id=? AND apprentice_id=? AND status='active' LIMIT 1",
+                (guild_id, user_id),
+            ) as cur:
+                if await cur.fetchone():
+                    return False
+    except Exception:
+        pass
+    return True
+
+
+class MentorAcceptView(View):
+    def __init__(self, mentorship_id: int):
+        super().__init__(timeout=None)
+        self.mid = mentorship_id
+        b_a = Button(label="✅ Accepter le mentorat", style=discord.ButtonStyle.success,
+                     custom_id=f"mentor_accept_{mentorship_id}")
+        b_a.callback = self._accept
+        b_r = Button(label="❌ Refuser", style=discord.ButtonStyle.secondary,
+                     custom_id=f"mentor_refuse_{mentorship_id}")
+        b_r.callback = self._refuse
+        self.add_item(b_a)
+        self.add_item(b_r)
+
+    async def _accept(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT guild_id, mentor_id, apprentice_id, status FROM mentorships WHERE id=?",
+                    (self.mid,),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row:
+                return await _safe_followup(i, content="⏱️ Invitation expirée.")
+            gid, mentor_id, app_id, status = int(row[0]), int(row[1]), int(row[2]), row[3]
+            if i.user.id != app_id:
+                return await _safe_followup(i, content="🔒 Pas pour toi.")
+            if status != "pending":
+                return await _safe_followup(i, content="⏱️ Déjà traitée.")
+            async with get_db() as db:
+                await db.execute("UPDATE mentorships SET status='active' WHERE id=?", (self.mid,))
+                await db.commit()
+            await _safe_followup(i, content="✅ Mentorat accepté ! Parlez ensemble chaque jour pour gagner des bonus.")
+            try:
+                guild = bot.get_guild(gid)
+                mentor = guild.get_member(mentor_id) if guild else None
+                if mentor:
+                    await mentor.send(f"🎉 {i.user.display_name} a accepté ton mentorat !")
+            except Exception:
+                pass
+        except Exception as ex:
+            print(f"[MentorAcceptView] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _refuse(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT apprentice_id FROM mentorships WHERE id=?", (self.mid,),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row or int(row[0]) != i.user.id:
+                return await _safe_followup(i, content="🔒 Pas pour toi.")
+            async with get_db() as db:
+                await db.execute(
+                    "UPDATE mentorships SET status='refused', ended_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (self.mid,),
+                )
+                await db.commit()
+            await _safe_followup(i, content="❌ Invitation refusée.")
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="mentor_invite",
+    description="🎓 Inviter un nouveau membre à être ton apprenti",
+)
+@app_commands.describe(nouveau_membre="Le membre <7j à mentorer")
+async def mentor_invite_cmd(i: discord.Interaction, nouveau_membre: discord.Member):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        if nouveau_membre.id == i.user.id or nouveau_membre.bot:
+            return await _safe_followup(i, content="❌ Pas toi-même / pas un bot.")
+        mem = i.user if isinstance(i.user, discord.Member) else i.guild.get_member(i.user.id)
+        if not await _is_eligible_as_mentor(i.guild.id, i.user.id, mem):
+            return await _safe_followup(
+                i,
+                content=f"❌ Mentor : ≥{soc.MENTOR_MIN_DAYS}j + level ≥{soc.MENTOR_MIN_LEVEL} + pas d'apprenti actuel.",
+            )
+        if not await _is_eligible_as_apprentice(i.guild.id, nouveau_membre.id, nouveau_membre):
+            return await _safe_followup(
+                i,
+                content=f"❌ Apprenti : ≤{soc.APPRENTICE_MAX_DAYS}j + pas de mentor.",
+            )
+        async with get_db() as db:
+            cur = await db.execute(
+                "INSERT INTO mentorships(guild_id, mentor_id, apprentice_id, status) "
+                "VALUES(?, ?, ?, 'pending')",
+                (i.guild.id, i.user.id, nouveau_membre.id),
+            )
+            mid = cur.lastrowid
+            await db.commit()
+        try:
+            await nouveau_membre.send(
+                embed=discord.Embed(
+                    title=f"🎓 {i.user.display_name} propose de te mentorer !",
+                    description=(
+                        f"Sur **{i.guild.name}**, un ancien propose de t'accompagner :\n\n"
+                        f"• +{soc.APPRENTICE_INTERACTION_BONUS_COINS} 🪙/j pour toi\n"
+                        f"• +{soc.MENTOR_INTERACTION_BONUS_COINS} 🪙/j pour lui\n"
+                        f"• Durée : {soc.MENTORSHIP_DURATION_DAYS} jours\n\n"
+                        f"Clique ci-dessous pour décider."
+                    ),
+                    color=0x3498DB,
+                ),
+                view=MentorAcceptView(int(mid)),
+            )
+            await _safe_followup(i, content=f"✅ Invitation envoyée à {nouveau_membre.mention} en DM.")
+        except discord.Forbidden:
+            c = await cfg(i.guild.id)
+            hub_id = int(c.get('hub_channel', 0) or 0)
+            hub_ch = i.guild.get_channel(hub_id) if hub_id else None
+            if hub_ch:
+                await hub_ch.send(
+                    content=nouveau_membre.mention,
+                    embed=discord.Embed(
+                        title=f"🎓 {i.user.display_name} propose de te mentorer",
+                        description=f"Accepte ci-dessous {nouveau_membre.mention}.",
+                        color=0x3498DB,
+                    ),
+                    view=MentorAcceptView(int(mid)),
+                    allowed_mentions=discord.AllowedMentions(users=True),
+                )
+                await _safe_followup(i, content=f"⚠️ DM fermé, invitation postée dans le hub.")
+            else:
+                await _safe_followup(i, content="❌ DM fermé + hub non configuré.")
+    except Exception as ex:
+        print(f"[mentor_invite_cmd] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _track_mentor_interaction(guild_id: int, user_id: int):
+    """Distribue bonus si mentor + apprenti tous deux actifs aujourd'hui."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, mentor_id, apprentice_id, started_at, interactions_count "
+                "FROM mentorships WHERE guild_id=? AND status='active' "
+                "AND (mentor_id=? OR apprentice_id=?) LIMIT 1",
+                (guild_id, user_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return
+        ms_id, m_id, a_id, started, cnt = int(row[0]), int(row[1]), int(row[2]), row[3], int(row[4] or 0)
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT DISTINCT user_id FROM member_activity WHERE guild_id=? "
+                "AND user_id IN (?, ?) AND activity_type='message' AND created_at>?",
+                (guild_id, m_id, a_id, today_start),
+            ) as cur:
+                today_active = {int(r[0]) for r in await cur.fetchall()}
+        if m_id not in today_active or a_id not in today_active:
+            return
+        try:
+            sd = datetime.fromisoformat(str(started).replace('Z', '+00:00')) \
+                if 'T' in str(started) \
+                else datetime.strptime(str(started), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+            days_elapsed = (datetime.now(timezone.utc) - sd).days + 1
+        except Exception:
+            days_elapsed = 1
+        if cnt >= days_elapsed:
+            return
+        try:
+            await add_coins(guild_id, m_id, soc.MENTOR_INTERACTION_BONUS_COINS)
+            await add_coins(guild_id, a_id, soc.APPRENTICE_INTERACTION_BONUS_COINS)
+        except Exception:
+            pass
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE mentorships SET interactions_count = interactions_count + 1 WHERE id=?",
+                (ms_id,),
+            )
+            await db.commit()
+        if days_elapsed >= soc.MENTORSHIP_DURATION_DAYS:
+            async with get_db() as db:
+                await db.execute(
+                    "UPDATE mentorships SET status='completed', ended_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (ms_id,),
+                )
+                await db.commit()
+    except Exception as ex:
+        print(f"[_track_mentor_interaction] {ex}")
+
+
+async def _open_mentor_panel(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, mentor_id, apprentice_id, started_at, interactions_count "
+                "FROM mentorships WHERE guild_id=? AND status='active' "
+                "AND (mentor_id=? OR apprentice_id=?)",
+                (i.guild.id, i.user.id, i.user.id),
+            ) as cur:
+                row = await cur.fetchone()
+        if row:
+            ms_id, m_id, a_id, started, cnt = int(row[0]), int(row[1]), int(row[2]), row[3], int(row[4] or 0)
+            partner_id = a_id if m_id == i.user.id else m_id
+            is_mentor = (m_id == i.user.id)
+            partner = i.guild.get_member(partner_id)
+            pname = partner.display_name if partner else f"User {partner_id}"
+            try:
+                sd = datetime.fromisoformat(str(started).replace('Z', '+00:00')) \
+                    if 'T' in str(started) \
+                    else datetime.strptime(str(started), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                days = (datetime.now(timezone.utc) - sd).days
+            except Exception:
+                days = 0
+            e = discord.Embed(
+                title="🎓 Mentorat actif",
+                description=(
+                    f"**Ton rôle :** {'🧠 Mentor' if is_mentor else '🌱 Apprenti'}\n"
+                    f"**Partenaire :** {pname}\n"
+                    f"**Durée :** `{days}` jours\n"
+                    f"**Bonus reçus :** `{cnt}` jours\n"
+                    f"**Reste :** `{max(0, soc.MENTORSHIP_DURATION_DAYS - days)}` jours\n\n"
+                    f"_Parlez tous deux chaque jour dans le hub pour gagner les bonus._"
+                ),
+                color=0x3498DB,
+            )
+        else:
+            mem = i.user if isinstance(i.user, discord.Member) else i.guild.get_member(i.user.id)
+            elig_m = await _is_eligible_as_mentor(i.guild.id, i.user.id, mem)
+            elig_a = await _is_eligible_as_apprentice(i.guild.id, i.user.id, mem)
+            desc = "_Aucun mentorat actif._\n\n"
+            if elig_m:
+                desc += f"**Tu es éligible comme MENTOR.** `/mentor_invite @nouveau`\n\n"
+            elif elig_a:
+                desc += f"**Tu es éligible comme APPRENTI.** Attends qu'un ancien te propose.\n\n"
+            else:
+                desc += (
+                    f"_Conditions :_\n"
+                    f"• Mentor : ≥{soc.MENTOR_MIN_DAYS}j + level ≥{soc.MENTOR_MIN_LEVEL}\n"
+                    f"• Apprenti : ≤{soc.APPRENTICE_MAX_DAYS}j sur le serveur\n"
+                )
+            e = discord.Embed(title="🎓 Mentorat", description=desc, color=0x95A5A6)
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        print(f"[_open_mentor_panel] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── CONFESSION REPLIES ──────────────────────────────────────────────────────
+
+
+class ConfessReplyModal(Modal):
+    def __init__(self, confession_id: int):
+        super().__init__(title="💬 Répondre à la confession")
+        self.confession_id = confession_id
+        self.content_input = TextInput(
+            label="Ta réponse (publique avec ton identité)",
+            placeholder="Ce que tu veux dire…",
+            style=discord.TextStyle.paragraph,
+            max_length=1000,
+            required=True,
+        )
+        self.add_item(self.content_input)
+
+    async def on_submit(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            content = self.content_input.value.strip()
+            if not content:
+                return await _safe_followup(i, content="❌ Réponse vide.")
+            async with get_db() as db:
+                await db.execute(
+                    "INSERT INTO confession_replies(confession_id, guild_id, replier_id, content) "
+                    "VALUES(?, ?, ?, ?)",
+                    (self.confession_id, i.guild.id, i.user.id, content),
+                )
+                await db.commit()
+            try:
+                LIFETIME = 24 * 3600
+                e = discord.Embed(
+                    description=f"💬 _Réponse à la confession #{self.confession_id} :_\n\n{content}",
+                    color=0x57F287,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                e.set_author(
+                    name=f"{i.user.display_name} (identité publique)",
+                    icon_url=i.user.display_avatar.url if i.user.display_avatar else None,
+                )
+                e.set_footer(text="Réponse à une confession · L'auteur initial reste anonyme")
+                msg = await i.channel.send(
+                    embed=e,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=LIFETIME,
+                )
+                try:
+                    await _register_for_cleanup(msg, LIFETIME, 'confess_reply')
+                except Exception:
+                    pass
+            except Exception as ex:
+                print(f"[confess reply post] {ex}")
+            await _safe_followup(i, content="✅ Réponse publique postée.")
+        except Exception as ex:
+            print(f"[ConfessReplyModal] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+class ConfessReplyView(View):
+    def __init__(self, confession_id: int):
+        super().__init__(timeout=None)
+        self.confession_id = confession_id
+        b = Button(
+            label="💬 Répondre publiquement",
+            style=discord.ButtonStyle.primary,
+            custom_id=f"confess_reply_{confession_id}",
+        )
+        b.callback = self._on_click
+        self.add_item(b)
+
+    async def _on_click(self, i: discord.Interaction):
+        try:
+            await i.response.send_modal(ConfessReplyModal(self.confession_id))
+        except Exception as ex:
+            print(f"[ConfessReplyView] {ex}")
+
+
+# ─── SOCIAL SUB-HUB ──────────────────────────────────────────────────────────
+
+
+class SocialSubHubView(View):
+    def __init__(self):
+        super().__init__(timeout=300)
+        b1 = Button(label="💝 Shoutouts", style=discord.ButtonStyle.success, row=0)
+        b1.callback = lambda i: _open_shoutout_panel(i)
+        self.add_item(b1)
+        b2 = Button(label="🎓 Mentorat", style=discord.ButtonStyle.primary, row=0)
+        b2.callback = lambda i: _open_mentor_panel(i)
+        self.add_item(b2)
+
+
+async def _open_social_panel(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        e = discord.Embed(
+            title="💝 Social",
+            description=(
+                "Les liens entre membres :\n\n"
+                "💝 **Shoutouts** — remercier publiquement (50 🪙 au receveur)\n"
+                "🎓 **Mentorat** — ancien parraine nouveau, +bonus quotidien\n\n"
+                "_Les confessions peuvent recevoir des réponses publiques via "
+                "le bouton ajouté sous chaque confession._"
+            ),
+            color=0xFEE75C,
+        )
+        await _safe_followup(i, embed=e, view=SocialSubHubView())
     except Exception as ex:
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
