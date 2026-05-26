@@ -1047,6 +1047,27 @@ async def db_init():
             PRIMARY KEY (event_id, zone_id)
         )''')
 
+        # Phase 40 : log des wake-up pings (pour éviter de spammer le même
+        # membre trop souvent — cap 1 mention publique / 48h)
+        await db.execute('''CREATE TABLE IF NOT EXISTS wakeup_log (
+            guild_id INTEGER,
+            user_id INTEGER,
+            last_mentioned_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            mention_count INTEGER DEFAULT 1,
+            PRIMARY KEY (guild_id, user_id)
+        )''')
+
+        # Phase 40 : log des comeback DMs (cap 1 DM / semaine par membre)
+        await db.execute('''CREATE TABLE IF NOT EXISTS comeback_dms (
+            guild_id INTEGER,
+            user_id INTEGER,
+            last_dm_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            bonus_amount INTEGER DEFAULT 0,
+            claimed INTEGER DEFAULT 0,
+            claimed_at DATETIME,
+            PRIMARY KEY (guild_id, user_id)
+        )''')
+
         # Migration : ajoute colonnes manquantes à player_event_stats si DB existe déjà
         try:
             async with db.execute('PRAGMA table_info(player_event_stats)') as cur:
@@ -6407,15 +6428,22 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
             embed = _build_boss_embed(boss, [], ends_at_dt, guild)
             # Phase 39 : ping les rôles de notification
             ping_str = await _get_event_mention(guild, 'boss_raid')
+            # Phase 40 : mentions individuelles des inactifs (wake-up ciblé)
+            try:
+                wakeup_line = await _build_wakeup_mention_line(guild, max_count=15)
+            except Exception as ex:
+                print(f"[event start wakeup line] {ex}")
+                wakeup_line = ""
             arena_msg = await arena_channel.send(
                 content=(
                     f"🚨 **UN BOSS APPARAÎT !** Tous les membres : préparez-vous au combat !"
                     + (f"\n{ping_str}" if ping_str else "")
+                    + wakeup_line
                     + "\n_💡 Pas envie d'être ping ? Utilise `/notify niveau:🔕 Aucun`._"
                 ),
                 embed=embed,
                 view=view,
-                allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False),
+                allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=False),
             )
             async with get_db() as db:
                 await db.execute(
@@ -7636,10 +7664,20 @@ async def _start_treasure_hunt(guild, triggered_by_id: int, *, manual: bool = Fa
         intro_embed.set_footer(text=f"{guild.name} · Chasse au Trésor", icon_url=(guild.icon.url if guild.icon else None))
         try:
             ping_str = await _get_event_mention(guild, 'treasure_hunt')
+            # Phase 40 : mentions individuelles des inactifs (wake-up ciblé)
+            try:
+                wakeup_line = await _build_wakeup_mention_line(guild, max_count=10)
+            except Exception as ex:
+                print(f"[treasure wakeup line] {ex}")
+                wakeup_line = ""
             arena_msg = await arena_channel.send(
-                content=(f"🚨 **CHASSE AU TRÉSOR LANCÉE !**" + (f"\n{ping_str}" if ping_str else "")),
+                content=(
+                    f"🚨 **CHASSE AU TRÉSOR LANCÉE !**"
+                    + (f"\n{ping_str}" if ping_str else "")
+                    + wakeup_line
+                ),
                 embed=intro_embed,
-                allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False),
+                allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=False),
             )
             async with get_db() as db:
                 await db.execute(
@@ -7900,10 +7938,20 @@ async def _start_quiz(guild, triggered_by_id: int, *, manual: bool = False) -> d
         intro_embed.set_footer(text=f"{guild.name} · Quiz", icon_url=(guild.icon.url if guild.icon else None))
         try:
             ping_str = await _get_event_mention(guild, 'quiz')
+            # Phase 40 : mentions individuelles des inactifs (wake-up ciblé)
+            try:
+                wakeup_line = await _build_wakeup_mention_line(guild, max_count=10)
+            except Exception as ex:
+                print(f"[quiz wakeup line] {ex}")
+                wakeup_line = ""
             arena_msg = await arena_channel.send(
-                content=(f"🎓 **QUIZ COMMUNAUTAIRE !**" + (f"\n{ping_str}" if ping_str else "")),
+                content=(
+                    f"🎓 **QUIZ COMMUNAUTAIRE !**"
+                    + (f"\n{ping_str}" if ping_str else "")
+                    + wakeup_line
+                ),
                 embed=intro_embed,
-                allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False),
+                allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=False),
             )
             async with get_db() as db:
                 await db.execute(
@@ -9312,6 +9360,586 @@ async def _get_event_mention(guild, event_type: str) -> str:
     except Exception as ex:
         print(f"[_get_event_mention] {ex}")
         return ""
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 40 — CIBLAGE WAKE-UP INDIVIDUEL
+#  Les gros events mentionnent personnellement les membres dormants (inactifs
+#  3-30 jours), même s'ils ne sont pas dans /notify. Anti-spam : max 1 mention
+#  publique par membre par 48h. Les actifs (< 24h) sont JAMAIS pingués.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def _get_wakeup_candidates(guild, max_count: int = 15) -> list[discord.Member]:
+    """Phase 40 : retourne les membres dormants à réveiller en priorité.
+
+    Critères :
+    - Inactif depuis 3 jours mais moins de 30 jours (probabilité de revenir)
+    - Pas mentionné publiquement dans les dernières 48h
+    - N'est pas un bot
+    - Est encore membre du serveur
+    """
+    try:
+        async with get_db() as db:
+            # On prend tous les membres avec activité connue
+            async with db.execute(
+                'SELECT user_id, last_message FROM activity_tracking '
+                'WHERE guild_id=? AND last_message IS NOT NULL '
+                'ORDER BY last_message DESC LIMIT 500',
+                (guild.id,),
+            ) as cur:
+                rows = await cur.fetchall()
+
+            # Charger les last_mentioned pour le cooldown 48h
+            async with db.execute(
+                'SELECT user_id, last_mentioned_at FROM wakeup_log WHERE guild_id=?',
+                (guild.id,),
+            ) as cur:
+                wakeup_rows = {r[0]: r[1] for r in await cur.fetchall()}
+
+        candidates_with_score = []
+        now_dt = datetime.now(timezone.utc)
+        cooldown_48h_cutoff = now_dt - timedelta(hours=48)
+
+        for user_id, last_msg in rows:
+            try:
+                # Catégoriser
+                cat = events2026.categorize_member_activity(last_msg)
+
+                # On veut DORMANT principalement, et un peu d'ASLEEP
+                if cat not in ('dormant', 'asleep'):
+                    continue
+
+                # Cooldown : pas mentionné dans les 48h
+                last_ping = wakeup_rows.get(user_id)
+                if last_ping:
+                    try:
+                        last_ping_dt = (
+                            datetime.fromisoformat(last_ping)
+                            if 'T' in str(last_ping)
+                            else datetime.strptime(last_ping, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                        )
+                        if last_ping_dt > cooldown_48h_cutoff:
+                            continue  # mentionné récemment, on attend
+                    except Exception:
+                        pass
+
+                member = guild.get_member(user_id)
+                if not member or member.bot:
+                    continue
+
+                # Score : dormant en priorité, puis asleep
+                # Plus l'inactivité est récente (3-7j), plus le score est haut
+                # (ils ont le plus de chances de revenir)
+                try:
+                    last_dt = (
+                        datetime.fromisoformat(last_msg)
+                        if 'T' in str(last_msg)
+                        else datetime.strptime(last_msg, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                    )
+                    days_inactive = (now_dt - last_dt).days
+                    # Score décroissant avec l'inactivité
+                    # 3j → 20, 7j → 15, 14j → 10, 30j → 5
+                    if days_inactive < 7:
+                        score = 20
+                    elif days_inactive < 14:
+                        score = 15
+                    elif days_inactive < 30:
+                        score = 10
+                    else:
+                        score = 5
+                except Exception:
+                    score = 5
+
+                candidates_with_score.append((member, score))
+            except Exception:
+                continue
+
+        # Tirage pondéré
+        if not candidates_with_score:
+            return []
+
+        # On prend les top N en mélangeant un peu (pas toujours les mêmes)
+        total_w = sum(s for _, s in candidates_with_score)
+        chosen = []
+        remaining = list(candidates_with_score)
+        for _ in range(min(max_count, len(remaining))):
+            if not remaining:
+                break
+            current_total = sum(s for _, s in remaining)
+            if current_total <= 0:
+                break
+            r = random.uniform(0, current_total)
+            acc = 0
+            for idx, (m, s) in enumerate(remaining):
+                acc += s
+                if r <= acc:
+                    chosen.append(m)
+                    remaining.pop(idx)
+                    break
+
+        return chosen
+    except Exception as ex:
+        print(f"[_get_wakeup_candidates] {ex}")
+        return []
+
+
+async def _log_wakeup_mentions(guild_id: int, member_ids: list[int]):
+    """Phase 40 : enregistre que ces membres viennent d'être mentionnés."""
+    if not member_ids:
+        return
+    try:
+        async with get_db() as db:
+            for uid in member_ids:
+                await db.execute(
+                    'INSERT INTO wakeup_log(guild_id, user_id, last_mentioned_at, mention_count) '
+                    'VALUES(?,?,CURRENT_TIMESTAMP,1) '
+                    'ON CONFLICT(guild_id, user_id) DO UPDATE SET '
+                    'last_mentioned_at=CURRENT_TIMESTAMP, mention_count=mention_count+1',
+                    (guild_id, uid),
+                )
+            await db.commit()
+    except Exception as ex:
+        print(f"[_log_wakeup_mentions] {ex}")
+
+
+async def _build_wakeup_mention_line(guild, max_count: int = 12) -> str:
+    """Phase 40 : construit la ligne de mentions wake-up à inclure dans un event.
+
+    Retourne "" si aucun candidat (pas de wake-up nécessaire).
+    """
+    candidates = await _get_wakeup_candidates(guild, max_count=max_count)
+    if not candidates:
+        return ""
+    # Logger pour le cooldown 48h
+    await _log_wakeup_mentions(guild.id, [m.id for m in candidates])
+    mentions = " ".join(m.mention for m in candidates)
+    return f"\n\n🔔 **On t'attend !** {mentions}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 40 — ONBOARDING DM pour nouveaux membres
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class OnboardingView(View):
+    """View envoyée aux nouveaux membres pour les guider."""
+
+    def __init__(self, guild_id: int, user_id: int):
+        super().__init__(timeout=None)  # persistant 48h via custom_id
+        self.guild_id = guild_id
+        self.user_id = user_id
+
+        b_class = Button(
+            label="🛡️ Choisir ma classe",
+            style=discord.ButtonStyle.primary,
+            custom_id=f"onb_class_{user_id}",
+        )
+        b_class.callback = self._on_choose_class
+        self.add_item(b_class)
+
+        b_notif = Button(
+            label="🔔 Activer les notifs events",
+            style=discord.ButtonStyle.success,
+            custom_id=f"onb_notif_{user_id}",
+        )
+        b_notif.callback = self._on_enable_notifs
+        self.add_item(b_notif)
+
+        b_quiet = Button(
+            label="🤫 Pas de notif merci",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"onb_quiet_{user_id}",
+        )
+        b_quiet.callback = self._on_quiet
+        self.add_item(b_quiet)
+
+    async def _on_choose_class(self, i: discord.Interaction):
+        try:
+            await i.response.defer(ephemeral=True)
+            # Construire une liste de boutons de classes
+            view = _ClassPickerOnboardingView(self.guild_id)
+            embed = discord.Embed(
+                title="🛡️ Choisis ta classe",
+                description=(
+                    "Chaque classe a un rôle différent pendant les events.\n"
+                    "Tu peux changer à tout moment avec `/class choose`."
+                ),
+                color=0x5865F2,
+            )
+            for cls in events2026.CLASSES:
+                embed.add_field(
+                    name=f"{cls['emoji']} {cls['name'].split(' ', 1)[1] if ' ' in cls['name'] else cls['name']}",
+                    value=cls['description'][:100],
+                    inline=False,
+                )
+            await i.followup.send(embed=embed, view=view, ephemeral=True)
+        except Exception as ex:
+            print(f"[OnboardingView _on_choose_class] {ex}")
+
+    async def _on_enable_notifs(self, i: discord.Interaction):
+        try:
+            await i.response.defer(ephemeral=True)
+            guild = bot.get_guild(self.guild_id)
+            if not guild:
+                return await i.followup.send("❌ Serveur introuvable.", ephemeral=True)
+            member = guild.get_member(i.user.id)
+            if not member:
+                return await i.followup.send("❌ Membre introuvable.", ephemeral=True)
+
+            # Activer le tier "all"
+            role = await _ensure_notify_role(guild, 'all')
+            if not role:
+                return await i.followup.send(
+                    "❌ Le bot n'a pas la permission Gérer les rôles.",
+                    ephemeral=True,
+                )
+            try:
+                await member.add_roles(role, reason="Onboarding — activation notifs")
+                await i.followup.send(
+                    f"📢 **Notifications activées !** Tu seras pingué pour tous les événements.\n"
+                    f"_Tu peux désactiver à tout moment avec `/notify niveau:🔕 Aucun`._",
+                    ephemeral=True,
+                )
+            except Exception as ex:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception as ex:
+            print(f"[OnboardingView _on_enable_notifs] {ex}")
+
+    async def _on_quiet(self, i: discord.Interaction):
+        try:
+            await i.response.send_message(
+                "🤫 Compris, pas de notifications.\n"
+                "_Si tu changes d'avis : `/notify niveau:📢 Tous les événements`_",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
+
+
+class _ClassPickerOnboardingView(View):
+    """Picker de classe pour l'onboarding."""
+
+    def __init__(self, guild_id: int):
+        super().__init__(timeout=300)
+        self.guild_id = guild_id
+        opts = []
+        for cls in events2026.CLASSES:
+            short_name = cls['name'].split(' ', 1)[1] if ' ' in cls['name'] else cls['name']
+            opts.append(discord.SelectOption(
+                label=short_name[:80],
+                value=cls['id'],
+                emoji=cls['emoji'],
+                description=cls['description'][:80],
+            ))
+        sel = Select(placeholder="Choisis ta classe…", options=opts)
+        sel.callback = self._on_pick
+        self.add_item(sel)
+
+    async def _on_pick(self, i: discord.Interaction):
+        try:
+            await i.response.defer(ephemeral=True)
+            class_id = i.data['values'][0]
+            cls = events2026.get_class(class_id)
+            if not cls:
+                return await i.followup.send("❌ Classe inconnue.", ephemeral=True)
+            async with get_db() as db:
+                await db.execute(
+                    'INSERT INTO player_classes(guild_id, user_id, class_id) VALUES(?,?,?) '
+                    'ON CONFLICT(guild_id, user_id) DO UPDATE SET class_id=?, chosen_at=CURRENT_TIMESTAMP',
+                    (self.guild_id, i.user.id, class_id, class_id),
+                )
+                await db.commit()
+            await i.followup.send(
+                f"{cls['emoji']} **Tu es maintenant {cls['name']} !**\n"
+                f"_{cls['description']}_\n\n"
+                f"💡 Participe à un Boss Raid avec `/event` ou attends-en un !",
+                ephemeral=True,
+            )
+        except Exception as ex:
+            print(f"[_ClassPickerOnboardingView _on_pick] {ex}")
+
+
+async def _send_onboarding_dm(member):
+    """Phase 40 : envoie un DM d'onboarding 3 minutes après l'arrivée.
+
+    But : présenter le système d'events au nouveau membre, lui faire choisir
+    sa classe et son niveau de notifications. 3 boutons clairs.
+    """
+    try:
+        await asyncio.sleep(180)  # 3 min de délai (laisser le membre s'installer)
+
+        # Vérifier qu'il est encore là
+        guild = member.guild
+        if not guild.get_member(member.id):
+            return
+
+        # Vérifier que les events sont activés sur le serveur
+        c = await cfg(guild.id)
+        if not c.get('event_enabled', False):
+            return
+
+        embed = discord.Embed(
+            title=f"👋 Bienvenue sur {guild.name} !",
+            description=(
+                "Ce serveur a un **système d'événements communautaires** :\n"
+                "⚔️ Boss Raids · 💎 Chasses au trésor · 🎓 Quiz · 📦 Mystery Boxes\n"
+                "🎁 Cadeaux personnels · ⚔️ Duels PvP entre membres\n\n"
+                "**Avec :**\n"
+                "🪙 Économie (pièces, boutique d'équipements)\n"
+                "🏅 Badges déblocables · 👑 Rangs (Champion / Vice / Troisième)\n"
+                "🛡️ 6 classes (Tank, DPS, Healer, Mage, Rogue, Bard)\n\n"
+                "Configure-toi en 30 secondes ↓"
+            ),
+            color=0x5865F2,
+        )
+        embed.set_footer(text=f"{guild.name} · Tu peux ignorer ce message si ça ne t'intéresse pas")
+
+        view = OnboardingView(guild.id, member.id)
+        try:
+            await member.send(embed=embed, view=view)
+            print(f"[ONBOARDING DM] guild={guild.id} user={member.id} sent")
+        except discord.Forbidden:
+            # DMs fermés — pas grave, on n'insiste pas
+            print(f"[ONBOARDING DM] guild={guild.id} user={member.id} DMs closed")
+        except Exception as ex:
+            print(f"[ONBOARDING DM] {ex}")
+    except Exception as ex:
+        print(f"[_send_onboarding_dm] {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 40 — COMEBACK DM hebdomadaire (réveille les dormants)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class ComebackClaimView(View):
+    """View persistante pour réclamer le bonus comeback en DM."""
+
+    def __init__(self, guild_id: int = 0, user_id: int = 0, bonus: int = 200):
+        super().__init__(timeout=None)
+        self.guild_id = guild_id
+        self.user_id = user_id
+        self.bonus = bonus
+        b = Button(
+            label=f"🎁 Récupérer mon bonus (+{bonus} 🪙)",
+            style=discord.ButtonStyle.success,
+            custom_id=f"comeback_{guild_id}_{user_id}",
+        )
+        b.callback = self._on_claim
+        self.add_item(b)
+
+    async def _on_claim(self, i: discord.Interaction):
+        try:
+            await i.response.defer(ephemeral=True)
+            # Check DB
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT bonus_amount, claimed FROM comeback_dms WHERE guild_id=? AND user_id=?',
+                    (self.guild_id, self.user_id),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row:
+                return await i.followup.send(
+                    "❌ Cette offre n'existe plus.",
+                    ephemeral=True,
+                )
+            bonus, claimed = row
+            if claimed:
+                return await i.followup.send(
+                    "⚠️ Tu as déjà réclamé ce bonus.",
+                    ephemeral=True,
+                )
+            if i.user.id != self.user_id:
+                return await i.followup.send(
+                    "🔒 Ce bonus n'est pas pour toi.",
+                    ephemeral=True,
+                )
+
+            # Donner les coins
+            try:
+                await add_coins(self.guild_id, self.user_id, int(bonus))
+            except Exception:
+                pass
+
+            # Marquer claimed
+            async with get_db() as db:
+                await db.execute(
+                    'UPDATE comeback_dms SET claimed=1, claimed_at=CURRENT_TIMESTAMP '
+                    'WHERE guild_id=? AND user_id=?',
+                    (self.guild_id, self.user_id),
+                )
+                await db.commit()
+
+            # Désactiver le bouton
+            for child in self.children:
+                child.disabled = True
+                child.label = f"✅ Réclamé · +{bonus} 🪙"
+            try:
+                await i.message.edit(view=self)
+            except Exception:
+                pass
+
+            guild = bot.get_guild(self.guild_id)
+            guild_name = guild.name if guild else "le serveur"
+            await i.followup.send(
+                f"🎉 **Bienvenue de retour sur {guild_name} !**\n"
+                f"+`{bonus}` 🪙 ajoutés à ton solde.\n\n"
+                f"_{events2026.get_help_footer('event_end')}_",
+                ephemeral=True,
+            )
+        except Exception as ex:
+            print(f"[ComebackClaimView _on_claim] {ex}")
+            try:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
+@tasks.loop(hours=24)
+async def comeback_dm_task():
+    """Phase 40 : 1 fois par jour, envoie des DMs de comeback aux dormants.
+
+    Cible les membres :
+    - Inactifs 7-30 jours
+    - Pas reçu de comeback DM dans les 7 derniers jours
+    - Étaient un peu actifs avant (au moins 5 messages cumulés)
+    """
+    try:
+        for guild in bot.guilds:
+            try:
+                c = await cfg(guild.id)
+                if not c.get('event_enabled', False):
+                    continue
+                # Respecter les heures actives
+                if not _is_event_active_time(c):
+                    continue
+
+                # Limite : max 5 comebacks par jour par serveur (anti-flood)
+                sent_today = 0
+                MAX_PER_DAY = 5
+
+                async with get_db() as db:
+                    # Récupérer membres avec activité + total messages connu
+                    async with db.execute(
+                        'SELECT user_id, last_message, total_messages FROM activity_tracking '
+                        'WHERE guild_id=? AND last_message IS NOT NULL '
+                        'AND total_messages >= 5 '
+                        'ORDER BY total_messages DESC LIMIT 100',
+                        (guild.id,),
+                    ) as cur:
+                        rows = await cur.fetchall()
+
+                    # Récupérer comeback_dms récents
+                    async with db.execute(
+                        'SELECT user_id, last_dm_at FROM comeback_dms WHERE guild_id=?',
+                        (guild.id,),
+                    ) as cur:
+                        comeback_rows = {r[0]: r[1] for r in await cur.fetchall()}
+
+                now_dt = datetime.now(timezone.utc)
+                seven_days_ago = now_dt - timedelta(days=7)
+
+                for user_id, last_msg, total_msgs in rows:
+                    if sent_today >= MAX_PER_DAY:
+                        break
+                    try:
+                        cat = events2026.categorize_member_activity(last_msg)
+                        if cat != 'dormant':  # uniquement les dormants
+                            continue
+
+                        # Cooldown 7j
+                        last_dm = comeback_rows.get(user_id)
+                        if last_dm:
+                            try:
+                                last_dm_dt = (
+                                    datetime.fromisoformat(last_dm)
+                                    if 'T' in str(last_dm)
+                                    else datetime.strptime(last_dm, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                                )
+                                if last_dm_dt > seven_days_ago:
+                                    continue
+                            except Exception:
+                                pass
+
+                        member = guild.get_member(user_id)
+                        if not member or member.bot:
+                            continue
+
+                        # Bonus proportionnel à l'activité passée (entre 200 et 500)
+                        bonus = min(500, max(200, int(total_msgs * 2)))
+
+                        # Enregistrer en DB
+                        async with get_db() as db:
+                            await db.execute(
+                                'INSERT INTO comeback_dms(guild_id, user_id, last_dm_at, bonus_amount, claimed) '
+                                'VALUES(?,?,CURRENT_TIMESTAMP,?,0) '
+                                'ON CONFLICT(guild_id, user_id) DO UPDATE SET '
+                                'last_dm_at=CURRENT_TIMESTAMP, bonus_amount=?, claimed=0, claimed_at=NULL',
+                                (guild.id, user_id, bonus, bonus),
+                            )
+                            await db.commit()
+
+                        # Envoyer le DM
+                        embed = discord.Embed(
+                            title=f"💙 Tu nous manques sur {guild.name} !",
+                            description=(
+                                f"Hey {member.mention} ! Ça fait un moment qu'on ne t'a pas vu.\n\n"
+                                f"En attendant ton retour, on t'a réservé un **cadeau de comeback** :\n"
+                                f"🎁 **+`{bonus}` 🪙** à récupérer en 1 clic.\n\n"
+                                f"_Pendant que tu étais parti, plein de choses se sont passées :_\n"
+                                f"⚔️ Des boss ont été vaincus\n"
+                                f"💎 Des trésors ont été distribués\n"
+                                f"🎓 Des quiz ont eu lieu\n\n"
+                                f"**Reviens nous voir quand tu veux** — clique le bouton pour récupérer ton bonus !"
+                            ),
+                            color=0x5865F2,
+                        )
+                        embed.set_footer(text=f"{guild.name} · Tu peux ignorer ce DM, on ne t'en voudra pas")
+
+                        view = ComebackClaimView(guild.id, user_id, bonus)
+                        try:
+                            await member.send(embed=embed, view=view)
+                            bot.add_view(view)
+                            sent_today += 1
+                            print(f"[COMEBACK DM] guild={guild.id} user={user_id} bonus={bonus}")
+                        except discord.Forbidden:
+                            pass  # DMs fermés
+                        except Exception as ex:
+                            print(f"[comeback DM send] {ex}")
+                    except Exception as ex:
+                        print(f"[comeback DM user_id={user_id}] {ex}")
+                        continue
+            except Exception as ex:
+                print(f"[comeback_dm_task guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[comeback_dm_task] {ex}")
+
+
+@comeback_dm_task.before_loop
+async def _comeback_dm_wait():
+    await bot.wait_until_ready()
+
+
+async def restore_active_comebacks():
+    """Au boot : ré-enregistre les ComebackClaimView non-claimed."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT guild_id, user_id, bonus_amount FROM comeback_dms '
+                'WHERE claimed=0 AND datetime(last_dm_at) > datetime("now", "-14 days")',
+            ) as cur:
+                rows = await cur.fetchall()
+        for guild_id, user_id, bonus in rows:
+            try:
+                v = ComebackClaimView(int(guild_id), int(user_id), int(bonus))
+                bot.add_view(v)
+            except Exception:
+                pass
+        if rows:
+            print(f"[COMEBACK] {len(rows)} comeback view(s) restored")
+    except Exception as ex:
+        print(f"[restore_active_comebacks] {ex}")
 
 
 @bot.tree.command(
@@ -33570,6 +34198,14 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready restore_active_personal_events] {ex}")
 
+    # Phase 40 : Smart engagement — comeback DM hebdo + restauration des views
+    if not comeback_dm_task.is_running():
+        comeback_dm_task.start()
+    try:
+        await restore_active_comebacks()
+    except Exception as ex:
+        print(f"[on_ready restore_active_comebacks] {ex}")
+
     print(f"✅ {bot.user.name} v28 prêt!")
     print(f"🌐 Serveurs: {len(bot.guilds)}")
     print(f"📢 Vérification feeds sociaux toutes les 5 minutes")
@@ -34076,6 +34712,12 @@ async def on_member_join(m):
         await _handle_welcome(m)
     except Exception as ex:
         print(f"[welcome] {ex}")
+
+    # ═══ Phase 40 : Onboarding DM (3 min après l'arrivée, en background) ═══
+    try:
+        asyncio.create_task(_send_onboarding_dm(m))
+    except Exception as ex:
+        print(f"[onboarding_dm schedule] {ex}")
 
 
 async def _handle_antiraid_join(member):
