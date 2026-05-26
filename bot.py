@@ -8611,6 +8611,9 @@ async def personal_event_dispatcher():
                     if not target_channel:
                         continue
 
+                    # Phase 38 : dé-masquer le salon temporairement si raid actif
+                    unmasked = await _temporarily_unmask_channel(guild, target_channel.id)
+
                     try:
                         ch_msg = await target_channel.send(
                             content=(
@@ -8631,9 +8634,17 @@ async def personal_event_dispatcher():
                             await db.commit()
                         _personal_event_last[(guild.id, target.id)] = now_ts
                         hourly.append(now_ts)
-                        print(f"[PERSONAL EVENT CHAN] guild={guild.id} user={target.id} type={ev_data.get('type')}")
+                        # Programmer le re-mask après les 10 min de delete_after
+                        if unmasked:
+                            async def _re_mask_personal():
+                                await asyncio.sleep(610)  # 10min + 10s buffer
+                                await _re_mask_channel_after_light_event(guild, target_channel.id)
+                            asyncio.create_task(_re_mask_personal())
+                        print(f"[PERSONAL EVENT CHAN] guild={guild.id} user={target.id} type={ev_data.get('type')}{' (temp unmask)' if unmasked else ''}")
                     except Exception as ex:
                         print(f"[personal event channel send] {ex}")
+                        if unmasked:
+                            await _re_mask_channel_after_light_event(guild, target_channel.id)
             except Exception as ex:
                 print(f"[personal_event_dispatcher guild={guild.id}] {ex}")
     except Exception as ex:
@@ -9254,6 +9265,124 @@ async def help_cmd(i: discord.Interaction):
 # Cache : message_id du mystery box → {box_data, claimed_by, claimed_at}
 _mystery_boxes: dict[int, dict] = {}
 
+# Phase 38 : refcount des salons temporairement dé-masqués pendant un raid
+# (guild_id, channel_id) → count
+# Permet de garder visible un salon pendant qu'un light event y est actif,
+# puis le re-masquer automatiquement quand l'event finit.
+_light_event_visible: dict[tuple[int, int], int] = {}
+
+
+async def _temporarily_unmask_channel(guild, channel_id: int) -> bool:
+    """Phase 38 : pendant un raid actif, restaure les perms @everyone d'origine
+    d'un salon (depuis le snapshot DB) pour qu'un light event y soit visible.
+
+    Retourne True si l'unmask a été appliqué, False sinon (pas de raid actif
+    ou snapshot introuvable).
+    """
+    try:
+        cache = _active_events_cache.get(guild.id, {})
+        event_id = cache.get('event_id')
+        if not event_id:
+            return False  # pas de raid actif
+
+        key = (guild.id, int(channel_id))
+        # Refcount : si déjà unmasked, juste incrémenter
+        _light_event_visible[key] = _light_event_visible.get(key, 0) + 1
+        if _light_event_visible[key] > 1:
+            return True  # déjà visible, refcount only
+
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT had_overwrite, allow_value, deny_value FROM event_channel_snapshots '
+                'WHERE event_id=? AND channel_id=?',
+                (event_id, channel_id),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            # Pas de snapshot → on tente quand même de unmask en supprimant view_channel=False
+            ch = guild.get_channel(int(channel_id))
+            if ch:
+                try:
+                    overw = ch.overwrites_for(guild.default_role)
+                    overw.view_channel = None  # neutre
+                    await ch.set_permissions(guild.default_role, overwrite=overw,
+                                              reason=f"Light event temp unmask (no snapshot)")
+                    return True
+                except Exception:
+                    pass
+            return False
+
+        had_overwrite, allow_v, deny_v = row
+        ch = guild.get_channel(int(channel_id))
+        if not ch:
+            return False
+
+        try:
+            if had_overwrite:
+                perm = discord.PermissionOverwrite.from_pair(
+                    discord.Permissions(int(allow_v)),
+                    discord.Permissions(int(deny_v)),
+                )
+                await ch.set_permissions(guild.default_role, overwrite=perm,
+                                          reason=f"Light event temp unmask")
+            else:
+                await ch.set_permissions(guild.default_role, overwrite=None,
+                                          reason=f"Light event temp unmask")
+            return True
+        except discord.Forbidden:
+            return False
+        except Exception as ex:
+            print(f"[_temporarily_unmask_channel] {ex}")
+            return False
+    except Exception as ex:
+        print(f"[_temporarily_unmask_channel outer] {ex}")
+        return False
+
+
+async def _re_mask_channel_after_light_event(guild, channel_id: int):
+    """Phase 38 : après qu'un light event finit, re-applique view_channel=False
+    sur @everyone si un raid est toujours actif ET si le refcount tombe à 0.
+    """
+    try:
+        key = (guild.id, int(channel_id))
+        current = _light_event_visible.get(key, 0)
+        if current <= 0:
+            return  # rien à faire
+        _light_event_visible[key] = current - 1
+        if _light_event_visible[key] > 0:
+            return  # encore des events actifs dans ce salon
+
+        # Refcount à 0 → cleanup et re-mask
+        _light_event_visible.pop(key, None)
+
+        cache = _active_events_cache.get(guild.id, {})
+        if not cache.get('event_id'):
+            return  # pas de raid actif, pas besoin de re-masquer
+
+        ch = guild.get_channel(int(channel_id))
+        if not ch:
+            return
+
+        # Vérifier qu'on ne touche pas un salon spécial du raid (arène, voice zones)
+        arena_id = int(cache.get('arena_channel_id', 0) or 0)
+        if int(channel_id) == arena_id:
+            return
+        voice_zones = cache.get('voice_zones', {}) or {}
+        if int(channel_id) in [int(v) for v in voice_zones.values()]:
+            return
+
+        try:
+            overw = ch.overwrites_for(guild.default_role)
+            overw.view_channel = False
+            await ch.set_permissions(guild.default_role, overwrite=overw,
+                                      reason=f"Light event ended — re-mask during raid")
+        except discord.Forbidden:
+            pass
+        except Exception as ex:
+            print(f"[_re_mask_channel_after_light_event] {ex}")
+    except Exception as ex:
+        print(f"[_re_mask_channel_after_light_event outer] {ex}")
+
 
 class MysteryBoxView(View):
     """Bouton pour ouvrir une mystery box — premier arrivé gagne le gros lot,
@@ -9391,13 +9520,22 @@ async def _drop_mystery_box(guild) -> bool:
         )
         e.set_footer(text="Clique sur 📦 pour ouvrir — tout le monde peut participer !")
 
+        # Phase 38 : si un raid est actif, dé-masquer temporairement ce salon
+        unmasked = await _temporarily_unmask_channel(guild, ch.id)
+
         # Envoyer avec auto-delete 5 min
         v = MysteryBoxView()
-        msg = await ch.send(embed=e, view=v)
+        try:
+            msg = await ch.send(embed=e, view=v)
+        except Exception as ex:
+            print(f"[MysteryBox send] {ex}")
+            # En cas d'erreur, on déférence l'unmask
+            if unmasked:
+                await _re_mask_channel_after_light_event(guild, ch.id)
+            return False
 
         # Update view to use real msg ID
         v.box_msg_id = msg.id
-        # Recréer le bouton avec le bon custom_id
         v.clear_items()
         b = Button(
             label="📦 Ouvrir la boîte !",
@@ -9419,7 +9557,7 @@ async def _drop_mystery_box(guild) -> bool:
             'opened_by': [],
         }
 
-        # Auto-delete dans 5 min
+        # Auto-delete dans 5 min + re-mask si raid encore actif
         async def _cleanup():
             await asyncio.sleep(300)
             try:
@@ -9427,9 +9565,11 @@ async def _drop_mystery_box(guild) -> bool:
                 await msg.delete()
             except Exception:
                 pass
+            if unmasked:
+                await _re_mask_channel_after_light_event(guild, ch.id)
         asyncio.create_task(_cleanup())
 
-        print(f"[MYSTERY BOX] guild={guild.id} dropped in #{ch.name}")
+        print(f"[MYSTERY BOX] guild={guild.id} dropped in #{ch.name}{' (temp unmask)' if unmasked else ''}")
         return True
     except Exception as ex:
         print(f"[_drop_mystery_box] {ex}")
