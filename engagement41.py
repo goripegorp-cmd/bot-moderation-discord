@@ -42,22 +42,26 @@ class QuestTemplate:
 DAILY_QUEST_TEMPLATES = [
     # --- Easy (5-15 min) ---
     QuestTemplate('msg_easy', 'Petit bavard', "Envoie {target} messages aujourd'hui", 'messages', (10, 25), 50, 30, '💬', 'easy'),
-    QuestTemplate('react_easy', 'Reaction kid', "Reagis a {target} messages d'autres membres", 'reactions_given', (5, 12), 40, 20, '👍', 'easy'),
-    QuestTemplate('voice_easy', 'Passage vocal', 'Passe {target} minutes en vocal', 'voice_min', (10, 25), 60, 40, '🎤', 'easy'),
-    QuestTemplate('command_easy', 'Explorateur', 'Utilise {target} commandes differentes', 'commands_used', (3, 5), 50, 30, '🧭', 'easy'),
-    QuestTemplate('event_easy', 'Spectateur', 'Sois present a {target} evenement(s)', 'events_participated', (1, 1), 80, 50, '🎯', 'easy'),
+    QuestTemplate('react_easy', 'Coeur leger', "Donne {target} reactions a d'autres messages", 'reactions_given', (8, 15), 40, 20, '❤️', 'easy'),
+    QuestTemplate('voice_easy', 'Passage vocal', 'Passe {target} minutes en vocal', 'voice_min', (10, 25), 60, 40, '🎙️', 'easy'),
+    QuestTemplate('event_easy', 'Curieux', 'Participe a {target} evenement(s) du jour', 'events_participated', (1, 1), 80, 50, '🎯', 'easy'),
+    QuestTemplate('flash_easy', 'Reflexe', "Saisis {target} Tresor(s) Flash dans le serveur", 'treasures_found', (1, 2), 90, 50, '💎', 'easy'),
+    # ⛔ supprime : 'command_easy' (utilisation de commandes trop vague et inutile)
     # --- Medium (30-60 min) ---
     QuestTemplate('msg_medium', 'Conversationnel', "Envoie {target} messages aujourd'hui", 'messages', (40, 80), 120, 80, '💬', 'medium'),
-    QuestTemplate('voice_medium', 'Vocal de fond', 'Passe {target} minutes en vocal', 'voice_min', (45, 90), 130, 90, '🎤', 'medium'),
-    QuestTemplate('coins_medium', 'Economiste', "Gagne {target} 🪙 aujourd'hui", 'coins_earned', (200, 400), 100, 70, '💰', 'medium'),
+    QuestTemplate('voice_medium', 'Vocal de fond', 'Passe {target} minutes en vocal', 'voice_min', (45, 90), 130, 90, '🎙️', 'medium'),
+    QuestTemplate('purchase_medium', 'Acheteur', "Achete {target} item(s) a la boutique", 'shop_purchases', (1, 2), 150, 90, '🛒', 'medium'),
     QuestTemplate('event_medium', 'Participant', 'Participe a {target} evenement(s)', 'events_participated', (2, 3), 200, 130, '🎯', 'medium'),
-    QuestTemplate('treasure_medium', 'Chasseur', 'Trouve {target} tresor(s)', 'treasures_found', (3, 6), 180, 120, '💎', 'medium'),
+    QuestTemplate('treasure_medium', 'Chasseur de tresors', 'Trouve {target} tresor(s)', 'treasures_found', (3, 6), 180, 120, '💎', 'medium'),
+    QuestTemplate('react_medium', 'Empathique', 'Donne {target} reactions au cours de la journee', 'reactions_given', (20, 35), 110, 70, '❤️', 'medium'),
+    # ⛔ supprime : 'coins_medium' (objectif "gagne X 🪙" est vague et confus)
     # --- Hard (1-3h) ---
     QuestTemplate('msg_hard', 'Pilier du chat', "Envoie {target} messages aujourd'hui", 'messages', (150, 250), 300, 200, '💬', 'hard'),
     QuestTemplate('event_hard', 'Combattant', 'Gagne {target} evenement(s)', 'events_won', (1, 2), 350, 250, '🏆', 'hard'),
-    QuestTemplate('voice_hard', 'Marathon vocal', 'Passe {target} minutes en vocal', 'voice_min', (120, 180), 280, 180, '🎤', 'hard'),
+    QuestTemplate('voice_hard', 'Marathon vocal', 'Passe {target} minutes en vocal', 'voice_min', (120, 180), 280, 180, '🎙️', 'hard'),
     QuestTemplate('duel_hard', 'Duelliste', 'Gagne {target} duel(s)', 'duels_won', (1, 2), 320, 200, '⚔️', 'hard'),
     QuestTemplate('quiz_hard', 'Cerveau', 'Reponds correctement a {target} questions de quiz', 'quiz_correct', (5, 10), 290, 190, '🧠', 'hard'),
+    QuestTemplate('boss_hard', 'Tueur de boss', 'Inflige des degats a {target} boss', 'bosses_won', (1, 2), 380, 250, '⚔️', 'hard'),
 ]
 
 

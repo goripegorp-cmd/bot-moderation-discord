@@ -42,6 +42,8 @@ import social_media as social2026
 import engagement41 as eng41
 # Phase 42 : nouveaux events (world boss, voice chaos, daily riddles)
 import events42 as ev42
+# Phase 47 : moteur long terme (saisons, prestige, factions, weekly/monthly)
+import engagement47 as eng47
 import protection_guards as guards2026
 import community_features as comm2026
 import admin_panels_v2 as panels2026
@@ -1394,6 +1396,85 @@ async def db_init():
             ended INTEGER DEFAULT 0,
             prompts_sent INTEGER DEFAULT 0
         )''')
+
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 47 — Saisons + Prestige + Factions + Weekly/Monthly quests
+        # ═══════════════════════════════════════════════════════════════════
+
+        # Season pass progress (1 ligne par user/saison)
+        await db.execute('''CREATE TABLE IF NOT EXISTS season_progress (
+            guild_id INTEGER,
+            user_id INTEGER,
+            season_id TEXT,                  -- 'spring_2026'
+            points INTEGER DEFAULT 0,
+            claimed_tiers_json TEXT DEFAULT '[]',  -- liste des tiers déjà claim
+            seasonal_role_id INTEGER,        -- role saisonnier attribué (tier 15+)
+            PRIMARY KEY (guild_id, user_id, season_id)
+        )''')
+
+        # Prestige rank (1 ligne par user)
+        await db.execute('''CREATE TABLE IF NOT EXISTS user_prestige (
+            guild_id INTEGER,
+            user_id INTEGER,
+            rank INTEGER DEFAULT 0,
+            total_prestiges INTEGER DEFAULT 0,
+            last_prestige_at DATETIME,
+            PRIMARY KEY (guild_id, user_id)
+        )''')
+
+        # Réputation par faction (4 lignes max par user : 1 par faction)
+        await db.execute('''CREATE TABLE IF NOT EXISTS faction_reputation (
+            guild_id INTEGER,
+            user_id INTEGER,
+            faction_id TEXT,                 -- 'garde' / 'sage' / 'marchand' / 'legende'
+            points INTEGER DEFAULT 0,
+            current_tier INTEGER DEFAULT 0,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (guild_id, user_id, faction_id)
+        )''')
+
+        # Weekly quests progress (5 lignes par user/semaine)
+        await db.execute('''CREATE TABLE IF NOT EXISTS weekly_quests (
+            guild_id INTEGER,
+            user_id INTEGER,
+            week TEXT,                       -- 'YYYY-Www' (ISO week)
+            quest_id TEXT,
+            metric TEXT,
+            target INTEGER,
+            progress INTEGER DEFAULT 0,
+            completed INTEGER DEFAULT 0,
+            completed_at DATETIME,
+            claimed INTEGER DEFAULT 0,
+            PRIMARY KEY (guild_id, user_id, week, quest_id)
+        )''')
+
+        # Monthly mega quest progress (1 ligne par user/mois)
+        await db.execute('''CREATE TABLE IF NOT EXISTS monthly_quests (
+            guild_id INTEGER,
+            user_id INTEGER,
+            month TEXT,                      -- 'YYYY-MM'
+            quest_id TEXT,
+            metric TEXT,
+            target INTEGER,
+            progress INTEGER DEFAULT 0,
+            completed INTEGER DEFAULT 0,
+            completed_at DATETIME,
+            claimed INTEGER DEFAULT 0,
+            PRIMARY KEY (guild_id, user_id, month)
+        )''')
+
+        # Indexes Phase 47
+        for _p47_idx in [
+            "CREATE INDEX IF NOT EXISTS idx_season_progress_season ON season_progress(season_id, points DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_prestige_rank ON user_prestige(guild_id, rank DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_faction_points ON faction_reputation(guild_id, faction_id, points DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_weekly_week ON weekly_quests(week)",
+            "CREATE INDEX IF NOT EXISTS idx_monthly_month ON monthly_quests(month)",
+        ]:
+            try:
+                await db.execute(_p47_idx)
+            except Exception:
+                pass
 
         # Indexes Phase 46
         for _p46_idx in [
@@ -45472,6 +45553,11 @@ async def _incr_stat_p41(guild_id: int, user_id: int, metric: str, amount: int =
         await _check_achievements_for_metric(guild_id, user_id, metric, new_val)
     except Exception as ex:
         print(f"[_incr_stat_p41 check_ach metric={metric}] {ex}")
+    # Phase 47 : propager le metric vers weekly/monthly/season/factions
+    try:
+        await _phase47_track_metric(guild_id, user_id, metric, amount)
+    except Exception as ex:
+        print(f"[_incr_stat_p41 phase47 metric={metric}] {ex}")
     return new_val
 
 
@@ -51916,6 +52002,970 @@ async def game_night_failsafe():
 @game_night_failsafe.before_loop
 async def _gn_failsafe_wait():
     await bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 47 — MOTEUR LONG TERME (Saisons + Prestige + Factions + Weekly/Monthly)
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _current_week_str() -> str:
+    """Retourne 'YYYY-Www' pour la semaine ISO courante (Europe/Paris)."""
+    try:
+        from zoneinfo import ZoneInfo as _ZI
+        tz = _ZI('Europe/Paris')
+    except Exception:
+        tz = timezone.utc
+    now_local = datetime.now(tz)
+    iso = now_local.isocalendar()
+    return f"{iso.year}-W{iso.week:02d}"
+
+
+def _current_month_str() -> str:
+    """Retourne 'YYYY-MM' pour le mois courant."""
+    try:
+        from zoneinfo import ZoneInfo as _ZI
+        tz = _ZI('Europe/Paris')
+    except Exception:
+        tz = timezone.utc
+    return datetime.now(tz).strftime('%Y-%m')
+
+
+def _current_season_id_now() -> str:
+    """Wrapper sur eng47.current_season_id() avec datetime now."""
+    try:
+        from zoneinfo import ZoneInfo as _ZI
+        tz = _ZI('Europe/Paris')
+    except Exception:
+        tz = timezone.utc
+    now_local = datetime.now(tz)
+    return eng47.current_season_id(now_local.year, now_local.month)
+
+
+# ─── SEASON PROGRESS / PASS ────────────────────────────────────────────────────
+
+
+async def _add_season_points(guild_id: int, user_id: int, points: int):
+    """Ajoute des points au Season Pass du joueur. Crée la ligne si nécessaire."""
+    if points <= 0:
+        return
+    season_id = _current_season_id_now()
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO season_progress(guild_id, user_id, season_id, points) "
+                "VALUES(?,?,?,?) "
+                "ON CONFLICT(guild_id, user_id, season_id) DO UPDATE SET "
+                "points = points + ?",
+                (guild_id, user_id, season_id, points, points),
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[_add_season_points] {ex}")
+
+
+async def _get_season_progress(guild_id: int, user_id: int) -> dict:
+    """Récupère le progrès saison courante du joueur."""
+    season_id = _current_season_id_now()
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT points, claimed_tiers_json, seasonal_role_id FROM season_progress "
+                "WHERE guild_id=? AND user_id=? AND season_id=?",
+                (guild_id, user_id, season_id),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return {'season_id': season_id, 'points': 0, 'claimed': [], 'role_id': 0}
+        points = int(row[0] or 0)
+        try:
+            claimed = json.loads(row[1] or '[]')
+        except Exception:
+            claimed = []
+        return {
+            'season_id': season_id,
+            'points': points,
+            'claimed': claimed,
+            'role_id': int(row[2] or 0),
+        }
+    except Exception as ex:
+        print(f"[_get_season_progress] {ex}")
+        return {'season_id': season_id, 'points': 0, 'claimed': [], 'role_id': 0}
+
+
+async def _claim_season_tiers(guild, user_id: int) -> dict:
+    """Reclame tous les tiers atteints mais pas encore claim. Retourne :
+    {'claimed': [tier dicts], 'coins_total': int, 'role_granted': str?}.
+    """
+    prog = await _get_season_progress(guild.id, user_id)
+    points = prog['points']
+    already = set(prog['claimed'])
+    new_claims = []
+    coins_total = 0
+    role_granted_name = None
+
+    for tier_def in eng47.SEASON_PASS_TIERS:
+        if points < tier_def['points']:
+            continue
+        if tier_def['tier'] in already:
+            continue
+        new_claims.append(tier_def)
+        coins_total += int(tier_def.get('reward_coins', 0))
+        already.add(tier_def['tier'])
+
+        # Récompenses spéciales (extra)
+        extra = tier_def.get('extra')
+        if extra == 'season_role' or extra == 'season_role_legendary':
+            # Créer/attribuer un rôle saisonnier au joueur
+            try:
+                season = eng47.current_season(datetime.now(timezone.utc).month)
+                year_suffix = prog['season_id'].split('_')[-1]
+                base_role_name = f"{season.emoji} {season.theme_role_name} {year_suffix}"
+                if extra == 'season_role_legendary':
+                    base_role_name = f"✨ {season.theme_role_name} LÉGENDAIRE {year_suffix}"
+                # Chercher si rôle existe déjà
+                existing = discord.utils.get(guild.roles, name=base_role_name)
+                if not existing:
+                    try:
+                        existing = await guild.create_role(
+                            name=base_role_name,
+                            colour=discord.Colour(season.color),
+                            hoist=False,
+                            mentionable=False,
+                            reason=f"Season Pass — Phase 47",
+                        )
+                    except Exception as ex:
+                        print(f"[_claim_season_tiers create_role] {ex}")
+                        existing = None
+                if existing:
+                    member = guild.get_member(user_id)
+                    if member and existing not in member.roles:
+                        try:
+                            await member.add_roles(existing, reason="Season Pass tier")
+                            role_granted_name = base_role_name
+                        except Exception as ex:
+                            print(f"[_claim_season_tiers add_roles] {ex}")
+                    # Persist role_id sur la ligne progress
+                    try:
+                        async with get_db() as db:
+                            await db.execute(
+                                "UPDATE season_progress SET seasonal_role_id=? "
+                                "WHERE guild_id=? AND user_id=? AND season_id=?",
+                                (existing.id, guild.id, user_id, prog['season_id']),
+                            )
+                            await db.commit()
+                    except Exception:
+                        pass
+            except Exception as ex:
+                print(f"[_claim_season_tiers role] {ex}")
+
+    if not new_claims:
+        return {'claimed': [], 'coins_total': 0, 'role_granted': None}
+
+    # Donner les coins
+    if coins_total > 0:
+        try:
+            await add_coins(guild.id, user_id, coins_total)
+        except Exception:
+            pass
+
+    # Persist claimed list
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE season_progress SET claimed_tiers_json=? "
+                "WHERE guild_id=? AND user_id=? AND season_id=?",
+                (json.dumps(sorted(already)), guild.id, user_id, prog['season_id']),
+            )
+            await db.commit()
+    except Exception:
+        pass
+
+    return {'claimed': new_claims, 'coins_total': coins_total, 'role_granted': role_granted_name}
+
+
+# ─── PRESTIGE ──────────────────────────────────────────────────────────────────
+
+
+async def _get_user_level(guild_id: int, user_id: int) -> int:
+    """Récupère le niveau global du joueur (depuis economy)."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT level FROM economy WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+        return int(row[0]) if row else 0
+    except Exception:
+        return 0
+
+
+async def _get_user_prestige(guild_id: int, user_id: int) -> int:
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT rank FROM user_prestige WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+        return int(row[0]) if row else 0
+    except Exception:
+        return 0
+
+
+async def _do_prestige(guild_id: int, user_id: int) -> dict:
+    """Effectue le prestige : reset level/xp + +1 rank."""
+    try:
+        level = await _get_user_level(guild_id, user_id)
+        if level < 100:
+            return {'ok': False, 'error': f'Tu dois être level 100 (actuellement {level}).'}
+
+        current = await _get_user_prestige(guild_id, user_id)
+        new_rank = current + 1
+
+        async with get_db() as db:
+            # Reset level + xp
+            await db.execute(
+                "UPDATE economy SET level=1, xp=0 WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id),
+            )
+            # Incrément prestige
+            await db.execute(
+                "INSERT INTO user_prestige(guild_id, user_id, rank, total_prestiges, last_prestige_at) "
+                "VALUES(?,?,?,1,CURRENT_TIMESTAMP) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                "rank = ?, total_prestiges = total_prestiges + 1, last_prestige_at = CURRENT_TIMESTAMP",
+                (guild_id, user_id, new_rank, new_rank),
+            )
+            await db.commit()
+
+        pdef = eng47.get_prestige_def(new_rank)
+        # Achievement caché reborn
+        try:
+            await _unlock_achievement(guild_id, user_id, 'reborn')
+        except Exception:
+            pass
+        return {'ok': True, 'new_rank': new_rank, 'def': pdef}
+    except Exception as ex:
+        print(f"[_do_prestige] {ex}")
+        return {'ok': False, 'error': str(ex)}
+
+
+# ─── FACTIONS ──────────────────────────────────────────────────────────────────
+
+
+async def _add_faction_points(guild_id: int, user_id: int, faction_id: str, points: int):
+    """Ajoute des points de réputation à une faction. Détecte les promotions tier."""
+    if points <= 0:
+        return
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO faction_reputation(guild_id, user_id, faction_id, points, current_tier) "
+                "VALUES(?,?,?,?,0) "
+                "ON CONFLICT(guild_id, user_id, faction_id) DO UPDATE SET "
+                "points = points + ?, updated_at = CURRENT_TIMESTAMP",
+                (guild_id, user_id, faction_id, points, points),
+            )
+            await db.commit()
+            # Récupérer le nouveau total
+            async with db.execute(
+                "SELECT points, current_tier FROM faction_reputation "
+                "WHERE guild_id=? AND user_id=? AND faction_id=?",
+                (guild_id, user_id, faction_id),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return
+        new_total = int(row[0])
+        old_tier = int(row[1])
+        new_tier_def = eng47.faction_tier_from_points(new_total)
+        if new_tier_def['tier'] > old_tier:
+            # Promotion ! Update current_tier
+            async with get_db() as db:
+                await db.execute(
+                    "UPDATE faction_reputation SET current_tier=? "
+                    "WHERE guild_id=? AND user_id=? AND faction_id=?",
+                    (new_tier_def['tier'], guild_id, user_id, faction_id),
+                )
+                await db.commit()
+            # Bonus coins pour promotion (croissant avec le tier)
+            promo_bonus = 100 * new_tier_def['tier']
+            if promo_bonus > 0:
+                try:
+                    await add_coins(guild_id, user_id, promo_bonus)
+                except Exception:
+                    pass
+    except Exception as ex:
+        print(f"[_add_faction_points] {ex}")
+
+
+async def _get_user_factions(guild_id: int, user_id: int) -> list:
+    """Retourne la liste des reputations du joueur pour les 4 factions."""
+    out = []
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT faction_id, points, current_tier FROM faction_reputation "
+                "WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id),
+            ) as cur:
+                rows = {r[0]: (int(r[1]), int(r[2])) for r in await cur.fetchall()}
+        for f in eng47.FACTIONS:
+            points, tier = rows.get(f['id'], (0, 0))
+            tier_def = eng47.faction_tier_from_points(points)
+            out.append({
+                'faction': f,
+                'points': points,
+                'tier': tier_def,
+            })
+    except Exception as ex:
+        print(f"[_get_user_factions] {ex}")
+    return out
+
+
+# ─── WEEKLY QUESTS ─────────────────────────────────────────────────────────────
+
+
+async def _ensure_weekly_quests(guild_id: int, user_id: int) -> list:
+    """S'assure que les 5 quêtes hebdo existent en DB pour la semaine en cours."""
+    week = _current_week_str()
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT quest_id, metric, target, progress, completed, claimed "
+                "FROM weekly_quests WHERE guild_id=? AND user_id=? AND week=?",
+                (guild_id, user_id, week),
+            ) as cur:
+                rows = await cur.fetchall()
+        if rows:
+            out = []
+            for q_id, metric, target, progress, completed, claimed in rows:
+                tmpl = next((t for t in eng47.WEEKLY_QUEST_TEMPLATES if t.id == q_id), None)
+                if not tmpl:
+                    continue
+                out.append({
+                    'id': q_id, 'metric': metric, 'target': target,
+                    'progress': progress, 'completed': bool(completed),
+                    'claimed': bool(claimed),
+                    'title': tmpl.title,
+                    'description': tmpl.description.format(target=target),
+                    'icon': tmpl.icon,
+                    'reward_coins': tmpl.reward_coins,
+                    'season_points': tmpl.season_points,
+                })
+            return out
+
+        quests = eng47.generate_weekly_quests(guild_id, user_id, week, count=5)
+        async with get_db() as db:
+            for q in quests:
+                await db.execute(
+                    "INSERT OR IGNORE INTO weekly_quests(guild_id, user_id, week, quest_id, metric, target) "
+                    "VALUES(?,?,?,?,?,?)",
+                    (guild_id, user_id, week, q['id'], q['metric'], q['target']),
+                )
+            await db.commit()
+        for q in quests:
+            q['progress'] = 0
+            q['completed'] = False
+            q['claimed'] = False
+        return quests
+    except Exception as ex:
+        print(f"[_ensure_weekly_quests] {ex}")
+        return []
+
+
+async def _update_weekly_progress(guild_id: int, user_id: int, metric: str, amount: int = 1):
+    """Met à jour le progrès des quêtes hebdo qui utilisent ce metric."""
+    week = _current_week_str()
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT quest_id, target, progress, completed FROM weekly_quests "
+                "WHERE guild_id=? AND user_id=? AND week=? AND metric=? AND completed=0",
+                (guild_id, user_id, week, metric),
+            ) as cur:
+                rows = await cur.fetchall()
+            for quest_id, target, progress, completed in rows:
+                new_progress = progress + amount
+                new_completed = new_progress >= target
+                await db.execute(
+                    "UPDATE weekly_quests SET progress=?, completed=?, completed_at=? "
+                    "WHERE guild_id=? AND user_id=? AND week=? AND quest_id=?",
+                    (new_progress, 1 if new_completed else 0,
+                     datetime.now(timezone.utc).isoformat() if new_completed else None,
+                     guild_id, user_id, week, quest_id),
+                )
+            await db.commit()
+    except Exception as ex:
+        print(f"[_update_weekly_progress] {ex}")
+
+
+async def _claim_weekly_quests(guild_id: int, user_id: int) -> dict:
+    """Claim toutes les weekly quests complétées."""
+    week = _current_week_str()
+    coins = 0
+    sp = 0
+    count = 0
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT quest_id FROM weekly_quests "
+                "WHERE guild_id=? AND user_id=? AND week=? AND completed=1 AND claimed=0",
+                (guild_id, user_id, week),
+            ) as cur:
+                rows = await cur.fetchall()
+            for (qid,) in rows:
+                tmpl = next((t for t in eng47.WEEKLY_QUEST_TEMPLATES if t.id == qid), None)
+                if not tmpl:
+                    continue
+                await db.execute(
+                    "UPDATE weekly_quests SET claimed=1 "
+                    "WHERE guild_id=? AND user_id=? AND week=? AND quest_id=?",
+                    (guild_id, user_id, week, qid),
+                )
+                coins += tmpl.reward_coins
+                sp += tmpl.season_points
+                count += 1
+            await db.commit()
+        if coins > 0:
+            try:
+                await add_coins(guild_id, user_id, coins)
+            except Exception:
+                pass
+        if sp > 0:
+            await _add_season_points(guild_id, user_id, sp)
+    except Exception as ex:
+        print(f"[_claim_weekly_quests] {ex}")
+    return {'count': count, 'coins': coins, 'season_points': sp}
+
+
+# ─── MONTHLY MEGA QUEST ────────────────────────────────────────────────────────
+
+
+async def _ensure_monthly_quest(guild_id: int, user_id: int) -> Optional[dict]:
+    """S'assure que la mega quest du mois existe."""
+    month = _current_month_str()
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT quest_id, metric, target, progress, completed, claimed "
+                "FROM monthly_quests WHERE guild_id=? AND user_id=? AND month=?",
+                (guild_id, user_id, month),
+            ) as cur:
+                row = await cur.fetchone()
+        if row:
+            q_id, metric, target, progress, completed, claimed = row
+            tmpl = next((t for t in eng47.MONTHLY_MEGA_TEMPLATES if t.id == q_id), None)
+            if not tmpl:
+                return None
+            return {
+                'id': q_id, 'metric': metric, 'target': target,
+                'progress': progress, 'completed': bool(completed),
+                'claimed': bool(claimed),
+                'title': tmpl.title,
+                'description': tmpl.description.format(target=target),
+                'icon': tmpl.icon,
+                'reward_coins': tmpl.reward_coins,
+                'season_points': tmpl.season_points,
+            }
+        q = eng47.generate_monthly_mega(guild_id, user_id, month)
+        if not q:
+            return None
+        async with get_db() as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO monthly_quests(guild_id, user_id, month, quest_id, metric, target) "
+                "VALUES(?,?,?,?,?,?)",
+                (guild_id, user_id, month, q['id'], q['metric'], q['target']),
+            )
+            await db.commit()
+        q['progress'] = 0
+        q['completed'] = False
+        q['claimed'] = False
+        return q
+    except Exception as ex:
+        print(f"[_ensure_monthly_quest] {ex}")
+        return None
+
+
+async def _update_monthly_progress(guild_id: int, user_id: int, metric: str, amount: int = 1):
+    month = _current_month_str()
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE monthly_quests SET progress = progress + ?, "
+                "completed = CASE WHEN progress + ? >= target THEN 1 ELSE completed END, "
+                "completed_at = CASE WHEN progress + ? >= target AND completed_at IS NULL THEN ? ELSE completed_at END "
+                "WHERE guild_id=? AND user_id=? AND month=? AND metric=? AND completed=0",
+                (amount, amount, amount, datetime.now(timezone.utc).isoformat(),
+                 guild_id, user_id, month, metric),
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[_update_monthly_progress] {ex}")
+
+
+async def _claim_monthly_quest(guild_id: int, user_id: int) -> dict:
+    month = _current_month_str()
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT quest_id FROM monthly_quests "
+                "WHERE guild_id=? AND user_id=? AND month=? AND completed=1 AND claimed=0",
+                (guild_id, user_id, month),
+            ) as cur:
+                row = await cur.fetchone()
+            if not row:
+                return {'count': 0, 'coins': 0, 'season_points': 0}
+            qid = row[0]
+            tmpl = next((t for t in eng47.MONTHLY_MEGA_TEMPLATES if t.id == qid), None)
+            if not tmpl:
+                return {'count': 0, 'coins': 0, 'season_points': 0}
+            await db.execute(
+                "UPDATE monthly_quests SET claimed=1 "
+                "WHERE guild_id=? AND user_id=? AND month=?",
+                (guild_id, user_id, month),
+            )
+            await db.commit()
+        try:
+            await add_coins(guild_id, user_id, tmpl.reward_coins)
+        except Exception:
+            pass
+        await _add_season_points(guild_id, user_id, tmpl.season_points)
+        return {'count': 1, 'coins': tmpl.reward_coins, 'season_points': tmpl.season_points}
+    except Exception as ex:
+        print(f"[_claim_monthly_quest] {ex}")
+        return {'count': 0, 'coins': 0, 'season_points': 0}
+
+
+# ─── Hooks pour intégrer Phase 47 dans le tracking existant ────────────────────
+
+
+async def _phase47_track_metric(guild_id: int, user_id: int, metric: str, amount: int = 1):
+    """Hook unique appelé depuis _incr_stat_p41 pour propager aux weekly/monthly."""
+    try:
+        await _update_weekly_progress(guild_id, user_id, metric, amount)
+        await _update_monthly_progress(guild_id, user_id, metric, amount)
+        # Faction reputation : mapping metric → faction
+        faction_metric_map = {
+            'bosses_won': 'garde', 'duels_won': 'garde', 'world_boss_attacks': 'garde',
+            'quiz_correct': 'sage',
+            'shop_purchases': 'marchand',
+            'events_won': 'legende',
+        }
+        faction_id = faction_metric_map.get(metric)
+        if faction_id:
+            # Petits incrément (50 points par event majeur)
+            rep_amount = {'bosses_won': 100, 'duels_won': 50, 'quiz_correct': 30,
+                          'shop_purchases': 80, 'events_won': 150}.get(metric, 50)
+            await _add_faction_points(guild_id, user_id, faction_id, rep_amount * amount)
+        # Season points : tous les gains majeurs donnent qq points de saison
+        sp_map = {
+            'messages': 1, 'reactions_given': 1, 'voice_min': 2,
+            'events_participated': 30, 'events_won': 80,
+            'bosses_won': 100, 'duels_won': 50, 'quiz_correct': 20,
+            'treasures_found': 25, 'shop_purchases': 30,
+        }
+        sp = sp_map.get(metric, 0) * amount
+        if sp > 0:
+            await _add_season_points(guild_id, user_id, sp)
+    except Exception as ex:
+        print(f"[_phase47_track_metric] {ex}")
+
+
+# ─── VIEWS / COMMANDES ─────────────────────────────────────────────────────────
+
+
+class SeasonClaimView(View):
+    """View ephemeral : 1 bouton 'Réclamer tous mes paliers'."""
+
+    def __init__(self, guild_id: int, user_id: int):
+        super().__init__(timeout=300)
+        self.guild_id = guild_id
+        self.user_id = user_id
+        b = Button(label="🎁 Réclamer mes paliers", style=discord.ButtonStyle.success)
+        b.callback = self._on_claim
+        self.add_item(b)
+
+    async def _on_claim(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if i.user.id != self.user_id:
+                return await _safe_followup(i, content="🔒 Pas pour toi.")
+            if not i.guild:
+                return await _safe_followup(i, content="❌ Serveur uniquement.")
+            result = await _claim_season_tiers(i.guild, self.user_id)
+            if not result['claimed']:
+                return await _safe_followup(i, content="ℹ️ Aucun palier à réclamer pour l'instant.")
+            lines = [f"🎉 **{len(result['claimed'])} palier(s) réclamé(s) !**"]
+            for t in result['claimed']:
+                lines.append(f"• Tier {t['tier']} ({t['label']}) — +{t.get('reward_coins', 0)} 🪙")
+            lines.append("")
+            lines.append(f"💰 **Total :** +{result['coins_total']} 🪙")
+            if result.get('role_granted'):
+                lines.append(f"👑 **Rôle débloqué :** `{result['role_granted']}`")
+            await _safe_followup(i, content="\n".join(lines))
+        except Exception as ex:
+            print(f"[SeasonClaimView] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _p47_open_season(i: discord.Interaction):
+    """Affiche le Season Pass du joueur."""
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        prog = await _get_season_progress(i.guild.id, i.user.id)
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+            tz = _ZI('Europe/Paris')
+        except Exception:
+            tz = timezone.utc
+        now_local = datetime.now(tz)
+        season = eng47.current_season(now_local.month)
+
+        current_tier = eng47.get_tier_by_points(prog['points'])
+        # Next tier
+        next_target = None
+        for t in eng47.SEASON_PASS_TIERS:
+            if t['tier'] > current_tier:
+                next_target = t
+                break
+
+        # Pending claims
+        already = set(prog['claimed'])
+        pending = [t for t in eng47.SEASON_PASS_TIERS
+                   if prog['points'] >= t['points'] and t['tier'] not in already]
+
+        # Build embed
+        desc_lines = [
+            f"**{season.emoji} {season.name} {prog['season_id'].split('_')[-1]}**",
+            "",
+            f"📊 **Points :** `{prog['points']:,}`",
+            f"🏅 **Palier actuel :** {current_tier} / 20",
+        ]
+        if next_target:
+            remaining = next_target['points'] - prog['points']
+            desc_lines.append(f"⏭️ **Prochain ({next_target['label']}) :** `{remaining:,}` points restants")
+            # Progress bar
+            prev_threshold = (eng47.SEASON_PASS_TIERS[current_tier - 1]['points']
+                              if current_tier >= 1 else 0)
+            span = next_target['points'] - prev_threshold
+            done = prog['points'] - prev_threshold
+            ratio = max(0.0, min(1.0, done / max(1, span)))
+            bar = "█" * int(ratio * 20) + "░" * (20 - int(ratio * 20))
+            desc_lines.append(f"`{bar}` {ratio*100:.0f}%")
+        else:
+            desc_lines.append("🌟 **Palier max atteint !**")
+        desc_lines.append("")
+        if pending:
+            desc_lines.append(f"🎁 **{len(pending)} palier(s) à réclamer !**")
+            total = sum(t.get('reward_coins', 0) for t in pending)
+            desc_lines.append(f"   Valeur : `+{total}` 🪙" + (" + 1 rôle saisonnier" if any(t.get('extra', '').startswith('season_role') for t in pending) else ""))
+
+        e = discord.Embed(
+            description="\n".join(desc_lines),
+            color=season.color,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text="Season Pass · 100% gratuit, gagnable via tes activités sur le serveur")
+
+        view = SeasonClaimView(i.guild.id, i.user.id) if pending else None
+        await _safe_followup(i, embed=e, view=view)
+    except Exception as ex:
+        print(f"[_p47_open_season] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _p47_open_factions(i: discord.Interaction):
+    """Affiche les réputations factions du joueur."""
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        factions = await _get_user_factions(i.guild.id, i.user.id)
+        e = discord.Embed(
+            title="🏰 Mes Renommées — Factions",
+            description="Quatre factions du serveur. Plus tu joues sur leurs thématiques, plus ta réputation monte.",
+            color=0x9B59B6,
+            timestamp=datetime.now(timezone.utc),
+        )
+        for f_data in factions:
+            f = f_data['faction']
+            tier_def = f_data['tier']
+            points = f_data['points']
+            _, remaining, next_tier = eng47.faction_points_to_next(points)
+            value_lines = [
+                f"_{f['description']}_",
+                f"**Palier :** {tier_def['emoji']} **{tier_def['name']}**",
+                f"**Points :** `{points:,}`",
+            ]
+            if next_tier:
+                value_lines.append(f"⏭️ Prochain ({next_tier['name']}) : `{remaining:,}` points restants")
+            else:
+                value_lines.append("🌟 Palier maximum atteint !")
+            e.add_field(
+                name=f"{f['emoji']} {f['name']}",
+                value="\n".join(value_lines),
+                inline=False,
+            )
+        e.set_footer(text="Atteindre Légendaire dans une faction = 2-3 ans de jeu actif")
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        print(f"[_p47_open_factions] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── Patch HUB : ajout des boutons "📆 Saison" et "🏰 Factions" ───────────────
+
+
+_original_hub_init_p46_2 = EngagementHubView.__init__
+
+
+def _patched_hub_init_p47(self):
+    _original_hub_init_p46_2(self)
+    b_season = Button(
+        label="📆 Mon Pass de Saison",
+        style=discord.ButtonStyle.success,
+        custom_id="hub_season",
+        row=3,
+    )
+    b_season.callback = self._on_season
+    self.add_item(b_season)
+    b_factions = Button(
+        label="🏰 Mes Renommées",
+        style=discord.ButtonStyle.secondary,
+        custom_id="hub_factions",
+        row=3,
+    )
+    b_factions.callback = self._on_factions
+    self.add_item(b_factions)
+
+
+async def _hub_on_season(self, i: discord.Interaction):
+    await _p47_open_season(i)
+
+
+async def _hub_on_factions(self, i: discord.Interaction):
+    await _p47_open_factions(i)
+
+
+EngagementHubView.__init__ = _patched_hub_init_p47
+EngagementHubView._on_season = _hub_on_season
+EngagementHubView._on_factions = _hub_on_factions
+
+
+# ─── SLASH COMMANDS ────────────────────────────────────────────────────────────
+
+
+@bot.tree.command(
+    name="prestige",
+    description="🌟 Effectuer un Prestige (niveau 100 requis, reset level + bonus permanents)",
+)
+async def prestige_cmd(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        level = await _get_user_level(i.guild.id, i.user.id)
+        current_prestige = await _get_user_prestige(i.guild.id, i.user.id)
+        pdef = eng47.get_prestige_def(current_prestige)
+
+        if level < 100:
+            return await _safe_followup(
+                i,
+                content=(
+                    f"❌ Tu dois être **niveau 100** pour Prestige.\n"
+                    f"Niveau actuel : `{level}` (Prestige : {pdef['emoji']} **{pdef['name']}**)"
+                ),
+            )
+
+        # Demander confirmation via bouton
+        class _ConfirmView(View):
+            def __init__(self, user_id: int):
+                super().__init__(timeout=60)
+                self.user_id = user_id
+                b_yes = Button(
+                    label="✅ Confirmer le Prestige (reset)",
+                    style=discord.ButtonStyle.danger,
+                )
+                b_yes.callback = self._on_yes
+                self.add_item(b_yes)
+                b_no = Button(label="❌ Annuler", style=discord.ButtonStyle.secondary)
+                b_no.callback = self._on_no
+                self.add_item(b_no)
+
+            async def _on_yes(self, ii):
+                if not await _safe_defer(ii):
+                    return
+                if ii.user.id != self.user_id:
+                    return await _safe_followup(ii, content="🔒 Pas pour toi.")
+                result = await _do_prestige(ii.guild.id, ii.user.id)
+                if not result.get('ok'):
+                    return await _safe_followup(ii, content=f"❌ {result.get('error')}")
+                pd = result['def']
+                await _safe_followup(
+                    ii,
+                    content=(
+                        f"🌟 **PRESTIGE RÉUSSI !**\n\n"
+                        f"Nouveau rang : {pd['emoji']} **{pd['name']}**\n"
+                        f"Bonus permanents :\n"
+                        f"• +{pd['xp_bonus']*100:.0f}% XP\n"
+                        f"• +{pd['coins_bonus']*100:.0f}% Coins\n\n"
+                        f"_Ton niveau a été reset à 1. Tu repars à zéro avec plus de pouvoir._"
+                    ),
+                )
+
+            async def _on_no(self, ii):
+                if not await _safe_defer(ii):
+                    return
+                await _safe_followup(ii, content="✅ Prestige annulé.")
+
+        next_def = eng47.get_prestige_def(current_prestige + 1)
+        await _safe_followup(
+            i,
+            content=(
+                f"🌟 **Tu es prêt pour le Prestige.**\n\n"
+                f"Actuel : {pdef['emoji']} **{pdef['name']}**\n"
+                f"Après : {next_def['emoji']} **{next_def['name']}**\n\n"
+                f"**Bonus permanents** (après prestige) :\n"
+                f"• +{next_def['xp_bonus']*100:.0f}% XP\n"
+                f"• +{next_def['coins_bonus']*100:.0f}% Coins\n\n"
+                f"⚠️ **Ton niveau reset à 1** (mais tu gardes coins/items/achievements/pets)."
+            ),
+            view=_ConfirmView(i.user.id),
+        )
+    except Exception as ex:
+        print(f"[/prestige] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="weekly",
+    description="📅 Voir tes 5 quêtes de la semaine + réclamer les récompenses",
+)
+async def weekly_cmd(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        quests = await _ensure_weekly_quests(i.guild.id, i.user.id)
+        week = _current_week_str()
+        e = discord.Embed(
+            title=f"📅 Quêtes de la semaine — {week}",
+            description="Les quêtes hebdo sont **plus dures** mais payent **bien plus** que les daily. Reset chaque lundi.",
+            color=0x3498DB,
+        )
+        total_pending = 0
+        for q in quests:
+            status = "✅" if q['claimed'] else ("🎁" if q['completed'] else "⏳")
+            bar = _make_progress_bar(q['progress'], q['target'])
+            e.add_field(
+                name=f"{status} {q['icon']} {q['title']}",
+                value=(
+                    f"{q['description']}\n{bar} `{q['progress']}/{q['target']}`\n"
+                    f"🪙 `{q['reward_coins']}` · 📆 `+{q['season_points']}` pts saison"
+                ),
+                inline=False,
+            )
+            if q['completed'] and not q['claimed']:
+                total_pending += q['reward_coins']
+
+        class _ClaimWeekly(View):
+            def __init__(self):
+                super().__init__(timeout=180)
+                b = Button(label="🎁 Réclamer mes weekly", style=discord.ButtonStyle.success)
+                b.callback = self._cb
+                self.add_item(b)
+            async def _cb(self, ii):
+                if not await _safe_defer(ii):
+                    return
+                if ii.user.id != i.user.id:
+                    return await _safe_followup(ii, content="🔒 Pas pour toi.")
+                r = await _claim_weekly_quests(i.guild.id, i.user.id)
+                if r['count'] == 0:
+                    return await _safe_followup(ii, content="ℹ️ Aucune quête hebdo à réclamer.")
+                await _safe_followup(
+                    ii,
+                    content=(
+                        f"✅ **{r['count']} quête(s) réclamée(s) !**\n"
+                        f"🪙 +`{r['coins']}` pièces\n"
+                        f"📆 +`{r['season_points']}` points Season Pass"
+                    ),
+                )
+
+        view = _ClaimWeekly() if total_pending > 0 else None
+        if total_pending:
+            e.add_field(name="🎁 À réclamer", value=f"`{total_pending}` 🪙 en attente", inline=False)
+        await _safe_followup(i, embed=e, view=view)
+    except Exception as ex:
+        print(f"[/weekly] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="monthly",
+    description="📆 Voir ta Méga Quête du mois + réclamer",
+)
+async def monthly_cmd(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        q = await _ensure_monthly_quest(i.guild.id, i.user.id)
+        month = _current_month_str()
+        if not q:
+            return await _safe_followup(i, content="❌ Pas de méga quête disponible pour le moment.")
+        status = "✅ Réclamé" if q['claimed'] else ("🎁 Terminé, à réclamer !" if q['completed'] else "⏳ En cours")
+        bar = _make_progress_bar(q['progress'], q['target'])
+        e = discord.Embed(
+            title=f"📆 Méga Quête du mois — {month}",
+            description=(
+                f"{q['icon']} **{q['title']}**\n\n"
+                f"_{q['description']}_\n\n"
+                f"{bar} `{q['progress']}/{q['target']}`\n\n"
+                f"**Récompense :** `{q['reward_coins']}` 🪙 + `{q['season_points']}` points saison\n"
+                f"**Statut :** {status}"
+            ),
+            color=0xE91E63,
+        )
+        class _ClaimMonth(View):
+            def __init__(self):
+                super().__init__(timeout=180)
+                b = Button(label="🎁 Réclamer la mega quête", style=discord.ButtonStyle.success)
+                b.callback = self._cb
+                self.add_item(b)
+            async def _cb(self, ii):
+                if not await _safe_defer(ii):
+                    return
+                if ii.user.id != i.user.id:
+                    return await _safe_followup(ii, content="🔒 Pas pour toi.")
+                r = await _claim_monthly_quest(i.guild.id, i.user.id)
+                if r['count'] == 0:
+                    return await _safe_followup(ii, content="ℹ️ Pas encore terminée.")
+                await _safe_followup(
+                    ii,
+                    content=(
+                        f"🎉 **MEGA QUEST RÉCLAMÉE !**\n"
+                        f"🪙 +`{r['coins']}` pièces\n"
+                        f"📆 +`{r['season_points']}` points Season Pass"
+                    ),
+                )
+        view = _ClaimMonth() if (q['completed'] and not q['claimed']) else None
+        await _safe_followup(i, embed=e, view=view)
+    except Exception as ex:
+        print(f"[/monthly] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
 if __name__ == "__main__":
