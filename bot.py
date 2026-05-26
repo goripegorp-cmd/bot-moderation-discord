@@ -1725,16 +1725,122 @@ async def is_ticket_channel(channel):
             ) as c:
                 if await c.fetchone():
                     return True
-        
+
         # Vérifier aussi par le nom du salon (backup)
         channel_name = channel.name.lower()
         if channel_name.startswith('ticket-') or channel_name.startswith('🎫'):
             return True
-            
+
     except:
         pass
-    
+
     return False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 41.2 — FILTRE CENTRAL "CHATTY CHANNEL"
+#  Garantit qu'un event auto ne se lance JAMAIS dans :
+#  - un ticket (privé d'un autre membre)
+#  - un salon d'annonce (lecture seule pour @everyone)
+#  - un thread / forum / vocal / stage
+#  - un salon où @everyone ne peut PAS voir ou écrire
+#  - le salon arena d'un event en cours
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# Blacklist de noms : si le nom contient un de ces mots, le salon est exclu
+_CHATTY_BLACKLIST_KEYWORDS = (
+    'ticket', 'mod-', 'mod_', 'modo', 'staff', 'admin', 'log', 'logs',
+    'rules', 'règles', 'regles', 'welcome', 'bienvenue', 'goodbye',
+    'annonces', 'announce', 'announcement', 'rules', 'rolereact',
+    'config', 'configuration', 'private', 'privé', 'priv',
+    'audit', 'webhook',
+)
+
+
+async def _is_chatty_channel(channel, *, allow_announce: bool = False) -> bool:
+    """Garantit qu'un salon est OK pour poster un event PUBLIC.
+
+    Conditions strictes (TOUTES doivent être vraies) :
+    1. TextChannel pur (refuse Thread, Voice, Stage, Forum, Category)
+    2. PAS un announcement channel (sauf si allow_announce=True)
+    3. PAS NSFW (on n'envoie pas de mystery box dans #18+)
+    4. PAS un ticket (vérif DB tickets + nom)
+    5. PAS un salon staff/log/admin/rules/welcome (blacklist de noms)
+    6. @everyone peut view_channel ET send_messages (refuse read-only)
+    7. Le bot peut send_messages ET embed_links
+    8. PAS le salon arena d'un event en cours
+    """
+    if not channel:
+        return False
+
+    # 1. Type strict : TextChannel uniquement
+    if not isinstance(channel, discord.TextChannel):
+        return False
+    # Double-check : refus explicite des Threads
+    if isinstance(channel, discord.Thread):
+        return False
+
+    # 2. Announcement
+    try:
+        if channel.is_news() and not allow_announce:
+            return False
+    except Exception:
+        pass
+
+    # 3. NSFW out (events publics doivent rester safe-for-everyone)
+    try:
+        if channel.is_nsfw():
+            return False
+    except Exception:
+        pass
+
+    # 4. Ticket (DB + nom)
+    try:
+        if await is_ticket_channel(channel):
+            return False
+    except Exception:
+        pass
+
+    # 5. Blacklist par nom
+    name_low = (channel.name or '').lower()
+    for kw in _CHATTY_BLACKLIST_KEYWORDS:
+        if kw in name_low:
+            return False
+
+    # 6. & 7. Permissions
+    if not channel.guild or not channel.guild.me:
+        return False
+    perms_bot = channel.permissions_for(channel.guild.me)
+    if not (perms_bot.send_messages and perms_bot.embed_links):
+        return False
+    perms_default = channel.permissions_for(channel.guild.default_role)
+    if not perms_default.view_channel:
+        return False
+    if not perms_default.send_messages:
+        return False
+
+    # 8. Arena d'un event en cours
+    try:
+        cache = _active_events_cache.get(channel.guild.id) if '_active_events_cache' in globals() else None
+        if cache and cache.get('arena_channel_id') == channel.id:
+            return False
+    except Exception:
+        pass
+
+    return True
+
+
+async def _filter_chatty_channels(channels, *, allow_announce: bool = False) -> list:
+    """Filtre une liste de salons en ne gardant que ceux où on peut poster un event."""
+    out = []
+    for ch in channels:
+        try:
+            if await _is_chatty_channel(ch, allow_announce=allow_announce):
+                out.append(ch)
+        except Exception:
+            continue
+    return out
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           📺 SÉLECTEURS PAGINÉS UNIVERSELS
@@ -8805,22 +8911,35 @@ async def personal_event_dispatcher():
 
                 # ── 2. Fallback channel SI DM fermé (avec auto-delete) ──
                 if not sent_dm:
-                    # Trouver son salon actif
+                    # Phase 41.2 : on cherche LE PLUS RÉCENT salon CHATTY où target a posté
                     target_channel = None
                     async with get_db() as db:
                         async with db.execute(
-                            'SELECT channel_id FROM member_activity WHERE guild_id=? AND user_id=? AND activity_type=\'message\' '
-                            'ORDER BY created_at DESC LIMIT 1',
+                            'SELECT DISTINCT channel_id FROM member_activity '
+                            'WHERE guild_id=? AND user_id=? AND activity_type=\'message\' '
+                            'ORDER BY created_at DESC LIMIT 10',
                             (guild.id, target.id),
                         ) as cur:
-                            r = await cur.fetchone()
-                    if r:
-                        target_channel = guild.get_channel(int(r[0]))
+                            recent_rows = await cur.fetchall()
+                    # Prendre le 1er chatty channel de la liste
+                    for rr in recent_rows:
+                        ch_cand = guild.get_channel(int(rr[0]))
+                        if ch_cand and await _is_chatty_channel(ch_cand):
+                            target_channel = ch_cand
+                            break
                     if not target_channel:
+                        # Fallback : 1er salon CHATTY du serveur où target peut écrire
                         for ch in guild.text_channels:
-                            if ch.permissions_for(guild.me).send_messages and ch.permissions_for(target).read_messages:
-                                target_channel = ch
-                                break
+                            if not await _is_chatty_channel(ch):
+                                continue
+                            # En plus : target doit pouvoir écrire (rôle non muté etc.)
+                            try:
+                                tperms = ch.permissions_for(target)
+                                if tperms.view_channel and tperms.send_messages:
+                                    target_channel = ch
+                                    break
+                            except Exception:
+                                continue
                     if not target_channel:
                         continue
 
@@ -9660,8 +9779,9 @@ async def _get_top_active_channels(guild, limit: int = 3) -> list:
 
     Utilisé pour poster un echo discret (sans mention) d'un event en cours.
     Permet aux actifs qui discutent dans ces salons de voir l'event arriver.
+
+    Phase 41.2 : filtre strict — JAMAIS tickets, annonces, RO, threads.
     """
-    # AUDIT fix : edge case rare — bot kické juste avant l'echo
     if not guild or not guild.me:
         return []
     try:
@@ -9671,20 +9791,17 @@ async def _get_top_active_channels(guild, limit: int = 3) -> list:
                 "SELECT channel_id, COUNT(*) AS msgs FROM member_activity "
                 "WHERE guild_id=? AND activity_type='message' AND created_at > ? "
                 "GROUP BY channel_id ORDER BY msgs DESC LIMIT ?",
-                (guild.id, cutoff, limit * 3),  # marge pour filtrer
+                (guild.id, cutoff, limit * 5),  # marge généreuse pour filtrer
             ) as cur:
                 rows = await cur.fetchall()
         out = []
         for ch_id, _msgs in rows:
             ch = guild.get_channel(int(ch_id))
-            if not ch or not isinstance(ch, discord.TextChannel):
+            # Filtre central Phase 41.2 (tickets, annonces, RO, threads OUT)
+            if not await _is_chatty_channel(ch):
                 continue
-            # Ne pas poster dans des salons restreints ou en lockdown
-            perms = ch.permissions_for(guild.me)
-            if not (perms.send_messages and perms.embed_links):
-                continue
-            # Skip les salons systèmes (welcome, rules, etc.)
-            if any(kw in (ch.name or '').lower() for kw in ('rules', 'règles', 'welcome', 'bienvenue', 'annonces')):
+            # Skip aussi les salons systèmes par nom (defense en profondeur)
+            if any(kw in (ch.name or '').lower() for kw in ('rules', 'règles', 'welcome', 'bienvenue', 'annonces', 'announcement')):
                 continue
             out.append(ch)
             if len(out) >= limit:
@@ -10635,29 +10752,38 @@ class MysteryBoxView(View):
 
 
 async def _drop_mystery_box(guild) -> bool:
-    """Drop une mystery box dans un salon actif aléatoire."""
+    """Drop une mystery box dans un salon actif aléatoire.
+
+    Phase 41.2 : filtre strict — JAMAIS dans un ticket / annonce / RO / thread.
+    """
     try:
-        # Trouver un salon actif
+        # Trouver les salons actifs récents (jusqu'à 15 candidats)
         async with get_db() as db:
             async with db.execute(
                 'SELECT channel_id, MAX(created_at) as last_active FROM member_activity '
                 'WHERE guild_id=? AND activity_type=\'message\' '
                 'AND datetime(created_at) > datetime("now", "-2 hours") '
-                'GROUP BY channel_id ORDER BY last_active DESC LIMIT 5',
+                'GROUP BY channel_id ORDER BY last_active DESC LIMIT 15',
                 (guild.id,),
             ) as cur:
                 rows = await cur.fetchall()
         if not rows:
             return False
 
-        # Tirer un salon parmi les actifs
-        ch_id = int(random.choice(rows)[0])
-        ch = guild.get_channel(ch_id)
-        if not ch:
+        # Phase 41.2 : filtrer via _is_chatty_channel (tickets/annonces/RO out)
+        candidates = []
+        for row in rows:
+            try:
+                ch = guild.get_channel(int(row[0]))
+                if ch and await _is_chatty_channel(ch):
+                    candidates.append(ch)
+            except Exception:
+                continue
+        if not candidates:
             return False
-        perms = ch.permissions_for(guild.me)
-        if not (perms.send_messages and perms.embed_links):
-            return False
+
+        # Tirer un salon CHATTY parmi les actifs
+        ch = random.choice(candidates)
 
         # Générer la box
         box = events2026.random_mystery_box()
@@ -45217,13 +45343,25 @@ async def _notify_achievement_unlock(guild_id: int, user_id: int, ach):
                 or 0
             )
             ch = guild.get_channel(int(ch_id)) if ch_id else None
-            if not ch or not isinstance(ch, discord.TextChannel):
-                # Fallback : prendre le premier canal "général" ou actif
+            # Phase 41.2 : si le channel configuré ne passe pas le filtre, fallback
+            if ch and not await _is_chatty_channel(ch):
+                ch = None
+            if not ch:
+                # Fallback : premier salon CHATTY avec "general" ou "chat" dans le nom
                 for candidate in guild.text_channels:
-                    if 'general' in (candidate.name or '').lower() or 'chat' in (candidate.name or '').lower():
+                    if not await _is_chatty_channel(candidate):
+                        continue
+                    name_low = (candidate.name or '').lower()
+                    if 'general' in name_low or 'chat' in name_low or 'général' in name_low:
                         ch = candidate
                         break
-            if ch and ch.permissions_for(guild.me).send_messages:
+                # Sinon, premier salon chatty tout court
+                if not ch:
+                    for candidate in guild.text_channels:
+                        if await _is_chatty_channel(candidate):
+                            ch = candidate
+                            break
+            if ch:
                 pub = discord.Embed(
                     title=f"🏆 Nouveau Haut Fait débloqué !",
                     description=(
