@@ -9790,6 +9790,37 @@ class OnboardingView(View):
         b_quiet.callback = self._on_quiet
         self.add_item(b_quiet)
 
+        # Phase 41.1 : bouton qui ouvre directement le hub depuis le DM
+        b_hub = Button(
+            label="🎮 Ouvrir mon hub d'engagement",
+            style=discord.ButtonStyle.primary,
+            custom_id="onb_hub",
+        )
+        b_hub.callback = self._on_open_hub
+        self.add_item(b_hub)
+
+    async def _on_open_hub(self, i: discord.Interaction):
+        """Ouvre le hub d'engagement depuis le DM onboarding."""
+        try:
+            # Réutilise le panneau hub directement
+            if not i.response.is_done():
+                await i.response.defer(ephemeral=True)
+            e = discord.Embed(
+                title="🎮 Ton Hub d'engagement",
+                description=(
+                    "Tout est accessible en **1 clic**.\n\n"
+                    "📜 **Quêtes du jour** — 3 défis quotidiens\n"
+                    "🎰 **Daily Wheel** — spin gratuit chaque jour\n"
+                    "🏆 **Hauts faits** — débloque 50+ achievements\n"
+                    "🐾 **Compagnon** — adopte ton pet\n"
+                    "🤫 **Confession** — message anonyme"
+                ),
+                color=0x5865F2,
+            )
+            await i.followup.send(embed=e, view=EngagementHubView(), ephemeral=True)
+        except Exception as ex:
+            print(f"[OnboardingView _on_open_hub] {ex}")
+
     def _resolve_guild_id(self, i: discord.Interaction) -> int:
         """Trouve le guild_id : soit du self (envoi initial), soit déduit.
 
@@ -34360,6 +34391,11 @@ async def on_ready():
         bot.add_view(ConfessionSendView())
     except Exception as ex:
         print(f"[on_ready add_view ConfessionSendView] {ex}")
+    # Phase 41.1 — Hub d'engagement (5 boutons, zéro commande)
+    try:
+        bot.add_view(EngagementHubView())
+    except Exception as ex:
+        print(f"[on_ready add_view EngagementHubView] {ex}")
     try:
         async with get_db() as db:
             async with db.execute('SELECT data FROM guild_config') as c:
@@ -45715,70 +45751,8 @@ async def _add_item_to_inventory(guild_id: int, user_id: int, item: dict):
     description="📜 Voir tes 3 quêtes journalières + réclamer les récompenses",
 )
 async def daily_cmd(i: discord.Interaction):
-    try:
-        await i.response.defer(ephemeral=True)
-        if not i.guild:
-            return await i.followup.send("❌ Commande serveur uniquement.", ephemeral=True)
-        quests = await _ensure_today_quests(i.guild.id, i.user.id)
-        # Update progress on the fly (au cas où des metrics auraient avancé sans refresh)
-
-        # Récupérer le streak
-        async with get_db() as db:
-            async with db.execute(
-                'SELECT current_streak, best_streak FROM user_streaks WHERE guild_id=? AND user_id=?',
-                (i.guild.id, i.user.id),
-            ) as cur:
-                streak_row = await cur.fetchone()
-        cur_streak = int(streak_row[0]) if streak_row else 0
-        best_streak = int(streak_row[1]) if streak_row else 0
-
-        # Build embed
-        e = discord.Embed(
-            title=f"📜 Quêtes journalières — {_today_str_p41()}",
-            description=(
-                f"🔥 **Streak actuel :** `{cur_streak}` jour{'s' if cur_streak != 1 else ''} "
-                f"· Record : `{best_streak}`\n"
-                f"_Termine au moins 1 quête par jour pour faire grimper ton streak._"
-            ),
-            color=0x5865F2,
-        )
-
-        completed_count = 0
-        total_reward_coins = 0
-        for q in quests:
-            status_icon = "✅" if q['claimed'] else ("🎁" if q['completed'] else "⏳")
-            diff_emoji = {'easy': '🟢', 'medium': '🟡', 'hard': '🔴'}.get(q['difficulty'], '⚪')
-            progress_bar = _make_progress_bar(q['progress'], q['target'])
-            field_val = (
-                f"{q['description']}\n"
-                f"{progress_bar} `{q['progress']}/{q['target']}`\n"
-                f"🪙 `{q['reward_coins']}` · ⭐ `{q['reward_xp']}` XP"
-            )
-            e.add_field(
-                name=f"{status_icon} {diff_emoji} {q['emoji']} {q['title']}",
-                value=field_val,
-                inline=False,
-            )
-            if q['completed'] and not q['claimed']:
-                total_reward_coins += q['reward_coins']
-            if q['completed']:
-                completed_count += 1
-
-        if total_reward_coins > 0:
-            e.add_field(
-                name="🎁 À réclamer",
-                value=f"**{total_reward_coins}** 🪙 en attente !",
-                inline=False,
-            )
-
-        e.set_footer(text=f"Reset à minuit (Europe/Paris) · {completed_count}/{len(quests)} terminée(s)")
-        await i.followup.send(embed=e, view=DailyQuestView(i.guild.id, i.user.id), ephemeral=True)
-    except Exception as ex:
-        print(f"[/daily] {ex}")
-        try:
-            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
-        except Exception:
-            pass
+    # Phase 41.1 : delegate à l'helper (utilisé aussi par le hub)
+    await _p41_open_daily(i)
 
 
 def _make_progress_bar(current: int, target: int, length: int = 10) -> str:
@@ -45795,68 +45769,8 @@ def _make_progress_bar(current: int, target: int, length: int = 10) -> str:
 )
 @app_commands.describe(membre="Voir les hauts faits d'un autre membre (optionnel)")
 async def achievements_cmd(i: discord.Interaction, membre: Optional[discord.Member] = None):
-    try:
-        await i.response.defer(ephemeral=True)
-        if not i.guild:
-            return await i.followup.send("❌ Commande serveur uniquement.", ephemeral=True)
-        target = membre or i.user
-        async with get_db() as db:
-            async with db.execute(
-                'SELECT achievement_id FROM achievements_unlocked WHERE guild_id=? AND user_id=?',
-                (i.guild.id, target.id),
-            ) as cur:
-                unlocked_ids = {r[0] for r in await cur.fetchall()}
-
-        # Group by category
-        categories = ['social', 'combat', 'economy', 'discovery', 'meta', 'hidden']
-        cat_labels = {
-            'social': '💬 Social', 'combat': '⚔️ Combat',
-            'economy': '💰 Économie', 'discovery': '🧭 Découverte',
-            'meta': '📜 Méta', 'hidden': '🌟 Cachés',
-        }
-
-        total_unlocked = len(unlocked_ids)
-        total_count = len(eng41.ACHIEVEMENTS)
-
-        e = discord.Embed(
-            title=f"🏆 Hauts faits — {target.display_name}",
-            description=f"**Débloqués :** `{total_unlocked}` / `{total_count}`",
-            color=0xF1C40F,
-        )
-        if target.display_avatar:
-            e.set_thumbnail(url=target.display_avatar.url)
-
-        for cat in categories:
-            items = eng41.achievements_by_category(cat)
-            if not items:
-                continue
-            lines = []
-            for a in items[:8]:  # cap 8 par cat pour limiter taille embed
-                unlocked = a.id in unlocked_ids
-                if a.hidden and not unlocked:
-                    lines.append("🔒 _Achievement caché — débloquable en jouant_")
-                    continue
-                icon = "✅" if unlocked else "🔒"
-                rarity_emoji = {
-                    'common': '⚪', 'rare': '🔵', 'epic': '🟣',
-                    'legendary': '🟡', 'mythic': '💠',
-                }.get(a.rarity, '⚪')
-                lines.append(f"{icon} {rarity_emoji} {a.icon} **{a.title}** — _{a.description[:60]}_")
-            cat_unlocked = sum(1 for a in items if a.id in unlocked_ids)
-            e.add_field(
-                name=f"{cat_labels[cat]} ({cat_unlocked}/{len(items)})",
-                value="\n".join(lines) or "_Aucun_",
-                inline=False,
-            )
-
-        e.set_footer(text=f"Continue à jouer pour débloquer plus ! · /achievements")
-        await i.followup.send(embed=e, ephemeral=True)
-    except Exception as ex:
-        print(f"[/achievements] {ex}")
-        try:
-            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
-        except Exception:
-            pass
+    # Phase 41.1 : delegate à l'helper (utilisé aussi par le hub)
+    await _p41_open_achievements(i, target=membre)
 
 
 @bot.tree.command(
@@ -46132,6 +46046,604 @@ async def confess_setup_cmd(i: discord.Interaction, channel: discord.TextChannel
             await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
         except Exception:
             pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 41.1 — HUB D'ENGAGEMENT (zéro commande à mémoriser)
+#  Un seul panneau avec 5 boutons → tous les systèmes accessibles en 1 clic
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def _safe_defer(i: discord.Interaction, ephemeral: bool = True) -> bool:
+    """Defer une interaction si pas déjà fait. Retourne True si OK, False si déjà mort."""
+    try:
+        if not i.response.is_done():
+            await i.response.defer(ephemeral=ephemeral)
+        return True
+    except discord.InteractionResponded:
+        return True
+    except (discord.NotFound, discord.HTTPException):
+        return False
+    except Exception as ex:
+        print(f"[_safe_defer] {ex}")
+        return False
+
+
+async def _safe_followup(i: discord.Interaction, **kwargs) -> bool:
+    """Envoie un followup safe. Retourne True si OK."""
+    try:
+        kwargs.setdefault('ephemeral', True)
+        await i.followup.send(**kwargs)
+        return True
+    except (discord.NotFound, discord.HTTPException) as ex:
+        print(f"[_safe_followup] {ex}")
+        return False
+    except Exception as ex:
+        print(f"[_safe_followup] {ex}")
+        return False
+
+
+async def _p41_open_daily(i: discord.Interaction):
+    """Panel quêtes du jour — appelable depuis /daily ou bouton hub."""
+    if not await _safe_defer(i):
+        return
+    if not i.guild:
+        return await _safe_followup(i, content="❌ Serveur uniquement.")
+    try:
+        quests = await _ensure_today_quests(i.guild.id, i.user.id)
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT current_streak, best_streak FROM user_streaks WHERE guild_id=? AND user_id=?',
+                (i.guild.id, i.user.id),
+            ) as cur:
+                streak_row = await cur.fetchone()
+        cur_streak = int(streak_row[0]) if streak_row else 0
+        best_streak = int(streak_row[1]) if streak_row else 0
+
+        e = discord.Embed(
+            title=f"📜 Quêtes journalières — {_today_str_p41()}",
+            description=(
+                f"🔥 **Streak actuel :** `{cur_streak}` jour{'s' if cur_streak != 1 else ''} "
+                f"· Record : `{best_streak}`\n"
+                f"_Termine au moins 1 quête par jour pour faire grimper ton streak._"
+            ),
+            color=0x5865F2,
+        )
+
+        completed_count = 0
+        total_reward_coins = 0
+        for q in quests:
+            status_icon = "✅" if q['claimed'] else ("🎁" if q['completed'] else "⏳")
+            diff_emoji = {'easy': '🟢', 'medium': '🟡', 'hard': '🔴'}.get(q['difficulty'], '⚪')
+            progress_bar = _make_progress_bar(q['progress'], q['target'])
+            field_val = (
+                f"{q['description']}\n"
+                f"{progress_bar} `{q['progress']}/{q['target']}`\n"
+                f"🪙 `{q['reward_coins']}` · ⭐ `{q['reward_xp']}` XP"
+            )
+            e.add_field(
+                name=f"{status_icon} {diff_emoji} {q['emoji']} {q['title']}",
+                value=field_val,
+                inline=False,
+            )
+            if q['completed'] and not q['claimed']:
+                total_reward_coins += q['reward_coins']
+            if q['completed']:
+                completed_count += 1
+
+        if total_reward_coins > 0:
+            e.add_field(
+                name="🎁 À réclamer",
+                value=f"**{total_reward_coins}** 🪙 en attente !",
+                inline=False,
+            )
+        e.set_footer(text=f"Reset à minuit (Europe/Paris) · {completed_count}/{len(quests)} terminée(s)")
+        await _safe_followup(i, embed=e, view=DailyQuestView(i.guild.id, i.user.id))
+    except Exception as ex:
+        print(f"[_p41_open_daily] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _p41_open_achievements(i: discord.Interaction, target: Optional[discord.Member] = None):
+    """Panel hauts faits — appelable depuis /achievements ou bouton hub."""
+    if not await _safe_defer(i):
+        return
+    if not i.guild:
+        return await _safe_followup(i, content="❌ Serveur uniquement.")
+    try:
+        tgt = target or i.user
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT achievement_id FROM achievements_unlocked WHERE guild_id=? AND user_id=?',
+                (i.guild.id, tgt.id),
+            ) as cur:
+                unlocked_ids = {r[0] for r in await cur.fetchall()}
+
+        categories = ['social', 'combat', 'economy', 'discovery', 'meta', 'hidden']
+        cat_labels = {
+            'social': '💬 Social', 'combat': '⚔️ Combat',
+            'economy': '💰 Économie', 'discovery': '🧭 Découverte',
+            'meta': '📜 Méta', 'hidden': '🌟 Cachés',
+        }
+
+        total_unlocked = len(unlocked_ids)
+        total_count = len(eng41.ACHIEVEMENTS)
+        e = discord.Embed(
+            title=f"🏆 Hauts faits — {tgt.display_name}",
+            description=f"**Débloqués :** `{total_unlocked}` / `{total_count}`",
+            color=0xF1C40F,
+        )
+        if tgt.display_avatar:
+            e.set_thumbnail(url=tgt.display_avatar.url)
+
+        for cat in categories:
+            items = eng41.achievements_by_category(cat)
+            if not items:
+                continue
+            lines = []
+            for a in items[:8]:
+                unlocked = a.id in unlocked_ids
+                if a.hidden and not unlocked:
+                    lines.append("🔒 _Achievement caché_")
+                    continue
+                icon = "✅" if unlocked else "🔒"
+                rarity_emoji = {
+                    'common': '⚪', 'rare': '🔵', 'epic': '🟣',
+                    'legendary': '🟡', 'mythic': '💠',
+                }.get(a.rarity, '⚪')
+                lines.append(f"{icon} {rarity_emoji} {a.icon} **{a.title}** — _{a.description[:60]}_")
+            cat_unlocked = sum(1 for a in items if a.id in unlocked_ids)
+            e.add_field(
+                name=f"{cat_labels[cat]} ({cat_unlocked}/{len(items)})",
+                value="\n".join(lines) or "_Aucun_",
+                inline=False,
+            )
+        e.set_footer(text="Continue à jouer pour débloquer plus !")
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        print(f"[_p41_open_achievements] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _p41_open_pet(i: discord.Interaction):
+    """Panel pet actif (ou propose la boutique si pas de pet)."""
+    if not await _safe_defer(i):
+        return
+    if not i.guild:
+        return await _safe_followup(i, content="❌ Serveur uniquement.")
+    try:
+        pet = await _get_active_pet(i.guild.id, i.user.id)
+        if not pet:
+            # Pas de pet — propose la boutique avec un Select
+            e = discord.Embed(
+                title="🐾 Tu n'as pas encore de compagnon !",
+                description=(
+                    "Adopte un pet et reçois des bonus passifs pendant tes events.\n\n"
+                    "Chaque pet a un **bonus spécialisé** :\n"
+                    "🐱 Chat — chance de loot rare\n"
+                    "🐶 Chien — bonus XP messages\n"
+                    "🐉 Dragon — dégâts en boss raid\n"
+                    "🐺 Loup — attaque en duel PvP\n"
+                    "🦊 Renard — chance Daily Wheel\n"
+                    "🤖 Robot — bonus partout (+5%)"
+                ),
+                color=0x5865F2,
+            )
+            return await _safe_followup(i, embed=e, view=PetBuySelectView(i.guild.id, i.user.id))
+
+        # Pet existant
+        bar = _make_progress_bar(pet['xp'], pet['next_level_xp'])
+        hunger_bar = _make_progress_bar(pet['hunger'], 100)
+        hunger_label = "Affamé 🚨" if pet['hunger'] < 30 else ("Faim 😋" if pet['hunger'] < 60 else "Repu 😊")
+        e = discord.Embed(
+            title=f"{pet['form_label']} · Lv. {pet['level']}",
+            description=(
+                f"**{pet['custom_name']}** _({pet['name']})_\n\n"
+                f"_{pet['description']}_\n\n"
+                f"⭐ **XP :** {bar} `{pet['xp']}/{pet['next_level_xp']}`\n"
+                f"🍖 **Faim :** {hunger_bar} `{pet['hunger']}/100` — _{hunger_label}_\n\n"
+                f"_Quand la faim < 30, les bonus sont réduits de 50%._"
+            ),
+            color=0xE67E22,
+        )
+        await _safe_followup(i, embed=e, view=PetActionsView(i.guild.id, i.user.id))
+    except Exception as ex:
+        print(f"[_p41_open_pet] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _p41_open_confession(i: discord.Interaction):
+    """Ouvre le modal de confession — vérifie d'abord que le salon est configuré."""
+    try:
+        if not i.guild:
+            if not i.response.is_done():
+                return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        c = await cfg(i.guild.id)
+        if not int(c.get('confessions_channel', 0) or 0):
+            msg = (
+                "❌ Le staff n'a pas encore configuré le salon des confessions.\n"
+                "_Owner : `/confess_setup channel:#confessions`._"
+            )
+            if not i.response.is_done():
+                return await i.response.send_message(msg, ephemeral=True)
+            return await _safe_followup(i, content=msg)
+        if i.response.is_done():
+            # Si on est déjà defer (depuis un bouton hub), on doit followup avec un message
+            # car les modals ne se send pas via followup. On envoie un mini message avec
+            # un bouton qui re-ouvre l'interaction et le modal.
+            class _OpenConfessRetry(View):
+                def __init__(self):
+                    super().__init__(timeout=60)
+                    b = Button(label="🤫 Écrire ma confession", style=discord.ButtonStyle.secondary)
+                    b.callback = self._on
+                    self.add_item(b)
+                async def _on(self, ii):
+                    try:
+                        await ii.response.send_modal(ConfessionModal())
+                    except Exception as ex:
+                        print(f"[_OpenConfessRetry] {ex}")
+            return await _safe_followup(
+                i,
+                content="Clique pour ouvrir le formulaire :",
+                view=_OpenConfessRetry(),
+            )
+        await i.response.send_modal(ConfessionModal())
+    except Exception as ex:
+        print(f"[_p41_open_confession] {ex}")
+
+
+# ─── PET SUB-VIEWS ─────────────────────────────────────────────────────────────
+
+
+class PetActionsView(View):
+    """Ephemeral : 2 boutons — Nourrir / Boutique."""
+
+    def __init__(self, guild_id: int, user_id: int):
+        super().__init__(timeout=180)
+        self.guild_id = guild_id
+        self.user_id = user_id
+
+        b_feed = Button(label="🍖 Nourrir (50 🪙)", style=discord.ButtonStyle.success)
+        b_feed.callback = self._on_feed
+        self.add_item(b_feed)
+
+        b_shop = Button(label="🛒 Boutique de pets", style=discord.ButtonStyle.primary)
+        b_shop.callback = self._on_shop
+        self.add_item(b_shop)
+
+        b_rename = Button(label="✏️ Renommer", style=discord.ButtonStyle.secondary)
+        b_rename.callback = self._on_rename
+        self.add_item(b_rename)
+
+    async def _on_feed(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if i.user.id != self.user_id:
+                return await _safe_followup(i, content="🔒 Pas pour toi.")
+            pet = await _get_active_pet(self.guild_id, self.user_id)
+            if not pet:
+                return await _safe_followup(i, content="🐾 Pas de pet actif.")
+            bal = await _get_balance_p41(self.guild_id, self.user_id)
+            if bal < 50:
+                return await _safe_followup(i, content=f"❌ Il te faut **50** 🪙 (tu as `{bal}`).")
+            try:
+                await add_coins(self.guild_id, self.user_id, -50)
+            except Exception:
+                pass
+            async with get_db() as db:
+                await db.execute(
+                    'UPDATE user_pets SET hunger=100, last_fed=CURRENT_TIMESTAMP '
+                    'WHERE guild_id=? AND user_id=? AND pet_id=?',
+                    (self.guild_id, self.user_id, pet['id']),
+                )
+                await db.commit()
+            await _give_pet_xp(self.guild_id, self.user_id, 10)
+            await _safe_followup(i, content=f"🍖 **{pet['custom_name']}** est repu ! +10 XP pour le pet.")
+        except Exception as ex:
+            print(f"[PetActionsView _on_feed] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_shop(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if i.user.id != self.user_id:
+                return await _safe_followup(i, content="🔒 Pas pour toi.")
+            e = discord.Embed(
+                title="🛒 Boutique de pets",
+                description="Choisis un pet à acheter dans le menu déroulant.\n_Tu pourras en équiper un à la fois._",
+                color=0x5865F2,
+            )
+            await _safe_followup(i, embed=e, view=PetBuySelectView(self.guild_id, self.user_id))
+        except Exception as ex:
+            print(f"[PetActionsView _on_shop] {ex}")
+
+    async def _on_rename(self, i: discord.Interaction):
+        try:
+            if i.user.id != self.user_id:
+                if not i.response.is_done():
+                    return await i.response.send_message("🔒 Pas pour toi.", ephemeral=True)
+                return await _safe_followup(i, content="🔒 Pas pour toi.")
+            if i.response.is_done():
+                return await _safe_followup(i, content="⚠️ Utilise `/pet action:rename nom:<...>`.")
+            await i.response.send_modal(PetRenameModal(self.guild_id, self.user_id))
+        except Exception as ex:
+            print(f"[PetActionsView _on_rename] {ex}")
+
+
+class PetRenameModal(Modal):
+    """Modal pour renommer son pet."""
+
+    def __init__(self, guild_id: int, user_id: int):
+        super().__init__(title="✏️ Renommer ton pet")
+        self.guild_id = guild_id
+        self.user_id = user_id
+        self.txt = TextInput(
+            label="Nouveau nom",
+            placeholder="Donne un nom à ton compagnon",
+            min_length=1,
+            max_length=30,
+            required=True,
+        )
+        self.add_item(self.txt)
+
+    async def on_submit(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            nom = (self.txt.value or '').strip()
+            if not nom:
+                return await _safe_followup(i, content="❌ Nom vide.")
+            pet = await _get_active_pet(self.guild_id, self.user_id)
+            if not pet:
+                return await _safe_followup(i, content="🐾 Pas de pet actif.")
+            async with get_db() as db:
+                await db.execute(
+                    'UPDATE user_pets SET custom_name=? WHERE guild_id=? AND user_id=? AND pet_id=?',
+                    (nom, self.guild_id, self.user_id, pet['id']),
+                )
+                await db.commit()
+            await _safe_followup(i, content=f"✏️ Ton pet s'appelle maintenant **{nom}**.")
+        except Exception as ex:
+            print(f"[PetRenameModal] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+class PetBuySelectView(View):
+    """Ephemeral : Select pour acheter un pet."""
+
+    def __init__(self, guild_id: int, user_id: int):
+        super().__init__(timeout=180)
+        self.guild_id = guild_id
+        self.user_id = user_id
+        opts = []
+        for p in eng41.PETS:
+            opts.append(discord.SelectOption(
+                label=f"{p['name']} — {p['price']} 🪙",
+                value=p['id'],
+                emoji=p['emoji'],
+                description=p['description'][:80],
+            ))
+        sel = Select(placeholder="Choisis ton pet…", options=opts)
+        sel.callback = self._on_pick
+        self.add_item(sel)
+
+    async def _on_pick(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if i.user.id != self.user_id:
+                return await _safe_followup(i, content="🔒 Pas pour toi.")
+            pid = i.data['values'][0]
+            pet_def = eng41.get_pet(pid)
+            if not pet_def:
+                return await _safe_followup(i, content="❌ Pet inconnu.")
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT 1 FROM user_pets WHERE guild_id=? AND user_id=? AND pet_id=?',
+                    (self.guild_id, self.user_id, pid),
+                ) as cur:
+                    already = await cur.fetchone()
+            if already:
+                # Déjà possédé → on l'active simplement
+                async with get_db() as db:
+                    await db.execute('UPDATE user_pets SET is_active=0 WHERE guild_id=? AND user_id=?', (self.guild_id, self.user_id))
+                    await db.execute('UPDATE user_pets SET is_active=1 WHERE guild_id=? AND user_id=? AND pet_id=?', (self.guild_id, self.user_id, pid))
+                    await db.commit()
+                return await _safe_followup(
+                    i,
+                    content=f"✅ **{pet_def['emoji']} {pet_def['name']}** est ton pet actif (déjà possédé).",
+                )
+            bal = await _get_balance_p41(self.guild_id, self.user_id)
+            if bal < pet_def['price']:
+                return await _safe_followup(
+                    i,
+                    content=f"❌ Solde insuffisant. Il te faut **{pet_def['price']}** 🪙 (tu as `{bal}`).",
+                )
+            try:
+                await add_coins(self.guild_id, self.user_id, -pet_def['price'])
+            except Exception as ex:
+                return await _safe_followup(i, content=f"❌ Erreur paiement : `{ex}`")
+            async with get_db() as db:
+                await db.execute('UPDATE user_pets SET is_active=0 WHERE guild_id=? AND user_id=?', (self.guild_id, self.user_id))
+                await db.execute(
+                    'INSERT INTO user_pets(guild_id, user_id, pet_id, is_active) VALUES(?,?,?,1) '
+                    'ON CONFLICT(guild_id, user_id, pet_id) DO UPDATE SET is_active=1',
+                    (self.guild_id, self.user_id, pid),
+                )
+                await db.commit()
+            await _incr_stat_p41(self.guild_id, self.user_id, 'pets_owned', 1)
+            await _safe_followup(
+                i,
+                content=(
+                    f"🎉 Tu as adopté **{pet_def['emoji']} {pet_def['name']}** !\n"
+                    f"_{pet_def['description']}_"
+                ),
+            )
+        except Exception as ex:
+            print(f"[PetBuySelectView _on_pick] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── HUB D'ENGAGEMENT (5 boutons persistants, custom_ids stables) ─────────────
+
+
+class EngagementHubView(View):
+    """Panneau persistant : 5 boutons pour accéder à tout sans commande.
+
+    Custom IDs stables, callbacks utilisent i.user.id directement (pas de state).
+    1 instance globale via bot.add_view au boot.
+    """
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+        b1 = Button(
+            label="📜 Mes quêtes du jour",
+            style=discord.ButtonStyle.primary,
+            custom_id="hub_quests",
+            row=0,
+        )
+        b1.callback = self._on_quests
+        self.add_item(b1)
+
+        b2 = Button(
+            label="🎰 Daily Wheel",
+            style=discord.ButtonStyle.success,
+            custom_id="hub_wheel",
+            row=0,
+        )
+        b2.callback = self._on_wheel
+        self.add_item(b2)
+
+        b3 = Button(
+            label="🏆 Mes hauts faits",
+            style=discord.ButtonStyle.secondary,
+            custom_id="hub_achievements",
+            row=1,
+        )
+        b3.callback = self._on_achievements
+        self.add_item(b3)
+
+        b4 = Button(
+            label="🐾 Mon compagnon",
+            style=discord.ButtonStyle.secondary,
+            custom_id="hub_pet",
+            row=1,
+        )
+        b4.callback = self._on_pet
+        self.add_item(b4)
+
+        b5 = Button(
+            label="🤫 Confession anonyme",
+            style=discord.ButtonStyle.secondary,
+            custom_id="hub_confess",
+            row=2,
+        )
+        b5.callback = self._on_confess
+        self.add_item(b5)
+
+    async def _on_quests(self, i: discord.Interaction):
+        await _p41_open_daily(i)
+
+    async def _on_wheel(self, i: discord.Interaction):
+        await _wheel_spin_command(i)
+
+    async def _on_achievements(self, i: discord.Interaction):
+        await _p41_open_achievements(i)
+
+    async def _on_pet(self, i: discord.Interaction):
+        await _p41_open_pet(i)
+
+    async def _on_confess(self, i: discord.Interaction):
+        await _p41_open_confession(i)
+
+
+# ─── COMMANDES /hub + /hub_setup ───────────────────────────────────────────────
+
+
+@bot.tree.command(
+    name="hub",
+    description="🎮 Ouvrir ton hub : quêtes, wheel, pet, hauts faits, confession (tout en 1 clic)",
+)
+async def hub_cmd(i: discord.Interaction):
+    """Ouvre le panneau hub en éphémère pour le membre."""
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        e = discord.Embed(
+            title="🎮 Ton Hub d'engagement",
+            description=(
+                "Tout est accessible en **1 clic**. Pas besoin de commande.\n\n"
+                "📜 **Quêtes du jour** — 3 défis quotidiens + streak\n"
+                "🎰 **Daily Wheel** — spin gratuit chaque jour\n"
+                "🏆 **Hauts faits** — débloque 50+ achievements\n"
+                "🐾 **Compagnon** — adopte et fais évoluer ton pet\n"
+                "🤫 **Confession** — message anonyme dans le salon dédié\n\n"
+                "_Le staff peut épingler ce panneau dans un salon avec `/hub_setup`._"
+            ),
+            color=0x5865F2,
+        )
+        e.set_footer(text="Hub d'engagement · Phase 41")
+        await _safe_followup(i, embed=e, view=EngagementHubView())
+    except Exception as ex:
+        print(f"[/hub] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="hub_setup",
+    description="🛠️ [Owner] Installer le panneau hub permanent dans un salon",
+)
+@app_commands.describe(channel="Salon où le panneau sera épinglé en permanence")
+async def hub_setup_cmd(i: discord.Interaction, channel: discord.TextChannel):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        e = discord.Embed(
+            title="🎮 Hub d'engagement",
+            description=(
+                "**Tout ce qu'il faut, sans aucune commande à mémoriser.**\n\n"
+                "📜 **Mes quêtes du jour** — voir mes 3 défis du jour + récompenses\n"
+                "🎰 **Daily Wheel** — 1 spin gratuit par jour, jackpot mythique possible\n"
+                "🏆 **Mes hauts faits** — 50+ achievements à débloquer\n"
+                "🐾 **Mon compagnon** — adopte un pet, fais-le évoluer, bonus passifs\n"
+                "🤫 **Confession anonyme** — envoie un message 100% anonyme\n\n"
+                "_Clique simplement sur un bouton ci-dessous. Tout est éphémère (toi seul vois la réponse)._"
+            ),
+            color=0x5865F2,
+        )
+        e.set_footer(text="Hub d'engagement · Cliquez les boutons — pas besoin de commandes")
+        try:
+            msg = await channel.send(embed=e, view=EngagementHubView())
+            try:
+                await msg.pin()
+            except Exception:
+                pass  # Pin peut échouer (limite ou perm)
+        except discord.Forbidden:
+            return await _safe_followup(
+                i,
+                content=f"❌ Pas la permission d'envoyer/pin dans {channel.mention}.",
+            )
+        await db_set(i.guild.id, 'hub_channel', channel.id)
+        await _safe_followup(
+            i,
+            content=(
+                f"✅ Hub installé dans {channel.mention} et épinglé.\n"
+                f"_Les membres n'ont plus qu'à cliquer les boutons — aucune commande à mémoriser._"
+            ),
+        )
+    except Exception as ex:
+        print(f"[/hub_setup] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
 # ─── HOOKS DE TRACKING (appelés par on_message etc.) ───────────────────────────
