@@ -744,6 +744,135 @@ def get_help_footer(context: str = "general") -> str:
 
 
 # =============================================================================
+# PHASE 36 — ÉVÉNEMENTS LÉGERS (sans masquage de salons)
+# Ces events s'ajoutent au flow normal — ils sont rapides, fréquents, et
+# n'interrompent personne. Ils visent à RÉVEILLER les inactifs et créer des
+# micro-moments d'interaction sans pollution.
+# =============================================================================
+
+# Pool d'emojis pour Speed React
+SPEED_REACT_EMOJIS = ['🔥', '⚡', '💎', '🎯', '🌟', '🎁', '🏆', '⭐']
+
+# Pool de "mystery boxes" thématiques
+MYSTERY_BOX_TYPES = [
+    {"name": "Boîte Mystère",         "emoji": "📦", "color": 0x95A5A6, "coins_min": 50,  "coins_max": 200, "gear_chance": 0.10, "weight": 40},
+    {"name": "Boîte Étincelante",     "emoji": "✨", "color": 0xF1C40F, "coins_min": 150, "coins_max": 400, "gear_chance": 0.25, "weight": 25},
+    {"name": "Coffre Doré",           "emoji": "💰", "color": 0xE67E22, "coins_min": 300, "coins_max": 700, "gear_chance": 0.40, "weight": 15},
+    {"name": "Relique Mystique",      "emoji": "🔮", "color": 0x9B59B6, "coins_min": 500, "coins_max": 1200,"gear_chance": 0.65, "weight": 5},
+]
+
+
+def random_mystery_box() -> dict:
+    """Génère une mystery box aléatoire pondérée."""
+    box = dict(_weighted_choice(MYSTERY_BOX_TYPES))
+    box["coins"] = random.randint(box["coins_min"], box["coins_max"])
+    box["gear"] = None
+    if random.random() < box["gear_chance"]:
+        if random.random() < 0.5:
+            box["gear"] = random_weapon(rarity_bias=1.2)
+            box["gear"]["slot"] = "weapon"
+        else:
+            box["gear"] = random_armor(rarity_bias=1.2)
+            box["gear"]["slot"] = "armor"
+    return box
+
+
+# Pool de citations / questions pour Daily Spark (un événement texte tout simple)
+DAILY_SPARKS = [
+    {"q": "Quel jeu vidéo a marqué ton enfance ?", "emoji": "🎮"},
+    {"q": "Ton film préféré de tous les temps ?", "emoji": "🎬"},
+    {"q": "Une chose que tu adores que personne d'autre n'aime ?", "emoji": "🤔"},
+    {"q": "Plage ou montagne ? Et pourquoi ?", "emoji": "🏖️"},
+    {"q": "Si tu pouvais maîtriser une langue instantanément ?", "emoji": "🌍"},
+    {"q": "Ton plat ultime quand t'as la flemme de cuisiner ?", "emoji": "🍕"},
+    {"q": "Animal de compagnie idéal : chat, chien, ou autre ?", "emoji": "🐱"},
+    {"q": "Pile ou face : tu pars en vacances DEMAIN ?", "emoji": "✈️"},
+    {"q": "Dernière série que tu as binge-watch ?", "emoji": "📺"},
+    {"q": "Un super-pouvoir au choix : voler ou être invisible ?", "emoji": "🦸"},
+    {"q": "Café, thé, ou rien le matin ?", "emoji": "☕"},
+    {"q": "Quel est le meilleur emoji selon toi ?", "emoji": "😄"},
+    {"q": "Si tu pouvais voyager dans le temps, quelle époque ?", "emoji": "⏳"},
+    {"q": "Une chose à apprendre absolument avant de mourir ?", "emoji": "📚"},
+    {"q": "Ton son préféré (pluie, feu, vagues, café qui passe...) ?", "emoji": "🎧"},
+]
+
+
+def random_daily_spark() -> dict:
+    """Choisit une question random pour daily spark."""
+    return dict(random.choice(DAILY_SPARKS))
+
+
+# =============================================================================
+# PHASE 36 : Catégorisation activité des membres
+# =============================================================================
+
+def categorize_member_activity(last_message_iso: Optional[str]) -> str:
+    """Catégorise un membre selon sa dernière activité.
+
+    Returns: 'very_active' (msg < 24h) · 'active' (< 7j) · 'dormant' (< 30j) · 'asleep' (> 30j ou jamais)
+    """
+    if not last_message_iso:
+        return 'asleep'
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        last_dt = _dt.fromisoformat(last_message_iso.replace('Z', '+00:00')) if 'T' in last_message_iso \
+            else _dt.strptime(last_message_iso, '%Y-%m-%d %H:%M:%S').replace(tzinfo=_tz.utc)
+        delta = _dt.now(_tz.utc) - last_dt
+        days = delta.total_seconds() / 86400
+        if days < 1:
+            return 'very_active'
+        if days < 7:
+            return 'active'
+        if days < 30:
+            return 'dormant'
+        return 'asleep'
+    except Exception:
+        return 'asleep'
+
+
+def targeting_weight(category: str) -> int:
+    """Poids pour le système de targeting intelligent.
+
+    Plus élevé = plus de chances d'être ciblé par un event personnel.
+    Les dormant/asleep ont plus de poids → on essaie de les réveiller.
+    """
+    return {
+        'very_active': 5,   # actifs : on les arrose modérément (pas spammer)
+        'active': 10,       # actifs récents : cibles principales
+        'dormant': 25,      # endormis : on essaie de réveiller (× 2.5)
+        'asleep': 15,       # très endormis : essai modéré (DMs souvent fermés)
+    }.get(category, 10)
+
+
+def random_event_intent(category: str) -> str:
+    """Choisit un type d'event personnel selon le profil du membre.
+
+    Pour les dormants/asleep : on privilégie les CADEAUX (motivation positive).
+    Pour les actifs : on varie plus (math/riddle/tip pour l'engager activement).
+    """
+    if category in ('dormant', 'asleep'):
+        # 60% cadeau, 20% tip motivant, 20% devinette facile
+        types = [('gift', 60), ('tip', 20), ('riddle', 20)]
+    elif category == 'active':
+        # Mix équilibré
+        types = [('gift', 30), ('math', 25), ('riddle', 25), ('tip', 20)]
+    else:  # very_active
+        # Plus de défis pour les actifs
+        types = [('math', 30), ('riddle', 30), ('gift', 25), ('tip', 15)]
+
+    # Tirage pondéré
+    weighted = [(t, w) for t, w in types]
+    total_w = sum(w for _, w in weighted)
+    r = random.uniform(0, total_w)
+    acc = 0
+    for t, w in weighted:
+        acc += w
+        if r <= acc:
+            return t
+    return 'gift'
+
+
+# =============================================================================
 # PHASE 31 : DIFFICULTÉ PROGRESSIVE
 # =============================================================================
 
@@ -806,9 +935,13 @@ __all__ = [
     "BADGE_CATALOG", "RANK_TIERS", "EVENT_RANK_ROLES", "COMBO_THRESHOLDS",
     "RARITY_COLORS", "RARITY_EMOJIS",
     "HELP_TIPS", "PERSONAL_RIDDLES",
+    "SPEED_REACT_EMOJIS", "MYSTERY_BOX_TYPES", "DAILY_SPARKS",
     # Generators
     "random_weapon", "random_armor", "random_boss", "random_treasure",
     "generate_shop_rotation", "get_quiz_set", "random_personal_event",
+    "random_mystery_box", "random_daily_spark",
+    # Targeting
+    "categorize_member_activity", "targeting_weight", "random_event_intent",
     # Helpers
     "hp_bar", "calc_damage", "serialize_overwrites", "compute_rewards",
     "check_badge_unlocks", "get_badge_by_id",

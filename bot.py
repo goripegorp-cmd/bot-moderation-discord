@@ -8187,31 +8187,78 @@ async def personal_event_dispatcher():
                     ) as cur:
                         rows = await cur.fetchall()
 
-                candidates = []
+                # Phase 36 : CIBLAGE INTELLIGENT
+                # On collecte TOUS les membres avec leur catégorie d'activité,
+                # puis on tire pondéré (dormant > actif > endormi > très actif).
+                # Cela permet de RÉVEILLER les membres qui dorment au lieu de
+                # spammer les actifs.
+                # On élargit aussi à 24h au lieu de 30min pour pouvoir cibler les dormants.
+                async with get_db() as db:
+                    async with db.execute(
+                        'SELECT user_id, last_message FROM activity_tracking '
+                        'WHERE guild_id=? AND last_message IS NOT NULL '
+                        'ORDER BY last_message DESC LIMIT 200',
+                        (guild.id,),
+                    ) as cur:
+                        all_rows = await cur.fetchall()
+
+                # Build weighted candidate pool
+                weighted_candidates = []
                 cooldown_h = int(c.get('personal_events_per_user_cooldown_h', 4) or 4)
                 cooldown_s = cooldown_h * 3600
-                for user_id, last_msg in rows:
+                for user_id, last_msg in all_rows:
                     try:
-                        last_dt = datetime.fromisoformat(last_msg) if 'T' in last_msg else datetime.strptime(last_msg, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
-                        if (datetime.now(timezone.utc) - last_dt).total_seconds() > 1800:
-                            continue  # pas actif depuis 30 min
                         # Cooldown user
                         last_pe = _personal_event_last.get((guild.id, user_id), 0)
                         if now_ts - last_pe < cooldown_s:
                             continue
                         member = guild.get_member(user_id)
-                        if member and not member.bot:
-                            candidates.append(member)
+                        if not member or member.bot:
+                            continue
+                        # Catégoriser
+                        cat = events2026.categorize_member_activity(last_msg)
+                        # On ne cible PAS les "asleep" en DM-only pour rien
+                        # (sauf si on a la possibilité de fallback channel)
+                        weight = events2026.targeting_weight(cat)
+                        weighted_candidates.append((member, cat, weight))
                     except Exception:
                         continue
 
-                if not candidates:
+                if not weighted_candidates:
                     continue
 
-                target = random.choice(candidates)
+                # Tirage pondéré
+                total_weight = sum(w for _, _, w in weighted_candidates)
+                r = random.uniform(0, total_weight)
+                acc = 0
+                target = None
+                target_cat = 'active'
+                for member, cat, w in weighted_candidates:
+                    acc += w
+                    if r <= acc:
+                        target = member
+                        target_cat = cat
+                        break
+                if not target:
+                    target, target_cat, _ = weighted_candidates[0]
 
-                # Générer l'event
+                # Type d'event adapté au profil
+                ev_type_hint = events2026.random_event_intent(target_cat)
                 ev_data = events2026.random_personal_event()
+                # Si on a une préférence, regénère jusqu'à 3 fois pour matcher (ou tant pis)
+                for _ in range(3):
+                    if ev_data.get('type') == ev_type_hint:
+                        break
+                    ev_data = events2026.random_personal_event()
+
+                # Pour les dormants/asleep : bonus coins motivationnel
+                if target_cat in ('dormant', 'asleep') and ev_data.get('type') == 'gift':
+                    ev_data['coins'] = int(ev_data.get('coins', 100) * 1.5)
+                    ev_data['title'] = "🌟 Le serveur t'attend !"
+                    ev_data['description'] = (
+                        f"Ça fait un moment qu'on ne t'a pas vu ! Le serveur t'a préparé "
+                        f"un cadeau de bienvenue. Reviens nous parler quand tu peux !"
+                    )
 
                 # Log en DB avec event_data_json (pour persistance)
                 async with get_db() as db:
@@ -8706,6 +8753,226 @@ async def help_cmd(i: discord.Interaction):
                 await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
         except Exception:
             pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 36 — ÉVÉNEMENTS LÉGERS (Mystery Box dans salon actif)
+#
+#  Ces events NE MASQUENT PAS les salons. Ils s'ajoutent simplement dans
+#  un salon actif et créent un micro-moment d'interaction. Tout le monde
+#  peut participer. Auto-delete 5 min après pour ne pas polluer.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Cache : message_id du mystery box → {box_data, claimed_by, claimed_at}
+_mystery_boxes: dict[int, dict] = {}
+
+
+class MysteryBoxView(View):
+    """Bouton pour ouvrir une mystery box — premier arrivé gagne le gros lot,
+    les suivants gagnent une consolation. Persistant via custom_id."""
+
+    def __init__(self, box_msg_id: int = 0):
+        super().__init__(timeout=None)
+        self.box_msg_id = box_msg_id
+        b = Button(
+            label="📦 Ouvrir la boîte !",
+            style=discord.ButtonStyle.success,
+            custom_id=f"mbox_{box_msg_id}",
+        )
+        b.callback = self._on_open
+        self.add_item(b)
+
+    async def _on_open(self, i: discord.Interaction):
+        # ACK immédiat
+        try:
+            await i.response.defer(ephemeral=True)
+        except discord.InteractionResponded:
+            pass
+        except Exception:
+            pass
+
+        try:
+            box = _mystery_boxes.get(self.box_msg_id)
+            if not box:
+                return await i.followup.send("❌ Cette boîte n'est plus disponible.", ephemeral=True)
+            if i.user.bot:
+                return await i.followup.send("🤖 Les bots ne peuvent pas ouvrir.", ephemeral=True)
+
+            already_opened = box.get('opened_by', [])
+            if i.user.id in already_opened:
+                return await i.followup.send("⚠️ Tu as déjà ouvert cette boîte.", ephemeral=True)
+
+            is_first = len(already_opened) == 0
+            already_opened.append(i.user.id)
+            box['opened_by'] = already_opened
+
+            # Récompenses
+            if is_first:
+                # Premier = full loot
+                coins = int(box.get('coins', 100))
+                gear = box.get('gear')
+                reward_msg = f"🎉 **Tu es le premier !** Tu remportes le contenu complet :\n+`{coins}` 🪙"
+                if gear:
+                    inv = await _get_or_create_inventory(i.guild.id, i.user.id)
+                    slot = gear.get('slot', 'weapon')
+                    cur_g = inv.get(slot, {}) or {}
+                    rank_order = {"commune": 0, "rare": 1, "épique": 2, "légendaire": 3}
+                    if rank_order.get(gear.get('rarity', 'commune'), 0) >= rank_order.get(cur_g.get('rarity', 'commune'), 0):
+                        inv[slot] = {
+                            'name': gear['name'], 'rarity': gear['rarity'],
+                            'emoji': gear.get('emoji', ''),
+                            'atk': gear.get('atk', 0), 'def': gear.get('def', 0),
+                        }
+                        await _save_inventory(i.guild.id, i.user.id, inv)
+                        reward_msg += f"\n+ {events2026.RARITY_EMOJIS.get(gear['rarity'], '')} **{gear['emoji']} {gear['name']}** ({gear['rarity']}) — équipé !"
+                    else:
+                        reward_msg += f"\n+ {events2026.RARITY_EMOJIS.get(gear['rarity'], '')} **{gear['emoji']} {gear['name']}** ({gear['rarity']})"
+            else:
+                # Les suivants : petite consolation (10% du loot)
+                coins = max(10, int(box.get('coins', 100) * 0.1))
+                reward_msg = (
+                    f"🎁 La boîte a déjà été ouverte ! Mais le serveur te fait quand même un cadeau.\n"
+                    f"+`{coins}` 🪙"
+                )
+
+            try:
+                await add_coins(i.guild.id, i.user.id, coins)
+            except Exception:
+                pass
+
+            await i.followup.send(
+                f"{reward_msg}\n\n_{events2026.get_help_footer('event_end')}_",
+                ephemeral=True,
+            )
+
+            # Update message visuel — désactiver le bouton si > 5 ouvertures ou > 3 min
+            if len(already_opened) >= 5:
+                for child in self.children:
+                    child.disabled = True
+                    child.label = f"📦 Boîte vide ({len(already_opened)} ouvertures)"
+                try:
+                    await i.message.edit(view=self)
+                except Exception:
+                    pass
+        except Exception as ex:
+            print(f"[MysteryBoxView _on_open] {ex}")
+            try:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
+async def _drop_mystery_box(guild) -> bool:
+    """Drop une mystery box dans un salon actif aléatoire."""
+    try:
+        # Trouver un salon actif
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT channel_id, MAX(created_at) as last_active FROM member_activity '
+                'WHERE guild_id=? AND activity_type=\'message\' '
+                'AND datetime(created_at) > datetime("now", "-2 hours") '
+                'GROUP BY channel_id ORDER BY last_active DESC LIMIT 5',
+                (guild.id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        if not rows:
+            return False
+
+        # Tirer un salon parmi les actifs
+        ch_id = int(random.choice(rows)[0])
+        ch = guild.get_channel(ch_id)
+        if not ch:
+            return False
+        perms = ch.permissions_for(guild.me)
+        if not (perms.send_messages and perms.embed_links):
+            return False
+
+        # Générer la box
+        box = events2026.random_mystery_box()
+
+        e = discord.Embed(
+            title=f"{box['emoji']} Une {box['name']} apparaît !",
+            description=(
+                f"Quelqu'un a laissé tomber un cadeau dans ce salon...\n\n"
+                f"⚡ **Premier ouvreur gagne le jackpot complet.**\n"
+                f"Les suivants gagnent une petite consolation.\n\n"
+                f"_La boîte se ferme dans 5 minutes._"
+            ),
+            color=box.get('color', 0x95A5A6),
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text="Clique sur 📦 pour ouvrir — tout le monde peut participer !")
+
+        # Envoyer avec auto-delete 5 min
+        v = MysteryBoxView()
+        msg = await ch.send(embed=e, view=v)
+
+        # Update view to use real msg ID
+        v.box_msg_id = msg.id
+        # Recréer le bouton avec le bon custom_id
+        v.clear_items()
+        b = Button(
+            label="📦 Ouvrir la boîte !",
+            style=discord.ButtonStyle.success,
+            custom_id=f"mbox_{msg.id}",
+        )
+        b.callback = v._on_open
+        v.add_item(b)
+        try:
+            await msg.edit(view=v)
+            bot.add_view(v, message_id=msg.id)
+        except Exception:
+            pass
+
+        _mystery_boxes[msg.id] = {
+            'box_name': box['name'],
+            'coins': box['coins'],
+            'gear': box.get('gear'),
+            'opened_by': [],
+        }
+
+        # Auto-delete dans 5 min
+        async def _cleanup():
+            await asyncio.sleep(300)
+            try:
+                _mystery_boxes.pop(msg.id, None)
+                await msg.delete()
+            except Exception:
+                pass
+        asyncio.create_task(_cleanup())
+
+        print(f"[MYSTERY BOX] guild={guild.id} dropped in #{ch.name}")
+        return True
+    except Exception as ex:
+        print(f"[_drop_mystery_box] {ex}")
+        return False
+
+
+@tasks.loop(minutes=25)
+async def light_events_dispatcher():
+    """Phase 36 — lance des événements légers (mystery box) toutes les ~25 min
+    dans les serveurs actifs avec event_enabled=True."""
+    try:
+        for guild in bot.guilds:
+            try:
+                c = await cfg(guild.id)
+                if not c.get('event_enabled', False):
+                    continue
+                if not _is_event_active_time(c):
+                    continue
+                # 50% chance de drop à chaque tick (50% de chance toutes les 25min = ~1/50min)
+                if random.random() > 0.5:
+                    continue
+                await _drop_mystery_box(guild)
+            except Exception as ex:
+                print(f"[light_events_dispatcher guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[light_events_dispatcher] {ex}")
+
+
+@light_events_dispatcher.before_loop
+async def _light_events_wait():
+    await bot.wait_until_ready()
 
 
 @tasks.loop(minutes=2)
@@ -32420,6 +32687,9 @@ async def on_ready():
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()
+    # Phase 36 : événements légers (mystery box) dans salons actifs
+    if not light_events_dispatcher.is_running():
+        light_events_dispatcher.start()
     try:
         await restore_active_events()
     except Exception as ex:
