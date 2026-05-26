@@ -45679,13 +45679,16 @@ async def _notify_achievement_unlock(guild_id: int, user_id: int, ach):
                             ch = candidate
                             break
             if ch:
+                # Annonce publique légendaire : visible 10 min puis se purge
+                LIFETIME_ACH = 10 * 60
                 pub = discord.Embed(
                     title=f"🏆 Nouveau Haut Fait débloqué !",
                     description=(
                         f"**{member.display_name}** vient de débloquer\n"
                         f"# {ach.icon} {ach.title}\n"
                         f"_{ach.description}_\n\n"
-                        f"**{rarity_label}**"
+                        f"**{rarity_label}**\n\n"
+                        f"{_chrono_footer(LIFETIME_ACH)}"
                     ),
                     color=color,
                     timestamp=datetime.now(timezone.utc),
@@ -45695,6 +45698,7 @@ async def _notify_achievement_unlock(guild_id: int, user_id: int, ach):
                 await ch.send(
                     embed=pub,
                     allowed_mentions=discord.AllowedMentions.none(),  # TOS-safe
+                    delete_after=LIFETIME_ACH,
                 )
         except Exception as ex:
             print(f"[_notify_achievement_unlock public ach={ach.id}] {ex}")
@@ -46536,6 +46540,57 @@ async def _safe_followup(i: discord.Interaction, **kwargs) -> bool:
     except Exception as ex:
         print(f"[_safe_followup] {ex}")
         return False
+
+
+# ─── Phase 45.1 : helpers anti-pollution (auto-delete + chrono visuel) ───────
+
+
+def _chrono_footer(seconds: int, prefix: str = "⏱️ Se supprime") -> str:
+    """Construit un footer chrono dynamique Discord.
+
+    Utilise <t:UNIX:R> qui s'affiche 'in 10 minutes' et se rafraîchit côté client.
+    Ex retour : '⏱️ Se supprime <t:1716738000:R>'
+    """
+    try:
+        target_ts = int(datetime.now(timezone.utc).timestamp()) + max(1, int(seconds))
+        return f"{prefix} <t:{target_ts}:R>"
+    except Exception:
+        return prefix
+
+
+def _claim_chrono(seconds: int) -> str:
+    """Chrono spécifique pour les claims : 'Claim avant <t:X:R>'."""
+    try:
+        target_ts = int(datetime.now(timezone.utc).timestamp()) + max(1, int(seconds))
+        return f"⏰ Claim avant <t:{target_ts}:R>"
+    except Exception:
+        return "⏰ Claim limité"
+
+
+async def _schedule_msg_delete(message, delay_seconds: int):
+    """Supprime un message après N secondes. Silent sur erreur (déjà delete / pas droits)."""
+    try:
+        await asyncio.sleep(max(1, int(delay_seconds)))
+        try:
+            await message.delete()
+        except (discord.NotFound, discord.Forbidden, AttributeError):
+            pass
+        except Exception as ex:
+            print(f"[_schedule_msg_delete] {ex}")
+    except asyncio.CancelledError:
+        raise
+    except Exception as ex:
+        print(f"[_schedule_msg_delete outer] {ex}")
+
+
+def _schedule_delete(message, delay_seconds: int):
+    """Helper sync : fire-and-forget asyncio.create_task pour delete."""
+    if message is None:
+        return
+    try:
+        asyncio.create_task(_schedule_msg_delete(message, delay_seconds))
+    except Exception as ex:
+        print(f"[_schedule_delete] {ex}")
 
 
 async def _p41_open_daily(i: discord.Interaction):
@@ -48004,22 +48059,29 @@ async def _post_daily_riddle(guild) -> bool:
         options_str = "\n".join(
             f"{chr(65 + idx)}. {opt}" for idx, opt in enumerate(riddle['options'])
         )
+        # Durée de vie : 22h (le message reste presque toute la journée puis se purge)
+        LIFETIME = 22 * 3600
         e = discord.Embed(
             title="🧠 Énigme du jour",
             description=(
                 f"{riddle['question']}\n\n"
                 f"**Choix :**\n{options_str}\n\n"
                 f"🎁 **Premier à trouver : +500 🪙**\n"
-                f"_Les bonnes réponses suivantes : +50 🪙 chacune._"
+                f"_Les bonnes réponses suivantes : +50 🪙 chacune._\n\n"
+                f"{_chrono_footer(LIFETIME)}"
             ),
             color=0x9B59B6,
             timestamp=datetime.now(timezone.utc),
         )
-        e.set_footer(text=f"Énigme du {day} · Clique sur la lettre de la bonne réponse")
+        e.set_footer(text=f"Énigme du {day}")
 
         view = RiddleAnswerView()
         try:
-            msg = await ch.send(embed=e, view=view, allowed_mentions=discord.AllowedMentions.none())
+            msg = await ch.send(
+                embed=e, view=view,
+                allowed_mentions=discord.AllowedMentions.none(),
+                delete_after=LIFETIME,
+            )
         except Exception as ex:
             print(f"[_post_daily_riddle send] {ex}")
             return False
@@ -48244,7 +48306,9 @@ class FlashTreasureView(View):
             except Exception:
                 pass
 
-            # Update le message d'origine : désactiver bouton + griser
+            # Update le message d'origine : afficher le winner + chrono delete (90s)
+            # Reste visible pour que tout le monde voie qui a gagné, puis se purge proprement
+            LIFETIME_POST_GRAB = 90
             try:
                 disabled_view = View(timeout=1)
                 disabled_btn = Button(
@@ -48254,7 +48318,17 @@ class FlashTreasureView(View):
                     disabled=True,
                 )
                 disabled_view.add_item(disabled_btn)
-                await i.message.edit(view=disabled_view)
+                new_e = discord.Embed(
+                    description=(
+                        f"💎 **{i.user.display_name}** a saisi le trésor !\n"
+                        f"💰 **+{reward}** 🪙 remportés.\n\n"
+                        f"{_chrono_footer(LIFETIME_POST_GRAB)}"
+                    ),
+                    color=0x2ECC71,
+                )
+                await i.message.edit(embed=new_e, view=disabled_view)
+                # Programmer la suppression du message d'annonce
+                _schedule_delete(i.message, LIFETIME_POST_GRAB)
             except Exception:
                 pass
 
@@ -48306,10 +48380,16 @@ async def _spawn_flash_treasure(guild) -> bool:
         reward = random.randint(100, 500)
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=60)
 
+        # Trésor : annonce 60s pour saisir. Si personne, auto-delete 75s plus tard via _flash_cleanup
+        # Si saisi : éditer puis delete via _on_grab (90s d'affichage post-grab = juste assez pour
+        # voir qui a gagné). Le delete_after natif s'applique au "message en attente" : si
+        # personne ne grab, il disparaît à 60s.
+        LIFETIME_TREASURE = 60
         e = discord.Embed(
             description=(
                 f"💎 **Quelque chose brille dans ce salon...**\n"
-                f"Cliquez vite — la fenêtre se ferme dans **60 secondes**."
+                f"Cliquez vite — la fenêtre se ferme dans **60 secondes**.\n\n"
+                f"{_claim_chrono(LIFETIME_TREASURE)}"
             ),
             color=0xF1C40F,
         )
@@ -48317,6 +48397,8 @@ async def _spawn_flash_treasure(guild) -> bool:
 
         view = FlashTreasureView()
         try:
+            # Pas de delete_after natif ici — le _flash_cleanup gère la disparition
+            # après 75s (pour laisser le temps de mettre à jour le message si quelqu'un grab)
             msg = await ch.send(
                 embed=e,
                 view=view,
@@ -48357,12 +48439,13 @@ async def _spawn_flash_treasure(guild) -> bool:
                         (tid,),
                     )
                     await db.commit()
-                # Désactiver le bouton + édit le message
+                # Désactiver le bouton + édit le message + auto-delete 60s
                 ch_obj = guild.get_channel(int(ch_id))
                 if ch_obj:
                     try:
                         old_msg = await ch_obj.fetch_message(msg_id)
                         if old_msg:
+                            LIFETIME_EXPIRED = 60
                             disabled_view = View(timeout=1)
                             disabled_btn = Button(
                                 label="💨 Trésor envolé",
@@ -48372,10 +48455,14 @@ async def _spawn_flash_treasure(guild) -> bool:
                             )
                             disabled_view.add_item(disabled_btn)
                             new_e = discord.Embed(
-                                description=f"💨 **Personne n'a saisi le trésor à temps.** ({reward} 🪙 perdus)",
+                                description=(
+                                    f"💨 **Personne n'a saisi le trésor à temps.** ({reward} 🪙 perdus)\n\n"
+                                    f"{_chrono_footer(LIFETIME_EXPIRED)}"
+                                ),
                                 color=0x95A5A6,
                             )
                             await old_msg.edit(embed=new_e, view=disabled_view)
+                            _schedule_delete(old_msg, LIFETIME_EXPIRED)
                     except Exception:
                         pass
             except Exception as ex:
@@ -48539,13 +48626,16 @@ async def _post_evening_ritual(guild) -> bool:
         if not ch:
             return False
 
+        # Le rituel reste affiché 11h (de 22h à 9h du matin, supprimé avant le récap)
+        LIFETIME = 11 * 3600
         e = discord.Embed(
             title="🌙 Rituel du soir",
             description=(
                 "**Comment était votre journée ?**\n\n"
                 "Clique sur le bouton qui correspond le mieux. Ton vote reste **anonyme**, "
                 "mais le récap demain matin te dira combien d'autres ont voté pareil.\n\n"
-                "💰 **+5 🪙** pour participer."
+                "💰 **+5 🪙** pour participer.\n\n"
+                f"{_chrono_footer(LIFETIME)}"
             ),
             color=0x5865F2,
             timestamp=datetime.now(timezone.utc),
@@ -48554,7 +48644,11 @@ async def _post_evening_ritual(guild) -> bool:
 
         view = EveningRitualView()
         try:
-            msg = await ch.send(embed=e, view=view, allowed_mentions=discord.AllowedMentions.none())
+            msg = await ch.send(
+                embed=e, view=view,
+                allowed_mentions=discord.AllowedMentions.none(),
+                delete_after=LIFETIME,
+            )
         except Exception as ex:
             print(f"[_post_evening_ritual send] {ex}")
             return False
@@ -48618,19 +48712,26 @@ async def _post_morning_recap(guild) -> bool:
         if not ch or not await _is_chatty_channel(ch):
             return False
 
+        # Le récap reste 12h (de 9h jusqu'au prochain rituel à 22h - 1h marge)
+        LIFETIME = 12 * 3600
         e = discord.Embed(
             title=f"☀️ Bonjour ! Récap d'hier ({yesterday})",
             description=(
                 f"**{total}** membre(s) ont partagé leur humeur hier soir.\n"
                 f"Humeur dominante : **{mood_label}**\n\n"
                 f"{chr(10).join(lines)}\n\n"
-                f"_Pensez à participer ce soir au prochain Rituel !_"
+                f"_Pensez à participer ce soir au prochain Rituel !_\n\n"
+                f"{_chrono_footer(LIFETIME)}"
             ),
             color=0xFFA500,
             timestamp=datetime.now(timezone.utc),
         )
         try:
-            await ch.send(embed=e, allowed_mentions=discord.AllowedMentions.none())
+            await ch.send(
+                embed=e,
+                allowed_mentions=discord.AllowedMentions.none(),
+                delete_after=LIFETIME,
+            )
         except Exception as ex:
             print(f"[_post_morning_recap send] {ex}")
             return False
@@ -48737,7 +48838,9 @@ async def _start_tag_royale(guild) -> bool:
             tr_id = cur.lastrowid
             await db.commit()
 
-        # Annoncer
+        # Annoncer (auto-delete 6h après le start — le tag royale est dynamique mais ne doit
+        # pas polluer le salon ad vitam)
+        LIFETIME_START = 6 * 3600
         e = discord.Embed(
             title="🔗 TAG ROYALE — La chaîne d'amitié",
             description=(
@@ -48746,7 +48849,8 @@ async def _start_tag_royale(guild) -> bool:
                 f"Si tu réussis, ces 3 membres devront à leur tour tag 3 autres → "
                 f"si la chaîne dure **4 niveaux** (donc ~81 personnes), **TOUT LE MONDE gagne 200 🪙 !**\n\n"
                 f"⚠️ Si la chaîne reste 1h sans nouveau tag, c'est PERDU pour tous.\n\n"
-                f"_Active une vraie cohésion entre membres._"
+                f"_Active une vraie cohésion entre membres._\n\n"
+                f"{_chrono_footer(LIFETIME_START)}"
             ),
             color=0xE91E63,
             timestamp=datetime.now(timezone.utc),
@@ -48757,6 +48861,7 @@ async def _start_tag_royale(guild) -> bool:
                 content=f"🔗 {starter.mention} — c'est à toi !",
                 embed=e,
                 allowed_mentions=discord.AllowedMentions(users=[starter], roles=False, everyone=False),
+                delete_after=LIFETIME_START,
             )
         except Exception as ex:
             print(f"[_start_tag_royale send] {ex}")
@@ -48828,24 +48933,29 @@ async def _check_tag_royale_chain(msg):
                 except Exception:
                     pass
             try:
+                # Annonce victoire — reste affichée 1h pour célébrer puis se supprime
+                LIFETIME_WIN = 3600
                 await msg.channel.send(
                     embed=discord.Embed(
                         title="🎊 TAG ROYALE — RÉUSSI !",
                         description=(
                             f"La chaîne a atteint **4 niveaux** ({len(new_chain)} participants).\n"
                             f"💰 **+{jackpot}** 🪙 à chacun !\n\n"
-                            f"_Solidarité du serveur récompensée._"
+                            f"_Solidarité du serveur récompensée._\n\n"
+                            f"{_chrono_footer(LIFETIME_WIN)}"
                         ),
                         color=0x2ECC71,
                     ),
                     allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=LIFETIME_WIN,
                 )
             except Exception:
                 pass
             return
 
-        # Sinon, niveau suivant
+        # Sinon, niveau suivant (auto-delete 2h)
         try:
+            LIFETIME_LVL = 2 * 3600
             await msg.channel.send(
                 embed=discord.Embed(
                     title=f"🔗 Tag Royale — Niveau {new_level}/4",
@@ -48853,11 +48963,13 @@ async def _check_tag_royale_chain(msg):
                         f"**{msg.author.display_name}** a relayé la chaîne !\n\n"
                         f"À vous maintenant {', '.join(m.mention for m in new_mentions)} — vous avez **1 heure** "
                         f"pour tag 3 autres membres chacun dans ce salon.\n\n"
-                        f"_Plus que **{4 - new_level}** niveau(x) pour le jackpot !_"
+                        f"_Plus que **{4 - new_level}** niveau(x) pour le jackpot !_\n\n"
+                        f"{_chrono_footer(LIFETIME_LVL)}"
                     ),
                     color=0xE91E63,
                 ),
                 allowed_mentions=discord.AllowedMentions(users=new_mentions, roles=False, everyone=False),
+                delete_after=LIFETIME_LVL,
             )
         except Exception:
             pass
@@ -48886,16 +48998,20 @@ async def tag_royale_timeout_checker():
             ch = guild.get_channel(int(ch_id)) if guild else None
             if ch:
                 try:
+                    # Reste affiché 30 min puis se purge
+                    LIFETIME_BROKEN = 30 * 60
                     await ch.send(
                         embed=discord.Embed(
                             title="💔 Tag Royale — Chaîne brisée",
                             description=(
                                 f"Personne n'a relancé la chaîne dans l'heure. Le jackpot s'envole !\n"
-                                f"_Rendez-vous la semaine prochaine._"
+                                f"_Rendez-vous la semaine prochaine._\n\n"
+                                f"{_chrono_footer(LIFETIME_BROKEN)}"
                             ),
                             color=0x95A5A6,
                         ),
                         allowed_mentions=discord.AllowedMentions.none(),
+                        delete_after=LIFETIME_BROKEN,
                     )
                 except Exception:
                     pass
@@ -48980,6 +49096,8 @@ async def server_anniversary_checker():
                 if not ch:
                     continue
 
+                # Annonce anniversaire visible 24h puis se purge proprement
+                LIFETIME_ANNIV = 24 * 3600
                 e = discord.Embed(
                     title=f"🎂 JOYEUX ANNIVERSAIRE {guild.name} !",
                     description=(
@@ -48988,7 +49106,8 @@ async def server_anniversary_checker():
                         f"💰 **+500 🪙 offerts à tous les membres**\n"
                         f"💎 **Trésors flash boostés** (x3 fréquence pendant 24h)\n"
                         f"🌟 **Achievement spécial** débloqué : Survivant de l'an {years_old}\n\n"
-                        f"_Merci d'être là._"
+                        f"_Merci d'être là._\n\n"
+                        f"{_chrono_footer(LIFETIME_ANNIV)}"
                     ),
                     color=0xFFD700,
                     timestamp=datetime.now(timezone.utc),
@@ -48996,7 +49115,11 @@ async def server_anniversary_checker():
                 e.set_footer(text=f"Anniversaire {today.year}")
 
                 try:
-                    await ch.send(embed=e, allowed_mentions=discord.AllowedMentions.none())
+                    await ch.send(
+                        embed=e,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                        delete_after=LIFETIME_ANNIV,
+                    )
                 except Exception:
                     pass
 
@@ -49859,22 +49982,24 @@ async def _apply_voice_spotlight(guild) -> bool:
                 await db.commit()
             return False
 
-        # Annonce discrète dans le hub
+        # Annonce discrète dans le hub — durée alignée sur le spotlight (15 min)
         try:
             hub_id = int(c.get('hub_channel', 0) or 0)
             hub_ch = guild.get_channel(hub_id) if hub_id else None
             if hub_ch and await _is_chatty_channel(hub_ch):
                 count = len([m for m in vc.members if not m.bot])
+                LIFETIME_SPOT = 15 * 60
                 await hub_ch.send(
                     embed=discord.Embed(
                         description=(
                             f"⭐ **Vocal en scène : <#{vc.id}>**\n"
-                            f"{count} membre(s) sont en train de discuter. Allez les voir !\n"
-                            f"_Mise en avant 15 min — auto-revert._"
+                            f"{count} membre(s) sont en train de discuter. Allez les voir !\n\n"
+                            f"{_chrono_footer(LIFETIME_SPOT, prefix='⏱️ Spotlight termine')}"
                         ),
                         color=0xFFD700,
                     ),
                     allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=LIFETIME_SPOT,
                 )
         except Exception:
             pass
@@ -50132,20 +50257,28 @@ async def _post_compliment_of_the_day(guild) -> bool:
         if not ch:
             return False
 
+        # Compliment du jour : visible 22h (de 19h à 17h du lendemain)
+        LIFETIME_COMPL = 22 * 3600
         e = discord.Embed(
             title="💝 Compliment du jour",
             description=(
                 "Qui dans le serveur t'a fait sourire récemment ?\n\n"
                 "Clique pour envoyer un message **100% anonyme** à un membre.\n"
                 "_Personne ne saura que c'est toi — pas même les admins._\n\n"
-                "💫 Un petit geste, ça fait beaucoup."
+                "💫 Un petit geste, ça fait beaucoup.\n\n"
+                f"{_chrono_footer(LIFETIME_COMPL)}"
             ),
             color=0xFF69B4,
             timestamp=datetime.now(timezone.utc),
         )
         e.set_footer(text="1 compliment / membre / jour")
         try:
-            await ch.send(embed=e, view=ComplimentOpenView(), allowed_mentions=discord.AllowedMentions.none())
+            await ch.send(
+                embed=e,
+                view=ComplimentOpenView(),
+                allowed_mentions=discord.AllowedMentions.none(),
+                delete_after=LIFETIME_COMPL,
+            )
         except Exception as ex:
             print(f"[_post_compliment_of_the_day send] {ex}")
             return False
