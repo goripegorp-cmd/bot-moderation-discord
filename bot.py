@@ -38,6 +38,8 @@ import vocabulary as vocab2026
 import help_system as help2026
 import engagement as engage2026
 import social_media as social2026
+# Phase 41 : moteur d'engagement quotidien (quests, achievements, pets, wheel, confessions)
+import engagement41 as eng41
 import protection_guards as guards2026
 import community_features as comm2026
 import admin_panels_v2 as panels2026
@@ -1067,6 +1069,112 @@ async def db_init():
             claimed INTEGER DEFAULT 0,
             claimed_at DATETIME,
             PRIMARY KEY (guild_id, user_id)
+        )''')
+
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 41 — Engagement quotidien (daily quests, achievements, pets,
+        # wheel, confessions)
+        # ═══════════════════════════════════════════════════════════════════
+        # Progrès des daily quests (1 ligne par (guild,user,date,quest_id))
+        await db.execute('''CREATE TABLE IF NOT EXISTS daily_quest_progress (
+            guild_id INTEGER,
+            user_id INTEGER,
+            day TEXT,                           -- 'YYYY-MM-DD' Europe/Paris
+            quest_id TEXT,
+            metric TEXT,
+            target INTEGER,
+            progress INTEGER DEFAULT 0,
+            completed INTEGER DEFAULT 0,
+            completed_at DATETIME,
+            claimed INTEGER DEFAULT 0,
+            PRIMARY KEY (guild_id, user_id, day, quest_id)
+        )''')
+
+        # Streak quotidien : N jours consécutifs avec >=1 quête complétée
+        await db.execute('''CREATE TABLE IF NOT EXISTS user_streaks (
+            guild_id INTEGER,
+            user_id INTEGER,
+            current_streak INTEGER DEFAULT 0,
+            best_streak INTEGER DEFAULT 0,
+            last_completion_day TEXT,           -- 'YYYY-MM-DD' du dernier jour avec quête finie
+            quests_done_total INTEGER DEFAULT 0,
+            PRIMARY KEY (guild_id, user_id)
+        )''')
+
+        # Stats cumulatives pour achievements (compteurs persistants)
+        await db.execute('''CREATE TABLE IF NOT EXISTS user_stats41 (
+            guild_id INTEGER,
+            user_id INTEGER,
+            messages INTEGER DEFAULT 0,
+            reactions_given INTEGER DEFAULT 0,
+            voice_min INTEGER DEFAULT 0,
+            events_participated INTEGER DEFAULT 0,
+            events_won INTEGER DEFAULT 0,
+            bosses_won INTEGER DEFAULT 0,
+            duels_won INTEGER DEFAULT 0,
+            treasures_found INTEGER DEFAULT 0,
+            quiz_correct INTEGER DEFAULT 0,
+            mystery_opened INTEGER DEFAULT 0,
+            total_coins_earned INTEGER DEFAULT 0,
+            shop_purchases INTEGER DEFAULT 0,
+            legendary_purchases INTEGER DEFAULT 0,
+            divine_purchases INTEGER DEFAULT 0,
+            unique_commands INTEGER DEFAULT 0,
+            classes_tried INTEGER DEFAULT 0,
+            pets_owned INTEGER DEFAULT 0,
+            wheel_spins INTEGER DEFAULT 0,
+            quests_done INTEGER DEFAULT 0,
+            confessions_sent INTEGER DEFAULT 0,
+            level INTEGER DEFAULT 0,
+            best_streak INTEGER DEFAULT 0,
+            commands_used_json TEXT DEFAULT '[]',  -- JSON array des commandes utilisées (pour unique_commands)
+            classes_tried_json TEXT DEFAULT '[]',
+            PRIMARY KEY (guild_id, user_id)
+        )''')
+
+        # Achievements débloqués (1 ligne par unlock)
+        await db.execute('''CREATE TABLE IF NOT EXISTS achievements_unlocked (
+            guild_id INTEGER,
+            user_id INTEGER,
+            achievement_id TEXT,
+            unlocked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (guild_id, user_id, achievement_id)
+        )''')
+
+        # Pets possédés par les membres (1 ligne par pet, plusieurs possibles)
+        await db.execute('''CREATE TABLE IF NOT EXISTS user_pets (
+            guild_id INTEGER,
+            user_id INTEGER,
+            pet_id TEXT,
+            custom_name TEXT,
+            level INTEGER DEFAULT 1,
+            xp INTEGER DEFAULT 0,
+            hunger INTEGER DEFAULT 100,            -- 0..100, baisse avec le temps
+            last_fed DATETIME DEFAULT CURRENT_TIMESTAMP,
+            acquired_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            is_active INTEGER DEFAULT 0,           -- 1 si c'est le pet actif
+            PRIMARY KEY (guild_id, user_id, pet_id)
+        )''')
+
+        # Log des spins de Daily Wheel (cooldown 24h)
+        await db.execute('''CREATE TABLE IF NOT EXISTS wheel_log (
+            guild_id INTEGER,
+            user_id INTEGER,
+            last_spin_at DATETIME,
+            total_spins INTEGER DEFAULT 0,
+            PRIMARY KEY (guild_id, user_id)
+        )''')
+
+        # Confessions anonymes (auto-incrément, conservées 30j)
+        await db.execute('''CREATE TABLE IF NOT EXISTS confessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            user_hash TEXT,                        -- hash anonymisé (HMAC) — anti-doublon
+            content TEXT,
+            message_id INTEGER,
+            channel_id INTEGER,
+            sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            flagged INTEGER DEFAULT 0
         )''')
 
         # Migration : ajoute colonnes manquantes à player_event_stats si DB existe déjà
@@ -9553,6 +9661,9 @@ async def _get_top_active_channels(guild, limit: int = 3) -> list:
     Utilisé pour poster un echo discret (sans mention) d'un event en cours.
     Permet aux actifs qui discutent dans ces salons de voir l'event arriver.
     """
+    # AUDIT fix : edge case rare — bot kické juste avant l'echo
+    if not guild or not guild.me:
+        return []
     try:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
         async with get_db() as db:
@@ -9634,19 +9745,31 @@ async def _post_event_echo(guild, arena_channel, event_kind: str, exclude_channe
 #  Phase 40 — ONBOARDING DM pour nouveaux membres
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# AUDIT fix : référencer les fire-and-forget tasks pour éviter le GC mid-sleep
+_pending_onboardings: set = set()
+
 
 class OnboardingView(View):
-    """View envoyée aux nouveaux membres pour les guider."""
+    """View envoyée aux nouveaux membres pour les guider.
 
-    def __init__(self, guild_id: int, user_id: int):
-        super().__init__(timeout=None)  # persistant 48h via custom_id
+    ⚠️ AUDIT fix : custom_ids GÉNÉRIQUES (pas de user_id) pour que la view
+    survive aux restarts. On utilise i.user.id dans les callbacks pour identifier
+    la personne. On enregistre 1 instance globale via bot.add_view au boot.
+    """
+
+    def __init__(self, guild_id: int = 0, user_id: int = 0):
+        super().__init__(timeout=None)  # persistant via custom_id stable
+        # Conservés pour pouvoir router vers un guild spécifique quand on send
+        # depuis _send_onboarding_dm. Quand la view est ré-instanciée pour
+        # bot.add_view au boot, on a (0, 0) — c'est OK, on utilise i.user.id
+        # et i.guild_id dans les callbacks.
         self.guild_id = guild_id
         self.user_id = user_id
 
         b_class = Button(
             label="🛡️ Choisir ma classe",
             style=discord.ButtonStyle.primary,
-            custom_id=f"onb_class_{user_id}",
+            custom_id="onb_class",
         )
         b_class.callback = self._on_choose_class
         self.add_item(b_class)
@@ -9654,7 +9777,7 @@ class OnboardingView(View):
         b_notif = Button(
             label="🔔 Activer les notifs events",
             style=discord.ButtonStyle.success,
-            custom_id=f"onb_notif_{user_id}",
+            custom_id="onb_notif",
         )
         b_notif.callback = self._on_enable_notifs
         self.add_item(b_notif)
@@ -9662,16 +9785,31 @@ class OnboardingView(View):
         b_quiet = Button(
             label="🤫 Pas de notif merci",
             style=discord.ButtonStyle.secondary,
-            custom_id=f"onb_quiet_{user_id}",
+            custom_id="onb_quiet",
         )
         b_quiet.callback = self._on_quiet
         self.add_item(b_quiet)
 
+    def _resolve_guild_id(self, i: discord.Interaction) -> int:
+        """Trouve le guild_id : soit du self (envoi initial), soit déduit.
+
+        En DM, i.guild_id est None. On utilise self.guild_id qui a été passé
+        lors de l'envoi initial. Si on est en re-restoration (0), on prend
+        le premier guild partagé entre le bot et l'utilisateur.
+        """
+        if self.guild_id:
+            return self.guild_id
+        # Restore : trouver un guild partagé
+        for g in bot.guilds:
+            if g.get_member(i.user.id):
+                return g.id
+        return 0
+
     async def _on_choose_class(self, i: discord.Interaction):
         try:
             await i.response.defer(ephemeral=True)
-            # Construire une liste de boutons de classes
-            view = _ClassPickerOnboardingView(self.guild_id)
+            gid = self._resolve_guild_id(i)
+            view = _ClassPickerOnboardingView(gid)
             embed = discord.Embed(
                 title="🛡️ Choisis ta classe",
                 description=(
@@ -9693,7 +9831,8 @@ class OnboardingView(View):
     async def _on_enable_notifs(self, i: discord.Interaction):
         try:
             await i.response.defer(ephemeral=True)
-            guild = bot.get_guild(self.guild_id)
+            gid = self._resolve_guild_id(i)
+            guild = bot.get_guild(gid) if gid else None
             if not guild:
                 return await i.followup.send("❌ Serveur introuvable.", ephemeral=True)
             member = guild.get_member(i.user.id)
@@ -9869,20 +10008,29 @@ class ComebackClaimView(View):
                     ephemeral=True,
                 )
 
-            # Donner les coins
-            try:
-                await add_coins(self.guild_id, self.user_id, int(bonus))
-            except Exception:
-                pass
-
-            # Marquer claimed
+            # ⚠️ AUDIT fix : marquer claimed AVANT add_coins pour éviter double-claim
+            # en cas de crash entre les 2 opérations. UPDATE conditionnel (claimed=0)
+            # garantit qu'un seul claim passe même en race.
             async with get_db() as db:
-                await db.execute(
+                cur = await db.execute(
                     'UPDATE comeback_dms SET claimed=1, claimed_at=CURRENT_TIMESTAMP '
-                    'WHERE guild_id=? AND user_id=?',
+                    'WHERE guild_id=? AND user_id=? AND claimed=0',
                     (self.guild_id, self.user_id),
                 )
                 await db.commit()
+                rowcount = cur.rowcount
+            if rowcount == 0:
+                # Quelqu'un (ou un retry) a déjà claim entre temps
+                return await i.followup.send(
+                    "⚠️ Bonus déjà réclamé (ou expiré).",
+                    ephemeral=True,
+                )
+
+            # Donner les coins APRÈS le marquage
+            try:
+                await add_coins(self.guild_id, self.user_id, int(bonus))
+            except Exception as ex:
+                print(f"[ComebackClaimView add_coins] {ex}")
 
             # Désactiver le bouton
             for child in self.children:
@@ -34202,6 +34350,16 @@ async def on_ready():
     
     bot.add_view(TicketControlView())
     bot.add_view(GiveawayParticipateView())  # Pour les boutons de participation aux giveaways
+    # Phase 40 — views persistantes (custom_ids stables, callbacks utilisent i.user.id)
+    try:
+        bot.add_view(OnboardingView())
+    except Exception as ex:
+        print(f"[on_ready add_view OnboardingView] {ex}")
+    # Phase 41 — confessions persistent view
+    try:
+        bot.add_view(ConfessionSendView())
+    except Exception as ex:
+        print(f"[on_ready add_view ConfessionSendView] {ex}")
     try:
         async with get_db() as db:
             async with db.execute('SELECT data FROM guild_config') as c:
@@ -34827,8 +34985,11 @@ async def on_member_join(m):
         print(f"[welcome] {ex}")
 
     # ═══ Phase 40 : Onboarding DM (3 min après l'arrivée, en background) ═══
+    # ⚠️ AUDIT fix : on store la task dans un set pour éviter le GC mid-sleep
     try:
-        asyncio.create_task(_send_onboarding_dm(m))
+        t = asyncio.create_task(_send_onboarding_dm(m))
+        _pending_onboardings.add(t)
+        t.add_done_callback(_pending_onboardings.discard)
     except Exception as ex:
         print(f"[onboarding_dm schedule] {ex}")
 
@@ -35274,6 +35435,12 @@ async def on_message(msg):
     
     # ═══════════════ TRACKING ACTIVITÉ MEMBRE ═══════════════
     await track_member_message(msg)
+
+    # ═══════════════ Phase 41 : tracking quests + achievements ═══════════════
+    try:
+        await _track_message_p41(msg)
+    except Exception as ex:
+        print(f"[_track_message_p41] {ex}")
 
     # ═══════════════ Phase 23 : DÉTECTION COMPTES PIRATÉS ═══════════════
     try:
@@ -40406,6 +40573,12 @@ async def on_raw_reaction_add(payload):
     # Suggestions : refresh couleur
     await _update_suggestion_colors(payload)
 
+    # Phase 41 : tracking quests + achievements
+    try:
+        await _track_reaction_p41(payload)
+    except Exception as ex:
+        print(f"[_track_reaction_p41] {ex}")
+
 @bot.event
 async def on_raw_reaction_remove(payload):
     if payload.user_id == bot.user.id:
@@ -44633,6 +44806,1368 @@ async def _2026_start_activity_flush():
 
 
 bot.add_listener(_2026_start_activity_flush, "on_ready")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 41 — ENGAGEMENT QUOTIDIEN
+#  Daily Quests · Achievements · Pets · Daily Wheel · Confessions anonymes
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import hmac as _hmac_p41
+
+# Timezone serveur (Europe/Paris par défaut — comme le reste du bot)
+try:
+    from zoneinfo import ZoneInfo as _ZI_p41
+    _TZ_P41 = _ZI_p41('Europe/Paris')
+except Exception:
+    _TZ_P41 = timezone.utc
+
+
+def _today_str_p41() -> str:
+    """Aujourd'hui au format YYYY-MM-DD (Europe/Paris)."""
+    return datetime.now(_TZ_P41).strftime('%Y-%m-%d')
+
+
+def _yesterday_str_p41() -> str:
+    return (datetime.now(_TZ_P41) - timedelta(days=1)).strftime('%Y-%m-%d')
+
+
+def _hour_local_p41() -> int:
+    return datetime.now(_TZ_P41).hour
+
+
+# ─── HELPERS STATS ─────────────────────────────────────────────────────────────
+
+
+async def _get_user_stats41(guild_id: int, user_id: int) -> dict:
+    """Récupère (ou crée) la ligne user_stats41 pour un membre."""
+    async with get_db() as db:
+        async with db.execute(
+            'SELECT messages, reactions_given, voice_min, events_participated, events_won, '
+            'bosses_won, duels_won, treasures_found, quiz_correct, mystery_opened, '
+            'total_coins_earned, shop_purchases, legendary_purchases, divine_purchases, '
+            'unique_commands, classes_tried, pets_owned, wheel_spins, quests_done, '
+            'confessions_sent, level, best_streak, commands_used_json, classes_tried_json '
+            'FROM user_stats41 WHERE guild_id=? AND user_id=?',
+            (guild_id, user_id),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            await db.execute(
+                'INSERT OR IGNORE INTO user_stats41(guild_id, user_id) VALUES(?,?)',
+                (guild_id, user_id),
+            )
+            await db.commit()
+            return {
+                'messages': 0, 'reactions_given': 0, 'voice_min': 0,
+                'events_participated': 0, 'events_won': 0, 'bosses_won': 0,
+                'duels_won': 0, 'treasures_found': 0, 'quiz_correct': 0,
+                'mystery_opened': 0, 'total_coins_earned': 0, 'shop_purchases': 0,
+                'legendary_purchases': 0, 'divine_purchases': 0,
+                'unique_commands': 0, 'classes_tried': 0, 'pets_owned': 0,
+                'wheel_spins': 0, 'quests_done': 0, 'confessions_sent': 0,
+                'level': 0, 'best_streak': 0,
+                'commands_used_json': '[]', 'classes_tried_json': '[]',
+            }
+        keys = [
+            'messages', 'reactions_given', 'voice_min', 'events_participated',
+            'events_won', 'bosses_won', 'duels_won', 'treasures_found',
+            'quiz_correct', 'mystery_opened', 'total_coins_earned',
+            'shop_purchases', 'legendary_purchases', 'divine_purchases',
+            'unique_commands', 'classes_tried', 'pets_owned', 'wheel_spins',
+            'quests_done', 'confessions_sent', 'level', 'best_streak',
+            'commands_used_json', 'classes_tried_json',
+        ]
+        return dict(zip(keys, row))
+
+
+async def _incr_stat_p41(guild_id: int, user_id: int, metric: str, amount: int = 1) -> int:
+    """Incrémente un compteur de user_stats41 et retourne la nouvelle valeur.
+
+    Trigger automatiquement la vérification d'achievements liés à ce metric.
+    """
+    # S'assurer que la ligne existe
+    await _get_user_stats41(guild_id, user_id)
+    async with get_db() as db:
+        await db.execute(
+            f'UPDATE user_stats41 SET {metric}={metric}+? WHERE guild_id=? AND user_id=?',
+            (amount, guild_id, user_id),
+        )
+        await db.commit()
+        async with db.execute(
+            f'SELECT {metric} FROM user_stats41 WHERE guild_id=? AND user_id=?',
+            (guild_id, user_id),
+        ) as cur:
+            row = await cur.fetchone()
+    new_val = int(row[0]) if row else 0
+    # Vérifier les achievements liés
+    try:
+        await _check_achievements_for_metric(guild_id, user_id, metric, new_val)
+    except Exception as ex:
+        print(f"[_incr_stat_p41 check_ach metric={metric}] {ex}")
+    return new_val
+
+
+# ─── HELPERS QUESTS ────────────────────────────────────────────────────────────
+
+
+async def _ensure_today_quests(guild_id: int, user_id: int) -> list:
+    """S'assure que les 3 quêtes du jour existent en DB. Retourne la liste."""
+    today = _today_str_p41()
+    async with get_db() as db:
+        async with db.execute(
+            'SELECT quest_id, metric, target, progress, completed, claimed '
+            'FROM daily_quest_progress WHERE guild_id=? AND user_id=? AND day=?',
+            (guild_id, user_id, today),
+        ) as cur:
+            rows = await cur.fetchall()
+        if rows:
+            # Quêtes existantes : reconstituer en injectant les titres depuis le catalogue
+            out = []
+            for q_id, metric, target, progress, completed, claimed in rows:
+                tmpl = next((t for t in eng41.DAILY_QUEST_TEMPLATES if t.id == q_id), None)
+                if not tmpl:
+                    continue
+                out.append({
+                    'id': q_id, 'metric': metric, 'target': target,
+                    'progress': progress, 'completed': bool(completed),
+                    'claimed': bool(claimed),
+                    'title': tmpl.title,
+                    'description': tmpl.description.format(target=target),
+                    'emoji': tmpl.emoji, 'difficulty': tmpl.difficulty,
+                    'reward_coins': tmpl.reward_coins, 'reward_xp': tmpl.reward_xp,
+                })
+            return out
+
+        # Générer 3 quêtes
+        quests = eng41.generate_daily_quests(guild_id, user_id, today, count=3)
+        for q in quests:
+            await db.execute(
+                'INSERT OR IGNORE INTO daily_quest_progress(guild_id, user_id, day, quest_id, metric, target) '
+                'VALUES(?,?,?,?,?,?)',
+                (guild_id, user_id, today, q['id'], q['metric'], q['target']),
+            )
+        await db.commit()
+        for q in quests:
+            q['progress'] = 0
+            q['completed'] = False
+            q['claimed'] = False
+        return quests
+
+
+async def _update_quest_progress(guild_id: int, user_id: int, metric: str, amount: int = 1):
+    """Met à jour le progrès des quêtes du jour qui utilisent ce metric."""
+    today = _today_str_p41()
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT quest_id, target, progress, completed FROM daily_quest_progress '
+                'WHERE guild_id=? AND user_id=? AND day=? AND metric=? AND completed=0',
+                (guild_id, user_id, today, metric),
+            ) as cur:
+                rows = await cur.fetchall()
+            for quest_id, target, progress, completed in rows:
+                new_progress = progress + amount
+                new_completed = new_progress >= target
+                await db.execute(
+                    'UPDATE daily_quest_progress SET progress=?, completed=?, completed_at=? '
+                    'WHERE guild_id=? AND user_id=? AND day=? AND quest_id=?',
+                    (
+                        new_progress,
+                        1 if new_completed else 0,
+                        datetime.now(_TZ_P41).isoformat() if new_completed else None,
+                        guild_id, user_id, today, quest_id,
+                    ),
+                )
+            await db.commit()
+    except Exception as ex:
+        print(f"[_update_quest_progress metric={metric}] {ex}")
+
+
+async def _claim_completed_quests(guild_id: int, user_id: int) -> dict:
+    """Réclame TOUTES les quêtes complétées non-claimed. Donne les rewards + update streak.
+
+    Retourne : {'claimed_count', 'coins', 'xp', 'streak_milestone'}
+    """
+    today = _today_str_p41()
+    coins_total = 0
+    xp_total = 0
+    claimed_count = 0
+
+    async with get_db() as db:
+        async with db.execute(
+            'SELECT quest_id FROM daily_quest_progress '
+            'WHERE guild_id=? AND user_id=? AND day=? AND completed=1 AND claimed=0',
+            (guild_id, user_id, today),
+        ) as cur:
+            rows = await cur.fetchall()
+
+        for (quest_id,) in rows:
+            tmpl = next((t for t in eng41.DAILY_QUEST_TEMPLATES if t.id == quest_id), None)
+            if not tmpl:
+                continue
+            await db.execute(
+                'UPDATE daily_quest_progress SET claimed=1 '
+                'WHERE guild_id=? AND user_id=? AND day=? AND quest_id=?',
+                (guild_id, user_id, today, quest_id),
+            )
+            coins_total += tmpl.reward_coins
+            xp_total += tmpl.reward_xp
+            claimed_count += 1
+        await db.commit()
+
+    if claimed_count == 0:
+        return {'claimed_count': 0, 'coins': 0, 'xp': 0, 'streak_milestone': None}
+
+    # Donner les rewards
+    if coins_total > 0:
+        try:
+            await add_coins(guild_id, user_id, coins_total)
+        except Exception as ex:
+            print(f"[claim quests add_coins] {ex}")
+
+    # Tracking achievements
+    await _incr_stat_p41(guild_id, user_id, 'quests_done', claimed_count)
+
+    # Update streak si au moins 1 quête a été terminée aujourd'hui
+    milestone = await _update_streak(guild_id, user_id, today)
+
+    return {
+        'claimed_count': claimed_count,
+        'coins': coins_total,
+        'xp': xp_total,
+        'streak_milestone': milestone,
+    }
+
+
+async def _update_streak(guild_id: int, user_id: int, today: str) -> Optional[dict]:
+    """Met à jour le streak. Retourne le palier atteint (ou None)."""
+    yesterday = _yesterday_str_p41()
+    async with get_db() as db:
+        async with db.execute(
+            'SELECT current_streak, best_streak, last_completion_day '
+            'FROM user_streaks WHERE guild_id=? AND user_id=?',
+            (guild_id, user_id),
+        ) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            cur_streak, best_streak, last_day = 0, 0, None
+        else:
+            cur_streak, best_streak, last_day = int(row[0] or 0), int(row[1] or 0), row[2]
+
+        # Déjà comptabilisé aujourd'hui ?
+        if last_day == today:
+            return None
+
+        # Continuer ou recommencer ?
+        if last_day == yesterday:
+            new_streak = cur_streak + 1
+        else:
+            new_streak = 1
+        new_best = max(best_streak, new_streak)
+
+        await db.execute(
+            'INSERT INTO user_streaks(guild_id, user_id, current_streak, best_streak, last_completion_day) '
+            'VALUES(?,?,?,?,?) '
+            'ON CONFLICT(guild_id, user_id) DO UPDATE SET '
+            'current_streak=?, best_streak=?, last_completion_day=?',
+            (guild_id, user_id, new_streak, new_best, today,
+             new_streak, new_best, today),
+        )
+        await db.commit()
+
+    # Mettre à jour le compteur best_streak dans user_stats41 aussi
+    async with get_db() as db:
+        await db.execute(
+            'UPDATE user_stats41 SET best_streak=? WHERE guild_id=? AND user_id=?',
+            (new_best, guild_id, user_id),
+        )
+        await db.commit()
+
+    # Vérifier achievements de streak
+    try:
+        await _check_achievements_for_metric(guild_id, user_id, 'best_streak', new_best)
+    except Exception:
+        pass
+
+    return eng41.streak_milestone_reached(cur_streak, new_streak)
+
+
+# ─── HELPERS ACHIEVEMENTS ──────────────────────────────────────────────────────
+
+
+async def _is_achievement_unlocked(guild_id: int, user_id: int, achievement_id: str) -> bool:
+    async with get_db() as db:
+        async with db.execute(
+            'SELECT 1 FROM achievements_unlocked WHERE guild_id=? AND user_id=? AND achievement_id=?',
+            (guild_id, user_id, achievement_id),
+        ) as cur:
+            return await cur.fetchone() is not None
+
+
+async def _unlock_achievement(guild_id: int, user_id: int, achievement_id: str) -> bool:
+    """Débloque un achievement (idempotent). Retourne True si nouveau unlock."""
+    if await _is_achievement_unlocked(guild_id, user_id, achievement_id):
+        return False
+    ach = eng41.get_achievement(achievement_id)
+    if not ach:
+        return False
+    async with get_db() as db:
+        await db.execute(
+            'INSERT OR IGNORE INTO achievements_unlocked(guild_id, user_id, achievement_id) VALUES(?,?,?)',
+            (guild_id, user_id, achievement_id),
+        )
+        await db.commit()
+    # Reward coins
+    if ach.reward_coins > 0:
+        try:
+            await add_coins(guild_id, user_id, ach.reward_coins)
+        except Exception:
+            pass
+    # Notification
+    try:
+        await _notify_achievement_unlock(guild_id, user_id, ach)
+    except Exception as ex:
+        print(f"[_notify_achievement_unlock] {ex}")
+    return True
+
+
+async def _check_achievements_for_metric(guild_id: int, user_id: int, metric: str, new_value: int):
+    """Vérifie tous les achievements liés à ce metric et débloque ceux atteints."""
+    for ach in eng41.achievements_for_metric(metric):
+        if ach.threshold and new_value >= ach.threshold:
+            await _unlock_achievement(guild_id, user_id, ach.id)
+
+
+async def _notify_achievement_unlock(guild_id: int, user_id: int, ach):
+    """Notifie publiquement (en privé pour common, public pour epic+)."""
+    guild = bot.get_guild(guild_id)
+    if not guild:
+        return
+    member = guild.get_member(user_id)
+    if not member:
+        return
+
+    color = eng41.RARITY_COLORS.get(ach.rarity, 0x95A5A6)
+    rarity_label = eng41.RARITY_LABELS.get(ach.rarity, ach.rarity.title())
+
+    # DM systématique au joueur (toujours)
+    try:
+        e = discord.Embed(
+            title=f"🏆 Achievement débloqué : {ach.icon} {ach.title}",
+            description=(
+                f"_{ach.description}_\n\n"
+                f"**Rareté :** {rarity_label}\n"
+                f"**Récompense :** `+{ach.reward_coins}` 🪙"
+            ),
+            color=color,
+            timestamp=datetime.now(timezone.utc),
+        )
+        e.set_footer(text=f"{guild.name} · /achievements pour voir tout")
+        await member.send(embed=e)
+    except Exception:
+        pass
+
+    # Annonce publique pour epic+ (mais discrète : pas de mention)
+    if ach.rarity in ('epic', 'legendary', 'mythic'):
+        try:
+            c = await cfg(guild_id)
+            # Cherche un channel d'annonce : achievements_channel > events_arena > système
+            ch_id = (
+                c.get('achievements_channel', 0)
+                or c.get('event_arena_category', 0)  # fallback (catégorie != channel mais on tente)
+                or 0
+            )
+            ch = guild.get_channel(int(ch_id)) if ch_id else None
+            if not ch or not isinstance(ch, discord.TextChannel):
+                # Fallback : prendre le premier canal "général" ou actif
+                for candidate in guild.text_channels:
+                    if 'general' in (candidate.name or '').lower() or 'chat' in (candidate.name or '').lower():
+                        ch = candidate
+                        break
+            if ch and ch.permissions_for(guild.me).send_messages:
+                pub = discord.Embed(
+                    title=f"🏆 Nouveau Haut Fait débloqué !",
+                    description=(
+                        f"**{member.display_name}** vient de débloquer\n"
+                        f"# {ach.icon} {ach.title}\n"
+                        f"_{ach.description}_\n\n"
+                        f"**{rarity_label}**"
+                    ),
+                    color=color,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                pub.set_thumbnail(url=member.display_avatar.url)
+                pub.set_footer(text="Hauts faits · /achievements")
+                await ch.send(
+                    embed=pub,
+                    allowed_mentions=discord.AllowedMentions.none(),  # TOS-safe
+                )
+        except Exception as ex:
+            print(f"[_notify_achievement_unlock public ach={ach.id}] {ex}")
+
+
+# ─── HELPERS PETS ──────────────────────────────────────────────────────────────
+
+
+async def _get_active_pet(guild_id: int, user_id: int) -> Optional[dict]:
+    async with get_db() as db:
+        async with db.execute(
+            'SELECT pet_id, custom_name, level, xp, hunger, last_fed FROM user_pets '
+            'WHERE guild_id=? AND user_id=? AND is_active=1 LIMIT 1',
+            (guild_id, user_id),
+        ) as cur:
+            row = await cur.fetchone()
+    if not row:
+        return None
+    pet_id, custom_name, level, xp, hunger, last_fed = row
+    pet = eng41.get_pet(pet_id)
+    if not pet:
+        return None
+    return {
+        **pet,
+        'custom_name': custom_name or pet['name'],
+        'level': level, 'xp': xp, 'hunger': hunger, 'last_fed': last_fed,
+        'form_label': eng41.pet_form_label(pet, level),
+        'next_level_xp': eng41.pet_xp_for_level(level),
+    }
+
+
+async def _apply_pet_bonus(guild_id: int, user_id: int, kind: str) -> float:
+    """Renvoie le bonus du pet actif pour ce kind ('boss_damage', 'rare_loot', etc.).
+
+    Bonus réduit si pet a faim (hunger < 30 → 50% du bonus).
+    """
+    pet = await _get_active_pet(guild_id, user_id)
+    if not pet:
+        return 0.0
+    if pet['bonus_kind'] != kind and pet['bonus_kind'] != 'global':
+        return 0.0
+    bonus = pet['bonus_value']
+    if pet['bonus_kind'] == 'global' and kind != 'global':
+        bonus = pet['bonus_value'] * 0.5  # global est plus petit qu'un spécialisé
+    # Pénalité hunger
+    if pet['hunger'] < 30:
+        bonus *= 0.5
+    return bonus
+
+
+async def _give_pet_xp(guild_id: int, user_id: int, amount: int):
+    """Donne de l'XP au pet actif. Level-up automatique."""
+    pet = await _get_active_pet(guild_id, user_id)
+    if not pet:
+        return
+    new_xp = pet['xp'] + amount
+    new_level = pet['level']
+    xp_needed = eng41.pet_xp_for_level(new_level)
+    while new_xp >= xp_needed:
+        new_xp -= xp_needed
+        new_level += 1
+        xp_needed = eng41.pet_xp_for_level(new_level)
+    async with get_db() as db:
+        await db.execute(
+            'UPDATE user_pets SET level=?, xp=? WHERE guild_id=? AND user_id=? AND pet_id=?',
+            (new_level, new_xp, guild_id, user_id, pet['id']),
+        )
+        await db.commit()
+    # Si forme 5 atteinte (level >= 60), unlock achievement pet_max
+    if new_level >= 60:
+        try:
+            await _unlock_achievement(guild_id, user_id, 'pet_max')
+        except Exception:
+            pass
+
+
+# ─── VIEWS PHASE 41 ────────────────────────────────────────────────────────────
+
+
+class DailyQuestView(View):
+    """View ephemeral affichée par /daily : 1 bouton 'Réclamer mes récompenses'."""
+
+    def __init__(self, guild_id: int, user_id: int):
+        super().__init__(timeout=180)
+        self.guild_id = guild_id
+        self.user_id = user_id
+        b = Button(
+            label="🎁 Réclamer mes récompenses",
+            style=discord.ButtonStyle.success,
+        )
+        b.callback = self._on_claim
+        self.add_item(b)
+        b_wheel = Button(
+            label="🎰 Spin Daily Wheel",
+            style=discord.ButtonStyle.primary,
+        )
+        b_wheel.callback = self._on_wheel
+        self.add_item(b_wheel)
+
+    async def _on_claim(self, i: discord.Interaction):
+        try:
+            await i.response.defer(ephemeral=True)
+            if i.user.id != self.user_id:
+                return await i.followup.send("🔒 Pas pour toi.", ephemeral=True)
+            result = await _claim_completed_quests(self.guild_id, self.user_id)
+            if result['claimed_count'] == 0:
+                return await i.followup.send(
+                    "ℹ️ Aucune quête terminée à réclamer pour le moment.",
+                    ephemeral=True,
+                )
+            lines = [f"✅ **{result['claimed_count']}** quête(s) réclamée(s) !"]
+            lines.append(f"🪙 **+{result['coins']}** pièces")
+            if result.get('streak_milestone'):
+                ms = result['streak_milestone']
+                lines.append("")
+                lines.append(f"🔥 **PALIER STREAK ATTEINT — {ms['label']} !**")
+                lines.append(f"Bonus : `+{ms['coins']}` 🪙")
+                try:
+                    await add_coins(self.guild_id, self.user_id, int(ms['coins']))
+                except Exception:
+                    pass
+            await i.followup.send("\n".join(lines), ephemeral=True)
+        except Exception as ex:
+            print(f"[DailyQuestView _on_claim] {ex}")
+
+    async def _on_wheel(self, i: discord.Interaction):
+        await _wheel_spin_command(i)
+
+
+class WheelSpinView(View):
+    """View ephemeral pour la Daily Wheel : 1 bouton SPIN."""
+
+    def __init__(self, guild_id: int, user_id: int):
+        super().__init__(timeout=120)
+        self.guild_id = guild_id
+        self.user_id = user_id
+        b = Button(label="🎰 SPIN !", style=discord.ButtonStyle.success)
+        b.callback = self._on_spin
+        self.add_item(b)
+
+    async def _on_spin(self, i: discord.Interaction):
+        try:
+            await i.response.defer(ephemeral=True)
+            if i.user.id != self.user_id:
+                return await i.followup.send("🔒 Pas pour toi.", ephemeral=True)
+            await _do_wheel_spin(i)
+        except Exception as ex:
+            print(f"[WheelSpinView _on_spin] {ex}")
+
+
+class ConfessionModal(Modal):
+    """Modal pour envoyer une confession anonyme."""
+
+    def __init__(self):
+        super().__init__(title="🤫 Envoyer une confession anonyme")
+        self.txt = TextInput(
+            label="Ta confession (anonyme)",
+            placeholder="Ce que tu n'oses pas dire publiquement...",
+            style=discord.TextStyle.long,
+            min_length=10,
+            max_length=1000,
+            required=True,
+        )
+        self.add_item(self.txt)
+
+    async def on_submit(self, i: discord.Interaction):
+        try:
+            await i.response.defer(ephemeral=True)
+            content = (self.txt.value or '').strip()
+            if not content:
+                return await i.followup.send("❌ Confession vide.", ephemeral=True)
+
+            # Filtre badwords (réutilise le filtre existant)
+            try:
+                c = await cfg(i.guild.id)
+                bw_list = c.get('badwords', []) or []
+                lower = content.lower()
+                for bw in bw_list:
+                    if isinstance(bw, str) and bw and bw.lower() in lower:
+                        return await i.followup.send(
+                            "❌ Cette confession contient un mot interdit. Reformule.",
+                            ephemeral=True,
+                        )
+            except Exception:
+                pass
+
+            # Channel de confessions
+            c = await cfg(i.guild.id)
+            ch_id = int(c.get('confessions_channel', 0) or 0)
+            if not ch_id:
+                return await i.followup.send(
+                    "❌ Le staff n'a pas encore configuré le salon des confessions.\n"
+                    "_Owner : `/configure` → Phase 41 → Confessions._",
+                    ephemeral=True,
+                )
+            ch = i.guild.get_channel(ch_id)
+            if not ch:
+                return await i.followup.send("❌ Salon des confessions introuvable.", ephemeral=True)
+
+            # Numéro de confession (auto-increment via DB)
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT COUNT(*)+1 FROM confessions WHERE guild_id=?',
+                    (i.guild.id,),
+                ) as cur:
+                    row = await cur.fetchone()
+                conf_num = int(row[0]) if row else 1
+
+            # Hash anonymisé (HMAC avec un secret stable par guild — pas reverse-able)
+            secret = f"conf_{i.guild.id}_{TOKEN[:16] if TOKEN else 'noseed'}"
+            user_hash = _hmac_p41.new(
+                secret.encode(),
+                f"{i.user.id}".encode(),
+                'sha256',
+            ).hexdigest()[:16]
+
+            # Embed
+            e = discord.Embed(
+                title=f"🤫 Confession {eng41.confession_id_format(conf_num)}",
+                description=content,
+                color=0x9B59B6,
+                timestamp=datetime.now(timezone.utc),
+            )
+            e.set_footer(text="Confession anonyme · /confess pour en envoyer une")
+
+            try:
+                msg = await ch.send(
+                    embed=e,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            except Exception as ex:
+                return await i.followup.send(f"❌ Erreur envoi : `{ex}`", ephemeral=True)
+
+            # DB log (sans user_id, juste le hash)
+            try:
+                async with get_db() as db:
+                    await db.execute(
+                        'INSERT INTO confessions(guild_id, user_hash, content, message_id, channel_id) '
+                        'VALUES(?,?,?,?,?)',
+                        (i.guild.id, user_hash, content[:2000], msg.id, ch.id),
+                    )
+                    await db.commit()
+            except Exception as ex:
+                print(f"[ConfessionModal db log] {ex}")
+
+            # Stats : confessions_sent (anonyme côté serveur mais on track la qty pour
+            # débloquer l'achievement confession_10)
+            try:
+                await _incr_stat_p41(i.guild.id, i.user.id, 'confessions_sent', 1)
+                # Achievement caché
+                stats = await _get_user_stats41(i.guild.id, i.user.id)
+                if stats['confessions_sent'] >= 10:
+                    await _unlock_achievement(i.guild.id, i.user.id, 'confession_10')
+            except Exception:
+                pass
+
+            await i.followup.send(
+                f"✅ Confession **{eng41.confession_id_format(conf_num)}** envoyée dans {ch.mention}.\n"
+                f"_Personne ne peut tracer l'auteur — pas même les admins._",
+                ephemeral=True,
+            )
+        except Exception as ex:
+            print(f"[ConfessionModal on_submit] {ex}")
+
+
+class ConfessionSendView(View):
+    """View persistante : bouton 'Envoyer une confession'."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+        b = Button(
+            label="🤫 Envoyer une confession anonyme",
+            style=discord.ButtonStyle.secondary,
+            custom_id="confess_open",
+        )
+        b.callback = self._on_open
+        self.add_item(b)
+
+    async def _on_open(self, i: discord.Interaction):
+        try:
+            await i.response.send_modal(ConfessionModal())
+        except Exception as ex:
+            print(f"[ConfessionSendView _on_open] {ex}")
+
+
+# ─── DAILY WHEEL : LOGIQUE ─────────────────────────────────────────────────────
+
+
+async def _wheel_spin_command(i: discord.Interaction):
+    """Affiche le bouton 'Spin Wheel' si dispo, sinon le cooldown restant."""
+    if not i.response.is_done():
+        await i.response.defer(ephemeral=True)
+    # Cooldown 24h
+    async with get_db() as db:
+        async with db.execute(
+            'SELECT last_spin_at FROM wheel_log WHERE guild_id=? AND user_id=?',
+            (i.guild.id, i.user.id),
+        ) as cur:
+            row = await cur.fetchone()
+    if row and row[0]:
+        try:
+            last = datetime.fromisoformat(row[0]) if 'T' in str(row[0]) else \
+                   datetime.strptime(row[0], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+            elapsed = (datetime.now(timezone.utc) - last).total_seconds()
+            if elapsed < 86400:
+                left = 86400 - elapsed
+                hours = int(left // 3600)
+                mins = int((left % 3600) // 60)
+                return await i.followup.send(
+                    f"⏱️ Reviens dans **{hours}h {mins}min** pour ton prochain spin.\n"
+                    f"_La Daily Wheel est limitée à 1 spin / 24h._",
+                    ephemeral=True,
+                )
+        except Exception:
+            pass
+
+    embed = discord.Embed(
+        title="🎰 Daily Wheel",
+        description=(
+            "Tente ta chance !\n\n"
+            "**Récompenses possibles :**\n"
+            "🪙 50 à 2500 pièces\n"
+            "⚡ XP ×2 ou ×3 pour 1h\n"
+            "🌟 Items communs / rares / **épiques** / **légendaires**\n"
+            "✨ Jackpot **MYTHIQUE** (1 sur 1010 chances)\n\n"
+            "_1 spin par 24h. Le renard 🦊 boost les chances de rare de +12%._"
+        ),
+        color=0xF1C40F,
+    )
+    await i.followup.send(embed=embed, view=WheelSpinView(i.guild.id, i.user.id), ephemeral=True)
+
+
+async def _do_wheel_spin(i: discord.Interaction):
+    """Effectue le spin et envoie le résultat."""
+    # Recheck cooldown (race-safe)
+    async with get_db() as db:
+        async with db.execute(
+            'SELECT last_spin_at FROM wheel_log WHERE guild_id=? AND user_id=?',
+            (i.guild.id, i.user.id),
+        ) as cur:
+            row = await cur.fetchone()
+    if row and row[0]:
+        try:
+            last = datetime.fromisoformat(row[0]) if 'T' in str(row[0]) else \
+                   datetime.strptime(row[0], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - last).total_seconds() < 86400:
+                return await i.followup.send("⏱️ Déjà spin aujourd'hui !", ephemeral=True)
+        except Exception:
+            pass
+
+    # Bonus de chance du pet renard
+    luck = await _apply_pet_bonus(i.guild.id, i.user.id, 'wheel_luck')
+    reward = eng41.spin_wheel(luck_bonus=luck)
+
+    # Persister le spin
+    async with get_db() as db:
+        await db.execute(
+            'INSERT INTO wheel_log(guild_id, user_id, last_spin_at, total_spins) VALUES(?,?,?,1) '
+            'ON CONFLICT(guild_id, user_id) DO UPDATE SET '
+            'last_spin_at=?, total_spins=total_spins+1',
+            (i.guild.id, i.user.id, datetime.now(timezone.utc).isoformat(),
+             datetime.now(timezone.utc).isoformat()),
+        )
+        await db.commit()
+
+    # Tracker
+    await _incr_stat_p41(i.guild.id, i.user.id, 'wheel_spins', 1)
+
+    # Appliquer le reward
+    lines = ["🎰 **La roue tourne...**", ""]
+    if reward['type'] == 'coins':
+        try:
+            await add_coins(i.guild.id, i.user.id, int(reward['amount']))
+        except Exception:
+            pass
+        lines.append(f"🎁 **Résultat :** {reward['label']}")
+    elif reward['type'] == 'xp_mult':
+        # XP multiplier — on stocke un buff temporaire dans guild_config
+        try:
+            c = await cfg(i.guild.id)
+            buffs = c.get('xp_buffs', {})
+            until = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+            buffs[str(i.user.id)] = {'mult': int(reward['amount']), 'until': until}
+            await db_set(i.guild.id, 'xp_buffs', buffs)
+        except Exception as ex:
+            print(f"[wheel xp_mult] {ex}")
+        lines.append(f"⚡ **Résultat :** {reward['label']} (actif pendant 1h)")
+    elif reward['type'] == 'item':
+        # Ajouter à l'inventaire — choix d'un item aléatoire de la rareté
+        try:
+            # Pool combiné WEAPONS + ARMOR de events_engine
+            all_items = []
+            try:
+                all_items.extend(getattr(events2026, 'WEAPONS', []))
+            except Exception:
+                pass
+            try:
+                all_items.extend(getattr(events2026, 'ARMOR', []))
+            except Exception:
+                pass
+            items_pool = [it for it in all_items if it.get('rarity') == reward['amount']]
+            equipped = False
+            if items_pool:
+                chosen_item = random.choice(items_pool)
+                equipped = await _add_item_to_inventory(i.guild.id, i.user.id, chosen_item)
+                lines.append(f"🎁 **Résultat :** {reward['label']}")
+                if equipped:
+                    lines.append(f"_⚔️ Équipé :_ **{chosen_item.get('name', chosen_item.get('id', '?'))}**")
+                else:
+                    # Item moins bon que l'équipement actuel → compense en coins
+                    fallback = {'common': 100, 'rare': 300, 'epic': 800, 'legendary': 2500, 'mythic': 10000}.get(reward['amount'], 100)
+                    try:
+                        await add_coins(i.guild.id, i.user.id, fallback)
+                    except Exception:
+                        pass
+                    lines.append(f"_(Tu avais déjà mieux équipé — converti en {fallback} 🪙)_")
+            else:
+                # Pool vide pour cette rareté → coins
+                fallback_coins = {'common': 100, 'rare': 300, 'epic': 800, 'legendary': 2500, 'mythic': 10000}.get(reward['amount'], 100)
+                try:
+                    await add_coins(i.guild.id, i.user.id, fallback_coins)
+                except Exception:
+                    pass
+                lines.append(f"🎁 **Résultat :** {reward['label']} (converti en {fallback_coins} 🪙)")
+        except Exception as ex:
+            print(f"[wheel item reward] {ex}")
+            lines.append(f"🎁 **Résultat :** {reward['label']}")
+
+    # Achievements liés
+    try:
+        if reward.get('rare') and reward.get('type') == 'coins' and reward.get('amount', 0) >= 2500:
+            await _unlock_achievement(i.guild.id, i.user.id, 'lucky_jackpot')
+        if reward.get('type') == 'item' and reward.get('amount') == 'mythic':
+            await _unlock_achievement(i.guild.id, i.user.id, 'mythic_wheel')
+    except Exception:
+        pass
+
+    color = 0xF1C40F if reward.get('rare') else 0x5865F2
+    e = discord.Embed(description="\n".join(lines), color=color)
+    e.set_footer(text="Daily Wheel · Reviens demain pour un nouveau spin")
+    await i.followup.send(embed=e, ephemeral=True)
+
+
+async def _get_balance_p41(guild_id: int, user_id: int) -> int:
+    """Renvoie le solde de coins (0 si pas en DB)."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT coins FROM economy WHERE guild_id=? AND user_id=?',
+                (guild_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+        return int(row[0]) if row else 0
+    except Exception:
+        return 0
+
+
+async def _add_item_to_inventory(guild_id: int, user_id: int, item: dict):
+    """Équipe l'item gagné dans player_inventory (weapon_json ou armor_json)
+    si c'est meilleur que ce qui est déjà équipé. Sinon compense en coins.
+
+    Retourne True si équipé, False sinon (le caller saura compenser).
+    """
+    try:
+        # Déterminer si c'est arme ou armure
+        is_weapon = 'attack' in item or 'atk' in item or item.get('slot') == 'weapon'
+        is_armor = 'defense' in item or 'def' in item or item.get('slot') == 'armor'
+        if not is_weapon and not is_armor:
+            return False
+        async with get_db() as db:
+            await db.execute(
+                'INSERT OR IGNORE INTO player_inventory(guild_id, user_id) VALUES(?,?)',
+                (guild_id, user_id),
+            )
+            field = 'weapon_json' if is_weapon else 'armor_json'
+            async with db.execute(
+                f'SELECT {field} FROM player_inventory WHERE guild_id=? AND user_id=?',
+                (guild_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+            current = {}
+            if row and row[0]:
+                try:
+                    current = json.loads(row[0])
+                except Exception:
+                    current = {}
+            # Comparer par rareté/stat — équiper si l'item Wheel a une stat strictement supérieure
+            cur_stat = int(current.get('attack', current.get('defense', 0)) or 0)
+            new_stat = int(item.get('attack', item.get('defense', 0)) or 0)
+            if new_stat <= cur_stat:
+                # Pas meilleur — on ne change rien
+                return False
+            await db.execute(
+                f'UPDATE player_inventory SET {field}=? WHERE guild_id=? AND user_id=?',
+                (json.dumps(item, ensure_ascii=False), guild_id, user_id),
+            )
+            await db.commit()
+        return True
+    except Exception as ex:
+        print(f"[_add_item_to_inventory] {ex}")
+        return False
+
+
+# ─── COMMANDES PHASE 41 ────────────────────────────────────────────────────────
+
+
+@bot.tree.command(
+    name="daily",
+    description="📜 Voir tes 3 quêtes journalières + réclamer les récompenses",
+)
+async def daily_cmd(i: discord.Interaction):
+    try:
+        await i.response.defer(ephemeral=True)
+        if not i.guild:
+            return await i.followup.send("❌ Commande serveur uniquement.", ephemeral=True)
+        quests = await _ensure_today_quests(i.guild.id, i.user.id)
+        # Update progress on the fly (au cas où des metrics auraient avancé sans refresh)
+
+        # Récupérer le streak
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT current_streak, best_streak FROM user_streaks WHERE guild_id=? AND user_id=?',
+                (i.guild.id, i.user.id),
+            ) as cur:
+                streak_row = await cur.fetchone()
+        cur_streak = int(streak_row[0]) if streak_row else 0
+        best_streak = int(streak_row[1]) if streak_row else 0
+
+        # Build embed
+        e = discord.Embed(
+            title=f"📜 Quêtes journalières — {_today_str_p41()}",
+            description=(
+                f"🔥 **Streak actuel :** `{cur_streak}` jour{'s' if cur_streak != 1 else ''} "
+                f"· Record : `{best_streak}`\n"
+                f"_Termine au moins 1 quête par jour pour faire grimper ton streak._"
+            ),
+            color=0x5865F2,
+        )
+
+        completed_count = 0
+        total_reward_coins = 0
+        for q in quests:
+            status_icon = "✅" if q['claimed'] else ("🎁" if q['completed'] else "⏳")
+            diff_emoji = {'easy': '🟢', 'medium': '🟡', 'hard': '🔴'}.get(q['difficulty'], '⚪')
+            progress_bar = _make_progress_bar(q['progress'], q['target'])
+            field_val = (
+                f"{q['description']}\n"
+                f"{progress_bar} `{q['progress']}/{q['target']}`\n"
+                f"🪙 `{q['reward_coins']}` · ⭐ `{q['reward_xp']}` XP"
+            )
+            e.add_field(
+                name=f"{status_icon} {diff_emoji} {q['emoji']} {q['title']}",
+                value=field_val,
+                inline=False,
+            )
+            if q['completed'] and not q['claimed']:
+                total_reward_coins += q['reward_coins']
+            if q['completed']:
+                completed_count += 1
+
+        if total_reward_coins > 0:
+            e.add_field(
+                name="🎁 À réclamer",
+                value=f"**{total_reward_coins}** 🪙 en attente !",
+                inline=False,
+            )
+
+        e.set_footer(text=f"Reset à minuit (Europe/Paris) · {completed_count}/{len(quests)} terminée(s)")
+        await i.followup.send(embed=e, view=DailyQuestView(i.guild.id, i.user.id), ephemeral=True)
+    except Exception as ex:
+        print(f"[/daily] {ex}")
+        try:
+            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+def _make_progress_bar(current: int, target: int, length: int = 10) -> str:
+    if target <= 0:
+        return "▱" * length
+    ratio = min(1.0, current / target)
+    filled = int(ratio * length)
+    return "▰" * filled + "▱" * (length - filled)
+
+
+@bot.tree.command(
+    name="achievements",
+    description="🏆 Voir tes hauts faits débloqués et ceux à débloquer",
+)
+@app_commands.describe(membre="Voir les hauts faits d'un autre membre (optionnel)")
+async def achievements_cmd(i: discord.Interaction, membre: Optional[discord.Member] = None):
+    try:
+        await i.response.defer(ephemeral=True)
+        if not i.guild:
+            return await i.followup.send("❌ Commande serveur uniquement.", ephemeral=True)
+        target = membre or i.user
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT achievement_id FROM achievements_unlocked WHERE guild_id=? AND user_id=?',
+                (i.guild.id, target.id),
+            ) as cur:
+                unlocked_ids = {r[0] for r in await cur.fetchall()}
+
+        # Group by category
+        categories = ['social', 'combat', 'economy', 'discovery', 'meta', 'hidden']
+        cat_labels = {
+            'social': '💬 Social', 'combat': '⚔️ Combat',
+            'economy': '💰 Économie', 'discovery': '🧭 Découverte',
+            'meta': '📜 Méta', 'hidden': '🌟 Cachés',
+        }
+
+        total_unlocked = len(unlocked_ids)
+        total_count = len(eng41.ACHIEVEMENTS)
+
+        e = discord.Embed(
+            title=f"🏆 Hauts faits — {target.display_name}",
+            description=f"**Débloqués :** `{total_unlocked}` / `{total_count}`",
+            color=0xF1C40F,
+        )
+        if target.display_avatar:
+            e.set_thumbnail(url=target.display_avatar.url)
+
+        for cat in categories:
+            items = eng41.achievements_by_category(cat)
+            if not items:
+                continue
+            lines = []
+            for a in items[:8]:  # cap 8 par cat pour limiter taille embed
+                unlocked = a.id in unlocked_ids
+                if a.hidden and not unlocked:
+                    lines.append("🔒 _Achievement caché — débloquable en jouant_")
+                    continue
+                icon = "✅" if unlocked else "🔒"
+                rarity_emoji = {
+                    'common': '⚪', 'rare': '🔵', 'epic': '🟣',
+                    'legendary': '🟡', 'mythic': '💠',
+                }.get(a.rarity, '⚪')
+                lines.append(f"{icon} {rarity_emoji} {a.icon} **{a.title}** — _{a.description[:60]}_")
+            cat_unlocked = sum(1 for a in items if a.id in unlocked_ids)
+            e.add_field(
+                name=f"{cat_labels[cat]} ({cat_unlocked}/{len(items)})",
+                value="\n".join(lines) or "_Aucun_",
+                inline=False,
+            )
+
+        e.set_footer(text=f"Continue à jouer pour débloquer plus ! · /achievements")
+        await i.followup.send(embed=e, ephemeral=True)
+    except Exception as ex:
+        print(f"[/achievements] {ex}")
+        try:
+            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+@bot.tree.command(
+    name="wheel",
+    description="🎰 Daily Wheel : tente ta chance (1 spin / 24h)",
+)
+async def wheel_cmd(i: discord.Interaction):
+    await _wheel_spin_command(i)
+
+
+@bot.tree.command(
+    name="pet",
+    description="🐾 Gérer ton compagnon (acheter, voir, nourrir, équiper)",
+)
+@app_commands.describe(
+    action="Action à effectuer",
+    pet_choice="Pet à acheter ou équiper (pour buy/setactive)",
+    nom="Nouveau nom (pour rename)",
+)
+@app_commands.choices(action=[
+    app_commands.Choice(name="📋 show — voir mon pet actif", value="show"),
+    app_commands.Choice(name="🛒 buy — acheter un nouveau pet", value="buy"),
+    app_commands.Choice(name="🔄 setactive — équiper un de mes pets", value="setactive"),
+    app_commands.Choice(name="🍖 feed — nourrir mon pet (coût: 50 🪙)", value="feed"),
+    app_commands.Choice(name="✏️ rename — renommer mon pet actif", value="rename"),
+    app_commands.Choice(name="📚 list — liste de tous les pets disponibles", value="list"),
+])
+@app_commands.choices(pet_choice=[
+    app_commands.Choice(name=f"{p['emoji']} {p['name']} ({p['price']} 🪙)", value=p['id'])
+    for p in eng41.PETS
+])
+async def pet_cmd(
+    i: discord.Interaction,
+    action: app_commands.Choice[str],
+    pet_choice: Optional[app_commands.Choice[str]] = None,
+    nom: Optional[str] = None,
+):
+    try:
+        await i.response.defer(ephemeral=True)
+        if not i.guild:
+            return await i.followup.send("❌ Serveur uniquement.", ephemeral=True)
+
+        act = action.value
+        gid, uid = i.guild.id, i.user.id
+
+        if act == "list":
+            e = discord.Embed(title="🐾 Pets disponibles", color=0x5865F2)
+            for p in eng41.PETS:
+                e.add_field(
+                    name=f"{p['emoji']} {p['name']} — {p['price']} 🪙",
+                    value=f"_{p['description']}_\nForme finale : {p['form_emojis'][4]} **{p['forms'][4]}**",
+                    inline=False,
+                )
+            e.set_footer(text="Choisis-en un avec `/pet buy pet_choice:<nom>`")
+            return await i.followup.send(embed=e, ephemeral=True)
+
+        if act == "show":
+            pet = await _get_active_pet(gid, uid)
+            if not pet:
+                return await i.followup.send(
+                    "🐾 Tu n'as pas encore de pet actif. Achète-en un avec `/pet buy`.",
+                    ephemeral=True,
+                )
+            xp_pct = (pet['xp'] / max(1, pet['next_level_xp'])) * 100
+            bar = _make_progress_bar(pet['xp'], pet['next_level_xp'])
+            hunger_bar = _make_progress_bar(pet['hunger'], 100)
+            hunger_label = "Affamé 🚨" if pet['hunger'] < 30 else ("Faim 😋" if pet['hunger'] < 60 else "Repu 😊")
+            e = discord.Embed(
+                title=f"{pet['form_label']} · Lv. {pet['level']}",
+                description=(
+                    f"**{pet['custom_name']}** _({pet['name']})_\n\n"
+                    f"_{pet['description']}_\n\n"
+                    f"⭐ **XP :** {bar} `{pet['xp']}/{pet['next_level_xp']}`\n"
+                    f"🍖 **Faim :** {hunger_bar} `{pet['hunger']}/100` — _{hunger_label}_\n\n"
+                    f"_Quand la faim < 30, les bonus sont réduits de 50%._"
+                ),
+                color=0xE67E22,
+            )
+            e.set_footer(text="Phase 41 · /pet feed pour le nourrir")
+            return await i.followup.send(embed=e, ephemeral=True)
+
+        if act == "buy":
+            if not pet_choice:
+                return await i.followup.send("❌ Choisis un pet avec `pet_choice:`.", ephemeral=True)
+            pet_def = eng41.get_pet(pet_choice.value)
+            if not pet_def:
+                return await i.followup.send("❌ Pet inconnu.", ephemeral=True)
+            # Déjà possédé ?
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT 1 FROM user_pets WHERE guild_id=? AND user_id=? AND pet_id=?',
+                    (gid, uid, pet_def['id']),
+                ) as cur:
+                    already = await cur.fetchone()
+            if already:
+                return await i.followup.send(
+                    f"⚠️ Tu possèdes déjà **{pet_def['name']}**. "
+                    f"Utilise `/pet setactive pet_choice:{pet_def['id']}` pour l'équiper.",
+                    ephemeral=True,
+                )
+            # Check coins
+            bal = await _get_balance_p41(gid, uid)
+            if bal < pet_def['price']:
+                return await i.followup.send(
+                    f"❌ Solde insuffisant. Il te faut **{pet_def['price']}** 🪙 (tu as `{bal}`).",
+                    ephemeral=True,
+                )
+            try:
+                await add_coins(gid, uid, -pet_def['price'])
+            except Exception as ex:
+                return await i.followup.send(f"❌ Erreur paiement : `{ex}`", ephemeral=True)
+            # Désactiver tout autre pet, activer celui-ci
+            async with get_db() as db:
+                await db.execute(
+                    'UPDATE user_pets SET is_active=0 WHERE guild_id=? AND user_id=?',
+                    (gid, uid),
+                )
+                await db.execute(
+                    'INSERT INTO user_pets(guild_id, user_id, pet_id, is_active) VALUES(?,?,?,1) '
+                    'ON CONFLICT(guild_id, user_id, pet_id) DO UPDATE SET is_active=1',
+                    (gid, uid, pet_def['id']),
+                )
+                await db.commit()
+            # Achievements
+            await _incr_stat_p41(gid, uid, 'pets_owned', 1)
+            return await i.followup.send(
+                f"🎉 Tu as adopté **{pet_def['emoji']} {pet_def['name']}** !\n"
+                f"_{pet_def['description']}_\n\n"
+                f"Tape `/pet show` pour le voir, `/pet feed` pour le nourrir.",
+                ephemeral=True,
+            )
+
+        if act == "setactive":
+            if not pet_choice:
+                return await i.followup.send("❌ Choisis un pet avec `pet_choice:`.", ephemeral=True)
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT 1 FROM user_pets WHERE guild_id=? AND user_id=? AND pet_id=?',
+                    (gid, uid, pet_choice.value),
+                ) as cur:
+                    has = await cur.fetchone()
+            if not has:
+                return await i.followup.send(
+                    f"❌ Tu ne possèdes pas ce pet. Achète-le avec `/pet buy`.",
+                    ephemeral=True,
+                )
+            async with get_db() as db:
+                await db.execute(
+                    'UPDATE user_pets SET is_active=0 WHERE guild_id=? AND user_id=?',
+                    (gid, uid),
+                )
+                await db.execute(
+                    'UPDATE user_pets SET is_active=1 WHERE guild_id=? AND user_id=? AND pet_id=?',
+                    (gid, uid, pet_choice.value),
+                )
+                await db.commit()
+            pet_def = eng41.get_pet(pet_choice.value)
+            return await i.followup.send(
+                f"✅ **{pet_def['emoji']} {pet_def['name']}** est maintenant ton pet actif.",
+                ephemeral=True,
+            )
+
+        if act == "feed":
+            pet = await _get_active_pet(gid, uid)
+            if not pet:
+                return await i.followup.send("🐾 Pas de pet actif. `/pet buy`.", ephemeral=True)
+            bal = await _get_balance_p41(gid, uid)
+            cost = 50
+            if bal < cost:
+                return await i.followup.send(
+                    f"❌ Il te faut **{cost}** 🪙 pour nourrir ton pet.",
+                    ephemeral=True,
+                )
+            try:
+                await add_coins(gid, uid, -cost)
+            except Exception:
+                pass
+            async with get_db() as db:
+                await db.execute(
+                    'UPDATE user_pets SET hunger=100, last_fed=CURRENT_TIMESTAMP '
+                    'WHERE guild_id=? AND user_id=? AND pet_id=?',
+                    (gid, uid, pet['id']),
+                )
+                await db.commit()
+            # Bonus XP pet
+            await _give_pet_xp(gid, uid, 10)
+            return await i.followup.send(
+                f"🍖 **{pet['custom_name']}** est repu et content ! +10 XP pour le pet.",
+                ephemeral=True,
+            )
+
+        if act == "rename":
+            if not nom:
+                return await i.followup.send("❌ Précise un nouveau nom avec `nom:`.", ephemeral=True)
+            if len(nom) > 30:
+                return await i.followup.send("❌ Nom max 30 caractères.", ephemeral=True)
+            pet = await _get_active_pet(gid, uid)
+            if not pet:
+                return await i.followup.send("🐾 Pas de pet actif.", ephemeral=True)
+            async with get_db() as db:
+                await db.execute(
+                    'UPDATE user_pets SET custom_name=? WHERE guild_id=? AND user_id=? AND pet_id=?',
+                    (nom, gid, uid, pet['id']),
+                )
+                await db.commit()
+            return await i.followup.send(
+                f"✏️ Ton pet s'appelle maintenant **{nom}**.",
+                ephemeral=True,
+            )
+
+        await i.followup.send("❌ Action inconnue.", ephemeral=True)
+    except Exception as ex:
+        print(f"[/pet] {ex}")
+        try:
+            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+@bot.tree.command(
+    name="confess",
+    description="🤫 Envoyer une confession 100% anonyme dans le salon dédié",
+)
+async def confess_cmd(i: discord.Interaction):
+    try:
+        # Vérifier que le channel est configuré
+        if not i.guild:
+            return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+        c = await cfg(i.guild.id)
+        if not int(c.get('confessions_channel', 0) or 0):
+            return await i.response.send_message(
+                "❌ Le staff n'a pas encore configuré le salon des confessions.\n"
+                "_Owner : `/confess_setup channel:#confessions`._",
+                ephemeral=True,
+            )
+        await i.response.send_modal(ConfessionModal())
+    except Exception as ex:
+        print(f"[/confess] {ex}")
+
+
+@bot.tree.command(
+    name="confess_setup",
+    description="🛠️ [Owner] Configurer le salon des confessions anonymes",
+)
+@app_commands.describe(channel="Salon où les confessions seront postées")
+async def confess_setup_cmd(i: discord.Interaction, channel: discord.TextChannel):
+    if not i.guild or i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    try:
+        await i.response.defer(ephemeral=True)
+        await db_set(i.guild.id, 'confessions_channel', channel.id)
+        # Poster le bouton persistant dans le salon
+        try:
+            embed = discord.Embed(
+                title="🤫 Confessions anonymes",
+                description=(
+                    "Envoie ton message anonymement ici.\n"
+                    "**Personne** ne peut tracer l'auteur — pas même les admins.\n\n"
+                    "Clique sur le bouton ci-dessous pour ouvrir le formulaire."
+                ),
+                color=0x9B59B6,
+            )
+            await channel.send(embed=embed, view=ConfessionSendView())
+        except Exception as ex:
+            print(f"[/confess_setup post button] {ex}")
+        await i.followup.send(
+            f"✅ Confessions configurées dans {channel.mention}.",
+            ephemeral=True,
+        )
+    except Exception as ex:
+        print(f"[/confess_setup] {ex}")
+        try:
+            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+# ─── HOOKS DE TRACKING (appelés par on_message etc.) ───────────────────────────
+
+
+async def _track_message_p41(msg):
+    """Hook appelé par on_message : trackle messages + nuit + night_owl."""
+    if msg.author.bot or not msg.guild:
+        return
+    try:
+        # Messages
+        new_messages = await _incr_stat_p41(msg.guild.id, msg.author.id, 'messages', 1)
+        await _update_quest_progress(msg.guild.id, msg.author.id, 'messages', 1)
+        # Night owl achievement
+        hour = _hour_local_p41()
+        if 3 <= hour < 5:
+            await _unlock_achievement(msg.guild.id, msg.author.id, 'night_owl')
+        elif 5 <= hour < 7:
+            await _unlock_achievement(msg.guild.id, msg.author.id, 'early_bird')
+        # Pet XP gain (small)
+        await _give_pet_xp(msg.guild.id, msg.author.id, 1)
+        # Phantom : si dernier message > 30j (mais on a pas l'info ici facilement)
+        # On le check ailleurs si on a un dernière_activité
+    except Exception as ex:
+        print(f"[_track_message_p41] {ex}")
+
+
+async def _track_reaction_p41(payload):
+    """Hook appelé par on_raw_reaction_add."""
+    if payload.user_id == bot.user.id or not payload.guild_id:
+        return
+    try:
+        await _incr_stat_p41(payload.guild_id, payload.user_id, 'reactions_given', 1)
+        await _update_quest_progress(payload.guild_id, payload.user_id, 'reactions_given', 1)
+    except Exception as ex:
+        print(f"[_track_reaction_p41] {ex}")
 
 
 if __name__ == "__main__":
