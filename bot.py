@@ -2109,6 +2109,34 @@ async def db_init():
             PRIMARY KEY (loot_id, owner_id, acquired_at)
         )''')
 
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 61 — VIE QUOTIDIENNE : Streak + Avent + Météo + Badges
+        # ═══════════════════════════════════════════════════════════════════
+        await db.execute('''CREATE TABLE IF NOT EXISTS server_streak (
+            guild_id INTEGER PRIMARY KEY,
+            current_streak INTEGER DEFAULT 0,
+            best_streak INTEGER DEFAULT 0,
+            last_active_day TEXT,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+
+        await db.execute('''CREATE TABLE IF NOT EXISTS advent_calendar (
+            guild_id INTEGER,
+            day INTEGER,
+            user_id INTEGER,
+            claimed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            reward_coins INTEGER,
+            PRIMARY KEY (guild_id, day, user_id)
+        )''')
+
+        await db.execute('''CREATE TABLE IF NOT EXISTS server_weather_log (
+            guild_id INTEGER,
+            day TEXT,
+            weather TEXT,
+            activity_score INTEGER,
+            PRIMARY KEY (guild_id, day)
+        )''')
+
         # Marketplace : annonces de vente entre joueurs
         await db.execute('''CREATE TABLE IF NOT EXISTS marketplace_listings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36014,6 +36042,14 @@ async def on_ready():
     # Phase 58 : update votes resolver
     if not update_votes_resolver_task.is_running():
         update_votes_resolver_task.start()
+    # Phase 61 : daily meta (streak collectif + météo)
+    if not daily_meta_task.is_running():
+        daily_meta_task.start()
+    # Phase 61 : AdventClaimView persistante (custom_id stable)
+    try:
+        bot.add_view(AdventClaimView())
+    except Exception as ex:
+        print(f"[on_ready advent persist] {ex}")
     # Boot recovery : supprimer tous les messages expirés pendant le downtime
     # Phase 55 : boucle jusqu'à plus rien à supprimer (par batch de 500)
     try:
@@ -61058,6 +61094,304 @@ async def narrative_choices_resolver_task():
 @narrative_choices_resolver_task.before_loop
 async def _narrative_resolver_wait():
     await bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 61 — VIE QUOTIDIENNE : Streak collectif + Avent + Météo + Activity badges
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@tasks.loop(hours=24)
+async def daily_meta_task():
+    """Une fois par jour à 8h FR : update streak collectif + post météo + reset badges hebdo."""
+    try:
+        try:
+            from zoneinfo import ZoneInfo
+            now_fr = datetime.now(ZoneInfo("Europe/Paris"))
+        except Exception:
+            now_fr = datetime.now(timezone.utc)
+        if now_fr.hour != 8:
+            return
+        today = now_fr.strftime("%Y-%m-%d")
+        yesterday = (now_fr - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        for guild in bot.guilds:
+            try:
+                c = await cfg(guild.id)
+                if not c.get('event_enabled', False):
+                    continue
+                hub_id = int(c.get('hub_channel', 0) or 0)
+                if not hub_id:
+                    continue
+                hub_ch = guild.get_channel(hub_id)
+                if not hub_ch or not await _is_chatty_channel(hub_ch):
+                    continue
+
+                # ── 1. Compter messages d'hier
+                day_start = (now_fr - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+                day_end = now_fr.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT COUNT(*) FROM member_activity WHERE guild_id=? "
+                        "AND activity_type='message' AND created_at>=? AND created_at<?",
+                        (guild.id, day_start, day_end),
+                    ) as cur:
+                        msgs_yesterday = int((await cur.fetchone() or [0])[0])
+
+                # ── 2. Update streak
+                async with get_db() as db:
+                    async with db.execute(
+                        "SELECT current_streak, best_streak, last_active_day FROM server_streak WHERE guild_id=?",
+                        (guild.id,),
+                    ) as cur:
+                        row = await cur.fetchone()
+                cur_streak = int(row[0]) if row else 0
+                best_streak = int(row[1]) if row else 0
+                last_day = row[2] if row else None
+
+                if msgs_yesterday > 0:
+                    # Streak continue
+                    if last_day == (now_fr - timedelta(days=2)).strftime("%Y-%m-%d") or last_day is None:
+                        cur_streak += 1
+                    elif last_day == yesterday:
+                        # Déjà compté
+                        pass
+                    else:
+                        cur_streak = 1
+                    if cur_streak > best_streak:
+                        best_streak = cur_streak
+                    async with get_db() as db:
+                        await db.execute(
+                            "INSERT INTO server_streak(guild_id, current_streak, best_streak, last_active_day) "
+                            "VALUES(?,?,?,?) ON CONFLICT(guild_id) DO UPDATE SET "
+                            "current_streak=?, best_streak=?, last_active_day=?, updated_at=CURRENT_TIMESTAMP",
+                            (guild.id, cur_streak, best_streak, yesterday,
+                             cur_streak, best_streak, yesterday),
+                        )
+                        await db.commit()
+                else:
+                    # Pas de message hier = streak cassé
+                    if cur_streak > 0:
+                        async with get_db() as db:
+                            await db.execute(
+                                "UPDATE server_streak SET current_streak=0 WHERE guild_id=?",
+                                (guild.id,),
+                            )
+                            await db.commit()
+                        cur_streak = 0
+
+                # ── 3. Météo du serveur
+                if msgs_yesterday >= 200:
+                    weather = "🔥 Brûlant"
+                elif msgs_yesterday >= 100:
+                    weather = "☀️ Vivant"
+                elif msgs_yesterday >= 50:
+                    weather = "🌤️ Doux"
+                elif msgs_yesterday >= 20:
+                    weather = "🌥️ Calme"
+                elif msgs_yesterday >= 5:
+                    weather = "🌧️ Pluvieux"
+                else:
+                    weather = "❄️ Glacial"
+
+                async with get_db() as db:
+                    await db.execute(
+                        "INSERT INTO server_weather_log(guild_id, day, weather, activity_score) "
+                        "VALUES(?,?,?,?) ON CONFLICT(guild_id, day) DO NOTHING",
+                        (guild.id, yesterday, weather, msgs_yesterday),
+                    )
+                    await db.commit()
+
+                # ── 4. Post météo + streak
+                LIFETIME = 22 * 3600
+                streak_milestone = ""
+                if cur_streak == 30:
+                    streak_milestone = "\n\n🎉 **30 jours d'affilée !** La guilde a débloqué un palier."
+                elif cur_streak == 100:
+                    streak_milestone = "\n\n🌟 **100 JOURS !** La guilde entre dans la légende."
+                elif cur_streak == 365:
+                    streak_milestone = "\n\n👑 **1 AN COMPLET !** Statut mythique."
+
+                e = discord.Embed(
+                    title=f"📅 Météo du serveur — {today}",
+                    description=(
+                        f"## {weather}\n\n"
+                        f"_Hier : `{msgs_yesterday}` messages._\n\n"
+                        f"🔥 **Streak collectif :** `{cur_streak}` jours consécutifs "
+                        f"(record : `{best_streak}`)"
+                        + streak_milestone
+                    ),
+                    color=0x3498DB if cur_streak > 0 else 0x95A5A6,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                e.set_footer(text="Météo daily · Continuez à parler pour garder le streak")
+                try:
+                    msg = await hub_ch.send(
+                        embed=e,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                        delete_after=LIFETIME,
+                    )
+                    await _register_for_cleanup(msg, LIFETIME, 'weather_daily')
+                except Exception:
+                    pass
+                print(f"[DAILY META] guild={guild.id} weather={weather} streak={cur_streak} msgs={msgs_yesterday}")
+            except Exception as ex:
+                print(f"[daily_meta guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[daily_meta_task] {ex}")
+
+
+@daily_meta_task.before_loop
+async def _daily_meta_wait():
+    await bot.wait_until_ready()
+
+
+@bot.tree.command(
+    name="weather",
+    description="📅 Voir la météo et le streak du serveur",
+)
+async def weather_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT current_streak, best_streak FROM server_streak WHERE guild_id=?",
+                (i.guild.id,),
+            ) as cur:
+                row = await cur.fetchone()
+        cur_s = int(row[0]) if row else 0
+        best_s = int(row[1]) if row else 0
+        # Dernière météo
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT day, weather, activity_score FROM server_weather_log "
+                "WHERE guild_id=? ORDER BY day DESC LIMIT 7",
+                (i.guild.id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        if rows:
+            lines = [f"`{r[0]}` {r[1]} ({int(r[2])} msgs)" for r in rows]
+            history = "\n".join(lines)
+        else:
+            history = "_Pas encore de données._"
+        e = discord.Embed(
+            title="📅 Météo & Streak du serveur",
+            description=(
+                f"🔥 **Streak collectif :** `{cur_s}` jours\n"
+                f"🏆 **Record all-time :** `{best_s}` jours\n\n"
+                f"**Météo des 7 derniers jours :**\n{history}\n\n"
+                f"_Continuez à parler chaque jour pour étendre le streak !_"
+            ),
+            color=0x3498DB,
+        )
+        await _safe_followup(i, embed=e)
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ─── CALENDRIER DE L'AVENT (30 jours, claim quotidien) ───────────────────────
+
+
+class AdventClaimView(View):
+    """View persistante : bouton pour claim le jour actuel."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+        b = Button(
+            label="🎁 Claim le cadeau du jour",
+            style=discord.ButtonStyle.primary,
+            custom_id="advent_claim",
+        )
+        b.callback = self._claim
+        self.add_item(b)
+
+    async def _claim(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            if not i.guild:
+                return await _safe_followup(i, content="❌ Serveur uniquement.")
+            try:
+                from zoneinfo import ZoneInfo
+                day = datetime.now(ZoneInfo("Europe/Paris")).day
+            except Exception:
+                day = datetime.now(timezone.utc).day
+            # Déjà claim aujourd'hui ?
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT 1 FROM advent_calendar WHERE guild_id=? AND day=? AND user_id=?",
+                    (i.guild.id, day, i.user.id),
+                ) as cur:
+                    if await cur.fetchone():
+                        return await _safe_followup(i, content="⏱️ Tu as déjà claim aujourd'hui. Reviens demain !")
+            # Reward random selon jour (plus tu avances, plus c'est gros)
+            base = 50 + day * 10
+            reward = base + random.randint(0, base // 2)
+            try:
+                await add_coins(i.guild.id, i.user.id, reward)
+            except Exception:
+                pass
+            async with get_db() as db:
+                await db.execute(
+                    "INSERT INTO advent_calendar(guild_id, day, user_id, reward_coins) VALUES(?,?,?,?)",
+                    (i.guild.id, day, i.user.id, reward),
+                )
+                await db.commit()
+            await _safe_followup(
+                i,
+                content=(
+                    f"🎁 **Jour {day} claim !** +`{reward}` 🪙\n"
+                    f"_Reviens demain pour le jour suivant._"
+                ),
+            )
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
+    name="advent_setup",
+    description="🎁 [Owner] Installer le panneau Calendrier de l'Avent dans le hub",
+)
+async def advent_setup_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        c = await cfg(i.guild.id)
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        hub_ch = i.guild.get_channel(hub_id) if hub_id else None
+        if not hub_ch:
+            return await _safe_followup(i, content="❌ Hub non configuré.")
+        e = discord.Embed(
+            title="🎁 Calendrier de l'Avent",
+            description=(
+                "**Chaque jour, 1 cadeau à récupérer.**\n\n"
+                "_Le bouton ci-dessous te donne le cadeau du jour. "
+                "Plus le mois avance, plus la récompense grossit._\n\n"
+                "**Reward formula :** 50 + day×10 + bonus random\n"
+                "_Exemple jour 1 : ~60-90 🪙 · jour 25 : ~300-450 🪙_\n\n"
+                "_Tu peux claim 1× par jour. Le compteur reset au début de chaque mois._"
+            ),
+            color=0xE74C3C,
+        )
+        e.set_footer(text="Calendrier de l'Avent · Persistant")
+        try:
+            msg = await hub_ch.send(embed=e, view=AdventClaimView())
+            try:
+                await msg.pin()
+            except Exception:
+                pass
+        except Exception as ex:
+            return await _safe_followup(i, content=f"❌ {ex}")
+        await _safe_followup(i, content=f"✅ Calendrier de l'Avent installé et épinglé dans {hub_ch.mention}.")
+    except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
