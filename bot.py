@@ -88,6 +88,8 @@ import community_hub as cmty_hub_module
 import alliance_vault as av_module
 # Phase 136 : Roblox link verify + game library
 import roblox_link as rblx_link_module
+# Phase 137 : Voice Lounges + paliers vocaux
+import voice_lounges as vlounge_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -37912,6 +37914,18 @@ async def on_ready():
         )
     except Exception as ex:
         print(f"[on_ready rblx_link setup] {ex}")
+    # Phase 137 : Voice Lounges + paliers vocaux
+    try:
+        vlounge_module.setup(
+            get_db,
+            {
+                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
+                'v2_divider': v2_divider, 'v2_container': v2_container,
+                'LayoutView': LayoutView,
+            },
+        )
+    except Exception as ex:
+        print(f"[on_ready vlounge setup] {ex}")
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()
@@ -38913,6 +38927,87 @@ async def roblox_remove_game_cmd(i: discord.Interaction, universe_id: int):
 
 
 bot.tree.add_command(roblox_group)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 137 : /voice — paliers de récompenses vocaux
+# ═══════════════════════════════════════════════════════════════════════════════
+voice_group = app_commands.Group(
+    name="voice",
+    description="🎙️ Paliers de récompenses sur tes minutes vocales",
+)
+
+
+@voice_group.command(
+    name="levels",
+    description="📋 Voir tous les paliers vocaux et leurs récompenses",
+)
+async def voice_levels_cmd(i: discord.Interaction):
+    try:
+        view = vlounge_module.build_levels_panel()
+        if view is None:
+            return await i.response.send_message(
+                "❌ Module indisponible.", ephemeral=True
+            )
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[voice_levels_cmd] {ex}")
+
+
+@voice_group.command(
+    name="my_stats",
+    description="🎧 Voir tes minutes vocales + ton prochain palier",
+)
+async def voice_my_stats_cmd(i: discord.Interaction):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        view = await vlounge_module.build_stats_panel(i.guild, i.user)
+        if view is None:
+            return await i.response.send_message(
+                "❌ Module indisponible.", ephemeral=True
+            )
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[voice_my_stats_cmd] {ex}")
+
+
+@voice_group.command(
+    name="claim",
+    description="🎁 Réclamer les paliers vocaux que tu as atteints",
+)
+async def voice_claim_cmd(i: discord.Interaction):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        awarded = await vlounge_module.check_and_award(
+            i.guild, i.user, add_coins_fn=add_coins
+        )
+        view = await vlounge_module.build_stats_panel(
+            i.guild, i.user, awarded_now=awarded
+        )
+        if view is None:
+            if awarded:
+                total = sum(int(a["milestone"].get("coins", 0)) for a in awarded)
+                return await i.response.send_message(
+                    f"✅ `{len(awarded)}` palier(s) débloqué(s) — "
+                    f"`+{total:,}` coins !",
+                    ephemeral=True,
+                )
+            return await i.response.send_message(
+                "ℹ️ Aucun nouveau palier à réclamer.", ephemeral=True
+            )
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[voice_claim_cmd] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+bot.tree.add_command(voice_group)
 
 
 @bot.event
