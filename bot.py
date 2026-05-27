@@ -84,6 +84,8 @@ import economy_events as econ_events_module
 import progression_milestones as prog_module
 # Phase 133 : liens sociaux entre joueurs (friend/marry/rival/hug)
 import social_bonds as social_module
+# Phase 134 : wiki + roadmap + weekly highlights
+import community_hub as cmty_hub_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -37879,6 +37881,23 @@ async def on_ready():
         )
     except Exception as ex:
         print(f"[on_ready social_module setup] {ex}")
+    # Phase 134 : Communauté — wiki + roadmap + weekly highlights
+    try:
+        cmty_hub_module.setup(
+            bot,
+            get_db,
+            db_get,
+            db_set,
+            {
+                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
+                'v2_divider': v2_divider, 'v2_container': v2_container,
+                'LayoutView': LayoutView,
+            },
+        )
+        if not cmty_hub_module.weekly_highlights_task.is_running():
+            cmty_hub_module.weekly_highlights_task.start()
+    except Exception as ex:
+        print(f"[on_ready cmty_hub setup] {ex}")
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()
@@ -38571,6 +38590,290 @@ async def bond_highfive(i: discord.Interaction, membre: discord.Member):
 
 
 bot.tree.add_command(bond_group)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 134 : /community — wiki + roadmap + highlights
+# ═══════════════════════════════════════════════════════════════════════════════
+community_group = app_commands.Group(
+    name="community",
+    description="🏛️ Wiki + Roadmap + Highlights de la communauté",
+)
+
+
+def _community_is_staff(member: discord.Member) -> bool:
+    """True si owner/admin (peut éditer wiki + roadmap status)."""
+    try:
+        return (
+            member.id == SUPER_OWNER_ID
+            or (member.guild and member.id == member.guild.owner_id)
+            or member.guild_permissions.administrator
+            or member.guild_permissions.manage_guild
+        )
+    except Exception:
+        return False
+
+
+@community_group.command(name="wiki", description="📖 Ouvrir une entrée wiki par slug ou titre")
+@app_commands.describe(entree="Slug ou titre exact de l'entrée")
+async def community_wiki(i: discord.Interaction, entree: str):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        entry = await cmty_hub_module.get_wiki_entry(i.guild.id, entree)
+        if not entry:
+            return await i.response.send_message(
+                f"❌ Aucune entrée trouvée pour `{entree}`. "
+                f"Essaie `/community wiki_search` ou `/community wiki_list`.",
+                ephemeral=True,
+            )
+        author = i.guild.get_member(int(entry.get("author_id", 0) or 0))
+        view = cmty_hub_module.build_wiki_entry_panel(entry, author_user=author)
+        if view is None:
+            return await i.response.send_message("❌ Module indisponible.", ephemeral=True)
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[community_wiki] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+@community_group.command(
+    name="wiki_search", description="🔍 Chercher dans le wiki par mot-clé"
+)
+@app_commands.describe(requete="Mot-clé à rechercher")
+async def community_wiki_search(i: discord.Interaction, requete: str):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        results = await cmty_hub_module.search_wiki(i.guild.id, requete)
+        view = cmty_hub_module.build_wiki_list_panel(results, query=requete)
+        if view is None:
+            return await i.response.send_message("❌ Module indisponible.", ephemeral=True)
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[community_wiki_search] {ex}")
+
+
+@community_group.command(name="wiki_list", description="📚 Lister les entrées wiki populaires")
+async def community_wiki_list(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        entries = await cmty_hub_module.list_wiki_entries(i.guild.id)
+        view = cmty_hub_module.build_wiki_list_panel(entries, query="")
+        if view is None:
+            return await i.response.send_message("❌ Module indisponible.", ephemeral=True)
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[community_wiki_list] {ex}")
+
+
+@community_group.command(
+    name="wiki_add",
+    description="✏️ [Staff] Créer/éditer une entrée wiki (modal)",
+)
+async def community_wiki_add(i: discord.Interaction):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not _community_is_staff(i.user):
+        return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
+
+    class _WikiAddModal(discord.ui.Modal, title="📖 Nouvelle entrée wiki"):
+        wt_title = discord.ui.TextInput(
+            label="Titre",
+            placeholder="Ex : Comment voter sur les sondages ?",
+            required=True, max_length=100,
+        )
+        wt_content = discord.ui.TextInput(
+            label="Contenu",
+            placeholder="Réponse / explication détaillée…",
+            style=discord.TextStyle.paragraph,
+            required=True, max_length=1800,
+        )
+
+        async def on_submit(self, modal_i: discord.Interaction):
+            ok, msg = await cmty_hub_module.add_wiki_entry(
+                modal_i.guild.id, modal_i.user.id,
+                str(self.wt_title.value), str(self.wt_content.value),
+            )
+            await modal_i.response.send_message(
+                f"{'✅' if ok else '❌'} {msg}", ephemeral=True
+            )
+
+    await i.response.send_modal(_WikiAddModal())
+
+
+@community_group.command(
+    name="wiki_remove", description="🗑️ [Staff] Supprimer une entrée wiki"
+)
+@app_commands.describe(entree="Slug ou titre exact de l'entrée à supprimer")
+async def community_wiki_remove(i: discord.Interaction, entree: str):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not _community_is_staff(i.user):
+        return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
+    try:
+        ok = await cmty_hub_module.delete_wiki_entry(i.guild.id, entree)
+        await i.response.send_message(
+            f"{'🗑️ Entrée supprimée.' if ok else 'ℹ️ Entrée introuvable.'}",
+            ephemeral=True,
+        )
+    except Exception as ex:
+        print(f"[community_wiki_remove] {ex}")
+
+
+@community_group.command(
+    name="suggest",
+    description="💡 Proposer une idée pour la roadmap communautaire",
+)
+async def community_suggest(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+
+    class _SuggestModal(discord.ui.Modal, title="💡 Nouvelle suggestion"):
+        s_title = discord.ui.TextInput(
+            label="Titre court",
+            placeholder="Ex : Ajouter un système de pets",
+            required=True, max_length=120,
+        )
+        s_desc = discord.ui.TextInput(
+            label="Description (optionnel)",
+            placeholder="Détails de la suggestion…",
+            style=discord.TextStyle.paragraph,
+            required=False, max_length=1000,
+        )
+
+        async def on_submit(self, modal_i: discord.Interaction):
+            ok, result = await cmty_hub_module.create_roadmap_item(
+                modal_i.guild.id, modal_i.user.id,
+                str(self.s_title.value), str(self.s_desc.value or ""),
+            )
+            if ok:
+                await modal_i.response.send_message(
+                    f"✅ Suggestion **#{result}** créée. "
+                    f"Utilise `/community roadmap` pour la voir + faire voter !",
+                    ephemeral=True,
+                )
+            else:
+                await modal_i.response.send_message(
+                    f"❌ {result}", ephemeral=True
+                )
+
+    await i.response.send_modal(_SuggestModal())
+
+
+@community_group.command(
+    name="roadmap", description="🗺️ Voir la roadmap (top suggestions par votes)"
+)
+@app_commands.describe(statut="Filtrer par statut (optionnel)")
+@app_commands.choices(statut=[
+    app_commands.Choice(name="⏳ Ouvert",   value="open"),
+    app_commands.Choice(name="📌 Planifié", value="planned"),
+    app_commands.Choice(name="🔨 En cours", value="in_progress"),
+    app_commands.Choice(name="✅ Terminé",  value="done"),
+])
+async def community_roadmap(
+    i: discord.Interaction,
+    statut: Optional[app_commands.Choice[str]] = None,
+):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        status_filter = statut.value if statut else None
+        items = await cmty_hub_module.get_roadmap_items(
+            i.guild.id, status_filter=status_filter
+        )
+        view = cmty_hub_module.build_roadmap_panel(items, status_filter=status_filter)
+        if view is None:
+            return await i.response.send_message("❌ Module indisponible.", ephemeral=True)
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[community_roadmap] {ex}")
+
+
+@community_group.command(
+    name="vote", description="👍👎 Voter sur une suggestion roadmap"
+)
+@app_commands.describe(
+    item_id="ID de la suggestion (#XX visible dans /community roadmap)",
+    choix="Ton vote",
+)
+@app_commands.choices(choix=[
+    app_commands.Choice(name="👍 Pour", value="up"),
+    app_commands.Choice(name="👎 Contre", value="down"),
+    app_commands.Choice(name="↩️ Retirer mon vote", value="clear"),
+])
+async def community_vote(
+    i: discord.Interaction,
+    item_id: int,
+    choix: app_commands.Choice[str],
+):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        vote_value = {"up": 1, "down": -1, "clear": 0}.get(choix.value, 0)
+        ok, msg = await cmty_hub_module.vote_roadmap_item(
+            int(item_id), i.user.id, vote_value
+        )
+        await i.response.send_message(
+            f"{'✅' if ok else '❌'} {msg}", ephemeral=True
+        )
+    except Exception as ex:
+        print(f"[community_vote] {ex}")
+
+
+@community_group.command(
+    name="set_status", description="🔧 [Staff] Changer le statut d'une suggestion"
+)
+@app_commands.describe(item_id="ID de l'item", nouveau_statut="Nouveau statut")
+@app_commands.choices(nouveau_statut=[
+    app_commands.Choice(name="⏳ Ouvert",   value="open"),
+    app_commands.Choice(name="📌 Planifié", value="planned"),
+    app_commands.Choice(name="🔨 En cours", value="in_progress"),
+    app_commands.Choice(name="✅ Terminé",  value="done"),
+    app_commands.Choice(name="❌ Rejeté",   value="rejected"),
+])
+async def community_set_status(
+    i: discord.Interaction,
+    item_id: int,
+    nouveau_statut: app_commands.Choice[str],
+):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not _community_is_staff(i.user):
+        return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
+    try:
+        ok = await cmty_hub_module.set_roadmap_status(int(item_id), nouveau_statut.value)
+        await i.response.send_message(
+            f"{'✅ Statut mis à jour.' if ok else 'ℹ️ Item introuvable.'}",
+            ephemeral=True,
+        )
+    except Exception as ex:
+        print(f"[community_set_status] {ex}")
+
+
+@community_group.command(
+    name="highlights",
+    description="✨ Voir les MVPs de la semaine (post auto chaque dimanche)",
+)
+async def community_highlights(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        stats = await cmty_hub_module._collect_highlights(i.guild.id)
+        view = cmty_hub_module._build_highlights_layout(stats, i.guild)
+        if view is None:
+            return await i.response.send_message("❌ Module indisponible.", ephemeral=True)
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[community_highlights] {ex}")
+
+
+bot.tree.add_command(community_group)
 
 
 @bot.event
