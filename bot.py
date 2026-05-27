@@ -59752,8 +59752,8 @@ async def shoutout_cmd(i: discord.Interaction, membre: discord.Member,
                     description=(
                         f"**De :** {i.user.mention}\n"
                         f"**Pour :** {membre.mention}\n\n"
-                        f"💬 _{raison[:300]}_\n\n"
-                        f"🎖️ {membre.display_name} a maintenant **{received_all}** shoutout(s) reçu(s)."
+                        f"💬 _{_escape_md(raison, 300)}_\n\n"
+                        f"🎖️ {_escape_md(membre.display_name, 80)} a maintenant **{received_all}** shoutout(s) reçu(s)."
                         + (" 🌟 Badge **Cœur d'or** !" if received_all == 10 else "")
                     ),
                     color=cat["color"],
@@ -64812,8 +64812,8 @@ class ShoutoutReasonModal(Modal):
                         description=(
                             f"**De :** {i.user.mention}\n"
                             f"**Pour :** {target.mention}\n\n"
-                            f"💬 _{self.reason.value[:300]}_\n\n"
-                            f"🎖️ {target.display_name} : **{received_all}** shoutout(s)."
+                            f"💬 _{_escape_md(self.reason.value, 300)}_\n\n"
+                            f"🎖️ {_escape_md(target.display_name, 80)} : **{received_all}** shoutout(s)."
                             + (" 🌟 Badge **Cœur d'or** !" if received_all == 10 else "")
                         ),
                         color=cat["color"],
@@ -65204,6 +65204,76 @@ async def _open_weather_panel(i: discord.Interaction):
         await _safe_followup(i, embed=e)
     except Exception as ex:
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 68 — SÉCURITÉ RENFORCÉE : helpers _escape_md / _rate_limit / _validate_int
+#  Anti markdown injection, anti rate-abuse, validation stricte des inputs.
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _escape_md(text: str, max_len: int = 1000) -> str:
+    """Anti markdown injection : échappe les caractères dangereux dans user content.
+
+    Protège contre :
+    - @everyone / @here (zero-width space insertion)
+    - ||spoilers||
+    - # headings, > quotes, * bold, _ italics, ` code, ~ strikethrough
+    - Liens markdown trompeurs [text](url)
+
+    Cap aussi la longueur pour éviter les flood d'embed.
+    """
+    if not text:
+        return ""
+    text = str(text)[:max_len]
+    # Blocage @everyone/@here par insertion zero-width
+    text = text.replace("@everyone", "@​everyone").replace("@here", "@​here")
+    # Échappement markdown via discord.utils
+    try:
+        text = discord.utils.escape_markdown(text)
+    except Exception:
+        # Fallback manuel
+        for char in ('*', '_', '`', '~', '|', '>', '#'):
+            text = text.replace(char, f"\\{char}")
+    return text
+
+
+# Rate limit in-memory : {(user_id, key): [timestamps]}
+_rate_limit_buckets: dict = {}
+
+
+def _rate_limit(user_id: int, key: str, max_per_min: int = 5) -> bool:
+    """Anti rate-abuse : True si la limite est dépassée. False si OK.
+
+    Window glissante 60 sec. Si l'user a fait >= max_per_min actions de type
+    `key` dans les 60 dernières secondes, on bloque.
+    """
+    import time as _t
+    now = _t.time()
+    bucket = (int(user_id), str(key))
+    timestamps = _rate_limit_buckets.setdefault(bucket, [])
+    # Purge timestamps > 60s
+    timestamps = [t for t in timestamps if t > now - 60]
+    if len(timestamps) >= max_per_min:
+        _rate_limit_buckets[bucket] = timestamps  # save purged
+        return True
+    timestamps.append(now)
+    _rate_limit_buckets[bucket] = timestamps
+    return False
+
+
+def _validate_int(value, min_val: int = 0, max_val: int = 10_000_000,
+                   default: int = 0) -> int:
+    """Convertit safe-ly en int avec bornes. default si erreur ou hors range."""
+    try:
+        v = int(str(value).strip())
+        if v < min_val or v > max_val:
+            return default
+        return v
+    except Exception:
+        return default
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
