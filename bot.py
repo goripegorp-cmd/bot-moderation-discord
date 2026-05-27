@@ -11270,21 +11270,41 @@ async def vocal_optin_cmd(i: discord.Interaction):
                 (i.guild.id, i.user.id, 1 if new_val else 0, 1 if new_val else 0),
             )
             await db.commit()
-        if new_val:
-            await i.followup.send(
-                "✅ **Déplacement vocal automatique : ACTIVÉ**\n\n"
-                "Pendant un Boss Raid, si tu es dans une zone vocale et que le boss attaque cette zone, "
-                "le bot pourra te déplacer automatiquement vers une zone safe pour te protéger.\n\n"
-                "_Tu peux désactiver à tout moment avec `/vocal_optin`._",
-                ephemeral=True,
-            )
-        else:
-            await i.followup.send(
-                "🔘 **Déplacement vocal automatique : DÉSACTIVÉ**\n\n"
-                "Le bot ne te déplacera plus. Il t'enverra une notification à la place.\n"
-                "_Réactive avec `/vocal_optin`._",
-                ephemeral=True,
-            )
+        _is_on = new_val
+
+        class _VocalOptinLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=300)
+                items = []
+                if _is_on:
+                    items.append(v2_title("🎤  DÉPLACEMENT VOCAL : ACTIVÉ"))
+                    items.append(v2_subtitle("Tu seras déplacé automatiquement en zone safe pendant un Boss Raid"))
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ ✅  COMMENT ÇA FONCTIONNE  ═══╗**"))
+                    items.append(v2_body(
+                        "Pendant un **Boss Raid**, si tu es dans une zone vocale et que le boss "
+                        "**attaque cette zone**, le bot te déplacera automatiquement vers une zone "
+                        "safe pour te protéger des dégâts."
+                    ))
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ 🔧  PRÉFÉRENCE  ═══╗**"))
+                    items.append(v2_body("Tu peux désactiver à tout moment avec `/vocal_optin`."))
+                else:
+                    items.append(v2_title("🔘  DÉPLACEMENT VOCAL : DÉSACTIVÉ"))
+                    items.append(v2_subtitle("Le bot ne te déplacera plus — tu recevras une notification à la place"))
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ ⚠️  À SAVOIR  ═══╗**"))
+                    items.append(v2_body(
+                        "Pendant un **Boss Raid**, si le boss attaque ta zone vocale, "
+                        "tu **ne seras pas déplacé** mais tu recevras une notification "
+                        "pour te déplacer manuellement."
+                    ))
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ 🔧  PRÉFÉRENCE  ═══╗**"))
+                    items.append(v2_body("Réactive l'opt-in à tout moment avec `/vocal_optin`."))
+                self.add_item(v2_container(*items, color=0x3498DB))
+
+        await i.followup.send(view=_VocalOptinLayout(), ephemeral=True)
     except Exception as ex:
         print(f"[/vocal_optin] {ex}")
         try:
@@ -52104,15 +52124,33 @@ async def pet_cmd(
         gid, uid = i.guild.id, i.user.id
 
         if act == "list":
-            e = discord.Embed(title="🐾 Pets disponibles", color=0x5865F2)
+            _pet_lines = []
             for p in eng41.PETS:
-                e.add_field(
-                    name=f"{p['emoji']} {p['name']} — {p['price']} 🪙",
-                    value=f"_{p['description']}_\nForme finale : {p['form_emojis'][4]} **{p['forms'][4]}**",
-                    inline=False,
+                _pet_lines.append(
+                    f"{p['emoji']} **{p['name']}** — `{p['price']}` 🪙\n"
+                    f"  _{p['description']}_\n"
+                    f"  Forme finale : {p['form_emojis'][4]} **{p['forms'][4]}**"
                 )
-            e.set_footer(text="Choisis-en un avec `/pet buy pet_choice:<nom>`")
-            return await i.followup.send(embed=e, ephemeral=True)
+            _pets_text = "\n\n".join(_pet_lines)
+
+            class _PetListLayout(LayoutView):
+                def __init__(self):
+                    super().__init__(timeout=300)
+                    items = []
+                    items.append(v2_title("🐾  PETS DISPONIBLES"))
+                    items.append(v2_subtitle("Tous les compagnons que tu peux adopter sur le serveur"))
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ 🛒  CATALOGUE  ═══╗**"))
+                    items.append(v2_body(_pets_text[:3500]))
+                    items.append(v2_divider())
+                    items.append(v2_body(
+                        "**╔═══ 💡  COMMENT ADOPTER  ═══╗**\n"
+                        "Choisis-en un avec `/pet action:buy pet_choice:<nom>`.\n"
+                        "Chaque pet évolue avec l'XP — tu peux le faire grandir jusqu'à sa forme finale."
+                    ))
+                    self.add_item(v2_container(*items, color=0xE67E22))
+
+            return await i.followup.send(view=_PetListLayout(), ephemeral=True)
 
         if act == "show":
             pet = await _get_active_pet(gid, uid)
@@ -52125,19 +52163,32 @@ async def pet_cmd(
             bar = _make_progress_bar(pet['xp'], pet['next_level_xp'])
             hunger_bar = _make_progress_bar(pet['hunger'], 100)
             hunger_label = "Affamé 🚨" if pet['hunger'] < 30 else ("Faim 😋" if pet['hunger'] < 60 else "Repu 😊")
-            e = discord.Embed(
-                title=f"{pet['form_label']} · Lv. {pet['level']}",
-                description=(
-                    f"**{pet['custom_name']}** _({pet['name']})_\n\n"
-                    f"_{pet['description']}_\n\n"
-                    f"⭐ **XP :** {bar} `{pet['xp']}/{pet['next_level_xp']}`\n"
-                    f"🍖 **Faim :** {hunger_bar} `{pet['hunger']}/100` — _{hunger_label}_\n\n"
-                    f"_Quand la faim < 30, les bonus sont réduits de 50%._"
-                ),
-                color=0xE67E22,
-            )
-            e.set_footer(text="Phase 41 · /pet feed pour le nourrir")
-            return await i.followup.send(embed=e, ephemeral=True)
+            _pet = pet
+
+            class _PetShowLayout(LayoutView):
+                def __init__(self):
+                    super().__init__(timeout=300)
+                    items = []
+                    items.append(v2_title(f"🐾  {_pet['form_label']} · LV. {_pet['level']}"))
+                    items.append(v2_subtitle(f"**{_pet['custom_name']}** _({_pet['name']})_"))
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ 📜  DESCRIPTION  ═══╗**"))
+                    items.append(v2_body(f"_{_pet['description']}_"))
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ 📊  PROGRESSION  ═══╗**"))
+                    items.append(v2_body(
+                        f"⭐ **XP :** {bar} `{_pet['xp']}/{_pet['next_level_xp']}`\n"
+                        f"🍖 **Faim :** {hunger_bar} `{_pet['hunger']}/100` — _{hunger_label}_"
+                    ))
+                    items.append(v2_divider())
+                    items.append(v2_body(
+                        "**╔═══ ⚠️  À SAVOIR  ═══╗**\n"
+                        "Quand la **faim < 30**, les bonus du pet sont **réduits de 50%**.\n"
+                        "Nourris-le avec `/pet action:feed` (coût : 50 🪙)."
+                    ))
+                    self.add_item(v2_container(*items, color=0xE67E22))
+
+            return await i.followup.send(view=_PetShowLayout(), ephemeral=True)
 
         if act == "buy":
             if not pet_choice:
@@ -52183,12 +52234,32 @@ async def pet_cmd(
                 await db.commit()
             # Achievements
             await _incr_stat_p41(gid, uid, 'pets_owned', 1)
-            return await i.followup.send(
-                f"🎉 Tu as adopté **{pet_def['emoji']} {pet_def['name']}** !\n"
-                f"_{pet_def['description']}_\n\n"
-                f"Tape `/pet show` pour le voir, `/pet feed` pour le nourrir.",
-                ephemeral=True,
-            )
+            _pd = pet_def
+
+            class _PetBuyLayout(LayoutView):
+                def __init__(self):
+                    super().__init__(timeout=300)
+                    items = []
+                    items.append(v2_title("🎉  PET ADOPTÉ"))
+                    items.append(v2_subtitle(f"**{_pd['emoji']} {_pd['name']}** rejoint ton équipe !"))
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ 🐾  TON NOUVEAU COMPAGNON  ═══╗**"))
+                    items.append(v2_body(
+                        f"**Nom :** {_pd['emoji']} **{_pd['name']}**\n"
+                        f"**Prix payé :** `{_pd['price']}` 🪙\n"
+                        f"_{_pd['description']}_"
+                    ))
+                    items.append(v2_divider())
+                    items.append(v2_body(
+                        "**╔═══ 💡  PROCHAINES ÉTAPES  ═══╗**\n"
+                        "• `/pet action:show` — voir ses stats\n"
+                        "• `/pet action:feed` — le nourrir (50 🪙)\n"
+                        "• `/pet action:rename` — lui donner un surnom\n"
+                        "_Ton pet gagne de l'XP en jouant — il évoluera avec toi._"
+                    ))
+                    self.add_item(v2_container(*items, color=0xE67E22))
+
+            return await i.followup.send(view=_PetBuyLayout(), ephemeral=True)
 
         if act == "setactive":
             if not pet_choice:
@@ -52215,10 +52286,25 @@ async def pet_cmd(
                 )
                 await db.commit()
             pet_def = eng41.get_pet(pet_choice.value)
-            return await i.followup.send(
-                f"✅ **{pet_def['emoji']} {pet_def['name']}** est maintenant ton pet actif.",
-                ephemeral=True,
-            )
+            _pd = pet_def
+
+            class _PetSetActiveLayout(LayoutView):
+                def __init__(self):
+                    super().__init__(timeout=300)
+                    items = []
+                    items.append(v2_title("🔄  PET ACTIF MIS À JOUR"))
+                    items.append(v2_subtitle(f"**{_pd['emoji']} {_pd['name']}** est maintenant ton compagnon actif"))
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ ✨  ACTIF  ═══╗**"))
+                    items.append(v2_body(
+                        f"{_pd['emoji']} **{_pd['name']}**\n"
+                        f"_{_pd['description']}_"
+                    ))
+                    items.append(v2_divider())
+                    items.append(v2_body("_Ses bonus s'appliquent désormais à toutes tes activités._"))
+                    self.add_item(v2_container(*items, color=0xE67E22))
+
+            return await i.followup.send(view=_PetSetActiveLayout(), ephemeral=True)
 
         if act == "feed":
             pet = await _get_active_pet(gid, uid)
@@ -52244,10 +52330,26 @@ async def pet_cmd(
                 await db.commit()
             # Bonus XP pet
             await _give_pet_xp(gid, uid, 10)
-            return await i.followup.send(
-                f"🍖 **{pet['custom_name']}** est repu et content ! +10 XP pour le pet.",
-                ephemeral=True,
-            )
+            _pet_name = pet['custom_name']
+
+            class _PetFeedLayout(LayoutView):
+                def __init__(self):
+                    super().__init__(timeout=300)
+                    items = []
+                    items.append(v2_title("🍖  PET NOURRI"))
+                    items.append(v2_subtitle(f"**{_pet_name}** est repu et content !"))
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ 🥩  REPAS  ═══╗**"))
+                    items.append(v2_body(
+                        f"**Coût :** `-{cost}` 🪙\n"
+                        f"**Faim :** restaurée à `100/100`\n"
+                        f"**Bonus :** **+10 XP** pour ton pet"
+                    ))
+                    items.append(v2_divider())
+                    items.append(v2_body("_Continue à le nourrir régulièrement pour qu'il garde ses bonus à 100%._"))
+                    self.add_item(v2_container(*items, color=0xE67E22))
+
+            return await i.followup.send(view=_PetFeedLayout(), ephemeral=True)
 
         if act == "rename":
             if not nom:
@@ -52263,10 +52365,22 @@ async def pet_cmd(
                     (nom, gid, uid, pet['id']),
                 )
                 await db.commit()
-            return await i.followup.send(
-                f"✏️ Ton pet s'appelle maintenant **{nom}**.",
-                ephemeral=True,
-            )
+            _new_name = nom
+
+            class _PetRenameLayout(LayoutView):
+                def __init__(self):
+                    super().__init__(timeout=300)
+                    items = []
+                    items.append(v2_title("✏️  PET RENOMMÉ"))
+                    items.append(v2_subtitle(f"Ton compagnon s'appelle désormais **{_new_name}**"))
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ 🏷️  NOUVEAU NOM  ═══╗**"))
+                    items.append(v2_body(f"Ton pet répond maintenant au nom de **{_new_name}**."))
+                    items.append(v2_divider())
+                    items.append(v2_body("_Tu peux le rebaptiser à tout moment via `/pet action:rename nom:<nouveau>`._"))
+                    self.add_item(v2_container(*items, color=0xE67E22))
+
+            return await i.followup.send(view=_PetRenameLayout(), ephemeral=True)
 
         await i.followup.send("❌ Action inconnue.", ephemeral=True)
     except Exception as ex:
@@ -61047,14 +61161,39 @@ async def sell_pet_cmd(i: discord.Interaction, pet: app_commands.Choice[str], pr
             except Exception as ex:
                 print(f"[sell_pet post hub] {ex}")
 
-        await _safe_followup(
-            i,
-            content=(
-                f"✅ Annonce créée !\n"
-                f"**{pet_def['emoji']} {custom_name}** (Lv. {level}) en vente pour `{price}` 🪙.\n"
-                f"_Tu seras notifié en DM dès qu'un acheteur clique._"
-            ),
-        )
+        _pet_emoji = pet_def['emoji']
+        _pet_name = pet_def['name']
+        _has_hub = bool(hub_ch)
+
+        class _SellPetLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=300)
+                items = []
+                items.append(v2_title("🛒  ANNONCE MARKETPLACE CRÉÉE"))
+                items.append(v2_subtitle(f"Ton pet **{custom_name}** est désormais en vente"))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 📦  TON ANNONCE  ═══╗**"))
+                items.append(v2_body(
+                    f"**Pet :** {_pet_emoji} **{custom_name}** _({_pet_name})_\n"
+                    f"**Niveau :** `{level}`\n"
+                    f"**Prix :** `{price}` 🪙\n"
+                    f"**Référence :** `#{listing_id}`"
+                ))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ ⏱️  DURÉE  ═══╗**"))
+                items.append(v2_body(
+                    "L'annonce reste **active pendant 7 jours**. Tu seras notifié en DM "
+                    "dès qu'un acheteur clique sur **'Acheter'**."
+                ))
+                if _has_hub:
+                    items.append(v2_divider())
+                    items.append(v2_body(
+                        "**╔═══ 📢  PUBLIÉE  ═══╗**\n"
+                        "L'annonce a été postée dans le hub du serveur — les autres membres peuvent maintenant l'acheter."
+                    ))
+                self.add_item(v2_container(*items, color=0xE67E22))
+
+        await _safe_followup(i, view=_SellPetLayout())
     except Exception as ex:
         print(f"[/sell_pet] {ex}")
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
@@ -61082,11 +61221,7 @@ async def marketplace_cmd(i: discord.Interaction):
         if not rows:
             return await _safe_followup(i, content="🛒 Aucune annonce active. Pour vendre : `/sell_pet`")
 
-        e = discord.Embed(
-            title="🛒 Marketplace — Annonces actives",
-            description="10 dernières annonces. Clique le bouton sur le message original pour acheter.",
-            color=0xF1C40F,
-        )
+        _lines = []
         for lid, seller_id, kind, payload_json, price, created in rows[:10]:
             try:
                 payload = json.loads(payload_json) if payload_json else {}
@@ -61102,14 +61237,30 @@ async def marketplace_cmd(i: discord.Interaction):
             else:
                 item_desc = f"Item type `{kind}`"
 
-            e.add_field(
-                name=f"#{lid} · {item_desc}",
-                value=f"💰 `{price}` 🪙 · Vendeur : {seller_name}",
-                inline=False,
+            _lines.append(
+                f"**#{lid}** · {item_desc}\n"
+                f"  💰 `{price}` 🪙 · Vendeur : {seller_name}"
             )
+        _listings_text = "\n\n".join(_lines)
 
-        e.set_footer(text="Trouve l'annonce dans le hub pour cliquer 'Acheter'")
-        await _safe_followup(i, embed=e)
+        class _MarketplaceLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=300)
+                items = []
+                items.append(v2_title("🛒  MARKETPLACE — ANNONCES ACTIVES"))
+                items.append(v2_subtitle("Les 10 dernières annonces postées sur le serveur"))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 📦  ANNONCES  ═══╗**"))
+                items.append(v2_body(_listings_text[:3500]))
+                items.append(v2_divider())
+                items.append(v2_body(
+                    "**╔═══ 💡  COMMENT ACHETER  ═══╗**\n"
+                    "Trouve l'annonce dans le **hub** du serveur et clique sur le bouton **'Acheter'**.\n"
+                    "Pour vendre : `/sell_pet`"
+                ))
+                self.add_item(v2_container(*items, color=0xE91E63))
+
+        await _safe_followup(i, view=_MarketplaceLayout())
     except Exception as ex:
         print(f"[/marketplace] {ex}")
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
@@ -64839,7 +64990,38 @@ async def shoutout_cmd(i: discord.Interaction, membre: discord.Member,
             await add_coins(i.guild.id, membre.id, 50)
         except Exception:
             pass
-        await _safe_followup(i, content=f"✅ Shoutout envoyé à {membre.mention} ! +50 🪙 pour lui.")
+        _cat_label = cat['label']
+        _posted_to_hub = bool(hub_ch)
+
+        class _ShoutoutLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=300)
+                items = []
+                items.append(v2_title("💝  SHOUTOUT ENVOYÉ"))
+                items.append(v2_subtitle(f"Tu as remercié **{membre.display_name}** publiquement"))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 🌟  DÉTAILS  ═══╗**"))
+                items.append(v2_body(
+                    f"**Pour :** {membre.mention}\n"
+                    f"**Catégorie :** {_cat_label}\n"
+                    f"**Raison :** _{_escape_md(raison, 200)}_"
+                ))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 🎁  RÉCOMPENSE  ═══╗**"))
+                items.append(v2_body(
+                    f"**+50 🪙** ont été versés à {membre.display_name} pour le remercier de sa contribution."
+                ))
+                if _posted_to_hub:
+                    items.append(v2_divider())
+                    items.append(v2_body(
+                        "**╔═══ 📢  PUBLIÉ  ═══╗**\n"
+                        "Ton shoutout a été posté dans le **hub** du serveur — tout le monde peut le voir."
+                    ))
+                items.append(v2_divider())
+                items.append(v2_body("_Continue à reconnaître les bons membres avec `/shoutout`._"))
+                self.add_item(v2_container(*items, color=0xFFD700))
+
+        await _safe_followup(i, view=_ShoutoutLayout())
     except Exception as ex:
         print(f"[shoutout_cmd] {ex}")
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
@@ -64993,6 +65175,7 @@ async def mentor_invite_cmd(i: discord.Interaction, nouveau_membre: discord.Memb
             )
             mid = cur.lastrowid
             await db.commit()
+        _delivery = None  # 'dm' | 'hub' | 'failed'
         try:
             await nouveau_membre.send(
                 embed=discord.Embed(
@@ -65008,7 +65191,7 @@ async def mentor_invite_cmd(i: discord.Interaction, nouveau_membre: discord.Memb
                 ),
                 view=MentorAcceptView(int(mid)),
             )
-            await _safe_followup(i, content=f"✅ Invitation envoyée à {nouveau_membre.mention} en DM.")
+            _delivery = 'dm'
         except discord.Forbidden:
             c = await cfg(i.guild.id)
             hub_id = int(c.get('hub_channel', 0) or 0)
@@ -65024,9 +65207,57 @@ async def mentor_invite_cmd(i: discord.Interaction, nouveau_membre: discord.Memb
                     view=MentorAcceptView(int(mid)),
                     allowed_mentions=discord.AllowedMentions(users=True),
                 )
-                await _safe_followup(i, content=f"⚠️ DM fermé, invitation postée dans le hub.")
+                _delivery = 'hub'
             else:
-                await _safe_followup(i, content="❌ DM fermé + hub non configuré.")
+                _delivery = 'failed'
+
+        _d = _delivery
+        _apprentice = nouveau_membre
+
+        class _MentorInviteLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=300)
+                items = []
+                if _d == 'failed':
+                    items.append(v2_title("❌  INVITATION ÉCHOUÉE"))
+                    items.append(v2_subtitle("Impossible de contacter le membre"))
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ 🚧  PROBLÈME  ═══╗**"))
+                    items.append(v2_body(
+                        f"Les **DMs sont fermés** pour {_apprentice.mention} et le **hub n'est pas configuré**.\n"
+                        "Demande à un admin de configurer un salon hub pour pouvoir l'inviter via ce salon."
+                    ))
+                    _color = 0xE74C3C
+                else:
+                    items.append(v2_title("🎓  INVITATION DE MENTORAT ENVOYÉE"))
+                    items.append(v2_subtitle(f"Tu proposes de mentorer **{_apprentice.display_name}**"))
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ 🎯  TON APPRENTI POTENTIEL  ═══╗**"))
+                    items.append(v2_body(
+                        f"**Membre :** {_apprentice.mention}\n"
+                        f"**Durée :** `{soc.MENTORSHIP_DURATION_DAYS}` jours\n"
+                        f"**Bonus mentor :** +{soc.MENTOR_INTERACTION_BONUS_COINS} 🪙/j\n"
+                        f"**Bonus apprenti :** +{soc.APPRENTICE_INTERACTION_BONUS_COINS} 🪙/j"
+                    ))
+                    items.append(v2_divider())
+                    if _d == 'dm':
+                        items.append(v2_body("**╔═══ 📨  LIVRAISON  ═══╗**"))
+                        items.append(v2_body(
+                            f"L'invitation a été envoyée en **DM** à {_apprentice.mention}. "
+                            "Il/elle décidera bientôt d'accepter ou refuser."
+                        ))
+                    else:  # hub
+                        items.append(v2_body("**╔═══ 📨  LIVRAISON  ═══╗**"))
+                        items.append(v2_body(
+                            f"⚠️ Les DMs de {_apprentice.mention} sont fermés — "
+                            "l'invitation a été postée dans le **hub** du serveur."
+                        ))
+                    items.append(v2_divider())
+                    items.append(v2_body("_Tu seras notifié dès que la personne accepte ou refuse._"))
+                    _color = 0x2ECC71
+                self.add_item(v2_container(*items, color=_color))
+
+        await _safe_followup(i, view=_MentorInviteLayout())
     except Exception as ex:
         print(f"[mentor_invite_cmd] {ex}")
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
@@ -66694,14 +66925,40 @@ async def capsule_create_cmd(i: discord.Interaction, message: str, duree: str = 
             )
             cid = cur.lastrowid
             await db.commit()
-        await _safe_followup(
-            i,
-            content=(
-                f"📦 **Capsule #{cid} scellée.**\n"
-                f"Elle sera ouverte publiquement le **{unlock}** dans le hub.\n\n"
-                f"_Ton message reste secret jusqu'à cette date._"
-            ),
-        )
+        _duree_label = {"1mois": "1 mois", "6mois": "6 mois", "1an": "1 an"}.get(duree, duree)
+        _has_hub = bool(hub_id)
+
+        class _CapsuleCreateLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=300)
+                items = []
+                items.append(v2_title("📦  CAPSULE TEMPORELLE SCELLÉE"))
+                items.append(v2_subtitle(f"Ton message au futur est en sécurité — capsule **#{cid}**"))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 🔒  TA CAPSULE  ═══╗**"))
+                items.append(v2_body(
+                    f"**Référence :** `#{cid}`\n"
+                    f"**Durée choisie :** `{_duree_label}`\n"
+                    f"**Date d'ouverture :** `{unlock}`\n"
+                    f"**Message :** `{len(message[:1500])}` caractères scellés"
+                ))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 🗝️  CE QUI VA SE PASSER  ═══╗**"))
+                if _has_hub:
+                    items.append(v2_body(
+                        f"À la date du **{unlock}**, ton message sera **automatiquement ouvert** "
+                        "et posté publiquement dans le hub du serveur, avec ton nom comme auteur."
+                    ))
+                else:
+                    items.append(v2_body(
+                        f"À la date du **{unlock}**, ta capsule sera ouverte. "
+                        "_Le staff doit configurer le hub pour que le message soit visible._"
+                    ))
+                items.append(v2_divider())
+                items.append(v2_body("_Ton message reste **secret** jusqu'à cette date. Personne ne peut le lire avant._"))
+                self.add_item(v2_container(*items, color=0x9B59B6))
+
+        await _safe_followup(i, view=_CapsuleCreateLayout())
     except Exception as ex:
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
@@ -67174,12 +67431,22 @@ async def voice_top_cmd(i: discord.Interaction):
             mins = (total_s % 3600) // 60
             mark = medals[idx] if idx < 3 else f"`{idx+1:02d}`"
             lines.append(f"{mark} **{mname}** — `{hours}h{mins:02d}m`")
-        e = discord.Embed(
-            title="🎙️ Top 10 vocal cette semaine",
-            description="\n".join(lines) + "\n\n_Continue à passer du temps en vocal pour grimper._",
-            color=0x9B59B6,
-        )
-        await _safe_followup(i, embed=e)
+        _ranking_text = "\n".join(lines)
+
+        class _VoiceTopLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=300)
+                items = []
+                items.append(v2_title("🎙️  TOP 10 VOCAL — CETTE SEMAINE"))
+                items.append(v2_subtitle("Les plus actifs en vocal ces 7 derniers jours"))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 🏆  CLASSEMENT  ═══╗**"))
+                items.append(v2_body(_ranking_text[:3500]))
+                items.append(v2_divider())
+                items.append(v2_body("_Continue à passer du temps en vocal pour grimper le classement._"))
+                self.add_item(v2_container(*items, color=0x3498DB))
+
+        await _safe_followup(i, view=_VoiceTopLayout())
     except Exception as ex:
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
@@ -67228,13 +67495,32 @@ async def voice_theme_cmd(i: discord.Interaction, theme: str):
                 (i.guild.id, i.user.id, vc.id, theme),
             )
             await db.commit()
-        await _safe_followup(
-            i,
-            content=(
-                f"✅ Vocal **{theme_def['label']}** créé : <#{vc.id}>\n"
-                f"_Limite : {theme_def['user_limit']} joueurs. Auto-supprimé après 5 min vide._"
-            ),
-        )
+        _label = theme_def['label']
+        _limit = theme_def['user_limit']
+        _vc_id = vc.id
+
+        class _VoiceThemeLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=300)
+                items = []
+                items.append(v2_title("🎙️  VOCAL THÉMATIQUE CRÉÉ"))
+                items.append(v2_subtitle(f"Ton vocal **{_label}** est prêt — invite tes amis !"))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 🎯  TON VOCAL  ═══╗**"))
+                items.append(v2_body(
+                    f"**Thème :** {_label}\n"
+                    f"**Salon :** <#{_vc_id}>\n"
+                    f"**Limite :** `{_limit}` joueurs max"
+                ))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ ⏱️  AUTO-SUPPRESSION  ═══╗**"))
+                items.append(v2_body(
+                    "Le vocal sera **automatiquement supprimé** s'il reste vide pendant **5 minutes**.\n"
+                    "Reste connecté pour le garder ouvert."
+                ))
+                self.add_item(v2_container(*items, color=0x9B59B6))
+
+        await _safe_followup(i, view=_VoiceThemeLayout())
     except Exception as ex:
         print(f"[voice_theme] {ex}")
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
@@ -68652,17 +68938,46 @@ async def duel_report_cmd(i: discord.Interaction, duel_id: int, gagnant: discord
                 (gagnant.id, duel_id),
             )
             await db.commit()
-        msg = f"🏆 **{gagnant.mention} gagne le duel #{duel_id} !**"
-        if stake > 0:
-            msg += f"\n💰 +`{stake * 2}` 🪙 (les 2 mises)"
-        if elo_result:
-            delta_w = elo_result['new_w'] - elo_result['old_w']
-            delta_l = elo_result['new_l'] - elo_result['old_l']
-            msg += f"\n📈 Elo : **{gagnant.display_name}** {elo_result['old_w']} → `{elo_result['new_w']}` (+{delta_w})"
-            loser = i.guild.get_member(loser_id)
-            lname = loser.display_name if loser else f"User {loser_id}"
-            msg += f"\n📉 Elo : **{lname}** {elo_result['old_l']} → `{elo_result['new_l']}` ({delta_l})"
-        await _safe_followup(i, content=msg)
+        _winner = gagnant
+        _loser_member = i.guild.get_member(loser_id)
+        _loser_name = _loser_member.display_name if _loser_member else f"User {loser_id}"
+        _payout = stake * 2 if stake > 0 else 0
+        _elo = elo_result
+
+        class _DuelReportLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=300)
+                items = []
+                items.append(v2_title("⚔️  DUEL RÉSOLU"))
+                items.append(v2_subtitle(f"**{_winner.display_name}** remporte le duel **#{duel_id}**"))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 🏆  VAINQUEUR  ═══╗**"))
+                items.append(v2_body(
+                    f"**Gagnant :** {_winner.mention}\n"
+                    f"**Perdant :** {_loser_name}\n"
+                    f"**Duel ID :** `#{duel_id}`"
+                ))
+                if _payout > 0:
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ 💰  RÉCOMPENSE  ═══╗**"))
+                    items.append(v2_body(
+                        f"**+{_payout}** 🪙 versés à {_winner.display_name}\n"
+                        f"_(les 2 mises de `{stake}` 🪙 cumulées)_"
+                    ))
+                if _elo:
+                    delta_w = _elo['new_w'] - _elo['old_w']
+                    delta_l = _elo['new_l'] - _elo['old_l']
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ 📊  ELO LADDER  ═══╗**"))
+                    items.append(v2_body(
+                        f"📈 **{_winner.display_name}** : `{_elo['old_w']}` → `{_elo['new_w']}` (+{delta_w})\n"
+                        f"📉 **{_loser_name}** : `{_elo['old_l']}` → `{_elo['new_l']}` ({delta_l})"
+                    ))
+                items.append(v2_divider())
+                items.append(v2_body("_Consulte le classement avec `/pvp_top` ou défie quelqu'un avec `/duel`._"))
+                self.add_item(v2_container(*items, color=0xE74C3C))
+
+        await _safe_followup(i, view=_DuelReportLayout())
     except Exception as ex:
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
