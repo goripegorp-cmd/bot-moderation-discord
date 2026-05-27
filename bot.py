@@ -40780,6 +40780,89 @@ async def inventory_cmd(i: discord.Interaction):
 
                 self.add_item(v2_container(*items, color=0x5865F2))
 
+                # ─── Phase 117 : 3 actions rapides (repair/forge/swap) ───
+                # Réactive l'accès à craft_cmd et swap_cmd (slash retirés Phase 116
+                # pour CommandLimitReached) via des boutons sur ce panel.
+                _owner_id = i.user.id
+
+                class _RepairBtn(discord.ui.Button):
+                    def __init__(self):
+                        super().__init__(
+                            label="🔧 Réparer mon équipement",
+                            style=discord.ButtonStyle.success,
+                            custom_id=f"phase117_inv_repair_{_owner_id}",
+                        )
+
+                    async def callback(self, btn_i: discord.Interaction):
+                        if btn_i.user.id != _owner_id:
+                            return await btn_i.response.send_message(
+                                "❌ Ce panneau n'est pas pour toi.", ephemeral=True
+                            )
+                        try:
+                            await repair_cmd.callback(btn_i)
+                        except Exception as ex:
+                            print(f"[phase117 inv repair btn] {ex}")
+                            try:
+                                if not btn_i.response.is_done():
+                                    await btn_i.response.send_message(
+                                        f"❌ Erreur : `{ex}`", ephemeral=True
+                                    )
+                            except Exception:
+                                pass
+
+                class _ForgeBtn(discord.ui.Button):
+                    def __init__(self):
+                        super().__init__(
+                            label="⚒️ Atelier de forge",
+                            style=discord.ButtonStyle.primary,
+                            custom_id=f"phase117_inv_forge_{_owner_id}",
+                        )
+
+                    async def callback(self, btn_i: discord.Interaction):
+                        if btn_i.user.id != _owner_id:
+                            return await btn_i.response.send_message(
+                                "❌ Ce panneau n'est pas pour toi.", ephemeral=True
+                            )
+                        try:
+                            # Phase 116 : craft_cmd n'est plus un slash, c'est un helper async direct
+                            await craft_cmd(btn_i)
+                        except Exception as ex:
+                            print(f"[phase117 inv forge btn] {ex}")
+                            try:
+                                if not btn_i.response.is_done():
+                                    await btn_i.response.send_message(
+                                        f"❌ Erreur : `{ex}`", ephemeral=True
+                                    )
+                            except Exception:
+                                pass
+
+                class _SwapBtn(discord.ui.Button):
+                    def __init__(self):
+                        super().__init__(
+                            label="🤝 Échanger avec un joueur",
+                            style=discord.ButtonStyle.secondary,
+                            custom_id=f"phase117_inv_swap_{_owner_id}",
+                        )
+
+                    async def callback(self, btn_i: discord.Interaction):
+                        if btn_i.user.id != _owner_id:
+                            return await btn_i.response.send_message(
+                                "❌ Ce panneau n'est pas pour toi.", ephemeral=True
+                            )
+                        try:
+                            await _open_swap_flow(btn_i)
+                        except Exception as ex:
+                            print(f"[phase117 inv swap btn] {ex}")
+                            try:
+                                if not btn_i.response.is_done():
+                                    await btn_i.response.send_message(
+                                        f"❌ Erreur : `{ex}`", ephemeral=True
+                                    )
+                            except Exception:
+                                pass
+
+                self.add_item(discord.ui.ActionRow(_RepairBtn(), _ForgeBtn(), _SwapBtn()))
+
         await i.response.send_message(view=_InventoryLayout(), ephemeral=True)
     except Exception as ex:
         print(f"[/inventory V2] {ex}")
@@ -41033,30 +41116,208 @@ def _format_trade_item(item: dict, slot: str) -> str:
     return f"{badge} {emoji} **{name}** _{rarity}_" + (f" `{stats_str}`" if stats_str else "")
 
 
+# ─── Phase 117 : Flow swap multi-étapes via boutons (sans slash) ─────────
+#
+# Le décorateur slash de /swap a été retiré (Phase 116 CommandLimitReached).
+# Ce flow le remplace, déclenché par le bouton "🤝 Échanger" du /inventory.
+#
+# Étapes :
+#   1. UserSelect → choisir la cible
+#   2. Slot buttons → choisir le slot d'échange
+#   3. Modal coins_bonus (optionnel)
+#   4. swap_cmd() → crée la proposition publique (mention cible)
+
+_PHASE117_SWAP_SLOT_CHOICES = [
+    ("weapon",    "⚔️ Arme"),
+    ("armor",     "🛡️ Armure"),
+    ("helmet",    "🎩 Casque"),
+    ("boots",     "👢 Bottes"),
+    ("accessory", "💍 Accessoire"),
+    ("trinket",   "🔮 Trinket"),
+]
+
+
+async def _open_swap_flow(btn_i: discord.Interaction):
+    """Phase 117 : ouvre le flow swap multi-étapes depuis un bouton d'inventaire."""
+    user_id = btn_i.user.id
+
+    class _SwapTargetSelect(discord.ui.UserSelect):
+        def __init__(self):
+            super().__init__(
+                placeholder="🎯 Choisis le joueur avec qui swap…",
+                min_values=1, max_values=1,
+                custom_id=f"phase117_swap_target_{user_id}",
+            )
+
+        async def callback(self, sel_i: discord.Interaction):
+            if sel_i.user.id != user_id:
+                return await sel_i.response.send_message(
+                    "❌ Ce panneau n'est pas pour toi.", ephemeral=True
+                )
+            target = self.values[0]
+            if target.bot:
+                return await sel_i.response.send_message(
+                    "🤖 On ne swap pas avec un bot.", ephemeral=True
+                )
+            if target.id == user_id:
+                return await sel_i.response.send_message(
+                    "🪞 Tu ne peux pas swap avec toi-même.", ephemeral=True
+                )
+            # Étape 2 : afficher les slots dispos
+            await _show_swap_slot_picker(sel_i, target)
+
+    class _TargetView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=180)
+            self.add_item(_SwapTargetSelect())
+
+        async def interaction_check(self, ic: discord.Interaction) -> bool:
+            return ic.user.id == user_id
+
+    await btn_i.response.send_message(
+        content="🤝 **Étape 1/3** — Sélectionne le joueur avec qui échanger :",
+        view=_TargetView(),
+        ephemeral=True,
+    )
+
+
+async def _show_swap_slot_picker(sel_i: discord.Interaction, target: discord.Member):
+    """Phase 117 : étape 2 — slot picker selon items dispos chez user ET target."""
+    user_id = sel_i.user.id
+    inv_a = await _get_or_create_inventory(sel_i.guild.id, user_id)
+    inv_b = await _get_or_create_inventory(sel_i.guild.id, target.id)
+
+    # Slots où LES DEUX ont un item équipé
+    available = []
+    for slot_key, slot_label in _PHASE117_SWAP_SLOT_CHOICES:
+        ia = inv_a.get(slot_key) or {}
+        ib = inv_b.get(slot_key) or {}
+        if ia.get("name") and ib.get("name"):
+            available.append((slot_key, slot_label, ia, ib))
+
+    if not available:
+        return await sel_i.response.edit_message(
+            content=(
+                f"❌ Aucun slot en commun avec {target.mention}.\n"
+                "_Les deux joueurs doivent avoir un item équipé dans le même slot._"
+            ),
+            view=None,
+        )
+
+    class _SwapSlotBtn(discord.ui.Button):
+        def __init__(self, slot_key: str, slot_label: str, item_a: dict, item_b: dict):
+            emoji_a = item_a.get("emoji", "⚪")
+            emoji_b = item_b.get("emoji", "⚪")
+            super().__init__(
+                label=f"{slot_label}  ({emoji_a} ↔ {emoji_b})"[:80],
+                style=discord.ButtonStyle.primary,
+                custom_id=f"phase117_swap_slot_{user_id}_{slot_key}",
+            )
+            self.slot_key = slot_key
+            self.slot_label = slot_label
+
+        async def callback(self, btn_i: discord.Interaction):
+            if btn_i.user.id != user_id:
+                return await btn_i.response.send_message(
+                    "❌ Ce panneau n'est pas pour toi.", ephemeral=True
+                )
+            # Étape 3 : modal coins_bonus
+            await btn_i.response.send_modal(
+                _SwapCoinsModal(target, self.slot_key, self.slot_label)
+            )
+
+    class _SlotView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=180)
+            buttons = [_SwapSlotBtn(sk, sl, ia, ib) for (sk, sl, ia, ib) in available]
+            for b in buttons:
+                self.add_item(b)
+
+        async def interaction_check(self, ic: discord.Interaction) -> bool:
+            return ic.user.id == user_id
+
+    # Lister les items côté user + target pour le contexte
+    lines = []
+    for slot_key, slot_label, ia, ib in available:
+        lines.append(
+            f"**{slot_label}** : tu donnes {_format_trade_item(ia, slot_key)}  →  "
+            f"tu reçois {_format_trade_item(ib, slot_key)}"
+        )
+
+    await sel_i.response.edit_message(
+        content=(
+            f"🤝 **Étape 2/3** — Swap avec {target.mention}\n\n"
+            + "\n".join(lines)
+            + "\n\n_Clique le slot à échanger :_"
+        ),
+        view=_SlotView(),
+    )
+
+
+class _SwapCoinsModal(discord.ui.Modal, title="🤝 Bonus coins (optionnel)"):
+    """Phase 117 : étape 3 — saisir le bonus de coins (0 si pas de bonus)."""
+
+    def __init__(self, target: discord.Member, slot_key: str, slot_label: str):
+        super().__init__()
+        self.target = target
+        self.slot_key = slot_key
+        self.slot_label = slot_label
+        self.coins_input = discord.ui.TextInput(
+            label="Coins bonus à donner (optionnel)",
+            placeholder="Ex: 100 (laisse 0 pour pas de bonus, max 100 000)",
+            default="0",
+            required=True,
+            min_length=1, max_length=7,
+        )
+        self.add_item(self.coins_input)
+
+    async def on_submit(self, modal_i: discord.Interaction):
+        try:
+            try:
+                coins = max(0, min(100_000, int(self.coins_input.value.strip())))
+            except ValueError:
+                return await modal_i.response.send_message(
+                    "❌ Coins invalides (entier requis, 0-100000).", ephemeral=True
+                )
+            # Étape 4 : appeler swap_cmd qui poste la proposition publique
+            await swap_cmd(modal_i, self.target, self.slot_key, self.slot_label, coins)
+        except Exception as ex:
+            print(f"[_SwapCoinsModal on_submit] {ex}")
+            import traceback; traceback.print_exc()
+            try:
+                if not modal_i.response.is_done():
+                    await modal_i.response.send_message(
+                        f"❌ Erreur : `{ex}`", ephemeral=True
+                    )
+            except Exception:
+                pass
+
+
 # Phase 116 HOTFIX : décorateur retiré (CommandLimitReached 100 globally).
-# Le helper swap_cmd reste accessible via futur bouton dans /inventory.
-# Pour réactiver : remettre le décorateur @bot.tree.command(name="swap", ...)
+# Phase 117 : signature refactorée pour accepter strings (appel depuis bouton).
+# Le helper swap_cmd est appelé depuis le flow Phase 117 (bouton inventory).
 async def swap_cmd(
     i: discord.Interaction,
     cible: discord.Member,
-    slot: app_commands.Choice[str],
+    slot_value: str,
+    slot_label: str,
     coins_bonus: int = 0,
 ):
-    """Phase 108 + Phase 112 : swap P2P 2-side confirm.
-
-    Renommé `/trade` → `/swap` (Phase 112 hotfix) car conflit avec
-    le système Marketplace P2P existant.
+    """Phase 108 + Phase 112 + Phase 117 : swap P2P 2-side confirm.
 
     A propose : "Je te donne mon [slot] + coins_bonus 🪙 contre ton [slot]"
     Les deux items doivent être du MÊME slot type pour éviter les
     incohérences (armure dans le slot weapon, etc.).
     B reçoit un panel ACCEPTER/REFUSER.
+
+    Phase 117 : accepte slot_value (str) + slot_label (str) au lieu de
+    Choice — permet d'être appelé depuis un bouton de panel UI.
     """
     try:
         # Phase 112 : single slot — pas de cross-slot pour cohérence
-        mon_slot_val = slot.value
-        son_slot_val = slot.value
-        slot_name = slot.name
+        mon_slot_val = slot_value
+        son_slot_val = slot_value
+        slot_name = slot_label
 
         # Validations basiques
         if cible.bot:
