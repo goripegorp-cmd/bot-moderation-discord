@@ -40279,6 +40279,377 @@ async def repair_cmd(i: discord.Interaction):
             pass
 
 
+# ─── Phase 108 : /trade (P2P Trade entre joueurs) ────────────────────────
+#
+# Système 2-side confirm : A propose un item de son inventaire en échange
+# d'un item de B + un bonus de coins éventuel. B reçoit un panel avec
+# ACCEPTER / REFUSER. Atomique côté DB, lock anti double-spend.
+
+# Lock global en mémoire des items "engagés" dans un trade ouvert
+# clé : (guild_id, user_id, slot) → trade_id
+_trade_locks: dict = {}
+# Trades actifs : trade_id → dict
+_active_trades: dict = {}
+_TRADE_TIMEOUT_SEC = 180  # 3 min pour confirmer
+
+
+def _trade_slot_choices():
+    """Phase 108 : choices pour les 6 slots équipables."""
+    return [
+        app_commands.Choice(name="⚔️ Arme",       value="weapon"),
+        app_commands.Choice(name="🛡️ Armure",     value="armor"),
+        app_commands.Choice(name="🎩 Casque",     value="helmet"),
+        app_commands.Choice(name="👢 Bottes",     value="boots"),
+        app_commands.Choice(name="💍 Accessoire", value="accessory"),
+        app_commands.Choice(name="🔮 Trinket",    value="trinket"),
+    ]
+
+
+def _format_trade_item(item: dict, slot: str) -> str:
+    """Phase 108 : ligne lisible pour afficher un item dans un trade."""
+    if not item or not item.get("name"):
+        return f"_(slot `{slot}` vide)_"
+    emoji = item.get("emoji", "⚪")
+    name = item.get("name", "?")
+    rarity = (item.get("rarity") or "commune").lower()
+    badges = {
+        "commune": "⚪",
+        "rare": "🔵",
+        "épique": "🟣",
+        "légendaire": "🟠",
+        "mythique": "🔴",
+        "divine": "💎",
+    }
+    badge = badges.get(rarity, "⚪")
+    try:
+        stats_d = events2026.gear_total_stats(item)
+        bits = []
+        if stats_d.get("atk"): bits.append(f"+{stats_d['atk']} ATK")
+        if stats_d.get("def"): bits.append(f"+{stats_d['def']} DEF")
+        if stats_d.get("crit"): bits.append(f"+{stats_d['crit']}% CRIT")
+        stats_str = " · ".join(bits) if bits else ""
+    except Exception:
+        stats_str = ""
+    return f"{badge} {emoji} **{name}** _{rarity}_" + (f" `{stats_str}`" if stats_str else "")
+
+
+@bot.tree.command(name="trade", description="🤝 Propose un échange d'équipement à un autre joueur")
+@app_commands.describe(
+    cible="Le joueur avec qui échanger",
+    mon_slot="Le slot de TON item à donner",
+    son_slot="Le slot de SON item à recevoir",
+    coins_bonus="Coins que tu donnes en plus (optionnel, max 100k)",
+)
+@app_commands.choices(
+    mon_slot=_trade_slot_choices(),
+    son_slot=_trade_slot_choices(),
+)
+async def trade_cmd(
+    i: discord.Interaction,
+    cible: discord.Member,
+    mon_slot: app_commands.Choice[str],
+    son_slot: app_commands.Choice[str],
+    coins_bonus: int = 0,
+):
+    """Phase 108 : trade P2P 2-side confirm.
+
+    A propose : "Je te donne mon [mon_slot] + coins_bonus 🪙
+                 contre ton [son_slot]"
+    B reçoit un panel ACCEPTER/REFUSER.
+    """
+    try:
+        # Validations basiques
+        if cible.bot:
+            return await i.response.send_message("🤖 On ne trade pas avec un bot.", ephemeral=True)
+        if cible.id == i.user.id:
+            return await i.response.send_message(
+                "🪞 Tu ne peux pas trade avec toi-même.", ephemeral=True
+            )
+        coins_bonus = max(0, min(100_000, int(coins_bonus or 0)))
+
+        # Lock check
+        key_a = (i.guild.id, i.user.id, mon_slot.value)
+        key_b = (i.guild.id, cible.id, son_slot.value)
+        if key_a in _trade_locks:
+            return await i.response.send_message(
+                "⏳ Ton slot est déjà engagé dans un autre trade en cours.",
+                ephemeral=True,
+            )
+        if key_b in _trade_locks:
+            return await i.response.send_message(
+                "⏳ Le slot de la cible est déjà engagé dans un autre trade.",
+                ephemeral=True,
+            )
+
+        # Récupérer les inventaires
+        inv_a = await _get_or_create_inventory(i.guild.id, i.user.id)
+        inv_b = await _get_or_create_inventory(i.guild.id, cible.id)
+        item_a = inv_a.get(mon_slot.value) or {}
+        item_b = inv_b.get(son_slot.value) or {}
+
+        if not item_a or not item_a.get("name"):
+            return await i.response.send_message(
+                f"❌ Tu n'as aucun item dans le slot **{mon_slot.name}**.",
+                ephemeral=True,
+            )
+        if not item_b or not item_b.get("name"):
+            return await i.response.send_message(
+                f"❌ {cible.mention} n'a aucun item dans le slot **{son_slot.name}**.",
+                ephemeral=True,
+            )
+
+        # Vérifier les coins du proposant
+        if coins_bonus > 0:
+            eco_a = await get_user_economy(i.guild.id, i.user.id)
+            hand_a = int(eco_a.get('coins', 0) or 0)
+            bank_a = int(eco_a.get('bank', 0) or 0)
+            if hand_a + bank_a < coins_bonus:
+                return await i.response.send_message(
+                    f"💸 Fonds insuffisants — tu n'as que `{hand_a + bank_a:,}` 🪙 "
+                    f"(demandé : `{coins_bonus:,}` 🪙).",
+                    ephemeral=True,
+                )
+
+        # Créer le trade
+        import time as _time
+        trade_id = f"trade_{i.guild.id}_{i.user.id}_{cible.id}_{int(_time.time())}"
+        trade_data = {
+            "id": trade_id,
+            "guild_id": i.guild.id,
+            "a_id": i.user.id,
+            "b_id": cible.id,
+            "a_slot": mon_slot.value,
+            "b_slot": son_slot.value,
+            "a_item_snap": dict(item_a),  # snapshot pour anti-tamper
+            "b_item_snap": dict(item_b),
+            "coins_bonus": coins_bonus,
+            "created_at": int(_time.time()),
+            "status": "pending",
+        }
+        _active_trades[trade_id] = trade_data
+        _trade_locks[key_a] = trade_id
+        _trade_locks[key_b] = trade_id
+
+        # Construire le panel pour B
+        a_disp = _format_trade_item(item_a, mon_slot.value)
+        b_disp = _format_trade_item(item_b, son_slot.value)
+        coins_line = f"\n💰 **+ `{coins_bonus:,}` 🪙 de bonus**" if coins_bonus > 0 else ""
+
+        class _TradeAccept(discord.ui.Button):
+            def __init__(self):
+                super().__init__(
+                    label="✅ Accepter l'échange",
+                    style=discord.ButtonStyle.success,
+                    custom_id=f"phase108_trade_accept_{trade_id}",
+                )
+
+            async def callback(self, btn_i: discord.Interaction):
+                if btn_i.user.id != cible.id:
+                    return await btn_i.response.send_message(
+                        "❌ Cette proposition n'est pas pour toi.", ephemeral=True
+                    )
+                await _finalize_trade(btn_i, trade_id, accept=True)
+
+        class _TradeRefuse(discord.ui.Button):
+            def __init__(self):
+                super().__init__(
+                    label="❌ Refuser",
+                    style=discord.ButtonStyle.danger,
+                    custom_id=f"phase108_trade_refuse_{trade_id}",
+                )
+
+            async def callback(self, btn_i: discord.Interaction):
+                if btn_i.user.id != cible.id:
+                    return await btn_i.response.send_message(
+                        "❌ Cette proposition n'est pas pour toi.", ephemeral=True
+                    )
+                await _finalize_trade(btn_i, trade_id, accept=False)
+
+        class _TradeCancel(discord.ui.Button):
+            def __init__(self):
+                super().__init__(
+                    label="🚫 Annuler ma proposition",
+                    style=discord.ButtonStyle.secondary,
+                    custom_id=f"phase108_trade_cancel_{trade_id}",
+                )
+
+            async def callback(self, btn_i: discord.Interaction):
+                if btn_i.user.id != i.user.id:
+                    return await btn_i.response.send_message(
+                        "❌ Seul le proposant peut annuler.", ephemeral=True
+                    )
+                await _finalize_trade(btn_i, trade_id, accept=False, cancelled_by_a=True)
+
+        class _TradeLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=_TRADE_TIMEOUT_SEC)
+                lay = []
+                lay.append(v2_title("🤝  PROPOSITION D'ÉCHANGE"))
+                lay.append(v2_subtitle(
+                    f"{i.user.mention} propose à {cible.mention}  ·  expire dans 3 min"
+                ))
+                lay.append(v2_divider())
+                lay.append(v2_body("**╔═══ 📤  CE QUE TU REÇOIS  ═══╗**"))
+                lay.append(v2_body(f"{a_disp}{coins_line}"))
+                lay.append(v2_divider())
+                lay.append(v2_body("**╔═══ 📥  CE QUE TU DONNES  ═══╗**"))
+                lay.append(v2_body(b_disp))
+                lay.append(v2_divider())
+                lay.append(v2_body(
+                    "_⚠️ L'échange est définitif. "
+                    "Vérifie bien les stats des items avant d'accepter._"
+                ))
+                self.add_item(v2_container(*lay, color=0xF1C40F))
+                self.add_item(discord.ui.ActionRow(_TradeAccept(), _TradeRefuse(), _TradeCancel()))
+
+        # Envoyer dans le salon courant + mention de B
+        await i.response.send_message(
+            content=f"{cible.mention}  ·  une proposition d'échange t'attend !",
+            view=_TradeLayout(),
+            allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+        )
+
+        # Auto-cleanup après timeout
+        async def _trade_timeout():
+            try:
+                await asyncio.sleep(_TRADE_TIMEOUT_SEC + 5)
+                if trade_id in _active_trades and _active_trades[trade_id].get("status") == "pending":
+                    _active_trades[trade_id]["status"] = "expired"
+                    _trade_locks.pop(key_a, None)
+                    _trade_locks.pop(key_b, None)
+            except Exception:
+                pass
+        asyncio.create_task(_trade_timeout())
+
+    except Exception as ex:
+        print(f"[/trade] {ex}")
+        import traceback; traceback.print_exc()
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+async def _finalize_trade(btn_i: discord.Interaction, trade_id: str, accept: bool, cancelled_by_a: bool = False):
+    """Phase 108 : finalise un trade (accept / refuse / cancel)."""
+    try:
+        td = _active_trades.get(trade_id)
+        if not td or td.get("status") != "pending":
+            return await btn_i.response.send_message(
+                "⏳ Ce trade n'est plus actif.", ephemeral=True
+            )
+
+        guild_id = td["guild_id"]
+        a_id = td["a_id"]
+        b_id = td["b_id"]
+        a_slot = td["a_slot"]
+        b_slot = td["b_slot"]
+        coins_bonus = int(td.get("coins_bonus", 0) or 0)
+
+        # Libérer locks dans tous les cas
+        _trade_locks.pop((guild_id, a_id, a_slot), None)
+        _trade_locks.pop((guild_id, b_id, b_slot), None)
+
+        if not accept:
+            td["status"] = "refused" if not cancelled_by_a else "cancelled"
+            who = "refusé" if not cancelled_by_a else "annulé par le proposant"
+            try:
+                await btn_i.response.edit_message(
+                    content=f"❌ **Trade {who}.**",
+                    view=None,
+                )
+            except Exception:
+                try:
+                    await btn_i.followup.send(f"❌ Trade {who}.", ephemeral=True)
+                except Exception:
+                    pass
+            return
+
+        # ACCEPT : re-vérifier les inventaires + coins en atomique
+        inv_a = await _get_or_create_inventory(guild_id, a_id)
+        inv_b = await _get_or_create_inventory(guild_id, b_id)
+        item_a_now = inv_a.get(a_slot) or {}
+        item_b_now = inv_b.get(b_slot) or {}
+
+        # Snapshots — items doivent toujours correspondre (par name+emoji+rarity)
+        def _sig(itm: dict) -> tuple:
+            return (
+                itm.get("name", ""), itm.get("emoji", ""),
+                itm.get("rarity", ""), itm.get("atk", 0), itm.get("def", 0),
+                itm.get("crit", 0),
+            )
+
+        if _sig(item_a_now) != _sig(td["a_item_snap"]):
+            td["status"] = "tampered_a"
+            return await btn_i.response.edit_message(
+                content="❌ **Trade annulé** — l'équipement du proposant a changé entre-temps.",
+                view=None,
+            )
+        if _sig(item_b_now) != _sig(td["b_item_snap"]):
+            td["status"] = "tampered_b"
+            return await btn_i.response.edit_message(
+                content="❌ **Trade annulé** — ton équipement a changé entre-temps.",
+                view=None,
+            )
+
+        # Coins check
+        if coins_bonus > 0:
+            eco_a = await get_user_economy(guild_id, a_id)
+            hand_a = int(eco_a.get('coins', 0) or 0)
+            bank_a = int(eco_a.get('bank', 0) or 0)
+            if hand_a + bank_a < coins_bonus:
+                td["status"] = "insufficient_funds"
+                return await btn_i.response.edit_message(
+                    content=f"❌ **Trade annulé** — le proposant n'a plus assez de coins (besoin `{coins_bonus:,}` 🪙).",
+                    view=None,
+                )
+            # Déduire de A
+            from_hand = min(hand_a, coins_bonus)
+            from_bank = coins_bonus - from_hand
+            if from_hand > 0:
+                await add_coins(guild_id, a_id, -from_hand)
+            if from_bank > 0:
+                await update_user_economy(guild_id, a_id, bank=bank_a - from_bank)
+            # Ajouter à B
+            await add_coins(guild_id, b_id, coins_bonus)
+
+        # Swap items
+        inv_a[a_slot] = item_b_now  # A reçoit l'item de B
+        inv_b[b_slot] = item_a_now  # B reçoit l'item de A
+        await _save_inventory(guild_id, a_id, inv_a)
+        await _save_inventory(guild_id, b_id, inv_b)
+
+        td["status"] = "completed"
+
+        # Confirm message
+        a_disp = _format_trade_item(td["a_item_snap"], a_slot)
+        b_disp = _format_trade_item(td["b_item_snap"], b_slot)
+        coins_line = (
+            f"\n💰 **+ `{coins_bonus:,}` 🪙 transférés**" if coins_bonus > 0 else ""
+        )
+        try:
+            await btn_i.response.edit_message(
+                content=(
+                    f"✅ **TRADE COMPLÉTÉ !**\n"
+                    f"<@{a_id}> a donné : {a_disp}{coins_line}\n"
+                    f"<@{b_id}> a donné : {b_disp}\n"
+                    f"_Les inventaires ont été mis à jour._"
+                ),
+                view=None,
+            )
+        except Exception:
+            pass
+
+    except Exception as ex:
+        print(f"[_finalize_trade] {ex}")
+        import traceback; traceback.print_exc()
+        try:
+            await btn_i.followup.send(f"❌ Erreur trade : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
 @bot.tree.command(name="badges", description="🏅 Affiche tes badges et ton rang")
 async def badges_cmd(i: discord.Interaction):
     """Phase 31 + Phase 95 AMPLIFY : badges en LayoutView V2 magnifique."""
