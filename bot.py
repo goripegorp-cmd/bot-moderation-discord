@@ -58588,24 +58588,22 @@ class RobloxSubHubView(View):
 
 
 async def _open_roblox_panel(i: discord.Interaction):
-    if not await _safe_defer(i):
-        return
+    """Phase 71 : sub-hub Roblox en LayoutView V2."""
     try:
-        e = discord.Embed(
-            title="🎮 Roblox — Panel central",
-            description=(
-                "Tout ce qui touche à nos jeux Roblox :\n\n"
-                "🏁 **Speedrun** — soumets ton record, vois les leaderboards\n"
-                "🎮 **Matchmaking** — lance/rejoins une party pour jouer ensemble\n"
-                "💡 **Tip Studio** — un conseil dev random parmi 60+\n"
-                "📢 **Derniers updates** — les 5 derniers updates de jeu\n"
-            ),
-            color=0x00A2FF,
-        )
-        await _safe_followup(i, embed=e, view=RobloxSubHubView())
+        view = RobloxLayoutV2(i.user.id)
+        if not i.response.is_done():
+            await i.response.send_message(view=view, ephemeral=True)
+        else:
+            await i.followup.send(view=view, ephemeral=True)
     except Exception as ex:
-        print(f"[_open_roblox_panel] {ex}")
-        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+        print(f"[_open_roblox_panel V2] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            else:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
 
 
 # ─── SLASH COMMANDS OWNER — gestion Roblox ───────────────────────────────────
@@ -59554,25 +59552,22 @@ class CompetitionsSubHubView(View):
 
 
 async def _open_competitions_panel(i: discord.Interaction):
-    if not await _safe_defer(i):
-        return
+    """Phase 71 : sub-hub Compétitions en LayoutView V2."""
     try:
-        e = discord.Embed(
-            title="🏆 Compétitions",
-            description=(
-                "Tous les défis compétitifs du serveur en 1 endroit :\n\n"
-                "🎲 **Bingo mensuel** — ta carte 5×5 du mois, +200 🪙 par ligne "
-                "complétée, +1500 🪙 si carte pleine\n"
-                "🎰 **Prédictions** — parie sur ce qui va arriver, pool partagé "
-                "entre les gagnants\n"
-                "⚔️ **Faction War** — leaderboard de l'objectif compétitif de la saison\n\n"
-                "_Auto-tracking : tu n'as rien à valider, c'est calculé en temps réel._"
-            ),
-            color=0xE91E63,
-        )
-        await _safe_followup(i, embed=e, view=CompetitionsSubHubView())
+        view = CompetitionsLayoutV2(i.user.id)
+        if not i.response.is_done():
+            await i.response.send_message(view=view, ephemeral=True)
+        else:
+            await i.followup.send(view=view, ephemeral=True)
     except Exception as ex:
-        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+        print(f"[_open_competitions_panel V2] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            else:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
 
 
 # ─── SLASH COMMANDS OWNER PHASE 51 ───────────────────────────────────────────
@@ -60218,23 +60213,22 @@ class SocialSubHubView(View):
 
 
 async def _open_social_panel(i: discord.Interaction):
-    if not await _safe_defer(i):
-        return
+    """Phase 71 : sub-hub Social en LayoutView V2."""
     try:
-        e = discord.Embed(
-            title="💝 Social",
-            description=(
-                "Les liens entre membres :\n\n"
-                "💝 **Shoutouts** — remercier publiquement (50 🪙 au receveur)\n"
-                "🎓 **Mentorat** — ancien parraine nouveau, +bonus quotidien\n\n"
-                "_Les confessions peuvent recevoir des réponses publiques via "
-                "le bouton ajouté sous chaque confession._"
-            ),
-            color=0xFEE75C,
-        )
-        await _safe_followup(i, embed=e, view=SocialSubHubView())
+        view = SocialLayoutV2(i.user.id)
+        if not i.response.is_done():
+            await i.response.send_message(view=view, ephemeral=True)
+        else:
+            await i.followup.send(view=view, ephemeral=True)
     except Exception as ex:
-        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+        print(f"[_open_social_panel V2] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            else:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -64293,35 +64287,22 @@ class ToolsSubHubView(View):
 
 
 async def _open_tools_panel(i: discord.Interaction):
-    if not await _safe_defer(i):
-        return
+    """Phase 71 : ouvre le sub-hub Outils en LayoutView V2 (sections cliquables)."""
     try:
-        e = discord.Embed(
-            title="🧰 Outils & Récompenses",
-            description=(
-                "Tous tes outils perso en 1 clic — **sans commandes à mémoriser** :\n\n"
-                "## 💰 Économie\n"
-                "🏦 **Banque** — dépôts avec intérêts 1%/jour (max 30j)\n"
-                "💎 **Mes loots** — items uniques que tu possèdes\n\n"
-                "## ⚔️ Compétitif\n"
-                "⚔️ **PvP / Duel** — défier un membre, voir le ladder Elo\n"
-                "🎖️ **Ma classe RP** — Guerrier / Mage / Voleur / Soigneur / Rôdeur\n\n"
-                "## 💝 Social\n"
-                "💝 **Shoutout** — remercier publiquement un membre\n"
-                "🎓 **Mentor** — parrainer un nouveau (≥30j + level ≥5 requis)\n\n"
-                "## 📦 Originalités\n"
-                "📦 **Time Capsule** — message à toi-même dans 1mois / 6mois / 1an\n"
-                "🏛️ **Hall of Fame** — records permanents du serveur\n\n"
-                "## 📊 Stats\n"
-                "🎙️ **Top vocal** · 📅 **Météo serveur**"
-            ),
-            color=0x95A5A6,
-        )
-        e.set_footer(text="Phase 65 · Tout via boutons · Aucune commande nécessaire")
-        await _safe_followup(i, embed=e, view=ToolsSubHubView())
+        view = ToolsLayoutV2(i.user.id)
+        if not i.response.is_done():
+            await i.response.send_message(view=view, ephemeral=True)
+        else:
+            await i.followup.send(view=view, ephemeral=True)
     except Exception as ex:
-        print(f"[_open_tools_panel] {ex}")
-        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+        print(f"[_open_tools_panel V2] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            else:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
 
 
 # ─── 🏦 BANQUE (panel avec boutons Modal) ────────────────────────────────────
@@ -65445,6 +65426,367 @@ class HubLayoutV2(LayoutView):
                 await i.edit_original_response(content="✅ Hub fermé", view=None, embed=None)
             except Exception:
                 pass
+        except Exception:
+            pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 71 — SUB-HUBS COMPONENTS V2 : Outils / Social / Compétitions / Roblox
+#  Cohérence visuelle avec HubLayoutV2 Phase 70 — sections cliquables partout.
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class ToolsLayoutV2(LayoutView):
+    """Sub-hub Outils en V2 — 10 sections (Banque, Loots, PvP, Alliance, etc.)."""
+
+    def __init__(self, user_id: int):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.user_id
+
+    def _build(self):
+        items = []
+        items.append(v2_title("🧰 Outils & Récompenses"))
+        items.append(v2_subtitle("Toutes tes fonctionnalités perso en 1 clic — aucune commande"))
+        items.append(v2_divider())
+
+        # Économie
+        b = Button(label="Ouvrir", style=discord.ButtonStyle.success, custom_id="toolv2_bank")
+        b.callback = self._on_bank
+        items.append(_section_with_button(
+            "🏦 Banque", "Dépôts avec 1%/jour d'intérêts (max 30j)", b,
+        ))
+
+        b = Button(label="Voir", style=discord.ButtonStyle.primary, custom_id="toolv2_loots")
+        b.callback = self._on_loots
+        items.append(_section_with_button(
+            "💎 Mes loots uniques", "Items rares dont tu es propriétaire", b,
+        ))
+
+        b = Button(label="Ouvrir", style=discord.ButtonStyle.success, custom_id="toolv2_alli")
+        b.callback = self._on_alliance
+        items.append(_section_with_button(
+            "🤝 Mon Alliance", "Trésorerie · Membres · Gestion (chef)", b,
+        ))
+
+        items.append(v2_divider())
+
+        # Compétitif
+        b = Button(label="Ouvrir", style=discord.ButtonStyle.danger, custom_id="toolv2_pvp")
+        b.callback = self._on_pvp
+        items.append(_section_with_button(
+            "⚔️ PvP / Duel", "Ladder Elo + défier un membre", b,
+        ))
+
+        b = Button(label="Choisir", style=discord.ButtonStyle.primary, custom_id="toolv2_class")
+        b.callback = self._on_class
+        items.append(_section_with_button(
+            "🎖️ Ma classe RP", "Guerrier · Mage · Voleur · Soigneur · Rôdeur", b,
+        ))
+
+        items.append(v2_divider())
+
+        # Social
+        b = Button(label="Faire", style=discord.ButtonStyle.success, custom_id="toolv2_shout")
+        b.callback = self._on_shoutout
+        items.append(_section_with_button(
+            "💝 Faire un Shoutout", "Remercier publiquement un membre", b,
+        ))
+
+        b = Button(label="Inviter", style=discord.ButtonStyle.primary, custom_id="toolv2_mentor")
+        b.callback = self._on_mentor
+        items.append(_section_with_button(
+            "🎓 Inviter un apprenti", "Pour les anciens ≥30j level ≥5", b,
+        ))
+
+        items.append(v2_divider())
+
+        # Originalités
+        b = Button(label="Sceller", style=discord.ButtonStyle.secondary, custom_id="toolv2_caps")
+        b.callback = self._on_capsule
+        items.append(_section_with_button(
+            "📦 Time Capsule", "Message scellé jusqu'à dans 1mois/6mois/1an", b,
+        ))
+
+        b = Button(label="Lire", style=discord.ButtonStyle.secondary, custom_id="toolv2_hof")
+        b.callback = self._on_hof
+        items.append(_section_with_button(
+            "🏛️ Hall of Fame", "Records permanents du serveur", b,
+        ))
+
+        items.append(v2_divider())
+
+        # Stats
+        b = Button(label="Top 10", style=discord.ButtonStyle.secondary, custom_id="toolv2_voice")
+        b.callback = self._on_voice
+        items.append(_section_with_button(
+            "🎙️ Top vocal", "Classement hebdomadaire (heures en vocal)", b,
+        ))
+
+        b = Button(label="Voir", style=discord.ButtonStyle.secondary, custom_id="toolv2_weather")
+        b.callback = self._on_weather
+        items.append(_section_with_button(
+            "📅 Météo serveur", "Streak collectif + activité 7 derniers jours", b,
+        ))
+
+        items.append(v2_divider())
+        b_close = Button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger,
+                         custom_id="toolv2_close")
+        b_close.callback = self._on_close
+        items.append(discord.ui.ActionRow(b_close))
+
+        self.add_item(v2_container(*items, color=Palette.PRIMARY))
+
+    async def _on_bank(self, i):     await _open_bank_panel(i)
+    async def _on_loots(self, i):    await _open_loots_panel(i)
+    async def _on_alliance(self, i): await _open_alliance_panel(i)
+    async def _on_pvp(self, i):      await _open_pvp_panel(i)
+    async def _on_class(self, i):    await _open_class_panel(i)
+    async def _on_shoutout(self, i): await _open_shoutout_make_panel(i)
+    async def _on_mentor(self, i):   await _open_mentor_invite_panel(i)
+    async def _on_capsule(self, i):  await _open_capsule_panel(i)
+    async def _on_hof(self, i):      await _open_hof_panel(i)
+    async def _on_voice(self, i):    await _open_voice_top_panel(i)
+    async def _on_weather(self, i):  await _open_weather_panel(i)
+
+    async def _on_close(self, i):
+        try:
+            await i.response.edit_message(content="✅ Fermé.", view=None, embed=None, embeds=[], attachments=[])
+        except discord.InteractionResponded:
+            try:
+                await i.edit_original_response(content="✅ Fermé", view=None, embed=None)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+
+class SocialLayoutV2(LayoutView):
+    """Sub-hub Social en V2 — 2 sections."""
+
+    def __init__(self, user_id: int):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.user_id
+
+    def _build(self):
+        items = []
+        items.append(v2_title("💝 Social"))
+        items.append(v2_subtitle("Les liens entre membres"))
+        items.append(v2_divider())
+
+        b = Button(label="Stats", style=discord.ButtonStyle.success, custom_id="socv2_shout")
+        b.callback = self._on_shoutout_stats
+        items.append(_section_with_button(
+            "💝 Shoutouts", "Top hebdo des bienveillants · badge Cœur d'or à 10 reçus", b,
+        ))
+
+        b = Button(label="Statut", style=discord.ButtonStyle.primary, custom_id="socv2_mentor")
+        b.callback = self._on_mentor_status
+        items.append(_section_with_button(
+            "🎓 Mentorat", "Ancien parraine nouveau · +bonus quotidien réciproque", b,
+        ))
+
+        items.append(v2_divider())
+        items.append(v2_body(
+            "_Pour faire un shoutout ou inviter un apprenti via UserSelect : "
+            "passe par **🧰 Outils**._"
+        ))
+
+        items.append(v2_divider())
+        b_close = Button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger,
+                         custom_id="socv2_close")
+        b_close.callback = self._on_close
+        items.append(discord.ui.ActionRow(b_close))
+
+        self.add_item(v2_container(*items, color=Palette.SUCCESS if hasattr(Palette, 'SUCCESS') else 0xFEE75C))
+
+    async def _on_shoutout_stats(self, i): await _open_shoutout_panel(i)
+    async def _on_mentor_status(self, i):  await _open_mentor_panel(i)
+
+    async def _on_close(self, i):
+        try:
+            await i.response.edit_message(content="✅ Fermé.", view=None, embed=None, embeds=[], attachments=[])
+        except Exception:
+            pass
+
+
+class CompetitionsLayoutV2(LayoutView):
+    """Sub-hub Compétitions en V2 — 3 sections."""
+
+    def __init__(self, user_id: int):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.user_id
+
+    def _build(self):
+        items = []
+        items.append(v2_title("🏆 Compétitions"))
+        items.append(v2_subtitle("Tous les défis compétitifs en 1 endroit"))
+        items.append(v2_divider())
+
+        b = Button(label="Ma carte", style=discord.ButtonStyle.primary, custom_id="compv2_bingo")
+        b.callback = self._on_bingo
+        items.append(_section_with_button(
+            "🎲 Bingo mensuel",
+            "Carte 5×5 · +200 🪙/ligne · +1500 🪙 + badge si pleine", b,
+        ))
+
+        b = Button(label="Voir", style=discord.ButtonStyle.success, custom_id="compv2_pred")
+        b.callback = self._on_predictions
+        items.append(_section_with_button(
+            "🎰 Prédictions",
+            "Parier des coins, pool partagé entre les bonnes prédictions", b,
+        ))
+
+        b = Button(label="Leaderboard", style=discord.ButtonStyle.danger, custom_id="compv2_war")
+        b.callback = self._on_faction_war
+        items.append(_section_with_button(
+            "⚔️ Faction War",
+            "Leaderboard de l'objectif compétitif saisonnier", b,
+        ))
+
+        items.append(v2_divider())
+        items.append(v2_body(
+            "_Auto-tracking : tu n'as rien à valider, c'est calculé en temps réel._"
+        ))
+
+        items.append(v2_divider())
+        b_close = Button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger,
+                         custom_id="compv2_close")
+        b_close.callback = self._on_close
+        items.append(discord.ui.ActionRow(b_close))
+
+        self.add_item(v2_container(*items, color=Palette.DANGER if hasattr(Palette, 'DANGER') else 0xE91E63))
+
+    async def _on_bingo(self, i):       await _open_bingo_panel(i)
+    async def _on_predictions(self, i): await _open_predictions_panel(i)
+    async def _on_faction_war(self, i): await _open_faction_war_panel(i)
+
+    async def _on_close(self, i):
+        try:
+            await i.response.edit_message(content="✅ Fermé.", view=None, embed=None, embeds=[], attachments=[])
+        except Exception:
+            pass
+
+
+class RobloxLayoutV2(LayoutView):
+    """Sub-hub Roblox en V2 — 4 sections (Speedrun/Matchmaking/Tips/Updates)."""
+
+    def __init__(self, user_id: int):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.user_id
+
+    def _build(self):
+        items = []
+        items.append(v2_title("🎮 Roblox — Panel central"))
+        items.append(v2_subtitle("Tout ce qui touche aux jeux de la communauté"))
+        items.append(v2_divider())
+
+        b = Button(label="Soumettre", style=discord.ButtonStyle.primary, custom_id="rblxv2_speed")
+        b.callback = self._on_speedrun
+        items.append(_section_with_button(
+            "🏁 Speedrun",
+            "Leaderboards + soumettre ta vidéo proof · staff vérifie · +500 🪙", b,
+        ))
+
+        b = Button(label="Lancer", style=discord.ButtonStyle.success, custom_id="rblxv2_match")
+        b.callback = self._on_matchmaking
+        items.append(_section_with_button(
+            "🎮 Matchmaking",
+            "Lance/rejoins une party pour jouer ensemble · max 8 · expire 2h", b,
+        ))
+
+        b = Button(label="Tip", style=discord.ButtonStyle.secondary, custom_id="rblxv2_tip")
+        b.callback = self._on_tip
+        items.append(_section_with_button(
+            "💡 Tip Studio",
+            "Un conseil dev Roblox random parmi 60+", b,
+        ))
+
+        b = Button(label="Voir", style=discord.ButtonStyle.secondary, custom_id="rblxv2_updates")
+        b.callback = self._on_updates
+        items.append(_section_with_button(
+            "📢 Derniers updates",
+            "Les 5 derniers updates de jeu postés par l'owner", b,
+        ))
+
+        items.append(v2_divider())
+        b_close = Button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger,
+                         custom_id="rblxv2_close")
+        b_close.callback = self._on_close
+        items.append(discord.ui.ActionRow(b_close))
+
+        # Couleur Roblox (bleu)
+        self.add_item(v2_container(*items, color=0x00A2FF))
+
+    async def _on_speedrun(self, i):    await _open_speedrun_panel(i)
+    async def _on_matchmaking(self, i): await _open_matchmaking_panel(i)
+
+    async def _on_tip(self, i):
+        if not await _safe_defer(i):
+            return
+        try:
+            tip = rblx.pick_random_tip()
+            e = discord.Embed(
+                title=f"💡 {tip['title']}",
+                description=tip["content"],
+                color=0x00A2FF,
+            )
+            e.set_footer(text=f"Catégorie : {tip.get('category', '?')}  ·  Tip #{tip['id']}/{len(rblx.STUDIO_TIPS)}")
+            await _safe_followup(i, embed=e)
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_updates(self, i):
+        if not await _safe_defer(i):
+            return
+        try:
+            if not i.guild:
+                return await _safe_followup(i, content="❌ Serveur uniquement.")
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT id, game_id, title, posted_at FROM game_updates "
+                    "WHERE guild_id=? ORDER BY posted_at DESC LIMIT 5",
+                    (i.guild.id,),
+                ) as cur:
+                    rows = await cur.fetchall()
+            if not rows:
+                return await _safe_followup(
+                    i,
+                    content="_Aucun update encore posté. L'owner peut en poster via `/game_update`._",
+                )
+            lines = []
+            for r in rows:
+                _uid, gid, title, posted = r
+                lines.append(f"📢 **{title}** _(jeu : `{gid}`)_")
+            e = discord.Embed(
+                title="📢 Derniers updates de jeu",
+                description="\n".join(lines),
+                color=0xFFD700,
+            )
+            await _safe_followup(i, embed=e)
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_close(self, i):
+        try:
+            await i.response.edit_message(content="✅ Fermé.", view=None, embed=None, embeds=[], attachments=[])
         except Exception:
             pass
 
