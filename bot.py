@@ -12365,6 +12365,17 @@ async def _drop_mystery_box(guild) -> bool:
         # Générer la box
         box = events2026.random_mystery_box()
 
+        # Phase 94 AMPLIFY : Jackpot Mythique 1/100 → ×5 reward + rendu spécial
+        is_jackpot = random.random() < 0.01  # 1% chance
+        if is_jackpot:
+            box['coins'] = int(box.get('coins', 100)) * 5
+            box['emoji'] = '🌌'
+            box['name'] = 'Boîte MYTHIQUE du Cosmos'
+            box['color'] = 0xFFD700  # gold
+            # Upgrade gear si présent
+            if box.get('gear'):
+                box['gear']['rarity'] = 'mythique'
+
         # Phase 38 : si un raid est actif, dé-masquer temporairement ce salon
         unmasked = await _temporarily_unmask_channel(guild, ch.id)
 
@@ -12374,19 +12385,36 @@ async def _drop_mystery_box(guild) -> bool:
         box_emoji = box.get('emoji', '📦')
         box_name = box['name']
         box_color = box.get('color', 0x95A5A6)
+        # Phase 94 : rarity tier visible (basé sur coins range)
+        _box_coins_val = int(box.get('coins', 100))
+        if is_jackpot:
+            rarity_label = "🌌 **MYTHIQUE** — ×5 multiplier !"
+        elif _box_coins_val >= 500:
+            rarity_label = "⭐ **Légendaire**"
+        elif _box_coins_val >= 250:
+            rarity_label = "💜 **Épique**"
+        elif _box_coins_val >= 150:
+            rarity_label = "💎 **Rare**"
+        else:
+            rarity_label = "📦 Commune"
         try:
             class _MysteryLayout(LayoutView):
                 def __init__(self):
                     super().__init__(timeout=None)
+                    title_prefix = "🌌 ✨ MYTHIQUE ✨ " if is_jackpot else ""
                     items = [
-                        v2_title(f"{box_emoji} {box_name}"),
-                        v2_subtitle("Quelqu'un a laissé tomber un cadeau dans ce salon..."),
+                        v2_title(f"{title_prefix}{box_emoji} {box_name}"),
+                        v2_subtitle(
+                            "🎰 ÉVÉNEMENT 1 SUR 100 — Loot massif !" if is_jackpot
+                            else "Quelqu'un a laissé tomber un cadeau dans ce salon..."
+                        ),
                         v2_divider(),
+                        v2_body(f"**Rareté :** {rarity_label}"),
                     ]
                     # Phase 88 : button indépendant avec callback délégué
                     open_btn = Button(
-                        label="📦 Ouvrir la boîte !",
-                        style=discord.ButtonStyle.success,
+                        label="🌌 OUVRIR LA MYTHIQUE !" if is_jackpot else "📦 Ouvrir la boîte !",
+                        style=discord.ButtonStyle.success if is_jackpot else discord.ButtonStyle.success,
                         custom_id="mbox_open",
                     )
                     open_btn.callback = _v2_delegate_to(MysteryBoxView, '_on_open')
@@ -50979,9 +51007,37 @@ class FlashTreasureView(View):
             if rc == 0:
                 return await _safe_followup(i, content="✋ Trop tard !")
 
-            # Donner les coins
+            # Phase 94 AMPLIFY : Streak bonus pour grabs consécutifs same user
+            # +10% par grab consécutif, max +50% (5 streaks)
+            streak_bonus = 0
+            streak_count = 0
             try:
-                await add_coins(i.guild.id, i.user.id, int(reward))
+                async with get_db() as db:
+                    async with db.execute(
+                        'SELECT grabbed_by FROM flash_treasures '
+                        'WHERE guild_id=? AND grabbed_by IS NOT NULL AND ended=1 '
+                        'ORDER BY grabbed_at DESC LIMIT 5',
+                        (i.guild.id,),
+                    ) as cur:
+                        recent_grabs = await cur.fetchall()
+                # Compter combien des 5 derniers sont par le même user (avant celui-ci)
+                for (uid,) in recent_grabs[1:]:  # skip the current one (already inserted)
+                    if int(uid) == i.user.id:
+                        streak_count += 1
+                    else:
+                        break
+                if streak_count > 0:
+                    bonus_pct = min(50, streak_count * 10)
+                    streak_bonus = int(reward * bonus_pct / 100)
+            except Exception as ex:
+                print(f"[flash_treasure streak calc] {ex}")
+                streak_bonus = 0
+
+            total_reward = int(reward) + streak_bonus
+
+            # Donner les coins (base + streak bonus)
+            try:
+                await add_coins(i.guild.id, i.user.id, total_reward)
             except Exception:
                 pass
 
@@ -50997,10 +51053,17 @@ class FlashTreasureView(View):
                     disabled=True,
                 )
                 disabled_view.add_item(disabled_btn)
+                # Phase 94 : afficher streak si applicable
+                streak_str = ""
+                if streak_count > 0:
+                    streak_str = (
+                        f"\n🔥 **Streak ×{streak_count + 1}** "
+                        f"(+`{streak_bonus}` 🪙 bonus = `{total_reward}` 🪙 total)"
+                    )
                 new_e = discord.Embed(
                     description=(
                         f"💎 **{i.user.display_name}** a saisi le trésor !\n"
-                        f"💰 **+{reward}** 🪙 remportés.\n\n"
+                        f"💰 **+{total_reward}** 🪙 remportés.{streak_str}\n\n"
                         f"{_chrono_footer(LIFETIME_POST_GRAB)}"
                     ),
                     color=0x2ECC71,
@@ -51011,14 +51074,15 @@ class FlashTreasureView(View):
             except Exception:
                 pass
 
-            await _safe_followup(
-                i,
-                content=(
-                    f"⚡ **Tu as saisi le trésor !**\n"
-                    f"💰 **+{reward}** 🪙 ajoutés à ton solde."
-                ),
-            )
-            print(f"[FLASH TREASURE GRAB] guild={i.guild.id} user={i.user.id} reward={reward}")
+            # Phase 94 : message de succès avec streak
+            success_msg = f"⚡ **Tu as saisi le trésor !**\n💰 **+{total_reward}** 🪙 ajoutés à ton solde."
+            if streak_count > 0:
+                success_msg += (
+                    f"\n🔥 **Streak ×{streak_count + 1}** — bonus `+{streak_bonus}` 🪙 "
+                    f"({min(50, (streak_count + 1) * 10)}% du base)"
+                )
+            await _safe_followup(i, content=success_msg)
+            print(f"[FLASH TREASURE GRAB] guild={i.guild.id} user={i.user.id} reward={total_reward} (streak={streak_count})")
         except Exception as ex:
             print(f"[FlashTreasureView _on_grab] {ex}")
             await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
