@@ -227,6 +227,111 @@ def random_armor(rarity_bias: float = 1.0) -> dict:
     return dict(_weighted_choice(ARMOR))
 
 
+# ─── Phase 102 : Nouveaux slots équipement ───────────────────────────────
+# Helmet (casque), Boots (bottes), Accessory (anneau/collier), Trinket (objet magique)
+
+HELMETS = [
+    {"name": "Bandeau de toile",  "emoji": "🎀", "rarity": "commune",    "def": 2, "weight": 40},
+    {"name": "Capuche d'éclaireur","emoji": "🧢", "rarity": "commune",    "def": 3, "weight": 35},
+    {"name": "Casque de bronze",  "emoji": "⛑️", "rarity": "rare",       "def": 6, "weight": 18},
+    {"name": "Heaume de chevalier","emoji": "🪖", "rarity": "épique",     "def": 11, "weight": 6},
+    {"name": "Couronne ancienne", "emoji": "👑", "rarity": "légendaire", "def": 18, "atk": 3, "weight": 1},
+]
+
+BOOTS_LIST = [
+    {"name": "Sandales de toile",  "emoji": "🥿", "rarity": "commune",    "def": 1, "weight": 40},
+    {"name": "Bottes en cuir",     "emoji": "🥾", "rarity": "commune",    "def": 2, "weight": 35},
+    {"name": "Bottes renforcées",  "emoji": "👢", "rarity": "rare",       "def": 5, "weight": 18},
+    {"name": "Bottes de vitesse",  "emoji": "🏃", "rarity": "épique",     "def": 9, "crit": 5, "weight": 6},
+    {"name": "Bottes ailées",      "emoji": "🪽", "rarity": "légendaire", "def": 14, "crit": 10, "weight": 1},
+]
+
+ACCESSORIES = [
+    {"name": "Bracelet en cuir",     "emoji": "💍", "rarity": "commune",    "atk": 1, "weight": 40},
+    {"name": "Anneau d'argent",      "emoji": "💎", "rarity": "commune",    "atk": 2, "weight": 35},
+    {"name": "Collier de chasseur",  "emoji": "📿", "rarity": "rare",       "atk": 5, "weight": 18},
+    {"name": "Anneau enchanté",      "emoji": "💠", "rarity": "épique",     "atk": 9, "crit": 5, "weight": 6},
+    {"name": "Amulette divine",      "emoji": "🌟", "rarity": "légendaire", "atk": 15, "crit": 10, "weight": 1},
+]
+
+TRINKETS = [
+    {"name": "Pierre porte-bonheur", "emoji": "🪨", "rarity": "commune",    "crit": 2, "weight": 40},
+    {"name": "Fiole d'huile",        "emoji": "🍶", "rarity": "commune",    "crit": 3, "weight": 35},
+    {"name": "Plume mystique",       "emoji": "🪶", "rarity": "rare",       "crit": 7, "weight": 18},
+    {"name": "Cristal magique",      "emoji": "🔮", "rarity": "épique",     "crit": 12, "atk": 3, "weight": 6},
+    {"name": "Œil de dragon",        "emoji": "🐉", "rarity": "légendaire", "crit": 20, "atk": 5, "weight": 1},
+]
+
+
+def _bias_pool(pool: list, rarity_bias: float) -> list:
+    """Helper : applique un bias de rareté à un pool."""
+    if rarity_bias == 1.0:
+        return pool
+    out = []
+    for item in pool:
+        new_item = dict(item)
+        if item["rarity"] in ("épique", "légendaire"):
+            new_item["weight"] = max(1, int(item["weight"] * rarity_bias))
+        out.append(new_item)
+    return out
+
+
+def random_helmet(rarity_bias: float = 1.0) -> dict:
+    """Phase 102 : génère un helmet aléatoire."""
+    pool = _bias_pool(HELMETS, rarity_bias)
+    item = dict(_weighted_choice(pool))
+    item["slot"] = "helmet"
+    return item
+
+
+def random_boots(rarity_bias: float = 1.0) -> dict:
+    """Phase 102 : génère des boots aléatoires."""
+    pool = _bias_pool(BOOTS_LIST, rarity_bias)
+    item = dict(_weighted_choice(pool))
+    item["slot"] = "boots"
+    return item
+
+
+def random_accessory(rarity_bias: float = 1.0) -> dict:
+    """Phase 102 : génère un accessoire aléatoire."""
+    pool = _bias_pool(ACCESSORIES, rarity_bias)
+    item = dict(_weighted_choice(pool))
+    item["slot"] = "accessory"
+    return item
+
+
+def random_trinket(rarity_bias: float = 1.0) -> dict:
+    """Phase 102 : génère un trinket aléatoire."""
+    pool = _bias_pool(TRINKETS, rarity_bias)
+    item = dict(_weighted_choice(pool))
+    item["slot"] = "trinket"
+    return item
+
+
+def random_gear_any(rarity_bias: float = 1.0) -> dict:
+    """Phase 102 : tire un item dans n'importe quel slot (6 types).
+
+    Pondération équilibrée : weapon/armor 25% chacun, helmet/boots/accessory/trinket
+    12.5% chacun (les nouveaux slots droppent moins souvent que weapon/armor).
+    """
+    r = random.random()
+    if r < 0.25:
+        item = random_weapon(rarity_bias)
+        item["slot"] = "weapon"
+    elif r < 0.50:
+        item = random_armor(rarity_bias)
+        item["slot"] = "armor"
+    elif r < 0.625:
+        item = random_helmet(rarity_bias)
+    elif r < 0.75:
+        item = random_boots(rarity_bias)
+    elif r < 0.875:
+        item = random_accessory(rarity_bias)
+    else:
+        item = random_trinket(rarity_bias)
+    return item
+
+
 def random_boss(difficulty: int = 100) -> dict:
     """Boss aléatoire. `difficulty` = facteur 50-500 (100 = normal)."""
     template = dict(random.choice(BOSS_CATALOG))
@@ -550,17 +655,16 @@ TREASURE_CATALOG = [
 
 
 def random_treasure() -> dict:
-    """Génère un trésor aléatoire pondéré + sa loot."""
+    """Génère un trésor aléatoire pondéré + sa loot.
+
+    Phase 102 : drop possible dans les 6 slots via random_gear_any (bias 1.5
+    pour favoriser épique/légendaire).
+    """
     template = dict(_weighted_choice(TREASURE_CATALOG))
     template["coins"] = random.randint(template["coins_min"], template["coins_max"])
     template["gear"] = None
     if random.random() < template["gear_chance"]:
-        if random.random() < 0.5:
-            template["gear"] = random_weapon(rarity_bias=1.5)
-            template["gear"]["slot"] = "weapon"
-        else:
-            template["gear"] = random_armor(rarity_bias=1.5)
-            template["gear"]["slot"] = "armor"
+        template["gear"] = random_gear_any(rarity_bias=1.5)
     return template
 
 
@@ -827,17 +931,16 @@ MYSTERY_BOX_TYPES = [
 
 
 def random_mystery_box() -> dict:
-    """Génère une mystery box aléatoire pondérée."""
+    """Génère une mystery box aléatoire pondérée.
+
+    Phase 102 : drop possible dans les 6 slots (weapon/armor/helmet/boots/accessory/trinket)
+    via random_gear_any() qui pondère 25%/25%/12.5%/12.5%/12.5%/12.5%.
+    """
     box = dict(_weighted_choice(MYSTERY_BOX_TYPES))
     box["coins"] = random.randint(box["coins_min"], box["coins_max"])
     box["gear"] = None
     if random.random() < box["gear_chance"]:
-        if random.random() < 0.5:
-            box["gear"] = random_weapon(rarity_bias=1.2)
-            box["gear"]["slot"] = "weapon"
-        else:
-            box["gear"] = random_armor(rarity_bias=1.2)
-            box["gear"]["slot"] = "armor"
+        box["gear"] = random_gear_any(rarity_bias=1.2)
     return box
 
 
@@ -1189,8 +1292,12 @@ __all__ = [
     "HELP_TIPS", "PERSONAL_RIDDLES",
     "SPEED_REACT_EMOJIS", "MYSTERY_BOX_TYPES", "DAILY_SPARKS",
     "CLASSES", "VOICE_ZONES",
+    # Phase 102 : nouveaux slots équipement
+    "HELMETS", "BOOTS_LIST", "ACCESSORIES", "TRINKETS",
     # Generators
     "random_weapon", "random_armor", "random_boss", "random_treasure",
+    "random_helmet", "random_boots", "random_accessory", "random_trinket",
+    "random_gear_any",
     "generate_shop_rotation", "get_quiz_set", "random_personal_event",
     "random_mystery_box", "random_daily_spark",
     # Targeting

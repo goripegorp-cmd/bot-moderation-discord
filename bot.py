@@ -971,6 +971,21 @@ async def db_init():
             PRIMARY KEY (guild_id, user_id)
         )''')
 
+        # Phase 102 : nouveaux slots équipement (Helmet, Boots, Accessory, Trinket)
+        # ALTER TABLE idempotent — try/except si colonne déjà existante
+        for col_def in (
+            "helmet_json TEXT DEFAULT '{}'",
+            "boots_json TEXT DEFAULT '{}'",
+            "accessory_json TEXT DEFAULT '{}'",
+            "trinket_json TEXT DEFAULT '{}'",
+        ):
+            col_name = col_def.split()[0]
+            try:
+                await db.execute(f"ALTER TABLE player_inventory ADD COLUMN {col_def}")
+            except Exception:
+                # Colonne déjà existante (SQLite throws on duplicate)
+                pass
+
         # Phase 31 : badges débloqués par joueur
         await db.execute('''CREATE TABLE IF NOT EXISTS player_badges (
             guild_id INTEGER,
@@ -7322,40 +7337,95 @@ def _is_event_active_time(c: dict) -> bool:
 
 
 async def _get_or_create_inventory(guild_id: int, user_id: int) -> dict:
-    """Retourne l'inventaire d'un joueur (en crée un par défaut si absent)."""
+    """Retourne l'inventaire d'un joueur (en crée un par défaut si absent).
+
+    Phase 102 : ajout des slots Helmet/Boots/Accessory/Trinket.
+    Try/except sur la SELECT étendue pour fallback graceful si ALTER TABLE
+    n'a pas encore migré (premier boot après deploy).
+    """
     async with get_db() as db:
-        async with db.execute(
-            'SELECT hp, max_hp, weapon_json, armor_json, kills, total_damage FROM player_inventory WHERE guild_id=? AND user_id=?',
-            (guild_id, user_id),
-        ) as cur:
-            row = await cur.fetchone()
-        if row:
-            return {
-                'hp': row[0], 'max_hp': row[1],
-                'weapon': json.loads(row[2]) if row[2] else {},
-                'armor': json.loads(row[3]) if row[3] else {},
-                'kills': row[4], 'total_damage': row[5],
-            }
+        # Tenter SELECT avec les nouveaux slots ; fallback sur l'ancien schema
+        try:
+            async with db.execute(
+                'SELECT hp, max_hp, weapon_json, armor_json, kills, total_damage, '
+                'helmet_json, boots_json, accessory_json, trinket_json '
+                'FROM player_inventory WHERE guild_id=? AND user_id=?',
+                (guild_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+            if row:
+                return {
+                    'hp': row[0], 'max_hp': row[1],
+                    'weapon': json.loads(row[2]) if row[2] else {},
+                    'armor': json.loads(row[3]) if row[3] else {},
+                    'kills': row[4], 'total_damage': row[5],
+                    'helmet': json.loads(row[6]) if row[6] else {},
+                    'boots': json.loads(row[7]) if row[7] else {},
+                    'accessory': json.loads(row[8]) if row[8] else {},
+                    'trinket': json.loads(row[9]) if row[9] else {},
+                }
+        except Exception:
+            # Fallback : ALTER TABLE pas encore appliquée → utiliser ancien schema
+            async with db.execute(
+                'SELECT hp, max_hp, weapon_json, armor_json, kills, total_damage '
+                'FROM player_inventory WHERE guild_id=? AND user_id=?',
+                (guild_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+            if row:
+                return {
+                    'hp': row[0], 'max_hp': row[1],
+                    'weapon': json.loads(row[2]) if row[2] else {},
+                    'armor': json.loads(row[3]) if row[3] else {},
+                    'kills': row[4], 'total_damage': row[5],
+                    'helmet': {}, 'boots': {}, 'accessory': {}, 'trinket': {},
+                }
         # Création par défaut
         await db.execute(
             'INSERT INTO player_inventory(guild_id, user_id, hp, max_hp, weapon_json, armor_json) VALUES(?,?,?,?,?,?)',
             (guild_id, user_id, 100, 100, '{}', '{}'),
         )
         await db.commit()
-    return {'hp': 100, 'max_hp': 100, 'weapon': {}, 'armor': {}, 'kills': 0, 'total_damage': 0}
+    return {
+        'hp': 100, 'max_hp': 100, 'weapon': {}, 'armor': {},
+        'kills': 0, 'total_damage': 0,
+        'helmet': {}, 'boots': {}, 'accessory': {}, 'trinket': {},
+    }
 
 
 async def _save_inventory(guild_id: int, user_id: int, inv: dict):
+    """Phase 102 : persiste aussi les 4 nouveaux slots.
+    Try/except pour fallback si colonnes pas encore ajoutées."""
     async with get_db() as db:
-        await db.execute(
-            'UPDATE player_inventory SET hp=?, max_hp=?, weapon_json=?, armor_json=?, kills=?, total_damage=?, updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND user_id=?',
-            (
-                int(inv.get('hp', 100)), int(inv.get('max_hp', 100)),
-                json.dumps(inv.get('weapon', {})), json.dumps(inv.get('armor', {})),
-                int(inv.get('kills', 0)), int(inv.get('total_damage', 0)),
-                guild_id, user_id,
-            ),
-        )
+        try:
+            await db.execute(
+                'UPDATE player_inventory SET '
+                'hp=?, max_hp=?, weapon_json=?, armor_json=?, kills=?, total_damage=?, '
+                'helmet_json=?, boots_json=?, accessory_json=?, trinket_json=?, '
+                'updated_at=CURRENT_TIMESTAMP '
+                'WHERE guild_id=? AND user_id=?',
+                (
+                    int(inv.get('hp', 100)), int(inv.get('max_hp', 100)),
+                    json.dumps(inv.get('weapon', {})), json.dumps(inv.get('armor', {})),
+                    int(inv.get('kills', 0)), int(inv.get('total_damage', 0)),
+                    json.dumps(inv.get('helmet', {})), json.dumps(inv.get('boots', {})),
+                    json.dumps(inv.get('accessory', {})), json.dumps(inv.get('trinket', {})),
+                    guild_id, user_id,
+                ),
+            )
+        except Exception:
+            # Fallback : nouvelles colonnes pas dispo (ALTER TABLE pas appliquée)
+            await db.execute(
+                'UPDATE player_inventory SET hp=?, max_hp=?, weapon_json=?, armor_json=?, '
+                'kills=?, total_damage=?, updated_at=CURRENT_TIMESTAMP '
+                'WHERE guild_id=? AND user_id=?',
+                (
+                    int(inv.get('hp', 100)), int(inv.get('max_hp', 100)),
+                    json.dumps(inv.get('weapon', {})), json.dumps(inv.get('armor', {})),
+                    int(inv.get('kills', 0)), int(inv.get('total_damage', 0)),
+                    guild_id, user_id,
+                ),
+            )
         await db.commit()
 
 
