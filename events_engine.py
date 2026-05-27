@@ -1233,19 +1233,44 @@ def calc_damage_v2(
     voice_zone_id: Optional[str] = None,
     allies_in_same_voice: int = 0,
     bard_in_same_voice: bool = False,
+    inventory: Optional[dict] = None,
 ) -> tuple[int, bool, bool, dict]:
-    """Calcul de dégâts avec toutes les modifications Phase 37.
+    """Calcul de dégâts avec toutes les modifications Phase 37 + 105.
+
+    Phase 105 : `inventory` (full dict) permet d'inclure enchants de tous les
+    slots (weapon/armor/helmet/boots/accessory/trinket). Si non fourni,
+    fallback sur weapon seul (backward compat).
 
     Retourne (final_damage, is_crit, is_double_attack, details_dict).
-    details_dict contient le breakdown pour affichage.
     """
     base = random.randint(10, 25)
-    weapon_atk = (weapon or {}).get("atk", 0) if weapon else 0
+
+    # Phase 105 : calcul stats totales depuis l'inventaire complet
+    if inventory:
+        gear_atk = 0
+        gear_crit_bonus = 0  # en pourcentage (e.g., 10 = +10%)
+        for slot_key in ("weapon", "armor", "helmet", "boots", "accessory", "trinket"):
+            slot_item = inventory.get(slot_key) or {}
+            if not slot_item:
+                continue
+            s = gear_total_stats(slot_item)
+            gear_atk += s.get("atk", 0)
+            gear_crit_bonus += s.get("crit", 0)
+    else:
+        gear_atk = (weapon or {}).get("atk", 0) if weapon else 0
+        # Inclure enchant ATK si présent sur weapon
+        if weapon and weapon.get("enchant"):
+            gear_atk += int(weapon["enchant"].get("atk_bonus", 0) or 0)
+        gear_crit_bonus = 0
+        if weapon and weapon.get("enchant"):
+            gear_crit_bonus += int(weapon["enchant"].get("crit_bonus", 0) or 0)
 
     pc = get_class(player_class_id) or {}
     zone = get_voice_zone(voice_zone_id) or {}
 
-    crit_chance = pc.get("crit_chance", 0.10)
+    # Phase 105 : crit chance = base class + bonus gear (/100)
+    crit_chance = pc.get("crit_chance", 0.10) + (gear_crit_bonus / 100.0)
+    crit_chance = min(0.75, max(0.0, crit_chance))  # cap 75%
     dmg_mult_class = pc.get("dmg_mult", 1.0)
     dmg_mult_zone = zone.get("dmg_mult", 1.0)
 
@@ -1254,7 +1279,7 @@ def calc_damage_v2(
     if bard_in_same_voice:
         bard_bonus_mult += 0.15 * min(3, max(0, allies_in_same_voice))
 
-    raw = base + weapon_atk
+    raw = base + gear_atk
     after_class = raw * dmg_mult_class
     after_zone = after_class * dmg_mult_zone
     after_bard = after_zone * bard_bonus_mult
@@ -1266,14 +1291,14 @@ def calc_damage_v2(
     is_double = False
     if pc.get("double_attack_chance", 0) > 0 and random.random() < pc["double_attack_chance"]:
         is_double = True
-        # Deuxième coup ajouté
-        after_crit *= 1.85  # un peu moins que ×2 pour équilibrer
+        after_crit *= 1.85
 
     final = int(round(after_crit))
 
     details = {
         "base": base,
-        "weapon_atk": weapon_atk,
+        "weapon_atk": gear_atk,
+        "crit_chance": crit_chance,
         "class_mult": dmg_mult_class,
         "zone_mult": dmg_mult_zone,
         "bard_mult": bard_bonus_mult,

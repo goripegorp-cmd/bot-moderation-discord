@@ -986,6 +986,25 @@ async def db_init():
                 # Colonne déjà existante (SQLite throws on duplicate)
                 pass
 
+        # Phase 105 : Loot history — journal de chaque drop obtenu
+        await db.execute('''CREATE TABLE IF NOT EXISTS loot_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            user_id INTEGER,
+            item_name TEXT,
+            item_emoji TEXT,
+            item_slot TEXT,
+            rarity TEXT,
+            atk INTEGER DEFAULT 0,
+            def INTEGER DEFAULT 0,
+            crit INTEGER DEFAULT 0,
+            enchant_name TEXT,
+            source TEXT,
+            obtained_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_loot_history_user '
+                         'ON loot_history(guild_id, user_id, obtained_at)')
+
         # Phase 31 : badges débloqués par joueur
         await db.execute('''CREATE TABLE IF NOT EXISTS player_badges (
             guild_id INTEGER,
@@ -7393,6 +7412,41 @@ async def _get_or_create_inventory(guild_id: int, user_id: int) -> dict:
     }
 
 
+async def _log_loot(
+    guild_id: int, user_id: int, item: dict, source: str = "unknown",
+) -> None:
+    """Phase 105 : log un drop de loot dans loot_history.
+
+    `source` = nom de l'event qui a généré le drop (mystery_box, treasure_hunt,
+    boss_raid, world_boss, etc.).
+    """
+    if not item or not item.get('name'):
+        return
+    try:
+        enchant = item.get('enchant') or {}
+        async with get_db() as db:
+            await db.execute(
+                'INSERT INTO loot_history(guild_id, user_id, item_name, item_emoji, '
+                'item_slot, rarity, atk, def, crit, enchant_name, source) '
+                'VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+                (
+                    guild_id, user_id,
+                    str(item.get('name', '?'))[:100],
+                    str(item.get('emoji', ''))[:10],
+                    str(item.get('slot', ''))[:20],
+                    str(item.get('rarity', 'commune'))[:20],
+                    int(item.get('atk', 0) or 0),
+                    int(item.get('def', 0) or 0),
+                    int(item.get('crit', 0) or 0),
+                    str(enchant.get('name', '') if enchant else '')[:50],
+                    str(source)[:30],
+                ),
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[_log_loot {source}] {ex}")
+
+
 async def _save_inventory(guild_id: int, user_id: int, inv: dict):
     """Phase 102 : persiste aussi les 4 nouveaux slots.
     Try/except pour fallback si colonnes pas encore ajoutées."""
@@ -8617,12 +8671,14 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
         allies_count, _ = _count_voice_allies(i.guild, i.user.id)
         bard_in_voice = await _detect_bard_in_voice(i.guild, i.user.id)
 
+        # Phase 105 : passer inventory complet pour inclure enchants de tous slots
         damage, is_crit, is_double, dmg_details = events2026.calc_damage_v2(
             weapon=inv.get('weapon'),
             player_class_id=player_class_id,
             voice_zone_id=voice_zone_id,
             allies_in_same_voice=allies_count,
             bard_in_same_voice=bard_in_voice,
+            inventory=inv,
         )
 
         # ─── Phase 31 : Crit streaks ───
@@ -12367,16 +12423,29 @@ class MysteryBoxView(View):
                     slot = gear.get('slot', 'weapon')
                     cur_g = inv.get(slot, {}) or {}
                     rank_order = events2026.RARITY_ORDER
+                    # Phase 105 : log dans loot_history (peu importe si équipé ou pas)
+                    try:
+                        await _log_loot(i.guild.id, i.user.id, gear, source='mystery_box')
+                    except Exception:
+                        pass
                     if rank_order.get(gear.get('rarity', 'commune'), 0) >= rank_order.get(cur_g.get('rarity', 'commune'), 0):
-                        inv[slot] = {
+                        # Phase 105 : préserver enchant + crit + tous les champs étendus
+                        new_item = {
                             'name': gear['name'], 'rarity': gear['rarity'],
                             'emoji': gear.get('emoji', ''),
                             'atk': gear.get('atk', 0), 'def': gear.get('def', 0),
                         }
+                        if gear.get('crit'):
+                            new_item['crit'] = gear['crit']
+                        if gear.get('enchant'):
+                            new_item['enchant'] = gear['enchant']
+                        inv[slot] = new_item
                         await _save_inventory(i.guild.id, i.user.id, inv)
-                        reward_msg += f"\n+ {events2026.RARITY_EMOJIS.get(gear['rarity'], '')} **{gear['emoji']} {gear['name']}** ({gear['rarity']}) — équipé !"
+                        ench_str = f" ✨ {gear['enchant']['emoji']}" if gear.get('enchant') else ""
+                        reward_msg += f"\n+ {events2026.RARITY_EMOJIS.get(gear['rarity'], '')} **{gear['emoji']} {gear['name']}**{ench_str} ({gear['rarity']}) — équipé !"
                     else:
-                        reward_msg += f"\n+ {events2026.RARITY_EMOJIS.get(gear['rarity'], '')} **{gear['emoji']} {gear['name']}** ({gear['rarity']})"
+                        ench_str = f" ✨ {gear['enchant']['emoji']}" if gear.get('enchant') else ""
+                        reward_msg += f"\n+ {events2026.RARITY_EMOJIS.get(gear['rarity'], '')} **{gear['emoji']} {gear['name']}**{ench_str} ({gear['rarity']})"
             else:
                 # Les suivants : petite consolation (10% du loot)
                 coins = max(10, int(box.get('coins', 100) * 0.1))
@@ -39969,6 +40038,31 @@ async def badges_cmd(i: discord.Interaction):
         else:
             progress_str = "`░░░░░░░░░░░░░░░` 0/0"
 
+        # Phase 105 : Achievement tier basé sur % complétion
+        if badges_total > 0:
+            pct = badges_count / badges_total
+            if pct >= 0.90:
+                ach_tier = "💎 **Légende**  (90%+ débloqués)"
+                tier_color = 0xE91E63
+            elif pct >= 0.75:
+                ach_tier = "🌟 **Platine**  (75%+ débloqués)"
+                tier_color = 0xE5E4E2
+            elif pct >= 0.50:
+                ach_tier = "🥇 **Or**  (50%+ débloqués)"
+                tier_color = 0xFFD700
+            elif pct >= 0.25:
+                ach_tier = "🥈 **Argent**  (25%+ débloqués)"
+                tier_color = 0xC0C0C0
+            elif pct > 0:
+                ach_tier = "🥉 **Bronze**  (commencé)"
+                tier_color = 0xCD7F32
+            else:
+                ach_tier = "⚪ **Aucun rang**  _(débloque ton premier badge !)_"
+                tier_color = 0x95A5A6
+        else:
+            ach_tier = "⚪ **Aucun rang**"
+            tier_color = 0x95A5A6
+
         # Unlocked badges
         unlocked_set = set()
         unlocked_lines = []
@@ -39993,9 +40087,10 @@ async def badges_cmd(i: discord.Interaction):
                 items.append(v2_subtitle(f"Rang actuel : {rank_name}"))
                 items.append(v2_divider())
 
-                # Groupe 1 : Stats clés
+                # Groupe 1 : Stats clés + Tier
                 items.append(v2_body("**╔═══ 📊  STATS  ═══╗**"))
                 items.append(v2_body(
+                    f"🏆 **Tier global :** {ach_tier}\n"
                     f"💀 **Boss vaincus :** `{kills}`\n"
                     f"💥 **Dégâts à vie :** `{total_dmg:,}`\n"
                     f"🏅 **Badges :** {progress_str}"
