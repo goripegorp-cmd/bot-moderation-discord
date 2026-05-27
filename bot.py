@@ -53638,7 +53638,7 @@ async def _start_game_night(guild) -> bool:
             gn_id = cur.lastrowid
             await db.commit()
 
-        # Annonce dans le hub
+        # Annonce dans le hub (Phase 79 : LayoutView V2)
         try:
             hub_id = int(c.get('hub_channel', 0) or 0)
             hub_ch = guild.get_channel(hub_id) if hub_id else None
@@ -53649,39 +53649,66 @@ async def _start_game_night(guild) -> bool:
                     wakeup_line = await _build_wakeup_mention_line_smart(guild, 'game_night', max_count=3)
                 except Exception:
                     wakeup_line = ""
+                # Phase 79 : LayoutView V2 — sections clean + chrono inline
+                _gn_remaining = int((ends_at - datetime.now(timezone.utc)).total_seconds())
+                _gn_end_ts = int(ends_at.timestamp())
+                _vc_id, _tc_id = vc.id, tc.id
+
+                class _GnAnnounceLayout(LayoutView):
+                    def __init__(self):
+                        super().__init__(timeout=None)
+                        items = [
+                            v2_title("🎮 Game Night — Ça commence !"),
+                            v2_subtitle("Soirée mini-jeux + vocal du vendredi"),
+                            v2_divider(),
+                            v2_body(
+                                f"🎙️ **Vocal :** <#{_vc_id}>\n"
+                                f"💬 **Chat :** <#{_tc_id}>"
+                            ),
+                            v2_body(
+                                f"Le bot lancera des **mini-jeux** dans le chat toutes les ~12 min.\n"
+                                f"Rejoins le vocal pour en profiter à fond !"
+                            ),
+                            v2_divider(),
+                            v2_body(f"⏱️ Termine <t:{_gn_end_ts}:R>"),
+                        ]
+                        self.add_item(v2_container(*items, color=0xE91E63))
+
                 gn_announce_msg = await hub_ch.send(
                     content=wakeup_line if wakeup_line else None,
-                    embed=discord.Embed(
-                        title="🎮 GAME NIGHT — Ça commence !",
-                        description=(
-                            f"**Salons créés pour la soirée :**\n"
-                            f"🎙️ Vocal : <#{vc.id}>\n"
-                            f"💬 Chat : <#{tc.id}>\n\n"
-                            f"Le bot lancera des **mini-jeux** dans le chat toutes les 12 min.\n"
-                            f"Rejoins le vocal pour en profiter à fond !\n\n"
-                            f"{_chrono_footer(int((ends_at - datetime.now(timezone.utc)).total_seconds()), prefix='⏱️ Termine')}"
-                        ),
-                        color=0xE91E63,
-                    ),
+                    view=_GnAnnounceLayout(),
                     allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
                     delete_after=LIFETIME_ANNOUNCE,
                 )
                 await _register_for_cleanup(gn_announce_msg, LIFETIME_ANNOUNCE, 'game_night_announce')
         except Exception as ex:
-            print(f"[_start_game_night announce] {ex}")
+            print(f"[_start_game_night announce V2] {ex}")
 
-        # Welcome dans le chat texte
+        # Welcome dans le chat texte (Phase 79 : LayoutView V2)
         try:
+            _gn_end_ts_w = int(ends_at.timestamp())
+
+            class _GnWelcomeLayout(LayoutView):
+                def __init__(self):
+                    super().__init__(timeout=None)
+                    items = [
+                        v2_title("🎮 Game Night — Bienvenue !"),
+                        v2_subtitle("Mini-jeux dans ce chat toutes les ~12 min"),
+                        v2_divider(),
+                        v2_body(
+                            "Réagis aux boutons des mini-jeux pour jouer.\n"
+                            "Ou réponds dans le chat — chaque event est différent !"
+                        ),
+                        v2_divider(),
+                        v2_body(
+                            f"⏱️ Soirée jusqu'à <t:{_gn_end_ts_w}:t> — "
+                            f"les 2 salons seront supprimés ensuite."
+                        ),
+                    ]
+                    self.add_item(v2_container(*items, color=0xE91E63))
+
             await tc.send(
-                embed=discord.Embed(
-                    title="🎮 Game Night — Bienvenue !",
-                    description=(
-                        "Le bot va poster des mini-jeux dans ce chat toutes les ~12 minutes.\n"
-                        "Réagissez avec les boutons ou répondez avec vos avis !\n\n"
-                        f"_Soirée jusqu'à 23h30 — les 2 salons seront supprimés ensuite._"
-                    ),
-                    color=0xE91E63,
-                ),
+                view=_GnWelcomeLayout(),
                 allowed_mentions=discord.AllowedMentions.none(),
             )
         except Exception:
