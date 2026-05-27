@@ -209,7 +209,6 @@ ACHIEVEMENTS = [
     Achievement('confession_10',  'Coeur leger',         'Envoie 10 confessions',                      'hidden', '🤫', 'rare',     hidden=True, reward_coins=200),
     Achievement('worldboss_kill', 'Slayer mondial',      'Vaincs un World Boss',                       'hidden', '🌍', 'legendary',hidden=True, reward_coins=5000),
     Achievement('helper_10',      'Mentor',              'Aide 10 nouveaux a configurer leur class',   'hidden', '🤝', 'epic',     hidden=True, reward_coins=600),
-    Achievement('marriage',       'Marie',               'Forme un duo permanent avec un membre',      'hidden', '💍', 'rare',     hidden=True, reward_coins=300),
     Achievement('pet_max',        'Eleveur',             'Fais evoluer un pet jusqu\'a sa forme 5',    'hidden', '🐲', 'epic',     hidden=True, reward_coins=800),
     Achievement('reborn',         'Renaissance',         'Reset de saison (prestige)',                 'hidden', '🔄', 'legendary',hidden=True, reward_coins=3000),
 ]

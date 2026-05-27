@@ -474,7 +474,7 @@ async def should_nudge_inactive_channel(
     content = (
         f"💭 Ce salon dort depuis un moment.\n\n"
         f"{starter.text}\n\n"
-        f"-# Premier qui repond gagne mon amour"
+        f"-# Premier qui repond a tout mon respect"
     )
     return FeaturePayload(
         action_type=FeatureActionType.POST_MESSAGE,

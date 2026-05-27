@@ -38419,55 +38419,6 @@ async def bond_unfriend(i: discord.Interaction, membre: discord.Member):
         print(f"[bond_unfriend] {ex}")
 
 
-@bond_group.command(name="marry", description="💍 Demander en mariage (accepté si l'autre te le propose aussi)")
-@app_commands.describe(membre="Le membre à épouser")
-async def bond_marry(i: discord.Interaction, membre: discord.Member):
-    err = _validate_target(i, membre)
-    if err:
-        return await i.response.send_message(err, ephemeral=True)
-    try:
-        status, msg = await social_module.propose_marry(i.guild.id, i.user.id, membre.id)
-        if status == "accepted":
-            return await i.response.send_message(
-                f"💍 **{i.user.mention} et {membre.mention} sont désormais mariés !** "
-                f"_Félicitations !_ 🎉",
-                ephemeral=False,
-            )
-        if status == "pending":
-            return await i.response.send_message(
-                f"💌 Demande en mariage envoyée à {membre.mention}. "
-                f"À lui/elle de faire `/bond marry @{i.user.display_name}` pour accepter.",
-                ephemeral=True,
-            )
-        await i.response.send_message(f"ℹ️ {msg}", ephemeral=True)
-    except Exception as ex:
-        print(f"[bond_marry] {ex}")
-        try:
-            if not i.response.is_done():
-                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
-        except Exception:
-            pass
-
-
-@bond_group.command(name="divorce", description="💔 Mettre fin à ton mariage")
-async def bond_divorce(i: discord.Interaction):
-    if not i.guild:
-        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
-    try:
-        ex_id = await social_module.divorce(i.guild.id, i.user.id)
-        if ex_id:
-            await i.response.send_message(
-                f"💔 {i.user.mention} et <@{ex_id}> ne sont plus mariés.",
-                ephemeral=False,
-            )
-        else:
-            await i.response.send_message(
-                "ℹ️ Tu n'es pas marié(e).", ephemeral=True
-            )
-    except Exception as ex:
-        print(f"[bond_divorce] {ex}")
-
-
 @bond_group.command(name="rival", description="⚔️ Déclarer un rival (one-way, sans son consentement)")
 @app_commands.describe(membre="Le membre à déclarer rival")
 async def bond_rival(i: discord.Interaction, membre: discord.Member):

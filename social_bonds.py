@@ -1,41 +1,36 @@
 """
 social_bonds.py — Liens sociaux entre joueurs (Phase 133).
 
-Quatre types de bonds gérés au même endroit :
+Trois types de bonds gérés au même endroit :
 
 1. **FRIENDSHIP** — amitié mutuelle (2-step propose/accept)
    • Aucune limite, on peut avoir N amis
-   • Bonus de +20% coins sur les highfives entre amis
+   • Bonus boosté sur les highfives entre amis
    • Visible dans /bond list
 
-2. **MARRIAGE** — mariage symbolique (1 par user max, 2-step)
-   • +100 coins/jour offerts par le partenaire automatiquement
-   • Bague visible dans /profile (titre custom)
-
-3. **RIVALRY** — rival déclaré (1 par user, one-way claim)
+2. **RIVALRY** — rival déclaré (1 par user, one-way claim)
    • Sans consentement nécessaire
    • Bonus en duel contre son rival (+10% reward)
 
-4. **INTERACTIONS** — hug / highfive / wave / etc.
+3. **INTERACTIONS** — hug / highfive
    • Limites anti-spam (1× par receiver par jour)
-   • Hug = câlin gratuit (juste social)
-   • Highfive = +25 coins pour les deux si amis, +10 sinon
+   • Hug = câlin amical (+50 coins receiver)
+   • Highfive = +25 coins ×2 si amis, sinon +10 ×2
+
+ℹ️ Aucun système romantique / couple / mariage — règle serveur permanente.
 
 DB tables (créées à la volée) :
 - friendships         (guild_id, user_a, user_b, since)  # user_a < user_b
 - friend_requests     (guild_id, sender_id, receiver_id, created_at)
-- marriages           (guild_id, user_a, user_b, since)  # user_a < user_b
-- marriage_proposals  (guild_id, sender_id, receiver_id, created_at)
 - rivalries           (guild_id, user_id, rival_id, since)
 - social_interactions (id, guild_id, from_user, to_user, kind, day, created_at)
 
 API publique :
 - setup(get_db_fn, v2_helpers)
-- Helpers async : propose_friend / accept_or_decline / list_friends / unfriend
-                  propose_marry / divorce / get_spouse
-                  declare_rival / clear_rival / get_rival
+- Helpers async : propose_friend / list_friends / unfriend / is_friend
+                  declare_rival / clear_rival / get_rival / is_rival_pair
                   send_interaction / can_send_interaction
-- show_panel(interaction) — /bond list V2
+- build_panel(guild, member) — LayoutView V2
 
 Toutes les commandes /bond X sont définies côté bot.py via le group app_commands.
 """
@@ -51,7 +46,6 @@ import discord
 HUG_COIN_BONUS_RECEIVER = 50         # /bond hug → receiver gagne
 HIGHFIVE_BONUS_DEFAULT = 10          # /bond highfive → bonus standard
 HIGHFIVE_BONUS_FRIENDS = 25          # /bond highfive entre amis
-MARRIAGE_DAILY_GIFT = 100            # coins offerts par le conjoint (1×/jour)
 RIVAL_DUEL_BONUS_PCT = 0.10          # +10% reward en duel contre son rival
 
 
@@ -75,7 +69,11 @@ _tables_initialized = False
 
 
 async def _ensure_tables():
-    """Crée toutes les tables nécessaires si pas déjà fait."""
+    """Crée toutes les tables nécessaires si pas déjà fait.
+
+    Nettoie aussi les tables legacy de l'ancien système mariage (drop silencieux)
+    pour les serveurs où le bot a tourné une version précédente.
+    """
     global _tables_initialized
     if _tables_initialized or _get_db is None:
         return
@@ -89,20 +87,6 @@ async def _ensure_tables():
                 PRIMARY KEY (guild_id, user_a, user_b)
             )''')
             await db.execute('''CREATE TABLE IF NOT EXISTS friend_requests (
-                guild_id INTEGER,
-                sender_id INTEGER,
-                receiver_id INTEGER,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (guild_id, sender_id, receiver_id)
-            )''')
-            await db.execute('''CREATE TABLE IF NOT EXISTS marriages (
-                guild_id INTEGER,
-                user_a INTEGER,
-                user_b INTEGER,
-                since DATETIME DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (guild_id, user_a, user_b)
-            )''')
-            await db.execute('''CREATE TABLE IF NOT EXISTS marriage_proposals (
                 guild_id INTEGER,
                 sender_id INTEGER,
                 receiver_id INTEGER,
@@ -129,6 +113,12 @@ async def _ensure_tables():
                 "CREATE INDEX IF NOT EXISTS idx_social_interactions_day "
                 "ON social_interactions(guild_id, from_user, to_user, kind, day)"
             )
+            # Cleanup défensif des tables legacy interdites (mariage)
+            try:
+                await db.execute("DROP TABLE IF EXISTS marriages")
+                await db.execute("DROP TABLE IF EXISTS marriage_proposals")
+            except Exception:
+                pass
             await db.commit()
         _tables_initialized = True
     except Exception as ex:
@@ -265,113 +255,6 @@ async def list_friends(guild_id: int, user_id: int) -> list[int]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# MARRIAGE
-# ═══════════════════════════════════════════════════════════════════════════════
-
-async def get_spouse(guild_id: int, user_id: int) -> Optional[int]:
-    """Retourne l'id du conjoint, ou None."""
-    if _get_db is None:
-        return None
-    await _ensure_tables()
-    try:
-        async with _get_db() as db:
-            async with db.execute(
-                "SELECT user_a, user_b FROM marriages "
-                "WHERE guild_id=? AND (user_a=? OR user_b=?)",
-                (guild_id, user_id, user_id),
-            ) as cur:
-                row = await cur.fetchone()
-        if row:
-            a, b = int(row[0]), int(row[1])
-            return b if a == user_id else a
-    except Exception as ex:
-        print(f"[social_bonds get_spouse] {ex}")
-    return None
-
-
-async def propose_marry(
-    guild_id: int, sender_id: int, receiver_id: int
-) -> tuple[str, str]:
-    """Propose un mariage (ou accepte si demande inverse existe).
-
-    Returns: (status, message)
-        status in {"accepted", "pending", "already_married_self",
-                   "already_married_target", "self", "error"}
-    """
-    if sender_id == receiver_id:
-        return "self", "Tu ne peux pas t'épouser toi-même."
-    if _get_db is None:
-        return "error", "Module non initialisé."
-
-    await _ensure_tables()
-    a, b = _ordered(sender_id, receiver_id)
-
-    try:
-        # Vérifs : ni l'un ni l'autre marié
-        if (await get_spouse(guild_id, sender_id)) is not None:
-            return "already_married_self", "Tu es déjà marié(e). Divorce d'abord."
-        if (await get_spouse(guild_id, receiver_id)) is not None:
-            return "already_married_target", "Cette personne est déjà mariée."
-
-        async with _get_db() as db:
-            # Demande inverse existante ? → accepter
-            async with db.execute(
-                "SELECT 1 FROM marriage_proposals "
-                "WHERE guild_id=? AND sender_id=? AND receiver_id=?",
-                (guild_id, receiver_id, sender_id),
-            ) as cur:
-                inverse_pending = await cur.fetchone() is not None
-
-            if inverse_pending:
-                await db.execute(
-                    "INSERT OR IGNORE INTO marriages "
-                    "(guild_id, user_a, user_b) VALUES (?, ?, ?)",
-                    (guild_id, a, b),
-                )
-                # Nettoie toutes les proposals impliquant les 2
-                await db.execute(
-                    "DELETE FROM marriage_proposals WHERE guild_id=? AND "
-                    "(sender_id IN (?, ?) OR receiver_id IN (?, ?))",
-                    (guild_id, sender_id, receiver_id,
-                     sender_id, receiver_id),
-                )
-                await db.commit()
-                return "accepted", "Mariage célébré ! 💍"
-
-            await db.execute(
-                "INSERT OR IGNORE INTO marriage_proposals "
-                "(guild_id, sender_id, receiver_id) VALUES (?, ?, ?)",
-                (guild_id, sender_id, receiver_id),
-            )
-            await db.commit()
-            return "pending", "Demande en mariage envoyée."
-    except Exception as ex:
-        print(f"[social_bonds propose_marry] {ex}")
-        return "error", f"Erreur DB : `{ex}`"
-
-
-async def divorce(guild_id: int, user_id: int) -> Optional[int]:
-    """Divorce ; retourne l'ex-conjoint id (ou None si pas marié)."""
-    if _get_db is None:
-        return None
-    spouse = await get_spouse(guild_id, user_id)
-    if spouse is None:
-        return None
-    a, b = _ordered(user_id, spouse)
-    try:
-        async with _get_db() as db:
-            await db.execute(
-                "DELETE FROM marriages WHERE guild_id=? AND user_a=? AND user_b=?",
-                (guild_id, a, b),
-            )
-            await db.commit()
-        return spouse
-    except Exception as ex:
-        print(f"[social_bonds divorce] {ex}")
-        return None
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # RIVALRY (one-way)
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -445,7 +328,7 @@ def is_rival_pair(guild_id: int, a_rival: Optional[int], b_id: int) -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# INTERACTIONS (hug / highfive / wave)
+# INTERACTIONS (hug / highfive)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def can_send_interaction(
@@ -507,7 +390,6 @@ async def build_panel(guild: discord.Guild, member: discord.Member):
     v2_container = _v2_helpers['v2_container']
 
     friends = await list_friends(guild.id, member.id)
-    spouse = await get_spouse(guild.id, member.id)
     rival = await get_rival(guild.id, member.id)
 
     class _BondPanel(LayoutView):
@@ -518,20 +400,7 @@ async def build_panel(guild: discord.Guild, member: discord.Member):
             items.append(v2_subtitle("_Ton réseau social sur le serveur_"))
             items.append(v2_divider())
 
-            # Mariage
-            items.append(v2_body("**╔═══ 💍  MARIAGE  ═══╗**"))
-            if spouse:
-                items.append(v2_body(
-                    f"💑 Marié(e) à <@{spouse}>\n"
-                    f"_Vous touchez `{MARRIAGE_DAILY_GIFT}` coins l'un de l'autre chaque jour._"
-                ))
-            else:
-                items.append(v2_body(
-                    "_Pas (encore) marié(e). `/bond marry @user` pour proposer._"
-                ))
-
             # Amis
-            items.append(v2_divider())
             items.append(v2_body(
                 f"**╔═══ 👥  AMIS ({len(friends)})  ═══╗**"
             ))
@@ -567,7 +436,7 @@ async def build_panel(guild: discord.Guild, member: discord.Member):
                 "pour interagir (1× par jour par personne)._"
             ))
 
-            self.add_item(v2_container(*items, color=0xE91E63))
+            self.add_item(v2_container(*items, color=0x3498DB))
 
     return _BondPanel()
 
@@ -576,8 +445,6 @@ __all__ = [
     "setup",
     # Friend
     "propose_friend", "unfriend", "list_friends", "is_friend",
-    # Marriage
-    "propose_marry", "divorce", "get_spouse",
     # Rival
     "declare_rival", "clear_rival", "get_rival", "is_rival_pair",
     # Interactions
@@ -586,7 +453,6 @@ __all__ = [
     "HUG_COIN_BONUS_RECEIVER",
     "HIGHFIVE_BONUS_DEFAULT",
     "HIGHFIVE_BONUS_FRIENDS",
-    "MARRIAGE_DAILY_GIFT",
     "RIVAL_DUEL_BONUS_PCT",
     # Rendering
     "build_panel",
