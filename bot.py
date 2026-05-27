@@ -40799,7 +40799,8 @@ async def inventory_cmd(i: discord.Interaction):
                                 "❌ Ce panneau n'est pas pour toi.", ephemeral=True
                             )
                         try:
-                            await repair_cmd.callback(btn_i)
+                            # Phase 118 : repair_cmd décorateur retiré, appel direct comme helper
+                            await repair_cmd(btn_i)
                         except Exception as ex:
                             print(f"[phase117 inv repair btn] {ex}")
                             try:
@@ -40874,11 +40875,15 @@ async def inventory_cmd(i: discord.Interaction):
 
 
 # ─── Phase 107 : /repair (Repair/Durability) ─────────────────────────────
-@bot.tree.command(name="repair", description="🔧 Répare ton équipement endommagé (coûte des coins)")
+# Phase 118 HOTFIX : décorateur @bot.tree.command retiré (CommandLimitReached
+# 101 globally — admin_panels_v2 + setup_wizard non comptés précédemment).
+# Le helper repair_cmd reste accessible via le bouton "🔧 Réparer mon équipement"
+# du panel /inventory (ajouté Phase 117).
 async def repair_cmd(i: discord.Interaction):
     """Phase 107 : panel V2 montrant la durabilité + bouton réparer tout.
 
     Le coût est déduit de coins en main d'abord, puis de la banque.
+    Phase 118 : appelé uniquement via bouton inventory (decorator retiré).
     """
     try:
         inv = await _get_or_create_inventory(i.guild.id, i.user.id)
