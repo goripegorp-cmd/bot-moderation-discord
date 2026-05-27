@@ -37208,10 +37208,71 @@ async def _boot_cleanup_active_events():
                 pass
         counts["msgs_deleted"] = deleted
 
+    # ─── 6. Phase 115 — fallback : détecter les salons "STUCK MASKED" ───
+    # Pour chaque snapshot des 7 derniers jours, si le salon est ACTUELLEMENT
+    # masqué (view_channel=False sur @everyone) MAIS le snapshot dit qu'il
+    # devrait être ouvert → on restaure le snapshot.
+    # Idempotent : si le state actuel = snapshot, on skip silencieusement.
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT DISTINCT s.channel_id, s.had_overwrite, s.allow_value, s.deny_value, e.guild_id "
+                "FROM event_channel_snapshots s "
+                "JOIN events e ON e.id = s.event_id "
+                "WHERE datetime(e.started_at) > datetime('now', '-7 days')"
+            ) as cur:
+                rows = await cur.fetchall()
+
+        for ch_id, had, allow_v, deny_v, gid in rows:
+            try:
+                guild = bot.get_guild(int(gid))
+                if not guild:
+                    continue
+                ch = guild.get_channel(int(ch_id))
+                if not ch or isinstance(ch, discord.CategoryChannel):
+                    continue
+
+                # État actuel de l'overwrite @everyone sur ce salon
+                cur_ow = ch.overwrites_for(guild.default_role)
+                cur_view = cur_ow.view_channel  # True / False / None
+
+                # Seulement traiter si le salon est CURRENT MASKED
+                if cur_view is not False:
+                    continue
+
+                # Snapshot : que devrait-il être ?
+                if had:
+                    snap_perm = discord.PermissionOverwrite.from_pair(
+                        discord.Permissions(int(allow_v or 0)),
+                        discord.Permissions(int(deny_v or 0)),
+                    )
+                    snap_view = snap_perm.view_channel
+                    # Si le snapshot disait aussi view_channel=False → laisser stuck (c'était voulu)
+                    if snap_view is False:
+                        continue
+                    # Restaurer le snapshot
+                    await ch.set_permissions(
+                        guild.default_role, overwrite=snap_perm,
+                        reason="Phase 115 boot cleanup — unmask stuck channel",
+                    )
+                else:
+                    # Snapshot : pas d'overwrite à l'origine → on supprime celui qu'on a posé
+                    await ch.set_permissions(
+                        guild.default_role, overwrite=None,
+                        reason="Phase 115 boot cleanup — unmask stuck channel",
+                    )
+                counts["perms_restored"] += 1
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+            except Exception as ex:
+                print(f"[boot_cleanup Phase 115 stuck ch={ch_id}] {ex}")
+    except Exception as ex:
+        print(f"[boot_cleanup Phase 115 scan] {ex}")
+
     total_db = counts["events"] + counts["world_bosses"] + counts["flash_treasures"] + counts["voice_chaos"]
     if total_db > 0 or counts["msgs_deleted"] > 0 or counts["perms_restored"] > 0:
         print(
-            f"🧹 [boot_cleanup Phase 114] reset terminé : "
+            f"🧹 [boot_cleanup Phase 114+115] reset terminé : "
             f"{counts['events']} events · {counts['world_bosses']} world_bosses · "
             f"{counts['flash_treasures']} flash_treasures · "
             f"{counts['voice_chaos']} voice_chaos · "
@@ -37219,7 +37280,7 @@ async def _boot_cleanup_active_events():
             f"{counts['msgs_deleted']} messages orphelins supprimés"
         )
     else:
-        print("🧹 [boot_cleanup Phase 114] aucun event actif à nettoyer")
+        print("🧹 [boot_cleanup Phase 114+115] aucun event actif à nettoyer")
 
 
 @bot.event
