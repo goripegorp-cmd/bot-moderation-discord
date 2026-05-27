@@ -72,6 +72,8 @@ import events_engine as events2026
 # Phase 126 : modules backend infrastructure
 import db_backup as db_backup_module
 import health_server as health_server_module
+# Phase 127 : helpers V2 communs réutilisables
+import panels_helpers as panels_h
 import random
 try:
     from zoneinfo import ZoneInfo
