@@ -80,6 +80,8 @@ import raid_recap as raid_recap_module
 import mod_dashboard as mod_dashboard_module
 # Phase 131 : événements économiques cycliques + /gift
 import economy_events as econ_events_module
+# Phase 132 : paliers de progression (streak / veteran / prestige)
+import progression_milestones as prog_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -37851,6 +37853,18 @@ async def on_ready():
             econ_events_module.daily_announce_task.start()
     except Exception as ex:
         print(f"[on_ready econ_events setup] {ex}")
+    # Phase 132 : Paliers de progression (streak / vétéran / prestige)
+    try:
+        prog_module.setup(
+            get_db,
+            {
+                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
+                'v2_divider': v2_divider, 'v2_container': v2_container,
+                'LayoutView': LayoutView,
+            },
+        )
+    except Exception as ex:
+        print(f"[on_ready prog_module setup] {ex}")
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()
@@ -38250,6 +38264,31 @@ async def gift_cmd(i: discord.Interaction, membre: discord.Member, montant: int)
             pass
     except Exception as ex:
         print(f"[gift_cmd] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            else:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 132 : /milestones — paliers streak / vétéran / prestige
+# ═══════════════════════════════════════════════════════════════════════════════
+@bot.tree.command(
+    name="milestones",
+    description="🏅 Voir tes paliers (streak, ancienneté, prestige) + claim récompenses",
+)
+async def milestones_cmd(i: discord.Interaction):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        # add_coins est dispo en module : on le passe pour que les paliers
+        # nouvellement débloqués créditent automatiquement le compte.
+        await prog_module.show(i, add_coins_fn=add_coins)
+    except Exception as ex:
+        print(f"[milestones_cmd] {ex}")
         try:
             if not i.response.is_done():
                 await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
