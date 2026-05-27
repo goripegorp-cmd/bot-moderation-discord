@@ -36700,14 +36700,33 @@ async def _handle_goodbye(member):
         )
     except Exception as ex:
         text = f"😢 {member.display_name} a quitté. _(erreur template: {ex})_"
-    e = discord.Embed(description=text, color=0xED4245, timestamp=datetime.now(timezone.utc))
-    e.set_author(name=f"😢 Au revoir", icon_url=member.display_avatar.url)
-    e.set_thumbnail(url=member.display_avatar.url)
-    e.set_footer(text=f"{member.guild.name} · {member.guild.member_count} membres", icon_url=(member.guild.icon.url if member.guild.icon else None))
+    # Phase 83 : LayoutView V2 — section avec avatar en thumb accessory
+    _gb_text = text
+    _gb_avatar = member.display_avatar.url if member.display_avatar else None
+    _gb_guild_line = f"{member.guild.name} · {member.guild.member_count or 0} membres"
+
+    class _GoodbyeLayout(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=None)
+            items = [
+                v2_title("😢 Au revoir"),
+                v2_subtitle(_gb_guild_line),
+                v2_divider(),
+            ]
+            # Section avec avatar en thumb accessory
+            if _gb_avatar:
+                items.append(v2_section(
+                    v2_body(_gb_text),
+                    accessory=v2_thumb(_gb_avatar),
+                ))
+            else:
+                items.append(v2_body(_gb_text))
+            self.add_item(v2_container(*items, color=0xED4245))
+
     try:
-        await ch.send(embed=e)
+        await ch.send(view=_GoodbyeLayout())
     except Exception as ex:
-        print(f"[goodbye send] {ex}")
+        print(f"[goodbye send V2] {ex}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -48153,18 +48172,34 @@ async def confess_setup_cmd(i: discord.Interaction, channel: discord.TextChannel
         await db_set(i.guild.id, 'confessions_channel', channel.id)
         # Poster le bouton persistant dans le salon
         try:
-            embed = discord.Embed(
-                title="🤫 Confessions anonymes",
-                description=(
-                    "Envoie ton message anonymement ici.\n"
-                    "**Personne** ne peut tracer l'auteur — pas même les admins.\n\n"
-                    "Clique sur le bouton ci-dessous pour ouvrir le formulaire."
-                ),
-                color=0x9B59B6,
+            # Phase 83 : LayoutView V2 — section avec bouton accessory persistant.
+            # custom_id "confess_open" stable → bot.add_view(ConfessionSendView())
+            # au boot dispatche les clics.
+            confess_btn = Button(
+                label="🤫 Envoyer une confession anonyme",
+                style=discord.ButtonStyle.secondary,
+                custom_id="confess_open",
             )
-            await channel.send(embed=embed, view=ConfessionSendView())
+
+            class _ConfessionSetupLayout(LayoutView):
+                def __init__(self):
+                    super().__init__(timeout=None)
+                    items = [
+                        v2_title("🤫 Confessions anonymes"),
+                        v2_subtitle("Aucune trace — pas même les admins ne peuvent identifier l'auteur"),
+                        v2_divider(),
+                    ]
+                    items.append(_section_with_button(
+                        "📝 Envoyer une confession",
+                        "Clique pour ouvrir le formulaire d'envoi.\n"
+                        "Ton message arrivera dans ce salon, sans aucune mention de toi.",
+                        confess_btn,
+                    ))
+                    self.add_item(v2_container(*items, color=0x9B59B6))
+
+            await channel.send(view=_ConfessionSetupLayout())
         except Exception as ex:
-            print(f"[/confess_setup post button] {ex}")
+            print(f"[/confess_setup post button V2] {ex}")
         await i.followup.send(
             f"✅ Confessions configurées dans {channel.mention}.",
             ephemeral=True,
@@ -63149,21 +63184,41 @@ async def advent_setup_cmd(i: discord.Interaction):
         hub_ch = i.guild.get_channel(hub_id) if hub_id else None
         if not hub_ch:
             return await _safe_followup(i, content="❌ Hub non configuré.")
-        e = discord.Embed(
-            title="🎁 Calendrier de l'Avent",
-            description=(
-                "**Chaque jour, 1 cadeau à récupérer.**\n\n"
-                "_Le bouton ci-dessous te donne le cadeau du jour. "
-                "Plus le mois avance, plus la récompense grossit._\n\n"
-                "**Reward formula :** 50 + day×10 + bonus random\n"
-                "_Exemple jour 1 : ~60-90 🪙 · jour 25 : ~300-450 🪙_\n\n"
-                "_Tu peux claim 1× par jour. Le compteur reset au début de chaque mois._"
-            ),
-            color=0xE74C3C,
-        )
-        e.set_footer(text="Calendrier de l'Avent · Persistant")
+        # Phase 83 : LayoutView V2 — section avec bouton claim accessory.
+        # AdventClaimView est persistante (bot.add_view au boot ligne ~36489).
+        # Custom_id du bouton claim doit matcher → on récupère le bouton existant
+        # de la View comme accessory pour préserver la dispatch.
+        adv_view = AdventClaimView()
+        # AdventClaimView contient un bouton ; on l'extrait pour le mettre en accessory
+        claim_btn = adv_view.children[0] if adv_view.children else None
+
+        class _AdventLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=None)
+                items = [
+                    v2_title("🎁 Calendrier de l'Avent"),
+                    v2_subtitle("Chaque jour, 1 cadeau à récupérer"),
+                    v2_divider(),
+                    v2_body(
+                        "_Plus le mois avance, plus la récompense grossit._\n\n"
+                        "**Formule :** 50 + (jour × 10) + bonus aléatoire\n"
+                        "• Jour 1 : ~60-90 🪙\n"
+                        "• Jour 25 : ~300-450 🪙"
+                    ),
+                    v2_divider(),
+                ]
+                if claim_btn:
+                    items.append(_section_with_button(
+                        "🎁 Récupérer le cadeau du jour",
+                        "1× par jour — compteur reset au début de chaque mois.",
+                        claim_btn,
+                    ))
+                else:
+                    items.append(v2_body("_⚠️ Bouton claim indisponible — réessayer plus tard._"))
+                self.add_item(v2_container(*items, color=0xE74C3C))
+
         try:
-            msg = await hub_ch.send(embed=e, view=AdventClaimView())
+            msg = await hub_ch.send(view=_AdventLayout())
             try:
                 await msg.pin()
             except Exception:
