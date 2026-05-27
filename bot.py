@@ -40790,24 +40790,15 @@ async def inventory_cmd(i: discord.Interaction):
 
                 items.append(v2_divider())
 
-                # ─── FOOTER ───
-                items.append(v2_body(
-                    "_💡 `/event` pour l'événement en cours · "
-                    "`/badges` pour les hauts faits · "
-                    "`/loots` pour les items uniques_"
-                ))
-
-                self.add_item(v2_container(*items, color=0x5865F2))
-
-                # ─── Phase 117 : 3 actions rapides (repair/forge/swap) ───
-                # Réactive l'accès à craft_cmd et swap_cmd (slash retirés Phase 116
-                # pour CommandLimitReached) via des boutons sur ce panel.
+                # ─── Phase 121 : 3 actions rapides INTÉGRÉES (sections + accessory) ───
+                # Boutons à l'intérieur du container V2 (vs ActionRow externe Phase 117)
+                # pour une UX cohérente — pas de boutons "détachés" sous le panel.
                 _owner_id = i.user.id
 
                 class _RepairBtn(discord.ui.Button):
                     def __init__(self):
                         super().__init__(
-                            label="🔧 Réparer mon équipement",
+                            label="🔧 Réparer",
                             style=discord.ButtonStyle.success,
                             custom_id=f"phase117_inv_repair_{_owner_id}",
                         )
@@ -40818,7 +40809,6 @@ async def inventory_cmd(i: discord.Interaction):
                                 "❌ Ce panneau n'est pas pour toi.", ephemeral=True
                             )
                         try:
-                            # Phase 118 : repair_cmd décorateur retiré, appel direct comme helper
                             await repair_cmd(btn_i)
                         except Exception as ex:
                             print(f"[phase117 inv repair btn] {ex}")
@@ -40833,7 +40823,7 @@ async def inventory_cmd(i: discord.Interaction):
                 class _ForgeBtn(discord.ui.Button):
                     def __init__(self):
                         super().__init__(
-                            label="⚒️ Atelier de forge",
+                            label="⚒️ Forger",
                             style=discord.ButtonStyle.primary,
                             custom_id=f"phase117_inv_forge_{_owner_id}",
                         )
@@ -40844,7 +40834,6 @@ async def inventory_cmd(i: discord.Interaction):
                                 "❌ Ce panneau n'est pas pour toi.", ephemeral=True
                             )
                         try:
-                            # Phase 116 : craft_cmd n'est plus un slash, c'est un helper async direct
                             await craft_cmd(btn_i)
                         except Exception as ex:
                             print(f"[phase117 inv forge btn] {ex}")
@@ -40859,7 +40848,7 @@ async def inventory_cmd(i: discord.Interaction):
                 class _SwapBtn(discord.ui.Button):
                     def __init__(self):
                         super().__init__(
-                            label="🤝 Échanger avec un joueur",
+                            label="🤝 Échanger",
                             style=discord.ButtonStyle.secondary,
                             custom_id=f"phase117_inv_swap_{_owner_id}",
                         )
@@ -40881,7 +40870,33 @@ async def inventory_cmd(i: discord.Interaction):
                             except Exception:
                                 pass
 
-                self.add_item(discord.ui.ActionRow(_RepairBtn(), _ForgeBtn(), _SwapBtn()))
+                # ─── Section "ACTIONS RAPIDES" avec boutons en accessory ───
+                items.append(v2_body("**╔═══ ⚡  ACTIONS RAPIDES  ═══╗**"))
+                items.append(v2_section(
+                    v2_title("🔧  Réparation"),
+                    v2_subtitle("Restaure la durabilité de tout ton équipement"),
+                    accessory=_RepairBtn(),
+                ))
+                items.append(v2_section(
+                    v2_title("⚒️  Atelier de forge"),
+                    v2_subtitle("Affine un item pour le rendre plus rare (risque/reward)"),
+                    accessory=_ForgeBtn(),
+                ))
+                items.append(v2_section(
+                    v2_title("🤝  Échange P2P"),
+                    v2_subtitle("Propose un swap d'équipement à un autre joueur"),
+                    accessory=_SwapBtn(),
+                ))
+                items.append(v2_divider())
+
+                # ─── FOOTER ───
+                items.append(v2_body(
+                    "_💡 `/event` pour l'événement en cours · "
+                    "`/badges` pour les hauts faits · "
+                    "`/loots` pour les items uniques_"
+                ))
+
+                self.add_item(v2_container(*items, color=0x5865F2))
 
         await i.response.send_message(view=_InventoryLayout(), ephemeral=True)
     except Exception as ex:
@@ -41069,11 +41084,19 @@ async def repair_cmd(i: discord.Interaction):
                         f"il te restera `{(total_wealth - total_cost):,}` 🪙{note}"
                     ))
 
-                self.add_item(v2_container(*lay, color=0xE67E22 if any_broken else 0x3498DB))
-
-                # Bouton "Réparer tout"
+                # Phase 121 : bouton "Tout réparer" INTÉGRÉ dans le container
+                # (ex-ActionRow externe Phase 107) pour UX cohérente.
                 if _can_repair:
-                    self.add_item(discord.ui.ActionRow(_RepairAllBtn()))
+                    lay.append(v2_divider())
+                    lay.append(v2_section(
+                        v2_title("🔧  Réparer tout l'équipement"),
+                        v2_subtitle(
+                            f"Coût total : `{total_cost:,}` 🪙 (déduit main → banque)"
+                        ),
+                        accessory=_RepairAllBtn(),
+                    ))
+
+                self.add_item(v2_container(*lay, color=0xE67E22 if any_broken else 0x3498DB))
 
         await i.response.send_message(view=_RepairLayout(), ephemeral=True)
     except Exception as ex:
@@ -41484,8 +41507,24 @@ async def swap_cmd(
                     "_⚠️ L'échange est définitif. "
                     "Vérifie bien les stats des items avant d'accepter._"
                 ))
+                # Phase 121 : boutons INTÉGRÉS via sections accessory
+                lay.append(v2_divider())
+                lay.append(v2_section(
+                    v2_title("✅  Accepter l'échange"),
+                    v2_subtitle("Confirme la transaction (atomique, anti-tamper)"),
+                    accessory=_TradeAccept(),
+                ))
+                lay.append(v2_section(
+                    v2_title("❌  Refuser"),
+                    v2_subtitle("Ferme la proposition sans changement"),
+                    accessory=_TradeRefuse(),
+                ))
+                lay.append(v2_section(
+                    v2_title("🚫  Annuler ma proposition"),
+                    v2_subtitle("Seul le proposant peut annuler"),
+                    accessory=_TradeCancel(),
+                ))
                 self.add_item(v2_container(*lay, color=0xF1C40F))
-                self.add_item(discord.ui.ActionRow(_TradeAccept(), _TradeRefuse(), _TradeCancel()))
 
         # Envoyer dans le salon courant + mention de B
         await i.response.send_message(
@@ -41905,21 +41944,23 @@ async def _auction_browse(i: discord.Interaction):
                 f"{len(rows)} enchère(s) active(s)  ·  commission `{AUCTION_COMMISSION_PCT}%`"
             ))
             lay.append(v2_divider())
+
+            # Phase 121 : chaque enchère devient une section avec bid en accessory
             for ah_id, item, current_bid, line in top4:
-                lay.append(v2_body(line))
-                lay.append(v2_divider())
+                bid_label = f"+10% · {int(current_bid * 1.10):,} 🪙"
+                lay.append(v2_section(
+                    v2_title(f"#{ah_id}  ·  {item.get('emoji', '⚪')} {item.get('name', '?')}"),
+                    v2_subtitle(
+                        f"💰 `{current_bid:,}` 🪙 actuellement — clique pour bid"
+                    ),
+                    accessory=_BidBtn(ah_id, bid_label, 10),
+                ))
             if rest:
+                lay.append(v2_divider())
                 lay.append(v2_body(
-                    f"_+ {len(rest)} autre(s) enchère(s) — affine ta vue plus tard, "
-                    f"ou ferme et relance la commande._"
+                    f"_+ {len(rest)} autre(s) enchère(s) — ferme et relance pour voir les suivantes._"
                 ))
             self.add_item(v2_container(*lay, color=0x9B59B6))
-
-            # Bouton bid +10% pour chacune des top4
-            for ah_id, item, current_bid, line in top4:
-                bid_label = f"#{ah_id} · +10% ({int(current_bid * 1.10):,} 🪙)"
-                # On limite à 1 bouton par enchère pour respecter Discord (max 5/row, 5 row max)
-                self.add_item(discord.ui.ActionRow(_BidBtn(ah_id, bid_label, 10)))
 
     await i.response.send_message(view=_BrowseLayout(), ephemeral=True)
 
@@ -42150,6 +42191,7 @@ async def _auction_create(i: discord.Interaction):
             lay.append(v2_title("📤  METTRE EN VENTE"))
             lay.append(v2_subtitle("Choisis le slot de l'item à vendre :"))
             lay.append(v2_divider())
+            # Phase 121 : chaque slot = section avec bouton accessory (UX claire)
             for slot_key, slot_label, item in available_slots:
                 rarity = (item.get("rarity") or "commune").lower()
                 rarity_emoji = {
@@ -42167,9 +42209,10 @@ async def _auction_create(i: discord.Interaction):
                     stats_str = " · ".join(bits) if bits else "—"
                 except Exception:
                     stats_str = "—"
-                lay.append(v2_body(
-                    f"**{slot_label}** {rarity_emoji} {emoji} **{name}** _{rarity}_\n"
-                    f"`{stats_str}`"
+                lay.append(v2_section(
+                    v2_title(f"{slot_label}  {rarity_emoji} {emoji} {name}"),
+                    v2_subtitle(f"_{rarity}_ · `{stats_str}`"),
+                    accessory=_SlotPickBtn(slot_key, slot_label, item),
                 ))
             lay.append(v2_divider())
             lay.append(v2_body(
@@ -42177,11 +42220,6 @@ async def _auction_create(i: discord.Interaction):
                 f"Commission `{AUCTION_COMMISSION_PCT}%` prélevée à la clôture._"
             ))
             self.add_item(v2_container(*lay, color=0x2ECC71))
-            # Boutons (max 5 par row, on en a 6 max → 2 rows possibles)
-            buttons = [_SlotPickBtn(sk, sl, it) for (sk, sl, it) in available_slots]
-            # Découpe en chunks de 5
-            for k in range(0, len(buttons), 5):
-                self.add_item(discord.ui.ActionRow(*buttons[k:k + 5]))
 
     await i.response.send_message(view=_CreateLayout(), ephemeral=True)
 
@@ -42408,6 +42446,7 @@ async def craft_cmd(i: discord.Interaction):
                 ))
                 lay.append(v2_divider())
                 lay.append(v2_body("**╔═══ 🔨  ITEMS ÉLIGIBLES  ═══╗**"))
+                # Phase 121 : chaque item = section avec bouton "Affiner" accessory
                 for slot_key, slot_label, item, recipe in eligible:
                     emoji = item.get("emoji", "⚪")
                     name = item.get("name", "?")
@@ -42421,23 +42460,15 @@ async def craft_cmd(i: discord.Interaction):
                     }
                     src_badge = rarity_emojis.get(rarity, "⚪")
                     tgt_badge = rarity_emojis.get(target, "✨")
-                    lay.append(v2_body(
-                        f"**{slot_label}**  {src_badge} {emoji} **{name}** _{rarity}_\n"
-                        f"  → cible : {tgt_badge} _{target}_  ·  succès : `{success}%`  ·  coût : `{cost:,}` 🪙"
+                    has_funds = total_wealth >= int(cost)
+                    lay.append(v2_section(
+                        v2_title(f"{slot_label}  {src_badge} {emoji} {name}"),
+                        v2_subtitle(
+                            f"→ {tgt_badge} _{target}_ · succès `{success}%` · coût `{cost:,}` 🪙"
+                        ),
+                        accessory=_ConfirmRefineBtn(slot_key, item, recipe, has_funds),
                     ))
-                lay.append(v2_divider())
-                lay.append(v2_body(
-                    "_Clique sur le bouton de l'item que tu veux raffiner._"
-                ))
                 self.add_item(v2_container(*lay, color=0xE67E22))
-
-                # Boutons (max 5 par row, 6 max donc 2 rows possibles)
-                buttons = []
-                for slot_key, slot_label, item, recipe in eligible:
-                    has_funds = total_wealth >= int(recipe["cost"])
-                    buttons.append(_ConfirmRefineBtn(slot_key, item, recipe, has_funds))
-                for k in range(0, len(buttons), 5):
-                    self.add_item(discord.ui.ActionRow(*buttons[k:k + 5]))
 
         await i.response.send_message(view=_CraftLayout(), ephemeral=True)
 
