@@ -48858,37 +48858,30 @@ class EngagementHubView(View):
 
 @bot.tree.command(
     name="hub",
-    description="🎮 Ouvrir ton hub : quêtes, wheel, pet, hauts faits, confession (tout en 1 clic)",
+    description="🎮 Ouvrir ton hub : tout en 1 clic — design moderne",
 )
 async def hub_cmd(i: discord.Interaction):
-    """Ouvre le panneau hub en éphémère pour le membre."""
-    if not await _safe_defer(i):
-        return
+    """Ouvre le panneau hub V2 en éphémère pour le membre.
+
+    Phase 70 : LayoutView Components V2 — sections cliquables au lieu de 13
+    boutons en bas. Plus moderne et plus lisible sur mobile.
+    Le panneau persistant épinglé via /hub_setup reste en EngagementHubView
+    (View classique pour survie reboot via custom_ids stables).
+    """
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
     try:
-        if not i.guild:
-            return await _safe_followup(i, content="❌ Serveur uniquement.")
-        e = discord.Embed(
-            title="🎮 Ton Hub d'engagement",
-            description=(
-                "Tout est accessible en **1 clic**. Pas besoin de commande.\n\n"
-                "📜 **Quêtes du jour** — 3 défis quotidiens + streak\n"
-                "🎰 **Daily Wheel** — spin gratuit chaque jour\n"
-                "🏆 **Hauts faits** — débloque 50+ achievements\n"
-                "🐾 **Compagnon** — adopte et fais évoluer ton pet\n"
-                "🤫 **Confession** — message anonyme dans le salon dédié\n"
-                "👤 **Mon profil** — level, prestige, saison, factions, stats\n"
-                "🔔 **Mes notifications** — choisis quels events te pingent\n"
-                "📖 **Histoire du serveur** — chapitre actuel + récit qui évolue\n"
-                "🎯 **Mission en cours** — aventure collective 5 étapes du mois\n\n"
-                "_Le staff peut épingler ce panneau dans un salon avec `/hub_setup`._"
-            ),
-            color=0x5865F2,
-        )
-        e.set_footer(text="Hub d'engagement · Phase 49")
-        await _safe_followup(i, embed=e, view=EngagementHubView())
+        view = HubLayoutV2(i.user.id)
+        await i.response.send_message(view=view, ephemeral=True)
     except Exception as ex:
-        print(f"[/hub] {ex}")
-        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+        print(f"[/hub V2] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            else:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
 
 
 @bot.tree.command(
@@ -65252,6 +65245,208 @@ async def _open_weather_panel(i: discord.Interaction):
         await _safe_followup(i, embed=e)
     except Exception as ex:
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 70 — HUB COMPONENTS V2 : LayoutView avec sections + boutons accessory
+#  Le hub d'engagement et ses sub-hubs passent au design moderne Discord 2024.
+#  Sections cliquables (bouton à droite du texte) au lieu de 13 boutons en bas.
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _section_with_button(title_str: str, subtitle_str: str, button: Button):
+    """Helper : crée une section V2 avec un bouton accessory à droite."""
+    return v2_section(
+        v2_title(title_str),
+        v2_subtitle(subtitle_str),
+        accessory=button,
+    )
+
+
+class HubLayoutV2(LayoutView):
+    """Hub principal en Components V2 — sections + boutons accessory.
+
+    Affiché sur /hub (ephemeral, par user). Le panneau épinglé via
+    /hub_setup reste en EngagementHubView (View persistante pour survie reboot).
+    """
+
+    def __init__(self, user_id: int):
+        super().__init__(timeout=600)
+        self.user_id = user_id
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.user_id
+
+    def _build(self):
+        items = []
+        items.append(v2_title("🎮 Ton Hub d'engagement"))
+        items.append(v2_subtitle("Tout en 1 clic — aucune commande à mémoriser"))
+        items.append(v2_divider())
+
+        # Section 1 : Quêtes
+        b_quests = Button(label="Ouvrir", style=discord.ButtonStyle.primary,
+                          custom_id="hubv2_quests")
+        b_quests.callback = self._on_quests
+        items.append(_section_with_button(
+            "📜 Mes quêtes du jour", "3 défis quotidiens + streak", b_quests,
+        ))
+
+        # Section 2 : Daily Wheel
+        b_wheel = Button(label="Spin", style=discord.ButtonStyle.success,
+                         custom_id="hubv2_wheel")
+        b_wheel.callback = self._on_wheel
+        items.append(_section_with_button(
+            "🎰 Daily Wheel", "1 spin gratuit/jour — jackpot mythique possible", b_wheel,
+        ))
+
+        # Section 3 : Hauts faits
+        b_ach = Button(label="Voir", style=discord.ButtonStyle.secondary,
+                       custom_id="hubv2_ach")
+        b_ach.callback = self._on_achievements
+        items.append(_section_with_button(
+            "🏆 Mes hauts faits", "50+ achievements à débloquer", b_ach,
+        ))
+
+        # Section 4 : Compagnon
+        b_pet = Button(label="Voir", style=discord.ButtonStyle.secondary,
+                       custom_id="hubv2_pet")
+        b_pet.callback = self._on_pet
+        items.append(_section_with_button(
+            "🐾 Mon compagnon", "Adopter et faire évoluer ton pet", b_pet,
+        ))
+
+        # Section 5 : Confession anonyme
+        b_conf = Button(label="Écrire", style=discord.ButtonStyle.secondary,
+                        custom_id="hubv2_conf")
+        b_conf.callback = self._on_confess
+        items.append(_section_with_button(
+            "🤫 Confession anonyme", "Message 100% anonyme dans le salon dédié", b_conf,
+        ))
+
+        items.append(v2_divider())
+
+        # Section 6 : Profil
+        b_prof = Button(label="Ouvrir", style=discord.ButtonStyle.primary,
+                        custom_id="hubv2_prof")
+        b_prof.callback = self._on_profile
+        items.append(_section_with_button(
+            "👤 Mon profil", "Level, prestige, saison, factions, stats", b_prof,
+        ))
+
+        # Section 7 : Notifications
+        b_notif = Button(label="Configurer", style=discord.ButtonStyle.secondary,
+                         custom_id="hubv2_notif")
+        b_notif.callback = self._on_notifs
+        items.append(_section_with_button(
+            "🔔 Mes notifications", "Choisis quels events te pingent", b_notif,
+        ))
+
+        # Section 8 : Histoire du serveur
+        b_lore = Button(label="Lire", style=discord.ButtonStyle.secondary,
+                        custom_id="hubv2_lore")
+        b_lore.callback = self._on_lore
+        items.append(_section_with_button(
+            "📖 Histoire du serveur", "Chapitre du lore qui évolue après chaque World Boss", b_lore,
+        ))
+
+        # Section 9 : Mission en cours
+        b_miss = Button(label="Voir", style=discord.ButtonStyle.success,
+                        custom_id="hubv2_miss")
+        b_miss.callback = self._on_mission
+        items.append(_section_with_button(
+            "🎯 Mission en cours", "Quête collective mensuelle en 5 étapes", b_miss,
+        ))
+
+        items.append(v2_divider())
+
+        # Section 10 : Roblox
+        b_rblx = Button(label="Ouvrir", style=discord.ButtonStyle.primary,
+                        custom_id="hubv2_roblox")
+        b_rblx.callback = self._on_roblox
+        items.append(_section_with_button(
+            "🎮 Roblox", "Speedrun · Matchmaking · Studio Tips · Updates", b_rblx,
+        ))
+
+        # Section 11 : Compétitions
+        b_comp = Button(label="Ouvrir", style=discord.ButtonStyle.danger,
+                        custom_id="hubv2_comp")
+        b_comp.callback = self._on_competitions
+        items.append(_section_with_button(
+            "🏆 Compétitions", "Bingo mensuel · Prédictions · Faction Wars", b_comp,
+        ))
+
+        # Section 12 : Social
+        b_soc = Button(label="Ouvrir", style=discord.ButtonStyle.success,
+                       custom_id="hubv2_social")
+        b_soc.callback = self._on_social
+        items.append(_section_with_button(
+            "💝 Social", "Shoutouts · Mentorat", b_soc,
+        ))
+
+        # Section 13 : Outils
+        b_tools = Button(label="Ouvrir", style=discord.ButtonStyle.secondary,
+                         custom_id="hubv2_tools")
+        b_tools.callback = self._on_tools
+        items.append(_section_with_button(
+            "🧰 Outils", "Banque · Loots · PvP · Classe RP · Alliance · Time Capsule · Hall of Fame", b_tools,
+        ))
+
+        items.append(v2_divider())
+
+        # Bouton fermer
+        close_btn = Button(label="Fermer", emoji="✖️",
+                           style=discord.ButtonStyle.danger,
+                           custom_id="hubv2_close")
+        close_btn.callback = self._on_close
+        items.append(discord.ui.ActionRow(close_btn))
+
+        self.add_item(v2_container(*items, color=Palette.PRIMARY))
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = False):
+        if edit:
+            try:
+                await interaction.response.edit_message(
+                    content=None, view=self, embed=None, attachments=[],
+                )
+            except Exception:
+                pass
+        else:
+            try:
+                await interaction.response.send_message(view=self, ephemeral=True)
+            except Exception:
+                pass
+
+    # Callbacks — délèguent aux helpers existants
+    async def _on_quests(self, i):     await _p41_open_daily(i)
+    async def _on_wheel(self, i):      await _wheel_spin_command(i)
+    async def _on_achievements(self, i): await _p41_open_achievements(i)
+    async def _on_pet(self, i):        await _p41_open_pet(i)
+    async def _on_confess(self, i):    await _p41_open_confession(i)
+    async def _on_profile(self, i):    await profile_cmd.callback(i)
+    async def _on_notifs(self, i):     await notifs_cmd.callback(i)
+    async def _on_lore(self, i):       await _open_lore_panel(i)
+    async def _on_mission(self, i):    await _open_mission_panel(i)
+    async def _on_roblox(self, i):     await _open_roblox_panel(i)
+    async def _on_competitions(self, i): await _open_competitions_panel(i)
+    async def _on_social(self, i):     await _open_social_panel(i)
+    async def _on_tools(self, i):      await _open_tools_panel(i)
+
+    async def _on_close(self, i):
+        try:
+            await i.response.edit_message(
+                content="✅ Hub fermé.",
+                view=None, embed=None, embeds=[], attachments=[],
+            )
+        except discord.InteractionResponded:
+            try:
+                await i.edit_original_response(content="✅ Hub fermé", view=None, embed=None)
+            except Exception:
+                pass
+        except Exception:
+            pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
