@@ -40483,7 +40483,12 @@ async def _poll_closer_wait():
 
 @bot.tree.command(name="event", description="🎪 Voir l'événement en cours et tes stats")
 async def event_cmd(i: discord.Interaction):
-    """Affiche l'événement actif (s'il y en a un) et l'inventaire du joueur."""
+    """Phase 30 + Phase 122 : événement actif en LayoutView V2 magnifique.
+
+    - Pas d'event : affiche équipement + prochain spawn + bouton inventory
+    - Event actif : affiche boss + bouton "Rejoindre l'arène"
+    - Module désactivé : panel explicatif
+    """
     try:
         c = await cfg(i.guild.id)
         enabled = bool(c.get('event_enabled', False))
@@ -40495,17 +40500,35 @@ async def event_cmd(i: discord.Interaction):
             ) as cur:
                 row = await cur.fetchone()
 
+        # ─── Cas 1 : Système désactivé ───
         if not enabled:
-            return await i.response.send_message(
-                "_Le système d'événements n'est pas activé sur ce serveur._\n"
-                "L'owner peut l'activer via `/configure → 🎪 Événements`.",
-                ephemeral=True,
-            )
+            class _EventDisabledLayout(LayoutView):
+                def __init__(self):
+                    super().__init__(timeout=300)
+                    items = []
+                    items.append(v2_title("🎪  ÉVÉNEMENTS"))
+                    items.append(v2_subtitle("Le système est désactivé sur ce serveur"))
+                    items.append(v2_divider())
+                    items.append(v2_body(
+                        "**💤 Aucun événement disponible**\n\n"
+                        "Les Boss Raids, Treasure Hunts, World Boss, Voice Chaos et "
+                        "Quiz collectifs sont en sommeil.\n\n"
+                        "_L'owner peut activer le système via `/configure → 🎪 Événements`._"
+                    ))
+                    self.add_item(v2_container(*items, color=0x95A5A6))
+
+            return await i.response.send_message(view=_EventDisabledLayout(), ephemeral=True)
+
+        # ─── Cas 2 : Pas d'event actif → afficher équipement + prochain spawn ───
         if not row:
-            # Pas d'event actif → afficher inventaire
             inv = await _get_or_create_inventory(i.guild.id, i.user.id)
-            w = inv.get('weapon', {})
-            a = inv.get('armor', {})
+            w = inv.get('weapon', {}) or {}
+            a = inv.get('armor', {}) or {}
+            hp = int(inv.get('hp', 100))
+            max_hp = int(inv.get('max_hp', 100))
+            kills = int(inv.get('kills', 0))
+            total_dmg = int(inv.get('total_damage', 0))
+
             interval = int(c.get('event_auto_interval_hours', 24) or 24)
             last_run = c.get('event_last_run', '')
             next_str = "_planification désactivée_"
@@ -40516,32 +40539,181 @@ async def event_cmd(i: discord.Interaction):
                 except Exception:
                     pass
 
-            e = discord.Embed(
-                title="🎪 Événements",
-                description=(
-                    f"_Aucun événement en cours._\n\n"
-                    f"**Prochain boss** · {next_str}\n\n"
-                    f"**🎒 Ton équipement :**\n"
-                    f"⚔️ Arme : {w.get('emoji', '')} **{w.get('name', '_aucune_')}** · `+{w.get('atk', 0)}` ATK · _{w.get('rarity', '—')}_\n"
-                    f"🛡️ Armure : {a.get('emoji', '')} **{a.get('name', '_aucune_')}** · `+{a.get('def', 0)}` DEF · _{a.get('rarity', '—')}_\n"
-                    f"❤️ PV : `{inv.get('hp', 100)}/{inv.get('max_hp', 100)}`\n"
-                    f"💀 Boss vaincus : `{inv.get('kills', 0)}` · Total dégâts cumulés : `{inv.get('total_damage', 0):,}`"
-                ),
-                color=0x5865F2,
-            )
-            e.set_footer(text=f"{i.guild.name}", icon_url=(i.guild.icon.url if i.guild.icon else None))
-            return await i.response.send_message(embed=e, ephemeral=True)
+            class _InventoryBtn(discord.ui.Button):
+                def __init__(self):
+                    super().__init__(
+                        label="🎒 Inventaire complet",
+                        style=discord.ButtonStyle.primary,
+                        custom_id=f"phase122_event_inv_{i.user.id}",
+                    )
 
-        # Event actif → afficher infos
+                async def callback(self, btn_i: discord.Interaction):
+                    if btn_i.user.id != i.user.id:
+                        return await btn_i.response.send_message(
+                            "❌ Ce panneau n'est pas pour toi.", ephemeral=True
+                        )
+                    try:
+                        await inventory_cmd.callback(btn_i)
+                    except Exception as ex:
+                        print(f"[phase122 event inv btn] {ex}")
+                        try:
+                            if not btn_i.response.is_done():
+                                await btn_i.response.send_message(
+                                    f"❌ Erreur : `{ex}`", ephemeral=True
+                                )
+                        except Exception:
+                            pass
+
+            class _BadgesBtn(discord.ui.Button):
+                def __init__(self):
+                    super().__init__(
+                        label="🏅 Hauts faits",
+                        style=discord.ButtonStyle.secondary,
+                        custom_id=f"phase122_event_badges_{i.user.id}",
+                    )
+
+                async def callback(self, btn_i: discord.Interaction):
+                    if btn_i.user.id != i.user.id:
+                        return await btn_i.response.send_message(
+                            "❌ Ce panneau n'est pas pour toi.", ephemeral=True
+                        )
+                    try:
+                        await badges_cmd.callback(btn_i)
+                    except Exception as ex:
+                        print(f"[phase122 event badges btn] {ex}")
+                        try:
+                            if not btn_i.response.is_done():
+                                await btn_i.response.send_message(
+                                    f"❌ Erreur : `{ex}`", ephemeral=True
+                                )
+                        except Exception:
+                            pass
+
+            class _EventIdleLayout(LayoutView):
+                def __init__(self):
+                    super().__init__(timeout=600)
+                    items = []
+                    items.append(v2_title(f"🎪  ÉVÉNEMENTS  ·  {i.user.display_name}"))
+                    items.append(v2_subtitle("Aucun event en cours — prépare-toi pour le prochain !"))
+                    items.append(v2_divider())
+
+                    # Prochain spawn
+                    items.append(v2_body("**╔═══ ⏰  PROCHAIN BOSS  ═══╗**"))
+                    items.append(v2_body(
+                        f"**Spawn estimé :** {next_str}\n"
+                        f"_Reste actif dans les salons pour ne pas le rater._"
+                    ))
+
+                    items.append(v2_divider())
+
+                    # Équipement résumé
+                    items.append(v2_body("**╔═══ 🎒  ÉQUIPEMENT  ═══╗**"))
+                    items.append(v2_body(
+                        f"⚔️ **Arme :** {w.get('emoji', '⚪')} {w.get('name', '_aucune_')} "
+                        f"· `+{w.get('atk', 0)}` ATK · _{w.get('rarity', '—')}_\n"
+                        f"🛡️ **Armure :** {a.get('emoji', '⚪')} {a.get('name', '_aucune_')} "
+                        f"· `+{a.get('def', 0)}` DEF · _{a.get('rarity', '—')}_"
+                    ))
+
+                    items.append(v2_divider())
+
+                    # Stats combat
+                    items.append(v2_body("**╔═══ 📊  STATS DE COMBAT  ═══╗**"))
+                    hp_bar = events2026.hp_bar(hp, max_hp, length=12)
+                    items.append(v2_body(
+                        f"❤️ **HP :** `{hp_bar}` `{hp}/{max_hp}`\n"
+                        f"💀 **Boss vaincus :** `{kills}`\n"
+                        f"💥 **Dégâts cumulés :** `{total_dmg:,}`"
+                    ))
+
+                    items.append(v2_divider())
+
+                    # Boutons navigation (sections accessory)
+                    items.append(v2_body("**╔═══ 🔗  NAVIGATION  ═══╗**"))
+                    items.append(v2_section(
+                        v2_title("🎒  Inventaire complet"),
+                        v2_subtitle("Équipement détaillé, set bonus, durabilité"),
+                        accessory=_InventoryBtn(),
+                    ))
+                    items.append(v2_section(
+                        v2_title("🏅  Hauts faits"),
+                        v2_subtitle("Tes badges débloqués + objectifs à venir"),
+                        accessory=_BadgesBtn(),
+                    ))
+
+                    items.append(v2_divider())
+                    items.append(v2_body(
+                        "_💡 Quand un boss spawn, le bouton ⚔️ ATTAQUER apparaît dans l'arène._"
+                    ))
+
+                    self.add_item(v2_container(*items, color=0x5865F2))
+
+            return await i.response.send_message(view=_EventIdleLayout(), ephemeral=True)
+
+        # ─── Cas 3 : Event actif → afficher boss + bouton vers arène ───
         boss = json.loads(row[1]) if row[1] else {}
         ch_id = int(row[2] or 0)
         ch = i.guild.get_channel(ch_id)
-        await i.response.send_message(
-            f"⚔️ **{boss.get('name', '?')}** est dans l'arène ! Rejoins le combat → {ch.mention if ch else '_arène introuvable_'}",
-            ephemeral=True,
-        )
+        ends_at_iso = row[3] or ''
+        ends_at_ts = None
+        try:
+            if ends_at_iso:
+                ends_at_ts = int(datetime.fromisoformat(ends_at_iso).timestamp())
+        except Exception:
+            pass
+
+        boss_name = boss.get('name', '?')
+        boss_emoji = boss.get('emoji', '👹')
+        boss_hp = int(boss.get('current_hp', 0) or 0)
+        boss_max = int(boss.get('max_hp', 1) or 1)
+        boss_hp_bar = events2026.hp_bar(boss_hp, boss_max, length=20)
+
+        class _GotoArenaBtn(discord.ui.Button):
+            def __init__(self):
+                super().__init__(
+                    label="⚔️ Rejoindre l'arène",
+                    style=discord.ButtonStyle.link if ch else discord.ButtonStyle.danger,
+                    url=ch.jump_url if ch else None,
+                    custom_id=None if ch else f"phase122_event_noarena_{i.user.id}",
+                )
+
+        class _EventActiveLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=300)
+                items = []
+                items.append(v2_title(f"⚔️  EVENT EN COURS  ·  {boss_name}"))
+                items.append(v2_subtitle("Le boss attend tes coups !"))
+                items.append(v2_divider())
+
+                items.append(v2_body("**╔═══ 👹  LE BOSS  ═══╗**"))
+                end_line = f"\n⏱️ **Fin :** <t:{ends_at_ts}:R>" if ends_at_ts else ""
+                items.append(v2_body(
+                    f"{boss_emoji} **{boss_name}**\n"
+                    f"❤️ `{boss_hp_bar}` `{boss_hp:,}/{boss_max:,}` HP{end_line}"
+                ))
+
+                items.append(v2_divider())
+
+                items.append(v2_section(
+                    v2_title("⚔️  Rejoins le combat"),
+                    v2_subtitle(
+                        f"L'arène est dans {ch.mention if ch else '_introuvable_'}"
+                    ),
+                    accessory=_GotoArenaBtn(),
+                ))
+
+                items.append(v2_divider())
+                items.append(v2_body(
+                    "_💡 Plus tu attaques, plus tu gagnes de coins + chance de loot. "
+                    "Le top damager remporte un loot exceptionnel !_"
+                ))
+
+                self.add_item(v2_container(*items, color=0xE74C3C))
+
+        await i.response.send_message(view=_EventActiveLayout(), ephemeral=True)
     except Exception as ex:
-        print(f"[/event] {ex}")
+        print(f"[/event V2] {ex}")
+        import traceback; traceback.print_exc()
         try:
             if not i.response.is_done():
                 await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
@@ -42552,44 +42724,130 @@ async def badges_cmd(i: discord.Interaction):
 
         _user_name = i.user.display_name
         _guild_name = i.guild.name
+        _viewer_id = i.user.id
+
+        # Phase 122 : navigation buttons vers panels reliés
+        class _InventoryBtn(discord.ui.Button):
+            def __init__(self):
+                super().__init__(
+                    label="🎒 Inventaire",
+                    style=discord.ButtonStyle.primary,
+                    custom_id=f"phase122_badges_inv_{_viewer_id}",
+                )
+
+            async def callback(self, btn_i: discord.Interaction):
+                if btn_i.user.id != _viewer_id:
+                    return await btn_i.response.send_message(
+                        "❌ Ce panneau n'est pas pour toi.", ephemeral=True
+                    )
+                try:
+                    await inventory_cmd.callback(btn_i)
+                except Exception as ex:
+                    print(f"[phase122 badges inv btn] {ex}")
+                    try:
+                        if not btn_i.response.is_done():
+                            await btn_i.response.send_message(
+                                f"❌ Erreur : `{ex}`", ephemeral=True
+                            )
+                    except Exception:
+                        pass
+
+        class _LeaderboardBtn(discord.ui.Button):
+            def __init__(self):
+                super().__init__(
+                    label="🏆 Classement",
+                    style=discord.ButtonStyle.secondary,
+                    custom_id=f"phase122_badges_lb_{_viewer_id}",
+                )
+
+            async def callback(self, btn_i: discord.Interaction):
+                if btn_i.user.id != _viewer_id:
+                    return await btn_i.response.send_message(
+                        "❌ Ce panneau n'est pas pour toi.", ephemeral=True
+                    )
+                try:
+                    await leaderboard_cmd.callback(btn_i)
+                except Exception as ex:
+                    print(f"[phase122 badges lb btn] {ex}")
+                    try:
+                        if not btn_i.response.is_done():
+                            await btn_i.response.send_message(
+                                f"❌ Erreur : `{ex}`", ephemeral=True
+                            )
+                    except Exception:
+                        pass
 
         class _BadgesLayout(LayoutView):
             def __init__(self):
                 super().__init__(timeout=600)
                 items = []
                 items.append(v2_title(f"🏅  HAUTS FAITS  ·  {_user_name}"))
-                items.append(v2_subtitle(f"Rang actuel : {rank_name}"))
+                items.append(v2_subtitle(
+                    f"{badges_count}/{badges_total} débloqués  ·  {ach_tier}"
+                ))
                 items.append(v2_divider())
 
-                # Groupe 1 : Stats clés + Tier
-                items.append(v2_body("**╔═══ 📊  STATS  ═══╗**"))
+                # Groupe 1 : Stats globales avec progress bar
+                items.append(v2_body("**╔═══ 📊  TA PROGRESSION  ═══╗**"))
                 items.append(v2_body(
-                    f"🏆 **Tier global :** {ach_tier}\n"
+                    f"🏆 **Rang actuel :** {rank_name}\n"
+                    f"🏅 **Badges :** {progress_str}\n"
                     f"💀 **Boss vaincus :** `{kills}`\n"
-                    f"💥 **Dégâts à vie :** `{total_dmg:,}`\n"
-                    f"🏅 **Badges :** {progress_str}"
+                    f"💥 **Dégâts à vie :** `{total_dmg:,}`"
                 ))
 
                 items.append(v2_divider())
 
-                # Groupe 2 : Débloqués
-                items.append(v2_body(f"**╔═══ ✅  DÉBLOQUÉS ({badges_count})  ═══╗**"))
+                # Groupe 2 : Débloqués (scrollable jusqu'à 25)
+                items.append(v2_body(
+                    f"**╔═══ ✅  DÉBLOQUÉS ({badges_count}/{badges_total})  ═══╗**"
+                ))
                 if unlocked_lines:
-                    items.append(v2_body("\n".join(unlocked_lines)[:1900]))
+                    body = "\n".join(unlocked_lines)
+                    # Cap à 1900 chars pour rester safe dans la limite Discord
+                    if len(body) > 1900:
+                        body = body[:1900].rsplit("\n", 1)[0] + "\n_… (panel coupé pour rentrer dans Discord)_"
+                    items.append(v2_body(body))
                     if len(rows) > 15:
-                        items.append(v2_body(f"_… + {len(rows) - 15} autre(s)_"))
+                        items.append(v2_body(f"_+ {len(rows) - 15} badge(s) plus anciens_"))
                 else:
-                    items.append(v2_body("_Aucun badge débloqué pour l'instant. Participe à un Boss Raid pour commencer !_"))
+                    items.append(v2_body(
+                        "_Aucun badge pour l'instant._\n"
+                        "_💡 **Comment commencer ?** Participe à un Boss Raid, gagne ton "
+                        "premier combat, ou complète une quête `/daily`._"
+                    ))
 
+                # Groupe 3 : Prochains objectifs
                 if next_lines:
                     items.append(v2_divider())
-                    items.append(v2_body(f"**╔═══ 🎯  À DÉBLOQUER ({len(remaining)})  ═══╗**"))
-                    items.append(v2_body("\n".join(next_lines)))
+                    items.append(v2_body(
+                        f"**╔═══ 🎯  PROCHAINS OBJECTIFS  ═══╗**"
+                    ))
+                    items.append(v2_body(
+                        "\n".join(next_lines)
+                        + (f"\n_+ {len(remaining) - 5} autres à découvrir_"
+                           if len(remaining) > 5 else "")
+                    ))
+
+                items.append(v2_divider())
+
+                # Groupe 4 : Navigation (sections accessory)
+                items.append(v2_body("**╔═══ 🔗  NAVIGATION  ═══╗**"))
+                items.append(v2_section(
+                    v2_title("🎒  Mon inventaire"),
+                    v2_subtitle("Équipement complet · set bonus · durabilité"),
+                    accessory=_InventoryBtn(),
+                ))
+                items.append(v2_section(
+                    v2_title("🏆  Voir le classement"),
+                    v2_subtitle("Top joueurs du serveur (coins · messages · vocal)"),
+                    accessory=_LeaderboardBtn(),
+                ))
 
                 items.append(v2_divider())
                 items.append(v2_body(
-                    f"_💡 {_guild_name} · "
-                    f"Participe aux Boss Raids et events pour débloquer plus !_"
+                    f"_💡 **{_guild_name}** · "
+                    f"Les badges sont permanents et visibles sur ton profil._"
                 ))
 
                 self.add_item(v2_container(*items, color=rank_color))
