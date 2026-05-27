@@ -90,6 +90,8 @@ import alliance_vault as av_module
 import roblox_link as rblx_link_module
 # Phase 137 : Voice Lounges + paliers vocaux
 import voice_lounges as vlounge_module
+# Phase 138 : Tickets enhancements (priority + templates + auto-close)
+import tickets_enhance as tix_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -37926,6 +37928,23 @@ async def on_ready():
         )
     except Exception as ex:
         print(f"[on_ready vlounge setup] {ex}")
+    # Phase 138 : Tickets enhancements (priority + templates + auto-close)
+    try:
+        tix_module.setup(
+            bot,
+            get_db,
+            db_get,
+            db_set,
+            {
+                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
+                'v2_divider': v2_divider, 'v2_container': v2_container,
+                'LayoutView': LayoutView,
+            },
+        )
+        if not tix_module.auto_close_inactive_task.is_running():
+            tix_module.auto_close_inactive_task.start()
+    except Exception as ex:
+        print(f"[on_ready tix setup] {ex}")
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()
@@ -39008,6 +39027,220 @@ async def voice_claim_cmd(i: discord.Interaction):
 
 
 bot.tree.add_command(voice_group)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 138 : /ticket — priorité + templates + stats + auto-close
+# ═══════════════════════════════════════════════════════════════════════════════
+ticket_group = app_commands.Group(
+    name="ticket",
+    description="🎫 Priority + templates de réponse + stats tickets",
+)
+
+
+def _tix_is_staff(member: discord.Member) -> bool:
+    """True si peut gérer templates + voir stats."""
+    try:
+        return (
+            member.id == SUPER_OWNER_ID
+            or (member.guild and member.id == member.guild.owner_id)
+            or member.guild_permissions.administrator
+            or member.guild_permissions.manage_messages
+        )
+    except Exception:
+        return False
+
+
+async def _tix_is_in_ticket(channel) -> bool:
+    """Check si on est dans un channel ticket actuel (status open)."""
+    if not isinstance(channel, discord.TextChannel):
+        return False
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM tickets WHERE channel_id=? AND status='open'",
+                (channel.id,),
+            ) as cur:
+                return (await cur.fetchone()) is not None
+    except Exception:
+        return False
+
+
+@ticket_group.command(
+    name="priority", description="🚨 Définir la priorité d'un ticket (staff)"
+)
+@app_commands.describe(niveau="Niveau de priorité")
+@app_commands.choices(niveau=[
+    app_commands.Choice(name="🔴 Urgent", value="urgent"),
+    app_commands.Choice(name="🟠 Haute", value="high"),
+    app_commands.Choice(name="🟡 Normale", value="normal"),
+    app_commands.Choice(name="🔵 Basse", value="low"),
+])
+async def ticket_priority_cmd(
+    i: discord.Interaction, niveau: app_commands.Choice[str]
+):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not _tix_is_staff(i.user):
+        return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
+    if not await _tix_is_in_ticket(i.channel):
+        return await i.response.send_message(
+            "❌ Cette commande s'utilise dans un salon de ticket ouvert.",
+            ephemeral=True,
+        )
+    try:
+        await tix_module.set_priority(i.channel.id, niveau.value)
+        await tix_module.update_channel_name_for_priority(i.channel, niveau.value)
+        emoji, label = tix_module.PRIORITY_LEVELS[niveau.value]
+        await i.response.send_message(
+            f"✅ Priorité réglée : {emoji} **{label}**",
+            ephemeral=False,
+        )
+    except Exception as ex:
+        print(f"[ticket_priority_cmd] {ex}")
+
+
+@ticket_group.command(
+    name="templates",
+    description="📋 Voir tous les templates de réponses disponibles",
+)
+async def ticket_templates_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        templates = await tix_module.list_templates(i.guild.id)
+        view = tix_module.build_templates_panel(templates, i.guild.name)
+        if view is None:
+            return await i.response.send_message("❌ Module indisponible.", ephemeral=True)
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[ticket_templates_cmd] {ex}")
+
+
+@ticket_group.command(
+    name="reply",
+    description="💬 Envoyer une réponse pré-rédigée dans ce ticket (staff)",
+)
+@app_commands.describe(template_name="Nom du template à utiliser")
+async def ticket_reply_cmd(i: discord.Interaction, template_name: str):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not _tix_is_staff(i.user):
+        return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
+    if not await _tix_is_in_ticket(i.channel):
+        return await i.response.send_message(
+            "❌ Cette commande s'utilise dans un salon de ticket ouvert.",
+            ephemeral=True,
+        )
+    try:
+        tpl = await tix_module.get_template(i.guild.id, template_name)
+        if not tpl:
+            return await i.response.send_message(
+                f"❌ Template `{template_name}` introuvable. "
+                f"`/ticket templates` pour la liste.",
+                ephemeral=True,
+            )
+        await i.response.send_message(tpl["content"], ephemeral=False)
+        await tix_module.touch_activity(i.channel.id)
+    except Exception as ex:
+        print(f"[ticket_reply_cmd] {ex}")
+
+
+@ticket_group.command(
+    name="template_add",
+    description="✏️ [Staff] Créer/éditer un template de réponse",
+)
+async def ticket_template_add_cmd(i: discord.Interaction):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not _tix_is_staff(i.user):
+        return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
+
+    class _TplModal(discord.ui.Modal, title="📝 Nouveau template ticket"):
+        tpl_name = discord.ui.TextInput(
+            label="Nom (court, sans espaces)",
+            placeholder="Ex : rule_5 ou ban_appeal",
+            required=True, max_length=50,
+        )
+        tpl_content = discord.ui.TextInput(
+            label="Contenu de la réponse",
+            placeholder="Le message envoyé quand le template est invoqué…",
+            style=discord.TextStyle.paragraph,
+            required=True, max_length=1800,
+        )
+
+        async def on_submit(self, modal_i: discord.Interaction):
+            ok, msg = await tix_module.add_template(
+                modal_i.guild.id, modal_i.user.id,
+                str(self.tpl_name.value), str(self.tpl_content.value),
+            )
+            await modal_i.response.send_message(
+                f"{'✅' if ok else '❌'} {msg}", ephemeral=True
+            )
+
+    await i.response.send_modal(_TplModal())
+
+
+@ticket_group.command(
+    name="template_remove", description="🗑️ [Staff] Supprimer un template"
+)
+@app_commands.describe(name="Nom du template à supprimer")
+async def ticket_template_remove_cmd(i: discord.Interaction, name: str):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not _tix_is_staff(i.user):
+        return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
+    try:
+        ok = await tix_module.delete_template(i.guild.id, name)
+        await i.response.send_message(
+            f"{'🗑️ Template supprimé.' if ok else 'ℹ️ Template introuvable.'}",
+            ephemeral=True,
+        )
+    except Exception as ex:
+        print(f"[ticket_template_remove_cmd] {ex}")
+
+
+@ticket_group.command(
+    name="stats", description="📊 [Staff] Dashboard tickets du serveur"
+)
+async def ticket_stats_cmd(i: discord.Interaction):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not _tix_is_staff(i.user):
+        return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
+    try:
+        await i.response.defer(ephemeral=True)
+        stats = await tix_module.collect_ticket_stats(i.guild.id)
+        view = tix_module.build_stats_panel(stats, i.guild.name)
+        if view is None:
+            return await i.followup.send("❌ Module indisponible.", ephemeral=True)
+        await i.followup.send(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[ticket_stats_cmd] {ex}")
+
+
+@ticket_group.command(
+    name="auto_close_config",
+    description="⏱️ [Staff] Configurer l'auto-close inactivité (jours)",
+)
+@app_commands.describe(jours="Nombre de jours d'inactivité avant fermeture auto (1-90)")
+async def ticket_auto_close_cmd(i: discord.Interaction, jours: int):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not _tix_is_staff(i.user):
+        return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
+    try:
+        d = max(1, min(90, int(jours or 7)))
+        ok = await tix_module.set_inactivity_days(i.guild.id, d)
+        await i.response.send_message(
+            f"{'✅' if ok else '❌'} Auto-close réglé à **`{d}` jours** d'inactivité.",
+            ephemeral=True,
+        )
+    except Exception as ex:
+        print(f"[ticket_auto_close_cmd] {ex}")
+
+
+bot.tree.add_command(ticket_group)
 
 
 @bot.event
