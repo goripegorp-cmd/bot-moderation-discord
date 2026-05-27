@@ -826,15 +826,43 @@ def attempt_refine(item: dict, roll: Optional[float] = None) -> tuple:
         "trinket": TRINKETS,
     }
     pool = pool_map.get(slot, WEAPONS)
-    # Filtrer le pool par target_rarity, fallback sur tout le pool si vide
+    # Filtrer le pool par target_rarity
     candidates = [x for x in pool if (x.get("rarity") or "").lower() == target_rarity.lower()]
-    if not candidates:
-        # Fallback : on prend un random commune+ et on FORCE la rareté target
-        candidates = pool
-    new_item = dict(random.choice(candidates))
+
+    if candidates:
+        # Pool contient des items de cette rareté → pick directement
+        new_item = dict(random.choice(candidates))
+    else:
+        # Phase 112 : pool vide pour cette rareté → fallback
+        # On prend l'item le plus haut tier dispo + scaling des stats au target tier
+        # Ordre des raretés du moins au plus rare
+        order = ["commune", "rare", "épique", "légendaire", "mythique", "divine"]
+        # Trouver le tier max du pool
+        pool_by_rarity = {}
+        for itm in pool:
+            r = (itm.get("rarity") or "commune").lower()
+            pool_by_rarity.setdefault(r, []).append(itm)
+        # Pick l'item du plus haut tier dispo
+        highest_available = None
+        for r in reversed(order):
+            if r in pool_by_rarity:
+                highest_available = random.choice(pool_by_rarity[r])
+                break
+        if not highest_available:
+            highest_available = random.choice(pool)
+        new_item = dict(highest_available)
+        # Scaling : multiplier les stats par le ratio (target_tier_index / source_tier_index)
+        src_idx = order.index((new_item.get("rarity") or "commune").lower()) if (new_item.get("rarity") or "").lower() in order else 0
+        tgt_idx = order.index(target_rarity) if target_rarity in order else src_idx
+        if tgt_idx > src_idx:
+            # Multiplier 1.5x par tier d'écart
+            mult = 1.5 ** (tgt_idx - src_idx)
+            for stat_key in ("atk", "def", "crit"):
+                if stat_key in new_item and new_item[stat_key]:
+                    new_item[stat_key] = int(new_item[stat_key] * mult)
+
     new_item["slot"] = slot
-    new_item["rarity"] = target_rarity  # force rare quoi qu'il arrive
-    # Garder le nom unique si possible
+    new_item["rarity"] = target_rarity  # force la rareté target
     init_item_durability(new_item)
     return True, new_item
 

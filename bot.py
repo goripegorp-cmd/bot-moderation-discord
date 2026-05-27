@@ -12820,11 +12820,12 @@ async def auction_settler_task():
 
                     # Crédite le seller
                     await add_coins(gid, seller_id, seller_revenue)
-                    # Donne l'item au top_bidder : place dans le slot ou inventory bonus
+                    # Donne l'item au top_bidder
                     buyer_inv = await _get_or_create_inventory(gid, top_bidder_id)
                     target_slot = slot if slot in events2026.EQUIPMENT_SLOTS else "weapon"
-                    # Si le slot est occupé, on remplace (le bidder doit gérer)
-                    # Note : un design plus avancé ajouterait à un "coffre" — pour l'MVP, on remplace
+                    # Phase 112 : si le slot est occupé, on prévient le buyer en DM
+                    old_item = buyer_inv.get(target_slot) or {}
+                    overwritten = bool(old_item and old_item.get("name"))
                     buyer_inv[target_slot] = item
                     await _save_inventory(gid, top_bidder_id, buyer_inv)
 
@@ -12838,6 +12839,45 @@ async def auction_settler_task():
                         f"[auction_settler] #{ah_id} VENDU à {top_bidder_id} pour {current_bid} "
                         f"(commission {commission}, seller gain {seller_revenue})"
                     )
+
+                    # Phase 112 : DM au buyer (gain + warning si écrasement)
+                    try:
+                        guild = bot.get_guild(gid)
+                        if guild:
+                            buyer = guild.get_member(top_bidder_id)
+                            if buyer:
+                                item_name = (item or {}).get("name", "?")
+                                item_emoji = (item or {}).get("emoji", "📦")
+                                msg = (
+                                    f"🎉 **Tu as remporté l'enchère #{ah_id} !**\n"
+                                    f"Tu reçois : {item_emoji} **{item_name}** dans ton slot `{target_slot}`.\n"
+                                    f"_Coût : `{current_bid:,}` 🪙_"
+                                )
+                                if overwritten:
+                                    old_emoji = old_item.get("emoji", "⚪")
+                                    old_name = old_item.get("name", "?")
+                                    msg += (
+                                        f"\n\n⚠️ **Ton ancien {old_emoji} {old_name}** "
+                                        f"a été remplacé. _(Garde un slot vide la prochaine fois "
+                                        f"pour éviter ça !)_"
+                                    )
+                                try:
+                                    await buyer.send(msg)
+                                except Exception:
+                                    pass
+                            # Notif seller aussi
+                            seller_m = guild.get_member(seller_id)
+                            if seller_m:
+                                try:
+                                    await seller_m.send(
+                                        f"💰 **Ton enchère #{ah_id} est vendue !**\n"
+                                        f"Tu reçois : `{seller_revenue:,}` 🪙 "
+                                        f"_(commission `{commission:,}` 🪙 retirée)_"
+                                    )
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
                 else:
                     # INVENDU → rend l'item au seller
                     seller_inv = await _get_or_create_inventory(gid, seller_id)
@@ -12861,6 +12901,25 @@ async def auction_settler_task():
                         )
                         await db.commit()
                     print(f"[auction_settler] #{ah_id} INVENDU → rendu au seller {seller_id}")
+
+                    # Phase 112 : DM seller pour notif unsold
+                    try:
+                        guild = bot.get_guild(gid)
+                        if guild:
+                            seller_m = guild.get_member(seller_id)
+                            if seller_m:
+                                item_name = (item or {}).get("name", "?")
+                                item_emoji = (item or {}).get("emoji", "📦")
+                                try:
+                                    await seller_m.send(
+                                        f"😔 **Ton enchère #{ah_id} n'a pas trouvé preneur.**\n"
+                                        f"{item_emoji} **{item_name}** t'a été rendu.\n"
+                                        f"_Essaie à un prix plus bas la prochaine fois._"
+                                    )
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
             except Exception as ex:
                 print(f"[auction_settler row={ah_id}] {ex}")
     except Exception as ex:
@@ -40673,68 +40732,72 @@ def _format_trade_item(item: dict, slot: str) -> str:
     return f"{badge} {emoji} **{name}** _{rarity}_" + (f" `{stats_str}`" if stats_str else "")
 
 
-@bot.tree.command(name="trade", description="🤝 Propose un échange d'équipement à un autre joueur")
+@bot.tree.command(name="swap", description="🤝 Propose un échange d'équipement direct avec un autre joueur")
 @app_commands.describe(
     cible="Le joueur avec qui échanger",
-    mon_slot="Le slot de TON item à donner",
-    son_slot="Le slot de SON item à recevoir",
+    slot="Le slot d'équipement à échanger (les deux items doivent être du même type)",
     coins_bonus="Coins que tu donnes en plus (optionnel, max 100k)",
 )
-@app_commands.choices(
-    mon_slot=_trade_slot_choices(),
-    son_slot=_trade_slot_choices(),
-)
-async def trade_cmd(
+@app_commands.choices(slot=_trade_slot_choices())
+async def swap_cmd(
     i: discord.Interaction,
     cible: discord.Member,
-    mon_slot: app_commands.Choice[str],
-    son_slot: app_commands.Choice[str],
+    slot: app_commands.Choice[str],
     coins_bonus: int = 0,
 ):
-    """Phase 108 : trade P2P 2-side confirm.
+    """Phase 108 + Phase 112 : swap P2P 2-side confirm.
 
-    A propose : "Je te donne mon [mon_slot] + coins_bonus 🪙
-                 contre ton [son_slot]"
+    Renommé `/trade` → `/swap` (Phase 112 hotfix) car conflit avec
+    le système Marketplace P2P existant.
+
+    A propose : "Je te donne mon [slot] + coins_bonus 🪙 contre ton [slot]"
+    Les deux items doivent être du MÊME slot type pour éviter les
+    incohérences (armure dans le slot weapon, etc.).
     B reçoit un panel ACCEPTER/REFUSER.
     """
     try:
+        # Phase 112 : single slot — pas de cross-slot pour cohérence
+        mon_slot_val = slot.value
+        son_slot_val = slot.value
+        slot_name = slot.name
+
         # Validations basiques
         if cible.bot:
-            return await i.response.send_message("🤖 On ne trade pas avec un bot.", ephemeral=True)
+            return await i.response.send_message("🤖 On ne swap pas avec un bot.", ephemeral=True)
         if cible.id == i.user.id:
             return await i.response.send_message(
-                "🪞 Tu ne peux pas trade avec toi-même.", ephemeral=True
+                "🪞 Tu ne peux pas swap avec toi-même.", ephemeral=True
             )
         coins_bonus = max(0, min(100_000, int(coins_bonus or 0)))
 
         # Lock check
-        key_a = (i.guild.id, i.user.id, mon_slot.value)
-        key_b = (i.guild.id, cible.id, son_slot.value)
+        key_a = (i.guild.id, i.user.id, mon_slot_val)
+        key_b = (i.guild.id, cible.id, son_slot_val)
         if key_a in _trade_locks:
             return await i.response.send_message(
-                "⏳ Ton slot est déjà engagé dans un autre trade en cours.",
+                "⏳ Ton slot est déjà engagé dans un autre swap en cours.",
                 ephemeral=True,
             )
         if key_b in _trade_locks:
             return await i.response.send_message(
-                "⏳ Le slot de la cible est déjà engagé dans un autre trade.",
+                "⏳ Le slot de la cible est déjà engagé dans un autre swap.",
                 ephemeral=True,
             )
 
         # Récupérer les inventaires
         inv_a = await _get_or_create_inventory(i.guild.id, i.user.id)
         inv_b = await _get_or_create_inventory(i.guild.id, cible.id)
-        item_a = inv_a.get(mon_slot.value) or {}
-        item_b = inv_b.get(son_slot.value) or {}
+        item_a = inv_a.get(mon_slot_val) or {}
+        item_b = inv_b.get(son_slot_val) or {}
 
         if not item_a or not item_a.get("name"):
             return await i.response.send_message(
-                f"❌ Tu n'as aucun item dans le slot **{mon_slot.name}**.",
+                f"❌ Tu n'as aucun item dans le slot **{slot_name}**.",
                 ephemeral=True,
             )
         if not item_b or not item_b.get("name"):
             return await i.response.send_message(
-                f"❌ {cible.mention} n'a aucun item dans le slot **{son_slot.name}**.",
+                f"❌ {cible.mention} n'a aucun item dans le slot **{slot_name}**.",
                 ephemeral=True,
             )
 
@@ -40758,8 +40821,8 @@ async def trade_cmd(
             "guild_id": i.guild.id,
             "a_id": i.user.id,
             "b_id": cible.id,
-            "a_slot": mon_slot.value,
-            "b_slot": son_slot.value,
+            "a_slot": mon_slot_val,
+            "b_slot": son_slot_val,
             "a_item_snap": dict(item_a),  # snapshot pour anti-tamper
             "b_item_snap": dict(item_b),
             "coins_bonus": coins_bonus,
@@ -40771,8 +40834,8 @@ async def trade_cmd(
         _trade_locks[key_b] = trade_id
 
         # Construire le panel pour B
-        a_disp = _format_trade_item(item_a, mon_slot.value)
-        b_disp = _format_trade_item(item_b, son_slot.value)
+        a_disp = _format_trade_item(item_a, mon_slot_val)
+        b_disp = _format_trade_item(item_b, son_slot_val)
         coins_line = f"\n💰 **+ `{coins_bonus:,}` 🪙 de bonus**" if coins_bonus > 0 else ""
 
         class _TradeAccept(discord.ui.Button):
