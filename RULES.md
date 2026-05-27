@@ -1,32 +1,53 @@
 # 📜 Règles permanentes du projet
 
 Ce fichier liste les **contraintes strictes et permanentes** qui doivent être
-respectées dans toute évolution du code. À lire avant d'ajouter une feature.
+respectées dans toute évolution du code. À lire **avant** d'ajouter une feature.
 
 ---
 
-## 🚫 Contenu interdit
+## 🎯 Identité du serveur
 
-### ❌ Aucun système romantique / couple / mariage
-**STRICTEMENT INTERDIT** sur ce serveur :
+Ce serveur est **un serveur d'événements, de gestion, de compétition et de
+communauté Roblox**. Pas une plateforme de relations interpersonnelles.
 
-- ❌ Système de mariage entre membres (`/marry`, `/divorce`, etc.)
-- ❌ Système de couple / duo romantique
-- ❌ Bagues, partenaire, conjoint, fiancé(e)
-- ❌ "Dating" ou matchmaking romantique
-- ❌ Emoji ❤️ comme cœur principal d'un event/mécanique
-- ❌ Vocabulaire « amour » dans les messages auto du bot
+Direction prise :
+- ✅ **Événements** : boss raids, world bosses, mini-jeux, treasure hunt, quiz
+- ✅ **Économie** : coins, bank, marketplace, auctions, crafting, trade
+- ✅ **Progression** : XP, level, prestige, achievements, streaks
+- ✅ **Clans / Factions / Alliances** : guildes, équipes, coffres partagés
+- ✅ **Gestion** : alliance management, trésorerie, log d'activité, rôles
+- ✅ **Compétition** : duels, tournois, ladder Elo, faction wars
+- ✅ **Roblox-spécifique** : updates, link verify, achievements broadcasts
 
-> Si une feature ressemble à un lien romantique entre membres, **ne pas la coder**.
-> Préférer rivalité (`/bond rival`), amitié (`/bond friend`), highfive ou hug.
+---
+
+## 🚫 Contenu interdit (strict)
+
+### ❌ Aucun système relationnel / romantique / "copain-copain"
+**TOTALEMENT INTERDIT** :
+
+- ❌ **Mariage** / fiançailles / duo permanent / partenariat romantique
+- ❌ **Couple** / dating / matchmaking / "âme sœur"
+- ❌ **Amitié explicite** entre joueurs (système de friendship, friend list,
+     amis acceptés) — l'amitié n'est PAS une feature à coder
+- ❌ **Hug / câlin / highfive** / interactions tactiles 1-vers-1
+- ❌ **Compliment anonyme** / "tu es génial" / gentillesse anonyme
+- ❌ **Cœur** (❤️ 💕 💖 💝 💞 💗 💘 💌 🥰 😘 ❣️ 💟) comme emoji de feature
+     ou de panel. Exception unique : ❤️ utilisé pour HP en combat (convention
+     RPG universelle, lifepoints/santé).
+- ❌ Vocabulaire « amour », « cœur de ... », « ami(e) cher(e) », etc.
+     dans les messages générés par le bot
+
+> Si une feature ressemble à "rapprocher deux joueurs personnellement",
+> **ne pas la coder**. Préférer rivalité (déjà existante), faction wars,
+> alliance contribution, leaderboard, mentor/apprenti (système d'aide).
 
 ### ❌ Aucun staff ne doit avoir les commandes Kick ou Ban
-- Les sanctions disponibles aux modérateurs sont uniquement :
-  warn / mute / direction / unwarn / unmute
+- Sanctions modé disponibles : **warn / mute / direction / unwarn / unmute**
 - Le bannissement reste accessible aux owners du serveur via Discord nativement,
   pas via slash command modé
 
-### ❌ Pas d'événements dans les salons tickets / annonces / lecture-seule
+### ❌ Pas d'événements dans tickets / annonces / lecture-seule
 Les events ne doivent jamais spawn dans :
 - Salons tickets
 - Salons announcements (annonces, news, updates)
@@ -37,7 +58,7 @@ Utiliser le helper `_is_chatty_channel` pour filtrer.
 ### ❌ Pas de mass-mention
 Limite Discord TOS : **max 3 mentions** dans un seul message bot.
 
-### ❌ Pas de Kick ni Ban depuis les alliances
+### ❌ Alliances : pas de pouvoir sur Discord
 - Le chef d'une alliance peut expulser un membre **de l'alliance** uniquement
 - Il ne peut JAMAIS kick / ban un membre du serveur Discord
 - Une expulsion d'alliance retire seulement les permissions d'alliance, pas la
@@ -59,6 +80,15 @@ Limite Discord TOS : **max 3 mentions** dans un seul message bot.
 ## 🔖 Historique des règles
 
 - **2026-05-28** : Création du fichier. Interdiction explicite de tout système
-  romantique / mariage / couple. Cleanup des features `propose_marry`,
-  `divorce`, `get_spouse`, achievement `marriage`, event `Vague d'amour`,
-  emoji ❤️ comme target d'un event de sync.
+  romantique / mariage / couple.
+- **2026-05-28** : **Renforcement** — interdiction étendue à toute feature
+  type "copain-copain" : friendship, hug, highfive, compliment anonyme,
+  emoji cœurs (sauf ❤️ HP). Strip :
+    - `social_bonds.py` (module entier supprimé)
+    - `/bond` group + 7 sub-commands (friend, unfriend, rival, unrival,
+       hug, highfive, list)
+    - `ComplimentSelectView` + `ComplimentOpenView` +
+       `_post_compliment_of_the_day` + `compliment_dispatcher`
+       (dead-code restant de Phase 48 Suppression Compliment)
+    - Achievement `marriage` dans engagement41.py
+    - Event "Vague d'amour ❤️" dans events42.py
