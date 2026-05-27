@@ -313,6 +313,9 @@ def random_gear_any(rarity_bias: float = 1.0) -> dict:
 
     Pondération équilibrée : weapon/armor 25% chacun, helmet/boots/accessory/trinket
     12.5% chacun (les nouveaux slots droppent moins souvent que weapon/armor).
+
+    Phase 104 : applique un enchantment aléatoire (30% chance sur épique+,
+    60% chance sur légendaire+).
     """
     r = random.random()
     if r < 0.25:
@@ -329,7 +332,89 @@ def random_gear_any(rarity_bias: float = 1.0) -> dict:
         item = random_accessory(rarity_bias)
     else:
         item = random_trinket(rarity_bias)
+
+    # Phase 104 : enchantment chance basée sur rareté
+    rarity = item.get("rarity", "commune")
+    enchant_chance = {
+        "commune": 0.0,
+        "rare": 0.10,
+        "épique": 0.30,
+        "légendaire": 0.60,
+        "mythique": 0.85,
+        "divine": 1.0,
+    }.get(rarity, 0.0)
+    if random.random() < enchant_chance:
+        item["enchant"] = random_enchantment(rarity_bias)
+
     return item
+
+
+# ─── Phase 104 : ENCHANTMENTS (modifiers magiques) ───────────────────────
+
+ENCHANTMENTS = [
+    # COMMON enchantments (small bonuses)
+    {"id": "flamme",     "name": "Flamme",        "emoji": "🔥", "atk_bonus": 3,                            "weight": 30, "tier": "minor",  "desc": "+3 ATK"},
+    {"id": "givre",      "name": "Givre",          "emoji": "❄️",  "def_bonus": 3,                            "weight": 30, "tier": "minor",  "desc": "+3 DEF"},
+    {"id": "vif",        "name": "Vif",            "emoji": "💨",  "crit_bonus": 3,                           "weight": 30, "tier": "minor",  "desc": "+3% CRIT"},
+    # MID enchantments
+    {"id": "vampirisme", "name": "Vampirisme",     "emoji": "🩸",  "lifesteal": 0.05, "atk_bonus": 2,         "weight": 15, "tier": "mid",    "desc": "5% lifesteal · +2 ATK"},
+    {"id": "fureur",     "name": "Fureur",         "emoji": "💢",  "atk_bonus": 6,                            "weight": 15, "tier": "mid",    "desc": "+6 ATK"},
+    {"id": "endurant",   "name": "Endurant",       "emoji": "🛡️",  "def_bonus": 6, "hp_bonus": 10,            "weight": 15, "tier": "mid",    "desc": "+6 DEF · +10 HP"},
+    # MAJOR enchantments
+    {"id": "tonnerre",   "name": "Tonnerre",       "emoji": "⚡",  "atk_bonus": 8, "crit_bonus": 5,           "weight": 6,  "tier": "major",  "desc": "+8 ATK · +5% CRIT"},
+    {"id": "divin",      "name": "Bénédiction divine","emoji": "🌟", "atk_bonus": 5, "def_bonus": 5, "crit_bonus": 5, "weight": 6, "tier": "major", "desc": "+5 ATK/DEF/CRIT"},
+    {"id": "chaos",      "name": "Chaos",          "emoji": "🌀",  "atk_bonus": 10, "crit_bonus": -3,         "weight": 4,  "tier": "major",  "desc": "+10 ATK · −3% CRIT (chaos)"},
+    # MYTHIC enchantments
+    {"id": "phoenix",    "name": "Phénix",         "emoji": "🦅",  "atk_bonus": 12, "crit_bonus": 8, "lifesteal": 0.08, "weight": 2, "tier": "mythic", "desc": "+12 ATK · +8% CRIT · 8% lifesteal"},
+    {"id": "dragon",     "name": "Souffle du Dragon","emoji": "🐉", "atk_bonus": 15, "crit_bonus": 10,         "weight": 1,  "tier": "mythic", "desc": "+15 ATK · +10% CRIT"},
+]
+
+
+def random_enchantment(rarity_bias: float = 1.0) -> dict:
+    """Phase 104 : tire un enchantment aléatoire pondéré.
+
+    Plus le rarity_bias est élevé, plus on favorise les tiers mid/major/mythic.
+    """
+    if rarity_bias != 1.0:
+        adjusted = []
+        for e in ENCHANTMENTS:
+            new_e = dict(e)
+            if e["tier"] in ("mid", "major", "mythic"):
+                new_e["weight"] = max(1, int(e["weight"] * rarity_bias))
+            adjusted.append(new_e)
+        chosen = dict(_weighted_choice(adjusted))
+    else:
+        chosen = dict(_weighted_choice(ENCHANTMENTS))
+    # Return only the keys utiles (pas weight/tier internes)
+    return {
+        "id": chosen["id"],
+        "name": chosen["name"],
+        "emoji": chosen["emoji"],
+        "desc": chosen["desc"],
+        "atk_bonus": chosen.get("atk_bonus", 0),
+        "def_bonus": chosen.get("def_bonus", 0),
+        "crit_bonus": chosen.get("crit_bonus", 0),
+        "hp_bonus": chosen.get("hp_bonus", 0),
+        "lifesteal": chosen.get("lifesteal", 0.0),
+    }
+
+
+def gear_total_stats(item: dict) -> dict:
+    """Phase 104 : calcule les stats totales d'un item (base + enchant).
+
+    Retourne {atk, def, crit, hp_bonus, lifesteal}.
+    """
+    base_atk = int(item.get("atk", 0) or 0)
+    base_def = int(item.get("def", 0) or 0)
+    base_crit = int(item.get("crit", 0) or 0)
+    enchant = item.get("enchant") or {}
+    return {
+        "atk": base_atk + int(enchant.get("atk_bonus", 0) or 0),
+        "def": base_def + int(enchant.get("def_bonus", 0) or 0),
+        "crit": base_crit + int(enchant.get("crit_bonus", 0) or 0),
+        "hp_bonus": int(enchant.get("hp_bonus", 0) or 0),
+        "lifesteal": float(enchant.get("lifesteal", 0.0) or 0.0),
+    }
 
 
 def random_boss(difficulty: int = 100) -> dict:
@@ -1294,10 +1379,12 @@ __all__ = [
     "CLASSES", "VOICE_ZONES",
     # Phase 102 : nouveaux slots équipement
     "HELMETS", "BOOTS_LIST", "ACCESSORIES", "TRINKETS",
+    # Phase 104 : enchantments
+    "ENCHANTMENTS",
     # Generators
     "random_weapon", "random_armor", "random_boss", "random_treasure",
     "random_helmet", "random_boots", "random_accessory", "random_trinket",
-    "random_gear_any",
+    "random_gear_any", "random_enchantment", "gear_total_stats",
     "generate_shop_rotation", "get_quiz_set", "random_personal_event",
     "random_mystery_box", "random_daily_spark",
     # Targeting

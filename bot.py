@@ -39744,9 +39744,31 @@ async def inventory_cmd(i: discord.Interaction):
         acc = inv.get('accessory', {}) or {}
         tri = inv.get('trinket', {}) or {}
 
-        atk = int(w.get('atk', 0) or 0) + int(h.get('atk', 0) or 0) + int(acc.get('atk', 0) or 0)
-        defe = int(a.get('def', 0) or 0) + int(h.get('def', 0) or 0) + int(b.get('def', 0) or 0)
-        power_score = atk + defe * 2
+        # Phase 104 : stats totales = base + enchantments
+        def _slot_total(item: dict) -> dict:
+            try:
+                return events2026.gear_total_stats(item)
+            except Exception:
+                return {
+                    'atk': int(item.get('atk', 0) or 0),
+                    'def': int(item.get('def', 0) or 0),
+                    'crit': int(item.get('crit', 0) or 0),
+                    'hp_bonus': 0, 'lifesteal': 0.0,
+                }
+
+        w_s = _slot_total(w)
+        a_s = _slot_total(a)
+        h_s = _slot_total(h)
+        b_s = _slot_total(b)
+        acc_s = _slot_total(acc)
+        tri_s = _slot_total(tri)
+
+        atk = w_s['atk'] + h_s['atk'] + acc_s['atk'] + tri_s['atk']
+        defe = a_s['def'] + h_s['def'] + b_s['def']
+        total_crit = w_s['crit'] + a_s['crit'] + h_s['crit'] + b_s['crit'] + acc_s['crit'] + tri_s['crit']
+        total_hp_bonus = sum(s['hp_bonus'] for s in (w_s, a_s, h_s, b_s, acc_s, tri_s))
+        total_lifesteal = sum(s['lifesteal'] for s in (w_s, a_s, h_s, b_s, acc_s, tri_s))
+        power_score = atk + defe * 2 + total_crit * 3
 
         # Coins
         coins = 0
@@ -39809,26 +39831,33 @@ async def inventory_cmd(i: discord.Interaction):
                 # ─── GROUPE 1 : ÉQUIPEMENT PRINCIPAL ───
                 items.append(v2_body("**╔═══ ⚔️  ÉQUIPEMENT  ═══╗**"))
 
+                # Helper : formatte une ligne enchantment si présent
+                def _enchant_line(item: dict) -> str:
+                    ench = item.get('enchant') or {}
+                    if not ench:
+                        return ""
+                    return f"\n   ✨ **{ench.get('emoji', '✨')} {ench.get('name', '?')}** — _{ench.get('desc', '')}_"
+
                 # Arme
                 w_emoji = w.get('emoji', '⚪')
                 w_name = w.get('name', '_aucune arme équipée_')
                 w_rarity = _rarity_badge(w)
-                w_atk = int(w.get('atk', 0) or 0)
                 items.append(v2_body(
                     f"**⚔️ Arme**  {w_rarity}\n"
                     f"{w_emoji} {w_name}\n"
-                    f"`+{w_atk}` ATK"
+                    f"`+{w_s['atk']}` ATK"
+                    + _enchant_line(w)
                 ))
 
                 # Armure
                 a_emoji = a.get('emoji', '⚪')
                 a_name = a.get('name', '_aucune armure équipée_')
                 a_rarity = _rarity_badge(a)
-                a_def = int(a.get('def', 0) or 0)
                 items.append(v2_body(
                     f"**🛡️ Armure**  {a_rarity}\n"
                     f"{a_emoji} {a_name}\n"
-                    f"`+{a_def}` DEF"
+                    f"`+{a_s['def']}` DEF"
+                    + _enchant_line(a)
                 ))
 
                 # Slots futurs (Helmet / Boots / Accessory / Trinket)
@@ -39846,21 +39875,34 @@ async def inventory_cmd(i: discord.Interaction):
                             si_emoji = slot_item.get('emoji', slot_emoji_default)
                             si_name = slot_item.get('name', '_vide_')
                             si_rarity = _rarity_badge(slot_item)
+                            # Phase 104 : mods incluent base + enchant total
+                            si_stats = _slot_total(slot_item)
                             mods = []
-                            if slot_item.get('atk'): mods.append(f"+{slot_item['atk']} ATK")
-                            if slot_item.get('def'): mods.append(f"+{slot_item['def']} DEF")
-                            if slot_item.get('crit'): mods.append(f"+{slot_item['crit']}% CRIT")
+                            if si_stats['atk']: mods.append(f"+{si_stats['atk']} ATK")
+                            if si_stats['def']: mods.append(f"+{si_stats['def']} DEF")
+                            if si_stats['crit']: mods.append(f"+{si_stats['crit']}% CRIT")
                             mods_str = " · ".join(mods) if mods else "—"
                             items.append(v2_body(
                                 f"**{slot_label}**  {si_rarity}\n{si_emoji} {si_name}\n`{mods_str}`"
+                                + _enchant_line(slot_item)
                             ))
 
                 items.append(v2_divider())
 
                 # ─── GROUPE 2 : STATS COMBAT ───
                 items.append(v2_body("**╔═══ ❤️  VITALITÉ  ═══╗**"))
+                # Phase 104 : afficher CRIT total + lifesteal si > 0
+                crit_line = f"\n**🎯 Critique**  `+{total_crit}%`" if total_crit > 0 else ""
+                lifesteal_line = (
+                    f"\n**🩸 Lifesteal**  `+{int(total_lifesteal * 100)}%`"
+                    if total_lifesteal > 0 else ""
+                )
+                hp_bonus_line = f"\n**💚 HP bonus**  `+{total_hp_bonus}`" if total_hp_bonus > 0 else ""
                 items.append(v2_body(
                     f"**HP**  `{hp_bar}` `{hp}/{max_hp}`\n"
+                    f"**⚔️ ATK total**  `+{atk}`\n"
+                    f"**🛡️ DEF total**  `+{defe}`"
+                    f"{crit_line}{lifesteal_line}{hp_bonus_line}\n"
                     f"**⚡ Puissance**  `{power_score}`  ({power_tier})\n"
                     f"**💀 Boss vaincus**  `{kills}`\n"
                     f"**💥 Dégâts à vie**  `{total_dmg:,}`"
