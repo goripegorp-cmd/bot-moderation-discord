@@ -50480,23 +50480,37 @@ async def _spawn_flash_treasure(guild) -> bool:
         # voir qui a gagné). Le delete_after natif s'applique au "message en attente" : si
         # personne ne grab, il disparaît à 60s.
         LIFETIME_TREASURE = 60
-        e = discord.Embed(
-            description=(
-                f"💎 **Quelque chose brille dans ce salon...**\n"
-                f"Cliquez vite — la fenêtre se ferme dans **60 secondes**.\n\n"
-                f"{_claim_chrono(LIFETIME_TREASURE)}"
-            ),
-            color=0xF1C40F,
-        )
-        e.set_footer(text="Trésor Flash · Premier arrivé, premier servi")
-
-        view = FlashTreasureView()
+        # Phase 76 : LayoutView V2 — section avec bouton "Saisir" en accessory.
+        # Custom_id "flash_grab" stable → bot.add_view(FlashTreasureView()) au
+        # boot continue de capter les clics. Le callback reste dans FlashTreasureView.
         try:
-            # Phase 69 : delete_after natif Discord + persistent registration
-            # 60s fenêtre + 75s grace + 60s expired display = ~195s total max
+            grab_btn = Button(
+                label="🤚 Saisir",
+                style=discord.ButtonStyle.success,
+                custom_id="flash_grab",
+            )
+            # Pas de callback assigné : Discord dispatch via custom_id global
+            # vers FlashTreasureView._on_grab (registered via bot.add_view)
+
+            class _FlashLayout(LayoutView):
+                def __init__(self):
+                    super().__init__(timeout=None)
+                    items = [
+                        v2_title("💎 Trésor Flash"),
+                        v2_subtitle("Premier arrivé, premier servi"),
+                        v2_divider(),
+                    ]
+                    items.append(_section_with_button(
+                        "✨ Quelque chose brille...",
+                        f"Fenêtre : **60 secondes**\n{_claim_chrono(LIFETIME_TREASURE)}",
+                        grab_btn,
+                    ))
+                    self.add_item(v2_container(*items, color=0xF1C40F))
+
+            v2_view = _FlashLayout()
+            # Phase 69+76 : delete_after natif Discord + persistent registration
             msg = await ch.send(
-                embed=e,
-                view=view,
+                view=v2_view,
                 allowed_mentions=discord.AllowedMentions.none(),
                 delete_after=200,
             )
@@ -50506,7 +50520,7 @@ async def _spawn_flash_treasure(guild) -> bool:
             except Exception:
                 pass
         except Exception as ex:
-            print(f"[_spawn_flash_treasure send] {ex}")
+            print(f"[_spawn_flash_treasure send V2] {ex}")
             return False
 
         # Insérer en DB
