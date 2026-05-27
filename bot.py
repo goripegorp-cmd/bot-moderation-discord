@@ -37013,12 +37013,232 @@ async def on_app_command_error(interaction: discord.Interaction, error):
     except Exception as ex:
         print(f"[APP CMD ERROR HANDLER FATAL] {ex}")
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 114 — BOOT CLEANUP : reset events actifs au démarrage
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# À chaque redéploiement Railway, les events `ended=0` en DB sont morts :
+# - Le message d'arène a perdu son bouton (View pas re-attachée)
+# - L'anti-spam Phase 69 bloque les nouveaux spawns du même type
+# - Les caches in-memory sont vides → incohérence vs DB
+#
+# Solution : au boot, marquer tous les events actifs comme terminés et vider
+# les caches. GARDE INTACT :
+# - player_inventory (équipement + HP + coins event)
+# - economy (coins/banque/XP/level)
+# - player_badges + player_event_stats (stats cumulées)
+# - loot_history, auctions, pets, daily_quests, achievements, missions, etc.
+#
+# Tente aussi de supprimer les messages d'arène orphelins (best-effort).
+async def _boot_cleanup_active_events():
+    """Phase 114 : reset events actifs + clear in-memory caches.
+
+    Idempotent : si rien à nettoyer, no-op. Log un récap des compteurs.
+    """
+    counts = {"events": 0, "world_bosses": 0, "flash_treasures": 0,
+              "voice_chaos": 0, "msgs_deleted": 0, "perms_restored": 0}
+
+    # ─── 1. Récolter les message_ids à supprimer + snapshots de perms ───
+    orphans_to_delete = []  # list of (channel_id, message_id)
+    perm_snapshots = []     # list of (guild_id, channel_id, had_overwrite, allow, deny)
+    try:
+        async with get_db() as db:
+            # events (Boss Raid + Treasure + Quiz)
+            async with db.execute(
+                "SELECT id, guild_id, arena_channel_id, arena_message_id FROM events "
+                "WHERE ended=0"
+            ) as cur:
+                event_rows = await cur.fetchall()
+            for eid, gid, ch, msg in event_rows:
+                if ch and msg:
+                    orphans_to_delete.append((int(ch), int(msg)))
+                # Charger snapshots de perms pour cet event
+                try:
+                    async with db.execute(
+                        "SELECT channel_id, had_overwrite, allow_value, deny_value "
+                        "FROM event_channel_snapshots WHERE event_id=?",
+                        (eid,),
+                    ) as sc:
+                        for ch_id, had, allow_v, deny_v in await sc.fetchall():
+                            perm_snapshots.append((int(gid), int(ch_id), int(had or 0), int(allow_v or 0), int(deny_v or 0)))
+                except Exception:
+                    pass
+            # world_bosses
+            async with db.execute(
+                "SELECT arena_channel_id, arena_message_id FROM world_bosses "
+                "WHERE ended=0 AND arena_message_id IS NOT NULL"
+            ) as cur:
+                for ch, msg in await cur.fetchall():
+                    if ch and msg:
+                        orphans_to_delete.append((int(ch), int(msg)))
+            # flash_treasures
+            async with db.execute(
+                "SELECT channel_id, message_id FROM flash_treasures "
+                "WHERE ended=0 AND message_id IS NOT NULL"
+            ) as cur:
+                for ch, msg in await cur.fetchall():
+                    if ch and msg:
+                        orphans_to_delete.append((int(ch), int(msg)))
+    except Exception as ex:
+        print(f"[boot_cleanup collect orphans] {ex}")
+
+    # ─── 2. Restaurer les permissions @everyone des salons d'event ───
+    # (les channels ont été restreints/ouverts pendant l'event ; on remet
+    # l'état d'origine snapshot AVANT mark-ended pour ne pas perdre l'info)
+    if perm_snapshots:
+        for gid, ch_id, had, allow_v, deny_v in perm_snapshots:
+            try:
+                guild = bot.get_guild(gid)
+                if not guild:
+                    continue
+                ch = guild.get_channel(ch_id)
+                if not ch:
+                    continue
+                try:
+                    if had:
+                        perm = discord.PermissionOverwrite.from_pair(
+                            discord.Permissions(allow_v),
+                            discord.Permissions(deny_v),
+                        )
+                        await ch.set_permissions(
+                            guild.default_role, overwrite=perm,
+                            reason="Phase 114 boot cleanup — restore event perms",
+                        )
+                    else:
+                        await ch.set_permissions(
+                            guild.default_role, overwrite=None,
+                            reason="Phase 114 boot cleanup — clear event perms",
+                        )
+                    counts["perms_restored"] += 1
+                except (discord.Forbidden, discord.HTTPException):
+                    pass
+            except Exception as ex:
+                print(f"[boot_cleanup restore perm ch={ch_id}] {ex}")
+
+    # ─── 3. Mark-ended en DB (tous events actifs) ───
+    try:
+        async with get_db() as db:
+            cur = await db.execute("UPDATE events SET ended=1 WHERE ended=0")
+            counts["events"] = cur.rowcount or 0
+            cur = await db.execute("UPDATE world_bosses SET ended=1 WHERE ended=0")
+            counts["world_bosses"] = cur.rowcount or 0
+            cur = await db.execute("UPDATE flash_treasures SET ended=1 WHERE ended=0")
+            counts["flash_treasures"] = cur.rowcount or 0
+            # voice_chaos_log : reverted=1 (libère la protection sur les vocaux)
+            cur = await db.execute(
+                "UPDATE voice_chaos_log SET reverted=1 WHERE reverted=0"
+            )
+            counts["voice_chaos"] = cur.rowcount or 0
+            await db.commit()
+    except Exception as ex:
+        print(f"[boot_cleanup mark-ended] {ex}")
+
+    # ─── 4. Clear in-memory caches d'events ───
+    # IMPORTANT : on garde _crit_streaks, _attack_cooldown (lifecycle court de
+    # toute façon), mais on clear tout ce qui référence un event spécifique.
+    try:
+        _active_events_cache.clear()
+    except Exception:
+        pass
+    try:
+        _recent_attacks_log.clear()
+    except Exception:
+        pass
+    try:
+        _event_combo_count.clear()
+    except Exception:
+        pass
+    try:
+        _mystery_boxes.clear()
+    except Exception:
+        pass
+    try:
+        _gn_event_state.clear()
+    except Exception:
+        pass
+    try:
+        _light_event_visible.clear()
+    except Exception:
+        pass
+    try:
+        _quiz_state.clear()
+    except Exception:
+        pass
+    try:
+        _treasure_pool.clear()
+    except Exception:
+        pass
+    try:
+        _heist_targets.clear()
+    except Exception:
+        pass
+    # Phase 111 : forcer un refresh complet du live events tile
+    try:
+        _hub_live_events_sig_cache.clear()
+    except Exception:
+        pass
+    # Phase 108 : si des trades étaient pending ils sont morts maintenant
+    try:
+        _active_trades.clear()
+    except Exception:
+        pass
+    try:
+        _trade_locks.clear()
+    except Exception:
+        pass
+
+    # ─── 5. Tenter de supprimer les messages d'arène orphelins (best-effort) ───
+    if orphans_to_delete:
+        deleted = 0
+        for ch_id, msg_id in orphans_to_delete[:100]:  # cap pour pas spammer l'API
+            try:
+                ch = bot.get_channel(ch_id)
+                if not ch:
+                    continue
+                try:
+                    msg = await ch.fetch_message(msg_id)
+                    await msg.delete()
+                    deleted += 1
+                except (discord.NotFound, discord.Forbidden):
+                    pass
+                except Exception as ex:
+                    print(f"[boot_cleanup del msg {msg_id}] {ex}")
+            except Exception:
+                pass
+        counts["msgs_deleted"] = deleted
+
+    total_db = counts["events"] + counts["world_bosses"] + counts["flash_treasures"] + counts["voice_chaos"]
+    if total_db > 0 or counts["msgs_deleted"] > 0 or counts["perms_restored"] > 0:
+        print(
+            f"🧹 [boot_cleanup Phase 114] reset terminé : "
+            f"{counts['events']} events · {counts['world_bosses']} world_bosses · "
+            f"{counts['flash_treasures']} flash_treasures · "
+            f"{counts['voice_chaos']} voice_chaos · "
+            f"{counts['perms_restored']} perms restaurées · "
+            f"{counts['msgs_deleted']} messages orphelins supprimés"
+        )
+    else:
+        print("🧹 [boot_cleanup Phase 114] aucun event actif à nettoyer")
+
+
 @bot.event
 async def on_ready():
     await db_init()
     await _db_pool.init()  # Initialise le pool de connexions DB
     await load_live_state_from_db()  # Charge l'état des lives depuis la DB
-    
+
+    # ═══ Phase 114 — Boot cleanup events fantômes ═══
+    # Après un redéploiement Railway, les events `ended=0` en DB sont morts
+    # (boutons cassés, messages orphelins, anti-spam bloquant nouveaux spawns).
+    # On les marque tous ended/reverted et on vide les caches in-memory.
+    # IMPORTANT : on garde TOUT le reste — player_inventory, economy,
+    # player_badges, player_event_stats, loot_history, auctions, pets, etc.
+    try:
+        await _boot_cleanup_active_events()
+    except Exception as ex:
+        print(f"[on_ready boot_cleanup_active_events] {ex}")
+
     # ═══ Capture l'avatar du bot pour TOUS les webhooks ═══
     global _BOT_AVATAR_URL
     try:
