@@ -64484,11 +64484,10 @@ class BankPanelView(View):
 
 
 async def _open_bank_panel(i: discord.Interaction):
-    if not await _safe_defer(i):
-        return
+    """Phase 72 : panel Banque en LayoutView V2."""
     try:
         if not i.guild:
-            return await _safe_followup(i, content="❌ Serveur uniquement.")
+            return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
         async with get_db() as db:
             async with db.execute(
                 "SELECT id, amount, deposited_at FROM user_bank_deposits "
@@ -64496,9 +64495,9 @@ async def _open_bank_panel(i: discord.Interaction):
                 (i.guild.id, i.user.id),
             ) as cur:
                 rows = await cur.fetchall()
+        deposits = []
         total_p = 0
         total_i = 0
-        lines = []
         for did, amt, dep_at in rows:
             try:
                 dt = datetime.fromisoformat(str(dep_at).replace('Z', '+00:00')) \
@@ -64508,25 +64507,26 @@ async def _open_bank_panel(i: discord.Interaction):
             except Exception:
                 days = 0
             interest = int(int(amt) * 0.01 * days)
+            deposits.append({
+                "id": int(did), "amount": int(amt), "days": days,
+                "interest": interest, "total": int(amt) + interest,
+            })
             total_p += int(amt)
             total_i += interest
-            lines.append(f"`#{did}` `{int(amt):,}` 🪙 +`{interest:,}` ({days}/30 j)")
-        e = discord.Embed(
-            title="🏦 Ta banque",
-            description=(
-                ("**Dépôts actifs :**\n" + "\n".join(lines) +
-                 f"\n\n💰 Total principal : `{total_p:,}` 🪙"
-                 f"\n💎 Intérêts cumulés : `{total_i:,}` 🪙"
-                 f"\n🏆 **Si tu retires tout :** `{total_p + total_i:,}` 🪙"
-                 if rows else "_Aucun dépôt actif._")
-                + "\n\n_Dépose pour gagner 1%/jour pendant 30 jours max._"
-            ),
-            color=0x3498DB,
-        )
-        await _safe_followup(i, embed=e, view=BankPanelView(bool(rows)))
+        view = BankLayoutV2(i.user.id, deposits, total_p, total_i)
+        if not i.response.is_done():
+            await i.response.send_message(view=view, ephemeral=True)
+        else:
+            await i.followup.send(view=view, ephemeral=True)
     except Exception as ex:
-        print(f"[_open_bank_panel] {ex}")
-        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+        print(f"[_open_bank_panel V2] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            else:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
 
 
 # ─── 💎 LOOTS (réutilise logique existante) ──────────────────────────────────
@@ -64737,27 +64737,25 @@ class PvPPanelView(View):
 
 
 async def _open_pvp_panel(i: discord.Interaction):
-    if not await _safe_defer(i):
-        return
+    """Phase 72 : panel PvP en LayoutView V2."""
     try:
+        if not i.guild:
+            return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
         my = await _get_ladder_rating(i.guild.id, i.user.id)
-        total = my["wins"] + my["losses"]
-        wr = (my["wins"] / total * 100) if total else 0
-        e = discord.Embed(
-            title=f"⚔️ PvP — Ton statut",
-            description=(
-                f"**Ton rating :** {_rating_division(my['rating'])} `{my['rating']}`\n"
-                f"**Victoires :** `{my['wins']}` · **Défaites :** `{my['losses']}`\n"
-                f"**Win Rate :** `{wr:.1f}%`\n\n"
-                f"_Défie un membre pour gagner ou perdre du rating Elo. "
-                f"Les duels peuvent être avec mise (winner prend tout)._"
-            ),
-            color=0xE74C3C,
-        )
-        await _safe_followup(i, embed=e, view=PvPPanelView())
+        view = PvPLayoutV2(i.user.id, my)
+        if not i.response.is_done():
+            await i.response.send_message(view=view, ephemeral=True)
+        else:
+            await i.followup.send(view=view, ephemeral=True)
     except Exception as ex:
-        print(f"[_open_pvp_panel] {ex}")
-        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+        print(f"[_open_pvp_panel V2] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            else:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
 
 
 # ─── 🎖️ CLASSE RP (réutilise ClassSelectView Phase 57) ──────────────────────
@@ -65793,6 +65791,457 @@ class RobloxLayoutV2(LayoutView):
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 72 — SUB-PANELS NIVEAU 2 EN V2 : Bank + PvP + Alliance
+#  Migration des panneaux ouverts depuis les sub-hubs vers LayoutView V2.
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class BankLayoutV2(LayoutView):
+    """Panel Banque en V2 — status + actions inline."""
+
+    def __init__(self, user_id: int, deposits: list, total_principal: int, total_interest: int):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        self.deposits = deposits
+        self.total_principal = total_principal
+        self.total_interest = total_interest
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.user_id
+
+    def _build(self):
+        items = []
+        items.append(v2_title("🏦 Ta banque"))
+        items.append(v2_subtitle("Dépôts avec 1%/jour pendant 30 jours max"))
+        items.append(v2_divider())
+
+        # Status
+        if self.deposits:
+            lines = [f"`#{d['id']}` `{d['amount']:,}` 🪙 +`{d['interest']:,}` ({d['days']}/30 j)"
+                     for d in self.deposits[:10]]
+            items.append(v2_body(
+                f"**Dépôts actifs ({len(self.deposits)}) :**\n" + "\n".join(lines) +
+                f"\n\n💰 **Principal total :** `{self.total_principal:,}` 🪙"
+                f"\n💎 **Intérêts cumulés :** `{self.total_interest:,}` 🪙"
+                f"\n🏆 **Si tu retires tout :** `{self.total_principal + self.total_interest:,}` 🪙"
+            ))
+        else:
+            items.append(v2_body("_Aucun dépôt actif. Utilise le bouton ci-dessous pour déposer._"))
+
+        items.append(v2_divider())
+
+        b_dep = Button(label="Déposer", style=discord.ButtonStyle.success, custom_id="bankv2_deposit")
+        b_dep.callback = self._on_deposit
+        items.append(_section_with_button(
+            "📥 Nouveau dépôt", "Min 100 🪙 · gagnera +1%/jour pendant 30 jours", b_dep,
+        ))
+
+        if self.deposits:
+            b_wit = Button(label="Choisir", style=discord.ButtonStyle.primary, custom_id="bankv2_withdraw")
+            b_wit.callback = self._on_withdraw
+            items.append(_section_with_button(
+                "📤 Retirer un dépôt", "Récupère principal + intérêts cumulés", b_wit,
+            ))
+
+        items.append(v2_divider())
+        b_close = Button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger,
+                         custom_id="bankv2_close")
+        b_close.callback = self._on_close
+        items.append(discord.ui.ActionRow(b_close))
+
+        self.add_item(v2_container(*items, color=Palette.SUCCESS if hasattr(Palette, 'SUCCESS') else 0x3498DB))
+
+    async def _on_deposit(self, i):
+        try:
+            await i.response.send_modal(BankDepositModal())
+        except Exception as ex:
+            print(f"[BankLayoutV2 deposit] {ex}")
+
+    async def _on_withdraw(self, i):
+        if not await _safe_defer(i):
+            return
+        try:
+            await _safe_followup(
+                i,
+                content="📤 Choisis le dépôt à retirer :",
+                view=BankWithdrawSelectView(self.deposits),
+            )
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_close(self, i):
+        try:
+            await i.response.edit_message(content="✅ Fermé.", view=None, embed=None, embeds=[], attachments=[])
+        except Exception:
+            pass
+
+
+class PvPLayoutV2(LayoutView):
+    """Panel PvP en V2 — stats personnelles + actions inline."""
+
+    def __init__(self, user_id: int, my_rating: dict):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        self.my_rating = my_rating
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.user_id
+
+    def _build(self):
+        items = []
+        my = self.my_rating
+        total = my["wins"] + my["losses"]
+        wr = (my["wins"] / total * 100) if total else 0
+        items.append(v2_title("⚔️ PvP — Ladder Elo"))
+        items.append(v2_subtitle(f"Ton rating : {_rating_division(my['rating'])} `{my['rating']}`"))
+        items.append(v2_divider())
+        items.append(v2_body(
+            f"**Victoires :** `{my['wins']}` · **Défaites :** `{my['losses']}`\n"
+            f"**Win Rate :** `{wr:.1f}%`\n\n"
+            f"_Défie un membre pour gagner ou perdre du rating. "
+            f"Les duels peuvent avoir une mise (winner prend tout)._"
+        ))
+        items.append(v2_divider())
+
+        b_top = Button(label="Top 10", style=discord.ButtonStyle.primary, custom_id="pvpv2_top")
+        b_top.callback = self._on_top
+        items.append(_section_with_button(
+            "📊 Top 10 Ladder", "Voir le classement Elo actuel", b_top,
+        ))
+
+        b_duel = Button(label="Choisir", style=discord.ButtonStyle.danger, custom_id="pvpv2_duel")
+        b_duel.callback = self._on_duel
+        items.append(_section_with_button(
+            "⚔️ Défier un membre", "UserSelect → choisir mise (0/10/50/100/500)", b_duel,
+        ))
+
+        items.append(v2_divider())
+        b_close = Button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger,
+                         custom_id="pvpv2_close")
+        b_close.callback = self._on_close
+        items.append(discord.ui.ActionRow(b_close))
+
+        self.add_item(v2_container(*items, color=Palette.DANGER if hasattr(Palette, 'DANGER') else 0xE74C3C))
+
+    async def _on_top(self, i):
+        if not await _safe_defer(i):
+            return
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT user_id, rating, wins, losses FROM ladder_ratings "
+                    "WHERE guild_id=? AND (wins+losses)>0 ORDER BY rating DESC LIMIT 10",
+                    (i.guild.id,),
+                ) as cur:
+                    rows = await cur.fetchall()
+            if not rows:
+                return await _safe_followup(i, content="_Personne n'a encore dueléé._")
+            medals = ["🥇", "🥈", "🥉"]
+            lines = []
+            for idx, r in enumerate(rows):
+                m = i.guild.get_member(int(r[0]))
+                mname = m.display_name if m else f"User {r[0]}"
+                mark = medals[idx] if idx < 3 else f"`{idx+1:02d}`"
+                w = (int(r[2]) / max(1, int(r[2]) + int(r[3]))) * 100
+                lines.append(
+                    f"{mark} **{mname}** — {_rating_division(int(r[1]))} `{int(r[1])}` "
+                    f"(W:{int(r[2])} L:{int(r[3])} · {w:.0f}%)"
+                )
+            e = discord.Embed(
+                title="📊 Top 10 Ladder Elo",
+                description="\n".join(lines),
+                color=0xE74C3C,
+            )
+            await _safe_followup(i, embed=e)
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_duel(self, i):
+        if not await _safe_defer(i):
+            return
+        try:
+            await _safe_followup(
+                i,
+                content="⚔️ **Défier un membre** — choisis ton adversaire ci-dessous :",
+                view=DuelTargetSelectView(),
+            )
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_close(self, i):
+        try:
+            await i.response.edit_message(content="✅ Fermé.", view=None, embed=None, embeds=[], attachments=[])
+        except Exception:
+            pass
+
+
+class AllianceLayoutV2(LayoutView):
+    """Panel Alliance en V2 — sections différentes selon chef ou membre."""
+
+    def __init__(self, user_id: int, alliance: dict, is_leader: bool,
+                  treasury: int, members: list, leader_name: str):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        self.alliance = alliance
+        self.is_leader = is_leader
+        self.treasury = treasury
+        self.members = members
+        self.leader_name = leader_name
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.user_id
+
+    def _build(self):
+        items = []
+        items.append(v2_title(f"{self.alliance['emoji']} {self.alliance['name']}"))
+        role_label = "👑 Chef" if self.is_leader else "👤 Membre"
+        items.append(v2_subtitle(f"Ton rôle : {role_label} · {len(self.members)} membre(s)"))
+        items.append(v2_divider())
+
+        items.append(v2_body(
+            f"**Chef :** 👑 {_escape_md(self.leader_name, 60)}\n"
+            f"**Trésorerie :** `{self.treasury:,}` 🪙\n"
+            f"📍 Salon : <#{self.alliance['channel_id']}>"
+        ))
+
+        items.append(v2_divider())
+
+        # Actions COMMUNES (membre + chef)
+        b_t = Button(label="Voir", style=discord.ButtonStyle.primary, custom_id="alliv2_treasury")
+        b_t.callback = self._on_treasury
+        items.append(_section_with_button(
+            "💰 Trésorerie",
+            f"Total actuel : `{self.treasury:,}` 🪙", b_t,
+        ))
+
+        b_m = Button(label="Liste", style=discord.ButtonStyle.secondary, custom_id="alliv2_members")
+        b_m.callback = self._on_members
+        items.append(_section_with_button(
+            "👥 Membres",
+            f"{len(self.members)} membres dans l'alliance", b_m,
+        ))
+
+        b_dep = Button(label="Modal", style=discord.ButtonStyle.success, custom_id="alliv2_deposit")
+        b_dep.callback = self._on_deposit
+        items.append(_section_with_button(
+            "📥 Déposer dans la trésorerie",
+            "Min 10 🪙 · les coins restent à l'alliance", b_dep,
+        ))
+
+        b_audit = Button(label="Voir", style=discord.ButtonStyle.secondary, custom_id="alliv2_audit")
+        b_audit.callback = self._on_audit
+        items.append(_section_with_button(
+            "📜 Historique",
+            "15 dernières actions (dépôts/retraits/expulsions)", b_audit,
+        ))
+
+        if self.is_leader:
+            items.append(v2_divider())
+            items.append(v2_subtitle("👑 Actions chef (gestion alliance)"))
+
+            b_wit = Button(label="Modal", style=discord.ButtonStyle.danger, custom_id="alliv2_withdraw")
+            b_wit.callback = self._on_withdraw
+            items.append(_section_with_button(
+                "📤 Retirer pour toi",
+                "Retire des coins de la trésorerie vers ton solde perso", b_wit,
+            ))
+
+            b_give = Button(label="Choisir", style=discord.ButtonStyle.primary, custom_id="alliv2_give")
+            b_give.callback = self._on_give
+            items.append(_section_with_button(
+                "💸 Donner à un membre",
+                "Récompense un membre depuis la trésorerie", b_give,
+            ))
+
+            b_exp = Button(label="Choisir", style=discord.ButtonStyle.danger, custom_id="alliv2_expel")
+            b_exp.callback = self._on_expel
+            items.append(_section_with_button(
+                "🚪 Expulser un membre",
+                "De l'alliance UNIQUEMENT (aucun kick/ban Discord)", b_exp,
+            ))
+
+            b_tr = Button(label="Choisir", style=discord.ButtonStyle.secondary, custom_id="alliv2_transfer")
+            b_tr.callback = self._on_transfer
+            items.append(_section_with_button(
+                "👑 Transférer chefferie",
+                "Tu deviens membre normal, un autre devient chef", b_tr,
+            ))
+        else:
+            items.append(v2_divider())
+            b_leave = Button(label="Confirmer", style=discord.ButtonStyle.danger, custom_id="alliv2_leave")
+            b_leave.callback = self._on_leave
+            items.append(_section_with_button(
+                "🚪 Quitter l'alliance",
+                "Tu pourras en rejoindre une autre après", b_leave,
+            ))
+
+        items.append(v2_divider())
+        b_close = Button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger,
+                         custom_id="alliv2_close")
+        b_close.callback = self._on_close
+        items.append(discord.ui.ActionRow(b_close))
+
+        self.add_item(v2_container(*items, color=0x16A085))
+
+    async def _on_treasury(self, i):
+        try:
+            cur = await _get_alliance_treasury(self.alliance['id'])
+            await i.response.send_message(f"💰 Trésorerie : `{cur:,}` 🪙", ephemeral=True)
+        except Exception as ex:
+            try:
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+    async def _on_members(self, i):
+        if not await _safe_defer(i):
+            return
+        try:
+            members = await _alliance_get_full_members(self.alliance['id'], i.guild)
+            lines = []
+            for m in members:
+                role_emoji = "👑" if m["role"] == 'leader' else "👤"
+                lines.append(f"{role_emoji} **{_escape_md(m['display_name'], 60)}**")
+            e = discord.Embed(
+                title=f"👥 Membres de l'alliance ({len(members)})",
+                description="\n".join(lines) if lines else "_Vide._",
+                color=0x16A085,
+            )
+            await _safe_followup(i, embed=e)
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_deposit(self, i):
+        try:
+            await i.response.send_modal(AllianceDepositModal(self.alliance['id']))
+        except Exception as ex:
+            print(f"[AllianceLayoutV2 deposit] {ex}")
+
+    async def _on_audit(self, i):
+        if not await _safe_defer(i):
+            return
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT action, actor_id, target_id, amount, detail, created_at FROM alliance_audit_log "
+                    "WHERE alliance_id=? ORDER BY created_at DESC LIMIT 15",
+                    (self.alliance['id'],),
+                ) as cur:
+                    rows = await cur.fetchall()
+            if not rows:
+                return await _safe_followup(i, content="_Aucune action récente._")
+            action_labels = {
+                'deposit':            "📥 Dépôt",
+                'withdraw_self':      "📤 Retrait perso",
+                'give_member':        "💸 Don à membre",
+                'expel':              "🚪 Expulsion",
+                'transfer_leadership':"👑 Transfert chefferie",
+                'leave':              "🚪 Départ volontaire",
+            }
+            lines = []
+            for action, actor_id, target_id, amount, detail, created_at in rows:
+                actor = i.guild.get_member(int(actor_id))
+                actor_name = _escape_md(actor.display_name if actor else f"User {actor_id}", 60)
+                target = i.guild.get_member(int(target_id)) if target_id else None
+                target_name = _escape_md(target.display_name if target else (f"User {target_id}" if target_id else ""), 60)
+                lbl = action_labels.get(action, action)
+                line = f"`{str(created_at)[:16]}` {lbl} par **{actor_name}**"
+                if amount:
+                    line += f" — `{int(amount):,}` 🪙"
+                if target_name and target_id != actor_id:
+                    line += f" → **{target_name}**"
+                lines.append(line)
+            e = discord.Embed(
+                title="📜 Historique alliance (15 dernières actions)",
+                description="\n".join(lines),
+                color=0x95A5A6,
+            )
+            await _safe_followup(i, embed=e)
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_withdraw(self, i):
+        try:
+            await i.response.send_modal(AllianceWithdrawModal(self.alliance['id']))
+        except Exception as ex:
+            print(f"[AllianceLayoutV2 withdraw] {ex}")
+
+    async def _on_give(self, i):
+        if not await _safe_defer(i):
+            return
+        try:
+            others = [m for m in self.members if m["user_id"] != i.user.id]
+            if not others:
+                return await _safe_followup(i, content="_Pas d'autres membres dans l'alliance._")
+            await _safe_followup(
+                i,
+                content="💸 Choisis le membre à qui donner des coins :",
+                view=AllianceGiveTargetSelectView(self.alliance['id'], others),
+            )
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_expel(self, i):
+        if not await _safe_defer(i):
+            return
+        try:
+            others = [m for m in self.members if m["role"] != 'leader']
+            if not others:
+                return await _safe_followup(i, content="_Aucun membre à expulser._")
+            await _safe_followup(
+                i,
+                content="🚪 Choisis le membre à expulser de l'alliance :",
+                view=AllianceExpelTargetSelectView(self.alliance['id'], self.members),
+            )
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_transfer(self, i):
+        if not await _safe_defer(i):
+            return
+        try:
+            others = [m for m in self.members if m["role"] != 'leader']
+            if not others:
+                return await _safe_followup(i, content="_Aucun membre vers qui transférer._")
+            await _safe_followup(
+                i,
+                content="👑 Choisis le nouveau chef de l'alliance :",
+                view=AllianceTransferTargetSelectView(self.alliance['id'], self.members),
+            )
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_leave(self, i):
+        if not await _safe_defer(i):
+            return
+        try:
+            async with get_db() as db:
+                await db.execute(
+                    "DELETE FROM alliance_members WHERE alliance_id=? AND user_id=? AND role!='leader'",
+                    (self.alliance['id'], i.user.id),
+                )
+                await db.commit()
+            await _alliance_audit(self.alliance['id'], 'leave', i.user.id)
+            await _safe_followup(
+                i,
+                content="✅ Tu as quitté l'alliance. Tu peux en rejoindre une autre quand tu veux.",
+            )
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_close(self, i):
+        try:
+            await i.response.edit_message(content="✅ Fermé.", view=None, embed=None, embeds=[], attachments=[])
+        except Exception:
+            pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 68 — SÉCURITÉ RENFORCÉE : helpers _escape_md / _rate_limit / _validate_int
 #  Anti markdown injection, anti rate-abuse, validation stricte des inputs.
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -66611,22 +67060,19 @@ async def _alliance_get_full_members(alliance_id: int, guild) -> list:
 
 
 async def _open_alliance_panel(i: discord.Interaction):
-    """Bouton hub "🤝 Mon Alliance" : ouvre le panel selon role."""
-    if not await _safe_defer(i):
-        return
+    """Phase 72 : panel Alliance en LayoutView V2 — actions chef/membre inline."""
     try:
         if not i.guild:
-            return await _safe_followup(i, content="❌ Serveur uniquement.")
+            return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
         alliance = await _get_user_alliance(i.guild.id, i.user.id)
         if not alliance:
-            return await _safe_followup(
-                i,
-                content=(
-                    "_Tu n'es dans aucune alliance._\n\n"
-                    "_Utilise les commandes alliances existantes (Phase 46) pour en créer "
-                    "une ou rejoindre une invitation._"
-                ),
+            msg = (
+                "_Tu n'es dans aucune alliance._\n\n"
+                "_Utilise les commandes alliances existantes pour en créer une ou rejoindre._"
             )
+            if not i.response.is_done():
+                return await i.response.send_message(msg, ephemeral=True)
+            return await i.followup.send(msg, ephemeral=True)
         is_leader = alliance.get('my_role') == 'leader'
         treasury = await _get_alliance_treasury(alliance['id'])
         members = await _alliance_get_full_members(alliance['id'], i.guild)
@@ -66635,23 +67081,20 @@ async def _open_alliance_panel(i: discord.Interaction):
             if m["role"] == 'leader':
                 leader_name = m["display_name"]
                 break
-        e = discord.Embed(
-            title=f"{alliance['emoji']} {alliance['name']}",
-            description=(
-                f"**Chef :** 👑 {leader_name}\n"
-                f"**Membres :** `{len(members)}`\n"
-                f"**Trésorerie :** `{treasury:,}` 🪙\n"
-                f"📍 Salon : <#{alliance['channel_id']}>\n\n"
-                + ("👑 _Tu es le chef. Tu peux gérer la trésorerie, donner aux membres, "
-                   "expulser ou transférer la chefferie._" if is_leader else
-                   "👤 _Tu es membre. Tu peux déposer dans la trésorerie ou quitter l'alliance._")
-            ),
-            color=0x16A085,
-        )
-        await _safe_followup(i, embed=e, view=AllianceMainPanelView(alliance['id'], is_leader))
+        view = AllianceLayoutV2(i.user.id, alliance, is_leader, treasury, members, leader_name)
+        if not i.response.is_done():
+            await i.response.send_message(view=view, ephemeral=True)
+        else:
+            await i.followup.send(view=view, ephemeral=True)
     except Exception as ex:
-        print(f"[_open_alliance_panel] {ex}")
-        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+        print(f"[_open_alliance_panel V2] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            else:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
