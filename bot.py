@@ -2488,6 +2488,15 @@ async def db_init():
                 await db.execute('ALTER TABLE player_event_stats ADD COLUMN duels_lost INTEGER DEFAULT 0')
             if 'personal_events_completed' not in cols:
                 await db.execute('ALTER TABLE player_event_stats ADD COLUMN personal_events_completed INTEGER DEFAULT 0')
+            # Phase 113 : compteurs Swap/Auction/Craft
+            if 'swaps_done' not in cols:
+                await db.execute('ALTER TABLE player_event_stats ADD COLUMN swaps_done INTEGER DEFAULT 0')
+            if 'auctions_sold' not in cols:
+                await db.execute('ALTER TABLE player_event_stats ADD COLUMN auctions_sold INTEGER DEFAULT 0')
+            if 'auctions_won' not in cols:
+                await db.execute('ALTER TABLE player_event_stats ADD COLUMN auctions_won INTEGER DEFAULT 0')
+            if 'refines_success' not in cols:
+                await db.execute('ALTER TABLE player_event_stats ADD COLUMN refines_success INTEGER DEFAULT 0')
         except Exception:
             pass
         
@@ -12839,6 +12848,17 @@ async def auction_settler_task():
                         f"[auction_settler] #{ah_id} VENDU à {top_bidder_id} pour {current_bid} "
                         f"(commission {commission}, seller gain {seller_revenue})"
                     )
+
+                    # Phase 113 : incr counters seller + buyer
+                    try:
+                        await _incr_phase113_counter(gid, seller_id, "auctions_sold")
+                        await _incr_phase113_counter(gid, top_bidder_id, "auctions_won")
+                        guild_obj = bot.get_guild(gid)
+                        if guild_obj:
+                            await _check_phase113_badges(guild_obj, seller_id)
+                            await _check_phase113_badges(guild_obj, top_bidder_id)
+                    except Exception as ex:
+                        print(f"[auction badge check] {ex}")
 
                     # Phase 112 : DM au buyer (gain + warning si écrasement)
                     try:
@@ -40934,6 +40954,131 @@ async def swap_cmd(
             pass
 
 
+# ─── Phase 113 : Achievement checker helper ──────────────────────────────
+#
+# Vérifie + débloque les badges Phase 113 (Swap/Auction/Craft) après une
+# action utilisateur. Idempotent : INSERT OR IGNORE sur player_badges.
+
+async def _check_phase113_badges(guild: discord.Guild, user_id: int):
+    """Phase 113 : check + unlock + DM badges Swap/Auction/Craft.
+
+    Appelé après chaque action :
+    - swap completed → incr swaps_done
+    - auction sold (seller) → incr auctions_sold
+    - auction won (buyer) → incr auctions_won
+    - refine success → incr refines_success
+    """
+    try:
+        # Charger les compteurs
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT swaps_done, auctions_sold, auctions_won, refines_success "
+                "FROM player_event_stats WHERE guild_id=? AND user_id=?",
+                (guild.id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+        swaps = (row[0] if row else 0) or 0
+        a_sold = (row[1] if row else 0) or 0
+        a_won = (row[2] if row else 0) or 0
+        r_ok = (row[3] if row else 0) or 0
+
+        # Check has_divine : un item équipé de rareté divine ?
+        inv = await _get_or_create_inventory(guild.id, user_id)
+        has_divine = False
+        for slot_key in ("weapon", "armor", "helmet", "boots", "accessory", "trinket"):
+            it = inv.get(slot_key) or {}
+            if (it.get("rarity") or "").lower() == "divine":
+                has_divine = True
+                break
+
+        # Badges déjà débloqués
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT badge_id FROM player_badges WHERE guild_id=? AND user_id=?",
+                (guild.id, user_id),
+            ) as cur:
+                already = {r[0] for r in await cur.fetchall()}
+
+        stats = {
+            "swaps_done": swaps,
+            "auctions_sold": a_sold,
+            "auctions_won": a_won,
+            "refines_success": r_ok,
+            "has_divine": has_divine,
+        }
+        new_badges = events2026.check_badge_unlocks(stats, already)
+
+        if not new_badges:
+            return
+
+        # Filtrer aux badges Phase 113 uniquement
+        phase113_ids = {
+            "first_swap", "merchant", "first_auction", "tycoon",
+            "first_bid_won", "auction_baron", "first_refine",
+            "master_smith", "the_divine",
+        }
+        new_badges = [b for b in new_badges if b in phase113_ids]
+        if not new_badges:
+            return
+
+        # Persister
+        async with get_db() as db:
+            for bid in new_badges:
+                try:
+                    await db.execute(
+                        "INSERT OR IGNORE INTO player_badges(guild_id, user_id, badge_id) VALUES(?,?,?)",
+                        (guild.id, user_id, bid),
+                    )
+                except Exception:
+                    pass
+            await db.commit()
+
+        # DM le joueur
+        try:
+            member = guild.get_member(user_id)
+            if member:
+                lines = []
+                for bid in new_badges:
+                    b = events2026.get_badge_by_id(bid)
+                    if b:
+                        lines.append(f"{b['emoji']} **{b['name']}** — _{b['desc']}_")
+                if lines:
+                    try:
+                        await member.send(
+                            f"🎉 **Nouveaux badges débloqués sur {guild.name} !**\n\n"
+                            + "\n".join(lines)
+                        )
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+    except Exception as ex:
+        print(f"[_check_phase113_badges] {ex}")
+
+
+async def _incr_phase113_counter(guild_id: int, user_id: int, column: str, by: int = 1):
+    """Phase 113 : incrémente un compteur dans player_event_stats.
+
+    Colonnes supportées : swaps_done, auctions_sold, auctions_won,
+    refines_success.
+    """
+    valid = {"swaps_done", "auctions_sold", "auctions_won", "refines_success"}
+    if column not in valid:
+        return
+    try:
+        async with get_db() as db:
+            # INSERT OR UPDATE (sans la colonne dans VALUES, on s'appuie sur DEFAULT 0)
+            await db.execute(
+                f"INSERT INTO player_event_stats(guild_id, user_id, {column}) "
+                f"VALUES(?,?,?) "
+                f"ON CONFLICT(guild_id, user_id) DO UPDATE SET {column} = {column} + ?",
+                (guild_id, user_id, by, by),
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[_incr_phase113_counter {column}] {ex}")
+
+
 async def _finalize_trade(btn_i: discord.Interaction, trade_id: str, accept: bool, cancelled_by_a: bool = False):
     """Phase 108 : finalise un trade (accept / refuse / cancel)."""
     try:
@@ -41025,6 +41170,15 @@ async def _finalize_trade(btn_i: discord.Interaction, trade_id: str, accept: boo
 
         td["status"] = "completed"
 
+        # Phase 113 : incr compteurs + check badges pour les 2 joueurs
+        try:
+            await _incr_phase113_counter(guild_id, a_id, "swaps_done")
+            await _incr_phase113_counter(guild_id, b_id, "swaps_done")
+            await _check_phase113_badges(btn_i.guild, a_id)
+            await _check_phase113_badges(btn_i.guild, b_id)
+        except Exception as ex:
+            print(f"[swap badge check] {ex}")
+
         # Confirm message
         a_disp = _format_trade_item(td["a_item_snap"], a_slot)
         b_disp = _format_trade_item(td["b_item_snap"], b_slot)
@@ -41034,7 +41188,7 @@ async def _finalize_trade(btn_i: discord.Interaction, trade_id: str, accept: boo
         try:
             await btn_i.response.edit_message(
                 content=(
-                    f"✅ **TRADE COMPLÉTÉ !**\n"
+                    f"✅ **SWAP COMPLÉTÉ !**\n"
                     f"<@{a_id}> a donné : {a_disp}{coins_line}\n"
                     f"<@{b_id}> a donné : {b_disp}\n"
                     f"_Les inventaires ont été mis à jour._"
@@ -41637,6 +41791,16 @@ async def craft_cmd(i: discord.Interaction):
                         "légendaire": "🟠", "mythique": "🔴", "divine": "💎",
                     }
                     badge = rarity_emojis.get(new_rarity.lower(), "✨")
+
+                    # Phase 113 : incr counter + check badges
+                    try:
+                        await _incr_phase113_counter(
+                            btn_i.guild.id, btn_i.user.id, "refines_success"
+                        )
+                        await _check_phase113_badges(btn_i.guild, btn_i.user.id)
+                    except Exception as ex:
+                        print(f"[craft badge check] {ex}")
+
                     await btn_i.response.edit_message(
                         content=(
                             f"🎉 **AFFINAGE RÉUSSI !**\n"

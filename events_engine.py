@@ -1050,6 +1050,16 @@ BADGE_CATALOG = [
     # Special / Rare
     {"id": "combo_master","name": "Maître des Combos",    "emoji": "🔥", "desc": "Déclencher 5 combos en une bataille"},
     {"id": "lucky",       "name": "Chanceux",             "emoji": "🍀", "desc": "Obtenir un loot épique avec moins de 100 dégâts"},
+    # Phase 113 — Achievements pour les nouveaux systèmes (Swap/Auction/Craft)
+    {"id": "first_swap",     "name": "Premier Marché",     "emoji": "🤝", "desc": "Compléter ton premier échange P2P"},
+    {"id": "merchant",       "name": "Marchand",           "emoji": "💼", "desc": "Compléter 5 échanges P2P"},
+    {"id": "first_auction",  "name": "Commissaire-Priseur","emoji": "🔨", "desc": "Vendre ton premier item aux enchères"},
+    {"id": "tycoon",         "name": "Magnat des Enchères","emoji": "💎", "desc": "Vendre 10 items aux enchères"},
+    {"id": "first_bid_won",  "name": "Premier Coup",       "emoji": "🎯", "desc": "Gagner ta première enchère"},
+    {"id": "auction_baron",  "name": "Baron des Enchères", "emoji": "👑", "desc": "Gagner 5 enchères"},
+    {"id": "first_refine",   "name": "Apprenti Forgeron",  "emoji": "⚒️", "desc": "Réussir ton premier affinage"},
+    {"id": "master_smith",   "name": "Maître Forgeron",    "emoji": "🔥", "desc": "Réussir 10 affinages"},
+    {"id": "the_divine",     "name": "Touché par le Divin","emoji": "🌌", "desc": "Affiner un item jusqu'au tier divine"},
 ]
 
 
@@ -1096,6 +1106,17 @@ def check_badge_unlocks(stats: dict, already_unlocked: set, event_context: dict 
     _unlock("shopper",      int(s.get("shop_spent", 0)) >= 10_000)
     _unlock("combo_master", int(s.get("combos_in_battle", 0)) >= 5)
     _unlock("lucky",        bool(s.get("lucky_drop_under_100", False)))
+
+    # Phase 113 — Nouveaux systèmes (Swap/Auction/Craft)
+    _unlock("first_swap",     int(s.get("swaps_done", 0)) >= 1)
+    _unlock("merchant",       int(s.get("swaps_done", 0)) >= 5)
+    _unlock("first_auction",  int(s.get("auctions_sold", 0)) >= 1)
+    _unlock("tycoon",         int(s.get("auctions_sold", 0)) >= 10)
+    _unlock("first_bid_won",  int(s.get("auctions_won", 0)) >= 1)
+    _unlock("auction_baron",  int(s.get("auctions_won", 0)) >= 5)
+    _unlock("first_refine",   int(s.get("refines_success", 0)) >= 1)
+    _unlock("master_smith",   int(s.get("refines_success", 0)) >= 10)
+    _unlock("the_divine",     bool(s.get("has_divine", False)))
 
     return out
 
