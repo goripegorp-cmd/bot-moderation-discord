@@ -40103,6 +40103,159 @@ async def records_cmd(i: discord.Interaction):
 
 
 @bot.tree.command(
+    name="loot_table",
+    description="📜 Loot Table — drops possibles de chaque event (Mystery Box, Treasure, Boss...)",
+)
+async def loot_table_cmd(i: discord.Interaction):
+    """Phase 99 NEW : /loot_table — vue exhaustive des drops possibles en LayoutView V2."""
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        # Get catalogs from events_engine
+        try:
+            mb_types = events2026.MYSTERY_BOX_TYPES
+        except Exception:
+            mb_types = []
+        try:
+            tr_types = events2026.TREASURE_CATALOG
+        except Exception:
+            tr_types = []
+
+        class _LootTableLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=600)
+                items = []
+                items.append(v2_title("📜  LOOT TABLE  ·  Tous les drops"))
+                items.append(v2_subtitle("Vue exhaustive des récompenses possibles par event"))
+                items.append(v2_divider())
+
+                # ─── MYSTERY BOX ───
+                items.append(v2_body("**╔═══ 📦  MYSTERY BOX  ═══╗**"))
+                if mb_types:
+                    lines = []
+                    total_weight = sum(b.get('weight', 0) for b in mb_types)
+                    for box in mb_types:
+                        weight_pct = int(box.get('weight', 0) * 100 / max(1, total_weight))
+                        lines.append(
+                            f"{box.get('emoji', '📦')} **{box.get('name', '?')}**  ·  `{weight_pct}%`\n"
+                            f"   🪙 `{box.get('coins_min', 0)}-{box.get('coins_max', 0)}` 🪙  ·  "
+                            f"🎁 Gear `{int(box.get('gear_chance', 0) * 100)}%`"
+                        )
+                    items.append(v2_body("\n\n".join(lines)))
+                    items.append(v2_body(
+                        "_🌌 **Jackpot Mythique 1/100** : ×5 reward + upgrade gear en mythique_"
+                    ))
+                else:
+                    items.append(v2_body("_Catalogue indisponible._"))
+
+                items.append(v2_divider())
+
+                # ─── TREASURE HUNT ───
+                items.append(v2_body("**╔═══ 💎  TREASURE HUNT  ═══╗**"))
+                if tr_types:
+                    lines = []
+                    total_weight = sum(t.get('weight', 0) for t in tr_types)
+                    for tr in tr_types:
+                        weight_pct = int(tr.get('weight', 0) * 100 / max(1, total_weight))
+                        lines.append(
+                            f"{tr.get('emoji', '📦')} **{tr.get('name', '?')}**  ·  `{weight_pct}%`\n"
+                            f"   🪙 `{tr.get('coins_min', 0)}-{tr.get('coins_max', 0)}` 🪙  ·  "
+                            f"🎁 Gear `{int(tr.get('gear_chance', 0) * 100)}%`"
+                        )
+                    items.append(v2_body("\n\n".join(lines)))
+                else:
+                    items.append(v2_body("_Catalogue indisponible._"))
+
+                items.append(v2_divider())
+
+                # ─── BOSS RAID ───
+                items.append(v2_body("**╔═══ ⚔️  BOSS RAID  ═══╗**"))
+                items.append(v2_body(
+                    "🥇 **Top 1 damager** : `1500` 🪙 + gear épique/légendaire\n"
+                    "🥈 **Top 2-3** : `1000-1200` 🪙 + gear rare/épique\n"
+                    "🎖️ **Participants** : `300-500` 🪙 + chance gear rare\n"
+                    "💀 **Last Hit (coup fatal) :** +`500` 🪙 BONUS instant !\n"
+                    "📊 _Récompense scale avec total damage + diversité de classe_"
+                ))
+
+                items.append(v2_divider())
+
+                # ─── WORLD BOSS ───
+                items.append(v2_body("**╔═══ 🌍  WORLD BOSS  ═══╗**"))
+                items.append(v2_body(
+                    "🥇 **Top 3 damagers** : `2000` 🪙 + achievement `worldboss_kill`\n"
+                    "🎖️ **Participants** : `400` 🪙\n"
+                    "💎 **Top 1 damager** : **10% chance loot unique** 🌌\n"
+                    "💀 **Défaite** : consolation moitié `200` 🪙 pour tous\n"
+                    "_Hebdomadaire · samedi 21h FR · 90 min de combat_"
+                ))
+
+                items.append(v2_divider())
+
+                # ─── FLASH TREASURE ───
+                items.append(v2_body("**╔═══ ⚡  FLASH TREASURE  ═══╗**"))
+                items.append(v2_body(
+                    "💰 **Base** : `100-500` 🪙 aléatoire\n"
+                    "🔥 **Streak bonus** : +10% par grab consécutif (cap +50%)\n"
+                    "_Premier arrivé, premier servi — fenêtre **60 secondes**_"
+                ))
+
+                items.append(v2_divider())
+
+                # ─── DAILY RIDDLE ───
+                items.append(v2_body("**╔═══ 🧠  DAILY RIDDLE  ═══╗**"))
+                items.append(v2_body(
+                    "🏆 **Premier à trouver** : `500` 🪙 base\n"
+                    "✅ **Bonne réponse (tard)** : `50` 🪙 consolation\n"
+                    "🔥 **Streak ≥ 3 jours** : +`300` 🪙 bonus\n"
+                    "🌟 **Streak ≥ 7 jours** : +`1000` 🪙 bonus hebdo !\n"
+                    "_1 énigme/jour · matin Europe/Paris_"
+                ))
+
+                items.append(v2_divider())
+
+                # ─── QUIZ ───
+                items.append(v2_body("**╔═══ 🎓  QUIZ COMMUNAUTAIRE  ═══╗**"))
+                items.append(v2_body(
+                    "✅ **Base bonne réponse** : `100` 🪙\n"
+                    "🥇 **1er à trouver** : +`100` 🪙\n"
+                    "⚡ **Speed < 5s** : +`200` 🪙 ÉCLAIR !\n"
+                    "💨 **Speed < 10s** : +`100` 🪙 Rapide !\n"
+                    "⏱️ **Speed < 20s** : +`50` 🪙 Réfléchi\n"
+                    "_10 questions × 30s · final dans l'arène temporaire_"
+                ))
+
+                items.append(v2_divider())
+
+                # ─── HEIST ───
+                items.append(v2_body("**╔═══ 🚨  HEIST (Braquage)  ═══╗**"))
+                items.append(v2_body(
+                    "💰 **Mise par joueur** : `50` 🪙\n"
+                    "📊 **Taux de réussite** : `50% + 10%` par joueur (max `90%`)\n"
+                    "✅ **Si réussi** : pool × 2 distribué selon rôle\n"
+                    "❌ **Si raté** : tout perdu (police arrive)\n"
+                    "_Min 3 joueurs · choisi son rôle (chacun a un share %)_"
+                ))
+
+                items.append(v2_divider())
+
+                # ─── FOOTER ───
+                items.append(v2_body(
+                    "_💡 Plus la rareté est élevée, plus la chance de drop diminue_\n"
+                    "_📊 `/records` pour voir qui a gagné quoi (Top 5)_"
+                ))
+
+                self.add_item(v2_container(*items, color=0xFFD700))
+
+        await _safe_followup(i, view=_LootTableLayout())
+    except Exception as ex:
+        print(f"[/loot_table V2] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+@bot.tree.command(
     name="server_stats",
     description="📊 Dashboard global du serveur — events, coins, activité, records",
 )
