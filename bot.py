@@ -61366,29 +61366,14 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
             ) as cur:
                 ach_count = int((await cur.fetchone() or [0])[0])
 
-        # Build embed
+        # Phase 125 : Build LayoutView V2 magnifique
         color = prestige_def.get('color', 0x5865F2) or 0x5865F2
-        e = discord.Embed(
-            title=f"📋 Profil de {target.display_name}",
-            color=color,
-            timestamp=datetime.now(timezone.utc),
-        )
-        if target.display_avatar:
-            e.set_thumbnail(url=target.display_avatar.url)
-
-        # Section : Identité
-        prestige_str = f"{prestige_def['emoji']} **{prestige_def['name']}**" if prestige_rank > 0 else "_Sans prestige_"
-        e.add_field(
-            name="🏅 Identité",
-            value=(
-                f"**Level :** `{level}` · XP : `{xp}`\n"
-                f"**Prestige :** {prestige_str}\n"
-                f"💰 **Solde :** `{coins}` 🪙" + (f" · Banque : `{bank}` 🪙" if bank else "")
-            ),
-            inline=False,
+        prestige_str = (
+            f"{prestige_def['emoji']} **{prestige_def['name']}**"
+            if prestige_rank > 0 else "_Sans prestige_"
         )
 
-        # Section : Saison
+        # Saison : prochain palier
         next_tier = None
         for t in eng47.SEASON_PASS_TIERS:
             if t['tier'] > season_tier:
@@ -61396,71 +61381,182 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
                 break
         if next_tier:
             remaining = next_tier['points'] - season_pts
-            season_progress = f"⏭️ Prochain palier (`{next_tier['label']}`) dans `{remaining:,}` pts"
+            season_progress = (
+                f"⏭️ Prochain palier (`{next_tier['label']}`) dans `{remaining:,}` pts"
+            )
         else:
-            season_progress = "🌟 Palier max atteint !"
-        e.add_field(
-            name=f"📆 Pass de Saison",
-            value=(
-                f"`{season_id}` · Palier `{season_tier}/20`\n"
-                f"**Points :** `{season_pts:,}`\n"
-                f"{season_progress}"
-            ),
-            inline=False,
-        )
+            season_progress = "🌟 **Palier max atteint !**"
 
-        # Section : Factions (top 2)
-        if factions_top:
-            lines = []
-            for fd in factions_top:
-                f = fd['faction']
-                tier_def = fd['tier']
-                lines.append(f"{f['emoji']} **{f['name']}** : {tier_def['emoji']} {tier_def['name']} (`{fd['points']:,}` pts)")
-            e.add_field(name="🏰 Renommées (top 2)", value="\n".join(lines), inline=False)
-
-        # Section : Pet
-        if pet:
-            e.add_field(
-                name="🐾 Compagnon actif",
-                value=(
-                    f"{pet['form_label']} — **{pet['custom_name']}** (Lv. {pet['level']})\n"
-                    f"_{pet['description']}_"
-                ),
-                inline=False,
-            )
-
-        # Section : Alliance
-        if alliance:
-            ally_role = "👑 Chef" if alliance.get('my_role') == 'leader' else "👤 Membre"
-            e.add_field(
-                name="🤝 Alliance",
-                value=(
-                    f"{alliance['emoji']} **{alliance['name']}** ({ally_role})\n"
-                    f"📍 <#{alliance['channel_id']}>"
-                ),
-                inline=False,
-            )
-
-        # Section : Stats clés
+        # Stats clés
         msgs = int(stats.get('messages', 0) or 0)
         events_won = int(stats.get('events_won', 0) or 0)
         bosses = int(stats.get('bosses_won', 0) or 0)
-        e.add_field(
-            name="📊 Stats",
-            value=(
-                f"💬 Messages : `{msgs:,}`\n"
-                f"🏆 Events gagnés : `{events_won}`\n"
-                f"⚔️ Boss vaincus : `{bosses}`\n"
-                f"🏅 Achievements : `{ach_count}` / `{len(eng41.ACHIEVEMENTS)}`\n"
-                f"🔥 Streak actuel : `{cur_streak}` jour(s) · Record `{best_streak}`"
-            ),
-            inline=False,
-        )
 
-        e.set_footer(text="Phase 48.2 · Profil unifié · /profile [membre]")
-        await _safe_followup(i, embed=e)
+        # Boutons navigation contextuels
+        _viewer_id = i.user.id
+        _target_id = target.id
+        _is_self = (_viewer_id == _target_id)
+
+        class _GotoInventoryBtn(discord.ui.Button):
+            def __init__(self):
+                super().__init__(
+                    label="🎒 Inventaire",
+                    style=discord.ButtonStyle.primary,
+                    custom_id=f"phase125_profile_inv_{_viewer_id}",
+                )
+
+            async def callback(self, btn_i: discord.Interaction):
+                if btn_i.user.id != _viewer_id:
+                    return await btn_i.response.send_message(
+                        "❌ Ce panneau n'est pas pour toi.", ephemeral=True
+                    )
+                try:
+                    await inventory_cmd.callback(btn_i)
+                except Exception as ex:
+                    print(f"[phase125 profile inv btn] {ex}")
+                    try:
+                        if not btn_i.response.is_done():
+                            await btn_i.response.send_message(
+                                f"❌ Erreur : `{ex}`", ephemeral=True
+                            )
+                    except Exception:
+                        pass
+
+        class _GotoBadgesBtn(discord.ui.Button):
+            def __init__(self):
+                super().__init__(
+                    label="🏅 Hauts faits",
+                    style=discord.ButtonStyle.secondary,
+                    custom_id=f"phase125_profile_badges_{_viewer_id}",
+                )
+
+            async def callback(self, btn_i: discord.Interaction):
+                if btn_i.user.id != _viewer_id:
+                    return await btn_i.response.send_message(
+                        "❌ Ce panneau n'est pas pour toi.", ephemeral=True
+                    )
+                try:
+                    await badges_cmd.callback(btn_i)
+                except Exception as ex:
+                    print(f"[phase125 profile badges btn] {ex}")
+                    try:
+                        if not btn_i.response.is_done():
+                            await btn_i.response.send_message(
+                                f"❌ Erreur : `{ex}`", ephemeral=True
+                            )
+                    except Exception:
+                        pass
+
+        class _ProfileLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=300)
+                items = []
+
+                # ═══ HEADER ═══
+                if _is_self:
+                    items.append(v2_title(f"📋  MON PROFIL"))
+                else:
+                    items.append(v2_title(f"📋  PROFIL DE {target.display_name.upper()}"))
+                items.append(v2_subtitle(
+                    f"_Vue complète : level · prestige · saison · factions · stats_"
+                ))
+                items.append(v2_divider())
+
+                # ═══ IDENTITÉ ═══
+                items.append(v2_body("**╔═══ 🏅  IDENTITÉ  ═══╗**"))
+                items.append(v2_body(
+                    f"**Niveau :** `{level}` · XP cumulés : `{xp:,}`\n"
+                    f"**Prestige :** {prestige_str}\n"
+                    f"💰 **En main :** `{coins:,}` 🪙"
+                    + (f"\n🏦 **Banque :** `{bank:,}` 🪙" if bank else "")
+                ))
+
+                items.append(v2_divider())
+
+                # ═══ PASS DE SAISON ═══
+                items.append(v2_body("**╔═══ 📆  PASS DE SAISON  ═══╗**"))
+                items.append(v2_body(
+                    f"**Saison :** `{season_id}` · Palier `{season_tier}/20`\n"
+                    f"**Points :** `{season_pts:,}`\n"
+                    f"{season_progress}"
+                ))
+
+                # ═══ FACTIONS ═══
+                if factions_top:
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ 🏰  RENOMMÉES (top 2)  ═══╗**"))
+                    lines = []
+                    for fd in factions_top:
+                        f = fd['faction']
+                        tier_def = fd['tier']
+                        lines.append(
+                            f"{f['emoji']} **{f['name']}** : "
+                            f"{tier_def['emoji']} {tier_def['name']} "
+                            f"(`{fd['points']:,}` pts)"
+                        )
+                    items.append(v2_body("\n".join(lines)))
+
+                # ═══ COMPAGNON ═══
+                if pet:
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ 🐾  COMPAGNON ACTIF  ═══╗**"))
+                    items.append(v2_body(
+                        f"{pet['form_label']} — **{pet['custom_name']}** "
+                        f"(Lv. {pet['level']})\n"
+                        f"_{pet['description']}_"
+                    ))
+
+                # ═══ ALLIANCE ═══
+                if alliance:
+                    ally_role = (
+                        "👑 Chef" if alliance.get('my_role') == 'leader' else "👤 Membre"
+                    )
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ 🤝  ALLIANCE  ═══╗**"))
+                    items.append(v2_body(
+                        f"{alliance['emoji']} **{alliance['name']}** ({ally_role})\n"
+                        f"📍 <#{alliance['channel_id']}>"
+                    ))
+
+                # ═══ STATS GLOBALES ═══
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 📊  STATS GLOBALES  ═══╗**"))
+                ach_total = max(1, len(eng41.ACHIEVEMENTS))
+                ach_pct = int((ach_count / ach_total) * 100) if ach_total else 0
+                items.append(v2_body(
+                    f"💬 **Messages :** `{msgs:,}`\n"
+                    f"🏆 **Events gagnés :** `{events_won}`\n"
+                    f"⚔️ **Boss vaincus :** `{bosses}`\n"
+                    f"🏅 **Achievements :** `{ach_count}/{ach_total}` ({ach_pct}%)\n"
+                    f"🔥 **Streak actuel :** `{cur_streak}` j  ·  Record : `{best_streak}` j"
+                ))
+
+                # ═══ NAVIGATION (sections accessory, uniquement pour son propre profil) ═══
+                if _is_self:
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ 🔗  NAVIGATION  ═══╗**"))
+                    items.append(v2_section(
+                        v2_title("🎒  Mon inventaire"),
+                        v2_subtitle("Équipement, set bonus, durabilité, actions rapides"),
+                        accessory=_GotoInventoryBtn(),
+                    ))
+                    items.append(v2_section(
+                        v2_title("🏅  Mes hauts faits"),
+                        v2_subtitle("Badges débloqués + prochains objectifs"),
+                        accessory=_GotoBadgesBtn(),
+                    ))
+
+                items.append(v2_divider())
+                items.append(v2_body(
+                    f"_💡 `/profile @membre` pour voir le profil d'un autre joueur._"
+                ))
+
+                self.add_item(v2_container(*items, color=color))
+
+        await _safe_followup(i, view=_ProfileLayout())
     except Exception as ex:
-        print(f"[/profile] {ex}")
+        print(f"[/profile V2] {ex}")
+        import traceback; traceback.print_exc()
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
