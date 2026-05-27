@@ -94,6 +94,8 @@ import voice_lounges as vlounge_module
 import tickets_enhance as tix_module
 # Phase 139 : Observabilité (daily report + anomalies + retention)
 import observability as obs_module
+# Phase 140 : Publish metrics + cross-poster
+import publish_metrics as pubmet_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -37966,6 +37968,23 @@ async def on_ready():
             obs_module.anomaly_check_task.start()
     except Exception as ex:
         print(f"[on_ready obs setup] {ex}")
+    # Phase 140 : Publish metrics + cross-poster
+    try:
+        pubmet_module.setup(
+            bot,
+            get_db,
+            db_get,
+            db_set,
+            {
+                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
+                'v2_divider': v2_divider, 'v2_container': v2_container,
+                'LayoutView': LayoutView,
+            },
+        )
+        if not pubmet_module.metrics_refresh_task.is_running():
+            pubmet_module.metrics_refresh_task.start()
+    except Exception as ex:
+        print(f"[on_ready pubmet setup] {ex}")
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()
@@ -39368,6 +39387,239 @@ async def server_anomalies_cmd(i: discord.Interaction):
 
 
 bot.tree.add_command(server_obs_group)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 140 : /publish — metrics + cross-poster
+# ═══════════════════════════════════════════════════════════════════════════════
+publish_metrics_group = app_commands.Group(
+    name="publish",
+    description="📢 Tracking d'engagement + cross-poster multi-salons",
+)
+
+
+def _publish_is_staff(member: discord.Member) -> bool:
+    try:
+        return (
+            member.id == SUPER_OWNER_ID
+            or (member.guild and member.id == member.guild.owner_id)
+            or member.guild_permissions.administrator
+            or member.guild_permissions.manage_guild
+        )
+    except Exception:
+        return False
+
+
+@publish_metrics_group.command(
+    name="track", description="📊 [Staff] Activer/désactiver le tracking des posts du bot"
+)
+@app_commands.describe(état="on / off")
+@app_commands.choices(état=[
+    app_commands.Choice(name="✅ Activé", value="on"),
+    app_commands.Choice(name="❌ Désactivé", value="off"),
+])
+async def publish_track_cmd(
+    i: discord.Interaction, état: app_commands.Choice[str]
+):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not _publish_is_staff(i.user):
+        return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
+    try:
+        enabled = (état.value == "on")
+        ok = await pubmet_module.set_tracking(i.guild.id, enabled)
+        msg = (
+            "✅ Tracking activé. Les posts du bot seront enregistrés."
+            if enabled else "❌ Tracking désactivé."
+        )
+        await i.response.send_message(
+            msg if ok else "❌ Échec config.", ephemeral=True
+        )
+    except Exception as ex:
+        print(f"[publish_track_cmd] {ex}")
+
+
+@publish_metrics_group.command(
+    name="best_week", description="🏆 Voir le top 3 posts bot de la semaine"
+)
+async def publish_best_week_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        await i.response.defer(ephemeral=True)
+        posts = await pubmet_module.get_best_posts_week(i.guild.id, limit=3)
+        view = pubmet_module.build_best_posts_panel(posts, i.guild.name, bot)
+        if view is None:
+            return await i.followup.send("❌ Module indisponible.", ephemeral=True)
+        await i.followup.send(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[publish_best_week_cmd] {ex}")
+
+
+@publish_metrics_group.command(
+    name="metrics", description="📊 Voir les métriques d'un post tracké"
+)
+@app_commands.describe(message_id="ID du message")
+async def publish_metrics_cmd(i: discord.Interaction, message_id: str):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        try:
+            msg_id = int(message_id)
+        except (TypeError, ValueError):
+            return await i.response.send_message(
+                "❌ ID invalide.", ephemeral=True
+            )
+        post = await pubmet_module.get_post_metrics(msg_id)
+        if not post:
+            return await i.response.send_message(
+                "ℹ️ Aucune métrique pour ce post.", ephemeral=True
+            )
+        if post["guild_id"] != i.guild.id:
+            return await i.response.send_message(
+                "❌ Ce post n'appartient pas à ce serveur.", ephemeral=True
+            )
+        view = pubmet_module.build_metrics_panel(post, i.guild.name)
+        if view is None:
+            return await i.response.send_message(
+                "❌ Module indisponible.", ephemeral=True
+            )
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[publish_metrics_cmd] {ex}")
+
+
+@publish_metrics_group.command(
+    name="cross_create",
+    description="📢 [Staff] Créer un groupe de cross-post",
+)
+@app_commands.describe(nom="Nom du groupe (court, sans espaces)")
+async def publish_cross_create_cmd(i: discord.Interaction, nom: str):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not _publish_is_staff(i.user):
+        return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
+    try:
+        ok, result = await pubmet_module.create_group(i.guild.id, nom)
+        if ok:
+            await i.response.send_message(
+                f"✅ Groupe `{nom}` créé (id `{result}`). "
+                f"Utilise `/publish cross_add {nom} #salon` pour ajouter des cibles.",
+                ephemeral=True,
+            )
+        else:
+            await i.response.send_message(f"❌ {result}", ephemeral=True)
+    except Exception as ex:
+        print(f"[publish_cross_create_cmd] {ex}")
+
+
+@publish_metrics_group.command(
+    name="cross_add",
+    description="📢 [Staff] Ajouter un salon à un groupe de cross-post",
+)
+@app_commands.describe(
+    nom="Nom du groupe",
+    salon="Salon à ajouter comme cible",
+)
+async def publish_cross_add_cmd(
+    i: discord.Interaction, nom: str, salon: discord.TextChannel
+):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not _publish_is_staff(i.user):
+        return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
+    try:
+        group = await pubmet_module.get_group_by_name(i.guild.id, nom)
+        if not group:
+            return await i.response.send_message(
+                f"❌ Groupe `{nom}` introuvable.", ephemeral=True
+            )
+        ok = await pubmet_module.add_target(group["id"], salon.id)
+        await i.response.send_message(
+            f"{'✅ Salon ajouté.' if ok else '❌ Échec.'}",
+            ephemeral=True,
+        )
+    except Exception as ex:
+        print(f"[publish_cross_add_cmd] {ex}")
+
+
+@publish_metrics_group.command(
+    name="cross_remove",
+    description="📢 [Staff] Retirer un salon d'un groupe de cross-post",
+)
+@app_commands.describe(nom="Nom du groupe", salon="Salon à retirer")
+async def publish_cross_remove_cmd(
+    i: discord.Interaction, nom: str, salon: discord.TextChannel
+):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not _publish_is_staff(i.user):
+        return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
+    try:
+        group = await pubmet_module.get_group_by_name(i.guild.id, nom)
+        if not group:
+            return await i.response.send_message(
+                f"❌ Groupe `{nom}` introuvable.", ephemeral=True
+            )
+        ok = await pubmet_module.remove_target(group["id"], salon.id)
+        await i.response.send_message(
+            f"{'🗑️ Salon retiré.' if ok else 'ℹ️ Pas dans ce groupe.'}",
+            ephemeral=True,
+        )
+    except Exception as ex:
+        print(f"[publish_cross_remove_cmd] {ex}")
+
+
+@publish_metrics_group.command(
+    name="cross_send",
+    description="📢 [Staff] Envoyer un message à tous les salons d'un groupe",
+)
+@app_commands.describe(nom="Nom du groupe", contenu="Message à envoyer")
+async def publish_cross_send_cmd(
+    i: discord.Interaction, nom: str, contenu: str
+):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not _publish_is_staff(i.user):
+        return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
+    try:
+        group = await pubmet_module.get_group_by_name(i.guild.id, nom)
+        if not group:
+            return await i.response.send_message(
+                f"❌ Groupe `{nom}` introuvable.", ephemeral=True
+            )
+        await i.response.defer(ephemeral=True)
+        success, total = await pubmet_module.send_to_group(
+            bot, i.guild, group["id"], contenu
+        )
+        await i.followup.send(
+            f"📢 Envoyé sur **`{success}` / `{total}`** salons du groupe `{nom}`.",
+            ephemeral=True,
+        )
+    except Exception as ex:
+        print(f"[publish_cross_send_cmd] {ex}")
+
+
+@publish_metrics_group.command(
+    name="cross_groups",
+    description="📋 Liste des groupes de cross-post configurés",
+)
+async def publish_cross_groups_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        groups = await pubmet_module.list_groups(i.guild.id)
+        view = pubmet_module.build_groups_panel(groups, i.guild.name)
+        if view is None:
+            return await i.response.send_message(
+                "❌ Module indisponible.", ephemeral=True
+            )
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[publish_cross_groups_cmd] {ex}")
+
+
+bot.tree.add_command(publish_metrics_group)
 
 
 @bot.event
