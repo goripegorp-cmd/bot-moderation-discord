@@ -12320,18 +12320,13 @@ async def _drop_mystery_box(guild) -> bool:
         # Phase 38 : si un raid est actif, dé-masquer temporairement ce salon
         unmasked = await _temporarily_unmask_channel(guild, ch.id)
 
-        # Phase 77 + Phase 86 : LayoutView V2 — button avec callback EXPLICITE
-        # (Fix Phase 86 : extraire depuis MysteryBoxView pour préserver le callback,
-        # sinon Échec interaction quand le LayoutView est dispatché en priorité).
+        # Phase 77 + Phase 88 fix : LayoutView V2 — button INDÉPENDANT + delegate.
+        # Phase 86 extrayait depuis MysteryBoxView → double-parenting → SEND échouait.
         LIFETIME = 300  # 5 min
         box_emoji = box.get('emoji', '📦')
         box_name = box['name']
         box_color = box.get('color', 0x95A5A6)
         try:
-            # Phase 86 : button avec callback bound à MysteryBoxView._on_open
-            _mb_handler = MysteryBoxView()
-            open_btn = _mb_handler.children[0]  # custom_id="mbox_open" + callback
-
             class _MysteryLayout(LayoutView):
                 def __init__(self):
                     super().__init__(timeout=None)
@@ -12340,6 +12335,13 @@ async def _drop_mystery_box(guild) -> bool:
                         v2_subtitle("Quelqu'un a laissé tomber un cadeau dans ce salon..."),
                         v2_divider(),
                     ]
+                    # Phase 88 : button indépendant avec callback délégué
+                    open_btn = Button(
+                        label="📦 Ouvrir la boîte !",
+                        style=discord.ButtonStyle.success,
+                        custom_id="mbox_open",
+                    )
+                    open_btn.callback = _v2_delegate_to(MysteryBoxView, '_on_open')
                     items.append(_section_with_button(
                         "⚡ Premier ouvreur = jackpot complet",
                         "Les suivants : petite consolation\nFenêtre : **5 minutes**",
@@ -48178,10 +48180,15 @@ async def confess_setup_cmd(i: discord.Interaction, channel: discord.TextChannel
         await db_set(i.guild.id, 'confessions_channel', channel.id)
         # Poster le bouton persistant dans le salon
         try:
-            # Phase 83 + Phase 86 fix : extraire le button depuis ConfessionSendView
-            # pour qu'il garde son callback (_on_open) sinon Échec interaction.
-            _conf_handler = ConfessionSendView()
-            confess_btn = _conf_handler.children[0]
+            # Phase 83 + Phase 88 fix : button indépendant avec callback délégué
+            # (Phase 86 extrayait depuis ConfessionSendView → double-parenting,
+            #  SEND échouait. Phase 88 : button standalone + delegate.)
+            confess_btn = Button(
+                label="🤫 Envoyer une confession anonyme",
+                style=discord.ButtonStyle.secondary,
+                custom_id="confess_open",
+            )
+            confess_btn.callback = _v2_delegate_to(ConfessionSendView, '_on_open')
 
             class _ConfessionSetupLayout(LayoutView):
                 def __init__(self):
@@ -49509,19 +49516,20 @@ class WorldBossArenaLayoutV2(LayoutView):
             items.append(v2_subtitle(_escape_md(boss.get('description', ''), 200)))
         items.append(v2_divider())
 
-        # Phase 86 fix : extraire les buttons depuis WorldBossAttackView pour
-        # qu'ils gardent leur callback (sinon Échec interaction).
-        _wb_handler = WorldBossAttackView()
-        # children[0] = wb_attack, children[1] = wb_top
-        attack_btn_src = _wb_handler.children[0]
-        top_btn_src = _wb_handler.children[1]
-
         # Section HP avec bouton ATTAQUER en accessory (toujours visible mobile)
+        # Phase 88 : buttons INDÉPENDANTS avec callbacks délégués (pas extraction
+        # depuis WorldBossAttackView qui causait double-parenting et cassait send).
         if hp > 0:
+            attack_btn = Button(
+                label="⚔️ Attaquer",
+                style=discord.ButtonStyle.danger,
+                custom_id="wb_attack",
+            )
+            attack_btn.callback = _v2_delegate_to(WorldBossAttackView, '_on_attack')
             items.append(_section_with_button(
                 f"❤️ HP — {phase_label}",
                 f"`{bar}` `{hp:,}/{max_hp:,}` ({ratio * 100:.0f}%)",
-                attack_btn_src,
+                attack_btn,
             ))
         else:
             items.append(v2_body(
@@ -49559,9 +49567,14 @@ class WorldBossArenaLayoutV2(LayoutView):
 
         items.append(v2_divider())
 
-        # Bouton TOP 10 en ActionRow (en bas) — Phase 86 : button avec callback
-        # depuis WorldBossAttackView.children[1] (custom_id "wb_top" + callback bound)
-        items.append(discord.ui.ActionRow(top_btn_src))
+        # Bouton TOP 10 en ActionRow (en bas) — Phase 88 : independent + delegate
+        top_btn = Button(
+            label="📊 Voir le top 10",
+            style=discord.ButtonStyle.secondary,
+            custom_id="wb_top",
+        )
+        top_btn.callback = _v2_delegate_to(WorldBossAttackView, '_on_top')
+        items.append(discord.ui.ActionRow(top_btn))
 
         self.add_item(v2_container(*items, color=color))
 
@@ -50746,15 +50759,10 @@ async def _spawn_flash_treasure(guild) -> bool:
         # voir qui a gagné). Le delete_after natif s'applique au "message en attente" : si
         # personne ne grab, il disparaît à 60s.
         LIFETIME_TREASURE = 60
-        # Phase 76 + Phase 86 : LayoutView V2 — button avec callback EXPLICITE.
-        # Fix Phase 86 : extraire le button depuis FlashTreasureView() pour qu'il
-        # garde son callback (sinon "Échec interaction" car LayoutView en mémoire
-        # tente de dispatch à un button sans callback).
+        # Phase 76 + Phase 88 fix : LayoutView V2 — button INDÉPENDANT + delegate
+        # callback. Phase 86 essayait d'extraire depuis FlashTreasureView ce qui
+        # créait du double-parenting → SEND échouait → events n'apparaissaient plus.
         try:
-            # Phase 86 : button avec callback bound à FlashTreasureView._on_grab
-            _ft_handler = FlashTreasureView()
-            grab_btn = _ft_handler.children[0]  # custom_id="flash_grab" + callback
-
             class _FlashLayout(LayoutView):
                 def __init__(self):
                     super().__init__(timeout=None)
@@ -50763,6 +50771,13 @@ async def _spawn_flash_treasure(guild) -> bool:
                         v2_subtitle("Premier arrivé, premier servi"),
                         v2_divider(),
                     ]
+                    # Phase 88 : button indépendant avec callback délégué
+                    grab_btn = Button(
+                        label="🤚 Saisir",
+                        style=discord.ButtonStyle.success,
+                        custom_id="flash_grab",
+                    )
+                    grab_btn.callback = _v2_delegate_to(FlashTreasureView, '_on_grab')
                     items.append(_section_with_button(
                         "✨ Quelque chose brille...",
                         f"Fenêtre : **60 secondes**\n{_claim_chrono(LIFETIME_TREASURE)}",
@@ -54614,12 +54629,7 @@ async def _post_game_night_prompt(gn_id: int):
                 _sc_btn_label = ev.get('button_label', '💥 GO !')
                 _sc_duration = duration
 
-                # Phase 86 fix : extraire le button depuis GameNightSpeedClickView
-                # pour qu'il garde son callback (_on_click) sinon Échec interaction.
-                _sc_handler = GameNightSpeedClickView()
-                sc_btn = _sc_handler.children[0]
-                sc_btn.label = _sc_btn_label[:80]  # label dynamique override
-
+                # Phase 88 fix : button INDÉPENDANT + delegate (anti double-parenting)
                 class _GnSpeedLayout(LayoutView):
                     def __init__(self):
                         super().__init__(timeout=None)
@@ -54630,6 +54640,12 @@ async def _post_game_night_prompt(gn_id: int):
                             v2_body(_sc_desc[:1500]),
                             v2_divider(),
                         ]
+                        sc_btn = Button(
+                            label=_sc_btn_label[:80],
+                            style=discord.ButtonStyle.success,
+                            custom_id="gn_speed",
+                        )
+                        sc_btn.callback = _v2_delegate_to(GameNightSpeedClickView, '_on_click')
                         items.append(_section_with_button(
                             "🚀 Clique vite !",
                             f"Fenêtre : **{_sc_duration}s**",
@@ -54666,12 +54682,7 @@ async def _post_game_night_prompt(gn_id: int):
                 _th_target = ev['threshold']
                 _th_duration = duration
 
-                # Phase 86 fix : extraire le button depuis GameNightThresholdView
-                # pour qu'il garde son callback (_on_click) sinon Échec interaction.
-                _th_handler = GameNightThresholdView()
-                th_btn = _th_handler.children[0]
-                th_btn.label = _th_btn_label[:80]  # label dynamique override
-
+                # Phase 88 fix : button INDÉPENDANT + delegate (anti double-parenting)
                 class _GnThresholdLayout(LayoutView):
                     def __init__(self):
                         super().__init__(timeout=None)
@@ -54682,6 +54693,12 @@ async def _post_game_night_prompt(gn_id: int):
                             v2_body(_th_desc[:1500]),
                             v2_divider(),
                         ]
+                        th_btn = Button(
+                            label=_th_btn_label[:80],
+                            style=discord.ButtonStyle.primary,
+                            custom_id="gn_thresh",
+                        )
+                        th_btn.callback = _v2_delegate_to(GameNightThresholdView, '_on_click')
                         items.append(_section_with_button(
                             f"📊 Progression : `0/{_th_target}`",
                             f"Fenêtre : **{_th_duration}s** — clique pour rejoindre",
@@ -63226,14 +63243,7 @@ async def advent_setup_cmd(i: discord.Interaction):
         hub_ch = i.guild.get_channel(hub_id) if hub_id else None
         if not hub_ch:
             return await _safe_followup(i, content="❌ Hub non configuré.")
-        # Phase 83 : LayoutView V2 — section avec bouton claim accessory.
-        # AdventClaimView est persistante (bot.add_view au boot ligne ~36489).
-        # Custom_id du bouton claim doit matcher → on récupère le bouton existant
-        # de la View comme accessory pour préserver la dispatch.
-        adv_view = AdventClaimView()
-        # AdventClaimView contient un bouton ; on l'extrait pour le mettre en accessory
-        claim_btn = adv_view.children[0] if adv_view.children else None
-
+        # Phase 83 + Phase 88 fix : button INDÉPENDANT + delegate (pas extraction).
         class _AdventLayout(LayoutView):
             def __init__(self):
                 super().__init__(timeout=None)
@@ -63249,14 +63259,17 @@ async def advent_setup_cmd(i: discord.Interaction):
                     ),
                     v2_divider(),
                 ]
-                if claim_btn:
-                    items.append(_section_with_button(
-                        "🎁 Récupérer le cadeau du jour",
-                        "1× par jour — compteur reset au début de chaque mois.",
-                        claim_btn,
-                    ))
-                else:
-                    items.append(v2_body("_⚠️ Bouton claim indisponible — réessayer plus tard._"))
+                claim_btn = Button(
+                    label="🎁 Claim le cadeau du jour",
+                    style=discord.ButtonStyle.primary,
+                    custom_id="advent_claim",
+                )
+                claim_btn.callback = _v2_delegate_to(AdventClaimView, '_claim')
+                items.append(_section_with_button(
+                    "🎁 Récupérer le cadeau du jour",
+                    "1× par jour — compteur reset au début de chaque mois.",
+                    claim_btn,
+                ))
                 self.add_item(v2_container(*items, color=0xE74C3C))
 
         try:
@@ -65863,6 +65876,40 @@ def _section_with_button(title_str: str, subtitle_str: str, button: Button):
     )
 
 
+def _v2_delegate_to(view_class, method_name: str):
+    """Phase 88 : retourne un callback async qui invoque view_class()._method_name(i).
+
+    Pourquoi : Phase 86 essayait d'extraire les buttons depuis une View persistante
+    (`_h = SomeView(); btn = _h.children[0]`) pour préserver leur callback. Mais ça
+    crée du DOUBLE-PARENTING (button._view = _h ET la LayoutView), discord.py
+    rejette le SEND → plus aucun event n'apparaît.
+
+    Solution Phase 88 : créer le button INDÉPENDAMMENT, lui assigner un callback
+    "delegate" qui instancie la View persistante au moment du clic et appelle
+    sa méthode. Les méthodes _on_xxx utilisent i.message.id / i.guild — donc
+    fonctionnent sur une instance fraîche, pas besoin de state persistant.
+
+    Usage :
+        btn = Button(label=..., custom_id="...")
+        btn.callback = _v2_delegate_to(FlashTreasureView, '_on_grab')
+    """
+    async def _delegate(i):
+        try:
+            handler = view_class()
+            method = getattr(handler, method_name)
+            await method(i)
+        except Exception as ex:
+            print(f"[v2_delegate {view_class.__name__}.{method_name}] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+                else:
+                    await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+    return _delegate
+
+
 class HubLayoutV2(LayoutView):
     """Hub principal en Components V2 — sections + boutons accessory.
 
@@ -66051,11 +66098,11 @@ class HubLayoutV2(LayoutView):
 #  Phase 81 — HubPinnedLayoutV2 : version PERSISTANTE du hub pour /hub_setup
 # ═══════════════════════════════════════════════════════════════════════════════
 class HubPinnedLayoutV2(LayoutView):
-    """Phase 81 + Phase 86 fix : Panneau ÉPINGLÉ du hub en LayoutView V2.
+    """Phase 81 + Phase 88 fix : Panneau ÉPINGLÉ du hub en LayoutView V2.
 
-    Phase 86 fix : extrait les 13 buttons depuis EngagementHubView() pour qu'ils
-    gardent leurs callbacks (sinon "Échec interaction" car LayoutView en view
-    store de discord.py dispatch en priorité, et un button sans callback fail).
+    Phase 88 : redesign magnifique avec sections groupées par thème, buttons
+    INDÉPENDANTS avec callbacks délégués (pattern Phase 88 _v2_delegate_to).
+    Discord affiche le message tall, l'utilisateur scroll naturellement.
     """
 
     def __init__(self):
@@ -66064,90 +66111,145 @@ class HubPinnedLayoutV2(LayoutView):
 
     def _build(self):
         items = []
-        items.append(v2_title("🎮 Hub d'engagement"))
-        items.append(v2_subtitle("Tout ce qu'il faut, sans aucune commande à mémoriser"))
+
+        # ═══ HEADER MAGNIFIQUE ═══
+        items.append(v2_title("✨  🎮  HUB D'ENGAGEMENT  🎮  ✨"))
+        items.append(v2_subtitle(
+            "Tout ce qu'il faut pour vivre l'expérience — aucune commande à mémoriser"
+        ))
         items.append(v2_divider())
 
-        # Phase 86 : extraire les 13 buttons depuis EngagementHubView pour conserver
-        # les callbacks bound aux _on_quests, _on_wheel, etc.
-        _eng = EngagementHubView()
-        # Ordre dans EngagementHubView.__init__ : quests, wheel, achievements, pet,
-        # confess, profile, notifs, lore, mission, roblox, competitions, social, tools
-        b_quests = _eng.children[0]
-        b_wheel = _eng.children[1]
-        b_ach = _eng.children[2]
-        b_pet = _eng.children[3]
-        b_conf = _eng.children[4]
-        b_prof = _eng.children[5]
-        b_notif = _eng.children[6]
-        b_lore = _eng.children[7]
-        b_miss = _eng.children[8]
-        b_rblx = _eng.children[9]
-        b_comp = _eng.children[10]
-        b_soc = _eng.children[11]
-        b_tools = _eng.children[12]
+        # ═══ GROUPE 1 — DAILY ROUTINE (boutons les plus utilisés) ═══
+        items.append(v2_body("**╔═══ 📅  DAILY  ═══╗**"))
 
-        # 1: Quêtes
+        b = Button(label="Ouvrir", style=discord.ButtonStyle.primary, custom_id="hub_quests")
+        b.callback = _v2_delegate_to(EngagementHubView, '_on_quests')
         items.append(_section_with_button(
-            "📜 Mes quêtes du jour", "3 défis quotidiens + streak", b_quests,
+            "📜  Mes quêtes du jour",
+            "3 défis quotidiens · streak bonus · récompenses immédiates",
+            b,
         ))
-        # 2: Daily Wheel
+
+        b = Button(label="Spin", style=discord.ButtonStyle.success, custom_id="hub_wheel")
+        b.callback = _v2_delegate_to(EngagementHubView, '_on_wheel')
         items.append(_section_with_button(
-            "🎰 Daily Wheel", "1 spin gratuit/jour — jackpot mythique possible", b_wheel,
+            "🎰  Daily Wheel",
+            "1 spin gratuit par jour · jackpot mythique possible",
+            b,
         ))
-        # 3: Hauts faits
+
+        b = Button(label="Voir", style=discord.ButtonStyle.secondary, custom_id="hub_achievements")
+        b.callback = _v2_delegate_to(EngagementHubView, '_on_achievements')
         items.append(_section_with_button(
-            "🏆 Mes hauts faits", "50+ achievements à débloquer", b_ach,
-        ))
-        # 4: Compagnon
-        items.append(_section_with_button(
-            "🐾 Mon compagnon", "Adopter et faire évoluer ton pet, bonus passifs", b_pet,
-        ))
-        # 5: Confession
-        items.append(_section_with_button(
-            "🤫 Confession anonyme", "Message 100% anonyme dans le salon dédié", b_conf,
+            "🏆  Mes hauts faits",
+            "50+ achievements à débloquer · progression visible",
+            b,
         ))
 
         items.append(v2_divider())
 
-        # 6: Profil
+        # ═══ GROUPE 2 — PERSO (profile, pet, notifs) ═══
+        items.append(v2_body("**╔═══ 👤  PERSO  ═══╗**"))
+
+        b = Button(label="Ouvrir", style=discord.ButtonStyle.primary, custom_id="hub_profile")
+        b.callback = _v2_delegate_to(EngagementHubView, '_on_profile')
         items.append(_section_with_button(
-            "👤 Mon profil", "Level, prestige, saison, factions, alliance, stats", b_prof,
+            "👤  Mon profil",
+            "Level · prestige · saison · factions · alliance · stats",
+            b,
         ))
-        # 7: Notifications
+
+        b = Button(label="Voir", style=discord.ButtonStyle.secondary, custom_id="hub_pet")
+        b.callback = _v2_delegate_to(EngagementHubView, '_on_pet')
         items.append(_section_with_button(
-            "🔔 Mes notifications", "Choisis précisément quels events te pingent", b_notif,
+            "🐾  Mon compagnon",
+            "Adopter et faire évoluer ton pet · bonus passifs",
+            b,
         ))
-        # 8: Histoire
+
+        b = Button(label="Régler", style=discord.ButtonStyle.secondary, custom_id="hub_notifs")
+        b.callback = _v2_delegate_to(EngagementHubView, '_on_notifs')
         items.append(_section_with_button(
-            "📖 Histoire du serveur", "Chapitre qui évolue après chaque World Boss", b_lore,
-        ))
-        # 9: Mission
-        items.append(_section_with_button(
-            "🎯 Mission en cours", "Quête collective mensuelle en 5 étapes", b_miss,
+            "🔔  Mes notifications",
+            "Choisis précisément quels events te pingent · granulaire",
+            b,
         ))
 
         items.append(v2_divider())
 
-        # 10: Roblox
+        # ═══ GROUPE 3 — NARRATIF (lore, mission, confess) ═══
+        items.append(v2_body("**╔═══ 📖  NARRATIF  ═══╗**"))
+
+        b = Button(label="Lire", style=discord.ButtonStyle.secondary, custom_id="hub_lore")
+        b.callback = _v2_delegate_to(EngagementHubView, '_on_lore')
         items.append(_section_with_button(
-            "🎮 Roblox", "Speedrun · Matchmaking · Studio Tips · Updates", b_rblx,
+            "📖  Histoire du serveur",
+            "Chapitre du lore qui évolue après chaque World Boss",
+            b,
         ))
-        # 11: Compétitions
+
+        b = Button(label="Suivre", style=discord.ButtonStyle.success, custom_id="hub_mission")
+        b.callback = _v2_delegate_to(EngagementHubView, '_on_mission')
         items.append(_section_with_button(
-            "🏆 Compétitions", "Bingo mensuel · Prédictions · Faction Wars", b_comp,
+            "🎯  Mission en cours",
+            "Quête collective mensuelle en 5 étapes · objectifs communs",
+            b,
         ))
-        # 12: Social
+
+        b = Button(label="Écrire", style=discord.ButtonStyle.secondary, custom_id="hub_confess")
+        b.callback = _v2_delegate_to(EngagementHubView, '_on_confess')
         items.append(_section_with_button(
-            "💝 Social", "Shoutouts · Mentorat · Confessions", b_soc,
+            "🤫  Confession anonyme",
+            "Message 100% anonyme dans le salon dédié · zéro trace",
+            b,
         ))
-        # 13: Outils
+
+        items.append(v2_divider())
+
+        # ═══ GROUPE 4 — HUBS THÉMATIQUES (sub-panels) ═══
+        items.append(v2_body("**╔═══ 🌐  EXPLORER  ═══╗**"))
+
+        b = Button(label="Ouvrir", style=discord.ButtonStyle.primary, custom_id="hub_roblox")
+        b.callback = _v2_delegate_to(EngagementHubView, '_on_roblox')
         items.append(_section_with_button(
-            "🧰 Outils",
+            "🎮  Roblox",
+            "Speedrun · Matchmaking · Studio Tips · Updates",
+            b,
+        ))
+
+        b = Button(label="Ouvrir", style=discord.ButtonStyle.danger, custom_id="hub_competitions")
+        b.callback = _v2_delegate_to(EngagementHubView, '_on_competitions')
+        items.append(_section_with_button(
+            "🏆  Compétitions",
+            "Bingo mensuel · Prédictions · Faction Wars saisonnières",
+            b,
+        ))
+
+        b = Button(label="Ouvrir", style=discord.ButtonStyle.success, custom_id="hub_social")
+        b.callback = _v2_delegate_to(EngagementHubView, '_on_social')
+        items.append(_section_with_button(
+            "💝  Social",
+            "Shoutouts · Mentorat · Apprentis · Reconnaissances",
+            b,
+        ))
+
+        b = Button(label="Ouvrir", style=discord.ButtonStyle.secondary, custom_id="hub_tools")
+        b.callback = _v2_delegate_to(EngagementHubView, '_on_tools')
+        items.append(_section_with_button(
+            "🧰  Outils",
             "Banque · Loots · PvP · Classe RP · Alliance · Time Capsule · Hall of Fame",
-            b_tools,
+            b,
         ))
 
+        items.append(v2_divider())
+
+        # ═══ FOOTER ═══
+        items.append(v2_body(
+            "_💡 Tout est éphémère : toi seul vois la réponse._\n"
+            "_🎮 Bonne aventure sur le serveur !_"
+        ))
+
+        # Phase 88 : couleur Discord blurple + frame visuel via emojis
         self.add_item(v2_container(*items, color=0x5865F2))
 
 
