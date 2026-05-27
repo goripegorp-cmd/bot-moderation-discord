@@ -39993,12 +39993,10 @@ async def badges_cmd(i: discord.Interaction):
             pass
 
 
-@bot.tree.command(
-    name="records",
-    description="🏆 Records du serveur — Top des boss killers, riddle streaks, treasures, et plus",
-)
+# Phase 103 HOTFIX : retirer @bot.tree.command (limite Discord 100 atteinte)
+# Cette fonction reste appelable via /stats view:records (helper interne).
 async def records_cmd(i: discord.Interaction):
-    """Phase 97 NEW : /records — Hall of Fame du serveur en LayoutView V2 magnifique."""
+    """Phase 97 + 103 : Hall of Fame du serveur, exposé via /stats view:records."""
     if not i.guild:
         return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
     if not await _safe_defer(i):
@@ -40172,12 +40170,10 @@ async def records_cmd(i: discord.Interaction):
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-@bot.tree.command(
-    name="loot_table",
-    description="📜 Loot Table — drops possibles de chaque event (Mystery Box, Treasure, Boss...)",
-)
+# Phase 103 HOTFIX : retirer @bot.tree.command (limite Discord 100 atteinte)
+# Cette fonction reste appelable via /stats view:loot_table (helper interne).
 async def loot_table_cmd(i: discord.Interaction):
-    """Phase 99 NEW : /loot_table — vue exhaustive des drops possibles en LayoutView V2."""
+    """Phase 99 + 103 : Loot table exhaustive, exposée via /stats view:loot_table."""
     if not i.guild:
         return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
     if not await _safe_defer(i):
@@ -40326,11 +40322,33 @@ async def loot_table_cmd(i: discord.Interaction):
 
 
 @bot.tree.command(
-    name="server_stats",
-    description="📊 Dashboard global du serveur — events, coins, activité, records",
+    name="stats",
+    description="📊 Stats du serveur — Records · Dashboard · Loot Table (1 commande = 3 vues)",
 )
+@app_commands.describe(view="Quelle vue afficher")
+@app_commands.choices(view=[
+    app_commands.Choice(name="🏆 Records — Hall of Fame Top 5", value="records"),
+    app_commands.Choice(name="📊 Dashboard — Stats globales du serveur", value="dashboard"),
+    app_commands.Choice(name="📜 Loot Table — Drops par event", value="loot_table"),
+])
+async def stats_cmd(i: discord.Interaction, view: app_commands.Choice[str]):
+    """Phase 103 HOTFIX : 3 commandes consolidées en 1 (limite Discord 100 atteinte).
+
+    Permet de garder /records + /server_stats + /loot_table sans dépasser la
+    limite globale Discord. Le user choisit la vue via le paramètre `view`.
+    """
+    if view.value == "records":
+        await records_cmd(i)
+    elif view.value == "loot_table":
+        await loot_table_cmd(i)
+    else:  # dashboard
+        await server_stats_cmd(i)
+
+
+# Phase 103 HOTFIX : retirer @bot.tree.command (limite Discord 100 atteinte)
+# Cette fonction reste appelable via /stats view:dashboard (helper interne).
 async def server_stats_cmd(i: discord.Interaction):
-    """Phase 98 NEW : /server_stats — Dashboard global LayoutView V2 magnifique."""
+    """Phase 98 + 103 : Dashboard global, exposé via /stats view:dashboard."""
     if not i.guild:
         return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
     if not await _safe_defer(i):
