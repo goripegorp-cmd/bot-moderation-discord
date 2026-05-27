@@ -525,6 +525,8 @@ def compute_set_bonus(inventory: dict) -> dict:
 def inventory_total_stats(inventory: dict) -> dict:
     """Phase 106 : stats TOTALES (gear + set bonus) pour l'inventaire complet.
 
+    Phase 107 : items à 0 durabilité n'apportent AUCUNE stat (cassés).
+
     Retourne {atk, def, crit, hp_bonus, lifesteal, set_name, set_emoji}.
     """
     total_atk = 0
@@ -535,6 +537,9 @@ def inventory_total_stats(inventory: dict) -> dict:
     for slot in EQUIPMENT_SLOTS:
         item = inventory.get(slot) or {}
         if not item:
+            continue
+        # Phase 107 : skip items cassés (durabilité <= 0)
+        if is_item_broken(item):
             continue
         s = gear_total_stats(item)
         total_atk += s["atk"]
@@ -560,6 +565,195 @@ def inventory_total_stats(inventory: dict) -> dict:
         "set_emoji": set_bonus["emoji"],
         "set_desc": set_bonus["desc"],
     }
+
+
+# ─── Phase 107 : Durability / Repair ─────────────────────────────────────
+#
+# Chaque item équipé possède une durabilité max (selon rareté).
+# Chaque combat consomme 1 point. À 0 → item cassé : stats désactivées
+# jusqu'à réparation. Coût de réparation = base * (max - current).
+#
+# Durabilité par rareté :
+# - commune    : 30  pts
+# - rare       : 50  pts
+# - épique     : 80  pts
+# - légendaire : 120 pts
+# - mythique   : 200 pts
+# - divine     : 300 pts
+#
+# Coût base par point manquant :
+# - commune    : 2 coins/pt
+# - rare       : 5 coins/pt
+# - épique     : 12 coins/pt
+# - légendaire : 25 coins/pt
+# - mythique   : 50 coins/pt
+# - divine     : 100 coins/pt
+
+DURABILITY_MAX_BY_RARITY = {
+    "commune": 30,
+    "rare": 50,
+    "épique": 80,
+    "epique": 80,  # alias
+    "légendaire": 120,
+    "legendaire": 120,  # alias
+    "mythique": 200,
+    "divine": 300,
+}
+
+REPAIR_COST_PER_POINT = {
+    "commune": 2,
+    "rare": 5,
+    "épique": 12,
+    "epique": 12,
+    "légendaire": 25,
+    "legendaire": 25,
+    "mythique": 50,
+    "divine": 100,
+}
+
+
+def get_max_durability(item: dict) -> int:
+    """Phase 107 : durabilité max d'un item selon sa rareté.
+
+    Si item.max_durability déjà défini → on le respecte (override custom).
+    Sinon → calcul depuis rareté.
+    """
+    if not item:
+        return 0
+    if "max_durability" in item and item["max_durability"]:
+        return int(item["max_durability"])
+    r = (item.get("rarity") or "commune").lower()
+    return DURABILITY_MAX_BY_RARITY.get(r, 30)
+
+
+def get_current_durability(item: dict) -> int:
+    """Phase 107 : durabilité actuelle d'un item.
+
+    Si non défini → on retourne le max (item neuf).
+    Rétro-compatible avec items legacy (sans champ durability).
+    """
+    if not item:
+        return 0
+    if "durability" in item and item["durability"] is not None:
+        return max(0, int(item["durability"]))
+    return get_max_durability(item)
+
+
+def is_item_broken(item: dict) -> bool:
+    """Phase 107 : True si l'item est cassé (durability <= 0)."""
+    if not item or not item.get("name"):
+        return False
+    return get_current_durability(item) <= 0
+
+
+def init_item_durability(item: dict) -> dict:
+    """Phase 107 : initialise durability/max_durability sur un item neuf.
+
+    Idempotent : si déjà initialisé, ne change rien.
+    Mutation in-place + return same dict pour chaînage.
+    """
+    if not item or not item.get("name"):
+        return item
+    max_dur = get_max_durability(item)
+    item["max_durability"] = max_dur
+    if "durability" not in item or item["durability"] is None:
+        item["durability"] = max_dur
+    return item
+
+
+def consume_durability(inventory: dict, points: int = 1) -> list:
+    """Phase 107 : retire `points` à chaque item équipé.
+
+    Retourne la liste des items qui viennent de CASSER (passage à 0).
+    Mutation in-place de l'inventaire.
+    """
+    just_broken = []
+    if not inventory:
+        return just_broken
+    for slot in EQUIPMENT_SLOTS:
+        item = inventory.get(slot) or {}
+        if not item or not item.get("name"):
+            continue
+        # Initialiser si nécessaire (rétro-compat)
+        if "max_durability" not in item:
+            init_item_durability(item)
+        cur = get_current_durability(item)
+        new_dur = max(0, cur - points)
+        was_alive = cur > 0
+        item["durability"] = new_dur
+        if was_alive and new_dur == 0:
+            just_broken.append({"slot": slot, "item": dict(item)})
+    return just_broken
+
+
+def repair_cost(item: dict) -> int:
+    """Phase 107 : coût total pour réparer un item à 100%."""
+    if not item or not item.get("name"):
+        return 0
+    max_dur = get_max_durability(item)
+    cur = get_current_durability(item)
+    missing = max(0, max_dur - cur)
+    if missing == 0:
+        return 0
+    r = (item.get("rarity") or "commune").lower()
+    cost_per_pt = REPAIR_COST_PER_POINT.get(r, 2)
+    return missing * cost_per_pt
+
+
+def repair_inventory_cost(inventory: dict) -> int:
+    """Phase 107 : coût TOTAL pour réparer tout l'inventaire."""
+    if not inventory:
+        return 0
+    total = 0
+    for slot in EQUIPMENT_SLOTS:
+        item = inventory.get(slot) or {}
+        total += repair_cost(item)
+    return total
+
+
+def repair_item(item: dict) -> int:
+    """Phase 107 : restaure la durabilité d'un item à son max.
+
+    Retourne le coût appliqué (0 si déjà au max).
+    Mutation in-place.
+    """
+    if not item or not item.get("name"):
+        return 0
+    cost = repair_cost(item)
+    item["durability"] = get_max_durability(item)
+    return cost
+
+
+def repair_all_inventory(inventory: dict) -> int:
+    """Phase 107 : répare tous les items équipés. Retourne le coût total."""
+    if not inventory:
+        return 0
+    total = 0
+    for slot in EQUIPMENT_SLOTS:
+        item = inventory.get(slot) or {}
+        if not item or not item.get("name"):
+            continue
+        total += repair_item(item)
+    return total
+
+
+def durability_bar(item: dict, length: int = 10) -> str:
+    """Phase 107 : mini-barre visuelle de durabilité.
+
+    █████████░ 90% (108/120)
+    """
+    if not item or not item.get("name"):
+        return ""
+    cur = get_current_durability(item)
+    mx = get_max_durability(item)
+    if mx <= 0:
+        return ""
+    ratio = max(0.0, min(1.0, cur / mx))
+    filled = round(ratio * length)
+    empty = length - filled
+    bar = "█" * filled + "░" * empty
+    pct = int(ratio * 100)
+    return f"{bar} {pct}% ({cur}/{mx})"
 
 
 def random_boss(difficulty: int = 100) -> dict:
@@ -1553,6 +1747,12 @@ __all__ = [
     "random_helmet", "random_boots", "random_accessory", "random_trinket",
     "random_gear_any", "random_enchantment", "gear_total_stats",
     "compute_set_bonus", "inventory_total_stats", "EQUIPMENT_SLOTS",
+    # Phase 107 : durability / repair
+    "DURABILITY_MAX_BY_RARITY", "REPAIR_COST_PER_POINT",
+    "get_max_durability", "get_current_durability", "is_item_broken",
+    "init_item_durability", "consume_durability",
+    "repair_cost", "repair_inventory_cost", "repair_item", "repair_all_inventory",
+    "durability_bar",
     "generate_shop_rotation", "get_quiz_set", "random_personal_event",
     "random_mystery_box", "random_daily_spark",
     # Targeting

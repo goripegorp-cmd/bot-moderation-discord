@@ -8730,7 +8730,38 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
 
         # Update inventory total damage
         inv['total_damage'] = inv.get('total_damage', 0) + damage
+
+        # Phase 107 : durabilité — chaque attaque consomme 1 pt sur tout l'équipement
+        broken_items = []
+        try:
+            broken_items = events2026.consume_durability(inv, points=1)
+        except Exception as ex:
+            print(f"[durability consume] {ex}")
+
         await _save_inventory(i.guild.id, i.user.id, inv)
+
+        # Phase 107 : notification DM/ephemeral si un item vient de casser
+        if broken_items:
+            try:
+                broken_lines = []
+                for b in broken_items[:3]:  # max 3 pour éviter spam
+                    itm = b.get('item', {})
+                    broken_lines.append(
+                        f"{itm.get('emoji', '⚙️')} **{itm.get('name', 'Item')}** ({b.get('slot', '?')}) — CASSÉ"
+                    )
+                if broken_lines:
+                    cost_total = 0
+                    try:
+                        cost_total = events2026.repair_inventory_cost(inv)
+                    except Exception:
+                        pass
+                    await i.followup.send(
+                        "⚠️ **Équipement endommagé !**\n" + "\n".join(broken_lines)
+                        + f"\n_Tape **/repair** pour réparer (coût total : `{cost_total:,}` 🪙)_",
+                        ephemeral=True,
+                    )
+            except Exception:
+                pass
 
         # Compteur final_blows si c'est le coup fatal
         if final_blow:
@@ -39922,6 +39953,18 @@ async def inventory_cmd(i: discord.Interaction):
                         return ""
                     return f"\n   ✨ **{ench.get('emoji', '✨')} {ench.get('name', '?')}** — _{ench.get('desc', '')}_"
 
+                # Phase 107 : helper durabilité
+                def _dura_line(item: dict) -> str:
+                    if not item or not item.get('name'):
+                        return ""
+                    try:
+                        bar = events2026.durability_bar(item, length=10)
+                        broken = events2026.is_item_broken(item)
+                        prefix = "🔴 **CASSÉ — stats désactivées**" if broken else "🔧 Durabilité"
+                        return f"\n   {prefix} `{bar}`" if bar else ""
+                    except Exception:
+                        return ""
+
                 # Arme
                 w_emoji = w.get('emoji', '⚪')
                 w_name = w.get('name', '_aucune arme équipée_')
@@ -39931,6 +39974,7 @@ async def inventory_cmd(i: discord.Interaction):
                     f"{w_emoji} {w_name}\n"
                     f"`+{w_s['atk']}` ATK"
                     + _enchant_line(w)
+                    + _dura_line(w)
                 ))
 
                 # Armure
@@ -39942,6 +39986,7 @@ async def inventory_cmd(i: discord.Interaction):
                     f"{a_emoji} {a_name}\n"
                     f"`+{a_s['def']}` DEF"
                     + _enchant_line(a)
+                    + _dura_line(a)
                 ))
 
                 # Slots futurs (Helmet / Boots / Accessory / Trinket)
@@ -39969,6 +40014,7 @@ async def inventory_cmd(i: discord.Interaction):
                             items.append(v2_body(
                                 f"**{slot_label}**  {si_rarity}\n{si_emoji} {si_name}\n`{mods_str}`"
                                 + _enchant_line(slot_item)
+                                + _dura_line(slot_item)
                             ))
 
                 items.append(v2_divider())
@@ -40037,6 +40083,195 @@ async def inventory_cmd(i: discord.Interaction):
         await i.response.send_message(view=_InventoryLayout(), ephemeral=True)
     except Exception as ex:
         print(f"[/inventory V2] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+# ─── Phase 107 : /repair (Repair/Durability) ─────────────────────────────
+@bot.tree.command(name="repair", description="🔧 Répare ton équipement endommagé (coûte des coins)")
+async def repair_cmd(i: discord.Interaction):
+    """Phase 107 : panel V2 montrant la durabilité + bouton réparer tout.
+
+    Le coût est déduit de coins en main d'abord, puis de la banque.
+    """
+    try:
+        inv = await _get_or_create_inventory(i.guild.id, i.user.id)
+
+        # Calculer coût total
+        try:
+            total_cost = events2026.repair_inventory_cost(inv)
+        except Exception:
+            total_cost = 0
+
+        eco = await get_user_economy(i.guild.id, i.user.id)
+        coins_hand = int(eco.get('coins', 0) or 0)
+        bank = int(eco.get('bank', 0) or 0)
+        total_wealth = coins_hand + bank
+
+        # Lister les items avec durabilité
+        lines = []
+        any_broken = False
+        any_damaged = False
+        for slot_key, slot_label in [
+            ("weapon", "⚔️ Arme"),
+            ("armor", "🛡️ Armure"),
+            ("helmet", "🎩 Casque"),
+            ("boots", "👢 Bottes"),
+            ("accessory", "💍 Accessoire"),
+            ("trinket", "🔮 Trinket"),
+        ]:
+            item = inv.get(slot_key) or {}
+            if not item or not item.get('name'):
+                continue
+            try:
+                cur = events2026.get_current_durability(item)
+                mx = events2026.get_max_durability(item)
+                broken = events2026.is_item_broken(item)
+                cost = events2026.repair_cost(item)
+            except Exception:
+                cur, mx, broken, cost = 0, 0, False, 0
+            emoji = item.get('emoji', '⚪')
+            name = item.get('name', '?')
+            if broken:
+                any_broken = True
+                lines.append(
+                    f"🔴 **{slot_label}** {emoji} {name} — **CASSÉ** `0/{mx}` · répare pour `{cost:,}` 🪙"
+                )
+            elif cur < mx:
+                any_damaged = True
+                ratio = cur / mx if mx > 0 else 1.0
+                if ratio < 0.30:
+                    badge = "🟠"
+                elif ratio < 0.60:
+                    badge = "🟡"
+                else:
+                    badge = "🟢"
+                lines.append(
+                    f"{badge} **{slot_label}** {emoji} {name} — `{cur}/{mx}` · répare pour `{cost:,}` 🪙"
+                )
+            else:
+                lines.append(
+                    f"✅ **{slot_label}** {emoji} {name} — `{cur}/{mx}` _(au max)_"
+                )
+
+        if not lines:
+            return await i.response.send_message(
+                "🎒 Tu n'as aucun équipement à réparer.\n_Combats des boss pour récupérer du loot !_",
+                ephemeral=True,
+            )
+
+        # Construire le panel V2
+        _owner_id = i.user.id  # capturé pour le callback
+        _can_repair = (total_cost > 0 and total_wealth >= total_cost)
+
+        class _RepairAllBtn(discord.ui.Button):
+            def __init__(self):
+                super().__init__(
+                    label=f"🔧 Tout réparer ({total_cost:,} 🪙)",
+                    style=discord.ButtonStyle.success,
+                    custom_id="phase107_repair_all",
+                )
+
+            async def callback(self, btn_i: discord.Interaction):
+                if btn_i.user.id != _owner_id:
+                    return await btn_i.response.send_message(
+                        "❌ Ce panneau n'est pas pour toi.", ephemeral=True
+                    )
+                try:
+                    # Re-vérifier en atomique
+                    inv2 = await _get_or_create_inventory(btn_i.guild.id, btn_i.user.id)
+                    cost = events2026.repair_inventory_cost(inv2)
+                    if cost == 0:
+                        return await btn_i.response.send_message(
+                            "✨ Ton équipement est déjà au max.", ephemeral=True
+                        )
+                    eco2 = await get_user_economy(btn_i.guild.id, btn_i.user.id)
+                    hand = int(eco2.get('coins', 0) or 0)
+                    bank2 = int(eco2.get('bank', 0) or 0)
+                    if hand + bank2 < cost:
+                        return await btn_i.response.send_message(
+                            f"💸 Fonds insuffisants ({hand + bank2:,} / {cost:,} 🪙).",
+                            ephemeral=True,
+                        )
+                    # Déduire de la main d'abord, puis de la banque
+                    from_hand = min(hand, cost)
+                    from_bank = cost - from_hand
+                    if from_hand > 0:
+                        await add_coins(btn_i.guild.id, btn_i.user.id, -from_hand)
+                    if from_bank > 0:
+                        await update_user_economy(
+                            btn_i.guild.id, btn_i.user.id,
+                            bank=bank2 - from_bank,
+                        )
+                    # Réparer
+                    events2026.repair_all_inventory(inv2)
+                    await _save_inventory(btn_i.guild.id, btn_i.user.id, inv2)
+                    await btn_i.response.edit_message(
+                        content=(
+                            f"✅ **Équipement intégralement réparé !**\n"
+                            f"Coût : `{cost:,}` 🪙 "
+                            f"({from_hand:,} main + {from_bank:,} banque)\n"
+                            f"_Tape `/inventory` pour voir l'état._"
+                        ),
+                        view=None,
+                    )
+                except Exception as ex:
+                    print(f"[/repair callback] {ex}")
+                    import traceback; traceback.print_exc()
+                    try:
+                        await btn_i.response.send_message(
+                            f"❌ Erreur : `{ex}`", ephemeral=True
+                        )
+                    except Exception:
+                        pass
+
+        class _RepairLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=180)
+                lay = []
+                lay.append(v2_title("🔧  ATELIER DE RÉPARATION"))
+                lay.append(v2_subtitle(
+                    f"Coût total : `{total_cost:,}` 🪙  ·  Tu as `{total_wealth:,}` 🪙 (main + banque)"
+                ))
+                lay.append(v2_divider())
+                lay.append(v2_body("**╔═══ 🛠️  ÉTAT DE L'ÉQUIPEMENT  ═══╗**"))
+                lay.append(v2_body("\n".join(lines)))
+                lay.append(v2_divider())
+
+                if total_cost == 0:
+                    lay.append(v2_body(
+                        "✨ **Tout ton équipement est en parfait état !**\n"
+                        "_Reviens après quelques combats si des items s'endommagent._"
+                    ))
+                elif total_wealth < total_cost:
+                    missing = total_cost - total_wealth
+                    lay.append(v2_body(
+                        f"💸 **Fonds insuffisants** — il te manque `{missing:,}` 🪙\n"
+                        "_Gagne plus en attaquant des boss, en participant aux events, "
+                        "ou en faisant `/work` puis `/daily`._"
+                    ))
+                else:
+                    note = ""
+                    if any_broken:
+                        note = "\n⚠️ _Items cassés détectés — leurs stats sont désactivées jusqu'à réparation !_"
+                    lay.append(v2_body(
+                        f"💰 **Prêt à payer** `{total_cost:,}` 🪙  →  "
+                        f"il te restera `{(total_wealth - total_cost):,}` 🪙{note}"
+                    ))
+
+                self.add_item(v2_container(*lay, color=0xE67E22 if any_broken else 0x3498DB))
+
+                # Bouton "Réparer tout"
+                if _can_repair:
+                    self.add_item(discord.ui.ActionRow(_RepairAllBtn()))
+
+        await i.response.send_message(view=_RepairLayout(), ephemeral=True)
+    except Exception as ex:
+        print(f"[/repair] {ex}")
+        import traceback; traceback.print_exc()
         try:
             if not i.response.is_done():
                 await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
