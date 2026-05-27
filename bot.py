@@ -12872,6 +12872,229 @@ async def _auction_settler_wait():
     await bot.wait_until_ready()
 
 
+# ─── Phase 111 : Hub Live Events Tile — refresh dynamique ────────────────
+#
+# Une seconde "tuile" est postée dans le salon du hub (juste après le hub
+# pinned). Elle affiche les events actifs en temps réel : Boss Raid, World
+# Boss, Treasure Hunt, Quiz, Voice Chaos, etc. La loop edit le message
+# toutes les minutes UNIQUEMENT si le contenu a changé (anti-spam edit log).
+
+# Cache : guild_id → last_signature
+_hub_live_events_sig_cache: dict = {}
+
+
+async def _collect_live_events(guild_id: int) -> list:
+    """Phase 111 : retourne une liste de tuples (label, emoji, line) pour
+    tous les events actifs du serveur."""
+    lines = []
+    try:
+        # Events boss raid / treasure / quiz (table `events`)
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT event_type, boss_json, started_at, ends_at "
+                "FROM events WHERE guild_id=? AND ended=0 ORDER BY id DESC LIMIT 5",
+                (guild_id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        for event_type, boss_json, started_at, ends_at in rows:
+            label_map = {
+                "boss": "👹 Boss Raid",
+                "treasure": "💎 Chasse au trésor",
+                "quiz": "❓ Quiz",
+                "boss_raid": "👹 Boss Raid",
+            }
+            label = label_map.get(event_type, f"🎯 {event_type}")
+            # Boss spécifique
+            extra = ""
+            if event_type in ("boss", "boss_raid") and boss_json:
+                try:
+                    boss = json.loads(boss_json)
+                    name = boss.get("name", "?")
+                    chp = int(boss.get("current_hp", 0) or 0)
+                    mhp = int(boss.get("max_hp", 1) or 1)
+                    extra = f" · **{name}** {chp}/{mhp} HP"
+                except Exception:
+                    pass
+            lines.append(f"{label}{extra}")
+    except Exception:
+        pass
+
+    # World boss hebdo
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT boss_id, hp, max_hp FROM world_bosses "
+                "WHERE guild_id=? AND ended=0 ORDER BY id DESC LIMIT 1",
+                (guild_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if row:
+            boss_id, hp, mhp = row
+            hp = int(hp or 0)
+            mhp = int(mhp or 1)
+            name = boss_id or "?"
+            lines.append(f"🌍 **World Boss** · {name} {hp}/{mhp} HP")
+    except Exception:
+        pass
+
+    # Voice chaos (récent : appliqué dans les dernières 30 min)
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT action_id, voice_channel_id FROM voice_chaos_log "
+                "WHERE guild_id=? AND reverted=0 "
+                "AND applied_at > datetime('now', '-30 minutes') "
+                "ORDER BY id DESC LIMIT 1",
+                (guild_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if row:
+            action, vch = row
+            lines.append(f"🎭 **Voice Chaos** actif · action `{action}`")
+    except Exception:
+        pass
+
+    # Daily riddle
+    try:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT first_winner_id FROM daily_riddles_log "
+                "WHERE guild_id=? AND day=?",
+                (guild_id, today),
+            ) as cur:
+                row = await cur.fetchone()
+        if row is not None:
+            first_winner_id = row[0]
+            if not first_winner_id:
+                lines.append("🧩 **Énigme du jour** disponible — premier arrivé = jackpot !")
+    except Exception:
+        pass
+
+    # Flash treasure
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id FROM flash_treasures WHERE guild_id=? AND ended=0 "
+                "ORDER BY id DESC LIMIT 1",
+                (guild_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if row:
+            lines.append("💰 **Flash Treasure** spawn actif")
+    except Exception:
+        pass
+
+    # Auctions actives (Phase 109)
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM auctions WHERE guild_id=? AND status='active'",
+                (guild_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if row and row[0]:
+            count = int(row[0])
+            lines.append(f"🔨 **{count} enchère(s) Maison des enchères** en cours")
+    except Exception:
+        pass
+
+    return lines
+
+
+class HubLiveEventsLayoutV2(LayoutView):
+    """Phase 111 : panel Live Events, refreshable, posté juste après le hub.
+
+    Pas de boutons interactifs (juste de l'info). Custom_ids stables not needed.
+    """
+
+    def __init__(self, event_lines: list, last_updated_ts: int):
+        super().__init__(timeout=None)
+        items = []
+        items.append(v2_title("📡  EVENTS EN COURS"))
+        items.append(v2_subtitle(
+            f"Actualisé <t:{last_updated_ts}:R>  ·  refresh auto chaque minute"
+        ))
+        items.append(v2_divider())
+        if event_lines:
+            items.append(v2_body("**╔═══ 🔥  ACTIF MAINTENANT  ═══╗**"))
+            items.append(v2_body("\n".join(f"• {line}" for line in event_lines)))
+        else:
+            items.append(v2_body(
+                "**╔═══ 😴  SILENCE…  ═══╗**\n"
+                "_Aucun event en cours pour le moment._\n"
+                "_Reste actif — un boss/chasse/quiz peut spawn à tout moment !_"
+            ))
+        items.append(v2_divider())
+        items.append(v2_body(
+            "_💡 Utilise les boutons du panneau du dessus pour participer dès qu'un event apparaît._"
+        ))
+        self.add_item(v2_container(*items, color=0xE74C3C if event_lines else 0x95A5A6))
+
+
+@tasks.loop(minutes=1)
+async def hub_live_events_refresh_task():
+    """Phase 111 : refresh la tuile Live Events de chaque guild dont le hub
+    est installé. Anti-spam : edit seulement si la signature a changé."""
+    try:
+        import time as _time
+        for guild in bot.guilds:
+            try:
+                cfg_d = await db_get(guild.id)
+                hub_ch_id = int(cfg_d.get("hub_channel", 0) or 0)
+                if not hub_ch_id:
+                    continue
+                channel = guild.get_channel(hub_ch_id)
+                if not channel:
+                    continue
+
+                # Collecter les events actifs
+                lines = await _collect_live_events(guild.id)
+                sig = "|".join(lines) if lines else "_empty_"
+
+                # Anti-spam edit : si la signature n'a pas changé, on skip
+                if _hub_live_events_sig_cache.get(guild.id) == sig:
+                    continue
+
+                live_msg_id = int(cfg_d.get("hub_live_events_msg_id", 0) or 0)
+                now_ts = int(_time.time())
+                view = HubLiveEventsLayoutV2(lines, now_ts)
+
+                if live_msg_id:
+                    # Edit existing
+                    try:
+                        msg = await channel.fetch_message(live_msg_id)
+                        await msg.edit(view=view)
+                        _hub_live_events_sig_cache[guild.id] = sig
+                    except (discord.NotFound, discord.Forbidden):
+                        # Re-poste
+                        try:
+                            msg = await channel.send(view=view)
+                            await db_set(guild.id, "hub_live_events_msg_id", msg.id)
+                            _hub_live_events_sig_cache[guild.id] = sig
+                        except Exception as ex:
+                            print(f"[hub_live_events guild={guild.id} resend] {ex}")
+                    except Exception as ex:
+                        print(f"[hub_live_events guild={guild.id} edit] {ex}")
+                else:
+                    # Premier post
+                    try:
+                        msg = await channel.send(view=view)
+                        await db_set(guild.id, "hub_live_events_msg_id", msg.id)
+                        _hub_live_events_sig_cache[guild.id] = sig
+                    except Exception as ex:
+                        print(f"[hub_live_events guild={guild.id} first post] {ex}")
+            except Exception as ex:
+                print(f"[hub_live_events_refresh_task guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[hub_live_events_refresh_task] {ex}")
+
+
+@hub_live_events_refresh_task.before_loop
+async def _hub_live_events_refresh_wait():
+    await bot.wait_until_ready()
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 89 — STALE EVENT CLEANUP
 #  Détecte les events dont le message a été supprimé manuellement (souris user)
@@ -37028,6 +37251,9 @@ async def on_ready():
     # Phase 109 : auction settler — termine les enchères expirées
     if not auction_settler_task.is_running():
         auction_settler_task.start()
+    # Phase 111 : refresh tuile Live Events sur les hubs configurés
+    if not hub_live_events_refresh_task.is_running():
+        hub_live_events_refresh_task.start()
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()
