@@ -78,6 +78,8 @@ import panels_helpers as panels_h
 import raid_recap as raid_recap_module
 # Phase 130 : dashboard staff modération
 import mod_dashboard as mod_dashboard_module
+# Phase 131 : événements économiques cycliques + /gift
+import economy_events as econ_events_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -37832,6 +37834,23 @@ async def on_ready():
         )
     except Exception as ex:
         print(f"[on_ready mod_dashboard setup] {ex}")
+    # Phase 131 : Événements économiques cycliques (annonce quotidienne 9h FR)
+    try:
+        econ_events_module.setup(
+            bot,
+            get_db,
+            db_get,
+            db_set,
+            {
+                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
+                'v2_divider': v2_divider, 'v2_container': v2_container,
+                'LayoutView': LayoutView,
+            },
+        )
+        if not econ_events_module.daily_announce_task.is_running():
+            econ_events_module.daily_announce_task.start()
+    except Exception as ex:
+        print(f"[on_ready econ_events setup] {ex}")
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()
@@ -38095,6 +38114,150 @@ async def owner_mod_stats_cmd(i: discord.Interaction, jours: int = 30):
                 await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
         except Exception:
             pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 131 : /bonus — voir le bonus économique du jour
+# ═══════════════════════════════════════════════════════════════════════════════
+@bot.tree.command(
+    name="bonus",
+    description="✨ Bonus économique du jour (et teasing de demain)",
+)
+async def bonus_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        view = econ_events_module.build_layout(i.guild)
+        if view is None:
+            return await i.response.send_message(
+                "❌ Module bonus indisponible.", ephemeral=True
+            )
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[bonus_cmd] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 131 : /gift — transfer P2P de coins (avec taxe configurable par jour)
+# ═══════════════════════════════════════════════════════════════════════════════
+@bot.tree.command(
+    name="gift",
+    description="🎁 Envoyer des coins à un autre membre (taxe 5%, 0% le dimanche)",
+)
+@app_commands.describe(
+    membre="Le membre à qui envoyer les coins",
+    montant="Montant à envoyer (min 100, max 50 000 par jour)",
+)
+async def gift_cmd(i: discord.Interaction, membre: discord.Member, montant: int):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        # Validations basiques
+        if membre.id == i.user.id:
+            return await i.response.send_message(
+                "❌ Tu ne peux pas te donner des coins à toi-même.", ephemeral=True
+            )
+        if membre.bot:
+            return await i.response.send_message(
+                "🤖 Tu ne peux pas envoyer de coins à un bot.", ephemeral=True
+            )
+        try:
+            montant = int(montant)
+        except (TypeError, ValueError):
+            return await i.response.send_message(
+                "❌ Montant invalide.", ephemeral=True
+            )
+        if montant <= 0:
+            return await i.response.send_message(
+                "❌ Le montant doit être positif.", ephemeral=True
+            )
+
+        # Vérif règles gift (min/max/plafond journalier)
+        ok, reason = await econ_events_module.can_send_gift(
+            i.guild.id, i.user.id, montant
+        )
+        if not ok:
+            return await i.response.send_message(f"❌ {reason}", ephemeral=True)
+
+        # Vérif solde
+        eco = await get_user_economy(i.guild.id, i.user.id)
+        sender_coins = int(eco.get("coins", 0) or 0)
+        if sender_coins < montant:
+            return await i.response.send_message(
+                f"❌ Solde insuffisant : tu as `{sender_coins:,}` coins, "
+                f"il en faut `{montant:,}`.",
+                ephemeral=True,
+            )
+
+        # Calcul de la taxe
+        tax_rate = econ_events_module.gift_tax_rate()
+        tax = int(round(montant * tax_rate))
+        receiver_amount = montant - tax
+
+        # Transfer atomique : retire au sender, donne au receiver
+        await add_coins(i.guild.id, i.user.id, -montant)
+        await add_coins(i.guild.id, membre.id, receiver_amount)
+        await econ_events_module.log_gift(
+            i.guild.id, i.user.id, membre.id, montant, tax
+        )
+
+        # Réponse V2
+        try:
+            items = []
+            items.append(v2_title("🎁  GIFT ENVOYÉ"))
+            items.append(v2_subtitle(
+                f"_Pour {membre.display_name} — merci de la générosité !_"
+            ))
+            items.append(v2_divider())
+            tax_line = (
+                f"💸 Taxe : `{tax:,}` coins ({int(tax_rate * 100)}%)"
+                if tax > 0
+                else "🌟 Taxe : **0%** (Sunday Funday !)"
+            )
+            items.append(v2_body(
+                f"💰 Montant envoyé : `{montant:,}` coins\n"
+                f"{tax_line}\n"
+                f"✅ {membre.mention} reçoit : `{receiver_amount:,}` coins"
+            ))
+            items.append(v2_divider())
+            items.append(v2_body(
+                f"_Ton nouveau solde : `{max(0, sender_coins - montant):,}` coins_"
+            ))
+            layout_view = LayoutView(timeout=120)
+            layout_view.add_item(v2_container(*items, color=0xE91E63))
+            await i.response.send_message(view=layout_view, ephemeral=True)
+        except Exception:
+            # Fallback texte si V2 indisponible
+            await i.response.send_message(
+                f"✅ `{montant:,}` coins envoyés à {membre.mention} "
+                f"(taxe `{tax:,}`, reçu `{receiver_amount:,}`).",
+                ephemeral=True,
+            )
+
+        # Notif au receiver (public dans le salon)
+        try:
+            await i.followup.send(
+                f"🎁 {i.user.mention} vient d'offrir `{receiver_amount:,}` coins "
+                f"à {membre.mention} !",
+                ephemeral=False,
+            )
+        except Exception:
+            pass
+    except Exception as ex:
+        print(f"[gift_cmd] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            else:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
 
 @bot.event
 async def on_member_ban(guild, user):
