@@ -8178,6 +8178,18 @@ async def _boss_phase_attacks(guild, event_id: int):
 
             # Annoncer l'attaque
             if arena and targeted_ch:
+                # Phase 66 : supprimer l'ANCIEN warning avant de poster le nouveau
+                # (sinon le bouton ATTAQUER finit en haut hors écran sur mobile)
+                old_warn_id = cache.get('last_warning_msg_id')
+                if old_warn_id:
+                    try:
+                        old_msg = await arena.fetch_message(int(old_warn_id))
+                        if old_msg:
+                            await old_msg.delete()
+                    except (discord.NotFound, discord.Forbidden):
+                        pass
+                    except Exception as ex:
+                        print(f"[phase66 delete old warn] {ex}")
                 attack_emoji = random.choice(['⚡', '🔥', '❄️', '💀', '🌪️'])
                 attack_name = random.choice(['souffle de feu', 'tornade', 'rayon glaciaire', 'frappe titanesque', 'cri funeste'])
                 warning_embed = discord.Embed(
@@ -8191,7 +8203,16 @@ async def _boss_phase_attacks(guild, event_id: int):
                     color=0xE74C3C,
                 )
                 try:
-                    warn_msg = await arena.send(embed=warning_embed)
+                    # Phase 66 : delete_after=60 + auto-cleanup quand le nouveau warning arrive
+                    warn_msg = await arena.send(embed=warning_embed, delete_after=60)
+                    # Stocker pour suppression au prochain warning
+                    cache['last_warning_msg_id'] = warn_msg.id
+                    _active_events_cache[guild.id] = cache
+                    # Backup persistent cleanup
+                    try:
+                        await _register_for_cleanup(warn_msg, 60, 'boss_phase_warning')
+                    except Exception:
+                        pass
                 except Exception:
                     warn_msg = None
 
