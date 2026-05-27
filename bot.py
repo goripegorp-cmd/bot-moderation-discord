@@ -49401,8 +49401,170 @@ class WorldBossAttackView(View):
             print(f"[WorldBossAttackView _on_top] {ex}")
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 78 — World Boss Arena en LayoutView V2
+# ═══════════════════════════════════════════════════════════════════════════════
+class WorldBossArenaLayoutV2(LayoutView):
+    """Phase 78 : Arena World Boss en LayoutView V2 (Components V2 modern).
+
+    Persistant — re-rendu à chaque update HP / nouvelle attaque. Les boutons
+    ATTAQUER (wb_attack) et TOP (wb_top) utilisent les custom_ids stables, ce
+    qui permet à bot.add_view(WorldBossAttackView()) au boot de continuer à
+    capter les clics même si le message est créé via LayoutView V2.
+
+    Pattern identique à BossArenaLayoutV2 (Phase 74) pour les Boss Raid.
+    """
+
+    def __init__(self, boss: dict, hp: int, max_hp: int, top_attackers: list,
+                  ends_at_dt: Optional[datetime], guild, wb_id: int):
+        super().__init__(timeout=None)
+        self.boss = boss
+        self.hp = hp
+        self.max_hp = max_hp
+        self.top_attackers = top_attackers or []
+        self.ends_at_dt = ends_at_dt
+        self.guild = guild
+        self.wb_id = wb_id
+        self._build()
+
+    def _build(self):
+        boss = self.boss
+        hp = max(0, int(self.hp))
+        max_hp = max(1, int(self.max_hp))
+        ratio = hp / max_hp
+        bar_len = 24
+        filled = int(ratio * bar_len)
+        bar = "█" * filled + "░" * (bar_len - filled)
+
+        # Phase label dynamique
+        phase_label = "🌟 Éveil cosmique"
+        if ratio <= 0:
+            phase_label = "💀 Vaincu"
+        elif ratio < 0.33:
+            phase_label = "💀 Dernier souffle"
+        elif ratio < 0.66:
+            phase_label = "⚡ Fureur stellaire"
+
+        color = boss.get('color', 0x9B59B6) if hp > 0 else 0x95A5A6
+
+        items = []
+        # Header : titre du boss + description lore
+        items.append(v2_title(
+            f"{boss.get('image_emoji', '🌍')} {boss.get('title', 'World Boss')}"
+        ))
+        if boss.get('description'):
+            items.append(v2_subtitle(_escape_md(boss.get('description', ''), 200)))
+        items.append(v2_divider())
+
+        # Section HP avec bouton ATTAQUER en accessory (toujours visible mobile)
+        # custom_id "wb_attack" stable → bot.add_view(WorldBossAttackView()) dispatch
+        if hp > 0:
+            attack_btn = Button(
+                label="⚔️ Attaquer",
+                style=discord.ButtonStyle.danger,
+                custom_id="wb_attack",
+            )
+            # Pas de callback : Discord dispatch via add_view global
+            items.append(_section_with_button(
+                f"❤️ HP — {phase_label}",
+                f"`{bar}` `{hp:,}/{max_hp:,}` ({ratio * 100:.0f}%)",
+                attack_btn,
+            ))
+        else:
+            items.append(v2_body(
+                f"**❤️ HP** — {phase_label}\n"
+                f"`{bar}` `{hp:,}/{max_hp:,}` — 💀 VAINCU"
+            ))
+
+        # Chrono + count attaquants
+        info_line = ""
+        if self.ends_at_dt and hp > 0:
+            info_line += f"⏰ Termine : <t:{int(self.ends_at_dt.timestamp())}:R>"
+        nb_top = len(self.top_attackers)
+        if nb_top:
+            total_dmg = sum(int(p[1]) for p in self.top_attackers)
+            if info_line:
+                info_line += "  ·  "
+            info_line += f"⚔️ `{nb_top}` attaquant(s) — `{total_dmg:,}` dégâts au total"
+        if info_line:
+            items.append(v2_body(info_line))
+
+        items.append(v2_divider())
+
+        # Top 3 attackers
+        if self.top_attackers:
+            medals = ["🥇", "🥈", "🥉"]
+            lines = []
+            for idx, row in enumerate(self.top_attackers[:3]):
+                uid, dmg = int(row[0]), int(row[1])
+                member = self.guild.get_member(uid) if self.guild else None
+                name = _escape_md(member.display_name if member else f"ID:{uid}", 60)
+                lines.append(f"{medals[idx]} **{name}** — `{dmg:,}` dégâts")
+            items.append(v2_body("**🏆 Top 3 attaquants**\n" + "\n".join(lines)))
+        else:
+            items.append(v2_body("_⚔️ Personne n'a encore attaqué._"))
+
+        items.append(v2_divider())
+
+        # Bouton TOP 10 en ActionRow (en bas)
+        # custom_id "wb_top" stable → WorldBossAttackView dispatch
+        top_btn = Button(
+            label="📊 Voir le top 10",
+            style=discord.ButtonStyle.secondary,
+            custom_id="wb_top",
+        )
+        items.append(discord.ui.ActionRow(top_btn))
+
+        self.add_item(v2_container(*items, color=color))
+
+
+async def _build_world_boss_layout(guild, wb_id: int):
+    """Phase 78 : construit le LayoutView V2 status du world boss.
+
+    Retourne None si introuvable — le caller fera fallback embed legacy.
+    """
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT boss_id, hp, max_hp, ends_at FROM world_bosses WHERE id=?',
+                (wb_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return None
+        boss_id, hp, max_hp, ends_at = row
+        boss = ev42.get_world_boss(boss_id)
+        if not boss:
+            return None
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT user_id, damage_dealt FROM world_boss_attackers '
+                'WHERE world_boss_id=? ORDER BY damage_dealt DESC LIMIT 10',
+                (wb_id,),
+            ) as cur:
+                top = await cur.fetchall()
+        ends_at_dt = None
+        try:
+            if ends_at:
+                ends_at_dt = (
+                    datetime.fromisoformat(ends_at)
+                    if 'T' in str(ends_at)
+                    else datetime.strptime(ends_at, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                )
+        except Exception:
+            ends_at_dt = None
+        return WorldBossArenaLayoutV2(
+            boss=boss, hp=int(hp), max_hp=int(max_hp), top_attackers=list(top),
+            ends_at_dt=ends_at_dt, guild=guild, wb_id=wb_id,
+        )
+    except Exception as ex:
+        print(f"[_build_world_boss_layout] {ex}")
+        return None
+
+
 async def _build_world_boss_embed(guild, wb_id: int) -> Optional[discord.Embed]:
-    """Construit l'embed status du world boss."""
+    """LEGACY (Phase 78) : embed fallback si LayoutView V2 échoue.
+    Préservé pour compat et au cas où _build_world_boss_layout retourne None."""
     try:
         async with get_db() as db:
             async with db.execute(
@@ -49458,7 +49620,11 @@ async def _build_world_boss_embed(guild, wb_id: int) -> Optional[discord.Embed]:
 
 
 async def _refresh_world_boss_message(guild, wb_id: int):
-    """Update le message d'arène avec le nouvel HP."""
+    """Update le message d'arène avec le nouvel HP.
+
+    Phase 78 : tente d'abord LayoutView V2 (WorldBossArenaLayoutV2), fallback
+    embed legacy si la construction échoue ou si Discord rejette la V2.
+    """
     try:
         async with get_db() as db:
             async with db.execute(
@@ -49478,6 +49644,15 @@ async def _refresh_world_boss_message(guild, wb_id: int):
             msg = await ch.fetch_message(int(msg_id))
         except Exception:
             return
+        # Phase 78 : tenter LayoutView V2 d'abord
+        try:
+            layout = await _build_world_boss_layout(guild, wb_id)
+            if layout:
+                await msg.edit(view=layout)
+                return
+        except Exception as ex:
+            print(f"[_refresh_world_boss_message V2 fallback] {ex}")
+        # Fallback embed legacy
         embed = await _build_world_boss_embed(guild, wb_id)
         if embed:
             try:
@@ -49548,28 +49723,38 @@ async def _start_world_boss(guild) -> dict:
             wb_id = cur.lastrowid
             await db.commit()
 
-        # Construire et envoyer l'embed + view
-        embed = await _build_world_boss_embed(guild, wb_id)
-        view = WorldBossAttackView()
+        # Phase 78 : construire et envoyer LayoutView V2 (avec fallback embed legacy)
         ping_str = await _get_event_mention(guild, 'boss_raid')  # réutilise le role notif boss_raid
         # Phase 48.4.A : smart mention pour wake-up dormants spécifiquement intéressés
         try:
             wakeup_line = await _build_wakeup_mention_line_smart(guild, 'world_boss', max_count=3)
         except Exception:
             wakeup_line = ""
+        send_content = (
+            f"🌍 **UN WORLD BOSS APPARAÎT !**\n"
+            f"Coordonnez vos attaques — il faut **plusieurs joueurs** pour le vaincre.\n"
+            + (f"{ping_str}\n" if ping_str else "")
+            + wakeup_line
+            + "\n_Pas envie d'être ping ? `/notifs` pour choisir précisément quoi recevoir._"
+        )
         try:
-            msg = await arena_ch.send(
-                content=(
-                    f"🌍 **UN WORLD BOSS APPARAÎT !**\n"
-                    f"Coordonnez vos attaques — il faut **plusieurs joueurs** pour le vaincre.\n"
-                    + (f"{ping_str}\n" if ping_str else "")
-                    + wakeup_line
-                    + "\n_Pas envie d'être ping ? `/notifs` pour choisir précisément quoi recevoir._"
-                ),
-                embed=embed,
-                view=view,
-                allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=False),
-            )
+            layout = await _build_world_boss_layout(guild, wb_id)
+            if layout:
+                msg = await arena_ch.send(
+                    content=send_content,
+                    view=layout,
+                    allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=False),
+                )
+            else:
+                # Fallback embed legacy si build échoue
+                embed = await _build_world_boss_embed(guild, wb_id)
+                view = WorldBossAttackView()
+                msg = await arena_ch.send(
+                    content=send_content,
+                    embed=embed,
+                    view=view,
+                    allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=False),
+                )
             async with get_db() as db:
                 await db.execute(
                     'UPDATE world_bosses SET arena_message_id=? WHERE id=?',
