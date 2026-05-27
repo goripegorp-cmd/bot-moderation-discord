@@ -1,0 +1,312 @@
+"""
+mod_dashboard.py — Dashboard staff modération (Phase 130).
+
+Affiche un panneau V2 magnifique avec :
+- 📊 Stats globales modération (warn/mute/direction count sur 30j)
+- 🛡️ Top staff par nb de sanctions (qui modère le plus)
+- 📝 Types d'infractions les plus fréquents
+- 👥 Top membres sanctionnés (récidivistes)
+- ⏱️ Activité récente (dernières 24h)
+
+Aussi exporté : REASON_TEMPLATES (liste de raisons préformatées pour
+/mod warn et /mod mute — usage futur).
+
+Usage dans bot.py :
+    import mod_dashboard
+
+    mod_dashboard.setup(get_db, v2_helpers)
+
+    @owner_group.command(name="mod_stats")
+    async def owner_mod_stats(i):
+        await mod_dashboard.show(i)
+"""
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+
+import discord
+
+# ─── Configuration ───────────────────────────────────────────────────────
+WINDOW_DAYS = 30           # Période de stats (par défaut 30 jours)
+TOP_STAFF_LIMIT = 5        # Top 5 staff
+TOP_OFFENDERS_LIMIT = 5    # Top 5 membres sanctionnés
+RECENT_ACTIVITY_HOURS = 24 # Activité dernière journée
+
+
+# Raison templates — usables comme app_commands.Choice futurement
+REASON_TEMPLATES = [
+    ("spam",          "📨 Spam / flood"),
+    ("toxic",         "🤬 Toxicité / insultes"),
+    ("off_topic",     "🎯 Off-topic / hors-sujet"),
+    ("nsfw",          "🔞 NSFW / contenu inapproprié"),
+    ("ad",            "📢 Publicité non autorisée"),
+    ("harassment",    "😡 Harcèlement"),
+    ("rule_break",    "📜 Non-respect des règles"),
+    ("provocation",   "🔥 Provocation"),
+    ("inappropriate", "❌ Comportement inapproprié"),
+    ("other",         "❓ Autre (voir notes)"),
+]
+
+
+# Références injectées
+_get_db = None
+_v2_helpers = None
+
+
+def setup(get_db_fn, v2_helpers: dict):
+    """Configure le module avec get_db + helpers V2."""
+    global _get_db, _v2_helpers
+    _get_db = get_db_fn
+    _v2_helpers = v2_helpers
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# QUERIES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def _collect_stats(guild_id: int, days: int = WINDOW_DAYS) -> dict:
+    """Agrège les stats de modération sur N derniers jours.
+
+    Retourne :
+        {
+            "total": int,
+            "by_type": dict[str, int],
+            "top_staff": list[{"mod_id", "count"}],
+            "top_offenders": list[{"user_id", "count"}],
+            "recent_24h": int,
+            "active_warns": int,  # warns sans unwarn
+            "window_days": int,
+        }
+    """
+    out = {
+        "total": 0,
+        "by_type": {},
+        "top_staff": [],
+        "top_offenders": [],
+        "recent_24h": 0,
+        "active_warns": 0,
+        "window_days": days,
+    }
+    if _get_db is None:
+        return out
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    cutoff_24h = (datetime.now(timezone.utc) - timedelta(hours=RECENT_ACTIVITY_HOURS)).isoformat()
+
+    try:
+        async with _get_db() as db:
+            # Total + breakdown par type
+            async with db.execute(
+                "SELECT type, COUNT(*) FROM infractions "
+                "WHERE guild_id=? AND created_at >= ? "
+                "GROUP BY type ORDER BY COUNT(*) DESC",
+                (guild_id, cutoff),
+            ) as cur:
+                rows = await cur.fetchall()
+            for typ, cnt in rows:
+                out["by_type"][typ or "unknown"] = int(cnt)
+                out["total"] += int(cnt)
+
+            # Top staff
+            async with db.execute(
+                "SELECT mod_id, COUNT(*) FROM infractions "
+                "WHERE guild_id=? AND created_at >= ? AND mod_id IS NOT NULL "
+                "GROUP BY mod_id ORDER BY COUNT(*) DESC LIMIT ?",
+                (guild_id, cutoff, TOP_STAFF_LIMIT),
+            ) as cur:
+                out["top_staff"] = [
+                    {"mod_id": int(r[0]), "count": int(r[1])}
+                    for r in await cur.fetchall()
+                    if r[0]
+                ]
+
+            # Top membres sanctionnés
+            async with db.execute(
+                "SELECT user_id, COUNT(*) FROM infractions "
+                "WHERE guild_id=? AND created_at >= ? "
+                "GROUP BY user_id ORDER BY COUNT(*) DESC LIMIT ?",
+                (guild_id, cutoff, TOP_OFFENDERS_LIMIT),
+            ) as cur:
+                out["top_offenders"] = [
+                    {"user_id": int(r[0]), "count": int(r[1])}
+                    for r in await cur.fetchall()
+                ]
+
+            # Activité 24h
+            async with db.execute(
+                "SELECT COUNT(*) FROM infractions "
+                "WHERE guild_id=? AND created_at >= ?",
+                (guild_id, cutoff_24h),
+            ) as cur:
+                row = await cur.fetchone()
+            out["recent_24h"] = int(row[0] or 0) if row else 0
+
+            # Warns "actifs" (toutes infractions de type 'warn' sur la période)
+            async with db.execute(
+                "SELECT COUNT(*) FROM infractions "
+                "WHERE guild_id=? AND type='warn' AND created_at >= ?",
+                (guild_id, cutoff),
+            ) as cur:
+                row = await cur.fetchone()
+            out["active_warns"] = int(row[0] or 0) if row else 0
+    except Exception as ex:
+        print(f"[mod_dashboard _collect_stats guild={guild_id}] {ex}")
+
+    return out
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# RENDERING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _build_layout(stats: dict, guild) -> discord.ui.LayoutView | None:
+    """Construit le LayoutView V2 du dashboard."""
+    if _v2_helpers is None:
+        return None
+
+    LayoutView = _v2_helpers['LayoutView']
+    v2_title = _v2_helpers['v2_title']
+    v2_subtitle = _v2_helpers['v2_subtitle']
+    v2_body = _v2_helpers['v2_body']
+    v2_divider = _v2_helpers['v2_divider']
+    v2_container = _v2_helpers['v2_container']
+
+    type_emojis = {
+        "warn":      "⚠️",
+        "mute":      "🔇",
+        "direction": "🔒",
+        "ban":       "🔨",
+        "kick":      "👢",
+        "unwarn":    "✅",
+        "unmute":    "🔊",
+    }
+
+    class _ModDashboardLayout(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=300)
+            items = []
+
+            items.append(v2_title("🛡️  DASHBOARD MODÉRATION"))
+            items.append(v2_subtitle(
+                f"Période : **{stats['window_days']} derniers jours** · "
+                f"{guild.name}"
+            ))
+            items.append(v2_divider())
+
+            # Stats globales
+            items.append(v2_body("**╔═══ 📊  ACTIVITÉ GLOBALE  ═══╗**"))
+            items.append(v2_body(
+                f"📋 **Total sanctions :** `{stats['total']}`\n"
+                f"⏱️ **Dernières 24h :** `{stats['recent_24h']}`\n"
+                f"⚠️ **Warns sur la période :** `{stats['active_warns']}`"
+            ))
+
+            # Breakdown par type
+            if stats["by_type"]:
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 📝  PAR TYPE  ═══╗**"))
+                lines = []
+                for typ, cnt in sorted(
+                    stats["by_type"].items(), key=lambda x: -x[1]
+                ):
+                    emo = type_emojis.get(typ, "▫️")
+                    lines.append(f"{emo} **{typ}** : `{cnt}`")
+                items.append(v2_body("\n".join(lines)))
+
+            # Top staff
+            if stats["top_staff"]:
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 🛡️  TOP STAFF  ═══╗**"))
+                medals = ["🥇", "🥈", "🥉", "▪️", "▪️"]
+                lines = []
+                for idx, s in enumerate(stats["top_staff"][:TOP_STAFF_LIMIT]):
+                    medal = medals[idx] if idx < 5 else "▪️"
+                    lines.append(
+                        f"{medal} <@{s['mod_id']}> · `{s['count']}` sanction(s)"
+                    )
+                items.append(v2_body("\n".join(lines)))
+
+            # Top offenders (récidivistes)
+            if stats["top_offenders"]:
+                items.append(v2_divider())
+                items.append(v2_body(
+                    "**╔═══ 👥  TOP RÉCIDIVISTES  ═══╗**"
+                ))
+                lines = []
+                for o in stats["top_offenders"][:TOP_OFFENDERS_LIMIT]:
+                    warning = " ⚠️" if o["count"] >= 5 else ""
+                    lines.append(
+                        f"• <@{o['user_id']}> · `{o['count']}` sanction(s){warning}"
+                    )
+                items.append(v2_body("\n".join(lines)))
+
+            # Cas où aucune activité
+            if stats["total"] == 0:
+                items.append(v2_divider())
+                items.append(v2_body(
+                    "✨ **Période calme !**\n\n"
+                    "_Aucune sanction sur cette période. Le serveur est propre._"
+                ))
+
+            items.append(v2_divider())
+            items.append(v2_body(
+                "_💡 `/mod infractions @user` pour la fiche complète d'un membre_"
+            ))
+
+            self.add_item(v2_container(*items, color=0x9B59B6))
+
+    return _ModDashboardLayout()
+
+
+async def show(interaction: discord.Interaction, days: int = WINDOW_DAYS) -> bool:
+    """Affiche le dashboard à l'utilisateur (ephemeral).
+
+    Returns True si envoyé avec succès.
+    """
+    if not interaction.guild:
+        try:
+            await interaction.response.send_message(
+                "❌ Serveur uniquement.", ephemeral=True
+            )
+        except Exception:
+            pass
+        return False
+
+    try:
+        stats = await _collect_stats(interaction.guild.id, days=days)
+        view = _build_layout(stats, interaction.guild)
+        if view is None:
+            await interaction.response.send_message(
+                "❌ Dashboard indisponible (module non initialisé).",
+                ephemeral=True,
+            )
+            return False
+
+        if not interaction.response.is_done():
+            await interaction.response.send_message(view=view, ephemeral=True)
+        else:
+            await interaction.followup.send(view=view, ephemeral=True)
+        return True
+    except Exception as ex:
+        print(f"[mod_dashboard show] {ex}")
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    f"❌ Erreur : `{ex}`", ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    f"❌ Erreur : `{ex}`", ephemeral=True
+                )
+        except Exception:
+            pass
+        return False
+
+
+__all__ = [
+    "setup",
+    "show",
+    "REASON_TEMPLATES",
+    "WINDOW_DAYS",
+]

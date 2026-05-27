@@ -76,6 +76,8 @@ import health_server as health_server_module
 import panels_helpers as panels_h
 # Phase 129 : récap hebdomadaire des Boss Raids
 import raid_recap as raid_recap_module
+# Phase 130 : dashboard staff modération
+import mod_dashboard as mod_dashboard_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -37818,6 +37820,18 @@ async def on_ready():
             raid_recap_module.weekly_recap_task.start()
     except Exception as ex:
         print(f"[on_ready raid_recap setup] {ex}")
+    # Phase 130 : Dashboard staff modération (helpers V2 injectés une fois)
+    try:
+        mod_dashboard_module.setup(
+            get_db,
+            {
+                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
+                'v2_divider': v2_divider, 'v2_container': v2_container,
+                'LayoutView': LayoutView,
+            },
+        )
+    except Exception as ex:
+        print(f"[on_ready mod_dashboard setup] {ex}")
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()
@@ -38050,7 +38064,7 @@ async def on_interaction(interaction: discord.Interaction):
 async def sync_cmd(i: discord.Interaction):
     if not i.user.guild_permissions.administrator:
         return await i.response.send_message("❌ Admin requis", ephemeral=True)
-    
+
     await i.response.defer(ephemeral=True)
     try:
         synced = await bot.tree.sync()
@@ -38058,6 +38072,29 @@ async def sync_cmd(i: discord.Interaction):
         await i.followup.send(f"✅ **{len(synced)} commandes synchronisées!**\n\n{cmd_list}", ephemeral=True)
     except Exception as ex:
         await i.followup.send(f"❌ Erreur: {ex}", ephemeral=True)
+
+
+# Phase 130 : /owner mod_stats — dashboard staff modération
+@owner_group.command(
+    name="mod_stats",
+    description="🛡️ [Owner] Dashboard staff modération (top sanctions, top staff, etc.)",
+)
+@app_commands.describe(jours="Période d'analyse en jours (défaut 30, max 365)")
+async def owner_mod_stats_cmd(i: discord.Interaction, jours: int = 30):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    jours = max(1, min(365, int(jours or 30)))
+    try:
+        await mod_dashboard_module.show(i, days=jours)
+    except Exception as ex:
+        print(f"[owner mod_stats] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
 
 @bot.event
 async def on_member_ban(guild, user):
