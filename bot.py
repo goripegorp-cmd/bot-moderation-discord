@@ -12136,15 +12136,19 @@ async def _re_mask_channel_after_light_event(guild, channel_id: int):
 
 class MysteryBoxView(View):
     """Bouton pour ouvrir une mystery box — premier arrivé gagne le gros lot,
-    les suivants gagnent une consolation. Persistant via custom_id."""
+    les suivants gagnent une consolation. Persistant via custom_id STABLE.
 
-    def __init__(self, box_msg_id: int = 0):
+    Phase 77 : custom_id stable "mbox_open" + lookup box par i.message.id
+    → bot.add_view(MysteryBoxView()) au boot capte tous les clics globalement,
+    pattern identique à FlashTreasureView (Phase 76).
+    """
+
+    def __init__(self):
         super().__init__(timeout=None)
-        self.box_msg_id = box_msg_id
         b = Button(
             label="📦 Ouvrir la boîte !",
             style=discord.ButtonStyle.success,
-            custom_id=f"mbox_{box_msg_id}",
+            custom_id="mbox_open",
         )
         b.callback = self._on_open
         self.add_item(b)
@@ -12159,7 +12163,10 @@ class MysteryBoxView(View):
             pass
 
         try:
-            box = _mystery_boxes.get(self.box_msg_id)
+            if not i.message:
+                return await i.followup.send("❌ Contexte invalide.", ephemeral=True)
+            # Phase 77 : lookup par i.message.id (custom_id stable)
+            box = _mystery_boxes.get(i.message.id)
             if not box:
                 return await i.followup.send("❌ Cette boîte n'est plus disponible.", ephemeral=True)
             if i.user.bot:
@@ -12212,13 +12219,36 @@ class MysteryBoxView(View):
                 ephemeral=True,
             )
 
-            # Update message visuel — désactiver le bouton si > 5 ouvertures ou > 3 min
+            # Phase 77 : désactiver après 5 ouvertures via reconstruction LayoutView V2
+            # (self est la view globale — on construit un layout disabled spécifique au msg)
             if len(already_opened) >= 5:
-                for child in self.children:
-                    child.disabled = True
-                    child.label = f"📦 Boîte vide ({len(already_opened)} ouvertures)"
                 try:
-                    await i.message.edit(view=self)
+                    disabled_btn = Button(
+                        label=f"📦 Boîte vide ({len(already_opened)} ouvertures)",
+                        style=discord.ButtonStyle.secondary,
+                        custom_id="mbox_done",
+                        disabled=True,
+                    )
+                    box_name = box.get('box_name', 'Boîte mystère')
+                    box_emoji = box.get('box_emoji', '📦')
+                    box_color = box.get('box_color', 0x95A5A6)
+
+                    class _MysteryDoneLayout(LayoutView):
+                        def __init__(self):
+                            super().__init__(timeout=None)
+                            items = [
+                                v2_title(f"{box_emoji} {box_name}"),
+                                v2_subtitle("Tous les cadeaux ont été distribués"),
+                                v2_divider(),
+                            ]
+                            items.append(_section_with_button(
+                                "✅ Boîte terminée",
+                                f"{len(already_opened)} membres ont ouvert cette boîte.",
+                                disabled_btn,
+                            ))
+                            self.add_item(v2_container(*items, color=box_color))
+
+                    await i.message.edit(view=_MysteryDoneLayout())
                 except Exception:
                     pass
         except Exception as ex:
@@ -12280,35 +12310,45 @@ async def _drop_mystery_box(guild) -> bool:
         # Générer la box
         box = events2026.random_mystery_box()
 
-        e = discord.Embed(
-            title=f"{box['emoji']} Une {box['name']} apparaît !",
-            description=(
-                f"Quelqu'un a laissé tomber un cadeau dans ce salon...\n\n"
-                f"⚡ **Premier ouvreur gagne le jackpot complet.**\n"
-                f"Les suivants gagnent une petite consolation.\n\n"
-                f"_La boîte se ferme dans 5 minutes._"
-            ),
-            color=box.get('color', 0x95A5A6),
-            timestamp=datetime.now(timezone.utc),
-        )
-        e.set_footer(text="Clique sur 📦 pour ouvrir — tout le monde peut participer !")
-
         # Phase 38 : si un raid est actif, dé-masquer temporairement ce salon
         unmasked = await _temporarily_unmask_channel(guild, ch.id)
 
-        # Envoyer avec auto-delete 5 min
-        # Phase 69 : delete_after natif Discord + _register_for_cleanup
-        # backup persistent (survie au reboot via persistent_msg_cleaner Phase 47.3)
+        # Phase 77 : LayoutView V2 — section avec bouton "Ouvrir" en accessory.
+        # Custom_id "mbox_open" STABLE → bot.add_view(MysteryBoxView()) au boot
+        # continue de capter les clics. Lookup box via i.message.id.
         LIFETIME = 300  # 5 min
-        v = MysteryBoxView()
+        box_emoji = box.get('emoji', '📦')
+        box_name = box['name']
+        box_color = box.get('color', 0x95A5A6)
         try:
+            open_btn = Button(
+                label="📦 Ouvrir la boîte !",
+                style=discord.ButtonStyle.success,
+                custom_id="mbox_open",
+            )
+            # Pas de callback : Discord dispatch via bot.add_view(MysteryBoxView())
+
+            class _MysteryLayout(LayoutView):
+                def __init__(self):
+                    super().__init__(timeout=None)
+                    items = [
+                        v2_title(f"{box_emoji} {box_name}"),
+                        v2_subtitle("Quelqu'un a laissé tomber un cadeau dans ce salon..."),
+                        v2_divider(),
+                    ]
+                    items.append(_section_with_button(
+                        "⚡ Premier ouvreur = jackpot complet",
+                        "Les suivants : petite consolation\nFenêtre : **5 minutes**",
+                        open_btn,
+                    ))
+                    self.add_item(v2_container(*items, color=box_color))
+
             # Phase 39 : ping le rôle "all" si configuré
             ping_str = await _get_event_mention(guild, 'mystery_box')
             send_content = ping_str if ping_str else None
             msg = await ch.send(
                 content=send_content,
-                embed=e,
-                view=v,
+                view=_MysteryLayout(),
                 allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False),
                 delete_after=LIFETIME,
             )
@@ -12318,30 +12358,18 @@ async def _drop_mystery_box(guild) -> bool:
             except Exception:
                 pass
         except Exception as ex:
-            print(f"[MysteryBox send] {ex}")
+            print(f"[MysteryBox send V2] {ex}")
             # En cas d'erreur, on déférence l'unmask
             if unmasked:
                 await _re_mask_channel_after_light_event(guild, ch.id)
             return False
 
-        # Update view to use real msg ID
-        v.box_msg_id = msg.id
-        v.clear_items()
-        b = Button(
-            label="📦 Ouvrir la boîte !",
-            style=discord.ButtonStyle.success,
-            custom_id=f"mbox_{msg.id}",
-        )
-        b.callback = v._on_open
-        v.add_item(b)
-        try:
-            await msg.edit(view=v)
-            bot.add_view(v, message_id=msg.id)
-        except Exception:
-            pass
-
+        # Phase 77 : pas de rebuild custom_id (déjà stable "mbox_open")
+        # MysteryBoxView est enregistrée globalement au boot.
         _mystery_boxes[msg.id] = {
             'box_name': box['name'],
+            'box_emoji': box_emoji,
+            'box_color': box_color,
             'coins': box['coins'],
             'gear': box.get('gear'),
             'opened_by': [],
@@ -36188,6 +36216,11 @@ async def on_ready():
         bot.add_view(FlashTreasureView())
     except Exception as ex:
         print(f"[on_ready add_view FlashTreasureView] {ex}")
+    # Phase 77 — Mystery Box V2 : custom_id stable "mbox_open" capté globalement
+    try:
+        bot.add_view(MysteryBoxView())
+    except Exception as ex:
+        print(f"[on_ready add_view MysteryBoxView] {ex}")
     try:
         bot.add_view(EveningRitualView())
     except Exception as ex:
