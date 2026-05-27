@@ -69,6 +69,9 @@ import game_updates as gameupdates2026
 import delegations as delegations2026
 import compromised_detector as compromised2026
 import events_engine as events2026
+# Phase 126 : modules backend infrastructure
+import db_backup as db_backup_module
+import health_server as health_server_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -37783,6 +37786,18 @@ async def on_ready():
     # Phase 111 : refresh tuile Live Events sur les hubs configurés
     if not hub_live_events_refresh_task.is_running():
         hub_live_events_refresh_task.start()
+    # Phase 126 : DB backup quotidien automatique (rotation 7 jours)
+    try:
+        if not db_backup_module.backup_task.is_running():
+            db_backup_module.backup_task.start()
+    except Exception as ex:
+        print(f"[on_ready db_backup_task] {ex}")
+    # Phase 126 : HTTP health endpoint pour Railway monitoring
+    try:
+        port = int(os.environ.get('PORT', '8000') or 8000)
+        await health_server_module.start(bot, port=port)
+    except Exception as ex:
+        print(f"[on_ready health_server.start] {ex}")
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()
