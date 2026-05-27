@@ -11162,6 +11162,23 @@ async def _detect_bard_in_voice(guild, user_id: int) -> bool:
 class_group = app_commands.Group(name="class", description="🛡️ Système de classes (Tank/DPS/Healer/Mage/Rogue/Bard)")
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 119 + 120 — Groupes consolidés définis tôt pour être utilisables partout
+# ═══════════════════════════════════════════════════════════════════════════════
+mod_group = app_commands.Group(
+    name="mod",
+    description="🛡️ Outils de modération (warn, mute, direction, infractions…)",
+)
+bank_group = app_commands.Group(
+    name="bank",
+    description="🏦 Banque — dépôts/retraits avec intérêts 1%/jour",
+)
+owner_group = app_commands.Group(
+    name="owner",
+    description="🔧 Commandes administrateur (Owner uniquement)",
+)
+
+
 @class_group.command(name="choose", description="Choisis ta classe (modifie ton rôle pendant les events)")
 @app_commands.describe(classe="La classe que tu veux jouer")
 @app_commands.choices(classe=[
@@ -37842,7 +37859,7 @@ async def on_interaction(interaction: discord.Interaction):
     except Exception as ex:
         print(f"Erreur on_interaction auto_help: {ex}")
 
-@bot.tree.command(name="sync", description="🔄 Synchroniser les commandes (Admin)")
+@owner_group.command(name="sync", description="🔄 Synchroniser les commandes (Admin)")
 async def sync_cmd(i: discord.Interaction):
     if not i.user.guild_permissions.administrator:
         return await i.response.send_message("❌ Admin requis", ephemeral=True)
@@ -43098,7 +43115,7 @@ async def server_stats_cmd(i: discord.Interaction):
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-@bot.tree.command(name="event_start", description="⚔️ [Owner] Lance un Boss Raid maintenant")
+@owner_group.command(name="event", description="⚔️ [Owner] Lance un Boss Raid maintenant")
 async def event_start_cmd(i: discord.Interaction):
     # Owner only
     if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
@@ -43165,23 +43182,12 @@ def _format_warn_id(infraction_id: int, created_dt=None) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Phase 119 — GROUPES CONSOLIDÉS (réduction CommandLimitReached)
-# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 119 + 120 — GROUPES CONSOLIDÉS (définis plus haut près de class_group
+# pour être utilisables par toutes les @group.command() où qu'elles se trouvent)
 # /mod        — modération (warn, mute, direction, infractions, ticketblacklist)
 # /bank       — banque (deposit, withdraw, status)
-#
-# Économise 10 commandes globales (8 mod + 3 bank → 2 groups + ping retiré).
-# Ces groupes apparaissent comme `/mod warn`, `/bank deposit`, etc.
-
-mod_group = app_commands.Group(
-    name="mod",
-    description="🛡️ Outils de modération (warn, mute, direction, infractions…)",
-)
-
-bank_group = app_commands.Group(
-    name="bank",
-    description="🏦 Banque — dépôts/retraits avec intérêts 1%/jour",
-)
+# /owner      — admin/owner commands (force events, config, debug)
+# ═══════════════════════════════════════════════════════════════════════════════
 
 
 @mod_group.command(name="warn", description="⚠️ Avertir un membre (crée une fiche, aucun rôle attribué)")
@@ -43871,7 +43877,7 @@ bot.tree.add_command(mod_group)
 #                              🎭 RELLSEAS COMMAND
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="rellseas", description="🎭 Gérer le système Realsy (rôle + questionnaire)")
+@owner_group.command(name="rellseas", description="🎭 Gérer le système Realsy (rôle + questionnaire)")
 async def rellseas_cmd(i: discord.Interaction):
     c = await cfg(i.guild.id)
     
@@ -50312,8 +50318,7 @@ class LeaderboardTabsView(LayoutView):
         await self.render(i, edit=True)
 
 
-@bot.tree.command(name="testdeals", description="🎮 [Owner] Tester le système de promotions de jeux")
-@app_commands.default_permissions(administrator=True)
+# Phase 120 : retiré (debug inutilisé, ex-/testdeals)
 async def testdeals_cmd(i: discord.Interaction):
     """Force la vérification des promotions de jeux (Owner-only)"""
     # Phase 3.8 : owner-only même si admin
@@ -50384,7 +50389,7 @@ async def testdeals_cmd(i: discord.Interaction):
     except Exception as ex:
         await i.followup.send(f"❌ Erreur lors de la vérification: {str(ex)}")
 
-@bot.tree.command(name="cleardeals", description="🗑️ [Owner] Supprimer tous les deals postés et réinitialiser")
+@owner_group.command(name="clear_deals", description="🗑️ [Owner] Supprimer tous les deals postés et réinitialiser")
 @app_commands.default_permissions(administrator=True)
 async def cleardeals_cmd(i: discord.Interaction):
     """Supprime tous les deals postés et leurs messages (Owner-only - destructif)"""
@@ -51872,7 +51877,7 @@ async def confess_cmd(i: discord.Interaction):
         print(f"[/confess] {ex}")
 
 
-@bot.tree.command(
+@owner_group.command(
     name="confess_setup",
     description="🛠️ [Owner] Configurer le salon des confessions anonymes",
 )
@@ -52920,7 +52925,7 @@ async def hub_cmd(i: discord.Interaction):
             pass
 
 
-@bot.tree.command(
+@owner_group.command(
     name="hub_setup",
     description="🛠️ [Owner] Installer le panneau hub permanent dans un salon",
 )
@@ -54399,7 +54404,7 @@ async def _daily_riddle_wait():
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-@bot.tree.command(
+@owner_group.command(
     name="voice_protect",
     description="🛡️ [Owner] Protéger un vocal contre les events Voice Chaos",
 )
@@ -54453,8 +54458,8 @@ async def voice_protect_cmd(
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-@bot.tree.command(
-    name="world_boss_force",
+@owner_group.command(
+    name="world_boss",
     description="⚔️ [Owner] Forcer le lancement d'un World Boss maintenant",
 )
 async def world_boss_force_cmd(i: discord.Interaction):
@@ -54475,8 +54480,8 @@ async def world_boss_force_cmd(i: discord.Interaction):
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-@bot.tree.command(
-    name="riddle_force",
+@owner_group.command(
+    name="riddle",
     description="🧠 [Owner] Forcer l'énigme du jour maintenant",
 )
 async def riddle_force_cmd(i: discord.Interaction):
@@ -59814,8 +59819,8 @@ EngagementHubView._on_factions = _hub_on_factions
 # ─── SLASH COMMANDS ────────────────────────────────────────────────────────────
 
 
-@bot.tree.command(
-    name="alliance_category",
+@owner_group.command(
+    name="alliance_cat",
     description="🛠️ [Owner] Choisir/voir la catégorie qui regroupe les alliances",
 )
 @app_commands.describe(
@@ -60125,10 +60130,7 @@ async def _track_event_engagement(guild_id: int, event_kind: str, action: str = 
         print(f"[_track_event_engagement {event_kind} {action}] {ex}")
 
 
-@bot.tree.command(
-    name="event_stats",
-    description="📊 [Owner] Voir les stats d'engagement de tous les events du serveur",
-)
+# Phase 120 : retiré (debug inutilisé, ex-/event_stats)
 async def event_stats_cmd(i: discord.Interaction):
     if not i.guild:
         return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
@@ -61034,8 +61036,8 @@ async def _celebrate_rare_drop(channel, member: discord.Member, item_name: str, 
 # ─── QUIET HOURS — commande owner pour personnaliser ─────────────────────────
 
 
-@bot.tree.command(
-    name="quiet_hours",
+@owner_group.command(
+    name="quiet",
     description="🌙 [Owner] Configurer les heures calmes (pas d'event auto pendant cette plage)",
 )
 @app_commands.describe(
@@ -62156,10 +62158,7 @@ async def _open_mission_panel(i: discord.Interaction):
 # ─── SLASH COMMANDS OWNER DEBUG ──────────────────────────────────────────────
 
 
-@bot.tree.command(
-    name="lore_advance",
-    description="📖 [Owner] Force l'avancement du chapitre de lore (debug)",
-)
+# Phase 120 : retiré (debug inutilisé, ex-/lore_advance)
 async def lore_advance_cmd(i: discord.Interaction):
     if not i.guild:
         return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
@@ -62180,10 +62179,7 @@ async def lore_advance_cmd(i: discord.Interaction):
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-@bot.tree.command(
-    name="mission_force_start",
-    description="🎯 [Owner] Force le démarrage d'une nouvelle mission (debug)",
-)
+# Phase 120 : retiré (debug inutilisé, ex-/mission_force_start)
 async def mission_force_start_cmd(i: discord.Interaction):
     if not i.guild:
         return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
@@ -62201,10 +62197,7 @@ async def mission_force_start_cmd(i: discord.Interaction):
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-@bot.tree.command(
-    name="npc_force_post",
-    description="🎭 [Owner] Force un NPC à parler maintenant (debug)",
-)
+# Phase 120 : retiré (debug inutilisé, ex-/npc_force_post)
 @app_commands.describe(
     npc="Quel NPC ? (forgeron / sage / gardien)",
     context="Quel context ? (idle / morning / evening / silence / world_boss_pre / etc.)",
@@ -63144,7 +63137,7 @@ async def _open_roblox_panel(i: discord.Interaction):
 # ─── SLASH COMMANDS OWNER — gestion Roblox ───────────────────────────────────
 
 
-@bot.tree.command(
+@owner_group.command(
     name="game_add",
     description="🎮 [Owner] Ajouter un jeu Roblox au catalogue",
 )
@@ -63180,7 +63173,7 @@ async def game_add_cmd(i: discord.Interaction, game_id: str, name: str,
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-@bot.tree.command(
+@owner_group.command(
     name="game_update",
     description="📢 [Owner] Poster une annonce d'update de jeu (avec thread feedback)",
 )
@@ -63206,10 +63199,7 @@ async def game_update_cmd(i: discord.Interaction, game_id: str, title: str, cont
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-@bot.tree.command(
-    name="speedrun_cat_add",
-    description="🏁 [Owner] Ajouter une catégorie speedrun custom",
-)
+# Phase 120 : retiré (debug inutilisé, ex-/speedrun_cat_add)
 @app_commands.describe(
     cat_id="ID unique (ex: 'glitchless_any')",
     name="Nom affiché (ex: '🏃 Glitchless Any%')",
@@ -64108,8 +64098,8 @@ async def _open_competitions_panel(i: discord.Interaction):
 # ─── SLASH COMMANDS OWNER PHASE 51 ───────────────────────────────────────────
 
 
-@bot.tree.command(
-    name="prediction_create",
+@owner_group.command(
+    name="prediction",
     description="🎲 [Owner] Crée une prédiction binaire avec deadline",
 )
 @app_commands.describe(
@@ -65304,16 +65294,16 @@ async def _open_health_dashboard(i: discord.Interaction):
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-@bot.tree.command(
-    name="admin_health",
+@owner_group.command(
+    name="health",
     description="📊 [Owner] Dashboard santé du serveur (stats, top actifs, members à risque)",
 )
 async def admin_health_cmd(i: discord.Interaction):
     await _open_health_dashboard(i)
 
 
-@bot.tree.command(
-    name="cleanup_now",
+@owner_group.command(
+    name="cleanup",
     description="🧹 [Owner] Force le cleanup des messages d'events expirés maintenant",
 )
 async def cleanup_now_cmd(i: discord.Interaction):
@@ -66057,10 +66047,7 @@ async def _check_auto_slow_mode(msg):
 # ─── MEMBER JOURNEY (slash owner) ────────────────────────────────────────────
 
 
-@bot.tree.command(
-    name="admin_journey",
-    description="📜 [Owner] Voir le parcours complet d'un membre depuis son arrivée",
-)
+# Phase 120 : retiré (debug inutilisé, ex-/admin_journey)
 @app_commands.describe(membre="Le membre à explorer")
 async def admin_journey_cmd(i: discord.Interaction, membre: discord.Member):
     if not i.guild:
@@ -66286,8 +66273,8 @@ async def _capsule_unlock_wait():
 # ─── HALL OF FAME ────────────────────────────────────────────────────────────
 
 
-@bot.tree.command(
-    name="hall_of_fame_add",
+@owner_group.command(
+    name="hof_add",
     description="🏛️ [Owner] Ajouter un exploit indélébile au Hall of Fame",
 )
 @app_commands.describe(
@@ -67169,8 +67156,8 @@ class AdventClaimView(View):
             await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-@bot.tree.command(
-    name="advent_setup",
+@owner_group.command(
+    name="advent",
     description="🎁 [Owner] Installer le panneau Calendrier de l'Avent dans le hub",
 )
 async def advent_setup_cmd(i: discord.Interaction):
@@ -67483,8 +67470,8 @@ class HeistJoinView(View):
             await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-@bot.tree.command(
-    name="heist_start",
+@owner_group.command(
+    name="heist",
     description="🚨 [Owner] Lance un Braquage collectif (choisis la cible)",
 )
 @app_commands.describe(target="Cible du braquage : small (×2 / 50%), medium (×3 / 40%), big (×5 / 30%)")
@@ -68201,8 +68188,8 @@ async def pvp_top_cmd(i: discord.Interaction):
 # ─── TITRES PERMANENTS ───────────────────────────────────────────────────────
 
 
-@bot.tree.command(
-    name="award_title",
+@owner_group.command(
+    name="award",
     description="🎖️ [Owner] Attribuer un titre permanent à un membre",
 )
 @app_commands.describe(
@@ -68346,8 +68333,8 @@ class TournamentJoinView(View):
             await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-@bot.tree.command(
-    name="tournament_create",
+@owner_group.command(
+    name="tournament",
     description="🏆 [Owner] Créer un tournoi (8 places, single-elim)",
 )
 @app_commands.describe(
@@ -68470,8 +68457,8 @@ class UpdateVoteView(View):
             await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-@bot.tree.command(
-    name="update_vote",
+@owner_group.command(
+    name="vote",
     description="📊 [Owner] Lance un vote sur la prochaine feature à implémenter",
 )
 @app_commands.describe(
@@ -68541,10 +68528,7 @@ async def update_vote_cmd(i: discord.Interaction, titre: str,
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-@bot.tree.command(
-    name="achievement_post",
-    description="🏆 [Owner] Annonce un achievement exceptionnel d'un membre dans le hub",
-)
+# Phase 120 : retiré (debug inutilisé, ex-/achievement_post)
 @app_commands.describe(
     membre="Le membre qui a réalisé l'exploit",
     achievement="Nom de l'achievement (ex: 'Premier à tuer le Boss Final')",
@@ -68611,10 +68595,7 @@ async def achievement_post_cmd(i: discord.Interaction, membre: discord.Member,
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-@bot.tree.command(
-    name="game_stats_set",
-    description="📊 [Owner] Met à jour le panneau Game Stats live (joueurs/visites/fav)",
-)
+# Phase 120 : retiré (debug inutilisé, ex-/game_stats_set)
 @app_commands.describe(
     game_id="ID du jeu (depuis /game_add)",
     players_online="Nb joueurs en ligne",
@@ -68821,10 +68802,7 @@ async def _update_votes_resolver_wait():
     await bot.wait_until_ready()
 
 
-@bot.tree.command(
-    name="narrative_force",
-    description="🌀 [Owner] Force le lancement d'un vote narratif maintenant",
-)
+# Phase 120 : retiré (debug inutilisé, ex-/narrative_force)
 @app_commands.describe(choice_id="ID de la narrative choice (ex: mage_prisoner). Vide = pick auto selon chapitre.")
 async def narrative_force_cmd(i: discord.Interaction, choice_id: Optional[str] = None):
     if not i.guild:
@@ -68890,8 +68868,8 @@ async def _maybe_greet_user_today(msg) -> None:
         print(f"[_maybe_greet_user_today] {ex}")
 
 
-@bot.tree.command(
-    name="faction_war_start",
+@owner_group.command(
+    name="faction_war",
     description="⚔️ [Owner] Lance une faction war pour la saison actuelle",
 )
 @app_commands.describe(objective="Objectif compétitif (events_won/messages_total/boss_damage/quests_done)")
@@ -68950,6 +68928,10 @@ async def faction_war_start_cmd(i: discord.Interaction, objective: str = "events
         await _safe_followup(i, content=f"✅ Faction War lancée pour la saison `{season_id}` ({objective}).")
     except Exception as ex:
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# Phase 120 : enregistrer /owner après toutes ses subcommands
+bot.tree.add_command(owner_group)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
