@@ -12062,8 +12062,22 @@ async def _drop_mystery_box(guild) -> bool:
     """Drop une mystery box dans un salon actif aléatoire.
 
     Phase 41.2 : filtre strict — JAMAIS dans un ticket / annonce / RO / thread.
+    Phase 69 : ANTI-SPAM SAME TYPE — si une mystery box est DÉJÀ active dans
+    cette guild, on n'en spawne pas une 2e (éviter doublons dans le chat).
     """
     try:
+        # Phase 69 : check anti-doublon même type
+        # Si une mystery box est encore dans _mystery_boxes pour CETTE guild → skip
+        for active_msg_id, box_data in list(_mystery_boxes.items()):
+            try:
+                # Vérifier que la box est dans cette guild via fetch
+                # Optim : on stocke guild_id dans box_data au prochain spawn (voir below)
+                if box_data.get('guild_id') == guild.id:
+                    print(f"[mystery_box anti-doublon] guild={guild.id} skip (box {active_msg_id} déjà active)")
+                    return False
+            except Exception:
+                continue
+
         # Trouver les salons actifs récents (jusqu'à 15 candidats)
         async with get_db() as db:
             async with db.execute(
@@ -12112,6 +12126,9 @@ async def _drop_mystery_box(guild) -> bool:
         unmasked = await _temporarily_unmask_channel(guild, ch.id)
 
         # Envoyer avec auto-delete 5 min
+        # Phase 69 : delete_after natif Discord + _register_for_cleanup
+        # backup persistent (survie au reboot via persistent_msg_cleaner Phase 47.3)
+        LIFETIME = 300  # 5 min
         v = MysteryBoxView()
         try:
             # Phase 39 : ping le rôle "all" si configuré
@@ -12122,7 +12139,13 @@ async def _drop_mystery_box(guild) -> bool:
                 embed=e,
                 view=v,
                 allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False),
+                delete_after=LIFETIME,
             )
+            # Phase 69 : register persistent — survit au reboot
+            try:
+                await _register_for_cleanup(msg, LIFETIME, 'mystery_box')
+            except Exception:
+                pass
         except Exception as ex:
             print(f"[MysteryBox send] {ex}")
             # En cas d'erreur, on déférence l'unmask
@@ -12151,19 +12174,22 @@ async def _drop_mystery_box(guild) -> bool:
             'coins': box['coins'],
             'gear': box.get('gear'),
             'opened_by': [],
+            'guild_id': guild.id,  # Phase 69 : anti-doublon check
         }
 
-        # Auto-delete dans 5 min + re-mask si raid encore actif
-        async def _cleanup():
-            await asyncio.sleep(300)
+        # Auto-cleanup state dict après 5 min (le message est supprimé par delete_after)
+        async def _cleanup_state():
+            await asyncio.sleep(LIFETIME + 5)
             try:
                 _mystery_boxes.pop(msg.id, None)
-                await msg.delete()
             except Exception:
                 pass
             if unmasked:
-                await _re_mask_channel_after_light_event(guild, ch.id)
-        asyncio.create_task(_cleanup())
+                try:
+                    await _re_mask_channel_after_light_event(guild, ch.id)
+                except Exception:
+                    pass
+        asyncio.create_task(_cleanup_state())
 
         try: await _track_event_engagement(guild.id, 'mystery_box', 'start')
         except Exception: pass
@@ -50239,6 +50265,9 @@ async def _spawn_flash_treasure(guild) -> bool:
 
     Fenêtre 60 secondes. Premier qui clique gagne 100-500 🪙.
     Le message est discret pour créer l'effet surveillance.
+
+    Phase 69 : ANTI-SPAM same type — skip si un autre flash_treasure est déjà
+    actif (ended=0) dans cette guild.
     """
     try:
         c = await cfg(guild.id)
@@ -50246,6 +50275,19 @@ async def _spawn_flash_treasure(guild) -> bool:
             return False
         if not c.get('flash_treasure_enabled', True):
             return False
+
+        # Phase 69 : check anti-doublon — déjà un flash treasure actif ?
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT 1 FROM flash_treasures WHERE guild_id=? AND ended=0 LIMIT 1',
+                    (guild.id,),
+                ) as cur:
+                    if await cur.fetchone():
+                        print(f"[flash_treasure anti-doublon] guild={guild.id} skip (un autre actif)")
+                        return False
+        except Exception:
+            pass
 
         # Trouver un salon actif chatty
         async with get_db() as db:
@@ -50286,13 +50328,19 @@ async def _spawn_flash_treasure(guild) -> bool:
 
         view = FlashTreasureView()
         try:
-            # Pas de delete_after natif ici — le _flash_cleanup gère la disparition
-            # après 75s (pour laisser le temps de mettre à jour le message si quelqu'un grab)
+            # Phase 69 : delete_after natif Discord + persistent registration
+            # 60s fenêtre + 75s grace + 60s expired display = ~195s total max
             msg = await ch.send(
                 embed=e,
                 view=view,
                 allowed_mentions=discord.AllowedMentions.none(),
+                delete_after=200,
             )
+            # Phase 69 : backup persistent (survit aux reboots)
+            try:
+                await _register_for_cleanup(msg, 200, 'flash_treasure')
+            except Exception:
+                pass
         except Exception as ex:
             print(f"[_spawn_flash_treasure send] {ex}")
             return False
