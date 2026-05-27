@@ -74,6 +74,8 @@ import db_backup as db_backup_module
 import health_server as health_server_module
 # Phase 127 : helpers V2 communs réutilisables
 import panels_helpers as panels_h
+# Phase 129 : récap hebdomadaire des Boss Raids
+import raid_recap as raid_recap_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -37800,6 +37802,22 @@ async def on_ready():
         await health_server_module.start(bot, port=port)
     except Exception as ex:
         print(f"[on_ready health_server.start] {ex}")
+    # Phase 129 : Récap hebdomadaire des Boss Raids (dimanche 21h FR)
+    try:
+        raid_recap_module.setup(
+            bot,
+            get_db,
+            db_get,
+            {
+                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
+                'v2_divider': v2_divider, 'v2_container': v2_container,
+                'LayoutView': LayoutView,
+            },
+        )
+        if not raid_recap_module.weekly_recap_task.is_running():
+            raid_recap_module.weekly_recap_task.start()
+    except Exception as ex:
+        print(f"[on_ready raid_recap setup] {ex}")
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()
