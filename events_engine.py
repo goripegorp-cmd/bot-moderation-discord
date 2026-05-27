@@ -417,6 +417,151 @@ def gear_total_stats(item: dict) -> dict:
     }
 
 
+# ─── Phase 106 : Set Bonuses (basés sur rareté) ──────────────────────────
+#
+# Plus l'inventaire contient d'items de haute rareté, plus le bonus de set
+# devient puissant. Récompense la collection et l'investissement long terme.
+#
+# Niveaux de set (par rareté minimum + nombre d'items requis) :
+# - 2+ rare        → 🌱 Apprenti     : +5 ATK
+# - 2+ épique      → 💪 Vétéran      : +10 ATK +5 DEF
+# - 2+ légendaire  → 🔥 Champion     : +15 ATK +5 DEF +5% CRIT
+# - 4+ légendaire  → ⚡ Champion Suprême : +20 ATK +10 DEF +10% CRIT
+# - 6  mythique    → 🌌 Divin (FULL)  : +30 ATK +20 DEF +15% CRIT
+#
+# Note : seul le PLUS HAUT set actif est compté (pas cumulatif).
+
+EQUIPMENT_SLOTS = ["weapon", "armor", "helmet", "boots", "accessory", "trinket"]
+
+
+def compute_set_bonus(inventory: dict) -> dict:
+    """Phase 106 : retourne le bonus de set actif (le plus haut tier).
+
+    Retourne {name, emoji, atk, def, crit, hp_bonus, desc, color}.
+    Si aucun set actif : {name='', ...zéros}.
+    """
+    if not inventory:
+        return {"name": "", "emoji": "", "atk": 0, "def": 0, "crit": 0,
+                "hp_bonus": 0, "desc": "", "color": 0x95A5A6, "tier_count": 0}
+
+    # Compter par rareté
+    counts = {"commune": 0, "rare": 0, "épique": 0, "légendaire": 0, "mythique": 0, "divine": 0}
+    for slot in EQUIPMENT_SLOTS:
+        item = inventory.get(slot) or {}
+        if not item or not item.get("name"):
+            continue
+        r = (item.get("rarity") or "commune").lower()
+        # Normaliser épique/epique
+        if r == "epique":
+            r = "épique"
+        elif r == "legendaire":
+            r = "légendaire"
+        if r in counts:
+            counts[r] += 1
+
+    # Détecter le plus haut set actif (du plus haut au plus bas)
+    # 6 mythique → Divin
+    if counts["mythique"] >= 6:
+        return {
+            "name": "Divin",
+            "emoji": "🌌",
+            "atk": 30, "def": 20, "crit": 15, "hp_bonus": 50,
+            "desc": "6 items mythiques équipés — bonus FULL DIVIN",
+            "color": 0xE74C3C,
+            "tier_count": counts["mythique"],
+        }
+
+    # 4+ légendaire → Champion Suprême
+    if counts["légendaire"] + counts["mythique"] >= 4:
+        return {
+            "name": "Champion Suprême",
+            "emoji": "⚡",
+            "atk": 20, "def": 10, "crit": 10, "hp_bonus": 25,
+            "desc": "4+ items légendaires/mythiques équipés",
+            "color": 0xF1C40F,
+            "tier_count": counts["légendaire"] + counts["mythique"],
+        }
+
+    # 2+ légendaire → Champion
+    if counts["légendaire"] + counts["mythique"] >= 2:
+        return {
+            "name": "Champion",
+            "emoji": "🔥",
+            "atk": 15, "def": 5, "crit": 5, "hp_bonus": 15,
+            "desc": "2+ items légendaires/mythiques équipés",
+            "color": 0xE67E22,
+            "tier_count": counts["légendaire"] + counts["mythique"],
+        }
+
+    # 2+ épique → Vétéran
+    if counts["épique"] + counts["légendaire"] + counts["mythique"] >= 2:
+        return {
+            "name": "Vétéran",
+            "emoji": "💪",
+            "atk": 10, "def": 5, "crit": 0, "hp_bonus": 10,
+            "desc": "2+ items épiques+ équipés",
+            "color": 0x9B59B6,
+            "tier_count": counts["épique"] + counts["légendaire"] + counts["mythique"],
+        }
+
+    # 2+ rare → Apprenti
+    if counts["rare"] + counts["épique"] + counts["légendaire"] + counts["mythique"] >= 2:
+        return {
+            "name": "Apprenti",
+            "emoji": "🌱",
+            "atk": 5, "def": 0, "crit": 0, "hp_bonus": 5,
+            "desc": "2+ items rares+ équipés",
+            "color": 0x3498DB,
+            "tier_count": counts["rare"] + counts["épique"] + counts["légendaire"] + counts["mythique"],
+        }
+
+    return {
+        "name": "", "emoji": "", "atk": 0, "def": 0, "crit": 0,
+        "hp_bonus": 0, "desc": "Équipe 2+ items rares pour activer un set",
+        "color": 0x95A5A6, "tier_count": 0,
+    }
+
+
+def inventory_total_stats(inventory: dict) -> dict:
+    """Phase 106 : stats TOTALES (gear + set bonus) pour l'inventaire complet.
+
+    Retourne {atk, def, crit, hp_bonus, lifesteal, set_name, set_emoji}.
+    """
+    total_atk = 0
+    total_def = 0
+    total_crit = 0
+    total_hp_bonus = 0
+    total_lifesteal = 0.0
+    for slot in EQUIPMENT_SLOTS:
+        item = inventory.get(slot) or {}
+        if not item:
+            continue
+        s = gear_total_stats(item)
+        total_atk += s["atk"]
+        total_def += s["def"]
+        total_crit += s["crit"]
+        total_hp_bonus += s["hp_bonus"]
+        total_lifesteal += s["lifesteal"]
+
+    # Phase 106 : ajouter set bonus
+    set_bonus = compute_set_bonus(inventory)
+    total_atk += set_bonus["atk"]
+    total_def += set_bonus["def"]
+    total_crit += set_bonus["crit"]
+    total_hp_bonus += set_bonus["hp_bonus"]
+
+    return {
+        "atk": total_atk,
+        "def": total_def,
+        "crit": total_crit,
+        "hp_bonus": total_hp_bonus,
+        "lifesteal": total_lifesteal,
+        "set_name": set_bonus["name"],
+        "set_emoji": set_bonus["emoji"],
+        "set_desc": set_bonus["desc"],
+    }
+
+
 def random_boss(difficulty: int = 100) -> dict:
     """Boss aléatoire. `difficulty` = facteur 50-500 (100 = normal)."""
     template = dict(random.choice(BOSS_CATALOG))
@@ -1245,20 +1390,16 @@ def calc_damage_v2(
     """
     base = random.randint(10, 25)
 
-    # Phase 105 : calcul stats totales depuis l'inventaire complet
+    # Phase 105 + 106 : calcul stats totales depuis l'inventaire complet
+    # Inclut gear (base + enchant) + set bonus
+    set_bonus_active = None
     if inventory:
-        gear_atk = 0
-        gear_crit_bonus = 0  # en pourcentage (e.g., 10 = +10%)
-        for slot_key in ("weapon", "armor", "helmet", "boots", "accessory", "trinket"):
-            slot_item = inventory.get(slot_key) or {}
-            if not slot_item:
-                continue
-            s = gear_total_stats(slot_item)
-            gear_atk += s.get("atk", 0)
-            gear_crit_bonus += s.get("crit", 0)
+        totals = inventory_total_stats(inventory)
+        gear_atk = totals["atk"]
+        gear_crit_bonus = totals["crit"]  # en pourcentage
+        set_bonus_active = totals["set_name"] or None
     else:
         gear_atk = (weapon or {}).get("atk", 0) if weapon else 0
-        # Inclure enchant ATK si présent sur weapon
         if weapon and weapon.get("enchant"):
             gear_atk += int(weapon["enchant"].get("atk_bonus", 0) or 0)
         gear_crit_bonus = 0
@@ -1305,6 +1446,7 @@ def calc_damage_v2(
         "crit": is_crit,
         "double": is_double,
         "final": final,
+        "set_bonus": set_bonus_active,
     }
     return final, is_crit, is_double, details
 
@@ -1410,6 +1552,7 @@ __all__ = [
     "random_weapon", "random_armor", "random_boss", "random_treasure",
     "random_helmet", "random_boots", "random_accessory", "random_trinket",
     "random_gear_any", "random_enchantment", "gear_total_stats",
+    "compute_set_bonus", "inventory_total_stats", "EQUIPMENT_SLOTS",
     "generate_shop_rotation", "get_quiz_set", "random_personal_event",
     "random_mystery_box", "random_daily_spark",
     # Targeting

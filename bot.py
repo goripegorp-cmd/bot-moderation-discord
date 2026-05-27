@@ -39813,7 +39813,7 @@ async def inventory_cmd(i: discord.Interaction):
         acc = inv.get('accessory', {}) or {}
         tri = inv.get('trinket', {}) or {}
 
-        # Phase 104 : stats totales = base + enchantments
+        # Phase 104 + 106 : stats totales = base + enchants + set bonus
         def _slot_total(item: dict) -> dict:
             try:
                 return events2026.gear_total_stats(item)
@@ -39832,11 +39832,26 @@ async def inventory_cmd(i: discord.Interaction):
         acc_s = _slot_total(acc)
         tri_s = _slot_total(tri)
 
-        atk = w_s['atk'] + h_s['atk'] + acc_s['atk'] + tri_s['atk']
-        defe = a_s['def'] + h_s['def'] + b_s['def']
-        total_crit = w_s['crit'] + a_s['crit'] + h_s['crit'] + b_s['crit'] + acc_s['crit'] + tri_s['crit']
-        total_hp_bonus = sum(s['hp_bonus'] for s in (w_s, a_s, h_s, b_s, acc_s, tri_s))
-        total_lifesteal = sum(s['lifesteal'] for s in (w_s, a_s, h_s, b_s, acc_s, tri_s))
+        # Phase 106 : inventory_total_stats inclut set bonus
+        try:
+            inv_totals = events2026.inventory_total_stats(inv)
+            set_bonus_info = events2026.compute_set_bonus(inv)
+        except Exception:
+            inv_totals = {
+                'atk': w_s['atk'] + h_s['atk'] + acc_s['atk'] + tri_s['atk'],
+                'def': a_s['def'] + h_s['def'] + b_s['def'],
+                'crit': w_s['crit'] + a_s['crit'] + h_s['crit'] + b_s['crit'] + acc_s['crit'] + tri_s['crit'],
+                'hp_bonus': sum(s['hp_bonus'] for s in (w_s, a_s, h_s, b_s, acc_s, tri_s)),
+                'lifesteal': sum(s['lifesteal'] for s in (w_s, a_s, h_s, b_s, acc_s, tri_s)),
+                'set_name': '', 'set_emoji': '', 'set_desc': '',
+            }
+            set_bonus_info = {'name': '', 'emoji': '', 'atk': 0, 'def': 0, 'crit': 0, 'hp_bonus': 0, 'desc': '', 'color': 0x95A5A6, 'tier_count': 0}
+
+        atk = inv_totals['atk']
+        defe = inv_totals['def']
+        total_crit = inv_totals['crit']
+        total_hp_bonus = inv_totals['hp_bonus']
+        total_lifesteal = inv_totals['lifesteal']
         power_score = atk + defe * 2 + total_crit * 3
 
         # Coins
@@ -39976,6 +39991,27 @@ async def inventory_cmd(i: discord.Interaction):
                     f"**💀 Boss vaincus**  `{kills}`\n"
                     f"**💥 Dégâts à vie**  `{total_dmg:,}`"
                 ))
+
+                # ─── Phase 106 : SET BONUS ACTIF ───
+                if set_bonus_info.get('name'):
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ 🏆  SET BONUS ACTIF  ═══╗**"))
+                    set_stats = []
+                    if set_bonus_info['atk']: set_stats.append(f"+{set_bonus_info['atk']} ATK")
+                    if set_bonus_info['def']: set_stats.append(f"+{set_bonus_info['def']} DEF")
+                    if set_bonus_info['crit']: set_stats.append(f"+{set_bonus_info['crit']}% CRIT")
+                    if set_bonus_info['hp_bonus']: set_stats.append(f"+{set_bonus_info['hp_bonus']} HP")
+                    items.append(v2_body(
+                        f"{set_bonus_info['emoji']} **{set_bonus_info['name']}**\n"
+                        f"_{set_bonus_info['desc']}_\n"
+                        f"`{' · '.join(set_stats) if set_stats else '—'}`"
+                    ))
+                else:
+                    items.append(v2_divider())
+                    items.append(v2_body(
+                        "**╔═══ 🏆  SET BONUS  ═══╗**\n"
+                        "_⚪ Aucun set actif — équipe 2+ items rares pour activer **Apprenti** (+5 ATK)_"
+                    ))
 
                 items.append(v2_divider())
 
