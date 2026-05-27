@@ -40102,6 +40102,198 @@ async def records_cmd(i: discord.Interaction):
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
+@bot.tree.command(
+    name="server_stats",
+    description="📊 Dashboard global du serveur — events, coins, activité, records",
+)
+async def server_stats_cmd(i: discord.Interaction):
+    """Phase 98 NEW : /server_stats — Dashboard global LayoutView V2 magnifique."""
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        # Stats EVENTS
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT COUNT(*) FROM events WHERE guild_id=? AND ended=1 AND victory=1",
+                    (i.guild.id,),
+                ) as cur:
+                    boss_won = int((await cur.fetchone() or [0])[0])
+                async with db.execute(
+                    "SELECT COUNT(*) FROM events WHERE guild_id=? AND ended=1",
+                    (i.guild.id,),
+                ) as cur:
+                    boss_total = int((await cur.fetchone() or [0])[0])
+                async with db.execute(
+                    "SELECT COUNT(*) FROM world_bosses WHERE guild_id=? AND ended=1 AND victory=1",
+                    (i.guild.id,),
+                ) as cur:
+                    wb_won = int((await cur.fetchone() or [0])[0])
+                async with db.execute(
+                    "SELECT COUNT(*) FROM world_bosses WHERE guild_id=? AND ended=1",
+                    (i.guild.id,),
+                ) as cur:
+                    wb_total = int((await cur.fetchone() or [0])[0])
+                async with db.execute(
+                    "SELECT COUNT(*) FROM flash_treasures WHERE guild_id=? AND grabbed_by IS NOT NULL",
+                    (i.guild.id,),
+                ) as cur:
+                    ft_grabbed = int((await cur.fetchone() or [0])[0])
+                async with db.execute(
+                    "SELECT COUNT(*) FROM daily_riddles_log WHERE guild_id=? AND first_winner_id IS NOT NULL",
+                    (i.guild.id,),
+                ) as cur:
+                    riddles_won = int((await cur.fetchone() or [0])[0])
+        except Exception as ex:
+            print(f"[server_stats events] {ex}")
+            boss_won = boss_total = wb_won = wb_total = ft_grabbed = riddles_won = 0
+
+        # Stats ÉCONOMIE
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT SUM(coins), SUM(bank), COUNT(*) FROM economy WHERE guild_id=?",
+                    (i.guild.id,),
+                ) as cur:
+                    row = await cur.fetchone()
+            total_coins = int((row[0] or 0)) if row else 0
+            total_bank = int((row[1] or 0)) if row else 0
+            economy_users = int((row[2] or 0)) if row else 0
+        except Exception:
+            total_coins = total_bank = economy_users = 0
+        total_wealth = total_coins + total_bank
+
+        # Stats COMBAT
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT SUM(kills), SUM(total_damage), COUNT(*) FROM player_inventory WHERE guild_id=?",
+                    (i.guild.id,),
+                ) as cur:
+                    row = await cur.fetchone()
+            total_kills = int((row[0] or 0)) if row else 0
+            total_dmg = int((row[1] or 0)) if row else 0
+            warriors = int((row[2] or 0)) if row else 0
+        except Exception:
+            total_kills = total_dmg = warriors = 0
+
+        # Stats UNIQUE LOOTS
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT COUNT(*) FROM unique_loots WHERE guild_id=?",
+                    (i.guild.id,),
+                ) as cur:
+                    unique_loots = int((await cur.fetchone() or [0])[0])
+        except Exception:
+            unique_loots = 0
+
+        # Stats ALLIANCES
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT COUNT(*) FROM alliances WHERE guild_id=? AND dissolved=0",
+                    (i.guild.id,),
+                ) as cur:
+                    alliances_active = int((await cur.fetchone() or [0])[0])
+        except Exception:
+            alliances_active = 0
+
+        # Stats CONFESSIONS
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT COUNT(*) FROM confessions WHERE guild_id=?",
+                    (i.guild.id,),
+                ) as cur:
+                    confessions_total = int((await cur.fetchone() or [0])[0])
+        except Exception:
+            confessions_total = 0
+
+        # Guild basics
+        member_count = i.guild.member_count or 0
+        channel_count = len(i.guild.channels)
+        role_count = len(i.guild.roles)
+
+        # Win rates
+        boss_winrate = int(boss_won * 100 / max(1, boss_total))
+        wb_winrate = int(wb_won * 100 / max(1, wb_total))
+
+        _guild_name = i.guild.name
+        _guild_icon = i.guild.icon.url if i.guild.icon else None
+
+        class _ServerStatsLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=600)
+                items = []
+
+                # ─── HEADER ───
+                items.append(v2_title(f"📊  DASHBOARD  ·  {_guild_name}"))
+                items.append(v2_subtitle(
+                    f"`{member_count}` membres · `{channel_count}` salons · `{role_count}` rôles"
+                ))
+                items.append(v2_divider())
+
+                # ─── GROUPE 1 : EVENTS ───
+                items.append(v2_body("**╔═══ ⚔️  COMBAT  ═══╗**"))
+                items.append(v2_body(
+                    f"💀 **Boss Raids vaincus :** `{boss_won}` / `{boss_total}` "
+                    f"({boss_winrate}% winrate)\n"
+                    f"🌍 **World Bosses vaincus :** `{wb_won}` / `{wb_total}` "
+                    f"({wb_winrate}% winrate)\n"
+                    f"⚔️ **Total kills cumulés :** `{total_kills:,}`\n"
+                    f"💥 **Dégâts à vie cumulés :** `{total_dmg:,}`\n"
+                    f"🛡️ **Combattants actifs :** `{warriors}`"
+                ))
+
+                items.append(v2_divider())
+
+                # ─── GROUPE 2 : LOOT & EVENTS LIGHT ───
+                items.append(v2_body("**╔═══ 💎  LOOT & EVENTS  ═══╗**"))
+                items.append(v2_body(
+                    f"💎 **Loots uniques au monde :** `{unique_loots}`\n"
+                    f"⚡ **Flash Treasures saisis :** `{ft_grabbed:,}`\n"
+                    f"🧠 **Énigmes résolues :** `{riddles_won}`"
+                ))
+
+                items.append(v2_divider())
+
+                # ─── GROUPE 3 : ÉCONOMIE ───
+                items.append(v2_body("**╔═══ 💰  ÉCONOMIE  ═══╗**"))
+                items.append(v2_body(
+                    f"🪙 **Coins en circulation :** `{total_coins:,}`\n"
+                    f"🏦 **Coins en banque :** `{total_bank:,}`\n"
+                    f"💎 **Richesse totale :** `{total_wealth:,}` 🪙\n"
+                    f"👥 **Joueurs avec wallet :** `{economy_users}`"
+                ))
+
+                items.append(v2_divider())
+
+                # ─── GROUPE 4 : SOCIAL ───
+                items.append(v2_body("**╔═══ 🤝  SOCIAL  ═══╗**"))
+                items.append(v2_body(
+                    f"🤝 **Alliances actives :** `{alliances_active}`\n"
+                    f"🤫 **Confessions envoyées :** `{confessions_total}`"
+                ))
+
+                items.append(v2_divider())
+
+                # ─── FOOTER ───
+                items.append(v2_body(
+                    "_💡 `/records` pour le Hall of Fame (Top 5 par catégorie)_\n"
+                    "_📈 `/leaderboard` pour les classements coins/activité_"
+                ))
+
+                self.add_item(v2_container(*items, color=0x5865F2))
+
+        await _safe_followup(i, view=_ServerStatsLayout())
+    except Exception as ex:
+        print(f"[/server_stats V2] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
 @bot.tree.command(name="event_start", description="⚔️ [Owner] Lance un Boss Raid maintenant")
 async def event_start_cmd(i: discord.Interaction):
     # Owner only
