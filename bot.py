@@ -6981,20 +6981,27 @@ class _ReactionRolesCreateModal(Modal, title="🎫 Nouveau Reaction Roles"):
                 return await i.response.send_message("❌ Aucune paire emoji=rôle valide.", ephemeral=True)
             raw_pairs = raw_pairs[:20]  # Discord supporte 20 réactions max par message
 
-            # Build embed
-            desc_lines = [self.description.value or '']
-            desc_lines.append('')
-            for emoji, role in raw_pairs:
-                desc_lines.append(f"{emoji} · {role.mention}")
-            e = discord.Embed(
-                title=self.title_in.value[:256],
-                description="\n".join(desc_lines)[:4000],
-                color=0x5865F2,
-            )
-            e.set_footer(text="Clique sur un emoji pour obtenir le rôle correspondant")
+            # Phase 82 : LayoutView V2 — sections claires pour Reaction Roles
+            _rr_title = (self.title_in.value or "🎫 Reaction Roles")[:256]
+            _rr_desc = (self.description.value or "").strip()
+            _rr_pairs_text = "\n".join(f"{emoji} · {role.mention}" for emoji, role in raw_pairs)
+
+            class _ReactionRolesLayout(LayoutView):
+                def __init__(self):
+                    super().__init__(timeout=None)
+                    items = [
+                        v2_title(_rr_title),
+                        v2_subtitle("Clique sur un emoji ci-dessous pour obtenir le rôle"),
+                        v2_divider(),
+                    ]
+                    if _rr_desc:
+                        items.append(v2_body(_rr_desc[:2000]))
+                        items.append(v2_divider())
+                    items.append(v2_body(_rr_pairs_text[:2000]))
+                    self.add_item(v2_container(*items, color=0x5865F2))
 
             await i.response.defer(ephemeral=True)
-            msg = await ch.send(embed=e)
+            msg = await ch.send(view=_ReactionRolesLayout())
 
             # Add reactions + persist
             async with get_db() as db:
@@ -35932,11 +35939,10 @@ class SendPanelPaginatedView(LayoutView):
             auto_info += f"\n🔢 Maximum **{mx}** ticket(s) simultané(s)."
 
             full_desc = embed_desc + auto_info
-            emb = discord.Embed(title=embed_title, description=full_desc, color=C.BLURPLE)
 
             embed_links = pnl.get('embed_links', '').strip()
+            links_text = ""
             if embed_links:
-                links_text = ""
                 for line in embed_links.split('\n'):
                     line = line.strip()
                     if '|' in line:
@@ -35947,10 +35953,35 @@ class SendPanelPaginatedView(LayoutView):
                             links_text += f"[{link_text}]({link_url})\n"
                     elif line:
                         links_text += f"{line}\n"
-                if links_text:
-                    emb.add_field(name="🔗 Liens utiles", value=links_text.strip(), inline=False)
 
-            sent_msg = await ch.send(embed=emb, view=TicketCreateView(self.pid))
+            # Phase 82 : LayoutView V2 — section "Créer un ticket" avec bouton accessory
+            # custom_id "ticket_create_{pid}" stable → bot.add_view(TicketCreateView(pid))
+            # restauré au boot dispatche les clics persistants.
+            _pid_local = self.pid
+            _emb_title = embed_title[:256]
+            _full_desc = full_desc[:1800]
+            _links_text = links_text.strip()
+            _create_btn = TicketCreateButton(_pid_local)
+            # Note: TicketCreateButton a son propre callback → dispatch via View enregistrée
+
+            class _TicketPanelLayout(LayoutView):
+                def __init__(self):
+                    super().__init__(timeout=None)
+                    items = [
+                        v2_title(_emb_title),
+                        v2_divider(),
+                    ]
+                    items.append(_section_with_button(
+                        "📩 Création de ticket",
+                        _full_desc,
+                        _create_btn,
+                    ))
+                    if _links_text:
+                        items.append(v2_divider())
+                        items.append(v2_body(f"**🔗 Liens utiles**\n{_links_text}"))
+                    self.add_item(v2_container(*items, color=C.BLURPLE))
+
+            sent_msg = await ch.send(view=_TicketPanelLayout())
             jump_url = f"https://discord.com/channels/{i.guild.id}/{ch.id}/{sent_msg.id}"
             await i.followup.send(
                 f"✅ Panel envoyé dans {ch.mention} !\n[Voir le message]({jump_url})",
