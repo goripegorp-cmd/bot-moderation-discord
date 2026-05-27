@@ -8135,16 +8135,21 @@ class BossArenaLayoutV2(LayoutView):
     Persistant via custom_id basé sur event_id. Re-rendu à chaque update HP /
     nouveau combattant. Le bouton ATTAQUER est accessory de la section HP
     (toujours visible en haut, mobile-friendly).
+
+    Phase 75 : `phase_warning` (optionnel) — affiche un panneau live "Le boss
+    prépare une attaque" INTÉGRÉ dans le LayoutView, plus de spam de messages
+    séparés. La section apparaît, se met à jour, et disparaît à chaque cycle.
     """
 
     def __init__(self, boss: dict, participants: list, ends_at_dt: Optional[datetime],
-                  guild, event_id: int):
+                  guild, event_id: int, phase_warning: Optional[dict] = None):
         super().__init__(timeout=None)
         self.boss = boss
         self.participants = participants or []
         self.ends_at_dt = ends_at_dt
         self.guild = guild
         self.event_id = event_id
+        self.phase_warning = phase_warning
         self._build()
 
     def _build(self):
@@ -8198,6 +8203,23 @@ class BossArenaLayoutV2(LayoutView):
             info_line += "  ·  "
         info_line += f"👥 `{len(self.participants)}` combattant(s)"
         items.append(v2_body(info_line))
+
+        # Phase 75 : section live "Phase d'attaque" (s'affiche/disparaît dynamique)
+        if self.phase_warning:
+            pw = self.phase_warning
+            attack_ts = pw.get('attack_at_ts', 0)
+            countdown_str = (
+                f" — impact <t:{int(attack_ts)}:R>" if attack_ts else ""
+            )
+            items.append(v2_divider())
+            warn_text = (
+                f"## {pw.get('emoji', '⚡')} Phase d'attaque !\n"
+                f"**Cible :** {pw.get('targeted_zone_mention', '?')}\n"
+                f"_Le boss lance un **{pw.get('attack_name', 'attaque')}**{countdown_str}._\n"
+                f"➡️ Quitte cette zone !"
+                + (f"\n💡 Zone safe : {pw['safe_zone_mention']}" if pw.get('safe_zone_mention') else "")
+            )
+            items.append(v2_body(warn_text))
 
         items.append(v2_divider())
 
@@ -8345,43 +8367,26 @@ async def _boss_phase_attacks(guild, event_id: int):
 
             # Annoncer l'attaque
             if arena and targeted_ch:
-                # Phase 66 : supprimer l'ANCIEN warning avant de poster le nouveau
-                # (sinon le bouton ATTAQUER finit en haut hors écran sur mobile)
-                old_warn_id = cache.get('last_warning_msg_id')
-                if old_warn_id:
-                    try:
-                        old_msg = await arena.fetch_message(int(old_warn_id))
-                        if old_msg:
-                            await old_msg.delete()
-                    except (discord.NotFound, discord.Forbidden):
-                        pass
-                    except Exception as ex:
-                        print(f"[phase66 delete old warn] {ex}")
                 attack_emoji = random.choice(['⚡', '🔥', '❄️', '💀', '🌪️'])
                 attack_name = random.choice(['souffle de feu', 'tornade', 'rayon glaciaire', 'frappe titanesque', 'cri funeste'])
-                warning_embed = discord.Embed(
-                    title=f"{attack_emoji} Le boss prépare une attaque !",
-                    description=(
-                        f"**Cible : {targeted_ch.mention}**\n\n"
-                        f"_Le boss lance un {attack_name} sur cette zone dans **30 secondes** !_\n\n"
-                        f"➡️ Quitte cette zone pour éviter les dégâts.\n"
-                        + (f"💡 Zone safe suggérée : {safe_ch.mention}" if safe_ch else "")
-                    ),
-                    color=0xE74C3C,
-                )
+                # Phase 75 : NE PLUS poster un message séparé. Stocker la phase
+                # active dans cache et refresh le LayoutView V2 du boss arena.
+                # Le warning apparaît comme une section LIVE dans le message arena
+                # principal — zéro spam, le bouton ATTAQUER reste toujours visible.
+                attack_at_ts = int(datetime.now(timezone.utc).timestamp()) + 30
+                cache['active_phase_warning'] = {
+                    'emoji': attack_emoji,
+                    'attack_name': attack_name,
+                    'targeted_zone_mention': targeted_ch.mention,
+                    'safe_zone_mention': safe_ch.mention if safe_ch else None,
+                    'attack_at_ts': attack_at_ts,
+                }
+                _active_events_cache[guild.id] = cache
+                # Phase 75 : refresh le LayoutView arena pour faire apparaître la section
                 try:
-                    # Phase 66 : delete_after=60 + auto-cleanup quand le nouveau warning arrive
-                    warn_msg = await arena.send(embed=warning_embed, delete_after=60)
-                    # Stocker pour suppression au prochain warning
-                    cache['last_warning_msg_id'] = warn_msg.id
-                    _active_events_cache[guild.id] = cache
-                    # Backup persistent cleanup
-                    try:
-                        await _register_for_cleanup(warn_msg, 60, 'boss_phase_warning')
-                    except Exception:
-                        pass
-                except Exception:
-                    warn_msg = None
+                    await _refresh_boss_message(guild, event_id)
+                except Exception as ex:
+                    print(f"[phase75 refresh arena warn] {ex}")
 
                 # Déplacer les opt-in après 25s
                 await asyncio.sleep(25)
@@ -8465,6 +8470,18 @@ async def _boss_phase_attacks(guild, event_id: int):
                             )
                         except Exception:
                             pass
+
+                # Phase 75 : clear l'active_phase_warning du cache + refresh LayoutView
+                # pour que la section "Phase d'attaque !" disparaisse de l'arena pendant
+                # les 5 min d'attente avant la prochaine phase.
+                try:
+                    cache_clear = _active_events_cache.get(guild.id, {})
+                    if cache_clear.get('active_phase_warning'):
+                        cache_clear.pop('active_phase_warning', None)
+                        _active_events_cache[guild.id] = cache_clear
+                        await _refresh_boss_message(guild, event_id)
+                except Exception as ex:
+                    print(f"[phase75 clear warning] {ex}")
 
             # Attendre 5 min pour la prochaine phase
             await asyncio.sleep(300)
@@ -8685,8 +8702,11 @@ async def _refresh_boss_message(guild, event_id: int):
         except Exception:
             return
 
-        # Phase 74 : edit avec le LayoutView V2 (HP + ATTAQUER + Top combattants)
-        new_view = BossArenaLayoutV2(boss, parts, ends_at_dt, guild, event_id)
+        # Phase 74+75 : edit avec LayoutView V2 (HP + ATTAQUER + Top + phase warning live)
+        # Phase 75 : récupérer la phase_warning active depuis cache si présente
+        cache = _active_events_cache.get(guild.id, {})
+        phase_warning = cache.get('active_phase_warning') if cache.get('event_id') == event_id else None
+        new_view = BossArenaLayoutV2(boss, parts, ends_at_dt, guild, event_id, phase_warning=phase_warning)
         try:
             await msg.edit(view=new_view)
         except discord.HTTPException as ex:
