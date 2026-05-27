@@ -92,6 +92,8 @@ import roblox_link as rblx_link_module
 import voice_lounges as vlounge_module
 # Phase 138 : Tickets enhancements (priority + templates + auto-close)
 import tickets_enhance as tix_module
+# Phase 139 : Observabilité (daily report + anomalies + retention)
+import observability as obs_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -37945,6 +37947,25 @@ async def on_ready():
             tix_module.auto_close_inactive_task.start()
     except Exception as ex:
         print(f"[on_ready tix setup] {ex}")
+    # Phase 139 : Observabilité (daily report + anomalies + retention)
+    try:
+        obs_module.setup(
+            bot,
+            get_db,
+            db_get,
+            db_set,
+            {
+                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
+                'v2_divider': v2_divider, 'v2_container': v2_container,
+                'LayoutView': LayoutView,
+            },
+        )
+        if not obs_module.daily_snapshot_task.is_running():
+            obs_module.daily_snapshot_task.start()
+        if not obs_module.anomaly_check_task.is_running():
+            obs_module.anomaly_check_task.start()
+    except Exception as ex:
+        print(f"[on_ready obs setup] {ex}")
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()
@@ -39243,6 +39264,112 @@ async def ticket_auto_close_cmd(i: discord.Interaction, jours: int):
 bot.tree.add_command(ticket_group)
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 139 : /server — observabilité (report quotidien + anomalies + retention)
+# ═══════════════════════════════════════════════════════════════════════════════
+server_obs_group = app_commands.Group(
+    name="server",
+    description="📊 Observabilité serveur : rapport quotidien + anomalies + retention",
+)
+
+
+def _obs_is_owner(member: discord.Member) -> bool:
+    """True si owner/admin du serveur (commandes owner-only)."""
+    try:
+        return (
+            member.id == SUPER_OWNER_ID
+            or (member.guild and member.id == member.guild.owner_id)
+            or member.guild_permissions.administrator
+        )
+    except Exception:
+        return False
+
+
+@server_obs_group.command(
+    name="report", description="📊 [Owner] Rapport quotidien du serveur"
+)
+async def server_report_cmd(i: discord.Interaction):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not _obs_is_owner(i.user):
+        return await i.response.send_message("❌ Owner/Admin uniquement.", ephemeral=True)
+    try:
+        await i.response.defer(ephemeral=True)
+        snapshot = await obs_module.capture_snapshot(i.guild)
+        prev_list = await obs_module.get_recent_snapshots(i.guild.id, days=3)
+        prev = prev_list[1] if len(prev_list) >= 2 else None
+        view = obs_module.build_daily_report_panel(snapshot, prev, i.guild.name)
+        if view is None:
+            return await i.followup.send("❌ Module indisponible.", ephemeral=True)
+        await i.followup.send(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[server_report_cmd] {ex}")
+        try:
+            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+@server_obs_group.command(
+    name="history", description="📈 [Owner] Historique des snapshots quotidiens"
+)
+@app_commands.describe(jours="Nombre de jours à afficher (1-30, défaut 7)")
+async def server_history_cmd(i: discord.Interaction, jours: int = 7):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not _obs_is_owner(i.user):
+        return await i.response.send_message("❌ Owner/Admin uniquement.", ephemeral=True)
+    try:
+        days = max(1, min(30, int(jours or 7)))
+        snapshots = await obs_module.get_recent_snapshots(i.guild.id, days=days)
+        view = obs_module.build_history_panel(snapshots, i.guild.name)
+        if view is None:
+            return await i.response.send_message("❌ Module indisponible.", ephemeral=True)
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[server_history_cmd] {ex}")
+
+
+@server_obs_group.command(
+    name="retention", description="📉 [Owner] Courbes de rétention 7j/30j/90j"
+)
+async def server_retention_cmd(i: discord.Interaction):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not _obs_is_owner(i.user):
+        return await i.response.send_message("❌ Owner/Admin uniquement.", ephemeral=True)
+    try:
+        await i.response.defer(ephemeral=True)
+        retention = await obs_module.compute_retention(i.guild.id)
+        view = obs_module.build_retention_panel(retention, i.guild.name)
+        if view is None:
+            return await i.followup.send("❌ Module indisponible.", ephemeral=True)
+        await i.followup.send(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[server_retention_cmd] {ex}")
+
+
+@server_obs_group.command(
+    name="anomalies", description="🚨 [Owner] Anomalies détectées (spikes/drops)"
+)
+async def server_anomalies_cmd(i: discord.Interaction):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not _obs_is_owner(i.user):
+        return await i.response.send_message("❌ Owner/Admin uniquement.", ephemeral=True)
+    try:
+        anomalies = await obs_module.get_recent_anomalies(i.guild.id, limit=10)
+        view = obs_module.build_anomalies_panel(anomalies, i.guild.name)
+        if view is None:
+            return await i.response.send_message("❌ Module indisponible.", ephemeral=True)
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[server_anomalies_cmd] {ex}")
+
+
+bot.tree.add_command(server_obs_group)
+
+
 @bot.event
 async def on_member_ban(guild, user):
     """Sauvegarde les informations du membre banni pour détection de comptes secondaires"""
@@ -39279,6 +39406,12 @@ async def on_member_remove(m):
             ''', (m.guild.id, today))
             await db.commit()
     except: pass
+
+    # ═══ Phase 139 : Observabilité (leave tracking pour retention) ═══
+    try:
+        await obs_module.record_leave(m.guild.id, m.id)
+    except Exception as ex:
+        print(f"[on_member_remove obs_record_leave] {ex}")
 
     # ═══ Log unifié (Phase 3.7) ═══
     try:
@@ -39466,6 +39599,12 @@ async def on_member_join(m):
             ''', (m.guild.id, today))
             await db.commit()
     except: pass
+
+    # ═══ Phase 139 : Observabilité (join tracking pour retention) ═══
+    try:
+        await obs_module.record_join(m.guild.id, m.id)
+    except Exception as ex:
+        print(f"[on_member_join obs_record_join] {ex}")
 
     # ═══ Log unifié (Phase 3.7) ═══
     try:
