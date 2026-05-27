@@ -49101,26 +49101,11 @@ async def hub_setup_cmd(i: discord.Interaction, channel: discord.TextChannel):
     if not await _safe_defer(i):
         return
     try:
-        e = discord.Embed(
-            title="🎮 Hub d'engagement",
-            description=(
-                "**Tout ce qu'il faut, sans aucune commande à mémoriser.**\n\n"
-                "📜 **Mes quêtes du jour** — voir mes 3 défis du jour + récompenses\n"
-                "🎰 **Daily Wheel** — 1 spin gratuit par jour, jackpot mythique possible\n"
-                "🏆 **Mes hauts faits** — 50+ achievements à débloquer\n"
-                "🐾 **Mon compagnon** — adopte un pet, fais-le évoluer, bonus passifs\n"
-                "🤫 **Confession anonyme** — envoie un message 100% anonyme\n"
-                "👤 **Mon profil** — level, prestige, saison, factions, alliance, stats\n"
-                "🔔 **Mes notifications** — choisis quels events te pingent (granulaire)\n"
-                "📖 **Histoire du serveur** — chapitre du lore qui évolue après chaque World Boss\n"
-                "🎯 **Mission en cours** — quête collective mensuelle en 5 étapes\n\n"
-                "_Clique simplement sur un bouton ci-dessous. Tout est éphémère (toi seul vois la réponse)._"
-            ),
-            color=0x5865F2,
-        )
-        e.set_footer(text="Hub d'engagement · Cliquez les boutons — pas besoin de commandes")
+        # Phase 81 : Hub épinglé en LayoutView V2 (sections cliquables + accessory)
+        # Custom_ids stables (hub_*) → bot.add_view(EngagementHubView()) au boot
+        # dispatche les clics globalement (pas de rebuild après reboot).
         try:
-            msg = await channel.send(embed=e, view=EngagementHubView())
+            msg = await channel.send(view=HubPinnedLayoutV2())
             try:
                 await msg.pin()
             except Exception:
@@ -65908,6 +65893,104 @@ class HubLayoutV2(LayoutView):
                 pass
         except Exception:
             pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 81 — HubPinnedLayoutV2 : version PERSISTANTE du hub pour /hub_setup
+# ═══════════════════════════════════════════════════════════════════════════════
+class HubPinnedLayoutV2(LayoutView):
+    """Phase 81 : Panneau ÉPINGLÉ du hub en LayoutView V2.
+
+    Custom_ids stables IDENTIQUES à EngagementHubView (hub_quests, hub_wheel...)
+    → bot.add_view(EngagementHubView()) au boot continue de dispatcher les
+    clics. Pas de callback local (Discord route via global).
+    """
+
+    def __init__(self):
+        super().__init__(timeout=None)
+        self._build()
+
+    def _build(self):
+        items = []
+        items.append(v2_title("🎮 Hub d'engagement"))
+        items.append(v2_subtitle("Tout ce qu'il faut, sans aucune commande à mémoriser"))
+        items.append(v2_divider())
+
+        # 1: Quêtes
+        b = Button(label="Ouvrir", style=discord.ButtonStyle.primary, custom_id="hub_quests")
+        items.append(_section_with_button(
+            "📜 Mes quêtes du jour", "3 défis quotidiens + streak", b,
+        ))
+        # 2: Daily Wheel
+        b = Button(label="Spin", style=discord.ButtonStyle.success, custom_id="hub_wheel")
+        items.append(_section_with_button(
+            "🎰 Daily Wheel", "1 spin gratuit/jour — jackpot mythique possible", b,
+        ))
+        # 3: Hauts faits
+        b = Button(label="Voir", style=discord.ButtonStyle.secondary, custom_id="hub_achievements")
+        items.append(_section_with_button(
+            "🏆 Mes hauts faits", "50+ achievements à débloquer", b,
+        ))
+        # 4: Compagnon
+        b = Button(label="Voir", style=discord.ButtonStyle.secondary, custom_id="hub_pet")
+        items.append(_section_with_button(
+            "🐾 Mon compagnon", "Adopter et faire évoluer ton pet, bonus passifs", b,
+        ))
+        # 5: Confession
+        b = Button(label="Écrire", style=discord.ButtonStyle.secondary, custom_id="hub_confess")
+        items.append(_section_with_button(
+            "🤫 Confession anonyme", "Message 100% anonyme dans le salon dédié", b,
+        ))
+
+        items.append(v2_divider())
+
+        # 6: Profil
+        b = Button(label="Ouvrir", style=discord.ButtonStyle.primary, custom_id="hub_profile")
+        items.append(_section_with_button(
+            "👤 Mon profil", "Level, prestige, saison, factions, alliance, stats", b,
+        ))
+        # 7: Notifications
+        b = Button(label="Configurer", style=discord.ButtonStyle.secondary, custom_id="hub_notifs")
+        items.append(_section_with_button(
+            "🔔 Mes notifications", "Choisis précisément quels events te pingent", b,
+        ))
+        # 8: Histoire
+        b = Button(label="Lire", style=discord.ButtonStyle.secondary, custom_id="hub_lore")
+        items.append(_section_with_button(
+            "📖 Histoire du serveur", "Chapitre qui évolue après chaque World Boss", b,
+        ))
+        # 9: Mission
+        b = Button(label="Voir", style=discord.ButtonStyle.success, custom_id="hub_mission")
+        items.append(_section_with_button(
+            "🎯 Mission en cours", "Quête collective mensuelle en 5 étapes", b,
+        ))
+
+        items.append(v2_divider())
+
+        # 10: Roblox
+        b = Button(label="Ouvrir", style=discord.ButtonStyle.primary, custom_id="hub_roblox")
+        items.append(_section_with_button(
+            "🎮 Roblox", "Speedrun · Matchmaking · Studio Tips · Updates", b,
+        ))
+        # 11: Compétitions
+        b = Button(label="Ouvrir", style=discord.ButtonStyle.danger, custom_id="hub_competitions")
+        items.append(_section_with_button(
+            "🏆 Compétitions", "Bingo mensuel · Prédictions · Faction Wars", b,
+        ))
+        # 12: Social
+        b = Button(label="Ouvrir", style=discord.ButtonStyle.success, custom_id="hub_social")
+        items.append(_section_with_button(
+            "💝 Social", "Shoutouts · Mentorat · Confessions", b,
+        ))
+        # 13: Outils
+        b = Button(label="Ouvrir", style=discord.ButtonStyle.secondary, custom_id="hub_tools")
+        items.append(_section_with_button(
+            "🧰 Outils",
+            "Banque · Loots · PvP · Classe RP · Alliance · Time Capsule · Hall of Fame",
+            b,
+        ))
+
+        self.add_item(v2_container(*items, color=0x5865F2))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
