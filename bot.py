@@ -41244,6 +41244,196 @@ async def _auction_mine(i: discord.Interaction):
     await i.response.send_message(view=_MineLayout(), ephemeral=True)
 
 
+# ─── Phase 110 : /craft (Crafting / Refinement) ──────────────────────────
+#
+# Affine un item équipé pour tenter de monter sa rareté d'un cran.
+# Coût en coins, chance de succès décroissante selon la rareté courante,
+# ÉCHEC = item perdu. Système risque/reward pur.
+
+@bot.tree.command(name="craft", description="⚒️ Atelier de forge — affine un item pour le rendre plus rare")
+async def craft_cmd(i: discord.Interaction):
+    """Phase 110 : atelier de forge / refining system."""
+    try:
+        inv = await _get_or_create_inventory(i.guild.id, i.user.id)
+
+        # Collecter les slots éligibles (item présent ET recette dispo)
+        eligible = []
+        for slot_key, slot_label in [
+            ("weapon", "⚔️ Arme"),
+            ("armor", "🛡️ Armure"),
+            ("helmet", "🎩 Casque"),
+            ("boots", "👢 Bottes"),
+            ("accessory", "💍 Accessoire"),
+            ("trinket", "🔮 Trinket"),
+        ]:
+            item = inv.get(slot_key) or {}
+            if not item or not item.get("name"):
+                continue
+            recipe = events2026.get_refine_recipe(item)
+            if recipe:
+                eligible.append((slot_key, slot_label, item, recipe))
+
+        if not eligible:
+            return await i.response.send_message(
+                "⚒️ **Forge fermée**\n"
+                "_Tu n'as aucun item éligible à l'affinage._\n"
+                "_(Pas d'item, ou tous déjà au rang divine — bravo !)_",
+                ephemeral=True,
+            )
+
+        eco = await get_user_economy(i.guild.id, i.user.id)
+        coins_hand = int(eco.get('coins', 0) or 0)
+        bank = int(eco.get('bank', 0) or 0)
+        total_wealth = coins_hand + bank
+
+        user_id = i.user.id
+
+        class _ConfirmRefineBtn(discord.ui.Button):
+            def __init__(self, slot_key: str, item: dict, recipe: dict, has_funds: bool):
+                target = recipe["target"]
+                success = recipe["success_pct"]
+                cost = recipe["cost"]
+                emoji = item.get("emoji", "⚪")
+                label = f"{emoji} {slot_key.title()} → {target} ({success}%) — {cost:,} 🪙"[:80]
+                super().__init__(
+                    label=label,
+                    style=discord.ButtonStyle.primary if has_funds else discord.ButtonStyle.secondary,
+                    custom_id=f"phase110_refine_{slot_key}",
+                    disabled=not has_funds,
+                )
+                self.slot_key = slot_key
+                self.item_snap = dict(item)
+                self.recipe = recipe
+
+            async def callback(self, btn_i: discord.Interaction):
+                if btn_i.user.id != user_id:
+                    return await btn_i.response.send_message(
+                        "❌ Ce panneau n'est pas pour toi.", ephemeral=True
+                    )
+                # Re-vérifier inventaire + coins
+                inv2 = await _get_or_create_inventory(btn_i.guild.id, btn_i.user.id)
+                item_now = inv2.get(self.slot_key) or {}
+                if item_now.get("name") != self.item_snap.get("name"):
+                    return await btn_i.response.send_message(
+                        "❌ L'item a changé depuis. Relance `/craft`.", ephemeral=True
+                    )
+                eco2 = await get_user_economy(btn_i.guild.id, btn_i.user.id)
+                hand2 = int(eco2.get('coins', 0) or 0)
+                bank2 = int(eco2.get('bank', 0) or 0)
+                cost = int(self.recipe["cost"])
+                if hand2 + bank2 < cost:
+                    return await btn_i.response.send_message(
+                        f"💸 Fonds insuffisants ({hand2 + bank2:,} / {cost:,} 🪙).",
+                        ephemeral=True,
+                    )
+
+                # Déduire les coins
+                from_hand = min(hand2, cost)
+                from_bank = cost - from_hand
+                if from_hand > 0:
+                    await add_coins(btn_i.guild.id, btn_i.user.id, -from_hand)
+                if from_bank > 0:
+                    await update_user_economy(btn_i.guild.id, btn_i.user.id, bank=bank2 - from_bank)
+
+                # Tenter l'affinage
+                success, result_item = events2026.attempt_refine(item_now)
+                if success and result_item:
+                    inv2[self.slot_key] = result_item
+                    await _save_inventory(btn_i.guild.id, btn_i.user.id, inv2)
+                    new_emoji = result_item.get("emoji", "✨")
+                    new_name = result_item.get("name", "?")
+                    new_rarity = result_item.get("rarity", "rare")
+                    rarity_emojis = {
+                        "commune": "⚪", "rare": "🔵", "épique": "🟣",
+                        "légendaire": "🟠", "mythique": "🔴", "divine": "💎",
+                    }
+                    badge = rarity_emojis.get(new_rarity.lower(), "✨")
+                    await btn_i.response.edit_message(
+                        content=(
+                            f"🎉 **AFFINAGE RÉUSSI !**\n"
+                            f"L'ancien {self.item_snap.get('emoji', '⚪')} **{self.item_snap.get('name', '?')}** "
+                            f"est devenu :\n\n"
+                            f"{badge} {new_emoji} **{new_name}** _{new_rarity}_\n"
+                            f"_Coût : `{cost:,}` 🪙_\n"
+                            f"_Tape `/inventory` pour admirer le résultat._"
+                        ),
+                        view=None,
+                    )
+                else:
+                    # Échec : item perdu
+                    inv2[self.slot_key] = {}
+                    await _save_inventory(btn_i.guild.id, btn_i.user.id, inv2)
+                    await btn_i.response.edit_message(
+                        content=(
+                            f"💥 **ÉCHEC DE L'AFFINAGE...**\n"
+                            f"Le {self.item_snap.get('emoji', '⚪')} **{self.item_snap.get('name', '?')}** "
+                            f"a été détruit dans le processus.\n"
+                            f"_Coût : `{cost:,}` 🪙 (perdu)_\n\n"
+                            f"_Combats des boss pour récupérer un nouvel item._"
+                        ),
+                        view=None,
+                    )
+
+        class _CraftLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=180)
+                lay = []
+                lay.append(v2_title("⚒️  ATELIER DE FORGE"))
+                lay.append(v2_subtitle(
+                    f"Tu as `{total_wealth:,}` 🪙  ·  "
+                    f"{len(eligible)} item(s) éligible(s)"
+                ))
+                lay.append(v2_divider())
+                lay.append(v2_body(
+                    "**╔═══ ⚠️  AVERTISSEMENT  ═══╗**\n"
+                    "_L'affinage est **risqué**. En cas d'échec, l'item est **détruit**. "
+                    "Plus la rareté cible est élevée, plus la chance d'échec est grande._"
+                ))
+                lay.append(v2_divider())
+                lay.append(v2_body("**╔═══ 🔨  ITEMS ÉLIGIBLES  ═══╗**"))
+                for slot_key, slot_label, item, recipe in eligible:
+                    emoji = item.get("emoji", "⚪")
+                    name = item.get("name", "?")
+                    rarity = (item.get("rarity") or "commune").lower()
+                    target = recipe["target"]
+                    success = recipe["success_pct"]
+                    cost = recipe["cost"]
+                    rarity_emojis = {
+                        "commune": "⚪", "rare": "🔵", "épique": "🟣",
+                        "légendaire": "🟠", "mythique": "🔴", "divine": "💎",
+                    }
+                    src_badge = rarity_emojis.get(rarity, "⚪")
+                    tgt_badge = rarity_emojis.get(target, "✨")
+                    lay.append(v2_body(
+                        f"**{slot_label}**  {src_badge} {emoji} **{name}** _{rarity}_\n"
+                        f"  → cible : {tgt_badge} _{target}_  ·  succès : `{success}%`  ·  coût : `{cost:,}` 🪙"
+                    ))
+                lay.append(v2_divider())
+                lay.append(v2_body(
+                    "_Clique sur le bouton de l'item que tu veux raffiner._"
+                ))
+                self.add_item(v2_container(*lay, color=0xE67E22))
+
+                # Boutons (max 5 par row, 6 max donc 2 rows possibles)
+                buttons = []
+                for slot_key, slot_label, item, recipe in eligible:
+                    has_funds = total_wealth >= int(recipe["cost"])
+                    buttons.append(_ConfirmRefineBtn(slot_key, item, recipe, has_funds))
+                for k in range(0, len(buttons), 5):
+                    self.add_item(discord.ui.ActionRow(*buttons[k:k + 5]))
+
+        await i.response.send_message(view=_CraftLayout(), ephemeral=True)
+
+    except Exception as ex:
+        print(f"[/craft] {ex}")
+        import traceback; traceback.print_exc()
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
 @bot.tree.command(name="badges", description="🏅 Affiche tes badges et ton rang")
 async def badges_cmd(i: discord.Interaction):
     """Phase 31 + Phase 95 AMPLIFY : badges en LayoutView V2 magnifique."""

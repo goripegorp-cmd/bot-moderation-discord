@@ -756,6 +756,89 @@ def durability_bar(item: dict, length: int = 10) -> str:
     return f"{bar} {pct}% ({cur}/{mx})"
 
 
+# ─── Phase 110 : Crafting / Refinement ───────────────────────────────────
+#
+# Affine un item équipé pour tenter de monter sa rareté d'un cran.
+# - Coût en coins selon la rareté ACTUELLE (croissant)
+# - Chance de succès décroissante avec les hauts tiers
+# - Échec → item perdu (retour à un état "vide")
+#
+# Conçu pour offrir une vraie tension/risque/reward sans système de stockage
+# additionnel (les items équipés sont raffinés directement).
+
+REFINE_RECIPES = {
+    # rarity_source → {target, success_pct, cost}
+    "commune":    {"target": "rare",       "success_pct": 80, "cost": 500},
+    "rare":       {"target": "épique",     "success_pct": 60, "cost": 2000},
+    "épique":     {"target": "légendaire", "success_pct": 40, "cost": 8000},
+    "légendaire": {"target": "mythique",   "success_pct": 20, "cost": 25000},
+    "mythique":   {"target": "divine",     "success_pct":  8, "cost": 75000},
+    # Aliases
+    "epique":     {"target": "légendaire", "success_pct": 40, "cost": 8000},
+    "legendaire": {"target": "mythique",   "success_pct": 20, "cost": 25000},
+}
+
+
+def get_refine_recipe(item: dict) -> Optional[dict]:
+    """Phase 110 : retourne la recette d'affinage pour cet item.
+
+    Retourne None si l'item est divine (max) ou inconnu.
+    """
+    if not item or not item.get("name"):
+        return None
+    r = (item.get("rarity") or "commune").lower()
+    return REFINE_RECIPES.get(r)
+
+
+def attempt_refine(item: dict, roll: Optional[float] = None) -> tuple:
+    """Phase 110 : tente l'affinage de l'item.
+
+    Args:
+        item: l'item à raffiner (mutation in-place)
+        roll: random.random() optionnel (pour tests)
+
+    Returns:
+        (success, result_item_or_empty)
+        Si succès : item modifié vers le nouveau tier (stats re-roll)
+        Si échec : item vidé ({})
+    """
+    recipe = get_refine_recipe(item)
+    if recipe is None:
+        # Pas de recette (item divine ou inconnu)
+        return False, item
+
+    if roll is None:
+        roll = random.random()
+    success = roll * 100 < recipe["success_pct"]
+
+    if not success:
+        return False, {}
+
+    # Re-roll de l'item vers la nouvelle rareté
+    target_rarity = recipe["target"]
+    slot = item.get("slot", "weapon")
+    pool_map = {
+        "weapon": WEAPONS,
+        "armor": ARMOR,
+        "helmet": HELMETS,
+        "boots": BOOTS_LIST,
+        "accessory": ACCESSORIES,
+        "trinket": TRINKETS,
+    }
+    pool = pool_map.get(slot, WEAPONS)
+    # Filtrer le pool par target_rarity, fallback sur tout le pool si vide
+    candidates = [x for x in pool if (x.get("rarity") or "").lower() == target_rarity.lower()]
+    if not candidates:
+        # Fallback : on prend un random commune+ et on FORCE la rareté target
+        candidates = pool
+    new_item = dict(random.choice(candidates))
+    new_item["slot"] = slot
+    new_item["rarity"] = target_rarity  # force rare quoi qu'il arrive
+    # Garder le nom unique si possible
+    init_item_durability(new_item)
+    return True, new_item
+
+
 def random_boss(difficulty: int = 100) -> dict:
     """Boss aléatoire. `difficulty` = facteur 50-500 (100 = normal)."""
     template = dict(random.choice(BOSS_CATALOG))
@@ -1753,6 +1836,8 @@ __all__ = [
     "init_item_durability", "consume_durability",
     "repair_cost", "repair_inventory_cost", "repair_item", "repair_all_inventory",
     "durability_bar",
+    # Phase 110 : crafting / refining
+    "REFINE_RECIPES", "get_refine_recipe", "attempt_refine",
     "generate_shop_rotation", "get_quiz_set", "random_personal_event",
     "random_mystery_box", "random_daily_spark",
     # Targeting
