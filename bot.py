@@ -57556,66 +57556,118 @@ async def _open_lore_panel(i: discord.Interaction):
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
+class MissionLayoutV2(LayoutView):
+    """Phase 73 : Panel Mission en cours en LayoutView V2 — progress bar visuelle."""
+
+    def __init__(self, user_id: int, mission_data: Optional[dict] = None):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        self.mission_data = mission_data
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.user_id
+
+    def _build(self):
+        items = []
+        if not self.mission_data:
+            items.append(v2_title("🎯 Mission en cours"))
+            items.append(v2_subtitle("Aucune mission active pour le moment"))
+            items.append(v2_divider())
+            items.append(v2_body(
+                "Les missions sont des aventures collectives en **5 étapes** qui se "
+                "lancent automatiquement chaque mois (ou après 30 jours sans mission).\n\n"
+                "**Comment ça marche ?**\n"
+                "1. Une mission a 5 étapes successives.\n"
+                "2. Chaque étape a un objectif collectif (messages, participants, victoires…).\n"
+                "3. Tu gagnes des coins à chaque étape où tu participes.\n"
+                "4. Si tu participes à ≥4 étapes : **gros bonus final + badge unique**."
+            ))
+        else:
+            md = self.mission_data
+            template = md["template"]
+            step_idx = md["step_idx"]
+            step = md["step"]
+            current = md["current"]
+            goal = md["goal"]
+            bar_filled = int((min(current, goal) / max(goal, 1)) * 20)
+            bar = "█" * bar_filled + "░" * (20 - bar_filled)
+            pct = int((min(current, goal) / max(goal, 1)) * 100)
+
+            items.append(v2_title(f"🎯 {template['title']}"))
+            items.append(v2_subtitle(
+                f"Étape {step_idx + 1}/{len(template['steps'])} · {step['title']}"
+            ))
+            items.append(v2_divider())
+            items.append(v2_body(f"_{template['intro']}_"))
+            items.append(v2_divider())
+            items.append(v2_body(
+                f"**Étape actuelle :**\n{step['description']}\n\n"
+                f"**Progression :** `{current}/{goal}` `{pct}%`\n"
+                f"`{bar}`"
+            ))
+            items.append(v2_divider())
+            items.append(v2_body(
+                f"**Récompenses :**\n"
+                f"💰 Par étape participée : **{step.get('reward_coins_per_user', 0)} 🪙**\n"
+                f"🏆 Bonus final (si ≥4 étapes) : "
+                f"**+{template.get('final_reward', {}).get('coins', 0):,} 🪙** + badge"
+            ))
+
+        items.append(v2_divider())
+        b_close = Button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger,
+                         custom_id="missv2_close")
+        b_close.callback = self._on_close
+        items.append(discord.ui.ActionRow(b_close))
+
+        self.add_item(v2_container(*items, color=0x3498DB if self.mission_data else 0x95A5A6))
+
+    async def _on_close(self, i):
+        try:
+            await i.response.edit_message(content="✅ Fermé.", view=None, embed=None, embeds=[], attachments=[])
+        except Exception:
+            pass
+
+
 async def _open_mission_panel(i: discord.Interaction):
-    """Affiche la mission active (si existe) ou un message d'attente."""
-    if not await _safe_defer(i):
-        return
+    """Phase 73 : Mission en cours en LayoutView V2."""
     try:
         if not i.guild:
-            return await _safe_followup(i, content="❌ Serveur uniquement.")
+            return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
         mission = await _get_active_mission(i.guild.id)
-        if not mission:
-            e = discord.Embed(
-                title="🎯 Mission en cours",
-                description=(
-                    "_Aucune mission en cours._\n\n"
-                    "Les missions sont des aventures collectives en 5 étapes qui se "
-                    "lancent automatiquement chaque mois (ou après 30 jours sans mission).\n\n"
-                    "**Comment ça marche ?**\n"
-                    "1. Une mission a 5 étapes successives.\n"
-                    "2. Chaque étape a un objectif collectif (messages, participants, victoires…).\n"
-                    "3. Tu gagnes des coins à chaque étape où tu participes.\n"
-                    "4. Si tu participes à 4 étapes ou plus, tu gagnes un **gros bonus final** + un **badge unique**."
-                ),
-                color=0x95A5A6,
-            )
-            return await _safe_followup(i, embed=e)
-
-        template = mission["template"]
-        step_idx = mission["current_step"]
-        step = template["steps"][step_idx] if step_idx < len(template["steps"]) else None
-        if not step:
-            return await _safe_followup(i, content="⏱️ Mission en transition…")
-
-        gk = step.get("goal_kind", "")
-        goal = int(step.get("goal_count", 1))
-        if gk in ("messages_total", "messages_keyword", "event_wins"):
-            current = int(mission.get("current_progress", 0))
+        mission_data = None
+        if mission:
+            template = mission["template"]
+            step_idx = mission["current_step"]
+            step = template["steps"][step_idx] if step_idx < len(template["steps"]) else None
+            if step:
+                gk = step.get("goal_kind", "")
+                goal = int(step.get("goal_count", 1))
+                if gk in ("messages_total", "messages_keyword", "event_wins"):
+                    current = int(mission.get("current_progress", 0))
+                else:
+                    current = await _count_mission_participants(mission["id"], step_idx)
+                mission_data = {
+                    "template": template,
+                    "step_idx": step_idx,
+                    "step": step,
+                    "current": current,
+                    "goal": goal,
+                }
+        view = MissionLayoutV2(i.user.id, mission_data)
+        if not i.response.is_done():
+            await i.response.send_message(view=view, ephemeral=True)
         else:
-            current = await _count_mission_participants(mission["id"], step_idx)
-
-        bar_filled = int((min(current, goal) / max(goal, 1)) * 20)
-        bar = "█" * bar_filled + "░" * (20 - bar_filled)
-
-        e = discord.Embed(
-            title=f"🎯 {template['title']}",
-            description=(
-                f"_{template['intro']}_\n\n"
-                f"**Étape {step_idx + 1}/{len(template['steps'])} : {step['title']}**\n"
-                f"{step['description']}\n\n"
-                f"**Progression :** `{current}/{goal}`\n"
-                f"`{bar}`\n\n"
-                f"💰 Récompense par participant : **{step.get('reward_coins_per_user', 0)} 🪙**\n"
-                f"🏆 Bonus final si tu participes à ≥4 étapes : **+{template.get('final_reward', {}).get('coins', 0):,} 🪙** + badge"
-            ),
-            color=0x3498DB,
-            timestamp=datetime.now(timezone.utc),
-        )
-        e.set_footer(text=f"Mission · ID #{mission['id']}")
-        await _safe_followup(i, embed=e)
+            await i.followup.send(view=view, ephemeral=True)
     except Exception as ex:
-        print(f"[_open_mission_panel] {ex}")
-        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+        print(f"[_open_mission_panel V2] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            else:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
 
 
 # ─── SLASH COMMANDS OWNER DEBUG ──────────────────────────────────────────────
