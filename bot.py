@@ -9594,10 +9594,32 @@ class QuizAnswerView(View):
                 # Bonne réponse — premier à trouver
                 state['locked'] = True
                 scores = state.setdefault('scores', {})
-                bonus = 100 if not scores else 50  # premier ou les suivants
                 # Bonus pour le 1er
                 first_bonus = 100 if not scores else 0
-                scores[i.user.id] = scores.get(i.user.id, 0) + 100 + first_bonus
+
+                # Phase 97 AMPLIFY : Speed bonus — réponse rapide = plus de coins
+                # Question postée à state['question_started_at'] (initialisé dans _quiz_runner)
+                speed_bonus = 0
+                speed_label = ""
+                try:
+                    q_started = state.get('question_started_at', 0)
+                    now_ts_speed = time.time()
+                    elapsed = max(0.0, now_ts_speed - q_started)
+                    if elapsed < 5:
+                        speed_bonus = 200
+                        speed_label = " ⚡ **ÉCLAIR !**"
+                    elif elapsed < 10:
+                        speed_bonus = 100
+                        speed_label = " 💨 **Rapide !**"
+                    elif elapsed < 20:
+                        speed_bonus = 50
+                        speed_label = " ⏱️ Réfléchi"
+                    # > 20s : pas de speed bonus
+                except Exception:
+                    speed_bonus = 0
+
+                total_score = 100 + first_bonus + speed_bonus
+                scores[i.user.id] = scores.get(i.user.id, 0) + total_score
 
                 # Compter en participation
                 now_ts = time.time()
@@ -9611,14 +9633,16 @@ class QuizAnswerView(View):
                     )
                     await db.commit()
 
-                # Coins
+                # Coins (base + first bonus + speed bonus)
                 try:
-                    await add_coins(i.guild.id, i.user.id, 100 + first_bonus)
+                    await add_coins(i.guild.id, i.user.id, total_score)
                 except Exception:
                     pass
 
+                first_str = " 🥇 1er à trouver !" if first_bonus else ""
                 await i.followup.send(
-                    f"✅ **Bonne réponse !** +`{100 + first_bonus}` 🪙",
+                    f"✅ **Bonne réponse !**{first_str}{speed_label}\n"
+                    f"💰 +`{total_score}` 🪙 (base 100 + 1er `{first_bonus}` + speed `{speed_bonus}`)",
                     ephemeral=True,
                 )
 
@@ -9775,6 +9799,8 @@ async def _quiz_runner(guild, event_id: int, arena_ch_id: int, nb_questions: int
             state['question_idx'] = q_idx
             state['answers_received'] = {}
             state['locked'] = False
+            # Phase 97 : capture timestamp pour speed bonus
+            state['question_started_at'] = time.time()
 
             # Embed de la question
             letters = ['A', 'B', 'C', 'D']
@@ -39895,6 +39921,185 @@ async def badges_cmd(i: discord.Interaction):
                 await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
         except Exception:
             pass
+
+
+@bot.tree.command(
+    name="records",
+    description="🏆 Records du serveur — Top des boss killers, riddle streaks, treasures, et plus",
+)
+async def records_cmd(i: discord.Interaction):
+    """Phase 97 NEW : /records — Hall of Fame du serveur en LayoutView V2 magnifique."""
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not await _safe_defer(i):
+        return
+    try:
+        # 1. Top 5 boss killers (player_inventory.kills DESC)
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT user_id, kills, total_damage FROM player_inventory "
+                "WHERE guild_id=? AND kills > 0 ORDER BY kills DESC, total_damage DESC LIMIT 5",
+                (i.guild.id,),
+            ) as cur:
+                top_killers = await cur.fetchall()
+
+        # 2. Top 5 World Boss damagers (somme par user via JOIN)
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT wba.user_id, SUM(wba.damage_dealt) as total "
+                    "FROM world_boss_attackers wba "
+                    "JOIN world_bosses wb ON wb.id = wba.world_boss_id "
+                    "WHERE wb.guild_id=? "
+                    "GROUP BY wba.user_id ORDER BY total DESC LIMIT 5",
+                    (i.guild.id,),
+                ) as cur:
+                    top_wb_damagers = await cur.fetchall()
+        except Exception:
+            top_wb_damagers = []
+
+        # 3. Top 5 Flash Treasure grabbers (count grabs per user)
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT grabbed_by, COUNT(*) as nb FROM flash_treasures "
+                    "WHERE guild_id=? AND grabbed_by IS NOT NULL "
+                    "GROUP BY grabbed_by ORDER BY nb DESC LIMIT 5",
+                    (i.guild.id,),
+                ) as cur:
+                    top_grabbers = await cur.fetchall()
+        except Exception:
+            top_grabbers = []
+
+        # 4. Top 5 Daily Riddle winners (count days won)
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT first_winner_id, COUNT(*) as nb FROM daily_riddles_log "
+                    "WHERE guild_id=? AND first_winner_id IS NOT NULL "
+                    "GROUP BY first_winner_id ORDER BY nb DESC LIMIT 5",
+                    (i.guild.id,),
+                ) as cur:
+                    top_riddle_winners = await cur.fetchall()
+        except Exception:
+            top_riddle_winners = []
+
+        # 5. Top 5 Heist participations + total payout
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT hp.user_id, COUNT(*) as nb, SUM(hp.payout) as total_pay "
+                    "FROM heist_participants hp "
+                    "JOIN heists h ON h.id = hp.heist_id "
+                    "WHERE h.guild_id=? "
+                    "GROUP BY hp.user_id ORDER BY total_pay DESC LIMIT 5",
+                    (i.guild.id,),
+                ) as cur:
+                    top_heisters = await cur.fetchall()
+        except Exception:
+            top_heisters = []
+
+        # 6. Top 5 Final Blows (Boss Raid coup fatal)
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT user_id, final_blows FROM player_event_stats "
+                    "WHERE guild_id=? AND final_blows > 0 "
+                    "ORDER BY final_blows DESC LIMIT 5",
+                    (i.guild.id,),
+                ) as cur:
+                    top_final_blows = await cur.fetchall()
+        except Exception:
+            top_final_blows = []
+
+        # Helper to format ranking lines
+        def _format_ranking(guild_obj, rows, value_formatter):
+            medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+            lines = []
+            for idx, row in enumerate(rows):
+                uid = int(row[0])
+                m = guild_obj.get_member(uid)
+                name = m.display_name if m else f"User#{uid}"
+                value_str = value_formatter(row)
+                medal = medals[idx] if idx < 5 else "▪️"
+                lines.append(f"{medal} **{name}** — {value_str}")
+            return "\n".join(lines) if lines else "_Aucun record pour l'instant._"
+
+        guild = i.guild
+        _guild_name = guild.name
+
+        class _RecordsLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=600)
+                items = []
+                items.append(v2_title(f"🏆  HALL OF FAME  ·  {_guild_name}"))
+                items.append(v2_subtitle("Top 5 dans chaque catégorie · Records persistants du serveur"))
+                items.append(v2_divider())
+
+                # 1. Boss Killers
+                items.append(v2_body("**╔═══ ⚔️  BOSS KILLERS  ═══╗**"))
+                items.append(v2_body(_format_ranking(
+                    guild, top_killers,
+                    lambda r: f"`{int(r[1])}` kills · `{int(r[2]):,}` dégâts à vie"
+                )))
+
+                items.append(v2_divider())
+
+                # 2. World Boss top damagers
+                items.append(v2_body("**╔═══ 🌍  WORLD BOSS DAMAGERS  ═══╗**"))
+                items.append(v2_body(_format_ranking(
+                    guild, top_wb_damagers,
+                    lambda r: f"`{int(r[1]):,}` dégâts au total"
+                )))
+
+                items.append(v2_divider())
+
+                # 3. Final Blows
+                items.append(v2_body("**╔═══ 💀  COUPS FATALS  ═══╗**"))
+                items.append(v2_body(_format_ranking(
+                    guild, top_final_blows,
+                    lambda r: f"`{int(r[1])}` killing blows"
+                )))
+
+                items.append(v2_divider())
+
+                # 4. Flash Treasure grabbers
+                items.append(v2_body("**╔═══ 💎  FLASH TREASURES  ═══╗**"))
+                items.append(v2_body(_format_ranking(
+                    guild, top_grabbers,
+                    lambda r: f"`{int(r[1])}` trésors saisis"
+                )))
+
+                items.append(v2_divider())
+
+                # 5. Riddle winners
+                items.append(v2_body("**╔═══ 🧠  RIDDLE MASTERS  ═══╗**"))
+                items.append(v2_body(_format_ranking(
+                    guild, top_riddle_winners,
+                    lambda r: f"`{int(r[1])}` énigmes résolues en premier"
+                )))
+
+                items.append(v2_divider())
+
+                # 6. Heisters
+                items.append(v2_body("**╔═══ 🚨  BRAQUEURS  ═══╗**"))
+                items.append(v2_body(_format_ranking(
+                    guild, top_heisters,
+                    lambda r: f"`{int(r[1])}` braquages · `{int(r[2] or 0):,}` 🪙 raflés"
+                )))
+
+                items.append(v2_divider())
+                items.append(v2_body(
+                    "_💡 Continue à participer pour grimper au top !_\n"
+                    "_📊 `/leaderboard` pour les classements coins/activité_"
+                ))
+
+                self.add_item(v2_container(*items, color=0xFFD700))
+
+        await _safe_followup(i, view=_RecordsLayout())
+    except Exception as ex:
+        print(f"[/records V2] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
 @bot.tree.command(name="event_start", description="⚔️ [Owner] Lance un Boss Raid maintenant")
