@@ -36252,6 +36252,15 @@ async def on_ready():
         bot.add_view(MysteryBoxView())
     except Exception as ex:
         print(f"[on_ready add_view MysteryBoxView] {ex}")
+    # Phase 85 — Game Night Speed Click + Threshold Click : custom_ids stables
+    try:
+        bot.add_view(GameNightSpeedClickView())
+    except Exception as ex:
+        print(f"[on_ready add_view GameNightSpeedClickView] {ex}")
+    try:
+        bot.add_view(GameNightThresholdView())
+    except Exception as ex:
+        print(f"[on_ready add_view GameNightThresholdView] {ex}")
     try:
         bot.add_view(EveningRitualView())
     except Exception as ex:
@@ -53815,14 +53824,18 @@ _gn_event_state: dict = {}  # event_msg_id -> {kind, gn_id, ...state}
 
 
 class GameNightSpeedClickView(View):
-    """Speed click : premier à cliquer dans la fenêtre temporelle gagne tout."""
+    """Speed click : premier à cliquer dans la fenêtre temporelle gagne tout.
 
-    def __init__(self, msg_id: int, button_label: str = "💥 GO !"):
+    Phase 85 : custom_id "gn_speed" STABLE (lookup state via i.message.id)
+    → bot.add_view(GameNightSpeedClickView()) au boot capte tous les clics.
+    """
+
+    def __init__(self):
         super().__init__(timeout=None)
         b = Button(
-            label=button_label[:80],
+            label="💥 GO !",
             style=discord.ButtonStyle.success,
-            custom_id=f"gn_speed_{msg_id}",
+            custom_id="gn_speed",
         )
         b.callback = self._on_click
         self.add_item(b)
@@ -53870,14 +53883,18 @@ class GameNightSpeedClickView(View):
 
 
 class GameNightThresholdView(View):
-    """Threshold click : N personnes différentes cliquent en T sec → tout le monde gagne."""
+    """Threshold click : N personnes différentes cliquent en T sec → tout le monde gagne.
 
-    def __init__(self, msg_id: int, button_label: str = "✋ J'en suis"):
+    Phase 85 : custom_id "gn_thresh" STABLE (lookup state via i.message.id)
+    → bot.add_view(GameNightThresholdView()) au boot capte tous les clics.
+    """
+
+    def __init__(self):
         super().__init__(timeout=None)
         b = Button(
-            label=button_label[:80],
+            label="✋ J'en suis",
             style=discord.ButtonStyle.primary,
-            custom_id=f"gn_thresh_{msg_id}",
+            custom_id="gn_thresh",
         )
         b.callback = self._on_click
         self.add_item(b)
@@ -54604,23 +54621,41 @@ async def _post_game_night_prompt(gn_id: int):
         duration = int(ev.get('duration', 60))
         msg = None
 
-        # ─── SPEED CLICK ────────────────────────────────────────────────
+        # ─── SPEED CLICK (Phase 85 : LayoutView V2) ─────────────────────
         if kind == 'speed_click':
-            embed = discord.Embed(
-                title=ev['title'],
-                description=ev['description'] + f"\n\n{_chrono_footer(duration)}",
-                color=0xF1C40F,
-            )
-            # On envoie d'abord pour avoir l'ID
             try:
+                _sc_title = ev['title']
+                _sc_desc = ev['description']
+                _sc_btn_label = ev.get('button_label', '💥 GO !')
+                _sc_duration = duration
+
+                class _GnSpeedLayout(LayoutView):
+                    def __init__(self):
+                        super().__init__(timeout=None)
+                        items = [
+                            v2_title(_sc_title),
+                            v2_subtitle("⚡ Premier arrivé, premier servi"),
+                            v2_divider(),
+                            v2_body(_sc_desc[:1500]),
+                            v2_divider(),
+                        ]
+                        sc_btn = Button(
+                            label=_sc_btn_label[:80],
+                            style=discord.ButtonStyle.success,
+                            custom_id="gn_speed",
+                        )
+                        items.append(_section_with_button(
+                            "🚀 Clique vite !",
+                            f"Fenêtre : **{_sc_duration}s**",
+                            sc_btn,
+                        ))
+                        self.add_item(v2_container(*items, color=0xF1C40F))
+
                 msg = await tc.send(
-                    embed=embed,
+                    view=_GnSpeedLayout(),
                     allowed_mentions=discord.AllowedMentions.none(),
-                    delete_after=duration + 30,  # marge avant cleanup
+                    delete_after=duration + 30,
                 )
-                view = GameNightSpeedClickView(msg.id, ev.get('button_label', '💥 GO !'))
-                await msg.edit(view=view)
-                bot.add_view(view, message_id=msg.id)
                 _gn_event_state[msg.id] = {
                     'kind': 'speed_click',
                     'gn_id': gn_id,
@@ -54634,24 +54669,44 @@ async def _post_game_night_prompt(gn_id: int):
                     _gn_event_state.pop(mid, None)
                 asyncio.create_task(_cleanup_speed(msg.id))
             except Exception as ex:
-                print(f"[gn speed_click] {ex}")
+                print(f"[gn speed_click V2] {ex}")
 
-        # ─── THRESHOLD CLICK ────────────────────────────────────────────
+        # ─── THRESHOLD CLICK (Phase 85 : LayoutView V2) ─────────────────
         elif kind == 'threshold_click':
-            embed = discord.Embed(
-                title=ev['title'],
-                description=ev['description'] + f"\n\n**Progression :** `0/{ev['threshold']}` participants\n\n{_chrono_footer(duration)}",
-                color=0xE91E63,
-            )
             try:
+                _th_title = ev['title']
+                _th_desc = ev['description']
+                _th_btn_label = ev.get('button_label', '✋ J\'en suis')
+                _th_target = ev['threshold']
+                _th_duration = duration
+
+                class _GnThresholdLayout(LayoutView):
+                    def __init__(self):
+                        super().__init__(timeout=None)
+                        items = [
+                            v2_title(_th_title),
+                            v2_subtitle(f"🤝 Objectif collectif : {_th_target} participants"),
+                            v2_divider(),
+                            v2_body(_th_desc[:1500]),
+                            v2_divider(),
+                        ]
+                        th_btn = Button(
+                            label=_th_btn_label[:80],
+                            style=discord.ButtonStyle.primary,
+                            custom_id="gn_thresh",
+                        )
+                        items.append(_section_with_button(
+                            f"📊 Progression : `0/{_th_target}`",
+                            f"Fenêtre : **{_th_duration}s** — clique pour rejoindre",
+                            th_btn,
+                        ))
+                        self.add_item(v2_container(*items, color=0xE91E63))
+
                 msg = await tc.send(
-                    embed=embed,
+                    view=_GnThresholdLayout(),
                     allowed_mentions=discord.AllowedMentions.none(),
                     delete_after=duration + 30,
                 )
-                view = GameNightThresholdView(msg.id, ev.get('button_label', '✋ J\'en suis'))
-                await msg.edit(view=view)
-                bot.add_view(view, message_id=msg.id)
                 _gn_event_state[msg.id] = {
                     'kind': 'threshold_click',
                     'gn_id': gn_id,
@@ -54667,7 +54722,7 @@ async def _post_game_night_prompt(gn_id: int):
                     _gn_event_state.pop(mid, None)
                 asyncio.create_task(_cleanup_thresh(msg.id))
             except Exception as ex:
-                print(f"[gn threshold_click] {ex}")
+                print(f"[gn threshold_click V2] {ex}")
 
         # ─── EMOJI STORM (tracking via on_message hook) ─────────────────
         elif kind == 'emoji_storm':
