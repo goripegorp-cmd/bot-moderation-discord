@@ -96,6 +96,8 @@ import tickets_enhance as tix_module
 import observability as obs_module
 # Phase 140 : Publish metrics + cross-poster
 import publish_metrics as pubmet_module
+# Phase 141 : UX final — theme switcher + tutorial
+import ux_polish as ux_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -37985,6 +37987,18 @@ async def on_ready():
             pubmet_module.metrics_refresh_task.start()
     except Exception as ex:
         print(f"[on_ready pubmet setup] {ex}")
+    # Phase 141 : UX final — theme switcher + tutorial
+    try:
+        ux_module.setup(
+            get_db,
+            {
+                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
+                'v2_divider': v2_divider, 'v2_container': v2_container,
+                'LayoutView': LayoutView,
+            },
+        )
+    except Exception as ex:
+        print(f"[on_ready ux_module setup] {ex}")
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()
@@ -39620,6 +39634,71 @@ async def publish_cross_groups_cmd(i: discord.Interaction):
 
 
 bot.tree.add_command(publish_metrics_group)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 141 : /theme & /tutorial — UX final
+# ═══════════════════════════════════════════════════════════════════════════════
+@bot.tree.command(
+    name="theme",
+    description="🎨 Choisir la couleur d'accent de tes panels (perso)",
+)
+@app_commands.describe(
+    set_theme="Clé du thème à appliquer (laisse vide pour voir la liste)",
+)
+@app_commands.choices(set_theme=[
+    app_commands.Choice(name="🌌 Standard", value="default"),
+    app_commands.Choice(name="🌑 Sombre", value="dark"),
+    app_commands.Choice(name="💜 Néon", value="neon"),
+    app_commands.Choice(name="🔥 Chaleureux", value="warm"),
+    app_commands.Choice(name="🌊 Océan", value="ocean"),
+    app_commands.Choice(name="🌲 Forêt", value="forest"),
+])
+async def theme_cmd(
+    i: discord.Interaction,
+    set_theme: Optional[app_commands.Choice[str]] = None,
+):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        if set_theme is not None:
+            ok = await ux_module.set_user_theme(
+                i.guild.id, i.user.id, set_theme.value
+            )
+            if not ok:
+                return await i.response.send_message(
+                    "❌ Thème invalide.", ephemeral=True
+                )
+        current = await ux_module.get_user_theme_key(i.guild.id, i.user.id)
+        view = ux_module.build_themes_panel(current)
+        if view is None:
+            return await i.response.send_message(
+                "❌ Module indisponible.", ephemeral=True
+            )
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[theme_cmd] {ex}")
+
+
+@bot.tree.command(
+    name="tutorial",
+    description="📖 Tour guidé du serveur (6 étapes)",
+)
+@app_commands.describe(step="Étape (1-6, défaut 1)")
+async def tutorial_cmd(i: discord.Interaction, step: int = 1):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        idx = max(0, min(len(ux_module.TUTORIAL_STEPS) - 1, int(step or 1) - 1))
+        accent = await ux_module.get_user_accent(i.guild.id, i.user.id)
+        view = ux_module.TutorialView.build(idx, i.guild.name, accent)
+        if view is None:
+            return await i.response.send_message(
+                "❌ Module indisponible.", ephemeral=True
+            )
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[tutorial_cmd] {ex}")
 
 
 @bot.event
