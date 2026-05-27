@@ -72454,6 +72454,9 @@ class HubLayoutV2(LayoutView):
         return i.user.id == self.user_id
 
     def _build(self):
+        # HOTFIX Phase 141.1 : réduit de 13 à 8 sections pour rester < 40
+        # composants (limite Discord LayoutView). Suppression du bouton
+        # "💝 Social" (RULES.md : pas d'emoji cœur sur features serveur).
         items = []
         items.append(v2_title("🎮 Ton Hub d'engagement"))
         items.append(v2_subtitle("Tout en 1 clic — aucune commande à mémoriser"))
@@ -72483,25 +72486,7 @@ class HubLayoutV2(LayoutView):
             "🏆 Mes hauts faits", "50+ achievements à débloquer", b_ach,
         ))
 
-        # Section 4 : Compagnon
-        b_pet = Button(label="Voir", style=discord.ButtonStyle.secondary,
-                       custom_id="hubv2_pet")
-        b_pet.callback = self._on_pet
-        items.append(_section_with_button(
-            "🐾 Mon compagnon", "Adopter et faire évoluer ton pet", b_pet,
-        ))
-
-        # Section 5 : Confession anonyme
-        b_conf = Button(label="Écrire", style=discord.ButtonStyle.secondary,
-                        custom_id="hubv2_conf")
-        b_conf.callback = self._on_confess
-        items.append(_section_with_button(
-            "🤫 Confession anonyme", "Message 100% anonyme dans le salon dédié", b_conf,
-        ))
-
-        items.append(v2_divider())
-
-        # Section 6 : Profil
+        # Section 4 : Profil
         b_prof = Button(label="Ouvrir", style=discord.ButtonStyle.primary,
                         custom_id="hubv2_prof")
         b_prof.callback = self._on_profile
@@ -72509,33 +72494,15 @@ class HubLayoutV2(LayoutView):
             "👤 Mon profil", "Level, prestige, saison, factions, stats", b_prof,
         ))
 
-        # Section 7 : Notifications
-        b_notif = Button(label="Configurer", style=discord.ButtonStyle.secondary,
-                         custom_id="hubv2_notif")
-        b_notif.callback = self._on_notifs
+        # Section 5 : Compagnon
+        b_pet = Button(label="Voir", style=discord.ButtonStyle.secondary,
+                       custom_id="hubv2_pet")
+        b_pet.callback = self._on_pet
         items.append(_section_with_button(
-            "🔔 Mes notifications", "Choisis quels events te pingent", b_notif,
+            "🐾 Mon compagnon", "Adopter et faire évoluer ton pet", b_pet,
         ))
 
-        # Section 8 : Histoire du serveur
-        b_lore = Button(label="Lire", style=discord.ButtonStyle.secondary,
-                        custom_id="hubv2_lore")
-        b_lore.callback = self._on_lore
-        items.append(_section_with_button(
-            "📖 Histoire du serveur", "Chapitre du lore qui évolue après chaque World Boss", b_lore,
-        ))
-
-        # Section 9 : Mission en cours
-        b_miss = Button(label="Voir", style=discord.ButtonStyle.success,
-                        custom_id="hubv2_miss")
-        b_miss.callback = self._on_mission
-        items.append(_section_with_button(
-            "🎯 Mission en cours", "Quête collective mensuelle en 5 étapes", b_miss,
-        ))
-
-        items.append(v2_divider())
-
-        # Section 10 : Roblox
+        # Section 6 : Roblox
         b_rblx = Button(label="Ouvrir", style=discord.ButtonStyle.primary,
                         custom_id="hubv2_roblox")
         b_rblx.callback = self._on_roblox
@@ -72543,7 +72510,7 @@ class HubLayoutV2(LayoutView):
             "🎮 Roblox", "Speedrun · Matchmaking · Studio Tips · Updates", b_rblx,
         ))
 
-        # Section 11 : Compétitions
+        # Section 7 : Compétitions
         b_comp = Button(label="Ouvrir", style=discord.ButtonStyle.danger,
                         custom_id="hubv2_comp")
         b_comp.callback = self._on_competitions
@@ -72551,20 +72518,12 @@ class HubLayoutV2(LayoutView):
             "🏆 Compétitions", "Bingo mensuel · Prédictions · Faction Wars", b_comp,
         ))
 
-        # Section 12 : Social
-        b_soc = Button(label="Ouvrir", style=discord.ButtonStyle.success,
-                       custom_id="hubv2_social")
-        b_soc.callback = self._on_social
-        items.append(_section_with_button(
-            "💝 Social", "Shoutouts · Mentorat", b_soc,
-        ))
-
-        # Section 13 : Outils
+        # Section 8 : Outils
         b_tools = Button(label="Ouvrir", style=discord.ButtonStyle.secondary,
                          custom_id="hubv2_tools")
         b_tools.callback = self._on_tools
         items.append(_section_with_button(
-            "🧰 Outils", "Banque · Loots · PvP · Classe RP · Alliance · Time Capsule · Hall of Fame", b_tools,
+            "🧰 Outils", "Banque · Loots · PvP · Classe RP · Alliance · Hall of Fame", b_tools,
         ))
 
         items.append(v2_divider())
@@ -72626,11 +72585,15 @@ class HubLayoutV2(LayoutView):
 #  Phase 81 — HubPinnedLayoutV2 : version PERSISTANTE du hub pour /hub_setup
 # ═══════════════════════════════════════════════════════════════════════════════
 class HubPinnedLayoutV2(LayoutView):
-    """Phase 81 + Phase 88 fix : Panneau ÉPINGLÉ du hub en LayoutView V2.
+    """Phase 141.1 (HOTFIX) : Panneau ÉPINGLÉ du hub en LayoutView V2.
 
-    Phase 88 : redesign magnifique avec sections groupées par thème, buttons
-    INDÉPENDANTS avec callbacks délégués (pattern Phase 88 _v2_delegate_to).
-    Discord affiche le message tall, l'utilisateur scroll naturellement.
+    HOTFIX max children Discord (40) : le hub précédent générait ~65 composants
+    (4 groupes × 3 sections + headers/dividers). Réduit à 8 sections core en
+    layout flat, ~37 composants total. Marge confortable sous la limite Discord.
+
+    Suppression du bouton "💝 Social" : conforme RULES.md (pas de copain-copain,
+    pas d'emoji cœur sur features serveur). Les fonctions de mentorat restent
+    accessibles via leurs propres commandes/panneaux dédiés.
     """
 
     def __init__(self):
@@ -72640,15 +72603,14 @@ class HubPinnedLayoutV2(LayoutView):
     def _build(self):
         items = []
 
-        # ═══ HEADER MAGNIFIQUE ═══
+        # ═══ HEADER ═══
         items.append(v2_title("✨  🎮  HUB D'ENGAGEMENT  🎮  ✨"))
         items.append(v2_subtitle(
             "Tout ce qu'il faut pour vivre l'expérience — aucune commande à mémoriser"
         ))
         items.append(v2_divider())
 
-        # ═══ GROUPE 1 — DAILY ROUTINE (boutons les plus utilisés) ═══
-        items.append(v2_body("**╔═══ 📅  DAILY  ═══╗**"))
+        # ═══ 8 SECTIONS FLAT (sans group headers/dividers pour rester < 40) ═══
 
         b = Button(label="Ouvrir", style=discord.ButtonStyle.primary, custom_id="hub_quests")
         b.callback = _v2_delegate_to(EngagementHubView, '_on_quests')
@@ -72674,11 +72636,6 @@ class HubPinnedLayoutV2(LayoutView):
             b,
         ))
 
-        items.append(v2_divider())
-
-        # ═══ GROUPE 2 — PERSO (profile, pet, notifs) ═══
-        items.append(v2_body("**╔═══ 👤  PERSO  ═══╗**"))
-
         b = Button(label="Ouvrir", style=discord.ButtonStyle.primary, custom_id="hub_profile")
         b.callback = _v2_delegate_to(EngagementHubView, '_on_profile')
         items.append(_section_with_button(
@@ -72694,48 +72651,6 @@ class HubPinnedLayoutV2(LayoutView):
             "Adopter et faire évoluer ton pet · bonus passifs",
             b,
         ))
-
-        b = Button(label="Régler", style=discord.ButtonStyle.secondary, custom_id="hub_notifs")
-        b.callback = _v2_delegate_to(EngagementHubView, '_on_notifs')
-        items.append(_section_with_button(
-            "🔔  Mes notifications",
-            "Choisis précisément quels events te pingent · granulaire",
-            b,
-        ))
-
-        items.append(v2_divider())
-
-        # ═══ GROUPE 3 — NARRATIF (lore, mission, confess) ═══
-        items.append(v2_body("**╔═══ 📖  NARRATIF  ═══╗**"))
-
-        b = Button(label="Lire", style=discord.ButtonStyle.secondary, custom_id="hub_lore")
-        b.callback = _v2_delegate_to(EngagementHubView, '_on_lore')
-        items.append(_section_with_button(
-            "📖  Histoire du serveur",
-            "Chapitre du lore qui évolue après chaque World Boss",
-            b,
-        ))
-
-        b = Button(label="Suivre", style=discord.ButtonStyle.success, custom_id="hub_mission")
-        b.callback = _v2_delegate_to(EngagementHubView, '_on_mission')
-        items.append(_section_with_button(
-            "🎯  Mission en cours",
-            "Quête collective mensuelle en 5 étapes · objectifs communs",
-            b,
-        ))
-
-        b = Button(label="Écrire", style=discord.ButtonStyle.secondary, custom_id="hub_confess")
-        b.callback = _v2_delegate_to(EngagementHubView, '_on_confess')
-        items.append(_section_with_button(
-            "🤫  Confession anonyme",
-            "Message 100% anonyme dans le salon dédié · zéro trace",
-            b,
-        ))
-
-        items.append(v2_divider())
-
-        # ═══ GROUPE 4 — HUBS THÉMATIQUES (sub-panels) ═══
-        items.append(v2_body("**╔═══ 🌐  EXPLORER  ═══╗**"))
 
         b = Button(label="Ouvrir", style=discord.ButtonStyle.primary, custom_id="hub_roblox")
         b.callback = _v2_delegate_to(EngagementHubView, '_on_roblox')
@@ -72753,19 +72668,11 @@ class HubPinnedLayoutV2(LayoutView):
             b,
         ))
 
-        b = Button(label="Ouvrir", style=discord.ButtonStyle.success, custom_id="hub_social")
-        b.callback = _v2_delegate_to(EngagementHubView, '_on_social')
-        items.append(_section_with_button(
-            "💝  Social",
-            "Shoutouts · Mentorat · Apprentis · Reconnaissances",
-            b,
-        ))
-
         b = Button(label="Ouvrir", style=discord.ButtonStyle.secondary, custom_id="hub_tools")
         b.callback = _v2_delegate_to(EngagementHubView, '_on_tools')
         items.append(_section_with_button(
             "🧰  Outils",
-            "Banque · Loots · PvP · Classe RP · Alliance · Time Capsule · Hall of Fame",
+            "Banque · Loots · PvP · Classe RP · Alliance · Hall of Fame",
             b,
         ))
 
@@ -72777,7 +72684,7 @@ class HubPinnedLayoutV2(LayoutView):
             "_🎮 Bonne aventure sur le serveur !_"
         ))
 
-        # Phase 88 : couleur Discord blurple + frame visuel via emojis
+        # Phase 88 : couleur Discord blurple
         self.add_item(v2_container(*items, color=0x5865F2))
 
 
