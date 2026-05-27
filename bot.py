@@ -82,6 +82,8 @@ import mod_dashboard as mod_dashboard_module
 import economy_events as econ_events_module
 # Phase 132 : paliers de progression (streak / veteran / prestige)
 import progression_milestones as prog_module
+# Phase 133 : liens sociaux entre joueurs (friend/marry/rival/hug)
+import social_bonds as social_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -37865,6 +37867,18 @@ async def on_ready():
         )
     except Exception as ex:
         print(f"[on_ready prog_module setup] {ex}")
+    # Phase 133 : Liens sociaux (friend/marry/rival/hug/highfive)
+    try:
+        social_module.setup(
+            get_db,
+            {
+                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
+                'v2_divider': v2_divider, 'v2_container': v2_container,
+                'LayoutView': LayoutView,
+            },
+        )
+    except Exception as ex:
+        print(f"[on_ready social_module setup] {ex}")
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()
@@ -38296,6 +38310,267 @@ async def milestones_cmd(i: discord.Interaction):
                 await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
         except Exception:
             pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 133 : /bond — groupe social (friend / marry / rival / hug / highfive)
+# ═══════════════════════════════════════════════════════════════════════════════
+bond_group = app_commands.Group(
+    name="bond",
+    description="💞 Tes liens sociaux : amis, mariage, rival, câlins",
+)
+
+
+def _validate_target(i: discord.Interaction, target: discord.Member,
+                     allow_bot: bool = False) -> Optional[str]:
+    """Retourne un message d'erreur ou None si OK."""
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return "❌ Serveur uniquement."
+    if target.id == i.user.id:
+        return "❌ Tu ne peux pas cibler toi-même."
+    if not allow_bot and target.bot:
+        return "🤖 Pas avec un bot."
+    return None
+
+
+@bond_group.command(name="list", description="💞 Voir tes liens sociaux")
+async def bond_list(i: discord.Interaction):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        view = await social_module.build_panel(i.guild, i.user)
+        if view is None:
+            return await i.response.send_message("❌ Module indisponible.", ephemeral=True)
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[bond_list] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+@bond_group.command(name="friend", description="👥 Proposer une amitié (acceptée si l'autre te la propose aussi)")
+@app_commands.describe(membre="Le membre à inviter")
+async def bond_friend(i: discord.Interaction, membre: discord.Member):
+    err = _validate_target(i, membre)
+    if err:
+        return await i.response.send_message(err, ephemeral=True)
+    try:
+        status, msg = await social_module.propose_friend(i.guild.id, i.user.id, membre.id)
+        if status == "accepted":
+            return await i.response.send_message(
+                f"💞 **Amitié scellée** entre {i.user.mention} et {membre.mention} !",
+                ephemeral=False,
+            )
+        if status == "pending":
+            return await i.response.send_message(
+                f"📨 Demande d'amitié envoyée à {membre.mention}. "
+                f"À lui/elle de faire `/bond friend @{i.user.display_name}` pour accepter.",
+                ephemeral=True,
+            )
+        await i.response.send_message(f"ℹ️ {msg}", ephemeral=True)
+    except Exception as ex:
+        print(f"[bond_friend] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+@bond_group.command(name="unfriend", description="❌ Retirer un ami")
+@app_commands.describe(membre="L'ami à retirer")
+async def bond_unfriend(i: discord.Interaction, membre: discord.Member):
+    err = _validate_target(i, membre)
+    if err:
+        return await i.response.send_message(err, ephemeral=True)
+    try:
+        ok = await social_module.unfriend(i.guild.id, i.user.id, membre.id)
+        if ok:
+            await i.response.send_message(
+                f"✂️ Tu n'es plus ami(e) avec {membre.mention}.", ephemeral=True
+            )
+        else:
+            await i.response.send_message(
+                f"ℹ️ Vous n'étiez pas amis.", ephemeral=True
+            )
+    except Exception as ex:
+        print(f"[bond_unfriend] {ex}")
+
+
+@bond_group.command(name="marry", description="💍 Demander en mariage (accepté si l'autre te le propose aussi)")
+@app_commands.describe(membre="Le membre à épouser")
+async def bond_marry(i: discord.Interaction, membre: discord.Member):
+    err = _validate_target(i, membre)
+    if err:
+        return await i.response.send_message(err, ephemeral=True)
+    try:
+        status, msg = await social_module.propose_marry(i.guild.id, i.user.id, membre.id)
+        if status == "accepted":
+            return await i.response.send_message(
+                f"💍 **{i.user.mention} et {membre.mention} sont désormais mariés !** "
+                f"_Félicitations !_ 🎉",
+                ephemeral=False,
+            )
+        if status == "pending":
+            return await i.response.send_message(
+                f"💌 Demande en mariage envoyée à {membre.mention}. "
+                f"À lui/elle de faire `/bond marry @{i.user.display_name}` pour accepter.",
+                ephemeral=True,
+            )
+        await i.response.send_message(f"ℹ️ {msg}", ephemeral=True)
+    except Exception as ex:
+        print(f"[bond_marry] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+@bond_group.command(name="divorce", description="💔 Mettre fin à ton mariage")
+async def bond_divorce(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        ex_id = await social_module.divorce(i.guild.id, i.user.id)
+        if ex_id:
+            await i.response.send_message(
+                f"💔 {i.user.mention} et <@{ex_id}> ne sont plus mariés.",
+                ephemeral=False,
+            )
+        else:
+            await i.response.send_message(
+                "ℹ️ Tu n'es pas marié(e).", ephemeral=True
+            )
+    except Exception as ex:
+        print(f"[bond_divorce] {ex}")
+
+
+@bond_group.command(name="rival", description="⚔️ Déclarer un rival (one-way, sans son consentement)")
+@app_commands.describe(membre="Le membre à déclarer rival")
+async def bond_rival(i: discord.Interaction, membre: discord.Member):
+    err = _validate_target(i, membre)
+    if err:
+        return await i.response.send_message(err, ephemeral=True)
+    try:
+        status, msg = await social_module.declare_rival(i.guild.id, i.user.id, membre.id)
+        if status == "ok":
+            await i.response.send_message(
+                f"⚔️ {i.user.mention} a déclaré {membre.mention} comme **rival** ! "
+                f"_+{int(social_module.RIVAL_DUEL_BONUS_PCT * 100)}% de récompenses "
+                f"en duel contre lui._",
+                ephemeral=False,
+            )
+        else:
+            await i.response.send_message(f"ℹ️ {msg}", ephemeral=True)
+    except Exception as ex:
+        print(f"[bond_rival] {ex}")
+
+
+@bond_group.command(name="unrival", description="🤝 Retirer ton rival")
+async def bond_unrival(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        ok = await social_module.clear_rival(i.guild.id, i.user.id)
+        if ok:
+            await i.response.send_message(
+                f"🕊️ Tu n'as plus de rival.", ephemeral=True
+            )
+        else:
+            await i.response.send_message(
+                "ℹ️ Tu n'avais pas de rival.", ephemeral=True
+            )
+    except Exception as ex:
+        print(f"[bond_unrival] {ex}")
+
+
+@bond_group.command(name="hug", description="🤗 Faire un câlin (1×/jour par personne)")
+@app_commands.describe(membre="Le membre à câliner")
+async def bond_hug(i: discord.Interaction, membre: discord.Member):
+    err = _validate_target(i, membre)
+    if err:
+        return await i.response.send_message(err, ephemeral=True)
+    try:
+        can = await social_module.can_send_interaction(
+            i.guild.id, i.user.id, membre.id, "hug"
+        )
+        if not can:
+            return await i.response.send_message(
+                f"⏱️ Tu as déjà câliné {membre.mention} aujourd'hui. Reviens demain !",
+                ephemeral=True,
+            )
+        await social_module.record_interaction(
+            i.guild.id, i.user.id, membre.id, "hug"
+        )
+        # Bonus coin pour le receiver
+        try:
+            await add_coins(i.guild.id, membre.id, social_module.HUG_COIN_BONUS_RECEIVER)
+        except Exception:
+            pass
+        await i.response.send_message(
+            f"🤗 {i.user.mention} fait un gros câlin à {membre.mention} ! "
+            f"_(+{social_module.HUG_COIN_BONUS_RECEIVER} coins pour lui/elle)_",
+            ephemeral=False,
+        )
+    except Exception as ex:
+        print(f"[bond_hug] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+@bond_group.command(name="highfive", description="🙏 Tapper dans la main (bonus boosté entre amis)")
+@app_commands.describe(membre="Le membre à highfiver")
+async def bond_highfive(i: discord.Interaction, membre: discord.Member):
+    err = _validate_target(i, membre)
+    if err:
+        return await i.response.send_message(err, ephemeral=True)
+    try:
+        can = await social_module.can_send_interaction(
+            i.guild.id, i.user.id, membre.id, "highfive"
+        )
+        if not can:
+            return await i.response.send_message(
+                f"⏱️ Tu as déjà highfivé {membre.mention} aujourd'hui.",
+                ephemeral=True,
+            )
+        await social_module.record_interaction(
+            i.guild.id, i.user.id, membre.id, "highfive"
+        )
+        # Bonus coin (boosté si amis)
+        amis = await social_module.is_friend(i.guild.id, i.user.id, membre.id)
+        bonus = (
+            social_module.HIGHFIVE_BONUS_FRIENDS
+            if amis
+            else social_module.HIGHFIVE_BONUS_DEFAULT
+        )
+        try:
+            await add_coins(i.guild.id, i.user.id, bonus)
+            await add_coins(i.guild.id, membre.id, bonus)
+        except Exception:
+            pass
+        amis_label = " _(bonus ami×)_" if amis else ""
+        await i.response.send_message(
+            f"🙏 {i.user.mention} et {membre.mention} se tapent dans la main ! "
+            f"_(+{bonus} coins chacun{amis_label})_",
+            ephemeral=False,
+        )
+    except Exception as ex:
+        print(f"[bond_highfive] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+bot.tree.add_command(bond_group)
 
 
 @bot.event
