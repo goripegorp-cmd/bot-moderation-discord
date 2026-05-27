@@ -1005,6 +1005,26 @@ async def db_init():
         await db.execute('CREATE INDEX IF NOT EXISTS idx_loot_history_user '
                          'ON loot_history(guild_id, user_id, obtained_at)')
 
+        # Phase 109 : Auction House — enchères pour items uniques
+        await db.execute('''CREATE TABLE IF NOT EXISTS auctions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            seller_id INTEGER NOT NULL,
+            slot TEXT,
+            item_json TEXT NOT NULL,
+            start_price INTEGER NOT NULL,
+            current_bid INTEGER NOT NULL,
+            top_bidder_id INTEGER,
+            bids_count INTEGER DEFAULT 0,
+            started_at INTEGER NOT NULL,
+            ends_at INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active'
+        )''')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_auctions_active '
+                         'ON auctions(guild_id, status, ends_at)')
+        await db.execute('CREATE INDEX IF NOT EXISTS idx_auctions_seller '
+                         'ON auctions(guild_id, seller_id, status)')
+
         # Phase 31 : badges débloqués par joueur
         await db.execute('''CREATE TABLE IF NOT EXISTS player_badges (
             guild_id INTEGER,
@@ -12759,6 +12779,97 @@ async def event_timeout_checker():
                 print(f"[event_timeout_checker row={event_id}] {ex}")
     except Exception as ex:
         print(f"[event_timeout_checker] {ex}")
+
+
+# ─── Phase 109 : Auction Settler ─────────────────────────────────────────
+# Loop qui termine les enchères expirées :
+# - Transfère l'item au top_bidder (ou rend au seller si pas de bid)
+# - Crédite le seller (prix - commission 5%)
+# - Marque l'enchère comme 'completed' / 'unsold'
+
+AUCTION_COMMISSION_PCT = 5  # 5% prélevé sur la vente
+
+
+@tasks.loop(minutes=1)
+async def auction_settler_task():
+    """Phase 109 : termine les enchères expirées toutes les minutes."""
+    try:
+        import time as _time
+        now_ts = int(_time.time())
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, guild_id, seller_id, slot, item_json, current_bid, "
+                "top_bidder_id, bids_count "
+                "FROM auctions WHERE status='active' AND ends_at <= ?",
+                (now_ts,),
+            ) as cur:
+                rows = await cur.fetchall()
+
+        for row in rows:
+            ah_id, gid, seller_id, slot, item_json, current_bid, top_bidder_id, bids_count = row
+            try:
+                item = json.loads(item_json) if item_json else {}
+            except Exception:
+                item = {}
+
+            try:
+                if top_bidder_id and bids_count > 0:
+                    # VENDU → top_bidder reçoit l'item, seller reçoit (prix - commission)
+                    commission = max(1, int(current_bid * AUCTION_COMMISSION_PCT / 100))
+                    seller_revenue = current_bid - commission
+
+                    # Crédite le seller
+                    await add_coins(gid, seller_id, seller_revenue)
+                    # Donne l'item au top_bidder : place dans le slot ou inventory bonus
+                    buyer_inv = await _get_or_create_inventory(gid, top_bidder_id)
+                    target_slot = slot if slot in events2026.EQUIPMENT_SLOTS else "weapon"
+                    # Si le slot est occupé, on remplace (le bidder doit gérer)
+                    # Note : un design plus avancé ajouterait à un "coffre" — pour l'MVP, on remplace
+                    buyer_inv[target_slot] = item
+                    await _save_inventory(gid, top_bidder_id, buyer_inv)
+
+                    async with get_db() as db:
+                        await db.execute(
+                            "UPDATE auctions SET status='completed' WHERE id=?",
+                            (ah_id,),
+                        )
+                        await db.commit()
+                    print(
+                        f"[auction_settler] #{ah_id} VENDU à {top_bidder_id} pour {current_bid} "
+                        f"(commission {commission}, seller gain {seller_revenue})"
+                    )
+                else:
+                    # INVENDU → rend l'item au seller
+                    seller_inv = await _get_or_create_inventory(gid, seller_id)
+                    target_slot = slot if slot in events2026.EQUIPMENT_SLOTS else "weapon"
+                    # Si seller a déjà un item dans ce slot, on n'écrase pas (anti-perte)
+                    if not seller_inv.get(target_slot) or not seller_inv[target_slot].get("name"):
+                        seller_inv[target_slot] = item
+                        await _save_inventory(gid, seller_id, seller_inv)
+                    else:
+                        # On le met dans le premier slot vide
+                        for s in events2026.EQUIPMENT_SLOTS:
+                            if not seller_inv.get(s) or not (seller_inv.get(s) or {}).get("name"):
+                                seller_inv[s] = item
+                                await _save_inventory(gid, seller_id, seller_inv)
+                                break
+
+                    async with get_db() as db:
+                        await db.execute(
+                            "UPDATE auctions SET status='unsold' WHERE id=?",
+                            (ah_id,),
+                        )
+                        await db.commit()
+                    print(f"[auction_settler] #{ah_id} INVENDU → rendu au seller {seller_id}")
+            except Exception as ex:
+                print(f"[auction_settler row={ah_id}] {ex}")
+    except Exception as ex:
+        print(f"[auction_settler] {ex}")
+
+
+@auction_settler_task.before_loop
+async def _auction_settler_wait():
+    await bot.wait_until_ready()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -36914,6 +37025,9 @@ async def on_ready():
     # Phase 89 : stale event cleanup (events supprimés manuellement)
     if not stale_event_cleanup.is_running():
         stale_event_cleanup.start()
+    # Phase 109 : auction settler — termine les enchères expirées
+    if not auction_settler_task.is_running():
+        auction_settler_task.start()
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()
@@ -40648,6 +40762,486 @@ async def _finalize_trade(btn_i: discord.Interaction, trade_id: str, accept: boo
             await btn_i.followup.send(f"❌ Erreur trade : `{ex}`", ephemeral=True)
         except Exception:
             pass
+
+
+# ─── Phase 109 : /auction (Auction House) ────────────────────────────────
+#
+# Vente aux enchères publiques entre joueurs. Commission 5% prélevée à la
+# clôture (settler task tourne toutes les minutes).
+#
+# Actions :
+# - browse : liste les enchères actives (V2 panel paginé)
+# - create : modal pour mettre en vente un slot avec prix + durée
+# - mine   : mes enchères actives
+# - bid    : (via boutons dans browse)
+
+@bot.tree.command(name="auction", description="🔨 Maison des enchères — vendre/acheter des items")
+@app_commands.describe(
+    action="Que veux-tu faire ?",
+)
+@app_commands.choices(action=[
+    app_commands.Choice(name="🔍 Voir les enchères en cours", value="browse"),
+    app_commands.Choice(name="📤 Mettre un item en vente",     value="create"),
+    app_commands.Choice(name="📋 Mes enchères en cours",       value="mine"),
+])
+async def auction_cmd(i: discord.Interaction, action: app_commands.Choice[str]):
+    """Phase 109 : maison des enchères P2P."""
+    try:
+        if action.value == "browse":
+            await _auction_browse(i)
+        elif action.value == "create":
+            await _auction_create(i)
+        elif action.value == "mine":
+            await _auction_mine(i)
+        else:
+            await i.response.send_message("❌ Action inconnue.", ephemeral=True)
+    except Exception as ex:
+        print(f"[/auction] {ex}")
+        import traceback; traceback.print_exc()
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+async def _auction_browse(i: discord.Interaction):
+    """Phase 109 : liste les enchères actives + boutons bid."""
+    import time as _time
+    now_ts = int(_time.time())
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT id, seller_id, slot, item_json, current_bid, top_bidder_id, "
+            "bids_count, ends_at FROM auctions "
+            "WHERE guild_id=? AND status='active' ORDER BY ends_at ASC LIMIT 10",
+            (i.guild.id,),
+        ) as cur:
+            rows = await cur.fetchall()
+
+    if not rows:
+        return await i.response.send_message(
+            "🏚️ **Aucune enchère active en ce moment.**\n"
+            "_Tape `/auction action:create` pour mettre un item en vente !_",
+            ephemeral=True,
+        )
+
+    # Helper format ligne enchère
+    def _fmt_auction(row) -> tuple:
+        ah_id, seller_id, slot, item_json, current_bid, top_bidder_id, bids_count, ends_at = row
+        try:
+            item = json.loads(item_json) if item_json else {}
+        except Exception:
+            item = {}
+        emoji = item.get("emoji", "⚪")
+        name = item.get("name", "?")
+        rarity = (item.get("rarity") or "commune").lower()
+        rarity_emoji = {
+            "commune": "⚪", "rare": "🔵", "épique": "🟣",
+            "légendaire": "🟠", "mythique": "🔴", "divine": "💎",
+        }.get(rarity, "⚪")
+        seconds_left = max(0, ends_at - now_ts)
+        if seconds_left > 3600:
+            time_str = f"{seconds_left // 3600}h {(seconds_left % 3600) // 60}min"
+        elif seconds_left > 60:
+            time_str = f"{seconds_left // 60}min"
+        else:
+            time_str = f"{seconds_left}s"
+
+        # Stats
+        try:
+            stats_d = events2026.gear_total_stats(item)
+            bits = []
+            if stats_d.get("atk"): bits.append(f"+{stats_d['atk']} ATK")
+            if stats_d.get("def"): bits.append(f"+{stats_d['def']} DEF")
+            if stats_d.get("crit"): bits.append(f"+{stats_d['crit']}% CRIT")
+            stats_str = " · ".join(bits) if bits else "—"
+        except Exception:
+            stats_str = "—"
+
+        top_part = (
+            f"  ·  🏆 <@{top_bidder_id}>"
+            if top_bidder_id else "  ·  _aucune offre_"
+        )
+        return (
+            ah_id, item, current_bid,
+            f"**#{ah_id} · {rarity_emoji} {emoji} {name}** _{rarity}_\n"
+            f"`{stats_str}`  ·  💰 `{current_bid:,}` 🪙  ·  ⏱️ {time_str}{top_part}\n"
+            f"_vendu par <@{seller_id}> · {bids_count} offre(s)_",
+        )
+
+    formatted = [_fmt_auction(r) for r in rows]
+
+    user_id = i.user.id  # pour callbacks
+
+    # On limite à 4 enchères par panneau (1 layout container + 4 boutons max)
+    # On affiche les top 4 et indique combien restent
+    top4 = formatted[:4]
+    rest = formatted[4:]
+
+    class _BidBtn(discord.ui.Button):
+        def __init__(self, ah_id: int, label: str, increment_pct: int):
+            super().__init__(
+                label=label,
+                style=discord.ButtonStyle.primary,
+                custom_id=f"phase109_bid_{ah_id}_{increment_pct}",
+            )
+            self.ah_id = ah_id
+            self.increment_pct = increment_pct
+
+        async def callback(self, btn_i: discord.Interaction):
+            await _place_bid(btn_i, self.ah_id, self.increment_pct)
+
+    class _BrowseLayout(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=300)
+            lay = []
+            lay.append(v2_title("🔨  MAISON DES ENCHÈRES"))
+            lay.append(v2_subtitle(
+                f"{len(rows)} enchère(s) active(s)  ·  commission `{AUCTION_COMMISSION_PCT}%`"
+            ))
+            lay.append(v2_divider())
+            for ah_id, item, current_bid, line in top4:
+                lay.append(v2_body(line))
+                lay.append(v2_divider())
+            if rest:
+                lay.append(v2_body(
+                    f"_+ {len(rest)} autre(s) enchère(s) — affine ta vue plus tard, "
+                    f"ou ferme et relance la commande._"
+                ))
+            self.add_item(v2_container(*lay, color=0x9B59B6))
+
+            # Bouton bid +10% pour chacune des top4
+            for ah_id, item, current_bid, line in top4:
+                bid_label = f"#{ah_id} · +10% ({int(current_bid * 1.10):,} 🪙)"
+                # On limite à 1 bouton par enchère pour respecter Discord (max 5/row, 5 row max)
+                self.add_item(discord.ui.ActionRow(_BidBtn(ah_id, bid_label, 10)))
+
+    await i.response.send_message(view=_BrowseLayout(), ephemeral=True)
+
+
+async def _place_bid(btn_i: discord.Interaction, ah_id: int, increment_pct: int):
+    """Phase 109 : placer une enchère atomiquement."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT seller_id, current_bid, top_bidder_id, bids_count, status, ends_at "
+                "FROM auctions WHERE id=? AND guild_id=?",
+                (ah_id, btn_i.guild.id),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return await btn_i.response.send_message(
+                "❌ Enchère introuvable.", ephemeral=True
+            )
+        seller_id, current_bid, top_bidder_id, bids_count, status, ends_at = row
+        import time as _time
+        now_ts = int(_time.time())
+        if status != "active":
+            return await btn_i.response.send_message(
+                f"⏳ Cette enchère est déjà terminée (`{status}`).", ephemeral=True
+            )
+        if now_ts > ends_at:
+            return await btn_i.response.send_message(
+                "⏳ Cette enchère vient d'expirer.", ephemeral=True
+            )
+        if btn_i.user.id == seller_id:
+            return await btn_i.response.send_message(
+                "🪞 Tu ne peux pas enchérir sur ta propre vente.", ephemeral=True
+            )
+        if btn_i.user.id == top_bidder_id:
+            return await btn_i.response.send_message(
+                "🏆 Tu es déjà le top bidder — attends une contre-offre.",
+                ephemeral=True,
+            )
+
+        new_bid = max(current_bid + 1, int(current_bid * (1 + increment_pct / 100)))
+        # Vérifier que le bidder a les coins (main + banque)
+        eco = await get_user_economy(btn_i.guild.id, btn_i.user.id)
+        hand = int(eco.get("coins", 0) or 0)
+        bank = int(eco.get("bank", 0) or 0)
+        if hand + bank < new_bid:
+            return await btn_i.response.send_message(
+                f"💸 Tu n'as que `{hand + bank:,}` 🪙 — il en faut `{new_bid:,}`.",
+                ephemeral=True,
+            )
+
+        # Atomique : déduire les coins du nouveau bidder, REMBOURSER l'ancien top_bidder
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE auctions SET current_bid=?, top_bidder_id=?, bids_count=bids_count+1 "
+                "WHERE id=? AND status='active'",
+                (new_bid, btn_i.user.id, ah_id),
+            )
+            await db.commit()
+
+        # Déduire du nouveau bidder
+        from_hand = min(hand, new_bid)
+        from_bank = new_bid - from_hand
+        if from_hand > 0:
+            await add_coins(btn_i.guild.id, btn_i.user.id, -from_hand)
+        if from_bank > 0:
+            await update_user_economy(btn_i.guild.id, btn_i.user.id, bank=bank - from_bank)
+
+        # Rembourser l'ancien top_bidder
+        if top_bidder_id and bids_count > 0:
+            await add_coins(btn_i.guild.id, top_bidder_id, current_bid)
+            # Notif discrète à l'ancien (en DM si possible)
+            try:
+                old_user = btn_i.guild.get_member(top_bidder_id)
+                if old_user:
+                    try:
+                        await old_user.send(
+                            f"📢 **Tu as été surenchéri sur l'enchère #{ah_id}** "
+                            f"({btn_i.user.mention} a misé `{new_bid:,}` 🪙).\n"
+                            f"_Tes `{current_bid:,}` 🪙 t'ont été rendus._"
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        await btn_i.response.send_message(
+            f"✅ **Enchère #{ah_id}** — tu as misé `{new_bid:,}` 🪙\n"
+            f"_Si personne ne surenchérit avant la fin, l'item est à toi._",
+            ephemeral=True,
+        )
+    except Exception as ex:
+        print(f"[_place_bid] {ex}")
+        import traceback; traceback.print_exc()
+        try:
+            await btn_i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+async def _auction_create(i: discord.Interaction):
+    """Phase 109 : crée une enchère via 2 étapes (slot picker + modal)."""
+    # Étape 1 : montrer les slots dispo en boutons
+    inv = await _get_or_create_inventory(i.guild.id, i.user.id)
+    available_slots = []
+    for slot_key, slot_label in [
+        ("weapon", "⚔️ Arme"),
+        ("armor", "🛡️ Armure"),
+        ("helmet", "🎩 Casque"),
+        ("boots", "👢 Bottes"),
+        ("accessory", "💍 Accessoire"),
+        ("trinket", "🔮 Trinket"),
+    ]:
+        item = inv.get(slot_key) or {}
+        if item and item.get("name"):
+            available_slots.append((slot_key, slot_label, item))
+
+    if not available_slots:
+        return await i.response.send_message(
+            "🎒 Tu n'as aucun item équipé à mettre en vente.\n"
+            "_Combats des boss pour obtenir du loot !_",
+            ephemeral=True,
+        )
+
+    user_id = i.user.id
+
+    class _SlotPickModal(discord.ui.Modal, title="📤 Mettre en vente"):
+        def __init__(self, slot_key: str, item: dict):
+            super().__init__()
+            self.slot_key = slot_key
+            self.item = item
+            self.prix = discord.ui.TextInput(
+                label="Prix de départ en 🪙",
+                placeholder="Ex: 500",
+                min_length=1, max_length=8,
+                required=True,
+            )
+            self.duree = discord.ui.TextInput(
+                label="Durée en heures (1-72)",
+                placeholder="Ex: 24",
+                min_length=1, max_length=2,
+                required=True,
+                default="24",
+            )
+            self.add_item(self.prix)
+            self.add_item(self.duree)
+
+        async def on_submit(self, modal_i: discord.Interaction):
+            try:
+                try:
+                    prix = max(1, min(10_000_000, int(self.prix.value.strip())))
+                    duree_h = max(1, min(72, int(self.duree.value.strip())))
+                except ValueError:
+                    return await modal_i.response.send_message(
+                        "❌ Prix/durée invalides (entiers requis).", ephemeral=True
+                    )
+
+                # Re-vérifier que l'item est toujours équipé (anti-tamper)
+                inv2 = await _get_or_create_inventory(modal_i.guild.id, modal_i.user.id)
+                item_now = inv2.get(self.slot_key) or {}
+                if not item_now or item_now.get("name") != self.item.get("name"):
+                    return await modal_i.response.send_message(
+                        "❌ Ton équipement a changé — relance `/auction action:create`.",
+                        ephemeral=True,
+                    )
+
+                # Retirer l'item de l'inventaire (escrow)
+                inv2[self.slot_key] = {}
+                await _save_inventory(modal_i.guild.id, modal_i.user.id, inv2)
+
+                # Insérer dans auctions
+                import time as _time
+                now_ts = int(_time.time())
+                ends_at = now_ts + (duree_h * 3600)
+                async with get_db() as db:
+                    cur = await db.execute(
+                        "INSERT INTO auctions "
+                        "(guild_id, seller_id, slot, item_json, start_price, current_bid, "
+                        "bids_count, started_at, ends_at, status) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,'active')",
+                        (modal_i.guild.id, modal_i.user.id, self.slot_key,
+                         json.dumps(item_now), prix, prix, 0, now_ts, ends_at),
+                    )
+                    await db.commit()
+                    ah_id = cur.lastrowid
+
+                emoji = item_now.get("emoji", "⚪")
+                name = item_now.get("name", "?")
+                await modal_i.response.send_message(
+                    f"✅ **Enchère #{ah_id} créée !**\n"
+                    f"{emoji} **{name}** mis en vente pour `{prix:,}` 🪙 pendant `{duree_h}h`.\n"
+                    f"_Tape `/auction action:browse` pour la voir._",
+                    ephemeral=True,
+                )
+            except Exception as ex:
+                print(f"[_SlotPickModal.on_submit] {ex}")
+                import traceback; traceback.print_exc()
+                try:
+                    await modal_i.response.send_message(
+                        f"❌ Erreur : `{ex}`", ephemeral=True
+                    )
+                except Exception:
+                    pass
+
+    class _SlotPickBtn(discord.ui.Button):
+        def __init__(self, slot_key: str, slot_label: str, item: dict):
+            emoji = item.get("emoji", "⚪")
+            name = item.get("name", "?")
+            super().__init__(
+                label=f"{slot_label}: {name}"[:80],
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"phase109_create_pick_{slot_key}",
+            )
+            self.slot_key = slot_key
+            self.slot_label = slot_label
+            self.item = item
+
+        async def callback(self, btn_i: discord.Interaction):
+            if btn_i.user.id != user_id:
+                return await btn_i.response.send_message(
+                    "❌ Ce panneau n'est pas pour toi.", ephemeral=True
+                )
+            await btn_i.response.send_modal(_SlotPickModal(self.slot_key, self.item))
+
+    class _CreateLayout(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=180)
+            lay = []
+            lay.append(v2_title("📤  METTRE EN VENTE"))
+            lay.append(v2_subtitle("Choisis le slot de l'item à vendre :"))
+            lay.append(v2_divider())
+            for slot_key, slot_label, item in available_slots:
+                rarity = (item.get("rarity") or "commune").lower()
+                rarity_emoji = {
+                    "commune": "⚪", "rare": "🔵", "épique": "🟣",
+                    "légendaire": "🟠", "mythique": "🔴", "divine": "💎",
+                }.get(rarity, "⚪")
+                emoji = item.get("emoji", "⚪")
+                name = item.get("name", "?")
+                try:
+                    stats_d = events2026.gear_total_stats(item)
+                    bits = []
+                    if stats_d.get("atk"): bits.append(f"+{stats_d['atk']} ATK")
+                    if stats_d.get("def"): bits.append(f"+{stats_d['def']} DEF")
+                    if stats_d.get("crit"): bits.append(f"+{stats_d['crit']}% CRIT")
+                    stats_str = " · ".join(bits) if bits else "—"
+                except Exception:
+                    stats_str = "—"
+                lay.append(v2_body(
+                    f"**{slot_label}** {rarity_emoji} {emoji} **{name}** _{rarity}_\n"
+                    f"`{stats_str}`"
+                ))
+            lay.append(v2_divider())
+            lay.append(v2_body(
+                f"_⚠️ Pendant la vente, l'item est en **escrow** (retiré de ton inventaire). "
+                f"Commission `{AUCTION_COMMISSION_PCT}%` prélevée à la clôture._"
+            ))
+            self.add_item(v2_container(*lay, color=0x2ECC71))
+            # Boutons (max 5 par row, on en a 6 max → 2 rows possibles)
+            buttons = [_SlotPickBtn(sk, sl, it) for (sk, sl, it) in available_slots]
+            # Découpe en chunks de 5
+            for k in range(0, len(buttons), 5):
+                self.add_item(discord.ui.ActionRow(*buttons[k:k + 5]))
+
+    await i.response.send_message(view=_CreateLayout(), ephemeral=True)
+
+
+async def _auction_mine(i: discord.Interaction):
+    """Phase 109 : liste les enchères du user (active + historique récent)."""
+    async with get_db() as db:
+        async with db.execute(
+            "SELECT id, slot, item_json, current_bid, top_bidder_id, bids_count, "
+            "ends_at, status FROM auctions WHERE guild_id=? AND seller_id=? "
+            "ORDER BY id DESC LIMIT 10",
+            (i.guild.id, i.user.id),
+        ) as cur:
+            rows = await cur.fetchall()
+    if not rows:
+        return await i.response.send_message(
+            "📋 Tu n'as encore créé aucune enchère.\n"
+            "_Tape `/auction action:create` pour commencer._",
+            ephemeral=True,
+        )
+    import time as _time
+    now_ts = int(_time.time())
+    lines = []
+    for ah_id, slot, item_json, current_bid, top_bidder_id, bids_count, ends_at, status in rows:
+        try:
+            item = json.loads(item_json) if item_json else {}
+        except Exception:
+            item = {}
+        emoji = item.get("emoji", "⚪")
+        name = item.get("name", "?")
+        if status == "active":
+            seconds_left = max(0, ends_at - now_ts)
+            if seconds_left > 3600:
+                time_str = f"{seconds_left // 3600}h"
+            elif seconds_left > 60:
+                time_str = f"{seconds_left // 60}min"
+            else:
+                time_str = "imminent"
+            status_str = f"🟢 active · {time_str}"
+            top_str = f" · 🏆 <@{top_bidder_id}>" if top_bidder_id else " · _aucune offre_"
+        elif status == "completed":
+            status_str = "✅ vendue"
+            top_str = f" · acheteur : <@{top_bidder_id}>" if top_bidder_id else ""
+        elif status == "unsold":
+            status_str = "🔴 invendue"
+            top_str = ""
+        else:
+            status_str = f"_{status}_"
+            top_str = ""
+        lines.append(
+            f"**#{ah_id}** {emoji} **{name}** · 💰 `{current_bid:,}` 🪙 · "
+            f"{bids_count} offre(s)\n_{status_str}{top_str}_"
+        )
+
+    class _MineLayout(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=180)
+            lay = []
+            lay.append(v2_title("📋  MES ENCHÈRES"))
+            lay.append(v2_subtitle(f"{len(rows)} entrée(s) (10 max affichés)"))
+            lay.append(v2_divider())
+            lay.append(v2_body("\n\n".join(lines)))
+            self.add_item(v2_container(*lay, color=0x3498DB))
+
+    await i.response.send_message(view=_MineLayout(), ephemeral=True)
 
 
 @bot.tree.command(name="badges", description="🏅 Affiche tes badges et ton rang")
