@@ -39803,7 +39803,7 @@ async def inventory_cmd(i: discord.Interaction):
 
 @bot.tree.command(name="badges", description="🏅 Affiche tes badges et ton rang")
 async def badges_cmd(i: discord.Interaction):
-    """Phase 31 — affiche les badges débloqués + rang actuel."""
+    """Phase 31 + Phase 95 AMPLIFY : badges en LayoutView V2 magnifique."""
     try:
         async with get_db() as db:
             async with db.execute(
@@ -39815,56 +39815,81 @@ async def badges_cmd(i: discord.Interaction):
         kills = int(inv.get('kills', 0))
         rank = events2026.rank_for_kills(kills)
 
-        e = discord.Embed(
-            title=f"🏅 Profil de {i.user.display_name}",
-            color=(rank['color'] if rank else 0x5865F2),
-            timestamp=datetime.now(timezone.utc),
-        )
-        e.set_thumbnail(url=i.user.display_avatar.url)
-        e.add_field(
-            name="🎖️ Rang actuel",
-            value=(rank['name'] if rank else "_Aucun rang (vainc 1 boss pour Bronze)_"),
-            inline=False,
-        )
-        e.add_field(name="💀 Boss vaincus", value=f"`{kills}`", inline=True)
-        e.add_field(name="📊 Dégâts cumulés", value=f"`{int(inv.get('total_damage', 0)):,}`", inline=True)
-        e.add_field(name="🏅 Badges", value=f"`{len(rows)}` / `{len(events2026.BADGE_CATALOG)}`", inline=True)
+        rank_name = rank['name'] if rank else "_Sans rang_"
+        rank_color = rank['color'] if rank else 0x5865F2
+        total_dmg = int(inv.get('total_damage', 0))
+        badges_count = len(rows)
+        badges_total = len(events2026.BADGE_CATALOG)
 
-        if rows:
-            unlocked_lines = []
-            unlocked_set = set()
-            for badge_id, _ in rows[:15]:
-                b = events2026.get_badge_by_id(badge_id)
-                if b:
-                    unlocked_lines.append(f"{b['emoji']} **{b['name']}** — _{b['desc']}_")
-                    unlocked_set.add(badge_id)
-            e.add_field(
-                name=f"✅ Badges débloqués ({len(rows)})",
-                value="\n".join(unlocked_lines) or "_Aucun_",
-                inline=False,
-            )
-            # Badges restants à débloquer (vue motivante)
-            remaining = [b for b in events2026.BADGE_CATALOG if b['id'] not in unlocked_set]
-            if remaining:
-                rem_lines = [f"{b['emoji']} **{b['name']}** — _{b['desc']}_" for b in remaining[:5]]
-                e.add_field(
-                    name=f"🎯 À débloquer ({len(remaining)} restants)",
-                    value="\n".join(rem_lines),
-                    inline=False,
-                )
+        # Progress bar global
+        if badges_total > 0:
+            progress = badges_count / badges_total
+            bar_len = 15
+            filled = int(progress * bar_len)
+            progress_bar = "█" * filled + "░" * (bar_len - filled)
+            progress_str = f"`{progress_bar}` {badges_count}/{badges_total} ({int(progress * 100)}%)"
         else:
-            e.add_field(
-                name="🎯 Objectifs",
-                value="\n".join(
-                    f"{b['emoji']} **{b['name']}** — _{b['desc']}_"
-                    for b in events2026.BADGE_CATALOG[:5]
-                ),
-                inline=False,
-            )
-        e.set_footer(text=f"{i.guild.name} · Participe aux Boss Raids pour débloquer plus !", icon_url=(i.guild.icon.url if i.guild.icon else None))
-        await i.response.send_message(embed=e, ephemeral=True)
+            progress_str = "`░░░░░░░░░░░░░░░` 0/0"
+
+        # Unlocked badges
+        unlocked_set = set()
+        unlocked_lines = []
+        for badge_id, _ in rows[:15]:
+            b = events2026.get_badge_by_id(badge_id)
+            if b:
+                unlocked_lines.append(f"{b['emoji']} **{b['name']}** · _{b['desc']}_")
+                unlocked_set.add(badge_id)
+
+        # Next objectives
+        remaining = [b for b in events2026.BADGE_CATALOG if b['id'] not in unlocked_set]
+        next_lines = [f"{b['emoji']} **{b['name']}** · _{b['desc']}_" for b in remaining[:5]]
+
+        _user_name = i.user.display_name
+        _guild_name = i.guild.name
+
+        class _BadgesLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=600)
+                items = []
+                items.append(v2_title(f"🏅  HAUTS FAITS  ·  {_user_name}"))
+                items.append(v2_subtitle(f"Rang actuel : {rank_name}"))
+                items.append(v2_divider())
+
+                # Groupe 1 : Stats clés
+                items.append(v2_body("**╔═══ 📊  STATS  ═══╗**"))
+                items.append(v2_body(
+                    f"💀 **Boss vaincus :** `{kills}`\n"
+                    f"💥 **Dégâts à vie :** `{total_dmg:,}`\n"
+                    f"🏅 **Badges :** {progress_str}"
+                ))
+
+                items.append(v2_divider())
+
+                # Groupe 2 : Débloqués
+                items.append(v2_body(f"**╔═══ ✅  DÉBLOQUÉS ({badges_count})  ═══╗**"))
+                if unlocked_lines:
+                    items.append(v2_body("\n".join(unlocked_lines)[:1900]))
+                    if len(rows) > 15:
+                        items.append(v2_body(f"_… + {len(rows) - 15} autre(s)_"))
+                else:
+                    items.append(v2_body("_Aucun badge débloqué pour l'instant. Participe à un Boss Raid pour commencer !_"))
+
+                if next_lines:
+                    items.append(v2_divider())
+                    items.append(v2_body(f"**╔═══ 🎯  À DÉBLOQUER ({len(remaining)})  ═══╗**"))
+                    items.append(v2_body("\n".join(next_lines)))
+
+                items.append(v2_divider())
+                items.append(v2_body(
+                    f"_💡 {_guild_name} · "
+                    f"Participe aux Boss Raids et events pour débloquer plus !_"
+                ))
+
+                self.add_item(v2_container(*items, color=rank_color))
+
+        await i.response.send_message(view=_BadgesLayout(), ephemeral=True)
     except Exception as ex:
-        print(f"[/badges] {ex}")
+        print(f"[/badges V2] {ex}")
         try:
             if not i.response.is_done():
                 await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
@@ -64417,6 +64442,7 @@ async def _maybe_drop_unique_loot(guild_id: int, user_id: int, event_kind: str, 
     description="💎 Voir tes loots uniques (1 exemplaire au monde chacun)",
 )
 async def loots_cmd(i: discord.Interaction):
+    """Phase 95 AMPLIFY : Loots uniques en LayoutView V2 magnifique."""
     if not i.guild:
         return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
     if not await _safe_defer(i):
@@ -64429,27 +64455,85 @@ async def loots_cmd(i: discord.Interaction):
                 (i.guild.id, i.user.id),
             ) as cur:
                 rows = await cur.fetchall()
+
+        _user_name = i.user.display_name
+
         if not rows:
-            return await _safe_followup(
-                i,
-                content=(
-                    "_Tu ne possèdes aucun loot unique._\n\n"
-                    "_Les loots uniques drop pendant les events majeurs (World Boss, Boss Raid, Treasure) "
-                    "avec ~1% de chance. **1 seul exemplaire au monde** par item — si quelqu'un d'autre le re-drop, il te le vole._"
-                ),
-            )
-        lines = []
+            class _LootsEmptyLayout(LayoutView):
+                def __init__(self):
+                    super().__init__(timeout=600)
+                    items = [
+                        v2_title(f"💎  LOOTS UNIQUES  ·  {_user_name}"),
+                        v2_subtitle("Items 1 exemplaire au monde · Drop ultra rare"),
+                        v2_divider(),
+                        v2_body(
+                            "**╔═══ 🪙  AUCUN LOOT  ═══╗**\n"
+                            "_Tu ne possèdes aucun loot unique pour l'instant._"
+                        ),
+                        v2_divider(),
+                        v2_body(
+                            "**╔═══ ℹ️  COMMENT EN OBTENIR  ═══╗**\n"
+                            "💀 **World Boss** : ~10% pour le Top Damager\n"
+                            "⚔️ **Boss Raid** : drop chance variable\n"
+                            "💎 **Treasure Hunt** : items mythiques rares\n\n"
+                            "_**1 seul exemplaire au monde** par item._\n"
+                            "_Si quelqu'un d'autre le re-drop, il te le vole._"
+                        ),
+                    ]
+                    self.add_item(v2_container(*items, color=0x95A5A6))
+            return await _safe_followup(i, view=_LootsEmptyLayout())
+
+        # Build loot lines grouped by rarity
+        rarity_order = {'mythique': 0, 'légendaire': 1, 'epique': 2, 'épique': 2, 'rare': 3, 'commune': 4}
+        rarity_emojis = {
+            'mythique': '🌌', 'légendaire': '⭐', 'epique': '💜',
+            'épique': '💜', 'rare': '💎', 'commune': '⚪',
+        }
+        loot_groups: dict = {}
         for r in rows:
-            lid, name, desc, rarity, event_kind, obt = r
-            lines.append(f"💎 `#{lid}` **{name}** — _{desc}_")
-        e = discord.Embed(
-            title=f"💎 Tes loots uniques ({len(rows)})",
-            description="\n\n".join(lines),
-            color=0xFFD700,
-        )
-        e.set_footer(text="Phase 60 · Loots uniques · 1 exemplaire au monde par item")
-        await _safe_followup(i, embed=e)
+            lid, lname, ldesc, lrarity, levent_kind, lobt = r
+            rar = (lrarity or 'commune').lower()
+            loot_groups.setdefault(rar, []).append((lid, lname, ldesc, levent_kind, lobt))
+
+        sorted_rarities = sorted(loot_groups.keys(), key=lambda r: rarity_order.get(r, 99))
+
+        class _LootsLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=600)
+                items = []
+                items.append(v2_title(f"💎  LOOTS UNIQUES  ·  {_user_name}"))
+                items.append(v2_subtitle(f"`{len(rows)}` items uniques au monde"))
+                items.append(v2_divider())
+
+                for rar in sorted_rarities:
+                    rar_emoji = rarity_emojis.get(rar, '⚪')
+                    group_items = loot_groups[rar]
+                    items.append(v2_body(
+                        f"**╔═══ {rar_emoji}  {rar.upper()} ({len(group_items)})  ═══╗**"
+                    ))
+                    lines = []
+                    for lid, lname, ldesc, levent_kind, lobt in group_items[:8]:
+                        ev_tag = f" · _via {levent_kind}_" if levent_kind else ""
+                        lines.append(f"`#{lid}` **{lname}**\n   _{ldesc[:120]}_{ev_tag}")
+                    items.append(v2_body("\n\n".join(lines)))
+                    if len(group_items) > 8:
+                        items.append(v2_body(f"_… + {len(group_items) - 8} autre(s) {rar}_"))
+                    items.append(v2_divider())
+
+                items.append(v2_body(
+                    "_💡 1 exemplaire au monde par item. "
+                    "Si quelqu'un re-drop le même → tu te le fais voler._"
+                ))
+
+                # Color based on highest rarity
+                top_color = 0xFFD700 if 'mythique' in loot_groups else (
+                    0xFFA500 if 'légendaire' in loot_groups else 0x5865F2
+                )
+                self.add_item(v2_container(*items, color=top_color))
+
+        await _safe_followup(i, view=_LootsLayout())
     except Exception as ex:
+        print(f"[/loots V2] {ex}")
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
