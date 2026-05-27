@@ -86,6 +86,8 @@ import progression_milestones as prog_module
 import community_hub as cmty_hub_module
 # Phase 135 : coffre d'alliance + stats de gestion
 import alliance_vault as av_module
+# Phase 136 : Roblox link verify + game library
+import roblox_link as rblx_link_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -37898,6 +37900,18 @@ async def on_ready():
         )
     except Exception as ex:
         print(f"[on_ready av_module setup] {ex}")
+    # Phase 136 : Roblox link verify + game library
+    try:
+        rblx_link_module.setup(
+            get_db,
+            {
+                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
+                'v2_divider': v2_divider, 'v2_container': v2_container,
+                'LayoutView': LayoutView,
+            },
+        )
+    except Exception as ex:
+        print(f"[on_ready rblx_link setup] {ex}")
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()
@@ -38700,6 +38714,205 @@ async def vault_contribs(i: discord.Interaction):
 
 
 bot.tree.add_command(vault_group)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 136 : /roblox — link verify + profile + game library
+# ═══════════════════════════════════════════════════════════════════════════════
+roblox_group = app_commands.Group(
+    name="roblox",
+    description="🎮 Liaison de compte Roblox + bibliothèque de jeux",
+)
+
+
+def _roblox_is_staff(member: discord.Member) -> bool:
+    """True si peut gérer la game library (add/remove)."""
+    try:
+        return (
+            member.id == SUPER_OWNER_ID
+            or (member.guild and member.id == member.guild.owner_id)
+            or member.guild_permissions.administrator
+            or member.guild_permissions.manage_guild
+        )
+    except Exception:
+        return False
+
+
+@roblox_group.command(
+    name="link", description="🔗 Lier ton compte Roblox via code dans la bio"
+)
+@app_commands.describe(username="Ton username Roblox exact")
+async def roblox_link_cmd(i: discord.Interaction, username: str):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        await i.response.defer(ephemeral=True)
+        status, msg, code = await rblx_link_module.start_link(
+            i.guild.id, i.user.id, username
+        )
+        if status == "started" and code:
+            view = rblx_link_module.build_link_instructions_panel(
+                msg, code, i.user.display_name
+            )
+            if view:
+                await i.followup.send(view=view, ephemeral=True)
+            else:
+                await i.followup.send(
+                    f"🔗 Code : `{code}` — mets-le dans ta bio Roblox "
+                    f"puis tape `/roblox verify`.",
+                    ephemeral=True,
+                )
+        elif status == "already_linked":
+            await i.followup.send(f"ℹ️ {msg}", ephemeral=True)
+        elif status == "user_not_found":
+            await i.followup.send(f"❌ {msg}", ephemeral=True)
+        else:
+            await i.followup.send(f"❌ {msg}", ephemeral=True)
+    except Exception as ex:
+        print(f"[roblox_link_cmd] {ex}")
+        try:
+            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+@roblox_group.command(
+    name="verify",
+    description="✅ Vérifier que le code est bien dans ta bio Roblox",
+)
+async def roblox_verify_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        await i.response.defer(ephemeral=True)
+        ok, msg, link_info = await rblx_link_module.verify_link(
+            i.guild.id, i.user.id
+        )
+        if ok and link_info:
+            view = rblx_link_module.build_profile_panel(i.user, link_info)
+            if view:
+                await i.followup.send(view=view, ephemeral=True)
+            else:
+                await i.followup.send(f"✅ {msg}", ephemeral=True)
+        else:
+            await i.followup.send(f"❌ {msg}", ephemeral=True)
+    except Exception as ex:
+        print(f"[roblox_verify_cmd] {ex}")
+        try:
+            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+@roblox_group.command(
+    name="unlink", description="🔌 Délier ton compte Roblox"
+)
+async def roblox_unlink_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        ok = await rblx_link_module.unlink(i.guild.id, i.user.id)
+        if ok:
+            await i.response.send_message(
+                "✅ Compte Roblox délié.", ephemeral=True
+            )
+        else:
+            await i.response.send_message(
+                "ℹ️ Tu n'avais pas de compte Roblox lié.", ephemeral=True
+            )
+    except Exception as ex:
+        print(f"[roblox_unlink_cmd] {ex}")
+
+
+@roblox_group.command(
+    name="profile",
+    description="👤 Voir le compte Roblox lié d'un membre",
+)
+@app_commands.describe(membre="Le membre (toi-même par défaut)")
+async def roblox_profile_cmd(
+    i: discord.Interaction, membre: Optional[discord.Member] = None
+):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    target = membre or i.user
+    if not isinstance(target, discord.Member):
+        return await i.response.send_message("❌ Membre invalide.", ephemeral=True)
+    try:
+        link_info = await rblx_link_module.get_link(i.guild.id, target.id)
+        if not link_info:
+            return await i.response.send_message(
+                f"ℹ️ {target.mention} n'a pas de compte Roblox lié.",
+                ephemeral=True,
+            )
+        view = rblx_link_module.build_profile_panel(target, link_info)
+        if view is None:
+            return await i.response.send_message(
+                "❌ Module indisponible.", ephemeral=True
+            )
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[roblox_profile_cmd] {ex}")
+
+
+@roblox_group.command(
+    name="games", description="🎮 Liste des jeux Roblox suivis par ce serveur"
+)
+async def roblox_games_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        games = await rblx_link_module.list_games(i.guild.id)
+        view = rblx_link_module.build_games_panel(games, i.guild.name)
+        if view is None:
+            return await i.response.send_message(
+                "❌ Module indisponible.", ephemeral=True
+            )
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[roblox_games_cmd] {ex}")
+
+
+@roblox_group.command(
+    name="add_game",
+    description="➕ [Staff] Ajouter un jeu Roblox au tracking via universe_id",
+)
+@app_commands.describe(universe_id="ID de l'univers Roblox (Game Settings)")
+async def roblox_add_game_cmd(i: discord.Interaction, universe_id: int):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not _roblox_is_staff(i.user):
+        return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
+    try:
+        await i.response.defer(ephemeral=True)
+        ok, msg = await rblx_link_module.add_game(
+            i.guild.id, int(universe_id), i.user.id
+        )
+        await i.followup.send(f"{'✅' if ok else '❌'} {msg}", ephemeral=True)
+    except Exception as ex:
+        print(f"[roblox_add_game_cmd] {ex}")
+
+
+@roblox_group.command(
+    name="remove_game",
+    description="🗑️ [Staff] Retirer un jeu du tracking",
+)
+@app_commands.describe(universe_id="ID de l'univers à retirer")
+async def roblox_remove_game_cmd(i: discord.Interaction, universe_id: int):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if not _roblox_is_staff(i.user):
+        return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
+    try:
+        ok = await rblx_link_module.remove_game(i.guild.id, int(universe_id))
+        await i.response.send_message(
+            f"{'🗑️ Jeu retiré.' if ok else 'ℹ️ Jeu introuvable.'}",
+            ephemeral=True,
+        )
+    except Exception as ex:
+        print(f"[roblox_remove_game_cmd] {ex}")
+
+
+bot.tree.add_command(roblox_group)
 
 
 @bot.event
