@@ -41033,13 +41033,9 @@ def _format_trade_item(item: dict, slot: str) -> str:
     return f"{badge} {emoji} **{name}** _{rarity}_" + (f" `{stats_str}`" if stats_str else "")
 
 
-@bot.tree.command(name="swap", description="🤝 Propose un échange d'équipement direct avec un autre joueur")
-@app_commands.describe(
-    cible="Le joueur avec qui échanger",
-    slot="Le slot d'équipement à échanger (les deux items doivent être du même type)",
-    coins_bonus="Coins que tu donnes en plus (optionnel, max 100k)",
-)
-@app_commands.choices(slot=_trade_slot_choices())
+# Phase 116 HOTFIX : décorateur retiré (CommandLimitReached 100 globally).
+# Le helper swap_cmd reste accessible via futur bouton dans /inventory.
+# Pour réactiver : remettre le décorateur @bot.tree.command(name="swap", ...)
 async def swap_cmd(
     i: discord.Interaction,
     cible: discord.Member,
@@ -41974,7 +41970,9 @@ async def _auction_mine(i: discord.Interaction):
 # Coût en coins, chance de succès décroissante selon la rareté courante,
 # ÉCHEC = item perdu. Système risque/reward pur.
 
-@bot.tree.command(name="craft", description="⚒️ Atelier de forge — affine un item pour le rendre plus rare")
+# Phase 116 HOTFIX : décorateur retiré (CommandLimitReached 100 globally).
+# Le helper craft_cmd reste accessible via futur bouton dans /inventory.
+# Pour réactiver : remettre le décorateur @bot.tree.command(name="craft", ...)
 async def craft_cmd(i: discord.Interaction):
     """Phase 110 : atelier de forge / refining system."""
     try:
