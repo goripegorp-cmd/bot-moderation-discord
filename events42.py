@@ -282,6 +282,52 @@ VOICE_CHAOS_ACTIONS = [
         "kind": "rename",
         "rename_pattern": "🔮 MYSTÈRE — {original}",
     },
+    # Phase 101 AMPLIFY : 5 nouveaux noms thématiques pour plus de variété
+    {
+        "id": "rename_volcan",
+        "name": "Éruption volcanique",
+        "emoji": "🌋",
+        "description": "Lave en fusion partout — restez au chaud !",
+        "duration_seconds": 300,
+        "kind": "rename",
+        "rename_pattern": "🌋 VOLCAN — {original}",
+    },
+    {
+        "id": "rename_forest",
+        "name": "Forêt enchantée",
+        "emoji": "🌲",
+        "description": "Une forêt magique envahit le vocal.",
+        "duration_seconds": 300,
+        "kind": "rename",
+        "rename_pattern": "🌲 FORÊT — {original}",
+    },
+    {
+        "id": "rename_pirate",
+        "name": "Bateau pirate",
+        "emoji": "🏴‍☠️",
+        "description": "Ahoy ! Le vocal devient un navire pirate.",
+        "duration_seconds": 300,
+        "kind": "rename",
+        "rename_pattern": "🏴‍☠️ PIRATES — {original}",
+    },
+    {
+        "id": "rename_neon",
+        "name": "Cyberpunk Neon",
+        "emoji": "🌃",
+        "description": "Lumières néon et synthwave invadent le vocal.",
+        "duration_seconds": 300,
+        "kind": "rename",
+        "rename_pattern": "🌃 NEON — {original}",
+    },
+    {
+        "id": "rename_ocean",
+        "name": "Profondeurs océanes",
+        "emoji": "🌊",
+        "description": "Le vocal est englouti par les abysses.",
+        "duration_seconds": 300,
+        "kind": "rename",
+        "rename_pattern": "🌊 OCÉAN — {original}",
+    },
     # Les chaos vraiment fous (déplacements) — désactivés par défaut, opt-in via owner
     # car ça peut être déstabilisant pour les membres
     {

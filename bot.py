@@ -64565,6 +64565,53 @@ HEIST_ROLES = [
 ]
 
 
+# Phase 101 AMPLIFY : Heist targets — 3 tiers risque/reward différents
+HEIST_TARGETS = [
+    {
+        "id": "small",
+        "name": "Banque locale",
+        "emoji": "🏪",
+        "stake": 50,
+        "payout_mult": 2.0,
+        "base_success": 0.50,
+        "per_player_bonus": 0.10,
+        "description": "Petit coup, faible risque · Mise 50 🪙 · Pot × 2",
+    },
+    {
+        "id": "medium",
+        "name": "Banque centrale",
+        "emoji": "🏦",
+        "stake": 100,
+        "payout_mult": 3.0,
+        "base_success": 0.40,
+        "per_player_bonus": 0.08,
+        "description": "Coup moyen, risque modéré · Mise 100 🪙 · Pot × 3",
+    },
+    {
+        "id": "big",
+        "name": "Coffre national",
+        "emoji": "🏛️",
+        "stake": 200,
+        "payout_mult": 5.0,
+        "base_success": 0.30,
+        "per_player_bonus": 0.06,
+        "description": "Le gros coup, haut risque · Mise 200 🪙 · Pot × 5",
+    },
+]
+
+
+def _get_heist_target(target_id: str) -> dict:
+    """Retourne le target spec par id, fallback small."""
+    for t in HEIST_TARGETS:
+        if t['id'] == target_id:
+            return t
+    return HEIST_TARGETS[0]
+
+
+# In-memory : heist_id → target_id (perdu au reboot, fallback small)
+_heist_targets: dict = {}
+
+
 class HeistJoinView(View):
     """View persistante : Select pour choisir son rôle + bouton lancer."""
 
@@ -64603,8 +64650,10 @@ class HeistJoinView(View):
             if not row or row[0] != 'recruiting':
                 return await _safe_followup(i, content="⏱️ Braquage déjà lancé / inexistant.")
             role_id = i.data["values"][0]
-            # Vérifier mise minimale (50 🪙 par participant)
-            stake = 50
+            # Phase 101 : stake dépend du target tier
+            target_id = _heist_targets.get(self.hid, 'small')
+            target = _get_heist_target(target_id)
+            stake = int(target['stake'])
             try:
                 async with get_db() as db:
                     async with db.execute(
@@ -64670,11 +64719,16 @@ class HeistJoinView(View):
                     parts = await cur.fetchall()
             if len(parts) < 3:
                 return await _safe_followup(i, content=f"❌ Min 3 participants ({len(parts)} actuels).")
-            # Success rate : 50% base + 10% par participant max 90%
-            success_rate = min(0.90, 0.50 + 0.10 * len(parts))
+            # Phase 101 : success rate + payout selon target tier
+            target_id_l = _heist_targets.get(self.hid, 'small')
+            target_l = _get_heist_target(target_id_l)
+            success_rate = min(
+                0.90,
+                float(target_l['base_success']) + float(target_l['per_player_bonus']) * len(parts),
+            )
             success = random.random() < success_rate
-            # Pot = pool_total × 2 si success, sinon 0
-            total_payout = pool * 2 if success else 0
+            # Pot = pool × payout_mult si success, sinon 0
+            total_payout = int(pool * float(target_l['payout_mult'])) if success else 0
             shares_total = 0.0
             role_map = {r["id"]: r for r in HEIST_ROLES}
             for uid, role_id in parts:
@@ -64751,9 +64805,19 @@ class HeistJoinView(View):
 
 @bot.tree.command(
     name="heist_start",
-    description="🚨 [Owner] Lance un événement Braquage collectif (50 🪙 mise/joueur)",
+    description="🚨 [Owner] Lance un Braquage collectif (choisis la cible)",
 )
-async def heist_start_cmd(i: discord.Interaction):
+@app_commands.describe(target="Cible du braquage : small (×2 / 50%), medium (×3 / 40%), big (×5 / 30%)")
+@app_commands.choices(target=[
+    app_commands.Choice(name="🏪 Banque locale (×2 / 50%+ / mise 50 🪙)", value="small"),
+    app_commands.Choice(name="🏦 Banque centrale (×3 / 40%+ / mise 100 🪙)", value="medium"),
+    app_commands.Choice(name="🏛️ Coffre national (×5 / 30%+ / mise 200 🪙)", value="big"),
+])
+async def heist_start_cmd(
+    i: discord.Interaction,
+    target: Optional[app_commands.Choice[str]] = None,
+):
+    """Phase 101 AMPLIFY : choix de cible (small/medium/big) avec risque/reward différents."""
     if not i.guild:
         return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
     if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
@@ -64766,6 +64830,11 @@ async def heist_start_cmd(i: discord.Interaction):
         hub_ch = i.guild.get_channel(hub_id) if hub_id else None
         if not hub_ch:
             return await _safe_followup(i, content="❌ Hub non configuré.")
+
+        # Phase 101 : récupérer le target choisi (default small)
+        target_id = (target.value if target else 'small')
+        target_spec = _get_heist_target(target_id)
+
         async with get_db() as db:
             cur = await db.execute(
                 "INSERT INTO heists(guild_id, channel_id) VALUES(?, ?)",
@@ -64773,17 +64842,29 @@ async def heist_start_cmd(i: discord.Interaction):
             )
             hid = cur.lastrowid
             await db.commit()
+        # Phase 101 : mémoriser le target tier (in-memory, perdu au reboot mais heists courts)
+        _heist_targets[hid] = target_id
+
+        # Calcul des estimations affichées
+        base_succ = int(target_spec['base_success'] * 100)
+        per_player = int(target_spec['per_player_bonus'] * 100)
+        mult = target_spec['payout_mult']
+        stake = int(target_spec['stake'])
+
         e = discord.Embed(
             title=f"🚨 BRAQUAGE COLLECTIF — #{hid}",
             description=(
-                "_La banque du serveur abrite un coffre. La porte est laissée entrouverte._\n\n"
-                "**Recrutement ouvert.** Min 3 joueurs, max 10.\n"
-                "**Mise par joueur :** `50 🪙`\n\n"
-                "**Rôles disponibles** (chacun a un share différent du butin) :\n"
+                f"## {target_spec['emoji']} {target_spec['name']}\n"
+                f"_{target_spec['description']}_\n\n"
+                f"**Recrutement ouvert.** Min 3 joueurs, max 10.\n"
+                f"**Mise par joueur :** `{stake}` 🪙\n"
+                f"**Taux succès :** `{base_succ}%` base + `{per_player}%`/joueur (cap 90%)\n"
+                f"**Multiplicateur payout :** `×{mult}` si réussi\n\n"
+                f"**Rôles disponibles** (share différent du butin) :\n"
                 + "\n".join(f"{r['label']} — _{r['desc']}_" for r in HEIST_ROLES) +
-                "\n\n_Si succès : pool × 2 distribué par share._\n"
-                "_Si échec : mises perdues._\n\n"
-                "**Choisis ton rôle ci-dessous. L'owner ou n'importe quel participant peut lancer.**"
+                f"\n\n_Si succès : pool × {mult} distribué par share._\n"
+                f"_Si échec : mises perdues._\n\n"
+                f"**Choisis ton rôle ci-dessous. Owner ou tout participant peut lancer.**"
             ),
             color=0xE67E22,
             timestamp=datetime.now(timezone.utc),
@@ -64796,7 +64877,10 @@ async def heist_start_cmd(i: discord.Interaction):
         async with get_db() as db:
             await db.execute("UPDATE heists SET message_id=? WHERE id=?", (msg.id, hid))
             await db.commit()
-        await _safe_followup(i, content=f"✅ Braquage #{hid} ouvert.")
+        await _safe_followup(
+            i,
+            content=f"✅ Braquage #{hid} ouvert · cible **{target_spec['name']}** ({target_spec['emoji']}).",
+        )
     except Exception as ex:
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
