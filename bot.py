@@ -12435,7 +12435,12 @@ async def _light_events_wait():
 
 @tasks.loop(minutes=2)
 async def event_timeout_checker():
-    """Vérifie toutes les 2 min si un event a dépassé sa durée → end."""
+    """Vérifie toutes les 2 min si un event a dépassé sa durée → end.
+
+    Phase 91 HOTFIX : marque ended=1 par event_id SPÉCIFIQUE au lieu d'appeler
+    _end_active_event(guild) qui kill le LATEST event (ORDER BY id DESC LIMIT 1)
+    → bug : tuait les nouveaux events spawnés pendant qu'un vieux était timed-out.
+    """
     try:
         now_iso = datetime.now(timezone.utc).isoformat()
         async with get_db() as db:
@@ -12445,9 +12450,16 @@ async def event_timeout_checker():
             ) as cur:
                 rows = await cur.fetchall()
         for event_id, guild_id in rows:
-            guild = bot.get_guild(int(guild_id))
-            if guild:
-                await _end_active_event(guild, victory=False, reason="⏰ Temps écoulé — le boss s'enfuit.")
+            try:
+                # Phase 91 : UPDATE direct par event_id (pas _end_active_event qui kill latest)
+                async with get_db() as db:
+                    await db.execute(
+                        'UPDATE events SET ended=1 WHERE id=?', (event_id,),
+                    )
+                    await db.commit()
+                print(f"[event_timeout_checker] event {event_id} timed out → ended")
+            except Exception as ex:
+                print(f"[event_timeout_checker row={event_id}] {ex}")
     except Exception as ex:
         print(f"[event_timeout_checker] {ex}")
 
@@ -12496,20 +12508,16 @@ async def stale_event_cleanup():
                     try:
                         await ch.fetch_message(int(msg_id))
                     except discord.NotFound:
-                        print(f"[stale_cleanup] event {event_id} ({etype}) msg supprimé → end")
-                        try:
-                            await _end_active_event(
-                                guild, victory=False,
-                                reason="🗑️ Event terminé (message supprimé manuellement)",
+                        # Phase 91 HOTFIX : UPDATE direct par event_id.
+                        # NE PAS appeler _end_active_event(guild) qui kill le
+                        # LATEST event (ORDER BY id DESC LIMIT 1) — donc tue
+                        # le NOUVEAU event qui vient de spawn !
+                        print(f"[stale_cleanup] event {event_id} ({etype}) msg supprimé → mark ended")
+                        async with get_db() as db:
+                            await db.execute(
+                                'UPDATE events SET ended=1 WHERE id=?', (event_id,),
                             )
-                        except Exception as ex:
-                            print(f"[stale_cleanup _end_active_event] {ex}")
-                            # Fallback : mark ended in DB directly
-                            async with get_db() as db:
-                                await db.execute(
-                                    'UPDATE events SET ended=1 WHERE id=?', (event_id,),
-                                )
-                                await db.commit()
+                            await db.commit()
                     except discord.Forbidden:
                         pass  # Pas la perm de fetch → laisser tel quel
                     except Exception:
@@ -12544,18 +12552,14 @@ async def stale_event_cleanup():
                     try:
                         await ch.fetch_message(int(msg_id))
                     except discord.NotFound:
-                        print(f"[stale_cleanup] world_boss {wb_id} msg supprimé → end")
-                        try:
-                            await _end_world_boss(
-                                guild, wb_id, victory=False,
-                                reason="🗑️ World Boss terminé (message supprimé)",
+                        # Phase 91 HOTFIX : UPDATE direct (skip _end_world_boss
+                        # qui distribuerait des rewards pour un event abandonné).
+                        print(f"[stale_cleanup] world_boss {wb_id} msg supprimé → mark ended")
+                        async with get_db() as db:
+                            await db.execute(
+                                'UPDATE world_bosses SET ended=1 WHERE id=?', (wb_id,),
                             )
-                        except Exception:
-                            async with get_db() as db:
-                                await db.execute(
-                                    'UPDATE world_bosses SET ended=1 WHERE id=?', (wb_id,),
-                                )
-                                await db.commit()
+                            await db.commit()
                     except discord.Forbidden:
                         pass
                     except Exception:
