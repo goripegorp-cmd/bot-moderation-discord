@@ -12237,75 +12237,207 @@ async def notify_cmd(i: discord.Interaction, niveau: app_commands.Choice[str]):
 
 @bot.tree.command(name="help", description="📖 Aide complète : toutes les commandes disponibles")
 async def help_cmd(i: discord.Interaction):
+    """Phase 123 : aide complète en LayoutView V2 magnifique avec sections
+    catégorisées par thème + boutons navigation vers le hub.
+    """
     try:
-        e = discord.Embed(
-            title="📖 Aide — Toutes les commandes",
-            description="_Voici les commandes que tu peux utiliser sur ce serveur._",
-            color=0x5865F2,
-        )
+        _viewer_id = i.user.id
 
-        e.add_field(
-            name="🎪 Événements",
-            value=(
-                "• `/event` — voir l'événement en cours\n"
-                "• `/inventory` — ton équipement et tes stats\n"
-                "• `/badges` — tes badges et ton rang\n"
-                "• `/event_shop` — boutique d'équipements (rotation hebdo)\n"
-                "• `/duel @membre [mise]` — défier un membre en combat 1v1\n"
-                "• `/leaderboard` — classement (pièces · messages · vocal)\n"
-                "• `/notify` — gère tes notifications d'événements (🔔/📢/🔕)\n"
-                "• `/class choose` — choisis ta classe (Tank/DPS/Healer/Mage/Rogue/Bard)\n"
-                "• `/vocal_optin` — autorise le bot à te déplacer entre vocaux pendant un raid"
-            ),
-            inline=False,
-        )
+        class _GotoHubBtn(discord.ui.Button):
+            def __init__(self):
+                super().__init__(
+                    label="🎮 Ouvrir mon Hub",
+                    style=discord.ButtonStyle.primary,
+                    custom_id=f"phase123_help_hub_{_viewer_id}",
+                )
 
-        e.add_field(
-            name="📈 Progression",
-            value=(
-                "• `/level` — voir ton niveau et ton XP\n"
-                "• `/shop` — boutique de rôles personnalisés\n"
-                "• `/birthday set JJ-MM` — déclarer ton anniversaire\n"
-                "• `/birthday list` — voir les anniversaires du mois"
-            ),
-            inline=False,
-        )
+            async def callback(self, btn_i: discord.Interaction):
+                if btn_i.user.id != _viewer_id:
+                    return await btn_i.response.send_message(
+                        "❌ Ce panneau n'est pas pour toi.", ephemeral=True
+                    )
+                try:
+                    if not btn_i.response.is_done():
+                        await btn_i.response.send_message(
+                            view=HubLayoutV2(btn_i.user.id),
+                            ephemeral=True,
+                        )
+                    else:
+                        await btn_i.followup.send(
+                            view=HubLayoutV2(btn_i.user.id),
+                            ephemeral=True,
+                        )
+                except Exception as ex:
+                    print(f"[phase123 help hub btn] {ex}")
+                    try:
+                        if not btn_i.response.is_done():
+                            await btn_i.response.send_message(
+                                f"❌ Erreur : `{ex}`", ephemeral=True
+                            )
+                    except Exception:
+                        pass
 
-        e.add_field(
-            name="🎬 Spotlight Créateurs",
-            value=(
-                "• `/creator add youtube <id>` — enregistrer ta chaîne\n"
-                "• `/creator list` — voir tes chaînes\n"
-                "• `/creator remove` — retirer une chaîne"
-            ),
-            inline=False,
-        )
+        class _GotoInventoryBtn(discord.ui.Button):
+            def __init__(self):
+                super().__init__(
+                    label="🎒 Mon inventaire",
+                    style=discord.ButtonStyle.secondary,
+                    custom_id=f"phase123_help_inv_{_viewer_id}",
+                )
 
-        e.add_field(
-            name="💬 Communauté",
-            value=(
-                "• `/poll question options=A|B|C` — créer un sondage avancé\n"
-                "• `/warn @membre raison` — avertir (mod uniquement)\n"
-                "• `/mute @membre durée raison` — mute (mod uniquement)"
-            ),
-            inline=False,
-        )
+            async def callback(self, btn_i: discord.Interaction):
+                if btn_i.user.id != _viewer_id:
+                    return await btn_i.response.send_message(
+                        "❌ Ce panneau n'est pas pour toi.", ephemeral=True
+                    )
+                try:
+                    await inventory_cmd.callback(btn_i)
+                except Exception as ex:
+                    print(f"[phase123 help inv btn] {ex}")
+                    try:
+                        if not btn_i.response.is_done():
+                            await btn_i.response.send_message(
+                                f"❌ Erreur : `{ex}`", ephemeral=True
+                            )
+                    except Exception:
+                        pass
 
-        e.add_field(
-            name="💡 Astuces générales",
-            value=(
-                "• Sois actif pour recevoir des **événements personnels** aléatoires (cadeaux, devinettes...)\n"
-                "• Participe aux **Boss Raids** pour gagner des coins, gear et badges\n"
-                "• Achète de l'équipement avant un raid pour faire plus de dégâts\n"
-                "• Garde tes coins pour les défis de duel"
-            ),
-            inline=False,
-        )
+        class _HelpLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=600)
+                items = []
 
-        e.set_footer(text=f"{i.guild.name} · {events2026.get_help_footer('general')}", icon_url=(i.guild.icon.url if i.guild.icon else None))
-        await i.response.send_message(embed=e, ephemeral=True)
+                # ═══ HEADER ═══
+                items.append(v2_title("📖  AIDE — TOUTES LES COMMANDES"))
+                items.append(v2_subtitle(
+                    f"_Toutes les fonctionnalités de {i.guild.name}_"
+                ))
+                items.append(v2_divider())
+
+                # ═══ GROUPE 1 — COMBAT & ÉQUIPEMENT ═══
+                items.append(v2_body("**╔═══ ⚔️  COMBAT & ÉQUIPEMENT  ═══╗**"))
+                items.append(v2_body(
+                    "• `/event` — l'événement en cours + tes stats\n"
+                    "• `/inventory` — ton équipement, set bonus, durabilité\n"
+                    "• `/badges` — tes hauts faits et ton rang\n"
+                    "• `/loots` — tes items uniques\n"
+                    "• `/event_shop` — boutique d'équipements (rotation hebdo)\n"
+                    "• `/class choose` — Tank / DPS / Healer / Mage / Rogue / Bard"
+                ))
+                items.append(v2_divider())
+
+                # ═══ GROUPE 2 — QUÊTES & PROGRESSION ═══
+                items.append(v2_body("**╔═══ 📈  QUÊTES & PROGRESSION  ═══╗**"))
+                items.append(v2_body(
+                    "• `/daily` — 3 quêtes du jour + streak\n"
+                    "• `/weekly` — 5 quêtes de la semaine\n"
+                    "• `/monthly` — Méga quête du mois\n"
+                    "• `/achievements` — tous tes hauts faits\n"
+                    "• `/wheel` — Daily Wheel (1 spin / 24h)\n"
+                    "• `/level` — ton niveau et ton XP\n"
+                    "• `/prestige` — Prestige (niveau 100+)\n"
+                    "• `/profile` — vue complète unifiée"
+                ))
+                items.append(v2_divider())
+
+                # ═══ GROUPE 3 — ÉCONOMIE & MARCHÉ ═══
+                items.append(v2_body("**╔═══ 💰  ÉCONOMIE & MARCHÉ  ═══╗**"))
+                items.append(v2_body(
+                    "• `/shop` — boutique de rôles\n"
+                    "• `/bank deposit/withdraw/status` — banque (1%/jour)\n"
+                    "• `/auction browse/create/mine` — Maison des enchères\n"
+                    "• `/trade` — créer annonce marketplace\n"
+                    "• `/marketplace` — voir les annonces actives\n"
+                    "• `/sell_pet` — vendre un pet\n"
+                    "• `/leaderboard` — top joueurs (coins · msg · vocal)"
+                ))
+                items.append(v2_divider())
+
+                # ═══ GROUPE 4 — COMPÉTITIF & PvP ═══
+                items.append(v2_body("**╔═══ 🏆  COMPÉTITIF & PvP  ═══╗**"))
+                items.append(v2_body(
+                    "• `/duel @membre [mise]` — défier en combat 1v1\n"
+                    "• `/duel_report` — reporter le gagnant\n"
+                    "• `/pvp_top` — top 10 du Ladder Elo\n"
+                    "• `/voice_top` — top 10 vocal de la semaine"
+                ))
+                items.append(v2_divider())
+
+                # ═══ GROUPE 5 — SOCIAL & COMMUNAUTÉ ═══
+                items.append(v2_body("**╔═══ 💬  SOCIAL & COMMUNAUTÉ  ═══╗**"))
+                items.append(v2_body(
+                    "• `/poll <question> <options=A|B|C>` — sondage\n"
+                    "• `/suggestion` — proposer une idée\n"
+                    "• `/confess` — confession anonyme (100%)\n"
+                    "• `/shoutout` — remercier publiquement un membre\n"
+                    "• `/mentor_invite` — devenir mentor d'un apprenti\n"
+                    "• `/afk` — voir les AFK du serveur"
+                ))
+                items.append(v2_divider())
+
+                # ═══ GROUPE 6 — PERSONNEL & UTILITAIRES ═══
+                items.append(v2_body("**╔═══ 🎨  PERSONNEL & UTILITAIRES  ═══╗**"))
+                items.append(v2_body(
+                    "• `/profile` — profil complet (level/prestige/saison)\n"
+                    "• `/pet` — ton compagnon (acheter/évoluer)\n"
+                    "• `/birthday set JJ-MM` — ton anniversaire\n"
+                    "• `/birthday list` — anniversaires du mois\n"
+                    "• `/notifs` — choisir ce qui te ping\n"
+                    "• `/quiet_hours` — heures calmes (owner)\n"
+                    "• `/vocal_optin` — autoriser déplacement vocal en raid\n"
+                    "• `/capsule_create` — sceller un message dans le futur\n"
+                    "• `/weather` — météo et streak du serveur"
+                ))
+                items.append(v2_divider())
+
+                # ═══ GROUPE 7 — MODÉRATION (staff) ═══
+                items.append(v2_body("**╔═══ 🛡️  MODÉRATION (STAFF)  ═══╗**"))
+                items.append(v2_body(
+                    "• `/mod warn @membre raison` — avertir\n"
+                    "• `/mod mute @membre durée` — timeout\n"
+                    "• `/mod unmute @membre` — retirer mute\n"
+                    "• `/mod direction @membre` — restriction complète\n"
+                    "• `/mod infractions @membre` — fiche d'infractions\n"
+                    "• `/configure` — panneau de config global"
+                ))
+                items.append(v2_divider())
+
+                # ═══ ASTUCES ═══
+                items.append(v2_body("**╔═══ 💡  ASTUCES  ═══╗**"))
+                items.append(v2_body(
+                    "• Reste actif → tu reçois des **events personnels** aléatoires (cadeaux, devinettes)\n"
+                    "• Participe aux **Boss Raids** → coins + gear + badges\n"
+                    "• Achète ton équipement **avant** un raid pour faire +damage\n"
+                    "• Garde tes coins pour les **enchères rares** et **duels**\n"
+                    "• Vérifie `/hub` pour tout accéder en 1 clic"
+                ))
+                items.append(v2_divider())
+
+                # ═══ Navigation rapide ═══
+                items.append(v2_body("**╔═══ 🚀  NAVIGATION RAPIDE  ═══╗**"))
+                items.append(v2_section(
+                    v2_title("🎮  Hub d'engagement"),
+                    v2_subtitle("Tout en 1 clic — quêtes, profil, achievements, etc."),
+                    accessory=_GotoHubBtn(),
+                ))
+                items.append(v2_section(
+                    v2_title("🎒  Mon inventaire"),
+                    v2_subtitle("Équipement, set bonus, durabilité, actions rapides"),
+                    accessory=_GotoInventoryBtn(),
+                ))
+
+                items.append(v2_divider())
+                items.append(v2_body(
+                    f"_💡 **{i.guild.name}** · "
+                    f"{events2026.get_help_footer('general')}_"
+                ))
+
+                self.add_item(v2_container(*items, color=0x5865F2))
+
+        await i.response.send_message(view=_HelpLayout(), ephemeral=True)
     except Exception as ex:
-        print(f"[/help] {ex}")
+        print(f"[/help V2] {ex}")
+        import traceback; traceback.print_exc()
         try:
             if not i.response.is_done():
                 await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
@@ -60198,25 +60330,16 @@ async def prestige_cmd(i: discord.Interaction):
                 ),
             )
 
-        # Demander confirmation via bouton
-        class _ConfirmView(View):
-            def __init__(self, user_id: int):
-                super().__init__(timeout=60)
-                self.user_id = user_id
-                b_yes = Button(
-                    label="✅ Confirmer le Prestige (reset)",
-                    style=discord.ButtonStyle.danger,
-                )
-                b_yes.callback = self._on_yes
-                self.add_item(b_yes)
-                b_no = Button(label="❌ Annuler", style=discord.ButtonStyle.secondary)
-                b_no.callback = self._on_no
-                self.add_item(b_no)
+        _user_id = i.user.id
+        next_def = eng47.get_prestige_def(current_prestige + 1)
 
-            async def _on_yes(self, ii):
+        class _ConfirmBtn(Button):
+            def __init__(self):
+                super().__init__(label="✅ Confirmer le Prestige (reset)", style=discord.ButtonStyle.danger)
+            async def callback(self, ii):
                 if not await _safe_defer(ii):
                     return
-                if ii.user.id != self.user_id:
+                if ii.user.id != _user_id:
                     return await _safe_followup(ii, content="🔒 Pas pour toi.")
                 result = await _do_prestige(ii.guild.id, ii.user.id)
                 if not result.get('ok'):
@@ -60234,25 +60357,47 @@ async def prestige_cmd(i: discord.Interaction):
                     ),
                 )
 
-            async def _on_no(self, ii):
+        class _CancelBtn(Button):
+            def __init__(self):
+                super().__init__(label="❌ Annuler", style=discord.ButtonStyle.secondary)
+            async def callback(self, ii):
                 if not await _safe_defer(ii):
                     return
                 await _safe_followup(ii, content="✅ Prestige annulé.")
 
-        next_def = eng47.get_prestige_def(current_prestige + 1)
-        await _safe_followup(
-            i,
-            content=(
-                f"🌟 **Tu es prêt pour le Prestige.**\n\n"
-                f"Actuel : {pdef['emoji']} **{pdef['name']}**\n"
-                f"Après : {next_def['emoji']} **{next_def['name']}**\n\n"
-                f"**Bonus permanents** (après prestige) :\n"
-                f"• +{next_def['xp_bonus']*100:.0f}% XP\n"
-                f"• +{next_def['coins_bonus']*100:.0f}% Coins\n\n"
-                f"⚠️ **Ton niveau reset à 1** (mais tu gardes coins/items/achievements/pets)."
-            ),
-            view=_ConfirmView(i.user.id),
-        )
+        class _PrestigeLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=60)
+                items = []
+                items.append(v2_title("🌟  PRESTIGE — TU ES PRÊT"))
+                items.append(v2_subtitle("Tu atteins le seuil ultime. Renaître plus fort, ça se prépare."))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 👑  TON RANG  ═══╗**"))
+                items.append(v2_body(
+                    f"**Actuel :** {pdef['emoji']} **{pdef['name']}**\n"
+                    f"**Après :** {next_def['emoji']} **{next_def['name']}**"
+                ))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 🎁  BONUS PERMANENTS  ═══╗**"))
+                items.append(v2_body(
+                    f"• +{next_def['xp_bonus']*100:.0f}% XP\n"
+                    f"• +{next_def['coins_bonus']*100:.0f}% Coins\n\n"
+                    f"⚠️ **Ton niveau reset à 1** (mais tu gardes coins/items/achievements/pets)."
+                ))
+                items.append(v2_divider())
+                items.append(v2_section(
+                    v2_title("✅  CONFIRMER"),
+                    v2_subtitle("Lancer la cérémonie de Prestige. Action irréversible."),
+                    accessory=_ConfirmBtn(),
+                ))
+                items.append(v2_section(
+                    v2_title("❌  ANNULER"),
+                    v2_subtitle("Réfléchis encore — tu peux le faire plus tard."),
+                    accessory=_CancelBtn(),
+                ))
+                self.add_item(v2_container(*items, color=0xFFD700))
+
+        await _safe_followup(i, view=_PrestigeLayout())
     except Exception as ex:
         print(f"[/prestige] {ex}")
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
@@ -60270,38 +60415,31 @@ async def weekly_cmd(i: discord.Interaction):
             return await _safe_followup(i, content="❌ Serveur uniquement.")
         quests = await _ensure_weekly_quests(i.guild.id, i.user.id)
         week = _current_week_str()
-        e = discord.Embed(
-            title=f"📅 Quêtes de la semaine — {week}",
-            description="Les quêtes hebdo sont **plus dures** mais payent **bien plus** que les daily. Reset chaque lundi.",
-            color=0x3498DB,
-        )
         total_pending = 0
+        quest_lines = []
         for q in quests:
             status = "✅" if q['claimed'] else ("🎁" if q['completed'] else "⏳")
             bar = _make_progress_bar(q['progress'], q['target'])
-            e.add_field(
-                name=f"{status} {q['icon']} {q['title']}",
-                value=(
-                    f"{q['description']}\n{bar} `{q['progress']}/{q['target']}`\n"
-                    f"🪙 `{q['reward_coins']}` · 📆 `+{q['season_points']}` pts saison"
-                ),
-                inline=False,
+            quest_lines.append(
+                f"**{status} {q['icon']} {q['title']}**\n"
+                f"{q['description']}\n{bar} `{q['progress']}/{q['target']}`\n"
+                f"🪙 `{q['reward_coins']}` · 📆 `+{q['season_points']}` pts saison"
             )
             if q['completed'] and not q['claimed']:
                 total_pending += q['reward_coins']
 
-        class _ClaimWeekly(View):
+        _user_id = i.user.id
+        _guild_id = i.guild.id
+
+        class _ClaimBtn(Button):
             def __init__(self):
-                super().__init__(timeout=180)
-                b = Button(label="🎁 Réclamer mes weekly", style=discord.ButtonStyle.success)
-                b.callback = self._cb
-                self.add_item(b)
-            async def _cb(self, ii):
+                super().__init__(label="🎁 Réclamer mes weekly", style=discord.ButtonStyle.success)
+            async def callback(self, ii):
                 if not await _safe_defer(ii):
                     return
-                if ii.user.id != i.user.id:
+                if ii.user.id != _user_id:
                     return await _safe_followup(ii, content="🔒 Pas pour toi.")
-                r = await _claim_weekly_quests(i.guild.id, i.user.id)
+                r = await _claim_weekly_quests(_guild_id, _user_id)
                 if r['count'] == 0:
                     return await _safe_followup(ii, content="ℹ️ Aucune quête hebdo à réclamer.")
                 await _safe_followup(
@@ -60313,10 +60451,28 @@ async def weekly_cmd(i: discord.Interaction):
                     ),
                 )
 
-        view = _ClaimWeekly() if total_pending > 0 else None
-        if total_pending:
-            e.add_field(name="🎁 À réclamer", value=f"`{total_pending}` 🪙 en attente", inline=False)
-        await _safe_followup(i, embed=e, view=view)
+        class _WeeklyLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=300)
+                items = []
+                items.append(v2_title(f"📅  QUÊTES DE LA SEMAINE — {week}"))
+                items.append(v2_subtitle(
+                    "Les quêtes hebdo sont **plus dures** mais payent **bien plus** que les daily. Reset chaque lundi."
+                ))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 🎯  TES 5 QUÊTES  ═══╗**"))
+                for ql in quest_lines:
+                    items.append(v2_body(ql))
+                if total_pending > 0:
+                    items.append(v2_divider())
+                    items.append(v2_section(
+                        v2_title("🎁  À RÉCLAMER"),
+                        v2_subtitle(f"`{total_pending}` 🪙 en attente"),
+                        accessory=_ClaimBtn(),
+                    ))
+                self.add_item(v2_container(*items, color=0xE91E63))
+
+        await _safe_followup(i, view=_WeeklyLayout())
     except Exception as ex:
         print(f"[/weekly] {ex}")
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
@@ -60338,29 +60494,20 @@ async def monthly_cmd(i: discord.Interaction):
             return await _safe_followup(i, content="❌ Pas de méga quête disponible pour le moment.")
         status = "✅ Réclamé" if q['claimed'] else ("🎁 Terminé, à réclamer !" if q['completed'] else "⏳ En cours")
         bar = _make_progress_bar(q['progress'], q['target'])
-        e = discord.Embed(
-            title=f"📆 Méga Quête du mois — {month}",
-            description=(
-                f"{q['icon']} **{q['title']}**\n\n"
-                f"_{q['description']}_\n\n"
-                f"{bar} `{q['progress']}/{q['target']}`\n\n"
-                f"**Récompense :** `{q['reward_coins']}` 🪙 + `{q['season_points']}` points saison\n"
-                f"**Statut :** {status}"
-            ),
-            color=0xE91E63,
-        )
-        class _ClaimMonth(View):
+        _claimable = bool(q['completed'] and not q['claimed'])
+
+        _user_id = i.user.id
+        _guild_id = i.guild.id
+
+        class _ClaimBtn(Button):
             def __init__(self):
-                super().__init__(timeout=180)
-                b = Button(label="🎁 Réclamer la mega quête", style=discord.ButtonStyle.success)
-                b.callback = self._cb
-                self.add_item(b)
-            async def _cb(self, ii):
+                super().__init__(label="🎁 Réclamer la mega quête", style=discord.ButtonStyle.success)
+            async def callback(self, ii):
                 if not await _safe_defer(ii):
                     return
-                if ii.user.id != i.user.id:
+                if ii.user.id != _user_id:
                     return await _safe_followup(ii, content="🔒 Pas pour toi.")
-                r = await _claim_monthly_quest(i.guild.id, i.user.id)
+                r = await _claim_monthly_quest(_guild_id, _user_id)
                 if r['count'] == 0:
                     return await _safe_followup(ii, content="ℹ️ Pas encore terminée.")
                 await _safe_followup(
@@ -60371,8 +60518,37 @@ async def monthly_cmd(i: discord.Interaction):
                         f"📆 +`{r['season_points']}` points Season Pass"
                     ),
                 )
-        view = _ClaimMonth() if (q['completed'] and not q['claimed']) else None
-        await _safe_followup(i, embed=e, view=view)
+
+        class _MonthlyLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=300)
+                items = []
+                items.append(v2_title(f"📆  MÉGA QUÊTE DU MOIS — {month}"))
+                items.append(v2_subtitle("Un objectif épique, une grosse récompense, tout le mois pour l'accomplir."))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 🎯  LA QUÊTE  ═══╗**"))
+                items.append(v2_body(
+                    f"{q['icon']} **{q['title']}**\n\n"
+                    f"_{q['description']}_\n\n"
+                    f"{bar} `{q['progress']}/{q['target']}`"
+                ))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 🎁  RÉCOMPENSES  ═══╗**"))
+                items.append(v2_body(
+                    f"🪙 `{q['reward_coins']}` pièces\n"
+                    f"📆 `+{q['season_points']}` points Season Pass\n"
+                    f"**Statut :** {status}"
+                ))
+                if _claimable:
+                    items.append(v2_divider())
+                    items.append(v2_section(
+                        v2_title("🎁  RÉCLAMER"),
+                        v2_subtitle("Tu as terminé, viens chercher ta récompense !"),
+                        accessory=_ClaimBtn(),
+                    ))
+                self.add_item(v2_container(*items, color=0x9B59B6))
+
+        await _safe_followup(i, view=_MonthlyLayout())
     except Exception as ex:
         print(f"[/monthly] {ex}")
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
@@ -61243,16 +61419,54 @@ async def notifs_cmd(i: discord.Interaction):
             return await _safe_followup(i, content="❌ Serveur uniquement.")
         prefs = await _get_notif_prefs(i.guild.id, i.user.id)
 
-        lines = ["🔔 **Tes préférences de notifications**\n"]
-        for cat, emoji, label in _NOTIF_CATEGORIES:
-            enabled = prefs.get(cat, True)
-            state = "✅" if enabled else "🔕"
-            lines.append(f"{state} {emoji} {label}")
-        lines.append("")
-        lines.append("_Click un bouton pour basculer ON/OFF._")
-        e = discord.Embed(description="\n".join(lines), color=0x3498DB)
-        e.set_footer(text="Phase 48.2 · Notifications personnalisées")
-        await _safe_followup(i, embed=e, view=NotifPrefsView(i.guild.id, i.user.id, prefs))
+        _guild_id = i.guild.id
+        _user_id = i.user.id
+        _prefs = dict(prefs)
+
+        def _make_toggle_cb(cat: str):
+            async def _cb(ii: discord.Interaction):
+                if not await _safe_defer(ii):
+                    return
+                try:
+                    if ii.user.id != _user_id:
+                        return await _safe_followup(ii, content="🔒 Pas pour toi.")
+                    current = _prefs.get(cat, True)
+                    await _set_notif_pref(_guild_id, _user_id, cat, not current)
+                    new_val = not current
+                    _prefs[cat] = new_val
+                    label_ = next((l for c, _e, l in _NOTIF_CATEGORIES if c == cat), cat)
+                    state_ = "✅ Activé" if new_val else "🔕 Désactivé"
+                    await _safe_followup(ii, content=f"{state_} : **{label_}**")
+                except Exception as ex:
+                    print(f"[NotifPrefsView] {ex}")
+            return _cb
+
+        class _NotifsLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=300)
+                items = []
+                items.append(v2_title("🔔  TES NOTIFICATIONS"))
+                items.append(v2_subtitle("Active ou coupe précisément ce qui te ping. Clique sur un bouton pour toggle."))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ ⚙️  CATÉGORIES  ═══╗**"))
+                for cat, emoji, label in _NOTIF_CATEGORIES:
+                    enabled = _prefs.get(cat, True)
+                    state_lbl = "✅ Activé" if enabled else "🔕 Coupé"
+                    btn = Button(
+                        label=("🔕 Couper" if enabled else "✅ Activer"),
+                        style=(discord.ButtonStyle.success if enabled else discord.ButtonStyle.secondary),
+                    )
+                    btn.callback = _make_toggle_cb(cat)
+                    items.append(v2_section(
+                        v2_title(f"{emoji}  {label}"),
+                        v2_subtitle(state_lbl),
+                        accessory=btn,
+                    ))
+                items.append(v2_divider())
+                items.append(v2_body("_Phase 48.2 · Notifications personnalisées_"))
+                self.add_item(v2_container(*items, color=0x3498DB))
+
+        await _safe_followup(i, view=_NotifsLayout())
     except Exception as ex:
         print(f"[/notifs] {ex}")
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
@@ -66629,13 +66843,24 @@ async def hall_of_fame_cmd(i: discord.Interaction):
             if detail:
                 line += f" · _{detail}_"
             lines.append(line)
-        e = discord.Embed(
-            title=f"🏛️ Hall of Fame — {i.guild.name}",
-            description="\n\n".join(lines),
-            color=0xFFD700,
-        )
-        e.set_footer(text="Records permanents · Phase 63")
-        await _safe_followup(i, embed=e)
+
+        _guild_name = i.guild.name
+        _records_text = "\n\n".join(lines)
+
+        class _HallOfFameLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=300)
+                items = []
+                items.append(v2_title(f"🏛️  HALL OF FAME — {_guild_name}"))
+                items.append(v2_subtitle("Les exploits permanents du serveur, gravés dans la pierre."))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 🏆  RECORDS LÉGENDAIRES  ═══╗**"))
+                items.append(v2_body(_records_text[:3500]))
+                items.append(v2_divider())
+                items.append(v2_body("_Records permanents · Phase 63_"))
+                self.add_item(v2_container(*items, color=0xFFD700))
+
+        await _safe_followup(i, view=_HallOfFameLayout())
     except Exception as ex:
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
@@ -67371,17 +67596,31 @@ async def weather_cmd(i: discord.Interaction):
             history = "\n".join(lines)
         else:
             history = "_Pas encore de données._"
-        e = discord.Embed(
-            title="📅 Météo & Streak du serveur",
-            description=(
-                f"🔥 **Streak collectif :** `{cur_s}` jours\n"
-                f"🏆 **Record all-time :** `{best_s}` jours\n\n"
-                f"**Météo des 7 derniers jours :**\n{history}\n\n"
-                f"_Continuez à parler chaque jour pour étendre le streak !_"
-            ),
-            color=0x3498DB,
-        )
-        await _safe_followup(i, embed=e)
+
+        _cur_s = cur_s
+        _best_s = best_s
+        _history = history
+
+        class _WeatherLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=300)
+                items = []
+                items.append(v2_title("📅  MÉTÉO & STREAK DU SERVEUR"))
+                items.append(v2_subtitle("La vie collective du serveur, jour après jour."))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 🔥  STREAK COLLECTIF  ═══╗**"))
+                items.append(v2_body(
+                    f"🔥 **Streak en cours :** `{_cur_s}` jours\n"
+                    f"🏆 **Record all-time :** `{_best_s}` jours"
+                ))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ ☀️  7 DERNIERS JOURS  ═══╗**"))
+                items.append(v2_body(_history))
+                items.append(v2_divider())
+                items.append(v2_body("_Continuez à parler chaque jour pour étendre le streak !_"))
+                self.add_item(v2_container(*items, color=0x3498DB))
+
+        await _safe_followup(i, view=_WeatherLayout())
     except Exception as ex:
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
@@ -68459,17 +68698,29 @@ async def pvp_top_cmd(i: discord.Interaction):
                 f"(W:{int(r[2])} L:{int(r[3])} · {wr:.0f}% WR)"
             )
         my = await _get_ladder_rating(i.guild.id, i.user.id)
-        e = discord.Embed(
-            title="📊 Ladder Elo PvP — Top 10",
-            description=(
-                "\n".join(lines) +
-                f"\n\n**Toi :** {_rating_division(my['rating'])} `{my['rating']}` "
-                f"(W:{my['wins']} L:{my['losses']})\n\n"
-                f"_Lance un duel via `/duel @membre mise:50` pour grimper._"
-            ),
-            color=0xE74C3C,
+        _ranking_text = "\n".join(lines)
+        _my_text = (
+            f"{_rating_division(my['rating'])} `{my['rating']}` "
+            f"(W:{my['wins']} L:{my['losses']})"
         )
-        await _safe_followup(i, embed=e)
+
+        class _PvpTopLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=300)
+                items = []
+                items.append(v2_title("📊  LADDER ELO PVP — TOP 10"))
+                items.append(v2_subtitle("Les meilleurs duellistes du serveur — saison en cours."))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 🏆  TOP 10  ═══╗**"))
+                items.append(v2_body(_ranking_text[:3500]))
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 👤  TON RANG  ═══╗**"))
+                items.append(v2_body(_my_text))
+                items.append(v2_divider())
+                items.append(v2_body("_Lance un duel via `/duel @membre mise:50` pour grimper._"))
+                self.add_item(v2_container(*items, color=0xE91E63))
+
+        await _safe_followup(i, view=_PvpTopLayout())
     except Exception as ex:
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
