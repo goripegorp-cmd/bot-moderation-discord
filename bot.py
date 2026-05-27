@@ -8619,6 +8619,31 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
             except Exception:
                 pass
 
+            # Phase 95 AMPLIFY : LAST HIT BONUS +500 🪙 immédiat
+            # (en plus des récompenses du recap final)
+            try:
+                LAST_HIT_BONUS = 500
+                await add_coins(i.guild.id, i.user.id, LAST_HIT_BONUS)
+            except Exception:
+                pass
+
+            # Broadcast "Killing Blow" dans l'arène
+            try:
+                cache = _active_events_cache.get(i.guild.id, {})
+                arena_id_kb = int(cache.get('arena_channel_id', 0) or 0)
+                arena_ch_kb = i.guild.get_channel(arena_id_kb) if arena_id_kb else i.channel
+                if arena_ch_kb:
+                    boss_name_kb = boss.get('name', 'le boss')
+                    await arena_ch_kb.send(
+                        f"💀 **COUP FATAL !** {i.user.mention} achève **{boss_name_kb}** "
+                        f"avec `{damage}` dégâts !\n"
+                        f"🎁 **+500 🪙 bonus Last Hit** (en plus des récompenses du recap)",
+                        delete_after=60,
+                        allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
+                    )
+            except Exception:
+                pass
+
         # Réponse immédiate à l'attaque
         crit_str = " 🌟 **CRITIQUE !**" if is_crit else ""
         double_str = " ⚡ **DOUBLE FRAPPE !**" if is_double else ""
@@ -39611,58 +39636,164 @@ async def event_cmd(i: discord.Interaction):
 
 @bot.tree.command(name="inventory", description="🎒 Affiche ton équipement et tes stats")
 async def inventory_cmd(i: discord.Interaction):
+    """Phase 95 AMPLIFY : Inventaire en LayoutView V2 magnifique avec sections
+    groupées par thème (Équipement / Stats / Économie / Progression)."""
     try:
         inv = await _get_or_create_inventory(i.guild.id, i.user.id)
-        w = inv.get('weapon', {})
-        a = inv.get('armor', {})
+        w = inv.get('weapon', {}) or {}
+        a = inv.get('armor', {}) or {}
+        # Phase 95 : nouveaux slots futurs (Helmet/Boots/Accessory/Trinket)
+        h = inv.get('helmet', {}) or {}
+        b = inv.get('boots', {}) or {}
+        acc = inv.get('accessory', {}) or {}
+        tri = inv.get('trinket', {}) or {}
 
-        atk = (w.get('atk', 0) or 0)
-        defe = (a.get('def', 0) or 0)
+        atk = int(w.get('atk', 0) or 0) + int(h.get('atk', 0) or 0) + int(acc.get('atk', 0) or 0)
+        defe = int(a.get('def', 0) or 0) + int(h.get('def', 0) or 0) + int(b.get('def', 0) or 0)
         power_score = atk + defe * 2
 
-        # Récupérer coins via économie existante
+        # Coins
         coins = 0
+        bank = 0
         try:
             eco = await get_user_economy(i.guild.id, i.user.id)
-            coins = (eco.get('coins', 0) or 0) + (eco.get('bank', 0) or 0)
+            coins = int(eco.get('coins', 0) or 0)
+            bank = int(eco.get('bank', 0) or 0)
         except Exception:
             pass
+        total_wealth = coins + bank
 
-        e = discord.Embed(
-            title=f"🎒 Inventaire de {i.user.display_name}",
-            color=0x5865F2,
-            timestamp=datetime.now(timezone.utc),
-        )
-        e.set_thumbnail(url=i.user.display_avatar.url)
-        e.add_field(
-            name="⚔️ Arme équipée",
-            value=(
-                f"{w.get('emoji', '⚪')} **{w.get('name', '_aucune_')}**\n"
-                f"`+{atk}` ATK · _{w.get('rarity', '—')}_"
-            ),
-            inline=True,
-        )
-        e.add_field(
-            name="🛡️ Armure équipée",
-            value=(
-                f"{a.get('emoji', '⚪')} **{a.get('name', '_aucune_')}**\n"
-                f"`+{defe}` DEF · _{a.get('rarity', '—')}_"
-            ),
-            inline=True,
-        )
-        e.add_field(name="❤️ Points de vie", value=f"`{inv.get('hp', 100)}/{inv.get('max_hp', 100)}`", inline=True)
-        e.add_field(name="💰 Pièces", value=f"`{coins:,}` 🪙", inline=True)
-        e.add_field(name="💀 Boss vaincus", value=f"`{inv.get('kills', 0)}`", inline=True)
-        e.add_field(name="⚡ Puissance", value=f"`{power_score}`", inline=True)
-        e.add_field(
-            name="📊 Stats à vie",
-            value=f"Total dégâts infligés : `{inv.get('total_damage', 0):,}`",
-            inline=False,
-        )
-        e.set_footer(text="Utilise /event pour voir l'événement en cours")
-        await i.response.send_message(embed=e, ephemeral=True)
+        hp = int(inv.get('hp', 100))
+        max_hp = int(inv.get('max_hp', 100))
+        kills = int(inv.get('kills', 0))
+        total_dmg = int(inv.get('total_damage', 0))
+
+        # Rarity emoji helper
+        def _rarity_badge(item: dict) -> str:
+            if not item or not item.get('name'):
+                return ""
+            r = item.get('rarity', 'commune')
+            badges = {
+                'commune': '⚪', 'rare': '💎', 'épique': '💜', 'epique': '💜',
+                'légendaire': '⭐', 'legendaire': '⭐', 'mythique': '🌌',
+            }
+            return badges.get(r.lower(), '⚪')
+
+        # HP bar visual
+        hp_ratio = hp / max(1, max_hp)
+        hp_bar_len = 10
+        hp_filled = int(hp_ratio * hp_bar_len)
+        hp_bar = "█" * hp_filled + "░" * (hp_bar_len - hp_filled)
+
+        # Power tier
+        if power_score >= 200:
+            power_tier = "🔥 Légende"
+        elif power_score >= 100:
+            power_tier = "⚡ Vétéran"
+        elif power_score >= 50:
+            power_tier = "💪 Confirmé"
+        elif power_score >= 20:
+            power_tier = "🌱 Apprenti"
+        else:
+            power_tier = "🥚 Débutant"
+
+        # ─── Construire le LayoutView V2 magnifique ───
+        _user_name = i.user.display_name
+        _user_avatar = i.user.display_avatar.url if i.user.display_avatar else None
+
+        class _InventoryLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=600)
+                items = []
+                # ─── HEADER ───
+                items.append(v2_title(f"🎒  INVENTAIRE  ·  {_user_name}"))
+                items.append(v2_subtitle(f"{power_tier}  ·  Puissance totale `{power_score}`"))
+                items.append(v2_divider())
+
+                # ─── GROUPE 1 : ÉQUIPEMENT PRINCIPAL ───
+                items.append(v2_body("**╔═══ ⚔️  ÉQUIPEMENT  ═══╗**"))
+
+                # Arme
+                w_emoji = w.get('emoji', '⚪')
+                w_name = w.get('name', '_aucune arme équipée_')
+                w_rarity = _rarity_badge(w)
+                w_atk = int(w.get('atk', 0) or 0)
+                items.append(v2_body(
+                    f"**⚔️ Arme**  {w_rarity}\n"
+                    f"{w_emoji} {w_name}\n"
+                    f"`+{w_atk}` ATK"
+                ))
+
+                # Armure
+                a_emoji = a.get('emoji', '⚪')
+                a_name = a.get('name', '_aucune armure équipée_')
+                a_rarity = _rarity_badge(a)
+                a_def = int(a.get('def', 0) or 0)
+                items.append(v2_body(
+                    f"**🛡️ Armure**  {a_rarity}\n"
+                    f"{a_emoji} {a_name}\n"
+                    f"`+{a_def}` DEF"
+                ))
+
+                # Slots futurs (Helmet / Boots / Accessory / Trinket)
+                if any([h, b, acc, tri]):
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ 🎩  ACCESSOIRES  ═══╗**"))
+
+                    for slot_label, slot_item, slot_emoji_default in [
+                        ("🎩 Casque", h, '⚪'),
+                        ("👢 Bottes", b, '⚪'),
+                        ("💍 Accessoire", acc, '⚪'),
+                        ("🔮 Trinket", tri, '⚪'),
+                    ]:
+                        if slot_item and slot_item.get('name'):
+                            si_emoji = slot_item.get('emoji', slot_emoji_default)
+                            si_name = slot_item.get('name', '_vide_')
+                            si_rarity = _rarity_badge(slot_item)
+                            mods = []
+                            if slot_item.get('atk'): mods.append(f"+{slot_item['atk']} ATK")
+                            if slot_item.get('def'): mods.append(f"+{slot_item['def']} DEF")
+                            if slot_item.get('crit'): mods.append(f"+{slot_item['crit']}% CRIT")
+                            mods_str = " · ".join(mods) if mods else "—"
+                            items.append(v2_body(
+                                f"**{slot_label}**  {si_rarity}\n{si_emoji} {si_name}\n`{mods_str}`"
+                            ))
+
+                items.append(v2_divider())
+
+                # ─── GROUPE 2 : STATS COMBAT ───
+                items.append(v2_body("**╔═══ ❤️  VITALITÉ  ═══╗**"))
+                items.append(v2_body(
+                    f"**HP**  `{hp_bar}` `{hp}/{max_hp}`\n"
+                    f"**⚡ Puissance**  `{power_score}`  ({power_tier})\n"
+                    f"**💀 Boss vaincus**  `{kills}`\n"
+                    f"**💥 Dégâts à vie**  `{total_dmg:,}`"
+                ))
+
+                items.append(v2_divider())
+
+                # ─── GROUPE 3 : ÉCONOMIE ───
+                items.append(v2_body("**╔═══ 💰  ÉCONOMIE  ═══╗**"))
+                items.append(v2_body(
+                    f"🪙 **En main :**  `{coins:,}`\n"
+                    f"🏦 **Banque :**  `{bank:,}`\n"
+                    f"💎 **Total :**  `{total_wealth:,}` 🪙"
+                ))
+
+                items.append(v2_divider())
+
+                # ─── FOOTER ───
+                items.append(v2_body(
+                    "_💡 `/event` pour l'événement en cours · "
+                    "`/badges` pour les hauts faits · "
+                    "`/loots` pour les items uniques_"
+                ))
+
+                self.add_item(v2_container(*items, color=0x5865F2))
+
+        await i.response.send_message(view=_InventoryLayout(), ephemeral=True)
     except Exception as ex:
-        print(f"[/inventory] {ex}")
+        print(f"[/inventory V2] {ex}")
         try:
             if not i.response.is_done():
                 await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
@@ -50348,10 +50479,11 @@ async def _end_world_boss(guild, wb_id: int, victory: bool, reason: str = ""):
 
 @tasks.loop(minutes=30)
 async def world_boss_scheduler():
-    """Phase 42 : déclenche un World Boss tous les samedis 21h-21h30 Europe/Paris.
+    """Phase 42 + Phase 95 AMPLIFY : World Boss samedi 21h FR avec pre-hype 30 min avant.
 
-    Tourne toutes les 30 min, check si on est samedi 21h-21h30 ET qu'aucun
-    world boss n'a déjà été lancé cette semaine.
+    Tourne toutes les 30 min :
+    - 20h30 samedi → broadcast pre-hype "Le World Boss arrive dans 30 min !"
+    - 21h00 samedi → lance le World Boss
     """
     try:
         from zoneinfo import ZoneInfo as _ZI
@@ -50359,10 +50491,14 @@ async def world_boss_scheduler():
     except Exception:
         tz = timezone.utc
     now_local = datetime.now(tz)
-    # Samedi (weekday=5) et 21h-22h
-    if now_local.weekday() != 5 or now_local.hour != 21:
+    # Samedi (weekday=5) uniquement
+    if now_local.weekday() != 5:
+        return
+    # Plage 20h-21h pour gérer hype + start
+    if now_local.hour not in (20, 21):
         return
     try:
+        week_start = (now_local - timedelta(days=now_local.weekday())).strftime('%Y-%m-%d')
         for guild in bot.guilds:
             try:
                 c = await cfg(guild.id)
@@ -50371,20 +50507,76 @@ async def world_boss_scheduler():
                 if not c.get('world_boss_enabled', True):
                     continue
                 # Pas 2× la même semaine
-                week_start = (now_local - timedelta(days=now_local.weekday())).strftime('%Y-%m-%d')
                 async with get_db() as db:
                     async with db.execute(
                         'SELECT 1 FROM world_bosses WHERE guild_id=? AND DATE(started_at) >= ? LIMIT 1',
                         (guild.id, week_start),
                     ) as cur:
-                        if await cur.fetchone():
-                            continue
-                # Pas si un autre event majeur en cours
-                if await _has_any_major_event_running(guild.id):
-                    continue
-                result = await _start_world_boss(guild)
-                if result.get('ok'):
-                    print(f"[world_boss_scheduler] guild={guild.id} lancé")
+                        already_started = bool(await cur.fetchone())
+                if already_started:
+                    continue  # already done this week
+
+                # Phase 95 AMPLIFY : Pre-hype broadcast à 20h30
+                if now_local.hour == 20 and now_local.minute >= 30:
+                    # Anti-doublon : cfg flag par semaine
+                    last_hype = c.get('world_boss_last_hype_week', '')
+                    if last_hype == week_start:
+                        continue  # déjà hypé cette semaine
+                    try:
+                        hub_id = int(c.get('hub_channel', 0) or 0)
+                        hub_ch = guild.get_channel(hub_id) if hub_id else None
+                        if hub_ch and await _is_chatty_channel(hub_ch):
+                            ping_str = await _get_event_mention(guild, 'world_boss')
+                            try:
+                                wakeup_line = await _build_wakeup_mention_line_smart(
+                                    guild, 'world_boss', max_count=3,
+                                )
+                            except Exception:
+                                wakeup_line = ""
+                            # Calc target ts (21h ce soir)
+                            target_dt = now_local.replace(hour=21, minute=0, second=0, microsecond=0)
+                            target_ts = int(target_dt.timestamp())
+                            hype_msg = (
+                                f"🌍 ⚠️ **WORLD BOSS HEBDOMADAIRE — DANS 30 MINUTES** ⚠️\n"
+                                + (f"{ping_str}\n" if ping_str else "")
+                                + wakeup_line
+                                + f"\n⏰ Apparition : <t:{target_ts}:R>\n"
+                                f"💪 Préparez votre équipement, votre vocal et votre classe RP !\n"
+                                f"🏆 Top 3 attaquants : récompense légendaire\n"
+                                f"💎 1% chance loot unique pour le top damager\n"
+                                f"⏱️ Durée : **90 minutes** — coordination collective requise\n\n"
+                                f"_Pas envie d'être ping ? `/notifs` pour gérer._"
+                            )
+                            LIFETIME_HYPE = 3600  # 1h (cover 20h30 → 21h30)
+                            try:
+                                hm = await hub_ch.send(
+                                    hype_msg,
+                                    allowed_mentions=discord.AllowedMentions(
+                                        roles=True, users=True, everyone=False,
+                                    ),
+                                    delete_after=LIFETIME_HYPE,
+                                )
+                                try:
+                                    await _register_for_cleanup(hm, LIFETIME_HYPE, 'world_boss_hype')
+                                except Exception:
+                                    pass
+                            except Exception as ex:
+                                print(f"[world_boss pre-hype send] {ex}")
+                            # Marquer hype envoyé cette semaine
+                            await db_set(guild.id, 'world_boss_last_hype_week', week_start)
+                            print(f"[world_boss_scheduler] guild={guild.id} pre-hype 20h30 envoyé")
+                    except Exception as ex:
+                        print(f"[world_boss pre-hype] {ex}")
+                    continue  # skip start cycle for this 20h30 tick
+
+                # 21h : start le World Boss
+                if now_local.hour == 21:
+                    # Pas si un autre event majeur en cours
+                    if await _has_any_major_event_running(guild.id):
+                        continue
+                    result = await _start_world_boss(guild)
+                    if result.get('ok'):
+                        print(f"[world_boss_scheduler] guild={guild.id} lancé à 21h")
             except Exception as ex:
                 print(f"[world_boss_scheduler guild={guild.id}] {ex}")
     except Exception as ex:
@@ -50654,9 +50846,51 @@ class RiddleAnswerView(View):
                             (i.user.id, i.guild.id, day),
                         )
                         await db.commit()
-                        # Reward jackpot 500 🪙
+
+                        # Phase 95 AMPLIFY : Streak system
+                        # Compter combien de jours CONSÉCUTIFS user a gagné (avant aujourd'hui)
+                        streak_count = 1  # aujourd'hui compte
                         try:
-                            await add_coins(i.guild.id, i.user.id, 500)
+                            async with get_db() as db_s:
+                                async with db_s.execute(
+                                    'SELECT day, first_winner_id FROM daily_riddles_log '
+                                    'WHERE guild_id=? AND day<? ORDER BY day DESC LIMIT 30',
+                                    (i.guild.id, day),
+                                ) as cur_s:
+                                    past_rows = await cur_s.fetchall()
+                            # Vérifier streak en remontant chronologiquement
+                            from datetime import date as _date
+                            cur_day = _date.fromisoformat(day)
+                            for past_day, past_winner in past_rows:
+                                if not past_day:
+                                    break
+                                try:
+                                    past_d = _date.fromisoformat(past_day)
+                                except Exception:
+                                    break
+                                # Doit être le jour précédent
+                                if (cur_day - past_d).days != 1:
+                                    break
+                                if past_winner and int(past_winner) == i.user.id:
+                                    streak_count += 1
+                                    cur_day = past_d
+                                else:
+                                    break
+                        except Exception as ex:
+                            print(f"[riddle streak calc] {ex}")
+                            streak_count = 1
+
+                        # Reward base 500 🪙 + bonus streak
+                        base_reward = 500
+                        streak_bonus = 0
+                        if streak_count >= 7:
+                            streak_bonus = 1000  # bonus hebdo
+                        elif streak_count >= 3:
+                            streak_bonus = 300  # bonus mini
+                        total_reward = base_reward + streak_bonus
+
+                        try:
+                            await add_coins(i.guild.id, i.user.id, total_reward)
                         except Exception:
                             pass
                         # Achievement quiz_correct
@@ -50671,11 +50905,26 @@ class RiddleAnswerView(View):
                             )
                         except Exception as ex:
                             print(f"[riddle mission track] {ex}")
+
+                        # Message de victoire avec streak
+                        streak_msg = ""
+                        if streak_count >= 7:
+                            streak_msg = (
+                                f"\n🔥 **STREAK ÉPIQUE ×{streak_count} !** "
+                                f"+`{streak_bonus}` 🪙 bonus hebdo !"
+                            )
+                        elif streak_count >= 3:
+                            streak_msg = (
+                                f"\n🔥 **Streak ×{streak_count}** "
+                                f"(+`{streak_bonus}` 🪙 bonus)"
+                            )
+                        elif streak_count >= 2:
+                            streak_msg = f"\n🔥 Streak ×{streak_count} (continue demain pour +bonus !)"
                         return await _safe_followup(
                             i,
                             content=(
                                 f"🎉 **BRAVO !** Tu es le premier à trouver !\n"
-                                f"💰 **+500** 🪙\n\n"
+                                f"💰 **+{total_reward}** 🪙{streak_msg}\n\n"
                                 f"_Explication :_ {riddle['explanation']}"
                             ),
                         )
