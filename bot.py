@@ -7886,8 +7886,8 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
 
         # ─── 4. Envoyer le message d'arène avec boutons ───
         try:
-            view = BossAttackView(event_id)
-            embed = _build_boss_embed(boss, [], ends_at_dt, guild)
+            # Phase 74 : LayoutView V2 unifié (HP + ATTAQUER + Top + INVENTAIRE)
+            view = BossArenaLayoutV2(boss, [], ends_at_dt, guild, event_id)
             # Phase 39 : ping les rôles de notification
             ping_str = await _get_event_mention(guild, 'boss_raid')
             # Phase 40 : mentions individuelles des inactifs (wake-up ciblé)
@@ -7905,7 +7905,6 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
                     + wakeup_line
                     + "\n_💡 Pas envie d'être ping ? `/notifs` pour choisir précisément quoi recevoir._"
                 ),
-                embed=embed,
                 view=view,
                 allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=False),
             )
@@ -8077,7 +8076,11 @@ async def _setup_arena(guild, event_id: int, arena_name: str):
 
 
 def _build_boss_embed(boss: dict, participants: list[dict], ends_at_dt: datetime, guild) -> discord.Embed:
-    """Construit l'embed du boss avec HP bar + top damagers."""
+    """[LEGACY Phase pré-74] Construit l'embed du boss avec HP bar + top damagers.
+
+    Conservé pour backward compat. Le nouveau message arena utilise
+    BossArenaLayoutV2 (Phase 74).
+    """
     hp = int(boss.get('current_hp', boss.get('max_hp', 1000)))
     max_hp = int(boss.get('max_hp', 1000))
     bar = events2026.hp_bar(hp, max_hp, length=24)
@@ -8117,6 +8120,143 @@ def _build_boss_embed(boss: dict, participants: list[dict], ends_at_dt: datetime
 
     e.set_footer(text=f"{guild.name} · Boss Raid", icon_url=(guild.icon.url if guild.icon else None))
     return e
+
+
+# ───────────────────────────  Phase 74 : BOSS ARENA V2  ───────────────────────
+# LayoutView unifié pour l'arène : HP boss + bouton ATTAQUER accessory + top
+# combattants + bouton INVENTAIRE. Remplace _build_boss_embed + BossAttackView
+# au niveau visuel. Les boutons restent persistants via custom_id event_id.
+# Tous les phase warning messages sont gérés séparément (Phase 66 cleanup).
+
+
+class BossArenaLayoutV2(LayoutView):
+    """Phase 74 : Arena Boss Raid en LayoutView V2.
+
+    Persistant via custom_id basé sur event_id. Re-rendu à chaque update HP /
+    nouveau combattant. Le bouton ATTAQUER est accessory de la section HP
+    (toujours visible en haut, mobile-friendly).
+    """
+
+    def __init__(self, boss: dict, participants: list, ends_at_dt: Optional[datetime],
+                  guild, event_id: int):
+        super().__init__(timeout=None)
+        self.boss = boss
+        self.participants = participants or []
+        self.ends_at_dt = ends_at_dt
+        self.guild = guild
+        self.event_id = event_id
+        self._build()
+
+    def _build(self):
+        boss = self.boss
+        hp = int(boss.get('current_hp', boss.get('max_hp', 1000)))
+        max_hp = int(boss.get('max_hp', 1000))
+        bar = events2026.hp_bar(hp, max_hp, length=24)
+        color = boss.get('color', 0xE74C3C) if hp > 0 else 0x95A5A6
+
+        items = []
+
+        # Header : nom du boss + lore
+        items.append(v2_title(f"⚔️ {boss.get('name', 'Boss')}"))
+        if boss.get('lore'):
+            items.append(v2_subtitle(_escape_md(boss.get('lore', ''), 200)))
+        items.append(v2_divider())
+
+        # Section HP avec bouton ATTAQUER en accessory (TOUJOURS visible)
+        # Phase 74 : custom_id ALIGNÉ avec BossAttackView (boss_attack_X) pour
+        # que la persistence boot existante (bot.add_view BossAttackView) continue
+        # à capter les clics même si le message a été créé avec LayoutView V2.
+        if hp > 0:
+            attack_btn = Button(
+                label="⚔️ ATTAQUER",
+                style=discord.ButtonStyle.danger,
+                custom_id=f"boss_attack_{self.event_id}",
+            )
+            attack_btn.callback = self._on_attack
+            items.append(_section_with_button(
+                "❤️ Points de vie",
+                f"`{bar}` `{hp:,}/{max_hp:,}`",
+                attack_btn,
+            ))
+        else:
+            # Boss vaincu : pas de bouton ATTAQUER
+            items.append(v2_body(
+                f"**❤️ Points de vie**\n`{bar}` `{hp:,}/{max_hp:,}` — 💀 VAINCU"
+            ))
+
+        # Capacités du boss
+        if boss.get('abilities'):
+            items.append(v2_body(
+                f"**Capacités :** {' · '.join(boss.get('abilities', []))}"
+            ))
+
+        # Temps restant + participants count
+        info_line = ""
+        if self.ends_at_dt and hp > 0:
+            info_line += f"⏰ Termine : <t:{int(self.ends_at_dt.timestamp())}:R>"
+        if info_line:
+            info_line += "  ·  "
+        info_line += f"👥 `{len(self.participants)}` combattant(s)"
+        items.append(v2_body(info_line))
+
+        items.append(v2_divider())
+
+        # Top 5 combattants
+        if self.participants:
+            sorted_p = sorted(self.participants, key=lambda p: p.get('damage', 0), reverse=True)[:5]
+            medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+            lines = []
+            for idx, p in enumerate(sorted_p):
+                member = self.guild.get_member(int(p['user_id'])) if self.guild else None
+                name = _escape_md(member.display_name if member else f"User#{p['user_id']}", 60)
+                lines.append(
+                    f"{medals[idx]} **{name}** · `{p['damage']:,}` dégâts "
+                    f"({p.get('attacks', 0)} attaques)"
+                )
+            items.append(v2_body(f"**⚔️ Top combattants**\n" + "\n".join(lines)))
+        else:
+            items.append(v2_body("_⚔️ Aucun combattant encore. Sois le premier à attaquer !_"))
+
+        items.append(v2_divider())
+
+        # Bouton INVENTAIRE en bas (Action Row)
+        # Phase 74 : custom_id ALIGNÉ avec BossAttackView (boss_inv_X) — voir HP section
+        inv_btn = Button(
+            label="🎒 Mon inventaire",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"boss_inv_{self.event_id}",
+        )
+        inv_btn.callback = self._on_inv
+        items.append(discord.ui.ActionRow(inv_btn))
+
+        self.add_item(v2_container(*items, color=color))
+
+    async def _on_attack(self, i: discord.Interaction):
+        """Délègue au handler d'attaque existant (compatibilité totale)."""
+        try:
+            await _handle_boss_attack(i, self.event_id)
+        except Exception as ex:
+            print(f"[BossArenaLayoutV2 _on_attack] {ex}")
+
+    async def _on_inv(self, i: discord.Interaction):
+        """Affiche l'inventaire du joueur (copié de BossAttackView._on_inv)."""
+        try:
+            inv = await _get_or_create_inventory(i.guild.id, i.user.id)
+            w = inv.get('weapon', {})
+            a = inv.get('armor', {})
+            txt = (
+                f"**🎒 Ton équipement :**\n"
+                f"⚔️ Arme : {w.get('emoji', '')} **{w.get('name', '_aucune_')}** · "
+                f"`+{w.get('atk', 0)}` ATK · _{w.get('rarity', '—')}_\n"
+                f"🛡️ Armure : {a.get('emoji', '')} **{a.get('name', '_aucune_')}** · "
+                f"`+{a.get('def', 0)}` DEF · _{a.get('rarity', '—')}_\n"
+                f"❤️ PV : `{inv.get('hp', 100)}/{inv.get('max_hp', 100)}`\n"
+                f"💀 Kills : `{inv.get('kills', 0)}` · "
+                f"Total dégâts : `{inv.get('total_damage', 0)}`"
+            )
+            await i.response.send_message(txt, ephemeral=True)
+        except Exception as ex:
+            print(f"[BossArenaLayoutV2 _on_inv] {ex}")
 
 
 # ─────────────────────────── BOUTON ATTAQUE ───────────────────────────
@@ -8545,8 +8685,19 @@ async def _refresh_boss_message(guild, event_id: int):
         except Exception:
             return
 
-        e = _build_boss_embed(boss, parts, ends_at_dt, guild)
-        await msg.edit(embed=e)
+        # Phase 74 : edit avec le LayoutView V2 (HP + ATTAQUER + Top combattants)
+        new_view = BossArenaLayoutV2(boss, parts, ends_at_dt, guild, event_id)
+        try:
+            await msg.edit(view=new_view)
+        except discord.HTTPException as ex:
+            # Si l'edit V2 échoue (ex: ancien message créé avec embed avant Phase 74),
+            # fallback en edit embed pour ne pas casser l'event en cours
+            print(f"[_refresh_boss_message V2 edit failed, fallback to embed] {ex}")
+            e = _build_boss_embed(boss, parts, ends_at_dt, guild)
+            try:
+                await msg.edit(embed=e)
+            except Exception as ex2:
+                print(f"[_refresh_boss_message fallback failed] {ex2}")
     except Exception as ex:
         print(f"[_refresh_boss_message] {ex}")
 
