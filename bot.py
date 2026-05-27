@@ -40073,6 +40073,8 @@ async def birthday_list(i: discord.Interaction):
 
 
 bot.tree.add_command(birthday_group)
+# Phase 119 : /mod et /bank groups enregistrés après leur définition
+# (cherche `bot.tree.add_command(mod_group)` plus bas dans le fichier).
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -43162,7 +43164,27 @@ def _format_warn_id(infraction_id: int, created_dt=None) -> str:
     return f"W-{date_str}-{infraction_id:04d}"
 
 
-@bot.tree.command(name="warn", description="⚠️ Avertir un membre (crée une fiche, aucun rôle attribué)")
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 119 — GROUPES CONSOLIDÉS (réduction CommandLimitReached)
+# ═══════════════════════════════════════════════════════════════════════════════
+# /mod        — modération (warn, mute, direction, infractions, ticketblacklist)
+# /bank       — banque (deposit, withdraw, status)
+#
+# Économise 10 commandes globales (8 mod + 3 bank → 2 groups + ping retiré).
+# Ces groupes apparaissent comme `/mod warn`, `/bank deposit`, etc.
+
+mod_group = app_commands.Group(
+    name="mod",
+    description="🛡️ Outils de modération (warn, mute, direction, infractions…)",
+)
+
+bank_group = app_commands.Group(
+    name="bank",
+    description="🏦 Banque — dépôts/retraits avec intérêts 1%/jour",
+)
+
+
+@mod_group.command(name="warn", description="⚠️ Avertir un membre (crée une fiche, aucun rôle attribué)")
 @app_commands.describe(membre="Le membre à avertir", raison="La raison de l'avertissement")
 async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
     if not await check_mod_perm(i, 'mod_warn_role'):
@@ -43224,7 +43246,7 @@ async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
         extra=f"Fiche {warn_id_str} · Total warns: {warn_count}",
     )
 
-@bot.tree.command(name="unwarn", description="✅ Supprimer un avertissement d'un membre")
+@mod_group.command(name="unwarn", description="✅ Supprimer un avertissement d'un membre")
 @app_commands.describe(membre="Le membre dont vous voulez supprimer un warn")
 async def unwarn_cmd(i: discord.Interaction, membre: discord.Member):
     if not await check_mod_perm(i, 'mod_warn_role'):
@@ -43299,7 +43321,7 @@ class UnwarnSelect(Select):
 #                              🔇 MUTE / UNMUTE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="mute", description="🔇 Timeout un membre")
+@mod_group.command(name="mute", description="🔇 Timeout un membre")
 @app_commands.describe(membre="Le membre à mute", duree="La durée (nombre)", unite="L'unité de temps", raison="La raison du mute")
 @app_commands.choices(unite=[
     app_commands.Choice(name="Minutes", value="minutes"),
@@ -43369,7 +43391,7 @@ async def mute_cmd(i: discord.Interaction, membre: discord.Member, duree: int, u
     # Log
     await send_mod_log(i.guild, 'mute', i.user, membre, raison, duration=dur_txt)
 
-@bot.tree.command(name="unmute", description="🔊 Retirer le mute d'un membre")
+@mod_group.command(name="unmute", description="🔊 Retirer le mute d'un membre")
 @app_commands.describe(membre="Le membre à unmute", raison="La raison du unmute (optionnel)")
 async def unmute_cmd(i: discord.Interaction, membre: discord.Member, raison: str = "Aucune raison"):
     if not await check_mod_perm(i, 'mod_mute_role'):
@@ -43400,7 +43422,7 @@ async def unmute_cmd(i: discord.Interaction, membre: discord.Member, raison: str
 #                              🔒 RESTRICT / UNRESTRICT
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="direction", description="🔒 Restreindre complètement un membre (mute + retrait rôles)")
+@mod_group.command(name="direction", description="🔒 Restreindre complètement un membre (mute + retrait rôles)")
 @app_commands.describe(
     membre="Le membre à restreindre",
     duree="Durée en minutes (0 = permanent)",
@@ -43502,7 +43524,7 @@ async def direction_cmd(i: discord.Interaction, membre: discord.Member, duree: i
     await send_mod_log(i.guild, 'direction', i.user, membre, raison)
 
 
-@bot.tree.command(name="undirection", description="🔓 Retirer la restriction d'un membre (restaurer rôles)")
+@mod_group.command(name="undirection", description="🔓 Retirer la restriction d'un membre (restaurer rôles)")
 @app_commands.describe(
     membre="Le membre à libérer",
     raison="Raison de la levée de restriction"
@@ -43575,7 +43597,7 @@ async def undirection_cmd(i: discord.Interaction, membre: discord.Member, raison
 #                              📋 INFRACTIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="infractions", description="📋 Voir la fiche d'infractions d'un membre")
+@mod_group.command(name="infractions", description="📋 Voir la fiche d'infractions d'un membre")
 @app_commands.describe(membre="Le membre dont vous voulez voir la fiche")
 async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
     if not await check_mod_perm(i, 'mod_infractions_role'):
@@ -43696,7 +43718,7 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
 #                        🚫 TICKET BLACKLIST COMMAND
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="ticketblacklist", description="🚫 Gérer la blacklist des tickets")
+@mod_group.command(name="ticketblacklist", description="🚫 Gérer la blacklist des tickets")
 @app_commands.describe(
     action="Ajouter ou retirer de la blacklist",
     membre="Le membre à blacklister/déblacklister",
@@ -43839,6 +43861,11 @@ async def ticketblacklist_cmd(
         e.add_field(name="👮 Par", value=i.user.mention, inline=True)
         
         await i.response.send_message(embed=e)
+
+
+# Phase 119 : enregistrer /mod après toutes ses subcommands
+bot.tree.add_command(mod_group)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              🎭 RELLSEAS COMMAND
@@ -50414,7 +50441,11 @@ slashcmds2026.setup_all_commands(bot)
 
 
 # ─── Phase 3.0g : commande /ping minimale pour tester la liveness ───
-@bot.tree.command(name="ping", description="🏓 Test simple : le bot repond ?")
+# Phase 119 : /ping retiré (consolidation) — utiliser /admin pour status bot.
+async def _phase119_ping_unused_marker_(_):  # pragma: no cover
+    pass
+# Le décorateur ci-dessous était :
+# @bot.tree.command(name="ping", description="🏓 Test simple : le bot repond ?")
 async def _2026_ping_cmd(i: discord.Interaction):
     """Reponse instantanee pour confirmer que le bot est en vie.
     Aucune dependance, aucune DB - si /ping marche, le bot tourne."""
@@ -67537,8 +67568,8 @@ async def heist_start_cmd(
 # ─── BANQUE AVEC INTÉRÊTS ───────────────────────────────────────────────────
 
 
-@bot.tree.command(
-    name="bank_deposit",
+@bank_group.command(
+    name="deposit",
     description="🏦 Déposer des coins à la banque (1%/jour d'intérêts, max 30j)",
 )
 @app_commands.describe(montant="Coins à déposer (min 100)")
@@ -67585,8 +67616,8 @@ async def bank_deposit_cmd(i: discord.Interaction, montant: int):
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-@bot.tree.command(
-    name="bank_withdraw",
+@bank_group.command(
+    name="withdraw",
     description="🏦 Retirer un dépôt de la banque (calcul intérêts auto)",
 )
 @app_commands.describe(deposit_id="ID du dépôt à retirer")
@@ -67642,8 +67673,8 @@ async def bank_withdraw_cmd(i: discord.Interaction, deposit_id: int):
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-@bot.tree.command(
-    name="bank_status",
+@bank_group.command(
+    name="status",
     description="🏦 Voir tes dépôts actifs et leurs intérêts cumulés",
 )
 async def bank_status_cmd(i: discord.Interaction):
@@ -67692,6 +67723,10 @@ async def bank_status_cmd(i: discord.Interaction):
         await _safe_followup(i, embed=e)
     except Exception as ex:
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# Phase 119 : enregistrer /bank après toutes ses subcommands
+bot.tree.add_command(bank_group)
 
 
 # ─── LOOTS UNIQUES (drop random pendant events) ──────────────────────────────
