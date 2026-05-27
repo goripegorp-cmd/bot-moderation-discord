@@ -49585,47 +49585,99 @@ async def _p41_open_daily(i: discord.Interaction):
         cur_streak = int(streak_row[0]) if streak_row else 0
         best_streak = int(streak_row[1]) if streak_row else 0
 
-        e = discord.Embed(
-            title=f"📜 Quêtes journalières — {_today_str_p41()}",
-            description=(
-                f"🔥 **Streak actuel :** `{cur_streak}` jour{'s' if cur_streak != 1 else ''} "
-                f"· Record : `{best_streak}`\n"
-                f"_Termine au moins 1 quête par jour pour faire grimper ton streak._"
-            ),
-            color=0x5865F2,
-        )
+        # Phase 100 AMPLIFY : LayoutView V2 magnifique avec boutons intégrés
+        # Pattern Phase 88 : buttons INDÉPENDANTS, callbacks via delegate fresh instance
+        completed_count = sum(1 for q in quests if q['completed'])
+        total_reward_coins = sum(q['reward_coins'] for q in quests if q['completed'] and not q['claimed'])
+        total_reward_xp = sum(q['reward_xp'] for q in quests if q['completed'] and not q['claimed'])
 
-        completed_count = 0
-        total_reward_coins = 0
-        for q in quests:
-            status_icon = "✅" if q['claimed'] else ("🎁" if q['completed'] else "⏳")
-            diff_emoji = {'easy': '🟢', 'medium': '🟡', 'hard': '🔴'}.get(q['difficulty'], '⚪')
-            progress_bar = _make_progress_bar(q['progress'], q['target'])
-            field_val = (
-                f"{q['description']}\n"
-                f"{progress_bar} `{q['progress']}/{q['target']}`\n"
-                f"🪙 `{q['reward_coins']}` · ⭐ `{q['reward_xp']}` XP"
-            )
-            e.add_field(
-                name=f"{status_icon} {diff_emoji} {q['emoji']} {q['title']}",
-                value=field_val,
-                inline=False,
-            )
-            if q['completed'] and not q['claimed']:
-                total_reward_coins += q['reward_coins']
-            if q['completed']:
-                completed_count += 1
+        _today = _today_str_p41()
+        _quests_total = len(quests)
+        _g_id = i.guild.id
+        _u_id = i.user.id
 
-        if total_reward_coins > 0:
-            e.add_field(
-                name="🎁 À réclamer",
-                value=f"**{total_reward_coins}** 🪙 en attente !",
-                inline=False,
-            )
-        e.set_footer(text=f"Reset à minuit (Europe/Paris) · {completed_count}/{len(quests)} terminée(s)")
-        await _safe_followup(i, embed=e, view=DailyQuestView(i.guild.id, i.user.id))
+        class _DailyQuestsLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=300)
+                items = []
+                items.append(v2_title(f"📜  QUÊTES JOURNALIÈRES  ·  {_today}"))
+                items.append(v2_subtitle(
+                    f"🔥 Streak `{cur_streak}` jour(s) · Record `{best_streak}`"
+                ))
+                items.append(v2_divider())
+
+                # ─── Groupe : Quêtes en cours ───
+                items.append(v2_body(f"**╔═══ 📋  QUÊTES ({completed_count}/{_quests_total})  ═══╗**"))
+                for q in quests:
+                    status_icon = "✅" if q['claimed'] else ("🎁" if q['completed'] else "⏳")
+                    diff_emoji = {'easy': '🟢', 'medium': '🟡', 'hard': '🔴'}.get(q['difficulty'], '⚪')
+                    progress_bar = _make_progress_bar(q['progress'], q['target'])
+                    items.append(v2_body(
+                        f"{status_icon} {diff_emoji} {q['emoji']} **{q['title']}**\n"
+                        f"_{q['description']}_\n"
+                        f"{progress_bar} `{q['progress']}/{q['target']}`  ·  "
+                        f"🪙 `{q['reward_coins']}`  ·  ⭐ `{q['reward_xp']}` XP"
+                    ))
+
+                items.append(v2_divider())
+
+                # ─── Groupe : À réclamer ───
+                if total_reward_coins > 0:
+                    items.append(v2_body("**╔═══ 🎁  À RÉCLAMER  ═══╗**"))
+                    items.append(v2_body(
+                        f"💰 **{total_reward_coins}** 🪙 en attente\n"
+                        f"⭐ **{total_reward_xp}** XP en attente"
+                    ))
+                    items.append(v2_divider())
+
+                # ─── Streak motivation ───
+                if cur_streak >= 7:
+                    streak_msg = f"🌟 Streak épique **{cur_streak}** jours ! Continue !"
+                elif cur_streak >= 3:
+                    streak_msg = f"🔥 Bonne lancée — **{cur_streak}** jours consécutifs"
+                else:
+                    streak_msg = "_💡 Termine 1 quête par jour pour construire ton streak._"
+                items.append(v2_body(streak_msg))
+
+                items.append(v2_divider())
+
+                # ─── Action buttons indépendants avec callbacks delegate ───
+                claim_btn = Button(
+                    label="🎁 Réclamer mes récompenses",
+                    style=discord.ButtonStyle.success,
+                )
+                async def _claim_delegate(inter):
+                    try:
+                        dq = DailyQuestView(_g_id, _u_id)
+                        await dq._on_claim(inter)
+                    except Exception as ex:
+                        print(f"[claim_delegate] {ex}")
+                claim_btn.callback = _claim_delegate
+
+                wheel_btn = Button(
+                    label="🎰 Spin Daily Wheel",
+                    style=discord.ButtonStyle.primary,
+                )
+                async def _wheel_delegate(inter):
+                    try:
+                        dq = DailyQuestView(_g_id, _u_id)
+                        await dq._on_wheel(inter)
+                    except Exception as ex:
+                        print(f"[wheel_delegate] {ex}")
+                wheel_btn.callback = _wheel_delegate
+
+                items.append(discord.ui.ActionRow(claim_btn, wheel_btn))
+
+                items.append(v2_body(
+                    f"_⏱️ Reset à minuit (Europe/Paris) · "
+                    f"{completed_count}/{_quests_total} quête(s) terminée(s)_"
+                ))
+
+                self.add_item(v2_container(*items, color=0x5865F2))
+
+        await _safe_followup(i, view=_DailyQuestsLayout())
     except Exception as ex:
-        print(f"[_p41_open_daily] {ex}")
+        print(f"[_p41_open_daily V2] {ex}")
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
