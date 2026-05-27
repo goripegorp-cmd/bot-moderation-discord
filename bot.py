@@ -84,6 +84,8 @@ import economy_events as econ_events_module
 import progression_milestones as prog_module
 # Phase 134 : wiki + roadmap + weekly highlights
 import community_hub as cmty_hub_module
+# Phase 135 : coffre d'alliance + stats de gestion
+import alliance_vault as av_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -37884,6 +37886,18 @@ async def on_ready():
             cmty_hub_module.weekly_highlights_task.start()
     except Exception as ex:
         print(f"[on_ready cmty_hub setup] {ex}")
+    # Phase 135 : Coffre d'alliance + stats de gestion
+    try:
+        av_module.setup(
+            get_db,
+            {
+                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
+                'v2_divider': v2_divider, 'v2_container': v2_container,
+                'LayoutView': LayoutView,
+            },
+        )
+    except Exception as ex:
+        print(f"[on_ready av_module setup] {ex}")
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()
@@ -38599,6 +38613,93 @@ async def community_highlights(i: discord.Interaction):
 
 
 bot.tree.add_command(community_group)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 135 : /vault — coffre d'alliance (overview / audit / contribs)
+# ═══════════════════════════════════════════════════════════════════════════════
+vault_group = app_commands.Group(
+    name="vault",
+    description="🏰 Coffre d'alliance : trésor, items, audit, contributeurs",
+)
+
+
+async def _vault_resolve_alliance(i: discord.Interaction) -> Optional[dict]:
+    """Récupère l'alliance du user, ou None + envoie une erreur."""
+    if not i.guild or not isinstance(i.user, discord.Member):
+        await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+        return None
+    alliance = await av_module.get_user_alliance(i.guild.id, i.user.id)
+    if not alliance:
+        await i.response.send_message(
+            "❌ Tu n'es membre d'aucune alliance.\n"
+            "_Rejoins-en une depuis le hub d'engagement._",
+            ephemeral=True,
+        )
+        return None
+    return alliance
+
+
+@vault_group.command(name="show", description="🏰 Voir le coffre de ton alliance")
+async def vault_show(i: discord.Interaction):
+    alliance = await _vault_resolve_alliance(i)
+    if not alliance:
+        return
+    try:
+        view = await av_module.build_vault_panel(alliance)
+        if view is None:
+            return await i.response.send_message(
+                "❌ Module indisponible.", ephemeral=True
+            )
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[vault_show] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+@vault_group.command(
+    name="audit", description="📜 Voir l'historique d'actions de l'alliance"
+)
+@app_commands.describe(lignes="Nombre de lignes à afficher (5-50, défaut 15)")
+async def vault_audit(i: discord.Interaction, lignes: int = 15):
+    alliance = await _vault_resolve_alliance(i)
+    if not alliance:
+        return
+    try:
+        limit = max(5, min(50, int(lignes or 15)))
+        view = await av_module.build_audit_panel(alliance, limit=limit)
+        if view is None:
+            return await i.response.send_message(
+                "❌ Module indisponible.", ephemeral=True
+            )
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[vault_audit] {ex}")
+
+
+@vault_group.command(
+    name="contribs", description="🏆 Voir le leaderboard des contributeurs"
+)
+async def vault_contribs(i: discord.Interaction):
+    alliance = await _vault_resolve_alliance(i)
+    if not alliance:
+        return
+    try:
+        view = await av_module.build_contribs_panel(alliance)
+        if view is None:
+            return await i.response.send_message(
+                "❌ Module indisponible.", ephemeral=True
+            )
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[vault_contribs] {ex}")
+
+
+bot.tree.add_command(vault_group)
 
 
 @bot.event
