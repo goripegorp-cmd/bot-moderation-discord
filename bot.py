@@ -12380,6 +12380,7 @@ async def _drop_mystery_box(guild) -> bool:
             'gear': box.get('gear'),
             'opened_by': [],
             'guild_id': guild.id,  # Phase 69 : anti-doublon check
+            'channel_id': ch.id,   # Phase 89 : stale cleanup
         }
 
         # Auto-cleanup state dict après 5 min (le message est supprimé par delete_after)
@@ -12449,6 +12450,241 @@ async def event_timeout_checker():
                 await _end_active_event(guild, victory=False, reason="⏰ Temps écoulé — le boss s'enfuit.")
     except Exception as ex:
         print(f"[event_timeout_checker] {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 89 — STALE EVENT CLEANUP
+#  Détecte les events dont le message a été supprimé manuellement (souris user)
+#  et nettoie l'état du bot. Sinon l'anti-doublon Phase 69 bloque les nouveaux
+#  spawns indéfiniment ("plus aucun event n'apparaît").
+# ═══════════════════════════════════════════════════════════════════════════════
+@tasks.loop(minutes=3)
+async def stale_event_cleanup():
+    """Phase 89 : pour chaque event actif (DB + in-memory), tente de fetch le
+    message. Si NotFound → suppression manuelle détectée → cleanup state.
+
+    Couverture :
+    - DB events (Boss Raid + Treasure + Quiz) → arena_message_id
+    - DB world_bosses → arena_message_id
+    - DB flash_treasures → message_id
+    - _mystery_boxes dict (in-mem) → msg.id + channel_id
+    - _gn_event_state dict (in-mem) → msg.id + channel_id
+    """
+    try:
+        # ─── 1. DB events (Boss Raid + Treasure + Quiz) ────────────────────
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT id, guild_id, arena_channel_id, arena_message_id, event_type '
+                    'FROM events WHERE ended=0 AND arena_message_id IS NOT NULL'
+                ) as cur:
+                    rows = await cur.fetchall()
+            for event_id, guild_id, ch_id, msg_id, etype in rows:
+                try:
+                    guild = bot.get_guild(int(guild_id))
+                    if not guild:
+                        async with get_db() as db:
+                            await db.execute('UPDATE events SET ended=1 WHERE id=?', (event_id,))
+                            await db.commit()
+                        continue
+                    ch = guild.get_channel(int(ch_id)) if ch_id else None
+                    if not ch:
+                        async with get_db() as db:
+                            await db.execute('UPDATE events SET ended=1 WHERE id=?', (event_id,))
+                            await db.commit()
+                        continue
+                    try:
+                        await ch.fetch_message(int(msg_id))
+                    except discord.NotFound:
+                        print(f"[stale_cleanup] event {event_id} ({etype}) msg supprimé → end")
+                        try:
+                            await _end_active_event(
+                                guild, victory=False,
+                                reason="🗑️ Event terminé (message supprimé manuellement)",
+                            )
+                        except Exception as ex:
+                            print(f"[stale_cleanup _end_active_event] {ex}")
+                            # Fallback : mark ended in DB directly
+                            async with get_db() as db:
+                                await db.execute(
+                                    'UPDATE events SET ended=1 WHERE id=?', (event_id,),
+                                )
+                                await db.commit()
+                    except discord.Forbidden:
+                        pass  # Pas la perm de fetch → laisser tel quel
+                    except Exception:
+                        pass
+                except Exception as ex:
+                    print(f"[stale_cleanup events row={event_id}] {ex}")
+        except Exception as ex:
+            print(f"[stale_cleanup events block] {ex}")
+
+        # ─── 2. DB world_bosses ────────────────────────────────────────────
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT id, guild_id, arena_channel_id, arena_message_id '
+                    'FROM world_bosses WHERE ended=0 AND arena_message_id IS NOT NULL'
+                ) as cur:
+                    rows = await cur.fetchall()
+            for wb_id, guild_id, ch_id, msg_id in rows:
+                try:
+                    guild = bot.get_guild(int(guild_id))
+                    if not guild:
+                        async with get_db() as db:
+                            await db.execute('UPDATE world_bosses SET ended=1 WHERE id=?', (wb_id,))
+                            await db.commit()
+                        continue
+                    ch = guild.get_channel(int(ch_id)) if ch_id else None
+                    if not ch:
+                        async with get_db() as db:
+                            await db.execute('UPDATE world_bosses SET ended=1 WHERE id=?', (wb_id,))
+                            await db.commit()
+                        continue
+                    try:
+                        await ch.fetch_message(int(msg_id))
+                    except discord.NotFound:
+                        print(f"[stale_cleanup] world_boss {wb_id} msg supprimé → end")
+                        try:
+                            await _end_world_boss(
+                                guild, wb_id, victory=False,
+                                reason="🗑️ World Boss terminé (message supprimé)",
+                            )
+                        except Exception:
+                            async with get_db() as db:
+                                await db.execute(
+                                    'UPDATE world_bosses SET ended=1 WHERE id=?', (wb_id,),
+                                )
+                                await db.commit()
+                    except discord.Forbidden:
+                        pass
+                    except Exception:
+                        pass
+                except Exception as ex:
+                    print(f"[stale_cleanup wb row={wb_id}] {ex}")
+        except Exception as ex:
+            print(f"[stale_cleanup wb block] {ex}")
+
+        # ─── 3. DB flash_treasures ─────────────────────────────────────────
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT id, guild_id, channel_id, message_id '
+                    'FROM flash_treasures WHERE ended=0'
+                ) as cur:
+                    rows = await cur.fetchall()
+            for ft_id, guild_id, ch_id, msg_id in rows:
+                try:
+                    guild = bot.get_guild(int(guild_id))
+                    if not guild:
+                        async with get_db() as db:
+                            await db.execute(
+                                'UPDATE flash_treasures SET ended=1 WHERE id=?', (ft_id,),
+                            )
+                            await db.commit()
+                        continue
+                    ch = guild.get_channel(int(ch_id)) if ch_id else None
+                    if not ch:
+                        async with get_db() as db:
+                            await db.execute(
+                                'UPDATE flash_treasures SET ended=1 WHERE id=?', (ft_id,),
+                            )
+                            await db.commit()
+                        continue
+                    try:
+                        await ch.fetch_message(int(msg_id))
+                    except discord.NotFound:
+                        print(f"[stale_cleanup] flash_treasure {ft_id} msg supprimé → end")
+                        async with get_db() as db:
+                            await db.execute(
+                                'UPDATE flash_treasures SET ended=1 WHERE id=?', (ft_id,),
+                            )
+                            await db.commit()
+                    except discord.Forbidden:
+                        pass
+                    except Exception:
+                        pass
+                except Exception as ex:
+                    print(f"[stale_cleanup ft row={ft_id}] {ex}")
+        except Exception as ex:
+            print(f"[stale_cleanup ft block] {ex}")
+
+        # ─── 4. _mystery_boxes dict (in-memory) ───────────────────────────
+        try:
+            for msg_id in list(_mystery_boxes.keys()):
+                try:
+                    box = _mystery_boxes.get(msg_id)
+                    if not box:
+                        continue
+                    guild_id = box.get('guild_id')
+                    ch_id = box.get('channel_id')
+                    if not guild_id:
+                        _mystery_boxes.pop(msg_id, None)
+                        continue
+                    guild = bot.get_guild(int(guild_id))
+                    if not guild:
+                        _mystery_boxes.pop(msg_id, None)
+                        continue
+                    ch = guild.get_channel(int(ch_id)) if ch_id else None
+                    if not ch:
+                        _mystery_boxes.pop(msg_id, None)
+                        continue
+                    try:
+                        await ch.fetch_message(int(msg_id))
+                    except discord.NotFound:
+                        print(f"[stale_cleanup] mystery_box msg={msg_id} supprimé → pop")
+                        _mystery_boxes.pop(msg_id, None)
+                    except discord.Forbidden:
+                        pass
+                    except Exception:
+                        pass
+                except Exception as ex:
+                    print(f"[stale_cleanup mbox msg={msg_id}] {ex}")
+        except Exception as ex:
+            print(f"[stale_cleanup mbox block] {ex}")
+
+        # ─── 5. _gn_event_state dict (in-memory) ──────────────────────────
+        try:
+            for msg_id in list(_gn_event_state.keys()):
+                try:
+                    state = _gn_event_state.get(msg_id)
+                    if not state:
+                        continue
+                    ch_id = state.get('channel_id') or 0
+                    if not ch_id:
+                        # Pas de channel_id stocké → impossible de vérifier
+                        # On laisse tel quel (les game night events ont leur propre cleanup)
+                        continue
+                    channel = None
+                    for g in bot.guilds:
+                        c = g.get_channel(int(ch_id))
+                        if c:
+                            channel = c
+                            break
+                    if not channel:
+                        _gn_event_state.pop(msg_id, None)
+                        continue
+                    try:
+                        await channel.fetch_message(int(msg_id))
+                    except discord.NotFound:
+                        print(f"[stale_cleanup] gn_event msg={msg_id} supprimé → pop")
+                        _gn_event_state.pop(msg_id, None)
+                    except discord.Forbidden:
+                        pass
+                    except Exception:
+                        pass
+                except Exception as ex:
+                    print(f"[stale_cleanup gn msg={msg_id}] {ex}")
+        except Exception as ex:
+            print(f"[stale_cleanup gn block] {ex}")
+
+    except Exception as ex:
+        print(f"[stale_event_cleanup] {ex}")
+
+
+@stale_event_cleanup.before_loop
+async def _stale_event_cleanup_wait():
+    await bot.wait_until_ready()
 
 
 @tasks.loop(hours=1)
@@ -36374,6 +36610,9 @@ async def on_ready():
         event_timeout_checker.start()
     if not event_auto_scheduler.is_running():
         event_auto_scheduler.start()
+    # Phase 89 : stale event cleanup (events supprimés manuellement)
+    if not stale_event_cleanup.is_running():
+        stale_event_cleanup.start()
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()
@@ -54661,6 +54900,7 @@ async def _post_game_night_prompt(gn_id: int):
                 _gn_event_state[msg.id] = {
                     'kind': 'speed_click',
                     'gn_id': gn_id,
+                    'channel_id': tc.id,  # Phase 89 : stale cleanup
                     'title': ev['title'],
                     'reward': ev['reward_coins'],
                     'winner': None,
@@ -54714,6 +54954,7 @@ async def _post_game_night_prompt(gn_id: int):
                 _gn_event_state[msg.id] = {
                     'kind': 'threshold_click',
                     'gn_id': gn_id,
+                    'channel_id': tc.id,  # Phase 89 : stale cleanup
                     'title': ev['title'],
                     'original_desc': ev['description'],
                     'threshold': ev['threshold'],
