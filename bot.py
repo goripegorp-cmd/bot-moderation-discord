@@ -40846,6 +40846,20 @@ async def event_cmd(i: discord.Interaction):
                     custom_id=None if ch else f"phase122_event_noarena_{i.user.id}",
                 )
 
+        # Phase 128 : callback de refresh — rappelle event_cmd avec nouvelle interaction
+        async def _refresh_event(btn_i: discord.Interaction):
+            try:
+                await event_cmd.callback(btn_i)
+            except Exception as ex:
+                print(f"[event refresh] {ex}")
+                try:
+                    if not btn_i.response.is_done():
+                        await btn_i.response.send_message(
+                            f"❌ Erreur refresh : `{ex}`", ephemeral=True
+                        )
+                except Exception:
+                    pass
+
         class _EventActiveLayout(LayoutView):
             def __init__(self):
                 super().__init__(timeout=300)
@@ -40869,6 +40883,16 @@ async def event_cmd(i: discord.Interaction):
                         f"L'arène est dans {ch.mention if ch else '_introuvable_'}"
                     ),
                     accessory=_GotoArenaBtn(),
+                ))
+
+                # Phase 128 : section refresh pour update HP boss en live
+                items.append(v2_section(
+                    v2_title("🔄  Actualiser HP du boss"),
+                    v2_subtitle("Recharge les données — utile entre 2 attaques"),
+                    accessory=panels_h.make_refresh_button(
+                        i.user.id, _refresh_event, label="🔄 Actualiser",
+                        custom_id_prefix="phase128_event_refresh",
+                    ),
                 ))
 
                 items.append(v2_divider())
@@ -41228,6 +41252,30 @@ async def inventory_cmd(i: discord.Interaction):
                     v2_subtitle("Propose un swap d'équipement à un autre joueur"),
                     accessory=_SwapBtn(),
                 ))
+
+                # Phase 128 : Refresh — re-charge stats/durabilité après combat
+                async def _refresh_inv(btn_i: discord.Interaction):
+                    try:
+                        await inventory_cmd.callback(btn_i)
+                    except Exception as ex:
+                        print(f"[inventory refresh] {ex}")
+                        try:
+                            if not btn_i.response.is_done():
+                                await btn_i.response.send_message(
+                                    f"❌ Erreur : `{ex}`", ephemeral=True
+                                )
+                        except Exception:
+                            pass
+
+                items.append(v2_section(
+                    v2_title("🔄  Actualiser"),
+                    v2_subtitle("Recharge équipement + stats (après combat ou réparation)"),
+                    accessory=panels_h.make_refresh_button(
+                        _owner_id, _refresh_inv,
+                        custom_id_prefix="phase128_inv_refresh",
+                    ),
+                ))
+
                 items.append(v2_divider())
 
                 # ─── FOOTER ───
