@@ -8945,6 +8945,54 @@ async def _end_active_event(guild, *, victory: bool, reason: str = ""):
             except Exception:
                 pass
 
+        # Phase 93 AMPLIFY : broadcast public dans le hub channel
+        # (l'arène est supprimée, donc les non-participants ne verraient rien sinon)
+        try:
+            hub_id = int(c.get('hub_channel', 0) or 0)
+            hub_ch = guild.get_channel(hub_id) if hub_id else None
+            if hub_ch and await _is_chatty_channel(hub_ch) and (not log_ch or hub_ch.id != log_ch.id):
+                # Recap court orienté "broadcast" pour le hub
+                top_killer_line = ""
+                if victory and participants:
+                    sorted_p = sorted(participants, key=lambda p: p.get('damage', 0), reverse=True)
+                    if sorted_p:
+                        top_member = guild.get_member(int(sorted_p[0]['user_id']))
+                        if top_member:
+                            top_killer_line = (
+                                f"\n🥇 **Top damage** : {top_member.mention} "
+                                f"(`{sorted_p[0]['damage']:,}` dégâts)"
+                            )
+                broadcast_desc = (
+                    f"{recap_title}\n"
+                    f"👥 **{len(participants)} combattant(s)** · "
+                    f"💥 **{sum(p['damage'] for p in participants):,} dégâts** au total"
+                    + top_killer_line
+                )
+                broadcast_e = discord.Embed(
+                    description=broadcast_desc[:2000],
+                    color=0x2ECC71 if victory else 0x95A5A6,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                broadcast_e.set_author(
+                    name="⚔️ Boss Raid terminé",
+                    icon_url=(guild.icon.url if guild.icon else None),
+                )
+                LIFETIME_BROADCAST = 6 * 3600
+                try:
+                    bm = await hub_ch.send(
+                        embed=broadcast_e,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                        delete_after=LIFETIME_BROADCAST,
+                    )
+                    try:
+                        await _register_for_cleanup(bm, LIFETIME_BROADCAST, 'boss_raid_broadcast')
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+        except Exception as ex:
+            print(f"[boss_raid hub broadcast] {ex}")
+
         # ─── Phase 31 : Difficulté progressive ───
         try:
             duration_used_sec = None
@@ -50451,6 +50499,36 @@ async def _apply_voice_chaos(guild) -> bool:
 
             asyncio.create_task(_revert())
             print(f"[VOICE CHAOS] guild={guild.id} vc={vc.id} action={action['id']} -> {new_name}")
+
+            # Phase 93 AMPLIFY : annonce dans le hub channel pour que tout le monde voie
+            # le chaos (les users hors vocal ne comprennent pas pourquoi le nom a changé sinon)
+            try:
+                hub_id = int(c.get('hub_channel', 0) or 0)
+                hub_ch = guild.get_channel(hub_id) if hub_id else None
+                if hub_ch and await _is_chatty_channel(hub_ch):
+                    minutes_left = max(1, duration // 60)
+                    chaos_msg = (
+                        f"🎭 **Voice Chaos !**\n"
+                        f"_{action.get('name', 'Effet mystère')}_\n\n"
+                        f"📍 Vocal touché : `{original_name}` → `{new_name}`\n"
+                        f"⏱️ Revient à la normale dans **{minutes_left} min**\n"
+                        f"_Restez dans le vocal pour voir l'effet !_"
+                    )
+                    try:
+                        announce_msg = await hub_ch.send(
+                            chaos_msg,
+                            allowed_mentions=discord.AllowedMentions.none(),
+                            delete_after=duration + 60,
+                        )
+                        try:
+                            await _register_for_cleanup(announce_msg, duration + 60, 'voice_chaos')
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+            except Exception as ex:
+                print(f"[voice_chaos hub announce] {ex}")
+
             return True
 
         # 'shuffle' kind : non implémenté pour éviter de déranger
