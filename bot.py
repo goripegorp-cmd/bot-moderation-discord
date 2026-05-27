@@ -64503,21 +64503,45 @@ async def game_stats_set_cmd(i: discord.Interaction, game_id: str,
                 (i.guild.id, game_id),
             ) as cur:
                 row = await cur.fetchone()
-        e = discord.Embed(
-            title=f"📊 Stats live — {game_name}",
-            description=(
-                f"🟢 **Joueurs en ligne :** `{players_online}`\n"
-                f"👁️ **Visites totales :** `{visits_total:,}`\n"
-                f"⭐ **Favorites :** `{favorites:,}`\n\n"
-                + (f"🔗 [Jouer maintenant](https://www.roblox.com/games/{game['place_id']})\n" if game and game.get("place_id") else "")
-                + f"_Dernière maj : <t:{int(datetime.now(timezone.utc).timestamp())}:R>_"
-            ),
-            color=0x00A2FF,
-            timestamp=datetime.now(timezone.utc),
+        # Phase 84 : LayoutView V2 — stats live avec thumb game image
+        _gs_name = game_name
+        _gs_online = players_online
+        _gs_visits = visits_total
+        _gs_favs = favorites
+        _gs_image = game.get("image_url") if game else None
+        _gs_place = game.get("place_id") if game else None
+        _gs_play_url = (
+            f"https://www.roblox.com/games/{_gs_place}" if _gs_place else None
         )
-        if game and game.get("image_url"):
-            e.set_thumbnail(url=game["image_url"])
-        e.set_footer(text="Game Stats Live · Mis à jour via /game_stats_set")
+        _gs_now_ts = int(datetime.now(timezone.utc).timestamp())
+
+        class _GameStatsLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=None)
+                items = [
+                    v2_title(f"📊 Stats live — {_gs_name}"),
+                    v2_subtitle(f"Mis à jour <t:{_gs_now_ts}:R>"),
+                    v2_divider(),
+                ]
+                # Stats détail avec thumb game image si dispo
+                stats_text = (
+                    f"🟢 **Joueurs en ligne :** `{_gs_online}`\n"
+                    f"👁️ **Visites totales :** `{_gs_visits:,}`\n"
+                    f"⭐ **Favorites :** `{_gs_favs:,}`"
+                )
+                if _gs_image:
+                    items.append(v2_section(
+                        v2_body(stats_text),
+                        accessory=v2_thumb(_gs_image),
+                    ))
+                else:
+                    items.append(v2_body(stats_text))
+                if _gs_play_url:
+                    items.append(v2_divider())
+                    items.append(v2_body(f"🔗 [Jouer maintenant]({_gs_play_url})"))
+                self.add_item(v2_container(*items, color=0x00A2FF))
+
+        layout = _GameStatsLayout()
         # Edit existing OR send new
         msg = None
         if row and row[1]:
@@ -64525,12 +64549,12 @@ async def game_stats_set_cmd(i: discord.Interaction, game_id: str,
                 old_ch = i.guild.get_channel(int(row[0]))
                 if old_ch:
                     old_msg = await old_ch.fetch_message(int(row[1]))
-                    await old_msg.edit(embed=e)
+                    await old_msg.edit(view=layout)
                     msg = old_msg
             except Exception:
                 msg = None
         if not msg:
-            msg = await hub_ch.send(embed=e, allowed_mentions=discord.AllowedMentions.none())
+            msg = await hub_ch.send(view=layout, allowed_mentions=discord.AllowedMentions.none())
             try:
                 await msg.pin()
             except Exception:
