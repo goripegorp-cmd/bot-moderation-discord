@@ -2255,6 +2255,33 @@ async def db_init():
             cleared_at DATETIME
         )''')
 
+        # ═══════════════════════════════════════════════════════════════════
+        # Phase 67 — ALLIANCE COMPLÈTE : Trésorerie + Audit log
+        # ═══════════════════════════════════════════════════════════════════
+        await db.execute('''CREATE TABLE IF NOT EXISTS alliance_treasury (
+            alliance_id INTEGER PRIMARY KEY,
+            coins INTEGER DEFAULT 0,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+
+        await db.execute('''CREATE TABLE IF NOT EXISTS alliance_audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            alliance_id INTEGER,
+            action TEXT,
+            actor_id INTEGER,
+            target_id INTEGER,
+            amount INTEGER DEFAULT 0,
+            detail TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_alliance_audit "
+                "ON alliance_audit_log(alliance_id, created_at DESC)"
+            )
+        except Exception:
+            pass
+
         # Marketplace : annonces de vente entre joueurs
         await db.execute('''CREATE TABLE IF NOT EXISTS marketplace_listings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64180,7 +64207,7 @@ async def faction_war_start_cmd(i: discord.Interaction, objective: str = "events
 
 
 class ToolsSubHubView(View):
-    """Sub-panel ephemeral : 8 boutons pour les features perso."""
+    """Sub-panel ephemeral : 11 boutons pour les features perso."""
 
     def __init__(self):
         super().__init__(timeout=300)
@@ -64191,6 +64218,9 @@ class ToolsSubHubView(View):
         b2 = Button(label="💎 Mes loots", style=discord.ButtonStyle.primary, row=0)
         b2.callback = lambda i: _open_loots_panel(i)
         self.add_item(b2)
+        b_alli = Button(label="🤝 Mon Alliance", style=discord.ButtonStyle.success, row=0)
+        b_alli.callback = lambda i: _open_alliance_panel(i)
+        self.add_item(b_alli)
         # Row 1 : Compétitif perso
         b3 = Button(label="⚔️ PvP / Duel", style=discord.ButtonStyle.danger, row=1)
         b3.callback = lambda i: _open_pvp_panel(i)
@@ -65173,6 +65203,799 @@ async def _open_weather_panel(i: discord.Interaction):
         )
         await _safe_followup(i, embed=e)
     except Exception as ex:
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 67 — ALLIANCE COMPLÈTE : Trésorerie + Gestion membres + Audit log
+#  Le chef peut déposer/retirer coins, donner à un membre, expulser de l'alliance.
+#  Aucun pouvoir Discord (kick/ban serveur) — uniquement gestion interne alliance.
+# ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── HELPERS TRÉSORERIE ──────────────────────────────────────────────────────
+
+
+async def _get_alliance_treasury(alliance_id: int) -> int:
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT coins FROM alliance_treasury WHERE alliance_id=?",
+                (alliance_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        return int(row[0]) if row else 0
+    except Exception:
+        return 0
+
+
+async def _alliance_audit(alliance_id: int, action: str, actor_id: int,
+                          target_id: int = 0, amount: int = 0, detail: str = ""):
+    """Log une action dans l'audit log de l'alliance."""
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO alliance_audit_log"
+                "(alliance_id, action, actor_id, target_id, amount, detail) "
+                "VALUES(?, ?, ?, ?, ?, ?)",
+                (alliance_id, action, actor_id, target_id, amount, detail[:300]),
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[_alliance_audit] {ex}")
+
+
+async def _alliance_deposit_coins(guild_id: int, alliance_id: int,
+                                   user_id: int, amount: int) -> bool:
+    """Transfert user.coins → alliance_treasury.coins. Atomic-ish."""
+    if amount <= 0:
+        return False
+    try:
+        # Check balance user
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT coins FROM economy WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+        bal = int(row[0]) if row else 0
+        if bal < amount:
+            return False
+        # Débit user
+        try:
+            await add_coins(guild_id, user_id, -amount)
+        except Exception:
+            return False
+        # Crédit treasury (upsert)
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO alliance_treasury(alliance_id, coins) VALUES(?, ?) "
+                "ON CONFLICT(alliance_id) DO UPDATE SET "
+                "coins = coins + ?, updated_at=CURRENT_TIMESTAMP",
+                (alliance_id, amount, amount),
+            )
+            await db.commit()
+        await _alliance_audit(alliance_id, 'deposit', user_id, 0, amount)
+        return True
+    except Exception as ex:
+        print(f"[_alliance_deposit_coins] {ex}")
+        return False
+
+
+async def _alliance_withdraw_coins(guild_id: int, alliance_id: int,
+                                    leader_id: int, target_id: int,
+                                    amount: int) -> bool:
+    """Transfert alliance_treasury → target_user. Chef only.
+    target_id = leader_id si retrait personnel, sinon donation à un membre.
+    """
+    if amount <= 0:
+        return False
+    try:
+        # Check treasury balance
+        cur_treasury = await _get_alliance_treasury(alliance_id)
+        if cur_treasury < amount:
+            return False
+        # Débit treasury (atomic check via WHERE)
+        async with get_db() as db:
+            cur = await db.execute(
+                "UPDATE alliance_treasury SET coins = coins - ?, updated_at=CURRENT_TIMESTAMP "
+                "WHERE alliance_id=? AND coins >= ?",
+                (amount, alliance_id, amount),
+            )
+            await db.commit()
+            if (cur.rowcount or 0) == 0:
+                return False  # race : pas assez
+        # Crédit target
+        try:
+            await add_coins(guild_id, target_id, amount)
+        except Exception:
+            # Rollback : remettre dans treasury
+            try:
+                async with get_db() as db:
+                    await db.execute(
+                        "UPDATE alliance_treasury SET coins = coins + ? WHERE alliance_id=?",
+                        (amount, alliance_id),
+                    )
+                    await db.commit()
+            except Exception:
+                pass
+            return False
+        action = 'withdraw_self' if target_id == leader_id else 'give_member'
+        await _alliance_audit(alliance_id, action, leader_id, target_id, amount)
+        return True
+    except Exception as ex:
+        print(f"[_alliance_withdraw_coins] {ex}")
+        return False
+
+
+async def _alliance_expel_member(alliance_id: int, leader_id: int,
+                                  target_id: int) -> bool:
+    """Le chef expulse un membre DE L'ALLIANCE UNIQUEMENT (pas du serveur Discord).
+
+    Le membre perd le rôle d'alliance + son entrée dans alliance_members.
+    AUCUNE action de modération Discord (pas de kick/ban).
+    """
+    if leader_id == target_id:
+        return False  # Le chef ne peut pas s'expulser lui-même
+    try:
+        # Vérifier que actor est bien le leader
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM alliance_members WHERE alliance_id=? AND user_id=? AND role='leader' LIMIT 1",
+                (alliance_id, leader_id),
+            ) as cur:
+                if not await cur.fetchone():
+                    return False
+        # Retirer le rôle Discord d'alliance si configuré
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT guild_id, role_id FROM alliances WHERE id=?",
+                    (alliance_id,),
+                ) as cur:
+                    arow = await cur.fetchone()
+            if arow and arow[1]:
+                guild = bot.get_guild(int(arow[0]))
+                target = guild.get_member(target_id) if guild else None
+                role = guild.get_role(int(arow[1])) if guild else None
+                if target and role and role in target.roles:
+                    try:
+                        await target.remove_roles(role, reason="Expulsé de l'alliance par le chef")
+                    except (discord.Forbidden, discord.HTTPException):
+                        pass
+        except Exception as ex:
+            print(f"[alliance expel role removal] {ex}")
+        # Retirer de alliance_members
+        async with get_db() as db:
+            await db.execute(
+                "DELETE FROM alliance_members WHERE alliance_id=? AND user_id=? AND role!='leader'",
+                (alliance_id, target_id),
+            )
+            await db.commit()
+        await _alliance_audit(alliance_id, 'expel', leader_id, target_id)
+        return True
+    except Exception as ex:
+        print(f"[_alliance_expel_member] {ex}")
+        return False
+
+
+async def _alliance_transfer_leadership(alliance_id: int, old_leader_id: int,
+                                         new_leader_id: int) -> bool:
+    """Le chef transfère son rôle à un autre membre."""
+    if old_leader_id == new_leader_id:
+        return False
+    try:
+        async with get_db() as db:
+            # Check old est bien leader
+            async with db.execute(
+                "SELECT 1 FROM alliance_members WHERE alliance_id=? AND user_id=? AND role='leader'",
+                (alliance_id, old_leader_id),
+            ) as cur:
+                if not await cur.fetchone():
+                    return False
+            # Check new est bien member
+            async with db.execute(
+                "SELECT 1 FROM alliance_members WHERE alliance_id=? AND user_id=? AND role='member'",
+                (alliance_id, new_leader_id),
+            ) as cur:
+                if not await cur.fetchone():
+                    return False
+            # Swap
+            await db.execute(
+                "UPDATE alliance_members SET role='member' "
+                "WHERE alliance_id=? AND user_id=?",
+                (alliance_id, old_leader_id),
+            )
+            await db.execute(
+                "UPDATE alliance_members SET role='leader' "
+                "WHERE alliance_id=? AND user_id=?",
+                (alliance_id, new_leader_id),
+            )
+            await db.execute(
+                "UPDATE alliances SET leader_id=? WHERE id=?",
+                (new_leader_id, alliance_id),
+            )
+            await db.commit()
+        await _alliance_audit(alliance_id, 'transfer_leadership', old_leader_id, new_leader_id)
+        return True
+    except Exception as ex:
+        print(f"[_alliance_transfer_leadership] {ex}")
+        return False
+
+
+# ─── MODALS ──────────────────────────────────────────────────────────────────
+
+
+class AllianceDepositModal(Modal):
+    def __init__(self, alliance_id: int):
+        super().__init__(title="📥 Déposer dans la trésorerie")
+        self.alliance_id = alliance_id
+        self.amount = TextInput(
+            label="Coins à déposer (min 10)",
+            placeholder="100",
+            max_length=10,
+            required=True,
+        )
+        self.add_item(self.amount)
+
+    async def on_submit(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            try:
+                amt = int(self.amount.value.strip())
+                if amt < 10:
+                    raise ValueError
+            except Exception:
+                return await _safe_followup(i, content="❌ Montant invalide (min 10 🪙).")
+            ok = await _alliance_deposit_coins(i.guild.id, self.alliance_id, i.user.id, amt)
+            if not ok:
+                return await _safe_followup(i, content="❌ Échec (solde insuffisant ou erreur).")
+            new_total = await _get_alliance_treasury(self.alliance_id)
+            await _safe_followup(
+                i,
+                content=(
+                    f"✅ Déposé `{amt:,}` 🪙 dans la trésorerie de l'alliance.\n"
+                    f"💰 Nouveau total : `{new_total:,}` 🪙"
+                ),
+            )
+        except Exception as ex:
+            print(f"[AllianceDepositModal] {ex}")
+            try:
+                await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+            except Exception:
+                pass
+
+
+class AllianceWithdrawModal(Modal):
+    """Modal chef-only : retirer pour soi-même."""
+
+    def __init__(self, alliance_id: int):
+        super().__init__(title="📤 Retirer pour toi")
+        self.alliance_id = alliance_id
+        self.amount = TextInput(
+            label="Coins à retirer pour toi (chef only)",
+            placeholder="50",
+            max_length=10,
+            required=True,
+        )
+        self.add_item(self.amount)
+
+    async def on_submit(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            try:
+                amt = int(self.amount.value.strip())
+                if amt < 1:
+                    raise ValueError
+            except Exception:
+                return await _safe_followup(i, content="❌ Montant invalide.")
+            # Re-vérif chef
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT 1 FROM alliance_members WHERE alliance_id=? AND user_id=? AND role='leader' LIMIT 1",
+                    (self.alliance_id, i.user.id),
+                ) as cur:
+                    if not await cur.fetchone():
+                        return await _safe_followup(i, content="🔒 Chef uniquement.")
+            ok = await _alliance_withdraw_coins(i.guild.id, self.alliance_id, i.user.id, i.user.id, amt)
+            if not ok:
+                return await _safe_followup(i, content="❌ Trésorerie insuffisante.")
+            new_total = await _get_alliance_treasury(self.alliance_id)
+            await _safe_followup(
+                i,
+                content=(
+                    f"✅ Retiré `{amt:,}` 🪙 de la trésorerie vers ton solde.\n"
+                    f"💰 Trésorerie restante : `{new_total:,}` 🪙"
+                ),
+            )
+        except Exception as ex:
+            print(f"[AllianceWithdrawModal] {ex}")
+            try:
+                await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+            except Exception:
+                pass
+
+
+class AllianceGiveModal(Modal):
+    def __init__(self, alliance_id: int, target_id: int, target_name: str):
+        super().__init__(title=f"💸 Donner à {target_name[:30]}")
+        self.alliance_id = alliance_id
+        self.target_id = target_id
+        self.amount = TextInput(
+            label=f"Coins à donner à {target_name[:30]}",
+            placeholder="50",
+            max_length=10,
+            required=True,
+        )
+        self.add_item(self.amount)
+
+    async def on_submit(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            try:
+                amt = int(self.amount.value.strip())
+                if amt < 1:
+                    raise ValueError
+            except Exception:
+                return await _safe_followup(i, content="❌ Montant invalide.")
+            # Re-vérif chef
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT 1 FROM alliance_members WHERE alliance_id=? AND user_id=? AND role='leader' LIMIT 1",
+                    (self.alliance_id, i.user.id),
+                ) as cur:
+                    if not await cur.fetchone():
+                        return await _safe_followup(i, content="🔒 Chef uniquement.")
+            # Re-vérif target est dans alliance
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT 1 FROM alliance_members WHERE alliance_id=? AND user_id=? LIMIT 1",
+                    (self.alliance_id, self.target_id),
+                ) as cur:
+                    if not await cur.fetchone():
+                        return await _safe_followup(i, content="❌ La cible n'est pas dans l'alliance.")
+            ok = await _alliance_withdraw_coins(i.guild.id, self.alliance_id, i.user.id, self.target_id, amt)
+            if not ok:
+                return await _safe_followup(i, content="❌ Trésorerie insuffisante.")
+            new_total = await _get_alliance_treasury(self.alliance_id)
+            target = i.guild.get_member(self.target_id)
+            tname = target.display_name if target else f"User {self.target_id}"
+            await _safe_followup(
+                i,
+                content=(
+                    f"✅ Donné `{amt:,}` 🪙 à **{tname}**.\n"
+                    f"💰 Trésorerie restante : `{new_total:,}` 🪙"
+                ),
+            )
+        except Exception as ex:
+            print(f"[AllianceGiveModal] {ex}")
+            try:
+                await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+            except Exception:
+                pass
+
+
+# ─── VIEWS ───────────────────────────────────────────────────────────────────
+
+
+class AllianceGiveTargetSelectView(View):
+    """View ephemeral : Select pour choisir le membre à qui donner des coins."""
+
+    def __init__(self, alliance_id: int, members: list):
+        super().__init__(timeout=300)
+        self.alliance_id = alliance_id
+        options = []
+        for m in members[:25]:
+            options.append(discord.SelectOption(
+                label=m["display_name"][:100],
+                value=str(m["user_id"]),
+                description=f"Rôle : {m['role']}",
+            ))
+        if not options:
+            return
+        select = Select(placeholder="Choisis le membre à qui donner…", options=options)
+        select.callback = self._on_select
+        self.add_item(select)
+        self.members_map = {m["user_id"]: m["display_name"] for m in members}
+
+    async def _on_select(self, i: discord.Interaction):
+        try:
+            target_id = int(i.data["values"][0])
+            target_name = self.members_map.get(target_id, "Membre")
+            await i.response.send_modal(AllianceGiveModal(self.alliance_id, target_id, target_name))
+        except Exception as ex:
+            print(f"[AllianceGiveTargetSelectView] {ex}")
+
+
+class AllianceExpelConfirmView(View):
+    """View ephemeral : confirmer l'expulsion d'un membre."""
+
+    def __init__(self, alliance_id: int, target_id: int, target_name: str):
+        super().__init__(timeout=120)
+        self.alliance_id = alliance_id
+        self.target_id = target_id
+        self.target_name = target_name
+        b_yes = Button(label=f"⚠️ Confirmer l'expulsion de {target_name[:30]}",
+                       style=discord.ButtonStyle.danger)
+        b_yes.callback = self._confirm
+        b_no = Button(label="❌ Annuler", style=discord.ButtonStyle.secondary)
+        b_no.callback = self._cancel
+        self.add_item(b_yes)
+        self.add_item(b_no)
+
+    async def _confirm(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            ok = await _alliance_expel_member(self.alliance_id, i.user.id, self.target_id)
+            if not ok:
+                return await _safe_followup(i, content="❌ Expulsion échouée (pas le chef ou autre erreur).")
+            await _safe_followup(
+                i,
+                content=(
+                    f"✅ **{self.target_name}** a été expulsé de l'alliance.\n"
+                    f"_Aucune action Discord (kick/ban) — uniquement l'alliance._"
+                ),
+            )
+            # DM le membre expulsé
+            try:
+                target = i.guild.get_member(self.target_id)
+                if target:
+                    await target.send(
+                        f"📢 Tu as été retiré de l'alliance de **{i.guild.name}** par le chef. "
+                        f"Tu peux rejoindre une autre alliance ou en créer une nouvelle."
+                    )
+            except Exception:
+                pass
+        except Exception as ex:
+            print(f"[AllianceExpelConfirmView confirm] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _cancel(self, i: discord.Interaction):
+        try:
+            await i.response.send_message("❌ Expulsion annulée.", ephemeral=True)
+        except Exception:
+            pass
+
+
+class AllianceExpelTargetSelectView(View):
+    def __init__(self, alliance_id: int, members: list):
+        super().__init__(timeout=300)
+        self.alliance_id = alliance_id
+        # Filtrer le chef out
+        options = []
+        for m in members[:25]:
+            if m["role"] == 'leader':
+                continue
+            options.append(discord.SelectOption(
+                label=m["display_name"][:100],
+                value=str(m["user_id"]),
+                description="Sera retiré de l'alliance (pas du serveur Discord)",
+            ))
+        if not options:
+            return
+        select = Select(placeholder="Choisis le membre à expulser…", options=options)
+        select.callback = self._on_select
+        self.add_item(select)
+        self.members_map = {m["user_id"]: m["display_name"] for m in members}
+
+    async def _on_select(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            target_id = int(i.data["values"][0])
+            target_name = self.members_map.get(target_id, "Membre")
+            await _safe_followup(
+                i,
+                content=(
+                    f"⚠️ **Confirmer l'expulsion de {target_name}** de l'alliance ?\n\n"
+                    f"_Cette action est immédiate. Aucun kick/ban Discord — uniquement l'alliance._"
+                ),
+                view=AllianceExpelConfirmView(self.alliance_id, target_id, target_name),
+            )
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+class AllianceTransferTargetSelectView(View):
+    def __init__(self, alliance_id: int, members: list):
+        super().__init__(timeout=300)
+        self.alliance_id = alliance_id
+        options = []
+        for m in members[:25]:
+            if m["role"] == 'leader':
+                continue
+            options.append(discord.SelectOption(
+                label=m["display_name"][:100],
+                value=str(m["user_id"]),
+                description="Deviendra le nouveau chef de l'alliance",
+            ))
+        if not options:
+            return
+        select = Select(placeholder="Choisis le nouveau chef…", options=options)
+        select.callback = self._on_select
+        self.add_item(select)
+        self.members_map = {m["user_id"]: m["display_name"] for m in members}
+
+    async def _on_select(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            target_id = int(i.data["values"][0])
+            target_name = self.members_map.get(target_id, "Membre")
+            ok = await _alliance_transfer_leadership(self.alliance_id, i.user.id, target_id)
+            if not ok:
+                return await _safe_followup(i, content="❌ Transfert échoué.")
+            await _safe_followup(
+                i,
+                content=(
+                    f"✅ Tu as transféré le rôle de chef à **{target_name}**.\n"
+                    f"_Tu redeviens un membre normal de l'alliance._"
+                ),
+            )
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+class AllianceMainPanelView(View):
+    """Panel central alliance : different boutons selon role (chef ou membre)."""
+
+    def __init__(self, alliance_id: int, is_leader: bool):
+        super().__init__(timeout=300)
+        self.alliance_id = alliance_id
+        self.is_leader = is_leader
+        # Boutons communs
+        b_t = Button(label="💰 Trésorerie", style=discord.ButtonStyle.primary, row=0)
+        b_t.callback = self._on_treasury
+        self.add_item(b_t)
+        b_m = Button(label="👥 Voir membres", style=discord.ButtonStyle.secondary, row=0)
+        b_m.callback = self._on_members
+        self.add_item(b_m)
+        b_dep = Button(label="📥 Déposer", style=discord.ButtonStyle.success, row=1)
+        b_dep.callback = self._on_deposit
+        self.add_item(b_dep)
+        b_audit = Button(label="📜 Historique", style=discord.ButtonStyle.secondary, row=1)
+        b_audit.callback = self._on_audit
+        self.add_item(b_audit)
+        if is_leader:
+            # Actions chef
+            b_wit = Button(label="📤 Retirer (chef)", style=discord.ButtonStyle.danger, row=2)
+            b_wit.callback = self._on_withdraw
+            self.add_item(b_wit)
+            b_give = Button(label="💸 Donner à un membre", style=discord.ButtonStyle.primary, row=2)
+            b_give.callback = self._on_give
+            self.add_item(b_give)
+            b_exp = Button(label="🚪 Expulser un membre", style=discord.ButtonStyle.danger, row=3)
+            b_exp.callback = self._on_expel
+            self.add_item(b_exp)
+            b_tr = Button(label="👑 Transférer chefferie", style=discord.ButtonStyle.secondary, row=3)
+            b_tr.callback = self._on_transfer
+            self.add_item(b_tr)
+        else:
+            b_leave = Button(label="🚪 Quitter l'alliance", style=discord.ButtonStyle.danger, row=2)
+            b_leave.callback = self._on_leave
+            self.add_item(b_leave)
+
+    async def _on_treasury(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            t = await _get_alliance_treasury(self.alliance_id)
+            await _safe_followup(
+                i,
+                content=f"💰 Trésorerie de l'alliance : `{t:,}` 🪙",
+            )
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_members(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            members = await _alliance_get_full_members(self.alliance_id, i.guild)
+            lines = []
+            for m in members:
+                role_emoji = "👑" if m["role"] == 'leader' else "👤"
+                lines.append(f"{role_emoji} **{m['display_name']}**")
+            e = discord.Embed(
+                title=f"👥 Membres de l'alliance ({len(members)})",
+                description="\n".join(lines) if lines else "_Vide._",
+                color=0x16A085,
+            )
+            await _safe_followup(i, embed=e)
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_deposit(self, i: discord.Interaction):
+        try:
+            await i.response.send_modal(AllianceDepositModal(self.alliance_id))
+        except Exception as ex:
+            print(f"[AllianceMainPanelView _on_deposit] {ex}")
+
+    async def _on_withdraw(self, i: discord.Interaction):
+        try:
+            await i.response.send_modal(AllianceWithdrawModal(self.alliance_id))
+        except Exception as ex:
+            print(f"[AllianceMainPanelView _on_withdraw] {ex}")
+
+    async def _on_give(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            members = await _alliance_get_full_members(self.alliance_id, i.guild)
+            others = [m for m in members if m["user_id"] != i.user.id]
+            if not others:
+                return await _safe_followup(i, content="_Pas d'autres membres dans l'alliance._")
+            await _safe_followup(
+                i,
+                content="💸 Choisis le membre à qui donner des coins :",
+                view=AllianceGiveTargetSelectView(self.alliance_id, others),
+            )
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_expel(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            members = await _alliance_get_full_members(self.alliance_id, i.guild)
+            others = [m for m in members if m["role"] != 'leader']
+            if not others:
+                return await _safe_followup(i, content="_Aucun membre à expulser._")
+            await _safe_followup(
+                i,
+                content="🚪 Choisis le membre à expulser de l'alliance :",
+                view=AllianceExpelTargetSelectView(self.alliance_id, members),
+            )
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_transfer(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            members = await _alliance_get_full_members(self.alliance_id, i.guild)
+            others = [m for m in members if m["role"] != 'leader']
+            if not others:
+                return await _safe_followup(i, content="_Aucun membre vers qui transférer._")
+            await _safe_followup(
+                i,
+                content="👑 Choisis le nouveau chef de l'alliance :",
+                view=AllianceTransferTargetSelectView(self.alliance_id, members),
+            )
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_audit(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT action, actor_id, target_id, amount, detail, created_at FROM alliance_audit_log "
+                    "WHERE alliance_id=? ORDER BY created_at DESC LIMIT 15",
+                    (self.alliance_id,),
+                ) as cur:
+                    rows = await cur.fetchall()
+            if not rows:
+                return await _safe_followup(i, content="_Aucune action récente._")
+            action_labels = {
+                'deposit':            "📥 Dépôt",
+                'withdraw_self':      "📤 Retrait perso",
+                'give_member':        "💸 Don à membre",
+                'expel':              "🚪 Expulsion",
+                'transfer_leadership':"👑 Transfert chefferie",
+            }
+            lines = []
+            for action, actor_id, target_id, amount, detail, created_at in rows:
+                actor = i.guild.get_member(int(actor_id))
+                actor_name = actor.display_name if actor else f"User {actor_id}"
+                target = i.guild.get_member(int(target_id)) if target_id else None
+                target_name = target.display_name if target else (f"User {target_id}" if target_id else "")
+                lbl = action_labels.get(action, action)
+                line = f"`{created_at[:16]}` {lbl} par **{actor_name}**"
+                if amount:
+                    line += f" — `{int(amount):,}` 🪙"
+                if target_name and target_id != actor_id:
+                    line += f" → **{target_name}**"
+                lines.append(line)
+            e = discord.Embed(
+                title="📜 Historique alliance (15 dernières actions)",
+                description="\n".join(lines),
+                color=0x95A5A6,
+            )
+            await _safe_followup(i, embed=e)
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+    async def _on_leave(self, i: discord.Interaction):
+        if not await _safe_defer(i):
+            return
+        try:
+            # Membre normal qui veut quitter
+            async with get_db() as db:
+                await db.execute(
+                    "DELETE FROM alliance_members WHERE alliance_id=? AND user_id=? AND role!='leader'",
+                    (self.alliance_id, i.user.id),
+                )
+                await db.commit()
+            await _alliance_audit(self.alliance_id, 'leave', i.user.id)
+            await _safe_followup(
+                i,
+                content="✅ Tu as quitté l'alliance. Tu peux en rejoindre une autre quand tu veux.",
+            )
+        except Exception as ex:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+async def _alliance_get_full_members(alliance_id: int, guild) -> list:
+    """Liste enrichie des membres : id + role + display_name."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT user_id, role FROM alliance_members WHERE alliance_id=? ORDER BY role DESC, joined_at ASC",
+                (alliance_id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        out = []
+        for uid, role in rows:
+            m = guild.get_member(int(uid))
+            out.append({
+                "user_id": int(uid),
+                "role": role,
+                "display_name": m.display_name if m else f"User {uid}",
+            })
+        return out
+    except Exception:
+        return []
+
+
+async def _open_alliance_panel(i: discord.Interaction):
+    """Bouton hub "🤝 Mon Alliance" : ouvre le panel selon role."""
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        alliance = await _get_user_alliance(i.guild.id, i.user.id)
+        if not alliance:
+            return await _safe_followup(
+                i,
+                content=(
+                    "_Tu n'es dans aucune alliance._\n\n"
+                    "_Utilise les commandes alliances existantes (Phase 46) pour en créer "
+                    "une ou rejoindre une invitation._"
+                ),
+            )
+        is_leader = alliance.get('my_role') == 'leader'
+        treasury = await _get_alliance_treasury(alliance['id'])
+        members = await _alliance_get_full_members(alliance['id'], i.guild)
+        leader_name = "?"
+        for m in members:
+            if m["role"] == 'leader':
+                leader_name = m["display_name"]
+                break
+        e = discord.Embed(
+            title=f"{alliance['emoji']} {alliance['name']}",
+            description=(
+                f"**Chef :** 👑 {leader_name}\n"
+                f"**Membres :** `{len(members)}`\n"
+                f"**Trésorerie :** `{treasury:,}` 🪙\n"
+                f"📍 Salon : <#{alliance['channel_id']}>\n\n"
+                + ("👑 _Tu es le chef. Tu peux gérer la trésorerie, donner aux membres, "
+                   "expulser ou transférer la chefferie._" if is_leader else
+                   "👤 _Tu es membre. Tu peux déposer dans la trésorerie ou quitter l'alliance._")
+            ),
+            color=0x16A085,
+        )
+        await _safe_followup(i, embed=e, view=AllianceMainPanelView(alliance['id'], is_leader))
+    except Exception as ex:
+        print(f"[_open_alliance_panel] {ex}")
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
