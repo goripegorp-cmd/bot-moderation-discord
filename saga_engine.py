@@ -409,6 +409,19 @@ async def end_saga(saga_id: int):
                 except Exception:
                     pass
 
+        # Phase 156 : Top 5 contributors saga → 2 tickets raffle chacun
+        try:
+            import roblox_raffle as raffle_mod
+            for i, (uid, _) in enumerate(top):
+                try:
+                    await raffle_mod.add_tickets(
+                        guild_id, int(uid), "saga_top5", 2,
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         return {"top_contributors": [{"user_id": int(t[0]), "contribution": int(t[1])} for t in top]}
     except Exception as ex:
         print(f"[saga_engine end_saga] {ex}")

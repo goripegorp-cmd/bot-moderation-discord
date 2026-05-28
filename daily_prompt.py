@@ -386,6 +386,20 @@ async def close_yesterday(guild: discord.Guild) -> dict:
                 except Exception:
                     pass
 
+        # Phase 156 : chaque vote donne 1 ticket de loterie (1 vote = 1 prompt/jour
+        # donc max 1 ticket/jour de cette source — ~5/semaine si quotidien)
+        try:
+            import roblox_raffle as raffle_mod
+            for uid_str in votes.keys():
+                try:
+                    await raffle_mod.add_tickets(
+                        guild.id, int(uid_str), "votes_5_week", 1,
+                    )
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         async with _get_db() as db:
             await db.execute(
                 "UPDATE daily_prompts SET status='closed', "

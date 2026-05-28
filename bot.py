@@ -8915,11 +8915,13 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
 
             # Phase 95 AMPLIFY : LAST HIT BONUS +500 🪙 immédiat
             # (en plus des récompenses du recap final)
-            # Phase 144 : boost saisonnier appliqué au last hit bonus
+            # Phase 144 + 156 : boost saisonnier × buff stream sur le last hit
             try:
                 base_bonus = 500
                 seasonal_mult = season_module.get_modifier("boss_reward_mult")
-                LAST_HIT_BONUS = int(round(base_bonus * seasonal_mult))
+                # Phase 156 : buff ×2 si un live du créateur est en cours
+                stream_mult = stream_party_module.get_buff_multiplier(i.guild.id)
+                LAST_HIT_BONUS = int(round(base_bonus * seasonal_mult * stream_mult))
                 await add_coins(i.guild.id, i.user.id, LAST_HIT_BONUS)
             except Exception:
                 LAST_HIT_BONUS = 500
@@ -21815,6 +21817,28 @@ async def mark_live_announced(cache_key: str, guild_id: int = 0, platform: str =
     }
     await save_live_state(cache_key, guild_id, platform, username)
 
+    # Phase 156 : déclenche un watch party (salon temp + buff XP×2)
+    try:
+        if guild_id:
+            guild = bot.get_guild(guild_id)
+            if guild:
+                # URL approximative (le module reconstruit si besoin)
+                if platform.lower() == "twitch":
+                    stream_url = f"https://twitch.tv/{username}"
+                elif platform.lower() == "youtube":
+                    stream_url = f"https://youtube.com/@{username}"
+                elif platform.lower() == "kick":
+                    stream_url = f"https://kick.com/{username}"
+                elif platform.lower() == "tiktok":
+                    stream_url = f"https://tiktok.com/@{username}"
+                else:
+                    stream_url = ""
+                await stream_party_module.on_creator_live_start(
+                    guild, platform, stream_url, username or "Stream",
+                )
+    except Exception as ex:
+        print(f"[mark_live_announced watch_party] {ex}")
+
 async def check_live_ended(cache_key: str, guild_id: int = 0, platform: str = '', username: str = ''):
     """Vérifie si le live est vraiment terminé (debounce 3h). Supprime le message Discord si le live est fini."""
     state = _live_state.get(cache_key)
@@ -21848,6 +21872,15 @@ async def check_live_ended(cache_key: str, guild_id: int = 0, platform: str = ''
         state['fail_count'] = 0
         state['message_id'] = 0
         state['live_channel_id'] = 0
+
+        # Phase 156 : end watch party (le salon se delete 30min plus tard)
+        try:
+            if guild_id:
+                guild = bot.get_guild(guild_id)
+                if guild:
+                    await stream_party_module.on_creator_live_end(guild)
+        except Exception as ex:
+            print(f"[check_live_ended watch_party] {ex}")
 
     await save_live_state(cache_key, guild_id, platform, username)
 
@@ -54359,6 +54392,14 @@ class DailyQuestView(View):
             except Exception as ex:
                 print(f"[daily_quest phase153] {ex}")
 
+            # Phase 156 : raffle ticket (1 par claim — max ~5/semaine)
+            try:
+                await roblox_raffle_module.add_tickets(
+                    self.guild_id, self.user_id, "quests_5_week", 1,
+                )
+            except Exception as ex:
+                print(f"[daily_quest raffle] {ex}")
+
             # Phase 146 : boutons de suivi (zéro commande à mémoriser)
             try:
                 fview = followup_module.build_followup_view(
@@ -64255,6 +64296,22 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
                     )
             except Exception as ex:
                 print(f"[/profile perso_panel] {ex}")
+
+            # Phase 156 : panel réputation + raffle tickets
+            try:
+                rep_panel = reputation_module.build_reputation_panel(target)
+                if rep_panel is not None:
+                    await rep_panel.populate()
+                    await i.followup.send(view=rep_panel, ephemeral=True)
+            except Exception as ex:
+                print(f"[/profile rep_panel] {ex}")
+            try:
+                raffle_panel = roblox_raffle_module.build_raffle_panel(target)
+                if raffle_panel is not None:
+                    await raffle_panel.populate()
+                    await i.followup.send(view=raffle_panel, ephemeral=True)
+            except Exception as ex:
+                print(f"[/profile raffle_panel] {ex}")
     except Exception as ex:
         print(f"[/profile V2] {ex}")
         import traceback; traceback.print_exc()
