@@ -12979,6 +12979,20 @@ class MysteryBoxView(View):
             except Exception as ex:
                 print(f"[mystery_box profile/saga] {ex}")
 
+            # Phase 162.5 : oublis comblés — reputation + mentor + community goal
+            try:
+                await reputation_module.add_points(
+                    i.guild.id, i.user.id, "treasure_claim",
+                )
+                await mentor_bonus_module.on_apprenti_event(
+                    i.guild.id, i.user.id, "treasure_claim",
+                )
+                await community_goals_module.record_action(
+                    i.guild.id, i.user.id, "mystery_open",
+                )
+            except Exception as ex:
+                print(f"[mystery_box phase162.5] {ex}")
+
             await i.followup.send(reward_msg, ephemeral=True)
 
             # Phase 146 : boutons de suivi
@@ -38816,6 +38830,17 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready Phase 161 weekly_stats] {ex}")
 
+    # Phase 162 : Server Pulse + Tips Rotator
+    try:
+        server_pulse_module.setup(
+            bot, get_db, db_get, _v2h,
+            season_module=season_module,
+            saga_module=saga_module,
+        )
+        print("[Phase 162] Server Pulse + Tips Rotator setup OK")
+    except Exception as ex:
+        print(f"[on_ready Phase 162 server_pulse] {ex}")
+
     # Phase 146 : Event followup buttons (zéro commande à mémoriser)
     try:
         followup_module.setup({
@@ -56524,8 +56549,11 @@ class EngagementHubView(View):
         b19.callback = self._on_dm_prefs
         self.add_item(b19)
 
-        # Phase 161 : Récap hebdo + Leaderboards
-        # Row 0 = quests+wheel+saga+community_goal (4) → 1 free
+        # Phase 161 : Récap hebdo
+        # Row 0 = quests+wheel+saga+community_goal+weekly_recap (5 max).
+        # Hmm la note disait "row 0 = 4 buttons" mais en fait b16 community_goal
+        # est sur row 1 (j'ai vérifié), pas row 0. Donc row 0 = quests+wheel+saga = 3.
+        # Ce bouton porte row 0 à 4. Reste 1 slot.
         b20 = Button(
             label="📰 Mon récap 7j",
             style=discord.ButtonStyle.primary,
@@ -56535,14 +56563,15 @@ class EngagementHubView(View):
         b20.callback = self._on_weekly_recap
         self.add_item(b20)
 
-        # Row 1 = achievements+pet+community+reputation+raffle (5 max atteint).
-        # row 4 = roblox+competitions+social+tools+faq (5 max). On reste sur row 4 si possible mais full.
-        # Vérification : row 0 vient d'atteindre 5 avec b20. row 4 full. Toutes pleines sauf row 1
-        # (5 utilisés). Pour ce dernier bouton "Top semaine", on n'a plus de place...
-        # Solution : on l'inclut dans le hub mais sans row explicite, Discord le placera.
-        # Ou on le met sur row 2 (4 patched + dm_prefs + ce nouveau = 6 → overflow).
-        # On utilise donc une row libre... aucune libre. On skip ce bouton :
-        # le leaderboard est auto-posté chaque lundi 9h FR, accessible depuis là.
+        # Phase 162.5 : Pulse serveur — utilise le dernier slot row 0
+        b21 = Button(
+            label="📡 Pulse serveur",
+            style=discord.ButtonStyle.success,
+            custom_id="hub_pulse",
+            row=0,
+        )
+        b21.callback = self._on_server_pulse
+        self.add_item(b21)
 
     async def _on_quests(self, i: discord.Interaction):
         await _p41_open_daily(i)
@@ -56732,6 +56761,24 @@ class EngagementHubView(View):
             await i.followup.send(view=panel, ephemeral=True)
         except Exception as ex:
             print(f"[hub_weekly_recap] {ex}")
+
+    async def _on_server_pulse(self, i: discord.Interaction):
+        """Phase 162.5 : ouvre le dashboard live du serveur."""
+        try:
+            if not i.guild:
+                return await i.response.send_message(
+                    "❌ Serveur uniquement.", ephemeral=True
+                )
+            panel = server_pulse_module.build_pulse_panel(i.guild)
+            if panel is None:
+                return await i.response.send_message(
+                    "📡 Module pulse indisponible.", ephemeral=True
+                )
+            await i.response.defer(ephemeral=True)
+            await panel.populate()
+            await i.followup.send(view=panel, ephemeral=True)
+        except Exception as ex:
+            print(f"[hub_server_pulse] {ex}")
 
 
 # ─── COMMANDES /hub + /hub_setup ───────────────────────────────────────────────
