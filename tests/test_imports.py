@@ -33,6 +33,10 @@ PHASE_163_MODULES = [
     "birthday_panel",
     "welcome_ack",
     "spotlight_quality",
+    # Phase 167 — status rotator, voice autoclean, member risk
+    "status_rotator",
+    "voice_autoclean",
+    "member_risk",
 ]
 
 
@@ -76,6 +80,9 @@ INIT_DB_MODULES = [
     "anti_token_leak",
     "welcome_ack",
     "spotlight_quality",
+    # Phase 167 (status_rotator n'a pas d'init_db, pas de table)
+    "voice_autoclean",
+    "member_risk",
 ]
 
 

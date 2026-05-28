@@ -158,6 +158,12 @@ import birthday_panel as birthday_panel_module
 import welcome_ack as welcome_ack_module
 # Phase 166.4 : Spotlight qualité (⭐ → highlights)
 import spotlight_quality as spotlight_quality_module
+# Phase 167.1 : Status rotator (bot status dynamique)
+import status_rotator as status_rotator_module
+# Phase 167.2 : Voice autoclean (vocaux temp vides)
+import voice_autoclean as voice_autoclean_module
+# Phase 167.3 : Member risk review
+import member_risk as member_risk_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -38950,7 +38956,20 @@ async def on_ready():
         spotlight_quality_module.setup(bot, get_db, db_get, _v2h)
         await spotlight_quality_module.init_db()
 
-        print("[Phase 155/165/166] Roblox/Stream + token_leak + birthday + welcome + spotlight")
+        # Phase 167.1-3 : Status rotator + voice autoclean + risk review
+        status_rotator_module.setup(bot, get_db, db_get, _v2h)
+        if not status_rotator_module.rotator_task.is_running():
+            status_rotator_module.rotator_task.start()
+
+        voice_autoclean_module.setup(bot, get_db, db_get, _v2h)
+        await voice_autoclean_module.init_db()
+        if not voice_autoclean_module.check_task.is_running():
+            voice_autoclean_module.check_task.start()
+
+        member_risk_module.setup(bot, get_db, db_get, _v2h)
+        await member_risk_module.init_db()
+
+        print("[Phase 155/165/166/167] Stream + token_leak + birthday + welcome + spotlight + rotator + voice_clean + risk")
     except Exception as ex:
         print(f"[on_ready Phase 155/165 roblox/stream] {ex}")
 
@@ -41237,6 +41256,12 @@ async def _handle_boost_started(member):
 
 @bot.event
 async def on_member_join(m):
+    # Phase 167.3 : score risque (visibility-only, no auto-action)
+    try:
+        asyncio.create_task(member_risk_module.on_member_join(m))
+    except Exception as ex:
+        print(f"[on_member_join member_risk] {ex}")
+
     # ═══ Tracking stats journalières ═══
     try:
         today = now().strftime('%Y-%m-%d')
@@ -60339,6 +60364,15 @@ async def db_optimizer_task():
             ("daily_prompts_old",          "DELETE FROM daily_prompts WHERE status='closed' AND datetime(closed_at) < datetime('now', '-30 days')"),
             ("roblox_game_stats_old",      "DELETE FROM roblox_game_stats WHERE datetime(fetched_at) < datetime('now', '-60 days')"),
             ("webhook_registry_dead",      "DELETE FROM webhook_registry WHERE alive=0 AND datetime(last_seen) < datetime('now', '-30 days')"),
+            # Phase 167 : cleanup nouveaux modules
+            ("member_risk_old_reviewed",   "DELETE FROM member_risk_scores WHERE reviewed=1 AND datetime(joined_at) < datetime('now', '-90 days')"),
+            ("member_risk_old_unreviewed", "DELETE FROM member_risk_scores WHERE reviewed=0 AND datetime(joined_at) < datetime('now', '-180 days')"),
+            ("voice_empty_stale",          "DELETE FROM voice_empty_since WHERE datetime(empty_since) < datetime('now', '-1 day')"),
+            ("welcomed_users_old",         "DELETE FROM welcomed_users WHERE datetime(welcomed_at) < datetime('now', '-365 days')"),
+            ("spotlight_old",              "DELETE FROM spotlighted_messages WHERE datetime(spotlight_at) < datetime('now', '-90 days')"),
+            ("token_leaks_old",            "DELETE FROM token_leaks WHERE datetime(detected_at) < datetime('now', '-180 days')"),
+            ("stream_schedule_past",       "DELETE FROM stream_schedule WHERE (cancelled=1 OR datetime(starts_at) < datetime('now', '-30 days'))"),
+            ("activity_heatmap_dispatch_old", "DELETE FROM activity_heatmap_dispatch WHERE datetime(last_sent_at) < datetime('now', '-90 days')"),
         ]
         total_deleted = 0
         for name, stmt in cleanup_stmts:
