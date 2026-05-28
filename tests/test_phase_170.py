@@ -1,4 +1,4 @@
-"""Phase 170.1-6 : Chronique + NPCs + Encounters + Conseil + Régions + Mystères."""
+"""Phase 170.1-7 : Chronique + NPCs + Encounters + Conseil + Régions + Mystères + Lettres."""
 import pytest
 
 import story_engine
@@ -8,6 +8,7 @@ import daily_encounters
 import weekly_council
 import regional_state
 import mystery_investigation
+import npc_letters
 
 
 # ─── story_engine ────────────────────────────────────────────────────────
@@ -597,3 +598,96 @@ def test_mystery_api():
         "ShareClueButton", "mystery_task", "register_persistent_views",
     ]:
         assert hasattr(mystery_investigation, name), f"manque : {name}"
+
+
+# ─── Phase 170.7 : NPC Letters ───────────────────────────────────────────
+
+def test_letter_catalog_size():
+    """18 lettres (3 par NPC × 6 NPCs)."""
+    assert len(npc_letters.LETTER_CATALOG) >= 18
+
+
+def test_letter_required_fields():
+    required = {"id", "npc_id", "mood_min", "mood_max", "subject", "body"}
+    for ltr in npc_letters.LETTER_CATALOG:
+        missing = required - set(ltr.keys())
+        assert not missing, f"Letter {ltr.get('id')} manque : {missing}"
+
+
+def test_letter_ids_unique():
+    ids = [ltr["id"] for ltr in npc_letters.LETTER_CATALOG]
+    assert len(ids) == len(set(ids))
+
+
+def test_letter_npcs_valid():
+    """Tous les NPCs des lettres existent."""
+    valid_ids = set(npc_personalities.list_npc_ids())
+    for ltr in npc_letters.LETTER_CATALOG:
+        assert ltr["npc_id"] in valid_ids, (
+            f"Letter {ltr['id']} ref NPC inconnu : {ltr['npc_id']}"
+        )
+
+
+def test_letter_each_npc_has_3_tones():
+    """Chaque NPC a au moins une lettre low/mid/high mood."""
+    for npc_id in npc_personalities.list_npc_ids():
+        ltrs = npc_letters.get_letters_for_npc(npc_id)
+        # at least 1 for each of the 3 ranges
+        has_low = any(l["mood_min"] <= 20 for l in ltrs)
+        has_mid = any(l["mood_min"] <= 50 <= l["mood_max"] for l in ltrs)
+        has_high = any(l["mood_max"] >= 80 for l in ltrs)
+        assert has_low, f"NPC {npc_id} sans lettre low mood"
+        assert has_mid, f"NPC {npc_id} sans lettre mid mood"
+        assert has_high, f"NPC {npc_id} sans lettre high mood"
+
+
+def test_letter_mood_ranges_valid():
+    """mood_min/max dans [0, 100] et min ≤ max."""
+    for ltr in npc_letters.LETTER_CATALOG:
+        assert 0 <= ltr["mood_min"] <= 100
+        assert 0 <= ltr["mood_max"] <= 100
+        assert ltr["mood_min"] <= ltr["mood_max"]
+
+
+def test_letter_body_substantial():
+    """Chaque corps de lettre fait au moins 50 caractères."""
+    for ltr in npc_letters.LETTER_CATALOG:
+        assert len(ltr["body"]) >= 50, (
+            f"Letter {ltr['id']} trop courte : {len(ltr['body'])} chars"
+        )
+
+
+def test_letter_npc_rotation_size():
+    """Rotation NPCs = 6 (= nb NPCs)."""
+    assert len(npc_letters.NPC_ROTATION) == 6
+    assert set(npc_letters.NPC_ROTATION) == set(
+        npc_personalities.list_npc_ids()
+    )
+
+
+def test_letter_timing_config():
+    """Dimanche 18h FR."""
+    assert npc_letters.LETTER_WEEKDAY == 6  # dimanche
+    assert 0 <= npc_letters.LETTER_HOUR <= 23
+    assert npc_letters.ACTIVE_WINDOW_DAYS > 0
+
+
+def test_letter_button_is_dynamic():
+    import discord
+    assert issubclass(
+        npc_letters.LetterToggleButton, discord.ui.DynamicItem,
+    )
+
+
+def test_letter_api():
+    for name in [
+        "setup", "init_db", "LETTER_CATALOG",
+        "get_letter_def", "list_letter_ids", "get_letters_for_npc",
+        "is_subscribed", "subscribe", "unsubscribe",
+        "toggle_subscription", "get_letters_history",
+        "generate_and_send_letters_for_guild",
+        "build_letters_panel", "open_letters_from_codex",
+        "LetterToggleButton", "weekly_letter_task",
+        "register_persistent_views",
+    ]:
+        assert hasattr(npc_letters, name), f"manque : {name}"

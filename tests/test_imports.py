@@ -55,6 +55,8 @@ PHASE_163_MODULES = [
     "regional_state",
     # Phase 170.6 : Indices fragmentés
     "mystery_investigation",
+    # Phase 170.7 : Lettres NPC hebdo en DM
+    "npc_letters",
 ]
 
 
@@ -119,6 +121,8 @@ INIT_DB_MODULES = [
     "regional_state",
     # Phase 170.6 : mystery clues + revelations
     "mystery_investigation",
+    # Phase 170.7 : letters subscriptions + sent log
+    "npc_letters",
 ]
 
 

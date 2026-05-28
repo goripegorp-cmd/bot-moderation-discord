@@ -184,6 +184,8 @@ import weekly_council as weekly_council_module
 import regional_state as regional_state_module
 # Phase 170.6 : Indices fragmentés (force la discussion en chat)
 import mystery_investigation as mystery_investigation_module
+# Phase 170.7 : Lettres NPC hebdo en DM (opt-in)
+import npc_letters as npc_letters_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -39081,12 +39083,24 @@ async def on_ready():
         if not mystery_investigation_module.mystery_task.is_running():
             mystery_investigation_module.mystery_task.start()
 
-        # Codex setup APRÈS council + regional + mystery pour injection refs
+        # Phase 170.7 : Lettres NPC hebdo en DM (dimanche 18h FR, opt-in)
+        npc_letters_module.setup(
+            bot, get_db, db_get, _v2h,
+            story_module=story_engine_module,
+            npc_module=npc_personalities_module,
+        )
+        await npc_letters_module.init_db()
+        npc_letters_module.register_persistent_views(bot)
+        if not npc_letters_module.weekly_letter_task.is_running():
+            npc_letters_module.weekly_letter_task.start()
+
+        # Codex setup APRÈS tous les modules pour injection refs complète
         codex_chronicle_module.setup(
             bot, get_db, db_get, _v2h, story_engine_module,
             council_module=weekly_council_module,
             regional_module=regional_state_module,
             mystery_module=mystery_investigation_module,
+            letters_module=npc_letters_module,
         )
         codex_chronicle_module.register_persistent_views(bot)
 
