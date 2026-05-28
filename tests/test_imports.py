@@ -25,6 +25,9 @@ PHASE_163_MODULES = [
     "coin_economy",
     "weekly_stats",
     "server_pulse",
+    # Phase 165 — nouveaux modules
+    "stream_schedule",
+    "activity_heatmap",
 ]
 
 
@@ -61,6 +64,9 @@ INIT_DB_MODULES = [
     "stream_watch_party",
     "community_goals",
     "coin_economy",
+    # Phase 165
+    "stream_schedule",
+    "activity_heatmap",
 ]
 
 

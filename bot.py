@@ -146,6 +146,10 @@ import coin_economy as coin_economy_module
 import weekly_stats as weekly_stats_module
 # Phase 162 : Server Pulse live + Tips Rotator
 import server_pulse as server_pulse_module
+# Phase 165.1 : Stream schedule + countdown auto
+import stream_schedule as stream_schedule_module
+# Phase 165.2 : Activity heatmap (quand le serveur est actif)
+import activity_heatmap as activity_heatmap_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -38907,9 +38911,21 @@ async def on_ready():
         if not stream_party_module.cleanup_task.is_running():
             stream_party_module.cleanup_task.start()
 
-        print("[Phase 155] Roblox/Stream : game stats + raffle + watch party")
+        # Phase 165.1 : Stream schedule + countdown
+        stream_schedule_module.setup(bot, get_db, db_get, _v2h)
+        await stream_schedule_module.init_db()
+        if not stream_schedule_module.countdown_task.is_running():
+            stream_schedule_module.countdown_task.start()
+
+        # Phase 165.2 : Activity heatmap (data-driven scheduling)
+        activity_heatmap_module.setup(bot, get_db, db_get, _v2h)
+        await activity_heatmap_module.init_db()
+        if not activity_heatmap_module.weekly_owner_dispatch_task.is_running():
+            activity_heatmap_module.weekly_owner_dispatch_task.start()
+
+        print("[Phase 155/165] Roblox/Stream : stats + raffle + watch + schedule + heatmap")
     except Exception as ex:
-        print(f"[on_ready Phase 155 roblox/stream] {ex}")
+        print(f"[on_ready Phase 155/165 roblox/stream] {ex}")
 
     # Phase 157 : Community goals + Coin economy
     try:
@@ -41911,6 +41927,19 @@ async def on_message(msg):
         # Phase 154 : tracking comportemental (background, ne bloque pas)
         try:
             asyncio.create_task(behavior_anomaly_module.track_message(msg))
+        except Exception:
+            pass
+
+        # Phase 165.2 : tracking heatmap (background, super léger : 1 UPSERT)
+        try:
+            asyncio.create_task(activity_heatmap_module.track_message(msg))
+        except Exception:
+            pass
+
+        # Phase 165.3 : auto-preview Roblox URLs (cooldown 5min/canal,
+        # silencieux si pas d'URL Roblox dans le message)
+        try:
+            asyncio.create_task(roblox_stats_module.try_inline_preview(msg))
         except Exception:
             pass
 
@@ -56777,6 +56806,16 @@ class EngagementHubView(View):
         b21.callback = self._on_server_pulse
         self.add_item(b21)
 
+        # Phase 165.1 : Schedule streams (owner-friendly, visible à tous)
+        b22 = Button(
+            label="📅 Streams programmés",
+            style=discord.ButtonStyle.primary,
+            custom_id="hub_stream_schedule",
+            row=2,
+        )
+        b22.callback = self._on_stream_schedule
+        self.add_item(b22)
+
     async def _on_quests(self, i: discord.Interaction):
         await _p41_open_daily(i)
 
@@ -56983,6 +57022,27 @@ class EngagementHubView(View):
             await i.followup.send(view=panel, ephemeral=True)
         except Exception as ex:
             print(f"[hub_server_pulse] {ex}")
+
+    async def _on_stream_schedule(self, i: discord.Interaction):
+        """Phase 165.1 : ouvre le calendrier des streams.
+
+        Tout user peut voir, mais seul le user qui ouvre le panel peut
+        programmer (vérif dans le modal callback)."""
+        try:
+            if not i.guild or not isinstance(i.user, discord.Member):
+                return await i.response.send_message(
+                    "❌ Serveur uniquement.", ephemeral=True
+                )
+            panel = stream_schedule_module.build_schedule_panel(i.user)
+            if panel is None:
+                return await i.response.send_message(
+                    "📅 Module schedule indisponible.", ephemeral=True
+                )
+            await i.response.defer(ephemeral=True)
+            await panel.populate()
+            await i.followup.send(view=panel, ephemeral=True)
+        except Exception as ex:
+            print(f"[hub_stream_schedule] {ex}")
 
 
 # ─── COMMANDES /hub + /hub_setup ───────────────────────────────────────────────

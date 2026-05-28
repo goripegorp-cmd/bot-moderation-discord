@@ -90,6 +90,95 @@ async def init_db():
         print(f"[roblox_game_stats init_db] {ex}")
 
 
+import re as _re
+import time as _time
+
+# Phase 165.3 : auto-preview Roblox URLs
+ROBLOX_URL_RE = _re.compile(
+    r"(?:https?://)?(?:www\.)?roblox\.com/games/(\d+)",
+    _re.IGNORECASE,
+)
+_PREVIEW_COOLDOWN: dict[tuple[int, int], float] = {}  # (guild, channel) → ts
+PREVIEW_COOLDOWN_SEC = 300  # 5 min
+
+
+def extract_place_id_from_text(text: str) -> Optional[int]:
+    """Extrait le 1er place_id Roblox d'un texte. None sinon."""
+    if not text:
+        return None
+    m = ROBLOX_URL_RE.search(text)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except (TypeError, ValueError):
+        return None
+
+
+async def fetch_universe_from_place(place_id: int) -> Optional[int]:
+    """Convertit un place_id en universe_id via l'API publique Roblox."""
+    if not place_id:
+        return None
+    try:
+        url = f"https://apis.roblox.com/universes/v1/places/{place_id}/universe"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=HTTP_TIMEOUT) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+        uid = data.get("universeId")
+        return int(uid) if uid else None
+    except Exception as ex:
+        print(f"[roblox_game_stats fetch_universe] {ex}")
+        return None
+
+
+async def try_inline_preview(message: discord.Message) -> bool:
+    """Hook on_message — si le message contient une URL Roblox, post un
+    preview stats (avec cooldown 5min/canal pour anti-spam).
+    Retourne True si un preview a été posté."""
+    if not message.guild or message.author.bot:
+        return False
+    place_id = extract_place_id_from_text(message.content or "")
+    if not place_id:
+        return False
+    # Cooldown par canal
+    key = (message.guild.id, message.channel.id)
+    last = _PREVIEW_COOLDOWN.get(key, 0)
+    if _time.time() - last < PREVIEW_COOLDOWN_SEC:
+        return False
+    try:
+        universe_id = await fetch_universe_from_place(place_id)
+        if not universe_id:
+            return False
+        stats = await fetch_game_stats(universe_id)
+        if not stats:
+            return False
+        _PREVIEW_COOLDOWN[key] = _time.time()
+        # Reply discret en réponse au message (pas de ping)
+        total_votes = stats["up_votes"] + stats["down_votes"]
+        approval = (
+            int((stats["up_votes"] / total_votes) * 100)
+            if total_votes > 0 else 0
+        )
+        reply = (
+            f"🎮 **{stats['name']}**\n"
+            f"👥 `{stats['playing']:,}` joueurs en ligne · "
+            f"🚀 `{stats['visits']:,}` visites · "
+            f"⭐ `{stats['favorites']:,}` favoris · "
+            f"👍 `{approval}%` approval"
+        )
+        await message.reply(
+            reply,
+            mention_author=False,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        return True
+    except Exception as ex:
+        print(f"[roblox_game_stats try_inline_preview] {ex}")
+        return False
+
+
 async def fetch_game_stats(universe_id: int) -> Optional[dict]:
     """Fetch stats publiques d'un jeu Roblox via API officielle."""
     if not universe_id:
