@@ -106,6 +106,12 @@ import seasonal_engine as season_module
 import dormant_wakeup as dormant_module
 # Phase 146 : Boutons de suivi après chaque event (zéro commande à mémoriser)
 import event_followup as followup_module
+# Phase 147 : Sécurité moderne 2026 — anti-raid, anti-phishing, anti-impersonation
+import raid_detector as raid_module
+import token_grabber as token_grabber_module
+import webhook_leak as webhook_leak_module
+import staff_sanction as staff_sanction_module
+import impersonation_detector as impersonation_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -38159,6 +38165,48 @@ async def on_ready():
             dormant_module.dormant_dispatch_task.start()
     except Exception as ex:
         print(f"[on_ready dormant_module setup] {ex}")
+    # Phase 147 : Sécurité moderne 2026 — staff_sanction (panel central),
+    # raid_detector, token_grabber, webhook_leak, impersonation_detector.
+    # IMPORTANT : staff_sanction est setup en premier car les autres modules
+    # s'en servent pour créer leurs panels d'action.
+    try:
+        _v2h = {
+            'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
+            'v2_divider': v2_divider, 'v2_container': v2_container,
+            'LayoutView': LayoutView,
+        }
+        staff_sanction_module.setup(bot, get_db, db_get, _v2h)
+        await staff_sanction_module.init_db()
+        staff_sanction_module.register_persistent_views(bot)
+
+        raid_module.setup(bot, get_db, db_get, _v2h)
+        await raid_module.init_db()
+
+        token_grabber_module.setup(
+            bot, get_db, db_get, _v2h,
+            staff_sanction_module=staff_sanction_module,
+        )
+        await token_grabber_module.init_db()
+
+        webhook_leak_module.setup(
+            bot, get_db, db_get, _v2h,
+            staff_sanction_module=staff_sanction_module,
+        )
+        await webhook_leak_module.init_db()
+
+        impersonation_module.setup(bot, get_db, db_get, _v2h)
+        await impersonation_module.init_db()
+        # Refresh initial index staff pour toutes les guilds
+        for g in bot.guilds:
+            try:
+                await impersonation_module.refresh_staff_index(g)
+            except Exception:
+                pass
+        print(f"[Phase 147] Sécurité 2026 active : raid + token + webhook + "
+              f"impersonation + staff_sanction")
+    except Exception as ex:
+        print(f"[on_ready Phase 147 security] {ex}")
+
     # Phase 146 : Event followup buttons (zéro commande à mémoriser)
     try:
         followup_module.setup({
@@ -40301,7 +40349,8 @@ async def _handle_goodbye(member):
 
 @bot.event
 async def on_member_update(before, after):
-    """Détecte les changements pertinents : boost Nitro principalement (Phase 26.1)."""
+    """Détecte les changements pertinents : boost Nitro (Phase 26.1) +
+    impersonation staff (Phase 147)."""
     try:
         # Boost détection : premium_since passe de None → not None
         if before.premium_since is None and after.premium_since is not None:
@@ -40309,7 +40358,21 @@ async def on_member_update(before, after):
         # Optionnel : log si arrêt de boost (premium_since None après → était set)
         # On ne fait rien sur l'arrêt pour éviter de spammer.
     except Exception as ex:
-        print(f"[on_member_update] {ex}")
+        print(f"[on_member_update boost] {ex}")
+    # Phase 147 : check impersonation sur changement de nick
+    try:
+        await impersonation_module.on_member_update_hook(before, after)
+    except Exception as ex:
+        print(f"[on_member_update impersonation] {ex}")
+
+
+@bot.event
+async def on_user_update(before, after):
+    """Phase 147 : check impersonation sur changement username/avatar global."""
+    try:
+        await impersonation_module.on_user_update_hook(before, after)
+    except Exception as ex:
+        print(f"[on_user_update impersonation] {ex}")
 
 
 async def _handle_boost_started(member):
@@ -40396,6 +40459,14 @@ async def on_member_join(m):
             ''', (m.guild.id, today))
             await db.commit()
     except: pass
+
+    # ═══ Phase 147 : raid_detector smart (account-signature based) ═══
+    # Ne déclenche QUE si plusieurs comptes suspects join en cluster.
+    # Friendly aux surges légitimes (lives streaming → comptes variés).
+    try:
+        await raid_module.on_member_join(m)
+    except Exception as ex:
+        print(f"[on_member_join raid_module] {ex}")
 
     # ═══ Phase 139 : Observabilité (join tracking pour retention) ═══
     try:
@@ -41058,6 +41129,24 @@ async def _check_compromised_account(msg):
 async def on_message(msg):
     if not msg.guild:
         return
+
+    # ═══════════════ Phase 147 : SÉCURITÉ EARLY-RETURN ═══════════════
+    # Webhook leak scan + token grabber scan AVANT tout autre traitement.
+    # Si détecté → message supprimé, on stoppe le pipeline ici (les autres
+    # handlers ne traiteront pas un message déjà supprimé).
+    if not msg.author.bot and msg.content:
+        try:
+            handled = await webhook_leak_module.on_message_hook(msg)
+            if handled:
+                return  # message supprimé, stop pipeline
+        except Exception as ex:
+            print(f"[on_message webhook_leak] {ex}")
+        try:
+            handled = await token_grabber_module.on_message_hook(msg)
+            if handled:
+                return  # message supprimé, stop pipeline
+        except Exception as ex:
+            print(f"[on_message token_grabber] {ex}")
 
     # ═══════════════ MESSAGES D'AIDE AUTOMATIQUES ═══════════════
     # Doit être appelé AVANT le filtre bot pour repositionner après les messages de bots
