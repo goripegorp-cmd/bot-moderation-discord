@@ -37,6 +37,12 @@ PHASE_163_MODULES = [
     "status_rotator",
     "voice_autoclean",
     "member_risk",
+    # Phase 168 — error logger
+    "error_logger",
+    # Phase 169 — mob hunts, marchand, invasion
+    "mob_hunts",
+    "wandering_merchant",
+    "world_invasion",
 ]
 
 
@@ -83,6 +89,12 @@ INIT_DB_MODULES = [
     # Phase 167 (status_rotator n'a pas d'init_db, pas de table)
     "voice_autoclean",
     "member_risk",
+    # Phase 168 — error_logger
+    "error_logger",
+    # Phase 169 — mob_hunts, merchant, invasion
+    "mob_hunts",
+    "wandering_merchant",
+    "world_invasion",
 ]
 
 

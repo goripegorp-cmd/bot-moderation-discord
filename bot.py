@@ -166,6 +166,12 @@ import voice_autoclean as voice_autoclean_module
 import member_risk as member_risk_module
 # Phase 168.4 : Central error logger + burst alert
 import error_logger as error_logger_module
+# Phase 169.1 : Mob Hunts (combat fréquent multi-user)
+import mob_hunts as mob_hunts_module
+# Phase 169.2 : Marchand itinérant quotidien
+import wandering_merchant as wandering_merchant_module
+# Phase 169.3 : World Invasion mensuelle
+import world_invasion as world_invasion_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -38980,7 +38986,27 @@ async def on_ready():
         if not error_logger_module.burst_check_task.is_running():
             error_logger_module.burst_check_task.start()
 
-        print("[Phase 155/165/166/167/168] Stream + token_leak + birthday + welcome + spotlight + rotator + voice_clean + risk + error_logger")
+        # Phase 169.1 : Mob Hunts (combat fréquent multi-user, drops alliance)
+        mob_hunts_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins)
+        await mob_hunts_module.init_db()
+        mob_hunts_module.register_persistent_views(bot)
+        if not mob_hunts_module.spawn_task.is_running():
+            mob_hunts_module.spawn_task.start()
+
+        # Phase 169.2 : Marchand itinérant quotidien
+        wandering_merchant_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins)
+        await wandering_merchant_module.init_db()
+        wandering_merchant_module.register_persistent_views(bot)
+        if not wandering_merchant_module.spawn_merchant_task.is_running():
+            wandering_merchant_module.spawn_merchant_task.start()
+
+        # Phase 169.3 : World Invasion (1er samedi 21h FR)
+        world_invasion_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins)
+        await world_invasion_module.init_db()
+        if not world_invasion_module.monthly_invasion_task.is_running():
+            world_invasion_module.monthly_invasion_task.start()
+
+        print("[Phase 155/165/166/167/168/169] Stream + token_leak + birthday + welcome + spotlight + rotator + voice_clean + risk + error_logger + mob_hunts + merchant + invasion")
     except Exception as ex:
         print(f"[on_ready Phase 155/165 roblox/stream] {ex}")
 
@@ -60454,6 +60480,16 @@ async def db_optimizer_task():
             ("token_leaks_old",            "DELETE FROM token_leaks WHERE datetime(detected_at) < datetime('now', '-180 days')"),
             ("stream_schedule_past",       "DELETE FROM stream_schedule WHERE (cancelled=1 OR datetime(starts_at) < datetime('now', '-30 days'))"),
             ("activity_heatmap_dispatch_old", "DELETE FROM activity_heatmap_dispatch WHERE datetime(last_sent_at) < datetime('now', '-90 days')"),
+            # Phase 168.4 + 169 : cleanup
+            ("error_log_old",              "DELETE FROM error_log WHERE datetime(occurred_at) < datetime('now', '-7 days')"),
+            ("error_burst_alerts_old",     "DELETE FROM error_burst_alerts WHERE datetime(last_alert_at) < datetime('now', '-30 days')"),
+            ("mob_spawns_old",             "DELETE FROM mob_spawns WHERE status IN ('killed','despawned') AND datetime(spawned_at) < datetime('now', '-7 days')"),
+            ("mob_attackers_orphan",       "DELETE FROM mob_attackers WHERE mob_id NOT IN (SELECT id FROM mob_spawns)"),
+            ("merchant_visits_old",        "DELETE FROM merchant_visits WHERE status != 'active' AND datetime(started_at) < datetime('now', '-30 days')"),
+            ("merchant_stock_orphan",      "DELETE FROM merchant_stock WHERE visit_id NOT IN (SELECT id FROM merchant_visits)"),
+            ("merchant_purchases_old",     "DELETE FROM merchant_purchases WHERE datetime(purchased_at) < datetime('now', '-180 days')"),
+            ("invasion_events_old",        "DELETE FROM invasion_events WHERE status != 'active' AND datetime(started_at) < datetime('now', '-90 days')"),
+            ("invasion_attackers_orphan",  "DELETE FROM invasion_attackers WHERE event_id NOT IN (SELECT id FROM invasion_events)"),
         ]
         total_deleted = 0
         for name, stmt in cleanup_stmts:
