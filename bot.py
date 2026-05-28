@@ -63942,6 +63942,34 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
                 self.add_item(v2_container(*items, color=color))
 
         await _safe_followup(i, view=_ProfileLayout())
+
+        # Phase 150.3 : afficher aussi le mini-panel personnalisation
+        # (toggle on/off du tracking style) — uniquement pour soi
+        if target.id == i.user.id:
+            try:
+                perso_panel = profile_module.build_personalization_panel(
+                    target
+                )
+                if perso_panel is not None:
+                    style = await profile_module.get_primary_style(
+                        gid, uid
+                    )
+                    style_label = profile_module.STYLE_LABEL.get(
+                        style, "Équilibré"
+                    )
+                    style_emoji = profile_module.STYLE_EMOJI.get(
+                        style, "⚖️"
+                    )
+                    await i.followup.send(
+                        content=(
+                            f"_Style de jeu détecté :_ "
+                            f"{style_emoji} **{style_label}**"
+                        ),
+                        view=perso_panel,
+                        ephemeral=True,
+                    )
+            except Exception as ex:
+                print(f"[/profile perso_panel] {ex}")
     except Exception as ex:
         print(f"[/profile V2] {ex}")
         import traceback; traceback.print_exc()
