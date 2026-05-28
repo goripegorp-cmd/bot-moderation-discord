@@ -900,7 +900,15 @@ async def db_init():
             else:
                 async with db.execute("PRAGMA table_info(tickets)") as cur2:
                     cols = [r[1] for r in await cur2.fetchall()]
-                for cn, ct in [('panel_id','TEXT DEFAULT ""'),('claimed_by','INTEGER DEFAULT 0'),('status','TEXT DEFAULT "open"'),('answers','TEXT DEFAULT "{}"')]:
+                # Phase 151 : ajout 'created_at' à la migration (manquait pour
+                # tickets legacy → cassait observability + tickets_enhance auto_close)
+                for cn, ct in [
+                    ('panel_id', 'TEXT DEFAULT ""'),
+                    ('claimed_by', 'INTEGER DEFAULT 0'),
+                    ('status', 'TEXT DEFAULT "open"'),
+                    ('answers', 'TEXT DEFAULT "{}"'),
+                    ('created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP'),
+                ]:
                     if cn not in cols:
                         try: await db.execute(f'ALTER TABLE tickets ADD COLUMN {cn} {ct}')
                         except: pass
@@ -7434,6 +7442,17 @@ def _is_event_active_time(c: dict) -> bool:
         print(f"[_is_event_active_time] {ex}")
         # En cas d'erreur, on autorise (fail-open) pour ne pas casser le système
         return True
+
+
+async def _is_event_active_hour(guild_id: int) -> bool:
+    """Phase 151 : wrapper async qui prend guild_id, charge cfg + appelle
+    _is_event_active_time. Utilisé par npc_chatter, conv_starter, etc."""
+    try:
+        c = await cfg(guild_id)
+        return _is_event_active_time(c)
+    except Exception as ex:
+        print(f"[_is_event_active_hour] {ex}")
+        return True  # fail-open
 
 
 async def _get_or_create_inventory(guild_id: int, user_id: int) -> dict:
@@ -42024,10 +42043,11 @@ except Exception as ex:
 #  100% fiable : pas de scrape, pas de rate-limit, pas de Cloudflare.
 # ═══════════════════════════════════════════════════════════════════════════════
 
-publish_group = app_commands.Group(
-    name="publish",
-    description="📝 Publier manuellement un post social (quand l'auto-detection échoue)",
-)
+# Phase 151 : conflict fix — publish_group reutilise publish_metrics_group
+# (declare ligne ~39949 sous le meme name="publish"). Les 4 sous-commandes
+# manuelles (twitter/tiktok/youtube/generic) sont decorees sur cette
+# instance commune, donc ajoutees au meme /publish que metrics/cross_*.
+publish_group = publish_metrics_group
 
 
 async def _fxtwitter_fetch(session, tweet_url: str) -> dict:
@@ -42269,10 +42289,9 @@ async def publish_generic(i: discord.Interaction, salon: discord.TextChannel, ur
             pass
 
 
-try:
-    bot.tree.add_command(publish_group)
-except Exception as ex:
-    print(f"[PUBLISH] Erreur enregistrement groupe : {ex}")
+# Phase 151 : publish_group est un alias de publish_metrics_group, deja
+# enregistre plus haut via bot.tree.add_command(publish_metrics_group).
+# On ne re-add pas pour eviter le "Command 'publish' already registered".
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -55265,11 +55284,14 @@ async def hub_orphan_cleaner_task():
                 if not hub_ch:
                     continue
                 # Trouver les pinned IDs pour les exclure
+                # Phase 151 : utilise l'iterator async (l'API .pins() awaitable
+                # est deprecated en discord.py 2.7+)
+                pinned_ids = set()
                 try:
-                    pinned = await hub_ch.pins()
-                    pinned_ids = {p.id for p in pinned}
+                    async for p in hub_ch.pins():
+                        pinned_ids.add(p.id)
                 except Exception:
-                    pinned_ids = set()
+                    pass
                 deleted = 0
                 # Scanner historique 48h+ (limit 100 pour pas trop charger)
                 try:
@@ -68391,7 +68413,7 @@ async def _compute_health_metrics(guild) -> dict:
         async with get_db() as db:
             try:
                 async with db.execute(
-                    "SELECT SUM(new_members), SUM(leaves) FROM daily_guild_stats "
+                    "SELECT SUM(new_members), SUM(left_members) FROM daily_guild_stats "
                     "WHERE guild_id=? AND date >= date('now', '-7 days')",
                     (gid,),
                 ) as cur:
@@ -68403,7 +68425,7 @@ async def _compute_health_metrics(guild) -> dict:
                 m["leaves_7d"] = 0
             try:
                 async with db.execute(
-                    "SELECT SUM(new_members), SUM(leaves) FROM daily_guild_stats "
+                    "SELECT SUM(new_members), SUM(left_members) FROM daily_guild_stats "
                     "WHERE guild_id=? AND date >= date('now', '-30 days')",
                     (gid,),
                 ) as cur:
@@ -68640,7 +68662,7 @@ async def owner_alerts_task():
                 if not _alert_already_sent_today(guild.id, "member_loss"):
                     async with get_db() as db:
                         async with db.execute(
-                            "SELECT SUM(new_members), SUM(leaves) FROM daily_guild_stats "
+                            "SELECT SUM(new_members), SUM(left_members) FROM daily_guild_stats "
                             "WHERE guild_id=? AND date >= date('now', '-1 days')",
                             (guild.id,),
                         ) as cur:
