@@ -1,4 +1,4 @@
-"""Phase 170.1-4 : Chronique + NPCs + Daily Encounters + Conseil."""
+"""Phase 170.1-5 : Chronique + NPCs + Encounters + Conseil + Régions."""
 import pytest
 
 import story_engine
@@ -6,6 +6,7 @@ import codex_chronicle
 import npc_personalities
 import daily_encounters
 import weekly_council
+import regional_state
 
 
 # ─── story_engine ────────────────────────────────────────────────────────
@@ -421,3 +422,87 @@ def test_council_api():
         "CouncilVoteButton", "council_task", "register_persistent_views",
     ]:
         assert hasattr(weekly_council, name), f"manque : {name}"
+
+
+# ─── Phase 170.5 : Regional State ────────────────────────────────────────
+
+def test_region_catalog_size():
+    """Exactement 5 régions."""
+    assert len(regional_state.REGION_CATALOG) == 5
+
+
+def test_region_required_fields():
+    """Chaque région a les champs requis."""
+    required = {"id", "name", "subtitle", "emoji", "description",
+                "ambiance", "lore_unlock_act", "linked_npc",
+                "bonus_when_healthy"}
+    for r in regional_state.REGION_CATALOG:
+        missing = required - set(r.keys())
+        assert not missing, f"Region {r.get('id')} manque : {missing}"
+
+
+def test_region_ids_unique():
+    ids = [r["id"] for r in regional_state.REGION_CATALOG]
+    assert len(ids) == len(set(ids))
+
+
+def test_region_expected_ids():
+    """Les 5 régions canoniques."""
+    ids = {r["id"] for r in regional_state.REGION_CATALOG}
+    expected = {"cendregris", "profondes", "cathedrale", "marais", "sanctuaire"}
+    assert ids == expected
+
+
+def test_region_linked_npcs_valid():
+    """Chaque région est liée à un NPC valide."""
+    valid_npcs = set(npc_personalities.list_npc_ids())
+    for r in regional_state.REGION_CATALOG:
+        assert r["linked_npc"] in valid_npcs, (
+            f"Region {r['id']} ref NPC inconnu : {r['linked_npc']}"
+        )
+
+
+def test_region_acts_distribution():
+    """Régions réparties sur les 3 Actes."""
+    acts = {r["lore_unlock_act"] for r in regional_state.REGION_CATALOG}
+    # Au moins 2 actes représentés (1 et 2 ou 3)
+    assert len(acts) >= 2
+
+
+def test_region_constants():
+    """Constantes saines."""
+    assert regional_state.HEALTH_MAX == 100
+    assert regional_state.THREAT_MAX == 100
+    assert 0 < regional_state.HEALTH_INITIAL <= 100
+    assert 0 <= regional_state.THREAT_INITIAL <= 100
+    assert regional_state.PATROL_WEEKDAY == 2  # mercredi
+    assert 0 <= regional_state.PATROL_HOUR <= 23
+    assert regional_state.PATROL_DURATION_HOURS > 0
+    assert regional_state.PATROL_TARGET_POINTS > 0
+    assert regional_state.PATROL_RECLAIM_TARGET < regional_state.PATROL_TARGET_POINTS
+    assert 1 <= regional_state.MAX_POINTS_PER_USER <= 20
+    assert regional_state.SERVER_DEBUFF_PER_FALLEN > 0
+
+
+def test_region_button_is_dynamic():
+    """PatrolDefendButton est un DynamicItem."""
+    import discord
+    assert issubclass(
+        regional_state.PatrolDefendButton, discord.ui.DynamicItem,
+    )
+
+
+def test_regional_api():
+    """API publique exposée."""
+    for name in [
+        "setup", "init_db", "REGION_CATALOG",
+        "get_region_def", "list_region_ids",
+        "ensure_regions_initialized", "get_region_state",
+        "get_all_regions_state", "get_server_debuff",
+        "apply_passive_threat", "defend_region",
+        "start_patrol", "close_patrol", "get_active_patrol",
+        "build_regions_panel", "build_patrol_panel",
+        "open_regions_from_codex",
+        "PatrolDefendButton", "regional_task", "register_persistent_views",
+    ]:
+        assert hasattr(regional_state, name), f"manque : {name}"

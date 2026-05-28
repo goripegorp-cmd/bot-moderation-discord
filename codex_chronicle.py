@@ -32,21 +32,23 @@ _db_get = None
 _v2 = None
 _story = None  # référence vers story_engine module
 _council = None  # référence vers weekly_council module (Phase 170.4)
+_regional = None  # référence vers regional_state module (Phase 170.5)
 
 VALID_PAGES = ("current", "history", "memoirs", "acts")
 
 
 def setup(
     bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, story_module,
-    council_module=None,
+    council_module=None, regional_module=None,
 ):
-    global _bot, _get_db, _db_get, _v2, _story, _council
+    global _bot, _get_db, _db_get, _v2, _story, _council, _regional
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
     _v2 = v2_helpers
     _story = story_module
     _council = council_module
+    _regional = regional_module
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -195,6 +197,32 @@ async def _build_page_current(guild_id: int) -> list:
                         f"`{active['total_votes']}` voix · ferme `{active['closes_at']}`\n\n"
                         f"_Clique sur 🗳️ Conseil ci-dessous pour voter._"
                     ))
+        except Exception:
+            pass
+
+    # Phase 170.5 : si une patrouille est active, alerte
+    if _regional is not None:
+        try:
+            patrol = await _regional.get_active_patrol(guild_id)
+            if patrol:
+                region = _regional.get_region_def(patrol["region_id"]) or {}
+                reclaim = " (RECONQUÊTE)" if patrol["is_reclaim"] else ""
+                pct = int(patrol["defense_total"] * 100 / max(1, patrol["target"]))
+                items.append(v2_divider())
+                items.append(v2_body(
+                    f"🚨 **PATROUILLE ACTIVE{reclaim}**\n"
+                    f"{region.get('emoji', '?')} **{region.get('name', '?')}** est menacée.\n"
+                    f"Défense : `{patrol['defense_total']}/{patrol['target']}` ({pct}%)\n\n"
+                    f"_Clique sur 🌍 Régions ci-dessous pour défendre._"
+                ))
+
+            # Debuff serveur
+            debuff = await _regional.get_server_debuff(guild_id)
+            if debuff["fallen_count"] > 0:
+                items.append(v2_body(
+                    f"⚠️ **{debuff['fallen_count']} région(s) tombée(s)** "
+                    f"— Debuff serveur : {debuff['loot_penalty_pct']:+d}% loot."
+                ))
         except Exception:
             pass
 
@@ -386,6 +414,14 @@ async def build_codex_panel(
         except Exception:
             pass
 
+    # Phase 170.5 : bouton "🌍 Régions" (toujours accessible)
+    if _regional is not None:
+        try:
+            region_btn = CodexRegionsButton(user_id)
+            layout.add_item(region_btn)
+        except Exception:
+            pass
+
     return layout
 
 
@@ -512,12 +548,65 @@ class CodexCouncilButton(
                 pass
 
 
+class CodexRegionsButton(
+    discord.ui.DynamicItem[Button],
+    template=r"codex_regions:(?P<user_id>\d+)",
+):
+    """Bouton qui ouvre le panel des Régions (Phase 170.5)."""
+
+    def __init__(self, user_id: int):
+        super().__init__(
+            Button(
+                label="🌍 Régions",
+                style=discord.ButtonStyle.success,
+                custom_id=f"codex_regions:{user_id}",
+            )
+        )
+        self.user_id = user_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["user_id"]))
+
+    async def callback(self, btn_i: discord.Interaction):
+        if btn_i.user.id != self.user_id:
+            try:
+                return await btn_i.response.send_message(
+                    "🔒 Ouvre ton propre Codex depuis le hub.", ephemeral=True
+                )
+            except Exception:
+                return
+        if _regional is None:
+            try:
+                return await btn_i.response.send_message(
+                    "❌ Régions indisponibles.", ephemeral=True
+                )
+            except Exception:
+                return
+        try:
+            await _regional.open_regions_from_codex(btn_i)
+        except Exception as ex:
+            print(f"[codex_regions callback] {ex}")
+            try:
+                if not btn_i.response.is_done():
+                    await btn_i.response.send_message(
+                        f"❌ Erreur : `{ex}`", ephemeral=True
+                    )
+                else:
+                    await btn_i.followup.send(
+                        f"❌ Erreur : `{ex}`", ephemeral=True
+                    )
+            except Exception:
+                pass
+
+
 def register_persistent_views(bot_instance):
     if bot_instance is None:
         return
     try:
         bot_instance.add_dynamic_items(CodexPageButton)
         bot_instance.add_dynamic_items(CodexCouncilButton)
+        bot_instance.add_dynamic_items(CodexRegionsButton)
     except Exception as ex:
         print(f"[codex_chronicle register_persistent_views] {ex}")
 

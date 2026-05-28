@@ -51,6 +51,8 @@ PHASE_163_MODULES = [
     "daily_encounters",
     # Phase 170.4 : Conseil des Anciens hebdomadaire
     "weekly_council",
+    # Phase 170.5 : Régions du monde + patrouilles
+    "regional_state",
 ]
 
 
@@ -111,6 +113,8 @@ INIT_DB_MODULES = [
     "daily_encounters",
     # Phase 170.4 : council sessions + votes
     "weekly_council",
+    # Phase 170.5 : regional state + patrols
+    "regional_state",
 ]
 
 

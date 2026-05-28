@@ -180,6 +180,8 @@ import npc_personalities as npc_personalities_module
 import daily_encounters as daily_encounters_module
 # Phase 170.4 : Conseil des Anciens hebdomadaire
 import weekly_council as weekly_council_module
+# Phase 170.5 : Régions du monde + patrouilles
+import regional_state as regional_state_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -39054,10 +39056,22 @@ async def on_ready():
         if not weekly_council_module.council_task.is_running():
             weekly_council_module.council_task.start()
 
-        # Codex setup APRÈS council pour que la référence soit injectée
+        # Phase 170.5 : 5 régions du monde + patrouilles (mercredi 19h FR)
+        regional_state_module.setup(
+            bot, get_db, db_get, _v2h,
+            story_module=story_engine_module,
+            npc_module=npc_personalities_module,
+        )
+        await regional_state_module.init_db()
+        regional_state_module.register_persistent_views(bot)
+        if not regional_state_module.regional_task.is_running():
+            regional_state_module.regional_task.start()
+
+        # Codex setup APRÈS council + regional pour injection des refs
         codex_chronicle_module.setup(
             bot, get_db, db_get, _v2h, story_engine_module,
             council_module=weekly_council_module,
+            regional_module=regional_state_module,
         )
         codex_chronicle_module.register_persistent_views(bot)
 
