@@ -39524,11 +39524,8 @@ async def bonus_cmd(i: discord.Interaction):
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Phase 131 : /gift — DÉSACTIVÉ Phase 168.2 (sleep-on-events guard)
+# Phase 168.3 : retiré du tree Discord (décorateur supprimé)
 # ═══════════════════════════════════════════════════════════════════════════════
-@bot.tree.command(
-    name="gift",
-    description="🚫 [DÉSACTIVÉ — Phase 168] Envoyer des coins",
-)
 async def gift_cmd(i: discord.Interaction):
     """Phase 168.2 : /gift désactivé. Économie 100% solo — éviter que
     les anciens passent leurs coins aux nouveaux (sleep-on-events guard)."""
@@ -45351,7 +45348,9 @@ async def _finalize_trade(btn_i: discord.Interaction, trade_id: str, accept: boo
 # - mine   : mes enchères actives
 # - bid    : (via boutons dans browse)
 
-@bot.tree.command(name="auction", description="🔨 [DÉSACTIVÉ — Phase 166] Maison des enchères")
+# Phase 168.3 : /auction retirée du tree Discord (décorateur supprimé).
+# Le body reste pour les rares cas où l'on appellerait la fonction
+# directement, mais elle n'apparaît plus dans le menu slash.
 async def auction_cmd(i: discord.Interaction):
     """Phase 166 : auction P2P désactivée — favorise le sleep-on-events
     + le passage d'items aux nouveaux. Économie reste 100% solo."""
@@ -48852,7 +48851,7 @@ async def suggestion_cmd(i: discord.Interaction, titre: str, proposition: str):
 
 trade_cooldowns = {}
 
-@bot.tree.command(name="trade", description="🔄 [DÉSACTIVÉ — Phase 166] Annonce d'échange")
+# Phase 168.3 : /trade retirée du tree Discord (décorateur supprimé).
 async def trade_cmd(i: discord.Interaction):
     """Phase 166 : trade community board désactivé.
 
@@ -64776,10 +64775,7 @@ class MarketplaceBuyView(View):
             await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-@bot.tree.command(
-    name="sell_pet",
-    description="🚫 [DÉSACTIVÉ — Phase 166] Vendre un pet",
-)
+# Phase 168.3 : /sell_pet retirée du tree Discord (décorateur supprimé).
 async def sell_pet_cmd(i: discord.Interaction):
     """Phase 166 : marketplace pet désactivé — sleep-on-events guard."""
     try:
@@ -64900,10 +64896,7 @@ async def _sell_pet_cmd_DEPRECATED(i):
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-@bot.tree.command(
-    name="marketplace",
-    description="🚫 [DÉSACTIVÉ — Phase 166] Marketplace",
-)
+# Phase 168.3 : /marketplace retirée du tree Discord (décorateur supprimé).
 async def marketplace_cmd(i: discord.Interaction):
     """Phase 166 : marketplace désactivé — sleep-on-events guard."""
     try:
