@@ -44290,30 +44290,8 @@ async def inventory_cmd(i: discord.Interaction):
                             except Exception:
                                 pass
 
-                class _SwapBtn(discord.ui.Button):
-                    def __init__(self):
-                        super().__init__(
-                            label="🤝 Échanger",
-                            style=discord.ButtonStyle.secondary,
-                            custom_id=f"phase117_inv_swap_{_owner_id}",
-                        )
-
-                    async def callback(self, btn_i: discord.Interaction):
-                        if btn_i.user.id != _owner_id:
-                            return await btn_i.response.send_message(
-                                "❌ Ce panneau n'est pas pour toi.", ephemeral=True
-                            )
-                        try:
-                            await _open_swap_flow(btn_i)
-                        except Exception as ex:
-                            print(f"[phase117 inv swap btn] {ex}")
-                            try:
-                                if not btn_i.response.is_done():
-                                    await btn_i.response.send_message(
-                                        f"❌ Erreur : `{ex}`", ephemeral=True
-                                    )
-                            except Exception:
-                                pass
+                # Phase 166.5 : _SwapBtn supprimé — pas d'échange P2P
+                # (cf décision owner : "aucun échange, sleep-on-events guard")
 
                 # ─── Section "ACTIONS RAPIDES" avec boutons en accessory ───
                 items.append(v2_body("**╔═══ ⚡  ACTIONS RAPIDES  ═══╗**"))
@@ -44327,11 +44305,8 @@ async def inventory_cmd(i: discord.Interaction):
                     v2_subtitle("Affine un item pour le rendre plus rare (risque/reward)"),
                     accessory=_ForgeBtn(),
                 ))
-                items.append(v2_section(
-                    v2_title("🤝  Échange P2P"),
-                    v2_subtitle("Propose un swap d'équipement à un autre joueur"),
-                    accessory=_SwapBtn(),
-                ))
+                # Phase 166.5 : section "🤝 Échange P2P" supprimée
+                # — économie solo only.
 
                 # Phase 128 : Refresh — re-charge stats/durabilité après combat
                 async def _refresh_inv(btn_i: discord.Interaction):
@@ -44467,25 +44442,44 @@ async def repair_cmd(i: discord.Interaction):
                 )
 
             async def callback(self, btn_i: discord.Interaction):
+                """Phase 166.5 : fix "Échec interaction" — defer first."""
                 if btn_i.user.id != _owner_id:
                     return await btn_i.response.send_message(
                         "❌ Ce panneau n'est pas pour toi.", ephemeral=True
                     )
+                # DEFER immédiat : 5+ ops DB dépasseraient les 3s window
+                try:
+                    await btn_i.response.defer()
+                except Exception:
+                    pass
+
+                async def _send_or_edit(content: str):
+                    try:
+                        await btn_i.edit_original_response(
+                            content=content, view=None, attachments=[],
+                        )
+                        return
+                    except Exception:
+                        pass
+                    try:
+                        await btn_i.followup.send(content, ephemeral=True)
+                    except Exception:
+                        pass
+
                 try:
                     # Re-vérifier en atomique
                     inv2 = await _get_or_create_inventory(btn_i.guild.id, btn_i.user.id)
                     cost = events2026.repair_inventory_cost(inv2)
                     if cost == 0:
-                        return await btn_i.response.send_message(
-                            "✨ Ton équipement est déjà au max.", ephemeral=True
+                        return await _send_or_edit(
+                            "✨ Ton équipement est déjà au max."
                         )
                     eco2 = await get_user_economy(btn_i.guild.id, btn_i.user.id)
                     hand = int(eco2.get('coins', 0) or 0)
                     bank2 = int(eco2.get('bank', 0) or 0)
                     if hand + bank2 < cost:
-                        return await btn_i.response.send_message(
-                            f"💸 Fonds insuffisants ({hand + bank2:,} / {cost:,} 🪙).",
-                            ephemeral=True,
+                        return await _send_or_edit(
+                            f"💸 Fonds insuffisants ({hand + bank2:,} / {cost:,} 🪙)."
                         )
                     # Déduire de la main d'abord, puis de la banque
                     from_hand = min(hand, cost)
@@ -44500,24 +44494,16 @@ async def repair_cmd(i: discord.Interaction):
                     # Réparer
                     events2026.repair_all_inventory(inv2)
                     await _save_inventory(btn_i.guild.id, btn_i.user.id, inv2)
-                    await btn_i.response.edit_message(
-                        content=(
-                            f"✅ **Équipement intégralement réparé !**\n"
-                            f"Coût : `{cost:,}` 🪙 "
-                            f"({from_hand:,} main + {from_bank:,} banque)\n"
-                            f"_Tape `/inventory` pour voir l'état._"
-                        ),
-                        view=None,
+                    await _send_or_edit(
+                        f"✅ **Équipement intégralement réparé !**\n"
+                        f"Coût : `{cost:,}` 🪙 "
+                        f"({from_hand:,} main + {from_bank:,} banque)\n"
+                        f"_Tape `/inventory` pour voir l'état._"
                     )
                 except Exception as ex:
                     print(f"[/repair callback] {ex}")
                     import traceback; traceback.print_exc()
-                    try:
-                        await btn_i.response.send_message(
-                            f"❌ Erreur : `{ex}`", ephemeral=True
-                        )
-                    except Exception:
-                        pass
+                    await _send_or_edit(f"❌ Erreur : `{ex}`")
 
         class _RepairLayout(LayoutView):
             def __init__(self):
@@ -45423,7 +45409,20 @@ async def _auction_browse(i: discord.Interaction):
 
 
 async def _place_bid(btn_i: discord.Interaction, ah_id: int, increment_pct: int):
-    """Phase 109 : placer une enchère atomiquement."""
+    """Phase 109 : placer une enchère atomiquement.
+    Phase 166.5 : short-circuit — auction est désactivée. Si quelqu'un
+    clique un vieux bouton de panel persisté, on répond proprement au
+    lieu de timeout."""
+    try:
+        await btn_i.response.send_message(
+            "🚫 **Maison des enchères désactivée** (Phase 166).\n\n"
+            "Pour éviter le passage d'items entre joueurs. "
+            "Tape `/inventory` pour gérer ton stuff.",
+            ephemeral=True,
+        )
+        return
+    except Exception:
+        pass
     try:
         async with get_db() as db:
             async with db.execute(
@@ -45808,83 +45807,106 @@ async def craft_cmd(i: discord.Interaction):
                 self.recipe = recipe
 
             async def callback(self, btn_i: discord.Interaction):
+                """Phase 166.5 : fix "Échec de l'interaction" — defer
+                immédiat (3s → 15min window) + edit_original_response
+                au lieu de response.edit_message après opérations DB."""
                 if btn_i.user.id != user_id:
                     return await btn_i.response.send_message(
                         "❌ Ce panneau n'est pas pour toi.", ephemeral=True
                     )
-                # Re-vérifier inventaire + coins
-                inv2 = await _get_or_create_inventory(btn_i.guild.id, btn_i.user.id)
-                item_now = inv2.get(self.slot_key) or {}
-                if item_now.get("name") != self.item_snap.get("name"):
-                    return await btn_i.response.send_message(
-                        "❌ L'item a changé depuis. Relance `/craft`.", ephemeral=True
-                    )
-                eco2 = await get_user_economy(btn_i.guild.id, btn_i.user.id)
-                hand2 = int(eco2.get('coins', 0) or 0)
-                bank2 = int(eco2.get('bank', 0) or 0)
-                cost = int(self.recipe["cost"])
-                if hand2 + bank2 < cost:
-                    return await btn_i.response.send_message(
-                        f"💸 Fonds insuffisants ({hand2 + bank2:,} / {cost:,} 🪙).",
-                        ephemeral=True,
-                    )
+                # DEFER FIRST : sinon les 6-8 ops DB qui suivent peuvent
+                # dépasser les 3s et timeout l'interaction Discord.
+                try:
+                    await btn_i.response.defer()
+                except Exception:
+                    pass
 
-                # Déduire les coins
-                from_hand = min(hand2, cost)
-                from_bank = cost - from_hand
-                if from_hand > 0:
-                    await add_coins(btn_i.guild.id, btn_i.user.id, -from_hand)
-                if from_bank > 0:
-                    await update_user_economy(btn_i.guild.id, btn_i.user.id, bank=bank2 - from_bank)
-
-                # Tenter l'affinage
-                success, result_item = events2026.attempt_refine(item_now)
-                if success and result_item:
-                    inv2[self.slot_key] = result_item
-                    await _save_inventory(btn_i.guild.id, btn_i.user.id, inv2)
-                    new_emoji = result_item.get("emoji", "✨")
-                    new_name = result_item.get("name", "?")
-                    new_rarity = result_item.get("rarity", "rare")
-                    rarity_emojis = {
-                        "commune": "⚪", "rare": "🔵", "épique": "🟣",
-                        "légendaire": "🟠", "mythique": "🔴", "divine": "💎",
-                    }
-                    badge = rarity_emojis.get(new_rarity.lower(), "✨")
-
-                    # Phase 113 : incr counter + check badges
+                async def _send_or_edit(content: str):
+                    """Helper : tente edit_original_response, fallback followup."""
                     try:
-                        await _incr_phase113_counter(
-                            btn_i.guild.id, btn_i.user.id, "refines_success"
+                        await btn_i.edit_original_response(
+                            content=content, view=None, attachments=[],
                         )
-                        await _check_phase113_badges(btn_i.guild, btn_i.user.id)
-                    except Exception as ex:
-                        print(f"[craft badge check] {ex}")
+                        return
+                    except Exception:
+                        pass
+                    try:
+                        await btn_i.followup.send(content, ephemeral=True)
+                    except Exception:
+                        pass
 
-                    await btn_i.response.edit_message(
-                        content=(
+                try:
+                    # Re-vérifier inventaire + coins
+                    inv2 = await _get_or_create_inventory(btn_i.guild.id, btn_i.user.id)
+                    item_now = inv2.get(self.slot_key) or {}
+                    if item_now.get("name") != self.item_snap.get("name"):
+                        return await _send_or_edit(
+                            "❌ L'item a changé depuis. Relance `/craft`."
+                        )
+                    eco2 = await get_user_economy(btn_i.guild.id, btn_i.user.id)
+                    hand2 = int(eco2.get('coins', 0) or 0)
+                    bank2 = int(eco2.get('bank', 0) or 0)
+                    cost = int(self.recipe["cost"])
+                    if hand2 + bank2 < cost:
+                        return await _send_or_edit(
+                            f"💸 Fonds insuffisants ({hand2 + bank2:,} / {cost:,} 🪙)."
+                        )
+
+                    # Déduire les coins
+                    from_hand = min(hand2, cost)
+                    from_bank = cost - from_hand
+                    if from_hand > 0:
+                        await add_coins(btn_i.guild.id, btn_i.user.id, -from_hand)
+                    if from_bank > 0:
+                        await update_user_economy(btn_i.guild.id, btn_i.user.id, bank=bank2 - from_bank)
+
+                    # Tenter l'affinage
+                    success, result_item = events2026.attempt_refine(item_now)
+                    if success and result_item:
+                        inv2[self.slot_key] = result_item
+                        await _save_inventory(btn_i.guild.id, btn_i.user.id, inv2)
+                        new_emoji = result_item.get("emoji", "✨")
+                        new_name = result_item.get("name", "?")
+                        new_rarity = result_item.get("rarity", "rare")
+                        rarity_emojis = {
+                            "commune": "⚪", "rare": "🔵", "épique": "🟣",
+                            "légendaire": "🟠", "mythique": "🔴", "divine": "💎",
+                        }
+                        badge = rarity_emojis.get(new_rarity.lower(), "✨")
+
+                        # Phase 113 : incr counter + check badges
+                        try:
+                            await _incr_phase113_counter(
+                                btn_i.guild.id, btn_i.user.id, "refines_success"
+                            )
+                            await _check_phase113_badges(btn_i.guild, btn_i.user.id)
+                        except Exception as ex:
+                            print(f"[craft badge check] {ex}")
+
+                        await _send_or_edit(
                             f"🎉 **AFFINAGE RÉUSSI !**\n"
                             f"L'ancien {self.item_snap.get('emoji', '⚪')} **{self.item_snap.get('name', '?')}** "
                             f"est devenu :\n\n"
                             f"{badge} {new_emoji} **{new_name}** _{new_rarity}_\n"
                             f"_Coût : `{cost:,}` 🪙_\n"
                             f"_Tape `/inventory` pour admirer le résultat._"
-                        ),
-                        view=None,
-                    )
-                else:
-                    # Échec : item perdu
-                    inv2[self.slot_key] = {}
-                    await _save_inventory(btn_i.guild.id, btn_i.user.id, inv2)
-                    await btn_i.response.edit_message(
-                        content=(
+                        )
+                    else:
+                        # Échec : item perdu
+                        inv2[self.slot_key] = {}
+                        await _save_inventory(btn_i.guild.id, btn_i.user.id, inv2)
+                        await _send_or_edit(
                             f"💥 **ÉCHEC DE L'AFFINAGE...**\n"
                             f"Le {self.item_snap.get('emoji', '⚪')} **{self.item_snap.get('name', '?')}** "
                             f"a été détruit dans le processus.\n"
                             f"_Coût : `{cost:,}` 🪙 (perdu)_\n\n"
                             f"_Combats des boss pour récupérer un nouvel item._"
-                        ),
-                        view=None,
-                    )
+                        )
+                except Exception as ex:
+                    print(f"[refine_btn callback] {ex}")
+                    import traceback
+                    traceback.print_exc()
+                    await _send_or_edit(f"❌ Erreur affinage : `{ex}`")
 
         class _CraftLayout(LayoutView):
             def __init__(self):
