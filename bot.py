@@ -54765,6 +54765,14 @@ async def _claim_completed_quests(guild_id: int, user_id: int) -> dict:
     # Tracking achievements
     await _incr_stat_p41(guild_id, user_id, 'quests_done', claimed_count)
 
+    # Phase 170.9 : alimente la Chronique (1 quête claimed = 1 quest_complete)
+    # Chapitre 1.2 "La Source Trouvée" target = 1500 quest_completes
+    try:
+        for _ in range(claimed_count):
+            await story_engine_module.on_quest_complete(guild_id, user_id)
+    except Exception:
+        pass
+
     # Update streak si au moins 1 quête a été terminée aujourd'hui
     milestone = await _update_streak(guild_id, user_id, today)
 

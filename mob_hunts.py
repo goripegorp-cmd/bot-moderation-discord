@@ -797,6 +797,17 @@ async def _on_mob_killed(
     except Exception:
         pass
 
+    # Phase 170.9 : 1% chance par mob tué pour le top_user de recevoir
+    # un fragment d'indice de mystère. Fail-soft.
+    try:
+        import mystery_investigation as _myst
+        if top_user_id:
+            await _myst.try_grant_clue(
+                guild.id, top_user_id, source="mob_kill",
+            )
+    except Exception:
+        pass
+
     # Build kill message
     elite_prefix = "👑 ÉLITE " if is_elite else ""
     title_msg = (

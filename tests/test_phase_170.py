@@ -779,3 +779,156 @@ def test_climax_api():
         "ClimaxAttackButton", "climax_task", "register_persistent_views",
     ]:
         assert hasattr(monthly_climax, name), f"manque : {name}"
+
+
+# ─── Phase 170.9 : Intégration cross-module ──────────────────────────────
+
+def test_all_chronicle_kinds_have_hooks():
+    """Pour chaque kind utilisé par les chapitres, story_engine doit exposer
+    une fonction hook on_<kind>."""
+    used_kinds = set()
+    for act in story_engine.ACTS:
+        for chap in act["chapters"]:
+            used_kinds.add(chap["kind"])
+    expected_hooks = {
+        "mob_kills": "on_mob_kill",
+        "quest_completes": "on_quest_complete",
+        "boss_damage": "on_boss_damage",
+        "encounters": "on_encounter_completed",
+        "council_votes": "on_council_vote",
+        "regional_defenses": "on_regional_defense",
+        "mystery_combines": "on_mystery_combine",
+    }
+    for kind in used_kinds:
+        hook_name = expected_hooks.get(kind)
+        assert hook_name is not None, f"Kind {kind} sans hook mapping"
+        assert hasattr(story_engine, hook_name), (
+            f"story_engine.{hook_name} manquant pour kind {kind}"
+        )
+
+
+def test_all_npcs_have_encounters():
+    """Chaque NPC du catalogue a au moins 1 encounter."""
+    encountered = {e["npc_id"] for e in daily_encounters.ENCOUNTER_CATALOG}
+    for npc_id in npc_personalities.list_npc_ids():
+        assert npc_id in encountered, (
+            f"NPC {npc_id} sans aucun encounter"
+        )
+
+
+def test_all_npcs_have_letters():
+    """Chaque NPC a des lettres dans le catalogue."""
+    npc_with_letters = {ltr["npc_id"] for ltr in npc_letters.LETTER_CATALOG}
+    for npc_id in npc_personalities.list_npc_ids():
+        assert npc_id in npc_with_letters, (
+            f"NPC {npc_id} sans lettres"
+        )
+
+
+def test_all_chapters_have_climax_boss():
+    """Chaque chapitre (1.1..3.3) a un boss climax."""
+    chapter_ids = []
+    for act in story_engine.ACTS:
+        for chap in act["chapters"]:
+            chapter_ids.append(chap["id"])
+    for chap_id in chapter_ids:
+        assert monthly_climax.get_climax_boss_for_chapter(chap_id) is not None, (
+            f"Chapitre {chap_id} sans boss climax"
+        )
+
+
+def test_all_regions_link_to_valid_npc():
+    """Chaque région réfère un NPC valide."""
+    valid_npcs = set(npc_personalities.list_npc_ids())
+    for r in regional_state.REGION_CATALOG:
+        assert r["linked_npc"] in valid_npcs
+
+
+def test_all_mysteries_link_to_valid_npc():
+    """Chaque mystère réfère un NPC valide."""
+    valid_npcs = set(npc_personalities.list_npc_ids())
+    for m in mystery_investigation.MYSTERY_CATALOG:
+        assert m["linked_npc"] in valid_npcs
+
+
+def test_all_council_options_ref_valid_npcs():
+    """Chaque option de conseil réfère des NPCs valides."""
+    valid_npcs = set(npc_personalities.list_npc_ids())
+    for c in weekly_council.COUNCIL_CATALOG:
+        for opt in c["options"]:
+            for npc_id in opt.get("npc_impacts", {}):
+                assert npc_id in valid_npcs
+
+
+def test_codex_pages_all_handled():
+    """Les pages déclarées dans VALID_PAGES sont 4 et bien définies."""
+    expected = {"current", "history", "memoirs", "acts"}
+    assert set(codex_chronicle.VALID_PAGES) == expected
+
+
+def test_codex_dynamic_items_count():
+    """Le Codex expose 6 DynamicItems (4 pages + Council, Regions, Mystery,
+    Letters, Climax)."""
+    import discord
+    dynamic_classes = [
+        codex_chronicle.CodexPageButton,
+        codex_chronicle.CodexCouncilButton,
+        codex_chronicle.CodexRegionsButton,
+        codex_chronicle.CodexMysteryButton,
+        codex_chronicle.CodexLettersButton,
+        codex_chronicle.CodexClimaxButton,
+    ]
+    for cls in dynamic_classes:
+        assert issubclass(cls, discord.ui.DynamicItem)
+
+
+def test_module_count_phase_170():
+    """8 modules Phase 170 + codex = 9 modules core."""
+    modules_phase_170 = [
+        story_engine, codex_chronicle, npc_personalities,
+        daily_encounters, weekly_council, regional_state,
+        mystery_investigation, npc_letters, monthly_climax,
+    ]
+    assert len(modules_phase_170) == 9
+    # Chaque module a setup
+    for mod in modules_phase_170:
+        assert hasattr(mod, "setup"), f"{mod.__name__} sans setup"
+        assert callable(mod.setup)
+
+
+def test_db_tables_complete():
+    """Les modules avec init_db doivent l'exposer."""
+    modules_with_db = [
+        story_engine, npc_personalities, daily_encounters,
+        weekly_council, regional_state, mystery_investigation,
+        npc_letters, monthly_climax,
+    ]
+    for mod in modules_with_db:
+        assert hasattr(mod, "init_db"), f"{mod.__name__} sans init_db"
+        assert callable(mod.init_db)
+
+
+def test_total_content_volume():
+    """Validation finale : le contenu narratif est substantiel."""
+    assert len(story_engine.ACTS) == 3
+    assert story_engine.total_chapters_count() == 9
+    assert len(npc_personalities.NPC_CATALOG) == 6
+    assert len(daily_encounters.ENCOUNTER_CATALOG) >= 30
+    assert len(weekly_council.COUNCIL_CATALOG) >= 5
+    assert len(regional_state.REGION_CATALOG) == 5
+    assert len(mystery_investigation.MYSTERY_CATALOG) >= 4
+    assert len(npc_letters.LETTER_CATALOG) >= 18
+    assert len(monthly_climax.CLIMAX_BOSSES) == 9
+
+
+def test_persistent_views_all_registered():
+    """Chaque module avec UI a une fonction register_persistent_views."""
+    modules_with_views = [
+        codex_chronicle, daily_encounters, weekly_council,
+        regional_state, mystery_investigation, npc_letters,
+        monthly_climax,
+    ]
+    for mod in modules_with_views:
+        assert hasattr(mod, "register_persistent_views"), (
+            f"{mod.__name__} sans register_persistent_views"
+        )
