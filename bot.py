@@ -38662,6 +38662,22 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready Phase 152 ux/owner] {ex}")
 
+    # Phase 160 : table voice_daily_rewards pour cap quotidien
+    try:
+        async with get_db() as db:
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS voice_daily_rewards (
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    day TEXT NOT NULL,
+                    coins_today INTEGER DEFAULT 0,
+                    PRIMARY KEY (guild_id, user_id, day)
+                )
+            """)
+            await db.commit()
+    except Exception as ex:
+        print(f"[Phase 160 voice_daily_rewards] {ex}")
+
     # Phase 152.D2 : Audit DB indexes + auto-create les manquants critiques
     try:
         async with get_db() as db:
@@ -70559,7 +70575,14 @@ _voice_session_starts: dict = {}  # (guild_id, user_id) → datetime du join
 
 
 async def _track_voice_state(member, before, after):
-    """Hook on_voice_state_update : log les durées de présence vocale."""
+    """Hook on_voice_state_update : log les durées de présence vocale.
+
+    Phase 160 : récompenses coins + tracking community_goals.
+    - 1 coin par minute de vocal
+    - Cap quotidien : 100 coins max/jour de cette source
+    - Anti-AFK : si user était muté + sourd au leave, skip reward
+    - Hook community_goals : "voice_minutes" objectif possible
+    """
     if not member.guild or member.bot:
         return
     try:
@@ -70582,6 +70605,68 @@ async def _track_voice_state(member, before, after):
                             await db.commit()
                     except Exception as ex:
                         print(f"[voice_log] {ex}")
+
+                    # Phase 160 : reward coins + community goal tracking
+                    minutes = duration // 60
+                    if minutes >= 1:
+                        try:
+                            # Anti-AFK : skip si muted+deafened au leave
+                            is_afk = bool(
+                                getattr(before, 'self_mute', False) and
+                                getattr(before, 'self_deaf', False)
+                            )
+                            if not is_afk:
+                                # Cap quotidien : 100 coins/jour de voice
+                                today = datetime.now(timezone.utc).strftime(
+                                    "%Y-%m-%d"
+                                )
+                                async with get_db() as db:
+                                    async with db.execute(
+                                        "SELECT coins_today FROM voice_daily_rewards "
+                                        "WHERE guild_id=? AND user_id=? AND day=?",
+                                        (member.guild.id, member.id, today),
+                                    ) as cur:
+                                        row = await cur.fetchone()
+                                    earned_today = int(row[0] or 0) if row else 0
+                                    remaining = max(0, 100 - earned_today)
+                                    award = min(minutes, remaining)
+                                    if award > 0:
+                                        try:
+                                            await add_coins(
+                                                member.guild.id, member.id, award,
+                                            )
+                                        except Exception:
+                                            pass
+                                        await db.execute(
+                                            "INSERT INTO voice_daily_rewards "
+                                            "(guild_id, user_id, day, coins_today) "
+                                            "VALUES (?, ?, ?, ?) "
+                                            "ON CONFLICT(guild_id, user_id, day) "
+                                            "DO UPDATE SET coins_today = coins_today + ?",
+                                            (
+                                                member.guild.id, member.id,
+                                                today, award, award,
+                                            ),
+                                        )
+                                        await db.commit()
+                            # Community goal tracking
+                            try:
+                                await community_goals_module.record_action(
+                                    member.guild.id, member.id,
+                                    "voice_minutes", count=minutes,
+                                )
+                            except Exception:
+                                pass
+                            # Profile tracking
+                            try:
+                                await profile_module.track_action(
+                                    member.guild.id, member.id,
+                                    "voice_time_hour", weight=1,
+                                )
+                            except Exception:
+                                pass
+                        except Exception as ex:
+                            print(f"[voice rewards] {ex}")
         # Si on rejoint un vocal (before.channel = None ou autre, after.channel != None)
         if after.channel and (not before.channel or before.channel.id != after.channel.id):
             _voice_session_starts[key] = datetime.now(timezone.utc)
