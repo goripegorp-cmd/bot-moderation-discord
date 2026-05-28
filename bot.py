@@ -74845,11 +74845,28 @@ def _v2_delegate_to(view_class, method_name: str):
     sa méthode. Les méthodes _on_xxx utilisent i.message.id / i.guild — donc
     fonctionnent sur une instance fraîche, pas besoin de state persistant.
 
+    Phase 169.5 HOTFIX : certains handlers (_open_tools_panel, _open_roblox_panel,
+    _open_competitions_panel) appellent send_message direct sans defer préalable.
+    Si la construction de la sub-LayoutView prend > 3s (cold start, DB lente),
+    Discord affiche "Échec de l'interaction". Pour garantir la réponse dans la
+    fenêtre 3s : on defer ICI avant d'instancier la View handler + d'appeler
+    le method. Les handlers en aval gèrent déjà `i.response.is_done()` →
+    fallback automatique sur `i.followup.send(...)`.
+
     Usage :
         btn = Button(label=..., custom_id="...")
         btn.callback = _v2_delegate_to(FlashTreasureView, '_on_grab')
     """
     async def _delegate(i):
+        # Phase 169.5 : defer EARLY pour ne jamais dépasser 3s
+        try:
+            if not i.response.is_done():
+                await i.response.defer(ephemeral=True)
+        except (discord.NotFound, discord.HTTPException, discord.InteractionResponded):
+            pass
+        except Exception as ex:
+            print(f"[v2_delegate defer {view_class.__name__}.{method_name}] {ex}")
+
         try:
             handler = view_class()
             method = getattr(handler, method_name)
