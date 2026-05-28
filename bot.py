@@ -38190,6 +38190,7 @@ async def on_ready():
 
         raid_module.setup(bot, get_db, db_get, _v2h)
         await raid_module.init_db()
+        raid_module.register_persistent_views(bot)
 
         token_grabber_module.setup(
             bot, get_db, db_get, _v2h,

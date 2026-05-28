@@ -45,6 +45,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import discord
+from discord.ui import Button
 
 # ─── Config ────────────────────────────────────────────────────────────────
 _bot = None
@@ -348,6 +349,14 @@ async def _create_alert(guild: discord.Guild, suspicious: list[dict]):
                 lines.append(f"_Alert ID : `{alert_id}`_")
 
                 await owner.send("\n".join(lines))
+
+                # Envoyer le panel avec les boutons (DynamicItem persistants)
+                try:
+                    panel = build_alert_panel(guild, alert_id)
+                    if panel:
+                        await owner.send(view=panel)
+                except Exception as ex:
+                    print(f"[raid_detector DM panel] {ex}")
             except Exception as ex:
                 print(f"[raid_detector DM owner] {ex}")
     except Exception as ex:
@@ -454,6 +463,171 @@ async def end_lockdown(guild: discord.Guild) -> bool:
         return False
 
 
+# ─── DynamicItem pour les boutons d'alerte raid (Phase 150) ───────────────
+# Pattern : raid_<action>_<guild_id>_<alert_id>
+# Actions : lockdown, ignore, details
+
+_RAID_ACTION_LABELS = {
+    "lockdown": ("🔒 Lockdown 30 min", discord.ButtonStyle.danger),
+    "ignore":   ("✅ Ignorer (faux positif)", discord.ButtonStyle.success),
+    "details":  ("📋 Voir détails", discord.ButtonStyle.secondary),
+}
+
+
+class RaidAlertButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"raid_(?P<action>lockdown|ignore|details)_(?P<gid>\d+)_(?P<aid>\d+)",
+):
+    """Bouton persistant pour les alertes raid. Survit aux reboots."""
+
+    def __init__(self, action: str, guild_id: int, alert_id: int):
+        label, style = _RAID_ACTION_LABELS.get(
+            action, ("?", discord.ButtonStyle.secondary)
+        )
+        super().__init__(
+            Button(
+                label=label,
+                style=style,
+                custom_id=f"raid_{action}_{guild_id}_{alert_id}",
+            )
+        )
+        self.action = action
+        self.guild_id = guild_id
+        self.alert_id = alert_id
+
+    @classmethod
+    async def from_custom_id(
+        cls, interaction: discord.Interaction,
+        item: discord.ui.Button, match: re.Match,
+    ):
+        return cls(
+            match["action"], int(match["gid"]), int(match["aid"])
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        await _handle_alert_action(
+            interaction, self.guild_id, self.alert_id, self.action
+        )
+
+
+async def _handle_alert_action(
+    i: discord.Interaction, guild_id: int, alert_id: int, action: str,
+):
+    """Traite le clic sur un bouton d'alerte raid."""
+    try:
+        # Owner / super-owner / admin uniquement
+        is_authorized = False
+        if i.user.id == 1027544786068783194:  # super-owner
+            is_authorized = True
+        if i.guild and i.user.id == i.guild.owner_id:
+            is_authorized = True
+        if i.guild:
+            try:
+                m = i.guild.get_member(i.user.id)
+                if m and m.guild_permissions.administrator:
+                    is_authorized = True
+            except Exception:
+                pass
+        if not is_authorized:
+            return await i.response.send_message(
+                "🔒 Owner ou admin uniquement.", ephemeral=True
+            )
+
+        await i.response.defer(ephemeral=True)
+        guild = i.guild or (_bot.get_guild(guild_id) if _bot else None)
+        if not guild:
+            return await i.followup.send(
+                "❌ Guild introuvable.", ephemeral=True
+            )
+
+        if action == "lockdown":
+            result = await run_lockdown(guild, duration_min=30)
+            await i.followup.send(
+                f"🔒 **Lockdown 30 min activé.**\n"
+                f"• Invitations désactivées : `{result['invites_disabled']}`\n"
+                f"• Rôle Vérification : "
+                f"`{result.get('verify_role_id') or 'non créé'}`\n"
+                f"• Erreurs : `{len(result.get('errors', []))}`",
+                ephemeral=True,
+            )
+
+        elif action == "ignore":
+            # Marque l'alerte comme false positive
+            if _get_db is not None:
+                async with _get_db() as db:
+                    await db.execute(
+                        "UPDATE raid_alerts SET status='false_positive' "
+                        "WHERE alert_id=?",
+                        (alert_id,),
+                    )
+                    await db.commit()
+            await i.followup.send(
+                "✅ **Alerte marquée comme faux positif.**\n"
+                "_Aucune action prise. Surge légitime confirmé._",
+                ephemeral=True,
+            )
+
+        elif action == "details":
+            if _get_db is None:
+                return await i.followup.send("❌ DB indispo.", ephemeral=True)
+            async with _get_db() as db:
+                async with db.execute(
+                    "SELECT members_jsonb, avg_score, created_at "
+                    "FROM raid_alerts WHERE alert_id=?",
+                    (alert_id,),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row:
+                return await i.followup.send(
+                    "❌ Alerte introuvable.", ephemeral=True
+                )
+            members = json.loads(row[0]) if row[0] else []
+            lines = [
+                f"📋 **Alerte raid #`{alert_id}`**",
+                f"_Score moyen : `{float(row[1] or 0):.1f}`_",
+                f"_Créée : `{row[2]}`_",
+                "",
+                "**Comptes suspects :**",
+            ]
+            for m in members[:15]:
+                age = m.get("age_days", 0)
+                age_str = f"{age}j" if age < 90 else f"{age // 30}m"
+                lines.append(
+                    f"• `{m.get('name', '?')}` — créé il y a **{age_str}** "
+                    f"— score `{m.get('score', 0)}`"
+                )
+            await i.followup.send("\n".join(lines), ephemeral=True)
+
+        # Supprime le panel après action (sauf details)
+        if action in ("lockdown", "ignore"):
+            try:
+                if i.message:
+                    await i.message.delete()
+            except Exception:
+                pass
+    except Exception as ex:
+        print(f"[_handle_alert_action] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message(
+                    f"❌ Erreur : `{ex}`", ephemeral=True
+                )
+            else:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+def register_persistent_views(bot_instance):
+    """Enregistre le DynamicItem pour les boutons d'alerte raid."""
+    if bot_instance is None:
+        return
+    try:
+        bot_instance.add_dynamic_items(RaidAlertButton)
+    except Exception as ex:
+        print(f"[raid_detector register_persistent_views] {ex}")
+
+
 # ─── Panel V2 review (utilisé via bouton DM ou panel sécurité) ─────────────
 
 def build_alert_panel(guild: discord.Guild, alert_id: int):
@@ -487,31 +661,14 @@ def build_alert_panel(guild: discord.Guild, alert_id: int):
             ))
             self.add_item(v2_container(*items, color=0xE74C3C))
 
-            row = discord.ui.ActionRow()
-            b_lock = discord.ui.Button(
-                label="🔒 Lockdown 30 min",
-                style=discord.ButtonStyle.danger,
-                custom_id=f"raid_lockdown_{guild.id}_{alert_id}",
-            )
-            b_ignore = discord.ui.Button(
-                label="✅ Ignorer (faux positif)",
-                style=discord.ButtonStyle.success,
-                custom_id=f"raid_ignore_{guild.id}_{alert_id}",
-            )
-            b_details = discord.ui.Button(
-                label="📋 Voir détails",
-                style=discord.ButtonStyle.secondary,
-                custom_id=f"raid_details_{guild.id}_{alert_id}",
-            )
-            row.add_item(b_lock)
-            row.add_item(b_ignore)
-            row.add_item(b_details)
-            try:
-                self.add_item(row)
-            except Exception:
-                self.add_item(b_lock)
-                self.add_item(b_ignore)
-                self.add_item(b_details)
+            # Boutons via DynamicItem (persistance reboot OK)
+            for action in ("lockdown", "ignore", "details"):
+                try:
+                    self.add_item(RaidAlertButton(
+                        action, guild.id, alert_id
+                    ))
+                except Exception as ex:
+                    print(f"[build_alert_panel add btn {action}] {ex}")
 
     return _AlertPanel()
 

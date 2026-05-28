@@ -39,6 +39,7 @@ DB tables :
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -169,52 +170,65 @@ async def ensure_channel(guild: discord.Guild) -> Optional[discord.TextChannel]:
 
 # ─── Panel builder ──────────────────────────────────────────────────────────
 
+# ─── DynamicItem pour persistance des boutons sanction (Phase 150) ────────
+# Le pattern: sanction_<action>_<sanction_id>
+# Discord.py va matcher tous les custom_ids correspondants et appeler le
+# callback même après reboot du bot.
+_ACTION_LABELS = {
+    "mute_1h": ("⏰ Mute 1h", discord.ButtonStyle.secondary),
+    "warn":    ("⚠️ Warn", discord.ButtonStyle.primary),
+    "kick":    ("👢 Kick", discord.ButtonStyle.danger),
+    "ban":     ("🔨 Ban", discord.ButtonStyle.danger),
+    "ignore":  ("✅ Faux positif", discord.ButtonStyle.success),
+}
+
+
+class SanctionDynamicButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"sanction_(?P<action>mute_1h|warn|kick|ban|ignore)_(?P<sid>\d+)",
+):
+    """Bouton dynamique persistant — survit aux reboots du bot.
+
+    Le custom_id encode l'action + le sanction_id. Au reboot, Discord
+    re-route l'interaction vers from_custom_id() qui reconstruit
+    l'instance, puis appelle callback().
+    """
+
+    def __init__(self, action: str, sanction_id: int):
+        label, style = _ACTION_LABELS.get(
+            action, ("?", discord.ButtonStyle.secondary)
+        )
+        super().__init__(
+            Button(
+                label=label,
+                style=style,
+                custom_id=f"sanction_{action}_{sanction_id}",
+            )
+        )
+        self.action = action
+        self.sanction_id = sanction_id
+
+    @classmethod
+    async def from_custom_id(
+        cls, interaction: discord.Interaction,
+        item: discord.ui.Button, match: re.Match,
+    ):
+        return cls(match["action"], int(match["sid"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        await _handle_sanction_click(
+            interaction, self.sanction_id, self.action
+        )
+
+
 class SanctionView(View):
-    """View persistante avec 4 boutons d'action staff."""
+    """View standard utilisée à la création du panel (avant persistance)."""
 
     def __init__(self, sanction_id: int):
         super().__init__(timeout=None)
         self.sanction_id = sanction_id
-
-        b_mute = Button(
-            label="⏰ Mute 1h",
-            style=discord.ButtonStyle.secondary,
-            custom_id=f"sanction_mute_{sanction_id}",
-        )
-        b_warn = Button(
-            label="⚠️ Warn",
-            style=discord.ButtonStyle.primary,
-            custom_id=f"sanction_warn_{sanction_id}",
-        )
-        b_kick = Button(
-            label="👢 Kick",
-            style=discord.ButtonStyle.danger,
-            custom_id=f"sanction_kick_{sanction_id}",
-        )
-        b_ban = Button(
-            label="🔨 Ban",
-            style=discord.ButtonStyle.danger,
-            custom_id=f"sanction_ban_{sanction_id}",
-        )
-        b_ignore = Button(
-            label="✅ Faux positif",
-            style=discord.ButtonStyle.success,
-            custom_id=f"sanction_ignore_{sanction_id}",
-        )
-
-        b_mute.callback = self._make_cb("mute_1h")
-        b_warn.callback = self._make_cb("warn")
-        b_kick.callback = self._make_cb("kick")
-        b_ban.callback = self._make_cb("ban")
-        b_ignore.callback = self._make_cb("ignore")
-
-        for btn in (b_mute, b_warn, b_kick, b_ban, b_ignore):
-            self.add_item(btn)
-
-    def _make_cb(self, action: str):
-        async def _cb(i: discord.Interaction):
-            await _handle_sanction_click(i, self.sanction_id, action)
-        return _cb
+        for action in ("mute_1h", "warn", "kick", "ban", "ignore"):
+            self.add_item(SanctionDynamicButton(action, sanction_id))
 
 
 async def _handle_sanction_click(
@@ -474,19 +488,13 @@ async def create_sanction_panel(
 
 
 def register_persistent_views(bot_instance):
-    """À appeler dans on_ready après init_db pour re-attacher les
-    SanctionView au boot. Les custom_id encodent le sanction_id."""
+    """À appeler dans on_ready après init_db. Enregistre le DynamicItem
+    qui matche TOUS les custom_ids sanction_*_*. Marche pour les sanctions
+    créées AVANT et APRÈS le reboot."""
     if bot_instance is None:
         return
     try:
-        # On enregistre une view template "wildcard"
-        # Discord.py 2.x retrouve via custom_id prefix
-        # On ne peut pas savoir tous les sanction_id existants à l'avance,
-        # donc on enregistre une factory qui réagit aux custom_id matchant
-        # Pour simplifier : ré-attache via bot.add_view(SanctionView(0))
-        # avec timeout=None, Discord matchera les boutons au reboot
-        # via custom_id.
-        bot_instance.add_view(SanctionView(0))
+        bot_instance.add_dynamic_items(SanctionDynamicButton)
     except Exception as ex:
         print(f"[staff_sanction register_persistent_views] {ex}")
 
