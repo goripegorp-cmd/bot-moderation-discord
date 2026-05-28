@@ -172,6 +172,9 @@ import mob_hunts as mob_hunts_module
 import wandering_merchant as wandering_merchant_module
 # Phase 169.3 : World Invasion mensuelle
 import world_invasion as world_invasion_module
+# Phase 170.1 : La Chronique d'Abylumis — récit narratif persistant 9 mois
+import story_engine as story_engine_module
+import codex_chronicle as codex_chronicle_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -39015,7 +39018,17 @@ async def on_ready():
         if not world_invasion_module.monthly_invasion_task.is_running():
             world_invasion_module.monthly_invasion_task.start()
 
-        print("[Phase 155/165/166/167/168/169] Stream + token_leak + birthday + welcome + spotlight + rotator + voice_clean + risk + error_logger + mob_hunts + merchant + invasion")
+        # Phase 170.1 : La Chronique d'Abylumis — récit collectif persistant
+        story_engine_module.setup(bot, get_db, db_get, _v2h)
+        await story_engine_module.init_db()
+        codex_chronicle_module.setup(
+            bot, get_db, db_get, _v2h, story_engine_module,
+        )
+        codex_chronicle_module.register_persistent_views(bot)
+        if not story_engine_module.chronicle_task.is_running():
+            story_engine_module.chronicle_task.start()
+
+        print("[Phase 155/165/166/167/168/169/170] Stream + token_leak + birthday + welcome + spotlight + rotator + voice_clean + risk + error_logger + mob_hunts + merchant + invasion + chronicle")
     except Exception as ex:
         print(f"[on_ready Phase 155/165 roblox/stream] {ex}")
 
@@ -57057,6 +57070,17 @@ class EngagementHubView(View):
         b23.callback = self._on_birthdays
         self.add_item(b23)
 
+        # Phase 170.1 : Codex de la Chronique d'Abylumis (récit collectif)
+        # Slot row=3 dispo (notifs/lore/mission = 3 ; on en ajoute 1 → 4/5).
+        b24 = Button(
+            label="📖 Chronique",
+            style=discord.ButtonStyle.success,
+            custom_id="hub_chronicle",
+            row=3,
+        )
+        b24.callback = self._on_chronicle
+        self.add_item(b24)
+
     async def _on_quests(self, i: discord.Interaction):
         await _p41_open_daily(i)
 
@@ -57103,6 +57127,24 @@ class EngagementHubView(View):
     async def _on_tools(self, i: discord.Interaction):
         # Phase 65 : ouvre le sub-hub Outils (regroupe tout ce qui était slash)
         await _open_tools_panel(i)
+
+    async def _on_chronicle(self, i: discord.Interaction):
+        # Phase 170.1 : ouvre le Codex de la Chronique d'Abylumis
+        try:
+            await codex_chronicle_module.open_codex_from_hub(i)
+        except Exception as ex:
+            print(f"[hub_chronicle] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(
+                        f"❌ Erreur Codex : `{ex}`", ephemeral=True
+                    )
+                else:
+                    await i.followup.send(
+                        f"❌ Erreur Codex : `{ex}`", ephemeral=True
+                    )
+            except Exception:
+                pass
 
     async def _on_faq(self, i: discord.Interaction):
         # Phase 150.3 : ouvre la FAQ navigable (zéro commande à mémoriser)

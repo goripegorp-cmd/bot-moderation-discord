@@ -788,6 +788,15 @@ async def _on_mob_killed(
     except Exception:
         pass
 
+    # Phase 170.1 : alimente la Chronique d'Abylumis (1 mob tué = +1 progress)
+    # Le top_user reçoit le crédit "killer principal", les autres participent
+    # via leur damage. Fail-soft : si story_engine pas wired, no-op.
+    try:
+        import story_engine as _se
+        await _se.on_mob_kill(guild.id, top_user_id)
+    except Exception:
+        pass
+
     # Build kill message
     elite_prefix = "👑 ÉLITE " if is_elite else ""
     title_msg = (

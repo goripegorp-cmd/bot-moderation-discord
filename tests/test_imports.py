@@ -43,6 +43,9 @@ PHASE_163_MODULES = [
     "mob_hunts",
     "wandering_merchant",
     "world_invasion",
+    # Phase 170 — Chronique d'Abylumis (récit collectif persistant)
+    "story_engine",
+    "codex_chronicle",
 ]
 
 
@@ -95,6 +98,9 @@ INIT_DB_MODULES = [
     "mob_hunts",
     "wandering_merchant",
     "world_invasion",
+    # Phase 170 — story_engine (codex_chronicle n'a pas d'init_db, lit DB
+    # de story_engine)
+    "story_engine",
 ]
 
 
