@@ -98,8 +98,55 @@ async def init_db():
 
 # ─── Channel management ─────────────────────────────────────────────────────
 
+async def get_configured_channel_id(guild_id: int) -> int:
+    """Lit l'ID du salon staff_sanction configuré. 0 = non configuré.
+
+    Phase 158 : owner pick le salon via /configure → Logs → Salons sécurité.
+    Fallback : recherche d'un salon nommé STAFF_CHANNEL_NAME (legacy).
+    """
+    if _db_get is None:
+        return 0
+    try:
+        data = await _db_get(guild_id)
+        return int(data.get("staff_sanction_channel_id", 0) or 0)
+    except Exception:
+        return 0
+
+
 async def ensure_channel(guild: discord.Guild) -> Optional[discord.TextChannel]:
-    """Renvoie le salon staff dédié. Le crée si absent."""
+    """Renvoie le salon staff dédié.
+
+    Phase 158 : ne CRÉE plus de salon auto. Lit l'ID configuré via
+    /configure. Fallback : recherche par nom legacy STAFF_CHANNEL_NAME.
+    Si aucun trouvé → retourne None et log un avertissement.
+    """
+    if not guild:
+        return None
+    try:
+        # 1. Salon configuré explicitement
+        configured_id = await get_configured_channel_id(guild.id)
+        if configured_id:
+            ch = guild.get_channel(configured_id)
+            if ch:
+                return ch
+        # 2. Fallback : recherche existant par nom legacy
+        for ch in guild.text_channels:
+            if ch.name == STAFF_CHANNEL_NAME:
+                return ch
+        # 3. Plus de création auto — owner doit configurer
+        print(
+            f"[staff_sanction] Pas de salon configuré pour guild={guild.id}. "
+            f"Owner doit utiliser /configure → Logs → Salons sécurité."
+        )
+        return None
+    except Exception as ex:
+        print(f"[staff_sanction ensure_channel] {ex}")
+        return None
+
+
+async def _legacy_ensure_channel(guild: discord.Guild) -> Optional[discord.TextChannel]:
+    """ANCIENNE création auto — gardée pour migrations manuelles owner.
+    Plus appelé automatiquement."""
     if not guild:
         return None
     try:

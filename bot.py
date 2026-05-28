@@ -15203,18 +15203,24 @@ class LogsPanelV2(LayoutView):
             b_events.callback = self._cb_events
             b_excl = Button(label="🛡️ Rôles épargnés", style=discord.ButtonStyle.primary, custom_id="logsv2_excl")
             b_excl.callback = self._cb_exclusions
+            # Phase 158 : bouton Salons sécurité (honeypot, staff sanction)
+            b_sec = Button(label="🛡️ Salons sécurité", style=discord.ButtonStyle.primary, custom_id="logsv2_sec")
+            b_sec.callback = self._cb_security_channels
             b_clear = Button(label="⚪ Désactiver", style=discord.ButtonStyle.danger, custom_id="logsv2_clear")
             b_clear.callback = self._cb_disable
             b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2_back")
             b_back.callback = self._cb_back
             items.append(discord.ui.ActionRow(b_chan, b_cats, b_events, b_excl))
-            items.append(discord.ui.ActionRow(b_clear, b_back))
+            items.append(discord.ui.ActionRow(b_sec, b_clear, b_back))
         else:
             b_chan = Button(label="📍 Définir le salon", style=discord.ButtonStyle.success, custom_id="logsv2_chan")
             b_chan.callback = self._cb_set_channel
+            # Phase 158 : même sans log unifié, on peut configurer les salons sécurité
+            b_sec = Button(label="🛡️ Salons sécurité", style=discord.ButtonStyle.primary, custom_id="logsv2_sec")
+            b_sec.callback = self._cb_security_channels
             b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2_back")
             b_back.callback = self._cb_back
-            items.append(discord.ui.ActionRow(b_chan, b_back))
+            items.append(discord.ui.ActionRow(b_chan, b_sec, b_back))
 
         self.add_item(v2_container(*items, color=Palette.INFO if log_ch else Palette.NEUTRAL))
 
@@ -15259,9 +15265,171 @@ class LogsPanelV2(LayoutView):
             print(f"[LogsPanelV2 disable] {ex}")
         await self.render_to(i, edit=True)
 
+    async def _cb_security_channels(self, i):
+        """Phase 158 : ouvre le panel salons sécurité."""
+        v = SecurityChannelsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
         await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
+
+
+class SecurityChannelsPanelV2(LayoutView):
+    """Phase 158 : sous-panel pour configurer les salons sécurité spécifiques.
+
+    Permet à l'owner de pointer chaque feature sécurité vers un salon
+    dédié (au lieu d'auto-créer des salons avec des noms imposés).
+
+    Salons configurables :
+    - 🍯 Honeypot : salon piège que l'owner crée avec n'importe quel nom
+      (suggéré : 🎁-claim-free-nitro pour appâter les bots scrapers)
+    - 🚨 Staff Sanction : salon où le bot pose les panels d'action quand
+      un module détecte une infraction (Mute/Warn/Kick/Ban)
+    """
+
+    CHANNEL_KEYS = [
+        ("honeypot_channel_id", "🍯 Honeypot",
+         "Salon piège anti-bot — doit être invisible aux humains. "
+         "Quiconque poste dedans = compte 99% piraté ou self-bot. "
+         "Action : mute 24h auto + alerte staff."),
+        ("staff_sanction_channel_id", "🚨 Staff Sanction",
+         "Salon où le bot envoie les panels d'action quand un module "
+         "(token grabber, webhook leak, honeypot, anomaly) détecte "
+         "une infraction. Boutons Mute/Warn/Kick/Ban."),
+    ]
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        cfg_data = await db_get(self.g.id)
+        self.clear_items()
+
+        items: list = []
+        items.append(v2_title("🛡️ Salons sécurité"))
+        items.append(v2_subtitle(
+            "Configure chaque salon de sécurité individuellement"
+        ))
+        items.append(v2_divider())
+
+        for key, label, desc in self.CHANNEL_KEYS:
+            ch_id = int(cfg_data.get(key, 0) or 0)
+            ch = self.g.get_channel(ch_id) if ch_id else None
+            if ch:
+                state_line = f"🔘 **{label}** · {ch.mention}"
+            elif ch_id:
+                state_line = (
+                    f"⚠️ **{label}** · ID `{ch_id}` introuvable"
+                )
+            else:
+                state_line = f"⚪ **{label}** · _non défini_"
+            items.append(v2_body(state_line))
+            items.append(v2_body(f"_{desc}_"))
+            items.append(v2_divider())
+
+        items.append(v2_body(
+            "_💡 Crée d'abord un salon dans Discord avec le nom et les "
+            "permissions que tu veux. Puis clique ci-dessous pour le lier._"
+        ))
+
+        self.add_item(v2_container(*items, color=0xE74C3C))
+
+        # Boutons par feature
+        for key, label, _ in self.CHANNEL_KEYS:
+            btn = Button(
+                label=f"📍 Définir : {label}",
+                style=discord.ButtonStyle.primary,
+                custom_id=f"secch_set_{key}",
+            )
+
+            async def _cb(i_inter: discord.Interaction, _k=key, _l=label):
+                await self._open_picker(i_inter, _k, _l)
+
+            btn.callback = _cb
+            self.add_item(btn)
+
+        b_back = Button(
+            label="◀️ Retour", style=discord.ButtonStyle.secondary,
+            custom_id="secch_back",
+        )
+        b_back.callback = self._cb_back
+        self.add_item(b_back)
+
+        if edit:
+            try:
+                await interaction.response.edit_message(
+                    content=None, view=self, embed=None, attachments=[],
+                )
+            except Exception:
+                pass
+
+    async def _open_picker(
+        self, i: discord.Interaction, cfg_key: str, label: str,
+    ):
+        """Ouvre un ChannelSelect pour définir le salon."""
+        sel = discord.ui.ChannelSelect(
+            channel_types=[discord.ChannelType.text],
+            placeholder=f"Choisir le salon pour {label}",
+            min_values=1, max_values=1,
+        )
+
+        async def _on_pick(i_pick: discord.Interaction):
+            if not sel.values:
+                return await i_pick.response.send_message(
+                    "❌ Aucun salon choisi.", ephemeral=True
+                )
+            picked = sel.values[0]
+            try:
+                await db_set(self.g.id, cfg_key, int(picked.id))
+                # Si honeypot → applique les perms restrictives
+                if cfg_key == "honeypot_channel_id":
+                    real_ch = self.g.get_channel(int(picked.id))
+                    if real_ch:
+                        result = await honeypot_module.apply_honeypot_perms(
+                            real_ch
+                        )
+                        extra = (
+                            f"\n🔒 Permissions verrouillées : "
+                            f"{'OK' if result['success'] else 'partiel'}"
+                            f" ({len(result.get('errors', []))} erreurs)"
+                        )
+                    else:
+                        extra = ""
+                else:
+                    extra = ""
+                await i_pick.response.send_message(
+                    f"✅ **{label}** défini : <#{picked.id}>{extra}",
+                    ephemeral=True,
+                )
+                # Re-render le panel parent
+                new_v = SecurityChannelsPanelV2(self.u, self.g)
+                try:
+                    await i.edit_original_response(view=new_v)
+                except Exception:
+                    pass
+            except Exception as ex:
+                print(f"[secch _on_pick {cfg_key}] {ex}")
+                await i_pick.response.send_message(
+                    f"❌ Erreur : `{ex}`", ephemeral=True
+                )
+
+        sel.callback = _on_pick
+        view = View(timeout=120)
+        view.add_item(sel)
+        await i.response.send_message(
+            f"Choisis le salon pour **{label}** :",
+            view=view, ephemeral=True,
+        )
+
+    async def _cb_back(self, i):
+        v = LogsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class LogsCategoriesPanelV2(LayoutView):
@@ -38560,12 +38728,9 @@ async def on_ready():
             staff_sanction_module=staff_sanction_module,
         )
         await honeypot_module.init_db()
-        # Crée le honeypot dans chaque guild (idempotent)
-        for g in bot.guilds:
-            try:
-                await honeypot_module.ensure_honeypot(g)
-            except Exception:
-                pass
+        # Phase 158 : plus d'auto-create. Owner configure le salon via
+        # /configure → Logs → Salons sécurité. honeypot.get_honeypot_channel_id(g.id)
+        # retourne 0 par défaut = honeypot désactivé tant que non configuré.
 
         behavior_anomaly_module.setup(
             get_db, db_get, _v2h,

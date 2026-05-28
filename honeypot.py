@@ -1,31 +1,32 @@
 """
-honeypot.py — Salon piège anti-bot (Phase 154 — C1).
+honeypot.py — Salon piège anti-bot (Phase 154 — C1, Phase 158 config-based).
 
 🎯 OBJECTIF : détecter les self-bots, scrapers et comptes piratés qui
-auto-explorent le serveur. Les humains ne voient jamais ce salon, mais
-les bots qui crawl la liste des salons y atterrissent.
+auto-explorent le serveur. Si quelqu'un poste dans LE salon que l'owner
+a désigné comme honeypot → compte 99% piraté ou self-bot.
 
-Mécanique :
-1. Crée un salon `🎁-claim-free-nitro` avec perms restrictives :
-   - @everyone : view_channel=False
-   - Bot lui-même : view_channel=True (pour modérer)
-   - Aucun rôle ne peut le voir
-2. Le salon a un nom appétissant pour les scrapers
-3. Si quelqu'un poste DANS ce salon → compte 99% piraté ou self-bot
-4. Auto-action : quarantine instantanée + alerte staff via
-   staff_sanction module
-
-Aucun humain légitime ne devrait jamais voir ce salon.
+Mécanique (Phase 158) :
+1. Plus de salon auto-créé. L'owner CRÉE le salon avec le nom qu'il veut
+   (suggéré : `🎁-claim-free-nitro`, `🍯-honeypot`, ou n'importe quel
+   autre nom appétissant pour les scrapers).
+2. Owner configure le salon via /configure → Logs → Salons sécurité.
+3. Le salon doit être configuré pour être invisible à @everyone et tous
+   les rôles non-staff.
+4. Quand un user poste dedans → mute 1h + alerte staff_sanction + DM
+   owner.
 
 API publique :
 - setup(bot_instance, get_db_fn, db_get_fn, v2_helpers,
-        staff_sanction_module=None)
-- ensure_honeypot(guild) -> TextChannel | None
+        staff_sanction_module=None, db_get_cfg=None)
+- get_honeypot_channel_id(guild_id) -> int (0 si non configuré)
 - on_message_hook(message) -> bool (action taken?)
 
 DB tables :
 - honeypot_hits (id PK, guild_id, user_id, content, detected_at,
                  action_taken)
+
+Config (lu via cfg() de bot.py) :
+- guild_config.honeypot_channel_id (INTEGER, 0 = désactivé)
 """
 from __future__ import annotations
 
@@ -37,12 +38,9 @@ import discord
 # ─── Config ────────────────────────────────────────────────────────────────
 _bot = None
 _get_db = None
-_db_get = None
+_db_get = None  # Fonction async pour lire la config (cfg de bot.py)
 _v2 = None
 _staff_sanction = None
-
-HONEYPOT_NAME = "🎁-claim-free-nitro"
-HONEYPOT_TOPIC = "EXCLUSIVE — claim your free Nitro here"
 
 
 def setup(
@@ -55,6 +53,17 @@ def setup(
     _db_get = db_get_fn
     _v2 = v2_helpers
     _staff_sanction = staff_sanction_module
+
+
+async def get_honeypot_channel_id(guild_id: int) -> int:
+    """Lit l'ID du salon honeypot configuré par l'owner. 0 = désactivé."""
+    if _db_get is None:
+        return 0
+    try:
+        data = await _db_get(guild_id)
+        return int(data.get("honeypot_channel_id", 0) or 0)
+    except Exception:
+        return 0
 
 
 async def init_db():
@@ -78,63 +87,68 @@ async def init_db():
         print(f"[honeypot init_db] {ex}")
 
 
-async def ensure_honeypot(
-    guild: discord.Guild,
-) -> Optional[discord.TextChannel]:
-    """Crée ou récupère le salon honeypot. Visible seulement par le bot."""
-    if not guild:
-        return None
-    try:
-        # Recherche existant
-        for ch in guild.text_channels:
-            if ch.name == HONEYPOT_NAME:
-                return ch
+async def apply_honeypot_perms(
+    channel: discord.TextChannel,
+) -> dict:
+    """Applique les permissions honeypot sur un salon configuré.
+    Owner appelle ceci via /configure pour bien verrouiller le salon
+    (@everyone deny + tous rôles deny + bot allow).
 
-        # Crée
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(
-                view_channel=False, read_messages=False,
-                send_messages=False,
-            ),
-        }
+    Retourne {success, errors}.
+    """
+    out = {"success": False, "errors": []}
+    if not channel:
+        out["errors"].append("Salon invalide")
+        return out
+    guild = channel.guild
+    try:
+        # @everyone deny
+        await channel.set_permissions(
+            guild.default_role,
+            view_channel=False, read_messages=False,
+            send_messages=False,
+            reason="Honeypot setup",
+        )
+        # Bot allow
         try:
-            overwrites[guild.me] = discord.PermissionOverwrite(
+            await channel.set_permissions(
+                guild.me,
                 view_channel=True, read_messages=True,
                 send_messages=False, manage_messages=True,
+                reason="Honeypot bot perms",
             )
         except Exception:
             pass
-
-        # Bloque chaque role explicitement
+        # Tous les rôles deny
         for role in guild.roles:
             if role == guild.default_role:
                 continue
             try:
-                overwrites[role] = discord.PermissionOverwrite(
+                await channel.set_permissions(
+                    role,
                     view_channel=False, read_messages=False,
+                    reason="Honeypot deny role",
                 )
-            except Exception:
-                pass
-
-        ch = await guild.create_text_channel(
-            HONEYPOT_NAME,
-            overwrites=overwrites,
-            topic=HONEYPOT_TOPIC,
-            reason="Anti-bot honeypot (Phase 154)",
-        )
-        return ch
+            except Exception as ex_r:
+                out["errors"].append(f"role {role.name}: {ex_r}")
+        out["success"] = True
+        return out
     except Exception as ex:
-        print(f"[honeypot ensure_honeypot] {ex}")
-        return None
+        out["errors"].append(str(ex))
+        return out
 
 
 async def on_message_hook(message: discord.Message) -> bool:
-    """Hook depuis bot.py on_message. Si message dans honeypot → action."""
+    """Hook depuis bot.py on_message. Si message dans LE salon honeypot
+    configuré → action immédiate."""
     if not message.guild or message.author.bot:
         return False
-    if message.channel.name != HONEYPOT_NAME:
-        return False
     try:
+        configured_id = await get_honeypot_channel_id(message.guild.id)
+        if configured_id == 0:
+            return False  # honeypot désactivé
+        if message.channel.id != configured_id:
+            return False  # pas le salon honeypot
         # 100% certain : compte piraté ou self-bot
         await _handle_hit(message)
         return True
@@ -241,6 +255,7 @@ async def _handle_hit(message: discord.Message):
 __all__ = [
     "setup",
     "init_db",
-    "ensure_honeypot",
+    "get_honeypot_channel_id",
+    "apply_honeypot_perms",
     "on_message_hook",
 ]
