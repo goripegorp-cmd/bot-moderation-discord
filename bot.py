@@ -60153,6 +60153,24 @@ async def db_optimizer_task():
             ("personal_events_log_old",  "DELETE FROM personal_events_log WHERE datetime(created_at) < datetime('now', '-14 days')"),
             ("comeback_dms_old_claimed", "DELETE FROM comeback_dms WHERE claimed=1 AND datetime(claimed_at) < datetime('now', '-30 days')"),
             ("comeback_dms_old_unclaimed", "DELETE FROM comeback_dms WHERE claimed=0 AND datetime(last_dm_at) < datetime('now', '-30 days')"),
+            # Phase 164.1 : DB Janitor — nouvelles tables Phase 152-163
+            ("behavior_profile_inactive",  "DELETE FROM behavior_profile WHERE datetime(last_message_at) < datetime('now', '-60 days')"),
+            ("honeypot_hits_old",          "DELETE FROM honeypot_hits WHERE datetime(detected_at) < datetime('now', '-90 days')"),
+            ("dm_digest_queue_sent",       "DELETE FROM dm_digest_queue WHERE status='sent' AND datetime(sent_at) < datetime('now', '-30 days')"),
+            ("dm_digest_queue_failed",     "DELETE FROM dm_digest_queue WHERE status='failed' AND datetime(created_at) < datetime('now', '-7 days')"),
+            ("analytics_events_old",       "DELETE FROM analytics_events WHERE datetime(created_at) < datetime('now', '-180 days')"),
+            ("reputation_history_old",     "DELETE FROM reputation_history WHERE datetime(created_at) < datetime('now', '-180 days')"),
+            ("raffle_tickets_old",         "DELETE FROM raffle_tickets WHERE week_key < strftime('%Y-W%W', 'now', '-6 weeks')"),
+            ("raffle_draws_old",           "DELETE FROM raffle_draws WHERE week_key < strftime('%Y-W%W', 'now', '-26 weeks')"),
+            ("community_goals_old",        "DELETE FROM community_goals WHERE week_key < strftime('%Y-W%W', 'now', '-6 weeks')"),
+            ("community_goal_progress_old","DELETE FROM community_goal_progress WHERE goal_id NOT IN (SELECT id FROM community_goals)"),
+            ("luxury_tax_log_old",         "DELETE FROM luxury_tax_log WHERE datetime(applied_at) < datetime('now', '-180 days')"),
+            ("behavior_alerts_old",        "DELETE FROM behavior_alerts WHERE datetime(detected_at) < datetime('now', '-90 days')"),
+            ("stream_watch_parties_old",   "DELETE FROM stream_watch_parties WHERE status IN ('ended','cleaned') AND datetime(ended_at) < datetime('now', '-30 days')"),
+            ("daily_prompt_votes_old",     "DELETE FROM daily_prompt_votes WHERE prompt_id IN (SELECT id FROM daily_prompts WHERE status='closed' AND datetime(closed_at) < datetime('now', '-30 days'))"),
+            ("daily_prompts_old",          "DELETE FROM daily_prompts WHERE status='closed' AND datetime(closed_at) < datetime('now', '-30 days')"),
+            ("roblox_game_stats_old",      "DELETE FROM roblox_game_stats WHERE datetime(fetched_at) < datetime('now', '-60 days')"),
+            ("webhook_registry_dead",      "DELETE FROM webhook_registry WHERE alive=0 AND datetime(last_seen) < datetime('now', '-30 days')"),
         ]
         total_deleted = 0
         for name, stmt in cleanup_stmts:

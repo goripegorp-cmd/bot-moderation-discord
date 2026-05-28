@@ -308,6 +308,35 @@ def build_recap_panel(member: discord.Member):
             ))
             items.append(v2_divider())
 
+            # Phase 164.2 : "Prochaine étape" — réduit cognitive load.
+            # Suggère 1-2 actions concrètes selon les stats faibles.
+            suggestions = []
+            if s.get("quests_done", 0) < 3:
+                suggestions.append(
+                    "🎯 **Réclame ta quête du jour** (bouton hub)"
+                )
+            if s.get("voice_minutes", 0) < 60:
+                suggestions.append(
+                    "🎙️ **Passe 1h en vocal cette semaine** "
+                    "(coins ×2 si live créateur actif)"
+                )
+            if s.get("treasures", 0) == 0 and s.get("boss_kills_final", 0) == 0:
+                suggestions.append(
+                    "⚔️ **Participe à un event** "
+                    "(boss raid, treasure hunt, mystery box)"
+                )
+            if s.get("reputation_gained", 0) == 0:
+                suggestions.append(
+                    "⭐ **Gagne tes premiers pts réputation** "
+                    "via duel, quête ou boss"
+                )
+            if suggestions:
+                items.append(v2_body("**👉  Prochaine étape**"))
+                # Affiche les 2 premières — focus, pas surcharge
+                for sug in suggestions[:2]:
+                    items.append(v2_body(f"• {sug}"))
+                items.append(v2_divider())
+
             # Combat
             items.append(v2_body("**⚔️  Combat**"))
             items.append(v2_body(
