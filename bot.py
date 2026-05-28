@@ -100,6 +100,10 @@ import publish_metrics as pubmet_module
 import ux_polish as ux_module
 # Phase 143 : DB cleanup hebdo (purge tables qui grossissent indéfiniment)
 import data_cleanup as cleanup_module
+# Phase 144 : Saisons thématiques qui transforment les events sur l'année
+import seasonal_engine as season_module
+# Phase 145 : Réveil intelligent des membres dormants (DM + reward comeback)
+import dormant_wakeup as dormant_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -38013,6 +38017,36 @@ async def on_ready():
             cleanup_module.weekly_cleanup_task.start()
     except Exception as ex:
         print(f"[on_ready cleanup_module setup] {ex}")
+    # Phase 144 : Moteur saisonnier — 8 saisons qui transforment les events
+    try:
+        season_module.setup(
+            get_db,
+            {
+                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
+                'v2_divider': v2_divider, 'v2_container': v2_container,
+                'LayoutView': LayoutView,
+            },
+        )
+    except Exception as ex:
+        print(f"[on_ready season_module setup] {ex}")
+    # Phase 145 : Réveil dormants (DM personnalisé + reward comeback)
+    try:
+        dormant_module.setup(
+            bot,
+            get_db,
+            db_get,
+            {
+                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
+                'v2_divider': v2_divider, 'v2_container': v2_container,
+                'LayoutView': LayoutView,
+            },
+            seasonal_module=season_module,
+            add_coins_fn=add_coins,
+        )
+        if not dormant_module.dormant_dispatch_task.is_running():
+            dormant_module.dormant_dispatch_task.start()
+    except Exception as ex:
+        print(f"[on_ready dormant_module setup] {ex}")
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()
@@ -39715,6 +39749,79 @@ async def tutorial_cmd(i: discord.Interaction, step: int = 1):
         print(f"[tutorial_cmd] {ex}")
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 144 : /season — voir la saison active + drops exclusifs
+# ═══════════════════════════════════════════════════════════════════════════════
+season_group = app_commands.Group(
+    name="season",
+    description="🍂 Saison active + drops exclusifs + ta collection",
+)
+
+
+@season_group.command(
+    name="info", description="🍂 Voir la saison active + bonus + drops exclusifs"
+)
+async def season_info_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        view = season_module.build_season_panel(i.guild.name)
+        if view is None:
+            return await i.response.send_message(
+                "❌ Module indisponible.", ephemeral=True
+            )
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[season_info_cmd] {ex}")
+
+
+@season_group.command(
+    name="my_drops", description="🏆 Voir tes drops exclusifs de la saison"
+)
+async def season_my_drops_cmd(i: discord.Interaction):
+    if not i.guild or not isinstance(i.user, discord.Member):
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    try:
+        drops = await season_module.get_user_seasonal_drops(i.guild.id, i.user.id)
+        view = season_module.build_my_drops_panel(i.user, drops, i.guild.name)
+        if view is None:
+            return await i.response.send_message(
+                "❌ Module indisponible.", ephemeral=True
+            )
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[season_my_drops_cmd] {ex}")
+
+
+bot.tree.add_command(season_group)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 145 : /dormant_stats — owner stats du réveil des dormants
+# ═══════════════════════════════════════════════════════════════════════════════
+@owner_group.command(
+    name="dormant_stats",
+    description="💌 [Owner] Stats du réveil des membres dormants",
+)
+@app_commands.describe(jours="Période (défaut 7, max 90)")
+async def owner_dormant_stats_cmd(i: discord.Interaction, jours: int = 7):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    try:
+        days = max(1, min(90, int(jours or 7)))
+        stats = await dormant_module.get_stats(i.guild.id, days=days)
+        view = dormant_module.build_stats_panel(stats, i.guild.name)
+        if view is None:
+            return await i.response.send_message(
+                "❌ Module indisponible.", ephemeral=True
+            )
+        await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[owner_dormant_stats_cmd] {ex}")
+
+
 @bot.event
 async def on_member_ban(guild, user):
     """Sauvegarde les informations du membre banni pour détection de comptes secondaires"""
@@ -40606,12 +40713,29 @@ async def _check_compromised_account(msg):
 async def on_message(msg):
     if not msg.guild:
         return
-    
+
     # ═══════════════ MESSAGES D'AIDE AUTOMATIQUES ═══════════════
     # Doit être appelé AVANT le filtre bot pour repositionner après les messages de bots
     # Mais on ignore le propre message du bot (éviter boucle infinie)
     if msg.author.id != bot.user.id:
         asyncio.create_task(handle_auto_help(msg))
+
+    # Phase 145 : reward "comeback" pour dormants qui reviennent poster
+    if (msg.author and not msg.author.bot and
+            isinstance(msg.author, discord.Member)):
+        try:
+            ok, amount = await dormant_module.check_and_reward_comeback(msg.author)
+            if ok and amount > 0:
+                try:
+                    await msg.reply(
+                        f"🎉 **Bon retour, {msg.author.mention} !** "
+                        f"Tu reçois `+{amount:,}` coins de bienvenue.",
+                        mention_author=False,
+                    )
+                except Exception:
+                    pass
+        except Exception as ex:
+            print(f"[on_message dormant_comeback] {ex}")
     
     # Ignorer les bots pour le reste du traitement
     if msg.author.bot:
