@@ -274,6 +274,96 @@ DEFAULT_MODIFIERS = {
 }
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# DAILY MYSTERY MODIFIERS — varient chaque jour, déterministe par jour de l'année
+# ═══════════════════════════════════════════════════════════════════════════════
+# Casino-style : les joueurs ouvrent le panel chaque matin pour voir le bonus
+# du jour. 12 variantes en rotation = quasi-jamais le même 2 jours d'affilée.
+
+DAILY_MODIFIERS = [
+    {"key": "lucky_morning", "emoji": "🍀", "label": "Matin Chanceux",
+     "tagline": "Drop rate ×1.5 toute la journée",
+     "modifiers": {"loot_mult": 1.5, "mysterybox_drop_mult": 1.3}},
+
+    {"key": "iron_arena", "emoji": "⚔️", "label": "Arène de Fer",
+     "tagline": "Combats et duels boostés",
+     "modifiers": {"combat_mult": 1.3, "duel_reward_mult": 1.4}},
+
+    {"key": "scholar", "emoji": "📚", "label": "Jour du Savant",
+     "tagline": "XP doublée sur les quêtes",
+     "modifiers": {"quest_reward_mult": 1.5, "xp_mult": 1.3}},
+
+    {"key": "merchant", "emoji": "🪙", "label": "Festival du Marchand",
+     "tagline": "Coins gagnés multipliés",
+     "modifiers": {"coin_mult": 1.4, "bank_interest_mult": 1.2}},
+
+    {"key": "wild_hunt", "emoji": "🐲", "label": "Chasse Sauvage",
+     "tagline": "Les boss tombent en plus grand nombre",
+     "modifiers": {"event_freq_mult": 1.4, "boss_reward_mult": 1.3}},
+
+    {"key": "treasure_winds", "emoji": "🌬️", "label": "Vents de Trésor",
+     "tagline": "Trésors flash et mystery boxes en abondance",
+     "modifiers": {"mysterybox_drop_mult": 1.8, "loot_mult": 1.2}},
+
+    {"key": "guild_pride", "emoji": "🏰", "label": "Fierté de Guilde",
+     "tagline": "Events collectifs et alliances boostés",
+     "modifiers": {"collective_event_bonus": 1.5, "bank_interest_mult": 1.3}},
+
+    {"key": "speedrunner", "emoji": "⚡", "label": "Jour de Vitesse",
+     "tagline": "Récompenses ladder et XP combat boostées",
+     "modifiers": {"ladder_xp_mult": 1.5, "combat_mult": 1.2}},
+
+    {"key": "patron_saint", "emoji": "🌟", "label": "Étoile du Jour",
+     "tagline": "Level up bonus + daily reward boosté",
+     "modifiers": {"level_up_bonus": 1.5, "daily_mult": 1.4}},
+
+    {"key": "voidcaller", "emoji": "🔮", "label": "Appel du Néant",
+     "tagline": "Mythiques 2× plus probables (drops)",
+     "modifiers": {"loot_mult": 1.6, "boss_reward_mult": 1.2}},
+
+    {"key": "rest_day", "emoji": "☕", "label": "Jour de Repos",
+     "tagline": "Bonus banque massif — pour ceux qui économisent",
+     "modifiers": {"bank_interest_mult": 1.8}},
+
+    {"key": "wild_card", "emoji": "🎰", "label": "Joker du Jour",
+     "tagline": "Tous les bonus à +20% — léger mais sur tout",
+     "modifiers": {"coin_mult": 1.2, "xp_mult": 1.2, "loot_mult": 1.2,
+                   "boss_reward_mult": 1.2, "duel_reward_mult": 1.2}},
+]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# WEEKEND SPECIALS — vendredi 18h → dimanche 23h, 6 variantes en rotation
+# ═══════════════════════════════════════════════════════════════════════════════
+
+WEEKEND_SPECIALS = [
+    {"key": "double_drop_weekend", "emoji": "💎", "label": "Weekend Double Drops",
+     "tagline": "Tous les drops sont doublés ce weekend",
+     "modifiers": {"loot_mult": 2.0, "mysterybox_drop_mult": 1.5}},
+
+    {"key": "boss_rush_weekend", "emoji": "🐲", "label": "Weekend Boss Rush",
+     "tagline": "Boss apparaissent 2× plus souvent + récompenses ×1.6",
+     "modifiers": {"event_freq_mult": 2.0, "boss_reward_mult": 1.6}},
+
+    {"key": "duel_fever", "emoji": "⚔️", "label": "Fièvre des Duels",
+     "tagline": "Duels doublés + ladder XP ×2",
+     "modifiers": {"duel_reward_mult": 2.0, "ladder_xp_mult": 2.0}},
+
+    {"key": "treasure_storm", "emoji": "🌪️", "label": "Tempête de Trésors",
+     "tagline": "Mystery boxes ×2.5 + loot ×1.5",
+     "modifiers": {"mysterybox_drop_mult": 2.5, "loot_mult": 1.5}},
+
+    {"key": "level_explosion", "emoji": "💥", "label": "Explosion d'XP",
+     "tagline": "XP doublée pour tous, niveau accéléré",
+     "modifiers": {"xp_mult": 2.0, "level_up_bonus": 1.5,
+                   "quest_reward_mult": 1.4}},
+
+    {"key": "coin_rain", "emoji": "🌧️", "label": "Pluie de Coins",
+     "tagline": "Tous les gains de coins ×1.8",
+     "modifiers": {"coin_mult": 1.8, "daily_mult": 1.5}},
+]
+
+
 # Références injectées
 _get_db = None
 _v2_helpers = None
@@ -345,14 +435,82 @@ def current_season() -> dict:
     return SEASONS[-1]  # summer par défaut
 
 
+def current_daily_modifier() -> dict:
+    """Retourne le DAILY_MODIFIER actif aujourd'hui.
+
+    Déterministe par jour de l'année (rotation sur 12 variantes).
+    Casino-style : prévisible mais varié = anticipation des joueurs.
+    """
+    now = datetime.now(_PARIS_TZ)
+    day_of_year = now.timetuple().tm_yday
+    return DAILY_MODIFIERS[day_of_year % len(DAILY_MODIFIERS)]
+
+
+def current_weekend_special() -> Optional[dict]:
+    """Retourne le WEEKEND_SPECIAL actif si on est vendredi 18h → dimanche 23h.
+
+    Sinon retourne None. Déterministe par numéro de semaine de l'année.
+    """
+    now = datetime.now(_PARIS_TZ)
+    wd = now.weekday()  # 0=lundi, 4=vendredi, 5=samedi, 6=dimanche
+    is_weekend = (
+        (wd == 4 and now.hour >= 18) or
+        (wd == 5) or
+        (wd == 6 and now.hour < 23)
+    )
+    if not is_weekend:
+        return None
+    week_of_year = now.isocalendar()[1]
+    return WEEKEND_SPECIALS[week_of_year % len(WEEKEND_SPECIALS)]
+
+
 def get_modifier(key: str, default: float = 1.0) -> float:
     """Retourne le multiplicateur courant pour `key`.
 
-    Si la saison ne définit pas ce key → retourne `default` (typiquement 1.0).
-    Lecture sync, lockless, safe pour utilisation massive.
+    EMPILE les modifiers : saison × daily × weekend (si actif).
+    Donc un Halloween + Lucky Morning + Double Drop Weekend = effet cumulé.
+
+    Ex pendant Halloween (boss_reward_mult=1.4) + Wild Hunt daily (1.3) +
+    Boss Rush weekend (1.6) → get_modifier("boss_reward_mult") = 2.91
+    """
+    final = float(default)
+
+    # Couche 1 : saison
+    season = current_season()
+    season_mult = float(season.get("modifiers", {}).get(key, default))
+    if season_mult != default:
+        final *= (season_mult / default) if default != 0 else season_mult
+
+    # Couche 2 : daily mystery
+    daily = current_daily_modifier()
+    daily_mult = float(daily.get("modifiers", {}).get(key, default))
+    if daily_mult != default:
+        final *= (daily_mult / default) if default != 0 else daily_mult
+
+    # Couche 3 : weekend special (si actif)
+    weekend = current_weekend_special()
+    if weekend:
+        wk_mult = float(weekend.get("modifiers", {}).get(key, default))
+        if wk_mult != default:
+            final *= (wk_mult / default) if default != 0 else wk_mult
+
+    return final
+
+
+def get_all_active_modifiers() -> dict:
+    """Retourne un snapshot de tous les modifiers actifs maintenant.
+
+    Utile pour afficher dans le panel /season info l'effet total
+    de saison + daily + weekend cumulés.
     """
     season = current_season()
-    return float(season.get("modifiers", {}).get(key, default))
+    daily = current_daily_modifier()
+    weekend = current_weekend_special()
+    return {
+        "season": season,
+        "daily": daily,
+        "weekend": weekend,
+    }
 
 
 def is_in_season(season_key: str) -> bool:
@@ -500,11 +658,11 @@ def build_season_panel(guild_name: str = ""):
                 f"_Profite des bonus et des drops exclusifs maintenant !_"
             ))
 
-            # Modifiers actifs
+            # Bonus de saison
             mods = season.get("modifiers", {})
             if mods:
                 items.append(v2_divider())
-                items.append(v2_body("**╔═══ ✨  BONUS ACTIFS  ═══╗**"))
+                items.append(v2_body("**╔═══ ✨  BONUS DE SAISON  ═══╗**"))
                 mod_labels = {
                     "boss_hp_mult": "🐲 Boss HP",
                     "boss_reward_mult": "🏆 Récompenses boss",
@@ -527,6 +685,71 @@ def build_season_panel(guild_name: str = ""):
                     label = mod_labels.get(key, key)
                     lines.append(f"• {label} : **×{mult}**")
                 items.append(v2_body("\n".join(lines)))
+
+            # Daily mystery modifier
+            daily = current_daily_modifier()
+            items.append(v2_divider())
+            items.append(v2_body(
+                f"**╔═══ {daily['emoji']}  AUJOURD'HUI : {daily['label'].upper()}  ═══╗**\n"
+                f"_{daily['tagline']}_"
+            ))
+            d_mods = daily.get("modifiers", {})
+            if d_mods:
+                d_lines = []
+                for key, mult in d_mods.items():
+                    label = {
+                        "boss_hp_mult": "🐲 Boss HP",
+                        "boss_reward_mult": "🏆 Récompenses boss",
+                        "duel_reward_mult": "⚔️ Duels",
+                        "combat_mult": "⚔️ Combats",
+                        "xp_mult": "📈 XP",
+                        "event_freq_mult": "🎯 Events fréquence",
+                        "quest_reward_mult": "📜 Quêtes",
+                        "bank_interest_mult": "🏦 Banque",
+                        "daily_mult": "🎁 Daily",
+                        "mysterybox_drop_mult": "📦 Mystery",
+                        "loot_mult": "💰 Loot",
+                        "coin_mult": "🪙 Coins",
+                        "ladder_xp_mult": "🪜 Ladder",
+                        "level_up_bonus": "⬆️ Level up",
+                        "collective_event_bonus": "🤝 Collectifs",
+                    }.get(key, key)
+                    d_lines.append(f"  · {label} ×{mult}")
+                items.append(v2_body("\n".join(d_lines)))
+            items.append(v2_body(
+                "_💡 Le bonus du jour change tous les matins — viens checker !_"
+            ))
+
+            # Weekend special (si actif)
+            weekend = current_weekend_special()
+            if weekend:
+                items.append(v2_divider())
+                items.append(v2_body(
+                    f"**╔═══ 🎉  WEEKEND SPECIAL : {weekend['label'].upper()}  ═══╗**\n"
+                    f"{weekend['emoji']} _{weekend['tagline']}_"
+                ))
+                w_mods = weekend.get("modifiers", {})
+                if w_mods:
+                    w_lines = []
+                    for key, mult in w_mods.items():
+                        label = {
+                            "boss_reward_mult": "🏆 Boss",
+                            "duel_reward_mult": "⚔️ Duels",
+                            "xp_mult": "📈 XP",
+                            "event_freq_mult": "🎯 Fréquence",
+                            "mysterybox_drop_mult": "📦 Mystery",
+                            "loot_mult": "💰 Loot",
+                            "coin_mult": "🪙 Coins",
+                            "ladder_xp_mult": "🪜 Ladder",
+                            "level_up_bonus": "⬆️ Level up",
+                            "quest_reward_mult": "📜 Quêtes",
+                            "daily_mult": "🎁 Daily",
+                        }.get(key, key)
+                        w_lines.append(f"  · {label} ×{mult}")
+                    items.append(v2_body("\n".join(w_lines)))
+                items.append(v2_body(
+                    "_⏰ Ce bonus weekend s'arrête dimanche 23h._"
+                ))
 
             # Drops exclusifs
             drops = season.get("exclusive_drops", [])
@@ -660,8 +883,11 @@ __all__ = [
     "setup",
     # Catalogue
     "SEASONS", "DEFAULT_MODIFIERS",
+    "DAILY_MODIFIERS", "WEEKEND_SPECIALS",
     # Detection
-    "current_season", "is_in_season", "get_modifier",
+    "current_season", "current_daily_modifier", "current_weekend_special",
+    "get_all_active_modifiers",
+    "is_in_season", "get_modifier",
     # Drops
     "seasonal_drop_pool", "maybe_drop_seasonal",
     "log_drop_claim", "get_user_seasonal_drops",

@@ -104,6 +104,8 @@ import data_cleanup as cleanup_module
 import seasonal_engine as season_module
 # Phase 145 : Réveil intelligent des membres dormants (DM + reward comeback)
 import dormant_wakeup as dormant_module
+# Phase 146 : Boutons de suivi après chaque event (zéro commande à mémoriser)
+import event_followup as followup_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -8842,11 +8844,29 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
 
             # Phase 95 AMPLIFY : LAST HIT BONUS +500 🪙 immédiat
             # (en plus des récompenses du recap final)
+            # Phase 144 : boost saisonnier appliqué au last hit bonus
             try:
-                LAST_HIT_BONUS = 500
+                base_bonus = 500
+                seasonal_mult = season_module.get_modifier("boss_reward_mult")
+                LAST_HIT_BONUS = int(round(base_bonus * seasonal_mult))
                 await add_coins(i.guild.id, i.user.id, LAST_HIT_BONUS)
             except Exception:
-                pass
+                LAST_HIT_BONUS = 500
+                try:
+                    await add_coins(i.guild.id, i.user.id, LAST_HIT_BONUS)
+                except Exception:
+                    pass
+
+            # Phase 144 : roll drop saisonnier sur le coup final (8% chance)
+            seasonal_drop = None
+            try:
+                seasonal_drop = season_module.maybe_drop_seasonal(extra_chance=0.05)
+                if seasonal_drop:
+                    await season_module.log_drop_claim(
+                        i.guild.id, i.user.id, seasonal_drop
+                    )
+            except Exception as ex:
+                print(f"[boss_raid seasonal_drop] {ex}")
 
             # Broadcast "Killing Blow" dans l'arène
             try:
@@ -8855,13 +8875,42 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
                 arena_ch_kb = i.guild.get_channel(arena_id_kb) if arena_id_kb else i.channel
                 if arena_ch_kb:
                     boss_name_kb = boss.get('name', 'le boss')
+                    drop_line = ""
+                    if seasonal_drop:
+                        season_em = season_module.current_season().get("emoji", "🌸")
+                        drop_line = (
+                            f"\n{season_em} **DROP SAISONNIER !** "
+                            f"{seasonal_drop['emoji']} **{seasonal_drop['name']}** "
+                            f"_({seasonal_drop.get('rarity', 'rare')})_"
+                        )
                     await arena_ch_kb.send(
                         f"💀 **COUP FATAL !** {i.user.mention} achève **{boss_name_kb}** "
                         f"avec `{damage}` dégâts !\n"
-                        f"🎁 **+500 🪙 bonus Last Hit** (en plus des récompenses du recap)",
+                        f"🎁 **+{LAST_HIT_BONUS} 🪙 bonus Last Hit**"
+                        f"{drop_line}",
                         delete_after=60,
                         allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
                     )
+
+                    # Phase 146 : followup buttons (guide l'user vers les features)
+                    try:
+                        summary = (
+                            f"✅ **Coup fatal réussi !**\n"
+                            f"💰 +`{LAST_HIT_BONUS}` coins · 💀 `{damage}` dégâts"
+                        )
+                        if seasonal_drop:
+                            summary += (
+                                f"\n{seasonal_drop['emoji']} Drop : **{seasonal_drop['name']}** "
+                                f"_({seasonal_drop.get('rarity', 'rare')})_"
+                            )
+                        await followup_module.followup_send(
+                            arena_ch_kb, i.user, "boss_raid", summary,
+                            title="🏆  VICTOIRE BOSS",
+                            color=0xFFD700,
+                            delete_after=180,
+                        )
+                    except Exception as ex:
+                        print(f"[boss_raid followup] {ex}")
             except Exception:
                 pass
 
@@ -38047,6 +38096,211 @@ async def on_ready():
             dormant_module.dormant_dispatch_task.start()
     except Exception as ex:
         print(f"[on_ready dormant_module setup] {ex}")
+    # Phase 146 : Event followup buttons (zéro commande à mémoriser)
+    try:
+        followup_module.setup({
+            'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
+            'v2_divider': v2_divider, 'v2_container': v2_container,
+            'LayoutView': LayoutView,
+        })
+        # Handlers : pour chaque event_kind, on enregistre les boutons à afficher.
+        # Chaque callback ouvre un panel existant (réutilise les modules custom).
+
+        # Helper : ouvre le panel /season info
+        async def _open_season_panel(i):
+            view = season_module.build_season_panel(
+                i.guild.name if i.guild else ""
+            )
+            if view:
+                await i.response.send_message(view=view, ephemeral=True)
+
+        # Helper : ouvre le panel /season my_drops
+        async def _open_season_drops(i):
+            if not i.guild or not isinstance(i.user, discord.Member):
+                return
+            drops = await season_module.get_user_seasonal_drops(
+                i.guild.id, i.user.id
+            )
+            view = season_module.build_my_drops_panel(i.user, drops, i.guild.name)
+            if view:
+                await i.response.send_message(view=view, ephemeral=True)
+
+        # Helper : ouvre milestones (paliers streak/vétéran/prestige)
+        async def _open_milestones(i):
+            try:
+                await prog_module.show(i, add_coins_fn=add_coins)
+            except Exception as ex:
+                print(f"[followup milestones] {ex}")
+
+        # Helper : ouvre /bonus du jour
+        async def _open_bonus(i):
+            try:
+                view = econ_events_module.build_layout(
+                    i.guild if i.guild else None
+                )
+                if view:
+                    await i.response.send_message(view=view, ephemeral=True)
+            except Exception as ex:
+                print(f"[followup bonus] {ex}")
+
+        # Helper : ouvre quêtes du jour
+        async def _open_quests(i):
+            try:
+                await _p41_open_daily(i)
+            except Exception as ex:
+                print(f"[followup quests] {ex}")
+
+        # Helper : ouvre wheel
+        async def _open_wheel(i):
+            try:
+                await _wheel_spin_command(i)
+            except Exception as ex:
+                print(f"[followup wheel] {ex}")
+
+        # Helper : ouvre /inventory
+        async def _open_inventory(i):
+            try:
+                # Inventory cmd existante
+                await inventory_cmd.callback(i)
+            except Exception as ex:
+                print(f"[followup inventory] {ex}")
+
+        # Helper : ouvre achievements
+        async def _open_achievements(i):
+            try:
+                await _p41_open_achievements(i)
+            except Exception as ex:
+                print(f"[followup achievements] {ex}")
+
+        # Helper : ouvre /vault show
+        async def _open_vault(i):
+            if not i.guild or not isinstance(i.user, discord.Member):
+                return
+            try:
+                alliance = await av_module.get_user_alliance(
+                    i.guild.id, i.user.id
+                )
+                if not alliance:
+                    await i.response.send_message(
+                        "ℹ️ Tu n'es membre d'aucune alliance.", ephemeral=True
+                    )
+                    return
+                view = await av_module.build_vault_panel(alliance)
+                if view:
+                    await i.response.send_message(view=view, ephemeral=True)
+            except Exception as ex:
+                print(f"[followup vault] {ex}")
+
+        # ENREGISTREMENT des handlers pour chaque type d'event
+        BTN_PRIM = discord.ButtonStyle.primary
+        BTN_SUCC = discord.ButtonStyle.success
+        BTN_SEC = discord.ButtonStyle.secondary
+
+        # 🐲 Boss raid victoire
+        followup_module.register_handler(
+            "boss_raid", "Drops saison", "🌸",
+            _open_season_drops, BTN_PRIM,
+        )
+        followup_module.register_handler(
+            "boss_raid", "Mes paliers", "🏅",
+            _open_milestones, BTN_SEC,
+        )
+        followup_module.register_handler(
+            "boss_raid", "Mon inventaire", "🎒",
+            _open_inventory, BTN_SEC,
+        )
+
+        # 🌍 World boss
+        followup_module.register_handler(
+            "world_boss", "Drops saison", "🌸",
+            _open_season_drops, BTN_PRIM,
+        )
+        followup_module.register_handler(
+            "world_boss", "Mes hauts faits", "🏆",
+            _open_achievements, BTN_SEC,
+        )
+        followup_module.register_handler(
+            "world_boss", "Saison active", "🍂",
+            _open_season_panel, BTN_SEC,
+        )
+
+        # 🎁 Daily reward / wheel
+        followup_module.register_handler(
+            "daily", "Bonus du jour", "✨",
+            _open_bonus, BTN_PRIM,
+        )
+        followup_module.register_handler(
+            "daily", "Mes quêtes", "🎯",
+            _open_quests, BTN_SEC,
+        )
+        followup_module.register_handler(
+            "daily", "Spin wheel", "🎰",
+            _open_wheel, BTN_SUCC,
+        )
+
+        # 💎 Treasure / mystery box
+        followup_module.register_handler(
+            "treasure", "Drops saison", "🌸",
+            _open_season_drops, BTN_PRIM,
+        )
+        followup_module.register_handler(
+            "treasure", "Mon inventaire", "🎒",
+            _open_inventory, BTN_SEC,
+        )
+        followup_module.register_handler(
+            "treasure", "Saison active", "🍂",
+            _open_season_panel, BTN_SEC,
+        )
+
+        # ⚔️ Duel win
+        followup_module.register_handler(
+            "duel_win", "Mes hauts faits", "🏆",
+            _open_achievements, BTN_PRIM,
+        )
+        followup_module.register_handler(
+            "duel_win", "Mes paliers", "🏅",
+            _open_milestones, BTN_SEC,
+        )
+        followup_module.register_handler(
+            "duel_win", "Mon inventaire", "🎒",
+            _open_inventory, BTN_SEC,
+        )
+
+        # 🧠 Quiz / Riddle
+        followup_module.register_handler(
+            "quiz_win", "Mes quêtes", "🎯",
+            _open_quests, BTN_PRIM,
+        )
+        followup_module.register_handler(
+            "quiz_win", "Drops saison", "🌸",
+            _open_season_drops, BTN_SEC,
+        )
+
+        # 🌐 Generic (fallback pour tout autre event)
+        followup_module.register_handler(
+            "generic", "Saison active", "🍂",
+            _open_season_panel, BTN_PRIM,
+        )
+        followup_module.register_handler(
+            "generic", "Mes quêtes", "🎯",
+            _open_quests, BTN_SEC,
+        )
+        followup_module.register_handler(
+            "generic", "Bonus du jour", "✨",
+            _open_bonus, BTN_SEC,
+        )
+
+        # 🏰 Alliance reward
+        followup_module.register_handler(
+            "alliance", "Coffre alliance", "🏰",
+            _open_vault, BTN_PRIM,
+        )
+        followup_module.register_handler(
+            "alliance", "Mes paliers", "🏅",
+            _open_milestones, BTN_SEC,
+        )
+    except Exception as ex:
+        print(f"[on_ready followup_module setup] {ex}")
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()
@@ -39820,6 +40074,31 @@ async def owner_dormant_stats_cmd(i: discord.Interaction, jours: int = 7):
         await i.response.send_message(view=view, ephemeral=True)
     except Exception as ex:
         print(f"[owner_dormant_stats_cmd] {ex}")
+
+
+@owner_group.command(
+    name="dormant_test",
+    description="💌 [Owner] Forcer un cycle de DMs aux dormants (test)",
+)
+async def owner_dormant_test_cmd(i: discord.Interaction):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
+        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
+    try:
+        await i.response.defer(ephemeral=True)
+        sent = await dormant_module.run_dormant_dispatch_for_guild(i.guild)
+        await i.followup.send(
+            f"💌 **{sent}** DM(s) envoyé(s) aux dormants éligibles.\n"
+            f"_Vérifie `/owner dormant_stats` pour les détails._",
+            ephemeral=True,
+        )
+    except Exception as ex:
+        print(f"[owner_dormant_test_cmd] {ex}")
+        try:
+            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
 
 
 @bot.event
