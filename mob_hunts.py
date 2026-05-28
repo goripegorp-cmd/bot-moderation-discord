@@ -317,26 +317,49 @@ async def _get_alliance_id(guild_id: int, user_id: int) -> Optional[int]:
 # ─── Spawn ─────────────────────────────────────────────────────────────────
 
 async def _find_arena_channel(guild: discord.Guild) -> Optional[discord.TextChannel]:
-    """Trouve le salon arène pour spawn les mobs."""
-    if _db_get is None:
+    """Trouve le salon arène pour spawn les mobs.
+
+    Phase 169.4 : 3 niveaux de fallback :
+    1. `combat_arena_channel_id` configuré par owner (Phase 169) — préféré
+    2. Arène boss raid ACTIVE (table events.arena_channel_id) — temporaire
+    3. Recherche par nom "arène/arena/combat"
+    4. None → mob ne spawn pas (skip silencieux)
+    """
+    if _db_get is None or _get_db is None:
         return None
+
+    # 1. Salon combat configuré par owner
     try:
         cfg_data = await _db_get(guild.id)
-        # Reuse event_arena_channel s'il existe (set par boss raid)
-        ch_id = (
-            cfg_data.get("event_arena_channel_id", 0)
-            or cfg_data.get("event_arena_channel", 0)
-            or 0
-        )
+        ch_id = int(cfg_data.get("combat_arena_channel_id", 0) or 0)
         if ch_id:
-            ch = guild.get_channel(int(ch_id))
+            ch = guild.get_channel(ch_id)
             if ch:
                 return ch
     except Exception:
         pass
-    # Fallback : recherche par nom
+
+    # 2. Arène boss raid active (si un boss tourne)
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT arena_channel_id FROM events "
+                "WHERE guild_id=? AND ended=0 "
+                "ORDER BY id DESC LIMIT 1",
+                (guild.id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if row and row[0]:
+            ch = guild.get_channel(int(row[0]))
+            if ch:
+                return ch
+    except Exception:
+        pass
+
+    # 3. Fallback : recherche par nom
     for ch in guild.text_channels:
-        if any(k in ch.name.lower() for k in ["arena", "arène", "combat"]):
+        n = (ch.name or "").lower()
+        if any(k in n for k in ["arène", "arena", "combat", "boss"]):
             return ch
     return None
 

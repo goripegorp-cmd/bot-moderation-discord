@@ -3109,6 +3109,10 @@ async def cfg(gid):
         # 0 = désactivé. Owner configure via /configure
         'spotlight_channel_id': 0,
         'spotlight_threshold': 5,
+        # Phase 169 : salon combat permanent (mobs, marchand, invasion)
+        # 0 = pas configuré → fallback boss arena si active, sinon skip.
+        # Owner configure via /configure → Logs → Salons sécurité.
+        'combat_arena_channel_id': 0,
     }
     for k, v in defaults.items():
         if k not in data: data[k] = v
@@ -15460,6 +15464,11 @@ class SecurityChannelsPanelV2(LayoutView):
          "Salon où le bot poste un panel quand le créateur lance un "
          "live Twitch/YouTube (buff XP×2 reste actif partout même si "
          "ce salon n'est pas configuré)."),
+        ("combat_arena_channel_id", "⚔️ Arène Combat",
+         "Salon où le bot fait spawn les mobs (Phase 169 Mob Hunts), "
+         "le marchand itinérant et les invasions mondiales. "
+         "Si non défini, fallback sur l'arène boss raid active ou "
+         "un salon nommé 'arène/arena/combat/boss'."),
     ]
 
     def __init__(self, u, g):
