@@ -1,10 +1,11 @@
-"""Phase 170.1-3 : tests fondation Chronique + NPCs + Daily Encounters."""
+"""Phase 170.1-4 : Chronique + NPCs + Daily Encounters + Conseil."""
 import pytest
 
 import story_engine
 import codex_chronicle
 import npc_personalities
 import daily_encounters
+import weekly_council
 
 
 # ─── story_engine ────────────────────────────────────────────────────────
@@ -313,3 +314,110 @@ def test_encounter_api():
         "EncounterChoiceButton", "register_persistent_views",
     ]:
         assert hasattr(daily_encounters, name), f"manque : {name}"
+
+
+# ─── Phase 170.4 : Weekly Council ────────────────────────────────────────
+
+def test_council_catalog_size():
+    """Au moins 5 conseils (2 clés + 3 génériques)."""
+    assert len(weekly_council.COUNCIL_CATALOG) >= 5
+
+
+def test_council_required_fields():
+    """Chaque conseil a les champs requis."""
+    required = {"id", "chapter_id", "title", "context", "question", "options"}
+    for c in weekly_council.COUNCIL_CATALOG:
+        missing = required - set(c.keys())
+        assert not missing, f"Council {c.get('id')} manque : {missing}"
+
+
+def test_council_ids_unique():
+    ids = [c["id"] for c in weekly_council.COUNCIL_CATALOG]
+    assert len(ids) == len(set(ids))
+
+
+def test_council_three_options_each():
+    """Chaque conseil a exactement 3 options."""
+    for c in weekly_council.COUNCIL_CATALOG:
+        assert len(c["options"]) == 3, (
+            f"Conseil {c['id']} a {len(c['options'])} options au lieu de 3"
+        )
+
+
+def test_council_options_required_fields():
+    """Chaque option a id/label/description/branch_key/npc_impacts."""
+    required = {"id", "label", "description", "branch_key", "npc_impacts"}
+    for c in weekly_council.COUNCIL_CATALOG:
+        for opt in c["options"]:
+            missing = required - set(opt.keys())
+            assert not missing, (
+                f"Option de {c['id']} manque : {missing}"
+            )
+
+
+def test_council_npc_impacts_valid_npcs():
+    """Tous les NPCs impactés par les choix existent."""
+    valid_ids = set(npc_personalities.list_npc_ids())
+    for c in weekly_council.COUNCIL_CATALOG:
+        for opt in c["options"]:
+            for npc_id in opt.get("npc_impacts", {}):
+                assert npc_id in valid_ids, (
+                    f"Council {c['id']} option {opt['id']} ref NPC inconnu : {npc_id}"
+                )
+
+
+def test_council_npc_deltas_bounded():
+    """Mood deltas dans [-20, +20]."""
+    for c in weekly_council.COUNCIL_CATALOG:
+        for opt in c["options"]:
+            for npc_id, delta in opt.get("npc_impacts", {}).items():
+                assert -20 <= int(delta) <= 20, (
+                    f"{c['id']} {opt['id']} delta {delta} hors borne"
+                )
+
+
+def test_council_timing_config():
+    """Lundi 20h / Mercredi 23h."""
+    assert weekly_council.COUNCIL_OPEN_WEEKDAY == 0  # lundi
+    assert weekly_council.COUNCIL_OPEN_HOUR == 20
+    assert weekly_council.COUNCIL_CLOSE_WEEKDAY == 2  # mercredi
+    assert 20 <= weekly_council.COUNCIL_CLOSE_HOUR <= 23
+
+
+def test_council_key_questions_for_chapters():
+    """Les chapitres 1.3 et 2.3 ont un conseil clé."""
+    chapter_councils = {
+        c["chapter_id"] for c in weekly_council.COUNCIL_CATALOG
+        if c["chapter_id"] != "any"
+    }
+    assert "1.3" in chapter_councils
+    assert "2.3" in chapter_councils
+
+
+def test_council_generic_pool_exists():
+    """Il y a au moins 2 conseils génériques pour remplir les semaines sans conseil clé."""
+    generics = [
+        c for c in weekly_council.COUNCIL_CATALOG if c["chapter_id"] == "any"
+    ]
+    assert len(generics) >= 2
+
+
+def test_council_button_is_dynamic():
+    """CouncilVoteButton est un DynamicItem."""
+    import discord
+    assert issubclass(
+        weekly_council.CouncilVoteButton, discord.ui.DynamicItem,
+    )
+
+
+def test_council_api():
+    """API publique exposée."""
+    for name in [
+        "setup", "init_db", "COUNCIL_CATALOG",
+        "get_council_def", "list_council_ids", "get_councils_for_chapter",
+        "get_active_council", "get_vote_counts", "has_user_voted",
+        "open_council", "close_council", "record_vote",
+        "build_council_panel", "open_council_from_codex",
+        "CouncilVoteButton", "council_task", "register_persistent_views",
+    ]:
+        assert hasattr(weekly_council, name), f"manque : {name}"

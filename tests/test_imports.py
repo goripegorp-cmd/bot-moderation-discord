@@ -49,6 +49,8 @@ PHASE_163_MODULES = [
     # Phase 170.2-3 : NPCs vivants + rencontres quotidiennes
     "npc_personalities",
     "daily_encounters",
+    # Phase 170.4 : Conseil des Anciens hebdomadaire
+    "weekly_council",
 ]
 
 
@@ -107,6 +109,8 @@ INIT_DB_MODULES = [
     # Phase 170.2-3 : NPCs mood + encounters log
     "npc_personalities",
     "daily_encounters",
+    # Phase 170.4 : council sessions + votes
+    "weekly_council",
 ]
 
 

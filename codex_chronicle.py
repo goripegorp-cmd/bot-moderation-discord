@@ -31,17 +31,22 @@ _get_db = None
 _db_get = None
 _v2 = None
 _story = None  # référence vers story_engine module
+_council = None  # référence vers weekly_council module (Phase 170.4)
 
 VALID_PAGES = ("current", "history", "memoirs", "acts")
 
 
-def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, story_module):
-    global _bot, _get_db, _db_get, _v2, _story
+def setup(
+    bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, story_module,
+    council_module=None,
+):
+    global _bot, _get_db, _db_get, _v2, _story, _council
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
     _v2 = v2_helpers
     _story = story_module
+    _council = council_module
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -175,6 +180,24 @@ async def _build_page_current(guild_id: int) -> list:
         f"_⏱️ Chapitre démarré le {_fmt_dt(state['chapter_started'])}._\n"
         f"_Si pas complété en 60 jours, l'histoire continue quand même._"
     ))
+
+    # Phase 170.4 : si un conseil hebdo est actif, on l'affiche
+    if _council is not None:
+        try:
+            active = await _council.get_active_council(guild_id)
+            if active:
+                council_def = _council.get_council_def(active["council_id"])
+                if council_def:
+                    items.append(v2_divider())
+                    items.append(v2_body(
+                        f"🗳️ **CONSEIL ACTIF — *{council_def['title']}***\n"
+                        f"_{council_def['question']}_\n"
+                        f"`{active['total_votes']}` voix · ferme `{active['closes_at']}`\n\n"
+                        f"_Clique sur 🗳️ Conseil ci-dessous pour voter._"
+                    ))
+        except Exception:
+            pass
+
     return items
 
 
@@ -353,6 +376,16 @@ async def build_codex_panel(
             btn = CodexPageButton(pkey, user_id)
         layout.add_item(btn)
 
+    # Phase 170.4 : 5e bouton "🗳️ Conseil" si un conseil est actif
+    if _council is not None:
+        try:
+            active = await _council.get_active_council(guild_id)
+            if active:
+                council_btn = CodexCouncilButton(user_id)
+                layout.add_item(council_btn)
+        except Exception:
+            pass
+
     return layout
 
 
@@ -427,11 +460,64 @@ class CodexPageButton(
                 pass
 
 
+class CodexCouncilButton(
+    discord.ui.DynamicItem[Button],
+    template=r"codex_council:(?P<user_id>\d+)",
+):
+    """Bouton qui ouvre le Conseil actif (Phase 170.4)."""
+
+    def __init__(self, user_id: int):
+        super().__init__(
+            Button(
+                label="🗳️ Conseil",
+                style=discord.ButtonStyle.danger,
+                custom_id=f"codex_council:{user_id}",
+            )
+        )
+        self.user_id = user_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["user_id"]))
+
+    async def callback(self, btn_i: discord.Interaction):
+        if btn_i.user.id != self.user_id:
+            try:
+                return await btn_i.response.send_message(
+                    "🔒 Ouvre ton propre Codex depuis le hub.", ephemeral=True
+                )
+            except Exception:
+                return
+        if _council is None:
+            try:
+                return await btn_i.response.send_message(
+                    "❌ Conseil indisponible.", ephemeral=True
+                )
+            except Exception:
+                return
+        try:
+            await _council.open_council_from_codex(btn_i)
+        except Exception as ex:
+            print(f"[codex_council callback] {ex}")
+            try:
+                if not btn_i.response.is_done():
+                    await btn_i.response.send_message(
+                        f"❌ Erreur : `{ex}`", ephemeral=True
+                    )
+                else:
+                    await btn_i.followup.send(
+                        f"❌ Erreur : `{ex}`", ephemeral=True
+                    )
+            except Exception:
+                pass
+
+
 def register_persistent_views(bot_instance):
     if bot_instance is None:
         return
     try:
         bot_instance.add_dynamic_items(CodexPageButton)
+        bot_instance.add_dynamic_items(CodexCouncilButton)
     except Exception as ex:
         print(f"[codex_chronicle register_persistent_views] {ex}")
 

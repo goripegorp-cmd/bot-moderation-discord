@@ -178,6 +178,8 @@ import codex_chronicle as codex_chronicle_module
 # Phase 170.2-3 : NPCs vivants + rencontres quotidiennes
 import npc_personalities as npc_personalities_module
 import daily_encounters as daily_encounters_module
+# Phase 170.4 : Conseil des Anciens hebdomadaire
+import weekly_council as weekly_council_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -39024,10 +39026,6 @@ async def on_ready():
         # Phase 170.1 : La Chronique d'Abylumis — récit collectif persistant
         story_engine_module.setup(bot, get_db, db_get, _v2h)
         await story_engine_module.init_db()
-        codex_chronicle_module.setup(
-            bot, get_db, db_get, _v2h, story_engine_module,
-        )
-        codex_chronicle_module.register_persistent_views(bot)
         if not story_engine_module.chronicle_task.is_running():
             story_engine_module.chronicle_task.start()
 
@@ -39045,7 +39043,25 @@ async def on_ready():
         await daily_encounters_module.init_db()
         daily_encounters_module.register_persistent_views(bot)
 
-        print("[Phase 155/165/166/167/168/169/170] Stream + token_leak + birthday + welcome + spotlight + rotator + voice_clean + risk + error_logger + mob_hunts + merchant + invasion + chronicle + npc + daily_encounters")
+        # Phase 170.4 : Conseil des Anciens hebdomadaire (lundi 20h FR)
+        weekly_council_module.setup(
+            bot, get_db, db_get, _v2h,
+            story_module=story_engine_module,
+            npc_module=npc_personalities_module,
+        )
+        await weekly_council_module.init_db()
+        weekly_council_module.register_persistent_views(bot)
+        if not weekly_council_module.council_task.is_running():
+            weekly_council_module.council_task.start()
+
+        # Codex setup APRÈS council pour que la référence soit injectée
+        codex_chronicle_module.setup(
+            bot, get_db, db_get, _v2h, story_engine_module,
+            council_module=weekly_council_module,
+        )
+        codex_chronicle_module.register_persistent_views(bot)
+
+        print("[Phase 155/165/166/167/168/169/170] Stream + token_leak + birthday + welcome + spotlight + rotator + voice_clean + risk + error_logger + mob_hunts + merchant + invasion + chronicle + npc + daily_encounters + council")
     except Exception as ex:
         print(f"[on_ready Phase 155/165 roblox/stream] {ex}")
 
