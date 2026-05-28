@@ -43,37 +43,46 @@ _get_db = None
 _db_get = None
 _v2 = None
 
-# Skins évolués par pet (suffix + emoji change à level 10/25/50)
+# Skins évolués par pet (suffix + emoji change à level 10/25/50).
+# Phase 163.6 : aligné sur engagement41.PETS — clés = pet `id` legacy
+# (cat/dog/dragon/wolf/fox/robot) pour que le wiring marche directement
+# avec _get_active_pet du bot.py.
 EVOLVED_SKINS = {
-    "fox": [
-        {"name": "Renard",         "emoji": "🦊", "min_lvl": 0},
-        {"name": "Renard Astral",  "emoji": "✨🦊", "min_lvl": 10},
-        {"name": "Renard Céleste", "emoji": "🌟🦊", "min_lvl": 25},
-        {"name": "Renard Mythique","emoji": "🔮🦊", "min_lvl": 50},
+    "cat": [
+        {"name": "Chat",           "emoji": "🐱", "min_lvl": 0},
+        {"name": "Chat Agile",     "emoji": "🐈", "min_lvl": 10},
+        {"name": "Chat Tigré",     "emoji": "🐅", "min_lvl": 25},
+        {"name": "Lion Cosmique",  "emoji": "🦁", "min_lvl": 50},
     ],
-    "rabbit": [
-        {"name": "Lapin",          "emoji": "🐰", "min_lvl": 0},
-        {"name": "Lapin Lunaire",  "emoji": "🌙🐰", "min_lvl": 10},
-        {"name": "Lapin Solaire",  "emoji": "☀️🐰", "min_lvl": 25},
-        {"name": "Lapin Cosmique", "emoji": "🌌🐰", "min_lvl": 50},
-    ],
-    "owl": [
-        {"name": "Chouette",       "emoji": "🦉", "min_lvl": 0},
-        {"name": "Chouette Sage",  "emoji": "📜🦉", "min_lvl": 10},
-        {"name": "Chouette Archéo","emoji": "🏛️🦉", "min_lvl": 25},
-        {"name": "Chouette Divine","emoji": "⚡🦉", "min_lvl": 50},
-    ],
-    "turtle": [
-        {"name": "Tortue",         "emoji": "🐢", "min_lvl": 0},
-        {"name": "Tortue Ancien",  "emoji": "🗿🐢", "min_lvl": 10},
-        {"name": "Tortue Bouclier","emoji": "🛡️🐢", "min_lvl": 25},
-        {"name": "Tortue Élémentaire","emoji": "💎🐢", "min_lvl": 50},
+    "dog": [
+        {"name": "Chien",          "emoji": "🐶", "min_lvl": 0},
+        {"name": "Loup",           "emoji": "🐺", "min_lvl": 10},
+        {"name": "Loup Alpha",     "emoji": "⚔️🐺", "min_lvl": 25},
+        {"name": "Fenrir",         "emoji": "🌑🐺", "min_lvl": 50},
     ],
     "dragon": [
         {"name": "Dragon",         "emoji": "🐲", "min_lvl": 0},
         {"name": "Dragon Ardent",  "emoji": "🔥🐲", "min_lvl": 10},
         {"name": "Dragon Tempête", "emoji": "⚡🐲", "min_lvl": 25},
         {"name": "Dragon Légendaire","emoji": "✨🐉", "min_lvl": 50},
+    ],
+    "wolf": [
+        {"name": "Loup",           "emoji": "🐺", "min_lvl": 0},
+        {"name": "Loup Garou",     "emoji": "🌙🐺", "min_lvl": 10},
+        {"name": "Loup Lunaire",   "emoji": "🌕🐺", "min_lvl": 25},
+        {"name": "Fenrir Mythique","emoji": "⚔️🌑", "min_lvl": 50},
+    ],
+    "fox": [
+        {"name": "Renard",         "emoji": "🦊", "min_lvl": 0},
+        {"name": "Renard Rusé",    "emoji": "🍃🦊", "min_lvl": 10},
+        {"name": "Kitsune",        "emoji": "🌸🦊", "min_lvl": 25},
+        {"name": "Esprit Renard",  "emoji": "✨🦊", "min_lvl": 50},
+    ],
+    "robot": [
+        {"name": "Bot v1",         "emoji": "🤖", "min_lvl": 0},
+        {"name": "Drone",          "emoji": "🛸", "min_lvl": 10},
+        {"name": "Mecha",          "emoji": "⚙️🤖", "min_lvl": 25},
+        {"name": "Conscience IA",  "emoji": "👁️🤖", "min_lvl": 50},
     ],
 }
 

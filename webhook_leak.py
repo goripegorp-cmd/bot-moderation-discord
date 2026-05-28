@@ -246,7 +246,20 @@ async def on_message_hook(message: discord.Message) -> bool:
                     "Voir le panel staff sanction pour décider d'une "
                     "action supplémentaire._"
                 )
-                await owner.send("\n".join(lines))
+                # Phase 163.6 : route via dm_digest.send_urgent_now si dispo
+                # (centralise les DMs urgents, fail-open silencieux sinon).
+                payload = "\n".join(lines)
+                sent_via_digest = False
+                try:
+                    import dm_digest as _dm_dig
+                    if _dm_dig and hasattr(_dm_dig, "send_urgent_now"):
+                        sent_via_digest = await _dm_dig.send_urgent_now(
+                            owner, payload,
+                        )
+                except Exception:
+                    sent_via_digest = False
+                if not sent_via_digest:
+                    await owner.send(payload)
         except Exception:
             pass
 

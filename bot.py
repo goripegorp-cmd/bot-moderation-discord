@@ -8978,8 +8978,12 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
                 await onboarding_module.mark_step_completed(
                     i.guild.id, i.user.id, 4,
                 )
+                # Phase 163.6 : pet_evolution XP (+50 sur boss kill final)
+                await _pet_evo_award(
+                    i.guild.id, i.user.id, "boss_kill_final",
+                )
             except Exception as ex:
-                print(f"[boss_kill phase153/163] {ex}")
+                print(f"[boss_kill phase153/163/166] {ex}")
 
             # Phase 163 : si drop saisonnier → DM digest "drop_collected"
             if seasonal_drop:
@@ -9810,8 +9814,12 @@ class TreasureClaimView(View):
                 await mentor_bonus_module.on_apprenti_event(
                     i.guild.id, i.user.id, "treasure_claim",
                 )
+                # Phase 163.6 : pet_evolution XP (+10 sur event participation)
+                await _pet_evo_award(
+                    i.guild.id, i.user.id, "treasure_claim",
+                )
             except Exception as ex:
-                print(f"[treasure phase153/163] {ex}")
+                print(f"[treasure phase153/163/166] {ex}")
 
             # Phase 157 : community goal
             try:
@@ -13054,8 +13062,12 @@ class MysteryBoxView(View):
                 await community_goals_module.record_action(
                     i.guild.id, i.user.id, "mystery_open",
                 )
+                # Phase 163.6 : pet_evolution XP
+                await _pet_evo_award(
+                    i.guild.id, i.user.id, "mystery_open",
+                )
             except Exception as ex:
-                print(f"[mystery_box phase162.5/163] {ex}")
+                print(f"[mystery_box phase162.5/163/166] {ex}")
 
             # Phase 163 : si drop saisonnier → DM digest "drop_collected"
             if seasonal_drop:
@@ -54603,6 +54615,46 @@ async def _get_active_pet(guild_id: int, user_id: int) -> Optional[dict]:
     }
 
 
+async def _pet_evo_award(guild_id: int, user_id: int, event_kind: str) -> None:
+    """Phase 163.6 : si le user a un pet actif, fais gagner de l'XP au pet via
+    pet_evolution. Si évolution → DM digest level_up.
+
+    event_kind : 'boss_kill_final' (50 XP) ou autre (10 XP).
+    Silent fail.
+    """
+    try:
+        pet = await _get_active_pet(guild_id, user_id)
+        if not pet:
+            return
+        slug = pet.get("id") or ""
+        if not slug:
+            return
+        result = await pet_evo_module.gain_xp_from_event(
+            guild_id, user_id, slug, event_kind,
+        )
+        if result and result.get("level_up"):
+            skin_up = result.get("skin_upgrade")
+            new_lvl = result.get("new_level", 0)
+            msg_parts = [
+                f"🐾 Ton pet **{pet.get('custom_name', pet.get('name', 'Pet'))}** "
+                f"passe niveau **{new_lvl}** !"
+            ]
+            if skin_up:
+                msg_parts.append(
+                    f"✨ **ÉVOLUTION !** Il devient "
+                    f"**{skin_up['emoji']} {skin_up['name']}**"
+                )
+            try:
+                await dm_digest_module.enqueue(
+                    guild_id, user_id, "level_up",
+                    "\n".join(msg_parts),
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 async def _apply_pet_bonus(guild_id: int, user_id: int, kind: str) -> float:
     """Renvoie le bonus du pet actif pour ce kind ('boss_damage', 'rare_loot', etc.).
 
@@ -54742,8 +54794,12 @@ class DailyQuestView(View):
                 await onboarding_module.mark_step_completed(
                     self.guild_id, self.user_id, 3,
                 )
+                # Phase 163.6 : pet_evolution XP
+                await _pet_evo_award(
+                    self.guild_id, self.user_id, "quest_complete",
+                )
             except Exception as ex:
-                print(f"[daily_quest phase153/163] {ex}")
+                print(f"[daily_quest phase153/163/166] {ex}")
 
             # Phase 156 : raffle ticket (1 par claim — max ~5/semaine)
             try:
@@ -56272,6 +56328,11 @@ class PetActionsView(View):
         b_rename.callback = self._on_rename
         self.add_item(b_rename)
 
+        # Phase 163.6 : panel d'évolution (niveau pet + skin)
+        b_evo = Button(label="🌟 Évolution", style=discord.ButtonStyle.secondary)
+        b_evo.callback = self._on_evolution
+        self.add_item(b_evo)
+
     async def _on_feed(self, i: discord.Interaction):
         if not await _safe_defer(i):
             return
@@ -56327,6 +56388,38 @@ class PetActionsView(View):
             await i.response.send_modal(PetRenameModal(self.guild_id, self.user_id))
         except Exception as ex:
             print(f"[PetActionsView _on_rename] {ex}")
+
+    async def _on_evolution(self, i: discord.Interaction):
+        """Phase 163.6 : ouvre le panel d'évolution pet (level + skin progression)."""
+        if not await _safe_defer(i):
+            return
+        try:
+            if i.user.id != self.user_id:
+                return await _safe_followup(i, content="🔒 Pas pour toi.")
+            pet = await _get_active_pet(self.guild_id, self.user_id)
+            if not pet:
+                return await _safe_followup(
+                    i, content="🐾 Pas de pet actif — utilise la 🛒 Boutique."
+                )
+            slug = pet.get("id") or ""
+            if not slug or slug not in pet_evo_module.EVOLVED_SKINS:
+                return await _safe_followup(
+                    i,
+                    content="🌟 Évolution pas encore disponible pour ce pet.",
+                )
+            member = i.guild.get_member(self.user_id) if i.guild else None
+            if not member:
+                return await _safe_followup(i, content="❌ Membre introuvable.")
+            panel = pet_evo_module.build_pet_evolution_panel(member, slug)
+            if panel is None:
+                return await _safe_followup(
+                    i, content="🌟 Module évolution indisponible."
+                )
+            await panel.populate()
+            await _safe_followup(i, view=panel)
+        except Exception as ex:
+            print(f"[PetActionsView _on_evolution] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
 class PetRenameModal(Modal):
@@ -58258,8 +58351,12 @@ class RiddleAnswerView(View):
                             await mentor_bonus_module.on_apprenti_event(
                                 i.guild.id, i.user.id, "riddle_first",
                             )
+                            # Phase 163.6 : pet_evolution XP
+                            await _pet_evo_award(
+                                i.guild.id, i.user.id, "riddle_first",
+                            )
                         except Exception as ex:
-                            print(f"[riddle phase153/163] {ex}")
+                            print(f"[riddle phase153/163/166] {ex}")
 
                         # Phase 157 : community goal
                         try:
@@ -72496,8 +72593,12 @@ async def duel_report_cmd(i: discord.Interaction, duel_id: int, gagnant: discord
             await mentor_bonus_module.on_apprenti_event(
                 i.guild.id, gagnant.id, "duel_win",
             )
+            # Phase 163.6 : pet_evolution XP
+            await _pet_evo_award(
+                i.guild.id, gagnant.id, "duel_win",
+            )
         except Exception as ex:
-            print(f"[duel phase153/163] {ex}")
+            print(f"[duel phase153/163/166] {ex}")
 
         # Phase 157 : community goal — 1 duel counté
         try:

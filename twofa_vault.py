@@ -208,9 +208,22 @@ async def request_confirmation(
             f"peut-être compromis._\n\n"
             f"Tu as **{timeout} secondes**."
         )
+        # Phase 163.6 : route via dm_digest.send_urgent_now si dispo,
+        # sinon fallback direct .send (le 2FA est LE cas urgent par excellence).
+        dm_sent = False
         try:
-            await member.send(content=dm_text, view=view)
-        except (discord.Forbidden, discord.HTTPException):
+            import dm_digest as _dm_dig
+            if _dm_dig and hasattr(_dm_dig, "send_urgent_now"):
+                dm_sent = await _dm_dig.send_urgent_now(member, dm_text, view=view)
+        except Exception:
+            dm_sent = False
+        if not dm_sent:
+            try:
+                await member.send(content=dm_text, view=view)
+                dm_sent = True
+            except (discord.Forbidden, discord.HTTPException):
+                dm_sent = False
+        if not dm_sent:
             # DMs fermés → fail-open (sinon on bloque les actions
             # légitimes). On log mais on continue.
             try:
