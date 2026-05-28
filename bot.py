@@ -125,6 +125,13 @@ import help_faq as faq_module
 import dm_digest as dm_digest_module
 import webhook_tracker as webhook_tracker_module
 import owner_digest as owner_digest_module
+# Phase 153 : Engagement long terme — reputation, pet evo, daily prompt,
+# onboarding journey, mentor bonus
+import reputation as reputation_module
+import pet_evolution as pet_evo_module
+import daily_prompt as daily_prompt_module
+import onboarding_journey as onboarding_module
+import mentor_bonus as mentor_bonus_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -8925,6 +8932,21 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
             except Exception as ex:
                 print(f"[boss_kill profile/saga] {ex}")
 
+            # Phase 153 : reputation + mentor bonus + onboarding step 4
+            try:
+                await reputation_module.add_points(
+                    i.guild.id, i.user.id, "boss_kill_final",
+                )
+                await mentor_bonus_module.on_apprenti_event(
+                    i.guild.id, i.user.id, "boss_kill_final",
+                )
+                # Étape 4 du parcours onboarding : 1er coup sur boss
+                await onboarding_module.mark_step_completed(
+                    i.guild.id, i.user.id, 4,
+                )
+            except Exception as ex:
+                print(f"[boss_kill phase153] {ex}")
+
             # Phase 144 : roll drop saisonnier sur le coup final (8% chance)
             seasonal_drop = None
             try:
@@ -9714,6 +9736,17 @@ class TreasureClaimView(View):
                 )
             except Exception as ex:
                 print(f"[treasure profile/saga] {ex}")
+
+            # Phase 153 : reputation + mentor bonus
+            try:
+                await reputation_module.add_points(
+                    i.guild.id, i.user.id, "treasure_claim",
+                )
+                await mentor_bonus_module.on_apprenti_event(
+                    i.guild.id, i.user.id, "treasure_claim",
+                )
+            except Exception as ex:
+                print(f"[treasure phase153] {ex}")
 
             seasonal_line = ""
             if seasonal_drop:
@@ -38430,6 +38463,37 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready Phase 152.D2 indexes] {ex}")
 
+    # Phase 153 : Engagement long terme (reputation, pet evo, daily prompt,
+    # onboarding journey, mentor bonus)
+    try:
+        reputation_module.setup(get_db, db_get, _v2h)
+        await reputation_module.init_db()
+
+        pet_evo_module.setup(get_db, db_get, _v2h)
+        await pet_evo_module.init_db()
+
+        daily_prompt_module.setup(
+            bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
+        )
+        await daily_prompt_module.init_db()
+        if not daily_prompt_module.daily_prompt_task.is_running():
+            daily_prompt_module.daily_prompt_task.start()
+
+        onboarding_module.setup(
+            bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
+        )
+        await onboarding_module.init_db()
+
+        mentor_bonus_module.setup(
+            get_db, db_get, _v2h, add_coins_fn=add_coins,
+            reputation_module=reputation_module,
+        )
+        await mentor_bonus_module.init_db()
+
+        print("[Phase 153] Engagement actif : reputation + pet evo + daily prompt + onboarding + mentor")
+    except Exception as ex:
+        print(f"[on_ready Phase 153 engagement] {ex}")
+
     # Phase 146 : Event followup buttons (zéro commande à mémoriser)
     try:
         followup_module.setup({
@@ -40690,6 +40754,13 @@ async def on_member_join(m):
         await raid_module.on_member_join(m)
     except Exception as ex:
         print(f"[on_member_join raid_module] {ex}")
+
+    # ═══ Phase 153 : démarre le parcours d'onboarding ═══
+    if not m.bot:
+        try:
+            await onboarding_module.start_for_member(m)
+        except Exception as ex:
+            print(f"[on_member_join onboarding] {ex}")
 
     # ═══ Phase 139 : Observabilité (join tracking pour retention) ═══
     try:
@@ -54206,6 +54277,21 @@ class DailyQuestView(View):
             except Exception as ex:
                 print(f"[daily_quest profile/saga] {ex}")
 
+            # Phase 153 : reputation + mentor + onboarding step 3
+            try:
+                await reputation_module.add_points(
+                    self.guild_id, self.user_id, "quest_complete",
+                )
+                await mentor_bonus_module.on_apprenti_event(
+                    self.guild_id, self.user_id, "quest_complete",
+                )
+                # Étape 3 onboarding
+                await onboarding_module.mark_step_completed(
+                    self.guild_id, self.user_id, 3,
+                )
+            except Exception as ex:
+                print(f"[daily_quest phase153] {ex}")
+
             # Phase 146 : boutons de suivi (zéro commande à mémoriser)
             try:
                 fview = followup_module.build_followup_view(
@@ -54598,6 +54684,17 @@ async def _do_wheel_spin(i: discord.Interaction):
         await saga_module.add_contribution(i.guild.id, i.user.id, 1)
     except Exception as ex:
         print(f"[wheel profile/saga] {ex}")
+
+    # Phase 153 : onboarding step 2 (1er spin wheel)
+    try:
+        await onboarding_module.mark_step_completed(
+            i.guild.id, i.user.id, 2,
+        )
+        await mentor_bonus_module.on_apprenti_event(
+            i.guild.id, i.user.id, "wheel_spin",
+        )
+    except Exception as ex:
+        print(f"[wheel phase153 onboarding] {ex}")
 
     # Phase 146 : boutons de suivi (zéro commande à mémoriser)
     try:
@@ -57492,6 +57589,16 @@ class RiddleAnswerView(View):
                             )
                         except Exception as ex:
                             print(f"[riddle profile/saga] {ex}")
+                        # Phase 153 : reputation + mentor
+                        try:
+                            await reputation_module.add_points(
+                                i.guild.id, i.user.id, "riddle_first",
+                            )
+                            await mentor_bonus_module.on_apprenti_event(
+                                i.guild.id, i.user.id, "riddle_first",
+                            )
+                        except Exception as ex:
+                            print(f"[riddle phase153] {ex}")
                         # Phase 146 : boutons de suivi (zéro commande à mémoriser)
                         try:
                             fview = followup_module.build_followup_view(
@@ -71615,6 +71722,17 @@ async def duel_report_cmd(i: discord.Interaction, duel_id: int, gagnant: discord
             )
         except Exception as ex:
             print(f"[duel profile/saga] {ex}")
+
+        # Phase 153 : reputation + mentor (gagnant uniquement)
+        try:
+            await reputation_module.add_points(
+                i.guild.id, gagnant.id, "duel_win",
+            )
+            await mentor_bonus_module.on_apprenti_event(
+                i.guild.id, gagnant.id, "duel_win",
+            )
+        except Exception as ex:
+            print(f"[duel phase153] {ex}")
 
         # Phase 146 : boutons de suivi pour le winner (zéro commande à mémoriser)
         try:
