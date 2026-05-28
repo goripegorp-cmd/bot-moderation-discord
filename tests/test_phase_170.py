@@ -62,10 +62,15 @@ def test_chapter_kinds_valid():
 
 
 def test_chapter_targets_reasonable():
-    """Targets entre 50 et 500000 (cohérent avec ~4 semaines)."""
+    """Targets entre 5 et 500000.
+
+    Borne basse à 5 car certains kinds (council_votes, mystery_combines)
+    sont des actions PAR SEMAINE — pas des compteurs unitaires comme
+    mob_kills. 8 council_votes = 2 mois de conseils hebdo.
+    """
     for act in story_engine.ACTS:
         for chap in act["chapters"]:
-            assert 50 <= chap["target"] <= 500000
+            assert 5 <= chap["target"] <= 500000
 
 
 def test_get_chapter_def():
