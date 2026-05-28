@@ -8949,10 +8949,21 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
                 print(f"[boss_kill profile/saga] {ex}")
 
             # Phase 153 : reputation + mentor bonus + onboarding step 4
+            # Phase 163 : capture tier upgrade → DM digest
             try:
-                await reputation_module.add_points(
+                rep_result = await reputation_module.add_points(
                     i.guild.id, i.user.id, "boss_kill_final",
                 )
+                if rep_result and rep_result.get("new_tier"):
+                    nt = rep_result["new_tier"]
+                    try:
+                        await dm_digest_module.enqueue(
+                            i.guild.id, i.user.id, "level_up",
+                            f"⭐ Tu as débloqué le tier **{nt['emoji']} "
+                            f"{nt['name']}** ({rep_result['new_total']} pts)!",
+                        )
+                    except Exception:
+                        pass
                 await mentor_bonus_module.on_apprenti_event(
                     i.guild.id, i.user.id, "boss_kill_final",
                 )
@@ -8961,7 +8972,19 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
                     i.guild.id, i.user.id, 4,
                 )
             except Exception as ex:
-                print(f"[boss_kill phase153] {ex}")
+                print(f"[boss_kill phase153/163] {ex}")
+
+            # Phase 163 : si drop saisonnier → DM digest "drop_collected"
+            if seasonal_drop:
+                try:
+                    await dm_digest_module.enqueue(
+                        i.guild.id, i.user.id, "drop_collected",
+                        f"{seasonal_drop['emoji']} **{seasonal_drop['name']}** "
+                        f"({seasonal_drop.get('rarity', 'rare')}) "
+                        f"— gagné via boss raid",
+                    )
+                except Exception:
+                    pass
 
             # Phase 157 : community goal tracking
             try:
@@ -9762,15 +9785,26 @@ class TreasureClaimView(View):
                 print(f"[treasure profile/saga] {ex}")
 
             # Phase 153 : reputation + mentor bonus
+            # Phase 163 : capture tier upgrade → DM digest
             try:
-                await reputation_module.add_points(
+                rep_result = await reputation_module.add_points(
                     i.guild.id, i.user.id, "treasure_claim",
                 )
+                if rep_result and rep_result.get("new_tier"):
+                    nt = rep_result["new_tier"]
+                    try:
+                        await dm_digest_module.enqueue(
+                            i.guild.id, i.user.id, "level_up",
+                            f"⭐ Tu as débloqué le tier **{nt['emoji']} "
+                            f"{nt['name']}** ({rep_result['new_total']} pts)!",
+                        )
+                    except Exception:
+                        pass
                 await mentor_bonus_module.on_apprenti_event(
                     i.guild.id, i.user.id, "treasure_claim",
                 )
             except Exception as ex:
-                print(f"[treasure phase153] {ex}")
+                print(f"[treasure phase153/163] {ex}")
 
             # Phase 157 : community goal
             try:
@@ -9779,6 +9813,18 @@ class TreasureClaimView(View):
                 )
             except Exception:
                 pass
+
+            # Phase 163 : si drop saisonnier → DM digest "drop_collected"
+            if seasonal_drop:
+                try:
+                    await dm_digest_module.enqueue(
+                        i.guild.id, i.user.id, "drop_collected",
+                        f"{seasonal_drop['emoji']} **{seasonal_drop['name']}** "
+                        f"({seasonal_drop.get('rarity', 'rare')}) "
+                        f"— gagné via trésor",
+                    )
+                except Exception:
+                    pass
 
             seasonal_line = ""
             if seasonal_drop:
@@ -12980,10 +13026,21 @@ class MysteryBoxView(View):
                 print(f"[mystery_box profile/saga] {ex}")
 
             # Phase 162.5 : oublis comblés — reputation + mentor + community goal
+            # Phase 163 : capture tier upgrade → DM digest
             try:
-                await reputation_module.add_points(
+                rep_result = await reputation_module.add_points(
                     i.guild.id, i.user.id, "treasure_claim",
                 )
+                if rep_result and rep_result.get("new_tier"):
+                    nt = rep_result["new_tier"]
+                    try:
+                        await dm_digest_module.enqueue(
+                            i.guild.id, i.user.id, "level_up",
+                            f"⭐ Tu as débloqué le tier **{nt['emoji']} "
+                            f"{nt['name']}** ({rep_result['new_total']} pts)!",
+                        )
+                    except Exception:
+                        pass
                 await mentor_bonus_module.on_apprenti_event(
                     i.guild.id, i.user.id, "treasure_claim",
                 )
@@ -12991,7 +13048,19 @@ class MysteryBoxView(View):
                     i.guild.id, i.user.id, "mystery_open",
                 )
             except Exception as ex:
-                print(f"[mystery_box phase162.5] {ex}")
+                print(f"[mystery_box phase162.5/163] {ex}")
+
+            # Phase 163 : si drop saisonnier → DM digest "drop_collected"
+            if seasonal_drop:
+                try:
+                    await dm_digest_module.enqueue(
+                        i.guild.id, i.user.id, "drop_collected",
+                        f"{seasonal_drop['emoji']} **{seasonal_drop['name']}** "
+                        f"({seasonal_drop.get('rarity', 'rare')}) "
+                        f"— gagné via mystery box",
+                    )
+                except Exception:
+                    pass
 
             await i.followup.send(reward_msg, ephemeral=True)
 
