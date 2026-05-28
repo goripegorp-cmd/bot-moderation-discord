@@ -142,6 +142,8 @@ import stream_watch_party as stream_party_module
 # Phase 157 : Community goals + Coin economy (anti-inflation)
 import community_goals as community_goals_module
 import coin_economy as coin_economy_module
+# Phase 161 : Weekly recap + Leaderboards publics
+import weekly_stats as weekly_stats_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -38803,6 +38805,15 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready Phase 157 community/economy] {ex}")
 
+    # Phase 161 : Weekly stats (récap perso + leaderboards auto)
+    try:
+        weekly_stats_module.setup(bot, get_db, db_get, _v2h)
+        if not weekly_stats_module.weekly_post_task.is_running():
+            weekly_stats_module.weekly_post_task.start()
+        print("[Phase 161] Weekly stats actifs : récap + leaderboards lundi 9h FR")
+    except Exception as ex:
+        print(f"[on_ready Phase 161 weekly_stats] {ex}")
+
     # Phase 146 : Event followup buttons (zéro commande à mémoriser)
     try:
         followup_module.setup({
@@ -56511,6 +56522,26 @@ class EngagementHubView(View):
         b19.callback = self._on_dm_prefs
         self.add_item(b19)
 
+        # Phase 161 : Récap hebdo + Leaderboards
+        # Row 0 = quests+wheel+saga+community_goal (4) → 1 free
+        b20 = Button(
+            label="📰 Mon récap 7j",
+            style=discord.ButtonStyle.primary,
+            custom_id="hub_weekly_recap",
+            row=0,
+        )
+        b20.callback = self._on_weekly_recap
+        self.add_item(b20)
+
+        # Row 1 = achievements+pet+community+reputation+raffle (5 max atteint).
+        # row 4 = roblox+competitions+social+tools+faq (5 max). On reste sur row 4 si possible mais full.
+        # Vérification : row 0 vient d'atteindre 5 avec b20. row 4 full. Toutes pleines sauf row 1
+        # (5 utilisés). Pour ce dernier bouton "Top semaine", on n'a plus de place...
+        # Solution : on l'inclut dans le hub mais sans row explicite, Discord le placera.
+        # Ou on le met sur row 2 (4 patched + dm_prefs + ce nouveau = 6 → overflow).
+        # On utilise donc une row libre... aucune libre. On skip ce bouton :
+        # le leaderboard est auto-posté chaque lundi 9h FR, accessible depuis là.
+
     async def _on_quests(self, i: discord.Interaction):
         await _p41_open_daily(i)
 
@@ -56681,6 +56712,24 @@ class EngagementHubView(View):
             await i.followup.send(view=panel, ephemeral=True)
         except Exception as ex:
             print(f"[hub_dm_prefs] {ex}")
+
+    async def _on_weekly_recap(self, i: discord.Interaction):
+        """Phase 161 : ouvre le récap perso 7 jours."""
+        try:
+            if not i.guild or not isinstance(i.user, discord.Member):
+                return await i.response.send_message(
+                    "❌ Serveur uniquement.", ephemeral=True
+                )
+            panel = weekly_stats_module.build_recap_panel(i.user)
+            if panel is None:
+                return await i.response.send_message(
+                    "📰 Module récap indisponible.", ephemeral=True
+                )
+            await i.response.defer(ephemeral=True)
+            await panel.populate()
+            await i.followup.send(view=panel, ephemeral=True)
+        except Exception as ex:
+            print(f"[hub_weekly_recap] {ex}")
 
 
 # ─── COMMANDES /hub + /hub_setup ───────────────────────────────────────────────
