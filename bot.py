@@ -186,6 +186,8 @@ import regional_state as regional_state_module
 import mystery_investigation as mystery_investigation_module
 # Phase 170.7 : Lettres NPC hebdo en DM (opt-in)
 import npc_letters as npc_letters_module
+# Phase 170.8 : Boss Climax mensuel thématique
+import monthly_climax as monthly_climax_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -39094,6 +39096,18 @@ async def on_ready():
         if not npc_letters_module.weekly_letter_task.is_running():
             npc_letters_module.weekly_letter_task.start()
 
+        # Phase 170.8 : Boss Climax mensuel (1er samedi 21h FR, thématique)
+        monthly_climax_module.setup(
+            bot, get_db, db_get, _v2h,
+            story_module=story_engine_module,
+            npc_module=npc_personalities_module,
+            add_coins_fn=add_coins,
+        )
+        await monthly_climax_module.init_db()
+        monthly_climax_module.register_persistent_views(bot)
+        if not monthly_climax_module.climax_task.is_running():
+            monthly_climax_module.climax_task.start()
+
         # Codex setup APRÈS tous les modules pour injection refs complète
         codex_chronicle_module.setup(
             bot, get_db, db_get, _v2h, story_engine_module,
@@ -39101,6 +39115,7 @@ async def on_ready():
             regional_module=regional_state_module,
             mystery_module=mystery_investigation_module,
             letters_module=npc_letters_module,
+            climax_module=monthly_climax_module,
         )
         codex_chronicle_module.register_persistent_views(bot)
 

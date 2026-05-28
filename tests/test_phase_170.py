@@ -1,4 +1,4 @@
-"""Phase 170.1-7 : Chronique + NPCs + Encounters + Conseil + Régions + Mystères + Lettres."""
+"""Phase 170.1-8 : Chronique complète + Boss Climax mensuel."""
 import pytest
 
 import story_engine
@@ -9,6 +9,7 @@ import weekly_council
 import regional_state
 import mystery_investigation
 import npc_letters
+import monthly_climax
 
 
 # ─── story_engine ────────────────────────────────────────────────────────
@@ -691,3 +692,90 @@ def test_letter_api():
         "register_persistent_views",
     ]:
         assert hasattr(npc_letters, name), f"manque : {name}"
+
+
+# ─── Phase 170.8 : Monthly Climax Boss ───────────────────────────────────
+
+def test_climax_catalog_size():
+    """Exactement 9 boss (1 par chapitre)."""
+    assert len(monthly_climax.CLIMAX_BOSSES) == 9
+
+
+def test_climax_required_fields():
+    required = {"id", "chapter_id", "name", "emoji", "description",
+                "lore", "hp_base", "winning_title", "participation_title"}
+    for b in monthly_climax.CLIMAX_BOSSES:
+        missing = required - set(b.keys())
+        assert not missing, f"Boss {b.get('id')} manque : {missing}"
+
+
+def test_climax_ids_unique():
+    ids = [b["id"] for b in monthly_climax.CLIMAX_BOSSES]
+    assert len(ids) == len(set(ids))
+
+
+def test_climax_chapter_coverage():
+    """Tous les 9 chapitres (1.1..3.3) ont leur boss."""
+    chapters_with_boss = {b["chapter_id"] for b in monthly_climax.CLIMAX_BOSSES}
+    expected = {f"{a}.{c}" for a in (1, 2, 3) for c in (1, 2, 3)}
+    assert chapters_with_boss == expected
+
+
+def test_climax_hp_progression():
+    """HP croissant des chapitres simples aux complexes."""
+    for b in monthly_climax.CLIMAX_BOSSES:
+        assert b["hp_base"] >= 5000
+        assert b["hp_base"] <= 100000
+    # Boss du chapitre 1.1 ≤ boss du chapitre 3.3
+    b11 = monthly_climax.get_climax_boss_for_chapter("1.1")
+    b33 = monthly_climax.get_climax_boss_for_chapter("3.3")
+    assert b11 is not None and b33 is not None
+    assert b11["hp_base"] < b33["hp_base"]
+
+
+def test_climax_titles_non_empty():
+    for b in monthly_climax.CLIMAX_BOSSES:
+        assert len(b["winning_title"]) > 0
+        assert len(b["participation_title"]) > 0
+
+
+def test_climax_get_for_chapter():
+    """get_climax_boss_for_chapter retrouve par chapter_id."""
+    for chap_id in ["1.1", "2.2", "3.3"]:
+        assert monthly_climax.get_climax_boss_for_chapter(chap_id) is not None
+    assert monthly_climax.get_climax_boss_for_chapter("99.99") is None
+
+
+def test_climax_timing_config():
+    assert monthly_climax.CLIMAX_WEEKDAY == 5  # samedi
+    assert 0 <= monthly_climax.CLIMAX_HOUR <= 23
+    assert monthly_climax.CLIMAX_DURATION_HOURS > 0
+
+
+def test_climax_reward_constants():
+    assert monthly_climax.COIN_PER_DAMAGE > 0
+    assert monthly_climax.TOP3_BONUS_COINS > 0
+    assert monthly_climax.PARTICIPATION_BONUS_COINS > 0
+    assert monthly_climax.MAX_ATTACKS_PER_USER >= 5
+    assert (monthly_climax.ATTACK_DAMAGE_MIN <=
+            monthly_climax.ATTACK_DAMAGE_MAX)
+
+
+def test_climax_button_is_dynamic():
+    import discord
+    assert issubclass(
+        monthly_climax.ClimaxAttackButton, discord.ui.DynamicItem,
+    )
+
+
+def test_climax_api():
+    for name in [
+        "setup", "init_db", "CLIMAX_BOSSES",
+        "get_climax_boss_for_chapter", "get_climax_boss_by_id",
+        "list_climax_ids",
+        "get_active_climax", "get_user_attack_count", "get_user_titles",
+        "trigger_climax", "record_attack", "resolve_climax",
+        "build_climax_panel", "open_climax_from_codex",
+        "ClimaxAttackButton", "climax_task", "register_persistent_views",
+    ]:
+        assert hasattr(monthly_climax, name), f"manque : {name}"

@@ -35,6 +35,7 @@ _council = None  # référence vers weekly_council module (Phase 170.4)
 _regional = None  # référence vers regional_state module (Phase 170.5)
 _mystery = None  # référence vers mystery_investigation module (Phase 170.6)
 _letters = None  # référence vers npc_letters module (Phase 170.7)
+_climax = None  # référence vers monthly_climax module (Phase 170.8)
 
 VALID_PAGES = ("current", "history", "memoirs", "acts")
 
@@ -42,10 +43,10 @@ VALID_PAGES = ("current", "history", "memoirs", "acts")
 def setup(
     bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, story_module,
     council_module=None, regional_module=None, mystery_module=None,
-    letters_module=None,
+    letters_module=None, climax_module=None,
 ):
     global _bot, _get_db, _db_get, _v2, _story, _council, _regional, _mystery
-    global _letters
+    global _letters, _climax
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -55,6 +56,7 @@ def setup(
     _regional = regional_module
     _mystery = mystery_module
     _letters = letters_module
+    _climax = climax_module
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -203,6 +205,25 @@ async def _build_page_current(guild_id: int) -> list:
                         f"`{active['total_votes']}` voix · ferme `{active['closes_at']}`\n\n"
                         f"_Clique sur 🗳️ Conseil ci-dessous pour voter._"
                     ))
+        except Exception:
+            pass
+
+    # Phase 170.8 : si un Boss Climax est actif, gros warning
+    if _climax is not None:
+        try:
+            active_climax = await _climax.get_active_climax(guild_id)
+            if active_climax:
+                boss = _climax.get_climax_boss_by_id(active_climax["boss_id"]) or {}
+                pct = int(active_climax["hp_current"] * 100
+                          / max(1, active_climax["hp_max"]))
+                items.append(v2_divider())
+                items.append(v2_body(
+                    f"⚔️ **BOSS CLIMAX ACTIF** ⚔️\n"
+                    f"{boss.get('emoji', '?')} **{boss.get('name', '?')}**\n"
+                    f"HP : `{active_climax['hp_current']:,}/{active_climax['hp_max']:,}` "
+                    f"({pct}%)\n\n"
+                    f"_Clique sur ⚔️ Boss ci-dessous pour attaquer._"
+                ))
         except Exception:
             pass
 
@@ -441,6 +462,14 @@ async def build_codex_panel(
         try:
             letters_btn = CodexLettersButton(user_id)
             layout.add_item(letters_btn)
+        except Exception:
+            pass
+
+    # Phase 170.8 : bouton "⚔️ Boss" (toujours visible, affiche titres si pas de boss)
+    if _climax is not None:
+        try:
+            climax_btn = CodexClimaxButton(user_id)
+            layout.add_item(climax_btn)
         except Exception:
             pass
 
@@ -726,6 +755,58 @@ class CodexLettersButton(
                 pass
 
 
+class CodexClimaxButton(
+    discord.ui.DynamicItem[Button],
+    template=r"codex_climax:(?P<user_id>\d+)",
+):
+    """Bouton qui ouvre le panel Boss Climax (Phase 170.8)."""
+
+    def __init__(self, user_id: int):
+        super().__init__(
+            Button(
+                label="⚔️ Boss",
+                style=discord.ButtonStyle.danger,
+                custom_id=f"codex_climax:{user_id}",
+            )
+        )
+        self.user_id = user_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["user_id"]))
+
+    async def callback(self, btn_i: discord.Interaction):
+        if btn_i.user.id != self.user_id:
+            try:
+                return await btn_i.response.send_message(
+                    "🔒 Ouvre ton propre Codex depuis le hub.", ephemeral=True
+                )
+            except Exception:
+                return
+        if _climax is None:
+            try:
+                return await btn_i.response.send_message(
+                    "❌ Boss indisponible.", ephemeral=True
+                )
+            except Exception:
+                return
+        try:
+            await _climax.open_climax_from_codex(btn_i)
+        except Exception as ex:
+            print(f"[codex_climax callback] {ex}")
+            try:
+                if not btn_i.response.is_done():
+                    await btn_i.response.send_message(
+                        f"❌ Erreur : `{ex}`", ephemeral=True
+                    )
+                else:
+                    await btn_i.followup.send(
+                        f"❌ Erreur : `{ex}`", ephemeral=True
+                    )
+            except Exception:
+                pass
+
+
 def register_persistent_views(bot_instance):
     if bot_instance is None:
         return
@@ -735,6 +816,7 @@ def register_persistent_views(bot_instance):
         bot_instance.add_dynamic_items(CodexRegionsButton)
         bot_instance.add_dynamic_items(CodexMysteryButton)
         bot_instance.add_dynamic_items(CodexLettersButton)
+        bot_instance.add_dynamic_items(CodexClimaxButton)
     except Exception as ex:
         print(f"[codex_chronicle register_persistent_views] {ex}")
 

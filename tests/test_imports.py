@@ -57,6 +57,8 @@ PHASE_163_MODULES = [
     "mystery_investigation",
     # Phase 170.7 : Lettres NPC hebdo en DM
     "npc_letters",
+    # Phase 170.8 : Boss Climax mensuel thématique
+    "monthly_climax",
 ]
 
 
@@ -123,6 +125,8 @@ INIT_DB_MODULES = [
     "mystery_investigation",
     # Phase 170.7 : letters subscriptions + sent log
     "npc_letters",
+    # Phase 170.8 : climax events + attackers + titles
+    "monthly_climax",
 ]
 
 

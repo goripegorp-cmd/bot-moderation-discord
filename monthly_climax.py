@@ -1,0 +1,1203 @@
+"""
+monthly_climax.py — Boss Climax mensuel thématique (Phase 170.8).
+
+🎯 OBJECTIF : Une fois par mois, le serveur affronte un BOSS CLIMAX
+thématiquement lié au chapitre actuel de la Chronique. Le boss vivra
+2-3 heures. Les attackers reçoivent des récompenses cumulées en
+fonction de leurs dégâts. Le top contributeur obtient un TITRE
+PERMANENT.
+
+PHILOSOPHIE :
+- 1 boss par mois (1er samedi 21h FR) — événement à ne pas rater
+- Le boss change selon le chapitre actif = narratif progressif
+- HP massif (5000-50000) → impossible à solo, force la coopération
+- Récompenses proportionnelles aux dégâts (équitable)
+- Titre permanent au top 3 → fierté durable, gravée dans Codex
+- Alimente la progression Chronique (kind: boss_damage,
+  chapitre 3.3 = 200000 boss_damage → ~3 climax pour finir)
+
+API :
+- setup(bot, get_db, db_get, v2, story_module, npc_module)
+- init_db()
+- CLIMAX_BOSSES (9 boss thématiques, 1 par chapitre)
+- get_climax_boss_for_chapter(chapter_id) → dict
+- trigger_climax(guild_id) → climax_id | None
+- record_attack(guild_id, user_id, damage) → dict
+- resolve_climax(climax_id) → dict
+- get_active_climax(guild_id) → dict | None
+- get_user_titles(guild_id, user_id) → list
+- build_climax_panel(guild_id, user_id) → LayoutView
+- ClimaxAttackButton (DynamicItem)
+- climax_task (loop hourly)
+- register_persistent_views(bot)
+- open_climax_from_codex(interaction)
+
+DB :
+- climax_events (id PK, guild_id, chapter_id, boss_id, month_key,
+                 hp_max, hp_current, damage_total, started_at,
+                 ends_at, ended_at, status, message_id, channel_id)
+- climax_attackers (event_id, user_id, damage_dealt, last_attack_at)
+                   PRIMARY KEY (event_id, user_id)
+- climax_titles (id PK, guild_id, user_id, title, chapter_id,
+                 earned_at)
+"""
+from __future__ import annotations
+
+import random
+import re
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+
+import discord
+from discord.ext import tasks
+from discord.ui import Button
+
+try:
+    from zoneinfo import ZoneInfo
+    _PARIS_TZ = ZoneInfo("Europe/Paris")
+except Exception:
+    _PARIS_TZ = None
+
+# ─── Config ────────────────────────────────────────────────────────────────
+_bot = None
+_get_db = None
+_db_get = None
+_v2 = None
+_story = None
+_npc = None
+_add_coins = None
+
+CLIMAX_WEEKDAY = 5    # samedi
+CLIMAX_HOUR = 21      # 21h FR
+CLIMAX_DURATION_HOURS = 3
+
+# Récompenses
+COIN_PER_DAMAGE = 0.05  # 0.05 coins par damage point
+TOP3_BONUS_COINS = 2000
+PARTICIPATION_BONUS_COINS = 200
+MAX_ATTACKS_PER_USER = 50  # anti-spam
+ATTACK_DAMAGE_MIN = 50
+ATTACK_DAMAGE_MAX = 200
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  CATALOGUE BOSS CLIMAX (1 par chapitre)
+# ═══════════════════════════════════════════════════════════════════════════
+# Chaque boss est thématiquement lié à son chapitre :
+# - chapter_id : 1.1, 1.2, ..., 3.3
+# - name, emoji, description, lore, hp_base
+# - winning_title : titre permanent au top 3 contributeurs
+# - participation_title : titre pour tous les attackers (option, peut être None)
+
+CLIMAX_BOSSES = [
+    {
+        "id": "climax_1_1",
+        "chapter_id": "1.1",
+        "name": "Le Brouillard de Cendre",
+        "emoji": "🌫️",
+        "description": (
+            "Une masse informe de cendres compactes qui flotte au-dessus de "
+            "la forêt. Plus elle est attaquée, plus elle révèle des visages "
+            "qui hurlent. Aria pense qu'elle est l'écho de mille morts oubliées."
+        ),
+        "lore": (
+            "Un présage. Le premier vrai signe que les cendres ne sont pas "
+            "un simple phénomène naturel."
+        ),
+        "hp_base": 8000,
+        "winning_title": "Disperseur du Brouillard",
+        "participation_title": "Témoin du Premier Boss",
+    },
+    {
+        "id": "climax_1_2",
+        "chapter_id": "1.2",
+        "name": "Le Premier Gardien",
+        "emoji": "🗿",
+        "description": (
+            "Une statue géante qui s'anime au pied de la Source des Cendres. "
+            "Elle protège un secret depuis des siècles. Korr reconnaît la "
+            "facture : c'est l'œuvre de forgerons disparus."
+        ),
+        "lore": (
+            "Ce qu'il garde est plus important que lui. Le serveur devra le "
+            "vaincre pour avancer."
+        ),
+        "hp_base": 12000,
+        "winning_title": "Brise-Gardien",
+        "participation_title": "Voyageur des Profondes",
+    },
+    {
+        "id": "climax_1_3",
+        "chapter_id": "1.3",
+        "name": "L'Augure des Profondeurs",
+        "emoji": "👁️",
+        "description": (
+            "Une entité oraculaire qui apparaît pour tester la résolution "
+            "du serveur avant le Premier Choix. Elle parle d'une voix faite "
+            "de mille voix. Personne ne sait si elle ment ou pas."
+        ),
+        "lore": (
+            "Vaincre l'Augure prouve au Conseil que le serveur est digne de "
+            "décider de son destin."
+        ),
+        "hp_base": 15000,
+        "winning_title": "Briseur d'Augure",
+        "participation_title": "Voix de l'Éveil",
+    },
+    {
+        "id": "climax_2_1",
+        "chapter_id": "2.1",
+        "name": "Le Ravisseur d'Âmes",
+        "emoji": "👻",
+        "description": (
+            "Entité spectrale qui a kidnappé Korr, Lyra, et Drazek. Pour "
+            "les libérer, le serveur doit la vaincre. Elle se nourrit de la "
+            "mémoire qu'on lui livre."
+        ),
+        "lore": (
+            "Plus on lutte, plus elle s'affaiblit — mais plus elle absorbe "
+            "aussi de nos souvenirs."
+        ),
+        "hp_base": 20000,
+        "winning_title": "Libérateur des Âmes",
+        "participation_title": "Veilleur des Disparus",
+    },
+    {
+        "id": "climax_2_2",
+        "chapter_id": "2.2",
+        "name": "Le Tisseur d'Énigmes",
+        "emoji": "🕷️",
+        "description": (
+            "Araignée géante qui tisse des fils de mystère. Chaque fil coupé "
+            "révèle un fragment d'indice. Mais elle ne se laisse pas faire — "
+            "ses pattes frappent à la vitesse de la pensée."
+        ),
+        "lore": (
+            "Lyra dit qu'il sait des choses sur le sceau ancien. Mais il les "
+            "garde pour lui."
+        ),
+        "hp_base": 25000,
+        "winning_title": "Coupeur de Toile",
+        "participation_title": "Limier des Cendres",
+    },
+    {
+        "id": "climax_2_3",
+        "chapter_id": "2.3",
+        "name": "Le Gardien du Sanctuaire",
+        "emoji": "⚔️",
+        "description": (
+            "Un colosse de pierre et de glace au pied du Sanctuaire. Il ne "
+            "laisse passer que ceux qui ont prouvé leur valeur. Drazek le "
+            "respecte ; il dit qu'il ne combat pas par méchanceté mais par "
+            "devoir."
+        ),
+        "lore": (
+            "Vaincu, il s'efface. Le passage vers le Sanctuaire s'ouvre."
+        ),
+        "hp_base": 30000,
+        "winning_title": "Ouvre-Passage",
+        "participation_title": "Pèlerin du Sanctuaire",
+    },
+    {
+        "id": "climax_3_1",
+        "chapter_id": "3.1",
+        "name": "L'Avant-coureur",
+        "emoji": "🐲",
+        "description": (
+            "Un dragon de cendres, héraut du Boss Final. Sa simple présence "
+            "fait trembler le sol. Drazek dit qu'il connaît son nom mais "
+            "refuse de le prononcer."
+        ),
+        "lore": (
+            "Sa mort prouve au serveur qu'il est prêt pour l'Affrontement Final."
+        ),
+        "hp_base": 35000,
+        "winning_title": "Tueur d'Avant-coureur",
+        "participation_title": "Forgeron de la Fin",
+    },
+    {
+        "id": "climax_3_2",
+        "chapter_id": "3.2",
+        "name": "La Sentinelle de l'Affrontement",
+        "emoji": "🛡️",
+        "description": (
+            "Un golem antique conçu pour empêcher quiconque d'atteindre "
+            "l'Entité Enchaînée. Le serveur entier doit converger pour le "
+            "briser. Aria pleure en le voyant."
+        ),
+        "lore": (
+            "Vaincre la Sentinelle, c'est franchir le dernier seuil."
+        ),
+        "hp_base": 40000,
+        "winning_title": "Brise-Sentinelle",
+        "participation_title": "Stratège du Sanctuaire",
+    },
+    {
+        "id": "climax_3_3",
+        "chapter_id": "3.3",
+        "name": "L'Entité Enchaînée",
+        "emoji": "👁️‍🗨️",
+        "description": (
+            "Ce qui a été scellé depuis des siècles, maintenant libéré. "
+            "Personne ne sait à quoi il ressemble vraiment — chaque attaquant "
+            "voit une forme différente. C'est le Boss Final de la Chronique."
+        ),
+        "lore": (
+            "Sa chute clôt la Chronique. Le serveur entrera dans l'Épilogue."
+        ),
+        "hp_base": 50000,
+        "winning_title": "Héros de la Chronique",
+        "participation_title": "Témoin de la Fin",
+    },
+]
+
+
+def get_climax_boss_for_chapter(chapter_id: str) -> Optional[dict]:
+    for b in CLIMAX_BOSSES:
+        if b["chapter_id"] == chapter_id:
+            return b
+    return None
+
+
+def get_climax_boss_by_id(boss_id: str) -> Optional[dict]:
+    for b in CLIMAX_BOSSES:
+        if b["id"] == boss_id:
+            return b
+    return None
+
+
+def list_climax_ids() -> list[str]:
+    return [b["id"] for b in CLIMAX_BOSSES]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Setup + DB
+# ═══════════════════════════════════════════════════════════════════════════
+
+def setup(
+    bot_instance, get_db_fn, db_get_fn, v2_helpers: dict,
+    story_module=None, npc_module=None, add_coins_fn=None,
+):
+    global _bot, _get_db, _db_get, _v2, _story, _npc, _add_coins
+    _bot = bot_instance
+    _get_db = get_db_fn
+    _db_get = db_get_fn
+    _v2 = v2_helpers
+    _story = story_module
+    _npc = npc_module
+    _add_coins = add_coins_fn
+
+
+async def init_db():
+    if _get_db is None:
+        return
+    try:
+        async with _get_db() as db:
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS climax_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    chapter_id TEXT NOT NULL,
+                    boss_id TEXT NOT NULL,
+                    month_key TEXT NOT NULL,
+                    hp_max INTEGER NOT NULL,
+                    hp_current INTEGER NOT NULL,
+                    damage_total INTEGER DEFAULT 0,
+                    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    ends_at TIMESTAMP NOT NULL,
+                    ended_at TIMESTAMP,
+                    status TEXT DEFAULT 'active',
+                    message_id INTEGER DEFAULT 0,
+                    channel_id INTEGER DEFAULT 0
+                )
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS climax_attackers (
+                    event_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    damage_dealt INTEGER DEFAULT 0,
+                    attack_count INTEGER DEFAULT 0,
+                    last_attack_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (event_id, user_id)
+                )
+            """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS climax_titles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    chapter_id TEXT,
+                    boss_id TEXT,
+                    earned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_climax_active "
+                "ON climax_events(guild_id, status)"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_climax_titles_user "
+                "ON climax_titles(guild_id, user_id)"
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[monthly_climax init_db] {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Time helpers
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _paris_now() -> datetime:
+    if _PARIS_TZ:
+        return datetime.now(_PARIS_TZ)
+    return datetime.now(timezone.utc) + timedelta(hours=2)
+
+
+def _is_climax_window() -> bool:
+    """True si 1er samedi du mois à 21h FR."""
+    now = _paris_now()
+    if now.weekday() != CLIMAX_WEEKDAY:
+        return False
+    if now.hour != CLIMAX_HOUR:
+        return False
+    # 1er samedi : jour <= 7
+    return now.day <= 7
+
+
+def _current_month_key() -> str:
+    return _paris_now().strftime("%Y-%m")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Active climax
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def get_active_climax(guild_id: int) -> Optional[dict]:
+    if _get_db is None:
+        return None
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT id, chapter_id, boss_id, hp_max, hp_current, "
+                "damage_total, started_at, ends_at, message_id, channel_id "
+                "FROM climax_events "
+                "WHERE guild_id=? AND status='active' "
+                "ORDER BY id DESC LIMIT 1",
+                (guild_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return None
+        return {
+            "event_id": int(row[0]),
+            "chapter_id": row[1],
+            "boss_id": row[2],
+            "hp_max": int(row[3] or 0),
+            "hp_current": int(row[4] or 0),
+            "damage_total": int(row[5] or 0),
+            "started_at": row[6],
+            "ends_at": row[7],
+            "message_id": int(row[8] or 0),
+            "channel_id": int(row[9] or 0),
+        }
+    except Exception:
+        return None
+
+
+async def get_user_attack_count(event_id: int, user_id: int) -> int:
+    if _get_db is None:
+        return 0
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT attack_count FROM climax_attackers "
+                "WHERE event_id=? AND user_id=?",
+                (event_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+        return int(row[0]) if row else 0
+    except Exception:
+        return 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Titles
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def get_user_titles(
+    guild_id: int, user_id: int, limit: int = 20,
+) -> list[dict]:
+    if _get_db is None:
+        return []
+    out = []
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT title, chapter_id, boss_id, earned_at "
+                "FROM climax_titles "
+                "WHERE guild_id=? AND user_id=? "
+                "ORDER BY id DESC LIMIT ?",
+                (guild_id, user_id, int(limit)),
+            ) as cur:
+                rows = await cur.fetchall()
+        for r in rows:
+            out.append({
+                "title": r[0],
+                "chapter_id": r[1],
+                "boss_id": r[2],
+                "earned_at": r[3],
+            })
+    except Exception:
+        pass
+    return out
+
+
+async def _grant_title(
+    guild_id: int, user_id: int, title: str,
+    chapter_id: str, boss_id: str,
+) -> None:
+    if _get_db is None:
+        return
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT INTO climax_titles "
+                "(guild_id, user_id, title, chapter_id, boss_id) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (guild_id, user_id, title, chapter_id, boss_id),
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[_grant_title] {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Trigger climax
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def trigger_climax(guild_id: int) -> Optional[int]:
+    """Déclenche un Boss Climax pour cette guild si :
+    - Aucun climax actif
+    - Pas déjà un climax ce mois
+    - Story engine donne un chapitre courant
+    """
+    if _get_db is None or _bot is None or _story is None:
+        return None
+
+    # Anti-doublon : déjà actif ?
+    if await get_active_climax(guild_id):
+        return None
+
+    # Anti-doublon : déjà eu un climax ce mois ?
+    month = _current_month_key()
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT id FROM climax_events "
+                "WHERE guild_id=? AND month_key=? LIMIT 1",
+                (guild_id, month),
+            ) as cur:
+                if await cur.fetchone():
+                    return None
+    except Exception:
+        pass
+
+    # Get state
+    state = await _story.get_state(guild_id)
+    if not state:
+        return None
+    chapter_id = state["chapter_id"]
+    boss = get_climax_boss_for_chapter(chapter_id)
+    if not boss:
+        return None
+
+    hp = int(boss["hp_base"])
+    ends_at = datetime.now(timezone.utc) + timedelta(hours=CLIMAX_DURATION_HOURS)
+
+    try:
+        async with _get_db() as db:
+            cur = await db.execute(
+                "INSERT INTO climax_events "
+                "(guild_id, chapter_id, boss_id, month_key, "
+                "hp_max, hp_current, ends_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (guild_id, chapter_id, boss["id"], month, hp, hp,
+                 ends_at.isoformat()),
+            )
+            event_id = cur.lastrowid
+            await db.commit()
+    except Exception as ex:
+        print(f"[trigger_climax INSERT] {ex}")
+        return None
+
+    guild = _bot.get_guild(guild_id)
+    if guild:
+        await _announce_climax_open(guild, boss, event_id, ends_at)
+
+    if _story is not None:
+        try:
+            await _story.log_chronicle_event(
+                guild_id, "climax_started",
+                {"chapter_id": chapter_id, "boss_id": boss["id"],
+                 "name": boss["name"], "hp": hp},
+            )
+        except Exception:
+            pass
+
+    print(
+        f"[monthly_climax] trigger guild={guild_id} boss={boss['id']} "
+        f"hp={hp} event={event_id}"
+    )
+    return event_id
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Attack
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def record_attack(
+    guild_id: int, user_id: int, damage: int = 0,
+) -> dict:
+    """Enregistre une attaque. Si damage=0, on tire un random dans
+    [ATTACK_DAMAGE_MIN, ATTACK_DAMAGE_MAX]."""
+    if _get_db is None:
+        return {"error": "DB indisponible"}
+    active = await get_active_climax(guild_id)
+    if not active:
+        return {"error": "Aucun climax actif"}
+    event_id = active["event_id"]
+    if active["hp_current"] <= 0:
+        return {"error": "Boss déjà tombé"}
+
+    attacks_done = await get_user_attack_count(event_id, user_id)
+    if attacks_done >= MAX_ATTACKS_PER_USER:
+        return {
+            "error": f"Max {MAX_ATTACKS_PER_USER} attaques par climax atteint",
+            "attack_count": attacks_done,
+        }
+
+    if damage <= 0:
+        damage = random.randint(ATTACK_DAMAGE_MIN, ATTACK_DAMAGE_MAX)
+    # Capé pour ne pas overkill
+    damage = min(damage, active["hp_current"])
+
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT INTO climax_attackers "
+                "(event_id, user_id, damage_dealt, attack_count) "
+                "VALUES (?, ?, ?, 1) "
+                "ON CONFLICT(event_id, user_id) DO UPDATE SET "
+                "damage_dealt = damage_dealt + ?, "
+                "attack_count = attack_count + 1, "
+                "last_attack_at = CURRENT_TIMESTAMP",
+                (event_id, user_id, damage, damage),
+            )
+            await db.execute(
+                "UPDATE climax_events SET "
+                "hp_current = MAX(0, hp_current - ?), "
+                "damage_total = damage_total + ? "
+                "WHERE id=?",
+                (damage, damage, event_id),
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[record_attack] {ex}")
+        return {"error": str(ex)}
+
+    # Alimente Chronique (boss_damage)
+    if _story is not None:
+        try:
+            await _story.on_boss_damage(guild_id, damage, user_id)
+        except Exception:
+            pass
+
+    # Re-read
+    updated = await get_active_climax(guild_id)
+    if not updated:
+        # Boss tombé exact pendant la requête → resolve
+        await resolve_climax(event_id)
+        return {
+            "success": True,
+            "damage": damage,
+            "boss_dead": True,
+            "attack_count": attacks_done + 1,
+        }
+
+    return {
+        "success": True,
+        "damage": damage,
+        "hp_current": updated["hp_current"],
+        "hp_max": updated["hp_max"],
+        "damage_total": updated["damage_total"],
+        "attack_count": attacks_done + 1,
+        "max_attacks": MAX_ATTACKS_PER_USER,
+        "boss_dead": updated["hp_current"] <= 0,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Resolve
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def resolve_climax(event_id: int) -> Optional[dict]:
+    """Résout un climax : distribue coins + titre, log Codex."""
+    if _get_db is None or _bot is None:
+        return None
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT guild_id, chapter_id, boss_id, hp_current, hp_max, "
+                "damage_total, status "
+                "FROM climax_events WHERE id=?",
+                (event_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return None
+        guild_id, chapter_id, boss_id, hp_current, hp_max, dmg_total, status = row
+        if status != "active":
+            return None
+    except Exception:
+        return None
+
+    boss = get_climax_boss_by_id(boss_id)
+    if not boss:
+        return None
+
+    killed = hp_current <= 0
+    final_status = "killed" if killed else "expired"
+
+    # Get attackers ranked
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT user_id, damage_dealt FROM climax_attackers "
+                "WHERE event_id=? AND damage_dealt > 0 "
+                "ORDER BY damage_dealt DESC",
+                (event_id,),
+            ) as cur:
+                attackers = [(int(r[0]), int(r[1])) for r in await cur.fetchall()]
+    except Exception:
+        attackers = []
+
+    # Distribute rewards
+    rewards = []
+    for i, (uid, dmg) in enumerate(attackers):
+        coins = int(dmg * COIN_PER_DAMAGE)
+        if killed:
+            coins += PARTICIPATION_BONUS_COINS
+            if i < 3:
+                coins += TOP3_BONUS_COINS
+        try:
+            if _add_coins:
+                await _add_coins(guild_id, uid, coins)
+        except Exception:
+            pass
+
+        # Titles
+        title_given = None
+        if killed:
+            # Participation title for all
+            if boss.get("participation_title"):
+                await _grant_title(
+                    guild_id, uid, boss["participation_title"],
+                    chapter_id, boss_id,
+                )
+                title_given = boss["participation_title"]
+            # Top 3 winning title
+            if i < 3 and boss.get("winning_title"):
+                await _grant_title(
+                    guild_id, uid, boss["winning_title"],
+                    chapter_id, boss_id,
+                )
+                title_given = boss["winning_title"]
+
+        rewards.append({
+            "user_id": uid,
+            "damage": dmg,
+            "coins": coins,
+            "rank": i + 1,
+            "title": title_given,
+            "is_top3": i < 3,
+        })
+
+    # Update status
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "UPDATE climax_events SET status=?, ended_at=CURRENT_TIMESTAMP "
+                "WHERE id=?",
+                (final_status, event_id),
+            )
+            await db.commit()
+    except Exception:
+        pass
+
+    # Log codex
+    if _story is not None:
+        try:
+            await _story.log_chronicle_event(
+                guild_id,
+                "boss_defeated" if killed else "climax_expired",
+                {
+                    "chapter_id": chapter_id, "boss_id": boss_id,
+                    "title": boss["name"], "killed": killed,
+                    "damage_total": int(dmg_total),
+                    "attackers": len(attackers),
+                    "top3_count": min(3, len(attackers)),
+                },
+            )
+        except Exception:
+            pass
+
+    guild = _bot.get_guild(guild_id)
+    if guild:
+        await _announce_climax_closed(
+            guild, boss, killed, int(dmg_total), int(hp_max),
+            rewards, chapter_id,
+        )
+
+    print(
+        f"[monthly_climax] resolve event={event_id} killed={killed} "
+        f"damage={dmg_total}/{hp_max} attackers={len(attackers)}"
+    )
+    return {
+        "event_id": event_id,
+        "killed": killed,
+        "damage_total": int(dmg_total),
+        "hp_max": int(hp_max),
+        "attackers": len(attackers),
+        "rewards": rewards,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  V2 panel
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _hp_bar(current: int, maximum: int, width: int = 20) -> str:
+    if maximum <= 0:
+        return "░" * width
+    pct = max(0, min(100, int((current * 100) / maximum)))
+    fill = int(width * pct / 100)
+    return "█" * fill + "░" * (width - fill)
+
+
+async def build_climax_panel(
+    guild_id: int, user_id: int,
+) -> Optional[discord.ui.LayoutView]:
+    if _v2 is None:
+        return None
+    LayoutView = _v2['LayoutView']
+    v2_title = _v2['v2_title']
+    v2_subtitle = _v2['v2_subtitle']
+    v2_body = _v2['v2_body']
+    v2_divider = _v2['v2_divider']
+    v2_container = _v2['v2_container']
+
+    active = await get_active_climax(guild_id)
+    if not active:
+        items = [
+            v2_title("⚔️  BOSS CLIMAX"),
+            v2_body(
+                "_Aucun boss n'est actif._\n\n"
+                "Le prochain Boss Climax apparaîtra le **1er samedi du "
+                "mois à 21h FR**. Il sera thématiquement lié au chapitre "
+                "actif de la Chronique."
+            ),
+        ]
+
+        # Affiche aussi les titres permanents du user
+        titles = await get_user_titles(guild_id, user_id, limit=10)
+        if titles:
+            items.append(v2_divider())
+            items.append(v2_body("**🏆 Tes titres permanents**"))
+            for t in titles:
+                items.append(v2_body(
+                    f"🏅 **{t['title']}** _(chapitre {t['chapter_id']})_"
+                ))
+
+        class _NoClimax(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=180)
+                self.add_item(v2_container(*items, color=0x5D4037))
+
+        return _NoClimax()
+
+    boss = get_climax_boss_by_id(active["boss_id"]) or {}
+    my_dmg = 0
+    my_attacks = 0
+    if _get_db is not None:
+        try:
+            async with _get_db() as db:
+                async with db.execute(
+                    "SELECT damage_dealt, attack_count FROM climax_attackers "
+                    "WHERE event_id=? AND user_id=?",
+                    (active["event_id"], user_id),
+                ) as cur:
+                    row = await cur.fetchone()
+                if row:
+                    my_dmg = int(row[0] or 0)
+                    my_attacks = int(row[1] or 0)
+        except Exception:
+            pass
+
+    pct = int(active["hp_current"] * 100 / max(1, active["hp_max"]))
+    items = [
+        v2_title(f"⚔️  BOSS CLIMAX : {boss.get('emoji', '?')}  {boss.get('name', '?')}"),
+        v2_subtitle(
+            f"_Chapitre {active['chapter_id']} · Boss thématique du mois_"
+        ),
+        v2_divider(),
+        v2_body(f"_{boss.get('description', '…')}_"),
+        v2_divider(),
+        v2_body(
+            f"**❤️ HP**\n"
+            f"`{_hp_bar(active['hp_current'], active['hp_max'])}`\n"
+            f"`{active['hp_current']:,} / {active['hp_max']:,}` ({pct}%)"
+        ),
+        v2_body(
+            f"**⚔️ Ma contribution**\n"
+            f"Dégâts : `{my_dmg:,}` · Attaques : `{my_attacks}/{MAX_ATTACKS_PER_USER}`"
+        ),
+        v2_divider(),
+        v2_body(
+            f"_⏱️ Fin : `{active['ends_at']}`_\n"
+            f"_Récompense top 3 : titre permanent **{boss.get('winning_title', '?')}**_\n"
+            f"_Participation : **{boss.get('participation_title', '?')}**_"
+        ),
+    ]
+
+    if my_attacks >= MAX_ATTACKS_PER_USER:
+        items.append(v2_body(
+            "_✅ Tu as donné le maximum. Reviens à la prochaine lune._"
+        ))
+
+    class _ClimaxLayout(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=300)
+            self.add_item(v2_container(*items, color=0xD32F2F))
+
+    layout = _ClimaxLayout()
+    if my_attacks < MAX_ATTACKS_PER_USER and active["hp_current"] > 0:
+        btn = ClimaxAttackButton(active["event_id"], user_id)
+        layout.add_item(btn)
+
+    return layout
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Persistent button
+# ═══════════════════════════════════════════════════════════════════════════
+
+class ClimaxAttackButton(
+    discord.ui.DynamicItem[Button],
+    template=r"climax_atk:(?P<event_id>\d+):(?P<user_id>\d+)",
+):
+    """Bouton d'attaque (persistent)."""
+
+    def __init__(self, event_id: int, user_id: int):
+        super().__init__(
+            Button(
+                label="⚔️ Attaquer",
+                style=discord.ButtonStyle.danger,
+                custom_id=f"climax_atk:{event_id}:{user_id}",
+            )
+        )
+        self.event_id = event_id
+        self.user_id = user_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["event_id"]), int(match["user_id"]))
+
+    async def callback(self, btn_i: discord.Interaction):
+        if btn_i.user.id != self.user_id:
+            try:
+                return await btn_i.response.send_message(
+                    "🔒 Ouvre ton propre Boss depuis le Codex.",
+                    ephemeral=True,
+                )
+            except Exception:
+                return
+
+        try:
+            await btn_i.response.defer(ephemeral=True)
+        except (discord.NotFound, discord.HTTPException, discord.InteractionResponded):
+            pass
+
+        if btn_i.guild is None:
+            try:
+                await btn_i.followup.send("❌ Serveur uniquement.", ephemeral=True)
+            except Exception:
+                pass
+            return
+
+        try:
+            active = await get_active_climax(btn_i.guild.id)
+            if not active or active["event_id"] != self.event_id:
+                await btn_i.followup.send(
+                    "❌ Boss inactif ou différent.", ephemeral=True
+                )
+                return
+
+            result = await record_attack(btn_i.guild.id, btn_i.user.id)
+            if result.get("error"):
+                await btn_i.followup.send(
+                    f"❌ {result['error']}", ephemeral=True
+                )
+                return
+
+            view = await build_climax_panel(btn_i.guild.id, btn_i.user.id)
+            msg = (
+                f"⚔️ **{result['damage']} dégâts** infligés !\n"
+                f"_Attaques : `{result['attack_count']}/{result.get('max_attacks', MAX_ATTACKS_PER_USER)}`._"
+            )
+            if result.get("boss_dead"):
+                msg += "\n\n💀 **Le boss est tombé !** Les récompenses seront distribuées."
+
+            if view:
+                try:
+                    await btn_i.edit_original_response(
+                        view=view, content=None, attachments=[],
+                    )
+                except Exception:
+                    pass
+            try:
+                await btn_i.followup.send(msg, ephemeral=True)
+            except Exception:
+                pass
+        except Exception as ex:
+            print(f"[climax_attack callback] {ex}")
+            try:
+                await btn_i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
+def register_persistent_views(bot_instance):
+    if bot_instance is None:
+        return
+    try:
+        bot_instance.add_dynamic_items(ClimaxAttackButton)
+    except Exception as ex:
+        print(f"[monthly_climax register_persistent_views] {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Announces
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def _find_chronicle_channel(guild: discord.Guild) -> Optional[discord.TextChannel]:
+    if _db_get is None:
+        return None
+    try:
+        cfg = await _db_get(guild.id)
+        for key in ("chronicle_channel_id", "combat_arena_channel_id", "hub_channel"):
+            ch_id = int(cfg.get(key, 0) or 0)
+            if ch_id:
+                ch = guild.get_channel(ch_id)
+                if ch:
+                    return ch
+    except Exception:
+        pass
+    for ch in guild.text_channels:
+        n = (ch.name or "").lower()
+        if any(k in n for k in ["chronique", "arène", "combat", "boss", "lore", "saga"]):
+            return ch
+    return None
+
+
+async def _announce_climax_open(
+    guild: discord.Guild, boss: dict, event_id: int, ends_at: datetime,
+) -> None:
+    ch = await _find_chronicle_channel(guild)
+    if not ch:
+        return
+    msg = (
+        f"⚔️ **BOSS CLIMAX DU MOIS** ⚔️\n\n"
+        f"{boss['emoji']} **{boss['name']}**\n"
+        f"_{boss['description']}_\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"❤️ HP : `{boss['hp_base']:,}`\n"
+        f"⏱️ Durée : **{CLIMAX_DURATION_HOURS}h** "
+        f"(ferme le `{ends_at.isoformat()}`)\n"
+        f"⚔️ Max **{MAX_ATTACKS_PER_USER}** attaques par membre\n\n"
+        f"**Récompenses :**\n"
+        f"🏅 Top 3 : titre permanent **« {boss.get('winning_title', '?')} »** + "
+        f"`{TOP3_BONUS_COINS}` 🪙 bonus\n"
+        f"🎖️ Participation : titre **« {boss.get('participation_title', '?')} »** + "
+        f"`{PARTICIPATION_BONUS_COINS}` 🪙\n\n"
+        f"_📖 Va dans le Codex → ⚔️ Boss pour attaquer._\n\n"
+        f"_« {boss.get('lore', '')} »_"
+    )
+    try:
+        await ch.send(msg, allowed_mentions=discord.AllowedMentions.none())
+    except Exception:
+        pass
+
+
+async def _announce_climax_closed(
+    guild: discord.Guild, boss: dict, killed: bool,
+    damage_total: int, hp_max: int, rewards: list[dict],
+    chapter_id: str,
+) -> None:
+    ch = await _find_chronicle_channel(guild)
+    if not ch:
+        return
+    if killed:
+        head = f"💀 **BOSS VAINCU** — {boss['emoji']} {boss['name']}"
+        body = (
+            f"_{boss.get('lore', '')}_\n\n"
+            f"Dégâts totaux : `{damage_total:,}` / `{hp_max:,}`\n"
+            f"Attackers : `{len(rewards)}`\n"
+        )
+    else:
+        head = f"⏳ **BOSS NON VAINCU** — {boss['emoji']} {boss['name']}"
+        body = (
+            f"_Le temps a manqué. Le boss s'est retiré._\n\n"
+            f"Dégâts totaux : `{damage_total:,}` / `{hp_max:,}` "
+            f"({int(damage_total * 100 / max(1, hp_max))}%)\n"
+            f"Attackers : `{len(rewards)}`\n"
+        )
+
+    if rewards:
+        top3 = rewards[:3]
+        lines = ["\n**🏅 Top 3 contributeurs :**"]
+        for r in top3:
+            member = guild.get_member(r["user_id"])
+            name = member.display_name if member else f"User {r['user_id']}"
+            medal = ["🥇", "🥈", "🥉"][r["rank"] - 1]
+            lines.append(
+                f"{medal} **{name}** : `{r['damage']:,}` dmg · `{r['coins']:,}` 🪙"
+                + (f" · titre **{r['title']}**" if r.get("title") else "")
+            )
+        body += "\n".join(lines)
+        if len(rewards) > 3:
+            body += f"\n\n_+ {len(rewards) - 3} autres attackers récompensés._"
+
+    body += "\n\n_📖 Tous les titres sont gravés dans le Codex._"
+
+    try:
+        await ch.send(
+            head + "\n\n" + body,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+    except Exception:
+        pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Task loop
+# ═══════════════════════════════════════════════════════════════════════════
+
+@tasks.loop(minutes=15)
+async def climax_task():
+    """Toutes les 15 min : check trigger / resolve."""
+    if _bot is None or _get_db is None:
+        return
+    try:
+        # Trigger 1er samedi 21h FR
+        if _is_climax_window():
+            for guild in _bot.guilds:
+                try:
+                    await trigger_climax(guild.id)
+                except Exception as ex:
+                    print(f"[climax_task trigger g={guild.id}] {ex}")
+
+        # Resolve expirés
+        try:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            async with _get_db() as db:
+                async with db.execute(
+                    "SELECT id FROM climax_events "
+                    "WHERE status='active' AND (ends_at < ? OR hp_current <= 0)",
+                    (now_iso,),
+                ) as cur:
+                    to_resolve = [int(r[0]) for r in await cur.fetchall()]
+            for eid in to_resolve:
+                try:
+                    await resolve_climax(eid)
+                except Exception as ex:
+                    print(f"[climax_task resolve event={eid}] {ex}")
+        except Exception as ex:
+            print(f"[climax_task resolve scan] {ex}")
+    except Exception as ex:
+        print(f"[climax_task] {ex}")
+
+
+@climax_task.before_loop
+async def _climax_wait_ready():
+    if _bot is not None:
+        await _bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Entry point depuis Codex
+# ═══════════════════════════════════════════════════════════════════════════
+
+async def open_climax_from_codex(interaction: discord.Interaction) -> None:
+    try:
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+    except (discord.NotFound, discord.HTTPException, discord.InteractionResponded):
+        pass
+    except Exception as ex:
+        print(f"[open_climax_from_codex defer] {ex}")
+
+    if interaction.guild is None:
+        try:
+            await interaction.followup.send("❌ Serveur uniquement.", ephemeral=True)
+        except Exception:
+            pass
+        return
+
+    try:
+        view = await build_climax_panel(interaction.guild.id, interaction.user.id)
+        if view is None:
+            await interaction.followup.send(
+                "❌ Boss indisponible.", ephemeral=True
+            )
+            return
+        await interaction.followup.send(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[open_climax_from_codex] {ex}")
+        try:
+            await interaction.followup.send(
+                f"❌ Erreur : `{ex}`", ephemeral=True,
+            )
+        except Exception:
+            pass
+
+
+__all__ = [
+    "CLIMAX_BOSSES",
+    "CLIMAX_WEEKDAY",
+    "CLIMAX_HOUR",
+    "CLIMAX_DURATION_HOURS",
+    "COIN_PER_DAMAGE",
+    "TOP3_BONUS_COINS",
+    "PARTICIPATION_BONUS_COINS",
+    "MAX_ATTACKS_PER_USER",
+    "ATTACK_DAMAGE_MIN",
+    "ATTACK_DAMAGE_MAX",
+    "setup",
+    "init_db",
+    "get_climax_boss_for_chapter",
+    "get_climax_boss_by_id",
+    "list_climax_ids",
+    "get_active_climax",
+    "get_user_attack_count",
+    "get_user_titles",
+    "trigger_climax",
+    "record_attack",
+    "resolve_climax",
+    "build_climax_panel",
+    "open_climax_from_codex",
+    "ClimaxAttackButton",
+    "climax_task",
+    "register_persistent_views",
+]
