@@ -39153,7 +39153,13 @@ async def on_ready():
         except Exception as ex:
             print(f"[on_ready 170 codex_chronicle] {ex}")
 
-        print("[Phase 155/165/166/167/168/169/170] Stream + token_leak + birthday + welcome + spotlight + rotator + voice_clean + risk + error_logger + mob_hunts + merchant + invasion + chronicle + npc + daily_encounters + council")
+        print(
+            "[Phase 155/165/166/167/168/169/170/171] Stream + token_leak + "
+            "birthday + welcome + spotlight + rotator + voice_clean + risk + "
+            "error_logger + mob_hunts + merchant + invasion + chronicle + npc "
+            "+ encounters + council + regions + mystery + letters + climax + "
+            "codex"
+        )
     except Exception as ex:
         print(f"[on_ready Phase 155/165 roblox/stream] {ex}")
 
@@ -51268,6 +51274,12 @@ async def check_twitter_feeds(session, guild, data):
 
     for username in feeds:
         try:
+            # Phase 171.1 fix prod : feeds peut contenir des dicts (format multi-channel)
+            # OU des strings (format legacy). On normalise vers string.
+            if isinstance(username, dict):
+                username = username.get('username', '') or ''
+            if not username or not isinstance(username, str):
+                continue
             tweet_id = None
             tweet_text = None
             tweet_link = None
