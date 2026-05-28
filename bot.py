@@ -2882,22 +2882,38 @@ async def fetch_avatar_url(platform: str, username: str, session) -> str:
     return avatar_url
 
 async def db_get(gid):
-    """Récupère la configuration d'un serveur de manière sécurisée"""
+    """Récupère la configuration brute d'un serveur (sans defaults).
+
+    Phase 163.7 : cache LRU partagé avec cfg(). La clé est négative
+    (-gid) pour ne pas collisionner avec cfg() qui stocke par gid positif.
+    Les invalidations de db_set() invalident les DEUX entrées.
+    """
     try:
         # Valider l'ID
         gid = validate_id(gid)
         if gid is None:
             return {}
-        
+
+        # Phase 163.7 : check cache (clé négative pour distinguer de cfg())
+        cache_key = -int(gid)
+        cached = _config_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         async with get_db() as db:
             async with db.execute('SELECT data FROM guild_config WHERE guild_id=?', (gid,)) as c:
                 r = await c.fetchone()
                 if r and r[0]:
                     try:
-                        return json.loads(r[0])
+                        data = json.loads(r[0])
+                        _config_cache.set(cache_key, data)
+                        return data
                     except json.JSONDecodeError:
                         print(f"[DB] JSON invalide pour guild {gid}")
                         return {}
+                # Vide aussi cache (évite les requêtes DB répétées pour
+                # des guilds sans config)
+                _config_cache.set(cache_key, {})
                 return {}
     except Exception as ex:
         print(f"[DB GET ERROR] {ex}")
@@ -2934,7 +2950,9 @@ async def db_set(gid, key, val):
             await db.commit()
         
         # Invalider le cache après modification
+        # Phase 163.7 : invalide AUSSI la clé négative utilisée par db_get
         _config_cache.invalidate(gid)
+        _config_cache.invalidate(-int(gid))
         return True
     except Exception as ex:
         print(f"[DB SET ERROR] {ex}")

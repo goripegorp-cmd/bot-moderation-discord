@@ -82,6 +82,11 @@ async def init_db():
                     action_taken TEXT
                 )
             """)
+            # Phase 163.7 : index pour les requêtes par guild + récent
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_honeypot_hits_guild "
+                "ON honeypot_hits(guild_id, detected_at DESC)"
+            )
             await db.commit()
     except Exception as ex:
         print(f"[honeypot init_db] {ex}")

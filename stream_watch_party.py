@@ -92,6 +92,11 @@ async def init_db():
                 )
             except Exception:
                 pass  # column déjà là
+            # Phase 163.7 : index pour le orphan-scan filter (status, ended_at)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_stream_parties_orphan "
+                "ON stream_watch_parties(status, ended_at)"
+            )
             await db.commit()
     except Exception as ex:
         print(f"[stream_watch_party init_db] {ex}")
