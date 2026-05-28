@@ -8872,6 +8872,17 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
                 except Exception:
                     pass
 
+            # Phase 150.2 : track style PvP + saga contribution
+            try:
+                await profile_module.track_action(
+                    i.guild.id, i.user.id, "boss_kill", weight=3,
+                )
+                await saga_module.add_contribution(
+                    i.guild.id, i.user.id, 5,
+                )
+            except Exception as ex:
+                print(f"[boss_kill profile/saga] {ex}")
+
             # Phase 144 : roll drop saisonnier sur le coup final (8% chance)
             seasonal_drop = None
             try:
@@ -9650,6 +9661,17 @@ class TreasureClaimView(View):
                     )
             except Exception as ex:
                 print(f"[treasure seasonal_drop] {ex}")
+
+            # Phase 150.2 : track style collector + saga contribution
+            try:
+                await profile_module.track_action(
+                    i.guild.id, i.user.id, "treasure_open", weight=2,
+                )
+                await saga_module.add_contribution(
+                    i.guild.id, i.user.id, 2,
+                )
+            except Exception as ex:
+                print(f"[treasure profile/saga] {ex}")
 
             seasonal_line = ""
             if seasonal_drop:
@@ -12838,6 +12860,17 @@ class MysteryBoxView(View):
                     )
             except Exception as ex:
                 print(f"[mystery_box seasonal_drop] {ex}")
+
+            # Phase 150.2 : track style collector + saga contribution
+            try:
+                await profile_module.track_action(
+                    i.guild.id, i.user.id, "mystery_open", weight=2,
+                )
+                await saga_module.add_contribution(
+                    i.guild.id, i.user.id, 2,
+                )
+            except Exception as ex:
+                print(f"[mystery_box profile/saga] {ex}")
 
             await i.followup.send(reward_msg, ephemeral=True)
 
@@ -54017,6 +54050,18 @@ class DailyQuestView(View):
             await i.response.defer(ephemeral=True)
             if i.user.id != self.user_id:
                 return await i.followup.send("🔒 Pas pour toi.", ephemeral=True)
+            # Phase 150.2 : rate limit anti-spam button
+            try:
+                ok_rate = await ratelimit_module.check_and_record(
+                    i.user.id, "button",
+                    user_member=i.user if isinstance(i.user, discord.Member) else None,
+                )
+                if not ok_rate:
+                    return await i.followup.send(
+                        "⏳ Trop de clics — pause 5 min.", ephemeral=True
+                    )
+            except Exception:
+                pass
             result = await _claim_completed_quests(self.guild_id, self.user_id)
             if result['claimed_count'] == 0:
                 return await i.followup.send(
@@ -54035,6 +54080,18 @@ class DailyQuestView(View):
                 except Exception:
                     pass
             await i.followup.send("\n".join(lines), ephemeral=True)
+
+            # Phase 150.2 : track style solo + saga contribution
+            try:
+                await profile_module.track_action(
+                    self.guild_id, self.user_id, "quest_complete",
+                    weight=2,
+                )
+                await saga_module.add_contribution(
+                    self.guild_id, self.user_id, 2,
+                )
+            except Exception as ex:
+                print(f"[daily_quest profile/saga] {ex}")
 
             # Phase 146 : boutons de suivi (zéro commande à mémoriser)
             try:
@@ -54072,6 +54129,18 @@ class WheelSpinView(View):
             await i.response.defer(ephemeral=True)
             if i.user.id != self.user_id:
                 return await i.followup.send("🔒 Pas pour toi.", ephemeral=True)
+            # Phase 150.2 : rate limit anti-spam button
+            try:
+                ok_rate = await ratelimit_module.check_and_record(
+                    i.user.id, "button",
+                    user_member=i.user if isinstance(i.user, discord.Member) else None,
+                )
+                if not ok_rate:
+                    return await i.followup.send(
+                        "⏳ Trop de clics — pause 5 min.", ephemeral=True
+                    )
+            except Exception:
+                pass
             await _do_wheel_spin(i)
         except Exception as ex:
             print(f"[WheelSpinView _on_spin] {ex}")
@@ -54298,8 +54367,27 @@ async def _do_wheel_spin(i: discord.Interaction):
     # Appliquer le reward
     lines = ["🎰 **La roue tourne...**", ""]
     if reward['type'] == 'coins':
+        amount_to_give = int(reward['amount'])
+        # Phase 150.2 : 2FA si jackpot > 5000 (anti-compte-piraté)
+        if twofa_module.is_protected_threshold(amount_to_give, "claim_coins"):
+            try:
+                confirmed = await twofa_module.request_confirmation(
+                    i.user,
+                    f"Récupérer **+{amount_to_give:,}** 🪙 du jackpot Wheel ?",
+                    action_type="claim_coins",
+                    amount=amount_to_give,
+                    timeout=60,
+                )
+                if not confirmed:
+                    return await i.followup.send(
+                        "🔐 **Action annulée par 2FA** — récompense non distribuée.\n"
+                        "_Si c'était toi, autorise les DMs du bot et re-essaie demain._",
+                        ephemeral=True,
+                    )
+            except Exception as ex:
+                print(f"[wheel 2FA] {ex}")
         try:
-            await add_coins(i.guild.id, i.user.id, int(reward['amount']))
+            await add_coins(i.guild.id, i.user.id, amount_to_give)
         except Exception:
             pass
         lines.append(f"🎁 **Résultat :** {reward['label']}")
@@ -54388,6 +54476,15 @@ async def _do_wheel_spin(i: discord.Interaction):
     e = discord.Embed(description="\n".join(lines), color=color)
     e.set_footer(text="Daily Wheel · Reviens demain pour un nouveau spin")
     await i.followup.send(embed=e, ephemeral=True)
+
+    # Phase 150.2 : track style solo + saga contribution
+    try:
+        await profile_module.track_action(
+            i.guild.id, i.user.id, "wheel_spin", weight=1,
+        )
+        await saga_module.add_contribution(i.guild.id, i.user.id, 1)
+    except Exception as ex:
+        print(f"[wheel profile/saga] {ex}")
 
     # Phase 146 : boutons de suivi (zéro commande à mémoriser)
     try:
@@ -57187,6 +57284,17 @@ class RiddleAnswerView(View):
                                 f"_Explication :_ {riddle['explanation']}"
                             ),
                         )
+                        # Phase 150.2 : track style solo + saga contribution
+                        try:
+                            await profile_module.track_action(
+                                i.guild.id, i.user.id, "riddle_solve",
+                                weight=2,
+                            )
+                            await saga_module.add_contribution(
+                                i.guild.id, i.user.id, 2,
+                            )
+                        except Exception as ex:
+                            print(f"[riddle profile/saga] {ex}")
                         # Phase 146 : boutons de suivi (zéro commande à mémoriser)
                         try:
                             fview = followup_module.build_followup_view(
@@ -71268,6 +71376,20 @@ async def duel_report_cmd(i: discord.Interaction, duel_id: int, gagnant: discord
                 self.add_item(v2_container(*items, color=0xE74C3C))
 
         await _safe_followup(i, view=_DuelReportLayout())
+
+        # Phase 150.2 : track style PvP + saga contribution pour le winner
+        try:
+            await profile_module.track_action(
+                i.guild.id, gagnant.id, "duel_win", weight=3,
+            )
+            await profile_module.track_action(
+                i.guild.id, loser_id, "duel_loss", weight=1,
+            )
+            await saga_module.add_contribution(
+                i.guild.id, gagnant.id, 3,
+            )
+        except Exception as ex:
+            print(f"[duel profile/saga] {ex}")
 
         # Phase 146 : boutons de suivi pour le winner (zéro commande à mémoriser)
         try:
