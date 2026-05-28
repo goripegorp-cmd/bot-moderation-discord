@@ -44,7 +44,7 @@ import discord
 THEMES = {
     "default": {"emoji": "🌌", "label": "Standard",  "color": 0x5865F2},
     "dark":    {"emoji": "🌑", "label": "Sombre",    "color": 0x2C2F33},
-    "neon":    {"emoji": "💜", "label": "Néon",      "color": 0xE91E63},
+    "neon":    {"emoji": "🔮", "label": "Néon",      "color": 0xE91E63},
     "warm":    {"emoji": "🔥", "label": "Chaleureux","color": 0xE67E22},
     "ocean":   {"emoji": "🌊", "label": "Océan",     "color": 0x1ABC9C},
     "forest":  {"emoji": "🌲", "label": "Forêt",     "color": 0x27AE60},
