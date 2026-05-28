@@ -48,6 +48,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import discord
+from discord.ext import tasks
 
 try:
     import aiohttp
@@ -63,17 +64,31 @@ LINK_CODE_PREFIX = "AB-"        # Préfixe pour repérage facile dans la bio
 ROBLOX_API_TIMEOUT_SEC = 10
 USER_AGENT = "Discord-Bot-RobloxLink/1.0"
 
+# Phase 142 : auto-detect des updates de jeux
+UPDATES_CHECK_INTERVAL_MIN = 30        # Task tourne toutes les 30 min
+UPDATES_MAX_GAMES_PER_RUN = 10         # Limite par cycle pour ne pas spam l'API
+UPDATES_DELAY_BETWEEN_GAMES_SEC = 1    # Throttle entre 2 requêtes Roblox API
+
 
 # Références injectées
+_bot = None                            # Phase 142 : pour le polling auto
 _get_db = None
+_db_get = None                         # Phase 142 : cfg lookup hub_channel
 _v2_helpers = None
 _tables_initialized = False
 
 
-def setup(get_db_fn, v2_helpers: dict):
-    """Configure le module."""
-    global _get_db, _v2_helpers
+def setup(get_db_fn, v2_helpers: dict, bot_instance=None, db_get_fn=None):
+    """Configure le module.
+
+    Phase 142 : bot_instance + db_get_fn ajoutés pour le polling auto des
+    updates. Les deux sont optionnels pour rester rétro-compatible avec
+    l'ancienne signature setup(get_db, v2_helpers).
+    """
+    global _bot, _get_db, _db_get, _v2_helpers
+    _bot = bot_instance
     _get_db = get_db_fn
+    _db_get = db_get_fn
     _v2_helpers = v2_helpers
 
 
@@ -699,6 +714,157 @@ def build_games_panel(games: list[dict], guild_name: str = ""):
     return _GamesPanel()
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 142 : AUTO-DETECT UPDATES — task qui poll les jeux trackés et
+# poste une notif quand "lastUpdated" change côté Roblox.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def build_update_notification_panel(
+    game_row: dict, new_info: dict, guild_name: str = ""
+):
+    """Panel V2 — notification quand un jeu Roblox tracké a été mis à jour."""
+    if _v2_helpers is None:
+        return None
+    LayoutView = _v2_helpers['LayoutView']
+    v2_title = _v2_helpers['v2_title']
+    v2_subtitle = _v2_helpers['v2_subtitle']
+    v2_body = _v2_helpers['v2_body']
+    v2_divider = _v2_helpers['v2_divider']
+    v2_container = _v2_helpers['v2_container']
+
+    name = new_info.get("name") or game_row.get("name", "?")
+    place_id = int(new_info.get("rootPlaceId", 0) or game_row.get("place_id", 0))
+    new_updated = new_info.get("lastUpdated", "")
+    short_new = new_updated.split("T")[0] if new_updated else "?"
+    playing = int(new_info.get("playing", 0) or 0)
+    visits = int(new_info.get("visits", 0) or 0)
+
+    class _UpdateNotifPanel(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=None)
+            items = []
+            items.append(v2_title("🚀  MISE À JOUR ROBLOX DÉTECTÉE"))
+            items.append(v2_subtitle(
+                f"_Le jeu **{name}** vient d'être mis à jour_"
+            ))
+            items.append(v2_divider())
+
+            items.append(v2_body(
+                f"🎮 **Jeu :** `{name}`\n"
+                f"📅 **Dernière update :** `{short_new}`\n"
+                f"👥 **Joueurs actuels :** `{playing:,}`\n"
+                f"👁️ **Visites totales :** `{visits:,}`"
+            ))
+
+            if place_id:
+                items.append(v2_divider())
+                items.append(v2_body(
+                    f"🔗 **Lien direct :**\n"
+                    f"https://www.roblox.com/games/{place_id}"
+                ))
+
+            items.append(v2_divider())
+            items.append(v2_body(
+                "_💡 Cette notification est postée automatiquement quand le "
+                "studio Roblox publie une nouvelle version du jeu._"
+            ))
+
+            self.add_item(v2_container(*items, color=0x00A2FF))
+
+    return _UpdateNotifPanel()
+
+
+async def _check_game_updates_for_guild(guild) -> int:
+    """Vérifie tous les jeux trackés d'un guild et poste des notifs si MAJ.
+
+    Returns : nombre de notifs postées.
+    """
+    if _get_db is None or _db_get is None or not _AIOHTTP_OK:
+        return 0
+    if not guild:
+        return 0
+
+    posted = 0
+    try:
+        cfg_data = await _db_get(guild.id)
+        hub_ch_id = int(cfg_data.get("hub_channel", 0) or 0)
+        if not hub_ch_id:
+            return 0  # Pas de hub_channel configuré
+        ch = guild.get_channel(hub_ch_id)
+        if not ch:
+            return 0
+
+        games = await list_games(guild.id)
+        if not games:
+            return 0
+
+        # Limite anti-spam : max N jeux check par cycle
+        for g in games[:UPDATES_MAX_GAMES_PER_RUN]:
+            try:
+                new_info = await fetch_game_info(int(g["universe_id"]))
+                if not new_info:
+                    continue
+                old_updated = g.get("last_updated") or ""
+                new_updated = new_info.get("lastUpdated") or ""
+                if not new_updated or new_updated == old_updated:
+                    continue  # Pas de changement
+
+                # MAJ détectée → post panel + update DB
+                view = build_update_notification_panel(g, new_info, guild.name)
+                if view is not None:
+                    try:
+                        await ch.send(view=view)
+                        posted += 1
+                    except (discord.Forbidden, discord.HTTPException) as ex:
+                        print(f"[roblox_link updates_send guild={guild.id}] {ex}")
+
+                # Update DB avec nouveau lastUpdated même si post a fail
+                async with _get_db() as db:
+                    await db.execute(
+                        "UPDATE roblox_game_library SET "
+                        "last_updated_iso=?, name=? "
+                        "WHERE guild_id=? AND universe_id=?",
+                        (new_updated, new_info.get("name") or g["name"],
+                         guild.id, int(g["universe_id"])),
+                    )
+                    await db.commit()
+
+                # Throttle pour ne pas spam Roblox API
+                await asyncio.sleep(UPDATES_DELAY_BETWEEN_GAMES_SEC)
+            except Exception as ex:
+                print(f"[roblox_link _check_game guild={guild.id} "
+                      f"univ={g.get('universe_id')}] {ex}")
+    except Exception as ex:
+        print(f"[roblox_link _check_game_updates_for_guild={guild.id}] {ex}")
+
+    return posted
+
+
+@tasks.loop(minutes=UPDATES_CHECK_INTERVAL_MIN)
+async def roblox_updates_check_task():
+    """Tourne toutes les 30 min — scan tous les guilds, poste notifs MAJ."""
+    try:
+        if _bot is None:
+            return
+        total_posted = 0
+        for guild in list(_bot.guilds):
+            try:
+                posted = await _check_game_updates_for_guild(guild)
+                total_posted += posted
+            except Exception as ex:
+                print(f"[roblox_link updates_task guild={guild.id}] {ex}")
+        if total_posted > 0:
+            print(f"✅ [roblox_link] {total_posted} game update(s) posted")
+    except Exception as ex:
+        print(f"[roblox_link roblox_updates_check_task] {ex}")
+
+
+@roblox_updates_check_task.before_loop
+async def _before_updates():
+    if _bot is not None:
+        await _bot.wait_until_ready()
+
+
 __all__ = [
     "setup",
     # Link API
@@ -706,6 +872,8 @@ __all__ = [
     "start_link", "verify_link", "unlink", "get_link",
     # Games API
     "fetch_game_info", "add_game", "remove_game", "list_games",
+    # Auto-updates
+    "roblox_updates_check_task", "build_update_notification_panel",
     # Panels
     "build_link_instructions_panel", "build_profile_panel", "build_games_panel",
     # Constants

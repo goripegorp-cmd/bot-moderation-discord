@@ -37910,7 +37910,7 @@ async def on_ready():
         )
     except Exception as ex:
         print(f"[on_ready av_module setup] {ex}")
-    # Phase 136 : Roblox link verify + game library
+    # Phase 136 + 142 : Roblox link verify + game library + auto-updates
     try:
         rblx_link_module.setup(
             get_db,
@@ -37919,7 +37919,12 @@ async def on_ready():
                 'v2_divider': v2_divider, 'v2_container': v2_container,
                 'LayoutView': LayoutView,
             },
+            bot_instance=bot,
+            db_get_fn=db_get,
         )
+        # Phase 142 : start polling task for tracked games updates
+        if not rblx_link_module.roblox_updates_check_task.is_running():
+            rblx_link_module.roblox_updates_check_task.start()
     except Exception as ex:
         print(f"[on_ready rblx_link setup] {ex}")
     # Phase 137 : Voice Lounges + paliers vocaux
