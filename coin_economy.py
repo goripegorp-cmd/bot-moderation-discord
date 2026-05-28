@@ -263,12 +263,31 @@ async def get_top_rich(guild_id: int, n: int = 5) -> list[dict]:
 
 
 async def apply_luxury_tax(guild: discord.Guild) -> dict:
-    """Applique la taxe de luxe sur les balances > seuil."""
+    """Applique la taxe de luxe sur TOUTES les balances > seuil.
+
+    Phase 163.4 : SQL direct au lieu de get_top_rich(n=100) — sinon
+    les users au-delà du top 100 échappaient à la taxe.
+    """
     out = {"taxed_count": 0, "total_collected": 0}
     if _get_db is None or not guild:
         return out
     try:
-        rich_list = await get_top_rich(guild.id, n=100)
+        # Récupère TOUS les users avec coins + bank > seuil (sans limit)
+        rich_list = []
+        try:
+            async with _get_db() as db:
+                async with db.execute(
+                    "SELECT user_id, COALESCE(coins, 0) + COALESCE(bank, 0) AS total "
+                    "FROM economy WHERE guild_id=? AND "
+                    "(COALESCE(coins, 0) + COALESCE(bank, 0)) >= ? ",
+                    (guild.id, LUXURY_TAX_THRESHOLD),
+                ) as cur:
+                    rows = await cur.fetchall()
+            for uid, total in rows:
+                rich_list.append({"user_id": int(uid), "total": int(total)})
+        except Exception:
+            # Fallback : top 100 si la requête SQL fail (schema variant)
+            rich_list = await get_top_rich(guild.id, n=100)
         for u in rich_list:
             total = u["total"]
             if total < LUXURY_TAX_THRESHOLD:

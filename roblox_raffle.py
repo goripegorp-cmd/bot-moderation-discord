@@ -321,8 +321,8 @@ def build_raffle_panel(member: discord.Member):
             items.append(v2_body("**🏆  Comment gagner des tickets**"))
             items.append(v2_body(
                 "• 🔗 Compte Roblox lié : **+1** ticket/semaine auto\n"
-                "• 🎯 5 quêtes/semaine : **+1**\n"
-                "• 📅 5 votes daily prompt : **+1**\n"
+                "• 🎯 Claim quête quotidienne : **+1** par claim\n"
+                "• 📅 Vote daily prompt : **+1** par vote (~7/semaine)\n"
                 "• 📜 Top 5 saga : **+2**\n"
                 "• 📱 Tweet du jeu (claim manuel) : **+3**"
             ))

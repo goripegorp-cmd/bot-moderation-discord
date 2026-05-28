@@ -144,7 +144,12 @@ async def get_profile(guild_id: int, user_id: int) -> dict:
 
 
 async def track_message(message: discord.Message):
-    """Met à jour le profile + check anomaly."""
+    """Met à jour le profile + check anomaly.
+
+    Phase 163.4 : décroissance lazy. Si le dernier message du user est >
+    14 jours, le counter et les distributions sont reset avant l'update
+    pour avoir une vraie rolling window 14j (au lieu de croître sans fin).
+    """
     if not message.guild or message.author.bot or _get_db is None:
         return
     try:
@@ -153,6 +158,31 @@ async def track_message(message: discord.Message):
         msg_len = len(message.content or "")
         hour = datetime.now(timezone.utc).hour
         ch_id = str(message.channel.id)
+
+        # Phase 163.4 : si profil pas mis à jour depuis > 14j → reset
+        # ("rolling 14d window" lazy)
+        last_at = prof.get("last_message_at")
+        if last_at:
+            try:
+                from datetime import timedelta
+                # last_at peut être string ISO ou datetime suivant SQLite
+                if isinstance(last_at, str):
+                    last_dt = datetime.fromisoformat(
+                        last_at.replace("Z", "+00:00").split(".")[0]
+                    )
+                else:
+                    last_dt = last_at
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+                age = datetime.now(timezone.utc) - last_dt
+                if age > timedelta(days=14):
+                    prof["msg_count_14d"] = 0
+                    prof["avg_msg_length"] = 0
+                    prof["typical_hours"] = {}
+                    prof["typical_channels"] = {}
+                    prof["mature"] = False
+            except Exception:
+                pass
 
         # Update incremental (running averages)
         n = prof["msg_count_14d"]
