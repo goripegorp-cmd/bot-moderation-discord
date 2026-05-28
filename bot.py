@@ -132,6 +132,9 @@ import pet_evolution as pet_evo_module
 import daily_prompt as daily_prompt_module
 import onboarding_journey as onboarding_module
 import mentor_bonus as mentor_bonus_module
+# Phase 154 : Sécurité 2026++ — honeypot + behavior anomaly
+import honeypot as honeypot_module
+import behavior_anomaly as behavior_anomaly_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -38494,6 +38497,30 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready Phase 153 engagement] {ex}")
 
+    # Phase 154 : Sécurité 2026++ — honeypot + behavior anomaly
+    try:
+        honeypot_module.setup(
+            bot, get_db, db_get, _v2h,
+            staff_sanction_module=staff_sanction_module,
+        )
+        await honeypot_module.init_db()
+        # Crée le honeypot dans chaque guild (idempotent)
+        for g in bot.guilds:
+            try:
+                await honeypot_module.ensure_honeypot(g)
+            except Exception:
+                pass
+
+        behavior_anomaly_module.setup(
+            get_db, db_get, _v2h,
+            staff_sanction_module=staff_sanction_module,
+        )
+        await behavior_anomaly_module.init_db()
+
+        print("[Phase 154] Sécurité 2026++ : honeypot + behavior anomaly")
+    except Exception as ex:
+        print(f"[on_ready Phase 154 security++] {ex}")
+
     # Phase 146 : Event followup buttons (zéro commande à mémoriser)
     try:
         followup_module.setup({
@@ -41429,6 +41456,13 @@ async def on_message(msg):
     # Si détecté → message supprimé, on stoppe le pipeline ici (les autres
     # handlers ne traiteront pas un message déjà supprimé).
     if not msg.author.bot and msg.content:
+        # Phase 154 : honeypot first (le plus rapide)
+        try:
+            handled = await honeypot_module.on_message_hook(msg)
+            if handled:
+                return  # 99% piraté/bot, on stoppe
+        except Exception as ex:
+            print(f"[on_message honeypot] {ex}")
         try:
             handled = await webhook_leak_module.on_message_hook(msg)
             if handled:
@@ -41441,6 +41475,12 @@ async def on_message(msg):
                 return  # message supprimé, stop pipeline
         except Exception as ex:
             print(f"[on_message token_grabber] {ex}")
+
+        # Phase 154 : tracking comportemental (background, ne bloque pas)
+        try:
+            asyncio.create_task(behavior_anomaly_module.track_message(msg))
+        except Exception:
+            pass
 
     # ═══════════════ MESSAGES D'AIDE AUTOMATIQUES ═══════════════
     # Doit être appelé AVANT le filtre bot pour repositionner après les messages de bots
