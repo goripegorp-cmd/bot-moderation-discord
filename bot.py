@@ -57027,22 +57027,25 @@ class EngagementHubView(View):
         self.add_item(b21)
 
         # Phase 165.1 : Schedule streams (owner-friendly, visible à tous)
+        # Phase 169.6 fix : row=2 était plein (7 > 5 avec monkey-patches
+        # events_live + alliances) → déplacé row=3 (avait 3 boutons).
         b22 = Button(
             label="📅 Streams programmés",
             style=discord.ButtonStyle.primary,
             custom_id="hub_stream_schedule",
-            row=2,
+            row=3,
         )
         b22.callback = self._on_stream_schedule
         self.add_item(b22)
 
         # Phase 166.2 : Birthday panel (qui a son anniv cette semaine ?)
         # Phase 167.4 fix : row=4 était plein (6 > 5) → déplacé row=2
+        # Phase 169.6 fix : row=2 saturé → déplacé row=3 (toujours libre).
         b23 = Button(
             label="🎂 Anniversaires",
             style=discord.ButtonStyle.secondary,
             custom_id="hub_birthdays",
-            row=2,
+            row=3,
         )
         b23.callback = self._on_birthdays
         self.add_item(b23)
