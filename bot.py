@@ -56455,6 +56455,46 @@ class EngagementHubView(View):
         b15.callback = self._on_saga
         self.add_item(b15)
 
+        # Phase 159 : Discovery — expose les nouveaux modules
+        # Row 1 has space (achievements + pet = 2, on peut en mettre 3 de plus)
+        b16 = Button(
+            label="📊 Objectif communauté",
+            style=discord.ButtonStyle.success,
+            custom_id="hub_community_goal",
+            row=1,
+        )
+        b16.callback = self._on_community_goal
+        self.add_item(b16)
+
+        b17 = Button(
+            label="⭐ Ma réputation",
+            style=discord.ButtonStyle.secondary,
+            custom_id="hub_reputation",
+            row=1,
+        )
+        b17.callback = self._on_reputation
+        self.add_item(b17)
+
+        b18 = Button(
+            label="🎰 Mes tickets loterie",
+            style=discord.ButtonStyle.primary,
+            custom_id="hub_raffle",
+            row=1,
+        )
+        b18.callback = self._on_raffle
+        self.add_item(b18)
+
+        # Row 2 a 2 boutons (confess + profile) + 2 patched (events_live + alliances)
+        # = 4 utilisés, 1 free → on ajoute DM prefs
+        b19 = Button(
+            label="🔔 Mes DMs",
+            style=discord.ButtonStyle.secondary,
+            custom_id="hub_dm_prefs",
+            row=2,
+        )
+        b19.callback = self._on_dm_prefs
+        self.add_item(b19)
+
     async def _on_quests(self, i: discord.Interaction):
         await _p41_open_daily(i)
 
@@ -56552,6 +56592,79 @@ class EngagementHubView(View):
                     await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
             except Exception:
                 pass
+
+    async def _on_community_goal(self, i: discord.Interaction):
+        """Phase 159 : ouvre le panel objectif collectif de la semaine."""
+        try:
+            if not i.guild:
+                return await i.response.send_message(
+                    "❌ Serveur uniquement.", ephemeral=True
+                )
+            panel = community_goals_module.build_goal_panel(i.guild.id)
+            if panel is None:
+                return await i.response.send_message(
+                    "📊 _Pas d'objectif actif. Reviens lundi 10h FR._",
+                    ephemeral=True,
+                )
+            await i.response.defer(ephemeral=True)
+            await panel.populate()
+            await i.followup.send(view=panel, ephemeral=True)
+        except Exception as ex:
+            print(f"[hub_community_goal] {ex}")
+
+    async def _on_reputation(self, i: discord.Interaction):
+        """Phase 159 : ouvre le panel réputation du joueur."""
+        try:
+            if not i.guild or not isinstance(i.user, discord.Member):
+                return await i.response.send_message(
+                    "❌ Serveur uniquement.", ephemeral=True
+                )
+            panel = reputation_module.build_reputation_panel(i.user)
+            if panel is None:
+                return await i.response.send_message(
+                    "⭐ Module réputation indisponible.", ephemeral=True
+                )
+            await i.response.defer(ephemeral=True)
+            await panel.populate()
+            await i.followup.send(view=panel, ephemeral=True)
+        except Exception as ex:
+            print(f"[hub_reputation] {ex}")
+
+    async def _on_raffle(self, i: discord.Interaction):
+        """Phase 159 : ouvre le panel tickets loterie."""
+        try:
+            if not i.guild or not isinstance(i.user, discord.Member):
+                return await i.response.send_message(
+                    "❌ Serveur uniquement.", ephemeral=True
+                )
+            panel = roblox_raffle_module.build_raffle_panel(i.user)
+            if panel is None:
+                return await i.response.send_message(
+                    "🎰 Module loterie indisponible.", ephemeral=True
+                )
+            await i.response.defer(ephemeral=True)
+            await panel.populate()
+            await i.followup.send(view=panel, ephemeral=True)
+        except Exception as ex:
+            print(f"[hub_raffle] {ex}")
+
+    async def _on_dm_prefs(self, i: discord.Interaction):
+        """Phase 159 : ouvre le panel preferences DM digest."""
+        try:
+            if not i.guild or not isinstance(i.user, discord.Member):
+                return await i.response.send_message(
+                    "❌ Serveur uniquement.", ephemeral=True
+                )
+            panel = dm_digest_module.build_prefs_panel(i.user)
+            if panel is None:
+                return await i.response.send_message(
+                    "🔔 Module DM indisponible.", ephemeral=True
+                )
+            await i.response.defer(ephemeral=True)
+            await panel.populate()
+            await i.followup.send(view=panel, ephemeral=True)
+        except Exception as ex:
+            print(f"[hub_dm_prefs] {ex}")
 
 
 # ─── COMMANDES /hub + /hub_setup ───────────────────────────────────────────────
