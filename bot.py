@@ -144,6 +144,8 @@ import community_goals as community_goals_module
 import coin_economy as coin_economy_module
 # Phase 161 : Weekly recap + Leaderboards publics
 import weekly_stats as weekly_stats_module
+# Phase 162 : Server Pulse live + Tips Rotator
+import server_pulse as server_pulse_module
 import random
 try:
     from zoneinfo import ZoneInfo
