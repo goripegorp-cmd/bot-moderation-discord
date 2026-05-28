@@ -175,6 +175,9 @@ import world_invasion as world_invasion_module
 # Phase 170.1 : La Chronique d'Abylumis — récit narratif persistant 9 mois
 import story_engine as story_engine_module
 import codex_chronicle as codex_chronicle_module
+# Phase 170.2-3 : NPCs vivants + rencontres quotidiennes
+import npc_personalities as npc_personalities_module
+import daily_encounters as daily_encounters_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -39028,7 +39031,21 @@ async def on_ready():
         if not story_engine_module.chronicle_task.is_running():
             story_engine_module.chronicle_task.start()
 
-        print("[Phase 155/165/166/167/168/169/170] Stream + token_leak + birthday + welcome + spotlight + rotator + voice_clean + risk + error_logger + mob_hunts + merchant + invasion + chronicle")
+        # Phase 170.2 : NPCs vivants (Aria, Korr, Lyra, Drazek, Sienna, Voyageur)
+        npc_personalities_module.setup(bot, get_db, db_get, _v2h)
+        await npc_personalities_module.init_db()
+
+        # Phase 170.3 : Daily encounters (1 rencontre/jour/user, 30 catalogue)
+        daily_encounters_module.setup(
+            bot, get_db, db_get, _v2h,
+            npc_module=npc_personalities_module,
+            story_module=story_engine_module,
+            add_coins_fn=add_coins,
+        )
+        await daily_encounters_module.init_db()
+        daily_encounters_module.register_persistent_views(bot)
+
+        print("[Phase 155/165/166/167/168/169/170] Stream + token_leak + birthday + welcome + spotlight + rotator + voice_clean + risk + error_logger + mob_hunts + merchant + invasion + chronicle + npc + daily_encounters")
     except Exception as ex:
         print(f"[on_ready Phase 155/165 roblox/stream] {ex}")
 
@@ -56826,13 +56843,14 @@ class EngagementHubView(View):
     1 instance globale via bot.add_view au boot.
     Phase 48.3.5 : ajout boutons Mon Profil + Mes notifs (zéro commande).
 
-    ⚠️  Phase 169.7 GUARD : 23/25 enfants Discord. **Row 3 a 2 slots libres,
-    toutes les autres rows sont à 5/5**. Avant d'ajouter un bouton :
-    1. Préfère le mettre sur row=3 (seul row avec de la place).
-    2. Sinon, remplace un bouton existant ou expose-le via HubPinnedLayoutV2
-       (LayoutView V2 → limite 40 items).
-    3. Les monkey-patches Phase 43/46/47 sont désactivés (overflow); ne PAS
-       les ré-activer sans repenser la distribution.
+    ⚠️  Phase 170.3 GUARD : **25/25 enfants Discord — LIMITE MAX ATTEINTE**.
+    Toutes les rows sont à 5/5. Aucune marge pour un nouveau bouton.
+    Avant d'ajouter quoi que ce soit :
+    1. Remplace un bouton existant qui peut être supprimé.
+    2. OU expose la feature via HubPinnedLayoutV2 (LayoutView V2 → limite 40).
+    3. OU crée un sub-hub accessible depuis un bouton existant.
+    4. Les monkey-patches Phase 43/46/47 sont désactivés (overflow); ne PAS
+       les ré-activer sans repenser toute la distribution.
     """
 
     def __init__(self):
@@ -57081,6 +57099,17 @@ class EngagementHubView(View):
         b24.callback = self._on_chronicle
         self.add_item(b24)
 
+        # Phase 170.3 : Rencontre quotidienne avec un NPC (5-10 min)
+        # Dernier slot row=3 → 5/5. Hub à 25/25 maintenant — limite Discord.
+        b25 = Button(
+            label="🌟 Rencontre du jour",
+            style=discord.ButtonStyle.primary,
+            custom_id="hub_encounter",
+            row=3,
+        )
+        b25.callback = self._on_encounter
+        self.add_item(b25)
+
     async def _on_quests(self, i: discord.Interaction):
         await _p41_open_daily(i)
 
@@ -57142,6 +57171,24 @@ class EngagementHubView(View):
                 else:
                     await i.followup.send(
                         f"❌ Erreur Codex : `{ex}`", ephemeral=True
+                    )
+            except Exception:
+                pass
+
+    async def _on_encounter(self, i: discord.Interaction):
+        # Phase 170.3 : ouvre la rencontre quotidienne du joueur
+        try:
+            await daily_encounters_module.open_encounter_from_hub(i)
+        except Exception as ex:
+            print(f"[hub_encounter] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(
+                        f"❌ Erreur Rencontre : `{ex}`", ephemeral=True
+                    )
+                else:
+                    await i.followup.send(
+                        f"❌ Erreur Rencontre : `{ex}`", ephemeral=True
                     )
             except Exception:
                 pass

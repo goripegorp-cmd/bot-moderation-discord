@@ -1,8 +1,10 @@
-"""Phase 170.1 : tests fondation Chronique d'Abylumis."""
+"""Phase 170.1-3 : tests fondation Chronique + NPCs + Daily Encounters."""
 import pytest
 
 import story_engine
 import codex_chronicle
+import npc_personalities
+import daily_encounters
 
 
 # ─── story_engine ────────────────────────────────────────────────────────
@@ -155,3 +157,159 @@ def test_prologue_epilogue_non_empty():
         for chap in act["chapters"]:
             assert len(chap["prologue"]) > 20
             assert len(chap["epilogue"]) > 20
+
+
+# ─── Phase 170.2 : NPCs ──────────────────────────────────────────────────
+
+def test_npc_catalog_size():
+    """Exactement 6 NPCs."""
+    assert len(npc_personalities.NPC_CATALOG) == 6
+
+
+def test_npc_required_fields():
+    """Chaque NPC a tous les champs requis."""
+    required = {"id", "name", "title", "emoji", "trait", "description",
+                "location", "voice"}
+    for npc in npc_personalities.NPC_CATALOG:
+        missing = required - set(npc.keys())
+        assert not missing, f"NPC {npc.get('id')} manque : {missing}"
+
+
+def test_npc_ids_unique():
+    ids = [n["id"] for n in npc_personalities.NPC_CATALOG]
+    assert len(ids) == len(set(ids))
+
+
+def test_npc_expected_ids():
+    """Les 6 NPCs canoniques de la saga."""
+    ids = {n["id"] for n in npc_personalities.NPC_CATALOG}
+    assert {"aria", "korr", "lyra", "drazek", "sienna", "voyageur"} == ids
+
+
+def test_npc_get_def():
+    """get_npc_def fonctionne pour chaque NPC + None pour inconnu."""
+    for npc_id in npc_personalities.list_npc_ids():
+        assert npc_personalities.get_npc_def(npc_id) is not None
+    assert npc_personalities.get_npc_def("inconnu") is None
+
+
+def test_mood_bounds():
+    """Constants 0-100 bien définies."""
+    assert npc_personalities.MIN_MOOD == 0
+    assert npc_personalities.MAX_MOOD == 100
+    assert 0 <= npc_personalities.INITIAL_MOOD <= 100
+
+
+def test_mood_label():
+    """Labels couvrent toute l'échelle 0-100."""
+    assert npc_personalities.mood_label(0)
+    assert npc_personalities.mood_label(50)
+    assert npc_personalities.mood_label(100)
+    # Les labels diffèrent selon la zone
+    assert npc_personalities.mood_label(10) != npc_personalities.mood_label(90)
+
+
+def test_npc_api():
+    """API publique exposée."""
+    for name in [
+        "setup", "init_db", "NPC_CATALOG",
+        "get_npc_def", "list_npc_ids", "mood_label", "mood_icon",
+        "get_mood", "change_mood", "get_aggregate_mood",
+        "get_user_relationships",
+    ]:
+        assert hasattr(npc_personalities, name), f"manque : {name}"
+
+
+# ─── Phase 170.3 : Daily Encounters ──────────────────────────────────────
+
+def test_encounter_catalog_size():
+    """30 encounters minimum (5 par NPC × 6 NPCs)."""
+    assert len(daily_encounters.ENCOUNTER_CATALOG) >= 30
+
+
+def test_encounter_required_fields():
+    """Chaque encounter a tous les champs requis."""
+    required = {"id", "npc_id", "title", "narrative", "choices"}
+    for e in daily_encounters.ENCOUNTER_CATALOG:
+        missing = required - set(e.keys())
+        assert not missing, f"Encounter {e.get('id')} manque : {missing}"
+
+
+def test_encounter_ids_unique():
+    ids = [e["id"] for e in daily_encounters.ENCOUNTER_CATALOG]
+    assert len(ids) == len(set(ids))
+
+
+def test_encounter_three_choices_each():
+    """Chaque encounter a exactement 3 choix."""
+    for e in daily_encounters.ENCOUNTER_CATALOG:
+        assert len(e["choices"]) == 3, (
+            f"Encounter {e['id']} a {len(e['choices'])} choix au lieu de 3"
+        )
+
+
+def test_encounter_choices_required_fields():
+    """Chaque choix a label/reply/mood_delta/coin_reward."""
+    required = {"label", "reply", "mood_delta", "coin_reward"}
+    for e in daily_encounters.ENCOUNTER_CATALOG:
+        for choice in e["choices"]:
+            missing = required - set(choice.keys())
+            assert not missing, (
+                f"Choix de {e['id']} manque : {missing}"
+            )
+
+
+def test_encounter_npc_references_valid():
+    """Tous les npc_id référencés existent dans NPC_CATALOG."""
+    valid_npc_ids = set(npc_personalities.list_npc_ids())
+    for e in daily_encounters.ENCOUNTER_CATALOG:
+        assert e["npc_id"] in valid_npc_ids, (
+            f"Encounter {e['id']} référence NPC inconnu : {e['npc_id']}"
+        )
+
+
+def test_encounter_all_npcs_covered():
+    """Chaque NPC a au moins 1 encounter (idéalement 5)."""
+    npc_counts = {}
+    for e in daily_encounters.ENCOUNTER_CATALOG:
+        npc_counts[e["npc_id"]] = npc_counts.get(e["npc_id"], 0) + 1
+    for npc_id in npc_personalities.list_npc_ids():
+        assert npc_counts.get(npc_id, 0) >= 1, (
+            f"NPC {npc_id} n'a aucun encounter"
+        )
+
+
+def test_encounter_mood_deltas_bounded():
+    """Mood deltas dans la fourchette [-25, +25] (cohérent avec gameplay)."""
+    for e in daily_encounters.ENCOUNTER_CATALOG:
+        for choice in e["choices"]:
+            assert -25 <= int(choice["mood_delta"]) <= 25, (
+                f"{e['id']} mood_delta {choice['mood_delta']} hors borne"
+            )
+
+
+def test_encounter_coin_rewards_bounded():
+    """Récompenses coins entre 0 et 100."""
+    for e in daily_encounters.ENCOUNTER_CATALOG:
+        for choice in e["choices"]:
+            assert 0 <= int(choice["coin_reward"]) <= 100
+
+
+def test_encounter_button_is_dynamic():
+    """EncounterChoiceButton est un DynamicItem."""
+    import discord
+    assert issubclass(
+        daily_encounters.EncounterChoiceButton, discord.ui.DynamicItem,
+    )
+
+
+def test_encounter_api():
+    """API publique exposée."""
+    for name in [
+        "setup", "init_db", "ENCOUNTER_CATALOG",
+        "get_encounter_def", "list_encounter_ids",
+        "has_done_today", "pick_encounter_for_user", "record_choice",
+        "build_encounter_panel", "open_encounter_from_hub",
+        "EncounterChoiceButton", "register_persistent_views",
+    ]:
+        assert hasattr(daily_encounters, name), f"manque : {name}"

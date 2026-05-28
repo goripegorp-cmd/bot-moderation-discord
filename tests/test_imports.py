@@ -46,6 +46,9 @@ PHASE_163_MODULES = [
     # Phase 170 — Chronique d'Abylumis (récit collectif persistant)
     "story_engine",
     "codex_chronicle",
+    # Phase 170.2-3 : NPCs vivants + rencontres quotidiennes
+    "npc_personalities",
+    "daily_encounters",
 ]
 
 
@@ -101,6 +104,9 @@ INIT_DB_MODULES = [
     # Phase 170 — story_engine (codex_chronicle n'a pas d'init_db, lit DB
     # de story_engine)
     "story_engine",
+    # Phase 170.2-3 : NPCs mood + encounters log
+    "npc_personalities",
+    "daily_encounters",
 ]
 
 
