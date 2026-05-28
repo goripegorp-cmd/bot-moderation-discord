@@ -56812,6 +56812,14 @@ class EngagementHubView(View):
     Custom IDs stables, callbacks utilisent i.user.id directement (pas de state).
     1 instance globale via bot.add_view au boot.
     Phase 48.3.5 : ajout boutons Mon Profil + Mes notifs (zéro commande).
+
+    ⚠️  Phase 169.7 GUARD : 23/25 enfants Discord. **Row 3 a 2 slots libres,
+    toutes les autres rows sont à 5/5**. Avant d'ajouter un bouton :
+    1. Préfère le mettre sur row=3 (seul row avec de la place).
+    2. Sinon, remplace un bouton existant ou expose-le via HubPinnedLayoutV2
+       (LayoutView V2 → limite 40 items).
+    3. Les monkey-patches Phase 43/46/47 sont désactivés (overflow); ne PAS
+       les ré-activer sans repenser la distribution.
     """
 
     def __init__(self):
@@ -57027,25 +57035,24 @@ class EngagementHubView(View):
         self.add_item(b21)
 
         # Phase 165.1 : Schedule streams (owner-friendly, visible à tous)
-        # Phase 169.6 fix : row=2 était plein (7 > 5 avec monkey-patches
-        # events_live + alliances) → déplacé row=3 (avait 3 boutons).
+        # Phase 169.7 : retour à row=2 — les monkey-patches Phase 43/46/47
+        # qui surchargaient row=2/3 sont désactivés.
         b22 = Button(
             label="📅 Streams programmés",
             style=discord.ButtonStyle.primary,
             custom_id="hub_stream_schedule",
-            row=3,
+            row=2,
         )
         b22.callback = self._on_stream_schedule
         self.add_item(b22)
 
         # Phase 166.2 : Birthday panel (qui a son anniv cette semaine ?)
-        # Phase 167.4 fix : row=4 était plein (6 > 5) → déplacé row=2
-        # Phase 169.6 fix : row=2 saturé → déplacé row=3 (toujours libre).
+        # Phase 169.7 : row=2 sécurisée maintenant que patches désactivés.
         b23 = Button(
             label="🎂 Anniversaires",
             style=discord.ButtonStyle.secondary,
             custom_id="hub_birthdays",
-            row=3,
+            row=2,
         )
         b23.callback = self._on_birthdays
         self.add_item(b23)
@@ -60083,26 +60090,29 @@ async def _p43_open_events_live(i: discord.Interaction):
 
 
 # Inject le 6ème bouton dans EngagementHubView (monkey-patch propre)
+# Phase 169.7 : le monkey-patch __init__ est DÉSACTIVÉ — il ajoutait un
+# bouton inutile (hub_events_live n'est exposé ni dans HubPinnedLayoutV2
+# ni ailleurs) et faisait dépasser la limite Discord de 25 enfants.
+# La méthode _on_events_live reste attachée à la classe au cas où un
+# autre code l'appelle.
 _original_hub_init = EngagementHubView.__init__
 
 
 def _patched_hub_init(self):
     _original_hub_init(self)
-    b6 = Button(
-        label="🌍 Events en cours",
-        style=discord.ButtonStyle.primary,
-        custom_id="hub_events_live",
-        row=2,
-    )
-    b6.callback = self._on_events_live
-    self.add_item(b6)
+    # Phase 169.7 : add_item commenté pour éviter overflow.
+    # b6 = Button(label="🌍 Events en cours", custom_id="hub_events_live", row=2)
+    # b6.callback = self._on_events_live
+    # self.add_item(b6)
 
 
 async def _hub_on_events_live(self, i: discord.Interaction):
     await _p43_open_events_live(i)
 
 
-EngagementHubView.__init__ = _patched_hub_init
+# Phase 169.7 : __init__ assignment commenté (le patch ne fait plus rien
+# d'utile, mais on garde la méthode pour compat).
+# EngagementHubView.__init__ = _patched_hub_init
 EngagementHubView._on_events_live = _hub_on_events_live
 
 
@@ -61813,26 +61823,24 @@ async def _p46_open_alliances(i: discord.Interaction):
 # ─── Patch hub : ajout du 7ème bouton "🤝 Mes alliances" ───────────────────────
 
 
+# Phase 169.7 : monkey-patch désactivé (overflow 25-enfants Discord).
 _original_hub_init_p45 = EngagementHubView.__init__
 
 
 def _patched_hub_init_p46(self):
     _original_hub_init_p45(self)
-    b7 = Button(
-        label="🤝 Mes alliances",
-        style=discord.ButtonStyle.primary,
-        custom_id="hub_alliances",
-        row=2,
-    )
-    b7.callback = self._on_alliances
-    self.add_item(b7)
+    # Phase 169.7 : add_item commenté.
+    # b7 = Button(label="🤝 Mes alliances", custom_id="hub_alliances", row=2)
+    # b7.callback = self._on_alliances
+    # self.add_item(b7)
 
 
 async def _hub_on_alliances(self, i: discord.Interaction):
     await _p46_open_alliances(i)
 
 
-EngagementHubView.__init__ = _patched_hub_init_p46
+# Phase 169.7 : __init__ assignment commenté.
+# EngagementHubView.__init__ = _patched_hub_init_p46
 EngagementHubView._on_alliances = _hub_on_alliances
 
 
@@ -64054,27 +64062,19 @@ async def _p47_open_factions(i: discord.Interaction):
 # ─── Patch HUB : ajout des boutons "📆 Saison" et "🏰 Factions" ───────────────
 
 
+# Phase 169.7 : monkey-patch désactivé (overflow 25-enfants Discord).
 _original_hub_init_p46_2 = EngagementHubView.__init__
 
 
 def _patched_hub_init_p47(self):
     _original_hub_init_p46_2(self)
-    b_season = Button(
-        label="📆 Mon Pass de Saison",
-        style=discord.ButtonStyle.success,
-        custom_id="hub_season",
-        row=3,
-    )
-    b_season.callback = self._on_season
-    self.add_item(b_season)
-    b_factions = Button(
-        label="🏰 Mes Renommées",
-        style=discord.ButtonStyle.secondary,
-        custom_id="hub_factions",
-        row=3,
-    )
-    b_factions.callback = self._on_factions
-    self.add_item(b_factions)
+    # Phase 169.7 : add_item commentés.
+    # b_season = Button(label="📆 Mon Pass de Saison", custom_id="hub_season", row=3)
+    # b_season.callback = self._on_season
+    # self.add_item(b_season)
+    # b_factions = Button(label="🏰 Mes Renommées", custom_id="hub_factions", row=3)
+    # b_factions.callback = self._on_factions
+    # self.add_item(b_factions)
 
 
 async def _hub_on_season(self, i: discord.Interaction):
@@ -64085,7 +64085,8 @@ async def _hub_on_factions(self, i: discord.Interaction):
     await _p47_open_factions(i)
 
 
-EngagementHubView.__init__ = _patched_hub_init_p47
+# Phase 169.7 : __init__ assignment commenté.
+# EngagementHubView.__init__ = _patched_hub_init_p47
 EngagementHubView._on_season = _hub_on_season
 EngagementHubView._on_factions = _hub_on_factions
 
@@ -74871,9 +74872,18 @@ def _v2_delegate_to(view_class, method_name: str):
             print(f"[v2_delegate defer {view_class.__name__}.{method_name}] {ex}")
 
         try:
-            handler = view_class()
-            method = getattr(handler, method_name)
-            await method(i)
+            # Phase 169.7 : récupère la méthode UNBOUND directement depuis la
+            # classe — n'instancie PAS view_class. Ça évite l'erreur
+            # "maximum number of children exceeded" qui survenait quand
+            # EngagementHubView (avec ses 23+ boutons + monkey-patches) était
+            # instancié à chaque clic. Les méthodes _on_xxx n'utilisent jamais
+            # `self`, donc on peut passer None.
+            method = getattr(view_class, method_name, None)
+            if method is None:
+                raise AttributeError(
+                    f"{view_class.__name__}.{method_name} introuvable"
+                )
+            await method(None, i)
         except Exception as ex:
             print(f"[v2_delegate {view_class.__name__}.{method_name}] {ex}")
             try:
