@@ -39031,93 +39031,127 @@ async def on_ready():
         if not world_invasion_module.monthly_invasion_task.is_running():
             world_invasion_module.monthly_invasion_task.start()
 
+        # ════════════════════════════════════════════════════════════════
+        # Phase 170 + 171 — Chronique d'Abylumis
+        # Chaque module est wired dans SON propre try/except : si un module
+        # crash à l'init, les autres modules continuent à fonctionner. Le bot
+        # ne tombe pas pour 1 module défaillant.
+        # ════════════════════════════════════════════════════════════════
+
         # Phase 170.1 : La Chronique d'Abylumis — récit collectif persistant
-        story_engine_module.setup(bot, get_db, db_get, _v2h)
-        await story_engine_module.init_db()
-        if not story_engine_module.chronicle_task.is_running():
-            story_engine_module.chronicle_task.start()
+        try:
+            story_engine_module.setup(bot, get_db, db_get, _v2h)
+            await story_engine_module.init_db()
+            if not story_engine_module.chronicle_task.is_running():
+                story_engine_module.chronicle_task.start()
+        except Exception as ex:
+            print(f"[on_ready 170.1 story_engine] {ex}")
 
-        # Phase 170.2 : NPCs vivants (Aria, Korr, Lyra, Drazek, Sienna, Voyageur)
-        npc_personalities_module.setup(bot, get_db, db_get, _v2h)
-        await npc_personalities_module.init_db()
+        # Phase 170.2 : NPCs vivants
+        try:
+            npc_personalities_module.setup(bot, get_db, db_get, _v2h)
+            await npc_personalities_module.init_db()
+        except Exception as ex:
+            print(f"[on_ready 170.2 npc_personalities] {ex}")
 
-        # Phase 170.3 : Daily encounters (1 rencontre/jour/user, 30 catalogue)
-        daily_encounters_module.setup(
-            bot, get_db, db_get, _v2h,
-            npc_module=npc_personalities_module,
-            story_module=story_engine_module,
-            add_coins_fn=add_coins,
-        )
-        await daily_encounters_module.init_db()
-        daily_encounters_module.register_persistent_views(bot)
+        # Phase 170.3 : Daily encounters
+        try:
+            daily_encounters_module.setup(
+                bot, get_db, db_get, _v2h,
+                npc_module=npc_personalities_module,
+                story_module=story_engine_module,
+                add_coins_fn=add_coins,
+            )
+            await daily_encounters_module.init_db()
+            daily_encounters_module.register_persistent_views(bot)
+        except Exception as ex:
+            print(f"[on_ready 170.3 daily_encounters] {ex}")
 
-        # Phase 170.4 : Conseil des Anciens hebdomadaire (lundi 20h FR)
-        weekly_council_module.setup(
-            bot, get_db, db_get, _v2h,
-            story_module=story_engine_module,
-            npc_module=npc_personalities_module,
-        )
-        await weekly_council_module.init_db()
-        weekly_council_module.register_persistent_views(bot)
-        if not weekly_council_module.council_task.is_running():
-            weekly_council_module.council_task.start()
+        # Phase 170.4 : Conseil des Anciens hebdomadaire
+        try:
+            weekly_council_module.setup(
+                bot, get_db, db_get, _v2h,
+                story_module=story_engine_module,
+                npc_module=npc_personalities_module,
+            )
+            await weekly_council_module.init_db()
+            weekly_council_module.register_persistent_views(bot)
+            if not weekly_council_module.council_task.is_running():
+                weekly_council_module.council_task.start()
+        except Exception as ex:
+            print(f"[on_ready 170.4 weekly_council] {ex}")
 
-        # Phase 170.5 : 5 régions du monde + patrouilles (mercredi 19h FR)
-        regional_state_module.setup(
-            bot, get_db, db_get, _v2h,
-            story_module=story_engine_module,
-            npc_module=npc_personalities_module,
-        )
-        await regional_state_module.init_db()
-        regional_state_module.register_persistent_views(bot)
-        if not regional_state_module.regional_task.is_running():
-            regional_state_module.regional_task.start()
+        # Phase 170.5 : 5 régions du monde + patrouilles
+        try:
+            regional_state_module.setup(
+                bot, get_db, db_get, _v2h,
+                story_module=story_engine_module,
+                npc_module=npc_personalities_module,
+            )
+            await regional_state_module.init_db()
+            regional_state_module.register_persistent_views(bot)
+            if not regional_state_module.regional_task.is_running():
+                regional_state_module.regional_task.start()
+        except Exception as ex:
+            print(f"[on_ready 170.5 regional_state] {ex}")
 
-        # Phase 170.6 : Indices fragmentés (force la discussion en chat)
-        mystery_investigation_module.setup(
-            bot, get_db, db_get, _v2h,
-            story_module=story_engine_module,
-            npc_module=npc_personalities_module,
-            add_coins_fn=add_coins,
-        )
-        await mystery_investigation_module.init_db()
-        mystery_investigation_module.register_persistent_views(bot)
-        if not mystery_investigation_module.mystery_task.is_running():
-            mystery_investigation_module.mystery_task.start()
+        # Phase 170.6 : Indices fragmentés
+        try:
+            mystery_investigation_module.setup(
+                bot, get_db, db_get, _v2h,
+                story_module=story_engine_module,
+                npc_module=npc_personalities_module,
+                add_coins_fn=add_coins,
+            )
+            await mystery_investigation_module.init_db()
+            mystery_investigation_module.register_persistent_views(bot)
+            if not mystery_investigation_module.mystery_task.is_running():
+                mystery_investigation_module.mystery_task.start()
+        except Exception as ex:
+            print(f"[on_ready 170.6 mystery_investigation] {ex}")
 
-        # Phase 170.7 : Lettres NPC hebdo en DM (dimanche 18h FR, opt-in)
-        npc_letters_module.setup(
-            bot, get_db, db_get, _v2h,
-            story_module=story_engine_module,
-            npc_module=npc_personalities_module,
-        )
-        await npc_letters_module.init_db()
-        npc_letters_module.register_persistent_views(bot)
-        if not npc_letters_module.weekly_letter_task.is_running():
-            npc_letters_module.weekly_letter_task.start()
+        # Phase 170.7 : Lettres NPC hebdo en DM (opt-in)
+        try:
+            npc_letters_module.setup(
+                bot, get_db, db_get, _v2h,
+                story_module=story_engine_module,
+                npc_module=npc_personalities_module,
+            )
+            await npc_letters_module.init_db()
+            npc_letters_module.register_persistent_views(bot)
+            if not npc_letters_module.weekly_letter_task.is_running():
+                npc_letters_module.weekly_letter_task.start()
+        except Exception as ex:
+            print(f"[on_ready 170.7 npc_letters] {ex}")
 
-        # Phase 170.8 : Boss Climax mensuel (1er samedi 21h FR, thématique)
-        monthly_climax_module.setup(
-            bot, get_db, db_get, _v2h,
-            story_module=story_engine_module,
-            npc_module=npc_personalities_module,
-            add_coins_fn=add_coins,
-        )
-        await monthly_climax_module.init_db()
-        monthly_climax_module.register_persistent_views(bot)
-        if not monthly_climax_module.climax_task.is_running():
-            monthly_climax_module.climax_task.start()
+        # Phase 170.8 : Boss Climax mensuel
+        try:
+            monthly_climax_module.setup(
+                bot, get_db, db_get, _v2h,
+                story_module=story_engine_module,
+                npc_module=npc_personalities_module,
+                add_coins_fn=add_coins,
+            )
+            await monthly_climax_module.init_db()
+            monthly_climax_module.register_persistent_views(bot)
+            if not monthly_climax_module.climax_task.is_running():
+                monthly_climax_module.climax_task.start()
+        except Exception as ex:
+            print(f"[on_ready 170.8 monthly_climax] {ex}")
 
         # Codex setup APRÈS tous les modules pour injection refs complète
-        codex_chronicle_module.setup(
-            bot, get_db, db_get, _v2h, story_engine_module,
-            council_module=weekly_council_module,
-            regional_module=regional_state_module,
-            mystery_module=mystery_investigation_module,
-            letters_module=npc_letters_module,
-            climax_module=monthly_climax_module,
-        )
-        codex_chronicle_module.register_persistent_views(bot)
+        try:
+            codex_chronicle_module.setup(
+                bot, get_db, db_get, _v2h, story_engine_module,
+                council_module=weekly_council_module,
+                regional_module=regional_state_module,
+                mystery_module=mystery_investigation_module,
+                letters_module=npc_letters_module,
+                climax_module=monthly_climax_module,
+            )
+            codex_chronicle_module.register_persistent_views(bot)
+        except Exception as ex:
+            print(f"[on_ready 170 codex_chronicle] {ex}")
 
         print("[Phase 155/165/166/167/168/169/170] Stream + token_leak + birthday + welcome + spotlight + rotator + voice_clean + risk + error_logger + mob_hunts + merchant + invasion + chronicle + npc + daily_encounters + council")
     except Exception as ex:
@@ -60683,6 +60717,29 @@ async def db_optimizer_task():
             ("merchant_purchases_old",     "DELETE FROM merchant_purchases WHERE datetime(purchased_at) < datetime('now', '-180 days')"),
             ("invasion_events_old",        "DELETE FROM invasion_events WHERE status != 'active' AND datetime(started_at) < datetime('now', '-90 days')"),
             ("invasion_attackers_orphan",  "DELETE FROM invasion_attackers WHERE event_id NOT IN (SELECT id FROM invasion_events)"),
+            # Phase 171 : cleanup Chronique d'Abylumis (Phase 170)
+            # Rétention longue pour préserver les "Mémoires" : on garde le
+            # gros de l'histoire 365 jours, le détail seulement 90 jours.
+            ("chronicle_events_old",       "DELETE FROM chronicle_events WHERE datetime(timestamp) < datetime('now', '-365 days')"),
+            ("daily_encounters_log_old",   "DELETE FROM daily_encounters_log WHERE datetime(played_at) < datetime('now', '-90 days')"),
+            ("council_votes_resolved",     "DELETE FROM council_votes WHERE session_id IN (SELECT id FROM council_sessions WHERE status='resolved' AND datetime(closes_at) < datetime('now', '-90 days'))"),
+            ("council_sessions_old",       "DELETE FROM council_sessions WHERE status='resolved' AND datetime(closes_at) < datetime('now', '-90 days')"),
+            ("patrol_contributions_old",   "DELETE FROM patrol_contributions WHERE patrol_id IN (SELECT id FROM patrol_sessions WHERE status != 'open' AND datetime(opens_at) < datetime('now', '-60 days'))"),
+            ("patrol_sessions_old",        "DELETE FROM patrol_sessions WHERE status != 'open' AND datetime(opens_at) < datetime('now', '-60 days')"),
+            ("mystery_shares_old",         "DELETE FROM mystery_shares WHERE datetime(shared_at) < datetime('now', '-60 days')"),
+            ("npc_letters_undelivered_old","DELETE FROM npc_letters_sent WHERE delivered=0 AND datetime(sent_at) < datetime('now', '-14 days')"),
+            ("npc_letters_delivered_old",  "DELETE FROM npc_letters_sent WHERE delivered=1 AND datetime(sent_at) < datetime('now', '-180 days')"),
+            ("climax_attackers_old",       "DELETE FROM climax_attackers WHERE event_id IN (SELECT id FROM climax_events WHERE status != 'active' AND datetime(started_at) < datetime('now', '-180 days'))"),
+            ("climax_events_old",          "DELETE FROM climax_events WHERE status != 'active' AND datetime(started_at) < datetime('now', '-180 days')"),
+            # Titres permanents = JAMAIS supprimés (fierté définitive)
+            # chronicle_state = JAMAIS supprimé (état du serveur)
+            # chronicle_chapter_progress = JAMAIS supprimé (historique chapitres)
+            # chronicle_contributors = JAMAIS supprimé (qui a contribué)
+            # mystery_clues_held = JAMAIS supprimé (les indices restent)
+            # mystery_revelations = JAMAIS supprimé (la mémoire collective)
+            # regional_state = JAMAIS supprimé (5 lignes max par guild)
+            # npc_mood = JAMAIS supprimé (relations durables)
+            # npc_letter_subscriptions = JAMAIS supprimé (consentement)
         ]
         total_deleted = 0
         for name, stmt in cleanup_stmts:

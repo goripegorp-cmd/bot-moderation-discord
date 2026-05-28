@@ -37,7 +37,7 @@ _mystery = None  # référence vers mystery_investigation module (Phase 170.6)
 _letters = None  # référence vers npc_letters module (Phase 170.7)
 _climax = None  # référence vers monthly_climax module (Phase 170.8)
 
-VALID_PAGES = ("current", "history", "memoirs", "acts")
+VALID_PAGES = ("current", "history", "memoirs", "acts", "welcome")
 
 
 def setup(
@@ -329,6 +329,102 @@ async def _build_page_memoirs(guild_id: int) -> list:
     return items
 
 
+async def _build_page_welcome(guild_id: int) -> list:
+    """Page 5 (Phase 171) : Bienvenue — résumé pour nouveaux membres.
+
+    Conçue pour quelqu'un qui rejoint le serveur mid-Chronicle et qui ne
+    sait pas ce qui s'est passé. Donne un résumé concis du voyage.
+    """
+    if _story is None or _v2 is None:
+        return []
+    v2_title = _v2['v2_title']
+    v2_subtitle = _v2['v2_subtitle']
+    v2_body = _v2['v2_body']
+    v2_divider = _v2['v2_divider']
+
+    items = [
+        v2_title("🌟  BIENVENUE DANS LA CHRONIQUE"),
+        v2_subtitle(
+            "_Tu es nouveau ? Cette page t'explique tout en 1 minute._"
+        ),
+        v2_divider(),
+    ]
+
+    state = await _story.get_state(guild_id)
+    current_act = state["act"] if state else 1
+    current_chap_id = state["chapter_id"] if state else "1.1"
+
+    items.append(v2_body(
+        "**📖 C'est quoi, la Chronique d'Abylumis ?**\n\n"
+        "_Une histoire collective qui se déroule sur **9 mois**. Le serveur "
+        "entier collabore pour avancer dans 3 Actes de 3 chapitres chacun. "
+        "Aucune action n'est obligatoire : tes actions habituelles (combat, "
+        "quêtes, rencontres) alimentent automatiquement l'histoire._"
+    ))
+    items.append(v2_divider())
+
+    items.append(v2_body(
+        "**🎭 Où en est le serveur ?**\n\n"
+        f"Actuellement : **Acte {current_act}**, chapitre **{current_chap_id}**.\n\n"
+        "_Clique sur 📖 Chapitre ci-dessous pour voir l'état détaillé._"
+    ))
+    items.append(v2_divider())
+
+    # Mini-récap des chapitres terminés
+    completed = []
+    if _get_db is not None:
+        try:
+            async with _get_db() as db:
+                async with db.execute(
+                    "SELECT act, chapter, status FROM chronicle_chapter_progress "
+                    "WHERE guild_id=? AND status='completed' "
+                    "ORDER BY id ASC",
+                    (guild_id,),
+                ) as cur:
+                    for r in await cur.fetchall():
+                        chap_def = _story.get_chapter_def(int(r[0]), int(r[1]))
+                        if chap_def:
+                            completed.append(chap_def["title"])
+        except Exception:
+            pass
+
+    if completed:
+        items.append(v2_body(
+            f"**📚 Ce que le serveur a déjà accompli ({len(completed)} chapitres) :**\n\n"
+            + "\n".join(f"✅ {t}" for t in completed)
+        ))
+        items.append(v2_divider())
+
+    items.append(v2_body(
+        "**🎯 Comment participer ?**\n\n"
+        "• 🌟 **Chaque jour** : clique « Rencontre du jour » dans le hub "
+        "(5 min de narration avec un NPC)\n"
+        "• 🗳️ **Chaque lundi 20h** : vote au Conseil des Anciens\n"
+        "• 🚨 **Chaque mercredi 19h** : défends une région en patrouille\n"
+        "• ⚔️ **1er samedi du mois 21h** : Boss Climax — récompense titre permanent\n"
+        "• ✉️ **Optionnel** : abonne-toi aux lettres NPC en DM"
+    ))
+    items.append(v2_divider())
+
+    items.append(v2_body(
+        "**🤝 Les 6 personnages que tu vas croiser :**\n\n"
+        "🌙 **Aria** la Veilleuse — sage, prudente\n"
+        "🔨 **Korr** le Forgeron — loyal, simple\n"
+        "📚 **Lyra** l'Érudite — curieuse, ambiguë\n"
+        "⚔️ **Drazek** le Guerrier — impulsif, courageux\n"
+        "💰 **Sienna** la Marchande — neutre, calculatrice\n"
+        "🌫️ **Le Voyageur** — mystérieux"
+    ))
+    items.append(v2_divider())
+
+    items.append(v2_body(
+        "_💡 La Chronique est conçue pour durer 9 mois. Aucune urgence : "
+        "même 5 minutes par jour suffisent pour vivre l'histoire pleinement._"
+    ))
+
+    return items
+
+
 async def _build_page_acts(guild_id: int) -> list:
     """Page 4 : Les 3 Actes — vue d'ensemble."""
     if _story is None or _v2 is None:
@@ -393,6 +489,8 @@ async def build_codex_panel(
         items = await _build_page_history(guild_id)
     elif page == "memoirs":
         items = await _build_page_memoirs(guild_id)
+    elif page == "welcome":
+        items = await _build_page_welcome(guild_id)
     else:  # acts
         items = await _build_page_acts(guild_id)
 
@@ -411,8 +509,9 @@ async def build_codex_panel(
 
     layout = _CodexLayout()
 
-    # 4 boutons de navigation
+    # 5 boutons de navigation (Phase 171 : ajout Welcome pour nouveaux membres)
     btn_defs = [
+        ("welcome", "🌟 Bienvenue", discord.ButtonStyle.success),
         ("current", "📖 Chapitre", discord.ButtonStyle.primary),
         ("history", "📚 Histoire", discord.ButtonStyle.secondary),
         ("memoirs", "📜 Mémoires", discord.ButtonStyle.secondary),
@@ -490,6 +589,7 @@ class CodexPageButton(
         super().__init__(
             Button(
                 label={
+                    "welcome": "🌟 Bienvenue",
                     "current": "📖 Chapitre",
                     "history": "📚 Histoire",
                     "memoirs": "📜 Mémoires",

@@ -123,12 +123,13 @@ def test_story_engine_api():
 # ─── codex_chronicle ─────────────────────────────────────────────────────
 
 def test_codex_pages():
-    """4 pages valides définies."""
-    assert len(codex_chronicle.VALID_PAGES) == 4
+    """5 pages valides définies (welcome ajouté Phase 171)."""
+    assert len(codex_chronicle.VALID_PAGES) == 5
     assert "current" in codex_chronicle.VALID_PAGES
     assert "history" in codex_chronicle.VALID_PAGES
     assert "memoirs" in codex_chronicle.VALID_PAGES
     assert "acts" in codex_chronicle.VALID_PAGES
+    assert "welcome" in codex_chronicle.VALID_PAGES
 
 
 def test_codex_api():
@@ -861,8 +862,8 @@ def test_all_council_options_ref_valid_npcs():
 
 
 def test_codex_pages_all_handled():
-    """Les pages déclarées dans VALID_PAGES sont 4 et bien définies."""
-    expected = {"current", "history", "memoirs", "acts"}
+    """Les 5 pages déclarées dans VALID_PAGES sont bien définies."""
+    expected = {"current", "history", "memoirs", "acts", "welcome"}
     assert set(codex_chronicle.VALID_PAGES) == expected
 
 
