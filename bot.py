@@ -98,6 +98,8 @@ import observability as obs_module
 import publish_metrics as pubmet_module
 # Phase 141 : UX final — theme switcher + tutorial
 import ux_polish as ux_module
+# Phase 143 : DB cleanup hebdo (purge tables qui grossissent indéfiniment)
+import data_cleanup as cleanup_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -38004,6 +38006,13 @@ async def on_ready():
         )
     except Exception as ex:
         print(f"[on_ready ux_module setup] {ex}")
+    # Phase 143 : DB cleanup hebdo (purge tables qui grossissent indéfiniment)
+    try:
+        cleanup_module.setup(bot, get_db)
+        if not cleanup_module.weekly_cleanup_task.is_running():
+            cleanup_module.weekly_cleanup_task.start()
+    except Exception as ex:
+        print(f"[on_ready cleanup_module setup] {ex}")
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()

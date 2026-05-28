@@ -126,8 +126,8 @@ PRESTIGE_RANKS = [
     {"rank": 10, "name": "Diamant",    "emoji": "💎", "color": 0x00BFFF, "xp_bonus": 0.30, "coins_bonus": 0.18},
     {"rank": 12, "name": "Diamant II", "emoji": "💎", "color": 0x00BFFF, "xp_bonus": 0.35, "coins_bonus": 0.22},
     {"rank": 15, "name": "Diamant III","emoji": "💎", "color": 0x00BFFF, "xp_bonus": 0.42, "coins_bonus": 0.28},
-    {"rank": 18, "name": "Mythique",   "emoji": "💜", "color": 0x9B59B6, "xp_bonus": 0.50, "coins_bonus": 0.35},
-    {"rank": 22, "name": "Mythique II","emoji": "💜", "color": 0x9B59B6, "xp_bonus": 0.60, "coins_bonus": 0.42},
+    {"rank": 18, "name": "Mythique",   "emoji": "🔮", "color": 0x9B59B6, "xp_bonus": 0.50, "coins_bonus": 0.35},
+    {"rank": 22, "name": "Mythique II","emoji": "🔮", "color": 0x9B59B6, "xp_bonus": 0.60, "coins_bonus": 0.42},
     {"rank": 25, "name": "Cosmique",   "emoji": "🌌", "color": 0xE91E63, "xp_bonus": 0.75, "coins_bonus": 0.50},
 ]
 
@@ -255,7 +255,7 @@ WEEKLY_QUEST_TEMPLATES = [
     WeeklyQuestTemplate("w_treasures","Trouve-trésors",       "Trouve {target} tresors / flash",         "treasures_found",   (10, 20),     1700, 350, "💎"),
     WeeklyQuestTemplate("w_duels_5",  "Duelliste",            "Gagne {target} duels PvP",                "duels_won",         (3, 7),       1600, 350, "⚔️"),
     WeeklyQuestTemplate("w_quests_5", "Maitre des taches",    "Termine {target} daily quests",           "quests_done",       (10, 18),     1400, 300, "📜"),
-    WeeklyQuestTemplate("w_react_50", "Cœur géant",           "Donne {target} reactions",                "reactions_given",   (50, 100),    1000, 200, "❤️"),
+    WeeklyQuestTemplate("w_react_50", "Très réactif",         "Donne {target} reactions",                "reactions_given",   (50, 100),    1000, 200, "🌟"),
     WeeklyQuestTemplate("w_wheel_5",  "Tournoyer",            "Spin la Daily Wheel {target} fois",       "wheel_spins",       (5, 7),       800,  150, "🎰"),
 ]
 

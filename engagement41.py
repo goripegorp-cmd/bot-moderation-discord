@@ -42,7 +42,7 @@ class QuestTemplate:
 DAILY_QUEST_TEMPLATES = [
     # --- Easy (5-15 min) ---
     QuestTemplate('msg_easy', 'Petit bavard', "Envoie {target} messages aujourd'hui", 'messages', (10, 25), 50, 30, '💬', 'easy'),
-    QuestTemplate('react_easy', 'Coeur leger', "Donne {target} reactions a d'autres messages", 'reactions_given', (8, 15), 40, 20, '❤️', 'easy'),
+    QuestTemplate('react_easy', 'Reactif', "Donne {target} reactions a d'autres messages", 'reactions_given', (8, 15), 40, 20, '👍', 'easy'),
     QuestTemplate('voice_easy', 'Passage vocal', 'Passe {target} minutes en vocal', 'voice_min', (10, 25), 60, 40, '🎙️', 'easy'),
     QuestTemplate('event_easy', 'Curieux', 'Participe a {target} evenement(s) du jour', 'events_participated', (1, 1), 80, 50, '🎯', 'easy'),
     QuestTemplate('flash_easy', 'Reflexe', "Saisis {target} Tresor(s) Flash dans le serveur", 'treasures_found', (1, 2), 90, 50, '💎', 'easy'),
@@ -53,7 +53,7 @@ DAILY_QUEST_TEMPLATES = [
     QuestTemplate('purchase_medium', 'Acheteur', "Achete {target} item(s) a la boutique", 'shop_purchases', (1, 2), 150, 90, '🛒', 'medium'),
     QuestTemplate('event_medium', 'Participant', 'Participe a {target} evenement(s)', 'events_participated', (2, 3), 200, 130, '🎯', 'medium'),
     QuestTemplate('treasure_medium', 'Chasseur de tresors', 'Trouve {target} tresor(s)', 'treasures_found', (3, 6), 180, 120, '💎', 'medium'),
-    QuestTemplate('react_medium', 'Empathique', 'Donne {target} reactions au cours de la journee', 'reactions_given', (20, 35), 110, 70, '❤️', 'medium'),
+    QuestTemplate('react_medium', 'Soutien', 'Donne {target} reactions au cours de la journee', 'reactions_given', (20, 35), 110, 70, '🌟', 'medium'),
     # ⛔ supprime : 'coins_medium' (objectif "gagne X 🪙" est vague et confus)
     # --- Hard (1-3h) ---
     QuestTemplate('msg_hard', 'Pilier du chat', "Envoie {target} messages aujourd'hui", 'messages', (150, 250), 300, 200, '💬', 'hard'),
@@ -148,8 +148,8 @@ ACHIEVEMENTS = [
     Achievement('msgs_10000',     'Voix du serveur',     '10000 messages',                             'social', '📢', 'epic',      'messages', 10000,  reward_coins=1000),
     Achievement('msgs_100000',    'Legende vivante',     '100000 messages',                            'social', '👑', 'legendary', 'messages', 100000, reward_coins=10000),
     Achievement('reactions_50',   'Emotif',              '50 reactions donnees',                       'social', '👍', 'common',    'reactions_given', 50,   reward_coins=40),
-    Achievement('reactions_500',  'Empathique',          '500 reactions donnees',                      'social', '❤️', 'rare',     'reactions_given', 500,  reward_coins=150),
-    Achievement('reactions_5000', 'Coeur d\'or',         '5000 reactions donnees',                     'social', '💖', 'epic',      'reactions_given', 5000, reward_coins=600),
+    Achievement('reactions_500',  'Soutien',             '500 reactions donnees',                      'social', '🌟', 'rare',     'reactions_given', 500,  reward_coins=150),
+    Achievement('reactions_5000', 'Bienveillant',        '5000 reactions donnees',                     'social', '💯', 'epic',      'reactions_given', 5000, reward_coins=600),
 
     # --- Combat ---
     Achievement('first_boss',     'Tueur de boss',       'Participe a la victoire d\'un boss',         'combat', '⚔️', 'common',    'bosses_won', 1,    reward_coins=100),
