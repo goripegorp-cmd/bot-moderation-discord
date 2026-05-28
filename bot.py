@@ -902,16 +902,35 @@ async def db_init():
                     cols = [r[1] for r in await cur2.fetchall()]
                 # Phase 151 : ajout 'created_at' à la migration (manquait pour
                 # tickets legacy → cassait observability + tickets_enhance auto_close)
+                # Phase 151.1 : SQLite refuse ALTER TABLE ADD COLUMN avec
+                # DEFAULT CURRENT_TIMESTAMP (non-constant default). On utilise
+                # un default string constant + UPDATE backfill ensuite.
                 for cn, ct in [
                     ('panel_id', 'TEXT DEFAULT ""'),
                     ('claimed_by', 'INTEGER DEFAULT 0'),
                     ('status', 'TEXT DEFAULT "open"'),
                     ('answers', 'TEXT DEFAULT "{}"'),
-                    ('created_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP'),
+                    ('created_at', "DATETIME DEFAULT '2020-01-01 00:00:00'"),
                 ]:
                     if cn not in cols:
-                        try: await db.execute(f'ALTER TABLE tickets ADD COLUMN {cn} {ct}')
-                        except: pass
+                        try:
+                            await db.execute(
+                                f'ALTER TABLE tickets ADD COLUMN {cn} {ct}'
+                            )
+                            print(f"[migration] tickets.{cn} ajoute")
+                        except Exception as ex_alter:
+                            print(f"[migration] tickets.{cn} echec : {ex_alter}")
+                # Backfill created_at sur les rows ayant la valeur par defaut
+                # (= '2020-01-01') avec CURRENT_TIMESTAMP au moment du backfill.
+                # Ca permet aux nouveaux tickets d'avoir un created_at correct
+                # via le default INSERT.
+                try:
+                    await db.execute(
+                        "UPDATE tickets SET created_at = CURRENT_TIMESTAMP "
+                        "WHERE created_at = '2020-01-01 00:00:00' OR created_at IS NULL"
+                    )
+                except Exception:
+                    pass
         # Migration infractions
         async with db.execute("PRAGMA table_info(infractions)") as cur:
             cols = [r[1] for r in await cur.fetchall()]
