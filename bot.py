@@ -182,6 +182,8 @@ import daily_encounters as daily_encounters_module
 import weekly_council as weekly_council_module
 # Phase 170.5 : Régions du monde + patrouilles
 import regional_state as regional_state_module
+# Phase 170.6 : Indices fragmentés (force la discussion en chat)
+import mystery_investigation as mystery_investigation_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -39067,11 +39069,24 @@ async def on_ready():
         if not regional_state_module.regional_task.is_running():
             regional_state_module.regional_task.start()
 
-        # Codex setup APRÈS council + regional pour injection des refs
+        # Phase 170.6 : Indices fragmentés (force la discussion en chat)
+        mystery_investigation_module.setup(
+            bot, get_db, db_get, _v2h,
+            story_module=story_engine_module,
+            npc_module=npc_personalities_module,
+            add_coins_fn=add_coins,
+        )
+        await mystery_investigation_module.init_db()
+        mystery_investigation_module.register_persistent_views(bot)
+        if not mystery_investigation_module.mystery_task.is_running():
+            mystery_investigation_module.mystery_task.start()
+
+        # Codex setup APRÈS council + regional + mystery pour injection refs
         codex_chronicle_module.setup(
             bot, get_db, db_get, _v2h, story_engine_module,
             council_module=weekly_council_module,
             regional_module=regional_state_module,
+            mystery_module=mystery_investigation_module,
         )
         codex_chronicle_module.register_persistent_views(bot)
 

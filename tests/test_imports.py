@@ -53,6 +53,8 @@ PHASE_163_MODULES = [
     "weekly_council",
     # Phase 170.5 : Régions du monde + patrouilles
     "regional_state",
+    # Phase 170.6 : Indices fragmentés
+    "mystery_investigation",
 ]
 
 
@@ -115,6 +117,8 @@ INIT_DB_MODULES = [
     "weekly_council",
     # Phase 170.5 : regional state + patrols
     "regional_state",
+    # Phase 170.6 : mystery clues + revelations
+    "mystery_investigation",
 ]
 
 

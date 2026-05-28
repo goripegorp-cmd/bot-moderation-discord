@@ -1,4 +1,4 @@
-"""Phase 170.1-5 : Chronique + NPCs + Encounters + Conseil + Régions."""
+"""Phase 170.1-6 : Chronique + NPCs + Encounters + Conseil + Régions + Mystères."""
 import pytest
 
 import story_engine
@@ -7,6 +7,7 @@ import npc_personalities
 import daily_encounters
 import weekly_council
 import regional_state
+import mystery_investigation
 
 
 # ─── story_engine ────────────────────────────────────────────────────────
@@ -506,3 +507,93 @@ def test_regional_api():
         "PatrolDefendButton", "regional_task", "register_persistent_views",
     ]:
         assert hasattr(regional_state, name), f"manque : {name}"
+
+
+# ─── Phase 170.6 : Mystery Investigation ─────────────────────────────────
+
+def test_mystery_catalog_size():
+    """Au moins 4 mystères."""
+    assert len(mystery_investigation.MYSTERY_CATALOG) >= 4
+
+
+def test_mystery_required_fields():
+    required = {"id", "title", "act_unlock", "linked_npc", "fragments",
+                "revelation", "reward_coins"}
+    for m in mystery_investigation.MYSTERY_CATALOG:
+        missing = required - set(m.keys())
+        assert not missing, f"Mystery {m.get('id')} manque : {missing}"
+
+
+def test_mystery_ids_unique():
+    ids = [m["id"] for m in mystery_investigation.MYSTERY_CATALOG]
+    assert len(ids) == len(set(ids))
+
+
+def test_mystery_fragments_count():
+    """Chaque mystère a 3 à 5 fragments."""
+    for m in mystery_investigation.MYSTERY_CATALOG:
+        n = len(m["fragments"])
+        assert 3 <= n <= 5, (
+            f"Mystère {m['id']} a {n} fragments (3-5 attendu)"
+        )
+
+
+def test_mystery_fragments_non_empty():
+    """Tous les textes de fragments sont substantiels."""
+    for m in mystery_investigation.MYSTERY_CATALOG:
+        for frag in m["fragments"]:
+            assert len(frag) > 20
+
+
+def test_mystery_revelation_non_empty():
+    for m in mystery_investigation.MYSTERY_CATALOG:
+        assert len(m["revelation"]) > 50
+
+
+def test_mystery_linked_npcs_valid():
+    """Tous les NPCs liés existent."""
+    valid_ids = set(npc_personalities.list_npc_ids())
+    for m in mystery_investigation.MYSTERY_CATALOG:
+        assert m["linked_npc"] in valid_ids, (
+            f"Mystère {m['id']} ref NPC inconnu : {m['linked_npc']}"
+        )
+
+
+def test_mystery_acts_range():
+    """act_unlock entre 1 et 3."""
+    for m in mystery_investigation.MYSTERY_CATALOG:
+        assert 1 <= int(m["act_unlock"]) <= 3
+
+
+def test_mystery_chances_in_range():
+    """Probabilités de drop entre 0 et 1."""
+    for chance in [
+        mystery_investigation.GRANT_CHANCE_ENCOUNTER,
+        mystery_investigation.GRANT_CHANCE_MOB_KILL,
+        mystery_investigation.GRANT_CHANCE_COUNCIL,
+        mystery_investigation.GRANT_CHANCE_PATROL,
+    ]:
+        assert 0.0 < chance < 1.0
+
+
+def test_mystery_reward_positive():
+    assert mystery_investigation.REVEAL_COIN_REWARD > 0
+
+
+def test_mystery_button_is_dynamic():
+    import discord
+    assert issubclass(
+        mystery_investigation.ShareClueButton, discord.ui.DynamicItem,
+    )
+
+
+def test_mystery_api():
+    for name in [
+        "setup", "init_db", "MYSTERY_CATALOG",
+        "get_mystery_def", "list_mystery_ids",
+        "try_grant_clue", "get_user_clues", "get_guild_clue_coverage",
+        "get_revelations", "try_reveal_mystery", "share_clue_publicly",
+        "build_mysteries_panel", "open_mysteries_from_codex",
+        "ShareClueButton", "mystery_task", "register_persistent_views",
+    ]:
+        assert hasattr(mystery_investigation, name), f"manque : {name}"

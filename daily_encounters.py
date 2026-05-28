@@ -1133,12 +1133,23 @@ async def record_choice(
         except Exception:
             pass
 
+    # Phase 170.6 : 5% chance d'obtenir un fragment d'indice
+    granted_clue = None
+    try:
+        import mystery_investigation as _myst
+        granted_clue = await _myst.try_grant_clue(
+            guild_id, user_id, source="encounter",
+        )
+    except Exception:
+        pass
+
     return {
         "reply": choice.get("reply", "…"),
         "mood_delta": mood_delta,
         "coin_reward": coin_reward,
         "new_mood": new_mood,
         "npc_id": npc_id,
+        "granted_clue": granted_clue,
     }
 
 
@@ -1235,6 +1246,20 @@ async def _build_result_panel(
         f"💰 `+{result['coin_reward']}` 🪙\n"
         f"📖 +1 progression Chronique"
     ))
+
+    # Phase 170.6 : si un indice a été obtenu, le révéler en bonus
+    clue = result.get("granted_clue")
+    if clue:
+        items.append(v2_divider())
+        items.append(v2_body(
+            f"🔮 **TU AS REÇU UN FRAGMENT D'INDICE !**\n\n"
+            f"_Mystère : **{clue['mystery_title']}** "
+            f"(fragment {clue['clue_idx'] + 1}/{clue['total_fragments']})_\n\n"
+            f"{clue['clue_text']}\n\n"
+            f"_📖 Va dans 🔮 Mystères du Codex pour le partager publiquement "
+            f"et inviter les autres à compléter._"
+        ))
+
     items.append(v2_body(
         "_Reviens demain pour une nouvelle rencontre._"
     ))
