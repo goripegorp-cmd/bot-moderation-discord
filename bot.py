@@ -150,6 +150,14 @@ import server_pulse as server_pulse_module
 import stream_schedule as stream_schedule_module
 # Phase 165.2 : Activity heatmap (quand le serveur est actif)
 import activity_heatmap as activity_heatmap_module
+# Phase 166.1 : Anti-token-leak DM scanner
+import anti_token_leak as anti_token_leak_module
+# Phase 166.2 : Birthday auto-panel
+import birthday_panel as birthday_panel_module
+# Phase 166.3 : Welcome ack (👋 sur premier message)
+import welcome_ack as welcome_ack_module
+# Phase 166.4 : Spotlight qualité (⭐ → highlights)
+import spotlight_quality as spotlight_quality_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -3083,6 +3091,10 @@ async def cfg(gid):
         # Phase 163.4 : salon watch party live (Twitch/YouTube créateur)
         # 0 = panel non posté (mais le buff XP×2 reste actif quand même)
         'stream_watch_channel_id': 0,
+        # Phase 166.4 : salon spotlight (⭐ 5+ → republie)
+        # 0 = désactivé. Owner configure via /configure
+        'spotlight_channel_id': 0,
+        'spotlight_threshold': 5,
     }
     for k, v in defaults.items():
         if k not in data: data[k] = v
@@ -38923,7 +38935,22 @@ async def on_ready():
         if not activity_heatmap_module.weekly_owner_dispatch_task.is_running():
             activity_heatmap_module.weekly_owner_dispatch_task.start()
 
-        print("[Phase 155/165] Roblox/Stream : stats + raffle + watch + schedule + heatmap")
+        # Phase 166.1-4 : token leak / birthday / welcome / spotlight
+        anti_token_leak_module.setup(
+            bot, get_db, db_get, _v2h,
+            staff_sanction_module=staff_sanction_module,
+        )
+        await anti_token_leak_module.init_db()
+
+        birthday_panel_module.setup(bot, get_db, db_get, _v2h)
+
+        welcome_ack_module.setup(bot, get_db, db_get, _v2h)
+        await welcome_ack_module.init_db()
+
+        spotlight_quality_module.setup(bot, get_db, db_get, _v2h)
+        await spotlight_quality_module.init_db()
+
+        print("[Phase 155/165/166] Roblox/Stream + token_leak + birthday + welcome + spotlight")
     except Exception as ex:
         print(f"[on_ready Phase 155/165 roblox/stream] {ex}")
 
@@ -41911,6 +41938,14 @@ async def on_message(msg):
                 return  # 99% piraté/bot, on stoppe
         except Exception as ex:
             print(f"[on_message honeypot] {ex}")
+
+        # Phase 166.1 : anti-token-leak — delete + DM + alert staff
+        try:
+            handled = await anti_token_leak_module.on_message_hook(msg)
+            if handled:
+                return  # message déjà supprimé, on arrête
+        except Exception as ex:
+            print(f"[on_message anti_token_leak] {ex}")
         try:
             handled = await webhook_leak_module.on_message_hook(msg)
             if handled:
@@ -41940,6 +41975,12 @@ async def on_message(msg):
         # silencieux si pas d'URL Roblox dans le message)
         try:
             asyncio.create_task(roblox_stats_module.try_inline_preview(msg))
+        except Exception:
+            pass
+
+        # Phase 166.3 : welcome ack — 👋 sur 1er message ever du user
+        try:
+            asyncio.create_task(welcome_ack_module.on_message_hook(msg))
         except Exception:
             pass
 
@@ -45247,34 +45288,22 @@ async def _finalize_trade(btn_i: discord.Interaction, trade_id: str, accept: boo
 # - mine   : mes enchères actives
 # - bid    : (via boutons dans browse)
 
-@bot.tree.command(name="auction", description="🔨 Maison des enchères — vendre/acheter des items")
-@app_commands.describe(
-    action="Que veux-tu faire ?",
-)
-@app_commands.choices(action=[
-    app_commands.Choice(name="🔍 Voir les enchères en cours", value="browse"),
-    app_commands.Choice(name="📤 Mettre un item en vente",     value="create"),
-    app_commands.Choice(name="📋 Mes enchères en cours",       value="mine"),
-])
-async def auction_cmd(i: discord.Interaction, action: app_commands.Choice[str]):
-    """Phase 109 : maison des enchères P2P."""
+@bot.tree.command(name="auction", description="🔨 [DÉSACTIVÉ — Phase 166] Maison des enchères")
+async def auction_cmd(i: discord.Interaction):
+    """Phase 166 : auction P2P désactivée — favorise le sleep-on-events
+    + le passage d'items aux nouveaux. Économie reste 100% solo."""
     try:
-        if action.value == "browse":
-            await _auction_browse(i)
-        elif action.value == "create":
-            await _auction_create(i)
-        elif action.value == "mine":
-            await _auction_mine(i)
-        else:
-            await i.response.send_message("❌ Action inconnue.", ephemeral=True)
-    except Exception as ex:
-        print(f"[/auction] {ex}")
-        import traceback; traceback.print_exc()
-        try:
-            if not i.response.is_done():
-                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
-        except Exception:
-            pass
+        await i.response.send_message(
+            "🚫 **Système d'enchères désactivé.**\n\n"
+            "Cette feature a été retirée pour éviter que les comptes "
+            "anciens passent leurs items aux nouveaux (sleep-on-events). "
+            "Chaque joueur gagne SON loot via les events.\n\n"
+            "_Tu peux toujours équiper et améliorer tes items via "
+            "`/inventory`._",
+            ephemeral=True,
+        )
+    except Exception:
+        pass
 
 
 async def _auction_browse(i: discord.Interaction):
@@ -48695,10 +48724,31 @@ async def suggestion_cmd(i: discord.Interaction, titre: str, proposition: str):
 
 trade_cooldowns = {}
 
-@bot.tree.command(name="trade", description="🔄 Créer une annonce d'échange")
+@bot.tree.command(name="trade", description="🔄 [DÉSACTIVÉ — Phase 166] Annonce d'échange")
 async def trade_cmd(i: discord.Interaction):
+    """Phase 166 : trade community board désactivé.
+
+    Owner-decision : éviter que les anciens donnent du stuff aux nouveaux
+    qui arrivent (sleep-on-events). Chaque joueur progresse par lui-même
+    via les events. Inventaire/équipement reste 100% solo.
+    """
+    try:
+        await i.response.send_message(
+            "🚫 **Système d'annonces de trade désactivé.**\n\n"
+            "Cette feature a été retirée pour éviter que les anciens "
+            "joueurs passent leur stuff aux nouveaux (sleep-on-events). "
+            "Chaque joueur gagne SA propre progression via les events.\n\n"
+            "_Tu peux toujours gérer ton inventaire via `/inventory`._",
+            ephemeral=True,
+        )
+    except Exception:
+        pass
+    return
+
+async def _trade_cmd_DEPRECATED_DO_NOT_CALL(i: discord.Interaction):
+    """Phase 166 : ancien body conservé pour archive. Plus jamais appelé."""
     c = await cfg(i.guild.id)
-    
+
     # Vérifier les salons autorisés pour la commande
     allowed_channels = c.get('trade_allowed_channels', [])
     if not allowed_channels:
@@ -49968,6 +50018,14 @@ async def on_raw_reaction_add(payload):
         await _track_reaction_p41(payload)
     except Exception as ex:
         print(f"[_track_reaction_p41] {ex}")
+
+    # Phase 166.4 : spotlight qualité (⭐ → repost dans #highlights)
+    try:
+        asyncio.create_task(
+            spotlight_quality_module.on_reaction_hook(payload)
+        )
+    except Exception as ex:
+        print(f"[spotlight_quality on_reaction] {ex}")
 
     # Phase 49 : tracking missions (étapes reactions_unique)
     try:
@@ -56816,6 +56874,16 @@ class EngagementHubView(View):
         b22.callback = self._on_stream_schedule
         self.add_item(b22)
 
+        # Phase 166.2 : Birthday panel (qui a son anniv cette semaine ?)
+        b23 = Button(
+            label="🎂 Anniversaires",
+            style=discord.ButtonStyle.secondary,
+            custom_id="hub_birthdays",
+            row=4,
+        )
+        b23.callback = self._on_birthdays
+        self.add_item(b23)
+
     async def _on_quests(self, i: discord.Interaction):
         await _p41_open_daily(i)
 
@@ -57043,6 +57111,24 @@ class EngagementHubView(View):
             await i.followup.send(view=panel, ephemeral=True)
         except Exception as ex:
             print(f"[hub_stream_schedule] {ex}")
+
+    async def _on_birthdays(self, i: discord.Interaction):
+        """Phase 166.2 : ouvre le panel anniversaires."""
+        try:
+            if not i.guild:
+                return await i.response.send_message(
+                    "❌ Serveur uniquement.", ephemeral=True
+                )
+            panel = birthday_panel_module.build_birthday_panel(i.guild)
+            if panel is None:
+                return await i.response.send_message(
+                    "🎂 Module anniversaire indisponible.", ephemeral=True
+                )
+            await i.response.defer(ephemeral=True)
+            await panel.populate()
+            await i.followup.send(view=panel, ephemeral=True)
+        except Exception as ex:
+            print(f"[hub_birthdays] {ex}")
 
 
 # ─── COMMANDES /hub + /hub_setup ───────────────────────────────────────────────
@@ -64554,14 +64640,23 @@ class MarketplaceBuyView(View):
 
 @bot.tree.command(
     name="sell_pet",
-    description="🛒 Vendre un de tes pets sur le marketplace (annonce publique)",
+    description="🚫 [DÉSACTIVÉ — Phase 166] Vendre un pet",
 )
-@app_commands.describe(pet="Pet à vendre", price="Prix de vente en 🪙")
-@app_commands.choices(pet=[
-    app_commands.Choice(name=f"{p['emoji']} {p['name']}", value=p['id'])
-    for p in eng41.PETS
-])
-async def sell_pet_cmd(i: discord.Interaction, pet: app_commands.Choice[str], price: int):
+async def sell_pet_cmd(i: discord.Interaction):
+    """Phase 166 : marketplace pet désactivé — sleep-on-events guard."""
+    try:
+        await i.response.send_message(
+            "🚫 **Marketplace pets désactivé.**\n\n"
+            "Pour éviter que les anciens donnent leurs pets aux nouveaux. "
+            "Tu peux toujours équiper ton pet via le hub.",
+            ephemeral=True,
+        )
+    except Exception:
+        pass
+    return
+
+async def _sell_pet_cmd_DEPRECATED(i):
+    """Phase 166 : ancien body conservé pour archive."""
     if not await _safe_defer(i):
         return
     try:
@@ -64669,9 +64764,23 @@ async def sell_pet_cmd(i: discord.Interaction, pet: app_commands.Choice[str], pr
 
 @bot.tree.command(
     name="marketplace",
-    description="🛒 Voir les annonces actives sur le marketplace",
+    description="🚫 [DÉSACTIVÉ — Phase 166] Marketplace",
 )
 async def marketplace_cmd(i: discord.Interaction):
+    """Phase 166 : marketplace désactivé — sleep-on-events guard."""
+    try:
+        await i.response.send_message(
+            "🚫 **Marketplace désactivé.**\n\n"
+            "Pour éviter que les anciens passent leur stuff aux nouveaux. "
+            "Chaque joueur progresse via les events.",
+            ephemeral=True,
+        )
+    except Exception:
+        pass
+    return
+
+async def _marketplace_cmd_DEPRECATED(i):
+    """Phase 166 : ancien body conservé pour archive."""
     if not await _safe_defer(i):
         return
     try:

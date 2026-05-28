@@ -28,6 +28,11 @@ PHASE_163_MODULES = [
     # Phase 165 — nouveaux modules
     "stream_schedule",
     "activity_heatmap",
+    # Phase 166 — anti-token-leak, birthday, welcome, spotlight
+    "anti_token_leak",
+    "birthday_panel",
+    "welcome_ack",
+    "spotlight_quality",
 ]
 
 
@@ -67,6 +72,10 @@ INIT_DB_MODULES = [
     # Phase 165
     "stream_schedule",
     "activity_heatmap",
+    # Phase 166 (birthday_panel n'a pas d'init_db, lit cfg directement)
+    "anti_token_leak",
+    "welcome_ack",
+    "spotlight_quality",
 ]
 
 
