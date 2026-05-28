@@ -164,6 +164,8 @@ import status_rotator as status_rotator_module
 import voice_autoclean as voice_autoclean_module
 # Phase 167.3 : Member risk review
 import member_risk as member_risk_module
+# Phase 168.4 : Central error logger + burst alert
+import error_logger as error_logger_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -11338,12 +11340,15 @@ class DuelChallengeView(View):
                 pass
 
 
-@bot.tree.command(name="duel", description="⚔️ Défie un autre membre en combat 1v1")
+@bot.tree.command(name="duel", description="⚔️ Défie un autre membre en combat 1v1 (mise désactivée)")
 @app_commands.describe(
     membre="Le membre à défier",
-    mise="Mise en pièces (optionnel, max configuré)",
 )
-async def duel_cmd(i: discord.Interaction, membre: discord.Member, mise: int = 0):
+async def duel_cmd(i: discord.Interaction, membre: discord.Member):
+    """Phase 168.2 : `mise` retiré — le perdant finançait le gagnant
+    (transfert P2P direct A→B). Le duel reste actif mais purement pour
+    le fun + stats PvP. Les récompenses sont gérées côté bot."""
+    mise = 0  # forcé à 0 — anti sleep-on-events
     try:
         c = await cfg(i.guild.id)
         if not c.get('pvp_enabled', True):
@@ -38969,7 +38974,13 @@ async def on_ready():
         member_risk_module.setup(bot, get_db, db_get, _v2h)
         await member_risk_module.init_db()
 
-        print("[Phase 155/165/166/167] Stream + token_leak + birthday + welcome + spotlight + rotator + voice_clean + risk")
+        # Phase 168.4 : Centralised error logger + burst alert
+        error_logger_module.setup(bot, get_db, db_get, _v2h)
+        await error_logger_module.init_db()
+        if not error_logger_module.burst_check_task.is_running():
+            error_logger_module.burst_check_task.start()
+
+        print("[Phase 155/165/166/167/168] Stream + token_leak + birthday + welcome + spotlight + rotator + voice_clean + risk + error_logger")
     except Exception as ex:
         print(f"[on_ready Phase 155/165 roblox/stream] {ex}")
 
@@ -39512,17 +39523,29 @@ async def bonus_cmd(i: discord.Interaction):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Phase 131 : /gift — transfer P2P de coins (avec taxe configurable par jour)
+# Phase 131 : /gift — DÉSACTIVÉ Phase 168.2 (sleep-on-events guard)
 # ═══════════════════════════════════════════════════════════════════════════════
 @bot.tree.command(
     name="gift",
-    description="🎁 Envoyer des coins à un autre membre (taxe 5%, 0% le dimanche)",
+    description="🚫 [DÉSACTIVÉ — Phase 168] Envoyer des coins",
 )
-@app_commands.describe(
-    membre="Le membre à qui envoyer les coins",
-    montant="Montant à envoyer (min 100, max 50 000 par jour)",
-)
-async def gift_cmd(i: discord.Interaction, membre: discord.Member, montant: int):
+async def gift_cmd(i: discord.Interaction):
+    """Phase 168.2 : /gift désactivé. Économie 100% solo — éviter que
+    les anciens passent leurs coins aux nouveaux (sleep-on-events guard)."""
+    try:
+        await i.response.send_message(
+            "🚫 **Gift de coins désactivé.**\n\n"
+            "Pour éviter que les anciens donnent leurs coins aux nouveaux "
+            "(sleep-on-events guard). Chaque joueur gagne SA propre "
+            "progression via les events.",
+            ephemeral=True,
+        )
+    except Exception:
+        pass
+    return
+
+async def _gift_cmd_DEPRECATED(i: discord.Interaction, membre: discord.Member, montant: int):
+    """Phase 168.2 : ancien body conservé pour archive."""
     if not i.guild:
         return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
     try:
@@ -41971,6 +41994,14 @@ async def on_message(msg):
                 return  # message déjà supprimé, on arrête
         except Exception as ex:
             print(f"[on_message anti_token_leak] {ex}")
+            try:
+                await error_logger_module.log_error(
+                    "on_message.anti_token_leak", ex,
+                    context={"guild": msg.guild.id, "user": msg.author.id},
+                    guild_id=msg.guild.id,
+                )
+            except Exception:
+                pass
         try:
             handled = await webhook_leak_module.on_message_hook(msg)
             if handled:
@@ -45161,8 +45192,29 @@ async def _incr_phase113_counter(guild_id: int, user_id: int, column: str, by: i
 
 
 async def _finalize_trade(btn_i: discord.Interaction, trade_id: str, accept: bool, cancelled_by_a: bool = False):
-    """Phase 108 : finalise un trade (accept / refuse / cancel)."""
+    """Phase 108 : finalise un trade (accept / refuse / cancel).
+    Phase 168.1 : short-circuit — trade est désactivé en Phase 166. Si
+    un user clique sur un vieux bouton trade persisté, on répond proprement
+    au lieu de timeout 'Échec de l'interaction' (le accept-path faisait
+    8-12 ops DB sans defer)."""
     try:
+        # Phase 168.1 hotfix
+        try:
+            await btn_i.response.send_message(
+                "🚫 **Trades P2P désactivés** (Phase 166).\n\n"
+                "Pour éviter le passage d'items entre joueurs. "
+                "Tape `/inventory` pour gérer ton stuff.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
+        # Pop le trade pour éviter qu'il reste en mémoire
+        try:
+            _active_trades.pop(trade_id, None)
+        except Exception:
+            pass
+        return
+
         td = _active_trades.get(trade_id)
         if not td or td.get("status") != "pending":
             return await btn_i.response.send_message(
@@ -48306,64 +48358,93 @@ class RellseasExamineAcceptButton(Button):
         self.guild_id = guild_id
     
     async def callback(self, i):
+        """Phase 168.1 fix : defer immédiat car add_roles peut prendre 1-3s
+        + 2 DB calls — risque "Échec de l'interaction" sans defer."""
+        # DEFER FIRST — interaction reste ouverte 15 min au lieu de 3s
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
+
         g = i.guild
         c = await cfg(g.id)
         role = g.get_role(c.get('rellseas_role', 0))
-        
-        # Récupérer le user_id du questionnaire
-        async with get_db() as db:
-            async with db.execute('SELECT user_id, status FROM rellseas_quizzes WHERE id=?', (self.quiz_id,)) as cur:
-                row = await cur.fetchone()
-        
-        if not row:
-            return await i.response.send_message("❌ Questionnaire introuvable", ephemeral=True)
-        
-        user_id, status = row
-        if status not in ('pending', 'answered'):
-            return await i.response.send_message(f"❌ Ce questionnaire a déjà été traité (statut: {status})", ephemeral=True)
-        
-        if not role:
-            return await i.response.send_message("❌ Le rôle Realsy n'est pas configuré", ephemeral=True)
-        
-        member = g.get_member(user_id)
-        if not member:
-            return await i.response.send_message("❌ Le membre n'est plus sur le serveur", ephemeral=True)
-        
+
+        async def _send_or_edit(content=None, embed=None, view=None):
+            try:
+                if embed is not None or view is not None:
+                    await i.edit_original_response(embed=embed, view=view, attachments=[])
+                else:
+                    await i.edit_original_response(content=content, view=None, attachments=[])
+                return
+            except Exception:
+                pass
+            try:
+                if embed is not None:
+                    await i.followup.send(embed=embed, ephemeral=True)
+                else:
+                    await i.followup.send(content or "...", ephemeral=True)
+            except Exception:
+                pass
+
         try:
-            await member.add_roles(role, reason=f"Questionnaire Realsy accepté par {i.user.name}")
-        except:
-            return await i.response.send_message("❌ Impossible de donner le rôle", ephemeral=True)
-        
-        async with get_db() as db:
-            await db.execute('UPDATE rellseas_quizzes SET status=?, examiner_id=? WHERE id=?', ('accepted', i.user.id, self.quiz_id))
-            await db.execute('''INSERT OR REPLACE INTO realsy_tracking 
-                (guild_id, user_id, last_activity, warn_count) VALUES (?, ?, ?, 0)''',
-                (g.id, user_id, now().isoformat()))
-            await db.commit()
-        
-        e = discord.Embed(
-            title="✅ Questionnaire Accepté",
-            description=f"{member.mention} a été accepté et a reçu le rôle {role.mention}!",
-            color=C.GREEN,
-            timestamp=now()
-        )
-        e.add_field(name="👮 Validé par", value=i.user.mention, inline=True)
-        e.set_thumbnail(url=member.display_avatar.url)
-        
-        await i.response.edit_message(embed=e, view=None)
-        
-        log_ch = g.get_channel(c.get('rellseas_log_channel', 0))
-        if log_ch:
-            try: await webhook_send(log_ch, 'realsy', embed=e)
+            # Récupérer le user_id du questionnaire
+            async with get_db() as db:
+                async with db.execute('SELECT user_id, status FROM rellseas_quizzes WHERE id=?', (self.quiz_id,)) as cur:
+                    row = await cur.fetchone()
+
+            if not row:
+                return await _send_or_edit(content="❌ Questionnaire introuvable")
+
+            user_id, status = row
+            if status not in ('pending', 'answered'):
+                return await _send_or_edit(content=f"❌ Ce questionnaire a déjà été traité (statut: {status})")
+
+            if not role:
+                return await _send_or_edit(content="❌ Le rôle Realsy n'est pas configuré")
+
+            member = g.get_member(user_id)
+            if not member:
+                return await _send_or_edit(content="❌ Le membre n'est plus sur le serveur")
+
+            try:
+                await member.add_roles(role, reason=f"Questionnaire Realsy accepté par {i.user.name}")
+            except Exception:
+                return await _send_or_edit(content="❌ Impossible de donner le rôle")
+
+            async with get_db() as db:
+                await db.execute('UPDATE rellseas_quizzes SET status=?, examiner_id=? WHERE id=?', ('accepted', i.user.id, self.quiz_id))
+                await db.execute('''INSERT OR REPLACE INTO realsy_tracking
+                    (guild_id, user_id, last_activity, warn_count) VALUES (?, ?, ?, 0)''',
+                    (g.id, user_id, now().isoformat()))
+                await db.commit()
+
+            e = discord.Embed(
+                title="✅ Questionnaire Accepté",
+                description=f"{member.mention} a été accepté et a reçu le rôle {role.mention}!",
+                color=C.GREEN,
+                timestamp=now()
+            )
+            e.add_field(name="👮 Validé par", value=i.user.mention, inline=True)
+            e.set_thumbnail(url=member.display_avatar.url)
+
+            await _send_or_edit(embed=e)
+
+            log_ch = g.get_channel(c.get('rellseas_log_channel', 0))
+            if log_ch:
+                try: await webhook_send(log_ch, 'realsy', embed=e)
+                except: pass
+
+            try:
+                await member.send(embed=discord.Embed(
+                    title="🎉 Félicitations !",
+                    description=f"Votre candidature Realsy sur **{g.name}** a été acceptée !\n\nVous avez reçu le rôle {role.mention}.",
+                    color=C.GREEN
+                ))
             except: pass
-        
-        try:
-            await member.send(embed=discord.Embed(
-                title="🎉 Félicitations !",
-                description=f"Votre candidature Realsy sur **{g.name}** a été acceptée !\n\nVous avez reçu le rôle {role.mention}.",
-                color=C.GREEN
-            ))
-        except: pass
+        except Exception as ex:
+            print(f"[RellseasExamineAcceptButton] {ex}")
+            await _send_or_edit(content=f"❌ Erreur : `{ex}`")
 
 
 class RellseasExamineRejectButton(Button):
@@ -68165,7 +68246,13 @@ class PredictionBetView(View):
 
 
 async def _resolve_prediction(prediction_id: int, outcome: str, resolver_id: int) -> Optional[dict]:
-    """Résout une prédiction et paye les bonnes prédictions.
+    """Résout une prédiction.
+
+    Phase 168.2 : le payout parimutuel original redistribuait le pool
+    des perdants aux gagnants — c'est un transfert P2P déguisé. Modifié
+    pour rembourser TOUS les bets sans redistribution. Le système reste
+    actif pour la mécanique de prédiction (qui a vu juste) mais sans
+    transfert d'argent entre joueurs.
 
     outcome = 'yes', 'no', ou 'cancel'.
     """
@@ -68207,34 +68294,28 @@ async def _resolve_prediction(prediction_id: int, outcome: str, resolver_id: int
                 await db.commit()
             return {"gid": gid, "title": title, "outcome": "cancel", "winners": len(bets)}
 
-        # Outcome 'yes' ou 'no' : winners reçoivent prop du pool perdant
+        # Phase 168.2 : Plus de redistribution parimutuel. Tous les bets
+        # sont simplement remboursés. Les "winners" sont juste loggés
+        # pour les stats / leaderboards mais ne reçoivent plus le pool
+        # des "losers" (= transfert P2P déguisé interdit).
         winners_choice = outcome
-        winners_pool = yp if outcome == "yes" else np_
-        losers_pool = np_ if outcome == "yes" else yp
-
         async with get_db() as db:
             async with db.execute(
-                "SELECT user_id, amount FROM prediction_bets "
-                "WHERE prediction_id=? AND choice=? AND paid_out=0",
-                (prediction_id, winners_choice),
+                "SELECT user_id, amount, choice FROM prediction_bets "
+                "WHERE prediction_id=? AND paid_out=0",
+                (prediction_id,),
             ) as cur:
-                winners = await cur.fetchall()
+                all_bets = await cur.fetchall()
 
-        # Payout : chaque winner reçoit son bet + sa part du loser_pool prop. à son bet
         winners_count = 0
-        for uid, amt in winners:
-            amt = int(amt)
-            # Récupère sa mise
-            payout = amt
-            # + sa part du loser pool (au prorata)
-            if winners_pool > 0 and losers_pool > 0:
-                share = (amt / winners_pool) * losers_pool
-                payout += int(share)
+        for uid, amt, choice in all_bets:
             try:
-                await add_coins(gid, int(uid), int(payout))
+                # Refund pur — chaque user reçoit SA propre mise back
+                await add_coins(gid, int(uid), int(amt))
             except Exception:
                 pass
-            winners_count += 1
+            if choice == winners_choice:
+                winners_count += 1
 
         async with get_db() as db:
             await db.execute(
@@ -75702,10 +75783,17 @@ class AllianceLayoutV2(LayoutView):
             await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
     async def _on_deposit(self, i):
+        """Phase 168.2 : désactivé. Le vault permettait un transfert A→B
+        indirect (déposé par A, retiré ou donné à B par le chef)."""
         try:
-            await i.response.send_modal(AllianceDepositModal(self.alliance['id']))
+            await i.response.send_message(
+                "🚫 **Vault alliance désactivé** (Phase 168).\n\n"
+                "Pour éviter le passage de coins entre membres via la "
+                "cagnotte alliance. Chacun garde ses coins solo.",
+                ephemeral=True,
+            )
         except Exception as ex:
-            print(f"[AllianceLayoutV2 deposit] {ex}")
+            print(f"[AllianceLayoutV2 deposit DISABLED] {ex}")
 
     async def _on_audit(self, i):
         if not await _safe_defer(i):
@@ -75751,12 +75839,29 @@ class AllianceLayoutV2(LayoutView):
             await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
     async def _on_withdraw(self, i):
+        """Phase 168.2 : désactivé — vault P2P transfer guard."""
         try:
-            await i.response.send_modal(AllianceWithdrawModal(self.alliance['id']))
+            await i.response.send_message(
+                "🚫 **Vault alliance désactivé** (Phase 168).",
+                ephemeral=True,
+            )
         except Exception as ex:
-            print(f"[AllianceLayoutV2 withdraw] {ex}")
+            print(f"[AllianceLayoutV2 withdraw DISABLED] {ex}")
 
     async def _on_give(self, i):
+        """Phase 168.2 : désactivé. Donner des coins à un autre membre via
+        la trésorerie alliance = transfert P2P déguisé."""
+        try:
+            await i.response.send_message(
+                "🚫 **Don de coins inter-membres désactivé** (Phase 168).\n\n"
+                "Économie 100% solo. Le chef ne peut pas distribuer la "
+                "trésorerie de l'alliance.",
+                ephemeral=True,
+            )
+        except Exception:
+            pass
+        return
+
         if not await _safe_defer(i):
             return
         try:
