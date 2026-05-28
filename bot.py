@@ -9625,10 +9625,45 @@ class TreasureClaimView(View):
             except Exception:
                 pass
 
+            # Phase 144 : roll drop saisonnier (10% chance sur trésor)
+            seasonal_drop = None
+            try:
+                seasonal_drop = season_module.maybe_drop_seasonal(extra_chance=0.07)
+                if seasonal_drop:
+                    await season_module.log_drop_claim(
+                        i.guild.id, i.user.id, seasonal_drop
+                    )
+            except Exception as ex:
+                print(f"[treasure seasonal_drop] {ex}")
+
+            seasonal_line = ""
+            if seasonal_drop:
+                season_em = season_module.current_season().get("emoji", "🌸")
+                seasonal_line = (
+                    f"\n{season_em} **Drop saison :** "
+                    f"{seasonal_drop['emoji']} **{seasonal_drop['name']}** "
+                    f"_({seasonal_drop.get('rarity', 'rare')})_"
+                )
+
             await i.followup.send(
-                f"💎 Tu as récupéré **{tr.get('name', 'Trésor')}** !\n+`{coins}` 🪙{gear_msg}\n\n_{events2026.get_help_footer('event_end')}_",
+                f"💎 Tu as récupéré **{tr.get('name', 'Trésor')}** !\n"
+                f"+`{coins}` 🪙{gear_msg}{seasonal_line}",
                 ephemeral=True,
             )
+
+            # Phase 146 : boutons de suivi (zéro commande à mémoriser)
+            try:
+                fview = followup_module.build_followup_view(
+                    i.user.id, "treasure"
+                )
+                if fview is not None:
+                    await i.followup.send(
+                        content="_💡 Continue ton aventure :_",
+                        view=fview,
+                        ephemeral=True,
+                    )
+            except Exception as ex:
+                print(f"[treasure followup_view] {ex}")
         except Exception as ex:
             print(f"[TreasureClaimView _on_claim] {ex}")
             try:
@@ -12772,10 +12807,38 @@ class MysteryBoxView(View):
             except Exception:
                 pass
 
-            await i.followup.send(
-                f"{reward_msg}\n\n_{events2026.get_help_footer('event_end')}_",
-                ephemeral=True,
-            )
+            # Phase 144 : roll drop saisonnier sur mystery box (10% chance)
+            seasonal_drop = None
+            try:
+                seasonal_drop = season_module.maybe_drop_seasonal(extra_chance=0.07)
+                if seasonal_drop:
+                    await season_module.log_drop_claim(
+                        i.guild.id, i.user.id, seasonal_drop
+                    )
+                    season_em = season_module.current_season().get("emoji", "🌸")
+                    reward_msg += (
+                        f"\n{season_em} **Drop saison :** "
+                        f"{seasonal_drop['emoji']} **{seasonal_drop['name']}** "
+                        f"_({seasonal_drop.get('rarity', 'rare')})_"
+                    )
+            except Exception as ex:
+                print(f"[mystery_box seasonal_drop] {ex}")
+
+            await i.followup.send(reward_msg, ephemeral=True)
+
+            # Phase 146 : boutons de suivi
+            try:
+                fview = followup_module.build_followup_view(
+                    i.user.id, "treasure"
+                )
+                if fview is not None:
+                    await i.followup.send(
+                        content="_💡 Continue ton aventure :_",
+                        view=fview,
+                        ephemeral=True,
+                    )
+            except Exception as ex:
+                print(f"[mystery_box followup_view] {ex}")
 
             # Phase 77 : désactiver après 5 ouvertures via reconstruction LayoutView V2
             # (self est la view globale — on construit un layout disabled spécifique au msg)
@@ -54142,6 +54205,18 @@ async def _do_wheel_spin(i: discord.Interaction):
     e = discord.Embed(description="\n".join(lines), color=color)
     e.set_footer(text="Daily Wheel · Reviens demain pour un nouveau spin")
     await i.followup.send(embed=e, ephemeral=True)
+
+    # Phase 146 : boutons de suivi (zéro commande à mémoriser)
+    try:
+        fview = followup_module.build_followup_view(i.user.id, "daily")
+        if fview is not None:
+            await i.followup.send(
+                content="_💡 Continue ton aventure :_",
+                view=fview,
+                ephemeral=True,
+            )
+    except Exception as ex:
+        print(f"[wheel followup_view] {ex}")
 
 
 async def _get_balance_p41(guild_id: int, user_id: int) -> int:
