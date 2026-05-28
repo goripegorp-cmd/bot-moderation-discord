@@ -55907,6 +55907,9 @@ class EngagementHubView(View):
         self.add_item(b13)
 
         # Phase 150.3 : FAQ navigable + Saga en cours
+        # Note : row=0/1 ont seulement 2 boutons chacun (3 places libres).
+        # row=3 est plein (notifs/lore/mission + patch p47 season/factions = 5).
+        # row=4 a 4 boutons (roblox/compet/social/tools) → 1 place pour FAQ.
         b14 = Button(
             label="❓ Comment ça marche ?",
             style=discord.ButtonStyle.primary,
@@ -55920,7 +55923,7 @@ class EngagementHubView(View):
             label="📜 Saga en cours",
             style=discord.ButtonStyle.success,
             custom_id="hub_saga",
-            row=3,
+            row=0,
         )
         b15.callback = self._on_saga
         self.add_item(b15)

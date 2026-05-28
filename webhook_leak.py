@@ -10,7 +10,7 @@ screenshot mal cropped contient l'URL, c'est game over.
 
 Stratégie :
 1. **Scan inline** : hook on_message early. Pattern strict
-   `discord(?:app)?\.com/api/webhooks/\d+/[\w-]+`.
+   `discord(?:app)?[.]com/api/webhooks/[0-9]+/[\\w-]+`.
 2. **Action immédiate** : delete message en < 1s, DM author warning.
 3. **Auto-revoke** : si le bot a le scope `WEBHOOKS`, tente DELETE
    sur l'URL leaked → invalide le webhook (les attaquants ne peuvent
