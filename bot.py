@@ -139,6 +139,9 @@ import behavior_anomaly as behavior_anomaly_module
 import roblox_game_stats as roblox_stats_module
 import roblox_raffle as roblox_raffle_module
 import stream_watch_party as stream_party_module
+# Phase 157 : Community goals + Coin economy (anti-inflation)
+import community_goals as community_goals_module
+import coin_economy as coin_economy_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -8956,6 +8959,14 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
             except Exception as ex:
                 print(f"[boss_kill phase153] {ex}")
 
+            # Phase 157 : community goal tracking
+            try:
+                await community_goals_module.record_action(
+                    i.guild.id, i.user.id, "boss_kill",
+                )
+            except Exception as ex:
+                print(f"[boss_kill community_goal] {ex}")
+
             # Phase 144 : roll drop saisonnier sur le coup final (8% chance)
             seasonal_drop = None
             try:
@@ -9756,6 +9767,14 @@ class TreasureClaimView(View):
                 )
             except Exception as ex:
                 print(f"[treasure phase153] {ex}")
+
+            # Phase 157 : community goal
+            try:
+                await community_goals_module.record_action(
+                    i.guild.id, i.user.id, "treasure_open",
+                )
+            except Exception:
+                pass
 
             seasonal_line = ""
             if seasonal_drop:
@@ -38581,6 +38600,28 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready Phase 155 roblox/stream] {ex}")
 
+    # Phase 157 : Community goals + Coin economy
+    try:
+        community_goals_module.setup(
+            bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
+        )
+        await community_goals_module.init_db()
+        if not community_goals_module.weekly_goal_task.is_running():
+            community_goals_module.weekly_goal_task.start()
+
+        coin_economy_module.setup(
+            bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
+        )
+        await coin_economy_module.init_db()
+        if not coin_economy_module.monthly_festival_task.is_running():
+            coin_economy_module.monthly_festival_task.start()
+        if not coin_economy_module.luxury_tax_task.is_running():
+            coin_economy_module.luxury_tax_task.start()
+
+        print("[Phase 157] Community goals + Coin economy actifs")
+    except Exception as ex:
+        print(f"[on_ready Phase 157 community/economy] {ex}")
+
     # Phase 146 : Event followup buttons (zéro commande à mémoriser)
     try:
         followup_module.setup({
@@ -54400,6 +54441,14 @@ class DailyQuestView(View):
             except Exception as ex:
                 print(f"[daily_quest raffle] {ex}")
 
+            # Phase 157 : community goal
+            try:
+                await community_goals_module.record_action(
+                    self.guild_id, self.user_id, "quest_complete",
+                )
+            except Exception:
+                pass
+
             # Phase 146 : boutons de suivi (zéro commande à mémoriser)
             try:
                 fview = followup_module.build_followup_view(
@@ -54803,6 +54852,14 @@ async def _do_wheel_spin(i: discord.Interaction):
         )
     except Exception as ex:
         print(f"[wheel phase153 onboarding] {ex}")
+
+    # Phase 157 : community goal
+    try:
+        await community_goals_module.record_action(
+            i.guild.id, i.user.id, "wheel_spin",
+        )
+    except Exception:
+        pass
 
     # Phase 146 : boutons de suivi (zéro commande à mémoriser)
     try:
@@ -57707,6 +57764,14 @@ class RiddleAnswerView(View):
                             )
                         except Exception as ex:
                             print(f"[riddle phase153] {ex}")
+
+                        # Phase 157 : community goal
+                        try:
+                            await community_goals_module.record_action(
+                                i.guild.id, i.user.id, "riddle_solve",
+                            )
+                        except Exception:
+                            pass
                         # Phase 146 : boutons de suivi (zéro commande à mémoriser)
                         try:
                             fview = followup_module.build_followup_view(
@@ -71857,6 +71922,14 @@ async def duel_report_cmd(i: discord.Interaction, duel_id: int, gagnant: discord
             )
         except Exception as ex:
             print(f"[duel phase153] {ex}")
+
+        # Phase 157 : community goal — 1 duel counté
+        try:
+            await community_goals_module.record_action(
+                i.guild.id, gagnant.id, "duel",
+            )
+        except Exception:
+            pass
 
         # Phase 146 : boutons de suivi pour le winner (zéro commande à mémoriser)
         try:
