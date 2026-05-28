@@ -422,6 +422,40 @@ async def end_saga(saga_id: int):
         except Exception:
             pass
 
+        # Phase 163.3 : Top 5 contributors → 5 points réputation + DM digest
+        try:
+            import reputation as rep_mod
+            import dm_digest as dm_mod
+            for i, (uid, _) in enumerate(top):
+                try:
+                    rep_result = await rep_mod.add_points(
+                        guild_id, int(uid), "saga_top_contributor",
+                    )
+                    # DM digest : saga_update si tier upgrade
+                    if rep_result and rep_result.get("new_tier"):
+                        nt = rep_result["new_tier"]
+                        try:
+                            await dm_mod.enqueue(
+                                guild_id, int(uid), "level_up",
+                                f"⭐ Tu as débloqué le tier **{nt['emoji']} "
+                                f"{nt['name']}** ({rep_result['new_total']} pts)!",
+                            )
+                        except Exception:
+                            pass
+                    # DM digest : saga_update pour informer du top placement
+                    try:
+                        await dm_mod.enqueue(
+                            guild_id, int(uid), "saga_update",
+                            f"📜 Top #{i+1} contributeur saga ! "
+                            f"+`{rewards[i]}` 🪙 + 2 tickets loterie + 5 pts rép.",
+                        )
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         return {"top_contributors": [{"user_id": int(t[0]), "contribution": int(t[1])} for t in top]}
     except Exception as ex:
         print(f"[saga_engine end_saga] {ex}")

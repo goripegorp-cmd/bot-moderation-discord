@@ -195,6 +195,29 @@ async def run_weekly_draw(guild: discord.Guild) -> dict:
     # Semaine qui se termine (= ISO week courante, on tire dimanche soir)
     week = _current_week_key()
     try:
+        # Phase 163.3 : distribute "roblox_linked_weekly" tickets juste avant
+        # le tirage. Tout user avec compte Roblox lié reçoit 1 ticket bonus.
+        # Le draw ne tire qu'une fois par semaine par guild (check raffle_draws
+        # plus haut), donc cette boucle ne s'exécute qu'une fois par semaine
+        # — pas de doublon.
+        try:
+            async with _get_db() as db:
+                async with db.execute(
+                    "SELECT user_id FROM roblox_account_links "
+                    "WHERE guild_id=?",
+                    (guild.id,),
+                ) as cur:
+                    linked_rows = await cur.fetchall()
+            for (uid,) in linked_rows:
+                try:
+                    await add_tickets(
+                        guild.id, int(uid), "roblox_linked_weekly", 1,
+                    )
+                except Exception:
+                    pass
+        except Exception as ex:
+            print(f"[roblox_raffle linked_weekly] {ex}")
+
         # Récupère tous les tickets de la semaine
         async with _get_db() as db:
             async with db.execute(
