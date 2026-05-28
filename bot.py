@@ -40117,49 +40117,52 @@ bot.tree.add_command(season_group)
 # Phase 145 : /dormant_stats — owner stats du réveil des dormants
 # ═══════════════════════════════════════════════════════════════════════════════
 @owner_group.command(
-    name="dormant_stats",
-    description="💌 [Owner] Stats du réveil des membres dormants",
+    name="dormant",
+    description="💌 [Owner] Réveil des dormants — stats ou test (consolide ex-2 cmds)",
 )
-@app_commands.describe(jours="Période (défaut 7, max 90)")
-async def owner_dormant_stats_cmd(i: discord.Interaction, jours: int = 7):
+@app_commands.describe(
+    mode="stats : voir les stats · test : forcer un cycle de DMs",
+    jours="(mode=stats) Période (défaut 7, max 90)",
+)
+@app_commands.choices(mode=[
+    app_commands.Choice(name="stats — voir le tableau de bord", value="stats"),
+    app_commands.Choice(name="test — forcer un cycle de DMs", value="test"),
+])
+async def owner_dormant_cmd(
+    i: discord.Interaction,
+    mode: app_commands.Choice[str],
+    jours: int = 7,
+):
     if not i.guild:
         return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
     if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
         return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
     try:
-        days = max(1, min(90, int(jours or 7)))
-        stats = await dormant_module.get_stats(i.guild.id, days=days)
-        view = dormant_module.build_stats_panel(stats, i.guild.name)
-        if view is None:
-            return await i.response.send_message(
-                "❌ Module indisponible.", ephemeral=True
+        if mode.value == "stats":
+            days = max(1, min(90, int(jours or 7)))
+            stats = await dormant_module.get_stats(i.guild.id, days=days)
+            view = dormant_module.build_stats_panel(stats, i.guild.name)
+            if view is None:
+                return await i.response.send_message(
+                    "❌ Module indisponible.", ephemeral=True
+                )
+            await i.response.send_message(view=view, ephemeral=True)
+        else:
+            # test
+            await i.response.defer(ephemeral=True)
+            sent = await dormant_module.run_dormant_dispatch_for_guild(i.guild)
+            await i.followup.send(
+                f"💌 **{sent}** DM(s) envoyé(s) aux dormants éligibles.\n"
+                f"_Vérifie `/owner dormant mode:stats` pour les détails._",
+                ephemeral=True,
             )
-        await i.response.send_message(view=view, ephemeral=True)
     except Exception as ex:
-        print(f"[owner_dormant_stats_cmd] {ex}")
-
-
-@owner_group.command(
-    name="dormant_test",
-    description="💌 [Owner] Forcer un cycle de DMs aux dormants (test)",
-)
-async def owner_dormant_test_cmd(i: discord.Interaction):
-    if not i.guild:
-        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
-    if i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID:
-        return await i.response.send_message("❌ Owner uniquement.", ephemeral=True)
-    try:
-        await i.response.defer(ephemeral=True)
-        sent = await dormant_module.run_dormant_dispatch_for_guild(i.guild)
-        await i.followup.send(
-            f"💌 **{sent}** DM(s) envoyé(s) aux dormants éligibles.\n"
-            f"_Vérifie `/owner dormant_stats` pour les détails._",
-            ephemeral=True,
-        )
-    except Exception as ex:
-        print(f"[owner_dormant_test_cmd] {ex}")
+        print(f"[owner_dormant_cmd mode={mode.value}] {ex}")
         try:
-            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            if not i.response.is_done():
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            else:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
         except Exception:
             pass
 
