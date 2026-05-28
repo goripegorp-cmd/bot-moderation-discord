@@ -214,6 +214,9 @@ async def _handle_hit(message: discord.Message):
             pass
 
         # Alerte staff via staff_sanction
+        # Phase 163.4 : utilise message.channel.name (Phase 158 = nom configurable
+        # par l'owner, donc plus de constante HONEYPOT_NAME qui causait NameError).
+        ch_name = message.channel.name if message.channel else "honeypot"
         if _staff_sanction is not None:
             try:
                 await _staff_sanction.create_sanction_panel(
@@ -222,7 +225,7 @@ async def _handle_hit(message: discord.Message):
                     reason="🍯 Honeypot — compte 99% piraté ou self-bot",
                     evidence_text=(
                         f"Le user a posté dans le salon piège "
-                        f"#{HONEYPOT_NAME} qui est invisible aux humains."
+                        f"#{ch_name} qui est invisible aux humains."
                     ),
                     evidence_channel_id=message.channel.id,
                     auto_action_taken="Mute auto 24h",
@@ -242,7 +245,7 @@ async def _handle_hit(message: discord.Message):
                     f"🍯 **HONEYPOT HIT — {message.guild.name}**\n\n"
                     f"User : {message.author.mention} "
                     f"(`{message.author.name}` · ID `{message.author.id}`)\n"
-                    f"A posté dans le salon piège **#{HONEYPOT_NAME}**.\n\n"
+                    f"A posté dans le salon piège **#{ch_name}**.\n\n"
                     f"Probablement un **self-bot** ou un **compte piraté**. "
                     f"Action auto : mute 24h. Panel staff sanction créé."
                 )

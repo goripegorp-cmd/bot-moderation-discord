@@ -312,11 +312,18 @@ def build_journey_panel(member: discord.Member):
                     f"le bonus final de **5000 coins** !"
                 ))
 
+            # Phase 163.4 : fix — l'instruction "Commence par choisir ton
+            # pet" doit être DANS le container, pas après. Auparavant elle
+            # était ajoutée à items après self.add_item(v2_container(...)),
+            # donc jamais affichée.
+            if not prog["steps_done"][0]:
+                items.append(v2_divider())
+                items.append(v2_body("**👇 Commence par choisir ton pet :**"))
+
             self.add_item(v2_container(*items, color=0x9B59B6))
 
             # Étape 1 : pet — boutons inline si pas encore fait
             if not prog["steps_done"][0]:
-                items.append(v2_body("**👇 Commence par choisir ton pet :**"))
                 for pet in PET_CHOICES:
                     btn = Button(
                         label=pet["name"],

@@ -3058,6 +3058,9 @@ async def cfg(gid):
         # 0 = désactivé. Owner configure via /configure → Logs → Salons sécurité.
         'honeypot_channel_id': 0,
         'staff_sanction_channel_id': 0,
+        # Phase 163.4 : salon watch party live (Twitch/YouTube créateur)
+        # 0 = panel non posté (mais le buff XP×2 reste actif quand même)
+        'stream_watch_channel_id': 0,
     }
     for k, v in defaults.items():
         if k not in data: data[k] = v
@@ -15367,16 +15370,18 @@ class LogsPanelV2(LayoutView):
 
 
 class SecurityChannelsPanelV2(LayoutView):
-    """Phase 158 : sous-panel pour configurer les salons sécurité spécifiques.
+    """Phase 158/163.4 : sous-panel pour configurer les salons spécifiques.
 
-    Permet à l'owner de pointer chaque feature sécurité vers un salon
-    dédié (au lieu d'auto-créer des salons avec des noms imposés).
+    Permet à l'owner de pointer chaque feature vers un salon dédié
+    (au lieu d'auto-créer des salons avec des noms imposés).
 
     Salons configurables :
     - 🍯 Honeypot : salon piège que l'owner crée avec n'importe quel nom
       (suggéré : 🎁-claim-free-nitro pour appâter les bots scrapers)
     - 🚨 Staff Sanction : salon où le bot pose les panels d'action quand
       un module détecte une infraction (Mute/Warn/Kick/Ban)
+    - 🔴 Watch Party : salon où le bot annonce les lives du créateur
+      (optionnel — buff XP×2 fonctionne sans)
     """
 
     CHANNEL_KEYS = [
@@ -15388,6 +15393,10 @@ class SecurityChannelsPanelV2(LayoutView):
          "Salon où le bot envoie les panels d'action quand un module "
          "(token grabber, webhook leak, honeypot, anomaly) détecte "
          "une infraction. Boutons Mute/Warn/Kick/Ban."),
+        ("stream_watch_channel_id", "🔴 Watch Party",
+         "Salon où le bot poste un panel quand le créateur lance un "
+         "live Twitch/YouTube (buff XP×2 reste actif partout même si "
+         "ce salon n'est pas configuré)."),
     ]
 
     def __init__(self, u, g):
