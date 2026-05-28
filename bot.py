@@ -54707,10 +54707,21 @@ class DailyQuestView(View):
                 print(f"[daily_quest profile/saga] {ex}")
 
             # Phase 153 : reputation + mentor + onboarding step 3
+            # Phase 163 : capture tier upgrade → DM digest
             try:
-                await reputation_module.add_points(
+                rep_result = await reputation_module.add_points(
                     self.guild_id, self.user_id, "quest_complete",
                 )
+                if rep_result and rep_result.get("new_tier"):
+                    nt = rep_result["new_tier"]
+                    try:
+                        await dm_digest_module.enqueue(
+                            self.guild_id, self.user_id, "level_up",
+                            f"⭐ Tu as débloqué le tier **{nt['emoji']} "
+                            f"{nt['name']}** ({rep_result['new_total']} pts)!",
+                        )
+                    except Exception:
+                        pass
                 await mentor_bonus_module.on_apprenti_event(
                     self.guild_id, self.user_id, "quest_complete",
                 )
@@ -54719,7 +54730,7 @@ class DailyQuestView(View):
                     self.guild_id, self.user_id, 3,
                 )
             except Exception as ex:
-                print(f"[daily_quest phase153] {ex}")
+                print(f"[daily_quest phase153/163] {ex}")
 
             # Phase 156 : raffle ticket (1 par claim — max ~5/semaine)
             try:
@@ -58216,15 +58227,26 @@ class RiddleAnswerView(View):
                         except Exception as ex:
                             print(f"[riddle profile/saga] {ex}")
                         # Phase 153 : reputation + mentor
+                        # Phase 163 : capture tier upgrade → DM digest
                         try:
-                            await reputation_module.add_points(
+                            rep_result = await reputation_module.add_points(
                                 i.guild.id, i.user.id, "riddle_first",
                             )
+                            if rep_result and rep_result.get("new_tier"):
+                                nt = rep_result["new_tier"]
+                                try:
+                                    await dm_digest_module.enqueue(
+                                        i.guild.id, i.user.id, "level_up",
+                                        f"⭐ Tu as débloqué le tier **{nt['emoji']} "
+                                        f"{nt['name']}** ({rep_result['new_total']} pts)!",
+                                    )
+                                except Exception:
+                                    pass
                             await mentor_bonus_module.on_apprenti_event(
                                 i.guild.id, i.user.id, "riddle_first",
                             )
                         except Exception as ex:
-                            print(f"[riddle phase153] {ex}")
+                            print(f"[riddle phase153/163] {ex}")
 
                         # Phase 157 : community goal
                         try:
@@ -72443,15 +72465,26 @@ async def duel_report_cmd(i: discord.Interaction, duel_id: int, gagnant: discord
             print(f"[duel profile/saga] {ex}")
 
         # Phase 153 : reputation + mentor (gagnant uniquement)
+        # Phase 163 : capture tier upgrade → DM digest
         try:
-            await reputation_module.add_points(
+            rep_result = await reputation_module.add_points(
                 i.guild.id, gagnant.id, "duel_win",
             )
+            if rep_result and rep_result.get("new_tier"):
+                nt = rep_result["new_tier"]
+                try:
+                    await dm_digest_module.enqueue(
+                        i.guild.id, gagnant.id, "level_up",
+                        f"⭐ Tu as débloqué le tier **{nt['emoji']} "
+                        f"{nt['name']}** ({rep_result['new_total']} pts)!",
+                    )
+                except Exception:
+                    pass
             await mentor_bonus_module.on_apprenti_event(
                 i.guild.id, gagnant.id, "duel_win",
             )
         except Exception as ex:
-            print(f"[duel phase153] {ex}")
+            print(f"[duel phase153/163] {ex}")
 
         # Phase 157 : community goal — 1 duel counté
         try:
