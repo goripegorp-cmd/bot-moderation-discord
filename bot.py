@@ -38310,8 +38310,24 @@ async def on_ready():
 
         faq_module.register_panel_opener("open_season_panel", _open_season_p)
         faq_module.register_panel_opener("open_my_drops_panel", _open_my_drops_p)
-        # Les autres openers (open_hub_*) peuvent être branchés sur l'EngagementHub
-        # existant ; ici on laisse le minimum pour ne pas casser.
+
+        # Phase 150.3 : openers vers les sub-hubs existants
+        async def _open_hub_root(i):
+            try:
+                await i.response.send_message(
+                    "🎮 **Ouvre /hub** pour accéder au panneau principal.",
+                    ephemeral=True,
+                )
+            except Exception:
+                pass
+
+        # Tous les open_hub_* pointent vers le hub central (l'utilisateur
+        # navigue ensuite via les boutons du hub).
+        for k in ("open_hub_economy", "open_hub_combat",
+                  "open_hub_pvp", "open_hub_boss", "open_hub_alliance",
+                  "open_hub_marketplace", "open_hub_bank",
+                  "open_hub_events"):
+            faq_module.register_panel_opener(k, _open_hub_root)
 
         print("[Phase 149] Events MMO actifs : sagas + profil + FAQ")
     except Exception as ex:
@@ -55890,6 +55906,25 @@ class EngagementHubView(View):
         b13.callback = self._on_tools
         self.add_item(b13)
 
+        # Phase 150.3 : FAQ navigable + Saga en cours
+        b14 = Button(
+            label="❓ Comment ça marche ?",
+            style=discord.ButtonStyle.primary,
+            custom_id="hub_faq",
+            row=4,
+        )
+        b14.callback = self._on_faq
+        self.add_item(b14)
+
+        b15 = Button(
+            label="📜 Saga en cours",
+            style=discord.ButtonStyle.success,
+            custom_id="hub_saga",
+            row=3,
+        )
+        b15.callback = self._on_saga
+        self.add_item(b15)
+
     async def _on_quests(self, i: discord.Interaction):
         await _p41_open_daily(i)
 
@@ -55936,6 +55971,57 @@ class EngagementHubView(View):
     async def _on_tools(self, i: discord.Interaction):
         # Phase 65 : ouvre le sub-hub Outils (regroupe tout ce qui était slash)
         await _open_tools_panel(i)
+
+    async def _on_faq(self, i: discord.Interaction):
+        # Phase 150.3 : ouvre la FAQ navigable (zéro commande à mémoriser)
+        try:
+            panel = faq_module.build_faq_root()
+            if panel:
+                await i.response.send_message(view=panel, ephemeral=True)
+            else:
+                await i.response.send_message(
+                    "❌ FAQ indisponible.", ephemeral=True
+                )
+        except Exception as ex:
+            print(f"[hub_faq] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(
+                        f"❌ Erreur : `{ex}`", ephemeral=True
+                    )
+            except Exception:
+                pass
+
+    async def _on_saga(self, i: discord.Interaction):
+        # Phase 150.3 : affiche l'état de la saga active
+        try:
+            if not i.guild:
+                return await i.response.send_message(
+                    "❌ Serveur uniquement.", ephemeral=True
+                )
+            panel = saga_module.build_saga_panel(
+                i.guild.id, i.user.id,
+            )
+            if panel is None:
+                return await i.response.send_message(
+                    "📜 _Aucune saga active. La prochaine démarre lundi 18h FR._",
+                    ephemeral=True,
+                )
+            # Le panel est async (populate) — defer + populate + send
+            await i.response.defer(ephemeral=True)
+            await panel.populate()
+            await i.followup.send(view=panel, ephemeral=True)
+        except Exception as ex:
+            print(f"[hub_saga] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(
+                        f"❌ Erreur : `{ex}`", ephemeral=True
+                    )
+                else:
+                    await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
 
 
 # ─── COMMANDES /hub + /hub_setup ───────────────────────────────────────────────
