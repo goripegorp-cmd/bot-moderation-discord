@@ -135,6 +135,10 @@ import mentor_bonus as mentor_bonus_module
 # Phase 154 : Sécurité 2026++ — honeypot + behavior anomaly
 import honeypot as honeypot_module
 import behavior_anomaly as behavior_anomaly_module
+# Phase 155 : Roblox / Stream — game stats, raffle, watch party
+import roblox_game_stats as roblox_stats_module
+import roblox_raffle as roblox_raffle_module
+import stream_watch_party as stream_party_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -38520,6 +38524,29 @@ async def on_ready():
         print("[Phase 154] Sécurité 2026++ : honeypot + behavior anomaly")
     except Exception as ex:
         print(f"[on_ready Phase 154 security++] {ex}")
+
+    # Phase 155 : Roblox / Stream
+    try:
+        roblox_stats_module.setup(bot, get_db, db_get, _v2h)
+        await roblox_stats_module.init_db()
+        if not roblox_stats_module.weekly_stats_task.is_running():
+            roblox_stats_module.weekly_stats_task.start()
+
+        roblox_raffle_module.setup(
+            bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
+        )
+        await roblox_raffle_module.init_db()
+        if not roblox_raffle_module.weekly_draw_task.is_running():
+            roblox_raffle_module.weekly_draw_task.start()
+
+        stream_party_module.setup(bot, get_db, db_get, _v2h)
+        await stream_party_module.init_db()
+        if not stream_party_module.cleanup_task.is_running():
+            stream_party_module.cleanup_task.start()
+
+        print("[Phase 155] Roblox/Stream : game stats + raffle + watch party")
+    except Exception as ex:
+        print(f"[on_ready Phase 155 roblox/stream] {ex}")
 
     # Phase 146 : Event followup buttons (zéro commande à mémoriser)
     try:
