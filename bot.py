@@ -117,6 +117,10 @@ import twofa_vault as twofa_module
 import rate_limiter as ratelimit_module
 import health_check as health_module
 import backup_lite as backup_module
+# Phase 149 : Events MMO — sagas multi-jours, profil joueur, FAQ navigable
+import saga_engine as saga_module
+import player_profile as profile_module
+import help_faq as faq_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -38231,6 +38235,53 @@ async def on_ready():
         print("[Phase 148] Robustesse active : 2FA + ratelimit + health + backup")
     except Exception as ex:
         print(f"[on_ready Phase 148 robustness] {ex}")
+
+    # Phase 149 : Events MMO — sagas + profil joueur + FAQ
+    try:
+        saga_module.setup(
+            bot, get_db, db_get, _v2h,
+            seasonal_module=season_module,
+            add_coins_fn=add_coins,
+        )
+        await saga_module.init_db()
+        if not saga_module.saga_lifecycle_task.is_running():
+            saga_module.saga_lifecycle_task.start()
+
+        profile_module.setup(get_db, db_get, _v2h)
+        await profile_module.init_db()
+
+        faq_module.setup(_v2h)
+        # Enregistre les openers (callbacks qui ouvrent les panels existants)
+        async def _open_season_p(i):
+            try:
+                v = season_module.build_season_panel(
+                    i.guild.name if i.guild else ""
+                )
+                if v:
+                    await i.response.send_message(view=v, ephemeral=True)
+            except Exception as ex:
+                print(f"[faq opener season] {ex}")
+
+        async def _open_my_drops_p(i):
+            try:
+                if not i.guild or not isinstance(i.user, discord.Member):
+                    return
+                v = await season_module.build_my_drops_panel(
+                    i.guild.id, i.user
+                )
+                if v:
+                    await i.response.send_message(view=v, ephemeral=True)
+            except Exception as ex:
+                print(f"[faq opener drops] {ex}")
+
+        faq_module.register_panel_opener("open_season_panel", _open_season_p)
+        faq_module.register_panel_opener("open_my_drops_panel", _open_my_drops_p)
+        # Les autres openers (open_hub_*) peuvent être branchés sur l'EngagementHub
+        # existant ; ici on laisse le minimum pour ne pas casser.
+
+        print("[Phase 149] Events MMO actifs : sagas + profil + FAQ")
+    except Exception as ex:
+        print(f"[on_ready Phase 149 events] {ex}")
 
     # Phase 146 : Event followup buttons (zéro commande à mémoriser)
     try:
