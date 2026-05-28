@@ -3054,6 +3054,10 @@ async def cfg(gid):
         'pvp_min_kills_required': 0,  # minimum kills lifetime pour pouvoir dueler
         'pvp_cooldown_min': 60,        # 1 duel par user par heure
         'pvp_max_bet': 5000,            # mise max en coins
+        # Phase 158 : salons sécurité configurables (au lieu d'auto-créer)
+        # 0 = désactivé. Owner configure via /configure → Logs → Salons sécurité.
+        'honeypot_channel_id': 0,
+        'staff_sanction_channel_id': 0,
     }
     for k, v in defaults.items():
         if k not in data: data[k] = v
