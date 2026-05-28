@@ -121,6 +121,10 @@ import backup_lite as backup_module
 import saga_engine as saga_module
 import player_profile as profile_module
 import help_faq as faq_module
+# Phase 152 : UX/Owner — DM digest, owner digest, webhook tracker
+import dm_digest as dm_digest_module
+import webhook_tracker as webhook_tracker_module
+import owner_digest as owner_digest_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -38371,6 +38375,61 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready Phase 149 events] {ex}")
 
+    # Phase 152 : DM digest + webhook tracker + owner daily digest
+    try:
+        dm_digest_module.setup(bot, get_db, db_get, _v2h)
+        await dm_digest_module.init_db()
+        if not dm_digest_module.digest_dispatch_task.is_running():
+            dm_digest_module.digest_dispatch_task.start()
+
+        webhook_tracker_module.setup(bot, get_db, db_get, _v2h)
+        await webhook_tracker_module.init_db()
+        if not webhook_tracker_module.weekly_scan_task.is_running():
+            webhook_tracker_module.weekly_scan_task.start()
+
+        owner_digest_module.setup(
+            bot, get_db, db_get, _v2h,
+            profile_module=profile_module,
+            raid_module=raid_module,
+            webhook_tracker_module=webhook_tracker_module,
+            seasonal_module=season_module,
+        )
+        await owner_digest_module.init_db()
+        if not owner_digest_module.owner_digest_task.is_running():
+            owner_digest_module.owner_digest_task.start()
+
+        print("[Phase 152] UX/Owner actifs : DM digest + webhook tracker + owner digest")
+    except Exception as ex:
+        print(f"[on_ready Phase 152 ux/owner] {ex}")
+
+    # Phase 152.D2 : Audit DB indexes + auto-create les manquants critiques
+    try:
+        async with get_db() as db:
+            # Indexes critiques pour les queries hot path
+            critical_indexes = [
+                ("idx_economy_guild_user", "economy(guild_id, user_id)"),
+                ("idx_infractions_guild_user", "infractions(guild_id, user_id, created_at)"),
+                ("idx_inventory_items_user", "inventory_items(guild_id, user_id)"),
+                ("idx_marketplace_active", "marketplace_listings(guild_id, status)"),
+                ("idx_pvp_duels_status", "pvp_duels(guild_id, status, resolved_at)"),
+                ("idx_alliance_members_user", "alliance_members(user_id)"),
+                ("idx_season_drops_user", "seasonal_drops_log(guild_id, user_id, season_key)"),
+                ("idx_player_styles_user", "player_styles(guild_id, user_id)"),
+                ("idx_voice_log_guild", "voice_log(guild_id, joined_at)"),
+                ("idx_member_activity_recent", "member_activity(guild_id, user_id, created_at)"),
+            ]
+            for idx_name, idx_def in critical_indexes:
+                try:
+                    await db.execute(
+                        f"CREATE INDEX IF NOT EXISTS {idx_name} ON {idx_def}"
+                    )
+                except Exception:
+                    pass  # Table peut ne pas exister sur tous les serveurs
+            await db.commit()
+        print("[Phase 152.D2] Audit indexes : OK")
+    except Exception as ex:
+        print(f"[on_ready Phase 152.D2 indexes] {ex}")
+
     # Phase 146 : Event followup buttons (zéro commande à mémoriser)
     try:
         followup_module.setup({
@@ -56086,7 +56145,15 @@ async def hub_cmd(i: discord.Interaction):
     if not i.guild:
         return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
     try:
-        view = HubLayoutV2(i.user.id)
+        # Phase 152.A1 : récupère le style joueur pour subtitle adaptatif
+        style_hint = "balanced"
+        try:
+            style_hint = await profile_module.get_primary_style(
+                i.guild.id, i.user.id,
+            )
+        except Exception:
+            pass
+        view = HubLayoutV2(i.user.id, i.guild.id, style_hint=style_hint)
         await i.response.send_message(view=view, ephemeral=True)
     except Exception as ex:
         print(f"[/hub V2] {ex}")
@@ -73433,9 +73500,11 @@ class HubLayoutV2(LayoutView):
     /hub_setup reste en EngagementHubView (View persistante pour survie reboot).
     """
 
-    def __init__(self, user_id: int):
+    def __init__(self, user_id: int, guild_id: int = 0, style_hint: str = ""):
         super().__init__(timeout=600)
         self.user_id = user_id
+        self.guild_id = guild_id
+        self.style_hint = style_hint
         self._build()
 
     async def interaction_check(self, i):
@@ -73445,9 +73514,24 @@ class HubLayoutV2(LayoutView):
         # HOTFIX Phase 141.1 : réduit de 13 à 8 sections pour rester < 40
         # composants (limite Discord LayoutView). Suppression du bouton
         # "💝 Social" (RULES.md : pas d'emoji cœur sur features serveur).
+        # Phase 152.A1 : subtitle adaptatif selon le style détecté du joueur.
         items = []
         items.append(v2_title("🎮 Ton Hub d'engagement"))
-        items.append(v2_subtitle("Tout en 1 clic — aucune commande à mémoriser"))
+
+        # Subtitle adaptatif : si on a un style, on le met en avant
+        STYLE_HINTS = {
+            "pvp": "⚔️ _Style **Combattant** détecté — tes events PvP sont en haut_",
+            "collector": "💎 _Style **Collectionneur** — focus drops & inventaire_",
+            "social": "🤝 _Style **Animateur** — focus alliances & voice_",
+            "solo": "🎯 _Style **Aventurier solo** — focus quêtes & wheel_",
+            "balanced": "⚖️ _Joue encore pour qu'on découvre ton style_",
+            "opted_out": "_Tout en 1 clic — aucune commande à mémoriser_",
+        }
+        subtitle_text = STYLE_HINTS.get(
+            self.style_hint or "opted_out",
+            "_Tout en 1 clic — aucune commande à mémoriser_",
+        )
+        items.append(v2_subtitle(subtitle_text))
         items.append(v2_divider())
 
         # Section 1 : Quêtes
