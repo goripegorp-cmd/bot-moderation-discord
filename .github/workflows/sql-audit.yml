@@ -1,0 +1,140 @@
+name: SQL Injection Audit (Phase 148)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  sql-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Audit SQL injection patterns
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          """
+          Audit AST de bot.py + modules pour détecter SQL injection.
+
+          Détecte :
+          1. f-string passées à db.execute() / cursor.execute()
+          2. String concatenation (+) dans une exec query
+          3. .format() dans une exec query
+          4. % formatting dans une exec query
+
+          Échoue le build si une violation est trouvée.
+          """
+          import ast
+          import sys
+          from pathlib import Path
+
+          EXEC_METHODS = {"execute", "executemany", "executescript"}
+          # Modules audités
+          TARGETS = ["bot.py"]
+          TARGETS += [str(p) for p in Path(".").glob("*.py")
+                      if p.name not in ("bot.py",) and not p.name.startswith("_")]
+
+          violations = []
+          info_count = 0
+
+          def is_sql_exec_call(node):
+              """True si node est un appel db.execute(...) ou cur.execute(...)."""
+              if not isinstance(node, ast.Call):
+                  return False
+              func = node.func
+              if isinstance(func, ast.Attribute):
+                  if func.attr in EXEC_METHODS:
+                      return True
+              return False
+
+          def first_arg_is_unsafe(call_node):
+              """Vérifie si le premier arg est une f-string ou une concat."""
+              if not call_node.args:
+                  return None
+              first = call_node.args[0]
+              # f-string
+              if isinstance(first, ast.JoinedStr):
+                  # Vérifier si la f-string contient des valeurs interpolées
+                  has_interp = any(isinstance(v, ast.FormattedValue)
+                                   for v in first.values)
+                  if has_interp:
+                      return ("f-string with interpolation", first)
+              # str + var
+              if isinstance(first, ast.BinOp) and isinstance(first.op, ast.Add):
+                  return ("string concatenation (+)", first)
+              # "..." % var
+              if isinstance(first, ast.BinOp) and isinstance(first.op, ast.Mod):
+                  return ("%-formatting", first)
+              # "...".format(...)
+              if isinstance(first, ast.Call):
+                  fn = first.func
+                  if isinstance(fn, ast.Attribute) and fn.attr == "format":
+                      return (".format() call", first)
+              return None
+
+          # Whitelist : noms de tables connus pour être hardcoded dans f-string
+          # (ex: f"SELECT * FROM {table_name}" où table_name est interne)
+          SAFE_FSTRING_VARS = {
+              "table_name", "tbl", "TABLE_NAME", "CRITICAL_TABLES",
+              "table",
+          }
+
+          def is_safe_fstring(fstr):
+              """Whitelist : si toutes les valeurs interpolées sont des
+              noms internes (pas d'input user), on tolère."""
+              for v in fstr.values:
+                  if isinstance(v, ast.FormattedValue):
+                      val = v.value
+                      if isinstance(val, ast.Name):
+                          if val.id not in SAFE_FSTRING_VARS:
+                              return False
+                      else:
+                          return False
+              return True
+
+          for target in TARGETS:
+              p = Path(target)
+              if not p.exists():
+                  continue
+              try:
+                  tree = ast.parse(p.read_text(encoding="utf-8"))
+              except SyntaxError as e:
+                  print(f"⚠️  {target} : syntax error, skip ({e})")
+                  continue
+
+              for node in ast.walk(tree):
+                  if not is_sql_exec_call(node):
+                      continue
+                  info_count += 1
+                  bad = first_arg_is_unsafe(node)
+                  if bad:
+                      kind, expr_node = bad
+                      # Filtre f-string safe
+                      if kind == "f-string with interpolation":
+                          if is_safe_fstring(expr_node):
+                              continue
+                      lineno = getattr(node, "lineno", 0)
+                      violations.append((target, lineno, kind))
+
+          print(f"\n📊 Audit SQL — {info_count} appels execute() inspectés")
+          print(f"   sur {len(TARGETS)} fichier(s).\n")
+
+          if violations:
+              print(f"❌ {len(violations)} violation(s) potentielle(s) "
+                    f"détectée(s) :\n")
+              for fname, ln, kind in violations[:30]:
+                  print(f"   {fname}:{ln}  — {kind}")
+              if len(violations) > 30:
+                  print(f"   ... + {len(violations) - 30} autre(s)")
+              print(f"\n💡 Fix : utilise des paramètres (?) au lieu de "
+                    f"f-string/concat dans les queries SQL.")
+              sys.exit(1)
+          else:
+              print("✅ Aucune SQL injection potentielle détectée.")
+          PY

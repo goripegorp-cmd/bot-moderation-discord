@@ -112,6 +112,11 @@ import token_grabber as token_grabber_module
 import webhook_leak as webhook_leak_module
 import staff_sanction as staff_sanction_module
 import impersonation_detector as impersonation_module
+# Phase 148 : Robustesse — 2FA, rate limit, health check, backup lite
+import twofa_vault as twofa_module
+import rate_limiter as ratelimit_module
+import health_check as health_module
+import backup_lite as backup_module
 import random
 try:
     from zoneinfo import ZoneInfo
@@ -38206,6 +38211,26 @@ async def on_ready():
               f"impersonation + staff_sanction")
     except Exception as ex:
         print(f"[on_ready Phase 147 security] {ex}")
+
+    # Phase 148 : Robustesse — 2FA + rate limit + health + backup
+    try:
+        twofa_module.setup(bot, get_db, db_get, _v2h)
+        await twofa_module.init_db()
+
+        ratelimit_module.setup(bot)
+
+        health_module.setup(bot, get_db, db_get)
+        await health_module.init_db()
+        if not health_module.health_check_task.is_running():
+            health_module.health_check_task.start()
+
+        backup_module.setup(get_db, bot)
+        if not backup_module.backup_daily_task.is_running():
+            backup_module.backup_daily_task.start()
+
+        print("[Phase 148] Robustesse active : 2FA + ratelimit + health + backup")
+    except Exception as ex:
+        print(f"[on_ready Phase 148 robustness] {ex}")
 
     # Phase 146 : Event followup buttons (zéro commande à mémoriser)
     try:

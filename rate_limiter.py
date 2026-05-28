@@ -1,0 +1,202 @@
+"""
+rate_limiter.py — Limite par utilisateur + endpoint (Phase 148).
+
+🎯 OBJECTIF : protéger le bot contre abus, comptes piratés et boutons
+spam-cliqués (qui causent les "Échec interaction" de saturation).
+
+Budget par user :
+- 10 clicks de boutons / minute
+- 30 commandes slash / heure
+- 50 messages chat / 5 minutes (couvre déjà l'anti-spam, on garde
+  ce slot pour les futures intégrations)
+
+Si dépassé → soft-lock 5 minutes + DM amical "ralentis".
+
+Implémentation : 100% in-memory (pas de DB pour la perf). Buckets
+expirent automatiquement. Très léger.
+
+API publique :
+- setup(bot_instance)
+- check(user_id, action) -> bool (True = autorisé, False = ratelimit)
+- record(user_id, action) — incrémente le compteur
+- check_and_record(user_id, action) -> bool — combine les deux
+- is_locked(user_id) -> bool
+- get_status(user_id) -> dict
+
+⚠️ Le owner et super-owner sont exempts (peuvent toujours agir).
+"""
+from __future__ import annotations
+
+import time
+from collections import deque
+from typing import Optional
+
+import discord
+
+# ─── Config ────────────────────────────────────────────────────────────────
+_bot = None
+SUPER_OWNER_ID = 1027544786068783194
+
+# (max_count, window_seconds)
+LIMITS = {
+    "button":   (10, 60),       # 10/min
+    "slash":    (30, 3600),     # 30/h
+    "message":  (50, 300),      # 50/5min (placeholder)
+    "dm":       (5, 3600),      # 5 DM/h
+}
+
+LOCK_DURATION_SEC = 300  # soft-lock 5 min après dépassement
+
+# user_id -> {action: deque[timestamps]}
+_buckets: dict[int, dict[str, deque]] = {}
+# user_id -> lock_until_ts
+_locked: dict[int, float] = {}
+# user_id -> set of actions for which we DMed recently (anti-spam DM)
+_dm_sent: dict[int, set[str]] = {}
+
+
+def setup(bot_instance):
+    global _bot
+    _bot = bot_instance
+
+
+def _is_exempt(user_id: int) -> bool:
+    """Owner / super-owner / bot lui-même = exempts."""
+    if user_id == SUPER_OWNER_ID:
+        return True
+    if _bot is not None:
+        try:
+            if user_id == _bot.user.id:
+                return True
+            # Check si user est owner d'un guild
+            for g in _bot.guilds:
+                if g.owner_id == user_id:
+                    return True
+        except Exception:
+            pass
+    return False
+
+
+def _gc_bucket(buf: deque, window: int, now_ts: float):
+    """Vire les timestamps en dehors de la fenêtre."""
+    while buf and (now_ts - buf[0]) > window:
+        buf.popleft()
+
+
+def is_locked(user_id: int) -> bool:
+    """True si le user est en soft-lock."""
+    if _is_exempt(user_id):
+        return False
+    lock = _locked.get(user_id)
+    if lock is None:
+        return False
+    if time.time() < lock:
+        return True
+    # Lock expiré
+    _locked.pop(user_id, None)
+    _dm_sent.pop(user_id, None)
+    return False
+
+
+def check(user_id: int, action: str) -> bool:
+    """Renvoie True si l'action est autorisée (sans incrémenter)."""
+    if _is_exempt(user_id):
+        return True
+    if is_locked(user_id):
+        return False
+    return True
+
+
+def record(user_id: int, action: str) -> bool:
+    """Incrémente le compteur. Renvoie True si OK, False si limite atteinte
+    (et lock soft activé)."""
+    if _is_exempt(user_id):
+        return True
+    limit = LIMITS.get(action)
+    if limit is None:
+        return True
+    max_count, window = limit
+    now_ts = time.time()
+
+    user_buckets = _buckets.setdefault(user_id, {})
+    buf = user_buckets.setdefault(action, deque())
+    _gc_bucket(buf, window, now_ts)
+
+    if len(buf) >= max_count:
+        # Lock soft
+        _locked[user_id] = now_ts + LOCK_DURATION_SEC
+        return False
+
+    buf.append(now_ts)
+    return True
+
+
+async def check_and_record(
+    user_id: int, action: str,
+    user_member: Optional[discord.Member] = None,
+) -> bool:
+    """Combine check + record. Si limite atteinte, DM amical le user
+    (1× par lock cycle). Renvoie True si OK, False si ratelimit."""
+    if _is_exempt(user_id):
+        return True
+    if is_locked(user_id):
+        # Déjà locké, on ne re-DM pas
+        return False
+
+    ok = record(user_id, action)
+    if ok:
+        return True
+
+    # On vient de locker. DM amical 1×.
+    sent_set = _dm_sent.setdefault(user_id, set())
+    if action not in sent_set:
+        sent_set.add(action)
+        try:
+            if user_member is not None and not user_member.bot:
+                await user_member.send(
+                    f"⚠️ **Ralentis un peu, {user_member.display_name} !**\n\n"
+                    f"Tu as cliqué/utilisé trop de **{action}s** en peu de "
+                    f"temps. Pour éviter les bugs Discord, je te mets en "
+                    f"pause **{LOCK_DURATION_SEC // 60} minutes**.\n\n"
+                    f"_Si ce n'est pas toi (compte piraté ?), change ton "
+                    f"mot de passe Discord immédiatement._"
+                )
+        except Exception:
+            pass
+
+    return False
+
+
+def get_status(user_id: int) -> dict:
+    """Renvoie l'état des buckets pour un user (debug/owner)."""
+    out = {
+        "exempt": _is_exempt(user_id),
+        "locked": is_locked(user_id),
+        "buckets": {},
+    }
+    now_ts = time.time()
+    user_buckets = _buckets.get(user_id, {})
+    for action, buf in user_buckets.items():
+        limit = LIMITS.get(action)
+        if limit:
+            _gc_bucket(buf, limit[1], now_ts)
+            out["buckets"][action] = {
+                "current": len(buf),
+                "max": limit[0],
+                "window_sec": limit[1],
+            }
+    lock = _locked.get(user_id)
+    if lock:
+        out["lock_remaining_sec"] = max(0, int(lock - now_ts))
+    return out
+
+
+__all__ = [
+    "setup",
+    "check",
+    "record",
+    "check_and_record",
+    "is_locked",
+    "get_status",
+    "LIMITS",
+]
