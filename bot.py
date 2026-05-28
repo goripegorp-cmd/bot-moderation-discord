@@ -53866,6 +53866,20 @@ class DailyQuestView(View):
                 except Exception:
                     pass
             await i.followup.send("\n".join(lines), ephemeral=True)
+
+            # Phase 146 : boutons de suivi (zéro commande à mémoriser)
+            try:
+                fview = followup_module.build_followup_view(
+                    self.user_id, "daily"
+                )
+                if fview is not None:
+                    await i.followup.send(
+                        content="_💡 Continue ton aventure :_",
+                        view=fview,
+                        ephemeral=True,
+                    )
+            except Exception as ex:
+                print(f"[daily_quest followup_view] {ex}")
         except Exception as ex:
             print(f"[DailyQuestView _on_claim] {ex}")
 
@@ -56996,7 +57010,7 @@ class RiddleAnswerView(View):
                             )
                         elif streak_count >= 2:
                             streak_msg = f"\n🔥 Streak ×{streak_count} (continue demain pour +bonus !)"
-                        return await _safe_followup(
+                        await _safe_followup(
                             i,
                             content=(
                                 f"🎉 **BRAVO !** Tu es le premier à trouver !\n"
@@ -57004,6 +57018,20 @@ class RiddleAnswerView(View):
                                 f"_Explication :_ {riddle['explanation']}"
                             ),
                         )
+                        # Phase 146 : boutons de suivi (zéro commande à mémoriser)
+                        try:
+                            fview = followup_module.build_followup_view(
+                                i.user.id, "quiz_win"
+                            )
+                            if fview is not None:
+                                await i.followup.send(
+                                    content="_💡 Continue ton aventure :_",
+                                    view=fview,
+                                    ephemeral=True,
+                                )
+                        except Exception as ex:
+                            print(f"[quiz_win followup_view] {ex}")
+                        return
                     else:
                         await db.execute(
                             'UPDATE daily_riddles_log SET answered_count=answered_count+1 '
@@ -71071,6 +71099,25 @@ async def duel_report_cmd(i: discord.Interaction, duel_id: int, gagnant: discord
                 self.add_item(v2_container(*items, color=0xE74C3C))
 
         await _safe_followup(i, view=_DuelReportLayout())
+
+        # Phase 146 : boutons de suivi pour le winner (zéro commande à mémoriser)
+        try:
+            winner_member = i.guild.get_member(gagnant.id)
+            if winner_member and i.channel:
+                summary = (
+                    f"✅ Tu as remporté le duel **#{duel_id}** "
+                    f"contre **{_loser_name}** !"
+                )
+                if _payout > 0:
+                    summary += f"\n💰 +`{_payout}` 🪙 dans ta cagnotte."
+                await followup_module.followup_send(
+                    i.channel, winner_member, "duel_win", summary,
+                    title="⚔️  VICTOIRE DUEL",
+                    color=0xE74C3C,
+                    delete_after=180,
+                )
+        except Exception as ex:
+            print(f"[duel_report followup_send] {ex}")
     except Exception as ex:
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
