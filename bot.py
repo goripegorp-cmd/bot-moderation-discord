@@ -9394,6 +9394,40 @@ async def _send_layout_with_ping(channel, layout_view, ping_content=None, *,
 
 # ─────────────────────────── END EVENT (restauration) ───────────────────────────
 
+async def _find_event_recap_channel(guild, exclude_ids=None):
+    """Phase 178 : trouve un salon PERSISTANT pour poster le récap d'un event.
+
+    L'arène d'un Boss Raid est SUPPRIMÉE en fin de combat → le récap (gagnants,
+    top dégâts, loot) doit atterrir dans un salon qui reste. Priorité :
+    event_log_channel → hub_channel → 1er salon "chatty". Exclut les salons en
+    cours de suppression (l'arène).
+    """
+    exclude = set(exclude_ids or [])
+    me = guild.me
+    try:
+        c = await cfg(guild.id)
+        for key in ('event_log_channel', 'hub_channel'):
+            cid = int(c.get(key, 0) or 0)
+            if cid and cid not in exclude:
+                ch = guild.get_channel(cid)
+                try:
+                    if ch and me and ch.permissions_for(me).send_messages:
+                        return ch
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    try:
+        for ch in guild.text_channels:
+            if ch.id in exclude:
+                continue
+            if await _is_chatty_channel(ch):
+                return ch
+    except Exception:
+        pass
+    return None
+
+
 async def _end_active_event(guild, *, victory: bool, reason: str = ""):
     """Termine l'event actif : restaure les salons, distribue les récompenses, supprime l'arène."""
     try:
@@ -9655,6 +9689,30 @@ async def _end_active_event(guild, *, victory: bool, reason: str = ""):
                     pass
         except Exception as ex:
             print(f"[boss_raid hub broadcast] {ex}")
+
+        # ─── Phase 178 : FILET DE SÉCURITÉ — récap TOUJOURS visible ───
+        # Si NI event_log_channel NI hub_channel ne sont configurés, le récap
+        # ne s'affichait QUE 10s dans l'arène avant sa suppression → invisible.
+        # On garantit un post dans un salon persistant (1er salon chatty).
+        try:
+            _crec = await cfg(guild.id)
+            _has_log = int(_crec.get('event_log_channel', 0) or 0) > 0
+            _has_hub = int(_crec.get('hub_channel', 0) or 0) > 0
+            if not _has_log and not _has_hub:
+                fb_ch = await _find_event_recap_channel(guild, exclude_ids=[arena_ch_id])
+                if fb_ch:
+                    LIFETIME_BROADCAST = 6 * 3600
+                    bm = await fb_ch.send(
+                        embed=recap_embed,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                        delete_after=LIFETIME_BROADCAST,
+                    )
+                    try:
+                        await _register_for_cleanup(bm, LIFETIME_BROADCAST, 'boss_raid_broadcast')
+                    except Exception:
+                        pass
+        except Exception as ex:
+            print(f"[boss_raid recap fallback] {ex}")
 
         # ─── Phase 31 : Difficulté progressive ───
         try:
@@ -58610,6 +58668,48 @@ async def _end_world_boss(guild, wb_id: int, victory: bool, reason: str = ""):
                         pass
         except Exception as ex:
             print(f"[world_boss faction war] {ex}")
+
+        # Phase 178 : RÉCAP PERSISTANT (top combattants) — l'arène World Boss est
+        # supprimée 5 min après la fin → le classement doit atterrir ailleurs,
+        # même si aucun salon de logs/hub n'est configuré.
+        try:
+            recap_ch = await _find_event_recap_channel(guild, exclude_ids=[int(ch_id)])
+            if recap_ch:
+                medals = ["🥇", "🥈", "🥉"]
+                lines = []
+                for idx, (uid, dmg) in enumerate(attackers[:10]):
+                    m = guild.get_member(int(uid))
+                    nm = m.mention if m else f"<@{uid}>"
+                    rank = medals[idx] if idx < 3 else f"`#{idx + 1}`"
+                    lines.append(f"{rank} {nm} · `{int(dmg or 0):,}` dégâts")
+                head = (
+                    f"🌍 **{boss['title']}** vaincu !" if victory
+                    else f"💀 **{boss['title']}** s'est échappé…"
+                )
+                desc = head + f"\n👥 **{len(attackers)} combattant(s)**"
+                if lines:
+                    desc += "\n\n**🏆 Top combattants :**\n" + "\n".join(lines)
+                wb_recap_e = discord.Embed(
+                    description=desc[:4000],
+                    color=0x2ECC71 if victory else 0x95A5A6,
+                    timestamp=datetime.now(timezone.utc),
+                )
+                wb_recap_e.set_author(
+                    name="🌍 World Boss terminé",
+                    icon_url=(guild.icon.url if guild.icon else None),
+                )
+                LIFETIME_WB = 6 * 3600
+                _bm = await recap_ch.send(
+                    embed=wb_recap_e,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=LIFETIME_WB,
+                )
+                try:
+                    await _register_for_cleanup(_bm, LIFETIME_WB, 'world_boss_recap')
+                except Exception:
+                    pass
+        except Exception as ex:
+            print(f"[world_boss recap persistent] {ex}")
 
         # Annoncer la fin + supprimer le salon dans 5 min
         ch = guild.get_channel(int(ch_id))
