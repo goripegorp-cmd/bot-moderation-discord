@@ -14,8 +14,10 @@ puis NETTOYAGE STRICT des salons.
 - Timeout dur (RUN_TIMEOUT_SEC) → un run qui traîne est fermé + salons supprimés.
 - Le groupe = overwrites @everyone view_channel=False (instancié, privé).
 
-⚔️ COMBAT : réutilise l'équipement réel (inventory_fn → ATK + procs
+⚔️ COMBAT : réutilise l'équipement réel (inventory_fn → ATK + DEF + procs
 élémentaires de events_engine) + bonus vocal +20%. Cohérent avec les boss/mobs.
+Les mobs/boss RIPOSTENT : chaque joueur a des PV et peut tomber au combat
+(réapparition après un court délai). La DEF d'équipement réduit les dégâts subis.
 
 API :
 - setup(bot, get_db, db_get, v2, add_coins_fn=None, inventory_fn=None)
@@ -53,6 +55,12 @@ WAVE_TIMEOUT_SEC = 300        # une vague non finie en 5 min → échec → clea
 WAVES = 3                     # nb de vagues de mobs avant le boss final
 ATTACK_CD_SEC = 4             # anti-spam clic par joueur
 VOICE_BONUS = 0.20            # +20% dégâts si dans le vocal du donjon
+
+# Phase 184.1 : on peut MOURIR dans le donjon (riposte des mobs/boss)
+DUNGEON_PLAYER_HP = 100       # PV par joueur, rechargés à chaque nouvelle vague
+DGN_RETAL_CHANCE = 0.30       # proba que le mob riposte quand on le frappe
+DGN_BOSS_RETAL_CHANCE = 0.42  # le boss riposte plus souvent/plus fort
+DGN_RESPAWN_SEC = 30          # à terre : temps avant de pouvoir réattaquer
 
 # Mobs de donjon (HP scalé selon la taille du groupe au lancement)
 DUNGEON_MOBS = [
@@ -158,23 +166,24 @@ async def _is_member(run_id: int, user_id: int) -> bool:
         return False
 
 
-async def _weapon_damage(guild_id: int, user_id: int, base: int) -> tuple:
-    """Dégâts d'un coup : base + ATK équipement + proc élémentaire.
-    Retourne (damage, elem_proc_or_None). Cohérent avec mob_hunts/daily_bosses."""
-    dmg = base
+async def _combat_profile(guild_id: int, user_id: int) -> tuple:
+    """Profil combat du joueur en 1 lecture d'inventaire : (atk, def, proc).
+    Cohérent avec mob_hunts/daily_bosses/boss : ATK + DEF d'équipement + proc
+    élémentaire (events_engine). proc = {emoji,name,bonus,...} ou None."""
+    atk = 0
+    deff = 0
     proc = None
     if _inventory_fn is not None:
         try:
             import events_engine as _ev
             inv = await _inventory_fn(guild_id, user_id)
-            dmg += int(_ev.inventory_total_stats(inv).get("atk", 0) or 0)
-            p = _ev.roll_elemental_proc(inv.get("weapon"))
-            if p:
-                dmg += int(p.get("bonus", 0) or 0)
-                proc = p
+            st = _ev.inventory_total_stats(inv)
+            atk = int(st.get("atk", 0) or 0)
+            deff = int(st.get("def", 0) or 0)
+            proc = _ev.roll_elemental_proc(inv.get("weapon"))
         except Exception:
             pass
-    return max(1, dmg), proc
+    return atk, deff, proc
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -261,9 +270,9 @@ def _lobby_text(lob: dict) -> str:
         f"_Groupe de **{MAX_PARTY} max** — cliquez pour rejoindre. Lancement auto "
         f"dans ~{LOBBY_WAIT_SEC // 60} min, ou dès que le groupe le décide._\n\n"
         f"**Aventuriers ({len(lob['members'])}/{MAX_PARTY}) :**\n{roster}\n\n"
-        f"_Une fois lancé : salon + vocal privés, {WAVES} vagues de mobs + un boss, "
-        f"butin partagé. Équipe ton meilleur stuff (🎒) et rejoins le vocal "
-        f"(+{int(VOICE_BONUS * 100)}% dégâts) !_"
+        f"_Une fois lancé : salon + vocal privés, {WAVES} vagues de mobs + un boss "
+        f"(qui **ripostent** — on peut tomber !), butin partagé. Équipe ton meilleur "
+        f"stuff (🎒) et rejoins le vocal (+{int(VOICE_BONUS * 100)}% dégâts) !_"
     )
 
 
@@ -472,7 +481,8 @@ async def _fight_wave(run_id, guild_id, txt_id, vc_id, label, mob_hp, is_boss=Fa
         return False
 
     state = {"hp": mob_hp, "max": mob_hp, "done": False}
-    view = _build_wave_view(run_id, guild_id, vc_id, state, label, is_boss)
+    pstate: dict = {}  # user_id -> {"hp": int, "down_until": ts} (PV joueur, reset/vague)
+    view = _build_wave_view(run_id, guild_id, vc_id, state, pstate, label, is_boss)
     try:
         view._msg = await txt.send(view=view)  # LayoutView : view-only (PAS de content)
     except Exception as ex:
@@ -492,15 +502,20 @@ async def _fight_wave(run_id, guild_id, txt_id, vc_id, label, mob_hp, is_boss=Fa
     return bool(state["done"])
 
 
-def _build_wave_view(run_id, guild_id, vc_id, state, label, is_boss):
+def _build_wave_view(run_id, guild_id, vc_id, state, pstate, label, is_boss):
     """Construit une LayoutView V2 unique (HP bar + bouton Attaquer) qui se
     réactualise elle-même à chaque coup. Définie en closure car LayoutView est
-    fourni via setup() (pas importable au chargement du module)."""
+    fourni via setup() (pas importable au chargement du module).
+
+    Phase 184.1 : le mob/boss RIPOSTE — chaque joueur a des PV (pstate) ; tomber
+    à 0 met à terre pendant DGN_RESPAWN_SEC (impossible d'attaquer). PV rechargés
+    à chaque nouvelle vague (pstate neuf par vague)."""
     LayoutView = _v2['LayoutView']
     v2_title = _v2['v2_title']
     v2_body = _v2['v2_body']
     v2_container = _v2['v2_container']
     color = 0xC0392B if is_boss else 0xE67E22
+    retal_chance = DGN_BOSS_RETAL_CHANCE if is_boss else DGN_RETAL_CHANCE
 
     class _WaveView(LayoutView):
         def __init__(self):
@@ -518,7 +533,8 @@ def _build_wave_view(run_id, guild_id, vc_id, state, label, is_boss):
                 v2_title(("👑 " if is_boss else "⚔️ ") + label),
                 v2_body(f"**❤️ HP :** `{bar}`\n`{hp:,} / {mx:,}`\n\n"
                         f"_Frappez ensemble ! +{int(VOICE_BONUS * 100)}% si vous êtes "
-                        f"dans le vocal du donjon._"),
+                        f"dans le vocal du donjon. ⚠️ Le {'boss' if is_boss else 'mob'} "
+                        f"riposte — vous pouvez tomber au combat._"),
             ]
             if not state["done"]:
                 b = Button(label="⚔️ Attaquer", style=discord.ButtonStyle.danger,
@@ -538,15 +554,22 @@ def _build_wave_view(run_id, guild_id, vc_id, state, label, is_boss):
                 return await i.followup.send("💀 Déjà vaincu !", ephemeral=True)
             if not await _is_member(run_id, i.user.id):
                 return await i.followup.send("❌ Ce donjon n'est pas le tien.", ephemeral=True)
-            key = (run_id, i.user.id)
             now = time.time()
+            ps = pstate.setdefault(i.user.id, {"hp": DUNGEON_PLAYER_HP, "down_until": 0.0})
+            # À terre ? (mort temporaire — réapparition)
+            if ps["down_until"] > now:
+                return await i.followup.send(
+                    f"💀 Tu es à terre ! Réapparition <t:{int(ps['down_until'])}:R>.",
+                    ephemeral=True)
+            key = (run_id, i.user.id)
             if now - _dgn_click_cd.get(key, 0) < ATTACK_CD_SEC:
                 return await i.followup.send("⏱️ Doucement ! Attends une seconde.",
                                              ephemeral=True)
             _dgn_click_cd[key] = now
 
+            atk_bonus, deff, proc = await _combat_profile(guild_id, i.user.id)
             base = random.randint(40, 90) if is_boss else random.randint(25, 55)
-            dmg, proc = await _weapon_damage(guild_id, i.user.id, base)
+            dmg = base + atk_bonus + (int(proc.get("bonus", 0) or 0) if proc else 0)
             in_vc = False
             try:
                 vs = i.user.voice
@@ -555,6 +578,7 @@ def _build_wave_view(run_id, guild_id, vc_id, state, label, is_boss):
                 in_vc = False
             if in_vc:
                 dmg = int(dmg * (1.0 + VOICE_BONUS))
+            dmg = max(1, dmg)
             state["hp"] = max(0, state["hp"] - dmg)
             try:
                 async with _get_db() as db:
@@ -566,6 +590,21 @@ def _build_wave_view(run_id, guild_id, vc_id, state, label, is_boss):
                 pass
             if state["hp"] <= 0:
                 state["done"] = True
+
+            # Riposte du mob/boss (DEF d'équipement réduit les dégâts subis)
+            retal_note = ""
+            if not state["done"] and random.random() < retal_chance:
+                raw = random.randint(12, 26) if is_boss else random.randint(6, 16)
+                taken = max(1, raw - deff // 2)
+                ps["hp"] = max(0, ps["hp"] - taken)
+                if ps["hp"] <= 0:
+                    ps["down_until"] = now + DGN_RESPAWN_SEC
+                    retal_note = (f"\n💀 **Tu tombes au combat !** (-{taken} PV) "
+                                  f"Réapparition <t:{int(ps['down_until'])}:R>.")
+                else:
+                    retal_note = (f"\n🩸 Le {'boss' if is_boss else 'mob'} riposte : "
+                                  f"-{taken} PV (il te reste **{ps['hp']}** PV).")
+
             # Réactualise le panneau (même message)
             self._render()
             try:
@@ -578,7 +617,7 @@ def _build_wave_view(run_id, guild_id, vc_id, state, label, is_boss):
             tail = " — **coup final !**" if state["done"] else ""
             try:
                 await i.followup.send(
-                    f"⚔️ Tu infliges `{dmg}` dégâts !{proc_str}{vc_str}{tail}",
+                    f"⚔️ Tu infliges `{dmg}` dégâts !{proc_str}{vc_str}{tail}{retal_note}",
                     ephemeral=True)
             except Exception:
                 pass
