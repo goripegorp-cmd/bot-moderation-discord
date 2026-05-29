@@ -162,26 +162,89 @@ def generate_boss_title(season_key: Optional[str] = None) -> str:
 # Rareté : commune (white), rare (blue), épique (purple), légendaire (gold)
 
 WEAPONS = [
-    # Communes
+    # ─── Communes (atk 5-10) — pas d'élément ───
     {"name": "Bâton de bois",         "atk": 5,  "rarity": "commune",    "emoji": "🪵", "weight": 30},
     {"name": "Couteau rouillé",       "atk": 7,  "rarity": "commune",    "emoji": "🔪", "weight": 30},
     {"name": "Massue grossière",      "atk": 8,  "rarity": "commune",    "emoji": "🏏", "weight": 25},
-    # Rares
+    {"name": "Dague ébréchée",        "atk": 6,  "rarity": "commune",    "emoji": "🗡️", "weight": 28},
+    {"name": "Fronde de cuir",        "atk": 5,  "rarity": "commune",    "emoji": "🪃", "weight": 28},
+    {"name": "Gourdin clouté",        "atk": 9,  "rarity": "commune",    "emoji": "🔨", "weight": 22},
+    {"name": "Faucille rouillée",     "atk": 7,  "rarity": "commune",    "emoji": "🌾", "weight": 24},
+    {"name": "Lance de bois",         "atk": 8,  "rarity": "commune",    "emoji": "🥢", "weight": 22},
+    # ─── Rares (atk 12-18) — premiers éléments ───
     {"name": "Épée d'acier",          "atk": 12, "rarity": "rare",       "emoji": "⚔️", "weight": 15},
     {"name": "Arc elfique",           "atk": 14, "rarity": "rare",       "emoji": "🏹", "weight": 15},
     {"name": "Hache de guerre",       "atk": 15, "rarity": "rare",       "emoji": "🪓", "weight": 12},
-    # Épiques
-    {"name": "Lame enflammée",        "atk": 22, "rarity": "épique",     "emoji": "🔥", "weight": 6},
-    {"name": "Foudre de Zeus",        "atk": 24, "rarity": "épique",     "emoji": "⚡", "weight": 5},
-    # Légendaires
-    {"name": "Excalibur",             "atk": 40, "rarity": "légendaire", "emoji": "🗡️", "weight": 2},
-    {"name": "Mjölnir",               "atk": 45, "rarity": "légendaire", "emoji": "🔨", "weight": 1},
-    # Mythiques (Phase 39 — rarissimes, demandent des années de farm)
-    {"name": "Aurora Stellaria",      "atk": 60, "rarity": "mythique",   "emoji": "🌌", "weight": 1},
-    {"name": "Lame du Néant",         "atk": 65, "rarity": "mythique",   "emoji": "🕳️", "weight": 1},
-    # Divines (Phase 39 — quasi inaccessibles, drop super rare)
-    {"name": "Lame du Créateur",      "atk": 100, "rarity": "divine",    "emoji": "👁️", "weight": 1},
+    {"name": "Dague empoisonnée",     "atk": 13, "rarity": "rare",       "emoji": "🗡️", "weight": 12, "element": "poison"},
+    {"name": "Bâton de givre",        "atk": 14, "rarity": "rare",       "emoji": "❄️", "weight": 11, "element": "ice"},
+    {"name": "Marteau d'orage",       "atk": 16, "rarity": "rare",       "emoji": "🔨", "weight": 10, "element": "lightning"},
+    {"name": "Cimeterre du désert",   "atk": 16, "rarity": "rare",       "emoji": "🗡️", "weight": 11},
+    {"name": "Arbalète lourde",       "atk": 17, "rarity": "rare",       "emoji": "🏹", "weight": 9},
+    # ─── Épiques (atk 20-30) — éléments fréquents ───
+    {"name": "Lame enflammée",        "atk": 22, "rarity": "épique",     "emoji": "🔥", "weight": 6,  "element": "fire"},
+    {"name": "Foudre de Zeus",        "atk": 24, "rarity": "épique",     "emoji": "⚡", "weight": 5,  "element": "lightning"},
+    {"name": "Arc du Crépuscule",     "atk": 23, "rarity": "épique",     "emoji": "🏹", "weight": 5,  "element": "shadow"},
+    {"name": "Bâton du Givre Éternel","atk": 25, "rarity": "épique",     "emoji": "❄️", "weight": 5,  "element": "ice"},
+    {"name": "Faux du Faucheur",      "atk": 27, "rarity": "épique",     "emoji": "🌑", "weight": 4,  "element": "shadow"},
+    {"name": "Masse sacrée",          "atk": 24, "rarity": "épique",     "emoji": "✨", "weight": 5,  "element": "holy"},
+    {"name": "Dague venimeuse",       "atk": 21, "rarity": "épique",     "emoji": "☠️", "weight": 6,  "element": "poison"},
+    # ─── Légendaires (atk 35-50) — éléments puissants ───
+    {"name": "Excalibur",             "atk": 40, "rarity": "légendaire", "emoji": "🗡️", "weight": 2,  "element": "holy"},
+    {"name": "Mjölnir",               "atk": 45, "rarity": "légendaire", "emoji": "🔨", "weight": 1,  "element": "lightning"},
+    {"name": "Embraseur de Phénix",   "atk": 42, "rarity": "légendaire", "emoji": "🔥", "weight": 2,  "element": "fire"},
+    {"name": "Glacial, l'Arc Polaire","atk": 38, "rarity": "légendaire", "emoji": "🏹", "weight": 2,  "element": "ice"},
+    {"name": "Venin du Roi-Serpent",  "atk": 44, "rarity": "légendaire", "emoji": "☠️", "weight": 1,  "element": "poison"},
+    {"name": "Faux des Ombres",       "atk": 47, "rarity": "légendaire", "emoji": "🌑", "weight": 1,  "element": "shadow"},
+    # ─── Mythiques (atk 55-70) — rarissimes ───
+    {"name": "Aurora Stellaria",      "atk": 60, "rarity": "mythique",   "emoji": "🌌", "weight": 1,  "element": "holy"},
+    {"name": "Lame du Néant",         "atk": 65, "rarity": "mythique",   "emoji": "🕳️", "weight": 1,  "element": "shadow"},
+    {"name": "Souffle du Dragon",     "atk": 68, "rarity": "mythique",   "emoji": "🔥", "weight": 1,  "element": "fire"},
+    {"name": "Tempête Éternelle",     "atk": 66, "rarity": "mythique",   "emoji": "⚡", "weight": 1,  "element": "lightning"},
+    # ─── Divines (atk 90-120) — quasi inaccessibles ───
+    {"name": "Lame du Créateur",      "atk": 100,"rarity": "divine",     "emoji": "👁️", "weight": 1,  "element": "holy"},
+    {"name": "Fléau Cosmique",        "atk": 110,"rarity": "divine",     "emoji": "🌠", "weight": 1,  "element": "shadow"},
+    {"name": "Aube Infinie",          "atk": 120,"rarity": "divine",     "emoji": "☀️", "weight": 1,  "element": "fire"},
 ]
+
+# Phase 180 : ÉLÉMENTS d'armes — proc en combat (DoT-flavored : burst élémentaire
+# bonus appliqué au coup, fréquence + puissance liées à la rareté de l'arme).
+ELEMENTS = {
+    "fire":      {"emoji": "🔥", "name": "Brûlure",     "verb": "embrase"},
+    "poison":    {"emoji": "☠️", "name": "Poison",      "verb": "empoisonne"},
+    "ice":       {"emoji": "❄️", "name": "Givre",       "verb": "gèle"},
+    "lightning": {"emoji": "⚡", "name": "Foudre",      "verb": "électrocute"},
+    "shadow":    {"emoji": "🌑", "name": "Ombre",       "verb": "corrompt"},
+    "holy":      {"emoji": "✨", "name": "Lumière",     "verb": "purifie"},
+}
+
+
+def roll_elemental_proc(weapon: Optional[dict]) -> Optional[dict]:
+    """Phase 180 : si l'arme a un élément, tente un PROC (burst élémentaire).
+
+    Chance + puissance montent avec la rareté (commune 0 → divine 5) :
+    proc 15%→60%, bonus dégâts ~ (8 + atk*0.4) × (1 + 0.25*rang).
+    Retourne {element, emoji, name, bonus} ou None.
+    """
+    if not weapon:
+        return None
+    el = weapon.get("element")
+    if not el or el not in ELEMENTS:
+        return None
+    rarity = (weapon.get("rarity") or "commune").lower()
+    rank = RARITY_ORDER.get(rarity, 0)
+    proc_chance = 0.15 + 0.09 * rank
+    if random.random() > proc_chance:
+        return None
+    atk = int(weapon.get("atk", 0) or 0)
+    bonus = int((8 + atk * 0.4) * (1.0 + 0.25 * rank))
+    meta = ELEMENTS[el]
+    return {
+        "element": el,
+        "emoji": meta["emoji"],
+        "name": meta["name"],
+        "verb": meta["verb"],
+        "bonus": max(1, bonus),
+    }
 
 ARMOR = [
     # Communes
@@ -1941,6 +2004,8 @@ __all__ = [
     "random_helmet", "random_boots", "random_accessory", "random_trinket",
     "random_gear_any", "random_enchantment", "gear_total_stats",
     "compute_set_bonus", "inventory_total_stats", "EQUIPMENT_SLOTS",
+    # Phase 180 : éléments d'armes + proc DoT
+    "ELEMENTS", "roll_elemental_proc",
     # Phase 107 : durability / repair
     "DURABILITY_MAX_BY_RARITY", "REPAIR_COST_PER_POINT",
     "get_max_durability", "get_current_durability", "is_item_broken",

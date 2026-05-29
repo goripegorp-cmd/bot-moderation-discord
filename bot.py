@@ -7965,7 +7965,16 @@ def _format_loadout_lines(inv: dict) -> list:
             if it.get('crit'):
                 bits.append(f"+{it['crit']}% crit")
             stat_s = (" · " + " · ".join(bits)) if bits else ""
-            lines.append(f"{emo} **{label}** : {rr}{it.get('emoji', '')} {it['name']}{stat_s}")
+            # Phase 180 : badge élémentaire (arme)
+            el = it.get('element')
+            el_badge = ""
+            try:
+                if el and el in events2026.ELEMENTS:
+                    _em = events2026.ELEMENTS[el]
+                    el_badge = f" · {_em['emoji']} {_em['name']}"
+            except Exception:
+                pass
+            lines.append(f"{emo} **{label}** : {rr}{it.get('emoji', '')} {it['name']}{stat_s}{el_badge}")
         else:
             lines.append(f"{emo} **{label}** : _vide_")
     return lines
@@ -9322,6 +9331,21 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
                 # On clear le log pour ne pas re-déclencher en chaîne sur le même flux
                 _recent_attacks_log[event_id] = []
 
+        # Phase 180 : PROC ÉLÉMENTAIRE de l'arme équipée (🔥 brûlure / ☠️ poison /
+        # ❄️ givre / ⚡ foudre / 🌑 ombre / ✨ lumière). Fréquence + puissance
+        # liées à la rareté de l'arme.
+        elem_str = ""
+        try:
+            _proc = events2026.roll_elemental_proc(inv.get('weapon'))
+            if _proc:
+                damage += _proc['bonus']
+                elem_str = (
+                    f"\n{_proc['emoji']} **{_proc['name']}** ! "
+                    f"+`{_proc['bonus']}` dégâts élémentaires"
+                )
+        except Exception:
+            pass
+
         # Appliquer les dégâts au boss
         new_hp = max(0, int(boss.get('current_hp', 0)) - damage)
         boss['current_hp'] = new_hp
@@ -9541,7 +9565,7 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
         bonus_str = ("\n_" + " · ".join(bonus_parts) + "_") if bonus_parts else ""
 
         await i.followup.send(
-            f"⚔️ Tu infliges `{damage}` dégâts au boss !{crit_str}{double_str}{bonus_str}",
+            f"⚔️ Tu infliges `{damage}` dégâts au boss !{crit_str}{double_str}{elem_str}{bonus_str}",
             ephemeral=True,
         )
 
@@ -9829,8 +9853,12 @@ async def _end_active_event(guild, *, victory: bool, reason: str = ""):
                     'emoji': gear.get('emoji', ''),
                     'atk': gear.get('atk', 0),
                     'def': gear.get('def', 0),
+                    'crit': gear.get('crit', 0),
                     'slot': slot,
                 }
+                # Phase 180 : conserver l'élément de l'arme (🔥☠️❄️…)
+                if gear.get('element'):
+                    item['element'] = gear['element']
                 _re = events2026.RARITY_EMOJIS.get(gear['rarity'], '')
                 if (not cur_gear or not cur_gear.get('name')) or _rarity_rank(item) > _rarity_rank(cur_gear):
                     if cur_gear and cur_gear.get('name'):
