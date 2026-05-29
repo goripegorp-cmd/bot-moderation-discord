@@ -1671,6 +1671,87 @@ def get_help_footer(context: str = "general") -> str:
 
 
 # =============================================================================
+# PHASE 187 — GUIDE « COMMENT JOUER » par type d'event
+# Objectif : un nouveau joueur ne doit JAMAIS être perdu. Pour chaque event,
+# 2-3 étapes ULTRA simples, concrètes, qui rappellent qu'on peut s'équiper.
+# Court exprès (pas de pavé) pour ne perdre personne.
+# =============================================================================
+
+_HOW_TO_PLAY = {
+    # ─── Combat (l'équipement compte → on le rappelle en étape 1) ───
+    "boss_raid": [
+        "🎒 **Équipe ton meilleur stuff** (bouton *Inventaire* / `/inventory`). Meilleure arme = plus de dégâts.",
+        "⚔️ Clique **Attaquer** pour frapper le boss (reclique à chaque coup).",
+        "🏆 Plus tu tapes, plus tu gagnes de **butin + 🪙**. ⚠️ Le boss riposte : si tu tombes, attends de réapparaître.",
+    ],
+    "world_boss": [
+        "🎒 **Équipe ton meilleur stuff** (`/inventory`) avant de frapper.",
+        "⚔️ Clique **Attaquer** : tout le serveur tape le même boss ensemble.",
+        "🏆 Battez-le **à temps** → butin + 🪙 (le top 3 gagne plus).",
+    ],
+    "daily_boss": [
+        "🎒 **Équipe ton meilleur stuff** (`/inventory`).",
+        "⚔️ Clique **Attaquer** pour infliger des dégâts.",
+        "🏆 Le serveur doit le vaincre avant la fin du chrono → 🪙 pour tous les combattants.",
+    ],
+    "mob": [
+        "🎒 Ton **équipement** (`/inventory`) augmente tes dégâts.",
+        "⚔️ Clique **Attaquer** : les mobs meurent vite (1-3 clics).",
+        "🎁 Tous ceux qui tapent gagnent un **drop + 🪙**.",
+    ],
+    "dungeon": [
+        "🔊 **Rejoins le vocal** d'une salle (sinon tu ne peux pas taper son mob).",
+        "🎒 Équipe ton stuff (`/inventory`), puis clique **⚔️ Attaquer**.",
+        "🏰 Nettoyez **toutes les salles**, puis battez le **boss** ensemble → butin partagé.",
+    ],
+    # ─── Rapidité / réflexe ───
+    "treasure": [
+        "👀 Un trésor apparaît dans l'arène.",
+        "🖱️ Clique le bouton **en premier** pour le rafler.",
+        "💰 Le plus rapide gagne les 🪙.",
+    ],
+    "flash_treasure": [
+        "⚡ Trésor éclair : clique **vite** le bouton.",
+        "💰 Premier arrivé, premier servi → 🪙.",
+    ],
+    "quiz": [
+        "❓ Lis la question.",
+        "🅰️ Clique la **bonne réponse** (A/B/C/D).",
+        "✅ Bonne réponse = 🪙 (les plus rapides gagnent plus).",
+    ],
+    "daily_riddle": [
+        "🧩 Lis l'énigme.",
+        "✍️ Clique **Répondre** et tape ta réponse.",
+        "🥇 Le **1er** à trouver rafle le jackpot.",
+    ],
+    "mystery_box": [
+        "📦 Clique **Ouvrir** la boîte.",
+        "🎁 Tu gagnes des 🪙 — et parfois du **gear** !",
+    ],
+    "game_night": [
+        "🎮 Des mini-jeux s'enchaînent dans ce salon.",
+        "🖱️ Réagis aux **boutons** (ou réponds dans le chat selon le jeu).",
+        "🏆 Sois rapide/malin → 🪙 et récompenses.",
+    ],
+}
+
+
+def how_to_play(kind: str, *, with_title: bool = True) -> str:
+    """Retourne un mini-guide « Comment jouer » (2-3 étapes) pour un type d'event.
+
+    Court + ultra simple, pensé pour un débutant total. Renvoie "" si le type
+    est inconnu (l'appelant n'affiche alors rien). À mettre dans un v2_body.
+    """
+    steps = _HOW_TO_PLAY.get(kind)
+    if not steps:
+        return ""
+    body = "\n".join(f"**{idx + 1}.** {s}" for idx, s in enumerate(steps))
+    if with_title:
+        return "🕹️ **Comment jouer** _(c'est simple !)_\n" + body
+    return body
+
+
+# =============================================================================
 # PHASE 36 — ÉVÉNEMENTS LÉGERS (sans masquage de salons)
 # Ces events s'ajoutent au flow normal — ils sont rapides, fréquents, et
 # n'interrompent personne. Ils visent à RÉVEILLER les inactifs et créer des
@@ -2109,4 +2190,5 @@ __all__ = [
     "adjust_difficulty",
     "simulate_duel",
     "get_help_footer",
+    "how_to_play",
 ]

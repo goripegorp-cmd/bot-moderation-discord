@@ -45,6 +45,7 @@ import discord
 from discord.ext import tasks
 from discord.ui import Button, View
 import ui_v2  # design-system V2 partagé (encadrés cohérents)
+import events_engine as _ev  # guide « comment jouer » + stats combat
 
 try:
     from zoneinfo import ZoneInfo
@@ -671,10 +672,11 @@ async def _post_mob_message(
         f"⏳ Disparaît dans **{MOB_LIFETIME_MIN} min** si pas vaincue"
     ))
     items.append(v2_divider())
+    items.append(v2_body(_ev.how_to_play('mob')))
     items.append(v2_body(
         "_🐾 Simple créature — **ce n'est PAS un boss** : aucun salon n'est masqué, "
-        "le serveur reste ouvert. Frappe-la (ou une autre) autant que tu veux. "
-        "Loot proportionnel aux dégâts · **bonus alliance** si 2+ alliés frappent._"
+        "le serveur reste ouvert. Loot proportionnel aux dégâts · "
+        "**bonus alliance** si 2+ alliés frappent._"
     ))
 
     color = 0xFFD700 if is_elite else mob_def.get("color", 0x95A5A6)

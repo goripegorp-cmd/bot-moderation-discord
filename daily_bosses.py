@@ -47,6 +47,7 @@ import discord
 from discord.ext import tasks
 from discord.ui import Button
 import ui_v2  # design-system V2 partagé (encadrés cohérents)
+import events_engine as _ev  # guide « comment jouer » + stats combat
 
 try:
     from zoneinfo import ZoneInfo
@@ -505,6 +506,8 @@ async def _post_boss_panel(
             f"🤝 HP élevé → **impossible en solo**, combattez ensemble !\n"
             f"🏅 Top 3 dégâts = bonus `{TOP3_BONUS_COINS}` 🪙"
         ),
+        v2_divider(),
+        v2_body(_ev.how_to_play('daily_boss')),
     ]
 
     class _BossLayout(LayoutView):
