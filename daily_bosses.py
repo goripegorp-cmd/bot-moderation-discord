@@ -378,6 +378,20 @@ async def trigger_daily_boss(
     if await get_active_boss(guild.id):
         return None
 
+    # Phase 177 : pas de boss du jour pendant un GROS event masquant (Boss Raid /
+    # Chasse au trésor / Quiz) — l'arène est dédiée à cet event, serveur masqué.
+    # Évite que deux events de combat se superposent dans le même salon.
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM events WHERE guild_id=? AND ended=0 LIMIT 1",
+                (guild.id,),
+            ) as cur:
+                if await cur.fetchone():
+                    return None
+    except Exception:
+        pass
+
     slot_key = _current_slot_key()
     if slot_key is None and boss_id is None:
         return None  # pas dans un créneau (sauf déclenchement forcé)

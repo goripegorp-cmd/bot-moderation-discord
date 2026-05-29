@@ -499,11 +499,36 @@ async def _find_arena_channel(guild: discord.Guild) -> Optional[discord.TextChan
     return None
 
 
+async def _is_major_event_active(guild_id: int) -> bool:
+    """Phase 177 : True si un GROS event masquant le serveur est en cours
+    (Boss Raid / Chasse au trésor / Quiz — table `events`, ended=0).
+
+    Pendant ces events, TOUS les salons @everyone sont masqués et l'arène est
+    dédiée à l'event → on NE spawn PAS de mobs (ils seraient invisibles OU
+    viendraient se superposer dans l'arène du boss). Les mobs reprennent dès
+    que l'event est terminé.
+    """
+    if _get_db is None:
+        return False
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM events WHERE guild_id=? AND ended=0 LIMIT 1",
+                (guild_id,),
+            ) as cur:
+                return await cur.fetchone() is not None
+    except Exception:
+        return False
+
+
 async def spawn_mob(guild: discord.Guild) -> bool:
     """Spawn un mob aléatoire dans l'arène. Retourne True si succès."""
     if not guild or _get_db is None or _bot is None:
         return False
     if not _is_active_hour():
+        return False
+    # Phase 177 : pas de mob pendant un Boss Raid / event masquant (serveur enfoui)
+    if await _is_major_event_active(guild.id):
         return False
     if await _count_alive_mobs(guild.id) >= MAX_CONCURRENT_MOBS:
         return False

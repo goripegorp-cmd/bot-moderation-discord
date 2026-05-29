@@ -3259,6 +3259,74 @@ _CHATTY_BLACKLIST_KEYWORDS = (
 )
 
 
+# Phase 177 : cache court (10s) des salons "occupés" par un event de combat
+# dédié — évite de marteler la DB depuis _is_chatty_channel (appelé en boucle).
+_busy_combat_cache: dict = {}  # guild_id -> (timestamp, set[channel_id])
+
+
+async def _busy_combat_channel_ids(guild_id: int) -> set:
+    """Phase 177 : salons actuellement RÉSERVÉS par un event de combat dédié.
+
+    Couvre : arène de Boss Raid (events), salons de mobs vivants (mob_spawns),
+    salons de boss du jour actifs (daily_boss_events). Ces salons sont dédiés à
+    LEUR event → aucun autre event (mystery box, énigme, cadeau...) ne doit y
+    apparaître. Résultat mis en cache 10s.
+    """
+    try:
+        now_ts = time.time()
+    except Exception:
+        now_ts = 0
+    cached = _busy_combat_cache.get(guild_id)
+    if cached and now_ts and (now_ts - cached[0] < 10):
+        return cached[1]
+
+    ids: set = set()
+    try:
+        async with get_db() as db:
+            # Boss Raid (arène dédiée + serveur masqué)
+            try:
+                async with db.execute(
+                    "SELECT arena_channel_id FROM events "
+                    "WHERE guild_id=? AND ended=0 AND arena_channel_id > 0",
+                    (guild_id,),
+                ) as cur:
+                    for r in await cur.fetchall():
+                        if r[0]:
+                            ids.add(int(r[0]))
+            except Exception:
+                pass
+            # Mobs vivants (mob_hunts)
+            try:
+                async with db.execute(
+                    "SELECT DISTINCT channel_id FROM mob_spawns "
+                    "WHERE guild_id=? AND status='alive' "
+                    "AND datetime(expires_at) > datetime('now')",
+                    (guild_id,),
+                ) as cur:
+                    for r in await cur.fetchall():
+                        if r[0]:
+                            ids.add(int(r[0]))
+            except Exception:
+                pass
+            # Boss du jour actifs (daily_bosses)
+            try:
+                async with db.execute(
+                    "SELECT DISTINCT channel_id FROM daily_boss_events "
+                    "WHERE guild_id=? AND status='alive' AND channel_id > 0",
+                    (guild_id,),
+                ) as cur:
+                    for r in await cur.fetchall():
+                        if r[0]:
+                            ids.add(int(r[0]))
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    _busy_combat_cache[guild_id] = (now_ts, ids)
+    return ids
+
+
 async def _is_chatty_channel(channel, *, allow_announce: bool = False) -> bool:
     """Garantit qu'un salon est OK pour poster un event PUBLIC.
 
@@ -3270,7 +3338,8 @@ async def _is_chatty_channel(channel, *, allow_announce: bool = False) -> bool:
     5. PAS un salon staff/log/admin/rules/welcome (blacklist de noms)
     6. @everyone peut view_channel ET send_messages (refuse read-only)
     7. Le bot peut send_messages ET embed_links
-    8. PAS le salon arena d'un event en cours
+    8. PAS le salon arena d'un event en cours (cache)
+    9. PAS un salon RÉSERVÉ par un event de combat dédié (boss/mob/daily boss)
     """
     if not channel:
         return False
@@ -3325,6 +3394,15 @@ async def _is_chatty_channel(channel, *, allow_announce: bool = False) -> bool:
     try:
         cache = _active_events_cache.get(channel.guild.id) if '_active_events_cache' in globals() else None
         if cache and cache.get('arena_channel_id') == channel.id:
+            return False
+    except Exception:
+        pass
+
+    # 9. Phase 177 : salon RÉSERVÉ par un event de combat dédié (boss raid,
+    #    mob, boss du jour) → aucun autre event ne doit s'y superposer.
+    try:
+        busy = await _busy_combat_channel_ids(channel.guild.id)
+        if channel.id in busy:
             return False
     except Exception:
         pass
