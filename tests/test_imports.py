@@ -45,6 +45,8 @@ PHASE_163_MODULES = [
     "world_invasion",
     # Phase 173.2 — Boss du jour (4×/jour, gating niveau)
     "daily_bosses",
+    # Phase 174.2 — Récompenses VIP des plus actifs (messages + vocal)
+    "activity_rewards",
     # Phase 170 — Chronique d'Abylumis (récit collectif persistant)
     "story_engine",
     "codex_chronicle",
@@ -129,6 +131,8 @@ INIT_DB_MODULES = [
     "npc_letters",
     # Phase 170.8 : climax events + attackers + titles
     "monthly_climax",
+    # Phase 174.2 : VIP grants + role IDs
+    "activity_rewards",
 ]
 
 

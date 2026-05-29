@@ -170,6 +170,7 @@ import error_logger as error_logger_module
 import mob_hunts as mob_hunts_module
 # Phase 173.2 : Boss du jour, 4×/jour, gating de niveau
 import daily_bosses as daily_bosses_module
+import activity_rewards as activity_rewards_module
 # Phase 169.2 : Marchand itinérant quotidien
 import wandering_merchant as wandering_merchant_module
 # Phase 169.3 : World Invasion mensuelle
@@ -39072,6 +39073,15 @@ async def on_ready():
                 daily_bosses_module.daily_boss_task.start()
         except Exception as ex:
             print(f"[on_ready 173.2 daily_bosses] {ex}")
+
+        # Phase 174.2 : Récompenses VIP des plus actifs (messages + vocal)
+        try:
+            activity_rewards_module.setup(bot, get_db, db_get, _v2h)
+            await activity_rewards_module.init_db()
+            if not activity_rewards_module.weekly_reward_task.is_running():
+                activity_rewards_module.weekly_reward_task.start()
+        except Exception as ex:
+            print(f"[on_ready 174.2 activity_rewards] {ex}")
 
         # Phase 169.2 : Marchand itinérant quotidien
         wandering_merchant_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins)

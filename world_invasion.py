@@ -118,11 +118,14 @@ def _is_first_saturday_21h() -> bool:
 async def _find_arena_channel(guild: discord.Guild) -> Optional[discord.TextChannel]:
     """Trouve le salon arène pour annoncer l'invasion.
 
-    Phase 169.4 : 3 niveaux de fallback (cohérent avec mob_hunts + merchant) :
+    Phase 174.1 : fallback robuste (cohérent avec mob_hunts) — garantit que
+    l'invasion mensuelle APPARAÎT même sans salon nommé "arène" :
     1. `combat_arena_channel_id` configuré par owner — préféré
     2. Arène boss raid ACTIVE (table events.arena_channel_id) — temporaire
-    3. Recherche par nom "arène/arena/combat/boss"
-    4. None → invasion ne se déclenche pas (skip silencieux)
+    3. Recherche par nom "arène/arena/combat/boss/jeu/game/chasse/donjon"
+    4-7. Délégation à mob_hunts._find_arena_channel (hub → salon sain →
+         system_channel), puis repli inline si mob_hunts indispo.
+    8. None seulement si AUCUN salon écrivable (cas extrême).
     """
     if _db_get is None or _get_db is None:
         return None
@@ -158,8 +161,51 @@ async def _find_arena_channel(guild: discord.Guild) -> Optional[discord.TextChan
     # 3. Fallback : recherche par nom
     for ch in guild.text_channels:
         n = (ch.name or "").lower()
-        if any(k in n for k in ["arène", "arena", "combat", "boss"]):
+        if any(k in n for k in ["arène", "arena", "combat", "boss",
+                                 "jeu", "game", "chasse", "donjon"]):
+            try:
+                if guild.me and ch.permissions_for(guild.me).send_messages:
+                    return ch
+            except Exception:
+                return ch
+
+    # 4-7. Fallback robuste partagé avec mob_hunts (hub → salon sain →
+    # system_channel). Garantit que l'invasion mensuelle APPARAÎT toujours.
+    try:
+        import mob_hunts as _mh
+        ch = await _mh._find_arena_channel(guild)
+        if ch:
             return ch
+    except Exception:
+        pass
+
+    # Dernier recours inline (si mob_hunts indispo) : hub puis 1er salon sain
+    try:
+        cfg_data = await _db_get(guild.id)
+        hub_id = int(cfg_data.get("hub_channel", 0) or 0)
+        if hub_id:
+            ch = guild.get_channel(hub_id)
+            if ch and guild.me and ch.permissions_for(guild.me).send_messages:
+                return ch
+    except Exception:
+        pass
+    _avoid = ("ticket", "log", "annonce", "règl", "regl", "rule",
+              "staff", "admin", "lecture", "read-only")
+    try:
+        for ch in guild.text_channels:
+            n = (ch.name or "").lower()
+            if any(a in n for a in _avoid):
+                continue
+            if guild.me and ch.permissions_for(guild.me).send_messages:
+                return ch
+    except Exception:
+        pass
+    try:
+        if guild.system_channel and guild.me and \
+                guild.system_channel.permissions_for(guild.me).send_messages:
+            return guild.system_channel
+    except Exception:
+        pass
     return None
 
 

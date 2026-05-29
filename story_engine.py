@@ -841,11 +841,15 @@ async def _chronicle_wait_ready():
 async def _find_announce_channel(guild: discord.Guild) -> Optional[discord.TextChannel]:
     """Trouve le salon d'annonce de la Chronique.
 
-    Priorité : `chronicle_channel_id` config → `hub_channel` → premier salon
-    nommé "chronique/lore/saga" → None.
+    Phase 174.1 : fallback robuste — garantit que les chapitres narratifs
+    APPARAISSENT toujours :
+    `chronicle_channel_id` config → `hub_channel` → salon nommé
+    "chronique/lore/saga/histoire" → premier salon SAIN écrivable →
+    system_channel → None (cas extrême uniquement).
     """
     if _db_get is None:
         return None
+    me = guild.me
     try:
         cfg = await _db_get(guild.id)
         for key in ("chronicle_channel_id", "hub_channel"):
@@ -859,7 +863,29 @@ async def _find_announce_channel(guild: discord.Guild) -> Optional[discord.TextC
     for ch in guild.text_channels:
         n = (ch.name or "").lower()
         if any(k in n for k in ["chronique", "lore", "saga", "histoire"]):
-            return ch
+            try:
+                if not me or ch.permissions_for(me).send_messages:
+                    return ch
+            except Exception:
+                return ch
+    # Fallback : premier salon SAIN écrivable (anti ticket/log/annonce/RO)
+    _avoid = ("ticket", "log", "annonce", "règl", "regl", "rule",
+              "staff", "admin", "lecture", "read-only")
+    try:
+        for ch in guild.text_channels:
+            n = (ch.name or "").lower()
+            if any(a in n for a in _avoid):
+                continue
+            if not me or ch.permissions_for(me).send_messages:
+                return ch
+    except Exception:
+        pass
+    try:
+        if guild.system_channel and (not me or
+                guild.system_channel.permissions_for(me).send_messages):
+            return guild.system_channel
+    except Exception:
+        pass
     return None
 
 
