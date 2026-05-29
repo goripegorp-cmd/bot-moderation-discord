@@ -71202,18 +71202,35 @@ async def _send_owner_alert(guild, title: str, description: str, color: int = 0x
         print(f"[_send_owner_alert] {ex}")
 
 
-# Cache pour ne pas spam la même alerte 2x dans la même journée
-_owner_alert_log: dict = {}  # {(guild_id, alert_key): date_str}
+# Cache pour ne pas spam la même alerte 2x dans la même journée.
+# Phase 184.x : guard PERSISTANT (DB/config) — sinon, si le bot redémarre
+# souvent (crash loop / redeploys), le cache mémoire est vidé à chaque boot et
+# l'alerte "Hub silencieux 24h" est renvoyée en DM à CHAQUE redémarrage (spam).
+_owner_alert_log: dict = {}  # {(guild_id, alert_key): date_str} — fast path mémoire
 
 
-def _alert_already_sent_today(guild_id: int, alert_key: str) -> bool:
+async def _alert_already_sent_today(guild_id: int, alert_key: str) -> bool:
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    return _owner_alert_log.get((guild_id, alert_key)) == today
+    if _owner_alert_log.get((guild_id, alert_key)) == today:
+        return True
+    # Persistant : survit aux redémarrages
+    try:
+        c = await cfg(guild_id)
+        if c.get(f'owner_alert_{alert_key}_date') == today:
+            _owner_alert_log[(guild_id, alert_key)] = today
+            return True
+    except Exception:
+        pass
+    return False
 
 
-def _mark_alert_sent(guild_id: int, alert_key: str):
+async def _mark_alert_sent(guild_id: int, alert_key: str):
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     _owner_alert_log[(guild_id, alert_key)] = today
+    try:
+        await db_set(guild_id, f'owner_alert_{alert_key}_date', today)
+    except Exception:
+        pass
 
 
 @tasks.loop(hours=4)
@@ -71227,7 +71244,7 @@ async def owner_alerts_task():
                     continue
 
                 # 1) Perte nette ≥5 membres dans les dernières 24h
-                if not _alert_already_sent_today(guild.id, "member_loss"):
+                if not await _alert_already_sent_today(guild.id, "member_loss"):
                     async with get_db() as db:
                         async with db.execute(
                             "SELECT SUM(new_members), SUM(left_members) FROM daily_guild_stats "
@@ -71252,11 +71269,11 @@ async def owner_alerts_task():
                                 ),
                                 color=0xE74C3C,
                             )
-                            _mark_alert_sent(guild.id, "member_loss")
+                            await _mark_alert_sent(guild.id, "member_loss")
 
                 # 2) Silence du hub : aucun message dans hub depuis 24h+
                 hub_id = int(c.get('hub_channel', 0) or 0)
-                if hub_id and not _alert_already_sent_today(guild.id, "hub_silence"):
+                if hub_id and not await _alert_already_sent_today(guild.id, "hub_silence"):
                     hub_ch = guild.get_channel(hub_id)
                     if hub_ch:
                         cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
@@ -71280,7 +71297,7 @@ async def owner_alerts_task():
                                 ),
                                 color=0xF39C12,
                             )
-                            _mark_alert_sent(guild.id, "hub_silence")
+                            await _mark_alert_sent(guild.id, "hub_silence")
             except Exception as ex:
                 print(f"[owner_alerts guild={guild.id}] {ex}")
     except Exception as ex:
