@@ -9025,7 +9025,7 @@ class BossArenaLayoutV2(LayoutView):
             "ta meilleure arme** depuis ton coffre avant d'attaquer !_"
         ))
 
-        # Bouton ÉQUIPEMENT en bas (Action Row)
+        # Boutons ÉQUIPEMENT + FAMILIER en bas (Action Row)
         # Phase 74 : custom_id ALIGNÉ avec BossAttackView (boss_inv_X) — voir HP section
         inv_btn = Button(
             label="🎒 Mon équipement",
@@ -9033,7 +9033,14 @@ class BossArenaLayoutV2(LayoutView):
             custom_id=f"boss_inv_{self.event_id}",
         )
         inv_btn.callback = self._on_inv
-        items.append(discord.ui.ActionRow(inv_btn))
+        # Phase 182 : bouton FAMILIER (assist actif)
+        pet_btn = Button(
+            label="🐾 Familier",
+            style=discord.ButtonStyle.success,
+            custom_id=f"boss_pet_{self.event_id}",
+        )
+        pet_btn.callback = self._on_pet
+        items.append(discord.ui.ActionRow(inv_btn, pet_btn))
 
         self.add_item(v2_container(*items, color=color))
 
@@ -9048,6 +9055,10 @@ class BossArenaLayoutV2(LayoutView):
         """Phase 179b : ouvre le panneau ÉQUIPEMENT interactif (loadout + équiper
         depuis le coffre)."""
         await _open_equipment(i)
+
+    async def _on_pet(self, i: discord.Interaction):
+        """Phase 182 : fait intervenir le familier dans le combat."""
+        await _handle_pet_assist(i, self.event_id)
 
 
 # ─────────────────────────── BOUTON ATTAQUE ───────────────────────────
@@ -9075,12 +9086,25 @@ class BossAttackView(View):
         b_inv.callback = self._on_inv
         self.add_item(b_inv)
 
+        # Phase 182 : bouton FAMILIER (assist actif) — persistance reboot
+        b_pet = Button(
+            label="🐾 Familier",
+            style=discord.ButtonStyle.success,
+            custom_id=f"boss_pet_{event_id}",
+        )
+        b_pet.callback = self._on_pet
+        self.add_item(b_pet)
+
     async def _on_attack(self, i: discord.Interaction):
         await _handle_boss_attack(i, self.event_id)
 
     async def _on_inv(self, i: discord.Interaction):
         # Phase 179b : ouvre le panneau ÉQUIPEMENT interactif (équiper depuis le coffre)
         await _open_equipment(i)
+
+    async def _on_pet(self, i: discord.Interaction):
+        # Phase 182 : fait intervenir le familier dans le combat
+        await _handle_pet_assist(i, self.event_id)
 
 
 async def _boss_phase_attacks(guild, event_id: int):
@@ -9602,6 +9626,105 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
             except Exception:
                 if not i.response.is_done():
                     await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+_pet_assist_cooldown = {}  # Phase 182 : (guild_id, user_id) -> last assist ts
+
+
+async def _handle_pet_assist(i: discord.Interaction, event_id: int):
+    """Phase 182 : le FAMILIER du joueur intervient dans le combat (assist actif).
+
+    Inflige une salve de dégâts au boss (selon niveau du pet + bonus boss_damage),
+    créditée au joueur, avec un cooldown par joueur. Donne aussi de l'XP au pet.
+    """
+    try:
+        try:
+            await i.response.defer(ephemeral=True)
+        except Exception:
+            pass
+
+        pet = await _get_active_pet(i.guild.id, i.user.id)
+        if not pet:
+            return await i.followup.send(
+                "🐾 Tu n'as **pas de familier actif**.\n"
+                "_Adopte/active un familier (hub → 🐾) pour qu'il combatte à tes côtés !_",
+                ephemeral=True,
+            )
+
+        key = (i.guild.id, i.user.id)
+        now_ts = time.time()
+        CD = 90
+        last = _pet_assist_cooldown.get(key, 0)
+        pet_name = pet.get('custom_name') or pet.get('name', 'Familier')
+        if now_ts - last < CD:
+            remaining = int(CD - (now_ts - last))
+            return await i.followup.send(
+                f"🐾 **{pet_name}** reprend son souffle — encore `{remaining}s` "
+                f"avant de pouvoir réintervenir.",
+                ephemeral=True,
+            )
+
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT boss_json, ended FROM events WHERE id=? AND guild_id=?',
+                (event_id, i.guild.id),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return await i.followup.send("❌ Cet événement n'existe plus.", ephemeral=True)
+        boss = json.loads(row[0]) if row[0] else {}
+        if row[1]:
+            return await i.followup.send("⏰ Cet événement est déjà terminé.", ephemeral=True)
+
+        _pet_assist_cooldown[key] = now_ts
+
+        lvl = int(pet.get('level', 1) or 1)
+        try:
+            bonus = await _apply_pet_bonus(i.guild.id, i.user.id, 'boss_damage')
+        except Exception:
+            bonus = 0.0
+        pet_dmg = int((15 + lvl * 6) * (1.0 + (bonus or 0.0)))
+        pet_dmg = max(5, min(pet_dmg, 600))  # garde-fous
+
+        new_hp = max(0, int(boss.get('current_hp', 0)) - pet_dmg)
+        boss['current_hp'] = new_hp
+
+        async with get_db() as db:
+            await db.execute(
+                'UPDATE events SET boss_json=? WHERE id=?', (json.dumps(boss), event_id),
+            )
+            await db.execute(
+                'INSERT INTO event_participants(event_id, user_id, damage_dealt, attacks_count, last_attack_ts) '
+                'VALUES (?,?,?,0,?) '
+                'ON CONFLICT(event_id, user_id) DO UPDATE SET '
+                'damage_dealt = damage_dealt + ?, last_attack_ts = ?',
+                (event_id, i.user.id, pet_dmg, now_ts, pet_dmg, now_ts),
+            )
+            await db.commit()
+
+        try:
+            await _pet_evo_award(i.guild.id, i.user.id, 'pet_assist')
+        except Exception:
+            pass
+
+        pet_label = f"{pet.get('emoji', '🐾')} {pet_name}"
+        await i.followup.send(
+            f"🐾 **{pet_label}** bondit au combat et inflige `{pet_dmg}` dégâts au boss !"
+            + ("\n_(bonus de familier appliqué)_" if bonus else ""),
+            ephemeral=True,
+        )
+        try:
+            await _refresh_boss_message(i.guild, event_id)
+        except Exception as ex:
+            print(f"[pet assist refresh] {ex}")
+        if new_hp == 0:
+            await _end_active_event(i.guild, victory=True, reason="Boss vaincu par un familier !")
+    except Exception as ex:
+        print(f"[_handle_pet_assist] {ex}")
+        try:
+            await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
         except Exception:
             pass
 
