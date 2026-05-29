@@ -9023,11 +9023,9 @@ class BossArenaLayoutV2(LayoutView):
 
         items.append(v2_divider())
 
-        # Phase 179b : rappel d'équipement avant de frapper
-        items.append(v2_body(
-            "_💡 Clique **🎒 Mon équipement** pour voir ton stuff et **équiper "
-            "ta meilleure arme** depuis ton coffre avant d'attaquer !_"
-        ))
+        # Phase 187 : guide « comment jouer » pas-à-pas (seulement si boss vivant)
+        if hp > 0:
+            items.append(v2_body(events2026.how_to_play('boss_raid')))
 
         # Boutons ÉQUIPEMENT + FAMILIER en bas (Action Row)
         # Phase 74 : custom_id ALIGNÉ avec BossAttackView (boss_inv_X) — voir HP section
@@ -58907,6 +58905,11 @@ class WorldBossArenaLayoutV2(LayoutView):
             items.append(v2_body("**🏆 Top 3 attaquants**\n" + "\n".join(lines)))
         else:
             items.append(v2_body("_⚔️ Personne n'a encore attaqué._"))
+
+        # Phase 187 : guide « comment jouer » pas-à-pas (seulement si boss vivant)
+        if hp > 0:
+            items.append(v2_divider())
+            items.append(v2_body(events2026.how_to_play('world_boss')))
 
         items.append(v2_divider())
 
