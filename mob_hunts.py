@@ -59,13 +59,16 @@ _v2 = None
 _add_coins = None
 
 # Spawn interval (random entre min et max minutes)
-SPAWN_MIN_MIN = 30
-SPAWN_MAX_MIN = 45
-# Durée avant despawn si pas tué
-MOB_LIFETIME_MIN = 15
-# Heures actives (FR) — pas de spawn la nuit
-ACTIVE_HOUR_START = 10
-ACTIVE_HOUR_END = 23
+# Phase 173.1 : plus fréquent (18-30 min au lieu de 30-45) → bien plus de
+# combat dans la journée.
+SPAWN_MIN_MIN = 18
+SPAWN_MAX_MIN = 30
+# Durée avant despawn si pas tué (un peu plus de temps pour réagir)
+MOB_LIFETIME_MIN = 20
+# Phase 173.1 : spawn 24h/24. Le jour (9h-23h FR) → mobs normaux ; la nuit
+# (23h-9h FR) → mobs NOCTURNES + coffres nocturnes. Plus de "trou" la nuit.
+DAY_HOUR_START = 9
+DAY_HOUR_END = 23
 # Anti-spam : max N mobs simultanés / guild
 MAX_CONCURRENT_MOBS = 2
 # Bonus alliance : multiplicateur si 2+ membres alliance ont attacké
@@ -210,7 +213,73 @@ MOB_CATALOG = [
         "item_pool": ["spell_scroll", "mana_crystal"],
         "color": 0x8E44AD,
     },
+    # ─── Phase 173.1 : MOBS NOCTURNES (spawn 23h-9h FR uniquement) ───
+    {
+        "id": "shadow_wolf",
+        "name": "Loup d'Ombre",
+        "emoji": "🐺",
+        "hp_base": 130,
+        "damage_per_click": (16, 34),
+        "drop_coins": (160, 380),
+        "drop_item_chance": 0.16,
+        "item_pool": ["night_fang", "shadow_pelt"],
+        "color": 0x2C3E50,
+        "nocturnal": True,
+    },
+    {
+        "id": "wraith",
+        "name": "Spectre Nocturne",
+        "emoji": "👻",
+        "hp_base": 170,
+        "damage_per_click": (20, 42),
+        "drop_coins": (200, 480),
+        "drop_item_chance": 0.20,
+        "item_pool": ["ectoplasm", "soul_ember"],
+        "color": 0x9B59B6,
+        "nocturnal": True,
+    },
+    {
+        "id": "moon_moth",
+        "name": "Phalène Lunaire",
+        "emoji": "🦋",
+        "hp_base": 90,
+        "damage_per_click": (12, 26),
+        "drop_coins": (130, 300),
+        "drop_item_chance": 0.22,
+        "item_pool": ["moon_dust", "silver_scale"],
+        "color": 0x5DADE2,
+        "nocturnal": True,
+    },
+    {
+        "id": "vampire_bat",
+        "name": "Chauve-souris Vampire",
+        "emoji": "🦇",
+        "hp_base": 110,
+        "damage_per_click": (14, 30),
+        "drop_coins": (150, 340),
+        "drop_item_chance": 0.17,
+        "item_pool": ["blood_vial", "leather_wing"],
+        "color": 0x7B241C,
+        "nocturnal": True,
+    },
+    # Coffre nocturne : très peu de HP (s'ouvre en 1-2 clics), gros coins
+    {
+        "id": "night_chest",
+        "name": "Coffre Nocturne",
+        "emoji": "🎁",
+        "hp_base": 60,
+        "damage_per_click": (20, 50),
+        "drop_coins": (350, 800),
+        "drop_item_chance": 0.35,
+        "item_pool": ["moon_dust", "soul_ember", "silver_scale", "blood_vial"],
+        "color": 0xF1C40F,
+        "nocturnal": True,
+    },
 ]
+
+
+def _is_nocturnal(mob: dict) -> bool:
+    return bool(mob.get("nocturnal", False))
 
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None):
@@ -270,13 +339,23 @@ def get_mob_def(mob_id: str) -> Optional[dict]:
     return None
 
 
-def _is_active_hour() -> bool:
-    """True si l'heure courante est dans la fenêtre active (Paris)."""
+def _now_paris() -> datetime:
     if _PARIS_TZ:
-        now = datetime.now(_PARIS_TZ)
-    else:
-        now = datetime.now(timezone.utc)
-    return ACTIVE_HOUR_START <= now.hour < ACTIVE_HOUR_END
+        return datetime.now(_PARIS_TZ)
+    return datetime.now(timezone.utc)
+
+
+def _is_night() -> bool:
+    """True si on est dans la fenêtre nocturne (23h-9h FR)."""
+    h = _now_paris().hour
+    # Nuit = NON (9h <= h < 23h)
+    return not (DAY_HOUR_START <= h < DAY_HOUR_END)
+
+
+def _is_active_hour() -> bool:
+    """Phase 173.1 : les mobs spawnent désormais 24h/24 (jour ET nuit).
+    Conservé pour compat — toujours True."""
+    return True
 
 
 async def _count_alive_mobs(guild_id: int) -> int:
@@ -316,25 +395,50 @@ async def _get_alliance_id(guild_id: int, user_id: int) -> Optional[int]:
 
 # ─── Spawn ─────────────────────────────────────────────────────────────────
 
+def _bot_can_send(guild: discord.Guild, ch: discord.TextChannel) -> bool:
+    """True si le bot peut écrire dans ce salon."""
+    try:
+        me = guild.me
+        if me is None:
+            return False
+        perms = ch.permissions_for(me)
+        return bool(perms.send_messages and perms.view_channel)
+    except Exception:
+        return False
+
+
+_ARENA_AVOID_KEYWORDS = (
+    "ticket", "annonce", "announce", "log", "règl", "regl", "rule",
+    "bienvenue", "welcome", "lecture", "read-only", "readonly", "info",
+    "staff", "admin", "mod-", "vocal", "voice",
+)
+
+
 async def _find_arena_channel(guild: discord.Guild) -> Optional[discord.TextChannel]:
     """Trouve le salon arène pour spawn les mobs.
 
-    Phase 169.4 : 3 niveaux de fallback :
-    1. `combat_arena_channel_id` configuré par owner (Phase 169) — préféré
-    2. Arène boss raid ACTIVE (table events.arena_channel_id) — temporaire
-    3. Recherche par nom "arène/arena/combat"
-    4. None → mob ne spawn pas (skip silencieux)
+    Phase 173.1 : fallback ÉLARGI pour que les mobs spawnent TOUJOURS quelque
+    part (avant, si aucun salon "arène" n'existait et que l'owner n'avait rien
+    configuré, les mobs ne spawnaient JAMAIS — bug observé).
+    1. `combat_arena_channel_id` configuré par owner — préféré
+    2. Arène boss raid ACTIVE (events.arena_channel_id) — temporaire
+    3. Recherche par nom "arène/arena/combat/boss/jeu/game/general"
+    4. `hub_channel` configuré (le hub d'engagement)
+    5. Premier salon écrivable "sain" (pas ticket/annonce/log/RO/vocal)
+    6. system_channel de la guild
+    7. None → skip silencieux (vraiment aucun salon dispo)
     """
     if _db_get is None or _get_db is None:
         return None
 
+    cfg_data = {}
     # 1. Salon combat configuré par owner
     try:
         cfg_data = await _db_get(guild.id)
         ch_id = int(cfg_data.get("combat_arena_channel_id", 0) or 0)
         if ch_id:
             ch = guild.get_channel(ch_id)
-            if ch:
+            if ch and _bot_can_send(guild, ch):
                 return ch
     except Exception:
         pass
@@ -351,16 +455,47 @@ async def _find_arena_channel(guild: discord.Guild) -> Optional[discord.TextChan
                 row = await cur.fetchone()
         if row and row[0]:
             ch = guild.get_channel(int(row[0]))
-            if ch:
+            if ch and _bot_can_send(guild, ch):
                 return ch
     except Exception:
         pass
 
-    # 3. Fallback : recherche par nom
+    # 3. Recherche par nom (élargie : jeux/game/general aussi)
     for ch in guild.text_channels:
         n = (ch.name or "").lower()
-        if any(k in n for k in ["arène", "arena", "combat", "boss"]):
-            return ch
+        if any(k in n for k in ["arène", "arena", "combat", "boss",
+                                 "jeu", "game", "chasse", "donjon", "dungeon"]):
+            if _bot_can_send(guild, ch):
+                return ch
+
+    # 4. Hub d'engagement configuré
+    try:
+        hub_id = int(cfg_data.get("hub_channel", 0) or 0)
+        if hub_id:
+            ch = guild.get_channel(hub_id)
+            if ch and _bot_can_send(guild, ch):
+                return ch
+    except Exception:
+        pass
+
+    # 5. Premier salon écrivable "sain" (général / discussion)
+    try:
+        for ch in guild.text_channels:
+            n = (ch.name or "").lower()
+            if any(bad in n for bad in _ARENA_AVOID_KEYWORDS):
+                continue
+            if _bot_can_send(guild, ch):
+                return ch
+    except Exception:
+        pass
+
+    # 6. system_channel en dernier recours
+    try:
+        if guild.system_channel and _bot_can_send(guild, guild.system_channel):
+            return guild.system_channel
+    except Exception:
+        pass
+
     return None
 
 
@@ -391,7 +526,14 @@ async def spawn_mob(guild: discord.Guild) -> bool:
                     alive_kinds.add(r[0])
     except Exception:
         pass
-    pool = [m for m in MOB_CATALOG if m["id"] not in alive_kinds]
+    # Phase 173.1 : filtre jour/nuit. La nuit (23h-9h FR) → uniquement les
+    # mobs nocturnes (loups d'ombre, spectres, coffres nocturnes...) ; le jour
+    # → uniquement les mobs normaux. Garantit des événements de combat 24h/24.
+    night = _is_night()
+    pool = [
+        m for m in MOB_CATALOG
+        if m["id"] not in alive_kinds and _is_nocturnal(m) == night
+    ]
     if not pool:
         return False
 

@@ -61,6 +61,50 @@ def test_mob_api():
     assert hasattr(mob_hunts, "register_persistent_views")
 
 
+# ─── Phase 173.1 : jour/nuit + mobs nocturnes ─────────────────────────────
+
+def test_mob_has_nocturnal_mobs():
+    """Au moins 3 mobs nocturnes (spawn la nuit)."""
+    nocturnal = [m for m in mob_hunts.MOB_CATALOG if m.get("nocturnal")]
+    assert len(nocturnal) >= 3
+
+
+def test_mob_has_day_mobs():
+    """Les mobs de jour restent majoritaires."""
+    day = [m for m in mob_hunts.MOB_CATALOG if not m.get("nocturnal")]
+    assert len(day) >= 10
+
+
+def test_mob_night_chest_exists():
+    """Le coffre nocturne existe et a peu de HP (s'ouvre vite)."""
+    chest = mob_hunts.get_mob_def("night_chest")
+    assert chest is not None
+    assert chest.get("nocturnal") is True
+    assert chest["hp_base"] <= 80
+
+
+def test_mob_day_night_helpers():
+    """Les helpers jour/nuit existent."""
+    assert hasattr(mob_hunts, "_is_night")
+    assert hasattr(mob_hunts, "_is_nocturnal")
+    assert callable(mob_hunts._is_night)
+    # _is_night() retourne un booléen
+    assert isinstance(mob_hunts._is_night(), bool)
+
+
+def test_mob_spawn_more_frequent():
+    """Phase 173.1 : cooldown réduit (plus fréquent qu'avant)."""
+    assert mob_hunts.SPAWN_MIN_MIN <= 20
+    assert mob_hunts.SPAWN_MAX_MIN <= 35
+    assert mob_hunts.SPAWN_MIN_MIN <= mob_hunts.SPAWN_MAX_MIN
+
+
+def test_mob_arena_fallback_helper():
+    """Phase 173.1 : helper _bot_can_send pour le fallback de salon."""
+    assert hasattr(mob_hunts, "_bot_can_send")
+    assert hasattr(mob_hunts, "_find_arena_channel")
+
+
 # ─── wandering_merchant ───────────────────────────────────────────────────
 
 def test_merchant_catalog_size():
