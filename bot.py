@@ -38922,6 +38922,13 @@ async def on_ready():
         bot.add_view(EngagementHubView())
     except Exception as ex:
         print(f"[on_ready add_view EngagementHubView] {ex}")
+    # Phase 189 — Leaderboard à onglets PERSISTANT : survit aux redémarrages et
+    # au timeout → fini les « Échec de l'interaction » sur un classement laissé
+    # affiché (custom_ids stables lb_coins/lb_msgs/lb_voice + callbacks sans état).
+    try:
+        bot.add_view(LeaderboardTabsView())
+    except Exception as ex:
+        print(f"[on_ready add_view LeaderboardTabsView] {ex}")
 
     # Phase 49 : re-attacher les MissionStepClickView actifs au boot
     try:
@@ -54993,25 +55000,45 @@ async def leaderboard_cmd(i: discord.Interaction):
     """Phase 26.4 : leaderboard à onglets (pièces / messages / vocal).
     Accessible à tout le monde sur le serveur.
     """
-    v = LeaderboardTabsView(i.guild, i.user, tab='coins')
-    await v.render(i, edit=False)
+    await LeaderboardTabsView().render(i, tab='coins', edit=False)
 
 
 class LeaderboardTabsView(LayoutView):
     """Phase 26.4 : leaderboard à 3 onglets — pièces / messages / vocal."""
 
-    def __init__(self, guild, user, *, tab='coins'):
-        super().__init__(timeout=300)
-        self.guild = guild
-        self.user = user
-        self.tab = tab  # 'coins' | 'messages' | 'voice'
+    def __init__(self):
+        # Phase 189 : PERSISTANT (timeout=None) + 1 instance globale via
+        # bot.add_view() au boot → les boutons survivent aux reboots / timeout.
+        super().__init__(timeout=None)
+        self.guild = None
+        self.user = None
+        self.tab = 'coins'  # 'coins' | 'messages' | 'voice'
+        # Squelette : boutons à custom_id stables présents dès l'init pour que
+        # bot.add_view() enregistre le dispatch (le contenu réel est posé par
+        # render() sur des instances fraîches — jamais sur l'instance globale).
+        b_coins = Button(label="🪙 Pièces", style=discord.ButtonStyle.secondary, custom_id="lb_coins")
+        b_coins.callback = lambda ix: self._switch_tab(ix, 'coins')
+        b_msg = Button(label="💬 Messages", style=discord.ButtonStyle.secondary, custom_id="lb_msgs")
+        b_msg.callback = lambda ix: self._switch_tab(ix, 'messages')
+        b_voice = Button(label="🎤 Vocal", style=discord.ButtonStyle.secondary, custom_id="lb_voice")
+        b_voice.callback = lambda ix: self._switch_tab(ix, 'voice')
+        self.add_item(v2_container(
+            discord.ui.ActionRow(b_coins, b_msg, b_voice),
+            color=Palette.PREMIUM,
+        ))
 
     async def interaction_check(self, i):
         # Tout le monde peut interagir avec son propre leaderboard (mais on ne
         # restreint pas — si quelqu'un veut le voir, il en lance un nouveau)
         return True
 
-    async def render(self, i, *, edit: bool = False):
+    async def render(self, i, *, tab=None, edit: bool = False):
+        # Phase 189 : on (re)pose l'état sur CETTE instance (toujours fraîche —
+        # jamais l'instance globale enregistrée au boot, partagée par tous les
+        # messages) pour éviter toute course entre clics simultanés.
+        self.guild = i.guild
+        if tab is not None:
+            self.tab = tab
         # Fetch data selon onglet
         title_map = {
             'coins':    ("🪙 Plus riches",    "Classement par pièces (coins + banque)"),
@@ -55151,8 +55178,9 @@ class LeaderboardTabsView(LayoutView):
         return rows_out
 
     async def _switch_tab(self, i, tab):
-        self.tab = tab
-        await self.render(i, edit=True)
+        # Instance FRAÎCHE pour l'édition : l'instance enregistrée au boot est
+        # partagée par tous les messages → on ne mute jamais son état (course).
+        await LeaderboardTabsView().render(i, tab=tab, edit=True)
 
 
 # Phase 120 : retiré (debug inutilisé, ex-/testdeals)
