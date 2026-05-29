@@ -13239,18 +13239,17 @@ async def _drop_mystery_box(guild) -> bool:
             except Exception:
                 continue
 
-        # Trouver les salons actifs récents (jusqu'à 15 candidats)
+        # Phase 174.1 : fenêtre élargie 2h -> 24h (sur serveur calme, l'ancienne
+        # fenêtre de 2h faisait que la box ne spawnait quasi jamais).
         async with get_db() as db:
             async with db.execute(
                 'SELECT channel_id, MAX(created_at) as last_active FROM member_activity '
                 'WHERE guild_id=? AND activity_type=\'message\' '
-                'AND datetime(created_at) > datetime("now", "-2 hours") '
+                'AND datetime(created_at) > datetime("now", "-24 hours") '
                 'GROUP BY channel_id ORDER BY last_active DESC LIMIT 15',
                 (guild.id,),
             ) as cur:
                 rows = await cur.fetchall()
-        if not rows:
-            return False
 
         # Phase 41.2 : filtrer via _is_chatty_channel (tickets/annonces/RO out)
         candidates = []
@@ -13261,6 +13260,26 @@ async def _drop_mystery_box(guild) -> bool:
                     candidates.append(ch)
             except Exception:
                 continue
+
+        # Phase 174.1 : fallback si aucune activité récente — on prend le hub
+        # configuré, sinon le premier salon "chatty" écrivable.
+        if not candidates:
+            try:
+                _cfg = await cfg(guild.id)
+                hub_id = int(_cfg.get('hub_channel', 0) or 0)
+                hub_ch = guild.get_channel(hub_id) if hub_id else None
+                if hub_ch and await _is_chatty_channel(hub_ch):
+                    candidates.append(hub_ch)
+            except Exception:
+                pass
+            if not candidates:
+                for ch in guild.text_channels:
+                    try:
+                        if await _is_chatty_channel(ch):
+                            candidates.append(ch)
+                            break
+                    except Exception:
+                        continue
         if not candidates:
             return False
 
@@ -14081,9 +14100,18 @@ async def event_auto_scheduler():
                     except Exception:
                         pass
 
-                # Vérifier qu'aucun event n'est en cours
+                # Vérifier qu'aucun event n'est RÉELLEMENT en cours.
+                # Phase 174.1 : avant, un event resté à ended=0 (jamais terminé
+                # proprement / stale) bloquait À VIE tous les events auto. On ne
+                # bloque désormais que sur un event encore dans sa fenêtre de
+                # temps (ends_at futur) — les events périmés sont ignorés ici
+                # (et nettoyés par stale_event_cleanup).
                 async with get_db() as db:
-                    async with db.execute('SELECT id FROM events WHERE guild_id=? AND ended=0', (guild.id,)) as cur:
+                    async with db.execute(
+                        "SELECT id FROM events WHERE guild_id=? AND ended=0 "
+                        "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now'))",
+                        (guild.id,),
+                    ) as cur:
                         if await cur.fetchone():
                             continue
 
@@ -59412,11 +59440,13 @@ async def _spawn_flash_treasure(guild) -> bool:
             pass
 
         # Trouver un salon actif chatty
+        # Phase 174.1 : fenêtre 1h -> 24h (sur serveur calme, l'ancienne fenêtre
+        # d'1h faisait que le trésor flash ne spawnait quasi jamais).
         async with get_db() as db:
             async with db.execute(
                 'SELECT channel_id, COUNT(*) FROM member_activity '
                 'WHERE guild_id=? AND activity_type=\'message\' '
-                'AND datetime(created_at) > datetime("now", "-1 hour") '
+                'AND datetime(created_at) > datetime("now", "-24 hours") '
                 'GROUP BY channel_id ORDER BY COUNT(*) DESC LIMIT 10',
                 (guild.id,),
             ) as cur:
@@ -59426,6 +59456,16 @@ async def _spawn_flash_treasure(guild) -> bool:
             ch = guild.get_channel(int(ch_id))
             if ch and await _is_chatty_channel(ch):
                 candidates.append(ch)
+
+        # Phase 174.1 : fallback si aucune activité — premier salon chatty.
+        if not candidates:
+            for ch in guild.text_channels:
+                try:
+                    if await _is_chatty_channel(ch):
+                        candidates.append(ch)
+                        break
+                except Exception:
+                    continue
         if not candidates:
             return False
 
