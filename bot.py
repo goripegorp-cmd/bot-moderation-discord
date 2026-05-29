@@ -9271,6 +9271,12 @@ async def _boss_phase_attacks(guild, event_id: int):
         import traceback; traceback.print_exc()
 
 
+# Phase 183 : RIPOSTE du boss + MORT / RÉAPPARITION du joueur (choix owner : ~5 min)
+BOSS_RETAL_CHANCE = 0.35   # proba qu'un coup déclenche une riposte du boss
+RESPAWN_SEC = 300          # délai de réapparition après un K.O. (5 min)
+_player_respawn = {}       # (guild_id, user_id) -> timestamp de réapparition
+
+
 async def _handle_boss_attack(i: discord.Interaction, event_id: int):
     """Gère un clic sur le bouton Attaquer."""
     try:
@@ -9299,6 +9305,17 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
         # Rate-limit 5s
         key = (i.guild.id, i.user.id)
         now_ts = time.time()
+        # Phase 183 : K.O. ? (réapparition en cours → interdiction d'attaquer)
+        _resp_until = _player_respawn.get(key, 0)
+        if _resp_until > now_ts:
+            remaining = int(_resp_until - now_ts)
+            mm, ss = divmod(remaining, 60)
+            return await i.followup.send(
+                f"💀 **Tu es K.O.** — le boss t'a terrassé.\n"
+                f"⏳ Réapparition dans `{mm}m{ss:02d}s` (tu ne peux pas attaquer "
+                f"d'ici là). Tes alliés continuent le combat !",
+                ephemeral=True,
+            )
         last = _attack_cooldown.get(key, 0)
         if now_ts - last < 5:
             remaining = 5 - (now_ts - last)
@@ -9395,6 +9412,41 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
 
         # Update inventory total damage
         inv['total_damage'] = inv.get('total_damage', 0) + damage
+
+        # Phase 183 : RIPOSTE du boss — il peut frapper en retour (PV du joueur).
+        # La DEF de l'équipement et la Zone Défense réduisent les dégâts subis.
+        # Si les PV tombent à 0 → K.O. + réapparition (5 min).
+        retal_str = ""
+        try:
+            if not final_blow and random.random() < BOSS_RETAL_CHANCE:
+                boss_max = int(boss.get('max_hp', 1000)) or 1000
+                raw = random.randint(8, 26) + int((boss_max ** 0.5) // 6)
+                try:
+                    _pdef = int(events2026.inventory_total_stats(inv).get('def', 0) or 0)
+                except Exception:
+                    _pdef = 0
+                dmg_taken = max(1, raw - _pdef // 2)
+                if voice_zone_id == 'defense':
+                    dmg_taken = max(1, int(dmg_taken * 0.5))  # 🛡️ Zone Défense −50%
+                cur_hp = int(inv.get('hp', 100) or 100)
+                new_php = cur_hp - dmg_taken
+                if new_php <= 0:
+                    _player_respawn[key] = now_ts + RESPAWN_SEC
+                    inv['hp'] = int(inv.get('max_hp', 100) or 100)  # plein à la réapparition
+                    retal_str = (
+                        f"\n💀 **TU ES TOMBÉ !** Le boss t'inflige `{dmg_taken}` dégâts fatals. "
+                        f"Réapparition dans **{RESPAWN_SEC // 60} min** — impossible d'attaquer "
+                        f"d'ici là."
+                    )
+                else:
+                    inv['hp'] = new_php
+                    _zone_txt = " · 🛡️ Zone Défense" if voice_zone_id == 'defense' else ""
+                    retal_str = (
+                        f"\n🩸 Le boss riposte : `-{dmg_taken}` PV "
+                        f"(`{new_php}/{int(inv.get('max_hp', 100) or 100)}`{_zone_txt})."
+                    )
+        except Exception as ex:
+            print(f"[boss retaliation] {ex}")
 
         # Phase 107 : durabilité — chaque attaque consomme 1 pt sur tout l'équipement
         broken_items = []
@@ -9592,7 +9644,7 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
         bonus_str = ("\n_" + " · ".join(bonus_parts) + "_") if bonus_parts else ""
 
         await i.followup.send(
-            f"⚔️ Tu infliges `{damage}` dégâts au boss !{crit_str}{double_str}{elem_str}{bonus_str}",
+            f"⚔️ Tu infliges `{damage}` dégâts au boss !{crit_str}{double_str}{elem_str}{bonus_str}{retal_str}",
             ephemeral=True,
         )
 
