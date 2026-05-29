@@ -8663,7 +8663,9 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
             # ⚠️ TOS Discord : on cap à 3 mentions max pour rester en règle
             try:
                 # Phase 48.4.A : smart mention — respecte opt-out + affinité
-                wakeup_line = await _build_wakeup_mention_line_smart(guild, 'boss_raid', max_count=3)
+                # Phase 186 : framing ré-engagement + lot mentionné
+                wakeup_line = await _build_wakeup_mention_line_smart(
+                    guild, 'boss_raid', max_count=3, reward_hint="du butin de boss + des 🪙")
             except Exception as ex:
                 print(f"[event start wakeup line] {ex}")
                 wakeup_line = ""
@@ -10697,7 +10699,7 @@ async def _start_treasure_hunt(guild, triggered_by_id: int, *, manual: bool = Fa
             # Phase 48.4.A : smart mention — respecte opt-out + affinité par event_kind
             # ⚠️ TOS Discord : on cap à 3 mentions max pour rester en règle
             try:
-                wakeup_line = await _build_wakeup_mention_line_smart(guild, 'treasure', max_count=3)
+                wakeup_line = await _build_wakeup_mention_line_smart(guild, 'treasure', max_count=3, reward_hint="le trésor + des 🪙")
             except Exception as ex:
                 print(f"[treasure wakeup line] {ex}")
                 wakeup_line = ""
@@ -11002,7 +11004,7 @@ async def _start_quiz(guild, triggered_by_id: int, *, manual: bool = False) -> d
             # Phase 48.4.A : smart mention — respecte opt-out + affinité par event_kind
             # ⚠️ TOS Discord : on cap à 3 mentions max pour rester en règle
             try:
-                wakeup_line = await _build_wakeup_mention_line_smart(guild, 'quiz', max_count=3)
+                wakeup_line = await _build_wakeup_mention_line_smart(guild, 'quiz', max_count=3, reward_hint="des 🪙 + un rang temporaire")
             except Exception as ex:
                 print(f"[quiz wakeup line] {ex}")
                 wakeup_line = ""
@@ -59129,7 +59131,7 @@ async def _start_world_boss(guild) -> dict:
         ping_str = await _get_event_mention(guild, 'boss_raid')  # réutilise le role notif boss_raid
         # Phase 48.4.A : smart mention pour wake-up dormants spécifiquement intéressés
         try:
-            wakeup_line = await _build_wakeup_mention_line_smart(guild, 'world_boss', max_count=3)
+            wakeup_line = await _build_wakeup_mention_line_smart(guild, 'world_boss', max_count=3, reward_hint="du butin de World Boss + des 🪙")
         except Exception:
             wakeup_line = ""
         send_content = (
@@ -63175,7 +63177,7 @@ async def _start_game_night(guild) -> bool:
                 LIFETIME_ANNOUNCE = int((ends_at - datetime.now(timezone.utc)).total_seconds()) + 600
                 # Phase 48.4.A : smart mention pour ramener les dormants intéressés par Game Night
                 try:
-                    wakeup_line = await _build_wakeup_mention_line_smart(guild, 'game_night', max_count=3)
+                    wakeup_line = await _build_wakeup_mention_line_smart(guild, 'game_night', max_count=3, reward_hint="des 🪙 et des récompenses")
                 except Exception:
                     wakeup_line = ""
                 # Phase 79 : LayoutView V2 — sections clean + chrono inline
@@ -65840,11 +65842,17 @@ async def _get_user_event_affinity(guild_id: int, user_id: int, event_kind: str)
         return 50
 
 
-async def _build_wakeup_mention_line_smart(guild, event_kind: str, max_count: int = 3) -> str:
+async def _build_wakeup_mention_line_smart(guild, event_kind: str, max_count: int = 3,
+                                           reward_hint: str = None) -> str:
     """Phase 48.1 : mention que les inactifs avec affinité élevée pour ce type d'event.
     Phase 48.3 : RESPECTE les préférences notif granulaires (skip si opted-out).
+    Phase 186 : framing RÉ-ENGAGEMENT honnête — on ne dit plus « spécialement pour
+    vous » (trompeur). Ces membres ont DÉJÀ participé à ce type d'event et sont
+    devenus inactifs → on les invite à REVENIR retenter leur chance (ouvert à tous).
+    Le but : faire revivre le serveur en redonnant une chance aux anciens actifs.
 
-    Cap 3 mentions max (TOS Discord respect).
+    `reward_hint` (optionnel) : si fourni, on précise « tenter de gagner X ».
+    Cap 3 mentions max + cooldown 48h + opt-out (TOS Discord respect).
     """
     try:
         all_candidates = await _get_wakeup_candidates(guild, max_count=20)
@@ -65876,7 +65884,12 @@ async def _build_wakeup_mention_line_smart(guild, event_kind: str, max_count: in
             return ""
         await _log_wakeup_mentions(guild.id, [m.id for m in chosen])
         mentions = " ".join(m.mention for m in chosen)
-        return f"\n\n🎯 **Spécialement pour vous :** {mentions}"
+        reward_part = f" et tenter de gagner **{reward_hint}**" if reward_hint else ""
+        return (
+            f"\n\n🔔 {mentions} — vous aviez déjà participé à ce genre d'événement et "
+            f"vous nous manquez ! Il **revient maintenant** : si ça vous tente toujours, "
+            f"revenez retenter votre chance{reward_part}. _C'est ouvert à tout le monde_ 👀"
+        )
     except Exception as ex:
         print(f"[_build_wakeup_mention_line_smart] {ex}")
         return ""
