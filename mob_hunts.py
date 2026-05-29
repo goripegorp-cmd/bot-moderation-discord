@@ -227,7 +227,7 @@ MOB_CATALOG = [
         "nocturnal": True,
     },
     {
-        "id": "wraith",
+        "id": "night_wraith",
         "name": "Spectre Nocturne",
         "emoji": "👻",
         "hp_base": 170,
