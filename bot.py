@@ -8103,10 +8103,10 @@ async def _open_equipment(i: discord.Interaction):
 # pour que chaque toggle soit fonctionnel. On n'ajoute ici que les events dont la
 # clé est déjà respectée par le scheduler / dispatcher.
 EVENT_TYPE_REGISTRY = [
-    {"key": "boss_engine", "emoji": "⚔️", "label": "Moteur Boss / Trésor / Quiz", "enabled_cfg": "event_enabled", "rich_panel": "EventConfigPanelV2"},
-    {"key": "world_boss", "emoji": "🐲", "label": "World Boss", "enabled_cfg": "world_boss_enabled"},
-    {"key": "voice_chaos", "emoji": "🎤", "label": "Chaos vocal", "enabled_cfg": "voice_chaos_enabled"},
-    {"key": "flash_treasure", "emoji": "⚡", "label": "Trésor Flash", "enabled_cfg": "flash_treasure_enabled"},
+    {"key": "boss_engine", "emoji": "⚔️", "label": "Moteur Boss / Trésor / Quiz", "enabled_cfg": "event_enabled", "default": False, "rich_panel": "EventConfigPanelV2"},
+    {"key": "world_boss", "emoji": "🐲", "label": "World Boss", "enabled_cfg": "world_boss_enabled", "default": True},
+    {"key": "voice_chaos", "emoji": "🎤", "label": "Chaos vocal", "enabled_cfg": "voice_chaos_enabled", "default": True},
+    {"key": "flash_treasure", "emoji": "⚡", "label": "Trésor Flash", "enabled_cfg": "flash_treasure_enabled", "default": True},
 ]
 
 
@@ -8132,7 +8132,7 @@ class EventsHubPanelV2(LayoutView):
         rows = []
         current_row = []
         for entry in EVENT_TYPE_REGISTRY:
-            on = bool(c.get(entry["enabled_cfg"], True))
+            on = bool(c.get(entry["enabled_cfg"], entry.get("default", True)))
             status = "✅ Activé" if on else "⛔ Désactivé"
             lines.append(f"{entry['emoji']} **{entry['label']}** — {status}")
 
@@ -8204,7 +8204,7 @@ class EventTypeConfigPanelV2(LayoutView):
 
     async def render_to(self, interaction, *, edit: bool = True):
         c = await cfg(self.g.id)
-        on = bool(c.get(self.entry["enabled_cfg"], True))
+        on = bool(c.get(self.entry["enabled_cfg"], self.entry.get("default", True)))
 
         self.clear_items()
 
@@ -8238,7 +8238,7 @@ class EventTypeConfigPanelV2(LayoutView):
         try:
             c = await cfg(self.g.id)
             key = self.entry["enabled_cfg"]
-            await db_set(self.g.id, key, not bool(c.get(key, True)))
+            await db_set(self.g.id, key, not bool(c.get(key, self.entry.get("default", True))))
             await self.render_to(i, edit=True)
         except Exception as ex:
             print(f"[EventTypeConfigPanelV2 _cb_toggle {self.entry.get('key')}] {ex}")
