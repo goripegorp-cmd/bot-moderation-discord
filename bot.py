@@ -171,6 +171,7 @@ import mob_hunts as mob_hunts_module
 # Phase 173.2 : Boss du jour, 4×/jour, gating de niveau
 import daily_bosses as daily_bosses_module
 import activity_rewards as activity_rewards_module
+import dungeon_instances as dungeon_module
 # Phase 169.2 : Marchand itinérant quotidien
 import wandering_merchant as wandering_merchant_module
 # Phase 169.3 : World Invasion mensuelle
@@ -39755,6 +39756,18 @@ async def on_ready():
         except Exception as ex:
             print(f"[on_ready 173.2 daily_bosses] {ex}")
 
+        # Phase 184 : Donjons instanciés (lobby groupe → salons dédiés → vagues)
+        try:
+            dungeon_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
+                                 inventory_fn=_get_or_create_inventory)
+            await dungeon_module.init_db()
+            await dungeon_module.boot_cleanup()  # nettoie les runs orphelins (reboot)
+            dungeon_module.register_persistent_views(bot)
+            if not dungeon_module.dungeon_timeout_task.is_running():
+                dungeon_module.dungeon_timeout_task.start()
+        except Exception as ex:
+            print(f"[on_ready 184 dungeon] {ex}")
+
         # Phase 174.2 : Récompenses VIP des plus actifs (messages + vocal)
         try:
             activity_rewards_module.setup(bot, get_db, db_get, _v2h)
@@ -76617,6 +76630,15 @@ class CompetitionsLayoutV2(LayoutView):
             "Leaderboard de l'objectif compétitif saisonnier", b,
         ))
 
+        b = Button(label="🏰 Ouvrir un donjon", style=discord.ButtonStyle.primary,
+                   custom_id="compv2_dungeon")
+        b.callback = self._on_dungeon
+        items.append(_section_with_button(
+            "🏰 Donjon instancié",
+            "Solo ou groupe (4 max) · salon + vocal privés · vagues de mobs + boss · "
+            "+20% dégâts en vocal · butin partagé", b,
+        ))
+
         items.append(v2_divider())
         items.append(v2_body(
             "_Auto-tracking : tu n'as rien à valider, c'est calculé en temps réel._"
@@ -76633,6 +76655,26 @@ class CompetitionsLayoutV2(LayoutView):
     async def _on_bingo(self, i):       await _open_bingo_panel(i)
     async def _on_predictions(self, i): await _open_predictions_panel(i)
     async def _on_faction_war(self, i): await _open_faction_war_panel(i)
+
+    async def _on_dungeon(self, i):
+        # Phase 184 : ouvre un lobby de donjon public dans le salon courant
+        try:
+            ok = await dungeon_module.start_dungeon_lobby(i.channel, i.user)
+        except Exception:
+            ok = False
+        try:
+            if ok:
+                await i.response.send_message(
+                    "🏰 **Lobby de donjon ouvert dans ce salon !** Les aventuriers "
+                    "peuvent cliquer pour rejoindre (4 max). Lancement auto sous peu.",
+                    ephemeral=True)
+            else:
+                await i.response.send_message(
+                    "⏳ Impossible d'ouvrir un donjon ici : un donjon est déjà en "
+                    "formation ou actif, ou ce salon ne convient pas. Réessaie dans "
+                    "un salon de discussion.", ephemeral=True)
+        except Exception:
+            pass
 
     async def _on_close(self, i):
         try:

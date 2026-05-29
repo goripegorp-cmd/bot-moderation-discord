@@ -47,6 +47,8 @@ PHASE_163_MODULES = [
     "daily_bosses",
     # Phase 174.2 — Récompenses VIP des plus actifs (messages + vocal)
     "activity_rewards",
+    # Phase 184 — Donjons instanciés (lobby groupe + salons dédiés)
+    "dungeon_instances",
     # Phase 170 — Chronique d'Abylumis (récit collectif persistant)
     "story_engine",
     "codex_chronicle",
@@ -133,6 +135,8 @@ INIT_DB_MODULES = [
     "monthly_climax",
     # Phase 174.2 : VIP grants + role IDs
     "activity_rewards",
+    # Phase 184 : dungeon_runs + dungeon_members
+    "dungeon_instances",
 ]
 
 
