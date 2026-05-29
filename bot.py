@@ -7938,6 +7938,150 @@ async def _acquire_gear(guild_id: int, user_id: int, item: dict) -> str:
         return None
 
 
+# ─────────────────────────── Phase 179b : UI ÉQUIPEMENT ───────────────────────────
+
+_SLOT_META = {
+    'weapon':    ('⚔️', 'Arme'),
+    'armor':     ('🛡️', 'Armure'),
+    'helmet':    ('⛑️', 'Casque'),
+    'boots':     ('🥾', 'Bottes'),
+    'accessory': ('💍', 'Accessoire'),
+    'trinket':   ('🔮', 'Babiole'),
+}
+
+
+def _format_loadout_lines(inv: dict) -> list:
+    """Une ligne par emplacement équipé (ou _vide_)."""
+    lines = []
+    for slot, (emo, label) in _SLOT_META.items():
+        it = inv.get(slot) or {}
+        if it and it.get('name'):
+            rr = events2026.RARITY_EMOJIS.get(it.get('rarity', 'commune'), '')
+            bits = []
+            if it.get('atk'):
+                bits.append(f"+{it['atk']} ATK")
+            if it.get('def'):
+                bits.append(f"+{it['def']} DEF")
+            if it.get('crit'):
+                bits.append(f"+{it['crit']}% crit")
+            stat_s = (" · " + " · ".join(bits)) if bits else ""
+            lines.append(f"{emo} **{label}** : {rr}{it.get('emoji', '')} {it['name']}{stat_s}")
+        else:
+            lines.append(f"{emo} **{label}** : _vide_")
+    return lines
+
+
+class _EquipSelect(discord.ui.Select):
+    """Sélecteur : équipe un objet du coffre (ephemeral, re-render au choix)."""
+
+    def __init__(self, stash: list):
+        options = []
+        for (sid, slot, item) in stash[:25]:
+            emo, label = _SLOT_META.get(slot, ('📦', slot))
+            rr = item.get('rarity', 'commune')
+            bits = []
+            if item.get('atk'):
+                bits.append(f"+{item['atk']}atk")
+            if item.get('def'):
+                bits.append(f"+{item['def']}def")
+            if item.get('crit'):
+                bits.append(f"+{item['crit']}%cr")
+            desc = f"{label} · {rr}" + ((" · " + " ".join(bits)) if bits else "")
+            options.append(discord.SelectOption(
+                label=str(item.get('name', '?'))[:90] or '?',
+                value=str(sid),
+                description=desc[:100],
+            ))
+        if not options:
+            options = [discord.SelectOption(label="(coffre vide)", value="none")]
+        super().__init__(
+            placeholder="🎒 Équiper un objet du coffre…",
+            options=options, min_values=1, max_values=1,
+        )
+
+    async def callback(self, i: discord.Interaction):
+        try:
+            if self.values[0] == "none":
+                return await i.response.defer()
+            sid = int(self.values[0])
+            ok, new_item, old_item = await _stash_equip(i.guild.id, i.user.id, sid)
+            if not ok:
+                return await i.response.send_message(
+                    "❌ Objet introuvable (déjà équipé ?).", ephemeral=True,
+                )
+            new_view = await EquipmentLayoutV2.create(i.guild, i.user.id)
+            await i.response.edit_message(view=new_view)
+        except Exception as ex:
+            print(f"[_EquipSelect callback] {ex}")
+            try:
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
+class EquipmentLayoutV2(LayoutView):
+    """Phase 179b : panneau ÉQUIPEMENT (loadout + équiper depuis le coffre).
+    Ephemeral, donc réservé au joueur qui l'ouvre."""
+
+    def __init__(self, guild, user_id: int, inv: dict, stash: list, totals: dict):
+        super().__init__(timeout=300)
+        items = []
+        items.append(v2_title("🎒 Mon Équipement"))
+        items.append(v2_body("\n".join(_format_loadout_lines(inv))))
+        items.append(v2_divider())
+        tot_line = (
+            f"**⚡ Puissance totale** : `+{totals.get('atk', 0)}` ATK · "
+            f"`+{totals.get('def', 0)}` DEF · `+{totals.get('crit', 0)}%` crit"
+        )
+        if totals.get('set_name'):
+            tot_line += f"\n{totals.get('set_emoji', '')} Set actif : **{totals['set_name']}**"
+        items.append(v2_body(tot_line))
+        items.append(v2_divider())
+        if stash:
+            items.append(v2_body(
+                f"_🎒 **{len(stash)}** objet(s) dans ton coffre. "
+                f"Choisis-en un ci-dessous pour l'équiper (l'ancien retourne au coffre)._"
+            ))
+        else:
+            items.append(v2_body(
+                "_🎒 Coffre vide — bats des boss et des mobs pour collecter du stuff "
+                "et bâtir ton arsenal !_"
+            ))
+        self.add_item(v2_container(*items, color=0x9B59B6))
+        if stash:
+            self.add_item(discord.ui.ActionRow(_EquipSelect(stash)))
+
+    @classmethod
+    async def create(cls, guild, user_id: int):
+        inv = await _get_or_create_inventory(guild.id, user_id)
+        stash = await _stash_list(guild.id, user_id)
+        try:
+            totals = events2026.inventory_total_stats(inv)
+        except Exception:
+            totals = {"atk": 0, "def": 0, "crit": 0}
+        return cls(guild, user_id, inv, stash, totals)
+
+
+async def _open_equipment(i: discord.Interaction):
+    """Ouvre le panneau d'équipement en ephemeral (réutilisable partout)."""
+    try:
+        view = await EquipmentLayoutV2.create(i.guild, i.user.id)
+        if i.response.is_done():
+            await i.followup.send(view=view, ephemeral=True)
+        else:
+            await i.response.send_message(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[_open_equipment] {ex}")
+        try:
+            msg = "❌ Impossible d'ouvrir l'équipement."
+            if i.response.is_done():
+                await i.followup.send(msg, ephemeral=True)
+            else:
+                await i.response.send_message(msg, ephemeral=True)
+        except Exception:
+            pass
+
+
 # ─────────────────────────── PANEL DE CONFIG ───────────────────────────
 
 class EventConfigPanelV2(LayoutView):
@@ -8863,10 +9007,16 @@ class BossArenaLayoutV2(LayoutView):
 
         items.append(v2_divider())
 
-        # Bouton INVENTAIRE en bas (Action Row)
+        # Phase 179b : rappel d'équipement avant de frapper
+        items.append(v2_body(
+            "_💡 Clique **🎒 Mon équipement** pour voir ton stuff et **équiper "
+            "ta meilleure arme** depuis ton coffre avant d'attaquer !_"
+        ))
+
+        # Bouton ÉQUIPEMENT en bas (Action Row)
         # Phase 74 : custom_id ALIGNÉ avec BossAttackView (boss_inv_X) — voir HP section
         inv_btn = Button(
-            label="🎒 Mon inventaire",
+            label="🎒 Mon équipement",
             style=discord.ButtonStyle.secondary,
             custom_id=f"boss_inv_{self.event_id}",
         )
@@ -8883,24 +9033,9 @@ class BossArenaLayoutV2(LayoutView):
             print(f"[BossArenaLayoutV2 _on_attack] {ex}")
 
     async def _on_inv(self, i: discord.Interaction):
-        """Affiche l'inventaire du joueur (copié de BossAttackView._on_inv)."""
-        try:
-            inv = await _get_or_create_inventory(i.guild.id, i.user.id)
-            w = inv.get('weapon', {})
-            a = inv.get('armor', {})
-            txt = (
-                f"**🎒 Ton équipement :**\n"
-                f"⚔️ Arme : {w.get('emoji', '')} **{w.get('name', '_aucune_')}** · "
-                f"`+{w.get('atk', 0)}` ATK · _{w.get('rarity', '—')}_\n"
-                f"🛡️ Armure : {a.get('emoji', '')} **{a.get('name', '_aucune_')}** · "
-                f"`+{a.get('def', 0)}` DEF · _{a.get('rarity', '—')}_\n"
-                f"❤️ PV : `{inv.get('hp', 100)}/{inv.get('max_hp', 100)}`\n"
-                f"💀 Kills : `{inv.get('kills', 0)}` · "
-                f"Total dégâts : `{inv.get('total_damage', 0)}`"
-            )
-            await i.response.send_message(txt, ephemeral=True)
-        except Exception as ex:
-            print(f"[BossArenaLayoutV2 _on_inv] {ex}")
+        """Phase 179b : ouvre le panneau ÉQUIPEMENT interactif (loadout + équiper
+        depuis le coffre)."""
+        await _open_equipment(i)
 
 
 # ─────────────────────────── BOUTON ATTAQUE ───────────────────────────
@@ -8932,20 +9067,8 @@ class BossAttackView(View):
         await _handle_boss_attack(i, self.event_id)
 
     async def _on_inv(self, i: discord.Interaction):
-        try:
-            inv = await _get_or_create_inventory(i.guild.id, i.user.id)
-            w = inv.get('weapon', {})
-            a = inv.get('armor', {})
-            txt = (
-                f"**🎒 Ton équipement :**\n"
-                f"⚔️ Arme : {w.get('emoji', '')} **{w.get('name', '_aucune_')}** · `+{w.get('atk', 0)}` ATK · _{w.get('rarity', '—')}_\n"
-                f"🛡️ Armure : {a.get('emoji', '')} **{a.get('name', '_aucune_')}** · `+{a.get('def', 0)}` DEF · _{a.get('rarity', '—')}_\n"
-                f"❤️ PV : `{inv.get('hp', 100)}/{inv.get('max_hp', 100)}`\n"
-                f"💀 Kills : `{inv.get('kills', 0)}` · Total dégâts : `{inv.get('total_damage', 0)}`"
-            )
-            await i.response.send_message(txt, ephemeral=True)
-        except Exception as ex:
-            print(f"[BossAttackView _on_inv] {ex}")
+        # Phase 179b : ouvre le panneau ÉQUIPEMENT interactif (équiper depuis le coffre)
+        await _open_equipment(i)
 
 
 async def _boss_phase_attacks(guild, event_id: int):
@@ -44940,8 +45063,29 @@ async def inventory_cmd(i: discord.Interaction):
                 # Phase 166.5 : _SwapBtn supprimé — pas d'échange P2P
                 # (cf décision owner : "aucun échange, sleep-on-events guard")
 
+                # Phase 179b : bouton ÉQUIPER → panneau coffre/équipement interactif
+                class _EquipBtn(discord.ui.Button):
+                    def __init__(self):
+                        super().__init__(
+                            label="🎒 Équiper",
+                            style=discord.ButtonStyle.primary,
+                            custom_id=f"phase179_inv_equip_{_owner_id}",
+                        )
+
+                    async def callback(self, btn_i: discord.Interaction):
+                        if btn_i.user.id != _owner_id:
+                            return await btn_i.response.send_message(
+                                "❌ Ce panneau n'est pas pour toi.", ephemeral=True
+                            )
+                        await _open_equipment(btn_i)
+
                 # ─── Section "ACTIONS RAPIDES" avec boutons en accessory ───
                 items.append(v2_body("**╔═══ ⚡  ACTIONS RAPIDES  ═══╗**"))
+                items.append(v2_section(
+                    v2_title("🎒  Équiper / Coffre"),
+                    v2_subtitle("Vois ton équipement + équipe une arme de ton coffre"),
+                    accessory=_EquipBtn(),
+                ))
                 items.append(v2_section(
                     v2_title("🔧  Réparation"),
                     v2_subtitle("Restaure la durabilité de tout ton équipement"),
