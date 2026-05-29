@@ -53,29 +53,29 @@ async def _is_alive_youtube(session, post: TrackedPost) -> bool:
 
 
 async def _is_alive_twitter(session, post: TrackedPost) -> bool:
-    """Check via syndication : si le tweet n'est plus dans les recent tweets, on assume supprime.
+    """Phase 171.2 : auto-suppression Twitter DESACTIVEE (faux positifs).
 
-    Nuance : Twitter ne retient que les ~20 derniers tweets, donc un tweet ancien
-    sortira naturellement. Pour limiter les faux positifs, on ne supprime que si
-    le post a < 14 jours (apres ca, on assume qu'il est juste sorti du feed).
+    Historique : on checkait via la syndication API si le tweet etait
+    encore dans les ~20 derniers tweets du profil. Probleme en 2026 :
+    - Nitter est mort depuis 2024.
+    - La syndication API est rate-limited (429) depuis le cloud ET renvoie
+      souvent un `200` avec une page de login/erreur qui NE CONTIENT PAS le
+      tweet recherche.
+    - Un compte actif peut tweeter > 20 fois en < 14 jours, poussant le
+      tweet hors du feed recent sans qu'il soit supprime.
+
+    Resultat : `post.post_id in html` renvoyait False pour des raisons
+    AUTRES qu'une suppression reelle -> le bot effacait des annonces
+    Discord LEGITIMES (symptome observe : `[CLEANUP] N annonces supprimees`).
+
+    Decision : on ne peut plus juger de facon fiable si un tweet est
+    supprime. On GARDE donc toujours les annonces Twitter. Mieux vaut une
+    annonce perimee qu'une annonce legitime effacee a tort.
+
+    (Si Twitter/Nitter redeviennent fiables un jour, ré-implémenter ici
+    un vrai check per-tweet 404.)
     """
-    import time
-    age_days = (time.time() - post.posted_at) / 86400
-    if age_days > 14:
-        return True  # trop vieux pour juger, on garde
-
-    synd_url = f"https://syndication.twitter.com/srv/timeline-profile/screen-name/{post.username}"
-    try:
-        async with session.get(synd_url, headers=_HEADERS, timeout=_TIMEOUT) as resp:
-            if resp.status != 200:
-                return True
-            html = await resp.text()
-        # Cherche le tweet_id dans la reponse
-        if post.post_id in html:
-            return True
-        return False
-    except Exception:
-        return True
+    return True
 
 
 async def _is_alive_tiktok(session, post: TrackedPost) -> bool:

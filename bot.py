@@ -54523,6 +54523,13 @@ async def _2026_social_cleanup_loop():
     session = None
     try:
         while not bot.is_closed():
+            # Phase 171.2 : kill-switch owner. Pour desactiver completement
+            # l'auto-suppression des annonces sociales, mettre la variable
+            # Railway SOCIAL_CLEANUP_ENABLED=0 puis redemarrer.
+            _cleanup_on = os.getenv("SOCIAL_CLEANUP_ENABLED", "1").strip().lower()
+            if _cleanup_on not in ("1", "true", "yes", "on"):
+                await asyncio.sleep(interval)
+                continue
             try:
                 if session is None or session.closed:
                     session = aiohttp.ClientSession()
