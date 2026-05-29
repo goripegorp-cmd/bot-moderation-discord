@@ -168,6 +168,8 @@ import member_risk as member_risk_module
 import error_logger as error_logger_module
 # Phase 169.1 : Mob Hunts (combat fréquent multi-user)
 import mob_hunts as mob_hunts_module
+# Phase 173.2 : Boss du jour, 4×/jour, gating de niveau
+import daily_bosses as daily_bosses_module
 # Phase 169.2 : Marchand itinérant quotidien
 import wandering_merchant as wandering_merchant_module
 # Phase 169.3 : World Invasion mensuelle
@@ -39032,6 +39034,16 @@ async def on_ready():
         mob_hunts_module.register_persistent_views(bot)
         if not mob_hunts_module.spawn_task.is_running():
             mob_hunts_module.spawn_task.start()
+
+        # Phase 173.2 : Boss du jour (4×/jour : 12h/17h/21h/1h FR, gating niveau)
+        try:
+            daily_bosses_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins)
+            await daily_bosses_module.init_db()
+            daily_bosses_module.register_persistent_views(bot)
+            if not daily_bosses_module.daily_boss_task.is_running():
+                daily_bosses_module.daily_boss_task.start()
+        except Exception as ex:
+            print(f"[on_ready 173.2 daily_bosses] {ex}")
 
         # Phase 169.2 : Marchand itinérant quotidien
         wandering_merchant_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins)

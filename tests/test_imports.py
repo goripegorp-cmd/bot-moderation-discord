@@ -43,6 +43,8 @@ PHASE_163_MODULES = [
     "mob_hunts",
     "wandering_merchant",
     "world_invasion",
+    # Phase 173.2 — Boss du jour (4×/jour, gating niveau)
+    "daily_bosses",
     # Phase 170 — Chronique d'Abylumis (récit collectif persistant)
     "story_engine",
     "codex_chronicle",
