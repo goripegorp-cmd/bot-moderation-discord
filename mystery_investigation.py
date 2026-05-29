@@ -55,6 +55,7 @@ from typing import Optional
 import discord
 from discord.ext import tasks
 from discord.ui import Button
+import ui_v2  # design-system V2 partagé (encadrés cohérents)
 
 # ─── Config ────────────────────────────────────────────────────────────────
 _bot = None
@@ -665,7 +666,11 @@ async def share_clue_publicly(
     )
 
     try:
-        await ch.send(msg, allowed_mentions=discord.AllowedMentions.none())
+        _t, _, _b = msg.partition("\n\n")
+        await ch.send(
+            view=ui_v2.recap_view(_t.replace("**", ""), _b or msg,
+                                  color=ui_v2.Palette.ACCENT),
+            allowed_mentions=discord.AllowedMentions.none())
     except Exception:
         return {"success": False, "error": "Envoi impossible"}
 
@@ -923,7 +928,11 @@ async def _announce_revelation(
         f"📖 Gravé dans le Codex pour toujours."
     )
     try:
-        await ch.send(msg, allowed_mentions=discord.AllowedMentions.none())
+        _t, _, _b = msg.partition("\n\n")
+        await ch.send(
+            view=ui_v2.recap_view(_t.replace("**", ""), _b or msg,
+                                  color=ui_v2.Palette.ACCENT),
+            allowed_mentions=discord.AllowedMentions.none())
     except Exception:
         pass
 

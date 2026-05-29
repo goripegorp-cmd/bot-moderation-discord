@@ -61,6 +61,7 @@ from typing import Optional
 import discord
 from discord.ext import tasks
 from discord.ui import Button
+import ui_v2  # design-system V2 partagé (encadrés cohérents)
 
 try:
     from zoneinfo import ZoneInfo
@@ -1043,7 +1044,11 @@ async def _announce_patrol_open(
         f"_📖 Va dans le Codex → 🌍 Régions pour défendre._"
     )
     try:
-        await ch.send(msg, allowed_mentions=discord.AllowedMentions.none())
+        _t, _, _b = msg.partition("\n\n")
+        await ch.send(
+            view=ui_v2.recap_view(_t.replace("**", ""), _b or msg,
+                                  color=ui_v2.Palette.INFO),
+            allowed_mentions=discord.AllowedMentions.none())
     except Exception:
         pass
 
@@ -1096,7 +1101,9 @@ async def _announce_patrol_closed(
 
     try:
         await ch.send(
-            head + "\n\n" + body,
+            view=ui_v2.recap_view(
+                head.replace("**", ""), body,
+                color=(ui_v2.Palette.SUCCESS if success else ui_v2.Palette.DANGER)),
             allowed_mentions=discord.AllowedMentions.none(),
         )
     except Exception:

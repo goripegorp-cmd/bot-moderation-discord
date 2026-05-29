@@ -50,6 +50,7 @@ from typing import Optional
 import discord
 from discord.ext import tasks
 from discord.ui import Button
+import ui_v2  # design-system V2 partagé (encadrés cohérents)
 
 try:
     from zoneinfo import ZoneInfo
@@ -1102,7 +1103,11 @@ async def _announce_council_open(
         f"_📖 Va dans le Codex (hub) pour voter._"
     )
     try:
-        await ch.send(msg, allowed_mentions=discord.AllowedMentions.none())
+        _t, _, _b = msg.partition("\n\n")
+        await ch.send(
+            view=ui_v2.recap_view(_t.replace("**", "").replace("*", ""), _b or msg,
+                                  color=ui_v2.Palette.INFO),
+            allowed_mentions=discord.AllowedMentions.none())
     except Exception:
         pass
 
@@ -1133,7 +1138,11 @@ async def _announce_council_closed(
         "tiendra compte._"
     )
     try:
-        await ch.send(msg, allowed_mentions=discord.AllowedMentions.none())
+        _t, _, _b = msg.partition("\n\n")
+        await ch.send(
+            view=ui_v2.recap_view(_t.replace("**", "").replace("*", ""), _b or msg,
+                                  color=ui_v2.Palette.PREMIUM),
+            allowed_mentions=discord.AllowedMentions.none())
     except Exception:
         pass
 

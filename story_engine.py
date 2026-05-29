@@ -41,6 +41,7 @@ from typing import Optional
 
 import discord
 from discord.ext import tasks
+import ui_v2  # design-system V2 partagé (encadrés cohérents)
 
 try:
     from zoneinfo import ZoneInfo
@@ -934,7 +935,12 @@ async def _announce_chapter_advance(guild: discord.Guild, result: dict) -> None:
         )
 
     try:
-        await ch.send(head + body, allowed_mentions=discord.AllowedMentions.none())
+        _full = head + body
+        _t, _, _b = _full.partition("\n\n")
+        await ch.send(
+            view=ui_v2.recap_view(_t.replace("**", ""), _b or _full,
+                                  color=ui_v2.Palette.PREMIUM),
+            allowed_mentions=discord.AllowedMentions.none())
     except Exception:
         pass
 
@@ -953,7 +959,11 @@ async def _announce_chronicle_completed(guild: discord.Guild) -> None:
         "ne reviendra jamais._"
     )
     try:
-        await ch.send(msg, allowed_mentions=discord.AllowedMentions.none())
+        _t, _, _b = msg.partition("\n\n")
+        await ch.send(
+            view=ui_v2.recap_view(_t.replace("**", ""), _b or msg,
+                                  color=ui_v2.Palette.PREMIUM),
+            allowed_mentions=discord.AllowedMentions.none())
     except Exception:
         pass
 
