@@ -26,6 +26,7 @@ from ui_v2 import (
     BasePanel as V2BasePanel,
     header as v2_header,
     info_card as v2_info_card,
+    recap_view as v2_recap_view,
 )
 
 # ─── Modules redesign 2026 (Phase 0 + 1) ───
@@ -59393,7 +59394,10 @@ async def _end_world_boss(guild, wb_id: int, victory: bool, reason: str = ""):
                     f"_Réessayez la semaine prochaine !_\n"
                     f"🗑️ Salon supprimé dans 5 minutes."
                 )
-                await ch.send(final_msg)
+                _wb_t, _, _wb_b = final_msg.partition("\n")
+                await ch.send(view=v2_recap_view(
+                    _wb_t.replace("**", ""), _wb_b or final_msg,
+                    color=(Palette.SUCCESS if victory else Palette.DANGER)))
 
                 async def _cleanup_arena():
                     await asyncio.sleep(300)
