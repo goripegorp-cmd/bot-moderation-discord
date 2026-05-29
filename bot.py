@@ -59090,12 +59090,9 @@ async def _start_world_boss(guild) -> dict:
         if await _has_any_major_event_running(guild.id):
             return {'ok': False, 'error': 'un event majeur est déjà en cours'}
 
-        # Trouver le salon où poster : on utilise event_arena_category si dispo,
-        # sinon on crée un salon dédié temporaire dans la catégorie events.
-        cat_id = int(c.get('event_arena_category', 0) or 0)
-        category = guild.get_channel(cat_id) if cat_id else None
-        if not isinstance(category, discord.CategoryChannel):
-            category = None
+        # Phase 188 : range l'arène dans LA catégorie « 🎪 Événements » (créée en
+        # haut du serveur si besoin). Respecte event_arena_category si configurée.
+        category = await _ensure_events_category(guild)
 
         # Choisir un boss
         boss = ev42.random_world_boss()
@@ -62270,6 +62267,60 @@ async def _get_alliance_members(alliance_id: int) -> list:
         return []
 
 
+async def _ensure_events_category(guild) -> Optional[discord.CategoryChannel]:
+    """Phase 188 : LA catégorie centrale '🎪 Événements', placée TOUT EN HAUT du
+    serveur, où sont rangés les salons d'event éphémères (World Boss, Game
+    Night...). Objectif : que ce soit propre et visible, pas éparpillé en bas.
+
+    Priorité :
+      1. `event_arena_category` configurée par l'owner (choix explicite respecté)
+      2. catégorie auto déjà créée (cache `events_category`)
+      3. catégorie nommée "🎪 Événements" déjà présente (anti-doublon)
+      4. création auto à position 0 (si le bot a Gérer les salons)
+    Retourne la CategoryChannel ou None (le caller retombe alors sans catégorie).
+    """
+    if guild is None:
+        return None
+    try:
+        c = await cfg(guild.id)
+        # 1. choix explicite de l'owner
+        cat_id = int(c.get('event_arena_category', 0) or 0)
+        if cat_id:
+            cat = guild.get_channel(cat_id)
+            if isinstance(cat, discord.CategoryChannel):
+                return cat
+        # 2. catégorie auto déjà connue
+        auto_id = int(c.get('events_category', 0) or 0)
+        if auto_id:
+            cat = guild.get_channel(auto_id)
+            if isinstance(cat, discord.CategoryChannel):
+                return cat
+        # 3. anti-doublon : une "🎪 Événements" existe déjà ?
+        for cc in guild.categories:
+            if cc.name == "🎪 Événements":
+                try:
+                    await db_set(guild.id, 'events_category', cc.id)
+                except Exception:
+                    pass
+                return cc
+        # 4. création auto en haut du serveur
+        me = guild.me
+        if not (me and me.guild_permissions.manage_channels):
+            return None
+        cat = await guild.create_category(
+            name="🎪 Événements", position=0,
+            reason="Phase 188 : catégorie centrale des événements",
+        )
+        try:
+            await db_set(guild.id, 'events_category', cat.id)
+        except Exception:
+            pass
+        return cat
+    except Exception as ex:
+        print(f"[_ensure_events_category] {ex}")
+        return None
+
+
 async def _ensure_alliance_category(guild) -> Optional[discord.CategoryChannel]:
     """Phase 47.2 : Retourne (ou crée) LA catégorie unique '🤝 Alliances' qui
     regroupe TOUS les salons d'équipes/clans du serveur.
@@ -63121,11 +63172,9 @@ async def _start_game_night(guild) -> bool:
         if await _has_active_game_night(guild.id):
             return False
 
-        # Catégorie : utilise event_arena_category
-        cat_id = int(c.get('event_arena_category', 0) or 0)
-        category = guild.get_channel(cat_id) if cat_id else None
-        if not isinstance(category, discord.CategoryChannel):
-            category = None
+        # Phase 188 : range les salons dans LA catégorie « 🎪 Événements »
+        # (créée en haut du serveur si besoin). Respecte event_arena_category.
+        category = await _ensure_events_category(guild)
 
         overwrites_vc = {
             guild.default_role: discord.PermissionOverwrite(
