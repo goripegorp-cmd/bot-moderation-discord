@@ -241,6 +241,12 @@ import matplotlib
 matplotlib.use('Agg')  # Backend non-interactif
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
+# Phase 172 : lock global pour le rendu matplotlib. pyplot N'EST PAS
+# thread-safe : on serialise les rendus + on les sort de la boucle asyncio
+# via asyncio.to_thread. Sinon un plt.savefig (dpi 100-120) gèle la boucle
+# 1-2s, ce qui fait rater la fenêtre de 3s à TOUTES les interactions en
+# cours → "Échec de l'interaction" global sans erreur loggée.
+_PLOT_LOCK = asyncio.Lock()
 from collections import defaultdict
 from functools import wraps
 from typing import Optional
@@ -344,7 +350,10 @@ class _DBConnection:
         return False
 
 # Instance globale du pool
-_db_pool = DBPool(DB_PATH, pool_size=8)
+# Phase 172 : 8 -> 20. ~80 tâches de fond + lectures config par interaction
+# saturaient un pool de 8 -> les callbacks de boutons attendaient une connexion
+# > 3s -> "Échec de l'interaction". 20 connexions évitent la starvation.
+_db_pool = DBPool(DB_PATH, pool_size=20)
 
 def get_db():
     """Raccourci : async with get_db() as db:"""
@@ -33000,9 +33009,15 @@ class StatPanel(View):
             ax4.tick_params(colors='white', labelsize=8)
             for spine in ax4.spines.values(): spine.set_visible(False)
             
-            plt.tight_layout(rect=[0, 0, 1, 0.95])
             buf = io.BytesIO()
-            plt.savefig(buf, format='png', facecolor='#1a1a2e', edgecolor='none', dpi=120, bbox_inches='tight')
+            # Phase 172 : rendu (tight_layout + savefig) sorti de la boucle
+            # asyncio via thread + lock global. dpi 120 -> 90 (rendu + rapide).
+            async with _PLOT_LOCK:
+                def _render_save():
+                    fig.tight_layout(rect=[0, 0, 1, 0.95])
+                    fig.savefig(buf, format='png', facecolor='#1a1a2e',
+                                edgecolor='none', dpi=90, bbox_inches='tight')
+                await asyncio.to_thread(_render_save)
             buf.seek(0)
             plt.close(fig)
             return buf
@@ -50083,14 +50098,17 @@ async def generate_stat_graph(stats, days, username):
         # Légende
         fig.legend(loc='upper right', bbox_to_anchor=(0.98, 0.98), facecolor='#36393f', edgecolor='white', labelcolor='white')
         
-        plt.tight_layout()
-        
-        # Sauvegarder
+        # Sauvegarder — Phase 172 : rendu hors boucle asyncio (thread + lock)
         buf = io.BytesIO()
-        plt.savefig(buf, format='png', facecolor='#2f3136', edgecolor='none', dpi=100)
+        async with _PLOT_LOCK:
+            def _render_save():
+                fig.tight_layout()
+                fig.savefig(buf, format='png', facecolor='#2f3136',
+                            edgecolor='none', dpi=80)
+            await asyncio.to_thread(_render_save)
         buf.seek(0)
         plt.close(fig)
-        
+
         return buf
         
     except Exception as ex:
@@ -50205,14 +50223,17 @@ async def generate_detailed_stat_graph(guild, member, days):
         fig.suptitle(f'📊 Statistiques détaillées de {member.display_name}', 
                     color='white', fontsize=16, fontweight='bold', y=0.98)
         
-        plt.tight_layout(rect=[0, 0, 1, 0.96])
-        
-        # Sauvegarder
+        # Sauvegarder — Phase 172 : rendu hors boucle asyncio (thread + lock)
         buf = io.BytesIO()
-        plt.savefig(buf, format='png', facecolor='#2f3136', edgecolor='none', dpi=100)
+        async with _PLOT_LOCK:
+            def _render_save():
+                fig.tight_layout(rect=[0, 0, 1, 0.96])
+                fig.savefig(buf, format='png', facecolor='#2f3136',
+                            edgecolor='none', dpi=80)
+            await asyncio.to_thread(_render_save)
         buf.seek(0)
         plt.close(fig)
-        
+
         return buf
         
     except Exception as ex:
