@@ -3,9 +3,14 @@ dungeon_instances.py — Donjons instanciés (Phase 184).
 
 🎯 IDÉE OWNER : faire vivre les solos + petits groupes via des DONJONS
 instanciés. Un lobby se forme (jusqu'à 4 joueurs), le bot crée une CATÉGORIE
-dédiée avec un salon TEXTE + un salon VOCAL réservés au groupe, lance un
-cooldown, puis des VAGUES de mobs à combattre ensemble. Récompenses à la clé,
-puis NETTOYAGE STRICT des salons.
+dédiée avec un salon TEXTE + PLUSIEURS salles VOCALES réservées au groupe, lance
+un cooldown, puis :
+  1) DISPERSION — chaque salle vocale abrite un mob ; on ne peut le frapper QUE
+     depuis SON vocal (détection vocale). Le groupe se disperse et nettoie les
+     salles en parallèle.
+  2) BOSS — une fois toutes les salles nettoyées, le groupe se regroupe pour un
+     boss partagé.
+Récompenses à la clé, puis NETTOYAGE STRICT des salons.
 
 🛡️ SÉCURITÉ SALONS (limite ~500/guild Discord) :
 - 1 seul run actif par guild à la fois.
@@ -51,10 +56,17 @@ MAX_PARTY = 4
 LOBBY_WAIT_SEC = 120          # délai avant lancement auto du lobby
 COOLDOWN_SEC = 20             # cooldown affiché avant la 1re vague
 RUN_TIMEOUT_SEC = 1800        # garde-fou : un run > 30 min est fermé
-WAVE_TIMEOUT_SEC = 300        # une vague non finie en 5 min → échec → cleanup
-WAVES = 3                     # nb de vagues de mobs avant le boss final
+WAVE_TIMEOUT_SEC = 300        # phase boss non finie en 5 min → échec → cleanup
+DISPERSION_TIMEOUT_SEC = 420  # phase d'exploration (salles) non finie en 7 min → échec
+WAVES = 3                     # (legacy) conservé pour compat ; remplacé par les salles
 ATTACK_CD_SEC = 4             # anti-spam clic par joueur
 VOICE_BONUS = 0.20            # +20% dégâts si dans le vocal du donjon
+
+# Phase 184.4 : DISPERSION — plusieurs salles vocales, chacune avec un mob ;
+# le groupe se disperse, on n'attaque le mob d'une salle QUE si on est connecté
+# à son vocal (détection vocale). Plafond strict (1 run/guild déjà garanti).
+DUNGEON_ROOMS_MAX = 3         # nb max de salles vocales (≤ taille du groupe)
+ROOM_NUMERALS = ["I", "II", "III", "IV"]
 
 # Phase 184.1 : on peut MOURIR dans le donjon (riposte des mobs/boss)
 DUNGEON_PLAYER_HP = 100       # PV par joueur, rechargés à chaque nouvelle vague
@@ -270,9 +282,10 @@ def _lobby_text(lob: dict) -> str:
         f"_Groupe de **{MAX_PARTY} max** — cliquez pour rejoindre. Lancement auto "
         f"dans ~{LOBBY_WAIT_SEC // 60} min, ou dès que le groupe le décide._\n\n"
         f"**Aventuriers ({len(lob['members'])}/{MAX_PARTY}) :**\n{roster}\n\n"
-        f"_Une fois lancé : salon + vocal privés, {WAVES} vagues de mobs + un boss "
-        f"(qui **ripostent** — on peut tomber !), butin partagé. Équipe ton meilleur "
-        f"stuff (🎒) et rejoins le vocal (+{int(VOICE_BONUS * 100)}% dégâts) !_"
+        f"_Une fois lancé : un salon + **plusieurs salles vocales** privées. "
+        f"Dispersez-vous : chaque salle abrite un mob qu'on ne frappe que depuis "
+        f"SON vocal, puis regroupez-vous pour le boss. Ils **ripostent** (on peut "
+        f"tomber !), butin partagé. Équipe ton meilleur stuff (🎒) !_"
     )
 
 
@@ -359,30 +372,45 @@ async def _launch_dungeon(guild_id: int):
         ow[m] = discord.PermissionOverwrite(view_channel=True, send_messages=True,
                                             connect=True, speak=True)
 
-    # Création ATOMIQUE : si une étape échoue, on supprime ce qui a déjà été
-    # créé (sinon catégorie/salon orphelins SANS enregistrement DB → jamais
+    # Nb de SALLES vocales = taille du groupe (plafonné). Le groupe se disperse
+    # dans ces vocaux ; 1 run/guild max → au pire cat + texte + 3 salles = 5 salons.
+    n_rooms = max(1, min(DUNGEON_ROOMS_MAX, len(members)))
+
+    # Création ATOMIQUE : si une étape échoue, on supprime TOUT ce qui a déjà été
+    # créé (sinon catégorie/salons orphelins SANS enregistrement DB → jamais
     # nettoyés par boot_cleanup/timeout → fuite de salons vs la limite ~500).
-    cat = txt = vc = None
+    cat = txt = None
+    created = []          # tous les salons créés, pour cleanup en cas d'échec
+    room_vc = []          # [(id, name), ...] des salles vocales
     try:
         cat = await guild.create_category(name="🏰 Donjon", overwrites=ow,
                                           reason="Donjon instancié")
+        created.append(cat)
         txt = await guild.create_text_channel(name="combat", category=cat, overwrites=ow,
                                               reason="Donjon instancié")
-        vc = await guild.create_voice_channel(name="🔊 Donjon — vocal", category=cat,
-                                              overwrites=ow, reason="Donjon instancié")
+        created.append(txt)
+        for k in range(n_rooms):
+            num = ROOM_NUMERALS[k] if k < len(ROOM_NUMERALS) else str(k + 1)
+            rname = f"🔊 Salle {num}"
+            rvc = await guild.create_voice_channel(name=rname, category=cat, overwrites=ow,
+                                                   reason="Donjon instancié")
+            created.append(rvc)
+            room_vc.append((rvc.id, rname))
     except Exception as ex:
         print(f"[dungeon create channels] {ex}")
-        await _delete_run_channels(txt, vc, cat)  # cleanup partiel
+        await _delete_run_channels(*reversed(created))  # cleanup partiel (enfants→parent)
         return
 
-    # Enregistre le run + ses membres
+    # Enregistre le run + ses membres (voice_channel_id = 1re salle ; le cleanup
+    # balaie toute la catégorie, donc inutile de tracer chaque salle en DB).
     run_id = 0
+    first_vc = room_vc[0][0] if room_vc else 0
     try:
         async with _get_db() as db:
             cur = await db.execute(
                 "INSERT INTO dungeon_runs(guild_id, category_id, text_channel_id, "
                 "voice_channel_id, status, wave) VALUES(?,?,?,?,'active',0)",
-                (guild_id, cat.id, txt.id, vc.id),
+                (guild_id, cat.id, txt.id, first_vc),
             )
             run_id = cur.lastrowid
             for m in members:
@@ -392,7 +420,7 @@ async def _launch_dungeon(guild_id: int):
             await db.commit()
     except Exception as ex:
         print(f"[dungeon insert run] {ex}")
-        await _delete_run_channels(txt, vc, cat)
+        await _delete_run_channels(*reversed(created))
         return
 
     # Met à jour le message public du lobby
@@ -400,27 +428,31 @@ async def _launch_dungeon(guild_id: int):
         if lob.get("message"):
             await lob["message"].edit(
                 content=f"🏰 **Donjon lancé !** Rendez-vous dans {txt.mention} "
-                        f"(et {vc.mention} pour le bonus vocal).", view=None)
+                        f"et dispersez-vous dans les salles vocales.", view=None)
     except Exception:
         pass
 
     party_mentions = " ".join(m.mention for m in members[:MAX_PARTY])
+    salles = ", ".join(name for _, name in room_vc)
     try:
         await txt.send(
             f"🏰 **Bienvenue dans le donjon, aventuriers !** {party_mentions}\n"
-            f"_Rejoignez {vc.mention} pour **+{int(VOICE_BONUS * 100)}% de dégâts**. "
-            f"{WAVES} vagues + un boss vous attendent. Préparez-vous…_",
+            f"_**Dispersez-vous** dans les salles vocales ({salles}) : chaque salle "
+            f"abrite un mob, et on ne peut le frapper **que** depuis SON vocal. "
+            f"Nettoyez toutes les salles, puis regroupez-vous pour le boss. "
+            f"Ils **ripostent** — équipez votre meilleur stuff (🎒) !_",
             allowed_mentions=discord.AllowedMentions(users=True),
         )
     except Exception:
         pass
 
-    # Déroulé en tâche de fond (cooldown + vagues), garde-fou via timeout task
-    asyncio.create_task(_run_dungeon(run_id, guild_id, vc.id, txt.id, cat.id))
+    # Déroulé en tâche de fond (cooldown + dispersion + boss), garde-fou timeout
+    asyncio.create_task(_run_dungeon(run_id, guild_id, room_vc, txt.id, cat.id))
 
 
-async def _run_dungeon(run_id, guild_id, vc_id, txt_id, cat_id):
-    """Déroulé : cooldown → WAVES vagues → boss → récompenses → cleanup."""
+async def _run_dungeon(run_id, guild_id, room_vc, txt_id, cat_id):
+    """Déroulé : cooldown → dispersion (salles) → boss → récompenses → cleanup.
+    room_vc : [(vc_id, vc_name), ...] les salles vocales créées au lancement."""
     try:
         guild = _bot.get_guild(guild_id)
         txt = guild.get_channel(txt_id) if guild else None
@@ -430,7 +462,7 @@ async def _run_dungeon(run_id, guild_id, vc_id, txt_id, cat_id):
         # Cooldown de départ (chrono Discord)
         try:
             impact = int(time.time()) + COOLDOWN_SEC
-            await txt.send(f"⏳ Le donjon s'éveille… premiers mobs <t:{impact}:R>.")
+            await txt.send(f"⏳ Le donjon s'éveille… dispersez-vous <t:{impact}:R>.")
         except Exception:
             pass
         await asyncio.sleep(COOLDOWN_SEC)
@@ -438,22 +470,23 @@ async def _run_dungeon(run_id, guild_id, vc_id, txt_id, cat_id):
         party_size = await _member_count(run_id)
         hp_mult = 1.0 + 0.5 * max(0, party_size - 1)  # +50% HP par joueur au-delà du 1er
 
-        # Vagues de mobs
-        for wave in range(1, WAVES + 1):
-            mob = random.choice(DUNGEON_MOBS)
-            mob_hp = int(mob["hp"] * hp_mult)
-            await _set_wave(run_id, wave)
-            ok = await _fight_wave(
-                run_id, guild_id, txt_id, vc_id,
-                f"Vague {wave}/{WAVES} — {mob['emoji']} {mob['name']}", mob_hp, False)
-            if not ok:
-                return await _close_run(run_id)  # timeout/échec → cleanup
+        # PHASE DISPERSION : une salle = un mob ; on ne frappe le mob d'une salle
+        # QUE depuis son vocal (détection vocale). Toutes les salles à nettoyer.
+        ok = await _fight_dispersion(run_id, guild_id, txt_id, room_vc, hp_mult)
+        if not ok:
+            return await _close_run(run_id)  # timeout/échec → cleanup
 
-        # Boss final
+        # PHASE BOSS : regroupement, combat partagé (bonus si dans une salle)
         boss_hp = int(DUNGEON_BOSS["hp"] * hp_mult)
-        await _set_wave(run_id, WAVES + 1)
+        await _set_wave(run_id, 99)
+        vc_ids = {vid for vid, _ in room_vc}
+        try:
+            await txt.send("🐲 **Les salles sont nettoyées… le Gardien du Donjon "
+                           "surgit !** Regroupez-vous et frappez ensemble !")
+        except Exception:
+            pass
         ok = await _fight_wave(
-            run_id, guild_id, txt_id, vc_id,
+            run_id, guild_id, txt_id, vc_ids,
             f"BOSS — {DUNGEON_BOSS['emoji']} {DUNGEON_BOSS['name']}", boss_hp, True)
         if not ok:
             return await _close_run(run_id)
@@ -484,9 +517,9 @@ async def _set_wave(run_id: int, wave: int):
         pass
 
 
-async def _fight_wave(run_id, guild_id, txt_id, vc_id, label, mob_hp, is_boss=False) -> bool:
-    """Combat d'une vague (HP partagé, panneau V2 auto-actualisé).
-    Retourne True si vaincu, False si timeout."""
+async def _fight_wave(run_id, guild_id, txt_id, vc_ids, label, mob_hp, is_boss=False) -> bool:
+    """Combat partagé (phase boss) : HP partagé, panneau V2 auto-actualisé.
+    vc_ids : set d'IDs de vocaux donnant le bonus +20%. True si vaincu, False si timeout."""
     guild = _bot.get_guild(guild_id)
     txt = guild.get_channel(txt_id) if guild else None
     if not txt:
@@ -494,7 +527,7 @@ async def _fight_wave(run_id, guild_id, txt_id, vc_id, label, mob_hp, is_boss=Fa
 
     state = {"hp": mob_hp, "max": mob_hp, "done": False}
     pstate: dict = {}  # user_id -> {"hp": int, "down_until": ts} (PV joueur, reset/vague)
-    view = _build_wave_view(run_id, guild_id, vc_id, state, pstate, label, is_boss)
+    view = _build_wave_view(run_id, guild_id, vc_ids, state, pstate, label, is_boss)
     try:
         view._msg = await txt.send(view=view)  # LayoutView : view-only (PAS de content)
     except Exception as ex:
@@ -514,7 +547,7 @@ async def _fight_wave(run_id, guild_id, txt_id, vc_id, label, mob_hp, is_boss=Fa
     return bool(state["done"])
 
 
-def _build_wave_view(run_id, guild_id, vc_id, state, pstate, label, is_boss):
+def _build_wave_view(run_id, guild_id, vc_ids, state, pstate, label, is_boss):
     """Construit une LayoutView V2 unique (HP bar + bouton Attaquer) qui se
     réactualise elle-même à chaque coup. Définie en closure car LayoutView est
     fourni via setup() (pas importable au chargement du module).
@@ -585,7 +618,7 @@ def _build_wave_view(run_id, guild_id, vc_id, state, pstate, label, is_boss):
             in_vc = False
             try:
                 vs = i.user.voice
-                in_vc = bool(vs and vs.channel and vs.channel.id == vc_id)
+                in_vc = bool(vs and vs.channel and vs.channel.id in vc_ids)
             except Exception:
                 in_vc = False
             if in_vc:
@@ -635,6 +668,179 @@ def _build_wave_view(run_id, guild_id, vc_id, state, pstate, label, is_boss):
                 pass
 
     return _WaveView()
+
+
+async def _fight_dispersion(run_id, guild_id, txt_id, room_vc, hp_mult) -> bool:
+    """PHASE DISPERSION : chaque salle vocale abrite un mob. On ne peut frapper
+    le mob d'une salle QUE si on est connecté à SON vocal (détection vocale).
+    Toutes les salles doivent être nettoyées. True si OK, False si timeout."""
+    guild = _bot.get_guild(guild_id)
+    txt = guild.get_channel(txt_id) if guild else None
+    if not txt or not room_vc:
+        return False
+    # Un mob distinct par salle (échantillon sans répétition tant que possible)
+    pool = random.sample(DUNGEON_MOBS, k=min(len(room_vc), len(DUNGEON_MOBS)))
+    rooms = []
+    for idx, (vc_id, vc_name) in enumerate(room_vc):
+        mob = pool[idx] if idx < len(pool) else random.choice(DUNGEON_MOBS)
+        hp = int(mob["hp"] * hp_mult)
+        rooms.append({"idx": idx, "vc_id": vc_id, "vc_name": vc_name,
+                      "emoji": mob["emoji"], "mob": mob["name"],
+                      "hp": hp, "max": hp, "done": False})
+    pstate: dict = {}  # PV joueur partagés sur toute la phase d'exploration
+    view = _build_dispersion_view(run_id, guild_id, rooms, pstate)
+    try:
+        view._msg = await txt.send(view=view)
+    except Exception as ex:
+        print(f"[fight_dispersion send] {ex}")
+        return False
+    waited = 0
+    while not all(r["done"] for r in rooms) and waited < DISPERSION_TIMEOUT_SEC:
+        await asyncio.sleep(2)
+        waited += 2
+    try:
+        if view._msg:
+            await view._msg.delete()
+    except Exception:
+        pass
+    return all(r["done"] for r in rooms)
+
+
+def _build_dispersion_view(run_id, guild_id, rooms, pstate):
+    """LayoutView V2 d'exploration : 1 section + 1 bouton par salle. Le bouton
+    d'une salle n'inflige des dégâts QUE si le joueur est dans SON vocal."""
+    LayoutView = _v2['LayoutView']
+    v2_title = _v2['v2_title']
+    v2_body = _v2['v2_body']
+    v2_container = _v2['v2_container']
+    color = 0x8E44AD
+
+    def _bar(hp, mx):
+        barlen = 14
+        filled = int((hp / mx) * barlen) if mx else 0
+        return "█" * filled + "░" * (barlen - filled)
+
+    def _numeral(idx):
+        return ROOM_NUMERALS[idx] if idx < len(ROOM_NUMERALS) else str(idx + 1)
+
+    class _DispView(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=DISPERSION_TIMEOUT_SEC + 20)
+            self._msg = None
+            self._render()
+
+        def _render(self):
+            self.clear_items()
+            cleared = sum(1 for r in rooms if r["done"])
+            items = [
+                v2_title("🏰 Donjon — Dispersez-vous dans les salles !"),
+                v2_body(f"Rejoins le **vocal** d'une salle pour frapper son mob "
+                        f"(+{int(VOICE_BONUS * 100)}% inclus). Salles nettoyées : "
+                        f"**{cleared}/{len(rooms)}**. Ils ripostent — tu peux tomber !"),
+            ]
+            buttons = []
+            for r in rooms:
+                if r["done"]:
+                    items.append(v2_body(
+                        f"**{r['vc_name']}** — {r['emoji']} {r['mob']} · 💀 _nettoyée_"))
+                else:
+                    items.append(v2_body(
+                        f"**{r['vc_name']}** — {r['emoji']} {r['mob']}\n"
+                        f"`{_bar(max(0, r['hp']), r['max'])}` "
+                        f"`{max(0, r['hp']):,}/{r['max']:,}`"))
+                    b = Button(label=f"⚔️ Salle {_numeral(r['idx'])}",
+                               style=discord.ButtonStyle.danger,
+                               custom_id=f"dgn_room_{run_id}_{r['idx']}")
+                    b.callback = self._on_attack
+                    buttons.append(b)
+            if buttons:
+                items.append(discord.ui.ActionRow(*buttons))
+            self.add_item(v2_container(*items, color=color))
+
+        async def _on_attack(self, i: discord.Interaction):
+            try:
+                await i.response.defer()
+            except Exception:
+                pass
+            cid = (i.data or {}).get("custom_id", "")
+            try:
+                idx = int(cid.rsplit("_", 1)[-1])
+            except Exception:
+                return
+            room = next((r for r in rooms if r["idx"] == idx), None)
+            if room is None:
+                return
+            if room["done"]:
+                return await i.followup.send("💀 Salle déjà nettoyée !", ephemeral=True)
+            if not await _is_member(run_id, i.user.id):
+                return await i.followup.send("❌ Ce donjon n'est pas le tien.", ephemeral=True)
+            # DÉTECTION VOCALE : il faut être dans le vocal de CETTE salle
+            try:
+                vs = i.user.voice
+                in_room = bool(vs and vs.channel and vs.channel.id == room["vc_id"])
+            except Exception:
+                in_room = False
+            if not in_room:
+                return await i.followup.send(
+                    f"🔊 Rejoins le vocal **{room['vc_name']}** pour frapper son mob !",
+                    ephemeral=True)
+            now = time.time()
+            ps = pstate.setdefault(i.user.id, {"hp": DUNGEON_PLAYER_HP, "down_until": 0.0})
+            if ps["down_until"] > now:
+                return await i.followup.send(
+                    f"💀 Tu es à terre ! Réapparition <t:{int(ps['down_until'])}:R>.",
+                    ephemeral=True)
+            key = (run_id, i.user.id, idx)  # cooldown par salle
+            if now - _dgn_click_cd.get(key, 0) < ATTACK_CD_SEC:
+                return await i.followup.send("⏱️ Doucement ! Attends une seconde.",
+                                             ephemeral=True)
+            _dgn_click_cd[key] = now
+
+            atk_bonus, deff, proc = await _combat_profile(guild_id, i.user.id)
+            base = random.randint(25, 55)
+            dmg = base + atk_bonus + (int(proc.get("bonus", 0) or 0) if proc else 0)
+            dmg = max(1, int(dmg * (1.0 + VOICE_BONUS)))  # on EST dans le vocal → +20%
+            room["hp"] = max(0, room["hp"] - dmg)
+            try:
+                async with _get_db() as db:
+                    await db.execute(
+                        "UPDATE dungeon_members SET damage_dealt = damage_dealt + ? "
+                        "WHERE run_id=? AND user_id=?", (dmg, run_id, i.user.id))
+                    await db.commit()
+            except Exception:
+                pass
+            if room["hp"] <= 0:
+                room["done"] = True
+            # Riposte du mob (DEF d'équipement réduit les dégâts subis)
+            retal_note = ""
+            if not room["done"] and random.random() < DGN_RETAL_CHANCE:
+                raw = random.randint(6, 16)
+                taken = max(1, raw - deff // 2)
+                ps["hp"] = max(0, ps["hp"] - taken)
+                if ps["hp"] <= 0:
+                    ps["down_until"] = now + DGN_RESPAWN_SEC
+                    retal_note = (f"\n💀 **Tu tombes !** (-{taken} PV) "
+                                  f"Réapparition <t:{int(ps['down_until'])}:R>.")
+                else:
+                    retal_note = (f"\n🩸 Le mob riposte : -{taken} PV "
+                                  f"(il te reste **{ps['hp']}** PV).")
+            self._render()
+            try:
+                if self._msg:
+                    await self._msg.edit(view=self)
+            except Exception:
+                pass
+            proc_str = (f" {proc['emoji']} {proc['name']} +{proc['bonus']}" if proc else "")
+            tail = " — **salle nettoyée !**" if room["done"] else ""
+            try:
+                await i.followup.send(
+                    f"⚔️ `{dmg}` dégâts sur {room['emoji']} {room['mob']} "
+                    f"🔊+{int(VOICE_BONUS * 100)}%{proc_str}{tail}{retal_note}",
+                    ephemeral=True)
+            except Exception:
+                pass
+
+    return _DispView()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -710,10 +916,21 @@ async def _close_run(run_id: int):
     guild = _bot.get_guild(int(guild_id)) if _bot else None
     if not guild:
         return
-    txt = guild.get_channel(int(txt_id)) if txt_id else None
-    vc = guild.get_channel(int(vc_id)) if vc_id else None
     cat = guild.get_channel(int(cat_id)) if cat_id else None
-    await _delete_run_channels(txt, vc, cat)
+    if cat is not None:
+        # Balaie TOUS les salons de la catégorie (texte + toutes les salles
+        # vocales) PUIS la catégorie → aucun salon orphelin, quel que soit le
+        # nombre de salles créées.
+        try:
+            children = list(getattr(cat, "channels", []) or [])
+        except Exception:
+            children = []
+        await _delete_run_channels(*children, cat)
+    else:
+        # Catégorie déjà absente : on tente quand même les salons connus en DB.
+        txt = guild.get_channel(int(txt_id)) if txt_id else None
+        vc = guild.get_channel(int(vc_id)) if vc_id else None
+        await _delete_run_channels(txt, vc)
 
 
 async def boot_cleanup():
