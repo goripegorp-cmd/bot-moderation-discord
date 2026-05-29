@@ -562,8 +562,15 @@ async def spawn_mob(guild: discord.Guild) -> bool:
         print(f"[mob_hunts spawn INSERT] {ex}")
         return False
 
+    # Phase 176 : combien de créatures rôdent actuellement (affiché sur le panel)
+    try:
+        alive_count = await _count_alive_mobs(guild.id)
+    except Exception:
+        alive_count = 1
     # Build le panel V2
-    msg = await _post_mob_message(ch, mob_db_id, mob_def, hp_max, hp_max, is_elite)
+    msg = await _post_mob_message(
+        ch, mob_db_id, mob_def, hp_max, hp_max, is_elite, alive_count
+    )
     if msg:
         try:
             async with _get_db() as db:
@@ -587,9 +594,9 @@ async def spawn_mob(guild: discord.Guild) -> bool:
 
 async def _post_mob_message(
     ch: discord.TextChannel, mob_db_id: int, mob_def: dict,
-    hp_current: int, hp_max: int, is_elite: bool,
+    hp_current: int, hp_max: int, is_elite: bool, alive_count: int = 1,
 ) -> Optional[discord.Message]:
-    """Build et poste le message du mob."""
+    """Build et poste le message du mob (Phase 176 : clairement distinct d'un boss)."""
     if _v2 is None:
         return None
     LayoutView = _v2['LayoutView']
@@ -613,24 +620,32 @@ async def _post_mob_message(
     if is_elite:
         drop_item_pct = min(100, drop_item_pct * 3)
 
+    # Phase 176 : compteur de créatures + cadrage clair "créature sauvage"
+    if alive_count and alive_count > 1:
+        count_line = (
+            f"🐾 **Créature sauvage** · `{alive_count}` créatures rôdent en ce moment "
+            f"— attaque celle que tu veux !"
+        )
+    else:
+        count_line = "🐾 **Créature sauvage** · seule pour l'instant"
+
     items = []
     items.append(v2_title(
         f"{elite_prefix}{mob_def['emoji']} {mob_def['name']}"
     ))
-    items.append(v2_subtitle(
-        f"_Mob apparu — cliquez pour attaquer · "
-        f"despawn dans {MOB_LIFETIME_MIN}min_"
-    ))
+    items.append(v2_subtitle(count_line))
     items.append(v2_divider())
     items.append(v2_body(
         f"**❤️ HP :** `{bar}` `{hp_current}/{hp_max}` ({pct}%)\n"
         f"**💰 Drop :** `{drop_min}-{drop_max}` 🪙 · "
-        f"**🎁 Item :** `{drop_item_pct}%`"
+        f"**🎁 Item :** `{drop_item_pct}%`\n"
+        f"⏳ Disparaît dans **{MOB_LIFETIME_MIN} min** si pas vaincue"
     ))
     items.append(v2_divider())
     items.append(v2_body(
-        "_⚔️ Tout le monde peut frapper · loot proportionnel "
-        "aux dégâts · **bonus alliance** si 2+ membres alliance attaquent._"
+        "_🐾 Simple créature — **ce n'est PAS un boss** : aucun salon n'est masqué, "
+        "le serveur reste ouvert. Frappe-la (ou une autre) autant que tu veux. "
+        "Loot proportionnel aux dégâts · **bonus alliance** si 2+ alliés frappent._"
     ))
 
     color = 0xFFD700 if is_elite else mob_def.get("color", 0x95A5A6)

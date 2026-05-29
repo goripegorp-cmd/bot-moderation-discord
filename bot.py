@@ -8129,6 +8129,25 @@ class _EventHoursModal(Modal, title="🌙 Plages horaires d'événements"):
 
 # ─────────────────────────── ENGINE — START / END ───────────────────────────
 
+def _boss_arena_channel_name(boss: dict) -> str:
+    """Phase 176 : dérive le nom du salon arène à partir du NOM DU BOSS.
+
+    Ex : boss "🐉 Vorthak le Dévoreur" → salon "🐉-vorthak-le-dévoreur".
+    Discord met en minuscules tout seul ; on remplace espaces/apostrophes par
+    des tirets pour un rendu propre. Garde l'emoji en tête (autorisé par Discord).
+    """
+    raw = (boss.get('name') or '⚔️ Arène du Boss').strip()
+    safe = (
+        raw.replace(' ', '-')
+        .replace("'", '-').replace('’', '-')
+        .replace('--', '-')
+    )
+    while '--' in safe:
+        safe = safe.replace('--', '-')
+    safe = safe.strip('-')
+    return (safe[:90] or '⚔️-arène-du-boss')
+
+
 async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False) -> dict:
     """Lance un Boss Raid. Retourne {ok, error?, event_id?, arena_channel_id?}."""
     try:
@@ -8153,10 +8172,16 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
 
         difficulty = int(c.get('event_difficulty', 100) or 100)
         duration_min = int(c.get('event_duration_min', 30) or 30)
-        arena_name = (c.get('event_arena_channel_name', '⚔️-arène-du-boss') or '⚔️-arène-du-boss')
 
-        # Boss aléatoire
-        boss = events2026.random_boss(difficulty)
+        # Phase 176 : boss au NOM ÉPIQUE thématisé par la saison en cours
+        try:
+            _season_key = season_module.current_season().get('key')
+        except Exception:
+            _season_key = None
+        boss = events2026.random_boss(difficulty, season_key=_season_key)
+
+        # Phase 176 : le salon arène porte le NOM DU BOSS (immersion totale)
+        arena_name = _boss_arena_channel_name(boss)
 
         # Créer l'event en DB (avant de modifier quoi que ce soit, pour traçabilité)
         ends_at_dt = datetime.now(timezone.utc) + timedelta(minutes=duration_min)
@@ -8269,7 +8294,8 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
             try:
                 await arena_channel.send(
                     content=(
-                        f"🚨 **UN BOSS APPARAÎT !** Tous les membres : préparez-vous au combat !"
+                        f"🚨 **{boss.get('name', 'UN BOSS')} surgit des ténèbres !** "
+                        f"Tous les membres : préparez-vous au combat !"
                         + (f"\n{ping_str}" if ping_str else "")
                         + wakeup_line
                         + "\n_💡 Pas envie d'être ping ? `/notifs` pour choisir précisément quoi recevoir._"

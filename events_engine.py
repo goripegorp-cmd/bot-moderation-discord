@@ -106,6 +106,57 @@ BOSS_CATALOG = [
 
 
 # =============================================================================
+# Phase 176 — NOMS DE BOSS ÉPIQUES (uniques + thématiques par saison)
+# =============================================================================
+# Chaque boss reçoit un nom PROPRE unique (prénom + épithète) au lieu du simple
+# type ("Dragon Ancestral"). L'épithète s'adapte à la saison en cours pour
+# coller au lore → des boss différents et immersifs à chaque apparition.
+
+BOSS_PROPER_NAMES = [
+    "Vorthak", "Malphas", "Nyxara", "Drathmor", "Kael'Thuzad", "Zsharûl",
+    "Morgaroth", "Velkhar", "Azgaroth", "Sythraxis", "Bal'Zoreth", "Khor'Valil",
+    "Ulthrax", "Maldraxis", "Vœurnoth", "Throgar", "Xal'Atath", "Néferith",
+    "Grimaldur", "Sombrelame", "Varathor", "Cindraxa", "Orgrath", "Velmyra",
+    "Dûragost", "Nhalleth", "Skornveil", "Thalmgor", "Ysraël", "Karnoth",
+]
+
+# Épithètes génériques (toutes saisons confondues)
+BOSS_EPITHETS_BASE = [
+    "le Dévoreur", "l'Indomptable", "le Maudit", "des Abysses", "le Cataclysme",
+    "l'Éternel", "le Fléau", "Briseur de Mondes", "l'Insatiable", "le Profanateur",
+    "l'Effroi", "le Sans-Nom", "Mangeur d'Âmes", "le Titan Déchu", "l'Implacable",
+    "la Ruine", "le Calamiteux", "Porteur de Fin",
+]
+
+# Épithètes thématiques par saison (clés = seasonal_engine.SEASONS[*]["key"])
+BOSS_EPITHETS_SEASONAL = {
+    "autumn":      ["de la Récolte Sanglante", "des Feuilles Mortes", "du Grand Déclin"],
+    "halloween":   ["des Tombes Oubliées", "l'Âme Damnée", "du Voile Spectral", "le Revenant"],
+    "fog":         ["du Brouillard Éternel", "des Brumes Maudites", "le Spectre Errant"],
+    "solstice":    ["du Givre Sacré", "des Neiges Profanes", "le Gel Éternel"],
+    "deep_winter": ["du Blizzard Sans Fin", "des Glaces Anciennes", "le Cœur de Givre"],
+    "tournament":  ["le Champion Déchu", "Briseur d'Arènes", "le Conquérant"],
+    "spring":      ["des Ronces Maudites", "du Renouveau Corrompu", "le Semeur de Fléaux"],
+    "summer":      ["du Soleil Noir", "des Flammes Éternelles", "l'Embrasé"],
+}
+
+
+def generate_boss_title(season_key: Optional[str] = None) -> str:
+    """Génère un nom de boss épique unique, ex : 'Vorthak le Dévoreur'.
+
+    Si une saison est fournie, ~60% de chance d'utiliser une épithète
+    thématique (immersion saisonnière) sinon une épithète générique.
+    """
+    proper = random.choice(BOSS_PROPER_NAMES).strip()
+    seasonal = BOSS_EPITHETS_SEASONAL.get(season_key or "", [])
+    if seasonal and random.random() < 0.60:
+        epithet = random.choice(seasonal)
+    else:
+        epithet = random.choice(BOSS_EPITHETS_BASE)
+    return f"{proper} {epithet}"
+
+
+# =============================================================================
 # CATALOGUE DE L'ÉQUIPEMENT
 # =============================================================================
 # Rareté : commune (white), rare (blue), épique (purple), légendaire (gold)
@@ -867,13 +918,24 @@ def attempt_refine(item: dict, roll: Optional[float] = None) -> tuple:
     return True, new_item
 
 
-def random_boss(difficulty: int = 100) -> dict:
-    """Boss aléatoire. `difficulty` = facteur 50-500 (100 = normal)."""
+def random_boss(difficulty: int = 100, season_key: Optional[str] = None) -> dict:
+    """Boss aléatoire. `difficulty` = facteur 50-500 (100 = normal).
+
+    Phase 176 : le boss reçoit un NOM ÉPIQUE unique (prénom + épithète, thématisé
+    par la saison). Le type d'origine ("Dragon Ancestral"...) est conservé dans
+    `archetype` pour le lore, et l'emoji du type est gardé en tête du nom.
+    """
     template = dict(random.choice(BOSS_CATALOG))
     base_hp = int(800 * template["hp_scale"])
     final_hp = int(base_hp * (difficulty / 100.0))
     template["max_hp"] = max(100, final_hp)
     template["current_hp"] = template["max_hp"]
+    # Nom épique : <emoji> <Prénom> <épithète>  (ex : "🐉 Vorthak le Dévoreur")
+    emoji = template.get("emoji", "👹")
+    template["archetype"] = template.get("name", "Boss")  # garde le type pour le lore
+    title = generate_boss_title(season_key)
+    template["title"] = title
+    template["name"] = f"{emoji} {title}"
     return template
 
 
