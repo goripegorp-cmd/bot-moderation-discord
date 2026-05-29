@@ -59,6 +59,7 @@ _get_db = None
 _db_get = None
 _v2 = None
 _add_coins = None
+_inventory_fn = None  # Phase 184 : getter d'inventaire (gear-scaling du combat)
 
 # 4 créneaux fixes FR : midi, après-midi, soir, NUIT (pour les noctambules)
 BOSS_HOURS = [12, 17, 21, 1]
@@ -188,13 +189,15 @@ def list_boss_ids() -> list[str]:
 #  Setup + DB
 # ═══════════════════════════════════════════════════════════════════════════
 
-def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None):
-    global _bot, _get_db, _db_get, _v2, _add_coins
+def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
+          inventory_fn=None):
+    global _bot, _get_db, _db_get, _v2, _add_coins, _inventory_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
     _v2 = v2_helpers
     _add_coins = add_coins_fn
+    _inventory_fn = inventory_fn
 
 
 async def init_db():
@@ -614,6 +617,21 @@ async def record_boss_attack(guild_id: int, user_id: int) -> dict:
         }
 
     damage = random.randint(ATTACK_DAMAGE_MIN, ATTACK_DAMAGE_MAX)
+    # Phase 184 (cohérence) : l'ÉQUIPEMENT du joueur compte (ATK total + proc
+    # élémentaire de l'arme), comme sur le Boss Raid → ton stuff/forge/éléments
+    # servent aussi contre les boss du jour.
+    elem_proc = None
+    if _inventory_fn is not None:
+        try:
+            import events_engine as _ev
+            inv = await _inventory_fn(guild_id, user_id)
+            damage += int(_ev.inventory_total_stats(inv).get("atk", 0) or 0)
+            _p = _ev.roll_elemental_proc(inv.get("weapon"))
+            if _p:
+                damage += int(_p.get("bonus", 0) or 0)
+                elem_proc = _p
+        except Exception:
+            pass
     damage = min(damage, active["hp_current"])
 
     try:
@@ -651,7 +669,7 @@ async def record_boss_attack(guild_id: int, user_id: int) -> dict:
     if boss_dead:
         await resolve_daily_boss(event_id)
         return {"success": True, "damage": damage, "boss_dead": True,
-                "attack_count": attacks_done + 1}
+                "attack_count": attacks_done + 1, "elem": elem_proc}
 
     return {
         "success": True,
@@ -661,6 +679,7 @@ async def record_boss_attack(guild_id: int, user_id: int) -> dict:
         "attack_count": attacks_done + 1,
         "max_attacks": MAX_ATTACKS_PER_USER,
         "boss_dead": False,
+        "elem": elem_proc,
     }
 
 
@@ -835,16 +854,22 @@ class DailyBossAttackButton(
             except Exception:
                 pass
 
+            # Phase 184 : note de proc élémentaire (si l'arme a déclenché)
+            _ep = result.get("elem")
+            _elem_note = (
+                f"\n{_ep['emoji']} **{_ep['name']}** ! +`{_ep['bonus']}` dégâts élémentaires"
+                if _ep else ""
+            )
             if result.get("boss_dead"):
                 await btn_i.followup.send(
                     f"⚔️ **{result['damage']} dégâts** — coup final ! "
-                    "Le boss est tombé, récompenses distribuées. 🎉",
+                    f"Le boss est tombé, récompenses distribuées. 🎉{_elem_note}",
                     ephemeral=True,
                 )
             else:
                 pct = int(result["hp_current"] * 100 / max(1, result["hp_max"]))
                 await btn_i.followup.send(
-                    f"⚔️ **{result['damage']} dégâts** infligés !\n"
+                    f"⚔️ **{result['damage']} dégâts** infligés !{_elem_note}\n"
                     f"_Boss : `{result['hp_current']:,}/{result['hp_max']:,}` HP "
                     f"({pct}%) · tes attaques : "
                     f"`{result['attack_count']}/{result['max_attacks']}`_",

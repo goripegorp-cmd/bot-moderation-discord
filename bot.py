@@ -39745,7 +39745,8 @@ async def on_ready():
 
         # Phase 173.2 : Boss du jour (4×/jour : 12h/17h/21h/1h FR, gating niveau)
         try:
-            daily_bosses_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins)
+            daily_bosses_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
+                                      inventory_fn=_get_or_create_inventory)
             await daily_bosses_module.init_db()
             daily_bosses_module.register_persistent_views(bot)
             if not daily_bosses_module.daily_boss_task.is_running():
