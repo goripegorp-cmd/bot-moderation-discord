@@ -342,16 +342,23 @@ async def _launch_dungeon(guild_id: int):
             pass
         return
 
-    # Overwrites : groupe seulement (instancié, privé)
+    # Overwrites : groupe seulement (instancié, privé). On ne grant PAS
+    # manage_channels au bot ici : sa permission serveur (déjà vérifiée) couvre
+    # création ET suppression — l'ajouter en overwrite est inutile et peut
+    # provoquer un 403 à la création si le bot n'a pas Gérer les rôles.
     ow = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
         me: discord.PermissionOverwrite(view_channel=True, send_messages=True,
-                                        manage_channels=True, connect=True),
+                                        connect=True),
     }
     for m in members:
         ow[m] = discord.PermissionOverwrite(view_channel=True, send_messages=True,
                                             connect=True, speak=True)
 
+    # Création ATOMIQUE : si une étape échoue, on supprime ce qui a déjà été
+    # créé (sinon catégorie/salon orphelins SANS enregistrement DB → jamais
+    # nettoyés par boot_cleanup/timeout → fuite de salons vs la limite ~500).
+    cat = txt = vc = None
     try:
         cat = await guild.create_category(name="🏰 Donjon", overwrites=ow,
                                           reason="Donjon instancié")
@@ -361,6 +368,7 @@ async def _launch_dungeon(guild_id: int):
                                               overwrites=ow, reason="Donjon instancié")
     except Exception as ex:
         print(f"[dungeon create channels] {ex}")
+        await _delete_run_channels(txt, vc, cat)  # cleanup partiel
         return
 
     # Enregistre le run + ses membres
