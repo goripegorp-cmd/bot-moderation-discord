@@ -7965,6 +7965,9 @@ def _format_loadout_lines(inv: dict) -> list:
             if it.get('crit'):
                 bits.append(f"+{it['crit']}% crit")
             stat_s = (" · " + " · ".join(bits)) if bits else ""
+            # Phase 181 : niveau d'amélioration (+N)
+            _lvl = int(it.get('upgrade_level', 0) or 0)
+            lvl_badge = f" **+{_lvl}**" if _lvl else ""
             # Phase 180 : badge élémentaire (arme)
             el = it.get('element')
             el_badge = ""
@@ -7974,7 +7977,7 @@ def _format_loadout_lines(inv: dict) -> list:
                     el_badge = f" · {_em['emoji']} {_em['name']}"
             except Exception:
                 pass
-            lines.append(f"{emo} **{label}** : {rr}{it.get('emoji', '')} {it['name']}{stat_s}{el_badge}")
+            lines.append(f"{emo} **{label}** : {rr}{it.get('emoji', '')} {it['name']}{lvl_badge}{stat_s}{el_badge}")
         else:
             lines.append(f"{emo} **{label}** : _vide_")
     return lines
@@ -46600,7 +46603,9 @@ async def craft_cmd(i: discord.Interaction):
         inv = await _get_or_create_inventory(i.guild.id, i.user.id)
 
         # Collecter les slots éligibles (item présent ET recette dispo)
+        # Phase 181 : + collecter les items AMÉLIORABLES (+N < max)
         eligible = []
+        enhance_eligible = []
         for slot_key, slot_label in [
             ("weapon", "⚔️ Arme"),
             ("armor", "🛡️ Armure"),
@@ -46615,12 +46620,18 @@ async def craft_cmd(i: discord.Interaction):
             recipe = events2026.get_refine_recipe(item)
             if recipe:
                 eligible.append((slot_key, slot_label, item, recipe))
+            try:
+                _lvl = events2026.get_upgrade_level(item)
+                if _lvl < events2026.ENHANCE_MAX:
+                    enhance_eligible.append((slot_key, slot_label, item, _lvl))
+            except Exception:
+                pass
 
-        if not eligible:
+        if not eligible and not enhance_eligible:
             return await i.response.send_message(
                 "⚒️ **Forge fermée**\n"
-                "_Tu n'as aucun item éligible à l'affinage._\n"
-                "_(Pas d'item, ou tous déjà au rang divine — bravo !)_",
+                "_Tu n'as aucun item à forger._\n"
+                "_(Équipe une arme/armure puis reviens — bats des boss pour looter !)_",
                 ephemeral=True,
             )
 
@@ -46750,6 +46761,94 @@ async def craft_cmd(i: discord.Interaction):
                     traceback.print_exc()
                     await _send_or_edit(f"❌ Erreur affinage : `{ex}`")
 
+        # Phase 181b : bouton AMÉLIORATION (+N) — réutilise le pattern coins du refine
+        class _ConfirmEnhanceBtn(discord.ui.Button):
+            def __init__(self, slot_key, slot_label, item, level, has_funds):
+                cost = events2026.enhance_cost(item, level)
+                pct = events2026.enhance_success_pct(level)
+                label = f"⬆️ {slot_label} +{level}→+{level + 1} ({pct}%) · {cost:,}🪙"[:80]
+                super().__init__(
+                    label=label,
+                    style=discord.ButtonStyle.success if has_funds else discord.ButtonStyle.secondary,
+                    custom_id=f"phase181_enhance_{slot_key}",
+                    disabled=not has_funds,
+                )
+                self.slot_key = slot_key
+                self.item_snap = dict(item)
+
+            async def callback(self, btn_i: discord.Interaction):
+                if btn_i.user.id != user_id:
+                    return await btn_i.response.send_message(
+                        "❌ Ce panneau n'est pas pour toi.", ephemeral=True
+                    )
+                try:
+                    await btn_i.response.defer()
+                except Exception:
+                    pass
+
+                async def _send_or_edit(content: str):
+                    try:
+                        await btn_i.edit_original_response(content=content, view=None, attachments=[])
+                        return
+                    except Exception:
+                        pass
+                    try:
+                        await btn_i.followup.send(content, ephemeral=True)
+                    except Exception:
+                        pass
+
+                try:
+                    inv2 = await _get_or_create_inventory(btn_i.guild.id, btn_i.user.id)
+                    item_now = inv2.get(self.slot_key) or {}
+                    if item_now.get("name") != self.item_snap.get("name"):
+                        return await _send_or_edit("❌ L'item a changé depuis. Relance `/craft`.")
+                    lvl_now = events2026.get_upgrade_level(item_now)
+                    if lvl_now >= events2026.ENHANCE_MAX:
+                        return await _send_or_edit("✅ Cet item est déjà au niveau **+10** (max).")
+                    cost = events2026.enhance_cost(item_now, lvl_now)
+                    eco2 = await get_user_economy(btn_i.guild.id, btn_i.user.id)
+                    hand2 = int(eco2.get('coins', 0) or 0)
+                    bank2 = int(eco2.get('bank', 0) or 0)
+                    if hand2 + bank2 < cost:
+                        return await _send_or_edit(
+                            f"💸 Fonds insuffisants ({hand2 + bank2:,} / {cost:,} 🪙)."
+                        )
+                    from_hand = min(hand2, cost)
+                    from_bank = cost - from_hand
+                    if from_hand > 0:
+                        await add_coins(btn_i.guild.id, btn_i.user.id, -from_hand)
+                    if from_bank > 0:
+                        await update_user_economy(btn_i.guild.id, btn_i.user.id, bank=bank2 - from_bank)
+
+                    res = events2026.attempt_enhance(item_now)
+                    inv2[self.slot_key] = item_now
+                    await _save_inventory(btn_i.guild.id, btn_i.user.id, inv2)
+                    emoji = item_now.get("emoji", "⚪")
+                    name = item_now.get("name", "?")
+                    if res["result"] == "success":
+                        pct_boost = int(events2026.ENHANCE_STAT_PER_LEVEL * res['new_level'] * 100)
+                        await _send_or_edit(
+                            f"⬆️ **AMÉLIORATION RÉUSSIE !**\n"
+                            f"{emoji} **{name}** : **+{res['old_level']} → +{res['new_level']}** !\n"
+                            f"_Coût `{cost:,}` 🪙 · stats de base **+{pct_boost}%**. "
+                            f"Relance `/craft` pour continuer._"
+                        )
+                    elif res["result"] == "fail_downgrade":
+                        await _send_or_edit(
+                            f"💥 **ÉCHEC...** {emoji} **{name}** redescend à **+{res['new_level']}**.\n"
+                            f"_Coût `{cost:,}` 🪙 (perdu) — au-delà de +6, un échec coûte 1 niveau._"
+                        )
+                    else:  # fail_safe
+                        await _send_or_edit(
+                            f"💢 **Échec.** {emoji} **{name}** reste à **+{res['new_level']}** "
+                            f"(aucune perte).\n_Coût `{cost:,}` 🪙 (perdu). Retente ta chance !_"
+                        )
+                except Exception as ex:
+                    print(f"[enhance_btn callback] {ex}")
+                    import traceback
+                    traceback.print_exc()
+                    await _send_or_edit(f"❌ Erreur amélioration : `{ex}`")
+
         class _CraftLayout(LayoutView):
             def __init__(self):
                 super().__init__(timeout=180)
@@ -46759,36 +46858,59 @@ async def craft_cmd(i: discord.Interaction):
                     f"Tu as `{total_wealth:,}` 🪙  ·  "
                     f"{len(eligible)} item(s) éligible(s)"
                 ))
-                lay.append(v2_divider())
-                lay.append(v2_body(
-                    "**╔═══ ⚠️  AVERTISSEMENT  ═══╗**\n"
-                    "_L'affinage est **risqué**. En cas d'échec, l'item est **détruit**. "
-                    "Plus la rareté cible est élevée, plus la chance d'échec est grande._"
-                ))
-                lay.append(v2_divider())
-                lay.append(v2_body("**╔═══ 🔨  ITEMS ÉLIGIBLES  ═══╗**"))
-                # Phase 121 : chaque item = section avec bouton "Affiner" accessory
-                for slot_key, slot_label, item, recipe in eligible:
-                    emoji = item.get("emoji", "⚪")
-                    name = item.get("name", "?")
-                    rarity = (item.get("rarity") or "commune").lower()
-                    target = recipe["target"]
-                    success = recipe["success_pct"]
-                    cost = recipe["cost"]
+                # Phase 181b : AMÉLIORATION (+N) — sûre, montée en puissance
+                if enhance_eligible:
+                    lay.append(v2_divider())
+                    lay.append(v2_body(
+                        "**╔═══ ⬆️  AMÉLIORATION  (+1 → +10)  ═══╗**\n"
+                        "_Renforce une pièce (**+8 % stats / niveau**). Échec **sans "
+                        "danger** jusqu'à +5 ; au-delà, un échec coûte 1 niveau "
+                        "(jamais de destruction)._"
+                    ))
+                    for slot_key, slot_label, item, lvl in enhance_eligible:
+                        emoji = item.get("emoji", "⚪")
+                        name = item.get("name", "?")
+                        cost = events2026.enhance_cost(item, lvl)
+                        pct = events2026.enhance_success_pct(lvl)
+                        has_funds = total_wealth >= int(cost)
+                        lay.append(v2_section(
+                            v2_title(f"{slot_label}  {emoji} {name}  `+{lvl}`"),
+                            v2_subtitle(
+                                f"+{lvl} → +{lvl + 1} · succès `{pct}%` · coût `{cost:,}` 🪙"
+                            ),
+                            accessory=_ConfirmEnhanceBtn(slot_key, slot_label, item, lvl, has_funds),
+                        ))
+
+                # ─── Affinage de RARETÉ (risqué) ───
+                if eligible:
+                    lay.append(v2_divider())
+                    lay.append(v2_body(
+                        "**╔═══ ⚠️  AFFINAGE DE RARETÉ  ═══╗**\n"
+                        "_Monte la **rareté** d'un cran, mais **risqué** : en cas "
+                        "d'échec, l'item est **détruit**. Plus la cible est haute, "
+                        "plus l'échec est probable._"
+                    ))
                     rarity_emojis = {
                         "commune": "⚪", "rare": "🔵", "épique": "🟣",
                         "légendaire": "🟠", "mythique": "🔴", "divine": "💎",
                     }
-                    src_badge = rarity_emojis.get(rarity, "⚪")
-                    tgt_badge = rarity_emojis.get(target, "✨")
-                    has_funds = total_wealth >= int(cost)
-                    lay.append(v2_section(
-                        v2_title(f"{slot_label}  {src_badge} {emoji} {name}"),
-                        v2_subtitle(
-                            f"→ {tgt_badge} _{target}_ · succès `{success}%` · coût `{cost:,}` 🪙"
-                        ),
-                        accessory=_ConfirmRefineBtn(slot_key, item, recipe, has_funds),
-                    ))
+                    for slot_key, slot_label, item, recipe in eligible:
+                        emoji = item.get("emoji", "⚪")
+                        name = item.get("name", "?")
+                        rarity = (item.get("rarity") or "commune").lower()
+                        target = recipe["target"]
+                        success = recipe["success_pct"]
+                        cost = recipe["cost"]
+                        src_badge = rarity_emojis.get(rarity, "⚪")
+                        tgt_badge = rarity_emojis.get(target, "✨")
+                        has_funds = total_wealth >= int(cost)
+                        lay.append(v2_section(
+                            v2_title(f"{slot_label}  {src_badge} {emoji} {name}"),
+                            v2_subtitle(
+                                f"→ {tgt_badge} _{target}_ · succès `{success}%` · coût `{cost:,}` 🪙"
+                            ),
+                            accessory=_ConfirmRefineBtn(slot_key, item, recipe, has_funds),
+                        ))
                 self.add_item(v2_container(*lay, color=0xE67E22))
 
         await i.response.send_message(view=_CraftLayout(), ephemeral=True)
