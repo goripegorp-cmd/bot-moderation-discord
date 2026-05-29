@@ -237,9 +237,14 @@ def recap_view(
 
     Look identique partout (même design-system que tous les panels du bot).
     `description` accepte du markdown multi-ligne (≤ ~4000 caractères).
+
+    Garde-fou : un TextDisplay VIDE est rejeté par Discord (400) → ferait
+    échouer le récap. On garantit donc un titre + un corps non vides.
     """
+    safe_title = (title_text or "").strip() or "📢 Événement"
+    safe_desc = (description or "").strip()[:4000] or "_—_"
     return StaticPanel(info_card(
-        title_text, description[:4000], icon_url=icon_url, color=color, footer=footer))
+        safe_title, safe_desc, icon_url=icon_url, color=color, footer=footer))
 
 
 __all__ = [
