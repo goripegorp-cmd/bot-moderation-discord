@@ -8260,16 +8260,26 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
             except Exception as ex:
                 print(f"[event start wakeup line] {ex}")
                 wakeup_line = ""
-            arena_msg = await arena_channel.send(
-                content=(
-                    f"🚨 **UN BOSS APPARAÎT !** Tous les membres : préparez-vous au combat !"
-                    + (f"\n{ping_str}" if ping_str else "")
-                    + wakeup_line
-                    + "\n_💡 Pas envie d'être ping ? `/notifs` pour choisir précisément quoi recevoir._"
-                ),
-                view=view,
-                allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=False),
-            )
+            # Phase 175 : FIX CRITIQUE — un LayoutView Components V2 NE PEUT PAS
+            # être envoyé avec du `content` (l'API Discord rejette content +
+            # flag IS_COMPONENTS_V2 → 400, le message ne part jamais → le bouton
+            # ATTAQUER n'apparaissait PAS). On envoie donc en DEUX messages :
+            #   1) l'annonce + ping (content seul) — déclenche les notifications
+            #   2) le panneau interactif V2 (view seule) — bouton ATTAQUER visible
+            try:
+                await arena_channel.send(
+                    content=(
+                        f"🚨 **UN BOSS APPARAÎT !** Tous les membres : préparez-vous au combat !"
+                        + (f"\n{ping_str}" if ping_str else "")
+                        + wakeup_line
+                        + "\n_💡 Pas envie d'être ping ? `/notifs` pour choisir précisément quoi recevoir._"
+                    ),
+                    allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=False),
+                )
+            except Exception as ex:
+                print(f"[event start announce] {ex}")
+            # Le panneau interactif (HP + ATTAQUER + Top) — view SEULE, jamais de content
+            arena_msg = await arena_channel.send(view=view)
             async with get_db() as db:
                 await db.execute(
                     'UPDATE events SET arena_channel_id=?, arena_message_id=? WHERE id=?',
@@ -9250,6 +9260,32 @@ async def _refresh_boss_message(guild, event_id: int):
                 print(f"[_refresh_boss_message fallback failed] {ex2}")
     except Exception as ex:
         print(f"[_refresh_boss_message] {ex}")
+
+
+# ─────────────────────────── Helper envoi V2 + ping ───────────────────────────
+
+async def _send_layout_with_ping(channel, layout_view, ping_content=None, *,
+                                 allowed_mentions=None, delete_after=None):
+    """Phase 175 : envoie un panneau Components V2 (LayoutView) + un ping optionnel.
+
+    ⚠️ BUG SYSTÉMIQUE corrigé : un LayoutView V2 NE PEUT PAS coexister avec du
+    `content`. L'API Discord rejette tout message combinant un `content` NON
+    VIDE et le flag IS_COMPONENTS_V2 (erreur 400 → le message ne part jamais →
+    bouton/panneau invisible). On envoie donc le ping/annonce dans un message
+    séparé (content seul), PUIS le panneau V2 (view seule).
+
+    Retourne le message du PANNEAU (pour DB / persistance / refresh / cleanup).
+    """
+    if ping_content:
+        try:
+            await channel.send(
+                content=ping_content,
+                allowed_mentions=allowed_mentions or discord.AllowedMentions.none(),
+                delete_after=delete_after,
+            )
+        except Exception as ex:
+            print(f"[_send_layout_with_ping ping] {ex}")
+    return await channel.send(view=layout_view, delete_after=delete_after)
 
 
 # ─────────────────────────── END EVENT (restauration) ───────────────────────────
@@ -13353,9 +13389,9 @@ async def _drop_mystery_box(guild) -> bool:
             # Phase 39 : ping le rôle "all" si configuré
             ping_str = await _get_event_mention(guild, 'mystery_box')
             send_content = ping_str if ping_str else None
-            msg = await ch.send(
-                content=send_content,
-                view=_MysteryLayout(),
+            # Phase 175 : V2 + content interdit → ping séparé puis panneau V2
+            msg = await _send_layout_with_ping(
+                ch, _MysteryLayout(), send_content,
                 allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False),
                 delete_after=LIFETIME,
             )
@@ -58276,9 +58312,9 @@ async def _start_world_boss(guild) -> dict:
         try:
             layout = await _build_world_boss_layout(guild, wb_id)
             if layout:
-                msg = await arena_ch.send(
-                    content=send_content,
-                    view=layout,
+                # Phase 175 : V2 + content interdit → annonce séparée puis panneau V2
+                msg = await _send_layout_with_ping(
+                    arena_ch, layout, send_content,
                     allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=False),
                 )
             else:
@@ -62292,9 +62328,9 @@ async def _start_game_night(guild) -> bool:
                         ]
                         self.add_item(v2_container(*items, color=0xE91E63))
 
-                gn_announce_msg = await hub_ch.send(
-                    content=wakeup_line if wakeup_line else None,
-                    view=_GnAnnounceLayout(),
+                # Phase 175 : V2 + content interdit → wake-up séparé puis panneau V2
+                gn_announce_msg = await _send_layout_with_ping(
+                    hub_ch, _GnAnnounceLayout(), wakeup_line if wakeup_line else None,
                     allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
                     delete_after=LIFETIME_ANNOUNCE,
                 )
