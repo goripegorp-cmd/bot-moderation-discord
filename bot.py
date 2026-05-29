@@ -5899,7 +5899,7 @@ class MainPanelV2(LayoutView):
             'creativite':   lambda: CentrePanelV2(self.u, self.g),
             'progression':  lambda: LevelSystemPanelV2(self.u, self.g),
             'permissions':  lambda: PermissionsHubPanelV2(self.u, self.g),
-            'events':       lambda: EventConfigPanelV2(self.u, self.g),
+            'events':       lambda: EventsHubPanelV2(self.u, self.g),
         }
         if val in v2_panels:
             v = v2_panels[val]()
@@ -8098,6 +8098,156 @@ async def _open_equipment(i: discord.Interaction):
 
 # ─────────────────────────── PANEL DE CONFIG ───────────────────────────
 
+# Registre extensible des types d'événements configurables (Phase 1 du hub).
+# Chaque entrée doit pointer vers un module qui APPLIQUE réellement son enabled_cfg,
+# pour que chaque toggle soit fonctionnel. On n'ajoute ici que les events dont la
+# clé est déjà respectée par le scheduler / dispatcher.
+EVENT_TYPE_REGISTRY = [
+    {"key": "boss_engine", "emoji": "⚔️", "label": "Moteur Boss / Trésor / Quiz", "enabled_cfg": "event_enabled", "rich_panel": "EventConfigPanelV2"},
+    {"key": "world_boss", "emoji": "🐲", "label": "World Boss", "enabled_cfg": "world_boss_enabled"},
+    {"key": "voice_chaos", "emoji": "🎤", "label": "Chaos vocal", "enabled_cfg": "voice_chaos_enabled"},
+    {"key": "flash_treasure", "emoji": "⚡", "label": "Trésor Flash", "enabled_cfg": "flash_treasure_enabled"},
+]
+
+
+class EventsHubPanelV2(LayoutView):
+    """Hub central des événements (Phase 1) : liste les types d'événements et
+    ouvre le sous-panel de configuration de chacun. Extensible via EVENT_TYPE_REGISTRY.
+    """
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+
+        self.clear_items()
+
+        lines = []
+        rows = []
+        current_row = []
+        for entry in EVENT_TYPE_REGISTRY:
+            on = bool(c.get(entry["enabled_cfg"], True))
+            status = "✅ Activé" if on else "⛔ Désactivé"
+            lines.append(f"{entry['emoji']} **{entry['label']}** — {status}")
+
+            b = Button(
+                label="⚙️ Configurer",
+                style=discord.ButtonStyle.primary,
+                custom_id=f"evhub_{entry['key']}",
+            )
+            b.callback = self._make_open_cb(entry["key"])
+            current_row.append(b)
+            if len(current_row) == 5:
+                rows.append(discord.ui.ActionRow(*current_row))
+                current_row = []
+        if current_row:
+            rows.append(discord.ui.ActionRow(*current_row))
+
+        b_back = Button(label="🔙 Retour", style=discord.ButtonStyle.secondary, custom_id="evhub_back")
+        b_back.callback = self._cb_back
+
+        items = [
+            v2_title("🎪 Configuration des événements"),
+            v2_subtitle("Active ou désactive chaque type d'événement, puis configure-le"),
+            v2_divider(),
+            v2_body("\n".join(lines)),
+            v2_divider(),
+        ]
+        items.extend(rows)
+        items.append(discord.ui.ActionRow(b_back))
+        self.add_item(v2_container(*items, color=Palette.PRIMARY))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    def _make_open_cb(self, key):
+        async def _cb(i):
+            try:
+                entry = next((e for e in EVENT_TYPE_REGISTRY if e["key"] == key), None)
+                if entry is None:
+                    return await i.response.defer()
+                if entry.get("rich_panel") == "EventConfigPanelV2":
+                    v = EventConfigPanelV2(self.u, self.g)
+                else:
+                    v = EventTypeConfigPanelV2(self.u, self.g, entry)
+                await v.render_to(i, edit=True)
+            except Exception as ex:
+                print(f"[EventsHubPanelV2 open {key}] {ex}")
+        return _cb
+
+    async def _cb_back(self, i):
+        v = MainPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+class EventTypeConfigPanelV2(LayoutView):
+    """Sous-panel générique de config d'un type d'événement (Phase 1 : toggle seul).
+    Le salon / la fréquence viendront dans une phase ultérieure.
+    """
+
+    def __init__(self, u, g, entry):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+        self.entry = entry
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        on = bool(c.get(self.entry["enabled_cfg"], True))
+
+        self.clear_items()
+
+        b_toggle = Button(
+            label=("⛔ Désactiver" if on else "✅ Activer"),
+            style=(discord.ButtonStyle.danger if on else discord.ButtonStyle.success),
+            custom_id="evtype_toggle",
+        )
+        b_toggle.callback = self._cb_toggle
+
+        b_back = Button(label="🔙 Retour", style=discord.ButtonStyle.secondary, custom_id="evtype_back")
+        b_back.callback = self._cb_back
+
+        items = [
+            v2_title(f"{self.entry['emoji']} {self.entry['label']}"),
+            v2_subtitle("Configuration de l'événement"),
+            v2_divider(),
+            v2_body(f"🔌 **État** · {'✅ Activé' if on else '⛔ Désactivé'}"),
+            v2_divider(),
+            discord.ui.ActionRow(b_toggle),
+            discord.ui.ActionRow(b_back),
+        ]
+        self.add_item(v2_container(*items, color=Palette.PRIMARY))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_toggle(self, i):
+        try:
+            c = await cfg(self.g.id)
+            key = self.entry["enabled_cfg"]
+            await db_set(self.g.id, key, not bool(c.get(key, True)))
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[EventTypeConfigPanelV2 _cb_toggle {self.entry.get('key')}] {ex}")
+
+    async def _cb_back(self, i):
+        v = EventsHubPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
 class EventConfigPanelV2(LayoutView):
     def __init__(self, u, g):
         super().__init__(timeout=600)
@@ -8432,8 +8582,8 @@ class EventConfigPanelV2(LayoutView):
                 pass
 
     async def _cb_back(self, i):
-        v = MainPanelV2(self.u, self.g)
-        await i.response.edit_message(content=None, view=v, embed=None, attachments=[])
+        v = EventsHubPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
 
 class _EventSettingsModal(Modal, title="⚙️ Réglages des événements"):
