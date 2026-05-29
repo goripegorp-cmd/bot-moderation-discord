@@ -57,6 +57,7 @@ _get_db = None
 _db_get = None
 _v2 = None
 _add_coins = None
+_inventory_fn = None  # Phase 184 : getter d'inventaire (gear-scaling du combat)
 
 # Spawn interval (random entre min et max minutes)
 # Phase 173.1 : plus fréquent (18-30 min au lieu de 30-45) → bien plus de
@@ -282,13 +283,15 @@ def _is_nocturnal(mob: dict) -> bool:
     return bool(mob.get("nocturnal", False))
 
 
-def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None):
-    global _bot, _get_db, _db_get, _v2, _add_coins
+def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
+          inventory_fn=None):
+    global _bot, _get_db, _db_get, _v2, _add_coins, _inventory_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
     _v2 = v2_helpers
     _add_coins = add_coins_fn
+    _inventory_fn = inventory_fn
 
 
 async def init_db():
@@ -759,6 +762,21 @@ async def _process_attack(btn_i: discord.Interaction, mob_id: int):
         # Calcul dégâts : base + random + petit bonus pet si éligible
         dmg_min, dmg_max = mob_def["damage_per_click"]
         dmg = random.randint(dmg_min, dmg_max)
+        # Phase 184 (cohérence) : l'arme du joueur compte (ATK partiel + proc
+        # élémentaire), comme sur les boss. Sur les mobs (peu de PV), on prend
+        # la moitié de l'ATK pour ne pas one-shot, + le burst élémentaire.
+        elem_proc = None
+        if _inventory_fn is not None:
+            try:
+                import events_engine as _ev
+                _pinv = await _inventory_fn(btn_i.guild.id, btn_i.user.id)
+                dmg += int(_ev.inventory_total_stats(_pinv).get("atk", 0) or 0) // 2
+                _p = _ev.roll_elemental_proc(_pinv.get("weapon"))
+                if _p:
+                    dmg += int(_p.get("bonus", 0) or 0)
+                    elem_proc = _p
+            except Exception:
+                pass
 
         new_hp = max(0, int(hp_curr) - dmg)
 
@@ -806,10 +824,14 @@ async def _process_attack(btn_i: discord.Interaction, mob_id: int):
 
         # Feedback ephemeral
         try:
+            _en = (
+                f"  {elem_proc['emoji']} {elem_proc['name']} +{elem_proc['bonus']}"
+                if elem_proc else ""
+            )
             await btn_i.followup.send(
                 f"⚔️ Tu infliges **{dmg}** dégâts à "
                 f"{mob_def['emoji']} **{mob_def['name']}** "
-                f"({new_hp}/{hp_max} HP).",
+                f"({new_hp}/{hp_max} HP).{_en}",
                 ephemeral=True,
             )
         except Exception:

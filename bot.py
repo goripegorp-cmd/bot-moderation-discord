@@ -39737,7 +39737,8 @@ async def on_ready():
             error_logger_module.burst_check_task.start()
 
         # Phase 169.1 : Mob Hunts (combat fréquent multi-user, drops alliance)
-        mob_hunts_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins)
+        mob_hunts_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
+                               inventory_fn=_get_or_create_inventory)
         await mob_hunts_module.init_db()
         mob_hunts_module.register_persistent_views(bot)
         if not mob_hunts_module.spawn_task.is_running():
