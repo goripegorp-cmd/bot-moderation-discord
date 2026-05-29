@@ -293,16 +293,20 @@ async def start_dungeon_lobby(channel, host) -> bool:
     gid = channel.guild.id
     if gid in _lobbies:
         return False  # déjà un lobby en cours
-    if await _active_run_exists(gid):
-        return False  # déjà un donjon actif
-    if not _bot_can(channel):
-        return False
+    # RÉSERVATION SYNCHRONE : on pose _lobbies[gid] AVANT tout await pour fermer
+    # la course (2 clics quasi simultanés dans la même guilde créeraient sinon
+    # 2 lobbies, le 1er orphelin avec des boutons morts). Pas d'await entre le
+    # check ci-dessus et cette ligne → atomique en async coopératif.
     host_id = host.id if host else 0
     lob = {"guild_id": gid, "host_id": host_id, "members": set(),
            "channel": channel, "message": None, "view": None}
     if host_id:
         lob["members"].add(host_id)
     _lobbies[gid] = lob
+    # Vérifs async APRÈS réservation ; on libère le créneau si elles échouent.
+    if await _active_run_exists(gid) or not _bot_can(channel):
+        _lobbies.pop(gid, None)
+        return False
     view = _LobbyView(gid, host_id)
     lob["view"] = view
     try:
