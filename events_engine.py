@@ -513,14 +513,92 @@ def random_enchantment(rarity_bias: float = 1.0) -> dict:
     }
 
 
+# ─── Phase 181 : AMÉLIORATION +1 → +10 (forge pro) ───────────────────────
+#
+# Système d'enchantement de NIVEAU, complémentaire de l'affinage de rareté
+# (attempt_refine). On rend une MÊME pièce plus forte (+8% stats de base par
+# niveau → +80% à +10) sans changer sa rareté. Taux de succès décroissant ;
+# échec "safe" jusqu'à +5, puis risque de PERDRE un niveau à partir de +6
+# (jamais de destruction d'item — c'est l'affinage qui porte ce risque-là).
+
+ENHANCE_MAX = 10
+ENHANCE_STAT_PER_LEVEL = 0.08  # +8 % stats de base par niveau
+
+# Taux de succès pour passer du niveau L à L+1
+ENHANCE_SUCCESS_PCT = {
+    0: 100, 1: 95, 2: 90, 3: 85, 4: 78, 5: 68,
+    6: 55, 7: 42, 8: 30, 9: 20,
+}
+
+# Coût de base (coins) par rareté pour une tentative
+_ENHANCE_BASE_COST = {
+    "commune": 150, "rare": 400, "épique": 1000, "epique": 1000,
+    "légendaire": 2500, "legendaire": 2500, "mythique": 6000, "divine": 15000,
+}
+
+
+def get_upgrade_level(item: dict) -> int:
+    if not item:
+        return 0
+    return max(0, min(ENHANCE_MAX, int(item.get("upgrade_level", 0) or 0)))
+
+
+def enhance_success_pct(level: int) -> int:
+    """% de réussite pour la tentative L → L+1."""
+    return int(ENHANCE_SUCCESS_PCT.get(int(level), 10))
+
+
+def enhance_cost(item: dict, level: Optional[int] = None) -> int:
+    """Coût en coins pour tenter L → L+1 (scale rareté × niveau)."""
+    if level is None:
+        level = get_upgrade_level(item)
+    rarity = (item.get("rarity") or "commune").lower()
+    base = _ENHANCE_BASE_COST.get(rarity, 150)
+    return int(base * (1.0 + level * 0.6))
+
+
+def attempt_enhance(item: dict, roll: Optional[float] = None) -> dict:
+    """Tente +1 sur l'item (mutation in-place de `upgrade_level`).
+
+    Retourne {result, old_level, new_level, success_pct} où result ∈
+    {'success', 'fail_safe', 'fail_downgrade', 'maxed', 'empty'}.
+    """
+    if not item or not item.get("name"):
+        return {"result": "empty", "old_level": 0, "new_level": 0, "success_pct": 0}
+    lvl = get_upgrade_level(item)
+    if lvl >= ENHANCE_MAX:
+        return {"result": "maxed", "old_level": lvl, "new_level": lvl, "success_pct": 0}
+    pct = enhance_success_pct(lvl)
+    if roll is None:
+        roll = random.random()
+    if roll * 100 < pct:
+        item["upgrade_level"] = lvl + 1
+        return {"result": "success", "old_level": lvl, "new_level": lvl + 1, "success_pct": pct}
+    # Échec : safe sous +6, sinon on perd 1 niveau (jamais < 0, jamais destruction)
+    if lvl >= 6:
+        item["upgrade_level"] = max(0, lvl - 1)
+        return {"result": "fail_downgrade", "old_level": lvl,
+                "new_level": item["upgrade_level"], "success_pct": pct}
+    item["upgrade_level"] = lvl
+    return {"result": "fail_safe", "old_level": lvl, "new_level": lvl, "success_pct": pct}
+
+
 def gear_total_stats(item: dict) -> dict:
     """Phase 104 : calcule les stats totales d'un item (base + enchant).
+    Phase 181 : applique aussi le bonus d'amélioration (+1..+10, +8%/niveau).
 
     Retourne {atk, def, crit, hp_bonus, lifesteal}.
     """
     base_atk = int(item.get("atk", 0) or 0)
     base_def = int(item.get("def", 0) or 0)
     base_crit = int(item.get("crit", 0) or 0)
+    # Phase 181 : multiplicateur d'amélioration sur les stats de BASE
+    _lvl = get_upgrade_level(item)
+    if _lvl:
+        _mult = 1.0 + ENHANCE_STAT_PER_LEVEL * _lvl
+        base_atk = int(round(base_atk * _mult))
+        base_def = int(round(base_def * _mult))
+        base_crit = int(round(base_crit * _mult))
     enchant = item.get("enchant") or {}
     return {
         "atk": base_atk + int(enchant.get("atk_bonus", 0) or 0),
@@ -2006,6 +2084,9 @@ __all__ = [
     "compute_set_bonus", "inventory_total_stats", "EQUIPMENT_SLOTS",
     # Phase 180 : éléments d'armes + proc DoT
     "ELEMENTS", "roll_elemental_proc",
+    # Phase 181 : amélioration +1..+10 (forge pro)
+    "ENHANCE_MAX", "ENHANCE_STAT_PER_LEVEL", "ENHANCE_SUCCESS_PCT",
+    "get_upgrade_level", "enhance_success_pct", "enhance_cost", "attempt_enhance",
     # Phase 107 : durability / repair
     "DURABILITY_MAX_BY_RARITY", "REPAIR_COST_PER_POINT",
     "get_max_durability", "get_current_durability", "is_item_broken",
