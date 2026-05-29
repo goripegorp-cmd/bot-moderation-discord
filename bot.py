@@ -38738,6 +38738,12 @@ async def _boot_cleanup_active_events():
     except Exception:
         pass
     try:
+        # Anti « Échec de l'interaction » : efface les mini-jeux Game Night dont
+        # les vues sont mortes après ce (re)démarrage (boutons orphelins).
+        await _purge_orphaned_gn_minigames()
+    except Exception:
+        pass
+    try:
         _light_event_visible.clear()
     except Exception:
         pass
@@ -63553,6 +63559,52 @@ async def _build_detective_clue(guild, member, stats: dict) -> str:
     return random.choice(candidates)
 
 
+async def _purge_orphaned_gn_minigames():
+    """Au boot : supprime les messages de mini-jeux Game Night ORPHELINS.
+
+    Les vues dynamiques (Détective Express, Mastermind, Quiz Survivor) ne se
+    ré-enregistrent PAS après un redémarrage et `_gn_event_state` est vidé →
+    leurs boutons renvoient « Échec de l'interaction » et le message reste
+    affiché avec des boutons morts (l'owner doit le supprimer à la main).
+
+    Comme un reboot rend ces mini-jeux invalides (state perdu), on efface ces
+    messages au boot — cohérent avec `_gn_event_state.clear()` déjà fait dans
+    on_ready. Tracés en DB via reason='gn_minigame'.
+    """
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT guild_id, channel_id, message_id FROM event_message_cleanup "
+                "WHERE reason='gn_minigame'"
+            ) as cur:
+                rows = await cur.fetchall()
+        done = []  # message_ids effectivement traités (guilde dispo)
+        for gid, cid, mid in rows:
+            g = bot.get_guild(int(gid))
+            if g is None:
+                # Guilde pas encore en cache → on LAISSE la ligne (sinon le message
+                # serait orphelin pour toujours). Le prochain boot/cleaner la reprendra.
+                continue
+            try:
+                ch = g.get_channel(int(cid))
+                if ch is not None:
+                    await ch.get_partial_message(int(mid)).delete()
+            except Exception:
+                pass  # message déjà supprimé / salon disparu → considéré traité
+            done.append(int(mid))
+        if done:
+            async with get_db() as db:
+                await db.executemany(
+                    "DELETE FROM event_message_cleanup WHERE reason='gn_minigame' AND message_id=?",
+                    [(m,) for m in done],
+                )
+                await db.commit()
+        if rows:
+            print(f"[gn purge] {len(done)}/{len(rows)} mini-jeu(x) Game Night orphelin(s) nettoyé(s)")
+    except Exception as ex:
+        print(f"[_purge_orphaned_gn_minigames] {ex}")
+
+
 async def _gn_start_detective(gn_id: int, guild, tc, ev: dict, duration: int):
     """Démarre une enquête Détective Express."""
     try:
@@ -63621,6 +63673,9 @@ async def _gn_start_detective(gn_id: int, guild, tc, ev: dict, duration: int):
             view = DetectiveSuspectView(msg.id, suspects)
             await msg.edit(view=view)
             bot.add_view(view, message_id=msg.id)
+            # Anti « Échec de l'interaction » : la vue dynamique ne se ré-enregistre
+            # PAS après un reboot → on trace le message pour le purger au boot.
+            await _register_for_cleanup(msg, duration + 90, 'gn_minigame')
             _gn_event_state[msg.id] = {
                 'kind': 'detective_express',
                 'gn_id': gn_id,
@@ -63820,6 +63875,8 @@ async def _gn_start_mastermind(gn_id: int, guild, tc, ev: dict, duration: int):
             view = MastermindView(msg.id)
             await msg.edit(view=view)
             bot.add_view(view, message_id=msg.id)
+            # Anti « Échec de l'interaction » : purge au boot (vue non ré-enregistrée).
+            await _register_for_cleanup(msg, duration + 90, 'gn_minigame')
             _gn_event_state[msg.id] = {
                 'kind': 'mastermind',
                 'gn_id': gn_id,
@@ -63969,6 +64026,8 @@ async def _gn_start_quiz_survivor(gn_id: int, guild, tc, ev: dict, duration: int
                         view = SurvivorAnswerView(q_msg.id, q_idx)
                         await q_msg.edit(view=view)
                         bot.add_view(view, message_id=q_msg.id)
+                        # Anti « Échec de l'interaction » : purge au boot (vue non ré-enregistrée).
+                        await _register_for_cleanup(q_msg, 90, 'gn_minigame')
                         _gn_event_state[q_msg.id] = state_root
                         await asyncio.sleep(30)
                     except Exception as ex:
@@ -64109,6 +64168,7 @@ async def _post_game_night_prompt(gn_id: int):
                     allowed_mentions=discord.AllowedMentions.none(),
                     delete_after=duration + 30,
                 )
+                await _register_for_cleanup(msg, duration + 90, 'gn_minigame')
                 _gn_event_state[msg.id] = {
                     'kind': 'speed_click',
                     'gn_id': gn_id,
@@ -64163,6 +64223,7 @@ async def _post_game_night_prompt(gn_id: int):
                     allowed_mentions=discord.AllowedMentions.none(),
                     delete_after=duration + 30,
                 )
+                await _register_for_cleanup(msg, duration + 90, 'gn_minigame')
                 _gn_event_state[msg.id] = {
                     'kind': 'threshold_click',
                     'gn_id': gn_id,
