@@ -58658,6 +58658,23 @@ class WorldBossAttackView(View):
                 pet_bonus = 0.0
             damage = int(base * (1.0 + pet_bonus))
 
+            # Phase 184 (cohérence) : l'ÉQUIPEMENT compte aussi sur le World Boss
+            # (ATK total du stuff + proc élémentaire de l'arme), comme le Boss Raid.
+            elem_wb_str = ""
+            try:
+                _winv = await _get_or_create_inventory(i.guild.id, i.user.id)
+                _wt = events2026.inventory_total_stats(_winv)
+                damage += int(_wt.get('atk', 0) or 0)
+                _wproc = events2026.roll_elemental_proc(_winv.get('weapon'))
+                if _wproc:
+                    damage += _wproc['bonus']
+                    elem_wb_str = (
+                        f"\n{_wproc['emoji']} **{_wproc['name']}** ! "
+                        f"+`{_wproc['bonus']}` dégâts élémentaires"
+                    )
+            except Exception:
+                pass
+
             # Apply phase buff : double damage if low HP
             hp_ratio = hp / max(1, max_hp)
             if hp_ratio < 0.33:
@@ -58691,7 +58708,7 @@ class WorldBossAttackView(View):
                 return await _safe_followup(
                     i,
                     content=(
-                        f"⚡ **COUP FATAL !** Tu as infligé `{damage}` dégâts.\n"
+                        f"⚡ **COUP FATAL !** Tu as infligé `{damage}` dégâts.{elem_wb_str}\n"
                         f"💀 **{boss['title']}** est vaincu — le serveur a triomphé !"
                     ),
                 )
@@ -58705,7 +58722,7 @@ class WorldBossAttackView(View):
             await _safe_followup(
                 i,
                 content=(
-                    f"⚔️ Tu infliges `{damage}` dégâts à **{boss['title']}** !\n"
+                    f"⚔️ Tu infliges `{damage}` dégâts à **{boss['title']}** !{elem_wb_str}\n"
                     f"🩸 HP : `{new_hp}/{max_hp}` ({(new_hp/max_hp*100):.0f}%){phase_msg}"
                 ),
             )
