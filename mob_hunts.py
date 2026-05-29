@@ -44,6 +44,7 @@ from typing import Optional
 import discord
 from discord.ext import tasks
 from discord.ui import Button, View
+import ui_v2  # design-system V2 partagé (encadrés cohérents)
 
 try:
     from zoneinfo import ZoneInfo
@@ -1045,7 +1046,14 @@ async def _on_mob_killed(
             if ch:
                 try:
                     msg = await ch.fetch_message(int(row[0]))
-                    await msg.edit(content="\n".join(lines), view=None)
+                    # Le panneau de spawn est en Components V2 → on NE PEUT PAS y
+                    # remettre du `content` (erreur 400). On édite donc avec un
+                    # bel encadré V2 de récap (cohérent avec tout le bot).
+                    _recap_title = (
+                        f"💀 {elite_prefix}{mob_def['emoji']} {mob_def['name']} vaincu !")
+                    _recap_body = "\n".join(lines[2:]) if len(lines) > 2 else "\n".join(lines)
+                    await msg.edit(view=ui_v2.recap_view(
+                        _recap_title, _recap_body, color=ui_v2.Palette.SUCCESS))
                 except Exception:
                     pass
     except Exception:

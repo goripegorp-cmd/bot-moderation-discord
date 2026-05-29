@@ -46,6 +46,7 @@ from typing import Optional
 import discord
 from discord.ext import tasks
 from discord.ui import Button
+import ui_v2  # design-system V2 partagé (encadrés cohérents)
 
 try:
     from zoneinfo import ZoneInfo
@@ -798,8 +799,11 @@ async def _announce_resolution(
         body += "\n".join(lines)
 
     try:
-        await ch.send(head + "\n\n" + body,
-                      allowed_mentions=discord.AllowedMentions.none())
+        await ch.send(
+            view=ui_v2.recap_view(
+                head.replace("**", ""), body,
+                color=(ui_v2.Palette.SUCCESS if killed else ui_v2.Palette.NEUTRAL)),
+            allowed_mentions=discord.AllowedMentions.none())
     except Exception:
         pass
 

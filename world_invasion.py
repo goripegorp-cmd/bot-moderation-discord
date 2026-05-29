@@ -35,6 +35,7 @@ from typing import Optional
 
 import discord
 from discord.ext import tasks
+import ui_v2  # design-system V2 partagé (encadrés cohérents)
 
 try:
     from zoneinfo import ZoneInfo
@@ -442,7 +443,10 @@ async def _post_resolution(
         lines.append("_Aucun participant n'a attaqué les mobs._")
 
     try:
-        await ch.send("\n".join(lines))
+        await ch.send(view=ui_v2.recap_view(
+            lines[0].replace("**", ""),
+            "\n".join(lines[1:]),
+            color=(ui_v2.Palette.SUCCESS if all_killed else ui_v2.Palette.WARNING)))
     except Exception:
         pass
 

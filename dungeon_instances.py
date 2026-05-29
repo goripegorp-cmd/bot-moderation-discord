@@ -42,6 +42,7 @@ from typing import Optional
 import discord
 from discord.ext import tasks
 from discord.ui import Button, View
+import ui_v2  # design-system V2 partagé (encadrés cohérents)
 
 # ─── Globals injectés ────────────────────────────────────────────────────
 _bot = None
@@ -426,6 +427,7 @@ async def _launch_dungeon(guild_id: int):
     room_vc = []          # [(id, name), ...] des salles vocales
     try:
         cat = await guild.create_category(name="🏰 Donjon", overwrites=ow,
+                                          position=0,  # catégorie propre TOUT EN HAUT
                                           reason="Donjon instancié")
         created.append(cat)
         txt = await guild.create_text_channel(name="combat", category=cat, overwrites=ow,
@@ -916,8 +918,13 @@ async def _reward_party(run_id, guild_id, txt_id):
         lines.append(f"{rank} {nm} · `{int(dmg):,}` dégâts · **+{reward}** 🪙")
     if txt and lines:
         try:
-            await txt.send("🏆 **Butin du donjon :**\n" + "\n".join(lines[:10]),
-                           allowed_mentions=discord.AllowedMentions.none())
+            await txt.send(
+                view=ui_v2.recap_view(
+                    "🏆 Butin du donjon",
+                    "\n".join(lines[:10]),
+                    color=ui_v2.Palette.PREMIUM,
+                    footer="Donjon terminé — merci d'avoir joué !"),
+                allowed_mentions=discord.AllowedMentions.none())
         except Exception:
             pass
 

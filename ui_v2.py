@@ -208,6 +208,40 @@ def info_card(
     return ui.Container(*items, accent_color=color)
 
 
+class StaticPanel(ui.LayoutView):
+    """LayoutView statique pour une ANNONCE / un RÉCAP public (sans boutons).
+
+    Pas d'interaction → pas de risque d'« Échec de l'interaction », pas besoin
+    de persistance. À envoyer en `view=` UNIQUEMENT (jamais avec `content=` :
+    content + Components V2 = erreur 400).
+    """
+
+    def __init__(self, *items: ui.Item, timeout: Optional[float] = None):
+        super().__init__(timeout=timeout)
+        for it in items:
+            self.add_item(it)
+
+
+def recap_view(
+    title_text: str,
+    description: str,
+    *,
+    color: discord.Color = Palette.PRIMARY,
+    footer: Optional[str] = None,
+    icon_url: Optional[str] = None,
+) -> "StaticPanel":
+    """Récap/annonce d'événement dans un bel ENCADRÉ Components V2 (au lieu de
+    texte brut). Renvoie une LayoutView prête à envoyer :
+
+        await channel.send(view=ui_v2.recap_view("🏆 Fin du Boss", body, color=...))
+
+    Look identique partout (même design-system que tous les panels du bot).
+    `description` accepte du markdown multi-ligne (≤ ~4000 caractères).
+    """
+    return StaticPanel(info_card(
+        title_text, description[:4000], icon_url=icon_url, color=color, footer=footer))
+
+
 __all__ = [
     "Palette",
     "title",
@@ -224,4 +258,6 @@ __all__ = [
     "BasePanel",
     "header",
     "info_card",
+    "StaticPanel",
+    "recap_view",
 ]
