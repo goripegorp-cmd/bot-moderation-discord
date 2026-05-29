@@ -1129,6 +1129,25 @@ async def db_init():
             PRIMARY KEY (guild_id, user_id)
         )''')
 
+        # Phase 179 : COFFRE / STASH — collection d'objets POSSÉDÉS mais non
+        # équipés. player_inventory = les 6 pièces ÉQUIPÉES (source de vérité
+        # combat) ; player_stash = tout le reste qu'on peut équiper à la main.
+        await db.execute('''CREATE TABLE IF NOT EXISTS player_stash (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            slot TEXT NOT NULL,
+            item_json TEXT NOT NULL,
+            acquired_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+        try:
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_player_stash_owner "
+                "ON player_stash(guild_id, user_id, slot)"
+            )
+        except Exception:
+            pass
+
         # Phase 102 : nouveaux slots équipement (Helmet, Boots, Accessory, Trinket)
         # ALTER TABLE idempotent — try/except si colonne déjà existante
         for col_def in (
@@ -7792,6 +7811,133 @@ async def _save_inventory(guild_id: int, user_id: int, inv: dict):
         await db.commit()
 
 
+# ─────────────────────────── Phase 179 : COFFRE / STASH ───────────────────────────
+# player_inventory = les 6 pièces ÉQUIPÉES. player_stash = la collection qu'on
+# peut équiper à la main. Loot → _acquire_gear (équipe si slot vide, sinon coffre).
+
+_RARITY_RANK = {
+    "commune": 0, "rare": 1, "épique": 2, "epique": 2,
+    "légendaire": 3, "legendaire": 3, "mythique": 4, "divine": 5,
+}
+
+
+def _rarity_rank(item) -> int:
+    return _RARITY_RANK.get((item or {}).get("rarity", "commune"), 0)
+
+
+async def _stash_add(guild_id: int, user_id: int, item: dict) -> bool:
+    """Ajoute un objet au coffre (cap 60/slot, on vire le plus ancien sinon)."""
+    if not item or not item.get("name"):
+        return False
+    slot = item.get("slot") or "weapon"
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM player_stash WHERE guild_id=? AND user_id=? AND slot=?",
+                (guild_id, user_id, slot),
+            ) as cur:
+                cnt = int((await cur.fetchone())[0])
+            if cnt >= 60:
+                await db.execute(
+                    "DELETE FROM player_stash WHERE id IN (SELECT id FROM player_stash "
+                    "WHERE guild_id=? AND user_id=? AND slot=? ORDER BY acquired_at ASC LIMIT 1)",
+                    (guild_id, user_id, slot),
+                )
+            await db.execute(
+                "INSERT INTO player_stash(guild_id, user_id, slot, item_json) VALUES(?,?,?,?)",
+                (guild_id, user_id, slot, json.dumps(item)),
+            )
+            await db.commit()
+        return True
+    except Exception as ex:
+        print(f"[_stash_add] {ex}")
+        return False
+
+
+async def _stash_list(guild_id: int, user_id: int, slot: str = None) -> list:
+    """Retourne [(stash_id, slot, item_dict), ...] trié du plus récent au plus ancien."""
+    out = []
+    try:
+        async with get_db() as db:
+            if slot:
+                q = ("SELECT id, slot, item_json FROM player_stash "
+                     "WHERE guild_id=? AND user_id=? AND slot=? ORDER BY id DESC")
+                args = (guild_id, user_id, slot)
+            else:
+                q = ("SELECT id, slot, item_json FROM player_stash "
+                     "WHERE guild_id=? AND user_id=? ORDER BY id DESC")
+                args = (guild_id, user_id)
+            async with db.execute(q, args) as cur:
+                for r in await cur.fetchall():
+                    try:
+                        out.append((int(r[0]), r[1], json.loads(r[2]) if r[2] else {}))
+                    except Exception:
+                        continue
+    except Exception as ex:
+        print(f"[_stash_list] {ex}")
+    return out
+
+
+async def _stash_count(guild_id: int, user_id: int) -> int:
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM player_stash WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id),
+            ) as cur:
+                return int((await cur.fetchone())[0])
+    except Exception:
+        return 0
+
+
+async def _stash_equip(guild_id: int, user_id: int, stash_id: int):
+    """Équipe un objet du coffre ; l'objet actuellement équipé retourne au coffre.
+    Retourne (ok: bool, new_item: dict|None, old_item: dict|None)."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT slot, item_json FROM player_stash WHERE id=? AND guild_id=? AND user_id=?",
+                (stash_id, guild_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+            if not row:
+                return (False, None, None)
+            slot = row[0]
+            new_item = json.loads(row[1]) if row[1] else {}
+            await db.execute("DELETE FROM player_stash WHERE id=?", (stash_id,))
+            await db.commit()
+        inv = await _get_or_create_inventory(guild_id, user_id)
+        old_item = inv.get(slot) or {}
+        inv[slot] = new_item
+        await _save_inventory(guild_id, user_id, inv)
+        if old_item and old_item.get("name"):
+            await _stash_add(guild_id, user_id, old_item)
+        return (True, new_item, old_item)
+    except Exception as ex:
+        print(f"[_stash_equip] {ex}")
+        return (False, None, None)
+
+
+async def _acquire_gear(guild_id: int, user_id: int, item: dict) -> str:
+    """Le joueur OBTIENT une pièce. Slot vide → équipe direct (jamais tout nu) ;
+    sinon → va au coffre (équipement manuel ensuite). Retourne 'equipped'|'stashed'|None."""
+    if not item or not item.get("name"):
+        return None
+    slot = item.get("slot") or "weapon"
+    try:
+        inv = await _get_or_create_inventory(guild_id, user_id)
+        cur_item = inv.get(slot) or {}
+        if not cur_item or not cur_item.get("name"):
+            inv[slot] = item
+            await _save_inventory(guild_id, user_id, inv)
+            return "equipped"
+        await _stash_add(guild_id, user_id, item)
+        return "stashed"
+    except Exception as ex:
+        print(f"[_acquire_gear] {ex}")
+        return None
+
+
 # ─────────────────────────── PANEL DE CONFIG ───────────────────────────
 
 class EventConfigPanelV2(LayoutView):
@@ -9545,26 +9691,32 @@ async def _end_active_event(guild, *, victory: bool, reason: str = ""):
                 await add_coins(guild.id, uid, r['coins'])
             except Exception:
                 pass
-            # Gear : auto-équiper si la rareté est >= actuelle, sinon stocker comme drop
+            # Phase 179 : gear → équipé si STRICTEMENT meilleur (l'ancien part au
+            # coffre), SINON rangé dans le COFFRE (avant : perdu s'il n'était pas
+            # meilleur). Le joueur équipe ensuite ce qu'il veut à la main.
             gear_str = ""
             if r.get('gear'):
                 gear = r['gear']
                 inv = await _get_or_create_inventory(guild.id, uid)
                 slot = gear['slot']
                 cur_gear = inv.get(slot, {})
-                rarity_rank = {"commune": 0, "rare": 1, "épique": 2, "légendaire": 3}
-                if rarity_rank.get(gear.get('rarity', 'commune'), 0) >= rarity_rank.get(cur_gear.get('rarity', 'commune'), 0):
-                    # Remplacer
-                    inv[slot] = {
-                        'name': gear['name'],
-                        'rarity': gear['rarity'],
-                        'emoji': gear.get('emoji', ''),
-                        'atk': gear.get('atk', 0),
-                        'def': gear.get('def', 0),
-                    }
-                    gear_str = f"+ {events2026.RARITY_EMOJIS.get(gear['rarity'], '')} **{gear['emoji']} {gear['name']}** ({gear['rarity']}) — équipé !"
+                item = {
+                    'name': gear['name'],
+                    'rarity': gear['rarity'],
+                    'emoji': gear.get('emoji', ''),
+                    'atk': gear.get('atk', 0),
+                    'def': gear.get('def', 0),
+                    'slot': slot,
+                }
+                _re = events2026.RARITY_EMOJIS.get(gear['rarity'], '')
+                if (not cur_gear or not cur_gear.get('name')) or _rarity_rank(item) > _rarity_rank(cur_gear):
+                    if cur_gear and cur_gear.get('name'):
+                        await _stash_add(guild.id, uid, cur_gear)  # ancien → coffre
+                    inv[slot] = item
+                    gear_str = f"+ {_re} **{gear['emoji']} {gear['name']}** ({gear['rarity']}) — équipé !"
                 else:
-                    gear_str = f"+ {events2026.RARITY_EMOJIS.get(gear['rarity'], '')} **{gear['emoji']} {gear['name']}** ({gear['rarity']})"
+                    await _stash_add(guild.id, uid, item)  # rangé au coffre
+                    gear_str = f"+ {_re} **{gear['emoji']} {gear['name']}** ({gear['rarity']}) — 🎒 coffre"
                 # Compter kill si victory + top 3
                 if victory and r['rank'] <= 3:
                     inv['kills'] = inv.get('kills', 0) + 1
