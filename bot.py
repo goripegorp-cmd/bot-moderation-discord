@@ -12144,6 +12144,14 @@ async def duel_cmd(i: discord.Interaction, membre: discord.Member):
             view=view,
             allowed_mentions=discord.AllowedMentions(users=[membre], roles=False, everyone=False),
         )
+        # Anti « Échec de l'interaction » : la vue du défi (timeout 5 min) n'est
+        # pas ré-enregistrée au reboot → on borne sa durée de vie en DB pour que
+        # le message ne traîne pas avec des boutons morts au-delà du défi.
+        try:
+            _duel_msg = await i.original_response()
+            await _register_for_cleanup(_duel_msg, 360, 'duel_challenge')
+        except Exception:
+            pass
     except Exception as ex:
         print(f"[/duel] {ex}")
         try:

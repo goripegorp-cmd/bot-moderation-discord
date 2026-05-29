@@ -126,6 +126,18 @@ async def init_db():
                     PRIMARY KEY (run_id, user_id)
                 )
             """)
+            # Anti « Échec de l'interaction » : un lobby est posté AVANT qu'un run
+            # n'existe en DB. Si le bot reboote pendant la fenêtre du lobby, le
+            # message resterait avec des boutons morts. On persiste donc le message
+            # du lobby pour pouvoir le supprimer au boot (boot_cleanup).
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS dungeon_lobbies (
+                    guild_id INTEGER PRIMARY KEY,
+                    channel_id INTEGER NOT NULL,
+                    message_id INTEGER NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             await db.commit()
     except Exception as ex:
         print(f"[dungeon init_db] {ex}")
@@ -155,6 +167,33 @@ async def _active_run_exists(guild_id: int) -> bool:
                 return await cur.fetchone() is not None
     except Exception:
         return False
+
+
+async def _save_lobby_row(guild_id: int, channel_id: int, message_id: int):
+    """Persiste le message du lobby pour pouvoir le nettoyer au boot (le lobby
+    existe AVANT tout run en DB → sinon boutons morts si reboot pendant le lobby)."""
+    if _get_db is None:
+        return
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT OR REPLACE INTO dungeon_lobbies(guild_id, channel_id, message_id) "
+                "VALUES(?,?,?)", (guild_id, channel_id, message_id))
+            await db.commit()
+    except Exception:
+        pass
+
+
+async def _del_lobby_row(guild_id: int):
+    """Oublie le lobby d'une guilde (consommé : lancé ou annulé)."""
+    if _get_db is None:
+        return
+    try:
+        async with _get_db() as db:
+            await db.execute("DELETE FROM dungeon_lobbies WHERE guild_id=?", (guild_id,))
+            await db.commit()
+    except Exception:
+        pass
 
 
 async def _member_count(run_id: int) -> int:
@@ -266,6 +305,7 @@ class _LobbyView(View):
                     except Exception:
                         pass
                 _lobbies.pop(self.guild_id, None)
+                await _del_lobby_row(self.guild_id)  # boutons retirés → plus à purger
         except Exception:
             pass
 
@@ -325,6 +365,7 @@ async def start_dungeon_lobby(channel, host) -> bool:
     try:
         msg = await channel.send(content=_lobby_text(lob), view=view)
         lob["message"] = msg
+        await _save_lobby_row(gid, channel.id, msg.id)  # pour purge au boot
         return True
     except Exception as ex:
         print(f"[dungeon start_lobby] {ex}")
@@ -338,6 +379,7 @@ async def start_dungeon_lobby(channel, host) -> bool:
 
 async def _launch_dungeon(guild_id: int):
     lob = _lobbies.pop(guild_id, None)
+    await _del_lobby_row(guild_id)  # lobby consommé → plus de boutons à purger
     if not lob:
         return
     guild = _bot.get_guild(guild_id) if _bot else None
@@ -934,10 +976,12 @@ async def _close_run(run_id: int):
 
 
 async def boot_cleanup():
-    """Au démarrage : ferme tous les runs 'active' orphelins (salons supprimés).
-    Protège contre l'accumulation de salons si le bot reboot pendant un donjon."""
+    """Au démarrage : ferme tous les runs 'active' orphelins (salons supprimés)
+    + supprime les messages de LOBBY orphelins (boutons morts après reboot).
+    Protège contre l'accumulation de salons + l'« Échec de l'interaction »."""
     if _get_db is None:
         return
+    # 1) Runs orphelins → suppression des salons
     try:
         async with _get_db() as db:
             async with db.execute(
@@ -948,7 +992,33 @@ async def boot_cleanup():
         if ids:
             print(f"[dungeon boot_cleanup] {len(ids)} run(s) orphelin(s) nettoyé(s)")
     except Exception as ex:
-        print(f"[dungeon boot_cleanup] {ex}")
+        print(f"[dungeon boot_cleanup runs] {ex}")
+    # 2) Lobbies orphelins → suppression des messages à boutons morts
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT guild_id, channel_id, message_id FROM dungeon_lobbies") as cur:
+                rows = await cur.fetchall()
+        done = []
+        for gid, cid, mid in rows:
+            g = _bot.get_guild(int(gid)) if _bot else None
+            if g is None:
+                continue  # guilde pas en cache → on garde la ligne pour plus tard
+            try:
+                ch = g.get_channel(int(cid))
+                if ch is not None:
+                    await ch.get_partial_message(int(mid)).delete()
+            except Exception:
+                pass
+            done.append(int(gid))
+        if done:
+            async with _get_db() as db:
+                await db.executemany(
+                    "DELETE FROM dungeon_lobbies WHERE guild_id=?", [(g,) for g in done])
+                await db.commit()
+            print(f"[dungeon boot_cleanup] {len(done)} lobby(s) orphelin(s) nettoyé(s)")
+    except Exception as ex:
+        print(f"[dungeon boot_cleanup lobbies] {ex}")
 
 
 @tasks.loop(minutes=5)
