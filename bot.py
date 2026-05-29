@@ -10692,6 +10692,7 @@ async def _start_treasure_hunt(guild, triggered_by_id: int, *, manual: bool = Fa
             timestamp=datetime.now(timezone.utc),
         )
         intro_embed.set_footer(text=f"{guild.name} · Chasse au Trésor", icon_url=(guild.icon.url if guild.icon else None))
+        intro_embed.add_field(name="🕹️ Comment jouer", value=events2026.how_to_play('treasure', with_title=False), inline=False)
         try:
             ping_str = await _get_event_mention(guild, 'treasure_hunt')
             # Phase 48.4.A : smart mention — respecte opt-out + affinité par event_kind
@@ -10997,6 +10998,7 @@ async def _start_quiz(guild, triggered_by_id: int, *, manual: bool = False) -> d
             timestamp=datetime.now(timezone.utc),
         )
         intro_embed.set_footer(text=f"{guild.name} · Quiz", icon_url=(guild.icon.url if guild.icon else None))
+        intro_embed.add_field(name="🕹️ Comment jouer", value=events2026.how_to_play('quiz', with_title=False), inline=False)
         try:
             ping_str = await _get_event_mention(guild, 'quiz')
             # Phase 48.4.A : smart mention — respecte opt-out + affinité par event_kind
@@ -60025,6 +60027,7 @@ async def _post_daily_riddle(guild) -> bool:
             timestamp=datetime.now(timezone.utc),
         )
         e.set_footer(text=f"Énigme du {day}")
+        e.add_field(name="🕹️ Comment jouer", value=events2026.how_to_play('daily_riddle', with_title=False), inline=False)
 
         view = RiddleAnswerView()
         try:
