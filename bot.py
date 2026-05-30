@@ -8202,13 +8202,8 @@ class EventsHubPanelV2(LayoutView):
 
 
 class EventTypeConfigPanelV2(LayoutView):
-    """Sous-panel générique de config d'un type d'événement.
-
-    Phase 199 : en plus de l'interrupteur on/off, l'owner choisit un SALON
-    (`{key}_channel`) et une FRÉQUENCE (`{key}_interval_hours`, 0 = défaut).
-    Ces réglages sont ADDITIFS et fail-open : non configurés → comportement
-    actuel inchangé. Le câblage réel salon/fréquence est appliqué côté modules
-    là où c'est faisable proprement ; sinon le réglage reste indicatif.
+    """Sous-panel générique de config d'un type d'événement (Phase 1 : toggle seul).
+    Le salon / la fréquence viendront dans une phase ultérieure.
     """
 
     def __init__(self, u, g, entry):
@@ -8224,20 +8219,7 @@ class EventTypeConfigPanelV2(LayoutView):
         c = await cfg(self.g.id)
         on = bool(c.get(self.entry["enabled_cfg"], self.entry.get("default", True)))
 
-        key = self.entry["key"]
-        ch_id = int(c.get(f"{key}_channel", 0) or 0)
-        ch = self.g.get_channel(ch_id) if ch_id else None
-        interval_h = int(c.get(f"{key}_interval_hours", 0) or 0)
-
         self.clear_items()
-
-        # ── ChannelSelect (rangée dédiée) — salon de destination de l'event ──
-        ch_select = discord.ui.ChannelSelect(
-            placeholder=f"📢 Salon : {(ch.name if ch else 'auto (par défaut)')}"[:150],
-            channel_types=[discord.ChannelType.text],
-            min_values=0, max_values=1, custom_id="evtype_channel",
-        )
-        ch_select.callback = self._cb_channel
 
         b_toggle = Button(
             label=("⛔ Désactiver" if on else "✅ Activer"),
@@ -8246,31 +8228,16 @@ class EventTypeConfigPanelV2(LayoutView):
         )
         b_toggle.callback = self._cb_toggle
 
-        b_freq = Button(
-            label="⏱️ Fréquence",
-            style=discord.ButtonStyle.primary,
-            custom_id="evtype_freq",
-        )
-        b_freq.callback = self._cb_freq
-
         b_back = Button(label="🔙 Retour", style=discord.ButtonStyle.secondary, custom_id="evtype_back")
         b_back.callback = self._cb_back
-
-        freq_str = f"toutes les `{interval_h}` h" if interval_h > 0 else "_auto / par défaut_"
 
         items = [
             v2_title(f"{self.entry['emoji']} {self.entry['label']}"),
             v2_subtitle("Configuration de l'événement"),
             v2_divider(),
-            v2_body(
-                f"🔌 **État** · {'✅ Activé' if on else '⛔ Désactivé'}\n"
-                f"📢 **Salon** · {ch.mention if ch else '_auto (par défaut)_'}\n"
-                f"⏱️ **Fréquence** · {freq_str}"
-            ),
-            v2_subtitle("Salon vide = automatique · Fréquence `0` = défaut. Selon l'event, ces réglages peuvent rester indicatifs."),
+            v2_body(f"🔌 **État** · {'✅ Activé' if on else '⛔ Désactivé'}"),
             v2_divider(),
-            discord.ui.ActionRow(ch_select),
-            discord.ui.ActionRow(b_toggle, b_freq),
+            discord.ui.ActionRow(b_toggle),
             discord.ui.ActionRow(b_back),
         ]
         self.add_item(v2_container(*items, color=Palette.PRIMARY))
@@ -8289,55 +8256,9 @@ class EventTypeConfigPanelV2(LayoutView):
         except Exception as ex:
             print(f"[EventTypeConfigPanelV2 _cb_toggle {self.entry.get('key')}] {ex}")
 
-    async def _cb_channel(self, i):
-        try:
-            vals = i.data.get('values', [])
-            ch_id = int(vals[0]) if vals else 0
-            await db_set(self.g.id, f"{self.entry['key']}_channel", ch_id)
-            await self.render_to(i, edit=True)
-        except Exception as ex:
-            print(f"[EventTypeConfigPanelV2 _cb_channel {self.entry.get('key')}] {ex}")
-
-    async def _cb_freq(self, i):
-        try:
-            c = await cfg(self.g.id)
-            modal = _EventTypeFreqModal(self.g, self.u, self.entry)
-            modal.hours.default = str(int(c.get(f"{self.entry['key']}_interval_hours", 0) or 0))
-            await i.response.send_modal(modal)
-        except Exception as ex:
-            print(f"[EventTypeConfigPanelV2 _cb_freq {self.entry.get('key')}] {ex}")
-
     async def _cb_back(self, i):
         v = EventsHubPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
-
-
-class _EventTypeFreqModal(Modal):
-    hours = TextInput(
-        label="Fréquence en heures (0 = auto / par défaut)",
-        placeholder="0",
-        max_length=4,
-        required=True,
-    )
-
-    def __init__(self, g, u, entry):
-        super().__init__(title=f"⏱️ Fréquence · {entry.get('label', '')}"[:45])
-        self.g = g
-        self.u = u
-        self.entry = entry
-
-    async def on_submit(self, i):
-        try:
-            raw = (self.hours.value or "0").strip()
-            value = max(0, min(8760, int(raw)))  # 0..1 an (en heures)
-            await db_set(self.g.id, f"{self.entry['key']}_interval_hours", value)
-            await EventTypeConfigPanelV2(self.u, self.g, self.entry).render_to(i, edit=True)
-        except Exception as ex:
-            print(f"[_EventTypeFreqModal on_submit {self.entry.get('key')}] {ex}")
-            try:
-                await i.response.send_message(f"❌ Valeur invalide (entier ≥ 0) : `{ex}`", ephemeral=True)
-            except Exception:
-                pass
 
 
 class EventConfigPanelV2(LayoutView):
@@ -8938,17 +8859,6 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
                     (arena_channel.id, arena_msg.id, event_id),
                 )
                 await db.commit()
-            # Phase 200 : rappel rotatif des VRAIS participants passés de boss_raid
-            # (lus depuis event_participants — JOIN events sur event_type). Message
-            # séparé (un LayoutView V2 ne porte pas de content). Fail-open : toute
-            # erreur n'empêche jamais le spawn.
-            try:
-                await _send_participant_recall(
-                    guild, arena_channel, 'boss_raid', 'un Boss Raid',
-                    notif_category='boss_raid',
-                )
-            except Exception as ex:
-                print(f"[event start boss recall] {ex}")
             # Phase 40.1 : Note — pour le boss raid, pas d'echo nécessaire car
             # tous les autres salons sont masqués → l'arène est LE seul salon
             # visible, les actifs la voient forcément.
@@ -10118,35 +10028,6 @@ async def _send_layout_with_ping(channel, layout_view, ping_content=None, *,
     return await channel.send(view=layout_view, delete_after=delete_after)
 
 
-# ─────────────────────── Phase 199 : override salon par event ───────────────────────
-
-async def _event_channel_override(guild, key):
-    """Phase 199 — salon de destination configuré par l'owner pour un type
-    d'event (clé `{key}_channel`, posée par EventTypeConfigPanelV2).
-
-    ADDITIF + FAIL-OPEN : retourne le salon texte SEULEMENT s'il est configuré,
-    existe, est un salon texte et que le bot peut y écrire. Sinon (non configuré,
-    introuvable, sans droit, ou la moindre erreur) → None pour que l'appelant
-    retombe sur sa logique EXISTANTE inchangée. Ne lève jamais.
-    """
-    try:
-        if guild is None or not key:
-            return None
-        c = await cfg(guild.id)
-        ch_id = int(c.get(f"{key}_channel", 0) or 0)
-        if not ch_id:
-            return None
-        ch = guild.get_channel(ch_id)
-        if not isinstance(ch, discord.TextChannel):
-            return None
-        me = guild.me
-        if me and ch.permissions_for(me).send_messages:
-            return ch
-    except Exception:
-        pass
-    return None
-
-
 # ─────────────────────────── END EVENT (restauration) ───────────────────────────
 
 async def _find_event_recap_channel(guild, exclude_ids=None):
@@ -11005,15 +10886,6 @@ async def _start_treasure_hunt(guild, triggered_by_id: int, *, manual: bool = Fa
                 await _post_event_echo(guild, arena_channel, 'treasure_hunt')
             except Exception as ex:
                 print(f"[treasure echo] {ex}")
-            # Phase 200 : rappel rotatif des VRAIS participants passés de la chasse
-            # au trésor (event_participants, event_type='treasure_hunt'). Fail-open.
-            try:
-                await _send_participant_recall(
-                    guild, arena_channel, 'treasure_hunt', 'une chasse au trésor',
-                    notif_category='treasure',
-                )
-            except Exception as ex:
-                print(f"[treasure recall] {ex}")
         except Exception as ex:
             print(f"[treasure intro] {ex}")
 
@@ -11319,15 +11191,6 @@ async def _start_quiz(guild, triggered_by_id: int, *, manual: bool = False) -> d
                 await _post_event_echo(guild, arena_channel, 'quiz')
             except Exception as ex:
                 print(f"[quiz echo] {ex}")
-            # Phase 200 : rappel rotatif des VRAIS participants passés du quiz
-            # (event_participants, event_type='quiz'). Fail-open.
-            try:
-                await _send_participant_recall(
-                    guild, arena_channel, 'quiz', 'un quiz',
-                    notif_category='quiz',
-                )
-            except Exception as ex:
-                print(f"[quiz recall] {ex}")
         except Exception as ex:
             print(f"[quiz intro] {ex}")
 
@@ -14277,13 +14140,6 @@ async def _drop_mystery_box(guild) -> bool:
 
         # Tirer un salon CHATTY parmi les actifs
         ch = random.choice(candidates)
-
-        # Phase 199 : override salon configuré (additif, fail-open) — si l'owner
-        # a fixé un salon pour la Boîte Mystère, on le préfère ; sinon on garde
-        # le salon actif tiré ci-dessus (comportement inchangé).
-        _ov = await _event_channel_override(guild, 'mystery_box')
-        if _ov is not None:
-            ch = _ov
 
         # Générer la box
         box = events2026.random_mystery_box()
@@ -40110,8 +39966,7 @@ async def on_ready():
 
         # Phase 169.1 : Mob Hunts (combat fréquent multi-user, drops alliance)
         mob_hunts_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
-                               inventory_fn=_get_or_create_inventory,
-                               recall_ping_fn=_send_participant_recall)
+                               inventory_fn=_get_or_create_inventory)
         await mob_hunts_module.init_db()
         mob_hunts_module.register_persistent_views(bot)
         if not mob_hunts_module.spawn_task.is_running():
@@ -59549,16 +59404,6 @@ async def _start_world_boss(guild) -> dict:
                     (msg.id, wb_id),
                 )
                 await db.commit()
-            # Phase 200 : rappel rotatif des VRAIS participants passés du World Boss
-            # (world_boss_attackers, JOIN world_bosses). Opt-out via la catégorie
-            # /notifs 'world_boss'. Message séparé, fail-open.
-            try:
-                await _send_participant_recall(
-                    guild, arena_ch, 'world_boss', 'un World Boss',
-                    notif_category='world_boss',
-                )
-            except Exception as ex:
-                print(f"[world boss recall] {ex}")
         except Exception as ex:
             print(f"[_start_world_boss send arena] {ex}")
             return {'ok': False, 'error': f'erreur envoi : {ex}'}
@@ -60397,14 +60242,6 @@ async def _post_daily_riddle(guild) -> bool:
         if not ch:
             return False
 
-        # Phase 199 : override salon configuré (additif, fail-open) — l'owner peut
-        # fixer un salon dédié pour l'Énigme du jour ; sinon on garde le salon
-        # hub/chatty calculé ci-dessus (comportement inchangé). La planification
-        # (10h FR) reste fixe.
-        _ov = await _event_channel_override(guild, 'daily_riddle')
-        if _ov is not None:
-            ch = _ov
-
         riddle = ev42.random_riddle()
         options_str = "\n".join(
             f"{chr(65 + idx)}. {opt}" for idx, opt in enumerate(riddle['options'])
@@ -60521,11 +60358,6 @@ def _build_daily_agenda_text(now) -> str:
     lines.append("")
     lines.append("__🗡️ Mobs__")
     lines.append("• En continu toute la journée (un groupe surgit environ toutes les 18-30 min).")
-    lines.append("")
-    lines.append("__🏰 Donjon du jour__")
-    lines.append("• Rassemble jusqu'à **4 aventuriers** et lancez un **donjon instancié** "
-                 "(vagues de mobs → boss final, salons privés, butin unique) depuis le **hub**. "
-                 "Le combat le plus fun du serveur — perso, c'est ce que je te conseille aujourd'hui. 🔥")
 
     # Rendez-vous hebdomadaires : on ne montre la ligne que le bon jour.
     # weekday() : lundi=0 … vendredi=4, samedi=5, dimanche=6.
@@ -60588,13 +60420,6 @@ async def _post_daily_agenda(guild) -> bool:
                 pass
         if not ch:
             return False
-
-        # Phase 199 : override salon configuré (additif, fail-open) — l'owner peut
-        # fixer un salon dédié pour le Programme du jour ; sinon on garde le salon
-        # recap/catégorie calculé ci-dessus. L'heure d'annonce (8h FR) reste fixe.
-        _ov = await _event_channel_override(guild, 'daily_agenda')
-        if _ov is not None:
-            ch = _ov
 
         now = datetime.now(_TZ_P41)
         body = _build_daily_agenda_text(now)
@@ -60966,11 +60791,6 @@ async def _spawn_flash_treasure(guild) -> bool:
             return False
 
         ch = random.choice(candidates)
-        # Phase 199 : override salon configuré (additif, fail-open) — préfère le
-        # salon fixé par l'owner pour le Trésor Flash, sinon garde le salon actif.
-        _ov = await _event_channel_override(guild, 'flash_treasure')
-        if _ov is not None:
-            ch = _ov
         reward = random.randint(100, 500)
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=60)
 
@@ -66569,273 +66389,6 @@ async def _build_wakeup_mention_line_smart(guild, event_kind: str, max_count: in
     except Exception as ex:
         print(f"[_build_wakeup_mention_line_smart] {ex}")
         return ""
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  Phase 200 — RAPPEL ROTATIF DES VRAIS PARTICIPANTS (par type d'event)
-#
-#  Vision owner (3 points) :
-#   1. VÉRIDIQUE — on ne mentionne QUE des membres qui ont RÉELLEMENT participé à
-#      CE type d'event auparavant (lus depuis l'enregistrement de participation
-#      réel du type : event_participants / world_boss_attackers / mob_attackers…).
-#      Aucune participation inventée.
-#   2. RÉ-ENGAGEMENT en ROTATION — on rappelle les anciens participants pour les
-#      faire revenir, en tournant (cooldown ~8h par (guild,user,type)) pour ne pas
-#      spammer les mêmes.
-#   3. OPT-OUT visible — la ligne dit comment couper la mention (`/notifs`).
-#
-#  Sécurité : cap 5, opt-out filtré (fail-closed sur la lecture des prefs), aucun
-#  @everyone/@here/rôle, FAIL-OPEN (toute erreur → "" : ne bloque jamais un spawn).
-# ═══════════════════════════════════════════════════════════════════════════════
-
-# Anti-spam : un même membre n'est re-rappelé pour un type donné qu'une fois / ~8h.
-RECALL_PING_COOLDOWN_HOURS = 8
-RECALL_PING_MAX_USERS = 5            # cap dur de mentions (TOS Discord)
-
-
-async def _ensure_recall_ping_log():
-    """Crée (si besoin) la table générique de cooldown des rappels participants.
-
-    Une ligne par (guild_id, user_id, event_type). `last_pinged` = ISO UTC du
-    dernier rappel reçu par ce membre POUR CE type → permet la rotation (on
-    privilégie les moins récemment rappelés) + l'anti-spam (cooldown 8h)."""
-    async with get_db() as db:
-        await db.execute(
-            "CREATE TABLE IF NOT EXISTS event_recall_ping_log ("
-            "  guild_id INTEGER NOT NULL,"
-            "  user_id INTEGER NOT NULL,"
-            "  event_type TEXT NOT NULL,"
-            "  last_pinged TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
-            "  PRIMARY KEY (guild_id, user_id, event_type)"
-            ")"
-        )
-        await db.commit()
-
-
-async def _participant_recall_ping(guild, event_type: str, kind_label: str,
-                                   source: dict, notif_category: str = None) -> str:
-    """Phase 200 : construit une ligne de mention VÉRIDIQUE + rotative pour le
-    spawn d'un event, ciblant uniquement les VRAIS participants passés de CE type.
-
-    Paramètres :
-      - event_type   : clé technique du type (sert la rotation + le log), ex 'quiz'.
-      - kind_label   : libellé lisible inséré dans le texte, ex « un quiz ».
-      - source       : dict décrivant l'enregistrement de participation RÉEL :
-          {"sql": "<SELECT renvoyant des user_id DISTINCT participants récents>",
-           "params": (...)}  — c'est l'APPELANT qui fournit la requête par type
-          (chaque table a son propre schéma/horodatage), garantissant qu'on lit
-          la VRAIE participation et non une donnée inventée. Le SELECT DOIT déjà
-          filtrer la fenêtre récente (≤ 14 j) et la guild.
-      - notif_category : catégorie /notifs à respecter pour l'opt-out (déf =
-          event_type s'il est une catégorie connue, sinon pas de filtre opt-out
-          mais on garde tout le reste).
-
-    Retourne une ligne `🔔 <@…> — vous avez déjà participé à {kind_label} : …`
-    (+ astuce opt-out /notifs) ou "" si personne d'éligible. FAIL-OPEN → "".
-    """
-    if guild is None or not source or not source.get("sql"):
-        return ""
-    try:
-        await _ensure_recall_ping_log()
-        now = datetime.now(timezone.utc)
-        now_iso = now.isoformat()
-        cooldown_iso = (now - timedelta(hours=RECALL_PING_COOLDOWN_HOURS)).isoformat()
-
-        # 1) Vrais participants récents (DISTINCT user_id) via la requête fournie.
-        async with get_db() as db:
-            async with db.execute(source["sql"], source.get("params", ())) as cur:
-                rows = await cur.fetchall()
-        # user_ids candidats issus de la VRAIE participation (dédupliqués, ordre
-        # préservé). On ignore les valeurs vides/0.
-        candidate_ids = []
-        seen = set()
-        for r in rows:
-            try:
-                uid = int(r[0])
-            except (TypeError, ValueError, IndexError):
-                continue
-            if uid and uid not in seen:
-                seen.add(uid)
-                candidate_ids.append(uid)
-        if not candidate_ids:
-            return ""
-
-        # 2) Derniers rappels (last_pinged) pour ces users sur CE type → rotation.
-        #    On exclut ceux en cooldown (rappelés < 8h) ; on trie les éligibles du
-        #    moins-récemment-rappelé au plus récent (jamais rappelé = prioritaire).
-        last_map = {}
-        try:
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT user_id, last_pinged FROM event_recall_ping_log "
-                    "WHERE guild_id=? AND event_type=?",
-                    (guild.id, event_type),
-                ) as cur:
-                    for uid, lp in await cur.fetchall():
-                        last_map[int(uid)] = lp
-        except Exception as ex:
-            print(f"[_participant_recall_ping read log {event_type}] {ex}")
-
-        def _sort_key(uid):
-            lp = last_map.get(uid)
-            # Jamais rappelé → priorité absolue (clé vide trie en premier).
-            return (lp is not None, str(lp) if lp is not None else "")
-
-        eligible = []
-        for uid in candidate_ids:
-            lp = last_map.get(uid)
-            if lp is not None and str(lp) > cooldown_iso:
-                # Comparaison ISO : si lp est au format SQLite 'YYYY-MM-DD HH:MM:SS'
-                # ce test reste sûr (différent format mais on écrit toujours en ISO
-                # dans CETTE table → cohérent). En cooldown → on saute.
-                continue
-            eligible.append(uid)
-        eligible.sort(key=_sort_key)
-        if not eligible:
-            return ""
-
-        # 3) Filtre présence serveur + bot + opt-out (fail-closed sur l'opt-out).
-        cat = notif_category if notif_category is not None else event_type
-        valid_categories = {c for c, _e, _l in _NOTIF_CATEGORIES}
-        check_optout = cat in valid_categories
-        chosen_ids = []
-        for uid in eligible:
-            if len(chosen_ids) >= RECALL_PING_MAX_USERS:
-                break
-            member = guild.get_member(uid)
-            if member is None or member.bot:
-                continue
-            if check_optout:
-                try:
-                    if not await _member_wants_notif(guild.id, uid, cat):
-                        continue
-                except Exception as ex:
-                    print(f"[_participant_recall_ping opt-out fail-closed "
-                          f"user={uid} cat={cat}] {ex}")
-                    continue
-            chosen_ids.append(uid)
-        if not chosen_ids:
-            return ""
-
-        # 4) Marque ces membres comme « rappelés maintenant » (rotation future).
-        try:
-            async with get_db() as db:
-                for uid in chosen_ids:
-                    await db.execute(
-                        "INSERT INTO event_recall_ping_log "
-                        "(guild_id, user_id, event_type, last_pinged) "
-                        "VALUES (?, ?, ?, ?) "
-                        "ON CONFLICT(guild_id, user_id, event_type) DO UPDATE SET "
-                        "last_pinged = excluded.last_pinged",
-                        (guild.id, uid, event_type, now_iso),
-                    )
-                await db.commit()
-        except Exception as ex:
-            print(f"[_participant_recall_ping log {event_type}] {ex}")
-
-        mentions = " ".join(f"<@{uid}>" for uid in chosen_ids)
-        # Texte VÉRIDIQUE : ces membres ont réellement déjà participé à ce type.
-        return (
-            f"🔔 {mentions} — vous avez déjà participé à {kind_label} : ça "
-            f"recommence, si ça vous tente revenez tenter votre chance ! \n"
-            f"-# Pour ne plus être mentionné : /notifs"
-        )
-    except Exception as ex:
-        print(f"[_participant_recall_ping {event_type}] {ex}")
-        return ""
-
-
-# Fenêtre de récence « a déjà participé » = 14 jours (comme le ping boss du jour).
-RECALL_PING_LOOKBACK_DAYS = 14
-# Auto-suppression de la ligne de rappel (ne pas encombrer le salon).
-RECALL_PING_CLEANUP_SECONDS = 30 * 60
-
-
-def _recall_source_for(guild_id: int, event_type: str) -> dict | None:
-    """Phase 200 : renvoie la requête lisant les VRAIS participants récents (≤14 j)
-    de CE type d'event, ou None si ce type n'a PAS d'enregistrement de
-    participation réel (→ on ne fabrique aucun ping).
-
-    Chaque type a son propre schéma/horodatage → requête dédiée :
-      - boss_raid / treasure_hunt / quiz : event_participants (JOIN events pour
-        guild + event_type) ; horodatage = last_attack_ts (REAL epoch).
-      - world_boss : world_boss_attackers (JOIN world_bosses) ; last_attack_at
-        (TEXT 'YYYY-MM-DD HH:MM:SS' via CURRENT_TIMESTAMP).
-      - mob_hunts  : mob_attackers (JOIN mob_spawns) ; last_attack_at idem.
-    """
-    if event_type in ('boss_raid', 'treasure_hunt', 'quiz'):
-        # event_participants.last_attack_ts est un epoch REAL (time.time()) ; on
-        # calcule la borne via datetime (importé au module) pour éviter toute
-        # dépendance à un `import time` global absent ici.
-        epoch_cutoff = (
-            datetime.now(timezone.utc) - timedelta(days=RECALL_PING_LOOKBACK_DAYS)
-        ).timestamp()
-        return {
-            "sql": (
-                "SELECT DISTINCT ep.user_id "
-                "FROM event_participants ep "
-                "JOIN events e ON e.id = ep.event_id "
-                "WHERE e.guild_id = ? AND e.event_type = ? "
-                "AND ep.last_attack_ts >= ?"
-            ),
-            "params": (guild_id, event_type, epoch_cutoff),
-        }
-    if event_type == 'world_boss':
-        return {
-            "sql": (
-                "SELECT DISTINCT wba.user_id "
-                "FROM world_boss_attackers wba "
-                "JOIN world_bosses wb ON wb.id = wba.world_boss_id "
-                "WHERE wb.guild_id = ? "
-                "AND datetime(wba.last_attack_at) >= datetime('now', ?)"
-            ),
-            "params": (guild_id, f'-{RECALL_PING_LOOKBACK_DAYS} days'),
-        }
-    if event_type == 'mob_hunts':
-        return {
-            "sql": (
-                "SELECT DISTINCT ma.user_id "
-                "FROM mob_attackers ma "
-                "JOIN mob_spawns ms ON ms.id = ma.mob_id "
-                "WHERE ms.guild_id = ? "
-                "AND datetime(ma.last_attack_at) >= datetime('now', ?)"
-            ),
-            "params": (guild_id, f'-{RECALL_PING_LOOKBACK_DAYS} days'),
-        }
-    return None
-
-
-async def _send_participant_recall(guild, channel, event_type: str,
-                                   kind_label: str, notif_category: str = None):
-    """Phase 200 : wrapper de wiring — construit la source du type, demande la
-    ligne VÉRIDIQUE à `_participant_recall_ping`, l'envoie en message SÉPARÉ
-    (mentions users-only, jamais @everyone/@here/rôle) et l'enregistre pour
-    nettoyage. Ne fait RIEN si le type n'a pas d'enregistrement réel ou si
-    personne n'est éligible. FAIL-OPEN : n'empêche jamais le spawn."""
-    if guild is None or channel is None:
-        return
-    try:
-        source = _recall_source_for(guild.id, event_type)
-        if not source:
-            return  # type sans participation réelle → aucun ping fabriqué
-        line = await _participant_recall_ping(
-            guild, event_type, kind_label, source, notif_category=notif_category,
-        )
-        if not line:
-            return
-        msg = await channel.send(
-            line,
-            allowed_mentions=discord.AllowedMentions(
-                users=True, everyone=False, roles=False),
-        )
-        if msg:
-            try:
-                await _register_for_cleanup(
-                    msg, RECALL_PING_CLEANUP_SECONDS, f'recall_{event_type}')
-            except Exception:
-                pass
-    except Exception as ex:
-        print(f"[_send_participant_recall {event_type}] {ex}")
 
 
 # ─── AUTO-PROMOTE des events morts ────────────────────────────────────────────

@@ -312,22 +312,6 @@ async def get_user_level(guild_id: int, user_id: int) -> int:
 async def _find_arena_channel(guild: discord.Guild):
     """Réutilise le finder robuste de mob_hunts (7 niveaux de fallback).
     Fallback local minimal si mob_hunts indisponible."""
-    # Phase 199 : override salon « Boss quotidien » (Hub Événements). ADDITIF +
-    # FAIL-OPEN — si l'owner a fixé `daily_boss_channel` et que le bot peut y
-    # écrire, on le préfère AVANT toute autre logique (y compris la délégation
-    # mob_hunts). Sinon → comportement existant inchangé.
-    if _db_get is not None:
-        try:
-            ov_id = int((await _db_get(guild.id)).get("daily_boss_channel", 0) or 0)
-            if ov_id:
-                ov = guild.get_channel(ov_id)
-                me = guild.me
-                if ov and isinstance(ov, discord.TextChannel) and me \
-                        and ov.permissions_for(me).send_messages:
-                    return ov
-        except Exception:
-            pass
-
     try:
         import mob_hunts as _mh
         ch = await _mh._find_arena_channel(guild)
@@ -371,10 +355,8 @@ async def _smart_combat_ping(guild: discord.Guild, exclude_opt_out: bool = True)
     (un même membre au plus une fois / ~8h, on privilégie les moins récemment
     ping). Respecte l'opt-out `boss_raid` via le check injecté de bot.py.
 
-    Retourne une courte ligne VÉRIDIQUE `🔔 <@id> … — vous avez déjà combattu un
-    boss ici …` (+ astuce opt-out /notifs) ou une chaîne vide si personne n'est
-    éligible. Phase 200 : on ne mentionne QUE de vrais participants passés.
-    FAIL-OPEN : toute erreur → "".
+    Retourne une courte ligne `🔔 <@id> … — venez tenter votre chance !` ou
+    une chaîne vide si personne n'est éligible. FAIL-OPEN : toute erreur → "".
     """
     if _get_db is None or guild is None:
         return ""
@@ -445,13 +427,10 @@ async def _smart_combat_ping(guild: discord.Guild, exclude_opt_out: bool = True)
             print(f"[_smart_combat_ping log] {ex}")
 
         mentions = " ".join(f"<@{uid}>" for uid in chosen_ids)
-        # Phase 200 : formulation VÉRIDIQUE. Ces membres sont uniquement ceux qui
-        # ont RÉELLEMENT déjà attaqué un boss du jour ici (< 14j) — on n'invente
-        # aucune participation. Astuce opt-out (/notifs) intégrée au message.
         return (
-            f"🔔 {mentions} — vous avez déjà combattu un boss ici : un nouveau "
-            f"vient d'apparaître, revenez tenter votre chance ! 🗡️\n"
-            f"-# Pour ne plus être mentionné : /notifs"
+            f"🔔 {mentions} — un boss vient d'apparaître, si ça vous tente venez "
+            f"tenter votre chance ! _(ouvert à tout le monde · `/notifs` pour gérer "
+            f"vos pings)_"
         )
     except Exception as ex:
         print(f"[_smart_combat_ping] {ex}")
