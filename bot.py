@@ -8138,39 +8138,40 @@ class EventsHubPanelV2(LayoutView):
 
         self.clear_items()
 
+        # Phase 192 : menu déroulant (1 entrée par type d'event) au lieu de N
+        # boutons « Configurer » identiques → lisible même avec 13 events.
         lines = []
-        rows = []
-        current_row = []
+        options = []
         for entry in EVENT_TYPE_REGISTRY:
             on = bool(c.get(entry["enabled_cfg"], entry.get("default", True)))
             status = "✅ Activé" if on else "⛔ Désactivé"
             lines.append(f"{entry['emoji']} **{entry['label']}** — {status}")
+            options.append(discord.SelectOption(
+                label=f"{entry['emoji']} {entry['label']}"[:100],
+                value=entry["key"],
+                description=status,
+            ))
 
-            b = Button(
-                label="⚙️ Configurer",
-                style=discord.ButtonStyle.primary,
-                custom_id=f"evhub_{entry['key']}",
-            )
-            b.callback = self._make_open_cb(entry["key"])
-            current_row.append(b)
-            if len(current_row) == 5:
-                rows.append(discord.ui.ActionRow(*current_row))
-                current_row = []
-        if current_row:
-            rows.append(discord.ui.ActionRow(*current_row))
+        sel = discord.ui.Select(
+            placeholder="⚙️ Choisis un événement à configurer…",
+            min_values=1, max_values=1,
+            options=options,
+            custom_id="evhub_select",
+        )
+        sel.callback = self._on_select
 
         b_back = Button(label="🔙 Retour", style=discord.ButtonStyle.secondary, custom_id="evhub_back")
         b_back.callback = self._cb_back
 
         items = [
             v2_title("🎪 Configuration des événements"),
-            v2_subtitle("Active ou désactive chaque type d'événement, puis configure-le"),
+            v2_subtitle("État de chaque événement ci-dessous — choisis-en un dans le menu pour le configurer"),
             v2_divider(),
             v2_body("\n".join(lines)),
             v2_divider(),
+            discord.ui.ActionRow(sel),
+            discord.ui.ActionRow(b_back),
         ]
-        items.extend(rows)
-        items.append(discord.ui.ActionRow(b_back))
         self.add_item(v2_container(*items, color=Palette.PRIMARY))
 
         if edit:
@@ -8178,20 +8179,20 @@ class EventsHubPanelV2(LayoutView):
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
 
-    def _make_open_cb(self, key):
-        async def _cb(i):
-            try:
-                entry = next((e for e in EVENT_TYPE_REGISTRY if e["key"] == key), None)
-                if entry is None:
-                    return await i.response.defer()
-                if entry.get("rich_panel") == "EventConfigPanelV2":
-                    v = EventConfigPanelV2(self.u, self.g)
-                else:
-                    v = EventTypeConfigPanelV2(self.u, self.g, entry)
-                await v.render_to(i, edit=True)
-            except Exception as ex:
-                print(f"[EventsHubPanelV2 open {key}] {ex}")
-        return _cb
+    async def _on_select(self, i):
+        try:
+            vals = i.data.get("values") or []
+            key = vals[0] if vals else None
+            entry = next((e for e in EVENT_TYPE_REGISTRY if e["key"] == key), None)
+            if entry is None:
+                return await i.response.defer()
+            if entry.get("rich_panel") == "EventConfigPanelV2":
+                v = EventConfigPanelV2(self.u, self.g)
+            else:
+                v = EventTypeConfigPanelV2(self.u, self.g, entry)
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[EventsHubPanelV2 _on_select] {ex}")
 
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
