@@ -60358,6 +60358,11 @@ def _build_daily_agenda_text(now) -> str:
     lines.append("")
     lines.append("__🗡️ Mobs__")
     lines.append("• En continu toute la journée (un groupe surgit environ toutes les 18-30 min).")
+    lines.append("")
+    lines.append("__🏰 Donjon du jour__")
+    lines.append("• Rassemble jusqu'à **4 aventuriers** et lancez un **donjon instancié** "
+                 "(vagues de mobs → boss final, salons privés, butin unique) depuis le **hub**. "
+                 "Le combat le plus fun du serveur — perso, c'est ce que je te conseille aujourd'hui. 🔥")
 
     # Rendez-vous hebdomadaires : on ne montre la ligne que le bon jour.
     # weekday() : lundi=0 … vendredi=4, samedi=5, dimanche=6.
