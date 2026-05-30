@@ -31653,14 +31653,17 @@ class TempVoiceHubsListPanelV2(LayoutView):
         if not hubs:
             return await i.response.send_message("❌ Aucun hub à modifier", ephemeral=True)
         v = TempVoiceHubEditSelect(self.u, self.g, hubs)
-        await i.response.edit_message(
+        # Phase 204 : ce message est en Components V2 → on NE PEUT PAS l'éditer
+        # vers un embed + vue classique (Discord rejette = "Échec de
+        # l'interaction"). On ouvre donc le sélecteur dans un NOUVEAU message.
+        await i.response.send_message(
             embed=discord.Embed(
                 title="✏️ Modifier un Hub",
                 description="Sélectionne le hub à modifier.",
                 color=0x9B59B6,
             ),
             view=v,
-            attachments=[],
+            ephemeral=True,
         )
 
     async def _cb_delete(self, i):
@@ -31668,14 +31671,15 @@ class TempVoiceHubsListPanelV2(LayoutView):
         if not hubs:
             return await i.response.send_message("❌ Aucun hub à supprimer", ephemeral=True)
         v = TempVoiceHubDeleteSelect(self.u, self.g, hubs)
-        await i.response.edit_message(
+        # Phase 204 : message V2 → nouveau message (cf. _cb_edit).
+        await i.response.send_message(
             embed=discord.Embed(
                 title="🗑️ Supprimer un Hub",
                 description="Sélectionne le hub à supprimer.",
                 color=0xE74C3C,
             ),
             view=v,
-            attachments=[],
+            ephemeral=True,
         )
 
     async def _cb_back(self, i):
@@ -31708,7 +31712,9 @@ class TempVoiceHubEditSelect(View):
     async def select_callback(self, i):
         hub_id = i.data['values'][0]
         v = TempVoiceHubEditPanelV2(self.u, self.g, hub_id)
-        await v.render_to(i, edit=True)
+        # Phase 204 : ce message est classique, la cible est V2 → nouveau
+        # message éphémère (on ne peut pas éditer classique → V2).
+        await v.render_to(i, edit=False)
     
     @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
     async def back(self, i, b):
@@ -31872,26 +31878,38 @@ class TempVoiceHubEditPanelV2(LayoutView):
     async def render_after_defer(self, interaction: discord.Interaction, *, content=None):
         """À utiliser quand interaction.response.defer() a déjà été appelé."""
         await self._build_async()
-        kwargs = dict(view=self, embed=None, attachments=[])
-        if content is not None:
-            kwargs['content'] = content
-        await interaction.edit_original_response(**kwargs)
+        try:
+            kwargs = dict(view=self, embed=None, attachments=[])
+            if content is not None:
+                kwargs['content'] = content
+            await interaction.edit_original_response(**kwargs)
+        except Exception:
+            # Phase 204 : si le message d'origine est CLASSIQUE (ex : sélecteur
+            # de rôle), Discord refuse de l'éditer vers du Components V2. On
+            # envoie alors le panel V2 dans un NOUVEAU message éphémère.
+            try:
+                await interaction.followup.send(view=self, ephemeral=True)
+            except Exception as ex:
+                print(f"[render_after_defer fallback] {ex}")
 
     async def _cb_cat(self, i):
         v = TempVoiceHubEditCategory(self.u, self.g, self.hub_id)
-        await i.response.edit_message(
+        # Phase 204 : ce panel est V2 → nouveau message éphémère (pas d'édition
+        # V2 → embed+vue classique).
+        await i.response.send_message(
             embed=discord.Embed(
                 title="📁 Changer la catégorie",
                 description="Sélectionne la nouvelle catégorie.",
                 color=0x9B59B6,
             ),
             view=v,
-            attachments=[],
+            ephemeral=True,
         )
 
     async def _cb_role(self, i):
         v = TempVoiceHubEditRole(self.u, self.g, self.hub_id)
-        await i.response.edit_message(
+        # Phase 204 : ce panel est V2 → nouveau message éphémère.
+        await i.response.send_message(
             embed=discord.Embed(
                 title="🔐 Changer le mode",
                 description=(
@@ -31901,7 +31919,7 @@ class TempVoiceHubEditPanelV2(LayoutView):
                 color=0x9B59B6,
             ),
             view=v,
-            attachments=[],
+            ephemeral=True,
         )
 
     async def _cb_name(self, i):
@@ -31963,8 +31981,9 @@ class TempVoiceHubEditCategory(View):
         await i.response.edit_message(view=self)
 
     async def _back(self, i):
+        # Phase 204 : message classique → cible V2 = nouveau message éphémère.
         v = TempVoiceHubEditPanelV2(self.u, self.g, self.hub_id)
-        await v.render_to(i, edit=True)
+        await v.render_to(i, edit=False)
 
     async def select_callback(self, i):
         cat_id = int(i.data['values'][0])
@@ -31976,8 +31995,9 @@ class TempVoiceHubEditCategory(View):
             voice_cfg['hubs'] = hubs
             await db_set(self.g.id, 'temp_voice_config', voice_cfg)
         cat = self.g.get_channel(cat_id)
+        # Phase 204 : message classique → cible V2 = nouveau message éphémère.
         v = TempVoiceHubEditPanelV2(self.u, self.g, self.hub_id)
-        await v.render_to(i, edit=True)
+        await v.render_to(i, edit=False)
 
 class TempVoiceHubEditRole(View):
     """Modifier le rôle requis d'un hub avec pagination complète"""
