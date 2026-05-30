@@ -39975,7 +39975,10 @@ async def on_ready():
         # Phase 173.2 : Boss du jour (4×/jour : 12h/17h/21h/1h FR, gating niveau)
         try:
             daily_bosses_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
-                                      inventory_fn=_get_or_create_inventory)
+                                      inventory_fn=_get_or_create_inventory,
+                                      events_channel_fn=_ensure_daily_boss_channel,
+                                      notif_check_fn=_member_wants_notif,
+                                      cleanup_register_fn=_register_for_cleanup)
             await daily_bosses_module.init_db()
             daily_bosses_module.register_persistent_views(bot)
             if not daily_bosses_module.daily_boss_task.is_running():
@@ -62710,6 +62713,52 @@ async def _ensure_events_category(guild) -> Optional[discord.CategoryChannel]:
         return cat
     except Exception as ex:
         print(f"[_ensure_events_category] {ex}")
+        return None
+
+
+async def _ensure_daily_boss_channel(guild) -> Optional[discord.TextChannel]:
+    """Phase 196 : salon VISIBLE garanti pour un boss du jour.
+
+    Injecté dans daily_bosses.setup() comme DERNIER recours du finder d'arène :
+    si mob_hunts + 1er-salon-écrivable échouent, le boss atterrit dans la
+    catégorie « 🎪 Événements ». On réutilise un salon écrivable existant de la
+    catégorie, sinon on en crée un (« 🐉-boss-du-jour ») pour que le boss ne
+    puisse JAMAIS échouer faute de salon. Fail-open : toute erreur → None.
+    """
+    if guild is None:
+        return None
+    try:
+        cat = await _ensure_events_category(guild)
+        me = guild.me
+        # 1. Réutiliser un salon écrivable de la catégorie Événements
+        if cat:
+            try:
+                for cand in cat.text_channels:
+                    if me and cand.permissions_for(me).send_messages:
+                        return cand
+            except Exception:
+                pass
+        # 2. Créer un salon dédié (si on peut gérer les salons)
+        if not (me and me.guild_permissions.manage_channels):
+            return None
+        ch = await guild.create_text_channel(
+            name="🐉-boss-du-jour",
+            category=cat,
+            reason="Phase 196 : salon visible garanti pour le boss du jour",
+            overwrites={
+                guild.default_role: discord.PermissionOverwrite(
+                    view_channel=True, send_messages=True,
+                    read_message_history=True,
+                ),
+                guild.me: discord.PermissionOverwrite(
+                    view_channel=True, send_messages=True,
+                    manage_messages=True, embed_links=True,
+                ),
+            },
+        )
+        return ch
+    except Exception as ex:
+        print(f"[_ensure_daily_boss_channel] {ex}")
         return None
 
 
