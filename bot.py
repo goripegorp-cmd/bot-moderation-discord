@@ -15045,6 +15045,65 @@ async def _stale_event_cleanup_wait():
     await bot.wait_until_ready()
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 203 — SUPERVISEUR DE TÂCHES (anti "bot online mais plus aucun event")
+#  Une @tasks.loop qui lève une exception non gérée s'ARRÊTE définitivement
+#  (jusqu'au reboot). Symptôme vécu : tout se tait alors que le bot est en ligne.
+#  Ce superviseur re-démarre toute boucle critique morte, toutes les 5 min.
+#  Sûr : .start() est ignoré si la boucle tourne déjà (garde is_running) ; on ne
+#  touche qu'à des boucles censées tourner en continu.
+# ═══════════════════════════════════════════════════════════════════════════════
+_SUPERVISED_LOOP_NAMES = [
+    "event_timeout_checker", "event_auto_scheduler", "stale_event_cleanup",
+    "personal_event_dispatcher", "light_events_dispatcher",
+    "world_boss_scheduler", "world_boss_timeout_checker",
+    "voice_chaos_dispatcher", "daily_riddle_dispatcher", "daily_agenda_dispatcher",
+    "flash_treasure_dispatcher", "evening_ritual_dispatcher",
+    "tag_royale_starter", "tag_royale_timeout_checker", "server_anniversary_checker",
+    "daily_quest_push_dispatcher", "channel_camouflage_dispatcher",
+    "voice_spotlight_dispatcher", "auto_promote_dying_events",
+    "npc_chatter_task", "missions_runner_task", "daily_studio_tip_task",
+    "golden_hour_announce_task", "conv_starter_task", "hub_live_events_refresh_task",
+    "auction_settler_task", "reversibles_failsafe", "persistent_msg_cleaner",
+    "marketplace_expire_cleaner", "hub_orphan_cleaner_task", "db_optimizer_task",
+    "comeback_dm_task",
+]
+
+
+@tasks.loop(minutes=5)
+async def task_supervisor():
+    """Phase 203 — Ressuscite les boucles critiques mortes (exception non gérée
+    → la loop s'arrête à vie). Garantit que le serveur reste vivant sans reboot."""
+    restarted = []
+    # Boucles définies dans bot.py
+    for name in _SUPERVISED_LOOP_NAMES:
+        try:
+            lo = globals().get(name)
+            if lo is not None and hasattr(lo, "is_running") and not lo.is_running():
+                lo.start()
+                restarted.append(name)
+        except Exception as ex:
+            print(f"[task_supervisor {name}] {ex}")
+    # Boucles des modules de combat (mob_hunts / daily_bosses)
+    for mod_name, attr in (("mob_hunts_module", "spawn_task"),
+                           ("daily_bosses_module", "daily_boss_task")):
+        try:
+            mod = globals().get(mod_name)
+            lo = getattr(mod, attr, None) if mod is not None else None
+            if lo is not None and hasattr(lo, "is_running") and not lo.is_running():
+                lo.start()
+                restarted.append(f"{mod_name}.{attr}")
+        except Exception as ex:
+            print(f"[task_supervisor {mod_name}.{attr}] {ex}")
+    if restarted:
+        print(f"[task_supervisor] ⚠️ RESSUSCITÉ {len(restarted)} tâche(s) morte(s) : {', '.join(restarted)}")
+
+
+@task_supervisor.before_loop
+async def _task_supervisor_wait():
+    await bot.wait_until_ready()
+
+
 async def _guild_recently_active(guild_id, minutes: int = 120, min_users: int = 1) -> bool:
     """Phase 194 — OFFRE À LA DEMANDE : le serveur a-t-il eu de l'activité humaine
     récente (≥ min_users membres ayant parlé dans les `minutes` dernières) ?
@@ -39527,6 +39586,10 @@ async def on_ready():
     # Phase 89 : stale event cleanup (events supprimés manuellement)
     if not stale_event_cleanup.is_running():
         stale_event_cleanup.start()
+
+    # Phase 203 — superviseur : ressuscite toute boucle critique morte
+    if not task_supervisor.is_running():
+        task_supervisor.start()
     # Phase 109 : auction settler — termine les enchères expirées
     if not auction_settler_task.is_running():
         auction_settler_task.start()
