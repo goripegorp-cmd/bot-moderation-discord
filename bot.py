@@ -8117,6 +8117,8 @@ EVENT_TYPE_REGISTRY = [
     {"key": "mystery_box", "emoji": "📦", "label": "Boîte Mystère", "enabled_cfg": "mystery_box_enabled", "default": True},
     {"key": "daily_riddle", "emoji": "🧠", "label": "Énigme du jour", "enabled_cfg": "daily_riddle_enabled", "default": True},
     {"key": "game_night", "emoji": "🎮", "label": "Game Night", "enabled_cfg": "game_night_enabled", "default": True},
+    # Phase 195 — annonce quotidienne calme du planning combat (sans ping, sans bouton)
+    {"key": "daily_agenda", "emoji": "📅", "label": "Programme du jour", "enabled_cfg": "daily_agenda_enabled", "default": True},
 ]
 
 
@@ -40426,6 +40428,9 @@ async def on_ready():
         voice_chaos_dispatcher.start()
     if not daily_riddle_dispatcher.is_running():
         daily_riddle_dispatcher.start()
+    # Phase 195 : Programme du jour (annonce quotidienne calme du planning combat)
+    if not daily_agenda_dispatcher.is_running():
+        daily_agenda_dispatcher.start()
 
     # Phase 43 : Trésor Flash + Rituel du Soir + Tag Royale + Anniversaire
     if not flash_treasure_dispatcher.is_running():
@@ -60312,6 +60317,164 @@ async def daily_riddle_dispatcher():
 
 @daily_riddle_dispatcher.before_loop
 async def _daily_riddle_wait():
+    await bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PHASE 195 — 📅 Programme du jour : annonce quotidienne calme du planning combat
+#   (zéro ping, zéro bouton, auto-supprimée en fin de journée). Postée à 8h FR,
+#   juste avant le boss accessible de 9h, pour que les membres anticipent.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _build_daily_agenda_text(now) -> str:
+    """Construit le corps de l'annonce « Programme du jour » à partir des heures
+    de combat réelles. `now` est un datetime Europe/Paris (pour le jour de la
+    semaine). On n'affiche QUE les rendez-vous pertinents du jour (ex : la ligne
+    World Boss seulement le samedi). Court, clair, hype — pas de blabla."""
+    # Heures fixes des boss du jour (daily_bosses.BOSS_HOURS = [9, 12, 17, 21, 1]).
+    # Libellés humains par créneau ; tout créneau inconnu retombe sur un défaut.
+    slot_labels = {
+        9: "**9h** — Boss du matin (accessible bas niveau, parfait pour démarrer)",
+        12: "**12h** — Boss du midi",
+        17: "**17h** — Boss du soir",
+        21: "**21h** — Boss du soir",
+        1: "**1h** — Boss de la nuit",
+    }
+    lines = []
+    lines.append("Voici les rendez-vous combat d'aujourd'hui — prépare ton stuff et sois là. 💪")
+    lines.append("")
+    lines.append("__⚔️ Boss du jour__")
+    try:
+        boss_hours = list(daily_bosses_module.BOSS_HOURS)
+    except Exception:
+        boss_hours = [9, 12, 17, 21, 1]
+    for h in boss_hours:
+        label = slot_labels.get(h) or f"**{h}h** — Boss"
+        lines.append(f"• {label}")
+    lines.append("")
+    lines.append("__🗡️ Mobs__")
+    lines.append("• En continu toute la journée (un groupe surgit environ toutes les 18-30 min).")
+
+    # Rendez-vous hebdomadaires : on ne montre la ligne que le bon jour.
+    # weekday() : lundi=0 … vendredi=4, samedi=5, dimanche=6.
+    wd = now.weekday()
+    day_of_month = now.day
+    weekly = []
+    if wd == 5:
+        # 1er samedi du mois → Invasion mondiale (sinon World Boss classique)
+        if day_of_month <= 7:
+            weekly.append("• 🌍 **Invasion mondiale** ce soir à **21h** (1er samedi du mois) — défense collective !")
+        else:
+            weekly.append("• 🐲 **World Boss** ce soir à **21h** — coordination de tout le serveur !")
+    if wd == 4:
+        weekly.append("• 🎮 **Game Night** ce soir à **21h** — mini-jeux en vocal, viens jouer !")
+    # Énigme du jour : tous les jours vers 10h.
+    weekly.append("• 🧠 **Énigme du jour** vers **10h** — premier à trouver, gros jackpot 🪙.")
+    if weekly:
+        lines.append("")
+        lines.append("__⭐ Aujourd'hui en plus__")
+        lines.extend(weekly)
+
+    lines.append("")
+    lines.append("_Bonne journée, et qu'on se retrouve sur le champ de bataille !_")
+    return "\n".join(lines)
+
+
+async def _post_daily_agenda(guild) -> bool:
+    """Poste l'annonce « Programme du jour » du guild (au plus une fois/jour).
+
+    Salon (best-effort, helpers existants) : salon d'annonce/recap configuré
+    (event_log_channel → hub_channel) → salon de la catégorie Événements →
+    1er salon « chatty ». JAMAIS de ticket/log/RO (filtres déjà inclus dans les
+    helpers). Sans ping (allowed_mentions=none), sans bouton (v2_recap_view),
+    auto-supprimée en fin de journée via le cleanup persistant."""
+    try:
+        c = await cfg(guild.id)
+        if not c.get('daily_agenda_enabled', True):
+            return False
+
+        # Anti-doublon par jour : marqueur cfg 'daily_agenda_last_date' (YYYY-MM-DD FR).
+        day = _today_str_p41()
+        if str(c.get('daily_agenda_last_date', '') or '') == day:
+            return False
+
+        # Salon : annonce/recap configuré → catégorie Événements → chatty.
+        ch = await _find_event_recap_channel(guild)
+        if not ch:
+            try:
+                cat = await _ensure_events_category(guild)
+                me = guild.me
+                if cat:
+                    for cand in cat.text_channels:
+                        try:
+                            if me and cand.permissions_for(me).send_messages:
+                                ch = cand
+                                break
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+        if not ch:
+            return False
+
+        now = datetime.now(_TZ_P41)
+        body = _build_daily_agenda_text(now)
+        # Durée de vie : reste jusqu'à ~minuit puis se purge (au moins 1h).
+        secs_until_eod = max(3600, (23 - now.hour) * 3600 + (59 - now.minute) * 60)
+        panel = v2_recap_view(
+            "📅 Programme du jour",
+            body,
+            color=Palette.INFO,
+            footer=f"Programme du {day} · se supprime en fin de journée",
+        )
+        try:
+            msg = await ch.send(view=panel, allowed_mentions=discord.AllowedMentions.none())
+            await _register_for_cleanup(msg, secs_until_eod, 'daily_agenda')
+        except Exception as ex:
+            print(f"[_post_daily_agenda send] {ex}")
+            return False
+
+        # Marqueur anti-doublon (db_set invalide le cache cfg → relu au prochain tour).
+        try:
+            await db_set(guild.id, 'daily_agenda_last_date', day)
+        except Exception as ex:
+            print(f"[_post_daily_agenda mark] {ex}")
+        print(f"[DAILY AGENDA] guild={guild.id} ch={ch.id} day={day}")
+        return True
+    except Exception as ex:
+        print(f"[_post_daily_agenda] {ex}")
+        return False
+
+
+@tasks.loop(minutes=30)
+async def daily_agenda_dispatcher():
+    """Phase 195 : poste « Programme du jour » à 8h Europe/Paris (juste avant le
+    boss accessible de 9h). Skip les serveurs abandonnés (fenêtre généreuse de
+    3 jours). Try/except par guild : l'échec d'un guild ne casse jamais le loop."""
+    try:
+        from zoneinfo import ZoneInfo as _ZI
+        tz = _ZI('Europe/Paris')
+    except Exception:
+        tz = timezone.utc
+    h = datetime.now(tz).hour
+    if h != 8:
+        return
+    try:
+        for guild in bot.guilds:
+            try:
+                # Serveur réellement abandonné (aucune activité humaine sur 3 jours) → skip.
+                if not await _guild_recently_active(guild.id, minutes=4320, min_users=1):
+                    continue
+                await _post_daily_agenda(guild)
+            except Exception as ex:
+                print(f"[daily_agenda_dispatcher guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[daily_agenda_dispatcher] {ex}")
+
+
+@daily_agenda_dispatcher.before_loop
+async def _daily_agenda_wait():
     await bot.wait_until_ready()
 
 
