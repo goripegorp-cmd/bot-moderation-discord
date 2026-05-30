@@ -362,11 +362,23 @@ async def _user_attack_count(event_id: int, user_id: int) -> int:
 #  Trigger
 # ═══════════════════════════════════════════════════════════════════════════
 
+# Phase 193c : créneaux « accessibles » — un boss BAS NIVEAU pour que tout le
+# monde (même les nouveaux) puisse lancer la journée. Le matin (9h) en fait
+# partie : faire vivre la matinée sans exclure les petits niveaux.
+MORNING_ACCESSIBLE_HOURS = {9}
+
+
 def _pick_boss_for_slot() -> dict:
     """Choisit le boss du créneau : rotation déterministe basée sur le jour +
-    l'index d'heure → difficulté qui alterne."""
+    l'index d'heure → difficulté qui alterne. Exception : sur un créneau
+    accessible (matin), on garantit un boss bas niveau (min_level <= 3) pour
+    n'exclure personne au réveil."""
     now = _now_paris()
     day_of_year = now.timetuple().tm_yday
+    if now.hour in MORNING_ACCESSIBLE_HOURS:
+        easy = [b for b in DAILY_BOSS_CATALOG if b.get("min_level", 0) <= 3]
+        if easy:
+            return easy[day_of_year % len(easy)]
     try:
         slot_idx = BOSS_HOURS.index(now.hour)
     except ValueError:

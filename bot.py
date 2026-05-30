@@ -14931,6 +14931,28 @@ async def _stale_event_cleanup_wait():
     await bot.wait_until_ready()
 
 
+async def _guild_recently_active(guild_id, minutes: int = 120, min_users: int = 1) -> bool:
+    """Phase 194 — OFFRE À LA DEMANDE : le serveur a-t-il eu de l'activité humaine
+    récente (≥ min_users membres ayant parlé dans les `minutes` dernières) ?
+    Évite de lancer un événement de remplissage dans un serveur désert (ça
+    « parle dans le vide » et ne sert personne). `last_message` est stocké en
+    UTC ISO (now()=UTC) → datetime() le normalise pour la comparaison. Fail-open :
+    en cas d'erreur on renvoie True (mieux vaut un event de trop qu'un serveur
+    rendu muet par une erreur technique)."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM activity_tracking WHERE guild_id=? "
+                "AND last_message IS NOT NULL "
+                "AND datetime(last_message) > datetime('now', ?)",
+                (guild_id, f"-{int(minutes)} minutes"),
+            ) as cur:
+                row = await cur.fetchone()
+                return bool(row and row[0] >= min_users)
+    except Exception:
+        return True
+
+
 @tasks.loop(hours=1)
 async def event_auto_scheduler():
     """Vérifie chaque heure si un event auto doit être lancé."""
@@ -14970,6 +14992,13 @@ async def event_auto_scheduler():
                     ) as cur:
                         if await cur.fetchone():
                             continue
+
+                # Phase 194 — OFFRE À LA DEMANDE : pas d'event de remplissage si
+                # le serveur est désert (personne n'a parlé depuis 2h). Les beats
+                # programmés (boss quotidien matin/midi/soir) restent fixes, eux,
+                # et servent d'ancres de réveil même quand c'est calme.
+                if not await _guild_recently_active(guild.id, minutes=120, min_users=1):
+                    continue
 
                 # Lancer (type aléatoire parmi ceux activés) !
                 enabled_types = []
