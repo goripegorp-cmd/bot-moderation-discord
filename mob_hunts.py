@@ -530,6 +530,12 @@ async def spawn_mob(guild: discord.Guild) -> bool:
     """Spawn un mob aléatoire dans l'arène. Retourne True si succès."""
     if not guild or _get_db is None or _bot is None:
         return False
+    # Phase 191 : interrupteur Hub Événements — Chasse aux mobs
+    try:
+        if _db_get is not None and not bool((await _db_get(guild.id)).get('mob_hunts_enabled', True)):
+            return False
+    except Exception:
+        pass
     if not _is_active_hour():
         return False
     # Phase 177 : pas de mob pendant un Boss Raid / event masquant (serveur enfoui)

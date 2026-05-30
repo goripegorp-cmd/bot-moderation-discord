@@ -8107,6 +8107,16 @@ EVENT_TYPE_REGISTRY = [
     {"key": "world_boss", "emoji": "🐲", "label": "World Boss", "enabled_cfg": "world_boss_enabled", "default": True},
     {"key": "voice_chaos", "emoji": "🎤", "label": "Chaos vocal", "enabled_cfg": "voice_chaos_enabled", "default": True},
     {"key": "flash_treasure", "emoji": "⚡", "label": "Trésor Flash", "enabled_cfg": "flash_treasure_enabled", "default": True},
+    # Phase 191 — interrupteurs réels (toggle seul) des events restants
+    {"key": "daily_boss", "emoji": "👹", "label": "Boss quotidien", "enabled_cfg": "daily_boss_enabled", "default": True},
+    {"key": "mob_hunts", "emoji": "🗡️", "label": "Chasse aux mobs", "enabled_cfg": "mob_hunts_enabled", "default": True},
+    {"key": "dungeon", "emoji": "🏰", "label": "Donjons", "enabled_cfg": "dungeon_enabled", "default": True},
+    {"key": "world_invasion", "emoji": "🌍", "label": "Invasion mondiale", "enabled_cfg": "world_invasion_enabled", "default": True},
+    {"key": "treasure", "emoji": "💎", "label": "Chasse au trésor", "enabled_cfg": "event_type_treasure_enabled", "default": True},
+    {"key": "quiz", "emoji": "🎓", "label": "Quiz", "enabled_cfg": "event_type_quiz_enabled", "default": True},
+    {"key": "mystery_box", "emoji": "📦", "label": "Boîte Mystère", "enabled_cfg": "mystery_box_enabled", "default": True},
+    {"key": "daily_riddle", "emoji": "🧠", "label": "Énigme du jour", "enabled_cfg": "daily_riddle_enabled", "default": True},
+    {"key": "game_night", "emoji": "🎮", "label": "Game Night", "enabled_cfg": "game_night_enabled", "default": True},
 ]
 
 
@@ -14257,6 +14267,9 @@ async def light_events_dispatcher():
             try:
                 c = await cfg(guild.id)
                 if not c.get('event_enabled', False):
+                    continue
+                # Phase 191 : interrupteur Hub Événements — Boîte Mystère
+                if not bool(c.get('mystery_box_enabled', True)):
                     continue
                 if not _is_event_active_time(c):
                     continue
@@ -76978,7 +76991,11 @@ class CompetitionsLayoutV2(LayoutView):
     async def _on_dungeon(self, i):
         # Phase 184 : ouvre un lobby de donjon public dans le salon courant
         try:
-            ok = await dungeon_module.start_dungeon_lobby(i.channel, i.user)
+            # Phase 191 : interrupteur Hub Événements — Donjons
+            if not bool((await cfg(i.guild.id)).get('dungeon_enabled', True)):
+                ok = False
+            else:
+                ok = await dungeon_module.start_dungeon_lobby(i.channel, i.user)
         except Exception:
             ok = False
         try:

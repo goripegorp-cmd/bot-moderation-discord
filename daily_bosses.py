@@ -379,6 +379,13 @@ async def trigger_daily_boss(
     if _get_db is None or _bot is None or not guild:
         return None
 
+    # Phase 191 : interrupteur Hub Événements — Boss quotidien
+    try:
+        if _db_get is not None and not bool((await _db_get(guild.id)).get('daily_boss_enabled', True)):
+            return None
+    except Exception:
+        pass
+
     # Anti-doublon : déjà un boss actif ?
     if await get_active_boss(guild.id):
         return None

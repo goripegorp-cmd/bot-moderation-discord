@@ -215,6 +215,13 @@ async def trigger_invasion(guild: discord.Guild) -> bool:
     if not guild or _get_db is None or _bot is None:
         return False
 
+    # Phase 191 : interrupteur Hub Événements — Invasion mondiale
+    try:
+        if _db_get is not None and not bool((await _db_get(guild.id)).get('world_invasion_enabled', True)):
+            return False
+    except Exception:
+        pass
+
     # Anti-doublon : pas 2 invasions par mois
     try:
         async with _get_db() as db:
