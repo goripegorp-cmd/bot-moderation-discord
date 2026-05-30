@@ -14752,6 +14752,50 @@ async def _hub_live_events_refresh_wait():
 #  et nettoie l'état du bot. Sinon l'anti-doublon Phase 69 bloque les nouveaux
 #  spawns indéfiniment ("plus aucun event n'apparaît").
 # ═══════════════════════════════════════════════════════════════════════════════
+async def _restore_event_masks(guild, event_id):
+    """Phase 202 — Restaure les permissions @everyone des salons masqués par un
+    event (depuis event_channel_snapshots), comme la fin normale d'un boss.
+    Idempotent et sûr : si aucun snapshot, ne fait rien. Réutilisé par le
+    watchdog stale_event_cleanup pour AUTO-SOIGNER les events bloqués sans
+    attendre un reboot. Retourne le nombre de salons démasqués."""
+    if guild is None:
+        return 0
+    restored = 0
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                'SELECT channel_id, had_overwrite, allow_value, deny_value '
+                'FROM event_channel_snapshots WHERE event_id=?',
+                (event_id,),
+            ) as cur:
+                snaps = await cur.fetchall()
+        for ch_id, had, allow_v, deny_v in snaps:
+            ch = guild.get_channel(int(ch_id))
+            if not ch:
+                continue
+            try:
+                if had:
+                    perm = discord.PermissionOverwrite.from_pair(
+                        discord.Permissions(int(allow_v)),
+                        discord.Permissions(int(deny_v)),
+                    )
+                    await ch.set_permissions(
+                        guild.default_role, overwrite=perm,
+                        reason=f"Stale event {event_id} unmask (watchdog)")
+                else:
+                    await ch.set_permissions(
+                        guild.default_role, overwrite=None,
+                        reason=f"Stale event {event_id} unmask (watchdog)")
+                restored += 1
+            except discord.Forbidden:
+                continue
+            except Exception as ex:
+                print(f"[_restore_event_masks ch={ch_id}] {ex}")
+    except Exception as ex:
+        print(f"[_restore_event_masks evt={event_id}] {ex}")
+    return restored
+
+
 @tasks.loop(minutes=3)
 async def stale_event_cleanup():
     """Phase 89 : pour chaque event actif (DB + in-memory), tente de fetch le
@@ -14765,6 +14809,34 @@ async def stale_event_cleanup():
     - _gn_event_state dict (in-mem) → msg.id + channel_id
     """
     try:
+        # ─── 0. WATCHDOG (Phase 202) : events EXPIRÉS ou FANTÔMES bloqués ───
+        # Cause racine du "serveur mort" : un event reste ended=0 alors que son
+        # timer est dépassé (ends_at < maintenant) OU qu'il n'a jamais fini son
+        # setup (arena_message_id NULL). Il garde alors les salons MASQUÉS et
+        # bloque le combat — jusqu'au prochain reboot seulement. Ici on AUTO-
+        # SOIGNE toutes les 3 min, sans attendre un restart.
+        # SÛRETÉ : on ne termine QUE des events que la garde Phase 201 considère
+        # DÉJÀ inactifs (ends_at dépassé) ou des fantômes sans message vieux de
+        # 30 min → ZÉRO risque pour un event réellement en cours.
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT id, guild_id FROM events WHERE ended=0 AND ("
+                    "(ends_at IS NOT NULL AND datetime(ends_at) <= datetime('now')) "
+                    "OR (arena_message_id IS NULL AND datetime(started_at) <= datetime('now','-30 minutes'))"
+                    ") LIMIT 50"
+                ) as cur:
+                    dead_rows = await cur.fetchall()
+            for ev_id, g_id in dead_rows:
+                guild = bot.get_guild(int(g_id)) if g_id else None
+                n = await _restore_event_masks(guild, ev_id) if guild else 0
+                async with get_db() as db:
+                    await db.execute('UPDATE events SET ended=1 WHERE id=?', (ev_id,))
+                    await db.commit()
+                print(f"[stale_cleanup WATCHDOG] event {ev_id} expiré/fantôme → ended + {n} salon(s) démasqué(s)")
+        except Exception as ex:
+            print(f"[stale_cleanup watchdog block] {ex}")
+
         # ─── 1. DB events (Boss Raid + Treasure + Quiz) ────────────────────
         try:
             async with get_db() as db:
