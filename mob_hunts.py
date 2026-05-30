@@ -60,6 +60,7 @@ _db_get = None
 _v2 = None
 _add_coins = None
 _inventory_fn = None  # Phase 184 : getter d'inventaire (gear-scaling du combat)
+_recall_ping_fn = None  # Phase 200 : rappel rotatif des vrais participants (bot.py)
 
 # Spawn interval (random entre min et max minutes)
 # Phase 173.1 : plus fréquent (18-30 min au lieu de 30-45) → bien plus de
@@ -286,14 +287,18 @@ def _is_nocturnal(mob: dict) -> bool:
 
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
-          inventory_fn=None):
-    global _bot, _get_db, _db_get, _v2, _add_coins, _inventory_fn
+          inventory_fn=None, recall_ping_fn=None):
+    global _bot, _get_db, _db_get, _v2, _add_coins, _inventory_fn, _recall_ping_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
     _v2 = v2_helpers
     _add_coins = add_coins_fn
     _inventory_fn = inventory_fn
+    # Phase 200 : rappel rotatif des VRAIS participants passés (injecté depuis
+    # bot.py : async (guild, channel, event_type, kind_label, notif_category)).
+    # ADDITIF + FAIL-OPEN — si non injecté, spawn_mob fonctionne comme avant.
+    _recall_ping_fn = recall_ping_fn
 
 
 async def init_db():
@@ -711,6 +716,17 @@ async def _post_mob_message(
 
     try:
         msg = await ch.send(view=layout)
+        # Phase 200 : rappel rotatif des VRAIS participants passés de la chasse aux
+        # mobs (lus depuis mob_attackers — JOIN mob_spawns). Délégué à bot.py via
+        # le hook injecté. Message séparé, fail-open : n'empêche jamais le spawn.
+        if _recall_ping_fn is not None:
+            try:
+                # opt-out via la catégorie /notifs 'boss_raid' (pings de combat) —
+                # même convention que le ping du boss du jour (Phase 196), pour que
+                # l'utilisateur dispose d'un vrai interrupteur off.
+                await _recall_ping_fn(guild, ch, 'mob_hunts', 'une chasse aux mobs', 'boss_raid')
+            except Exception as ex:
+                print(f"[mob_hunts recall] {ex}")
         return msg
     except Exception as ex:
         print(f"[mob_hunts post_message] {ex}")

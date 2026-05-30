@@ -371,8 +371,10 @@ async def _smart_combat_ping(guild: discord.Guild, exclude_opt_out: bool = True)
     (un même membre au plus une fois / ~8h, on privilégie les moins récemment
     ping). Respecte l'opt-out `boss_raid` via le check injecté de bot.py.
 
-    Retourne une courte ligne `🔔 <@id> … — venez tenter votre chance !` ou
-    une chaîne vide si personne n'est éligible. FAIL-OPEN : toute erreur → "".
+    Retourne une courte ligne VÉRIDIQUE `🔔 <@id> … — vous avez déjà combattu un
+    boss ici …` (+ astuce opt-out /notifs) ou une chaîne vide si personne n'est
+    éligible. Phase 200 : on ne mentionne QUE de vrais participants passés.
+    FAIL-OPEN : toute erreur → "".
     """
     if _get_db is None or guild is None:
         return ""
@@ -443,10 +445,13 @@ async def _smart_combat_ping(guild: discord.Guild, exclude_opt_out: bool = True)
             print(f"[_smart_combat_ping log] {ex}")
 
         mentions = " ".join(f"<@{uid}>" for uid in chosen_ids)
+        # Phase 200 : formulation VÉRIDIQUE. Ces membres sont uniquement ceux qui
+        # ont RÉELLEMENT déjà attaqué un boss du jour ici (< 14j) — on n'invente
+        # aucune participation. Astuce opt-out (/notifs) intégrée au message.
         return (
-            f"🔔 {mentions} — un boss vient d'apparaître, si ça vous tente venez "
-            f"tenter votre chance ! _(ouvert à tout le monde · `/notifs` pour gérer "
-            f"vos pings)_"
+            f"🔔 {mentions} — vous avez déjà combattu un boss ici : un nouveau "
+            f"vient d'apparaître, revenez tenter votre chance ! 🗡️\n"
+            f"-# Pour ne plus être mentionné : /notifs"
         )
     except Exception as ex:
         print(f"[_smart_combat_ping] {ex}")
