@@ -65,6 +65,9 @@ DISPERSION_TIMEOUT_SEC = 420  # phase d'exploration (salles) non finie en 7 min 
 WAVES = 3                     # (legacy) conservé pour compat ; remplacé par les salles
 ATTACK_CD_SEC = 4             # anti-spam clic par joueur
 VOICE_BONUS = 0.20            # +20% dégâts si dans le vocal du donjon
+# Phase 197 — déplacement auto entre les salles (permission-safe). Nécessite
+# "Déplacer des membres" ; absence → Forbidden capturé → repli message.
+MOVE_REASON = "Donjon : passage à la salle suivante"
 
 # Phase 184.4 : DISPERSION — plusieurs salles vocales, chacune avec un mob ;
 # le groupe se disperse, on n'attaque le mob d'une salle QUE si on est connecté
@@ -531,6 +534,41 @@ async def _run_dungeon(run_id, guild_id, room_plan, txt_id, cat_id):
         for wave_idx, (vc_id, vc_name, enc) in enumerate(room_plan, start=1):
             is_boss = bool(enc.get("is_boss"))
             mob_hp = int(enc["hp"] * hp_mult)
+            # Phase 197 — la salle précédente est nettoyée : on FAIT AVANCER le
+            # groupe dans le vocal de CETTE vague (≥2). Permission-safe : si le bot
+            # n'a pas « Déplacer des membres » (move_to → Forbidden), on capture et
+            # le message d'annonce sert de repli (indique où aller). Jamais bloquant.
+            if wave_idx >= 2:
+                try:
+                    next_vc = guild.get_channel(vc_id) if guild else None
+                    if next_vc is not None:
+                        # Cible : membres connectés dans N'IMPORTE QUELLE salle du
+                        # donjon (les VCs du room_plan), encore en vocal.
+                        room_ids = {rvc_id for rvc_id, _, _ in room_plan}
+                        to_move = []
+                        for rid in room_ids:
+                            rvc = guild.get_channel(rid)
+                            for mem in list(getattr(rvc, "members", []) or []):
+                                if mem.bot or mem.id == guild.me.id:
+                                    continue
+                                vs = getattr(mem, "voice", None)
+                                if vs and vs.channel and mem not in to_move:
+                                    to_move.append(mem)
+                        for mem in to_move:
+                            if getattr(mem.voice, "channel", None) == next_vc:
+                                continue  # déjà dans la bonne salle
+                            try:
+                                await mem.move_to(next_vc, reason=MOVE_REASON)
+                            except (discord.Forbidden, discord.HTTPException, Exception):
+                                pass
+                    # Annonce TOUJOURS (double comme repli si le move a échoué).
+                    if txt:
+                        await txt.send(
+                            f"➡️ **Salle nettoyée !** Direction "
+                            f"{next_vc.mention if next_vc else vc_name} pour la suite.",
+                            allowed_mentions=discord.AllowedMentions.none())
+                except Exception:
+                    pass  # le move/annonce ne doit JAMAIS empêcher la vague
             await _set_wave(run_id, wave_idx)
             vc_ids = {vc_id}  # bonus vocal = la salle de CETTE vague (étape 2 : move auto)
             try:
