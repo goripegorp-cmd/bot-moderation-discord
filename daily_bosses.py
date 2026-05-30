@@ -541,7 +541,8 @@ async def trigger_daily_boss(
     try:
         async with _get_db() as db:
             async with db.execute(
-                "SELECT 1 FROM events WHERE guild_id=? AND ended=0 LIMIT 1",
+                "SELECT 1 FROM events WHERE guild_id=? AND ended=0 "
+                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now')) LIMIT 1",
                 (guild.id,),
             ) as cur:
                 if await cur.fetchone():
@@ -574,6 +575,7 @@ async def trigger_daily_boss(
 
     ch = await _find_arena_channel(guild)
     if not ch:
+        print(f"[daily_boss] pas de salon dispo, spawn annulé guild={guild.id}")
         return None
 
     hp = int(boss["hp_base"])

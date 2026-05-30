@@ -8693,6 +8693,23 @@ def _boss_arena_channel_name(boss: dict) -> str:
     return (safe[:90] or '⚔️-arène-du-boss')
 
 
+async def _mark_event_ended(event_id: int):
+    """Phase 201 : marque une ligne `events` comme terminée (best-effort).
+
+    Un event starter INSERT sa ligne `ended=0` AVANT de configurer l'arène /
+    masquer les salons / envoyer le panneau. Si une de ces étapes échoue, la
+    ligne resterait à `ended=0` à VIE → un "event fantôme" qui bloque ensuite
+    tout le combat (mobs + boss du jour) jusqu'au prochain reboot. On nettoie
+    donc la ligne sur tout échec post-INSERT. Fail-open : ne lève jamais.
+    """
+    try:
+        async with get_db() as db:
+            await db.execute("UPDATE events SET ended=1 WHERE id=?", (event_id,))
+            await db.commit()
+    except Exception as ex:
+        print(f"[_mark_event_ended id={event_id}] {ex}")
+
+
 async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False) -> dict:
     """Lance un Boss Raid. Retourne {ok, error?, event_id?, arena_channel_id?}."""
     try:
@@ -8794,27 +8811,13 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
             except Exception:
                 pass
         except discord.Forbidden:
+            # Phase 201 : échec post-INSERT → nettoyer la ligne event (sinon fantôme)
+            await _mark_event_ended(event_id)
             return {"ok": False, "error": "Permission manage_channels refusée"}
         except Exception as ex:
+            # Phase 201 : échec post-INSERT → nettoyer la ligne event (sinon fantôme)
+            await _mark_event_ended(event_id)
             return {"ok": False, "error": f"Création arène échouée : {ex}"}
-
-        # ─── 3. Masquer tous les autres salons pour @everyone ───
-        for ch in guild.channels:
-            if isinstance(ch, discord.CategoryChannel):
-                continue
-            if ch.id == arena_channel.id:
-                continue
-            try:
-                # On ajoute simplement view_channel=False à l'overwrite @everyone
-                overw = ch.overwrites_for(guild.default_role)
-                overw.view_channel = False
-                await ch.set_permissions(guild.default_role, overwrite=overw, reason=f"Event {event_id} mask")
-            except discord.Forbidden:
-                # Pas grave si certains salons ne sont pas modifiables (déjà privés)
-                continue
-            except Exception as ex:
-                print(f"[event start mask ch={ch.id}] {ex}")
-                continue
 
         # ─── 4. Envoyer le message d'arène avec boutons ───
         try:
@@ -8864,6 +8867,29 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
             # visible, les actifs la voient forcément.
         except Exception as ex:
             print(f"[event start send arena] {ex}")
+
+        # ─── 3. Masquer tous les autres salons pour @everyone ───
+        # Phase 201 : on masque SEULEMENT APRÈS confirmation de l'arène + panneau.
+        # Avant, le masquage se faisait juste après la création du salon ; si la
+        # suite échouait, les salons restaient masqués (rien ne pouvait spawn
+        # nulle part). On ne masque donc que si le panneau est bien parti.
+        if 'arena_msg' in locals():
+            for ch in guild.channels:
+                if isinstance(ch, discord.CategoryChannel):
+                    continue
+                if ch.id == arena_channel.id:
+                    continue
+                try:
+                    # On ajoute simplement view_channel=False à l'overwrite @everyone
+                    overw = ch.overwrites_for(guild.default_role)
+                    overw.view_channel = False
+                    await ch.set_permissions(guild.default_role, overwrite=overw, reason=f"Event {event_id} mask")
+                except discord.Forbidden:
+                    # Pas grave si certains salons ne sont pas modifiables (déjà privés)
+                    continue
+                except Exception as ex:
+                    print(f"[event start mask ch={ch.id}] {ex}")
+                    continue
 
         # Phase 37 : créer les 3 zones vocales temporaires
         voice_zones_map = {}  # zone_id → channel_id
@@ -8942,6 +8968,9 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
         print(f"[EVENT START] guild={guild.id} event={event_id} boss={boss.get('name')} HP={boss.get('max_hp')} voice_zones={len(voice_zones_map)}")
         return {"ok": True, "event_id": event_id, "arena_channel_id": arena_channel.id}
     except Exception as ex:
+        # Phase 201 : si l'INSERT a déjà eu lieu, nettoyer la ligne (sinon fantôme)
+        if 'event_id' in locals():
+            await _mark_event_ended(event_id)
         print(f"[_start_boss_raid] {ex}")
         import traceback; traceback.print_exc()
         return {"ok": False, "error": str(ex)}
@@ -10840,6 +10869,8 @@ async def _start_treasure_hunt(guild, triggered_by_id: int, *, manual: bool = Fa
 
         arena_channel = await _setup_arena(guild, event_id, arena_name)
         if not arena_channel:
+            # Phase 201 : échec post-INSERT → nettoyer la ligne event (sinon fantôme)
+            await _mark_event_ended(event_id)
             return {"ok": False, "error": "Création arène échouée"}
 
         # Intro
@@ -10907,6 +10938,9 @@ async def _start_treasure_hunt(guild, triggered_by_id: int, *, manual: bool = Fa
         print(f"[EVENT TREASURE START] guild={guild.id} event={event_id} {nb_treasures} trésors")
         return {"ok": True, "event_id": event_id, "arena_channel_id": arena_channel.id}
     except Exception as ex:
+        # Phase 201 : si l'INSERT a déjà eu lieu, nettoyer la ligne (sinon fantôme)
+        if 'event_id' in locals():
+            await _mark_event_ended(event_id)
         print(f"[_start_treasure_hunt] {ex}")
         import traceback; traceback.print_exc()
         return {"ok": False, "error": str(ex)}
@@ -11147,6 +11181,8 @@ async def _start_quiz(guild, triggered_by_id: int, *, manual: bool = False) -> d
 
         arena_channel = await _setup_arena(guild, event_id, arena_name)
         if not arena_channel:
+            # Phase 201 : échec post-INSERT → nettoyer la ligne event (sinon fantôme)
+            await _mark_event_ended(event_id)
             return {"ok": False, "error": "Création arène échouée"}
 
         intro_embed = discord.Embed(
@@ -11208,6 +11244,9 @@ async def _start_quiz(guild, triggered_by_id: int, *, manual: bool = False) -> d
         print(f"[EVENT QUIZ START] guild={guild.id} event={event_id} {nb_questions} questions")
         return {"ok": True, "event_id": event_id, "arena_channel_id": arena_channel.id}
     except Exception as ex:
+        # Phase 201 : si l'INSERT a déjà eu lieu, nettoyer la ligne (sinon fantôme)
+        if 'event_id' in locals():
+            await _mark_event_ended(event_id)
         print(f"[_start_quiz] {ex}")
         import traceback; traceback.print_exc()
         return {"ok": False, "error": str(ex)}
@@ -14136,6 +14175,7 @@ async def _drop_mystery_box(guild) -> bool:
                     except Exception:
                         continue
         if not candidates:
+            print(f"[mystery_box] pas de salon dispo, spawn annulé guild={guild.id}")
             return False
 
         # Tirer un salon CHATTY parmi les actifs

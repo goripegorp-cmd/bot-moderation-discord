@@ -518,7 +518,8 @@ async def _is_major_event_active(guild_id: int) -> bool:
     try:
         async with _get_db() as db:
             async with db.execute(
-                "SELECT 1 FROM events WHERE guild_id=? AND ended=0 LIMIT 1",
+                "SELECT 1 FROM events WHERE guild_id=? AND ended=0 "
+                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now')) LIMIT 1",
                 (guild_id,),
             ) as cur:
                 return await cur.fetchone() is not None
@@ -546,6 +547,7 @@ async def spawn_mob(guild: discord.Guild) -> bool:
 
     ch = await _find_arena_channel(guild)
     if not ch:
+        print(f"[mob_hunts] pas de salon dispo, spawn annulé guild={guild.id}")
         return False
 
     # Anti-doublon : pas le même type qu'un mob déjà vivant
