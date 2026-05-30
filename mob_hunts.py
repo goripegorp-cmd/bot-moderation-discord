@@ -437,6 +437,20 @@ async def _find_arena_channel(guild: discord.Guild) -> Optional[discord.TextChan
         return None
 
     cfg_data = {}
+    # Phase 199 : override salon « Chasse aux mobs » (Hub Événements). ADDITIF +
+    # FAIL-OPEN — si l'owner a fixé `mob_hunts_channel` et que le bot peut y
+    # écrire, on le préfère ; sinon on retombe sur la priorité 1 existante
+    # (combat_arena_channel_id) et la suite, INCHANGÉES.
+    try:
+        cfg_data = await _db_get(guild.id)
+        ov_id = int(cfg_data.get("mob_hunts_channel", 0) or 0)
+        if ov_id:
+            ov = guild.get_channel(ov_id)
+            if ov and isinstance(ov, discord.TextChannel) and _bot_can_send(guild, ov):
+                return ov
+    except Exception:
+        pass
+
     # 1. Salon combat configuré par owner
     try:
         cfg_data = await _db_get(guild.id)
@@ -1137,6 +1151,17 @@ async def spawn_task():
                         ).total_seconds() / 60
                         # Cooldown random 30-45 min
                         cooldown = random.randint(SPAWN_MIN_MIN, SPAWN_MAX_MIN)
+                        # Phase 199 : override fréquence « Chasse aux mobs » (Hub
+                        # Événements). ADDITIF + FAIL-OPEN — si l'owner a fixé
+                        # `mob_hunts_interval_hours` (>0), on l'utilise comme
+                        # cooldown (en minutes) ; sinon on garde le random.
+                        if _db_get is not None:
+                            try:
+                                _ov_h = int((await _db_get(guild.id)).get("mob_hunts_interval_hours", 0) or 0)
+                                if _ov_h > 0:
+                                    cooldown = _ov_h * 60
+                            except Exception:
+                                pass
                         if elapsed_min < cooldown:
                             continue
                     except Exception:

@@ -8202,8 +8202,13 @@ class EventsHubPanelV2(LayoutView):
 
 
 class EventTypeConfigPanelV2(LayoutView):
-    """Sous-panel générique de config d'un type d'événement (Phase 1 : toggle seul).
-    Le salon / la fréquence viendront dans une phase ultérieure.
+    """Sous-panel générique de config d'un type d'événement.
+
+    Phase 199 : en plus de l'interrupteur on/off, l'owner choisit un SALON
+    (`{key}_channel`) et une FRÉQUENCE (`{key}_interval_hours`, 0 = défaut).
+    Ces réglages sont ADDITIFS et fail-open : non configurés → comportement
+    actuel inchangé. Le câblage réel salon/fréquence est appliqué côté modules
+    là où c'est faisable proprement ; sinon le réglage reste indicatif.
     """
 
     def __init__(self, u, g, entry):
@@ -8219,7 +8224,20 @@ class EventTypeConfigPanelV2(LayoutView):
         c = await cfg(self.g.id)
         on = bool(c.get(self.entry["enabled_cfg"], self.entry.get("default", True)))
 
+        key = self.entry["key"]
+        ch_id = int(c.get(f"{key}_channel", 0) or 0)
+        ch = self.g.get_channel(ch_id) if ch_id else None
+        interval_h = int(c.get(f"{key}_interval_hours", 0) or 0)
+
         self.clear_items()
+
+        # ── ChannelSelect (rangée dédiée) — salon de destination de l'event ──
+        ch_select = discord.ui.ChannelSelect(
+            placeholder=f"📢 Salon : {(ch.name if ch else 'auto (par défaut)')}"[:150],
+            channel_types=[discord.ChannelType.text],
+            min_values=0, max_values=1, custom_id="evtype_channel",
+        )
+        ch_select.callback = self._cb_channel
 
         b_toggle = Button(
             label=("⛔ Désactiver" if on else "✅ Activer"),
@@ -8228,16 +8246,31 @@ class EventTypeConfigPanelV2(LayoutView):
         )
         b_toggle.callback = self._cb_toggle
 
+        b_freq = Button(
+            label="⏱️ Fréquence",
+            style=discord.ButtonStyle.primary,
+            custom_id="evtype_freq",
+        )
+        b_freq.callback = self._cb_freq
+
         b_back = Button(label="🔙 Retour", style=discord.ButtonStyle.secondary, custom_id="evtype_back")
         b_back.callback = self._cb_back
+
+        freq_str = f"toutes les `{interval_h}` h" if interval_h > 0 else "_auto / par défaut_"
 
         items = [
             v2_title(f"{self.entry['emoji']} {self.entry['label']}"),
             v2_subtitle("Configuration de l'événement"),
             v2_divider(),
-            v2_body(f"🔌 **État** · {'✅ Activé' if on else '⛔ Désactivé'}"),
+            v2_body(
+                f"🔌 **État** · {'✅ Activé' if on else '⛔ Désactivé'}\n"
+                f"📢 **Salon** · {ch.mention if ch else '_auto (par défaut)_'}\n"
+                f"⏱️ **Fréquence** · {freq_str}"
+            ),
+            v2_subtitle("Salon vide = automatique · Fréquence `0` = défaut. Selon l'event, ces réglages peuvent rester indicatifs."),
             v2_divider(),
-            discord.ui.ActionRow(b_toggle),
+            discord.ui.ActionRow(ch_select),
+            discord.ui.ActionRow(b_toggle, b_freq),
             discord.ui.ActionRow(b_back),
         ]
         self.add_item(v2_container(*items, color=Palette.PRIMARY))
@@ -8256,9 +8289,55 @@ class EventTypeConfigPanelV2(LayoutView):
         except Exception as ex:
             print(f"[EventTypeConfigPanelV2 _cb_toggle {self.entry.get('key')}] {ex}")
 
+    async def _cb_channel(self, i):
+        try:
+            vals = i.data.get('values', [])
+            ch_id = int(vals[0]) if vals else 0
+            await db_set(self.g.id, f"{self.entry['key']}_channel", ch_id)
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[EventTypeConfigPanelV2 _cb_channel {self.entry.get('key')}] {ex}")
+
+    async def _cb_freq(self, i):
+        try:
+            c = await cfg(self.g.id)
+            modal = _EventTypeFreqModal(self.g, self.u, self.entry)
+            modal.hours.default = str(int(c.get(f"{self.entry['key']}_interval_hours", 0) or 0))
+            await i.response.send_modal(modal)
+        except Exception as ex:
+            print(f"[EventTypeConfigPanelV2 _cb_freq {self.entry.get('key')}] {ex}")
+
     async def _cb_back(self, i):
         v = EventsHubPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
+
+
+class _EventTypeFreqModal(Modal):
+    hours = TextInput(
+        label="Fréquence en heures (0 = auto / par défaut)",
+        placeholder="0",
+        max_length=4,
+        required=True,
+    )
+
+    def __init__(self, g, u, entry):
+        super().__init__(title=f"⏱️ Fréquence · {entry.get('label', '')}"[:45])
+        self.g = g
+        self.u = u
+        self.entry = entry
+
+    async def on_submit(self, i):
+        try:
+            raw = (self.hours.value or "0").strip()
+            value = max(0, min(8760, int(raw)))  # 0..1 an (en heures)
+            await db_set(self.g.id, f"{self.entry['key']}_interval_hours", value)
+            await EventTypeConfigPanelV2(self.u, self.g, self.entry).render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[_EventTypeFreqModal on_submit {self.entry.get('key')}] {ex}")
+            try:
+                await i.response.send_message(f"❌ Valeur invalide (entier ≥ 0) : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
 
 
 class EventConfigPanelV2(LayoutView):
@@ -10026,6 +10105,35 @@ async def _send_layout_with_ping(channel, layout_view, ping_content=None, *,
         except Exception as ex:
             print(f"[_send_layout_with_ping ping] {ex}")
     return await channel.send(view=layout_view, delete_after=delete_after)
+
+
+# ─────────────────────── Phase 199 : override salon par event ───────────────────────
+
+async def _event_channel_override(guild, key):
+    """Phase 199 — salon de destination configuré par l'owner pour un type
+    d'event (clé `{key}_channel`, posée par EventTypeConfigPanelV2).
+
+    ADDITIF + FAIL-OPEN : retourne le salon texte SEULEMENT s'il est configuré,
+    existe, est un salon texte et que le bot peut y écrire. Sinon (non configuré,
+    introuvable, sans droit, ou la moindre erreur) → None pour que l'appelant
+    retombe sur sa logique EXISTANTE inchangée. Ne lève jamais.
+    """
+    try:
+        if guild is None or not key:
+            return None
+        c = await cfg(guild.id)
+        ch_id = int(c.get(f"{key}_channel", 0) or 0)
+        if not ch_id:
+            return None
+        ch = guild.get_channel(ch_id)
+        if not isinstance(ch, discord.TextChannel):
+            return None
+        me = guild.me
+        if me and ch.permissions_for(me).send_messages:
+            return ch
+    except Exception:
+        pass
+    return None
 
 
 # ─────────────────────────── END EVENT (restauration) ───────────────────────────
@@ -14140,6 +14248,13 @@ async def _drop_mystery_box(guild) -> bool:
 
         # Tirer un salon CHATTY parmi les actifs
         ch = random.choice(candidates)
+
+        # Phase 199 : override salon configuré (additif, fail-open) — si l'owner
+        # a fixé un salon pour la Boîte Mystère, on le préfère ; sinon on garde
+        # le salon actif tiré ci-dessus (comportement inchangé).
+        _ov = await _event_channel_override(guild, 'mystery_box')
+        if _ov is not None:
+            ch = _ov
 
         # Générer la box
         box = events2026.random_mystery_box()
@@ -60242,6 +60357,14 @@ async def _post_daily_riddle(guild) -> bool:
         if not ch:
             return False
 
+        # Phase 199 : override salon configuré (additif, fail-open) — l'owner peut
+        # fixer un salon dédié pour l'Énigme du jour ; sinon on garde le salon
+        # hub/chatty calculé ci-dessus (comportement inchangé). La planification
+        # (10h FR) reste fixe.
+        _ov = await _event_channel_override(guild, 'daily_riddle')
+        if _ov is not None:
+            ch = _ov
+
         riddle = ev42.random_riddle()
         options_str = "\n".join(
             f"{chr(65 + idx)}. {opt}" for idx, opt in enumerate(riddle['options'])
@@ -60425,6 +60548,13 @@ async def _post_daily_agenda(guild) -> bool:
                 pass
         if not ch:
             return False
+
+        # Phase 199 : override salon configuré (additif, fail-open) — l'owner peut
+        # fixer un salon dédié pour le Programme du jour ; sinon on garde le salon
+        # recap/catégorie calculé ci-dessus. L'heure d'annonce (8h FR) reste fixe.
+        _ov = await _event_channel_override(guild, 'daily_agenda')
+        if _ov is not None:
+            ch = _ov
 
         now = datetime.now(_TZ_P41)
         body = _build_daily_agenda_text(now)
@@ -60796,6 +60926,11 @@ async def _spawn_flash_treasure(guild) -> bool:
             return False
 
         ch = random.choice(candidates)
+        # Phase 199 : override salon configuré (additif, fail-open) — préfère le
+        # salon fixé par l'owner pour le Trésor Flash, sinon garde le salon actif.
+        _ov = await _event_channel_override(guild, 'flash_treasure')
+        if _ov is not None:
+            ch = _ov
         reward = random.randint(100, 500)
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=60)
 

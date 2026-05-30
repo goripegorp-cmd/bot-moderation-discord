@@ -312,6 +312,22 @@ async def get_user_level(guild_id: int, user_id: int) -> int:
 async def _find_arena_channel(guild: discord.Guild):
     """Réutilise le finder robuste de mob_hunts (7 niveaux de fallback).
     Fallback local minimal si mob_hunts indisponible."""
+    # Phase 199 : override salon « Boss quotidien » (Hub Événements). ADDITIF +
+    # FAIL-OPEN — si l'owner a fixé `daily_boss_channel` et que le bot peut y
+    # écrire, on le préfère AVANT toute autre logique (y compris la délégation
+    # mob_hunts). Sinon → comportement existant inchangé.
+    if _db_get is not None:
+        try:
+            ov_id = int((await _db_get(guild.id)).get("daily_boss_channel", 0) or 0)
+            if ov_id:
+                ov = guild.get_channel(ov_id)
+                me = guild.me
+                if ov and isinstance(ov, discord.TextChannel) and me \
+                        and ov.permissions_for(me).send_messages:
+                    return ov
+        except Exception:
+            pass
+
     try:
         import mob_hunts as _mh
         ch = await _mh._find_arena_channel(guild)

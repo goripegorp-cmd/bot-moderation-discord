@@ -131,6 +131,22 @@ async def _find_arena_channel(guild: discord.Guild) -> Optional[discord.TextChan
     if _db_get is None or _get_db is None:
         return None
 
+    # Phase 199 : override salon « Invasion mondiale » (Hub Événements). ADDITIF
+    # + FAIL-OPEN — si l'owner a fixé `world_invasion_channel` et que le bot peut
+    # y écrire, on le préfère ; sinon → priorités existantes inchangées. La
+    # planification (1er samedi 21h FR) reste fixe.
+    try:
+        cfg_data = await _db_get(guild.id)
+        ov_id = int(cfg_data.get("world_invasion_channel", 0) or 0)
+        if ov_id:
+            ov = guild.get_channel(ov_id)
+            me = guild.me
+            if ov and isinstance(ov, discord.TextChannel) and me \
+                    and ov.permissions_for(me).send_messages:
+                return ov
+    except Exception:
+        pass
+
     # 1. Salon combat configuré par owner
     try:
         cfg_data = await _db_get(guild.id)
