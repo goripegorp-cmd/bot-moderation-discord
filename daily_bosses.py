@@ -63,8 +63,11 @@ _v2 = None
 _add_coins = None
 _inventory_fn = None  # Phase 184 : getter d'inventaire (gear-scaling du combat)
 
-# 4 créneaux fixes FR : midi, après-midi, soir, NUIT (pour les noctambules)
-BOSS_HOURS = [12, 17, 21, 1]
+# Phase 193 : 5 créneaux fixes FR — MATIN (9h), midi, après-midi, soir, NUIT.
+# Le créneau matin garantit un combat dès le réveil (vision owner : faire vivre
+# la journée matin / midi / soir, pas juste le soir). _pick_boss_for_slot()
+# utilise len(BOSS_HOURS) + .index(now.hour) → ajouter un créneau est sûr.
+BOSS_HOURS = [9, 12, 17, 21, 1]
 # Cap anti-spam : nb max d'attaques par membre par boss
 MAX_ATTACKS_PER_USER = 30
 # Dégâts par clic (avant bonus)

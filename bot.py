@@ -14982,7 +14982,15 @@ async def event_auto_scheduler():
                 if not enabled_types:
                     continue
                 import random as _r
-                chosen_type = _r.choice(enabled_types)
+                # Phase 193 : COMBAT AMPLIFIÉ — le boss (combat, ce qui rend le
+                # serveur unique) est tiré ~3× plus souvent que trésor/quiz
+                # (basiques que tout le monde a). On met le combat en avant.
+                _evt_weights = {'boss_raid': 3, 'treasure_hunt': 1, 'quiz': 1}
+                chosen_type = _r.choices(
+                    enabled_types,
+                    weights=[_evt_weights.get(t, 1) for t in enabled_types],
+                    k=1,
+                )[0]
                 result = await _start_any_event(guild, bot.user.id, chosen_type, manual=False)
                 if result.get('ok'):
                     print(f"[EVENT AUTO] guild={guild.id} type={chosen_type} déclenché")
