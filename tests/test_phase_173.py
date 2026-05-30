@@ -43,13 +43,15 @@ def test_boss_hp_forces_collaboration():
     assert len(need_team) >= 3
 
 
-def test_boss_4_slots():
-    """4 créneaux par jour (midi/après-midi/soir/nuit)."""
-    assert len(daily_bosses.BOSS_HOURS) == 4
+def test_boss_slots():
+    """Plusieurs créneaux/jour : matin, midi, après-midi, soir, nuit (Phase 193)."""
+    assert len(daily_bosses.BOSS_HOURS) >= 4
     for h in daily_bosses.BOSS_HOURS:
         assert 0 <= h <= 23
     # Inclut un créneau nocturne (heure < 6 ou >= 22)
     assert any(h < 6 or h >= 22 for h in daily_bosses.BOSS_HOURS)
+    # Phase 193 : inclut un créneau MATIN (faire vivre la journée dès le réveil)
+    assert any(7 <= h <= 11 for h in daily_bosses.BOSS_HOURS)
 
 
 def test_boss_lifetime_reasonable():
