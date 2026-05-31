@@ -43,6 +43,7 @@ DB :
 """
 from __future__ import annotations
 
+import asyncio
 import random
 import re
 from datetime import datetime, timedelta, timezone
@@ -67,6 +68,10 @@ _v2 = None
 _story = None
 _npc = None
 _add_coins = None
+# Phase 213 : arène de combat DÉDIÉE (créée au spawn, supprimée à la fin), comme
+# le boss du jour. Fail-open : si None, on retombe sur _find_chronicle_channel.
+_arena_create_fn = None  # async (guild, kind, title) -> salon texte dédié
+_arena_delete_fn = None  # async (guild, text_channel_id) -> supprime l'arène
 
 CLIMAX_WEEKDAY = 5    # samedi
 CLIMAX_HOUR = 21      # 21h FR
@@ -278,8 +283,10 @@ def list_climax_ids() -> list[str]:
 def setup(
     bot_instance, get_db_fn, db_get_fn, v2_helpers: dict,
     story_module=None, npc_module=None, add_coins_fn=None,
+    arena_create_fn=None, arena_delete_fn=None,
 ):
     global _bot, _get_db, _db_get, _v2, _story, _npc, _add_coins
+    global _arena_create_fn, _arena_delete_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -287,6 +294,9 @@ def setup(
     _story = story_module
     _npc = npc_module
     _add_coins = add_coins_fn
+    # Phase 213 : arène de combat dédiée (créée au spawn, supprimée à la fin)
+    _arena_create_fn = arena_create_fn
+    _arena_delete_fn = arena_delete_fn
 
 
 async def init_db():
@@ -535,7 +545,28 @@ async def trigger_climax(guild_id: int) -> Optional[int]:
 
     guild = _bot.get_guild(guild_id)
     if guild:
-        await _announce_climax_open(guild, boss, event_id, ends_at)
+        # Phase 213 : salon DÉDIÉ pour ce boss climax (catégorie ⚔️ + texte +
+        # vocaux), créé puis supprimé à la fin — comme le boss du jour. On stocke
+        # son id dans climax_events.channel_id pour le supprimer à la résolution.
+        # Fail-open : si l'arène échoue, _announce_climax_open retombe sur
+        # _find_chronicle_channel (ch=None).
+        ch = None
+        if _arena_create_fn is not None:
+            try:
+                ch = await _arena_create_fn(guild, 'monthly_climax', boss['name'])
+            except Exception as ex:
+                print(f"[trigger_climax arena create] {ex}")
+        if ch is not None:
+            try:
+                async with _get_db() as db:
+                    await db.execute(
+                        "UPDATE climax_events SET channel_id=? WHERE id=?",
+                        (ch.id, event_id),
+                    )
+                    await db.commit()
+            except Exception as ex:
+                print(f"[trigger_climax channel_id store] {ex}")
+        await _announce_climax_open(guild, boss, event_id, ends_at, channel=ch)
 
     if _story is not None:
         try:
@@ -651,14 +682,15 @@ async def resolve_climax(event_id: int) -> Optional[dict]:
         async with _get_db() as db:
             async with db.execute(
                 "SELECT guild_id, chapter_id, boss_id, hp_current, hp_max, "
-                "damage_total, status "
+                "damage_total, status, channel_id "
                 "FROM climax_events WHERE id=?",
                 (event_id,),
             ) as cur:
                 row = await cur.fetchone()
         if not row:
             return None
-        guild_id, chapter_id, boss_id, hp_current, hp_max, dmg_total, status = row
+        (guild_id, chapter_id, boss_id, hp_current, hp_max, dmg_total,
+         status, channel_id) = row
         if status != "active":
             return None
     except Exception:
@@ -756,10 +788,27 @@ async def resolve_climax(event_id: int) -> Optional[dict]:
 
     guild = _bot.get_guild(guild_id)
     if guild:
+        # Phase 213 : poster le récap dans l'arène dédiée (si elle existe encore),
+        # sinon fallback _find_chronicle_channel via channel=None.
+        close_ch = None
+        try:
+            if channel_id:
+                close_ch = guild.get_channel(int(channel_id))
+        except Exception:
+            close_ch = None
         await _announce_climax_closed(
             guild, boss, killed, int(dmg_total), int(hp_max),
-            rewards, chapter_id,
+            rewards, chapter_id, channel=close_ch,
         )
+
+        # Phase 213 : supprimer l'arène dédiée (catégorie + texte + vocaux) après
+        # le récap (grâce au délai interne du helper). Fire-and-forget ; le
+        # balayage des orphelins rattrape si perdu. No-op si pas d'arène (channel_id=0).
+        if _arena_delete_fn is not None and channel_id:
+            try:
+                asyncio.create_task(_arena_delete_fn(guild, int(channel_id)))
+            except Exception as ex:
+                print(f"[resolve_climax arena delete] {ex}")
 
     print(
         f"[monthly_climax] resolve event={event_id} killed={killed} "
@@ -1022,8 +1071,11 @@ async def _find_chronicle_channel(guild: discord.Guild) -> Optional[discord.Text
 
 async def _announce_climax_open(
     guild: discord.Guild, boss: dict, event_id: int, ends_at: datetime,
+    channel: Optional[discord.TextChannel] = None,
 ) -> None:
-    ch = await _find_chronicle_channel(guild)
+    # Phase 213 : `channel` = arène dédiée créée au spawn (préférée). Fallback sur
+    # _find_chronicle_channel si l'arène n'a pas pu être créée (fail-open).
+    ch = channel or await _find_chronicle_channel(guild)
     if not ch:
         return
     msg = (
@@ -1056,9 +1108,11 @@ async def _announce_climax_open(
 async def _announce_climax_closed(
     guild: discord.Guild, boss: dict, killed: bool,
     damage_total: int, hp_max: int, rewards: list[dict],
-    chapter_id: str,
+    chapter_id: str, channel: Optional[discord.TextChannel] = None,
 ) -> None:
-    ch = await _find_chronicle_channel(guild)
+    # Phase 213 : `channel` = arène dédiée (récap dedans avant suppression).
+    # Fallback _find_chronicle_channel si l'arène n'existe pas/plus (fail-open).
+    ch = channel or await _find_chronicle_channel(guild)
     if not ch:
         return
     if killed:

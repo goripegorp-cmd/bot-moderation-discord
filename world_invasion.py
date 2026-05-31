@@ -50,6 +50,7 @@ _db_get = None
 _v2 = None
 _add_coins = None
 _active_ping_fn = None  # Phase 207 : ping « membres actifs » (injecté par bot.py)
+_arena_ensure_fn = None  # Phase 213 : arène de combat PARTAGÉE (mêmes mobs que mob_hunts)
 
 INVASION_MOBS_COUNT = 5
 INVASION_DURATION_MIN = 30
@@ -59,14 +60,18 @@ ALLIANCE_BONUS_MULT = 1.30
 
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
-          active_ping_fn=None):
+          active_ping_fn=None, arena_ensure_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _active_ping_fn
+    global _arena_ensure_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
     _v2 = v2_helpers
     _add_coins = add_coins_fn
     _active_ping_fn = active_ping_fn
+    # Phase 213 : arène de combat PARTAGÉE — l'annonce d'invasion atterrit dans le
+    # MÊME salon que ses 5 mobs (mob_hunts spawne dans cette arène partagée).
+    _arena_ensure_fn = arena_ensure_fn
 
 
 async def init_db():
@@ -239,7 +244,17 @@ async def trigger_invasion(guild: discord.Guild) -> bool:
     except Exception:
         pass
 
-    ch = await _find_arena_channel(guild)
+    # Phase 213 : on annonce dans l'arène de combat PARTAGÉE (où mob_hunts fait
+    # spawner les 5 mobs élite) → annonce + mobs regroupés. Fail-open : si l'arène
+    # partagée est indispo (perm/échec), on retombe sur la résolution habituelle.
+    ch = None
+    if _arena_ensure_fn is not None:
+        try:
+            ch = await _arena_ensure_fn(guild)
+        except Exception as ex:
+            print(f"[world_invasion arena ensure] {ex}")
+    if ch is None:
+        ch = await _find_arena_channel(guild)
     if not ch:
         return False
 

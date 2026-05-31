@@ -40264,7 +40264,8 @@ async def on_ready():
 
         # Phase 169.3 : World Invasion (1er samedi 21h FR)
         world_invasion_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
-                                    active_ping_fn=_ping_active_members)
+                                    active_ping_fn=_ping_active_members,
+                                    arena_ensure_fn=_ensure_combat_arena_channel)
         await world_invasion_module.init_db()
         if not world_invasion_module.monthly_invasion_task.is_running():
             world_invasion_module.monthly_invasion_task.start()
@@ -40369,6 +40370,8 @@ async def on_ready():
                 story_module=story_engine_module,
                 npc_module=npc_personalities_module,
                 add_coins_fn=add_coins,
+                arena_create_fn=_create_combat_arena,
+                arena_delete_fn=_delete_combat_arena,
             )
             await monthly_climax_module.init_db()
             monthly_climax_module.register_persistent_views(bot)
