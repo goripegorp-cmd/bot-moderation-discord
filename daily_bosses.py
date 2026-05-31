@@ -1174,6 +1174,39 @@ async def daily_boss_task():
                     print(f"[daily_boss_task resolve e={eid}] {ex}")
         except Exception as ex:
             print(f"[daily_boss_task resolve scan] {ex}")
+
+        # Phase 207 : NETTOYAGE BACKLOG — supprime les panneaux des boss DÉJÀ
+        # terminés qui traînent encore (events d'avant la Phase 205, ou si la
+        # suppression à la résolution a échoué). On ne touche QU'À nos propres
+        # panneaux (message_id stocké) puis on remet message_id=0 pour ne pas
+        # réessayer. LIMIT 20/passage (anti rate-limit).
+        try:
+            async with _get_db() as db:
+                async with db.execute(
+                    "SELECT id, guild_id, channel_id, message_id FROM daily_boss_events "
+                    "WHERE status != 'alive' AND message_id IS NOT NULL AND message_id != 0 "
+                    "LIMIT 20"
+                ) as cur:
+                    old_panels = await cur.fetchall()
+            for ev_id, g_id, ch_id, m_id in old_panels:
+                try:
+                    g = _bot.get_guild(int(g_id)) if g_id else None
+                    pch = g.get_channel(int(ch_id)) if (g and ch_id) else None
+                    if pch and m_id:
+                        try:
+                            pmsg = await pch.fetch_message(int(m_id))
+                            await pmsg.delete()
+                        except Exception:
+                            pass  # déjà supprimé / introuvable
+                    async with _get_db() as db:
+                        await db.execute(
+                            "UPDATE daily_boss_events SET message_id=0 WHERE id=?",
+                            (ev_id,))
+                        await db.commit()
+                except Exception as ex:
+                    print(f"[daily_boss_task backlog ev={ev_id}] {ex}")
+        except Exception as ex:
+            print(f"[daily_boss_task backlog scan] {ex}")
     except Exception as ex:
         print(f"[daily_boss_task] {ex}")
 

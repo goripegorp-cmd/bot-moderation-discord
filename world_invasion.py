@@ -49,6 +49,7 @@ _get_db = None
 _db_get = None
 _v2 = None
 _add_coins = None
+_active_ping_fn = None  # Phase 207 : ping « membres actifs » (injecté par bot.py)
 
 INVASION_MOBS_COUNT = 5
 INVASION_DURATION_MIN = 30
@@ -57,13 +58,15 @@ ALLIANCE_BONUS_MIN_MEMBERS = 3
 ALLIANCE_BONUS_MULT = 1.30
 
 
-def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None):
-    global _bot, _get_db, _db_get, _v2, _add_coins
+def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
+          active_ping_fn=None):
+    global _bot, _get_db, _db_get, _v2, _add_coins, _active_ping_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
     _v2 = v2_helpers
     _add_coins = add_coins_fn
+    _active_ping_fn = active_ping_fn
 
 
 async def init_db():
@@ -274,6 +277,17 @@ async def trigger_invasion(guild: discord.Guild) -> bool:
             await db.commit()
     except Exception:
         pass
+
+    # Phase 207 : ping des MEMBRES ACTIFS — une invasion (mensuelle) DOIT être
+    # vue, sinon les 5 mobs élite spawnent dans le vide. Rotation + opt-out +
+    # auto-suppression gérés par le helper. Cap large : c'est un rassemblement.
+    if _active_ping_fn is not None:
+        try:
+            await _active_ping_fn(
+                guild, ch, cap=10, cleanup_seconds=INVASION_DURATION_MIN * 60,
+                intro="🚨 **INVASION DU SERVEUR** — tous à l'arène,")
+        except Exception as ex:
+            print(f"[world_invasion active_ping] {ex}")
 
     # Spawn 5 mobs via mob_hunts
     try:

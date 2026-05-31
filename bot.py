@@ -40218,7 +40218,8 @@ async def on_ready():
             wandering_merchant_module.spawn_merchant_task.start()
 
         # Phase 169.3 : World Invasion (1er samedi 21h FR)
-        world_invasion_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins)
+        world_invasion_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
+                                    active_ping_fn=_ping_active_members)
         await world_invasion_module.init_db()
         if not world_invasion_module.monthly_invasion_task.is_running():
             world_invasion_module.monthly_invasion_task.start()
