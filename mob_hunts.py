@@ -82,6 +82,32 @@ ALLIANCE_BONUS_MIN_MEMBERS = 2
 # Probabilité d'apparition élite
 ELITE_CHANCE = 0.10
 
+# ─── Phase 214 : COMBAT SOLO vs COLLECTIF ──────────────────────────────────
+# Certains mobs sont des DÉFIS SOLO (on ne ping qu'1 seul actif, PV modestes,
+# faisable à une personne) ; d'autres sont des COMBATS COLLECTIFS (on ping
+# PLUSIEURS actifs, PV très élevés → il faut se coordonner, « plus à faire »).
+# Le ping reste la priorité : sans lui, personne ne vient frapper.
+GROUP_COMBAT_CHANCE = 0.40   # 40% des mobs = combat COLLECTIF
+SOLO_PING_CHANCE = 0.70      # parmi les solos, 70% défient 1 actif (sinon mob ambiant)
+# Multiplicateurs de PV selon le mode (× hp_base) :
+SOLO_HP_MULT = 1             # solo normal
+SOLO_HP_MULT_ELITE = 2       # solo élite
+GROUP_HP_MULT = 6            # collectif normal
+GROUP_HP_MULT_ELITE = 10     # collectif élite
+# Seuil d'affichage : hp_max >= hp_base * 4 → considéré COLLECTIF (déduit du
+# ratio, donc aucune colonne DB à ajouter ; solo ≤ ×2, collectif ≥ ×6).
+GROUP_HP_THRESHOLD = 4
+
+
+def _is_group_combat(mob_def: dict, hp_max: int) -> bool:
+    """Phase 214 : True si ce mob est un COMBAT COLLECTIF (PV gonflés), déduit du
+    ratio hp_max/hp_base — pas de colonne DB. Solo ≤ ×2, collectif ≥ ×6."""
+    try:
+        base = int(mob_def.get("hp_base", 0) or 0)
+        return base > 0 and hp_max >= base * GROUP_HP_THRESHOLD
+    except Exception:
+        return False
+
 # ─── Catalogue des mobs ────────────────────────────────────────────────────
 # Format : {id, name, emoji, hp_base, attack_damage_per_click,
 #           drop_coins_min, drop_coins_max, drop_item_chance, item_pool}
@@ -592,7 +618,14 @@ async def spawn_mob(guild: discord.Guild) -> bool:
 
     mob_def = random.choice(pool)
     is_elite = random.random() < ELITE_CHANCE
-    hp_max = mob_def["hp_base"] * 5 if is_elite else mob_def["hp_base"]
+    # Phase 214 : MODE de combat. solo → 1 actif pingé, PV modestes (faisable
+    # seul) ; group → plusieurs actifs pingés, PV très élevés (coordination).
+    combat_mode = 'group' if random.random() < GROUP_COMBAT_CHANCE else 'solo'
+    if combat_mode == 'group':
+        hp_mult = GROUP_HP_MULT_ELITE if is_elite else GROUP_HP_MULT
+    else:
+        hp_mult = SOLO_HP_MULT_ELITE if is_elite else SOLO_HP_MULT
+    hp_max = mob_def["hp_base"] * hp_mult
     elite_prefix = "👑 " if is_elite else ""
 
     # INSERT en DB
@@ -635,17 +668,36 @@ async def spawn_mob(guild: discord.Guild) -> bool:
         except Exception:
             pass
 
-        # Phase 206 : ~1 spawn sur 3 → prévenir les MEMBRES ACTIFS (rotation +
-        # opt-out gérés par le helper) pour que le combat soit VU. Discret le
-        # reste du temps (les mobs sont fréquents → pas de ping à chaque fois).
-        if _active_ping_fn is not None and random.random() < 0.34:
-            try:
-                emoji = mob_def.get("emoji", "🗡️")
-                await _active_ping_fn(
-                    guild, ch, cap=4, cleanup_seconds=900,
-                    intro=f"{emoji} {elite_prefix}**{mob_def['name']}** rôde dans l'arène —")
-            except Exception as ex:
-                print(f"[spawn_mob active_ping] {ex}")
+        # Phase 214 : LE PING EST LA PRIORITÉ (sans lui personne ne vient).
+        #  • COLLECTIF → on appelle PLUSIEURS actifs (cap 5-8) car le mob a
+        #    énormément de PV : ping quasi systématique, sinon il rote sans
+        #    combattants (le despawn timer le nettoiera dans le pire cas).
+        #  • SOLO → on DÉFIE 1 seul actif (cap 1) ~70% du temps ; sinon mob
+        #    « ambiant » que les passants peuvent cliquer.
+        # Rotation + opt-out + auto-suppression du ping gérés par le helper.
+        if _active_ping_fn is not None:
+            emoji = mob_def.get("emoji", "🗡️")
+            do_ping = (combat_mode == 'group') or (random.random() < SOLO_PING_CHANCE)
+            if do_ping:
+                try:
+                    if combat_mode == 'group':
+                        ping_cap = random.randint(5, 8)
+                        ping_cooldown = 4
+                        ping_intro = (
+                            f"⚔️ **COMBAT COLLECTIF !** {emoji} {elite_prefix}"
+                            f"**{mob_def['name']}** débarque avec énormément de PV — "
+                            f"rassemblez-vous pour l'abattre")
+                    else:
+                        ping_cap = 1
+                        ping_cooldown = 2
+                        ping_intro = (
+                            f"🎯 {emoji} {elite_prefix}**{mob_def['name']}** te "
+                            f"défie en combat singulier —")
+                    await _active_ping_fn(
+                        guild, ch, cap=ping_cap, cooldown_hours=ping_cooldown,
+                        cleanup_seconds=900, intro=ping_intro)
+                except Exception as ex:
+                    print(f"[spawn_mob active_ping] {ex}")
 
         # Schedule despawn cleanup
         asyncio.create_task(_despawn_after(mob_db_id, MOB_LIFETIME_MIN * 60))
@@ -685,14 +737,22 @@ async def _post_mob_message(
     if is_elite:
         drop_item_pct = min(100, drop_item_pct * 3)
 
-    # Phase 176 : compteur de créatures + cadrage clair "créature sauvage"
-    if alive_count and alive_count > 1:
+    # Phase 214 : combat SOLO (défi perso, PV modestes) vs COLLECTIF (PV gonflés,
+    # à plusieurs) — déduit du ratio PV (aucune colonne DB).
+    is_group = _is_group_combat(mob_def, hp_max)
+    crowd = (
+        f"`{alive_count}` créatures rôdent — attaque celle que tu veux !"
+        if (alive_count and alive_count > 1) else "seule pour l'instant"
+    )
+    if is_group:
         count_line = (
-            f"🐾 **Créature sauvage** · `{alive_count}` créatures rôdent en ce moment "
-            f"— attaque celle que tu veux !"
+            f"⚔️ **COMBAT COLLECTIF** · gros PV — frappez à **plusieurs** "
+            f"(bonus alliance dès 2 alliés) · {crowd}"
         )
     else:
-        count_line = "🐾 **Créature sauvage** · seule pour l'instant"
+        count_line = (
+            f"🎯 **Cible solo** · défi personnel, faisable en solo · {crowd}"
+        )
 
     items = []
     items.append(v2_title(
@@ -706,6 +766,12 @@ async def _post_mob_message(
         f"**🎁 Item :** `{drop_item_pct}%`\n"
         f"⏳ Disparaît dans **{MOB_LIFETIME_MIN} min** si pas vaincue"
     ))
+    if is_group:
+        # Phase 214 : « plus à faire » en combat collectif → on oriente les joueurs.
+        items.append(v2_body(
+            "🐾 **Plus à faire :** active ton **familier**, équipe ton **meilleur "
+            "stuff** et regroupez-vous en vocal — ce monstre tombe en équipe."
+        ))
     items.append(v2_divider())
     items.append(v2_body(_ev.how_to_play('mob')))
     items.append(v2_body(
@@ -911,9 +977,15 @@ async def _build_updated_layout(
         drop_min *= 3
         drop_max *= 3
 
+    # Phase 214 : sous-titre selon le mode (déduit du ratio PV).
+    _sub = (
+        "_⚔️ Combat collectif — continuez à frapper **ensemble** !_"
+        if _is_group_combat(mob_def, hp_max)
+        else "_🎯 Combat solo — frappe encore !_"
+    )
     items = [
         v2_title(f"{elite_prefix}{mob_def['emoji']} {mob_def['name']}"),
-        v2_subtitle("_Mob en combat — frappe encore !_"),
+        v2_subtitle(_sub),
         v2_divider(),
         v2_body(
             f"**❤️ HP :** `{bar}` `{hp_current}/{hp_max}` ({pct}%)\n"
@@ -985,6 +1057,22 @@ async def _on_mob_killed(
     drop_chance = mob_def["drop_item_chance"]
     if is_elite:
         drop_chance = min(1.0, drop_chance * 3)
+
+    # Phase 214 : un COMBAT COLLECTIF (PV gonflés ×6-10) partage le pool de coins
+    # entre plus de monde → sans correction chacun gagnerait MOINS pour bien plus
+    # d'effort. On gonfle le pool ~ au ratio de PV (plafonné) pour que la
+    # récompense PAR DÉGÂT reste constante (équitable) et que le collectif vaille
+    # le coup. Les items sont déjà tirés par personne (non dilués).
+    try:
+        _base_hp = int(mob_def.get("hp_base", 0) or 0)
+        if _base_hp > 0:
+            _hp_ratio = max(1, int(hp_max) // _base_hp)
+            if _hp_ratio >= GROUP_HP_THRESHOLD:
+                _loot_scale = min(_hp_ratio, GROUP_HP_MULT_ELITE)
+                drop_min *= _loot_scale
+                drop_max *= _loot_scale
+    except Exception:
+        pass
 
     top_user_id = max(attackers, key=lambda x: int(x[1]))[0]
     rewards: list[dict] = []
