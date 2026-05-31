@@ -68,6 +68,7 @@ _events_channel_fn = None  # async (guild) -> salon visible garanti (catégorie 
 _notif_check_fn = None     # async (guild_id, user_id, category) -> bool (opt-out)
 _cleanup_register_fn = None  # async (message, delay_seconds, reason) -> nettoyage différé
 _arena_create_fn = None  # Phase 210 : async (guild, kind, title) -> salon texte dédié
+_report_fn = None  # Phase 223 : async (guild, title, body) -> rapport dans « chroniques-combat »
 _arena_delete_fn = None  # Phase 210 : async (guild, text_channel_id) -> supprime l'arène
 
 # Phase 196 : mention intelligente rotative — paramètres anti-spam.
@@ -211,10 +212,11 @@ def list_boss_ids() -> list[str]:
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
           inventory_fn=None, events_channel_fn=None, notif_check_fn=None,
-          cleanup_register_fn=None, arena_create_fn=None, arena_delete_fn=None):
+          cleanup_register_fn=None, arena_create_fn=None, arena_delete_fn=None,
+          report_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _inventory_fn
     global _events_channel_fn, _notif_check_fn, _cleanup_register_fn
-    global _arena_create_fn, _arena_delete_fn
+    global _arena_create_fn, _arena_delete_fn, _report_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -228,6 +230,8 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
     # Phase 210 : arène de combat dédiée (créée au spawn, supprimée à la fin)
     _arena_create_fn = arena_create_fn
     _arena_delete_fn = arena_delete_fn
+    # Phase 223 : rapport de fin → salon « 📜 chroniques-combat »
+    _report_fn = report_fn
 
 
 async def init_db():
@@ -1086,6 +1090,13 @@ async def _announce_resolution(
         if msg and _cleanup_register_fn is not None:
             try:
                 await _cleanup_register_fn(msg, RESOLUTION_CLEANUP_SECONDS, 'boss_resolution')
+            except Exception:
+                pass
+        # Phase 223 : copie PERSISTANTE du rapport dans « 📜 chroniques-combat »
+        # (l'arène du boss est éphémère → le rapport reste consultable au propre).
+        if _report_fn is not None and ch is not None and getattr(ch, 'guild', None):
+            try:
+                await _report_fn(ch.guild, head.replace("**", ""), body)
             except Exception:
                 pass
     except Exception:

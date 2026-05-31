@@ -62,6 +62,7 @@ _add_coins = None
 _inventory_fn = None  # Phase 184 : getter d'inventaire (gear-scaling du combat)
 _active_ping_fn = None  # Phase 206 : ping « membres actifs » (injecté par bot.py)
 _arena_ensure_fn = None  # Phase 211 : arène de combat partagée dédiée (injecté)
+_report_fn = None  # Phase 223 : rapports de fin → salon « 📜 chroniques-combat » (injecté)
 
 # Spawn interval (random entre min et max minutes)
 # Phase 173.1 : plus fréquent (18-30 min au lieu de 30-45) → bien plus de
@@ -314,9 +315,9 @@ def _is_nocturnal(mob: dict) -> bool:
 
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
-          inventory_fn=None, active_ping_fn=None, arena_ensure_fn=None):
+          inventory_fn=None, active_ping_fn=None, arena_ensure_fn=None, report_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _inventory_fn, _active_ping_fn
-    global _arena_ensure_fn
+    global _arena_ensure_fn, _report_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -325,6 +326,7 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
     _inventory_fn = inventory_fn
     _active_ping_fn = active_ping_fn
     _arena_ensure_fn = arena_ensure_fn
+    _report_fn = report_fn
 
 
 async def init_db():
@@ -1194,8 +1196,21 @@ async def _on_mob_killed(
                     _recap_title = (
                         f"💀 {elite_prefix}{mob_def['emoji']} {mob_def['name']} vaincu !")
                     _recap_body = "\n".join(lines[2:]) if len(lines) > 2 else "\n".join(lines)
+                    # Phase 223 : le rapport PERSISTE dans « 📜 chroniques-combat »
+                    # (informe au propre, hors de l'arène).
+                    if _report_fn is not None:
+                        try:
+                            await _report_fn(guild, _recap_title, _recap_body)
+                        except Exception:
+                            pass
+                    # Le panneau du mob devient un mini-récap PUIS s'auto-supprime
+                    # (~90 s) → l'arène ne s'encombre plus de pavés de « X vaincu ».
                     await msg.edit(view=ui_v2.recap_view(
                         _recap_title, _recap_body, color=ui_v2.Palette.SUCCESS))
+                    try:
+                        await msg.delete(delay=90)
+                    except Exception:
+                        pass
                 except Exception:
                     pass
     except Exception:

@@ -40468,7 +40468,8 @@ async def on_ready():
         mob_hunts_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
                                inventory_fn=_get_or_create_inventory,
                                active_ping_fn=_ping_active_members,
-                               arena_ensure_fn=_ensure_combat_arena_channel)
+                               arena_ensure_fn=_ensure_combat_arena_channel,
+                               report_fn=_post_combat_report)
         await mob_hunts_module.init_db()
         mob_hunts_module.register_persistent_views(bot)
         if not mob_hunts_module.spawn_task.is_running():
@@ -40482,7 +40483,8 @@ async def on_ready():
                                       notif_check_fn=_member_wants_notif,
                                       cleanup_register_fn=_register_for_cleanup,
                                       arena_create_fn=_create_combat_arena,
-                                      arena_delete_fn=_delete_combat_arena)
+                                      arena_delete_fn=_delete_combat_arena,
+                                      report_fn=_post_combat_report)
             await daily_bosses_module.init_db()
             daily_bosses_module.register_persistent_views(bot)
             if not daily_bosses_module.daily_boss_task.is_running():
@@ -60287,6 +60289,14 @@ async def _end_world_boss(guild, wb_id: int, victory: bool, reason: str = ""):
                     await _register_for_cleanup(_bm, LIFETIME_WB, 'world_boss_recap')
                 except Exception:
                     pass
+                # Phase 223 : copie PERSISTANTE dans « 📜 chroniques-combat »
+                # (l'arène world boss est éphémère → le rapport y reste, au propre).
+                try:
+                    await _post_combat_report(
+                        guild, head.replace("**", ""), desc,
+                        color=(0x2ECC71 if victory else 0x95A5A6))
+                except Exception:
+                    pass
         except Exception as ex:
             print(f"[world_boss recap persistent] {ex}")
 
@@ -63589,6 +63599,64 @@ async def _arena_make_public(guild, text_channel):
                 pass
     except Exception as ex:
         print(f"[_arena_make_public] {ex}")
+
+
+async def _ensure_combat_reports_channel(guild):
+    """Phase 223 : salon PERSISTANT « 📜 chroniques-combat » où atterrissent TOUS
+    les rapports de fin de combat (mob/boss/world boss vaincu, rapport quotidien).
+    Les ARÈNES sont éphémères (1 par event, supprimées à la fin) ; les RAPPORTS,
+    eux, RESTENT ici, au propre, pour informer tout le monde — au lieu de
+    s'entasser en pavés de texte dans l'arène. Lecture publique, écriture bot.
+    Mémorisé en cfg (combat_reports_channel_id). Retourne le salon ou None."""
+    if guild is None:
+        return None
+    me = guild.me
+    try:
+        c = await cfg(guild.id)
+        ch_id = int(c.get('combat_reports_channel_id', 0) or 0)
+        if ch_id:
+            ch = guild.get_channel(ch_id)
+            if isinstance(ch, discord.TextChannel):
+                return ch
+        ch = discord.utils.get(guild.text_channels, name="📜-chroniques-combat")
+        if ch is None:
+            if not (me and me.guild_permissions.manage_channels):
+                return None
+            ow = {
+                guild.default_role: discord.PermissionOverwrite(
+                    view_channel=True, read_message_history=True, send_messages=False),
+                me: discord.PermissionOverwrite(
+                    view_channel=True, send_messages=True, embed_links=True,
+                    manage_messages=True),
+            }
+            ch = await guild.create_text_channel(
+                name="📜-chroniques-combat", overwrites=ow,
+                topic="Rapports de fin de combat : boss, mobs, world boss vaincus + rapport quotidien.",
+                reason="Phase 223 : journal des rapports de combat")
+        await db_set(guild.id, 'combat_reports_channel_id', ch.id)
+        return ch
+    except Exception as ex:
+        print(f"[_ensure_combat_reports_channel] {ex}")
+        return None
+
+
+async def _post_combat_report(guild, title: str, body: str = "", color: int = 0x2ECC71):
+    """Phase 223 : poste un rapport de fin de combat dans « 📜 chroniques-combat »
+    (rendu V2 propre). PERSISTANT (c'est le journal, pas d'auto-suppression).
+    Fail-open. Injecté dans mob_hunts / daily_bosses comme report_fn ; appelé
+    directement pour le world boss."""
+    try:
+        ch = await _ensure_combat_reports_channel(guild)
+        if ch is None:
+            return None
+        try:
+            return await ch.send(view=v2_recap_view(title, body or "", color=color))
+        except Exception:
+            txt = f"**{title}**" + (f"\n{body}" if body else "")
+            return await ch.send(txt[:1900])
+    except Exception as ex:
+        print(f"[_post_combat_report] {ex}")
+        return None
 
 
 async def _ensure_combat_arena_channel(guild):
