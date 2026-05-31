@@ -59664,26 +59664,31 @@ async def _start_world_boss(guild) -> dict:
         # Choisir un boss
         boss = ev42.random_world_boss()
 
-        # Créer le salon arena (visible et écrivable par @everyone)
-        try:
-            arena_ch = await guild.create_text_channel(
-                name=f"🌍-world-boss-{boss['id']}"[:90],
-                category=category,
-                reason="World Boss event",
-                overwrites={
-                    guild.default_role: discord.PermissionOverwrite(
-                        view_channel=True, send_messages=True, read_message_history=True,
-                    ),
-                    guild.me: discord.PermissionOverwrite(
-                        view_channel=True, send_messages=True, manage_messages=True,
-                        manage_channels=True, embed_links=True,
-                    ),
-                },
-            )
-        except discord.Forbidden:
-            return {'ok': False, 'error': 'permission manage_channels refusée'}
-        except Exception as ex:
-            return {'ok': False, 'error': f'erreur création salon : {ex}'}
+        # Phase 211 : arène DÉDIÉE (catégorie « ⚔️ {boss} » + salon texte + 2
+        # vocaux « Combat », supprimée à la fin). Fallback : salon simple dans la
+        # catégorie Événements si la création d'arène échoue (fail-open).
+        arena_ch = await _create_combat_arena(
+            guild, 'world_boss', boss.get('title', boss['id']))
+        if arena_ch is None:
+            try:
+                arena_ch = await guild.create_text_channel(
+                    name=f"🌍-world-boss-{boss['id']}"[:90],
+                    category=category,
+                    reason="World Boss event",
+                    overwrites={
+                        guild.default_role: discord.PermissionOverwrite(
+                            view_channel=True, send_messages=True, read_message_history=True,
+                        ),
+                        guild.me: discord.PermissionOverwrite(
+                            view_channel=True, send_messages=True, manage_messages=True,
+                            manage_channels=True, embed_links=True,
+                        ),
+                    },
+                )
+            except discord.Forbidden:
+                return {'ok': False, 'error': 'permission manage_channels refusée'}
+            except Exception as ex:
+                return {'ok': False, 'error': f'erreur création salon : {ex}'}
 
         ends_at = datetime.now(timezone.utc) + timedelta(minutes=90)
         # Insérer en DB
@@ -59972,6 +59977,12 @@ async def _end_world_boss(guild, wb_id: int, victory: bool, reason: str = ""):
 
                 async def _cleanup_arena():
                     await asyncio.sleep(300)
+                    # Phase 211 : si arène dédiée (catégorie), supprime TOUT
+                    # (texte + vocaux) ; sinon supprime juste le salon.
+                    try:
+                        await _delete_combat_arena(guild, int(ch_id), grace_seconds=0)
+                    except Exception:
+                        pass
                     try:
                         await ch.delete(reason="World Boss event ended")
                     except Exception:
