@@ -1203,12 +1203,20 @@ async def build_encounter_panel(
             self.add_item(v2_container(*items, color=0x6B46C1))
 
     layout = _EncLayout()
-    # 3 boutons de choix
+    # Phase 208 FIX : boutons de choix dans un ActionRow (max 5).
+    # Un Button/DynamicItem brut au top-level d'un LayoutView V2 = 400 "Invalid
+    # Form Body". On crée des Button BRUTS avec le MÊME custom_id que
+    # EncounterChoiceButton (DynamicItem) ; le clic reste capté par le
+    # DynamicItem enregistré (match du custom_id).
+    choice_buttons = []
     for idx, choice in enumerate(encounter["choices"][:3]):
-        btn = EncounterChoiceButton(encounter["id"], idx, target_uid)
-        # Personnalise le label
-        btn.item.label = (choice.get("label", f"Choix {idx + 1}"))[:80]
-        layout.add_item(btn)
+        choice_buttons.append(Button(
+            label=(choice.get("label", f"Choix {idx + 1}"))[:80],
+            style=discord.ButtonStyle.primary,
+            custom_id=f"enc_choice:{encounter['id']}:{idx}:{target_uid}",
+        ))
+    if choice_buttons:
+        layout.add_item(discord.ui.ActionRow(*choice_buttons))
 
     return layout
 

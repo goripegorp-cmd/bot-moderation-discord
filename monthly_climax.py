@@ -884,8 +884,16 @@ async def build_climax_panel(
 
     layout = _ClimaxLayout()
     if my_attacks < MAX_ATTACKS_PER_USER and active["hp_current"] > 0:
-        btn = ClimaxAttackButton(active["event_id"], user_id)
-        layout.add_item(btn)
+        # Phase 208 FIX : bouton dans un ActionRow (type 1). Un Button/DynamicItem
+        # brut au top-level d'un LayoutView V2 = 400 "Invalid Form Body". On crée
+        # un Button BRUT avec le MÊME label/style/custom_id que ClimaxAttackButton
+        # (DynamicItem) ; le clic reste capté par le DynamicItem enregistré.
+        btn = Button(
+            label="⚔️ Attaquer",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"climax_atk:{active['event_id']}:{user_id}",
+        )
+        layout.add_item(discord.ui.ActionRow(btn))
 
     return layout
 

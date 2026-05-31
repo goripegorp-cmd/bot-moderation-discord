@@ -855,8 +855,17 @@ async def build_letters_panel(
             self.add_item(v2_container(*items, color=0x6D4C41))
 
     layout = _LettersLayout()
-    btn = LetterToggleButton(user_id, subscribed)
-    layout.add_item(btn)
+    # Phase 208 FIX : bouton dans un ActionRow (type 1). Un Button/DynamicItem
+    # brut au top-level d'un LayoutView V2 = 400 "Invalid Form Body". On crée un
+    # Button BRUT avec le MÊME label/style/custom_id que LetterToggleButton
+    # (DynamicItem) ; le clic reste capté par le DynamicItem enregistré.
+    btn = Button(
+        label=("🔴 Se désabonner" if subscribed else "🟢 S'abonner"),
+        style=(discord.ButtonStyle.danger if subscribed
+               else discord.ButtonStyle.success),
+        custom_id=f"letter_toggle:{user_id}",
+    )
+    layout.add_item(discord.ui.ActionRow(btn))
     return layout
 
 

@@ -399,9 +399,20 @@ async def _post_merchant_panel(
             self.add_item(v2_container(*items_render, color=0xD4AF37))
 
     layout = _MerchantLayout()
-    # 1 bouton par item (max 5)
+    # Phase 208 FIX : boutons d'achat dans un ActionRow (max 5).
+    # Un bouton brut au top-level d'un LayoutView V2 = 400 "Invalid Form Body".
+    # On crée des Button bruts avec le MÊME custom_id que MerchantBuyButton
+    # (DynamicItem) ; le clic est capté par le DynamicItem enregistré (match
+    # du custom_id) — un DynamicItem ne peut PAS aller dans un ActionRow.
+    buy_buttons = []
     for item in items_list[:5]:
-        layout.add_item(MerchantBuyButton(visit_id, item["id"], item["name"], item["price"]))
+        buy_buttons.append(Button(
+            label=f"🛒 {item['name'][:30]} — {item['price']:,} 🪙",
+            style=discord.ButtonStyle.success,
+            custom_id=f"merch_buy:{visit_id}:{item['id']}",
+        ))
+    if buy_buttons:
+        layout.add_item(discord.ui.ActionRow(*buy_buttons))
 
     try:
         msg = await ch.send(view=layout)

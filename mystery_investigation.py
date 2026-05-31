@@ -787,12 +787,21 @@ async def build_mysteries_panel(
 
     layout = _MysteriesLayout()
 
-    # 1 bouton "Partager" par indice possédé (max 5 pour pas dépasser)
+    # Phase 208 FIX : boutons "Partager" dans un ActionRow (max 5). Un Button/
+    # DynamicItem brut au top-level d'un LayoutView V2 = 400 "Invalid Form Body".
+    # On crée des Button BRUTS avec le MÊME label/style/custom_id que
+    # ShareClueButton (DynamicItem) ; le clic reste capté par le DynamicItem.
+    share_buttons = []
     for c in my_clues[:5]:
         if c["mystery_id"] in revealed_ids:
             continue  # déjà révélé : pas la peine
-        btn = ShareClueButton(c["mystery_id"], c["clue_idx"], user_id)
-        layout.add_item(btn)
+        share_buttons.append(Button(
+            label=f"📜 Partager fragment {c['clue_idx'] + 1}",
+            style=discord.ButtonStyle.primary,
+            custom_id=f"mystery_share:{c['mystery_id']}:{c['clue_idx']}:{user_id}",
+        ))
+    if share_buttons:
+        layout.add_item(discord.ui.ActionRow(*share_buttons))
 
     return layout
 

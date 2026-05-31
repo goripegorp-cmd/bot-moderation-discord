@@ -954,11 +954,20 @@ async def build_council_panel(
     layout = _CouncilLayout()
 
     # Boutons de vote (3 options) si pas encore voté
+    # Phase 208 FIX : boutons dans des ActionRow (max 5/row). Un Button/
+    # DynamicItem brut au top-level d'un LayoutView V2 = 400 "Invalid Form Body".
+    # On crée des Button BRUTS avec le MÊME label/style/custom_id que
+    # CouncilVoteButton (DynamicItem) ; le clic reste capté par le DynamicItem.
     if user_voted is None:
+        vote_buttons = []
         for idx, opt in enumerate(council["options"]):
-            btn = CouncilVoteButton(active["session_id"], idx, user_id)
-            btn.item.label = (opt["label"])[:80]
-            layout.add_item(btn)
+            vote_buttons.append(Button(
+                label=(opt["label"])[:80],
+                style=discord.ButtonStyle.primary,
+                custom_id=f"council_vote:{active['session_id']}:{idx}:{user_id}",
+            ))
+        for i in range(0, len(vote_buttons), 5):
+            layout.add_item(discord.ui.ActionRow(*vote_buttons[i:i + 5]))
 
     return layout
 

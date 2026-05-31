@@ -815,8 +815,16 @@ async def build_regions_panel(
     layout = _RegionsLayout()
 
     if active_patrol:
-        btn = PatrolDefendButton(active_patrol["patrol_id"], user_id)
-        layout.add_item(btn)
+        # Phase 208 FIX : bouton dans un ActionRow (type 1). Un Button/DynamicItem
+        # brut au top-level d'un LayoutView V2 = 400 "Invalid Form Body". On crée
+        # un Button BRUT avec le MÊME label/style/custom_id que PatrolDefendButton
+        # (DynamicItem) ; le clic reste capté par le DynamicItem enregistré.
+        btn = Button(
+            label="🛡️ Défendre (+1 pt)",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"patrol_defend:{active_patrol['patrol_id']}:{user_id}",
+        )
+        layout.add_item(discord.ui.ActionRow(btn))
 
     return layout
 
@@ -894,8 +902,16 @@ async def build_patrol_panel(
 
     layout = _PatrolLayout()
     if my_contribution < MAX_POINTS_PER_USER:
-        btn = PatrolDefendButton(active["patrol_id"], user_id)
-        layout.add_item(btn)
+        # Phase 208 FIX : bouton dans un ActionRow (type 1). Un Button/DynamicItem
+        # brut au top-level d'un LayoutView V2 = 400 "Invalid Form Body". On crée
+        # un Button BRUT avec le MÊME label/style/custom_id que PatrolDefendButton
+        # (DynamicItem) ; le clic reste capté par le DynamicItem enregistré.
+        btn = Button(
+            label="🛡️ Défendre (+1 pt)",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"patrol_defend:{active['patrol_id']}:{user_id}",
+        )
+        layout.add_item(discord.ui.ActionRow(btn))
 
     return layout
 

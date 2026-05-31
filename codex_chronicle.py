@@ -509,6 +509,13 @@ async def build_codex_panel(
 
     layout = _CodexLayout()
 
+    # Phase 208 FIX : tous les boutons doivent vivre dans des ActionRow (type 1).
+    # Un Button/DynamicItem brut au top-level d'un LayoutView V2 = 400 "Invalid
+    # Form Body". On collecte des Button BRUTS (un DynamicItem ne peut pas aller
+    # dans un ActionRow) avec le MÊME custom_id que chaque DynamicItem ; le clic
+    # reste capté par le DynamicItem enregistré (match du custom_id).
+    nav_buttons: list[Button] = []
+
     # 5 boutons de navigation (Phase 171 : ajout Welcome pour nouveaux membres)
     btn_defs = [
         ("welcome", "🌟 Bienvenue", discord.ButtonStyle.success),
@@ -527,50 +534,74 @@ async def build_codex_panel(
                 disabled=True,
             )
         else:
-            btn = CodexPageButton(pkey, user_id)
-        layout.add_item(btn)
+            # Équivalent brut de CodexPageButton (même label/style/custom_id).
+            btn = Button(
+                label=label,
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"codex_nav:{pkey}:{user_id}",
+            )
+        nav_buttons.append(btn)
 
     # Phase 170.4 : 5e bouton "🗳️ Conseil" si un conseil est actif
     if _council is not None:
         try:
             active = await _council.get_active_council(guild_id)
             if active:
-                council_btn = CodexCouncilButton(user_id)
-                layout.add_item(council_btn)
+                nav_buttons.append(Button(
+                    label="🗳️ Conseil",
+                    style=discord.ButtonStyle.danger,
+                    custom_id=f"codex_council:{user_id}",
+                ))
         except Exception:
             pass
 
     # Phase 170.5 : bouton "🌍 Régions" (toujours accessible)
     if _regional is not None:
         try:
-            region_btn = CodexRegionsButton(user_id)
-            layout.add_item(region_btn)
+            nav_buttons.append(Button(
+                label="🌍 Régions",
+                style=discord.ButtonStyle.success,
+                custom_id=f"codex_regions:{user_id}",
+            ))
         except Exception:
             pass
 
     # Phase 170.6 : bouton "🔮 Mystères" (toujours accessible)
     if _mystery is not None:
         try:
-            mystery_btn = CodexMysteryButton(user_id)
-            layout.add_item(mystery_btn)
+            nav_buttons.append(Button(
+                label="🔮 Mystères",
+                style=discord.ButtonStyle.primary,
+                custom_id=f"codex_mystery:{user_id}",
+            ))
         except Exception:
             pass
 
     # Phase 170.7 : bouton "✉️ Lettres NPCs" (opt-in DM)
     if _letters is not None:
         try:
-            letters_btn = CodexLettersButton(user_id)
-            layout.add_item(letters_btn)
+            nav_buttons.append(Button(
+                label="✉️ Lettres",
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"codex_letters:{user_id}",
+            ))
         except Exception:
             pass
 
     # Phase 170.8 : bouton "⚔️ Boss" (toujours visible, affiche titres si pas de boss)
     if _climax is not None:
         try:
-            climax_btn = CodexClimaxButton(user_id)
-            layout.add_item(climax_btn)
+            nav_buttons.append(Button(
+                label="⚔️ Boss",
+                style=discord.ButtonStyle.danger,
+                custom_id=f"codex_climax:{user_id}",
+            ))
         except Exception:
             pass
+
+    # Phase 208 FIX : regrouper en ActionRows de 5 boutons max (Discord cap).
+    for i in range(0, len(nav_buttons), 5):
+        layout.add_item(discord.ui.ActionRow(*nav_buttons[i:i + 5]))
 
     return layout
 
