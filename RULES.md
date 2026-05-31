@@ -12,12 +12,24 @@ communauté Roblox**. Pas une plateforme de relations interpersonnelles.
 
 Direction prise :
 - ✅ **Événements** : boss raids, world bosses, mini-jeux, treasure hunt, quiz
-- ✅ **Économie** : coins, bank, marketplace, auctions, crafting, trade
+- ✅ **Économie** : coins, bank, crafting, enchantement, forge, **vente au marchand** (item → pièces)
 - ✅ **Progression** : XP, level, prestige, achievements, streaks
 - ✅ **Clans / Factions / Alliances** : guildes, équipes, coffres partagés
 - ✅ **Gestion** : alliance management, trésorerie, log d'activité, rôles
 - ✅ **Compétition** : duels, tournois, ladder Elo, faction wars
 - ✅ **Roblox-spécifique** : updates, link verify, achievements broadcasts
+
+### 🚫 Trading joueur-à-joueur STRICTEMENT INTERDIT
+Aucun item / équipement / pièce ne doit jamais **changer de joueur** :
+- ❌ **Trade P2P** (échange direct d'items entre 2 joueurs) — désactivé (Phase 166)
+- ❌ **Hôtel des ventes / enchères** (auction house) — désactivé (Phase 166)
+- ❌ **Marketplace** joueur-à-joueur (revente d'items à d'autres joueurs) — désactivé
+- ✅ Seule transformation autorisée d'un item en pièces : **la VENTE AU MARCHAND**
+  (système), via le coffre `/inventory` → bouton Équipement (Phase 217).
+
+Raison : empêcher le passage de stuff des anciens vers les nouveaux (qui tue la
+progression), les arnaques, et le RMT. Le stuff se **gagne** (combat, loot,
+craft), il ne se **transfère pas**.
 
 ---
 

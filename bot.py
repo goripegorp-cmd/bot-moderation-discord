@@ -7845,6 +7845,37 @@ def _rarity_rank(item) -> int:
     return _RARITY_RANK.get((item or {}).get("rarity", "commune"), 0)
 
 
+def _canon_rarity(r) -> str:
+    """Rareté canonique (accentuée) pour l'affichage / RARITY_EMOJIS."""
+    r = str(r or "commune").lower()
+    return {"epique": "épique", "legendaire": "légendaire"}.get(r, r)
+
+
+# ── Phase 217 : VENTE au MARCHAND (système) — PAS de trading joueur↔joueur ──
+# Vendre un objet du coffre = pièces. Valeur selon la rareté, bonifiée par le
+# niveau d'amélioration (+N) et l'enchantement. C'est le SEUL moyen de
+# transformer du stuff en pièces : aucun item ne change jamais de joueur.
+_SELL_VALUE = {
+    "commune": 25, "rare": 80,
+    "épique": 220, "epique": 220,
+    "légendaire": 650, "legendaire": 650,
+    "mythique": 1800, "divine": 5000,
+}
+
+
+def _sell_value(item: dict) -> int:
+    """Prix de revente (pièces) d'un objet au marchand. Fail-safe → 25."""
+    if not item or not item.get("name"):
+        return 0
+    base = _SELL_VALUE.get(str(item.get("rarity", "commune")).lower(), 25)
+    lvl = int(item.get("upgrade_level", item.get("enhancement_level", 0)) or 0)
+    if lvl > 0:
+        base += lvl * max(10, base // 8)
+    if item.get("enchant"):
+        base = int(base * 1.25)
+    return max(5, int(base))
+
+
 async def _stash_add(guild_id: int, user_id: int, item: dict) -> bool:
     """Ajoute un objet au coffre (cap 60/slot, on vire le plus ancien sinon)."""
     if not item or not item.get("name"):
@@ -7936,6 +7967,61 @@ async def _stash_equip(guild_id: int, user_id: int, stash_id: int):
     except Exception as ex:
         print(f"[_stash_equip] {ex}")
         return (False, None, None)
+
+
+async def _stash_sell(guild_id: int, user_id: int, stash_id: int):
+    """Phase 217 : VEND un objet du coffre au marchand → crédite des pièces.
+    Atomique. Retourne (ok, item_name, coins) ou (False, None, 0). Fail-open.
+    AUCUN transfert vers un autre joueur — c'est une vente au système."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT item_json FROM player_stash WHERE id=? AND guild_id=? AND user_id=?",
+                (stash_id, guild_id, user_id),
+            ) as cur:
+                row = await cur.fetchone()
+            if not row:
+                return (False, None, 0)
+            item = json.loads(row[0]) if row[0] else {}
+            value = _sell_value(item)
+            await db.execute("DELETE FROM player_stash WHERE id=?", (stash_id,))
+            await db.commit()
+        try:
+            await add_coins(guild_id, user_id, value)
+        except Exception as ex:
+            print(f"[_stash_sell add_coins] {ex}")
+        return (True, item.get("name", "?"), value)
+    except Exception as ex:
+        print(f"[_stash_sell] {ex}")
+        return (False, None, 0)
+
+
+async def _stash_sell_bulk(guild_id: int, user_id: int, max_rank: int = 0):
+    """Phase 217 : vend EN LOT tout le coffre jusqu'à la rareté `max_rank`
+    (0 = commune uniquement → déclutter). Retourne (count, total_coins). Fail-open."""
+    sold, total = 0, 0
+    try:
+        rows = await _stash_list(guild_id, user_id)
+        ids = []
+        for (sid, _slot, item) in rows:
+            if _rarity_rank(item) <= max_rank:
+                ids.append(int(sid))
+                total += _sell_value(item)
+                sold += 1
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            async with get_db() as db:
+                await db.execute(
+                    f"DELETE FROM player_stash WHERE id IN ({placeholders})", ids)
+                await db.commit()
+            if total > 0:
+                try:
+                    await add_coins(guild_id, user_id, total)
+                except Exception as ex:
+                    print(f"[_stash_sell_bulk add_coins] {ex}")
+    except Exception as ex:
+        print(f"[_stash_sell_bulk] {ex}")
+    return (sold, total)
 
 
 async def _acquire_gear(guild_id: int, user_id: int, item: dict) -> str:
@@ -8051,12 +8137,89 @@ class _EquipSelect(discord.ui.Select):
                 pass
 
 
+class _SellSelect(discord.ui.Select):
+    """Phase 217 : VEND un objet du coffre au MARCHAND (→ pièces). Vente au
+    système, jamais à un autre joueur (trading interdit)."""
+
+    def __init__(self, stash: list):
+        options = []
+        for (sid, slot, item) in stash[:25]:
+            emo, label = _SLOT_META.get(slot, ('📦', slot))
+            rr = events2026.RARITY_EMOJIS.get(_canon_rarity(item.get('rarity')), '')
+            val = _sell_value(item)
+            desc = f"{label} · {item.get('rarity', 'commune')} · 💰 {val} 🪙"
+            options.append(discord.SelectOption(
+                label=str(item.get('name', '?'))[:90] or '?',
+                value=str(sid),
+                description=desc[:100],
+                emoji=(rr or None),
+            ))
+        if not options:
+            options = [discord.SelectOption(label="(coffre vide)", value="none")]
+        super().__init__(
+            placeholder="💰 Vendre un objet au marchand…",
+            options=options, min_values=1, max_values=1,
+        )
+
+    async def callback(self, i: discord.Interaction):
+        try:
+            if self.values[0] == "none":
+                return await i.response.defer()
+            sid = int(self.values[0])
+            ok, name, coins = await _stash_sell(i.guild.id, i.user.id, sid)
+            if not ok:
+                return await i.response.send_message(
+                    "❌ Objet introuvable (déjà vendu/équipé ?).", ephemeral=True)
+            new_view = await EquipmentLayoutV2.create(i.guild, i.user.id)
+            await i.response.edit_message(view=new_view)
+            try:
+                await i.followup.send(
+                    f"💰 Vendu **{name}** pour **{coins}** 🪙 !", ephemeral=True)
+            except Exception:
+                pass
+        except Exception as ex:
+            print(f"[_SellSelect callback] {ex}")
+            try:
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
+class _SellCommonsButton(discord.ui.Button):
+    """Phase 217 : vend d'un coup TOUT le stuff commun du coffre (déclutter)."""
+
+    def __init__(self, count: int, total: int):
+        super().__init__(
+            label=f"🧹 Vendre tout le commun ({count} → {total} 🪙)",
+            style=discord.ButtonStyle.secondary,
+        )
+
+    async def callback(self, i: discord.Interaction):
+        try:
+            sold, total = await _stash_sell_bulk(i.guild.id, i.user.id, max_rank=0)
+            new_view = await EquipmentLayoutV2.create(i.guild, i.user.id)
+            await i.response.edit_message(view=new_view)
+            msg = (f"🧹 Vendu **{sold}** objet(s) commun(s) pour **{total}** 🪙 !"
+                   if sold else "Rien de commun à vendre.")
+            try:
+                await i.followup.send(msg, ephemeral=True)
+            except Exception:
+                pass
+        except Exception as ex:
+            print(f"[_SellCommonsButton] {ex}")
+
+
 class EquipmentLayoutV2(LayoutView):
     """Phase 179b : panneau ÉQUIPEMENT (loadout + équiper depuis le coffre).
     Ephemeral, donc réservé au joueur qui l'ouvre."""
 
     def __init__(self, guild, user_id: int, inv: dict, stash: list, totals: dict):
         super().__init__(timeout=300)
+        # Phase 217 : coffre TRIÉ par rareté décroissante (meilleurs en premier).
+        try:
+            stash = sorted(stash, key=lambda t: (-_rarity_rank(t[2]), t[1]))
+        except Exception:
+            pass
         items = []
         items.append(v2_title("🎒 Mon Équipement"))
         items.append(v2_body("\n".join(_format_loadout_lines(inv))))
@@ -8070,9 +8233,18 @@ class EquipmentLayoutV2(LayoutView):
         items.append(v2_body(tot_line))
         items.append(v2_divider())
         if stash:
+            # Phase 217 : répartition par RARETÉ (classer le stuff d'un coup d'œil)
+            rc = {}
+            for (_s, _sl, _it) in stash:
+                k = _canon_rarity(_it.get('rarity'))
+                rc[k] = rc.get(k, 0) + 1
+            parts = [f"{events2026.RARITY_EMOJIS.get(r, '')} {rc[r]}"
+                     for r in ("divine", "mythique", "légendaire", "épique", "rare", "commune")
+                     if rc.get(r)]
             items.append(v2_body(
-                f"_🎒 **{len(stash)}** objet(s) dans ton coffre. "
-                f"Choisis-en un ci-dessous pour l'équiper (l'ancien retourne au coffre)._"
+                f"_🎒 **{len(stash)}** objet(s) — " + " · ".join(parts) + "\n"
+                "Équipe-en un, ou **vends-le au marchand** pour des 🪙 ci-dessous. "
+                "🔒 Aucun échange entre joueurs._"
             ))
         else:
             items.append(v2_body(
@@ -8082,6 +8254,13 @@ class EquipmentLayoutV2(LayoutView):
         self.add_item(v2_container(*items, color=0x9B59B6))
         if stash:
             self.add_item(discord.ui.ActionRow(_EquipSelect(stash)))
+            # Phase 217 : vendre au marchand (item par item) + déclutter le commun
+            self.add_item(discord.ui.ActionRow(_SellSelect(stash)))
+            commons = [t for t in stash if _rarity_rank(t[2]) == 0]
+            if commons:
+                _ctot = sum(_sell_value(t[2]) for t in commons)
+                self.add_item(discord.ui.ActionRow(
+                    _SellCommonsButton(len(commons), _ctot)))
 
     @classmethod
     async def create(cls, guild, user_id: int):
@@ -45786,7 +45965,7 @@ async def inventory_cmd(i: discord.Interaction):
                 class _EquipBtn(discord.ui.Button):
                     def __init__(self):
                         super().__init__(
-                            label="🎒 Équiper",
+                            label="🎒 Équiper / Vendre",
                             style=discord.ButtonStyle.primary,
                             custom_id=f"phase179_inv_equip_{_owner_id}",
                         )
@@ -45801,8 +45980,8 @@ async def inventory_cmd(i: discord.Interaction):
                 # ─── Section "ACTIONS RAPIDES" avec boutons en accessory ───
                 items.append(v2_body("**╔═══ ⚡  ACTIONS RAPIDES  ═══╗**"))
                 items.append(v2_section(
-                    v2_title("🎒  Équiper / Coffre"),
-                    v2_subtitle("Vois ton équipement + équipe une arme de ton coffre"),
+                    v2_title("🎒  Équipement · Coffre · Vente"),
+                    v2_subtitle("Vois ton stuff trié par rareté · équipe · vends au marchand pour des 🪙"),
                     accessory=_EquipBtn(),
                 ))
                 items.append(v2_section(
