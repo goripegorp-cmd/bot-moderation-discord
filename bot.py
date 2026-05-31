@@ -9014,16 +9014,25 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
                     embed_links=True,
                 ),
             }
+            # Phase 219 : CATÉGORIE éphémère créée EN PREMIER, tout EN HAUT
+            # (position=0), avec le salon texte ET les vocaux DEDANS. Sinon les
+            # vocaux (créés plus bas) atterrissent tout en bas du serveur, détachés
+            # du texte. On regroupe donc tout dans une seule catégorie en haut.
+            arena_category = await guild.create_category(
+                name=f"⚔️ {arena_name}"[:90], position=0,
+                overwrites=arena_overwrites,
+                reason=f"Boss Raid event {event_id} — catégorie d'arène",
+            )
+            try:
+                await arena_category.edit(position=0)
+            except Exception:
+                pass
             arena_channel = await guild.create_text_channel(
                 name=arena_name[:90],
+                category=arena_category,
                 overwrites=arena_overwrites,
                 reason=f"Boss Raid event {event_id}",
             )
-            # Positionner en haut
-            try:
-                await arena_channel.edit(position=0)
-            except Exception:
-                pass
         except discord.Forbidden:
             # Phase 201 : échec post-INSERT → nettoyer la ligne event (sinon fantôme)
             await _mark_event_ended(event_id)
@@ -10510,8 +10519,10 @@ async def _end_active_event(guild, *, victory: bool, reason: str = ""):
         except Exception as ex:
             print(f"[event end voice zones cleanup] {ex}")
 
-        # ─── Supprimer le salon arène (le contenu sera perdu mais c'est temporaire par design) ───
+        # ─── Supprimer le salon arène + SA CATÉGORIE (Phase 219 : tout détruire) ───
         arena_ch = guild.get_channel(arena_ch_id) if arena_ch_id else None
+        # On capture la catégorie AVANT de supprimer le salon (sinon plus de ref).
+        arena_cat = arena_ch.category if arena_ch else None
         if arena_ch:
             # Envoyer un dernier message dans l'arène avant de la fermer
             try:
@@ -10523,6 +10534,18 @@ async def _end_active_event(guild, *, victory: bool, reason: str = ""):
                 await arena_ch.delete(reason=f"Event {event_id} terminé")
             except Exception as ex:
                 print(f"[event arena delete] {ex}")
+        # Phase 219 : détruire la CATÉGORIE d'arène + tout résidu (vocaux non
+        # listés, salons restants) → garantit que RIEN ne traîne après l'event.
+        if arena_cat is not None:
+            try:
+                for _child in list(getattr(arena_cat, 'channels', [])):
+                    try:
+                        await _child.delete(reason=f"Event {event_id} terminé — résidu arène")
+                    except Exception:
+                        pass
+                await arena_cat.delete(reason=f"Event {event_id} terminé — catégorie arène")
+            except Exception as ex:
+                print(f"[event arena category delete] {ex}")
 
         # Salon log
         if log_ch:
@@ -39274,6 +39297,7 @@ async def _boot_cleanup_active_events():
     # ─── 1. Récolter les message_ids à supprimer + snapshots de perms ───
     orphans_to_delete = []  # list of (channel_id, message_id)
     perm_snapshots = []     # list of (guild_id, channel_id, had_overwrite, allow, deny)
+    arena_chans_to_delete = []  # Phase 219 : (guild_id, arena_channel_id) à DÉTRUIRE (+ leur catégorie)
     try:
         async with get_db() as db:
             # events (Boss Raid + Treasure + Quiz)
@@ -39285,6 +39309,10 @@ async def _boot_cleanup_active_events():
             for eid, gid, ch, msg in event_rows:
                 if ch and msg:
                     orphans_to_delete.append((int(ch), int(msg)))
+                # Phase 219 : l'arène masquante (boss raid/trésor/quiz) est un salon
+                # CRÉÉ pour l'event → on le détruit au boot (+ sa catégorie).
+                if ch and gid:
+                    arena_chans_to_delete.append((int(gid), int(ch)))
                 # Charger snapshots de perms pour cet event
                 try:
                     async with db.execute(
@@ -39347,6 +39375,36 @@ async def _boot_cleanup_active_events():
                     pass
             except Exception as ex:
                 print(f"[boot_cleanup restore perm ch={ch_id}] {ex}")
+
+    # ─── Phase 219 : DÉTRUIRE les arènes d'event résiduelles (salon + catégorie) ───
+    # Après un redémarrage en plein event, l'arène masquante (salon créé en haut +
+    # sa catégorie « ⚔️ … ») doit disparaître — sinon elle traîne, vide. On ne
+    # touche JAMAIS la catégorie persistante des mobs « ⚔️ Combat ».
+    for gid, ch_id in arena_chans_to_delete:
+        try:
+            guild = bot.get_guild(gid)
+            if not guild:
+                continue
+            ach = guild.get_channel(ch_id)
+            if ach is None:
+                continue
+            acat = getattr(ach, 'category', None)
+            try:
+                await ach.delete(reason="Phase 219 boot cleanup — arène d'event résiduelle")
+            except Exception:
+                pass
+            if acat is not None and acat.name.startswith("⚔️ ") and acat.name != "⚔️ Combat":
+                try:
+                    for _c in list(getattr(acat, 'channels', [])):
+                        try:
+                            await _c.delete(reason="Phase 219 boot cleanup — résidu arène")
+                        except Exception:
+                            pass
+                    await acat.delete(reason="Phase 219 boot cleanup — catégorie arène")
+                except Exception:
+                    pass
+        except Exception as ex:
+            print(f"[boot_cleanup arena delete ch={ch_id}] {ex}")
 
     # ─── 3. Mark-ended en DB (tous events actifs) ───
     try:
