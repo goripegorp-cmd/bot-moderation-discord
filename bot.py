@@ -8962,11 +8962,14 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
     """Lance un Boss Raid. Retourne {ok, error?, event_id?, arena_channel_id?}."""
     try:
         c = await cfg(guild.id)
-        # Sanity : pas d'event en cours ?
-        async with get_db() as db:
-            async with db.execute('SELECT id FROM events WHERE guild_id=? AND ended=0', (guild.id,)) as cur:
-                if await cur.fetchone():
-                    return {"ok": False, "error": "Un événement est déjà en cours"}
+        # Phase 233 : VERROU GLOBAL — un boss raid MASQUE tout le serveur, donc on ne
+        # le lance JAMAIS par-dessus un autre event de combat en cours (world boss /
+        # boss du jour / climax / mob / autre masquant). Couvre AUSSI les lancements
+        # MANUELS (bouton « Lancer », /owner event) qui appelaient directement cette
+        # fonction sans passer par le gate du scheduler. include_mobs=True (le masquage
+        # cacherait aussi une arène de mob). Fail-open (anti-serveur-mort) via le helper.
+        if await _has_any_major_event_running(guild.id, include_mobs=True):
+            return {"ok": False, "error": "⏳ Un événement de combat est déjà en cours — attends qu'il se termine (ou que son timer expire)."}
 
         # Permissions du bot
         me = guild.me
@@ -11591,6 +11594,15 @@ async def _quiz_runner(guild, event_id: int, arena_ch_id: int, nb_questions: int
 
 async def _start_any_event(guild, triggered_by_id: int, event_type: str, *, manual: bool = False) -> dict:
     """Dispatch vers le bon starter selon le type."""
+    # Phase 233 : VERROU GLOBAL au point d'entrée commun — boss raid / trésor / quiz
+    # sont des events MASQUANTS. On ne les lance jamais par-dessus un autre event de
+    # combat (couvre trésor + quiz lancés manuellement, en plus du boss raid déjà gardé
+    # dans _start_boss_raid). Fail-open.
+    try:
+        if await _has_any_major_event_running(guild.id, include_mobs=True):
+            return {"ok": False, "error": "⏳ Un événement de combat est déjà en cours — attends qu'il se termine (ou que son timer expire)."}
+    except Exception:
+        pass
     if event_type == 'boss_raid':
         result = await _start_boss_raid(guild, triggered_by_id, manual=manual)
     elif event_type == 'treasure_hunt':
@@ -40666,7 +40678,8 @@ async def on_ready():
         world_invasion_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
                                     active_ping_fn=_ping_active_members,
                                     arena_ensure_fn=_ensure_combat_arena_channel,
-                                    event_busy_fn=_has_any_major_event_running)
+                                    event_busy_fn=_has_any_major_event_running,
+                                    arena_delete_fn=_delete_combat_arena)
         await world_invasion_module.init_db()
         if not world_invasion_module.monthly_invasion_task.is_running():
             world_invasion_module.monthly_invasion_task.start()
@@ -63814,6 +63827,7 @@ async def _delete_combat_arena(guild, text_channel_id: int, grace_seconds: int =
     except Exception:
         pass
     cat_id = alert_ch_id = alert_msg_id = 0
+    found_row = False
     try:
         async with get_db() as db:
             async with db.execute(
@@ -63822,6 +63836,7 @@ async def _delete_combat_arena(guild, text_channel_id: int, grace_seconds: int =
                 (guild.id, int(text_channel_id))) as cur:
                 row = await cur.fetchone()
         if row:
+            found_row = True
             cat_id = int(row[0] or 0)
             alert_ch_id = int(row[1] or 0)
             alert_msg_id = int(row[2] or 0)
@@ -63850,7 +63865,11 @@ async def _delete_combat_arena(guild, text_channel_id: int, grace_seconds: int =
                 await cat.delete(reason="Fin du combat — catégorie supprimée")
             except Exception:
                 pass
-    else:
+    elif found_row:
+        # Arène enregistrée mais sans catégorie (cas legacy/fallback) → supprimer
+        # juste son salon texte. SÉCURITÉ (Phase 233) : si AUCUNE ligne combat_arenas
+        # n'existe pour ce salon, on ne supprime RIEN — sinon un fallback qui aurait
+        # renvoyé le hub / un salon général le ferait supprimer par erreur.
         try:
             ch = guild.get_channel(int(text_channel_id))
             if isinstance(ch, discord.TextChannel):
@@ -63973,11 +63992,27 @@ async def _post_combat_report(guild, title: str, body: str = "", color: int = 0x
 
 
 async def _ensure_combat_arena_channel(guild):
-    """Phase 232 : PLUS d'arène « ⚔️ Combat » permanente. L'owner veut que TOUT
-    soit supprimé en fin d'event (rien ne doit traîner). On délègue donc à
-    _create_combat_arena → une arène ÉPHÉMÈRE (catégorie + texte + vocaux), qui
-    sera nettoyée à la fin du combat (ou au boot via combat_arenas). Conservé pour
-    compat (fallback mob / arène partagée d'invasion). Fail-open → None."""
+    """Phase 232/233 : PLUS d'arène « ⚔️ Combat » permanente. Pour le fallback mob et
+    l'arène partagée d'invasion, on RÉUTILISE l'arène 'shared' éphémère si elle est
+    encore vivante (Phase 233 — sinon chaque appel en recréait une → multiplication),
+    sinon on en crée une via _create_combat_arena. Elle reste éphémère (nettoyée à la
+    fin de l'event qui s'en sert, ou au boot via combat_arenas). Fail-open → None."""
+    if guild is None:
+        return None
+    # Réutiliser une arène 'shared' déjà vivante (évite la multiplication d'arènes)
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT text_channel_id FROM combat_arenas WHERE guild_id=? AND kind='shared' "
+                "ORDER BY id DESC LIMIT 1",
+                (guild.id,)) as cur:
+                row = await cur.fetchone()
+        if row and row[0]:
+            ch = guild.get_channel(int(row[0]))
+            if isinstance(ch, discord.TextChannel):
+                return ch
+    except Exception:
+        pass
     return await _create_combat_arena(guild, 'shared', 'Combat')
 
 

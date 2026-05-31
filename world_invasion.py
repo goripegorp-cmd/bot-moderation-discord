@@ -51,6 +51,7 @@ _v2 = None
 _add_coins = None
 _active_ping_fn = None  # Phase 207 : ping « membres actifs » (injecté par bot.py)
 _arena_ensure_fn = None  # Phase 213 : arène de combat PARTAGÉE (mêmes mobs que mob_hunts)
+_arena_delete_fn = None  # Phase 233 : async (guild, text_channel_id) -> supprime l'arène à la fin (injecté)
 _event_busy_fn = None  # Phase 230 : async (guild_id) -> True si un AUTRE event de combat tourne (injecté)
 
 INVASION_MOBS_COUNT = 5
@@ -61,9 +62,10 @@ ALLIANCE_BONUS_MULT = 1.30
 
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
-          active_ping_fn=None, arena_ensure_fn=None, event_busy_fn=None):
+          active_ping_fn=None, arena_ensure_fn=None, event_busy_fn=None,
+          arena_delete_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _active_ping_fn
-    global _arena_ensure_fn, _event_busy_fn
+    global _arena_ensure_fn, _event_busy_fn, _arena_delete_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -75,6 +77,8 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
     _arena_ensure_fn = arena_ensure_fn
     # Phase 230 : verrou global « un seul event de combat à la fois »
     _event_busy_fn = event_busy_fn
+    # Phase 233 : suppression de l'arène à la fin de l'invasion (fix fuite C1)
+    _arena_delete_fn = arena_delete_fn
 
 
 async def init_db():
@@ -449,6 +453,13 @@ async def _resolve_invasion_after(event_id: int, seconds: int):
         ch = guild.get_channel(int(ch_id))
         if ch:
             await _post_resolution(ch, all_killed, mobs_killed, rewards)
+        # Phase 233 (fix fuite C1) : supprimer l'arène d'invasion (catégorie + salons)
+        # — avant, elle traînait jusqu'au prochain boot. Délai pour lire le récap.
+        if _arena_delete_fn is not None and ch_id:
+            try:
+                asyncio.create_task(_arena_delete_fn(guild, int(ch_id), grace_seconds=120))
+            except Exception:
+                pass
     except Exception as ex:
         print(f"[_resolve_invasion_after] {ex}")
 
