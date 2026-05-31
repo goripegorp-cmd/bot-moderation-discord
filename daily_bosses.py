@@ -723,13 +723,22 @@ async def _post_boss_panel(
         v2_body(_ev.how_to_play('daily_boss')),
     ]
 
+    # Phase 208 FIX : le bouton DOIT être dans un ActionRow DANS le conteneur.
+    # Un bouton brut au top-level d'un LayoutView V2 = 400 "Invalid Form Body".
+    # Le clic est capté par le DynamicItem DailyBossAttackButton enregistré
+    # (match du custom_id), exactement comme le World Boss.
+    attack_btn = Button(
+        label="⚔️ Attaquer", style=discord.ButtonStyle.danger,
+        custom_id=f"dboss_atk:{event_id}",
+    )
+    items.append(discord.ui.ActionRow(attack_btn))
+
     class _BossLayout(LayoutView):
         def __init__(self):
             super().__init__(timeout=None)
             self.add_item(v2_container(*items, color=boss.get("color", 0xC0392B)))
 
     layout = _BossLayout()
-    layout.add_item(DailyBossAttackButton(event_id))
 
     try:
         return await ch.send(view=layout)
@@ -776,14 +785,20 @@ async def _refresh_boss_panel(guild: discord.Guild, event_id: int) -> None:
         v2_body(f"⚔️ Dégâts totaux infligés : `{active['damage_total']:,}`"),
     ]
 
+    # Phase 208 FIX : bouton (si boss vivant) dans un ActionRow DANS le conteneur.
+    if active["hp_current"] > 0:
+        attack_btn = Button(
+            label="⚔️ Attaquer", style=discord.ButtonStyle.danger,
+            custom_id=f"dboss_atk:{event_id}",
+        )
+        items.append(discord.ui.ActionRow(attack_btn))
+
     class _BossLayout(LayoutView):
         def __init__(self):
             super().__init__(timeout=None)
             self.add_item(v2_container(*items, color=boss.get("color", 0xC0392B)))
 
     layout = _BossLayout()
-    if active["hp_current"] > 0:
-        layout.add_item(DailyBossAttackButton(event_id))
     try:
         await msg.edit(view=layout)
     except Exception:

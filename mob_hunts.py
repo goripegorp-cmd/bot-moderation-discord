@@ -703,13 +703,22 @@ async def _post_mob_message(
 
     color = 0xFFD700 if is_elite else mob_def.get("color", 0x95A5A6)
 
+    # Phase 208 FIX : le bouton DOIT être dans un ActionRow DANS le conteneur.
+    # Un bouton brut au top-level d'un LayoutView V2 = 400 "Invalid Form Body /
+    # components.1 type". Le clic est capté par le DynamicItem MobAttackButton
+    # enregistré (match du custom_id), exactement comme le World Boss.
+    attack_btn = Button(
+        label="⚔️ Attaquer", style=discord.ButtonStyle.danger,
+        custom_id=f"mob_attack:{mob_db_id}",
+    )
+    items.append(discord.ui.ActionRow(attack_btn))
+
     class _MobLayout(LayoutView):
         def __init__(self):
             super().__init__(timeout=None)
             self.add_item(v2_container(*items, color=color))
 
     layout = _MobLayout()
-    layout.add_item(MobAttackButton(mob_db_id))
 
     try:
         msg = await ch.send(view=layout)
@@ -900,13 +909,19 @@ async def _build_updated_layout(
     ]
     color = 0xFFD700 if is_elite else mob_def.get("color", 0x95A5A6)
 
+    # Phase 208 FIX : bouton dans un ActionRow DANS le conteneur (cf. _post_mob_message).
+    attack_btn = Button(
+        label="⚔️ Attaquer", style=discord.ButtonStyle.danger,
+        custom_id=f"mob_attack:{mob_id}",
+    )
+    items.append(discord.ui.ActionRow(attack_btn))
+
     class _MobLayout(LayoutView):
         def __init__(self):
             super().__init__(timeout=None)
             self.add_item(v2_container(*items, color=color))
 
     layout = _MobLayout()
-    layout.add_item(MobAttackButton(mob_id))
     return layout
 
 
