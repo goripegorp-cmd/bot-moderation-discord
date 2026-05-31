@@ -57237,6 +57237,13 @@ async def _wheel_spin_command(i: discord.Interaction):
     """Affiche le bouton 'Spin Wheel' si dispo, sinon le cooldown restant."""
     if not i.response.is_done():
         await i.response.defer(ephemeral=True)
+    # Phase 230.1 : la Daily Wheel est liée au serveur (wheel_log.guild_id). Si le
+    # hub est ouvert en MP (i.guild is None), on évite le crash 'NoneType.id' et on
+    # explique gentiment au lieu d'un « Échec de l'interaction ».
+    if i.guild is None:
+        return await i.followup.send(
+            "🎰 La **Daily Wheel** se lance depuis un salon du serveur, pas en message privé.",
+            ephemeral=True)
     # Cooldown 24h
     async with get_db() as db:
         async with db.execute(
@@ -57279,6 +57286,17 @@ async def _wheel_spin_command(i: discord.Interaction):
 
 async def _do_wheel_spin(i: discord.Interaction):
     """Effectue le spin et envoie le résultat."""
+    # Phase 230.1 : garde MP (cohérence avec _wheel_spin_command) — la Wheel est
+    # liée au serveur ; en MP i.guild est None → 'NoneType.id'. Le callback a déjà
+    # deferré, donc on répond en followup.
+    if i.guild is None:
+        try:
+            await i.followup.send(
+                "🎰 La **Daily Wheel** se lance depuis un salon du serveur, pas en message privé.",
+                ephemeral=True)
+        except Exception:
+            pass
+        return
     # Recheck cooldown (race-safe)
     async with get_db() as db:
         async with db.execute(
