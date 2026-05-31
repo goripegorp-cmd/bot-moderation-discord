@@ -8202,28 +8202,52 @@ class _SellSelect(discord.ui.Select):
                 pass
 
 
-class _SellCommonsButton(discord.ui.Button):
-    """Phase 217 : vend d'un coup TOUT le stuff commun du coffre (déclutter)."""
+class _BulkSellSelect(discord.ui.Select):
+    """Phase 224 : vente EN LOT par PALIER de rareté (déclutter). Vend tout le
+    coffre jusqu'à la rareté choisie. On s'arrête volontairement à RARE — l'épique+
+    se vend à l'unité (via le menu Vendre), pour ne pas brader du bon stuff par
+    accident. Vente au marchand uniquement (jamais entre joueurs)."""
 
-    def __init__(self, count: int, total: int):
+    def __init__(self, stash: list):
+        tiers = [
+            (0, "⚪ Vendre tous les communs"),
+            (1, "⚪🔵 Vendre communs + rares"),
+        ]
+        options = []
+        for max_rank, label in tiers:
+            tier_items = [t for t in stash if _rarity_rank(t[2]) <= max_rank]
+            if not tier_items:
+                continue
+            total = sum(_sell_value(t[2]) for t in tier_items)
+            options.append(discord.SelectOption(
+                label=label[:100], value=str(max_rank),
+                description=f"{len(tier_items)} objet(s) → {total} 🪙"[:100]))
+        if not options:
+            options = [discord.SelectOption(label="(rien à vendre en lot)", value="none")]
         super().__init__(
-            label=f"🧹 Vendre tout le commun ({count} → {total} 🪙)",
-            style=discord.ButtonStyle.secondary,
-        )
+            placeholder="🧹 Vendre en lot (par rareté)…",
+            options=options, min_values=1, max_values=1)
 
     async def callback(self, i: discord.Interaction):
         try:
-            sold, total = await _stash_sell_bulk(i.guild.id, i.user.id, max_rank=0)
+            if self.values[0] == "none":
+                return await i.response.defer()
+            max_rank = int(self.values[0])
+            sold, total = await _stash_sell_bulk(i.guild.id, i.user.id, max_rank=max_rank)
             new_view = await EquipmentLayoutV2.create(i.guild, i.user.id)
             await i.response.edit_message(view=new_view)
-            msg = (f"🧹 Vendu **{sold}** objet(s) commun(s) pour **{total}** 🪙 !"
-                   if sold else "Rien de commun à vendre.")
+            msg = (f"🧹 Vendu **{sold}** objet(s) pour **{total}** 🪙 !"
+                   if sold else "Rien à vendre dans ce palier.")
             try:
                 await i.followup.send(msg, ephemeral=True)
             except Exception:
                 pass
         except Exception as ex:
-            print(f"[_SellCommonsButton] {ex}")
+            print(f"[_BulkSellSelect] {ex}")
+            try:
+                await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
 
 
 class EquipmentLayoutV2(LayoutView):
@@ -8271,13 +8295,11 @@ class EquipmentLayoutV2(LayoutView):
         self.add_item(v2_container(*items, color=0x9B59B6))
         if stash:
             self.add_item(discord.ui.ActionRow(_EquipSelect(stash)))
-            # Phase 217 : vendre au marchand (item par item) + déclutter le commun
+            # Phase 217 : vendre au marchand (item par item)
             self.add_item(discord.ui.ActionRow(_SellSelect(stash)))
-            commons = [t for t in stash if _rarity_rank(t[2]) == 0]
-            if commons:
-                _ctot = sum(_sell_value(t[2]) for t in commons)
-                self.add_item(discord.ui.ActionRow(
-                    _SellCommonsButton(len(commons), _ctot)))
+            # Phase 224 : vente EN LOT par palier (commun / commun+rare) — déclutter
+            if any(_rarity_rank(t[2]) <= 1 for t in stash):
+                self.add_item(discord.ui.ActionRow(_BulkSellSelect(stash)))
 
     @classmethod
     async def create(cls, guild, user_id: int):
