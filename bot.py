@@ -924,6 +924,13 @@ async def db_init():
             total_vocal_time INTEGER DEFAULT 0,
             PRIMARY KEY (guild_id, user_id)
         )''')
+        # Phase 206 : journal de rotation des pings « membres actifs » (combat)
+        await db.execute('''CREATE TABLE IF NOT EXISTS combat_ping_log (
+            guild_id INTEGER,
+            user_id INTEGER,
+            last_pinged DATETIME,
+            PRIMARY KEY (guild_id, user_id)
+        )''')
         # Table pour les stats journalières du serveur (graphiques tendances)
         await db.execute('''CREATE TABLE IF NOT EXISTS daily_guild_stats (
             guild_id INTEGER,
@@ -40161,7 +40168,8 @@ async def on_ready():
 
         # Phase 169.1 : Mob Hunts (combat fréquent multi-user, drops alliance)
         mob_hunts_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
-                               inventory_fn=_get_or_create_inventory)
+                               inventory_fn=_get_or_create_inventory,
+                               active_ping_fn=_ping_active_members)
         await mob_hunts_module.init_db()
         mob_hunts_module.register_persistent_views(bot)
         if not mob_hunts_module.spawn_task.is_running():
@@ -57655,6 +57663,87 @@ async def _register_for_cleanup(message, delay_seconds: int, reason: str = 'even
             await asyncio.sleep(0.5 * (attempt + 1))
     print(f"[_register_for_cleanup FAILED 3x reason={reason} msg={message.id}] {last_err}")
     return False
+
+
+async def _ping_active_members(guild, channel, *, notif_key='boss_raid',
+                               cap=8, cooldown_hours=8, active_hours=72,
+                               cleanup_seconds=1800, intro=None):
+    """Phase 206 — Mentionne des MEMBRES ACTIFS récents (activity_tracking) pour
+    qu'un événement de COMBAT soit VU (sinon il spawn dans le vide et personne
+    ne vient). Générique : boss / mob / world boss / invasion.
+
+    Anti-spam : rotation via combat_ping_log (un même membre max 1×/cooldown),
+    opt-out respecté via _member_wants_notif, cap dur de mentions, et le message
+    de ping s'AUTO-SUPPRIME. FAIL-OPEN : toute erreur → 0 (ne casse jamais le
+    spawn). Retourne le nombre de membres effectivement pingés."""
+    if guild is None or channel is None:
+        return 0
+    try:
+        chosen = []
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT t.user_id FROM activity_tracking t "
+                "LEFT JOIN combat_ping_log p "
+                "  ON p.guild_id = t.guild_id AND p.user_id = t.user_id "
+                "WHERE t.guild_id = ? AND t.last_message IS NOT NULL "
+                "  AND datetime(t.last_message) >= datetime('now', ?) "
+                "  AND (p.last_pinged IS NULL OR datetime(p.last_pinged) < datetime('now', ?)) "
+                "ORDER BY (p.last_pinged IS NOT NULL), datetime(t.last_message) DESC "
+                "LIMIT 50",
+                (guild.id, f"-{int(active_hours)} hours", f"-{int(cooldown_hours)} hours"),
+            ) as cur:
+                rows = await cur.fetchall()
+        for r in rows:
+            if len(chosen) >= cap:
+                break
+            uid = int(r[0])
+            m = guild.get_member(uid)
+            if m is None or m.bot:
+                continue
+            try:
+                if not await _member_wants_notif(guild.id, uid, notif_key):
+                    continue
+            except Exception:
+                continue
+            chosen.append(uid)
+        if not chosen:
+            return 0
+        now_iso = datetime.now(timezone.utc).isoformat()
+        try:
+            async with get_db() as db:
+                for uid in chosen:
+                    await db.execute(
+                        "INSERT INTO combat_ping_log (guild_id, user_id, last_pinged) "
+                        "VALUES (?, ?, ?) ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                        "last_pinged = excluded.last_pinged",
+                        (guild.id, uid, now_iso),
+                    )
+                await db.commit()
+        except Exception as ex:
+            print(f"[_ping_active_members log] {ex}")
+        mentions = " ".join(f"<@{u}>" for u in chosen)
+        line = (
+            f"{intro or '🔔 Un combat vient de commencer —'} {mentions} "
+            f"venez tenter votre chance ! _(ouvert à tous · `/notifs` pour gérer vos pings)_"
+        )
+        try:
+            msg = await channel.send(
+                line,
+                allowed_mentions=discord.AllowedMentions(
+                    users=True, everyone=False, roles=False),
+            )
+            if msg:
+                try:
+                    await _register_for_cleanup(msg, cleanup_seconds, 'combat_ping')
+                except Exception:
+                    pass
+        except Exception as ex:
+            print(f"[_ping_active_members send] {ex}")
+            return 0
+        return len(chosen)
+    except Exception as ex:
+        print(f"[_ping_active_members] {ex}")
+        return 0
 
 
 async def _send_and_register(channel, delay_seconds: int, reason: str = 'event', **send_kwargs):
