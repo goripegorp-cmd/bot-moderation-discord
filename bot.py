@@ -46092,7 +46092,7 @@ async def inventory_cmd(i: discord.Interaction):
                 ))
                 items.append(v2_section(
                     v2_title("⚒️  Atelier de forge"),
-                    v2_subtitle("Affine un item pour le rendre plus rare (risque/reward)"),
+                    v2_subtitle("**Améliore** (+N, sûr) ou **affine la rareté** (risqué) de ton équipement"),
                     accessory=_ForgeBtn(),
                 ))
                 # Phase 166.5 : section "🤝 Échange P2P" supprimée
