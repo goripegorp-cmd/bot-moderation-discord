@@ -10481,10 +10481,10 @@ async def _end_active_event(guild, *, victory: bool, reason: str = ""):
                     if cur_gear and cur_gear.get('name'):
                         await _stash_add(guild.id, uid, cur_gear)  # ancien → coffre
                     inv[slot] = item
-                    gear_str = f"+ {_re} **{gear['emoji']} {gear['name']}** ({gear['rarity']}) — équipé !"
+                    gear_str = f"+ {_re} **{gear['emoji']} {gear['name']}** ({gear['rarity']}) · revente `{_sell_value(gear)}` 🪙 — équipé !"
                 else:
                     await _stash_add(guild.id, uid, item)  # rangé au coffre
-                    gear_str = f"+ {_re} **{gear['emoji']} {gear['name']}** ({gear['rarity']}) — 🎒 coffre"
+                    gear_str = f"+ {_re} **{gear['emoji']} {gear['name']}** ({gear['rarity']}) · revente `{_sell_value(gear)}` 🪙 — 🎒 coffre"
                 # Compter kill si victory + top 3
                 if victory and r['rank'] <= 3:
                     inv['kills'] = inv.get('kills', 0) + 1
@@ -10960,9 +10960,9 @@ class TreasureClaimView(View):
                         'atk': gear.get('atk', 0), 'def': gear.get('def', 0),
                     }
                     await _save_inventory(i.guild.id, i.user.id, inv)
-                    gear_msg = f"\n+ {events2026.RARITY_EMOJIS.get(gear['rarity'], '')} **{gear['emoji']} {gear['name']}** ({gear['rarity']}) — équipé !"
+                    gear_msg = f"\n+ {events2026.RARITY_EMOJIS.get(gear['rarity'], '')} **{gear['emoji']} {gear['name']}** ({gear['rarity']}) · revente `{_sell_value(gear)}` 🪙 — équipé !"
                 else:
-                    gear_msg = f"\n+ {events2026.RARITY_EMOJIS.get(gear['rarity'], '')} **{gear['emoji']} {gear['name']}** ({gear['rarity']})"
+                    gear_msg = f"\n+ {events2026.RARITY_EMOJIS.get(gear['rarity'], '')} **{gear['emoji']} {gear['name']}** ({gear['rarity']}) · revente `{_sell_value(gear)}` 🪙"
 
             # Compter comme une "participation" (pour distribuer ranks event)
             now_ts = time.time()
@@ -14230,10 +14230,10 @@ class MysteryBoxView(View):
                         inv[slot] = new_item
                         await _save_inventory(i.guild.id, i.user.id, inv)
                         ench_str = f" ✨ {gear['enchant']['emoji']}" if gear.get('enchant') else ""
-                        reward_msg += f"\n+ {events2026.RARITY_EMOJIS.get(gear['rarity'], '')} **{gear['emoji']} {gear['name']}**{ench_str} ({gear['rarity']}) — équipé !"
+                        reward_msg += f"\n+ {events2026.RARITY_EMOJIS.get(gear['rarity'], '')} **{gear['emoji']} {gear['name']}**{ench_str} ({gear['rarity']}) · revente `{_sell_value(gear)}` 🪙 — équipé !"
                     else:
                         ench_str = f" ✨ {gear['enchant']['emoji']}" if gear.get('enchant') else ""
-                        reward_msg += f"\n+ {events2026.RARITY_EMOJIS.get(gear['rarity'], '')} **{gear['emoji']} {gear['name']}**{ench_str} ({gear['rarity']})"
+                        reward_msg += f"\n+ {events2026.RARITY_EMOJIS.get(gear['rarity'], '')} **{gear['emoji']} {gear['name']}**{ench_str} ({gear['rarity']}) · revente `{_sell_value(gear)}` 🪙"
             else:
                 # Les suivants : petite consolation (10% du loot)
                 coins = max(10, int(box.get('coins', 100) * 0.1))
