@@ -61,6 +61,7 @@ _v2 = None
 _add_coins = None
 _inventory_fn = None  # Phase 184 : getter d'inventaire (gear-scaling du combat)
 _active_ping_fn = None  # Phase 206 : ping « membres actifs » (injecté par bot.py)
+_arena_ensure_fn = None  # Phase 211 : arène de combat partagée dédiée (injecté)
 
 # Spawn interval (random entre min et max minutes)
 # Phase 173.1 : plus fréquent (18-30 min au lieu de 30-45) → bien plus de
@@ -287,8 +288,9 @@ def _is_nocturnal(mob: dict) -> bool:
 
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
-          inventory_fn=None, active_ping_fn=None):
+          inventory_fn=None, active_ping_fn=None, arena_ensure_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _inventory_fn, _active_ping_fn
+    global _arena_ensure_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -296,6 +298,7 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
     _add_coins = add_coins_fn
     _inventory_fn = inventory_fn
     _active_ping_fn = active_ping_fn
+    _arena_ensure_fn = arena_ensure_fn
 
 
 async def init_db():
@@ -437,6 +440,16 @@ async def _find_arena_channel(guild: discord.Guild) -> Optional[discord.TextChan
     """
     if _db_get is None or _get_db is None:
         return None
+
+    # Phase 211 : arène de combat PARTAGÉE dédiée (priorité). Évite que les mobs
+    # atterrissent dans un salon au hasard. Créée une fois, réutilisée.
+    if _arena_ensure_fn is not None:
+        try:
+            arena = await _arena_ensure_fn(guild)
+            if arena is not None and _bot_can_send(guild, arena):
+                return arena
+        except Exception as ex:
+            print(f"[mob_hunts arena ensure] {ex}")
 
     cfg_data = {}
     # 1. Salon combat configuré par owner

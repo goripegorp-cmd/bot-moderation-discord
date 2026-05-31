@@ -40211,7 +40211,8 @@ async def on_ready():
         # Phase 169.1 : Mob Hunts (combat fréquent multi-user, drops alliance)
         mob_hunts_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
                                inventory_fn=_get_or_create_inventory,
-                               active_ping_fn=_ping_active_members)
+                               active_ping_fn=_ping_active_members,
+                               arena_ensure_fn=_ensure_combat_arena_channel)
         await mob_hunts_module.init_db()
         mob_hunts_module.register_persistent_views(bot)
         if not mob_hunts_module.spawn_task.is_running():
@@ -63195,6 +63196,62 @@ async def _delete_combat_arena(guild, text_channel_id: int, grace_seconds: int =
             await db.commit()
     except Exception:
         pass
+
+
+async def _ensure_combat_arena_channel(guild):
+    """Phase 211 : arène de combat PARTAGÉE (réutilisée) pour les MOBS — une
+    catégorie « ⚔️ Combat » permanente + salon texte « ⚔️-arène » + 2 vocaux
+    « Combat », créée UNE fois et mémorisée en config (combat_arena_channel_id).
+    Les mobs étant fréquents (~20 min), on NE crée pas une arène neuve à chaque
+    fois (churn/rate-limit) : on en réutilise une seule. Évite aussi que les mobs
+    atterrissent dans un salon au hasard. Retourne le salon TEXTE ou None
+    (fail-open → le caller retombe sur sa logique habituelle)."""
+    if guild is None:
+        return None
+    me = guild.me
+    try:
+        c = await cfg(guild.id)
+        ch_id = int(c.get('combat_arena_channel_id', 0) or 0)
+        if ch_id:
+            ch = guild.get_channel(ch_id)
+            if isinstance(ch, discord.TextChannel) and me and \
+                    ch.permissions_for(me).send_messages:
+                return ch
+        # Catégorie « ⚔️ Combat » déjà présente ?
+        cat = discord.utils.get(guild.categories, name="⚔️ Combat")
+        if cat is None:
+            if not (me and me.guild_permissions.manage_channels):
+                return None
+            cat = await guild.create_category(
+                name="⚔️ Combat", position=0,
+                reason="Phase 211 : arène de combat partagée (mobs)")
+            txt = await guild.create_text_channel(
+                name="⚔️-arène", category=cat,
+                reason="Phase 211 : arène de combat partagée (mobs)")
+            try:
+                for i in range(2):
+                    await guild.create_voice_channel(
+                        name=("🔊 Combat" if i == 0 else f"🔊 Combat {i + 1}"),
+                        category=cat,
+                        reason="Phase 211 : vocaux de combat partagés")
+            except Exception:
+                pass
+            await db_set(guild.id, 'combat_arena_channel_id', txt.id)
+            return txt
+        # Catégorie existe : réutiliser/créer un salon texte dedans
+        for ch in cat.text_channels:
+            if me and ch.permissions_for(me).send_messages:
+                await db_set(guild.id, 'combat_arena_channel_id', ch.id)
+                return ch
+        if me and me.guild_permissions.manage_channels:
+            txt = await guild.create_text_channel(
+                name="⚔️-arène", category=cat,
+                reason="Phase 211 : arène de combat partagée (mobs)")
+            await db_set(guild.id, 'combat_arena_channel_id', txt.id)
+            return txt
+    except Exception as ex:
+        print(f"[_ensure_combat_arena_channel] {ex}")
+    return None
 
 
 async def _ensure_alliance_category(guild) -> Optional[discord.CategoryChannel]:
