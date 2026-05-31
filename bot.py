@@ -54689,6 +54689,8 @@ async def on_voice_state_update(member, before, after):
                 
                 if hub_data:
                     # C'est un hub configuré !
+                    print(f"[TEMP VOICE] {member.display_name} a rejoint le hub "
+                          f"'{after.channel.name}' → création du salon perso…")
                     cat_id = hub_data.get('category', 0)
                     required_role_id = hub_data.get('required_role', 0)
                     default_name = hub_data.get('default_name', '🔊 Vocal de {user}')
@@ -54715,8 +54717,11 @@ async def on_voice_state_update(member, before, after):
                             return
                     
                     # Le membre peut créer un vocal
+                    # Phase 221 : la catégorie peut avoir été supprimée/déplacée →
+                    # on crée QUAND MÊME (salon non catégorisé) plutôt que de laisser
+                    # le membre bloqué dans le hub sans rien qui se passe.
                     category = member.guild.get_channel(cat_id)
-                    if category:
+                    if category is None or isinstance(category, discord.CategoryChannel):
                         channel_name = default_name.replace('{user}', member.display_name)[:50]
                         # Phase 25 : taille (user_limit) configurable par hub
                         try:
@@ -54764,45 +54769,90 @@ async def on_voice_state_update(member, before, after):
                                 read_messages=True
                             )
                         
-                        # Le propriétaire a toutes les permissions
-                        overwrites[member] = discord.PermissionOverwrite(
-                            view_channel=True,
-                            connect=True,
-                            speak=True,
-                            use_voice_activation=True,
-                            stream=True,
-                            send_messages=False,
-                            read_messages=True,
-                            mute_members=perms.get('can_mute', True),
-                            move_members=perms.get('can_kick', True),
-                            manage_channels=perms.get('can_rename', True) or perms.get('can_limit', True)
+                        # Le propriétaire — Phase 221 : on n'accorde les perms ÉLEVÉES
+                        # (mute/move/manage) que SI le bot les possède lui-même. Sinon
+                        # Discord refuse TOUTE la création (403 « Missing Permissions »)
+                        # → le salon ne se créait jamais, le membre restait bloqué.
+                        _me_perms = member.guild.me.guild_permissions
+                        owner_ow = discord.PermissionOverwrite(
+                            view_channel=True, connect=True, speak=True,
+                            use_voice_activation=True, stream=True,
+                            send_messages=False, read_messages=True,
                         )
+                        if _me_perms.mute_members and perms.get('can_mute', True):
+                            owner_ow.mute_members = True
+                        if _me_perms.move_members and perms.get('can_kick', True):
+                            owner_ow.move_members = True
+                        if _me_perms.manage_channels and (perms.get('can_rename', True) or perms.get('can_limit', True)):
+                            owner_ow.manage_channels = True
+                        overwrites[member] = owner_ow
                         
-                        # Le bot a toutes les permissions
-                        overwrites[member.guild.me] = discord.PermissionOverwrite(
-                            view_channel=True,
-                            connect=True,
-                            speak=True,
-                            manage_channels=True,
-                            move_members=True,
-                            send_messages=True
+                        # Le bot — Phase 221 : ne fixe en overwrite que les perms
+                        # élevées qu'il possède réellement (sinon 403 à la création).
+                        bot_ow = discord.PermissionOverwrite(
+                            view_channel=True, connect=True, speak=True,
+                            send_messages=True,
                         )
+                        if _me_perms.manage_channels:
+                            bot_ow.manage_channels = True
+                        if _me_perms.move_members:
+                            bot_ow.move_members = True
+                        overwrites[member.guild.me] = bot_ow
                         
-                        new_channel = await member.guild.create_voice_channel(
-                            name=channel_name,
-                            category=category,
-                            overwrites=overwrites,
-                            user_limit=default_user_limit,
-                        )
-                        
-                        temp_voice_channels[new_channel.id] = {
-                            'owner': member.id,
-                            'hub_id': after.channel.id,
-                            'created_at': now()
-                        }
-                        
-                        await member.move_to(new_channel)
-                        print(f"[TEMP VOICE] Créé vocal '{channel_name}' pour {member.display_name} (hub: {after.channel.name})")
+                        # Phase 221 : création ROBUSTE. Si Discord refuse les overwrites
+                        # (perm manquante au bot → 403), on retente avec des overwrites
+                        # MINIMAUX, puis SANS overwrites (hérite de la catégorie). Le
+                        # salon DOIT se créer, sinon le membre reste coincé dans le hub.
+                        new_channel = None
+                        try:
+                            new_channel = await member.guild.create_voice_channel(
+                                name=channel_name, category=category,
+                                overwrites=overwrites, user_limit=default_user_limit)
+                        except discord.Forbidden:
+                            try:
+                                _safe = {t: discord.PermissionOverwrite(
+                                            view_channel=getattr(o, 'view_channel', None),
+                                            connect=getattr(o, 'connect', None),
+                                            speak=getattr(o, 'speak', None))
+                                         for t, o in overwrites.items()}
+                                new_channel = await member.guild.create_voice_channel(
+                                    name=channel_name, category=category,
+                                    overwrites=_safe, user_limit=default_user_limit)
+                                print("[TEMP VOICE] créé avec overwrites minimaux (perms bot limitées)")
+                            except Exception:
+                                try:
+                                    new_channel = await member.guild.create_voice_channel(
+                                        name=channel_name, category=category,
+                                        user_limit=default_user_limit)
+                                    print("[TEMP VOICE] créé SANS overwrites (hérite catégorie)")
+                                except Exception as ex_c:
+                                    print(f"[TEMP VOICE] création IMPOSSIBLE (manage_channels ?) : {ex_c}")
+                        except Exception as ex_c:
+                            print(f"[TEMP VOICE] création échouée : {ex_c}")
+
+                        if new_channel is not None:
+                            temp_voice_channels[new_channel.id] = {
+                                'owner': member.id,
+                                'hub_id': after.channel.id,
+                                'created_at': now(),
+                            }
+                            # Déplacer le membre DANS son salon. Si le bot n'a pas
+                            # « Déplacer des membres », on le prévient en DM.
+                            try:
+                                await member.move_to(new_channel)
+                                print(f"[TEMP VOICE] Créé vocal '{channel_name}' pour {member.display_name} (hub: {after.channel.name})")
+                            except discord.Forbidden:
+                                print("[TEMP VOICE] move échoué — bot sans « Déplacer des membres »")
+                                try:
+                                    await member.send(
+                                        f"🔊 Ton salon **{channel_name}** a été créé sur "
+                                        f"**{member.guild.name}**, mais je n'ai pas pu t'y "
+                                        f"déplacer (permission « Déplacer des membres » "
+                                        f"manquante côté bot). Rejoins-le manuellement !")
+                                except Exception:
+                                    pass
+                            except Exception as ex_m:
+                                print(f"[TEMP VOICE] move échoué : {ex_m}")
             
             # Si l'utilisateur quitte un vocal temporaire → vérifier si vide et supprimer
             if before.channel and before.channel.id in temp_voice_channels:
