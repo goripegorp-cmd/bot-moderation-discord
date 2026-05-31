@@ -178,6 +178,7 @@ import dungeon_instances as dungeon_module
 import wandering_merchant as wandering_merchant_module
 # Phase 169.3 : World Invasion mensuelle
 import world_invasion as world_invasion_module
+import conversation_starters as conversation_starters_module  # Phase 234 : 1re extraction du monolithe
 # Phase 170.1 : La Chronique d'Abylumis — récit narratif persistant 9 mois
 import story_engine as story_engine_module
 import codex_chronicle as codex_chronicle_module
@@ -15387,7 +15388,7 @@ _SUPERVISED_LOOP_NAMES = [
     "daily_quest_push_dispatcher", "channel_camouflage_dispatcher",
     "voice_spotlight_dispatcher", "auto_promote_dying_events",
     "npc_chatter_task", "missions_runner_task", "daily_studio_tip_task",
-    "golden_hour_announce_task", "conv_starter_task", "hub_live_events_refresh_task",
+    "golden_hour_announce_task", "hub_live_events_refresh_task",
     "auction_settler_task", "reversibles_failsafe", "persistent_msg_cleaner",
     "marketplace_expire_cleaner", "hub_orphan_cleaner_task", "db_optimizer_task",
     "comeback_dm_task",
@@ -15411,7 +15412,8 @@ async def task_supervisor():
     # Boucles des modules de combat (mob_hunts / daily_bosses)
     for mod_name, attr in (("mob_hunts_module", "spawn_task"),
                            ("daily_bosses_module", "daily_boss_task"),
-                           ("event_notif_role_module", "event_role_task")):
+                           ("event_notif_role_module", "event_role_task"),
+                           ("conversation_starters_module", "conv_starter_task")):
         try:
             mod = globals().get(mod_name)
             lo = getattr(mod, attr, None) if mod is not None else None
@@ -41161,8 +41163,16 @@ async def on_ready():
         golden_hour_announce_task.start()
     if not weekly_recap_task.is_running():
         weekly_recap_task.start()
-    if not conv_starter_task.is_running():
-        conv_starter_task.start()
+    # Phase 234 : conversation starters extrait dans conversation_starters.py
+    # (1re brique de modularisation — toutes les déps de bot.py sont injectées).
+    try:
+        conversation_starters_module.setup(
+            bot, get_db, cfg, _is_event_active_hour,
+            _is_chatty_channel, _register_for_cleanup)
+        if not conversation_starters_module.conv_starter_task.is_running():
+            conversation_starters_module.conv_starter_task.start()
+    except Exception as ex:
+        print(f"[on_ready conversation_starters] {ex}")
     # Phase 54 : alertes auto owner
     if not owner_alerts_task.is_running():
         owner_alerts_task.start()
@@ -72748,75 +72758,9 @@ async def _weekly_recap_wait():
 # ─── CONVERSATION STARTERS (anti-silence dans le hub) ────────────────────────
 
 
-@tasks.loop(hours=1)
-async def conv_starter_task():
-    """Si le hub est mort depuis >3h pendant la plage active, poste une question."""
-    try:
-        for guild in bot.guilds:
-            try:
-                c = await cfg(guild.id)
-                if not c.get('event_enabled', False):
-                    continue
-                if not await _is_event_active_hour(guild.id):
-                    continue
-                hub_id = int(c.get('hub_channel', 0) or 0)
-                if not hub_id:
-                    continue
-                hub_ch = guild.get_channel(hub_id)
-                if not hub_ch or not await _is_chatty_channel(hub_ch):
-                    continue
-                # Check last message dans hub
-                cutoff_3h = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
-                async with get_db() as db:
-                    async with db.execute(
-                        "SELECT 1 FROM member_activity WHERE guild_id=? AND channel_id=? "
-                        "AND activity_type='message' AND created_at>? LIMIT 1",
-                        (guild.id, hub_ch.id, cutoff_3h),
-                    ) as cur:
-                        if await cur.fetchone():
-                            continue  # Y a eu de l'activité récemment
-                # Check qu'on n'a pas déjà posté un starter dans les 6h
-                cutoff_6h = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
-                async with get_db() as db:
-                    async with db.execute(
-                        "SELECT 1 FROM conv_starter_log WHERE guild_id=? AND posted_at>? LIMIT 1",
-                        (guild.id, cutoff_6h),
-                    ) as cur:
-                        if await cur.fetchone():
-                            continue
-                starter = amb.pick_random_starter()
-                LIFETIME = 6 * 3600
-                e = discord.Embed(
-                    title="💬 On se motive ?",
-                    description=starter,
-                    color=0x9B59B6,
-                )
-                e.set_footer(text="_Une question lancée par le bot pour redémarrer la discussion._")
-                try:
-                    msg = await hub_ch.send(
-                        embed=e,
-                        allowed_mentions=discord.AllowedMentions.none(),
-                        delete_after=LIFETIME,
-                    )
-                    await _register_for_cleanup(msg, LIFETIME, 'conv_starter')
-                    async with get_db() as db:
-                        await db.execute(
-                            "INSERT INTO conv_starter_log(guild_id, content) VALUES(?,?)",
-                            (guild.id, starter[:200]),
-                        )
-                        await db.commit()
-                    print(f"[conv_starter] guild={guild.id} posted")
-                except Exception as ex:
-                    print(f"[conv_starter send] {ex}")
-            except Exception as ex:
-                print(f"[conv_starter guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[conv_starter_task] {ex}")
-
-
-@conv_starter_task.before_loop
-async def _conv_starter_wait():
-    await bot.wait_until_ready()
+# conv_starter_task → EXTRAIT dans conversation_starters.py (Phase 234, 1re brique
+# de modularisation du monolithe). Déps injectées au boot ; ressuscité par le
+# task_supervisor via le tuple ("conversation_starters_module", "conv_starter_task").
 
 
 # ─── GREETING JOURNALIER (1er message du jour) ───────────────────────────────
