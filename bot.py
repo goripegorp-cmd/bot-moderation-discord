@@ -45808,16 +45808,18 @@ async def inventory_cmd(i: discord.Interaction):
         kills = int(inv.get('kills', 0))
         total_dmg = int(inv.get('total_damage', 0))
 
-        # Rarity emoji helper
+        # Rarity emoji helper — Phase 220 : UNE seule source (events2026.RARITY_EMOJIS)
+        # pour que le MÊME item affiche la MÊME rareté partout (inventaire, combat,
+        # équipement, vente). Avant, /inventory utilisait un set divergent (💎💜⭐🌌)
+        # ≠ des cercles colorés vus en combat → incohérence visuelle.
         def _rarity_badge(item: dict) -> str:
             if not item or not item.get('name'):
                 return ""
-            r = item.get('rarity', 'commune')
-            badges = {
-                'commune': '⚪', 'rare': '💎', 'épique': '💜', 'epique': '💜',
-                'légendaire': '⭐', 'legendaire': '⭐', 'mythique': '🌌',
-            }
-            return badges.get(r.lower(), '⚪')
+            try:
+                return events2026.RARITY_EMOJIS.get(
+                    _canon_rarity(item.get('rarity', 'commune')), '⚪')
+            except Exception:
+                return '⚪'
 
         # HP bar visual
         hp_ratio = hp / max(1, max_hp)
