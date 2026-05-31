@@ -7877,7 +7877,9 @@ def _sell_value(item: dict) -> int:
 
 
 async def _stash_add(guild_id: int, user_id: int, item: dict) -> bool:
-    """Ajoute un objet au coffre (cap 60/slot, on vire le plus ancien sinon)."""
+    """Ajoute un objet au coffre (cap 60/slot). Phase 218 : à saturation on jette
+    le PLUS FAIBLE (rareté la plus basse, puis le plus ancien) — jamais un bon
+    item par accident (un légendaire n'est plus écrasé par un commun récent)."""
     if not item or not item.get("name"):
         return False
     slot = item.get("slot") or "weapon"
@@ -7889,11 +7891,26 @@ async def _stash_add(guild_id: int, user_id: int, item: dict) -> bool:
             ) as cur:
                 cnt = int((await cur.fetchone())[0])
             if cnt >= 60:
-                await db.execute(
-                    "DELETE FROM player_stash WHERE id IN (SELECT id FROM player_stash "
-                    "WHERE guild_id=? AND user_id=? AND slot=? ORDER BY acquired_at ASC LIMIT 1)",
+                # Phase 218 : choisir la pièce la PLUS FAIBLE à jeter (la rareté est
+                # dans le JSON → tri en Python, pas en SQL). Clé = (rang rareté, id)
+                # croissants → le 1er = rareté mini puis le plus ancien.
+                ranked = []
+                async with db.execute(
+                    "SELECT id, item_json FROM player_stash "
+                    "WHERE guild_id=? AND user_id=? AND slot=?",
                     (guild_id, user_id, slot),
-                )
+                ) as cur2:
+                    for rid, ij in await cur2.fetchall():
+                        try:
+                            _it = json.loads(ij) if ij else {}
+                        except Exception:
+                            _it = {}
+                        ranked.append((_rarity_rank(_it), int(rid)))
+                if ranked:
+                    ranked.sort()
+                    worst_id = ranked[0][1]
+                    await db.execute(
+                        "DELETE FROM player_stash WHERE id=?", (worst_id,))
             await db.execute(
                 "INSERT INTO player_stash(guild_id, user_id, slot, item_json) VALUES(?,?,?,?)",
                 (guild_id, user_id, slot, json.dumps(item)),
