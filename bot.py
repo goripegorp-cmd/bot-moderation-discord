@@ -172,6 +172,7 @@ import mob_hunts as mob_hunts_module
 # Phase 173.2 : Boss du jour, 4×/jour, gating de niveau
 import daily_bosses as daily_bosses_module
 import activity_rewards as activity_rewards_module
+import event_notif_role as event_notif_role_module
 import dungeon_instances as dungeon_module
 # Phase 169.2 : Marchand itinérant quotidien
 import wandering_merchant as wandering_merchant_module
@@ -15135,7 +15136,8 @@ async def task_supervisor():
             print(f"[task_supervisor {name}] {ex}")
     # Boucles des modules de combat (mob_hunts / daily_bosses)
     for mod_name, attr in (("mob_hunts_module", "spawn_task"),
-                           ("daily_bosses_module", "daily_boss_task")):
+                           ("daily_bosses_module", "daily_boss_task"),
+                           ("event_notif_role_module", "event_role_task")):
         try:
             mod = globals().get(mod_name)
             lo = getattr(mod, attr, None) if mod is not None else None
@@ -40255,6 +40257,17 @@ async def on_ready():
         except Exception as ex:
             print(f"[on_ready 174.2 activity_rewards] {ex}")
 
+        # Phase 216 : rôle « 🔔 Événements » auto-attribué aux ACTIFS (en cachette) ;
+        # opt-out via /notifs (catégorie « events ») → retire le rôle + coupe les pings.
+        try:
+            event_notif_role_module.setup(bot, get_db, db_get,
+                                          wants_notif_fn=_member_wants_notif)
+            await event_notif_role_module.init_db()
+            if not event_notif_role_module.event_role_task.is_running():
+                event_notif_role_module.event_role_task.start()
+        except Exception as ex:
+            print(f"[on_ready 216 event_notif_role] {ex}")
+
         # Phase 169.2 : Marchand itinérant quotidien
         wandering_merchant_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins)
         await wandering_merchant_module.init_db()
@@ -57752,6 +57765,11 @@ async def _ping_active_members(guild, channel, *, notif_key='boss_raid',
             try:
                 if not await _member_wants_notif(guild.id, uid, notif_key):
                     continue
+                # Phase 216 : interrupteur MAÎTRE « events » (= rôle 🔔 Événements).
+                # Couper les pings d'événements via /notifs → plus jamais pingé,
+                # quel que soit le type d'event.
+                if not await _member_wants_notif(guild.id, uid, 'events'):
+                    continue
             except Exception:
                 continue
             chosen.append(uid)
@@ -67734,6 +67752,7 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
 
 # Catégories disponibles pour notif opt-in
 _NOTIF_CATEGORIES = [
+    ('events',     '🔔', "Pings d'événements (rôle auto)"),
     ('boss_raid',  '⚔️', 'Boss Raids'),
     ('world_boss', '🌍', 'World Boss (hebdo)'),
     ('treasure',   '💎', 'Trésor / Flash'),
@@ -67850,6 +67869,14 @@ async def notifs_cmd(i: discord.Interaction):
                     await _set_notif_pref(_guild_id, _user_id, cat, not current)
                     new_val = not current
                     _prefs[cat] = new_val
+                    # Phase 216 : le toggle « events » pilote AUSSI le rôle 🔔 Événements
+                    # (opt-in → on l'attribue, opt-out → on le retire) — instantané.
+                    if cat == 'events':
+                        try:
+                            await event_notif_role_module.sync_member(
+                                ii.guild, ii.user, new_val)
+                        except Exception:
+                            pass
                     label_ = next((l for c, _e, l in _NOTIF_CATEGORIES if c == cat), cat)
                     state_ = "✅ Activé" if new_val else "🔕 Désactivé"
                     await _safe_followup(ii, content=f"{state_} : **{label_}**")
