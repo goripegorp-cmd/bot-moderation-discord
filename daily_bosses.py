@@ -68,10 +68,12 @@ _notif_check_fn = None     # async (guild_id, user_id, category) -> bool (opt-ou
 _cleanup_register_fn = None  # async (message, delay_seconds, reason) -> nettoyage différé
 
 # Phase 196 : mention intelligente rotative — paramètres anti-spam.
-PING_MAX_USERS = 5          # cap dur de mentions par spawn (TOS Discord)
+PING_MAX_USERS = 8          # cap dur de mentions par spawn (TOS Discord)
 PING_COOLDOWN_HOURS = 8     # un même membre n'est ping qu'une fois / ~8h
 PING_LOOKBACK_DAYS = 14     # « participe au combat » = a attaqué un boss < 14j
+ACTIVE_PING_LOOKBACK_HOURS = 72  # Phase 205 : fallback = membres ACTIFS < 72h
 PING_CLEANUP_SECONDS = 30 * 60  # la ligne de ping s'auto-supprime après 30 min
+RESOLUTION_CLEANUP_SECONDS = 15 * 60  # Phase 205 : le récap de fin disparaît après 15 min
 
 # Phase 193 : 5 créneaux fixes FR — MATIN (9h), midi, après-midi, soir, NUIT.
 # Le créneau matin garantit un combat dès le réveil (vision owner : faire vivre
@@ -351,9 +353,10 @@ async def _smart_combat_ping(guild: discord.Guild, exclude_opt_out: bool = True)
     """Construit une ligne de mention CIBLÉE pour le spawn d'un boss du jour.
 
     Vision owner : prévenir ceux qui AIMENT le combat (ils ont déjà attaqué un
-    boss récemment) — mais SANS spammer : on en ping peu (max 5) et on TOURNE
-    (un même membre au plus une fois / ~8h, on privilégie les moins récemment
-    ping). Respecte l'opt-out `boss_raid` via le check injecté de bot.py.
+    boss récemment) ET, à défaut, les MEMBRES ACTIFS récents (Phase 205 : sinon
+    le boss spawnait dans le vide, personne ne venait) — mais SANS spammer : cap
+    PING_MAX_USERS et on TOURNE (un même membre au plus une fois / ~8h, via
+    boss_ping_log). Respecte l'opt-out `boss_raid` via le check injecté de bot.py.
 
     Retourne une courte ligne `🔔 <@id> … — venez tenter votre chance !` ou
     une chaîne vide si personne n'est éligible. FAIL-OPEN : toute erreur → "".
@@ -365,10 +368,27 @@ async def _smart_combat_ping(guild: discord.Guild, exclude_opt_out: bool = True)
         lookback_iso = (now - timedelta(days=PING_LOOKBACK_DAYS)).isoformat()
         cooldown_iso = (now - timedelta(hours=PING_COOLDOWN_HOURS)).isoformat()
 
-        # 1) Participants récents au combat (distinct), avec leur dernier ping.
-        #    JOIN sur daily_boss_events car la table attackers n'a pas guild_id.
-        #    LEFT JOIN boss_ping_log → on récupère last_pinged (NULL = jamais).
-        #    On exclut les déjà-en-cooldown directement en SQL (last_pinged récent).
+        chosen_ids = []
+
+        async def _consider(uid: int) -> None:
+            """Filtre commun : anti-doublon, présence, non-bot, opt-out.
+            Fail-CLOSED sur l'opt-out (on saute en cas d'erreur du check)."""
+            if uid in chosen_ids or len(chosen_ids) >= PING_MAX_USERS:
+                return
+            member = guild.get_member(uid)
+            if member is None or member.bot:
+                return
+            if exclude_opt_out and _notif_check_fn is not None:
+                try:
+                    if not await _notif_check_fn(guild.id, uid, 'boss_raid'):
+                        return
+                except Exception as ex:
+                    print(f"[_smart_combat_ping opt-out fail-closed user={uid}] {ex}")
+                    return
+            chosen_ids.append(uid)
+
+        # 1) PRIORITÉ : participants récents au combat (ils adorent ça), triés
+        #    par « pas ping récemment » d'abord (rotation), via boss_ping_log.
         async with _get_db() as db:
             async with db.execute(
                 "SELECT a.user_id, MAX(a.last_attack_at) AS last_seen, p.last_pinged "
@@ -384,28 +404,37 @@ async def _smart_combat_ping(guild: discord.Guild, exclude_opt_out: bool = True)
                 (guild.id, lookback_iso, cooldown_iso),
             ) as cur:
                 rows = await cur.fetchall()
-        if not rows:
-            return ""
-
-        # 2) Filtre opt-out + présence sur le serveur. On s'arrête à PING_MAX_USERS.
-        #    Fail-CLOSED sur l'opt-out (cohérent avec bot.py) : si le check échoue,
-        #    on saute le membre plutôt que risquer un ping non désiré.
-        chosen_ids = []
         for row in rows:
-            if len(chosen_ids) >= PING_MAX_USERS:
-                break
-            uid = int(row[0])
-            member = guild.get_member(uid)
-            if member is None or member.bot:
-                continue
-            if exclude_opt_out and _notif_check_fn is not None:
-                try:
-                    if not await _notif_check_fn(guild.id, uid, 'boss_raid'):
-                        continue
-                except Exception as ex:
-                    print(f"[_smart_combat_ping opt-out fail-closed user={uid}] {ex}")
-                    continue
-            chosen_ids.append(uid)
+            await _consider(int(row[0]))
+
+        # 2) FALLBACK CRITIQUE (Phase 205) : s'il n'y a pas (assez) d'attaquants
+        #    récents — cas du serveur où le combat démarre — on prévient les
+        #    MEMBRES ACTIFS récents (ont parlé < ACTIVE_PING_LOOKBACK_HOURS).
+        #    SANS ça, le boss spawnait dans le vide → personne ne venait →
+        #    « boss non combattus ». On tourne aussi via boss_ping_log.
+        if len(chosen_ids) < PING_MAX_USERS:
+            try:
+                async with _get_db() as db:
+                    async with db.execute(
+                        "SELECT t.user_id "
+                        "FROM activity_tracking t "
+                        "LEFT JOIN boss_ping_log p "
+                        "  ON p.guild_id = t.guild_id AND p.user_id = t.user_id "
+                        "WHERE t.guild_id = ? AND t.last_message IS NOT NULL "
+                        "  AND datetime(t.last_message) >= datetime('now', ?) "
+                        "  AND (p.last_pinged IS NULL OR datetime(p.last_pinged) < datetime('now', ?)) "
+                        "ORDER BY (p.last_pinged IS NOT NULL), datetime(t.last_message) DESC "
+                        "LIMIT 50",
+                        (guild.id, f"-{ACTIVE_PING_LOOKBACK_HOURS} hours",
+                         f"-{PING_COOLDOWN_HOURS} hours"),
+                    ) as cur:
+                        arows = await cur.fetchall()
+                for row in arows:
+                    if len(chosen_ids) >= PING_MAX_USERS:
+                        break
+                    await _consider(int(row[0]))
+            except Exception as ex:
+                print(f"[_smart_combat_ping active-fallback] {ex}")
 
         if not chosen_ids:
             return ""
@@ -608,6 +637,15 @@ async def trigger_daily_boss(
                 await db.commit()
         except Exception:
             pass
+        # Phase 205 : filet de sécurité — le panneau s'auto-nettoie même si la
+        # résolution ne tourne jamais (redémarrage). En temps normal il est
+        # supprimé dès la résolution (resolve_daily_boss).
+        if _cleanup_register_fn is not None:
+            try:
+                await _cleanup_register_fn(
+                    msg, int(boss["lifetime_min"]) * 60 + 3600, 'boss_panel')
+            except Exception:
+                pass
 
     # Phase 196 : ping intelligent rotatif APRÈS le panneau (un LayoutView V2 ne
     # peut PAS porter de content/mention → message séparé). Cap 5, opt-out
@@ -936,6 +974,26 @@ async def resolve_daily_boss(event_id: int) -> Optional[dict]:
                 ch, boss, killed, int(dmg_total), int(hp_max), rewards,
             )
 
+    # Phase 205 : le boss est terminé → supprimer son panneau (le récap le
+    # remplace) pour ne pas laisser traîner un boss mort dans le salon.
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT message_id, channel_id FROM daily_boss_events WHERE id=?",
+                (event_id,),
+            ) as cur:
+                prow = await cur.fetchone()
+        if prow and prow[0] and prow[1] and guild:
+            pch = guild.get_channel(int(prow[1]))
+            if pch:
+                try:
+                    pmsg = await pch.fetch_message(int(prow[0]))
+                    await pmsg.delete()
+                except Exception:
+                    pass
+    except Exception as ex:
+        print(f"[resolve_daily_boss panel delete] {ex}")
+
     print(
         f"[daily_bosses] resolve event={event_id} killed={killed} "
         f"dmg={dmg_total}/{hp_max} attackers={len(attackers)}"
@@ -977,11 +1035,18 @@ async def _announce_resolution(
         body += "\n".join(lines)
 
     try:
-        await ch.send(
+        msg = await ch.send(
             view=ui_v2.recap_view(
                 head.replace("**", ""), body,
                 color=(ui_v2.Palette.SUCCESS if killed else ui_v2.Palette.NEUTRAL)),
             allowed_mentions=discord.AllowedMentions.none())
+        # Phase 205 : le récap de fin s'auto-supprime (évite d'encombrer le
+        # Discord avec les vieux « X s'est retiré / X est vaincu »).
+        if msg and _cleanup_register_fn is not None:
+            try:
+                await _cleanup_register_fn(msg, RESOLUTION_CLEANUP_SECONDS, 'boss_resolution')
+            except Exception:
+                pass
     except Exception:
         pass
 
