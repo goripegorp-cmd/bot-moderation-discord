@@ -39434,7 +39434,7 @@ async def _boot_cleanup_active_events():
                 await ach.delete(reason="Phase 219 boot cleanup — arène d'event résiduelle")
             except Exception:
                 pass
-            if acat is not None and acat.name.startswith("⚔️ ") and acat.name != "⚔️ Combat":
+            if acat is not None and acat.name.startswith("⚔️ "):  # Phase 232 : plus d'exception « ⚔️ Combat » (rien de permanent)
                 try:
                     for _c in list(getattr(acat, 'channels', [])):
                         try:
@@ -39510,15 +39510,17 @@ async def _boot_cleanup_active_events():
     except Exception as ex:
         print(f"[boot_cleanup combat arenas] {ex}")
 
-    # Ancienne archi : catégories de combat ÉPHÉMÈRES « ⚔️ {boss} » (une par event)
-    # devenues obsolètes → on les supprime ENTIÈREMENT (salons + vocaux + catégorie).
-    # On épargne SEULEMENT la permanente « ⚔️ Combat ». Nettoie le bazar existant.
+    # Phase 232 : TOUTE catégorie de combat « ⚔️ … » résiduelle (y compris l'ancienne
+    # « ⚔️ Combat » permanente, désormais supprimée) → on la détruit ENTIÈREMENT
+    # (salons texte + vocaux + catégorie). Plus rien de permanent : au boot, aucun
+    # combat n'est en cours, donc aucune catégorie « ⚔️ … » ne doit subsister.
     try:
         for _g in list(bot.guilds):
             for _cat in list(getattr(_g, 'categories', [])):
                 try:
                     _nm = _cat.name or ""
-                    if not (_nm.startswith("⚔️ ") and _nm != "⚔️ Combat"):
+                    # Phase 232 : on supprime AUSSI « ⚔️ Combat » (plus rien de permanent).
+                    if not _nm.startswith("⚔️ "):
                         continue
                     for _cc in list(getattr(_cat, 'channels', [])):
                         try:
@@ -63716,16 +63718,22 @@ async def _ensure_permanent_combat_category(guild):
 
 
 async def _create_combat_arena(guild, kind: str, title: str, voice_count: int = 2):
-    """Phase 231 : crée le salon TEXTE d'un combat À L'INTÉRIEUR de la catégorie
-    PERMANENTE « ⚔️ Combat » (au lieu d'une catégorie neuve par event, qui naissait
-    « non-suivie » côté membres → invisible, tout en bas). Le salon texte est
-    ÉPHÉMÈRE (supprimé en fin de combat → zéro salon mort qui s'entasse) ; les
-    vocaux « 🔊 Combat » sont PERMANENTS et partagés (pas de churn / rate-limit).
-    En plus : poste une ALERTE avec lien cliquable (#salon) dans le hub — ou, à
-    défaut, dans 📜-chroniques-combat — pour que TOUT LE MONDE voie le combat sans
-    avoir à « suivre » quoi que ce soit. Enregistré en DB (combat_arenas) pour
-    suppression garantie. Retourne le salon TEXTE ou None (fail-open → le caller
-    retombe sur l'arène partagée)."""
+    """Phase 232 : arène de combat 100 % ÉPHÉMÈRE. Crée une catégorie « ⚔️ {title} »
+    (tout en haut) + 1 salon texte + {voice_count} vocaux « 🔊 Combat » — et TOUT
+    est supprimé à la fin du combat (catégorie + texte + vocaux). Demande explicite
+    de l'owner : rien ne doit traîner une fois l'event terminé.
+
+    Visibilité : l'onboarding Discord masque les NOUVEAUX salons de la barre
+    latérale (il faut les « cocher »), et un bot ne peut pas cocher à la place des
+    membres. On contourne en postant une ALERTE avec LIENS CLIQUABLES (salon texte
+    + salon vocal) dans le hub — ou, à défaut, dans 📜-chroniques-combat (salon
+    PERMANENT que tout le monde voit) : un clic ouvre l'arène / rejoint le vocal,
+    même si le salon n'est pas dans la barre latérale (un lien y donne accès dès
+    qu'on a la permission de voir, ce qui est garanti ici).
+
+    Création atomique (rollback si une étape échoue). Enregistré en DB
+    (combat_arenas) pour suppression garantie. Retourne le salon TEXTE ou None
+    (fail-open → le caller retombe sur sa logique habituelle)."""
     if guild is None:
         return None
     me = guild.me
@@ -63733,21 +63741,39 @@ async def _create_combat_arena(guild, kind: str, title: str, voice_count: int = 
         return None
     safe = (title or "Combat").strip()[:90]
     pub_txt, pub_voice, bot_ow = _arena_public_overwrites(guild)
-    cat = await _ensure_permanent_combat_category(guild)
-    if cat is None:
-        return None
+    created = []
+    first_voice = None
     try:
+        cat = await guild.create_category(
+            name=f"⚔️ {safe}"[:100], position=0,
+            overwrites={guild.default_role: pub_txt, me: bot_ow},
+            reason=f"Arène de combat éphémère ({kind})")
+        created.append(cat)
         txt = await guild.create_text_channel(
             name=f"⚔️-{safe}"[:100], category=cat,
             overwrites={guild.default_role: pub_txt, me: bot_ow},
-            reason=f"Combat ({kind}) : {safe}")
+            reason=f"Arène de combat ({kind})")
+        created.append(txt)
+        for i in range(max(1, int(voice_count))):
+            vc = await guild.create_voice_channel(
+                name=("🔊 Combat" if i == 0 else f"🔊 Combat {i + 1}"),
+                category=cat,
+                overwrites={guild.default_role: pub_voice, me: bot_ow},
+                reason=f"Arène de combat ({kind})")
+            created.append(vc)
+            if first_voice is None:
+                first_voice = vc
     except Exception as ex:
         print(f"[_create_combat_arena {kind}] {ex}")
+        for ch in reversed(created):
+            try:
+                await ch.delete(reason="Rollback arène combat")
+            except Exception:
+                pass
         return None
-    # ALERTE « combat en cours » avec lien cliquable, dans un salon PERMANENT que
-    # tout le monde voit (hub en priorité, sinon le journal de combat). Sans ping
-    # (le ciblage des actifs est déjà fait par le module appelant). Supprimée à la
-    # fin du combat (id mémorisé).
+    # ALERTE « combat en cours » avec liens cliquables (texte + vocal), dans un
+    # salon PERMANENT visible par tous. Sans ping (le ciblage des actifs est déjà
+    # fait par le module appelant). Supprimée à la fin (id mémorisé).
     alert_ch_id = alert_msg_id = 0
     try:
         c = await cfg(guild.id)
@@ -63756,8 +63782,9 @@ async def _create_combat_arena(guild, kind: str, title: str, voice_count: int = 
         if not isinstance(target, discord.TextChannel):
             target = await _ensure_combat_reports_channel(guild)
         if isinstance(target, discord.TextChannel) and target.id != txt.id:
+            _vc_line = f"\n🔊 Farm en vocal → {first_voice.mention}" if first_voice else ""
             am = await target.send(
-                f"⚔️ **{safe}** — le combat commence ! Rejoins l'arène → {txt.mention}",
+                f"⚔️ **{safe}** — le combat commence !\n💬 Arène → {txt.mention}{_vc_line}",
                 allowed_mentions=discord.AllowedMentions.none())
             alert_ch_id, alert_msg_id = target.id, am.id
     except Exception as ex:
@@ -63775,11 +63802,10 @@ async def _create_combat_arena(guild, kind: str, title: str, voice_count: int = 
 
 
 async def _delete_combat_arena(guild, text_channel_id: int, grace_seconds: int = 120):
-    """Phase 231 : fin de combat — supprime UNIQUEMENT le salon TEXTE éphémère du
-    combat + l'alerte postée dans le hub/journal. GARDE la catégorie PERMANENTE
-    « ⚔️ Combat » et ses vocaux partagés (sinon les membres devraient re-suivre la
-    catégorie à chaque fois). Court délai pour laisser lire le récap. Idempotent /
-    fail-open."""
+    """Phase 232 : fin de combat — supprime TOUT ce qui a été créé pour l'event :
+    l'alerte du hub + la catégorie « ⚔️ {title} » + TOUS ses salons (texte ET
+    vocaux). Rien ne reste (demande de l'owner). Court délai pour laisser lire le
+    récap. Idempotent / fail-open."""
     if guild is None or not text_channel_id:
         return
     try:
@@ -63787,17 +63813,18 @@ async def _delete_combat_arena(guild, text_channel_id: int, grace_seconds: int =
             await asyncio.sleep(grace_seconds)
     except Exception:
         pass
-    alert_ch_id = alert_msg_id = 0
+    cat_id = alert_ch_id = alert_msg_id = 0
     try:
         async with get_db() as db:
             async with db.execute(
-                "SELECT alert_channel_id, alert_message_id FROM combat_arenas "
+                "SELECT category_id, alert_channel_id, alert_message_id FROM combat_arenas "
                 "WHERE guild_id=? AND text_channel_id=?",
                 (guild.id, int(text_channel_id))) as cur:
                 row = await cur.fetchone()
         if row:
-            alert_ch_id = int(row[0] or 0)
-            alert_msg_id = int(row[1] or 0)
+            cat_id = int(row[0] or 0)
+            alert_ch_id = int(row[1] or 0)
+            alert_msg_id = int(row[2] or 0)
     except Exception as ex:
         print(f"[_delete_combat_arena lookup] {ex}")
     # 1) supprimer l'alerte « combat en cours » (elle n'a plus lieu d'être)
@@ -63809,14 +63836,27 @@ async def _delete_combat_arena(guild, text_channel_id: int, grace_seconds: int =
                 await am.delete()
         except Exception:
             pass
-    # 2) supprimer le salon TEXTE éphémère du combat — JAMAIS la catégorie ni les
-    #    vocaux permanents, et JAMAIS le salon partagé permanent « ⚔️-arène ».
-    try:
-        ch = guild.get_channel(int(text_channel_id))
-        if isinstance(ch, discord.TextChannel) and ch.name != "⚔️-arène":
-            await ch.delete(reason="Fin du combat — salon éphémère")
-    except Exception:
-        pass
+    # 2) supprimer la CATÉGORIE + TOUS ses salons (texte + vocaux). Si pas de
+    #    catégorie connue (fallback), au moins supprimer le salon texte.
+    if cat_id:
+        cat = guild.get_channel(int(cat_id))
+        if isinstance(cat, discord.CategoryChannel):
+            for ch in list(cat.channels):
+                try:
+                    await ch.delete(reason="Fin du combat — tout supprimé")
+                except Exception:
+                    pass
+            try:
+                await cat.delete(reason="Fin du combat — catégorie supprimée")
+            except Exception:
+                pass
+    else:
+        try:
+            ch = guild.get_channel(int(text_channel_id))
+            if isinstance(ch, discord.TextChannel):
+                await ch.delete(reason="Fin du combat — salon éphémère")
+        except Exception:
+            pass
     try:
         async with get_db() as db:
             await db.execute(
@@ -63933,69 +63973,12 @@ async def _post_combat_report(guild, title: str, body: str = "", color: int = 0x
 
 
 async def _ensure_combat_arena_channel(guild):
-    """Phase 211 : arène de combat PARTAGÉE (réutilisée) pour les MOBS — une
-    catégorie « ⚔️ Combat » permanente + salon texte « ⚔️-arène » + 2 vocaux
-    « Combat », créée UNE fois et mémorisée en config (combat_arena_channel_id).
-    Les mobs étant fréquents (~20 min), on NE crée pas une arène neuve à chaque
-    fois (churn/rate-limit) : on en réutilise une seule. Évite aussi que les mobs
-    atterrissent dans un salon au hasard. Retourne le salon TEXTE ou None
-    (fail-open → le caller retombe sur sa logique habituelle)."""
-    if guild is None:
-        return None
-    me = guild.me
-    # Phase 215 : overwrites PUBLICS dès la création (sinon l'arène hérite d'un
-    # @everyone serveur sans « Voir les salons » → salon privé → les gens pingés
-    # ne peuvent pas entrer).
-    pub_txt, pub_voice, bot_ow = _arena_public_overwrites(guild)
-    try:
-        c = await cfg(guild.id)
-        ch_id = int(c.get('combat_arena_channel_id', 0) or 0)
-        if ch_id:
-            ch = guild.get_channel(ch_id)
-            if isinstance(ch, discord.TextChannel) and me and \
-                    ch.permissions_for(me).send_messages:
-                await _arena_make_public(guild, ch)  # répare l'accès si privé
-                return ch
-        # Catégorie « ⚔️ Combat » déjà présente ?
-        cat = discord.utils.get(guild.categories, name="⚔️ Combat")
-        if cat is None:
-            if not (me and me.guild_permissions.manage_channels):
-                return None
-            cat = await guild.create_category(
-                name="⚔️ Combat", position=0,
-                overwrites={guild.default_role: pub_txt, me: bot_ow},
-                reason="Phase 211 : arène de combat partagée (mobs)")
-            txt = await guild.create_text_channel(
-                name="⚔️-arène", category=cat,
-                overwrites={guild.default_role: pub_txt, me: bot_ow},
-                reason="Phase 211 : arène de combat partagée (mobs)")
-            try:
-                for i in range(2):
-                    await guild.create_voice_channel(
-                        name=("🔊 Combat" if i == 0 else f"🔊 Combat {i + 1}"),
-                        category=cat,
-                        overwrites={guild.default_role: pub_voice, me: bot_ow},
-                        reason="Phase 211 : vocaux de combat partagés")
-            except Exception:
-                pass
-            await db_set(guild.id, 'combat_arena_channel_id', txt.id)
-            return txt
-        # Catégorie existe : réutiliser/créer un salon texte dedans
-        for ch in cat.text_channels:
-            if me and ch.permissions_for(me).send_messages:
-                await db_set(guild.id, 'combat_arena_channel_id', ch.id)
-                await _arena_make_public(guild, ch)  # répare l'accès si privé
-                return ch
-        if me and me.guild_permissions.manage_channels:
-            txt = await guild.create_text_channel(
-                name="⚔️-arène", category=cat,
-                overwrites={guild.default_role: pub_txt, me: bot_ow},
-                reason="Phase 211 : arène de combat partagée (mobs)")
-            await db_set(guild.id, 'combat_arena_channel_id', txt.id)
-            return txt
-    except Exception as ex:
-        print(f"[_ensure_combat_arena_channel] {ex}")
-    return None
+    """Phase 232 : PLUS d'arène « ⚔️ Combat » permanente. L'owner veut que TOUT
+    soit supprimé en fin d'event (rien ne doit traîner). On délègue donc à
+    _create_combat_arena → une arène ÉPHÉMÈRE (catégorie + texte + vocaux), qui
+    sera nettoyée à la fin du combat (ou au boot via combat_arenas). Conservé pour
+    compat (fallback mob / arène partagée d'invasion). Fail-open → None."""
+    return await _create_combat_arena(guild, 'shared', 'Combat')
 
 
 async def _ensure_alliance_category(guild) -> Optional[discord.CategoryChannel]:
