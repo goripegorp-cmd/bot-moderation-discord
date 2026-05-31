@@ -72,6 +72,7 @@ _add_coins = None
 # le boss du jour. Fail-open : si None, on retombe sur _find_chronicle_channel.
 _arena_create_fn = None  # async (guild, kind, title) -> salon texte dédié
 _arena_delete_fn = None  # async (guild, text_channel_id) -> supprime l'arène
+_event_busy_fn = None  # Phase 230 : async (guild_id) -> True si un AUTRE event de combat tourne (injecté)
 
 CLIMAX_WEEKDAY = 5    # samedi
 CLIMAX_HOUR = 21      # 21h FR
@@ -283,10 +284,10 @@ def list_climax_ids() -> list[str]:
 def setup(
     bot_instance, get_db_fn, db_get_fn, v2_helpers: dict,
     story_module=None, npc_module=None, add_coins_fn=None,
-    arena_create_fn=None, arena_delete_fn=None,
+    arena_create_fn=None, arena_delete_fn=None, event_busy_fn=None,
 ):
     global _bot, _get_db, _db_get, _v2, _story, _npc, _add_coins
-    global _arena_create_fn, _arena_delete_fn
+    global _arena_create_fn, _arena_delete_fn, _event_busy_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -297,6 +298,8 @@ def setup(
     # Phase 213 : arène de combat dédiée (créée au spawn, supprimée à la fin)
     _arena_create_fn = arena_create_fn
     _arena_delete_fn = arena_delete_fn
+    # Phase 230 : verrou global « un seul event de combat à la fois »
+    _event_busy_fn = event_busy_fn
 
 
 async def init_db():
@@ -514,6 +517,16 @@ async def trigger_climax(guild_id: int) -> Optional[int]:
                     return None
     except Exception:
         pass
+
+    # Phase 230 : VERROU GLOBAL — pas de boss climax par-dessus un autre event de
+    # combat en cours (boss raid / quiz / world boss / boss du jour). Un seul à la
+    # fois ; il se relancera plus tard. Fail-open si l'injection manque.
+    if _event_busy_fn is not None:
+        try:
+            if await _event_busy_fn(guild_id):
+                return None
+        except Exception:
+            pass
 
     # Get state
     state = await _story.get_state(guild_id)

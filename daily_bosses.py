@@ -70,6 +70,7 @@ _cleanup_register_fn = None  # async (message, delay_seconds, reason) -> nettoya
 _arena_create_fn = None  # Phase 210 : async (guild, kind, title) -> salon texte dédié
 _report_fn = None  # Phase 223 : async (guild, title, body) -> rapport dans « chroniques-combat »
 _arena_delete_fn = None  # Phase 210 : async (guild, text_channel_id) -> supprime l'arène
+_event_busy_fn = None  # Phase 230 : async (guild_id) -> True si un AUTRE event de combat tourne (injecté)
 
 # Phase 196 : mention intelligente rotative — paramètres anti-spam.
 PING_MAX_USERS = 8          # cap dur de mentions par spawn (TOS Discord)
@@ -213,10 +214,10 @@ def list_boss_ids() -> list[str]:
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
           inventory_fn=None, events_channel_fn=None, notif_check_fn=None,
           cleanup_register_fn=None, arena_create_fn=None, arena_delete_fn=None,
-          report_fn=None):
+          report_fn=None, event_busy_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _inventory_fn
     global _events_channel_fn, _notif_check_fn, _cleanup_register_fn
-    global _arena_create_fn, _arena_delete_fn, _report_fn
+    global _arena_create_fn, _arena_delete_fn, _report_fn, _event_busy_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -232,6 +233,8 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
     _arena_delete_fn = arena_delete_fn
     # Phase 223 : rapport de fin → salon « 📜 chroniques-combat »
     _report_fn = report_fn
+    # Phase 230 : verrou global « un seul event de combat à la fois »
+    _event_busy_fn = event_busy_fn
 
 
 async def init_db():
@@ -608,6 +611,19 @@ async def trigger_daily_boss(
                     return None
     except Exception:
         pass
+
+    # Phase 230 : VERROU GLOBAL — si un AUTRE event de combat est en cours (boss
+    # raid / quiz / trésor / world boss / climax), on NE lance PAS le boss du jour
+    # par-dessus (sinon il masque/double l'event en cours). On réessaiera au
+    # prochain passage de daily_boss_task (toutes les 15 min). Le verrou n'inclut
+    # PAS les mobs : un simple mob ne doit pas repousser une ancre comme le boss
+    # du jour. Fail-open si l'injection manque.
+    if _event_busy_fn is not None:
+        try:
+            if await _event_busy_fn(guild.id):
+                return None
+        except Exception:
+            pass
 
     boss = get_boss_def(boss_id) if boss_id else _pick_boss_for_slot()
     if not boss:

@@ -51,6 +51,7 @@ _v2 = None
 _add_coins = None
 _active_ping_fn = None  # Phase 207 : ping « membres actifs » (injecté par bot.py)
 _arena_ensure_fn = None  # Phase 213 : arène de combat PARTAGÉE (mêmes mobs que mob_hunts)
+_event_busy_fn = None  # Phase 230 : async (guild_id) -> True si un AUTRE event de combat tourne (injecté)
 
 INVASION_MOBS_COUNT = 5
 INVASION_DURATION_MIN = 30
@@ -60,9 +61,9 @@ ALLIANCE_BONUS_MULT = 1.30
 
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
-          active_ping_fn=None, arena_ensure_fn=None):
+          active_ping_fn=None, arena_ensure_fn=None, event_busy_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _active_ping_fn
-    global _arena_ensure_fn
+    global _arena_ensure_fn, _event_busy_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -72,6 +73,8 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
     # Phase 213 : arène de combat PARTAGÉE — l'annonce d'invasion atterrit dans le
     # MÊME salon que ses 5 mobs (mob_hunts spawne dans cette arène partagée).
     _arena_ensure_fn = arena_ensure_fn
+    # Phase 230 : verrou global « un seul event de combat à la fois »
+    _event_busy_fn = event_busy_fn
 
 
 async def init_db():
@@ -243,6 +246,16 @@ async def trigger_invasion(guild: discord.Guild) -> bool:
                     return False
     except Exception:
         pass
+
+    # Phase 230 : VERROU GLOBAL — pas d'invasion par-dessus un autre event de
+    # combat en cours (boss raid / quiz / world boss / boss du jour / climax).
+    # Un seul à la fois. Fail-open si l'injection manque.
+    if _event_busy_fn is not None:
+        try:
+            if await _event_busy_fn(guild.id):
+                return False
+        except Exception:
+            pass
 
     # Phase 213 : on annonce dans l'arène de combat PARTAGÉE (où mob_hunts fait
     # spawner les 5 mobs élite) → annonce + mobs regroupés. Fail-open : si l'arène

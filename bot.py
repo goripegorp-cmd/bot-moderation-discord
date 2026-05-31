@@ -15452,20 +15452,18 @@ async def event_auto_scheduler():
                     except Exception:
                         pass
 
-                # Vérifier qu'aucun event n'est RÉELLEMENT en cours.
-                # Phase 174.1 : avant, un event resté à ended=0 (jamais terminé
-                # proprement / stale) bloquait À VIE tous les events auto. On ne
-                # bloque désormais que sur un event encore dans sa fenêtre de
-                # temps (ends_at futur) — les events périmés sont ignorés ici
-                # (et nettoyés par stale_event_cleanup).
-                async with get_db() as db:
-                    async with db.execute(
-                        "SELECT id FROM events WHERE guild_id=? AND ended=0 "
-                        "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now'))",
-                        (guild.id,),
-                    ) as cur:
-                        if await cur.fetchone():
-                            continue
+                # Phase 230 : VERROU GLOBAL « un seul event de combat à la fois ».
+                # Avant on ne regardait QUE la table `events` (boss raid / trésor /
+                # quiz) → un quiz auto pouvait se lancer PAR-DESSUS un boss du jour
+                # / world boss / mob (tables séparées) et MASQUER l'event en cours.
+                # On consulte désormais la source de vérité unique, qui couvre
+                # TOUTES les tables (events + world_bosses + daily_boss + climax +
+                # mobs). include_mobs=True : ce « remplissage » auto cède le pas à
+                # TOUT, y compris un simple mob (pas de masquage par-dessus lui).
+                # Anti-« serveur mort » : seuls les events dans leur fenêtre de
+                # temps comptent (les périmés sont ignorés → cleanup les enlève).
+                if await _has_any_major_event_running(guild.id, include_mobs=True):
+                    continue
 
                 # Phase 194 — OFFRE À LA DEMANDE : pas d'event de remplissage si
                 # le serveur est désert (personne n'a parlé depuis 2h). Les beats
@@ -39437,6 +39435,32 @@ async def _boot_cleanup_active_events():
         except Exception as ex:
             print(f"[boot_cleanup arena delete ch={ch_id}] {ex}")
 
+    # ─── Phase 230 : balayage des VOCAUX « 🔊 Combat » ORPHELINS ───
+    # Quand une arène de boss a été mal nettoyée (catégorie supprimée mais vocaux
+    # restés — bug rapporté), il traîne des « 🔊 Combat » / « 🔊 Combat 2 » SANS
+    # catégorie, tout en bas du serveur. Ces noms ne sont créés QUE par
+    # _create_combat_arena, et TOUJOURS dans une catégorie → un vocal de ce nom
+    # SANS catégorie est forcément un orphelin. On les supprime (auto-réparation
+    # du bazar existant). La catégorie persistante des mobs « ⚔️ Combat » est
+    # épargnée : ses vocaux, eux, ONT une catégorie.
+    try:
+        for _g in list(bot.guilds):
+            for _vc in list(getattr(_g, 'voice_channels', [])):
+                try:
+                    if _vc.category is not None:
+                        continue
+                    _nm = (_vc.name or "").strip()
+                    _is_orphan_combat = _nm == "🔊 Combat" or (
+                        _nm.startswith("🔊 Combat ")
+                        and _nm[len("🔊 Combat "):].strip().isdigit())
+                    if _is_orphan_combat:
+                        await _vc.delete(
+                            reason="Phase 230 boot cleanup — vocal d'arène orphelin")
+                except Exception:
+                    pass
+    except Exception as ex:
+        print(f"[boot_cleanup orphan voice] {ex}")
+
     # ─── 3. Mark-ended en DB (tous events actifs) ───
     try:
         async with get_db() as db:
@@ -40502,7 +40526,8 @@ async def on_ready():
                                arena_ensure_fn=_ensure_combat_arena_channel,
                                report_fn=_post_combat_report,
                                arena_create_fn=_create_combat_arena,
-                               arena_delete_fn=_delete_combat_arena)
+                               arena_delete_fn=_delete_combat_arena,
+                               event_busy_fn=_has_any_major_event_running)
         await mob_hunts_module.init_db()
         mob_hunts_module.register_persistent_views(bot)
         if not mob_hunts_module.spawn_task.is_running():
@@ -40517,7 +40542,8 @@ async def on_ready():
                                       cleanup_register_fn=_register_for_cleanup,
                                       arena_create_fn=_create_combat_arena,
                                       arena_delete_fn=_delete_combat_arena,
-                                      report_fn=_post_combat_report)
+                                      report_fn=_post_combat_report,
+                                      event_busy_fn=_has_any_major_event_running)
             await daily_bosses_module.init_db()
             daily_bosses_module.register_persistent_views(bot)
             if not daily_bosses_module.daily_boss_task.is_running():
@@ -40567,7 +40593,8 @@ async def on_ready():
         # Phase 169.3 : World Invasion (1er samedi 21h FR)
         world_invasion_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
                                     active_ping_fn=_ping_active_members,
-                                    arena_ensure_fn=_ensure_combat_arena_channel)
+                                    arena_ensure_fn=_ensure_combat_arena_channel,
+                                    event_busy_fn=_has_any_major_event_running)
         await world_invasion_module.init_db()
         if not world_invasion_module.monthly_invasion_task.is_running():
             world_invasion_module.monthly_invasion_task.start()
@@ -40674,6 +40701,7 @@ async def on_ready():
                 add_coins_fn=add_coins,
                 arena_create_fn=_create_combat_arena,
                 arena_delete_fn=_delete_combat_arena,
+                event_busy_fn=_has_any_major_event_running,
             )
             await monthly_climax_module.init_db()
             monthly_climax_module.register_persistent_views(bot)
@@ -59522,22 +59550,76 @@ async def _track_reaction_p41(payload):
 # ─── ANTI-SPAM GLOBAL : 1 event majeur en cours max ────────────────────────────
 
 
-async def _has_any_major_event_running(guild_id: int) -> bool:
-    """Retourne True si un boss raid / treasure / quiz / world boss est actif."""
+async def _has_any_major_event_running(guild_id: int, include_mobs: bool = False) -> bool:
+    """SOURCE DE VÉRITÉ UNIQUE (Phase 230) : un événement de combat est-il
+    réellement EN COURS sur ce serveur ? Couvre TOUTES les tables d'events :
+      - events            (boss raid / chasse au trésor / quiz — moteur MASQUANT)
+      - world_bosses      (world boss hebdo)
+      - daily_boss_events (boss du jour, 4×/jour)
+      - climax_events     (boss climax mensuel)
+      - mob_spawns        (UNIQUEMENT si include_mobs=True)
+
+    RÈGLE owner : « quand un événement est lancé, on attend qu'il soit terminé
+    avant d'en lancer un autre ; on ne détruit/remplace JAMAIS un event en cours.
+    Seule l'expiration de son timer y met fin. » → tant que ceci renvoie True,
+    aucun NOUVEL event ne doit démarrer.
+
+    SÉCURITÉ ANTI-« SERVEUR MORT » : on ne bloque QUE sur un event encore dans sa
+    fenêtre de temps (ends_at / expires_at dans le futur). Une ligne périmée
+    laissée à ended=0 / status='alive' (cleanup raté) est IGNORÉE ici — sinon
+    elle bloquerait À VIE tous les events (leçon Phase 174.1). Fail-open : une
+    erreur DB renvoie False (on préfère un doublon rare à un serveur figé).
+
+    include_mobs : True seulement pour le « remplissage » auto (event_auto_
+    scheduler) — un mob éphémère ne doit pas, lui, bloquer un GROS boss (sinon le
+    boss du jour, qui est une ancre fixe, serait sans cesse repoussé)."""
     try:
         async with get_db() as db:
             async with db.execute(
-                'SELECT 1 FROM events WHERE guild_id=? AND ended=0 LIMIT 1',
+                'SELECT 1 FROM events WHERE guild_id=? AND ended=0 '
+                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now')) LIMIT 1",
                 (guild_id,),
             ) as cur:
                 if await cur.fetchone():
                     return True
             async with db.execute(
-                'SELECT 1 FROM world_bosses WHERE guild_id=? AND ended=0 LIMIT 1',
+                'SELECT 1 FROM world_bosses WHERE guild_id=? AND ended=0 '
+                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now')) LIMIT 1",
                 (guild_id,),
             ) as cur:
                 if await cur.fetchone():
                     return True
+            try:
+                async with db.execute(
+                    "SELECT 1 FROM daily_boss_events WHERE guild_id=? AND status='alive' "
+                    "AND (expires_at IS NULL OR datetime(expires_at) > datetime('now')) LIMIT 1",
+                    (guild_id,),
+                ) as cur:
+                    if await cur.fetchone():
+                        return True
+            except Exception:
+                pass  # table absente sur un vieux schéma → on n'empêche rien
+            try:
+                async with db.execute(
+                    "SELECT 1 FROM climax_events WHERE guild_id=? AND status='active' "
+                    "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now')) LIMIT 1",
+                    (guild_id,),
+                ) as cur:
+                    if await cur.fetchone():
+                        return True
+            except Exception:
+                pass
+            if include_mobs:
+                try:
+                    async with db.execute(
+                        "SELECT 1 FROM mob_spawns WHERE guild_id=? AND status='alive' "
+                        "AND expires_at IS NOT NULL AND datetime(expires_at) > datetime('now') LIMIT 1",
+                        (guild_id,),
+                    ) as cur:
+                        if await cur.fetchone():
+                            return True
+                except Exception:
+                    pass
     except Exception:
         pass
     return False
@@ -60342,7 +60424,7 @@ async def _end_world_boss(guild, wb_id: int, victory: bool, reason: str = ""):
         except Exception as ex:
             print(f"[world_boss recap persistent] {ex}")
 
-        # Annoncer la fin + supprimer le salon dans 5 min
+        # Annoncer la fin (si le salon existe encore) puis DÉTRUIRE l'arène.
         ch = guild.get_channel(int(ch_id))
         if ch:
             try:
@@ -60361,22 +60443,33 @@ async def _end_world_boss(guild, wb_id: int, victory: bool, reason: str = ""):
                 await ch.send(view=v2_recap_view(
                     _wb_t.replace("**", ""), _wb_b or final_msg,
                     color=(Palette.SUCCESS if victory else Palette.DANGER)))
-
-                async def _cleanup_arena():
-                    await asyncio.sleep(300)
-                    # Phase 211 : si arène dédiée (catégorie), supprime TOUT
-                    # (texte + vocaux) ; sinon supprime juste le salon.
-                    try:
-                        await _delete_combat_arena(guild, int(ch_id), grace_seconds=0)
-                    except Exception:
-                        pass
-                    try:
-                        await ch.delete(reason="World Boss event ended")
-                    except Exception:
-                        pass
-                asyncio.create_task(_cleanup_arena())
             except Exception as ex:
                 print(f"[_end_world_boss send final] {ex}")
+
+        # Phase 230 : suppression de l'arène GARANTIE — même si le salon texte a
+        # déjà disparu (masqué/supprimé par un autre event), sinon la CATÉGORIE
+        # « ⚔️ {boss} » et les VOCAUX « 🔊 Combat » restaient orphelins tout en
+        # bas du serveur (bug rapporté). _delete_combat_arena retrouve la
+        # catégorie via la DB (combat_arenas) → pas besoin de l'objet salon vivant.
+        # Délai de 5 min si le salon existe (lecture du récap), sinon immédiat.
+        _wb_grace = 300 if ch else 0
+        _wb_ch_id = int(ch_id)
+
+        async def _cleanup_arena():
+            try:
+                await _delete_combat_arena(guild, _wb_ch_id, grace_seconds=_wb_grace)
+            except Exception:
+                pass
+            # Filet : si l'arène n'était PAS une catégorie dédiée (fallback salon
+            # simple, aucune ligne combat_arenas), _delete_combat_arena n'a rien
+            # supprimé → on enlève le salon résiduel à la main.
+            try:
+                c2 = guild.get_channel(_wb_ch_id)
+                if c2:
+                    await c2.delete(reason="World Boss event ended")
+            except Exception:
+                pass
+        asyncio.create_task(_cleanup_arena())
         print(f"[WORLD BOSS END] guild={guild.id} wb_id={wb_id} victory={victory}")
     except Exception as ex:
         print(f"[_end_world_boss] {ex}")

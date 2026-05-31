@@ -65,6 +65,7 @@ _arena_ensure_fn = None  # Phase 211 : arène de combat partagée dédiée (inje
 _report_fn = None  # Phase 223 : rapports de fin → salon « 📜 chroniques-combat » (injecté)
 _arena_create_fn = None  # Phase 228 : crée une arène ÉPHÉMÈRE dédiée par mob (injecté)
 _arena_delete_fn = None  # Phase 228 : supprime l'arène éphémère du mob à la fin (injecté)
+_event_busy_fn = None  # Phase 230 : async (guild_id) -> True si un AUTRE event de combat tourne (injecté)
 
 # Spawn interval (random entre min et max minutes)
 # Phase 173.1 : plus fréquent (18-30 min au lieu de 30-45) → bien plus de
@@ -318,9 +319,10 @@ def _is_nocturnal(mob: dict) -> bool:
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
           inventory_fn=None, active_ping_fn=None, arena_ensure_fn=None, report_fn=None,
-          arena_create_fn=None, arena_delete_fn=None):
+          arena_create_fn=None, arena_delete_fn=None, event_busy_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _inventory_fn, _active_ping_fn
     global _arena_ensure_fn, _report_fn, _arena_create_fn, _arena_delete_fn
+    global _event_busy_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -332,6 +334,7 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
     _report_fn = report_fn
     _arena_create_fn = arena_create_fn
     _arena_delete_fn = arena_delete_fn
+    _event_busy_fn = event_busy_fn
 
 
 async def init_db():
@@ -590,6 +593,15 @@ async def spawn_mob(guild: discord.Guild) -> bool:
     # Phase 177 : pas de mob pendant un Boss Raid / event masquant (serveur enfoui)
     if await _is_major_event_active(guild.id):
         return False
+    # Phase 230 : verrou GLOBAL — pas de mob non plus pendant un boss du jour /
+    # world boss / climax (tables séparées que _is_major_event_active ne voit
+    # pas). Un seul event de combat à la fois. Fail-open si l'injection manque.
+    if _event_busy_fn is not None:
+        try:
+            if await _event_busy_fn(guild.id):
+                return False
+        except Exception:
+            pass
     if await _count_alive_mobs(guild.id) >= MAX_CONCURRENT_MOBS:
         return False
 
