@@ -940,8 +940,20 @@ async def db_init():
             kind TEXT,
             category_id INTEGER,
             text_channel_id INTEGER,
+            alert_channel_id INTEGER DEFAULT 0,
+            alert_message_id INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )''')
+        # Phase 231 : alerte « combat en cours » (hub/journal) à supprimer en fin
+        # de combat → colonnes ajoutées aux bases existantes (no-op si déjà là).
+        try:
+            await db.execute("ALTER TABLE combat_arenas ADD COLUMN alert_channel_id INTEGER DEFAULT 0")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE combat_arenas ADD COLUMN alert_message_id INTEGER DEFAULT 0")
+        except Exception:
+            pass
         # Table pour les stats journalières du serveur (graphiques tendances)
         await db.execute('''CREATE TABLE IF NOT EXISTS daily_guild_stats (
             guild_id INTEGER,
@@ -39461,6 +39473,64 @@ async def _boot_cleanup_active_events():
     except Exception as ex:
         print(f"[boot_cleanup orphan voice] {ex}")
 
+    # ─── Phase 231 : salons de combat ÉPHÉMÈRES résiduels + alertes ───
+    # Les combats vivent dans la catégorie PERMANENTE « ⚔️ Combat » via des salons
+    # texte éphémères « ⚔️-{nom} » (table combat_arenas). Après un redémarrage en
+    # plein combat, ces salons + leurs alertes hub traînent → on nettoie. On GARDE
+    # la catégorie permanente, ses vocaux, et le salon partagé « ⚔️-arène ».
+    try:
+        _ca_rows = []
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT guild_id, text_channel_id, alert_channel_id, alert_message_id "
+                "FROM combat_arenas") as cur:
+                _ca_rows = await cur.fetchall()
+        for _gid, _tch, _ach, _amsg in _ca_rows:
+            _g = bot.get_guild(int(_gid))
+            if not _g:
+                continue
+            try:
+                if _ach and _amsg:
+                    _a_ch = _g.get_channel(int(_ach))
+                    if isinstance(_a_ch, discord.TextChannel):
+                        _am = await _a_ch.fetch_message(int(_amsg))
+                        await _am.delete()
+            except Exception:
+                pass
+            try:
+                _c2 = _g.get_channel(int(_tch))
+                if isinstance(_c2, discord.TextChannel) and _c2.name != "⚔️-arène":
+                    await _c2.delete(reason="Phase 231 boot cleanup — salon de combat résiduel")
+            except Exception:
+                pass
+        if _ca_rows:
+            async with get_db() as db:
+                await db.execute("DELETE FROM combat_arenas")
+                await db.commit()
+    except Exception as ex:
+        print(f"[boot_cleanup combat arenas] {ex}")
+
+    # Ancienne archi : catégories de combat ÉPHÉMÈRES « ⚔️ {boss} » (une par event)
+    # devenues obsolètes → on les supprime ENTIÈREMENT (salons + vocaux + catégorie).
+    # On épargne SEULEMENT la permanente « ⚔️ Combat ». Nettoie le bazar existant.
+    try:
+        for _g in list(bot.guilds):
+            for _cat in list(getattr(_g, 'categories', [])):
+                try:
+                    _nm = _cat.name or ""
+                    if not (_nm.startswith("⚔️ ") and _nm != "⚔️ Combat"):
+                        continue
+                    for _cc in list(getattr(_cat, 'channels', [])):
+                        try:
+                            await _cc.delete(reason="Phase 231 cleanup — ancienne arène éphémère")
+                        except Exception:
+                            pass
+                    await _cat.delete(reason="Phase 231 cleanup — ancienne catégorie de combat")
+                except Exception:
+                    pass
+    except Exception as ex:
+        print(f"[boot_cleanup old combat cats] {ex}")
+
     # ─── 3. Mark-ended en DB (tous events actifs) ───
     try:
         async with get_db() as db:
@@ -63601,61 +63671,103 @@ async def _ensure_daily_boss_channel(guild) -> Optional[discord.TextChannel]:
         return None
 
 
+async def _ensure_permanent_combat_category(guild):
+    """Phase 231 : retourne (ou crée) LA catégorie PERMANENTE « ⚔️ Combat » — tout
+    en haut, publique, + 2 vocaux « 🔊 Combat » partagés. Elle n'est JAMAIS
+    détruite : c'est l'ancre que les membres « suivent » une seule fois pour voir
+    tous les combats. Tous les salons de combat (boss/mob/...) sont créés DEDANS,
+    donc ils héritent de la visibilité de la catégorie suivie (au lieu de naître
+    dans une catégorie neuve « non-suivie » qui coule tout en bas). Fail-open."""
+    if guild is None:
+        return None
+    me = guild.me
+    if not (me and me.guild_permissions.manage_channels):
+        return None
+    pub_txt, pub_voice, bot_ow = _arena_public_overwrites(guild)
+    try:
+        cat = discord.utils.get(guild.categories, name="⚔️ Combat")
+        if cat is None:
+            cat = await guild.create_category(
+                name="⚔️ Combat", position=0,
+                overwrites={guild.default_role: pub_txt, me: bot_ow},
+                reason="Phase 231 : catégorie de combat PERMANENTE (suivie une fois)")
+            for i in range(2):
+                try:
+                    await guild.create_voice_channel(
+                        name=("🔊 Combat" if i == 0 else f"🔊 Combat {i + 1}"),
+                        category=cat,
+                        overwrites={guild.default_role: pub_voice, me: bot_ow},
+                        reason="Phase 231 : vocaux de combat permanents")
+                except Exception:
+                    pass
+        elif not cat.voice_channels:
+            # catégorie présente mais sans vocal (cas migration) → en (re)mettre 1
+            try:
+                await guild.create_voice_channel(
+                    name="🔊 Combat", category=cat,
+                    overwrites={guild.default_role: pub_voice, me: bot_ow},
+                    reason="Phase 231 : vocal de combat permanent")
+            except Exception:
+                pass
+        return cat
+    except Exception as ex:
+        print(f"[_ensure_permanent_combat_category] {ex}")
+        return None
+
+
 async def _create_combat_arena(guild, kind: str, title: str, voice_count: int = 2):
-    """Phase 210 : crée une catégorie DÉDIÉE « ⚔️ {title} » (tout en haut) + 1
-    salon texte PUBLIC + {voice_count} vocaux « Combat » (pour farmer ensemble),
-    pour un event de combat (boss du jour / world boss / invasion). Création
-    ATOMIQUE : rollback complet si une étape échoue (pas d'orphelins). Enregistré
-    en DB (combat_arenas, clé = salon texte) pour suppression garantie + balayage
-    des orphelins. Retourne le salon TEXTE (où poster le panneau) ou None — le
-    caller retombe alors sur un salon partagé. Fail-open."""
+    """Phase 231 : crée le salon TEXTE d'un combat À L'INTÉRIEUR de la catégorie
+    PERMANENTE « ⚔️ Combat » (au lieu d'une catégorie neuve par event, qui naissait
+    « non-suivie » côté membres → invisible, tout en bas). Le salon texte est
+    ÉPHÉMÈRE (supprimé en fin de combat → zéro salon mort qui s'entasse) ; les
+    vocaux « 🔊 Combat » sont PERMANENTS et partagés (pas de churn / rate-limit).
+    En plus : poste une ALERTE avec lien cliquable (#salon) dans le hub — ou, à
+    défaut, dans 📜-chroniques-combat — pour que TOUT LE MONDE voie le combat sans
+    avoir à « suivre » quoi que ce soit. Enregistré en DB (combat_arenas) pour
+    suppression garantie. Retourne le salon TEXTE ou None (fail-open → le caller
+    retombe sur l'arène partagée)."""
     if guild is None:
         return None
     me = guild.me
     if not (me and me.guild_permissions.manage_channels):
         return None
     safe = (title or "Combat").strip()[:90]
-    pub_txt = discord.PermissionOverwrite(view_channel=True, send_messages=True,
-                                          read_message_history=True)
-    pub_voice = discord.PermissionOverwrite(view_channel=True, connect=True, speak=True)
-    # NB : on NE met PAS manage_channels en overwrite (la perm SERVEUR du bot
-    # couvre création/suppression ; l'overwrite peut provoquer un 403).
-    bot_ow = discord.PermissionOverwrite(view_channel=True, send_messages=True,
-                                         manage_messages=True, embed_links=True,
-                                         connect=True)
-    created = []
+    pub_txt, pub_voice, bot_ow = _arena_public_overwrites(guild)
+    cat = await _ensure_permanent_combat_category(guild)
+    if cat is None:
+        return None
     try:
-        cat = await guild.create_category(
-            name=f"⚔️ {safe}", position=0,
-            overwrites={guild.default_role: pub_txt, me: bot_ow},
-            reason=f"Arène de combat ({kind})")
-        created.append(cat)
         txt = await guild.create_text_channel(
-            name="⚔️-combat", category=cat,
+            name=f"⚔️-{safe}"[:100], category=cat,
             overwrites={guild.default_role: pub_txt, me: bot_ow},
-            reason=f"Arène de combat ({kind})")
-        created.append(txt)
-        for i in range(max(0, int(voice_count))):
-            vname = "🔊 Combat" if i == 0 else f"🔊 Combat {i + 1}"
-            vc = await guild.create_voice_channel(
-                name=vname, category=cat,
-                overwrites={guild.default_role: pub_voice, me: bot_ow},
-                reason=f"Arène de combat ({kind})")
-            created.append(vc)
+            reason=f"Combat ({kind}) : {safe}")
     except Exception as ex:
         print(f"[_create_combat_arena {kind}] {ex}")
-        for ch in reversed(created):
-            try:
-                await ch.delete(reason="Rollback arène combat")
-            except Exception:
-                pass
         return None
+    # ALERTE « combat en cours » avec lien cliquable, dans un salon PERMANENT que
+    # tout le monde voit (hub en priorité, sinon le journal de combat). Sans ping
+    # (le ciblage des actifs est déjà fait par le module appelant). Supprimée à la
+    # fin du combat (id mémorisé).
+    alert_ch_id = alert_msg_id = 0
+    try:
+        c = await cfg(guild.id)
+        hub_id = int(c.get('hub_channel', 0) or 0)
+        target = guild.get_channel(hub_id) if hub_id else None
+        if not isinstance(target, discord.TextChannel):
+            target = await _ensure_combat_reports_channel(guild)
+        if isinstance(target, discord.TextChannel) and target.id != txt.id:
+            am = await target.send(
+                f"⚔️ **{safe}** — le combat commence ! Rejoins l'arène → {txt.mention}",
+                allowed_mentions=discord.AllowedMentions.none())
+            alert_ch_id, alert_msg_id = target.id, am.id
+    except Exception as ex:
+        print(f"[_create_combat_arena alert] {ex}")
     try:
         async with get_db() as db:
             await db.execute(
-                "INSERT INTO combat_arenas(guild_id, kind, category_id, text_channel_id) "
-                "VALUES(?,?,?,?)",
-                (guild.id, str(kind), cat.id, txt.id))
+                "INSERT INTO combat_arenas(guild_id, kind, category_id, text_channel_id, "
+                "alert_channel_id, alert_message_id) VALUES(?,?,?,?,?,?)",
+                (guild.id, str(kind), cat.id, txt.id, alert_ch_id, alert_msg_id))
             await db.commit()
     except Exception as ex:
         print(f"[_create_combat_arena record] {ex}")
@@ -63663,9 +63775,11 @@ async def _create_combat_arena(guild, kind: str, title: str, voice_count: int = 
 
 
 async def _delete_combat_arena(guild, text_channel_id: int, grace_seconds: int = 120):
-    """Phase 210 : supprime la catégorie d'arène (et TOUS ses salons texte+vocaux)
-    liée à ce salon texte, après un court délai (le temps que le récap de fin soit
-    lu). Retire l'enregistrement DB. Idempotent / fail-open."""
+    """Phase 231 : fin de combat — supprime UNIQUEMENT le salon TEXTE éphémère du
+    combat + l'alerte postée dans le hub/journal. GARDE la catégorie PERMANENTE
+    « ⚔️ Combat » et ses vocaux partagés (sinon les membres devraient re-suivre la
+    catégorie à chaque fois). Court délai pour laisser lire le récap. Idempotent /
+    fail-open."""
     if guild is None or not text_channel_id:
         return
     try:
@@ -63673,30 +63787,36 @@ async def _delete_combat_arena(guild, text_channel_id: int, grace_seconds: int =
             await asyncio.sleep(grace_seconds)
     except Exception:
         pass
-    cat_id = 0
+    alert_ch_id = alert_msg_id = 0
     try:
         async with get_db() as db:
             async with db.execute(
-                "SELECT category_id FROM combat_arenas "
+                "SELECT alert_channel_id, alert_message_id FROM combat_arenas "
                 "WHERE guild_id=? AND text_channel_id=?",
                 (guild.id, int(text_channel_id))) as cur:
                 row = await cur.fetchone()
-        if row and row[0]:
-            cat_id = int(row[0])
+        if row:
+            alert_ch_id = int(row[0] or 0)
+            alert_msg_id = int(row[1] or 0)
     except Exception as ex:
         print(f"[_delete_combat_arena lookup] {ex}")
-    if cat_id:
-        cat = guild.get_channel(cat_id)
-        if isinstance(cat, discord.CategoryChannel):
-            for ch in list(cat.channels):
-                try:
-                    await ch.delete(reason="Fin de l'event de combat")
-                except Exception:
-                    pass
-            try:
-                await cat.delete(reason="Fin de l'event de combat")
-            except Exception:
-                pass
+    # 1) supprimer l'alerte « combat en cours » (elle n'a plus lieu d'être)
+    if alert_ch_id and alert_msg_id:
+        try:
+            ach = guild.get_channel(int(alert_ch_id))
+            if isinstance(ach, discord.TextChannel):
+                am = await ach.fetch_message(int(alert_msg_id))
+                await am.delete()
+        except Exception:
+            pass
+    # 2) supprimer le salon TEXTE éphémère du combat — JAMAIS la catégorie ni les
+    #    vocaux permanents, et JAMAIS le salon partagé permanent « ⚔️-arène ».
+    try:
+        ch = guild.get_channel(int(text_channel_id))
+        if isinstance(ch, discord.TextChannel) and ch.name != "⚔️-arène":
+            await ch.delete(reason="Fin du combat — salon éphémère")
+    except Exception:
+        pass
     try:
         async with get_db() as db:
             await db.execute(
