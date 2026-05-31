@@ -68542,11 +68542,16 @@ async def notifs_cmd(i: discord.Interaction):
         class _NotifsLayout(LayoutView):
             def __init__(self):
                 super().__init__(timeout=300)
+                # Phase 231.1 : Components V2 plafonne à 40 composants par message.
+                # Chaque catégorie = 1 SECTION COMPACTE (1 texte « label — état » +
+                # 1 bouton accessoire = 3 composants), pas de sous-titre séparé ni
+                # de lignes déco superflues → ~31 composants pour 9 catégories (vs 43
+                # avant, qui FAISAIT CRASHER /notifs). Garde de la marge ; au-delà de
+                # ~11 catégories, il faudra paginer.
                 items = []
                 items.append(v2_title("🔔  TES NOTIFICATIONS"))
-                items.append(v2_subtitle("Active ou coupe précisément ce qui te ping. Clique sur un bouton pour toggle."))
+                items.append(v2_subtitle("Active ou coupe précisément ce qui te ping. Clique pour basculer."))
                 items.append(v2_divider())
-                items.append(v2_body("**╔═══ ⚙️  CATÉGORIES  ═══╗**"))
                 for cat, emoji, label in _NOTIF_CATEGORIES:
                     enabled = _prefs.get(cat, True)
                     state_lbl = "✅ Activé" if enabled else "🔕 Coupé"
@@ -68556,12 +68561,9 @@ async def notifs_cmd(i: discord.Interaction):
                     )
                     btn.callback = _make_toggle_cb(cat)
                     items.append(v2_section(
-                        v2_title(f"{emoji}  {label}"),
-                        v2_subtitle(state_lbl),
+                        v2_title(f"{emoji}  {label} — {state_lbl}"),
                         accessory=btn,
                     ))
-                items.append(v2_divider())
-                items.append(v2_body("_Phase 48.2 · Notifications personnalisées_"))
                 self.add_item(v2_container(*items, color=0x3498DB))
 
         await _safe_followup(i, view=_NotifsLayout())
