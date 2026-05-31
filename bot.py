@@ -40500,7 +40500,9 @@ async def on_ready():
                                inventory_fn=_get_or_create_inventory,
                                active_ping_fn=_ping_active_members,
                                arena_ensure_fn=_ensure_combat_arena_channel,
-                               report_fn=_post_combat_report)
+                               report_fn=_post_combat_report,
+                               arena_create_fn=_create_combat_arena,
+                               arena_delete_fn=_delete_combat_arena)
         await mob_hunts_module.init_db()
         mob_hunts_module.register_persistent_views(bot)
         if not mob_hunts_module.spawn_task.is_running():

@@ -63,6 +63,8 @@ _inventory_fn = None  # Phase 184 : getter d'inventaire (gear-scaling du combat)
 _active_ping_fn = None  # Phase 206 : ping « membres actifs » (injecté par bot.py)
 _arena_ensure_fn = None  # Phase 211 : arène de combat partagée dédiée (injecté)
 _report_fn = None  # Phase 223 : rapports de fin → salon « 📜 chroniques-combat » (injecté)
+_arena_create_fn = None  # Phase 228 : crée une arène ÉPHÉMÈRE dédiée par mob (injecté)
+_arena_delete_fn = None  # Phase 228 : supprime l'arène éphémère du mob à la fin (injecté)
 
 # Spawn interval (random entre min et max minutes)
 # Phase 173.1 : plus fréquent (18-30 min au lieu de 30-45) → bien plus de
@@ -315,9 +317,10 @@ def _is_nocturnal(mob: dict) -> bool:
 
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
-          inventory_fn=None, active_ping_fn=None, arena_ensure_fn=None, report_fn=None):
+          inventory_fn=None, active_ping_fn=None, arena_ensure_fn=None, report_fn=None,
+          arena_create_fn=None, arena_delete_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _inventory_fn, _active_ping_fn
-    global _arena_ensure_fn, _report_fn
+    global _arena_ensure_fn, _report_fn, _arena_create_fn, _arena_delete_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -327,6 +330,8 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
     _active_ping_fn = active_ping_fn
     _arena_ensure_fn = arena_ensure_fn
     _report_fn = report_fn
+    _arena_create_fn = arena_create_fn
+    _arena_delete_fn = arena_delete_fn
 
 
 async def init_db():
@@ -588,11 +593,6 @@ async def spawn_mob(guild: discord.Guild) -> bool:
     if await _count_alive_mobs(guild.id) >= MAX_CONCURRENT_MOBS:
         return False
 
-    ch = await _find_arena_channel(guild)
-    if not ch:
-        print(f"[mob_hunts] pas de salon dispo, spawn annulé guild={guild.id}")
-        return False
-
     # Anti-doublon : pas le même type qu'un mob déjà vivant
     alive_kinds = set()
     try:
@@ -629,6 +629,23 @@ async def spawn_mob(guild: discord.Guild) -> bool:
         hp_mult = SOLO_HP_MULT_ELITE if is_elite else SOLO_HP_MULT
     hp_max = mob_def["hp_base"] * hp_mult
     elite_prefix = "👑 " if is_elite else ""
+
+    # Phase 228 : CHAQUE mob a SON salon dédié (catégorie « ⚔️ {mob} » + texte +
+    # 1 vocal), créé maintenant et SUPPRIMÉ à sa mort/despawn → fini l'arène
+    # partagée qui restait vide à l'infini sans panneau. Le panneau d'attaque est
+    # dans CE salon. Fallback : arène partagée si la création dédiée échoue.
+    ch = None
+    if _arena_create_fn is not None:
+        try:
+            ch = await _arena_create_fn(
+                guild, 'mob', f"{elite_prefix}{mob_def['name']}", voice_count=1)
+        except Exception as ex:
+            print(f"[spawn_mob arena create] {ex}")
+    if ch is None:
+        ch = await _find_arena_channel(guild)
+    if not ch:
+        print(f"[mob_hunts] pas de salon dispo, spawn annulé guild={guild.id}")
+        return False
 
     # INSERT en DB
     expires = datetime.now(timezone.utc) + timedelta(minutes=MOB_LIFETIME_MIN)
@@ -1203,14 +1220,23 @@ async def _on_mob_killed(
                             await _report_fn(guild, _recap_title, _recap_body)
                         except Exception:
                             pass
-                    # Le panneau du mob devient un mini-récap PUIS s'auto-supprime
-                    # (~90 s) → l'arène ne s'encombre plus de pavés de « X vaincu ».
+                    # Le panneau devient un mini-récap « vaincu » (visible un court
+                    # instant). Phase 228 : on SUPPRIME ensuite TOUT le salon dédié du
+                    # mob (catégorie + texte + vocal) après ~20 s → plus rien ne
+                    # traîne. Le rapport reste dans « 📜 chroniques-combat ».
                     await msg.edit(view=ui_v2.recap_view(
                         _recap_title, _recap_body, color=ui_v2.Palette.SUCCESS))
-                    try:
-                        await msg.delete(delay=90)
-                    except Exception:
-                        pass
+                    if _arena_delete_fn is not None:
+                        try:
+                            asyncio.create_task(
+                                _arena_delete_fn(guild, int(row[1]), grace_seconds=20))
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            await msg.delete(delay=90)
+                        except Exception:
+                            pass
                 except Exception:
                     pass
     except Exception:
@@ -1245,6 +1271,14 @@ async def _despawn_after(mob_id: int, seconds: int):
                     await msg.delete()
                 except Exception:
                     pass
+        # Phase 228 : le mob a despawn sans être tué → supprimer SON salon dédié
+        # (catégorie + texte + vocal). No-op si c'est l'arène partagée (fallback,
+        # pas dans combat_arenas) → on ne touche jamais l'arène partagée.
+        if guild and ch_id and _arena_delete_fn is not None:
+            try:
+                await _arena_delete_fn(guild, int(ch_id), grace_seconds=0)
+            except Exception:
+                pass
         # Mark despawned
         async with _get_db() as db:
             await db.execute(
