@@ -58046,6 +58046,14 @@ async def _ping_active_members(guild, channel, *, notif_key='boss_raid',
     spawn). Retourne le nombre de membres effectivement pingés."""
     if guild is None or channel is None:
         return 0
+    # Phase 222 : PLANCHER anti-sur-mention. Quel que soit le type d'event, une
+    # même personne n'est jamais pingée plus d'une fois toutes les 4 h pour le
+    # combat (le log combat_ping_log est commun à tous les events). Évite que les
+    # gens reçoivent trop de mentions, surtout pour les gros events fréquents.
+    try:
+        cooldown_hours = max(int(cooldown_hours or 0), 4)
+    except Exception:
+        cooldown_hours = 4
     try:
         chosen = []
         async with get_db() as db:

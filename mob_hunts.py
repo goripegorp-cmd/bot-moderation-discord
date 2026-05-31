@@ -681,8 +681,10 @@ async def spawn_mob(guild: discord.Guild) -> bool:
             if do_ping:
                 try:
                     if combat_mode == 'group':
-                        ping_cap = random.randint(5, 8)
-                        ping_cooldown = 4
+                        # Phase 222 : cap plus DOUX (3-5 au lieu de 5-8) + cooldown 6h
+                        # → moins de mentions par event collectif, on évite le spam.
+                        ping_cap = random.randint(3, 5)
+                        ping_cooldown = 6
                         ping_intro = (
                             f"⚔️ **COMBAT COLLECTIF !** {emoji} {elite_prefix}"
                             f"**{mob_def['name']}** débarque avec énormément de PV — "
