@@ -931,6 +931,16 @@ async def db_init():
             last_pinged DATETIME,
             PRIMARY KEY (guild_id, user_id)
         )''')
+        # Phase 210 : arènes de combat éphémères (catégorie + salons créés par
+        # event de combat, supprimés à la fin). Suivi pour cleanup garanti.
+        await db.execute('''CREATE TABLE IF NOT EXISTS combat_arenas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            kind TEXT,
+            category_id INTEGER,
+            text_channel_id INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
         # Table pour les stats journalières du serveur (graphiques tendances)
         await db.execute('''CREATE TABLE IF NOT EXISTS daily_guild_stats (
             guild_id INTEGER,
@@ -14843,6 +14853,38 @@ async def stale_event_cleanup():
                 print(f"[stale_cleanup WATCHDOG] event {ev_id} expiré/fantôme → ended + {n} salon(s) démasqué(s)")
         except Exception as ex:
             print(f"[stale_cleanup watchdog block] {ex}")
+
+        # ─── 0.b ARÈNES DE COMBAT ORPHELINES (Phase 210) ───────────────────
+        # Catégorie+salons d'un boss/invasion dont la résolution n'a jamais
+        # tourné (ex. reboot). > 3h = forcément terminé (lifetime boss max ~2h).
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT guild_id, category_id, text_channel_id FROM combat_arenas "
+                    "WHERE datetime(created_at) <= datetime('now','-3 hours') LIMIT 25"
+                ) as cur:
+                    arena_rows = await cur.fetchall()
+            for g_id, cat_id, txt_id in arena_rows:
+                g = bot.get_guild(int(g_id)) if g_id else None
+                if g and cat_id:
+                    cat = g.get_channel(int(cat_id))
+                    if isinstance(cat, discord.CategoryChannel):
+                        for ch in list(cat.channels):
+                            try:
+                                await ch.delete(reason="Arène combat orpheline")
+                            except Exception:
+                                pass
+                        try:
+                            await cat.delete(reason="Arène combat orpheline")
+                        except Exception:
+                            pass
+                async with get_db() as db:
+                    await db.execute(
+                        "DELETE FROM combat_arenas WHERE guild_id=? AND text_channel_id=?",
+                        (g_id, txt_id))
+                    await db.commit()
+        except Exception as ex:
+            print(f"[stale_cleanup combat_arenas] {ex}")
 
         # ─── 1. DB events (Boss Raid + Treasure + Quiz) ────────────────────
         try:
@@ -40181,7 +40223,9 @@ async def on_ready():
                                       inventory_fn=_get_or_create_inventory,
                                       events_channel_fn=_ensure_daily_boss_channel,
                                       notif_check_fn=_member_wants_notif,
-                                      cleanup_register_fn=_register_for_cleanup)
+                                      cleanup_register_fn=_register_for_cleanup,
+                                      arena_create_fn=_create_combat_arena,
+                                      arena_delete_fn=_delete_combat_arena)
             await daily_bosses_module.init_db()
             daily_bosses_module.register_persistent_views(bot)
             if not daily_bosses_module.daily_boss_task.is_running():
@@ -63045,6 +63089,112 @@ async def _ensure_daily_boss_channel(guild) -> Optional[discord.TextChannel]:
     except Exception as ex:
         print(f"[_ensure_daily_boss_channel] {ex}")
         return None
+
+
+async def _create_combat_arena(guild, kind: str, title: str, voice_count: int = 2):
+    """Phase 210 : crée une catégorie DÉDIÉE « ⚔️ {title} » (tout en haut) + 1
+    salon texte PUBLIC + {voice_count} vocaux « Combat » (pour farmer ensemble),
+    pour un event de combat (boss du jour / world boss / invasion). Création
+    ATOMIQUE : rollback complet si une étape échoue (pas d'orphelins). Enregistré
+    en DB (combat_arenas, clé = salon texte) pour suppression garantie + balayage
+    des orphelins. Retourne le salon TEXTE (où poster le panneau) ou None — le
+    caller retombe alors sur un salon partagé. Fail-open."""
+    if guild is None:
+        return None
+    me = guild.me
+    if not (me and me.guild_permissions.manage_channels):
+        return None
+    safe = (title or "Combat").strip()[:90]
+    pub_txt = discord.PermissionOverwrite(view_channel=True, send_messages=True,
+                                          read_message_history=True)
+    pub_voice = discord.PermissionOverwrite(view_channel=True, connect=True, speak=True)
+    # NB : on NE met PAS manage_channels en overwrite (la perm SERVEUR du bot
+    # couvre création/suppression ; l'overwrite peut provoquer un 403).
+    bot_ow = discord.PermissionOverwrite(view_channel=True, send_messages=True,
+                                         manage_messages=True, embed_links=True,
+                                         connect=True)
+    created = []
+    try:
+        cat = await guild.create_category(
+            name=f"⚔️ {safe}", position=0,
+            overwrites={guild.default_role: pub_txt, me: bot_ow},
+            reason=f"Arène de combat ({kind})")
+        created.append(cat)
+        txt = await guild.create_text_channel(
+            name="⚔️-combat", category=cat,
+            overwrites={guild.default_role: pub_txt, me: bot_ow},
+            reason=f"Arène de combat ({kind})")
+        created.append(txt)
+        for i in range(max(0, int(voice_count))):
+            vname = "🔊 Combat" if i == 0 else f"🔊 Combat {i + 1}"
+            vc = await guild.create_voice_channel(
+                name=vname, category=cat,
+                overwrites={guild.default_role: pub_voice, me: bot_ow},
+                reason=f"Arène de combat ({kind})")
+            created.append(vc)
+    except Exception as ex:
+        print(f"[_create_combat_arena {kind}] {ex}")
+        for ch in reversed(created):
+            try:
+                await ch.delete(reason="Rollback arène combat")
+            except Exception:
+                pass
+        return None
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO combat_arenas(guild_id, kind, category_id, text_channel_id) "
+                "VALUES(?,?,?,?)",
+                (guild.id, str(kind), cat.id, txt.id))
+            await db.commit()
+    except Exception as ex:
+        print(f"[_create_combat_arena record] {ex}")
+    return txt
+
+
+async def _delete_combat_arena(guild, text_channel_id: int, grace_seconds: int = 120):
+    """Phase 210 : supprime la catégorie d'arène (et TOUS ses salons texte+vocaux)
+    liée à ce salon texte, après un court délai (le temps que le récap de fin soit
+    lu). Retire l'enregistrement DB. Idempotent / fail-open."""
+    if guild is None or not text_channel_id:
+        return
+    try:
+        if grace_seconds and grace_seconds > 0:
+            await asyncio.sleep(grace_seconds)
+    except Exception:
+        pass
+    cat_id = 0
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT category_id FROM combat_arenas "
+                "WHERE guild_id=? AND text_channel_id=?",
+                (guild.id, int(text_channel_id))) as cur:
+                row = await cur.fetchone()
+        if row and row[0]:
+            cat_id = int(row[0])
+    except Exception as ex:
+        print(f"[_delete_combat_arena lookup] {ex}")
+    if cat_id:
+        cat = guild.get_channel(cat_id)
+        if isinstance(cat, discord.CategoryChannel):
+            for ch in list(cat.channels):
+                try:
+                    await ch.delete(reason="Fin de l'event de combat")
+                except Exception:
+                    pass
+            try:
+                await cat.delete(reason="Fin de l'event de combat")
+            except Exception:
+                pass
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "DELETE FROM combat_arenas WHERE guild_id=? AND text_channel_id=?",
+                (guild.id, int(text_channel_id)))
+            await db.commit()
+    except Exception:
+        pass
 
 
 async def _ensure_alliance_category(guild) -> Optional[discord.CategoryChannel]:

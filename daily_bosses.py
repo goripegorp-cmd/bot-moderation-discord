@@ -43,6 +43,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import asyncio
 import discord
 from discord.ext import tasks
 from discord.ui import Button
@@ -66,6 +67,8 @@ _inventory_fn = None  # Phase 184 : getter d'inventaire (gear-scaling du combat)
 _events_channel_fn = None  # async (guild) -> salon visible garanti (catégorie Événements)
 _notif_check_fn = None     # async (guild_id, user_id, category) -> bool (opt-out)
 _cleanup_register_fn = None  # async (message, delay_seconds, reason) -> nettoyage différé
+_arena_create_fn = None  # Phase 210 : async (guild, kind, title) -> salon texte dédié
+_arena_delete_fn = None  # Phase 210 : async (guild, text_channel_id) -> supprime l'arène
 
 # Phase 196 : mention intelligente rotative — paramètres anti-spam.
 PING_MAX_USERS = 8          # cap dur de mentions par spawn (TOS Discord)
@@ -208,9 +211,10 @@ def list_boss_ids() -> list[str]:
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
           inventory_fn=None, events_channel_fn=None, notif_check_fn=None,
-          cleanup_register_fn=None):
+          cleanup_register_fn=None, arena_create_fn=None, arena_delete_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _inventory_fn
     global _events_channel_fn, _notif_check_fn, _cleanup_register_fn
+    global _arena_create_fn, _arena_delete_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -221,6 +225,9 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
     _events_channel_fn = events_channel_fn
     _notif_check_fn = notif_check_fn
     _cleanup_register_fn = cleanup_register_fn
+    # Phase 210 : arène de combat dédiée (créée au spawn, supprimée à la fin)
+    _arena_create_fn = arena_create_fn
+    _arena_delete_fn = arena_delete_fn
 
 
 async def init_db():
@@ -602,7 +609,16 @@ async def trigger_daily_boss(
     if not boss:
         return None
 
-    ch = await _find_arena_channel(guild)
+    # Phase 210 : salon DÉDIÉ par boss (catégorie ⚔️ + texte + 2 vocaux), créé
+    # puis supprimé à la fin. Fallback sur l'arène partagée si pas la perm/échec.
+    ch = None
+    if _arena_create_fn is not None:
+        try:
+            ch = await _arena_create_fn(guild, 'daily_boss', boss['name'])
+        except Exception as ex:
+            print(f"[trigger_daily_boss arena create] {ex}")
+    if ch is None:
+        ch = await _find_arena_channel(guild)
     if not ch:
         print(f"[daily_boss] pas de salon dispo, spawn annulé guild={guild.id}")
         return None
@@ -1008,6 +1024,16 @@ async def resolve_daily_boss(event_id: int) -> Optional[dict]:
                     pass
     except Exception as ex:
         print(f"[resolve_daily_boss panel delete] {ex}")
+
+    # Phase 210 : supprimer l'arène dédiée (catégorie + texte + vocaux) ~2 min
+    # après le récap (le temps de le lire). Fire-and-forget ; le balayage des
+    # orphelins (stale_event_cleanup) rattrape si perdu (reboot). No-op si le
+    # boss était dans un salon partagé (aucune arène enregistrée).
+    if _arena_delete_fn is not None and guild and channel_id:
+        try:
+            asyncio.create_task(_arena_delete_fn(guild, int(channel_id)))
+        except Exception as ex:
+            print(f"[resolve_daily_boss arena delete] {ex}")
 
     print(
         f"[daily_bosses] resolve event={event_id} killed={killed} "
