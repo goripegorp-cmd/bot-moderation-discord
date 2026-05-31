@@ -63212,6 +63212,53 @@ async def _delete_combat_arena(guild, text_channel_id: int, grace_seconds: int =
         pass
 
 
+def _arena_public_overwrites(guild):
+    """Phase 215 : overwrites PUBLICS pour une arène de combat (visible + jouable
+    par @everyone). Corrige le cas où le @everyone du serveur n'a PAS « Voir les
+    salons » par défaut : sans overwrite explicite, l'arène serait privée et les
+    gens pingés ne pourraient pas entrer combattre."""
+    me = guild.me
+    pub_txt = discord.PermissionOverwrite(
+        view_channel=True, send_messages=True, read_message_history=True)
+    pub_voice = discord.PermissionOverwrite(
+        view_channel=True, connect=True, speak=True)
+    bot_ow = discord.PermissionOverwrite(
+        view_channel=True, send_messages=True, manage_messages=True,
+        embed_links=True, connect=True)
+    return pub_txt, pub_voice, bot_ow
+
+
+async def _arena_make_public(guild, text_channel):
+    """Phase 215 : garantit que l'arène (catégorie + salon texte + vocaux) est
+    VISIBLE par @everyone — RÉPARE une arène déjà créée en privé. Fail-open :
+    si le bot n'a pas manage_permissions, on log et on n'empêche rien."""
+    if guild is None or text_channel is None:
+        return
+    pub_txt, pub_voice, _ = _arena_public_overwrites(guild)
+    try:
+        cat = text_channel.category
+        chans = []
+        if cat is not None:
+            chans.append((cat, pub_txt))
+            for tc in cat.text_channels:
+                chans.append((tc, pub_txt))
+            for vc in cat.voice_channels:
+                chans.append((vc, pub_voice))
+        else:
+            chans.append((text_channel, pub_txt))
+        for chan, ow in chans:
+            try:
+                cur = chan.overwrites_for(guild.default_role)
+                if cur.view_channel is not True:
+                    await chan.set_permissions(
+                        guild.default_role, overwrite=ow,
+                        reason="Arène de combat — accès ouvert à tous (Phase 215)")
+            except Exception:
+                pass
+    except Exception as ex:
+        print(f"[_arena_make_public] {ex}")
+
+
 async def _ensure_combat_arena_channel(guild):
     """Phase 211 : arène de combat PARTAGÉE (réutilisée) pour les MOBS — une
     catégorie « ⚔️ Combat » permanente + salon texte « ⚔️-arène » + 2 vocaux
@@ -63223,6 +63270,10 @@ async def _ensure_combat_arena_channel(guild):
     if guild is None:
         return None
     me = guild.me
+    # Phase 215 : overwrites PUBLICS dès la création (sinon l'arène hérite d'un
+    # @everyone serveur sans « Voir les salons » → salon privé → les gens pingés
+    # ne peuvent pas entrer).
+    pub_txt, pub_voice, bot_ow = _arena_public_overwrites(guild)
     try:
         c = await cfg(guild.id)
         ch_id = int(c.get('combat_arena_channel_id', 0) or 0)
@@ -63230,6 +63281,7 @@ async def _ensure_combat_arena_channel(guild):
             ch = guild.get_channel(ch_id)
             if isinstance(ch, discord.TextChannel) and me and \
                     ch.permissions_for(me).send_messages:
+                await _arena_make_public(guild, ch)  # répare l'accès si privé
                 return ch
         # Catégorie « ⚔️ Combat » déjà présente ?
         cat = discord.utils.get(guild.categories, name="⚔️ Combat")
@@ -63238,15 +63290,18 @@ async def _ensure_combat_arena_channel(guild):
                 return None
             cat = await guild.create_category(
                 name="⚔️ Combat", position=0,
+                overwrites={guild.default_role: pub_txt, me: bot_ow},
                 reason="Phase 211 : arène de combat partagée (mobs)")
             txt = await guild.create_text_channel(
                 name="⚔️-arène", category=cat,
+                overwrites={guild.default_role: pub_txt, me: bot_ow},
                 reason="Phase 211 : arène de combat partagée (mobs)")
             try:
                 for i in range(2):
                     await guild.create_voice_channel(
                         name=("🔊 Combat" if i == 0 else f"🔊 Combat {i + 1}"),
                         category=cat,
+                        overwrites={guild.default_role: pub_voice, me: bot_ow},
                         reason="Phase 211 : vocaux de combat partagés")
             except Exception:
                 pass
@@ -63256,10 +63311,12 @@ async def _ensure_combat_arena_channel(guild):
         for ch in cat.text_channels:
             if me and ch.permissions_for(me).send_messages:
                 await db_set(guild.id, 'combat_arena_channel_id', ch.id)
+                await _arena_make_public(guild, ch)  # répare l'accès si privé
                 return ch
         if me and me.guild_permissions.manage_channels:
             txt = await guild.create_text_channel(
                 name="⚔️-arène", category=cat,
+                overwrites={guild.default_role: pub_txt, me: bot_ow},
                 reason="Phase 211 : arène de combat partagée (mobs)")
             await db_set(guild.id, 'combat_arena_channel_id', txt.id)
             return txt
