@@ -58111,6 +58111,15 @@ async def _ping_active_members(guild, channel, *, notif_key='boss_raid',
             m = guild.get_member(uid)
             if m is None or m.bot:
                 continue
+            # Phase 229 : l'owner veut cibler les membres EN LIGNE (présents pour
+            # combattre). On saute les hors-ligne ET les « ne pas déranger » (dnd) ;
+            # on garde en ligne + inactif. Intents.all() → status fiable. Fail-open :
+            # si le statut est indéterminé, on n'exclut pas (mieux vaut pinger).
+            try:
+                if m.status in (discord.Status.offline, discord.Status.dnd):
+                    continue
+            except Exception:
+                pass
             try:
                 if not await _member_wants_notif(guild.id, uid, notif_key):
                     continue
