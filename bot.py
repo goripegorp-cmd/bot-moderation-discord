@@ -9264,15 +9264,24 @@ async def _setup_arena(guild, event_id: int, arena_name: str):
         ),
     }
     try:
+        # Phase 227 : CATÉGORIE créée EN PREMIER, tout en haut (position=0), avec le
+        # salon DEDANS — sinon le salon d'arène (trésor/quiz) atterrissait en vrac
+        # tout en haut du serveur, hors catégorie. _end_active_event + le boot
+        # cleanup suppriment la catégorie (via arena_ch.category) à la fin.
+        arena_category = await guild.create_category(
+            name=f"⚔️ {arena_name}"[:90], position=0,
+            overwrites=arena_overwrites,
+            reason=f"Event {event_id} — catégorie d'arène")
+        try:
+            await arena_category.edit(position=0)
+        except Exception:
+            pass
         arena_channel = await guild.create_text_channel(
             name=arena_name[:90],
+            category=arena_category,
             overwrites=arena_overwrites,
             reason=f"Event {event_id} arena",
         )
-        try:
-            await arena_channel.edit(position=0)
-        except Exception:
-            pass
     except Exception as ex:
         print(f"[_setup_arena create channel] {ex}")
         return None
