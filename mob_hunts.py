@@ -823,7 +823,13 @@ async def _post_mob_message(
         label="⚔️ Attaquer", style=discord.ButtonStyle.danger,
         custom_id=f"mob_attack:{mob_db_id}",
     )
-    items.append(discord.ui.ActionRow(attack_btn))
+    # Phase 235.22 : bouton « 🔔 Me notifier » (type mob) DANS le panneau — capté par
+    # EventNotifyButton (bot.py) via le custom_id. Même ActionRow que l'attaque.
+    notify_btn = Button(
+        label="🔔 Me notifier", style=discord.ButtonStyle.secondary,
+        custom_id="evtnotif:mob",
+    )
+    items.append(discord.ui.ActionRow(attack_btn, notify_btn))
 
     class _MobLayout(LayoutView):
         def __init__(self):

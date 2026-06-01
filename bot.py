@@ -9460,7 +9460,14 @@ class BossArenaLayoutV2(LayoutView):
             custom_id=f"boss_pet_{self.event_id}",
         )
         pet_btn.callback = self._on_pet
-        items.append(discord.ui.ActionRow(inv_btn, pet_btn))
+        # Phase 235.22 : bouton « 🔔 Me notifier » (type boss) DANS le panneau. Cette
+        # View est suivie (callbacks) → on met un VRAI callback (pas de bouton nu).
+        notify_btn = Button(
+            label="🔔 Me notifier", style=discord.ButtonStyle.secondary,
+            custom_id=f"boss_notify_{self.event_id}",
+        )
+        notify_btn.callback = self._on_notify
+        items.append(discord.ui.ActionRow(inv_btn, pet_btn, notify_btn))
 
         self.add_item(v2_container(*items, color=color))
 
@@ -9479,6 +9486,10 @@ class BossArenaLayoutV2(LayoutView):
     async def _on_pet(self, i: discord.Interaction):
         """Phase 182 : fait intervenir le familier dans le combat."""
         await _handle_pet_assist(i, self.event_id)
+
+    async def _on_notify(self, i: discord.Interaction):
+        """Phase 235.22 : abonne/désabonne au rôle de notif « Boss »."""
+        await _toggle_event_notify(i, "boss")
 
 
 # ─────────────────────────── BOUTON ATTAQUE ───────────────────────────
@@ -13070,6 +13081,56 @@ def _event_notify_button(etype: str) -> Button:
                   custom_id=f"evtnotif:{etype}")
 
 
+async def _toggle_event_notify(i: discord.Interaction, etype: str):
+    """Toggle le rôle 🔔 de la catégorie `etype` pour le membre. Réutilisé par le
+    DynamicItem EventNotifyButton (panneaux V2 nus) ET par les boutons à callback des
+    Views suivies/enregistrées (boss raid, world boss) — où un bouton nu ne serait pas
+    capté. Fail-open."""
+    try:
+        await i.response.defer(ephemeral=True)
+    except (discord.NotFound, discord.HTTPException, discord.InteractionResponded):
+        pass
+    if i.guild is None:
+        try:
+            await i.followup.send("❌ Serveur uniquement.", ephemeral=True)
+        except Exception:
+            pass
+        return
+    label = _EVENT_NOTIFY_TYPES.get(etype, ("ce type",))[0]
+    role = await _event_notify_role(i.guild, etype, create=True)
+    if role is None:
+        try:
+            await i.followup.send(
+                "❌ Rôle de notif indisponible (permissions). Préviens un admin.",
+                ephemeral=True)
+        except Exception:
+            pass
+        return
+    try:
+        member = i.user if isinstance(i.user, discord.Member) else i.guild.get_member(i.user.id)
+        if member is None:
+            return
+        if role in member.roles:
+            await member.remove_roles(role, reason="Désabonnement notif (bouton)")
+            msg = f"🔕 Ok, tu ne seras **plus** notifié pour **{label}**."
+        else:
+            await member.add_roles(role, reason="Abonnement notif (bouton)")
+            msg = (f"🔔 C'est noté ! Tu seras notifié pour **{label}**.\n"
+                   f"_Reclique pour te désabonner._")
+        await i.followup.send(msg, ephemeral=True)
+    except discord.Forbidden:
+        try:
+            await i.followup.send("❌ Je n'ai pas la permission de gérer ce rôle.", ephemeral=True)
+        except Exception:
+            pass
+    except Exception as ex:
+        print(f"[_toggle_event_notify {etype}] {ex}")
+        try:
+            await i.followup.send("❌ Erreur, réessaie.", ephemeral=True)
+        except Exception:
+            pass
+
+
 class EventNotifyButton(discord.ui.DynamicItem[Button],
                         template=r"evtnotif:(?P<etype>[a-z_]+)"):
     """1er clic = abonné au type, 2e clic = désabonné. Persistant (DynamicItem)."""
@@ -13084,49 +13145,7 @@ class EventNotifyButton(discord.ui.DynamicItem[Button],
         return cls(match["etype"])
 
     async def callback(self, i: discord.Interaction):
-        try:
-            await i.response.defer(ephemeral=True)
-        except (discord.NotFound, discord.HTTPException, discord.InteractionResponded):
-            pass
-        if i.guild is None:
-            try:
-                await i.followup.send("❌ Serveur uniquement.", ephemeral=True)
-            except Exception:
-                pass
-            return
-        label = _EVENT_NOTIFY_TYPES.get(self.etype, ("ce type",))[0]
-        role = await _event_notify_role(i.guild, self.etype, create=True)
-        if role is None:
-            try:
-                await i.followup.send(
-                    "❌ Rôle de notif indisponible (permissions manquantes). Préviens un admin.",
-                    ephemeral=True)
-            except Exception:
-                pass
-            return
-        try:
-            member = i.user if isinstance(i.user, discord.Member) else i.guild.get_member(i.user.id)
-            if member is None:
-                return
-            if role in member.roles:
-                await member.remove_roles(role, reason="Désabonnement notif (bouton)")
-                msg = f"🔕 Ok, tu ne seras **plus** notifié pour **{label}**."
-            else:
-                await member.add_roles(role, reason="Abonnement notif (bouton)")
-                msg = (f"🔔 C'est noté ! Tu seras notifié pour **{label}**.\n"
-                       f"_Reclique sur le bouton pour te désabonner._")
-            await i.followup.send(msg, ephemeral=True)
-        except discord.Forbidden:
-            try:
-                await i.followup.send("❌ Je n'ai pas la permission de gérer ce rôle.", ephemeral=True)
-            except Exception:
-                pass
-        except Exception as ex:
-            print(f"[EventNotifyButton {self.etype}] {ex}")
-            try:
-                await i.followup.send("❌ Erreur, réessaie.", ephemeral=True)
-            except Exception:
-                pass
+        await _toggle_event_notify(i, self.etype)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
