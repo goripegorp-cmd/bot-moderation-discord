@@ -324,6 +324,86 @@ PETS = [
 ]
 
 
+# =============================================================================
+# Phase 235.26 — FAMILIERS PAR ŒUFS (~50 au total). Obtenables UNIQUEMENT via
+# œufs à faire éclore (egg_only=True → exclus de /pet buy). Raretés TRÈS dures :
+# les meilleurs (légendaires/mythiques) sortent d'œufs rarissimes, sur le long
+# terme. Bonus volontairement MODESTES (rétention long terme = valeur #1).
+# perk_type : 'passive' (auto pendant le combat) ou 'active' (bouton 🐾). Le
+# câblage fin des perks mixtes vient en 235.26c — ici tout réutilise déjà le
+# bonus passif existant (_apply_pet_bonus) + le bouton 🐾 (_handle_pet_assist).
+# =============================================================================
+def _ep(pid, name, emoji, rarity, kind, val, desc, perk='passive'):
+    return {
+        'id': pid, 'name': name, 'emoji': emoji, 'rarity': rarity,
+        'bonus_kind': kind, 'bonus_value': val, 'description': desc,
+        'egg_only': True, 'perk_type': perk,
+    }
+
+
+PETS.extend([
+    # ── 🟢 COMMUN (œuf commun) — bonus 0.03–0.05 ──
+    _ep('bunny', 'Lapin', '🐰', 'common', 'global', 0.03, 'Petit porte-bonheur. +3% partout.'),
+    _ep('chick', 'Poussin', '🐤', 'common', 'msg_xp', 0.04, 'Piaille gaiement. +4% XP messages.'),
+    _ep('mouse', 'Souris', '🐭', 'common', 'rare_loot', 0.04, 'Fouineuse. +4% chance de loot rare.'),
+    _ep('frog', 'Grenouille', '🐸', 'common', 'global', 0.03, 'Saut porte-chance. +3% partout.'),
+    _ep('hedgehog', 'Hérisson', '🦔', 'common', 'boss_damage', 0.04, 'Piquant. +4% dégâts sur les boss.'),
+    _ep('duck', 'Canard', '🦆', 'common', 'wheel_luck', 0.05, 'Chançard. +5% à la roue.'),
+    _ep('turtle', 'Tortue', '🐢', 'common', 'boss_damage', 0.03, 'Lente mais sûre. +3% dégâts boss.'),
+    _ep('bee', 'Abeille', '🐝', 'common', 'msg_xp', 0.05, 'Travailleuse. +5% XP messages.'),
+    _ep('snail', 'Escargot', '🐌', 'common', 'rare_loot', 0.03, 'Traîne mais trouve. +3% loot rare.'),
+    _ep('piglet', 'Cochon', '🐷', 'common', 'global', 0.04, 'Gourmand chançard. +4% partout.'),
+    _ep('crab', 'Crabe', '🦀', 'common', 'boss_damage', 0.04, 'Pince solide. +4% dégâts boss.'),
+    _ep('sparrow', 'Moineau', '🐦', 'common', 'wheel_luck', 0.04, 'Vif. +4% à la roue.'),
+    _ep('ladybug', 'Coccinelle', '🐞', 'common', 'wheel_luck', 0.05, 'Porte-bonheur. +5% à la roue.'),
+    _ep('ant', 'Fourmi', '🐜', 'common', 'msg_xp', 0.04, 'Bosseuse. +4% XP messages.'),
+    # ── 🔵 RARE (œuf rare) — bonus 0.06–0.08 ──
+    _ep('owl', 'Hibou', '🦉', 'rare', 'msg_xp', 0.07, 'Sage nocturne. +7% XP messages.'),
+    _ep('blackcat', 'Chat noir', '🐈‍⬛', 'rare', 'wheel_luck', 0.08, 'Mystérieux. +8% à la roue.'),
+    _ep('panda', 'Panda', '🐼', 'rare', 'boss_damage', 0.06, 'Calme et fort. +6% dégâts boss.'),
+    _ep('penguin', 'Manchot', '🐧', 'rare', 'global', 0.06, 'Glisse vers la chance. +6% partout.'),
+    _ep('koala', 'Koala', '🐨', 'rare', 'rare_loot', 0.07, 'Agrippe les trésors. +7% loot rare.'),
+    _ep('boar', 'Sanglier', '🐗', 'rare', 'duel_attack', 0.08, 'Charge brutale. +8% attaque en duel.'),
+    _ep('ram', 'Bélier', '🐏', 'rare', 'boss_damage', 0.07, 'Coup de tête. +7% dégâts boss.'),
+    _ep('octopus', 'Pieuvre', '🐙', 'rare', 'rare_loot', 0.07, 'Huit bras fouineurs. +7% loot rare.'),
+    _ep('parrot', 'Perroquet', '🦜', 'rare', 'wheel_luck', 0.07, 'Répète la chance. +7% à la roue.'),
+    _ep('swan', 'Cygne', '🦢', 'rare', 'global', 0.06, 'Élégant. +6% partout.'),
+    _ep('bat', 'Chauve-souris', '🦇', 'rare', 'boss_damage', 0.07, 'Frappe dans le noir. +7% dégâts boss.', 'active'),
+    _ep('raccoon', 'Raton laveur', '🦝', 'rare', 'rare_loot', 0.08, 'Voleur malin. +8% loot rare.'),
+    # ── 🟣 ÉPIQUE (œuf épique) — bonus 0.10–0.12 ──
+    _ep('tiger', 'Tigre', '🐅', 'epic', 'boss_damage', 0.11, 'Prédateur royal. +11% dégâts boss.'),
+    _ep('eagle', 'Aigle', '🦅', 'epic', 'duel_attack', 0.12, 'Fond sur sa proie. +12% attaque.', 'active'),
+    _ep('shark', 'Requin', '🦈', 'epic', 'boss_damage', 0.12, 'Mâchoire d\'acier. +12% dégâts boss.', 'active'),
+    _ep('unicorn', 'Licorne', '🦄', 'epic', 'global', 0.10, 'Magie pure. +10% partout.'),
+    _ep('peacock', 'Paon', '🦚', 'epic', 'wheel_luck', 0.12, 'Éclatant. +12% à la roue.'),
+    _ep('gorilla', 'Gorille', '🦍', 'epic', 'duel_attack', 0.11, 'Force brute. +11% attaque.'),
+    _ep('lion', 'Lion', '🦁', 'epic', 'boss_damage', 0.11, 'Roi de l\'arène. +11% dégâts boss.'),
+    _ep('rhino', 'Rhinocéros', '🦏', 'epic', 'boss_damage', 0.12, 'Charge imparable. +12% dégâts boss.', 'active'),
+    _ep('scorpion', 'Scorpion', '🦂', 'epic', 'boss_damage', 0.10, 'Dard venimeux. +10% dégâts boss.', 'active'),
+    _ep('flamingo', 'Flamant', '🦩', 'epic', 'rare_loot', 0.11, 'Rose et rare. +11% loot rare.'),
+    # ── 🟠 LÉGENDAIRE (œuf légendaire, rarissime) — bonus 0.15–0.18 ──
+    _ep('phoenix', 'Phénix', '🔥', 'legendary', 'boss_damage', 0.16, 'Renaît des cendres. +16% dégâts boss.', 'active'),
+    _ep('kraken', 'Kraken', '🦑', 'legendary', 'boss_damage', 0.17, 'Terreur des abysses. +17% dégâts boss.', 'active'),
+    _ep('griffin', 'Griffon', '🦅', 'legendary', 'duel_attack', 0.16, 'Bête mythique. +16% attaque.', 'active'),
+    _ep('wendigo', 'Wendigo', '🦌', 'legendary', 'global', 0.15, 'Esprit affamé. +15% partout.'),
+    _ep('golem', 'Golem', '🗿', 'legendary', 'boss_damage', 0.15, 'Roche vivante. +15% dégâts boss.'),
+    _ep('serpent', 'Serpent céleste', '🐍', 'legendary', 'rare_loot', 0.17, 'Gardien des trésors. +17% loot rare.'),
+    # ── 🌈 MYTHIQUE (œuf mythique, ultra-rare) — bonus 0.22–0.25 ──
+    _ep('celestialdragon', 'Dragon Céleste', '☄️', 'mythic', 'boss_damage', 0.25, 'Le plus rare des familiers. +25% dégâts boss.', 'active'),
+    _ep('cosmicfox', 'Renard Cosmique', '🌌', 'mythic', 'global', 0.22, 'Esprit des étoiles. +22% partout.'),
+])
+
+
+# Phase 235.26 : helpers de catégorisation (réutilisés par pet_eggs.py + /pet)
+def pets_by_rarity(rarity: str) -> list:
+    return [p for p in PETS if p.get('rarity') == rarity and p.get('egg_only')]
+
+
+def buyable_pets() -> list:
+    """Pets achetables en boutique (les 6 d'origine ; les pets d'œuf en sont exclus)."""
+    return [p for p in PETS if not p.get('egg_only')]
+
+
 def get_pet(pet_id: str) -> Optional[dict]:
     for p in PETS:
         if p['id'] == pet_id:
@@ -345,9 +425,13 @@ def pet_form_index(level: int) -> int:
 
 
 def pet_form_label(pet: dict, level: int) -> str:
+    # Phase 235.26 : DÉFENSIF — les familiers d'œuf n'ont pas les 5 formes
+    # d'évolution (forms/form_emojis). On retombe alors sur nom+emoji de base.
+    forms = pet.get('forms') or [pet.get('name', 'Familier')]
+    emojis = pet.get('form_emojis') or [pet.get('emoji', '🐾')]
     idx = pet_form_index(level)
-    emo = pet['form_emojis'][idx]
-    name = pet['forms'][idx]
+    name = forms[idx] if idx < len(forms) else forms[-1]
+    emo = emojis[idx] if idx < len(emojis) else emojis[-1]
     return f"{emo} {name}"
 
 

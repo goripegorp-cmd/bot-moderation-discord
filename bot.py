@@ -184,6 +184,7 @@ import story_engine as story_engine_module
 import codex_chronicle as codex_chronicle_module
 import hero_journey as hero_journey_module  # Phase 235.19 : Parcours de l'Aventurier (onboarding crescendo)
 import activity_system as activity_system_module  # Phase 235.25 : gate d'activité (clé d'accès aux events)
+import pet_eggs as pet_eggs_module  # Phase 235.26 : œufs de familiers (acquisition par éclosion)
 # Phase 170.2-3 : NPCs vivants + rencontres quotidiennes
 import npc_personalities as npc_personalities_module
 import daily_encounters as daily_encounters_module
@@ -41151,6 +41152,16 @@ async def on_ready():
             print("[Phase 235.25] activity_system OK (tracking messages + vocal)")
         except Exception as ex:
             print(f"[on_ready 235.25 activity_system] {ex}")
+
+        # Phase 235.26 : 🥚 Œufs de familiers — acquisition par éclosion (le #1
+        # reproche owner : « on ne savait pas comment en avoir »). Catalogue
+        # étendu à ~50 familiers (engagement41.PETS, egg_only). Module backend.
+        try:
+            pet_eggs_module.setup(get_db, add_coins_fn=add_coins)
+            await pet_eggs_module.init_db()
+            print("[Phase 235.26] pet_eggs OK (œufs de familiers)")
+        except Exception as ex:
+            print(f"[on_ready 235.26 pet_eggs] {ex}")
 
         # Phase 235.22 : bouton « 🔔 Me notifier » par type (opt-in, persistant).
         try:
