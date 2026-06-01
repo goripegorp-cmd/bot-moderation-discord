@@ -58183,6 +58183,7 @@ async def wheel_cmd(i: discord.Interaction):
     app_commands.Choice(name="✏️ rename — renommer mon pet actif", value="rename"),
     app_commands.Choice(name="📚 list — liste de tous les pets disponibles", value="list"),
     app_commands.Choice(name="🥚 oeufs — voir et faire éclore mes œufs", value="oeufs"),
+    app_commands.Choice(name="🐾 collection — mes familiers + équiper", value="collection"),
 ])
 @app_commands.choices(pet_choice=[
     # Phase 235.26 : SEULEMENT les pets achetables (les ~44 familiers d'œuf
@@ -58333,6 +58334,104 @@ async def pet_cmd(
                     self.add_item(v2_container(*items, color=0xF1C40F))
 
             return await i.followup.send(view=_EggsLayout(), ephemeral=True)
+
+        if act == "collection":
+            # Phase 235.26c : COLLECTION — voir tous ses familiers + en ÉQUIPER un
+            # (les familiers d'œuf ne passent pas par /pet setactive, limité aux
+            # achetables). Select natif → 1 seul actif. Réutilise /pet (0 cmd en +).
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT pet_id, is_active, level FROM user_pets "
+                    "WHERE guild_id=? AND user_id=? ORDER BY is_active DESC, level DESC",
+                    (gid, uid),
+                ) as cur:
+                    owned_rows = await cur.fetchall()
+            _owned = []
+            for _pid, _isact, _lvl in (owned_rows or []):
+                _pdef = eng41.get_pet(_pid)
+                if not _pdef:
+                    continue
+                _owned.append({
+                    'id': _pid, 'active': bool(_isact), 'level': int(_lvl or 1),
+                    'name': _pdef.get('name', '?'), 'emoji': _pdef.get('emoji', '🐾'),
+                    'rarity': _pdef.get('rarity', 'common'),
+                })
+            if not _owned:
+                return await i.followup.send(
+                    "🐾 Tu n'as encore **aucun familier**.\n"
+                    "🥚 Gagne des **œufs** en participant aux events → `/pet action:oeufs`, "
+                    "ou adopte-en un → `/pet action:list`.",
+                    ephemeral=True)
+            _uid2, _gid2 = uid, gid
+
+            async def _do_equip(sel_i: discord.Interaction, pet_id: str):
+                if sel_i.user.id != _uid2:
+                    return await sel_i.response.send_message(
+                        "❌ Ce panneau n'est pas pour toi.", ephemeral=True)
+                try:
+                    if not sel_i.response.is_done():
+                        await sel_i.response.defer(ephemeral=True)
+                except Exception:
+                    pass
+                try:
+                    async with get_db() as db:
+                        await db.execute(
+                            "UPDATE user_pets SET is_active=0 WHERE guild_id=? AND user_id=?",
+                            (_gid2, _uid2))
+                        await db.execute(
+                            "UPDATE user_pets SET is_active=1 "
+                            "WHERE guild_id=? AND user_id=? AND pet_id=?",
+                            (_gid2, _uid2, pet_id))
+                        await db.commit()
+                    _pd = eng41.get_pet(pet_id) or {}
+                    await sel_i.followup.send(
+                        f"✅ **{_pd.get('emoji', '🐾')} {_pd.get('name', 'Familier')}** "
+                        f"est maintenant ton familier **actif**.", ephemeral=True)
+                except Exception as ex:
+                    print(f"[pet collection equip] {ex}")
+                    try:
+                        await sel_i.followup.send("❌ Erreur, réessaie.", ephemeral=True)
+                    except Exception:
+                        pass
+
+            class _EquipSelect(discord.ui.Select):
+                def __init__(self):
+                    opts = []
+                    for p in _owned[:25]:
+                        rl = pet_eggs_module.rarity_label(p['rarity'])
+                        opts.append(discord.SelectOption(
+                            label=f"{p['name']} · niv.{p['level']}"[:100],
+                            value=p['id'],
+                            emoji=p['emoji'],
+                            description=(rl + (" · ÉQUIPÉ" if p['active'] else ""))[:100],
+                            default=p['active'],
+                        ))
+                    super().__init__(
+                        placeholder="Choisis ton familier à équiper…",
+                        options=opts, min_values=1, max_values=1)
+
+                async def callback(self, sel_i: discord.Interaction):
+                    await _do_equip(sel_i, self.values[0])
+
+            class _CollLayout(LayoutView):
+                def __init__(self):
+                    super().__init__(timeout=300)
+                    items = []
+                    items.append(v2_title(f"🐾  MA COLLECTION · {len(_owned)} familier(s)"))
+                    items.append(v2_subtitle("1 seul équipé à la fois — choisis-le ci-dessous"))
+                    items.append(v2_divider())
+                    _lines = []
+                    for p in _owned[:30]:
+                        rl = pet_eggs_module.rarity_label(p['rarity'])
+                        star = " ⭐ **équipé**" if p['active'] else ""
+                        _lines.append(f"{p['emoji']} **{p['name']}** · {rl} · niv.{p['level']}{star}")
+                    items.append(v2_body("\n".join(_lines)[:3500]))
+                    if len(_owned) > 30:
+                        items.append(v2_body(f"_+ {len(_owned) - 30} autres…_"))
+                    items.append(discord.ui.ActionRow(_EquipSelect()))
+                    self.add_item(v2_container(*items, color=0xE67E22))
+
+            return await i.followup.send(view=_CollLayout(), ephemeral=True)
 
         if act == "show":
             pet = await _get_active_pet(gid, uid)
