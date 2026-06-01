@@ -41160,7 +41160,11 @@ async def on_ready():
             activity_system_module.setup(get_db)
             await activity_system_module.init_db()
             await activity_system_module.cleanup_old()
-            bot.add_listener(activity_system_module.on_message_activity, "on_message")
+            # Garde anti-doublon : on_ready peut refirer (reconnexion gateway) →
+            # sans ce flag, on ajouterait un 2e listener → messages comptés ×2.
+            if not getattr(bot, "_activity_listener_added", False):
+                bot.add_listener(activity_system_module.on_message_activity, "on_message")
+                bot._activity_listener_added = True
             print("[Phase 235.25] activity_system OK (tracking messages + vocal)")
         except Exception as ex:
             print(f"[on_ready 235.25 activity_system] {ex}")

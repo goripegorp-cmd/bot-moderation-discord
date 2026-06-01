@@ -62,8 +62,13 @@ EVENT_TIERS = {
 ROLLING_DAYS = 7          # fenêtre glissante
 _CLEANUP_AFTER_DAYS = 21  # purge des buckets plus vieux que ça
 
-# Anti-spam : 1 point max par fenêtre de N s par user (un paste-bomb ne farme pas)
-_MSG_DEBOUNCE_SECONDS = 4
+# Phase 235.25b : anti double-comptage UNIQUEMENT. Avant, un debounce de 4 s
+# « avalait » les messages rapprochés → « j'écris 3 messages mais il n'en compte
+# que 2 » (bug signalé owner). Mis à 0 : CHAQUE message ≥ 2 caractères compte
+# (le owner veut que « 3 messages = 3 points » soit fiable, même envoyés vite).
+# L'anti-spam du serveur gère les abus ; farmer 60 pts = 60 messages = vraie
+# activité de toute façon.
+_MSG_DEBOUNCE_SECONDS = 0
 _last_msg_ts: dict = {}   # (guild_id, user_id) -> datetime du dernier message compté
 
 # Grâce de démarrage : tant qu'un serveur n'a pas ROLLING_DAYS jours de recul,
