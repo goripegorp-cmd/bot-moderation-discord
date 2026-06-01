@@ -59492,7 +59492,10 @@ class PetBuySelectView(View):
         self.guild_id = guild_id
         self.user_id = user_id
         opts = []
-        for p in eng41.PETS:
+        # Phase 235.26 : SEULEMENT les pets achetables (6) — les 44 familiers
+        # d'œuf n'ont pas de 'price' (KeyError) et 50 > limite Discord de 25
+        # options de Select. Les familiers d'œuf s'obtiennent via /pet oeufs.
+        for p in eng41.buyable_pets():
             opts.append(discord.SelectOption(
                 label=f"{p['name']} — {p['price']} 🪙",
                 value=p['id'],
