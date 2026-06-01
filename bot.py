@@ -9100,6 +9100,8 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
                         + wakeup_line
                         + f"\n⏰ **Le combat commence <t:{_warm_ts}:R>** — équipez votre meilleur "
                           f"stuff (`/inventory`) et **rejoignez un vocal** pour le bonus de dégâts !"
+                        + "\n🎁 **Butin** : équipement du 🟢 commun au 🟡 légendaire "
+                          "(meilleure place au classement = meilleure pièce) + des 🪙."
                         + "\n-# 💡 Pas envie d'être ping ? `/notifs` pour choisir quoi recevoir."
                     ),
                     allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=False),
@@ -60473,6 +60475,8 @@ async def _start_world_boss(guild) -> dict:
             + wakeup_line
             + f"\n⏰ **Le combat commence <t:{_wb_warm}:R>** — équipez votre meilleur stuff "
               f"(`/inventory`) et **rejoignez un vocal** (bonus de dégâts) !"
+            + "\n🎁 **Butin** : 🪙 pour tous (bonus top 3) · **10 % de loot UNIQUE** "
+              "pour le meilleur combattant !"
             + "\n_Pas envie d'être ping ? `/notifs` pour choisir précisément quoi recevoir._"
         )
         try:
