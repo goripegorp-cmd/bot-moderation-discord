@@ -182,6 +182,7 @@ import conversation_starters as conversation_starters_module  # Phase 234 : 1re 
 # Phase 170.1 : La Chronique d'Abylumis — récit narratif persistant 9 mois
 import story_engine as story_engine_module
 import codex_chronicle as codex_chronicle_module
+import hero_journey as hero_journey_module  # Phase 235.19 : Parcours de l'Aventurier (onboarding crescendo)
 # Phase 170.2-3 : NPCs vivants + rencontres quotidiennes
 import npc_personalities as npc_personalities_module
 import daily_encounters as daily_encounters_module
@@ -13304,6 +13305,23 @@ class OnboardingView(View):
         b_hub.callback = self._on_open_hub
         self.add_item(b_hub)
 
+        # Phase 235.19 : entrée du Parcours de l'Aventurier (onboarding crescendo).
+        b_journey = Button(
+            label="🧭 Mon Parcours d'aventurier",
+            style=discord.ButtonStyle.primary,
+            custom_id="onb_journey",
+            row=1,
+        )
+        b_journey.callback = self._on_journey
+        self.add_item(b_journey)
+
+    async def _on_journey(self, i: discord.Interaction):
+        """Ouvre le Parcours de l'Aventurier (auto-évalue + panneau éphémère)."""
+        try:
+            await hero_journey_module.open_panel(i)
+        except Exception as ex:
+            print(f"[OnboardingView _on_journey] {ex}")
+
     async def _on_open_hub(self, i: discord.Interaction):
         """Ouvre le hub d'engagement depuis le DM onboarding."""
         try:
@@ -15412,7 +15430,8 @@ async def task_supervisor():
     for mod_name, attr in (("mob_hunts_module", "spawn_task"),
                            ("daily_bosses_module", "daily_boss_task"),
                            ("event_notif_role_module", "event_role_task"),
-                           ("conversation_starters_module", "conv_starter_task")):
+                           ("conversation_starters_module", "conv_starter_task"),
+                           ("hero_journey_module", "hero_journey_task")):
         try:
             mod = globals().get(mod_name)
             lo = getattr(mod, attr, None) if mod is not None else None
@@ -40875,6 +40894,23 @@ async def on_ready():
         except Exception as ex:
             print(f"[on_ready 170 codex_chronicle] {ex}")
 
+        # Phase 235.19 : 🧭 Parcours de l'Aventurier — onboarding crescendo per-player
+        try:
+            hero_journey_module.setup(
+                bot, get_db, _v2h,
+                add_coins_fn=add_coins,
+                get_level_fn=_hero_level,
+                grant_item_fn=_stash_add,
+                check_fn=_hero_check,
+                notify_check_fn=None,
+            )
+            await hero_journey_module.init_db()
+            hero_journey_module.register_persistent_views(bot)
+            if not hero_journey_module.hero_journey_task.is_running():
+                hero_journey_module.hero_journey_task.start()
+        except Exception as ex:
+            print(f"[on_ready 235.19 hero_journey] {ex}")
+
         print(
             "[Phase 155/165/166/167/168/169/170/171] Stream + token_leak + "
             "birthday + welcome + spotlight + rotator + voice_clean + risk + "
@@ -64163,6 +64199,62 @@ async def _maybe_delete_idle_combat_channel(guild, grace_seconds: int = 0):
         await db_set(guild.id, 'combat_channel_id', 0)
     except Exception:
         pass
+
+
+async def _hero_level(guild_id: int, user_id: int) -> int:
+    """Phase 235.19 : niveau du joueur pour le Parcours de l'Aventurier."""
+    try:
+        return int((await get_user_economy(guild_id, user_id)).get('level', 1) or 1)
+    except Exception:
+        return 1
+
+
+async def _hero_check(kind: str, guild_id: int, user_id: int) -> bool:
+    """Phase 235.19 : conditions du Parcours de l'Aventurier (schémas CENTRALISÉS ici
+    pour garder le module hero_journey générique). Fail-CLOSED (False) sauf 'none' →
+    jamais de récompense à tort ; le joueur avance dès la vraie condition remplie."""
+    try:
+        if kind == "none":
+            return True
+        if kind == "daily":
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT last_daily FROM economy WHERE guild_id=? AND user_id=?",
+                    (guild_id, user_id)) as cur:
+                    r = await cur.fetchone()
+            return bool(r and r[0])
+        if kind == "equip":
+            inv = await _get_or_create_inventory(guild_id, user_id)
+            for slot in ("weapon", "armor", "helmet", "boots", "accessory", "trinket"):
+                if (inv.get(slot) or {}).get("name"):
+                    return True
+            return False
+        if kind == "alliance":
+            return (await _get_user_alliance(guild_id, user_id)) is not None
+        if kind == "mob":
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT 1 FROM mob_attackers ma JOIN mob_spawns ms ON ma.mob_id=ms.id "
+                    "WHERE ms.guild_id=? AND ma.user_id=? LIMIT 1",
+                    (guild_id, user_id)) as cur:
+                    return (await cur.fetchone()) is not None
+        if kind == "daily_boss":
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT 1 FROM daily_boss_attackers da JOIN daily_boss_events de "
+                    "ON da.event_id=de.id WHERE de.guild_id=? AND da.user_id=? LIMIT 1",
+                    (guild_id, user_id)) as cur:
+                    return (await cur.fetchone()) is not None
+        if kind == "world_boss":
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT 1 FROM world_boss_attackers wa JOIN world_bosses wb "
+                    "ON wa.world_boss_id=wb.id WHERE wb.guild_id=? AND wa.user_id=? LIMIT 1",
+                    (guild_id, user_id)) as cur:
+                    return (await cur.fetchone()) is not None
+    except Exception as ex:
+        print(f"[_hero_check {kind}] {ex}")
+    return False
 
 
 async def _post_combat_report(guild, title: str, body: str = "", color: int = 0x2ECC71):
