@@ -72,6 +72,13 @@ _report_fn = None  # Phase 223 : async (guild, title, body) -> rapport dans « c
 _arena_delete_fn = None  # Phase 210 : async (guild, text_channel_id) -> supprime l'arène
 _event_busy_fn = None  # Phase 230 : async (guild_id) -> True si un AUTRE event de combat tourne (injecté)
 
+# Phase 235.16 : WARM-UP — léger sas de préparation au spawn (« le combat commence
+# dans X s » demandé par l'owner : recevoir le ping, lire le butin, s'équiper,
+# rejoindre un vocal). { event_id: epoch_fin_warmup }. Fail-open (vide au reboot →
+# attaquable normalement).
+_DBOSS_WARMUP_SECONDS = 20
+_warmup_until: dict[int, float] = {}
+
 # Phase 196 : mention intelligente rotative — paramètres anti-spam.
 PING_MAX_USERS = 8          # cap dur de mentions par spawn (TOS Discord)
 PING_COOLDOWN_HOURS = 8     # un même membre n'est ping qu'une fois / ~8h
@@ -661,8 +668,13 @@ async def trigger_daily_boss(
         print(f"[trigger_daily_boss INSERT] {ex}")
         return None
 
+    # Phase 235.16 : warm-up — le boss est invulnérable les premières secondes
+    # (sas de préparation). Le panneau affiche « commence <t:..:R> ».
+    _warm = datetime.now(timezone.utc).timestamp() + _DBOSS_WARMUP_SECONDS
+    _warmup_until[event_id] = _warm
     # Poste le panel public + bouton
-    msg = await _post_boss_panel(ch, event_id, boss, hp, hp, int(boss["lifetime_min"]))
+    msg = await _post_boss_panel(ch, event_id, boss, hp, hp, int(boss["lifetime_min"]),
+                                 warmup_ts=_warm)
     if msg:
         try:
             async with _get_db() as db:
@@ -742,7 +754,8 @@ def _parse_ts(val) -> Optional[int]:
 
 def _build_boss_layout(
     boss: dict, hp_cur: int, hp_max: int, damage_total: int, event_id: int,
-    *, expires_ts: Optional[int] = None, alive: bool = True,
+    *, expires_ts: Optional[int] = None, warmup_ts: Optional[float] = None,
+    alive: bool = True,
 ):
     """Phase 235.16 : construit le panneau V2 COMPLET du boss du jour (lore + HP +
     infos/butin + how-to-play + bouton). UTILISÉ par le post initial ET le refresh
@@ -783,6 +796,16 @@ def _build_boss_layout(
         v2_body(_ev.how_to_play('daily_boss')),
     ]
 
+    # Phase 235.16 : si le warm-up est actif, bandeau « commence <t:..:R> » en haut
+    # (le compte à rebours est rendu LIVE côté client, sans re-edit du message).
+    try:
+        if warmup_ts and warmup_ts > datetime.now(timezone.utc).timestamp():
+            items.insert(3, v2_body(
+                f"⏰ **Le combat commence <t:{int(warmup_ts)}:R>** — équipe ton meilleur "
+                f"stuff (`/inventory`) et **rejoins un vocal** (bonus de dégâts) !"))
+    except Exception:
+        pass
+
     # Phase 208 FIX : le bouton DOIT être dans un ActionRow DANS le conteneur
     # (bouton brut top-level d'un LayoutView = 400). Le clic est capté par le
     # DynamicItem DailyBossAttackButton (match du custom_id), comme le World Boss.
@@ -802,6 +825,7 @@ def _build_boss_layout(
 
 async def _post_boss_panel(
     ch, event_id: int, boss: dict, hp_cur: int, hp_max: int, lifetime_min: int,
+    warmup_ts: Optional[float] = None,
 ) -> Optional[discord.Message]:
     """Poste le panel V2 COMPLET du boss (builder partagé avec le refresh)."""
     if _v2 is None:
@@ -812,7 +836,8 @@ async def _post_boss_panel(
     except Exception:
         expires_ts = None
     layout = _build_boss_layout(
-        boss, hp_cur, hp_max, 0, event_id, expires_ts=expires_ts, alive=True)
+        boss, hp_cur, hp_max, 0, event_id, expires_ts=expires_ts,
+        warmup_ts=warmup_ts, alive=True)
     try:
         return await ch.send(view=layout)
     except Exception as ex:
@@ -843,6 +868,7 @@ async def _refresh_boss_panel(guild: discord.Guild, event_id: int) -> None:
         boss, active["hp_current"], active["hp_max"],
         active.get("damage_total", 0), event_id,
         expires_ts=_parse_ts(active.get("expires_at")),
+        warmup_ts=_warmup_until.get(event_id),
         alive=active["hp_current"] > 0)
     try:
         await msg.edit(view=layout)
@@ -870,6 +896,18 @@ async def record_boss_attack(guild_id: int, user_id: int) -> dict:
     boss = get_boss_def(active["boss_id"])
     if not boss:
         return {"error": "Boss introuvable"}
+
+    # ─── WARM-UP (Phase 235.16) : sas de préparation au spawn ───
+    _wu = _warmup_until.get(active["event_id"], 0)
+    if _wu and datetime.now(timezone.utc).timestamp() < _wu:
+        return {
+            "error": (
+                f"⏳ **Le boss se prépare !** Le combat commence <t:{int(_wu)}:R>.\n"
+                f"Équipe ton meilleur stuff (`/inventory`) et **rejoins un vocal** "
+                f"(bonus de dégâts) en attendant !"
+            ),
+            "warmup": True,
+        }
 
     # ─── GATING DE NIVEAU ───
     if boss["min_level"] > 0:
