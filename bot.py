@@ -60843,7 +60843,7 @@ async def _end_world_boss(guild, wb_id: int, victory: bool, reason: str = ""):
                     hub_id = int(c.get('hub_channel', 0) or 0)
                     hub_ch = guild.get_channel(hub_id) if hub_id else None
                     if hub_ch and top_member:
-                        action = "vole" if loot.get("stolen_from") else "obtient"
+                        action = "obtient"  # Phase 235.23 : plus de vol — l'item reste à son proprio
                         LIFETIME = 6 * 3600
                         e = discord.Embed(
                             title=f"💎 LOOT UNIQUE OBTENU !",
@@ -76021,53 +76021,33 @@ async def _maybe_drop_unique_loot(guild_id: int, user_id: int, event_kind: str, 
     pool = loot_pool.get(event_kind, [])
     if not pool:
         return None
-    name, desc = random.choice(pool)
-    # Insert (1 seul exemplaire au monde par name)
+    # Phase 235.23 : AUCUN VOL (demande owner). 1 exemplaire au monde par item : une
+    # fois obtenu, il reste à son proprio À VIE — personne ne peut le lui voler. On ne
+    # drop donc QUE des items encore JAMAIS obtenus sur ce serveur (sinon : rien).
     try:
         async with get_db() as db:
-            # Check si ce loot existe déjà
             async with db.execute(
-                "SELECT id, current_owner_id FROM unique_loots WHERE guild_id=? AND name=?",
-                (guild_id, name),
+                "SELECT name FROM unique_loots WHERE guild_id=?",
+                (guild_id,),
             ) as cur:
-                existing = await cur.fetchone()
-        if existing:
-            # Loot existe déjà → transfer (l'ancien owner perd, le nouveau gagne)
-            loot_id, old_owner = int(existing[0]), int(existing[1] or 0)
-            if old_owner == user_id:
-                return None  # Déjà à toi
-            async with get_db() as db:
-                await db.execute(
-                    "UPDATE unique_loot_history SET released_at=CURRENT_TIMESTAMP "
-                    "WHERE loot_id=? AND owner_id=? AND released_at IS NULL",
-                    (loot_id, old_owner),
-                )
-                await db.execute(
-                    "INSERT INTO unique_loot_history(loot_id, owner_id) VALUES(?, ?)",
-                    (loot_id, user_id),
-                )
-                await db.execute(
-                    "UPDATE unique_loots SET current_owner_id=?, obtained_at=CURRENT_TIMESTAMP "
-                    "WHERE id=?",
-                    (user_id, loot_id),
-                )
-                await db.commit()
-            return {"id": loot_id, "name": name, "desc": desc, "stolen_from": old_owner, "new": False}
-        else:
-            # Nouveau loot
-            async with get_db() as db:
-                cur = await db.execute(
-                    "INSERT INTO unique_loots(guild_id, name, description, current_owner_id, event_kind) "
-                    "VALUES(?, ?, ?, ?, ?)",
-                    (guild_id, name, desc, user_id, event_kind),
-                )
-                loot_id = cur.lastrowid
-                await db.execute(
-                    "INSERT INTO unique_loot_history(loot_id, owner_id) VALUES(?, ?)",
-                    (loot_id, user_id),
-                )
-                await db.commit()
-            return {"id": int(loot_id), "name": name, "desc": desc, "stolen_from": None, "new": True}
+                owned = {r[0] for r in await cur.fetchall()}
+        available = [(n, d) for (n, d) in pool if n not in owned]
+        if not available:
+            return None  # tous les uniques de ce type sont déjà au monde → rien à drop
+        name, desc = random.choice(available)
+        async with get_db() as db:
+            cur = await db.execute(
+                "INSERT INTO unique_loots(guild_id, name, description, current_owner_id, event_kind) "
+                "VALUES(?, ?, ?, ?, ?)",
+                (guild_id, name, desc, user_id, event_kind),
+            )
+            loot_id = cur.lastrowid
+            await db.execute(
+                "INSERT INTO unique_loot_history(loot_id, owner_id) VALUES(?, ?)",
+                (loot_id, user_id),
+            )
+            await db.commit()
+        return {"id": int(loot_id), "name": name, "desc": desc, "stolen_from": None, "new": True}
     except Exception as ex:
         print(f"[_maybe_drop_unique_loot] {ex}")
         return None
@@ -76113,7 +76093,7 @@ async def loots_cmd(i: discord.Interaction):
                             "⚔️ **Boss Raid** : drop chance variable\n"
                             "💎 **Treasure Hunt** : items mythiques rares\n\n"
                             "_**1 seul exemplaire au monde** par item._\n"
-                            "_Si quelqu'un d'autre le re-drop, il te le vole._"
+                            "_À toi pour toujours — personne ne peut te le voler. Revente possible._"
                         ),
                     ]
                     self.add_item(v2_container(*items, color=0x95A5A6))
@@ -76157,8 +76137,8 @@ async def loots_cmd(i: discord.Interaction):
                     items.append(v2_divider())
 
                 items.append(v2_body(
-                    "_💡 1 exemplaire au monde par item. "
-                    "Si quelqu'un re-drop le même → tu te le fais voler._"
+                    "_💡 1 exemplaire au monde par item — à toi pour toujours. "
+                    "Personne ne peut te le voler ; tu peux le revendre._"
                 ))
 
                 # Color based on highest rarity
@@ -77642,7 +77622,7 @@ async def _open_loots_panel(i: discord.Interaction):
                 description=(
                     "_Aucun loot unique pour le moment._\n\n"
                     "_Les loots uniques drop pendant les events majeurs (~10% pour top damager world boss). "
-                    "**1 seul exemplaire au monde par item** — si quelqu'un re-drop, il te le vole._"
+                    "**1 seul exemplaire au monde par item** — à toi pour toujours, personne ne peut te le voler._"
                 ),
                 color=0x95A5A6,
             )
