@@ -12978,18 +12978,155 @@ async def _get_event_mention(guild, event_type: str) -> str:
                 if role:
                     mentions.append(role.mention)
 
+        # Phase 235.22 : ping AUSSI le rôle 🔔 par-type (opt-in via le bouton « Me
+        # notifier » sous l'event). create=False → le rôle n'existe que si ≥1 membre
+        # s'est abonné → on ne ping QUE les volontaires (zéro spam aléatoire).
+        try:
+            _cat = _EVENT_TYPE_TO_NOTIFY.get(event_type)
+            if _cat:
+                _tr = await _event_notify_role(guild, _cat, create=False)
+                if _tr and _tr.mention not in mentions:
+                    mentions.append(_tr.mention)
+        except Exception:
+            pass
         if not mentions:
             return ""
-        # Phase 235.7 : rappel DISCRET sous CHAQUE ping d'événement. Beaucoup de
-        # joueurs ignorent qu'ils peuvent s'abonner/désabonner → le rôle
-        # « 📢 Tous les Événements » avait 0 membre. On indique la commande
-        # /notify (prendre OU retirer le rôle) en sous-texte, juste sous le ping.
+        # Phase 235.7/22 : rappel DISCRET sous chaque ping. Le bouton « 🔔 Me notifier »
+        # (dans le panneau de l'event) abonne/désabonne en 1 clic pour CE type précis.
         return (" ".join(mentions)
-                + "\n-# 🔔 Tu veux recevoir (ou ne plus recevoir) ces alertes "
-                  "d'événements ? Fais **/notify** pour prendre ou retirer le rôle.")
+                + "\n-# 🔔 Règle tes alertes : bouton **Me notifier** sous l'event "
+                  "(ou **/notify**). Reclique = désabonné.")
     except Exception as ex:
         print(f"[_get_event_mention] {ex}")
         return ""
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 235.22 — NOTIFICATION PAR TYPE (opt-in EN UN BOUTON, sous chaque event)
+#  Owner : « pas de multi-mentions ; un bouton sous chaque event pour être notifié
+#  UNIQUEMENT pour ce type ; reclique = retire le rôle. » → rôles 🔔 par catégorie,
+#  créés à la demande, toggle en 1 clic, pingés au spawn (seulement les volontaires).
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_EVENT_NOTIFY_TYPES = {
+    "boss":       ("🔔 Boss", "Boss du jour & Boss Raid"),
+    "world_boss": ("🔔 World Boss", "World Boss hebdo"),
+    "climax":     ("🔔 Climax", "Boss climax mensuel"),
+    "chest":      ("🔔 Coffres & Trésors", "Boîtes mystères, coffres, trésors"),
+    "minigame":   ("🔔 Quiz & Énigmes", "Quiz et énigmes"),
+    "mob":        ("🔔 Chasses", "Chasses aux mobs"),
+    "invasion":   ("🔔 Invasions", "Invasions du serveur"),
+    "council":    ("🔔 Conseil", "Conseil des Anciens"),
+}
+
+# event_type interne → catégorie de notif (pour le ping au spawn via _get_event_mention).
+_EVENT_TYPE_TO_NOTIFY = {
+    "boss_raid": "boss", "daily_boss": "boss",
+    "world_boss": "world_boss", "climax": "climax",
+    "mystery_box": "chest", "treasure_hunt": "chest", "treasure": "chest",
+    "quiz": "minigame", "riddle": "minigame", "daily_riddle": "minigame",
+    "mob": "mob", "mob_hunt": "mob",
+    "invasion": "invasion", "world_invasion": "invasion", "council": "council",
+}
+
+
+async def _event_notify_role(guild, etype: str, *, create: bool = True):
+    """Get-or-create le rôle 🔔 de la catégorie `etype`. Retourne le rôle ou None.
+    create=False → simple lookup (utilisé au spawn : on ne ping que si le rôle existe
+    déjà, càd si ≥1 membre s'est abonné)."""
+    if guild is None or etype not in _EVENT_NOTIFY_TYPES:
+        return None
+    name = _EVENT_NOTIFY_TYPES[etype][0]
+    cfg_key = f"notify_type_{etype}_id"
+    try:
+        c = await cfg(guild.id)
+        rid = int(c.get(cfg_key, 0) or 0)
+        if rid:
+            r = guild.get_role(rid)
+            if r:
+                return r
+        r = discord.utils.get(guild.roles, name=name)
+        if r:
+            await db_set(guild.id, cfg_key, r.id)
+            return r
+        if not create:
+            return None
+        me = guild.me
+        if not (me and me.guild_permissions.manage_roles):
+            return None
+        r = await guild.create_role(name=name, mentionable=True,
+                                    reason="Notif par type (opt-in bouton)")
+        await db_set(guild.id, cfg_key, r.id)
+        return r
+    except Exception as ex:
+        print(f"[_event_notify_role {etype}] {ex}")
+        return None
+
+
+def _event_notify_button(etype: str) -> Button:
+    """Bouton 🔔 à placer dans un ActionRow d'un panneau d'event (DANS le post).
+    Toggle le rôle de notif de la catégorie. Capté par EventNotifyButton (DynamicItem)."""
+    return Button(label="🔔 Me notifier", style=discord.ButtonStyle.secondary,
+                  custom_id=f"evtnotif:{etype}")
+
+
+class EventNotifyButton(discord.ui.DynamicItem[Button],
+                        template=r"evtnotif:(?P<etype>[a-z_]+)"):
+    """1er clic = abonné au type, 2e clic = désabonné. Persistant (DynamicItem)."""
+    def __init__(self, etype: str):
+        super().__init__(Button(label="🔔 Me notifier",
+                                style=discord.ButtonStyle.secondary,
+                                custom_id=f"evtnotif:{etype}"))
+        self.etype = etype
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["etype"])
+
+    async def callback(self, i: discord.Interaction):
+        try:
+            await i.response.defer(ephemeral=True)
+        except (discord.NotFound, discord.HTTPException, discord.InteractionResponded):
+            pass
+        if i.guild is None:
+            try:
+                await i.followup.send("❌ Serveur uniquement.", ephemeral=True)
+            except Exception:
+                pass
+            return
+        label = _EVENT_NOTIFY_TYPES.get(self.etype, ("ce type",))[0]
+        role = await _event_notify_role(i.guild, self.etype, create=True)
+        if role is None:
+            try:
+                await i.followup.send(
+                    "❌ Rôle de notif indisponible (permissions manquantes). Préviens un admin.",
+                    ephemeral=True)
+            except Exception:
+                pass
+            return
+        try:
+            member = i.user if isinstance(i.user, discord.Member) else i.guild.get_member(i.user.id)
+            if member is None:
+                return
+            if role in member.roles:
+                await member.remove_roles(role, reason="Désabonnement notif (bouton)")
+                msg = f"🔕 Ok, tu ne seras **plus** notifié pour **{label}**."
+            else:
+                await member.add_roles(role, reason="Abonnement notif (bouton)")
+                msg = (f"🔔 C'est noté ! Tu seras notifié pour **{label}**.\n"
+                       f"_Reclique sur le bouton pour te désabonner._")
+            await i.followup.send(msg, ephemeral=True)
+        except discord.Forbidden:
+            try:
+                await i.followup.send("❌ Je n'ai pas la permission de gérer ce rôle.", ephemeral=True)
+            except Exception:
+                pass
+        except Exception as ex:
+            print(f"[EventNotifyButton {self.etype}] {ex}")
+            try:
+                await i.followup.send("❌ Erreur, réessaie.", ephemeral=True)
+            except Exception:
+                pass
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -40935,6 +41072,12 @@ async def on_ready():
                 hero_journey_module.hero_journey_task.start()
         except Exception as ex:
             print(f"[on_ready 235.19 hero_journey] {ex}")
+
+        # Phase 235.22 : bouton « 🔔 Me notifier » par type (opt-in, persistant).
+        try:
+            bot.add_dynamic_items(EventNotifyButton)
+        except Exception as ex:
+            print(f"[on_ready 235.22 event_notify] {ex}")
 
         print(
             "[Phase 155/165/166/167/168/169/170/171] Stream + token_leak + "

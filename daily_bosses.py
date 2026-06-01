@@ -810,10 +810,14 @@ def _build_boss_layout(
     # (bouton brut top-level d'un LayoutView = 400). Le clic est capté par le
     # DynamicItem DailyBossAttackButton (match du custom_id), comme le World Boss.
     if alive:
-        items.append(discord.ui.ActionRow(Button(
-            label="⚔️ Attaquer", style=discord.ButtonStyle.danger,
-            custom_id=f"dboss_atk:{event_id}",
-        )))
+        # Phase 235.22 : bouton « 🔔 Me notifier » (type boss) DANS le panneau — toggle
+        # le rôle de notif en 1 clic. custom_id capté par EventNotifyButton (bot.py).
+        items.append(discord.ui.ActionRow(
+            Button(label="⚔️ Attaquer", style=discord.ButtonStyle.danger,
+                   custom_id=f"dboss_atk:{event_id}"),
+            Button(label="🔔 Me notifier", style=discord.ButtonStyle.secondary,
+                   custom_id="evtnotif:boss"),
+        ))
 
     class _BossLayout(LayoutView):
         def __init__(self):
