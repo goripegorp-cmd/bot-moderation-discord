@@ -39290,12 +39290,40 @@ async def update_realsy_activity(guild_id, user_id):
 #                           🛡️ GESTIONNAIRE D'ERREURS GLOBAL
 # ═══════════════════════════════════════════════════════════════════════════════
 
+async def _tree_dm_guard(interaction: discord.Interaction) -> bool:
+    """Phase 235.3 : TOUTES les commandes de ce bot sont liées au serveur. En message
+    privé, interaction.guild est None → la plupart des commandes plantent
+    (i.guild.id / i.guild.icon …). Plutôt que de garder chaque commande une par une
+    (whack-a-mole : /wheel, /event, /leaderboard…), on bloque proprement TOUTE
+    commande en MP, ICI, en un seul endroit. Renvoie False en MP → CheckFailure →
+    message clair géré par on_app_command_error. (Les checks par-commande, ex.
+    owner-only, continuent de tourner séparément.)"""
+    return interaction.guild is not None
+
+
+bot.tree.interaction_check = _tree_dm_guard
+
+
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error):
     """Gestionnaire d'erreur global pour les commandes slash - évite 'échec de l'interaction'.
 
     Phase 3.0h : imprime le traceback complet dans les logs Railway pour debug."""
     cmd_name = interaction.command.name if interaction.command else 'Unknown'
+    # Phase 235.3 : CheckFailure = souvent commande tentée en MP (cf _tree_dm_guard).
+    # Message clair + PAS de traceback bruyant (ce n'est pas un vrai bug).
+    if isinstance(error, discord.app_commands.errors.CheckFailure):
+        _msg = ("ℹ️ Les commandes de ce bot s'utilisent **sur le serveur**, pas en message privé."
+                if interaction.guild is None
+                else "❌ Tu ne peux pas utiliser cette commande ici.")
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(_msg, ephemeral=True)
+            else:
+                await interaction.followup.send(_msg, ephemeral=True)
+        except Exception:
+            pass
+        return
     try:
         import traceback
         print(f"[APP CMD ERROR] /{cmd_name}: {type(error).__name__}: {error}")
