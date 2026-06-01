@@ -907,6 +907,16 @@ async def _process_attack(btn_i: discord.Interaction, mob_id: int):
                 "💀 Ce mob est déjà mort.", ephemeral=True
             )
 
+        # Phase 235.25 : GATE D'ACTIVITÉ 🟢 base (3 pts/7 j) — exclut les AFK total.
+        try:
+            import activity_system as _act
+            _aok, _asc, _aneed = await _act.check_gate(btn_i.guild.id, btn_i.user.id, "mob")
+            if not _aok:
+                return await btn_i.followup.send(
+                    _act.block_message("mob", _asc, _aneed), ephemeral=True)
+        except Exception:
+            pass
+
         mob_def = get_mob_def(mob_kind)
         if not mob_def:
             return

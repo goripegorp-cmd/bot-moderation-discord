@@ -10959,6 +10959,16 @@ class TreasureClaimView(View):
             pool = _treasure_pool.get(self.event_id, [])
             if self.treasure_idx >= len(pool):
                 return await i.followup.send("❌ Ce trésor n'existe plus.", ephemeral=True)
+            # Phase 235.25 : GATE D'ACTIVITÉ 🟢 base (3 pts/7 j).
+            try:
+                _aok, _asc, _aneed = await activity_system_module.check_gate(
+                    i.guild.id, i.user.id, "treasure")
+                if not _aok:
+                    return await i.followup.send(
+                        activity_system_module.block_message("treasure", _asc, _aneed),
+                        ephemeral=True)
+            except Exception:
+                pass
             tr = pool[self.treasure_idx]
             if tr.get('claimed_by'):
                 claimer = i.guild.get_member(int(tr['claimed_by']))
@@ -11343,6 +11353,17 @@ class QuizAnswerView(View):
                 return await i.followup.send("✅ Quelqu'un a déjà répondu juste !", ephemeral=True)
             if i.user.bot:
                 return await i.followup.send("🤖 Les bots ne peuvent pas répondre.", ephemeral=True)
+
+            # Phase 235.25 : GATE D'ACTIVITÉ 🟢 base (3 pts/7 j).
+            try:
+                _aok, _asc, _aneed = await activity_system_module.check_gate(
+                    i.guild.id, i.user.id, "quiz")
+                if not _aok:
+                    return await i.followup.send(
+                        activity_system_module.block_message("quiz", _asc, _aneed),
+                        ephemeral=True)
+            except Exception:
+                pass
 
             answers = state.setdefault('answers_received', {})
             if i.user.id in answers:
@@ -14401,6 +14422,16 @@ class MysteryBoxView(View):
                 return await i.followup.send("❌ Cette boîte n'est plus disponible.", ephemeral=True)
             if i.user.bot:
                 return await i.followup.send("🤖 Les bots ne peuvent pas ouvrir.", ephemeral=True)
+            # Phase 235.25 : GATE D'ACTIVITÉ 🟢 base (3 pts/7 j).
+            try:
+                _aok, _asc, _aneed = await activity_system_module.check_gate(
+                    i.guild.id, i.user.id, "mystery")
+                if not _aok:
+                    return await i.followup.send(
+                        activity_system_module.block_message("mystery", _asc, _aneed),
+                        ephemeral=True)
+            except Exception:
+                pass
 
             already_opened = box.get('opened_by', [])
             if i.user.id in already_opened:
