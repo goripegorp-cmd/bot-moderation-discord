@@ -58630,31 +58630,43 @@ async def _ping_active_members(guild, channel, *, notif_key='boss_raid',
             except Exception:
                 continue
             chosen.append(uid)
-        if not chosen:
+        # Phase 235.24 : on ping AUSSI les rôles opt-in (/notify + 🔔 par-type) de CE
+        # type d'event → même si AUCUN actif n'est choisi, les abonnés sont prévenus.
+        role_mention = ""
+        try:
+            role_mention = await _get_event_mention(guild, notif_key)
+        except Exception:
+            role_mention = ""
+        if not chosen and not role_mention:
             return 0
         now_iso = datetime.now(timezone.utc).isoformat()
-        try:
-            async with get_db() as db:
-                for uid in chosen:
-                    await db.execute(
-                        "INSERT INTO combat_ping_log (guild_id, user_id, last_pinged) "
-                        "VALUES (?, ?, ?) ON CONFLICT(guild_id, user_id) DO UPDATE SET "
-                        "last_pinged = excluded.last_pinged",
-                        (guild.id, uid, now_iso),
-                    )
-                await db.commit()
-        except Exception as ex:
-            print(f"[_ping_active_members log] {ex}")
-        mentions = " ".join(f"<@{u}>" for u in chosen)
-        line = (
-            f"{intro or '🔔 Un combat vient de commencer —'} {mentions} "
-            f"venez tenter votre chance ! _(ouvert à tous · `/notifs` pour gérer vos pings)_"
-        )
+        if chosen:
+            try:
+                async with get_db() as db:
+                    for uid in chosen:
+                        await db.execute(
+                            "INSERT INTO combat_ping_log (guild_id, user_id, last_pinged) "
+                            "VALUES (?, ?, ?) ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                            "last_pinged = excluded.last_pinged",
+                            (guild.id, uid, now_iso),
+                        )
+                    await db.commit()
+            except Exception as ex:
+                print(f"[_ping_active_members log] {ex}")
+        parts = []
+        if role_mention:
+            parts.append(role_mention)
+        if chosen:
+            mentions = " ".join(f"<@{u}>" for u in chosen)
+            parts.append(
+                f"{intro or '🔔 Un combat vient de commencer —'} {mentions} "
+                f"venez tenter votre chance !")
+        line = "\n".join(parts)
         try:
             msg = await channel.send(
                 line,
                 allowed_mentions=discord.AllowedMentions(
-                    users=True, everyone=False, roles=False),
+                    users=True, everyone=False, roles=True),
             )
             if msg:
                 try:
