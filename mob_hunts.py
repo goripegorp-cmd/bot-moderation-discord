@@ -1192,8 +1192,9 @@ async def _on_mob_killed(
         f"💀 **{elite_prefix}{mob_def['emoji']} {mob_def['name']}** est tombé !"
     )
 
-    lines = [title_msg, "", "**🏆 Récompenses :**"]
-    for r in rewards[:10]:
+    # Phase 235.20 : TOUS les combattants affichés (chacun = vainqueur), pas que le top 10.
+    lines = [title_msg, "", "**🏆 Tous les combattants récompensés :**"]
+    for r in rewards[:30]:
         member = guild.get_member(r["user_id"])
         name = member.display_name if member else f"User {r['user_id']}"
         badge_top = " 🥇" if r["is_top"] else ""
@@ -1203,8 +1204,8 @@ async def _on_mob_killed(
             f"• **{name}**{badge_top}{badge_alli} : "
             f"`{r['coins']}` 🪙{item_str} _(`{r['damage']}` dmg)_"
         )
-    if len(rewards) > 10:
-        lines.append(f"_+ {len(rewards) - 10} autres attackers récompensés._")
+    if len(rewards) > 30:
+        lines.append(f"_+ {len(rewards) - 30} autres aussi récompensés._")
 
     # Edit le message original pour montrer le kill
     try:

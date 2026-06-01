@@ -10615,9 +10615,10 @@ async def _end_active_event(guild, *, victory: bool, reason: str = ""):
             f"💥 **{sum(p['damage'] for p in participants):,}** dégâts au total"
         )
         if reward_lines:
-            _report_body += "\n\n**🎁 Récompenses :**\n" + "\n".join(reward_lines[:15])
-            if len(reward_lines) > 15:
-                _report_body += f"\n_… + {len(reward_lines) - 15} autre(s)_"
+            # Phase 235.20 : TOUS les combattants affichés (chacun = vainqueur).
+            _report_body += "\n\n**🎁 Tous les combattants récompensés :**\n" + "\n".join(reward_lines[:30])
+            if len(reward_lines) > 30:
+                _report_body += f"\n_… + {len(reward_lines) - 30} autres aussi récompensés._"
         if reason:
             _report_body += f"\n\n_{reason}_"
         _recap_posted = False
@@ -60745,16 +60746,20 @@ async def _end_world_boss(guild, wb_id: int, victory: bool, reason: str = ""):
             else f"💀 {boss['title']} s'est échappé…"
         )
         try:
+            # Phase 235.20 : TOUS les combattants affichés (display_name → pas de
+            # ping de 30 personnes dans le récap).
             medals = ["🥇", "🥈", "🥉"]
             lines = []
-            for idx, (uid, dmg) in enumerate(attackers[:10]):
+            for idx, (uid, dmg) in enumerate(attackers[:30]):
                 m = guild.get_member(int(uid))
-                nm = m.mention if m else f"<@{uid}>"
-                rank = medals[idx] if idx < 3 else f"`#{idx + 1}`"
+                nm = m.display_name if m else f"User {uid}"
+                rank = medals[idx] if idx < 3 else "🔸"
                 lines.append(f"{rank} {nm} · `{int(dmg or 0):,}` dégâts")
             desc = head + f"\n👥 **{len(attackers)} combattant(s)**"
             if lines:
-                desc += "\n\n**🏆 Top combattants :**\n" + "\n".join(lines)
+                desc += "\n\n**🏆 Tous les combattants récompensés :**\n" + "\n".join(lines)
+                if len(attackers) > 30:
+                    desc += f"\n_… + {len(attackers) - 30} autres aussi récompensés._"
             if victory:
                 desc += (
                     f"\n\n💰 Récompenses : top 3 `{boss['victory_reward_coins']}` 🪙, "

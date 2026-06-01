@@ -1147,14 +1147,17 @@ async def _announce_resolution(
         )
 
     if rewards:
-        lines = ["\n**🏅 Top combattants :**"]
-        for r in rewards[:3]:
+        # Phase 235.20 : on affiche TOUS les combattants (chacun qui a participé est
+        # un vainqueur), pas seulement le top 3. Médaille pour le podium, 🔸 sinon.
+        lines = ["\n**🏅 Combattants récompensés (tous !) :**"]
+        medals = ["🥇", "🥈", "🥉"]
+        for r in rewards[:30]:
             member = ch.guild.get_member(r["user_id"]) if ch.guild else None
             nm = member.display_name if member else f"User {r['user_id']}"
-            medal = ["🥇", "🥈", "🥉"][r["rank"] - 1]
-            lines.append(f"{medal} **{nm}** : `{r['damage']:,}` dmg · `{r['coins']:,}` 🪙")
-        if len(rewards) > 3:
-            lines.append(f"_+ {len(rewards) - 3} autres récompensés._")
+            mark = medals[r["rank"] - 1] if r["rank"] <= 3 else "🔸"
+            lines.append(f"{mark} **{nm}** · `{r['damage']:,}` dmg · `{r['coins']:,}` 🪙")
+        if len(rewards) > 30:
+            lines.append(f"_+ {len(rewards) - 30} autres aussi récompensés._")
         body += "\n".join(lines)
 
     try:

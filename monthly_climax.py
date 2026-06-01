@@ -1218,19 +1218,20 @@ async def _announce_climax_closed(
         )
 
     if rewards:
-        top3 = rewards[:3]
-        lines = ["\n**🏅 Top 3 contributeurs :**"]
-        for r in top3:
+        # Phase 235.20 : TOUS les combattants affichés (chacun = vainqueur), pas que le top 3.
+        lines = ["\n**🏅 Combattants récompensés (tous !) :**"]
+        medals = ["🥇", "🥈", "🥉"]
+        for r in rewards[:30]:
             member = guild.get_member(r["user_id"])
             name = member.display_name if member else f"User {r['user_id']}"
-            medal = ["🥇", "🥈", "🥉"][r["rank"] - 1]
+            mark = medals[r["rank"] - 1] if r["rank"] <= 3 else "🔸"
             lines.append(
-                f"{medal} **{name}** : `{r['damage']:,}` dmg · `{r['coins']:,}` 🪙"
+                f"{mark} **{name}** · `{r['damage']:,}` dmg · `{r['coins']:,}` 🪙"
                 + (f" · titre **{r['title']}**" if r.get("title") else "")
             )
         body += "\n".join(lines)
-        if len(rewards) > 3:
-            body += f"\n\n_+ {len(rewards) - 3} autres attackers récompensés._"
+        if len(rewards) > 30:
+            body += f"\n\n_+ {len(rewards) - 30} autres aussi récompensés._"
 
     body += "\n\n_📖 Tous les titres sont gravés dans le Codex._"
 
