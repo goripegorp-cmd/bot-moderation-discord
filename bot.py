@@ -15288,6 +15288,17 @@ async def stale_event_cleanup():
                                 'UPDATE world_bosses SET ended=1 WHERE id=?', (wb_id,),
                             )
                             await db.commit()
+                        # Phase 235.8 : si l'arène était le salon de SECOURS
+                        # « 🌍-world-boss-… » (créé quand _create_combat_arena a
+                        # échoué → PAS de ligne combat_arenas), il n'était nettoyé
+                        # nulle part au reboot → orphelin en bas du serveur. On le
+                        # supprime ici. GARDE sur le nom dédié : jamais un salon
+                        # partagé/permanent.
+                        try:
+                            if ch is not None and str(getattr(ch, 'name', '')).startswith('🌍-world-boss'):
+                                await ch.delete(reason="Salon world-boss de secours orphelin")
+                        except Exception:
+                            pass
                     except discord.Forbidden:
                         pass
                     except Exception:
