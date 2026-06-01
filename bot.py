@@ -4816,11 +4816,30 @@ class TicketControlView(View):
             async with get_db() as db:
                 await db.execute('UPDATE tickets SET claimed_by=? WHERE channel_id=?', (i.user.id, i.channel.id))
                 await db.commit()
-            await i.response.send_message(f"✅ **{i.user.display_name}** prend ce ticket en charge\n\n*Les autres staffs ne peuvent plus voir ce ticket.*")
+            # Phase 235.4 : le panneau de ticket est posté par un WEBHOOK (nom custom
+            # « Tickets ») → i.message.edit() échouait (403 50005 : on ne peut pas
+            # éditer le message d'un AUTRE auteur). On met à jour le bouton via la
+            # RÉPONSE d'interaction (autorisée sur le message du composant, même
+            # webhook), PUIS on annonce dans le salon. Plus de 50005.
             btn.disabled = True
-            btn.label = f"Pris par {i.user.display_name}"
+            btn.label = f"Pris par {i.user.display_name}"[:80]
             btn.style = discord.ButtonStyle.secondary
-            await i.message.edit(view=self)
+            try:
+                await i.response.edit_message(view=self)
+            except Exception:
+                # Filet : si l'édition du panneau échoue, on acquitte quand même
+                # l'interaction pour éviter « Échec de l'interaction ».
+                try:
+                    if not i.response.is_done():
+                        await i.response.defer()
+                except Exception:
+                    pass
+            try:
+                await i.channel.send(
+                    f"✅ **{i.user.display_name}** prend ce ticket en charge\n\n"
+                    "*Les autres staffs ne peuvent plus voir ce ticket.*")
+            except Exception:
+                pass
             await send_ticket_log(i.guild, 'claim', tk['user'], tk, extra=i.user.id)
         except Exception as _tk_ex:
             print(f"[ticket_btn] {type(_tk_ex).__name__}: {_tk_ex}")

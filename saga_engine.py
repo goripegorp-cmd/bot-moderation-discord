@@ -556,11 +556,22 @@ async def saga_lifecycle_task():
                                 pass
                 # Si dimanche 23h+ et saga active >= 6 jours, finalise
                 if saga and saga.get("started_at"):
-                    started = datetime.fromisoformat(
-                        str(saga["started_at"]).replace("Z", "+00:00")
-                        if "T" in str(saga["started_at"]) else
-                        str(saga["started_at"])
-                    ) if isinstance(saga["started_at"], str) else None
+                    # Phase 235.4 : normaliser en datetime *aware* (UTC). started_at
+                    # stocké par SQLite (CURRENT_TIMESTAMP) vaut « 2026-05-25 18:00:00 »
+                    # — SANS fuseau → datetime NAÏF → la soustraction avec
+                    # datetime.now(timezone.utc) (aware) levait « can't subtract
+                    # offset-naive and offset-aware datetimes ». Fix : forcer UTC.
+                    started = None
+                    raw = saga["started_at"]
+                    try:
+                        if isinstance(raw, datetime):
+                            started = raw
+                        elif isinstance(raw, str):
+                            started = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                    except Exception:
+                        started = None
+                    if started is not None and started.tzinfo is None:
+                        started = started.replace(tzinfo=timezone.utc)
                     # Fallback : on finalise simplement si > 6 jours
                     if started and (datetime.now(timezone.utc) - started).days >= 6:
                         await end_saga(saga["saga_id"])
