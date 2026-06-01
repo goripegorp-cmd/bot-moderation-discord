@@ -7695,6 +7695,11 @@ class _BirthdayMsgModal(Modal, title="📝 Message d'anniversaire"):
 # ── État runtime des événements (en plus de la DB) ──
 # Cache rapide : { guild_id: {event_id, arena_channel_id, arena_message_id} }
 _active_events_cache: dict[int, dict] = {}
+# Phase 235.13 : WARM-UP pré-combat. Le boss est INVULNÉRABLE pendant les premières
+# secondes après le spawn → le temps que les gens reçoivent le ping, lisent le loot,
+# s'équipent et rejoignent un vocal. { event_id: timestamp_fin_warmup }.
+_BOSS_WARMUP_SECONDS = 25
+_boss_warmup_until: dict[int, float] = {}
 # Rate-limit des attaques : { (guild_id, user_id): last_ts }
 _attack_cooldown: dict[tuple[int, int], float] = {}
 # Phase 31 : historique attaques récentes par event (pour combos)
@@ -9081,13 +9086,18 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
             #   1) l'annonce + ping (content seul) — déclenche les notifications
             #   2) le panneau interactif V2 (view seule) — bouton ATTAQUER visible
             try:
+                # Phase 235.13 : warm-up — countdown avant que le boss soit attaquable.
+                _warm_ts = int(time.time()) + _BOSS_WARMUP_SECONDS
+                _boss_warmup_until[event_id] = time.time() + _BOSS_WARMUP_SECONDS
                 await arena_channel.send(
                     content=(
                         f"🚨 **{boss.get('name', 'UN BOSS')} surgit des ténèbres !** "
-                        f"Tous les membres : préparez-vous au combat !"
+                        f"Préparez-vous au combat !"
                         + (f"\n{ping_str}" if ping_str else "")
                         + wakeup_line
-                        + "\n_💡 Pas envie d'être ping ? `/notifs` pour choisir précisément quoi recevoir._"
+                        + f"\n⏰ **Le combat commence <t:{_warm_ts}:R>** — équipez votre meilleur "
+                          f"stuff (`/inventory`) et **rejoignez un vocal** pour le bonus de dégâts !"
+                        + "\n-# 💡 Pas envie d'être ping ? `/notifs` pour choisir quoi recevoir."
                     ),
                     allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=False),
                 )
@@ -9720,6 +9730,19 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
                 f"🔒 Le **Boss Raid** demande le **niveau {_BR_MIN_LVL}** "
                 f"(tu es niveau **{_br_lvl}**).\n💡 Monte vite en niveau : tape dans le chat, "
                 f"fais `/daily`, et tabasse les **mobs** & le **boss du jour** (ouverts à tous) !",
+                ephemeral=True,
+            )
+
+        # Phase 235.13 : WARM-UP — le boss est invulnérable les premières secondes
+        # (léger cooldown de préparation demandé par l'owner : recevoir le ping,
+        # lire le loot, s'équiper, rejoindre un vocal). Fail-open : pas d'entrée
+        # dans le dict (reboot) → attaquable normalement.
+        _wu = _boss_warmup_until.get(event_id, 0)
+        if _wu and time.time() < _wu:
+            return await i.followup.send(
+                f"⏳ **Le boss se prépare !** Le combat commence <t:{int(_wu)}:R>.\n"
+                f"Équipe ton meilleur stuff (`/inventory`) et **rejoins un vocal** "
+                f"(bonus de dégâts) en attendant !",
                 ephemeral=True,
             )
 
