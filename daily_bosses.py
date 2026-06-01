@@ -900,6 +900,19 @@ async def record_boss_attack(guild_id: int, user_id: int) -> dict:
                 elem_proc = _p
         except Exception:
             pass
+    # Phase 235.10 : BOOST VOCAL — être connecté à N'IMPORTE QUEL vocal donne un
+    # bonus de dégâts ALÉATOIRE (+12-30 %, plafonné). Même règle que Boss Raid /
+    # World Boss. Incite à se retrouver en vocal sans créer le moindre salon.
+    voice_bonus = 0
+    try:
+        _g = _bot.get_guild(guild_id) if _bot is not None else None
+        _m = _g.get_member(user_id) if _g is not None else None
+        if _m and getattr(_m, "voice", None) and _m.voice.channel is not None:
+            voice_bonus = int(damage * (random.uniform(1.12, 1.30) - 1.0))
+            if voice_bonus > 0:
+                damage += voice_bonus
+    except Exception:
+        voice_bonus = 0
     damage = min(damage, active["hp_current"])
 
     try:
@@ -937,7 +950,8 @@ async def record_boss_attack(guild_id: int, user_id: int) -> dict:
     if boss_dead:
         await resolve_daily_boss(event_id)
         return {"success": True, "damage": damage, "boss_dead": True,
-                "attack_count": attacks_done + 1, "elem": elem_proc}
+                "attack_count": attacks_done + 1, "elem": elem_proc,
+                "voice_bonus": voice_bonus}
 
     return {
         "success": True,
@@ -948,6 +962,7 @@ async def record_boss_attack(guild_id: int, user_id: int) -> dict:
         "max_attacks": MAX_ATTACKS_PER_USER,
         "boss_dead": False,
         "elem": elem_proc,
+        "voice_bonus": voice_bonus,
     }
 
 
@@ -1175,16 +1190,19 @@ class DailyBossAttackButton(
                 f"\n{_ep['emoji']} **{_ep['name']}** ! +`{_ep['bonus']}` dégâts élémentaires"
                 if _ep else ""
             )
+            # Phase 235.10 : note de BOOST VOCAL (si connecté à un vocal)
+            _vb = int(result.get("voice_bonus", 0) or 0)
+            _voice_note = (f"\n🔊 **Boost vocal** ! +`{_vb}` dégâts" if _vb > 0 else "")
             if result.get("boss_dead"):
                 await btn_i.followup.send(
                     f"⚔️ **{result['damage']} dégâts** — coup final ! "
-                    f"Le boss est tombé, récompenses distribuées. 🎉{_elem_note}",
+                    f"Le boss est tombé, récompenses distribuées. 🎉{_elem_note}{_voice_note}",
                     ephemeral=True,
                 )
             else:
                 pct = int(result["hp_current"] * 100 / max(1, result["hp_max"]))
                 await btn_i.followup.send(
-                    f"⚔️ **{result['damage']} dégâts** infligés !{_elem_note}\n"
+                    f"⚔️ **{result['damage']} dégâts** infligés !{_elem_note}{_voice_note}\n"
                     f"_Boss : `{result['hp_current']:,}/{result['hp_max']:,}` HP "
                     f"({pct}%) · tes attaques : "
                     f"`{result['attack_count']}/{result['max_attacks']}`_",
