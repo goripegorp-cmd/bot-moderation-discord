@@ -183,6 +183,7 @@ import conversation_starters as conversation_starters_module  # Phase 234 : 1re 
 import story_engine as story_engine_module
 import codex_chronicle as codex_chronicle_module
 import hero_journey as hero_journey_module  # Phase 235.19 : Parcours de l'Aventurier (onboarding crescendo)
+import activity_system as activity_system_module  # Phase 235.25 : gate d'activité (clé d'accès aux events)
 # Phase 170.2-3 : NPCs vivants + rencontres quotidiennes
 import npc_personalities as npc_personalities_module
 import daily_encounters as daily_encounters_module
@@ -41094,6 +41095,20 @@ async def on_ready():
         except Exception as ex:
             print(f"[on_ready 235.19 hero_journey] {ex}")
 
+        # Phase 235.25 : 📊 Système d'ACTIVITÉ — clé d'accès aux events.
+        # Score glissant 7 j : 1 message = 1 pt · 1 min vocal = 1 pt. Paliers
+        # 🟢 3 / 🟡 20 / 🔴 60 (gate appliqué AU-DESSUS du gate de niveau, phase
+        # suivante). Ici on ne fait QUE démarrer la collecte (tracking) pour que
+        # les scores s'accumulent dès maintenant.
+        try:
+            activity_system_module.setup(get_db)
+            await activity_system_module.init_db()
+            await activity_system_module.cleanup_old()
+            bot.add_listener(activity_system_module.on_message_activity, "on_message")
+            print("[Phase 235.25] activity_system OK (tracking messages + vocal)")
+        except Exception as ex:
+            print(f"[on_ready 235.25 activity_system] {ex}")
+
         # Phase 235.22 : bouton « 🔔 Me notifier » par type (opt-in, persistant).
         try:
             bot.add_dynamic_items(EventNotifyButton)
@@ -74849,6 +74864,14 @@ async def _track_voice_state(member, before, after):
                                 getattr(before, 'self_deaf', False)
                             )
                             if not is_afk:
+                                # Phase 235.25 : +1 point d'ACTIVITÉ par minute de
+                                # vocal (le vocal compense l'écrit pour l'accès aux
+                                # events). Déjà filtré anti-AFK juste au-dessus.
+                                try:
+                                    await activity_system_module.add_voice_minutes(
+                                        member.guild.id, member.id, minutes)
+                                except Exception:
+                                    pass
                                 # Cap quotidien : 100 coins/jour de voice
                                 today = datetime.now(timezone.utc).strftime(
                                     "%Y-%m-%d"

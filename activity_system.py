@@ -1,0 +1,237 @@
+"""activity_system.py — Phase 235.25 : Système d'ACTIVITÉ (clé d'accès aux events).
+
+Cahier des charges owner : pour PARTICIPER à un événement, il faut être VRAIMENT
+actif sur le serveur. Le palier monte avec la rareté de l'event :
+
+  🟢 Base          (Trésor Flash, Boîte mystère, Mob, Quiz)   = 3 points
+  🟡 Intermédiaire (Boss du jour, Boss Raid)                  = 20 points
+  🔴 Grandiose     (World Boss, Climax, Invasion)             = 60 points
+
+Score = somme GLISSANTE sur 7 jours. 1 message = 1 point · 1 minute de vocal =
+1 point (le vocal COMPENSE l'écrit). Ce gate s'ajoute AU-DESSUS du gate de niveau.
+
+Principes :
+- La barre n'est JAMAIS nulle mais TRIVIALE pour le base (3 messages ≈ rien,
+  exclut juste les AFK total).
+- HAUTE pour le grandiose (impossible à donner à quelqu'un de quasi-AFK).
+- Messages de blocage ENCOURAGEANTS, jamais punitifs.
+- Peu de notifs, tout est expliqué clairement dans le message de blocage.
+
+Module AUTONOME : dépendances injectées via setup() (même patron que
+mob_hunts / hero_journey). La CI ne voit pas les NameError runtime → on garde
+tout défensif (FAIL-OPEN sur le gate : un bug n'empêche JAMAIS de jouer).
+"""
+
+from datetime import datetime, timezone, timedelta
+
+# ─── Dépendances injectées ───
+_get_db = None
+
+# ─── Paliers d'activité (points) ───
+TIER_BASE = 3
+TIER_INTER = 20
+TIER_GRAND = 60
+
+TIER_LABELS = {
+    TIER_BASE: "🟢 Base",
+    TIER_INTER: "🟡 Intermédiaire",
+    TIER_GRAND: "🔴 Grandiose",
+}
+
+# event_type (minuscules) -> palier requis
+EVENT_TIERS = {
+    # 🟢 Base — accessible avec un minimum d'activité (≈ 3 messages)
+    "treasure": TIER_BASE,
+    "flash_treasure": TIER_BASE,
+    "mystery": TIER_BASE,
+    "mystery_box": TIER_BASE,
+    "mob": TIER_BASE,
+    "quiz": TIER_BASE,
+    "minigame": TIER_BASE,
+    "riddle": TIER_BASE,
+    # 🟡 Intermédiaire — demande une présence régulière
+    "daily_boss": TIER_INTER,
+    "boss": TIER_INTER,
+    "boss_raid": TIER_INTER,
+    # 🔴 Grandiose — réservé aux vrais actifs de la semaine
+    "world_boss": TIER_GRAND,
+    "climax": TIER_GRAND,
+    "invasion": TIER_GRAND,
+}
+
+ROLLING_DAYS = 7          # fenêtre glissante
+_CLEANUP_AFTER_DAYS = 21  # purge des buckets plus vieux que ça
+
+# Anti-spam : 1 point max par fenêtre de N s par user (un paste-bomb ne farme pas)
+_MSG_DEBOUNCE_SECONDS = 4
+_last_msg_ts: dict = {}   # (guild_id, user_id) -> datetime du dernier message compté
+
+
+def _today() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _window_start() -> str:
+    """Premier jour (inclus) de la fenêtre glissante, format 'YYYY-MM-DD'."""
+    d = datetime.now(timezone.utc) - timedelta(days=ROLLING_DAYS - 1)
+    return d.strftime("%Y-%m-%d")
+
+
+def setup(get_db_fn):
+    """Injecte le context manager DB (le même que bot.py : `async with get_db()`)."""
+    global _get_db
+    _get_db = get_db_fn
+
+
+async def init_db():
+    if _get_db is None:
+        return
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "CREATE TABLE IF NOT EXISTS activity_score ("
+                "guild_id INTEGER, user_id INTEGER, day TEXT, "
+                "points INTEGER DEFAULT 0, "
+                "PRIMARY KEY (guild_id, user_id, day))"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_activity_score_lookup "
+                "ON activity_score(guild_id, user_id, day)"
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[activity init_db] {ex}")
+
+
+async def _add_points(guild_id, user_id, points, *, day=None):
+    if _get_db is None or points <= 0:
+        return
+    day = day or _today()
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT INTO activity_score (guild_id, user_id, day, points) "
+                "VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(guild_id, user_id, day) "
+                "DO UPDATE SET points = points + ?",
+                (int(guild_id), int(user_id), day, int(points), int(points)),
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[activity _add_points] {ex}")
+
+
+async def get_score(guild_id, user_id) -> int:
+    """Score d'activité glissant sur les 7 derniers jours."""
+    if _get_db is None:
+        return 0
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT COALESCE(SUM(points), 0) FROM activity_score "
+                "WHERE guild_id=? AND user_id=? AND day >= ?",
+                (int(guild_id), int(user_id), _window_start()),
+            ) as cur:
+                row = await cur.fetchone()
+        return int(row[0] or 0) if row else 0
+    except Exception as ex:
+        print(f"[activity get_score] {ex}")
+        return 0
+
+
+def required_points(event_type) -> int:
+    return EVENT_TIERS.get((event_type or "").lower(), TIER_BASE)
+
+
+def tier_label(event_type) -> str:
+    return TIER_LABELS.get(required_points(event_type), "🟢 Base")
+
+
+async def check_gate(guild_id, user_id, event_type):
+    """Retourne (ok: bool, score: int, needed: int).
+
+    FAIL-OPEN : toute erreur → (True, 0, 0). On ne bloque JAMAIS le combat sur un
+    bug d'activité (sinon plus personne ne peut jouer → catastrophe). La pire
+    conséquence d'un bug ici est juste "le gate ne filtre pas", pas "tout cassé".
+    """
+    try:
+        needed = required_points(event_type)
+        score = await get_score(guild_id, user_id)
+        return (score >= needed, score, needed)
+    except Exception as ex:
+        print(f"[activity check_gate] {ex}")
+        return (True, 0, 0)
+
+
+def block_message(event_type, score, needed) -> str:
+    """Message ENCOURAGEANT (jamais punitif) affiché quand le palier manque."""
+    missing = max(0, int(needed) - int(score))
+    tier = TIER_LABELS.get(int(needed), "")
+    base = (
+        f"🌱 **Presque !** Cet événement {tier} demande "
+        f"**{needed} points d'activité** sur 7 jours — tu en as **{score}**.\n"
+    )
+    if needed <= TIER_BASE:
+        tip = (
+            f"Il te manque **{missing}** tout petit point : écris 2-3 messages "
+            f"et l'accès s'ouvre tout seul. 💬"
+        )
+    else:
+        tip = (
+            f"Il te manque **{missing}** : participe à la vie du serveur "
+            f"(💬 1 message = 1 pt · 🔊 1 min vocal = 1 pt) et reviens — "
+            f"l'accès s'ouvre automatiquement, sans rien à taper. 💪"
+        )
+    return base + tip
+
+
+# ─── HOOKS DE COLLECTE ───
+async def on_message_activity(message):
+    """Listener ADDITIF sur on_message : +1 point / message (debounce anti-spam).
+
+    À enregistrer via bot.add_listener(on_message_activity, "on_message") — JAMAIS
+    en @bot.event (écraserait le handler principal, cf. règle mémoire)."""
+    try:
+        if _get_db is None:
+            return
+        if getattr(message, "guild", None) is None:
+            return
+        author = getattr(message, "author", None)
+        if author is None or getattr(author, "bot", False):
+            return
+        content = (getattr(message, "content", "") or "").strip()
+        if len(content) < 2:
+            return
+        key = (message.guild.id, author.id)
+        now = datetime.now(timezone.utc)
+        last = _last_msg_ts.get(key)
+        if last is not None and (now - last).total_seconds() < _MSG_DEBOUNCE_SECONDS:
+            return
+        _last_msg_ts[key] = now
+        await _add_points(message.guild.id, author.id, 1)
+    except Exception as ex:
+        print(f"[activity on_message] {ex}")
+
+
+async def add_voice_minutes(guild_id, user_id, minutes):
+    """Appelé par le tracker vocal existant (déjà anti-AFK) : +1 point / minute."""
+    try:
+        m = int(minutes or 0)
+        if m > 0:
+            await _add_points(guild_id, user_id, m)
+    except Exception as ex:
+        print(f"[activity add_voice_minutes] {ex}")
+
+
+async def cleanup_old():
+    """Purge des buckets de plus de _CLEANUP_AFTER_DAYS jours (table reste minuscule)."""
+    if _get_db is None:
+        return
+    try:
+        cutoff = (datetime.now(timezone.utc)
+                  - timedelta(days=_CLEANUP_AFTER_DAYS)).strftime("%Y-%m-%d")
+        async with _get_db() as db:
+            await db.execute("DELETE FROM activity_score WHERE day < ?", (cutoff,))
+            await db.commit()
+    except Exception as ex:
+        print(f"[activity cleanup_old] {ex}")
