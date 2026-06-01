@@ -78759,73 +78759,33 @@ class AllianceLayoutV2(LayoutView):
 
         items.append(v2_divider())
 
-        # Actions COMMUNES (membre + chef)
-        b_t = Button(label="Voir", style=discord.ButtonStyle.primary, custom_id="alliv2_treasury")
-        b_t.callback = self._on_treasury
-        items.append(_section_with_button(
-            "💰 Trésorerie",
-            f"Total actuel : `{self.treasury:,}` 🪙", b_t,
-        ))
+        # ─── Phase 235 : sections → catégories + ActionRows. Un CHEF avait 9
+        # sections (~45 composants > limite Components V2 de 40) → le panneau
+        # Alliance PLANTAIT pour les chefs. Mêmes callbacks ; libellés explicites.
+        def _mk(label, style, cid, cb):
+            btn = Button(label=label, style=style, custom_id=cid)
+            btn.callback = cb
+            return btn
 
-        b_m = Button(label="Liste", style=discord.ButtonStyle.secondary, custom_id="alliv2_members")
-        b_m.callback = self._on_members
-        items.append(_section_with_button(
-            "👥 Membres",
-            f"{len(self.members)} membres dans l'alliance", b_m,
-        ))
-
-        b_dep = Button(label="Modal", style=discord.ButtonStyle.success, custom_id="alliv2_deposit")
-        b_dep.callback = self._on_deposit
-        items.append(_section_with_button(
-            "📥 Déposer dans la trésorerie",
-            "Min 10 🪙 · les coins restent à l'alliance", b_dep,
-        ))
-
-        b_audit = Button(label="Voir", style=discord.ButtonStyle.secondary, custom_id="alliv2_audit")
-        b_audit.callback = self._on_audit
-        items.append(_section_with_button(
-            "📜 Historique",
-            "15 dernières actions (dépôts/retraits/expulsions)", b_audit,
+        items.append(v2_body("**💠 Actions de l'alliance**"))
+        items.append(discord.ui.ActionRow(
+            _mk("💰 Trésorerie", discord.ButtonStyle.primary, "alliv2_treasury", self._on_treasury),
+            _mk("👥 Membres", discord.ButtonStyle.secondary, "alliv2_members", self._on_members),
+            _mk("📥 Déposer", discord.ButtonStyle.success, "alliv2_deposit", self._on_deposit),
+            _mk("📜 Historique", discord.ButtonStyle.secondary, "alliv2_audit", self._on_audit),
         ))
 
         if self.is_leader:
-            items.append(v2_divider())
-            items.append(v2_subtitle("👑 Actions chef (gestion alliance)"))
-
-            b_wit = Button(label="Modal", style=discord.ButtonStyle.danger, custom_id="alliv2_withdraw")
-            b_wit.callback = self._on_withdraw
-            items.append(_section_with_button(
-                "📤 Retirer pour toi",
-                "Retire des coins de la trésorerie vers ton solde perso", b_wit,
-            ))
-
-            b_give = Button(label="Choisir", style=discord.ButtonStyle.primary, custom_id="alliv2_give")
-            b_give.callback = self._on_give
-            items.append(_section_with_button(
-                "💸 Donner à un membre",
-                "Récompense un membre depuis la trésorerie", b_give,
-            ))
-
-            b_exp = Button(label="Choisir", style=discord.ButtonStyle.danger, custom_id="alliv2_expel")
-            b_exp.callback = self._on_expel
-            items.append(_section_with_button(
-                "🚪 Expulser un membre",
-                "De l'alliance UNIQUEMENT (aucun kick/ban Discord)", b_exp,
-            ))
-
-            b_tr = Button(label="Choisir", style=discord.ButtonStyle.secondary, custom_id="alliv2_transfer")
-            b_tr.callback = self._on_transfer
-            items.append(_section_with_button(
-                "👑 Transférer chefferie",
-                "Tu deviens membre normal, un autre devient chef", b_tr,
+            items.append(v2_subtitle("👑 Gestion chef — l'expulsion retire de l'ALLIANCE, jamais du serveur"))
+            items.append(discord.ui.ActionRow(
+                _mk("📤 Retirer", discord.ButtonStyle.danger, "alliv2_withdraw", self._on_withdraw),
+                _mk("💸 Donner", discord.ButtonStyle.primary, "alliv2_give", self._on_give),
+                _mk("🚪 Expulser", discord.ButtonStyle.danger, "alliv2_expel", self._on_expel),
+                _mk("👑 Transférer chefferie", discord.ButtonStyle.secondary, "alliv2_transfer", self._on_transfer),
             ))
         else:
-            items.append(v2_divider())
-            b_leave = Button(label="Confirmer", style=discord.ButtonStyle.danger, custom_id="alliv2_leave")
-            b_leave.callback = self._on_leave
-            items.append(_section_with_button(
-                "🚪 Quitter l'alliance",
-                "Tu pourras en rejoindre une autre après", b_leave,
+            items.append(discord.ui.ActionRow(
+                _mk("🚪 Quitter l'alliance", discord.ButtonStyle.danger, "alliv2_leave", self._on_leave),
             ))
 
         items.append(v2_divider())
