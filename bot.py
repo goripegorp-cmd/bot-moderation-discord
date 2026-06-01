@@ -45640,6 +45640,11 @@ async def event_cmd(i: discord.Interaction):
     - Module désactivé : panel explicatif
     """
     try:
+        # Phase 235 : /event est lié au serveur → garde MP (sinon i.guild None → crash)
+        if i.guild is None:
+            return await i.response.send_message(
+                "🎪 La commande `/event` s'utilise depuis le serveur, pas en message privé.",
+                ephemeral=True)
         c = await cfg(i.guild.id)
         enabled = bool(c.get('event_enabled', False))
 
@@ -46212,27 +46217,9 @@ async def inventory_cmd(i: discord.Interaction):
                             )
                         await _open_equipment(btn_i)
 
-                # ─── Section "ACTIONS RAPIDES" avec boutons en accessory ───
-                items.append(v2_body("**╔═══ ⚡  ACTIONS RAPIDES  ═══╗**"))
-                items.append(v2_section(
-                    v2_title("🎒  Équipement · Coffre · Vente"),
-                    v2_subtitle("Vois ton stuff trié par rareté · équipe · vends au marchand pour des 🪙"),
-                    accessory=_EquipBtn(),
-                ))
-                items.append(v2_section(
-                    v2_title("🔧  Réparation"),
-                    v2_subtitle("Restaure la durabilité de tout ton équipement"),
-                    accessory=_RepairBtn(),
-                ))
-                items.append(v2_section(
-                    v2_title("⚒️  Atelier de forge"),
-                    v2_subtitle("**Améliore** (+N, sûr) ou **affine la rareté** (risqué) de ton équipement"),
-                    accessory=_ForgeBtn(),
-                ))
-                # Phase 166.5 : section "🤝 Échange P2P" supprimée
-                # — économie solo only.
-
-                # Phase 128 : Refresh — re-charge stats/durabilité après combat
+                # ─── ACTIONS (Phase 235) : 1 SEULE ActionRow au lieu de 4 sections
+                # (titre+sous-titre+bouton ×4 = 16 composants) → /inventory dépassait
+                # la limite Components V2 de 40 et PLANTAIT. Mêmes boutons/callbacks.
                 async def _refresh_inv(btn_i: discord.Interaction):
                     try:
                         await inventory_cmd.callback(btn_i)
@@ -46246,10 +46233,12 @@ async def inventory_cmd(i: discord.Interaction):
                         except Exception:
                             pass
 
-                items.append(v2_section(
-                    v2_title("🔄  Actualiser"),
-                    v2_subtitle("Recharge équipement + stats (après combat ou réparation)"),
-                    accessory=panels_h.make_refresh_button(
+                items.append(v2_body(
+                    "**⚡  ACTIONS**  ·  🎒 équiper/vendre · 🔧 réparer · ⚒️ forger · 🔄 actualiser"
+                ))
+                items.append(discord.ui.ActionRow(
+                    _EquipBtn(), _RepairBtn(), _ForgeBtn(),
+                    panels_h.make_refresh_button(
                         _owner_id, _refresh_inv,
                         custom_id_prefix="phase128_inv_refresh",
                     ),
@@ -78219,83 +78208,44 @@ class ToolsLayoutV2(LayoutView):
         items.append(v2_subtitle("Toutes tes fonctionnalités perso en 1 clic — aucune commande"))
         items.append(v2_divider())
 
-        # Économie
-        b = Button(label="Ouvrir", style=discord.ButtonStyle.success, custom_id="toolv2_bank")
-        b.callback = self._on_bank
-        items.append(_section_with_button(
-            "🏦 Banque", "Dépôts avec 1%/jour d'intérêts (max 30j)", b,
+        # ─── Phase 235 : 11 sections (titre+sous-titre+bouton = ~44 composants)
+        # dépassaient la limite Components V2 de 40 → le panneau Outils PLANTAIT.
+        # On regroupe en catégories (1 ligne titre) + ActionRows de boutons.
+        # Mêmes callbacks ; les libellés portent désormais le nom de la fonctionnalité.
+        def _mk(label, style, cid, cb):
+            btn = Button(label=label, style=style, custom_id=cid)
+            btn.callback = cb
+            return btn
+
+        items.append(v2_body("**💰 Économie**"))
+        items.append(discord.ui.ActionRow(
+            _mk("🏦 Banque", discord.ButtonStyle.success, "toolv2_bank", self._on_bank),
+            _mk("💎 Mes loots", discord.ButtonStyle.primary, "toolv2_loots", self._on_loots),
+            _mk("🤝 Alliance", discord.ButtonStyle.success, "toolv2_alli", self._on_alliance),
         ))
 
-        b = Button(label="Voir", style=discord.ButtonStyle.primary, custom_id="toolv2_loots")
-        b.callback = self._on_loots
-        items.append(_section_with_button(
-            "💎 Mes loots uniques", "Items rares dont tu es propriétaire", b,
+        items.append(v2_body("**⚔️ Compétitif**"))
+        items.append(discord.ui.ActionRow(
+            _mk("⚔️ PvP / Duel", discord.ButtonStyle.danger, "toolv2_pvp", self._on_pvp),
+            _mk("🎖️ Ma classe RP", discord.ButtonStyle.primary, "toolv2_class", self._on_class),
         ))
 
-        b = Button(label="Ouvrir", style=discord.ButtonStyle.success, custom_id="toolv2_alli")
-        b.callback = self._on_alliance
-        items.append(_section_with_button(
-            "🤝 Mon Alliance", "Trésorerie · Membres · Gestion (chef)", b,
+        items.append(v2_body("**💝 Social**"))
+        items.append(discord.ui.ActionRow(
+            _mk("💝 Shoutout", discord.ButtonStyle.success, "toolv2_shout", self._on_shoutout),
+            _mk("🎓 Inviter apprenti", discord.ButtonStyle.primary, "toolv2_mentor", self._on_mentor),
         ))
 
-        items.append(v2_divider())
-
-        # Compétitif
-        b = Button(label="Ouvrir", style=discord.ButtonStyle.danger, custom_id="toolv2_pvp")
-        b.callback = self._on_pvp
-        items.append(_section_with_button(
-            "⚔️ PvP / Duel", "Ladder Elo + défier un membre", b,
+        items.append(v2_body("**✨ Originalités**"))
+        items.append(discord.ui.ActionRow(
+            _mk("📦 Time Capsule", discord.ButtonStyle.secondary, "toolv2_caps", self._on_capsule),
+            _mk("🏛️ Hall of Fame", discord.ButtonStyle.secondary, "toolv2_hof", self._on_hof),
         ))
 
-        b = Button(label="Choisir", style=discord.ButtonStyle.primary, custom_id="toolv2_class")
-        b.callback = self._on_class
-        items.append(_section_with_button(
-            "🎖️ Ma classe RP", "Guerrier · Mage · Voleur · Soigneur · Rôdeur", b,
-        ))
-
-        items.append(v2_divider())
-
-        # Social
-        b = Button(label="Faire", style=discord.ButtonStyle.success, custom_id="toolv2_shout")
-        b.callback = self._on_shoutout
-        items.append(_section_with_button(
-            "💝 Faire un Shoutout", "Remercier publiquement un membre", b,
-        ))
-
-        b = Button(label="Inviter", style=discord.ButtonStyle.primary, custom_id="toolv2_mentor")
-        b.callback = self._on_mentor
-        items.append(_section_with_button(
-            "🎓 Inviter un apprenti", "Pour les anciens ≥30j level ≥5", b,
-        ))
-
-        items.append(v2_divider())
-
-        # Originalités
-        b = Button(label="Sceller", style=discord.ButtonStyle.secondary, custom_id="toolv2_caps")
-        b.callback = self._on_capsule
-        items.append(_section_with_button(
-            "📦 Time Capsule", "Message scellé jusqu'à dans 1mois/6mois/1an", b,
-        ))
-
-        b = Button(label="Lire", style=discord.ButtonStyle.secondary, custom_id="toolv2_hof")
-        b.callback = self._on_hof
-        items.append(_section_with_button(
-            "🏛️ Hall of Fame", "Records permanents du serveur", b,
-        ))
-
-        items.append(v2_divider())
-
-        # Stats
-        b = Button(label="Top 10", style=discord.ButtonStyle.secondary, custom_id="toolv2_voice")
-        b.callback = self._on_voice
-        items.append(_section_with_button(
-            "🎙️ Top vocal", "Classement hebdomadaire (heures en vocal)", b,
-        ))
-
-        b = Button(label="Voir", style=discord.ButtonStyle.secondary, custom_id="toolv2_weather")
-        b.callback = self._on_weather
-        items.append(_section_with_button(
-            "📅 Météo serveur", "Streak collectif + activité 7 derniers jours", b,
+        items.append(v2_body("**📊 Stats**"))
+        items.append(discord.ui.ActionRow(
+            _mk("🎙️ Top vocal", discord.ButtonStyle.secondary, "toolv2_voice", self._on_voice),
+            _mk("📅 Météo serveur", discord.ButtonStyle.secondary, "toolv2_weather", self._on_weather),
         ))
 
         items.append(v2_divider())

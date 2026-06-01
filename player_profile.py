@@ -267,7 +267,9 @@ def build_personalization_panel(member: discord.Member):
                 )
 
             b.callback = _cb
-            self.add_item(b)
+            # Phase 235 (fix 400 50035) : un bouton NU n'est pas un composant
+            # top-level valide d'une LayoutView V2 — il DOIT être dans un ActionRow.
+            self.add_item(discord.ui.ActionRow(b))
 
     return _PersoPanel()
 
