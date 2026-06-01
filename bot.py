@@ -9311,6 +9311,7 @@ async def _setup_arena(guild, event_id: int, arena_name: str):
             manage_messages=True, embed_links=True,
         ),
     }
+    arena_category = None
     try:
         # Phase 227 : CATÉGORIE créée EN PREMIER, tout en haut (position=0), avec le
         # salon DEDANS — sinon le salon d'arène (trésor/quiz) atterrissait en vrac
@@ -9332,6 +9333,14 @@ async def _setup_arena(guild, event_id: int, arena_name: str):
         )
     except Exception as ex:
         print(f"[_setup_arena create channel] {ex}")
+        # Phase 235.6 : rollback — si la catégorie a été créée mais que le salon
+        # texte échoue, supprimer la catégorie pour ne pas laisser d'orphelin
+        # (aucune ligne DB ne pointera dessus → boot cleanup ne la verrait pas).
+        if arena_category is not None:
+            try:
+                await arena_category.delete(reason="Rollback arène incomplète")
+            except Exception:
+                pass
         return None
 
     # 3. Masquer tous les autres salons
@@ -65040,6 +65049,7 @@ async def _start_game_night(guild) -> bool:
             ),
         }
 
+        vc = None
         try:
             vc = await guild.create_voice_channel(
                 name="🎮 Game Night",
@@ -65056,9 +65066,20 @@ async def _start_game_night(guild) -> bool:
             )
         except discord.Forbidden:
             print(f"[_start_game_night] Permission denied guild={guild.id}")
+            # Phase 235.6 : rollback du vocal orphelin si le texte échoue
+            if vc is not None:
+                try:
+                    await vc.delete(reason="Rollback Game Night incomplète")
+                except Exception:
+                    pass
             return False
         except Exception as ex:
             print(f"[_start_game_night create_channels] {ex}")
+            if vc is not None:
+                try:
+                    await vc.delete(reason="Rollback Game Night incomplète")
+                except Exception:
+                    pass
             return False
 
         ends_at = datetime.now(timezone.utc) + timedelta(hours=2, minutes=30)
