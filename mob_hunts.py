@@ -1233,20 +1233,24 @@ async def _on_mob_killed(
                         except Exception:
                             pass
                     # Le panneau devient un mini-récap « vaincu » (visible un court
-                    # instant). Phase 228 : on SUPPRIME ensuite TOUT le salon dédié du
-                    # mob (catégorie + texte + vocal) après ~20 s → plus rien ne
-                    # traîne. Le rapport reste dans « 📜 chroniques-combat ».
+                    # instant) PUIS on l'EFFACE. Phase 235.15 (demande owner) : le salon
+                    # de combat permanent « ⚔️-combat » doit se VIDER entre deux combats
+                    # → on supprime le panneau après ~15 s, qu'il soit dans le salon
+                    # permanent OU dans un salon dédié éphémère. Le récap reste, lui,
+                    # dans « 📜 chroniques-combat » (journal persistant).
                     await msg.edit(view=ui_v2.recap_view(
                         _recap_title, _recap_body, color=ui_v2.Palette.SUCCESS))
+                    try:
+                        await msg.delete(delay=15)
+                    except Exception:
+                        pass
+                    # Si le mob avait un salon DÉDIÉ éphémère (catégorie + texte +
+                    # vocal), _arena_delete_fn le supprime entièrement (grace 20 s).
+                    # Sur le salon permanent, il se contente d'oublier la ligne DB.
                     if _arena_delete_fn is not None:
                         try:
                             asyncio.create_task(
                                 _arena_delete_fn(guild, int(row[1]), grace_seconds=20))
-                        except Exception:
-                            pass
-                    else:
-                        try:
-                            await msg.delete(delay=90)
                         except Exception:
                             pass
                 except Exception:

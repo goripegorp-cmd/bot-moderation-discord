@@ -53,6 +53,7 @@ _active_ping_fn = None  # Phase 207 : ping « membres actifs » (injecté par bo
 _arena_ensure_fn = None  # Phase 213 : arène de combat PARTAGÉE (mêmes mobs que mob_hunts)
 _arena_delete_fn = None  # Phase 233 : async (guild, text_channel_id) -> supprime l'arène à la fin (injecté)
 _event_busy_fn = None  # Phase 230 : async (guild_id) -> True si un AUTRE event de combat tourne (injecté)
+_report_fn = None  # Phase 235.15 : async (guild, title, body) -> récap consolidé dans « 📜 chroniques-combat »
 
 INVASION_MOBS_COUNT = 5
 INVASION_DURATION_MIN = 30
@@ -63,9 +64,9 @@ ALLIANCE_BONUS_MULT = 1.30
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
           active_ping_fn=None, arena_ensure_fn=None, event_busy_fn=None,
-          arena_delete_fn=None):
+          arena_delete_fn=None, report_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _active_ping_fn
-    global _arena_ensure_fn, _event_busy_fn, _arena_delete_fn
+    global _arena_ensure_fn, _event_busy_fn, _arena_delete_fn, _report_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -79,6 +80,8 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
     _event_busy_fn = event_busy_fn
     # Phase 233 : suppression de l'arène à la fin de l'invasion (fix fuite C1)
     _arena_delete_fn = arena_delete_fn
+    # Phase 235.15 : rapport de fin consolidé → « 📜 chroniques-combat »
+    _report_fn = report_fn
 
 
 async def init_db():
@@ -355,14 +358,14 @@ async def _resolve_invasion_after(event_id: int, seconds: int):
     try:
         async with _get_db() as db:
             async with db.execute(
-                "SELECT guild_id, channel_id, status FROM invasion_events "
+                "SELECT guild_id, channel_id, status, announce_message_id FROM invasion_events "
                 "WHERE id=?",
                 (event_id,),
             ) as cur:
                 row = await cur.fetchone()
         if not row or row[2] != "active":
             return
-        gid, ch_id, _ = row
+        gid, ch_id, _, _announce_msg_id = row
         guild = _bot.get_guild(int(gid))
         if not guild:
             return
@@ -453,6 +456,15 @@ async def _resolve_invasion_after(event_id: int, seconds: int):
         ch = guild.get_channel(int(ch_id))
         if ch:
             await _post_resolution(ch, all_killed, mobs_killed, rewards)
+            # Phase 235.15 : effacer le PANNEAU d'annonce live → le salon de combat
+            # permanent se vide entre deux events (demande owner). Le récap persiste
+            # dans « 📜 chroniques-combat » (via _post_resolution).
+            if _announce_msg_id:
+                try:
+                    _amsg = await ch.fetch_message(int(_announce_msg_id))
+                    await _amsg.delete()
+                except Exception:
+                    pass
         # Phase 233 (fix fuite C1) : supprimer l'arène d'invasion (catégorie + salons)
         # — avant, elle traînait jusqu'au prochain boot. Délai pour lire le récap.
         if _arena_delete_fn is not None and ch_id:
@@ -502,11 +514,23 @@ async def _post_resolution(
     else:
         lines.append("_Aucun participant n'a attaqué les mobs._")
 
+    _title_clean = lines[0].replace("**", "")
+    _body = "\n".join(lines[1:])
+    # Phase 235.15 : récap consolidé PERSISTANT → « 📜 chroniques-combat » (journal
+    # commun à TOUS les events) = la source unique du récap.
+    if _report_fn is not None and getattr(ch, "guild", None):
+        try:
+            await _report_fn(ch.guild, _title_clean, _body)
+        except Exception:
+            pass
+    # Bref écho dans l'arène (closure pour les combattants), AUTO-supprimé pour ne
+    # pas encombrer le salon de combat permanent.
     try:
-        await ch.send(view=ui_v2.recap_view(
-            lines[0].replace("**", ""),
-            "\n".join(lines[1:]),
-            color=(ui_v2.Palette.SUCCESS if all_killed else ui_v2.Palette.WARNING)))
+        await ch.send(
+            view=ui_v2.recap_view(
+                _title_clean, _body,
+                color=(ui_v2.Palette.SUCCESS if all_killed else ui_v2.Palette.WARNING)),
+            delete_after=3 * 3600)
     except Exception:
         pass
 

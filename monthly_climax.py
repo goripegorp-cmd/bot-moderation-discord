@@ -73,6 +73,7 @@ _add_coins = None
 _arena_create_fn = None  # async (guild, kind, title) -> salon texte dédié
 _arena_delete_fn = None  # async (guild, text_channel_id) -> supprime l'arène
 _event_busy_fn = None  # Phase 230 : async (guild_id) -> True si un AUTRE event de combat tourne (injecté)
+_report_fn = None  # Phase 235.15 : async (guild, title, body) -> récap consolidé dans « 📜 chroniques-combat »
 
 CLIMAX_WEEKDAY = 5    # samedi
 CLIMAX_HOUR = 21      # 21h FR
@@ -285,9 +286,10 @@ def setup(
     bot_instance, get_db_fn, db_get_fn, v2_helpers: dict,
     story_module=None, npc_module=None, add_coins_fn=None,
     arena_create_fn=None, arena_delete_fn=None, event_busy_fn=None,
+    report_fn=None,
 ):
     global _bot, _get_db, _db_get, _v2, _story, _npc, _add_coins
-    global _arena_create_fn, _arena_delete_fn, _event_busy_fn
+    global _arena_create_fn, _arena_delete_fn, _event_busy_fn, _report_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -300,6 +302,8 @@ def setup(
     _arena_delete_fn = arena_delete_fn
     # Phase 230 : verrou global « un seul event de combat à la fois »
     _event_busy_fn = event_busy_fn
+    # Phase 235.15 : rapport de fin consolidé → « 📜 chroniques-combat »
+    _report_fn = report_fn
 
 
 async def init_db():
@@ -729,7 +733,7 @@ async def resolve_climax(event_id: int) -> Optional[dict]:
         async with _get_db() as db:
             async with db.execute(
                 "SELECT guild_id, chapter_id, boss_id, hp_current, hp_max, "
-                "damage_total, status, channel_id "
+                "damage_total, status, channel_id, message_id "
                 "FROM climax_events WHERE id=?",
                 (event_id,),
             ) as cur:
@@ -737,7 +741,7 @@ async def resolve_climax(event_id: int) -> Optional[dict]:
         if not row:
             return None
         (guild_id, chapter_id, boss_id, hp_current, hp_max, dmg_total,
-         status, channel_id) = row
+         status, channel_id, _panel_msg_id) = row
         if status != "active":
             return None
     except Exception:
@@ -847,6 +851,16 @@ async def resolve_climax(event_id: int) -> Optional[dict]:
             guild, boss, killed, int(dmg_total), int(hp_max),
             rewards, chapter_id, channel=close_ch,
         )
+
+        # Phase 235.15 : effacer le PANNEAU live du climax → le salon de combat
+        # permanent se vide entre deux events (demande owner). Le récap reste dans
+        # « 📜 chroniques-combat » (via _announce_climax_closed).
+        if close_ch is not None and _panel_msg_id:
+            try:
+                _pm = await close_ch.fetch_message(int(_panel_msg_id))
+                await _pm.delete()
+            except Exception:
+                pass
 
         # Phase 213 : supprimer l'arène dédiée (catégorie + texte + vocaux) après
         # le récap (grâce au délai interne du helper). Fire-and-forget ; le
@@ -1197,12 +1211,23 @@ async def _announce_climax_closed(
 
     body += "\n\n_📖 Tous les titres sont gravés dans le Codex._"
 
+    _head_clean = head.replace("**", "")
+    # Phase 235.15 : récap consolidé PERSISTANT → « 📜 chroniques-combat » (journal
+    # commun à TOUS les events) = la source unique du récap.
+    if _report_fn is not None:
+        try:
+            await _report_fn(guild, _head_clean, body)
+        except Exception:
+            pass
+    # Bref écho dans l'arène (closure pour les combattants), AUTO-supprimé pour ne
+    # pas encombrer le salon de combat permanent.
     try:
         await ch.send(
             view=ui_v2.recap_view(
-                head.replace("**", ""), body,
+                _head_clean, body,
                 color=(ui_v2.Palette.SUCCESS if killed else ui_v2.Palette.NEUTRAL)),
             allowed_mentions=discord.AllowedMentions.none(),
+            delete_after=3 * 3600,
         )
     except Exception:
         pass

@@ -10564,46 +10564,37 @@ async def _end_active_event(guild, *, victory: bool, reason: str = ""):
         except Exception as ex:
             print(f"[event end voice zones cleanup] {ex}")
 
-        # ─── Phase 235.10 : fin d'event — fermeture du panneau ───
-        # Le Boss Raid s'affiche dans le salon PERMANENT « ⚔️-combat » → on ne
-        # supprime PLUS le salon : on retire juste le PANNEAU live (HP/ATTAQUER) et
-        # on poste le récap. Le salon reste visible pour la suite. Pour les vieilles
-        # arènes éphémères « ⚔️ {boss} » (trésor/quiz ou données d'avant migration),
-        # on garde l'ancien comportement (supprimer le salon + sa catégorie).
+        # ─── Phase 235.15 : fin d'event — nettoyage + UN SEUL récap consolidé ───
+        # Demande owner : (1) un event TERMINÉ ne laisse RIEN traîner ; (2) plus de
+        # spam — un seul regroupement du récap dans « 📜-chroniques-combat » (journal
+        # persistant commun à TOUS les events). « ⚔️-combat » reste permanent mais se
+        # VIDE entre deux combats (on efface le panneau live, on n'y poste plus le récap).
         try:
             _perm_id = int((await cfg(guild.id)).get('combat_channel_id', 0) or 0)
         except Exception:
             _perm_id = 0
         arena_ch = guild.get_channel(arena_ch_id) if arena_ch_id else None
-        if arena_ch and _perm_id and arena_ch_id == _perm_id:
-            # Salon PERMANENT → on GARDE le salon. Supprimer le panneau live + récap.
+        # 1) Effacer le PANNEAU live → le combat terminé disparaît de l'écran.
+        if arena_ch and arena_msg_id:
             try:
-                if arena_msg_id:
-                    _pm = await arena_ch.fetch_message(arena_msg_id)
-                    await _pm.delete()
+                _pm = await arena_ch.fetch_message(arena_msg_id)
+                await _pm.delete()
             except Exception:
                 pass
+        # 2) Ancienne arène ÉPHÉMÈRE (trésor / quiz : catégorie « ⚔️ {nom} » + masquage)
+        #    → supprimer salon + catégorie. Le salon PERMANENT (arena_ch_id == _perm_id)
+        #    n'est JAMAIS supprimé.
+        if arena_ch and not (_perm_id and arena_ch_id == _perm_id):
+            arena_cat = arena_ch.category
             try:
-                await arena_ch.send(embed=recap_embed)
-            except Exception:
-                pass
-        else:
-            # Ancienne arène ÉPHÉMÈRE (catégorie « ⚔️ {nom} ») → supprimer salon +
-            # catégorie (migration / trésor / quiz). On capture la catégorie AVANT.
-            arena_cat = arena_ch.category if arena_ch else None
-            if arena_ch:
-                try:
-                    await arena_ch.send(embed=recap_embed)
-                    await asyncio.sleep(10)
-                except Exception:
-                    pass
-                try:
-                    await arena_ch.delete(reason=f"Event {event_id} terminé")
-                except Exception as ex:
-                    print(f"[event arena delete] {ex}")
+                await arena_ch.delete(reason=f"Event {event_id} terminé")
+            except Exception as ex:
+                print(f"[event arena delete] {ex}")
             if arena_cat is not None:
                 try:
                     for _child in list(getattr(arena_cat, 'channels', [])):
+                        if _perm_id and _child.id == _perm_id:
+                            continue
                         try:
                             await _child.delete(reason=f"Event {event_id} terminé — résidu arène")
                         except Exception:
@@ -10611,85 +10602,43 @@ async def _end_active_event(guild, *, victory: bool, reason: str = ""):
                     await arena_cat.delete(reason=f"Event {event_id} terminé — catégorie arène")
                 except Exception as ex:
                     print(f"[event arena category delete] {ex}")
+        # 3) UN SEUL récap consolidé → « 📜-chroniques-combat ». Plus de copie dans
+        #    ⚔️-combat, plus de broadcast hub, plus de duplicata salon-log : fini le spam.
+        _report_body = (
+            f"👥 **{len(participants)}** combattant(s) · "
+            f"💥 **{sum(p['damage'] for p in participants):,}** dégâts au total"
+        )
+        if reward_lines:
+            _report_body += "\n\n**🎁 Récompenses :**\n" + "\n".join(reward_lines[:15])
+            if len(reward_lines) > 15:
+                _report_body += f"\n_… + {len(reward_lines) - 15} autre(s)_"
+        if reason:
+            _report_body += f"\n\n_{reason}_"
+        _recap_posted = False
+        try:
+            _rep = await _post_combat_report(
+                guild, recap_title, _report_body,
+                0x2ECC71 if victory else 0x95A5A6)
+            _recap_posted = _rep is not None
+        except Exception as ex:
+            print(f"[event recap journal] {ex}")
 
-        # Salon log
-        if log_ch:
+        # ─── Filet : si le journal « 📜-chroniques-combat » n'a pas pu poster (pas de
+        #    perms / pas de salon), on retombe sur le salon log owner sinon un salon
+        #    bavard → le récap n'est JAMAIS perdu. Un seul post, auto-nettoyé. ───
+        if not _recap_posted:
             try:
-                await log_ch.send(embed=recap_embed)
-            except Exception:
-                pass
-
-        # Phase 93 AMPLIFY : broadcast public dans le hub channel
-        # (l'arène est supprimée, donc les non-participants ne verraient rien sinon)
-        try:
-            hub_id = int(c.get('hub_channel', 0) or 0)
-            hub_ch = guild.get_channel(hub_id) if hub_id else None
-            if hub_ch and await _is_chatty_channel(hub_ch) and (not log_ch or hub_ch.id != log_ch.id):
-                # Recap court orienté "broadcast" pour le hub
-                top_killer_line = ""
-                if victory and participants:
-                    sorted_p = sorted(participants, key=lambda p: p.get('damage', 0), reverse=True)
-                    if sorted_p:
-                        top_member = guild.get_member(int(sorted_p[0]['user_id']))
-                        if top_member:
-                            top_killer_line = (
-                                f"\n🥇 **Top damage** : {top_member.mention} "
-                                f"(`{sorted_p[0]['damage']:,}` dégâts)"
-                            )
-                broadcast_desc = (
-                    f"{recap_title}\n"
-                    f"👥 **{len(participants)} combattant(s)** · "
-                    f"💥 **{sum(p['damage'] for p in participants):,} dégâts** au total"
-                    + top_killer_line
-                )
-                broadcast_e = discord.Embed(
-                    description=broadcast_desc[:2000],
-                    color=0x2ECC71 if victory else 0x95A5A6,
-                    timestamp=datetime.now(timezone.utc),
-                )
-                broadcast_e.set_author(
-                    name="⚔️ Boss Raid terminé",
-                    icon_url=(guild.icon.url if guild.icon else None),
-                )
-                LIFETIME_BROADCAST = 6 * 3600
-                try:
-                    bm = await hub_ch.send(
-                        embed=broadcast_e,
-                        allowed_mentions=discord.AllowedMentions.none(),
-                        delete_after=LIFETIME_BROADCAST,
-                    )
-                    try:
-                        await _register_for_cleanup(bm, LIFETIME_BROADCAST, 'boss_raid_broadcast')
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
-        except Exception as ex:
-            print(f"[boss_raid hub broadcast] {ex}")
-
-        # ─── Phase 178 : FILET DE SÉCURITÉ — récap TOUJOURS visible ───
-        # Si NI event_log_channel NI hub_channel ne sont configurés, le récap
-        # ne s'affichait QUE 10s dans l'arène avant sa suppression → invisible.
-        # On garantit un post dans un salon persistant (1er salon chatty).
-        try:
-            _crec = await cfg(guild.id)
-            _has_log = int(_crec.get('event_log_channel', 0) or 0) > 0
-            _has_hub = int(_crec.get('hub_channel', 0) or 0) > 0
-            if not _has_log and not _has_hub:
-                fb_ch = await _find_event_recap_channel(guild, exclude_ids=[arena_ch_id])
-                if fb_ch:
-                    LIFETIME_BROADCAST = 6 * 3600
-                    bm = await fb_ch.send(
+                _fb = log_ch or await _find_event_recap_channel(guild, exclude_ids=[arena_ch_id])
+                if _fb:
+                    _bm = await _fb.send(
                         embed=recap_embed,
-                        allowed_mentions=discord.AllowedMentions.none(),
-                        delete_after=LIFETIME_BROADCAST,
-                    )
+                        allowed_mentions=discord.AllowedMentions.none())
                     try:
-                        await _register_for_cleanup(bm, LIFETIME_BROADCAST, 'boss_raid_broadcast')
+                        await _register_for_cleanup(_bm, 6 * 3600, 'boss_raid_broadcast')
                     except Exception:
                         pass
-        except Exception as ex:
-            print(f"[boss_raid recap fallback] {ex}")
+            except Exception as ex:
+                print(f"[event recap fallback] {ex}")
 
         # ─── Phase 31 : Difficulté progressive ───
         try:
@@ -40781,7 +40730,8 @@ async def on_ready():
                                     active_ping_fn=_ping_active_members,
                                     arena_ensure_fn=_ensure_combat_arena_channel,
                                     event_busy_fn=_has_any_major_event_running,
-                                    arena_delete_fn=_delete_combat_arena)
+                                    arena_delete_fn=_delete_combat_arena,
+                                    report_fn=_post_combat_report)
         await world_invasion_module.init_db()
         if not world_invasion_module.monthly_invasion_task.is_running():
             world_invasion_module.monthly_invasion_task.start()
@@ -40889,6 +40839,7 @@ async def on_ready():
                 arena_create_fn=_create_combat_arena,
                 arena_delete_fn=_delete_combat_arena,
                 event_busy_fn=_has_any_major_event_running,
+                report_fn=_post_combat_report,
             )
             await monthly_climax_module.init_db()
             monthly_climax_module.register_persistent_views(bot)
@@ -60535,13 +60486,13 @@ async def _end_world_boss(guild, wb_id: int, victory: bool, reason: str = ""):
     try:
         async with get_db() as db:
             async with db.execute(
-                'SELECT boss_id, arena_channel_id FROM world_bosses WHERE id=? AND ended=0',
+                'SELECT boss_id, arena_channel_id, arena_message_id FROM world_bosses WHERE id=? AND ended=0',
                 (wb_id,),
             ) as cur:
                 row = await cur.fetchone()
         if not row:
             return
-        boss_id, ch_id = row
+        boss_id, ch_id, _wb_panel_msg_id = row
         boss = ev42.get_world_boss(boss_id)
         if not boss:
             return
@@ -60691,76 +60642,43 @@ async def _end_world_boss(guild, wb_id: int, victory: bool, reason: str = ""):
         except Exception as ex:
             print(f"[world_boss faction war] {ex}")
 
-        # Phase 178 : RÉCAP PERSISTANT (top combattants) — l'arène World Boss est
-        # supprimée 5 min après la fin → le classement doit atterrir ailleurs,
-        # même si aucun salon de logs/hub n'est configuré.
+        # Phase 235.15 : UN SEUL récap consolidé → « 📜-chroniques-combat » (journal
+        # commun à TOUS les events). Plus de copie dans un salon de logs ni de message
+        # final qui traîne dans l'arène : fini le spam multi-salons (demande owner).
+        head = (
+            f"🌍 {boss['title']} vaincu !" if victory
+            else f"💀 {boss['title']} s'est échappé…"
+        )
         try:
-            recap_ch = await _find_event_recap_channel(guild, exclude_ids=[int(ch_id)])
-            if recap_ch:
-                medals = ["🥇", "🥈", "🥉"]
-                lines = []
-                for idx, (uid, dmg) in enumerate(attackers[:10]):
-                    m = guild.get_member(int(uid))
-                    nm = m.mention if m else f"<@{uid}>"
-                    rank = medals[idx] if idx < 3 else f"`#{idx + 1}`"
-                    lines.append(f"{rank} {nm} · `{int(dmg or 0):,}` dégâts")
-                head = (
-                    f"🌍 **{boss['title']}** vaincu !" if victory
-                    else f"💀 **{boss['title']}** s'est échappé…"
-                )
-                desc = head + f"\n👥 **{len(attackers)} combattant(s)**"
-                if lines:
-                    desc += "\n\n**🏆 Top combattants :**\n" + "\n".join(lines)
-                wb_recap_e = discord.Embed(
-                    description=desc[:4000],
-                    color=0x2ECC71 if victory else 0x95A5A6,
-                    timestamp=datetime.now(timezone.utc),
-                )
-                wb_recap_e.set_author(
-                    name="🌍 World Boss terminé",
-                    icon_url=(guild.icon.url if guild.icon else None),
-                )
-                LIFETIME_WB = 6 * 3600
-                _bm = await recap_ch.send(
-                    embed=wb_recap_e,
-                    allowed_mentions=discord.AllowedMentions.none(),
-                    delete_after=LIFETIME_WB,
-                )
-                try:
-                    await _register_for_cleanup(_bm, LIFETIME_WB, 'world_boss_recap')
-                except Exception:
-                    pass
-                # Phase 223 : copie PERSISTANTE dans « 📜 chroniques-combat »
-                # (l'arène world boss est éphémère → le rapport y reste, au propre).
-                try:
-                    await _post_combat_report(
-                        guild, head.replace("**", ""), desc,
-                        color=(0x2ECC71 if victory else 0x95A5A6))
-                except Exception:
-                    pass
+            medals = ["🥇", "🥈", "🥉"]
+            lines = []
+            for idx, (uid, dmg) in enumerate(attackers[:10]):
+                m = guild.get_member(int(uid))
+                nm = m.mention if m else f"<@{uid}>"
+                rank = medals[idx] if idx < 3 else f"`#{idx + 1}`"
+                lines.append(f"{rank} {nm} · `{int(dmg or 0):,}` dégâts")
+            desc = head + f"\n👥 **{len(attackers)} combattant(s)**"
+            if lines:
+                desc += "\n\n**🏆 Top combattants :**\n" + "\n".join(lines)
+            if victory:
+                desc += (
+                    f"\n\n💰 Récompenses : top 3 `{boss['victory_reward_coins']}` 🪙, "
+                    f"autres `{boss['participation_reward_coins']}` 🪙.")
+            await _post_combat_report(
+                guild, head, desc[:4000],
+                color=(0x2ECC71 if victory else 0x95A5A6))
         except Exception as ex:
-            print(f"[world_boss recap persistent] {ex}")
+            print(f"[world_boss recap journal] {ex}")
 
-        # Annoncer la fin (si le salon existe encore) puis DÉTRUIRE l'arène.
+        # Effacer le PANNEAU live → le salon de combat se vide (sur le permanent
+        # « ⚔️-combat » ; une arène dédiée éphémère sera de toute façon supprimée).
         ch = guild.get_channel(int(ch_id))
-        if ch:
+        if ch and _wb_panel_msg_id:
             try:
-                final_msg = (
-                    f"🎉 **VICTOIRE !** Le **{boss['title']}** a été vaincu par votre coordination !\n"
-                    f"💰 Récompenses distribuées (top 3 : `{boss['victory_reward_coins']}` 🪙, "
-                    f"autres : `{boss['participation_reward_coins']}` 🪙).\n"
-                    f"📜 Récap complet dans les chroniques de combat."
-                ) if victory else (
-                    f"💀 **DÉFAITE.** Le **{boss['title']}** s'enfuit dans les ombres.\n"
-                    f"📜 Vous recevez tous une petite consolation.\n"
-                    f"_Réessayez la semaine prochaine !_"
-                )
-                _wb_t, _, _wb_b = final_msg.partition("\n")
-                await ch.send(view=v2_recap_view(
-                    _wb_t.replace("**", ""), _wb_b or final_msg,
-                    color=(Palette.SUCCESS if victory else Palette.DANGER)))
-            except Exception as ex:
-                print(f"[_end_world_boss send final] {ex}")
+                _wb_pm = await ch.fetch_message(int(_wb_panel_msg_id))
+                await _wb_pm.delete()
+            except Exception:
+                pass
 
         # Phase 230 : suppression de l'arène GARANTIE — même si le salon texte a
         # déjà disparu (masqué/supprimé par un autre event), sinon la CATÉGORIE
