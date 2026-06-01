@@ -74,6 +74,9 @@ _arena_create_fn = None  # async (guild, kind, title) -> salon texte dédié
 _arena_delete_fn = None  # async (guild, text_channel_id) -> supprime l'arène
 _event_busy_fn = None  # Phase 230 : async (guild_id) -> True si un AUTRE event de combat tourne (injecté)
 _report_fn = None  # Phase 235.15 : async (guild, title, body) -> récap consolidé dans « 📜 chroniques-combat »
+# Phase 235.16 : warm-up climax (clé = event_id) — sas de préparation au spawn.
+_CLIMAX_WARMUP_SECONDS = 25
+_warmup_until: dict[int, float] = {}
 
 CLIMAX_WEEKDAY = 5    # samedi
 CLIMAX_HOUR = 21      # 21h FR
@@ -583,7 +586,11 @@ async def trigger_climax(guild_id: int) -> Optional[int]:
                     await db.commit()
             except Exception as ex:
                 print(f"[trigger_climax channel_id store] {ex}")
-        await _announce_climax_open(guild, boss, event_id, ends_at, channel=ch)
+        # Phase 235.16 : warm-up — invulnérable les premières secondes (sas de prép.).
+        _warm = datetime.now(timezone.utc).timestamp() + _CLIMAX_WARMUP_SECONDS
+        _warmup_until[event_id] = _warm
+        await _announce_climax_open(guild, boss, event_id, ends_at, channel=ch,
+                                    warmup_ts=_warm)
 
     if _story is not None:
         try:
@@ -619,6 +626,18 @@ async def record_attack(
     event_id = active["event_id"]
     if active["hp_current"] <= 0:
         return {"error": "Boss déjà tombé"}
+
+    # Phase 235.16 : WARM-UP — sas de préparation au spawn (fail-open au reboot →
+    # attaquable normalement). Même principe que Boss Raid / World Boss / boss du jour.
+    _wu = _warmup_until.get(event_id, 0)
+    if _wu and datetime.now(timezone.utc).timestamp() < _wu:
+        return {
+            "error": (
+                f"⏳ **Le Climax se prépare !** Le combat commence <t:{int(_wu)}:R>.\n"
+                f"Équipe ton meilleur stuff (`/inventory`) et rejoins un vocal en attendant !"
+            ),
+            "warmup": True,
+        }
 
     attacks_done = await get_user_attack_count(event_id, user_id)
     if attacks_done >= MAX_ATTACKS_PER_USER:
@@ -1135,6 +1154,7 @@ async def _find_chronicle_channel(guild: discord.Guild) -> Optional[discord.Text
 async def _announce_climax_open(
     guild: discord.Guild, boss: dict, event_id: int, ends_at: datetime,
     channel: Optional[discord.TextChannel] = None,
+    warmup_ts: Optional[float] = None,
 ) -> None:
     # Phase 213 : `channel` = arène dédiée créée au spawn (préférée). Fallback sur
     # _find_chronicle_channel si l'arène n'a pas pu être créée (fail-open).
@@ -1158,6 +1178,9 @@ async def _announce_climax_open(
         f"_📖 Va dans le Codex → ⚔️ Boss pour attaquer._\n\n"
         f"_« {boss.get('lore', '')} »_"
     )
+    if warmup_ts:
+        msg += (f"\n\n⏰ **Le combat commence <t:{int(warmup_ts)}:R>** — "
+                f"équipez-vous (`/inventory`) et rejoignez un vocal (bonus de dégâts) !")
     try:
         _t, _, _b = msg.partition("\n\n")
         await ch.send(

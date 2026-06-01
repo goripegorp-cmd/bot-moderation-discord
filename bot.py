@@ -7700,6 +7700,9 @@ _active_events_cache: dict[int, dict] = {}
 # s'équipent et rejoignent un vocal. { event_id: timestamp_fin_warmup }.
 _BOSS_WARMUP_SECONDS = 25
 _boss_warmup_until: dict[int, float] = {}
+# Phase 235.16 : warm-up World Boss (clé = wb_id) — même principe, namespace séparé
+# (les ids des tables events / world_bosses peuvent coïncider).
+_wb_warmup_until: dict[int, float] = {}
 # Rate-limit des attaques : { (guild_id, user_id): last_ts }
 _attack_cooldown: dict[tuple[int, int], float] = {}
 # Phase 31 : historique attaques récentes par event (pour combos)
@@ -59923,6 +59926,20 @@ class WorldBossAttackView(View):
             if hp <= 0:
                 return await _safe_followup(i, content="✅ Le boss est déjà mort !")
 
+            # Phase 235.16 : WARM-UP — invulnérable les premières secondes (sas de
+            # préparation, même principe que Boss Raid / boss du jour). Fail-open
+            # (pas d'entrée au reboot → attaquable normalement).
+            _wb_wu = _wb_warmup_until.get(wb_id, 0)
+            if _wb_wu and time.time() < _wb_wu:
+                return await _safe_followup(
+                    i,
+                    content=(
+                        f"⏳ **Le World Boss se prépare !** Le combat commence <t:{int(_wb_wu)}:R>.\n"
+                        f"Équipe ton meilleur stuff (`/inventory`) et **rejoins un vocal** "
+                        f"(bonus de dégâts) en attendant !"
+                    ),
+                )
+
             # Phase 235.12 : GATING DE NIVEAU — le World Boss (plus gros loot du
             # serveur) demande le niveau 10. Récompense la progression et empêche
             # un nouveau de faceroll le contenu le plus dur. Fail-open.
@@ -60437,11 +60454,17 @@ async def _start_world_boss(guild) -> dict:
             wakeup_line = await _build_wakeup_mention_line_smart(guild, 'world_boss', max_count=3, reward_hint="du butin de World Boss + des 🪙")
         except Exception:
             wakeup_line = ""
+        # Phase 235.16 : warm-up — invulnérable les premières secondes (sas de
+        # préparation : ping reçu, stuff équipé, vocal rejoint). <t:..:R> = live.
+        _wb_warm = int(time.time()) + _BOSS_WARMUP_SECONDS
+        _wb_warmup_until[wb_id] = float(_wb_warm)
         send_content = (
             f"🌍 **UN WORLD BOSS APPARAÎT !**\n"
             f"Coordonnez vos attaques — il faut **plusieurs joueurs** pour le vaincre.\n"
             + (f"{ping_str}\n" if ping_str else "")
             + wakeup_line
+            + f"\n⏰ **Le combat commence <t:{_wb_warm}:R>** — équipez votre meilleur stuff "
+              f"(`/inventory`) et **rejoignez un vocal** (bonus de dégâts) !"
             + "\n_Pas envie d'être ping ? `/notifs` pour choisir précisément quoi recevoir._"
         )
         try:
