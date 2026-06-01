@@ -74378,12 +74378,21 @@ async def _track_voice_state(member, before, after):
         print(f"[_track_voice_state] {ex}")
 
 
-@bot.event
-async def on_voice_state_update(member, before, after):
+# Phase 235.2 (FIX VOCAUX TEMPORAIRES) : ceci était un 2e « @bot.event
+# on_voice_state_update » qui ÉCRASAIT le handler principal (≈ ligne 54814 :
+# activité vocale + VOCAUX TEMPORAIRES « Voc Build »). discord.py ne garde qu'UN
+# seul @bot.event par événement (le dernier défini gagne) → le join-to-create ne
+# se déclenchait JAMAIS. On enregistre donc le tracking de durée comme LISTENER
+# ADDITIF (les listeners se cumulent, ils n'écrasent rien) + renommage pour ne
+# plus masquer le handler principal.
+async def _voice_duration_track_listener(member, before, after):
     try:
         await _track_voice_state(member, before, after)
     except Exception as ex:
-        print(f"[on_voice_state_update] {ex}")
+        print(f"[_voice_duration_track_listener] {ex}")
+
+
+bot.add_listener(_voice_duration_track_listener, "on_voice_state_update")
 
 
 @bot.tree.command(
