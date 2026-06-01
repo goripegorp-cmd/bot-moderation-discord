@@ -929,6 +929,13 @@ async def _process_attack(btn_i: discord.Interaction, mob_id: int):
         except Exception:
             pass
 
+        # Phase 235.25c : mémorise la participation (rappel rétention).
+        try:
+            import combat_recall as _cr
+            await _cr.record(btn_i.guild.id, btn_i.user.id)
+        except Exception:
+            pass
+
         mob_def = get_mob_def(mob_kind)
         if not mob_def:
             return

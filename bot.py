@@ -185,6 +185,7 @@ import codex_chronicle as codex_chronicle_module
 import hero_journey as hero_journey_module  # Phase 235.19 : Parcours de l'Aventurier (onboarding crescendo)
 import activity_system as activity_system_module  # Phase 235.25 : gate d'activité (clé d'accès aux events)
 import pet_eggs as pet_eggs_module  # Phase 235.26 : œufs de familiers (acquisition par éclosion)
+import combat_recall as combat_recall_module  # Phase 235.25c : rappel des participants aux combats
 # Phase 170.2-3 : NPCs vivants + rencontres quotidiennes
 import npc_personalities as npc_personalities_module
 import daily_encounters as daily_encounters_module
@@ -9761,6 +9762,11 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
                 return await i.followup.send(
                     activity_system_module.block_message("boss", _asc, _aneed),
                     ephemeral=True)
+        except Exception:
+            pass
+        # Phase 235.25c : mémorise la participation (rappel rétention).
+        try:
+            await combat_recall_module.record(i.guild.id, i.user.id)
         except Exception:
             pass
 
@@ -41179,6 +41185,17 @@ async def on_ready():
         except Exception as ex:
             print(f"[on_ready 235.26 pet_eggs] {ex}")
 
+        # Phase 235.25c : 🔁 Rappel des participants aux combats (rétention) —
+        # mémorise qui combat → re-ping au prochain event du même genre, via
+        # _ping_active_members (qui respecte l'opt-out 🔔 / /notify).
+        try:
+            combat_recall_module.setup(get_db)
+            await combat_recall_module.init_db()
+            await combat_recall_module.cleanup_old()
+            print("[Phase 235.25c] combat_recall OK (rappel participants)")
+        except Exception as ex:
+            print(f"[on_ready 235.25c combat_recall] {ex}")
+
         # Phase 235.22 : bouton « 🔔 Me notifier » par type (opt-in, persistant).
         try:
             bot.add_dynamic_items(EventNotifyButton)
@@ -58807,23 +58824,55 @@ async def _ping_active_members(guild, channel, *, notif_key='boss_raid',
         cooldown_hours = 4
     try:
         chosen = []
+        # Phase 235.25c : RAPPEL des participants passés EN PRIORITÉ (directive
+        # rétention owner) — d'abord ceux qui ont DÉJÀ combattu (combat_recall),
+        # puis les actifs récents (activity_tracking). L'opt-out + le cooldown +
+        # le filtre en-ligne s'appliquent PAREIL à tout le monde ci-dessous.
+        recalled_ids = []
+        try:
+            recalled_ids = await combat_recall_module.recent_user_ids(guild.id, limit=50)
+        except Exception:
+            recalled_ids = []
+        cd_map = {}    # user_id -> last_pinged (cooldown vérifié en Python)
+        active_ids = []
         async with get_db() as db:
+            try:
+                async with db.execute(
+                    "SELECT user_id, last_pinged FROM combat_ping_log WHERE guild_id=?",
+                    (guild.id,),
+                ) as cur:
+                    for cr in await cur.fetchall():
+                        cd_map[int(cr[0])] = cr[1]
+            except Exception:
+                pass
             async with db.execute(
                 "SELECT t.user_id FROM activity_tracking t "
-                "LEFT JOIN combat_ping_log p "
-                "  ON p.guild_id = t.guild_id AND p.user_id = t.user_id "
                 "WHERE t.guild_id = ? AND t.last_message IS NOT NULL "
                 "  AND datetime(t.last_message) >= datetime('now', ?) "
-                "  AND (p.last_pinged IS NULL OR datetime(p.last_pinged) < datetime('now', ?)) "
-                "ORDER BY (p.last_pinged IS NOT NULL), datetime(t.last_message) DESC "
+                "ORDER BY datetime(t.last_message) DESC "
                 "LIMIT 50",
-                (guild.id, f"-{int(active_hours)} hours", f"-{int(cooldown_hours)} hours"),
+                (guild.id, f"-{int(active_hours)} hours"),
             ) as cur:
-                rows = await cur.fetchall()
-        for r in rows:
+                active_ids = [int(r[0]) for r in await cur.fetchall()]
+        _cd_cut = datetime.now(timezone.utc) - timedelta(hours=int(cooldown_hours))
+        _seen = set()
+        for uid in (recalled_ids + active_ids):
             if len(chosen) >= cap:
                 break
-            uid = int(r[0])
+            if uid in _seen:
+                continue
+            _seen.add(uid)
+            # Cooldown commun : pas re-pingé plus d'1×/cooldown_hours (plancher 4 h)
+            _lp = cd_map.get(uid)
+            if _lp:
+                try:
+                    _lpd = datetime.fromisoformat(str(_lp))
+                    if _lpd.tzinfo is None:
+                        _lpd = _lpd.replace(tzinfo=timezone.utc)
+                    if _lpd > _cd_cut:
+                        continue
+                except Exception:
+                    pass
             m = guild.get_member(uid)
             if m is None or m.bot:
                 continue
@@ -60432,6 +60481,11 @@ class WorldBossAttackView(View):
                     return await _safe_followup(
                         i, content=activity_system_module.block_message(
                             "world_boss", _asc, _aneed))
+            except Exception:
+                pass
+            # Phase 235.25c : mémorise la participation (rappel rétention).
+            try:
+                await combat_recall_module.record(i.guild.id, i.user.id)
             except Exception:
                 pass
 

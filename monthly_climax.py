@@ -689,6 +689,13 @@ async def record_attack(
     except Exception:
         pass
 
+    # Phase 235.25c : mémorise la participation (rappel rétention).
+    try:
+        import combat_recall as _cr
+        await _cr.record(guild_id, user_id)
+    except Exception:
+        pass
+
     if damage <= 0:
         damage = random.randint(ATTACK_DAMAGE_MIN, ATTACK_DAMAGE_MAX)
     # Phase 235.10 : BOOST VOCAL — connecté à N'IMPORTE QUEL vocal → bonus de dégâts

@@ -948,6 +948,13 @@ async def record_boss_attack(guild_id: int, user_id: int) -> dict:
     except Exception:
         pass
 
+    # Phase 235.25c : mémorise la participation (rappel rétention).
+    try:
+        import combat_recall as _cr
+        await _cr.record(guild_id, user_id)
+    except Exception:
+        pass
+
     event_id = active["event_id"]
     attacks_done = await _user_attack_count(event_id, user_id)
     if attacks_done >= MAX_ATTACKS_PER_USER:
