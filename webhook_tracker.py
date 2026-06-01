@@ -336,8 +336,8 @@ def build_panel(guild: discord.Guild):
 
             b_purge.callback = _on_purge
             b_rescan.callback = _on_rescan
-            self.add_item(b_purge)
-            self.add_item(b_rescan)
+            # Phase 235.5 : boutons via ActionRow (bouton nu interdit top-level LayoutView).
+            self.add_item(discord.ui.ActionRow(b_purge, b_rescan))
 
     return _WebhookPanel()
 

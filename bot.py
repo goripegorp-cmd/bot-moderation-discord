@@ -16977,7 +16977,9 @@ class SecurityChannelsPanelV2(LayoutView):
 
         self.add_item(v2_container(*items, color=0xE74C3C))
 
-        # Boutons par feature
+        # Boutons par feature — Phase 235.5 : un bouton NU est interdit en
+        # top-level d'une LayoutView (400 50035) → grouper en ActionRow (max 5/row).
+        _sec_btns = []
         for key, label, _ in self.CHANNEL_KEYS:
             btn = Button(
                 label=f"📍 Définir : {label}",
@@ -16989,14 +16991,16 @@ class SecurityChannelsPanelV2(LayoutView):
                 await self._open_picker(i_inter, _k, _l)
 
             btn.callback = _cb
-            self.add_item(btn)
+            _sec_btns.append(btn)
 
         b_back = Button(
             label="◀️ Retour", style=discord.ButtonStyle.secondary,
             custom_id="secch_back",
         )
         b_back.callback = self._cb_back
-        self.add_item(b_back)
+        _sec_btns.append(b_back)
+        for _k in range(0, len(_sec_btns), 5):
+            self.add_item(discord.ui.ActionRow(*_sec_btns[_k:_k + 5]))
 
         if edit:
             try:

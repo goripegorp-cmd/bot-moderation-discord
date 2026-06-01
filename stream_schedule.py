@@ -472,7 +472,7 @@ def build_schedule_panel(member: discord.Member):
                 await i.response.send_modal(_ScheduleModal())
 
             b_add.callback = _on_add
-            self.add_item(b_add)
+            _row_btns = [b_add]
 
             # Bouton annuler le prochain
             if upcoming:
@@ -494,7 +494,9 @@ def build_schedule_panel(member: discord.Member):
                     await i.response.send_message(msg, ephemeral=True)
 
                 b_cancel.callback = _on_cancel
-                self.add_item(b_cancel)
+                _row_btns.append(b_cancel)
+            # Phase 235.5 : boutons via ActionRow (bouton nu interdit top-level LayoutView).
+            self.add_item(discord.ui.ActionRow(*_row_btns))
 
     class _ScheduleModal(Modal):
         def __init__(self):

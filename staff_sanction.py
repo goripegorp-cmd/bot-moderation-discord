@@ -465,12 +465,24 @@ def _build_panel_view(_v2_helpers: dict, sanction_id: int, target: discord.Membe
             ))
             self.add_item(v2_container(*items, color=0xE74C3C))
 
-            sv = SanctionView(sanction_id)
-            for child in sv.children:
-                try:
-                    self.add_item(child)
-                except Exception:
-                    pass
+            # Phase 235.5 : un DynamicItem ne peut PAS être un composant
+            # top-level d'une LayoutView (ni vivre dans un ActionRow) → 400 50035
+            # à l'envoi. On crée des Button NORMAUX portant le MÊME custom_id
+            # `sanction_<action>_<sid>` : le DynamicItem enregistré au boot
+            # (add_dynamic_items(SanctionDynamicButton)) matche ce custom_id au
+            # clic et route vers _handle_sanction_click → comportement identique,
+            # persistance incluse.
+            _sanction_btns = []
+            for _action in ("mute_1h", "warn", "kick", "ban", "ignore"):
+                _lbl, _sty = _ACTION_LABELS.get(
+                    _action, ("?", discord.ButtonStyle.secondary)
+                )
+                _sanction_btns.append(Button(
+                    label=_lbl,
+                    style=_sty,
+                    custom_id=f"sanction_{_action}_{sanction_id}",
+                ))
+            self.add_item(discord.ui.ActionRow(*_sanction_btns))
 
     return _SanctionPanel()
 

@@ -434,7 +434,9 @@ def build_prefs_panel(member: discord.Member):
                 items.append(v2_body(f"{emoji} {label} — `{status}`"))
             self.add_item(v2_container(*items, color=0x3498DB))
 
-            # Boutons toggle par catégorie (max 5 par row)
+            # Boutons toggle par catégorie — Phase 235.5 : groupés en ActionRow
+            # (bouton nu interdit top-level LayoutView = 400 50035 ; max 5/row).
+            _btns = []
             for i, (cat_key, (emoji, label)) in enumerate(CATEGORIES.items()):
                 btn = Button(
                     label=label[:20],
@@ -444,7 +446,6 @@ def build_prefs_panel(member: discord.Member):
                         else discord.ButtonStyle.primary
                     ),
                     custom_id=f"digest_toggle_{member.id}_{cat_key}",
-                    row=i // 4,
                 )
 
                 async def _cb(i_inter: discord.Interaction, k=cat_key):
@@ -462,7 +463,9 @@ def build_prefs_panel(member: discord.Member):
                     )
 
                 btn.callback = _cb
-                self.add_item(btn)
+                _btns.append(btn)
+            for _k in range(0, len(_btns), 5):
+                self.add_item(discord.ui.ActionRow(*_btns[_k:_k + 5]))
 
     return _PrefsPanel()
 

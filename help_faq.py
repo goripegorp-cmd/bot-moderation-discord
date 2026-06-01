@@ -306,10 +306,12 @@ def build_faq_root():
                 else:
                     row2_buttons.append(btn)
 
-            for b in row1_buttons:
-                self.add_item(b)
-            for b in row2_buttons:
-                self.add_item(b)
+            # Phase 235.5 : un bouton NU est interdit en top-level d'une
+            # LayoutView (400 50035) → toujours via ActionRow (max 5/row).
+            if row1_buttons:
+                self.add_item(discord.ui.ActionRow(*row1_buttons))
+            if row2_buttons:
+                self.add_item(discord.ui.ActionRow(*row2_buttons))
 
     return _FAQRoot()
 
@@ -343,7 +345,9 @@ def build_faq_category(cat_key: str):
                 items.append(v2_body(f"**`{i}.`** {qa['q']}"))
             self.add_item(v2_container(*items, color=0x3498DB))
 
-            # Boutons (1 par question)
+            # Boutons (1 par question) — Phase 235.5 : groupés en ActionRow
+            # (bouton nu interdit top-level LayoutView = 400 50035 ; max 5/row).
+            _qbtns = []
             for i, qa in enumerate(qa_list, 1):
                 b = Button(
                     label=f"Q{i}",
@@ -359,7 +363,9 @@ def build_faq_category(cat_key: str):
                         )
 
                 b.callback = _cb
-                self.add_item(b)
+                _qbtns.append(b)
+            for _k in range(0, len(_qbtns), 5):
+                self.add_item(discord.ui.ActionRow(*_qbtns[_k:_k + 5]))
 
     return _CatPanel()
 
@@ -410,7 +416,8 @@ def build_faq_answer(cat_key: str, qa_idx: int):
                             pass
 
                 b.callback = _cb
-                self.add_item(b)
+                # Phase 235.5 : bouton nu → ActionRow (top-level LayoutView).
+                self.add_item(discord.ui.ActionRow(b))
 
     return _AnswerPanel()
 

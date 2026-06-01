@@ -661,14 +661,25 @@ def build_alert_panel(guild: discord.Guild, alert_id: int):
             ))
             self.add_item(v2_container(*items, color=0xE74C3C))
 
-            # Boutons via DynamicItem (persistance reboot OK)
+            # Phase 235.5 : un DynamicItem ne peut PAS être un composant
+            # top-level d'une LayoutView (400 50035 à l'envoi). On crée des Button
+            # NORMAUX portant le MÊME custom_id `raid_<action>_<gid>_<aid>` : le
+            # DynamicItem RaidAlertButton enregistré au boot (add_dynamic_items)
+            # matche ce custom_id au clic → comportement + persistance identiques.
+            _raid_btns = []
             for action in ("lockdown", "ignore", "details"):
-                try:
-                    self.add_item(RaidAlertButton(
-                        action, guild.id, alert_id
-                    ))
-                except Exception as ex:
-                    print(f"[build_alert_panel add btn {action}] {ex}")
+                _lbl, _sty = _RAID_ACTION_LABELS.get(
+                    action, ("?", discord.ButtonStyle.secondary)
+                )
+                _raid_btns.append(Button(
+                    label=_lbl,
+                    style=_sty,
+                    custom_id=f"raid_{action}_{guild.id}_{alert_id}",
+                ))
+            try:
+                self.add_item(discord.ui.ActionRow(*_raid_btns))
+            except Exception as ex:
+                print(f"[build_alert_panel add row] {ex}")
 
     return _AlertPanel()
 

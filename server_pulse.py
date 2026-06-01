@@ -350,7 +350,8 @@ def build_pulse_panel(guild: discord.Guild):
                         pass
 
             b_refresh.callback = _on_refresh
-            self.add_item(b_refresh)
+            # Phase 235.5 : bouton nu → ActionRow (top-level LayoutView).
+            self.add_item(discord.ui.ActionRow(b_refresh))
 
     return _PulsePanel()
 

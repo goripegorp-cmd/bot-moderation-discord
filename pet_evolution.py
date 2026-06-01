@@ -396,7 +396,8 @@ def build_pet_evolution_panel(member: discord.Member, pet_slug: str):
                         )
 
                 btn.callback = _cb
-                self.add_item(btn)
+                # Phase 235.5 : bouton nu → ActionRow (top-level LayoutView).
+                self.add_item(discord.ui.ActionRow(btn))
 
     return _PetPanel()
 

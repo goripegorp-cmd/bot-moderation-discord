@@ -244,9 +244,12 @@ async def post_now(guild: discord.Guild) -> bool:
             def __init__(self):
                 super().__init__(timeout=None)
                 self.add_item(v2_container(*items, color=0x5865F2))
-                for btn in view.children:
+                # Phase 235.5 : boutons nus interdits en top-level LayoutView
+                # (400 50035) → on enveloppe les boutons de vote dans des ActionRow.
+                _btns = list(view.children)
+                for _k in range(0, len(_btns), 5):
                     try:
-                        self.add_item(btn)
+                        self.add_item(discord.ui.ActionRow(*_btns[_k:_k + 5]))
                     except Exception:
                         pass
 

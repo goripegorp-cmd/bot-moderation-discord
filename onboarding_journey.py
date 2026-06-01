@@ -324,6 +324,7 @@ def build_journey_panel(member: discord.Member):
 
             # Étape 1 : pet — boutons inline si pas encore fait
             if not prog["steps_done"][0]:
+                _petbtns = []
                 for pet in PET_CHOICES:
                     btn = Button(
                         label=pet["name"],
@@ -353,7 +354,11 @@ def build_journey_panel(member: discord.Member):
                         await i.response.send_message(msg, ephemeral=True)
 
                     btn.callback = _cb
-                    self.add_item(btn)
+                    _petbtns.append(btn)
+                # Phase 235.5 : bouton nu interdit top-level LayoutView (400 50035)
+                # → grouper en ActionRow (max 5/row).
+                for _k in range(0, len(_petbtns), 5):
+                    self.add_item(discord.ui.ActionRow(*_petbtns[_k:_k + 5]))
 
     return _JourneyPanel()
 

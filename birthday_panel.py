@@ -216,7 +216,8 @@ def build_birthday_panel(guild: discord.Guild):
                             pass
 
                 b_wish.callback = _on_wish
-                self.add_item(b_wish)
+                # Phase 235.5 : bouton nu → ActionRow (top-level LayoutView).
+                self.add_item(discord.ui.ActionRow(b_wish))
 
     return _BirthdayPanel()
 
