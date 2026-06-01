@@ -723,12 +723,31 @@ def _hp_bar(cur_hp: int, max_hp: int, width: int = 18) -> str:
     return "█" * fill + "░" * (width - fill)
 
 
-async def _post_boss_panel(
-    ch, event_id: int, boss: dict, hp_cur: int, hp_max: int, lifetime_min: int,
-) -> Optional[discord.Message]:
-    """Poste le panel V2 du boss avec bouton Attaquer."""
-    if _v2 is None:
+def _parse_ts(val) -> Optional[int]:
+    """Parse un timestamp SQLite (naïf OU aware) → epoch UTC (int) ou None.
+    (CURRENT_TIMESTAMP est NAÏF → on le normalise en UTC, cf. piège datetime.)"""
+    if not val:
         return None
+    try:
+        s = str(val)
+        if " " in s and "T" not in s:
+            s = s.replace(" ", "T", 1)
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp())
+    except Exception:
+        return None
+
+
+def _build_boss_layout(
+    boss: dict, hp_cur: int, hp_max: int, damage_total: int, event_id: int,
+    *, expires_ts: Optional[int] = None, alive: bool = True,
+):
+    """Phase 235.16 : construit le panneau V2 COMPLET du boss du jour (lore + HP +
+    infos/butin + how-to-play + bouton). UTILISÉ par le post initial ET le refresh
+    → le refresh ne « décape » plus le descriptif/butin (bug « le message
+    disparaît, on n'a pas le temps de lire »). Compte à rebours LIVE via expires_ts."""
     LayoutView = _v2['LayoutView']
     v2_title = _v2['v2_title']
     v2_subtitle = _v2['v2_subtitle']
@@ -739,6 +758,14 @@ async def _post_boss_panel(
     pct = int(hp_cur * 100 / max(1, hp_max))
     lvl_txt = ("Accessible à tous" if boss["min_level"] <= 0
                else f"Niveau **{boss['min_level']}** requis")
+    when_line = (f"⏱️ Se termine <t:{int(expires_ts)}:R>" if expires_ts
+                 else f"⏱️ Temps imparti : **{boss.get('lifetime_min', 45)} min**")
+    hp_block = (
+        f"**❤️ HP**\n`{_hp_bar(hp_cur, hp_max)}`\n"
+        f"`{hp_cur:,} / {hp_max:,}` ({pct}%)"
+    )
+    if damage_total:
+        hp_block += f"\n⚔️ Dégâts totaux infligés : `{int(damage_total):,}`"
 
     items = [
         v2_title(f"{boss['emoji']}  BOSS DU JOUR : {boss['name']}"),
@@ -746,12 +773,9 @@ async def _post_boss_panel(
         v2_divider(),
         v2_body(f"_{boss['description']}_"),
         v2_divider(),
+        v2_body(hp_block),
         v2_body(
-            f"**❤️ HP**\n`{_hp_bar(hp_cur, hp_max)}`\n"
-            f"`{hp_cur:,} / {hp_max:,}` ({pct}%)"
-        ),
-        v2_body(
-            f"⏱️ Temps imparti : **{lifetime_min} min**\n"
+            f"{when_line}\n"
             f"🤝 HP élevé → **impossible en solo**, combattez ensemble !\n"
             f"🏅 Top 3 dégâts = bonus `{TOP3_BONUS_COINS}` 🪙"
         ),
@@ -759,23 +783,36 @@ async def _post_boss_panel(
         v2_body(_ev.how_to_play('daily_boss')),
     ]
 
-    # Phase 208 FIX : le bouton DOIT être dans un ActionRow DANS le conteneur.
-    # Un bouton brut au top-level d'un LayoutView V2 = 400 "Invalid Form Body".
-    # Le clic est capté par le DynamicItem DailyBossAttackButton enregistré
-    # (match du custom_id), exactement comme le World Boss.
-    attack_btn = Button(
-        label="⚔️ Attaquer", style=discord.ButtonStyle.danger,
-        custom_id=f"dboss_atk:{event_id}",
-    )
-    items.append(discord.ui.ActionRow(attack_btn))
+    # Phase 208 FIX : le bouton DOIT être dans un ActionRow DANS le conteneur
+    # (bouton brut top-level d'un LayoutView = 400). Le clic est capté par le
+    # DynamicItem DailyBossAttackButton (match du custom_id), comme le World Boss.
+    if alive:
+        items.append(discord.ui.ActionRow(Button(
+            label="⚔️ Attaquer", style=discord.ButtonStyle.danger,
+            custom_id=f"dboss_atk:{event_id}",
+        )))
 
     class _BossLayout(LayoutView):
         def __init__(self):
             super().__init__(timeout=None)
             self.add_item(v2_container(*items, color=boss.get("color", 0xC0392B)))
 
-    layout = _BossLayout()
+    return _BossLayout()
 
+
+async def _post_boss_panel(
+    ch, event_id: int, boss: dict, hp_cur: int, hp_max: int, lifetime_min: int,
+) -> Optional[discord.Message]:
+    """Poste le panel V2 COMPLET du boss (builder partagé avec le refresh)."""
+    if _v2 is None:
+        return None
+    try:
+        expires_ts = int(
+            (datetime.now(timezone.utc) + timedelta(minutes=int(lifetime_min))).timestamp())
+    except Exception:
+        expires_ts = None
+    layout = _build_boss_layout(
+        boss, hp_cur, hp_max, 0, event_id, expires_ts=expires_ts, alive=True)
     try:
         return await ch.send(view=layout)
     except Exception as ex:
@@ -784,7 +821,9 @@ async def _post_boss_panel(
 
 
 async def _refresh_boss_panel(guild: discord.Guild, event_id: int) -> None:
-    """Met à jour le message du boss avec les HP actuels."""
+    """Met à jour le panneau du boss (HP/dégâts) SANS rien retirer : Phase 235.16,
+    on réutilise le builder COMPLET → le descriptif + butin + how-to-play RESTENT
+    affichés (avant, le refresh les décapait → « le message disparaît »)."""
     active = await get_active_boss(guild.id)
     if not active or active["event_id"] != event_id:
         return
@@ -800,41 +839,11 @@ async def _refresh_boss_panel(guild: discord.Guild, event_id: int) -> None:
         return
     if _v2 is None:
         return
-    LayoutView = _v2['LayoutView']
-    v2_title = _v2['v2_title']
-    v2_subtitle = _v2['v2_subtitle']
-    v2_body = _v2['v2_body']
-    v2_divider = _v2['v2_divider']
-    v2_container = _v2['v2_container']
-
-    pct = int(active["hp_current"] * 100 / max(1, active["hp_max"]))
-    lvl_txt = ("Accessible à tous" if boss["min_level"] <= 0
-               else f"Niveau **{boss['min_level']}** requis")
-    items = [
-        v2_title(f"{boss['emoji']}  BOSS DU JOUR : {boss['name']}"),
-        v2_subtitle(f"_Difficulté : {boss['tier']} · {lvl_txt}_"),
-        v2_divider(),
-        v2_body(
-            f"**❤️ HP**\n`{_hp_bar(active['hp_current'], active['hp_max'])}`\n"
-            f"`{active['hp_current']:,} / {active['hp_max']:,}` ({pct}%)"
-        ),
-        v2_body(f"⚔️ Dégâts totaux infligés : `{active['damage_total']:,}`"),
-    ]
-
-    # Phase 208 FIX : bouton (si boss vivant) dans un ActionRow DANS le conteneur.
-    if active["hp_current"] > 0:
-        attack_btn = Button(
-            label="⚔️ Attaquer", style=discord.ButtonStyle.danger,
-            custom_id=f"dboss_atk:{event_id}",
-        )
-        items.append(discord.ui.ActionRow(attack_btn))
-
-    class _BossLayout(LayoutView):
-        def __init__(self):
-            super().__init__(timeout=None)
-            self.add_item(v2_container(*items, color=boss.get("color", 0xC0392B)))
-
-    layout = _BossLayout()
+    layout = _build_boss_layout(
+        boss, active["hp_current"], active["hp_max"],
+        active.get("damage_total", 0), event_id,
+        expires_ts=_parse_ts(active.get("expires_at")),
+        alive=active["hp_current"] > 0)
     try:
         await msg.edit(view=layout)
     except Exception:
