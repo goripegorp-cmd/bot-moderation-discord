@@ -8134,6 +8134,31 @@ _SLOT_META = {
 }
 
 
+# Phase 235.27 : NIVEAU REQUIS POUR ÉQUIPER. Les items n'ont pas de champ
+# 'level' → on le DÉRIVE de la rareté : plus c'est rare, plus il faut être haut
+# niveau (les meilleures pièces se méritent — cahier des charges owner). Tolère
+# les libellés FR/EN.
+_EQUIP_LEVEL_BY_RARITY = {
+    "commune": 1, "common": 1,
+    "rare": 5,
+    "épique": 12, "epique": 12, "epic": 12,
+    "légendaire": 25, "legendaire": 25, "legendary": 25,
+    "mythique": 40, "mythic": 40,
+    "divine": 60,
+}
+
+
+def _required_level_for_item(item) -> int:
+    """Niveau requis pour équiper `item` (0 si vide). Dérivé de la rareté. Défensif."""
+    try:
+        if not item or not item.get('name'):
+            return 0
+        rar = str(item.get('rarity', 'commune')).lower().strip()
+        return int(_EQUIP_LEVEL_BY_RARITY.get(rar, 1))
+    except Exception:
+        return 0
+
+
 def _format_loadout_lines(inv: dict) -> list:
     """Une ligne par emplacement équipé (ou _vide_)."""
     lines = []
@@ -8182,7 +8207,10 @@ class _EquipSelect(discord.ui.Select):
                 bits.append(f"+{item['def']}def")
             if item.get('crit'):
                 bits.append(f"+{item['crit']}%cr")
-            desc = f"{label} · {rr}" + ((" · " + " ".join(bits)) if bits else "")
+            # Phase 235.27 : niveau requis (dérivé de la rareté)
+            _rq = _required_level_for_item(item)
+            _rqs = f" · 🔒niv.{_rq}" if _rq > 1 else ""
+            desc = f"{label} · {rr}{_rqs}" + ((" · " + " ".join(bits)) if bits else "")
             options.append(discord.SelectOption(
                 label=str(item.get('name', '?'))[:90] or '?',
                 value=str(sid),
@@ -8200,6 +8228,30 @@ class _EquipSelect(discord.ui.Select):
             if self.values[0] == "none":
                 return await i.response.defer()
             sid = int(self.values[0])
+            # Phase 235.27 : NIVEAU REQUIS POUR ÉQUIPER (fail-open). Vérif AVANT
+            # _stash_equip (qui sort l'objet du coffre) → si refusé, l'objet RESTE
+            # dans le coffre. Toute erreur → on laisse passer (jamais bloquant).
+            try:
+                async with get_db() as _db:
+                    async with _db.execute(
+                        "SELECT item_json FROM player_stash "
+                        "WHERE id=? AND guild_id=? AND user_id=?",
+                        (sid, i.guild.id, i.user.id),
+                    ) as _c:
+                        _sr = await _c.fetchone()
+                if _sr and _sr[0]:
+                    _sit = json.loads(_sr[0])
+                    _req = _required_level_for_item(_sit)
+                    _eco = await get_user_economy(i.guild.id, i.user.id)
+                    _plvl = int(_eco.get('level', 1) or 1)
+                    if _req > _plvl:
+                        return await i.response.send_message(
+                            f"🔒 **{_sit.get('name', 'Cet objet')}** demande le "
+                            f"**niveau {_req}** (tu es niveau **{_plvl}**).\n"
+                            f"💡 Continue à monter — il t'attend dans ton coffre, "
+                            f"bien au chaud !", ephemeral=True)
+            except Exception:
+                pass
             ok, new_item, old_item = await _stash_equip(i.guild.id, i.user.id, sid)
             if not ok:
                 return await i.response.send_message(
