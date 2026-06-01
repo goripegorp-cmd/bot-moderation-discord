@@ -74,6 +74,7 @@ _arena_create_fn = None  # async (guild, kind, title) -> salon texte dédié
 _arena_delete_fn = None  # async (guild, text_channel_id) -> supprime l'arène
 _event_busy_fn = None  # Phase 230 : async (guild_id) -> True si un AUTRE event de combat tourne (injecté)
 _report_fn = None  # Phase 235.15 : async (guild, title, body) -> récap consolidé dans « 📜 chroniques-combat »
+_event_mention_fn = None  # Phase 235.24 : async (guild, type) -> mention rôles opt-in (/notify + 🔔)
 # Phase 235.16 : warm-up climax (clé = event_id) — sas de préparation au spawn.
 _CLIMAX_WARMUP_SECONDS = 25
 _warmup_until: dict[int, float] = {}
@@ -289,10 +290,10 @@ def setup(
     bot_instance, get_db_fn, db_get_fn, v2_helpers: dict,
     story_module=None, npc_module=None, add_coins_fn=None,
     arena_create_fn=None, arena_delete_fn=None, event_busy_fn=None,
-    report_fn=None,
+    report_fn=None, event_mention_fn=None,
 ):
     global _bot, _get_db, _db_get, _v2, _story, _npc, _add_coins
-    global _arena_create_fn, _arena_delete_fn, _event_busy_fn, _report_fn
+    global _arena_create_fn, _arena_delete_fn, _event_busy_fn, _report_fn, _event_mention_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -307,6 +308,8 @@ def setup(
     _event_busy_fn = event_busy_fn
     # Phase 235.15 : rapport de fin consolidé → « 📜 chroniques-combat »
     _report_fn = report_fn
+    # Phase 235.24 : mention des rôles opt-in (/notify + 🔔 Climax) au spawn
+    _event_mention_fn = event_mention_fn
 
 
 async def init_db():
@@ -591,6 +594,16 @@ async def trigger_climax(guild_id: int) -> Optional[int]:
         _warmup_until[event_id] = _warm
         await _announce_climax_open(guild, boss, event_id, ends_at, channel=ch,
                                     warmup_ts=_warm)
+        # Phase 235.24 : ping des rôles opt-in (/notify + 🔔 Climax). L'annonce est en
+        # V2 (pas de content) → message de ping séparé, roles=True.
+        if _event_mention_fn is not None and ch is not None:
+            try:
+                _cm = await _event_mention_fn(guild, 'climax')
+                if _cm:
+                    await ch.send(_cm, allowed_mentions=discord.AllowedMentions(
+                        roles=True, users=True, everyone=False))
+            except Exception:
+                pass
 
     if _story is not None:
         try:
