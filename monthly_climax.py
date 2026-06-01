@@ -623,6 +623,26 @@ async def record_attack(
             "attack_count": attacks_done,
         }
 
+    # Phase 235.12 : GATING DE NIVEAU (crescendo) — le Climax (boss de fin de
+    # chapitre) demande le niveau 10, comme le World Boss. On lit economy.level
+    # (même DB). Fail-open : erreur → on laisse passer.
+    try:
+        async with _get_db() as _db:
+            async with _db.execute(
+                "SELECT level FROM economy WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id),
+            ) as _cur:
+                _lr = await _cur.fetchone()
+        _clvl = int((_lr[0] if _lr and _lr[0] else 1) or 1)
+    except Exception:
+        _clvl = 999
+    if _clvl < 10:
+        return {
+            "error": (f"🔒 Le **Climax** demande le **niveau 10** (tu es niveau **{_clvl}**). "
+                      f"Farme les mobs, le boss du jour et fais `/daily` pour monter !"),
+            "attack_count": attacks_done,
+        }
+
     if damage <= 0:
         damage = random.randint(ATTACK_DAMAGE_MIN, ATTACK_DAMAGE_MAX)
     # Phase 235.10 : BOOST VOCAL — connecté à N'IMPORTE QUEL vocal → bonus de dégâts

@@ -9706,6 +9706,23 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
         if ended:
             return await i.followup.send("⏰ Cet événement est déjà terminé.", ephemeral=True)
 
+        # Phase 235.12 : GATING DE NIVEAU (crescendo). Le Boss Raid demande le
+        # niveau 5 → un nouveau ne peut pas rafler le gros loot sans progresser un
+        # peu. Les mobs / la boîte mystère / le trésor restent OUVERTS à tous (porte
+        # d'entrée pour farmer de l'XP). Fail-open : erreur de lecture → on laisse.
+        _BR_MIN_LVL = 5
+        try:
+            _br_lvl = int((await get_user_economy(i.guild.id, i.user.id)).get('level', 1) or 1)
+        except Exception:
+            _br_lvl = 999
+        if _br_lvl < _BR_MIN_LVL:
+            return await i.followup.send(
+                f"🔒 Le **Boss Raid** demande le **niveau {_BR_MIN_LVL}** "
+                f"(tu es niveau **{_br_lvl}**).\n💡 Monte vite en niveau : tape dans le chat, "
+                f"fais `/daily`, et tabasse les **mobs** & le **boss du jour** (ouverts à tous) !",
+                ephemeral=True,
+            )
+
         # Rate-limit 5s
         key = (i.guild.id, i.user.id)
         now_ts = time.time()
@@ -59930,6 +59947,24 @@ class WorldBossAttackView(View):
                 return await _safe_followup(i, content="❌ Boss inconnu.")
             if hp <= 0:
                 return await _safe_followup(i, content="✅ Le boss est déjà mort !")
+
+            # Phase 235.12 : GATING DE NIVEAU — le World Boss (plus gros loot du
+            # serveur) demande le niveau 10. Récompense la progression et empêche
+            # un nouveau de faceroll le contenu le plus dur. Fail-open.
+            _WB_MIN_LVL = 10
+            try:
+                _wb_lvl = int((await get_user_economy(i.guild.id, i.user.id)).get('level', 1) or 1)
+            except Exception:
+                _wb_lvl = 999
+            if _wb_lvl < _WB_MIN_LVL:
+                return await _safe_followup(
+                    i,
+                    content=(
+                        f"🔒 Le **World Boss** demande le **niveau {_WB_MIN_LVL}** "
+                        f"(tu es niveau **{_wb_lvl}**).\n💡 Farme les **mobs**, le **boss du jour** "
+                        f"et fais tes **quêtes** `/daily` — tu y seras vite, et le butin en vaut la peine !"
+                    ),
+                )
 
             # Cooldown 10s par user pour éviter le spam
             async with get_db() as db:
