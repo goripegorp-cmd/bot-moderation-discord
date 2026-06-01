@@ -48050,7 +48050,8 @@ async def craft_cmd(i: discord.Interaction):
                 lay.append(v2_title("⚒️  ATELIER DE FORGE"))
                 lay.append(v2_subtitle(
                     f"Tu as `{total_wealth:,}` 🪙  ·  "
-                    f"{len(eligible)} item(s) éligible(s)"
+                    f"{len(eligible)} item(s) éligible(s) · "
+                    f"_4 max par section — rouvre /craft pour la suite_"
                 ))
                 # Phase 181b : AMÉLIORATION (+N) — sûre, montée en puissance
                 if enhance_eligible:
@@ -48061,7 +48062,7 @@ async def craft_cmd(i: discord.Interaction):
                         "danger** jusqu'à +5 ; au-delà, un échec coûte 1 niveau "
                         "(jamais de destruction)._"
                     ))
-                    for slot_key, slot_label, item, lvl in enhance_eligible:
+                    for slot_key, slot_label, item, lvl in enhance_eligible[:4]:  # Phase 235.14 : cap (limite 40 composants V2 → /craft plantait)
                         emoji = item.get("emoji", "⚪")
                         name = item.get("name", "?")
                         cost = events2026.enhance_cost(item, lvl)
@@ -48088,7 +48089,7 @@ async def craft_cmd(i: discord.Interaction):
                         "commune": "⚪", "rare": "🔵", "épique": "🟣",
                         "légendaire": "🟠", "mythique": "🔴", "divine": "💎",
                     }
-                    for slot_key, slot_label, item, recipe in eligible:
+                    for slot_key, slot_label, item, recipe in eligible[:4]:  # Phase 235.14 : cap (limite 40 composants V2 → /craft plantait)
                         emoji = item.get("emoji", "⚪")
                         name = item.get("name", "?")
                         rarity = (item.get("rarity") or "commune").lower()
