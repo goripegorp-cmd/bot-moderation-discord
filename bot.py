@@ -9184,42 +9184,12 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
                     print(f"[event start mask ch={ch.id}] {ex}")
                     continue
 
-        # Phase 37 : créer les 3 zones vocales temporaires
-        voice_zones_map = {}  # zone_id → channel_id
-        try:
-            arena_category = arena_channel.category
-            for zone_spec in events2026.VOICE_ZONES:
-                try:
-                    overwrites = {
-                        guild.default_role: discord.PermissionOverwrite(
-                            view_channel=True, connect=True, speak=True,
-                        ),
-                        guild.me: discord.PermissionOverwrite(
-                            view_channel=True, connect=True, speak=True, move_members=True,
-                        ),
-                    }
-                    vc = await guild.create_voice_channel(
-                        name=zone_spec['name'][:90],
-                        overwrites=overwrites,
-                        category=arena_category,
-                        reason=f"Boss Raid event {event_id} — voice zone",
-                    )
-                    voice_zones_map[zone_spec['id']] = vc.id
-                    # Persister en DB
-                    async with get_db() as db:
-                        await db.execute(
-                            'INSERT OR REPLACE INTO event_voice_zones(event_id, zone_id, channel_id) VALUES(?,?,?)',
-                            (event_id, zone_spec['id'], vc.id),
-                        )
-                        await db.commit()
-                except discord.Forbidden:
-                    print(f"[event start voice zone {zone_spec['id']}] perm refusée")
-                    break
-                except Exception as ex:
-                    print(f"[event start voice zone {zone_spec['id']}] {ex}")
-                    continue
-        except Exception as ex:
-            print(f"[event start voice zones global] {ex}")
+        # Phase 235.9 : PLUS de zones vocales créées. L'owner : « le système de
+        # vocaux créés ne marche pas, ça traîne en bas du serveur ». Le combat
+        # reste donc 100 % TEXTE. Le bonus de combat passe désormais par « être
+        # connecté à un vocal » (n'importe lequel) → boost de dégâts ALÉATOIRE,
+        # appliqué dans le handler d'attaque. Aucun salon vocal créé/à nettoyer.
+        voice_zones_map = {}  # plus aucune zone vocale dédiée (gardé pour compat aval)
 
         # Cache
         _active_events_cache[guild.id] = {
@@ -9895,6 +9865,24 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
         except Exception:
             pass
 
+        # Phase 235.9 : BOOST VOCAL — être connecté à N'IMPORTE QUEL vocal du
+        # serveur donne un bonus de dégâts ALÉATOIRE (+12 % à +30 %). Plafonné →
+        # impossible de one-shot le boss juste en se connectant. Remplace les
+        # anciennes « zones vocales » (salons dédiés supprimés) : incite à se
+        # retrouver en vocal sans qu'on crée le moindre salon.
+        voice_str = ""
+        try:
+            _mem = i.user if isinstance(i.user, discord.Member) else i.guild.get_member(i.user.id)
+            if _mem and getattr(_mem, 'voice', None) and _mem.voice.channel is not None:
+                _vmult = random.uniform(1.12, 1.30)
+                _vbonus = int(damage * (_vmult - 1.0))
+                if _vbonus > 0:
+                    damage += _vbonus
+                    voice_str = (f"\n🔊 **Boost vocal** ! +`{_vbonus}` dégâts "
+                                 f"(+{int(round((_vmult - 1.0) * 100))} %)")
+        except Exception:
+            pass
+
         # Appliquer les dégâts au boss
         new_hp = max(0, int(boss.get('current_hp', 0)) - damage)
         boss['current_hp'] = new_hp
@@ -10149,7 +10137,7 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
         bonus_str = ("\n_" + " · ".join(bonus_parts) + "_") if bonus_parts else ""
 
         await i.followup.send(
-            f"⚔️ Tu infliges `{damage}` dégâts au boss !{crit_str}{double_str}{elem_str}{bonus_str}{retal_str}",
+            f"⚔️ Tu infliges `{damage}` dégâts au boss !{crit_str}{double_str}{elem_str}{voice_str}{bonus_str}{retal_str}",
             ephemeral=True,
         )
 
@@ -60022,6 +60010,21 @@ class WorldBossAttackView(View):
             if hp_ratio < 0.33:
                 damage = int(damage * 1.5)  # phase finale = +50% damage taken par le boss
 
+            # Phase 235.9 : BOOST VOCAL — connecté à N'IMPORTE QUEL vocal → bonus
+            # de dégâts aléatoire (+12-30 %, plafonné). Même règle que le Boss Raid.
+            voice_wb_str = ""
+            try:
+                _wm = i.user if isinstance(i.user, discord.Member) else i.guild.get_member(i.user.id)
+                if _wm and getattr(_wm, 'voice', None) and _wm.voice.channel is not None:
+                    _wvmult = random.uniform(1.12, 1.30)
+                    _wvbonus = int(damage * (_wvmult - 1.0))
+                    if _wvbonus > 0:
+                        damage += _wvbonus
+                        voice_wb_str = (f"\n🔊 **Boost vocal** ! +`{_wvbonus}` dégâts "
+                                        f"(+{int(round((_wvmult - 1.0) * 100))} %)")
+            except Exception:
+                pass
+
             new_hp = max(0, hp - damage)
             async with get_db() as db:
                 await db.execute(
@@ -60050,7 +60053,7 @@ class WorldBossAttackView(View):
                 return await _safe_followup(
                     i,
                     content=(
-                        f"⚡ **COUP FATAL !** Tu as infligé `{damage}` dégâts.{elem_wb_str}\n"
+                        f"⚡ **COUP FATAL !** Tu as infligé `{damage}` dégâts.{elem_wb_str}{voice_wb_str}\n"
                         f"💀 **{boss['title']}** est vaincu — le serveur a triomphé !"
                     ),
                 )
@@ -60064,7 +60067,7 @@ class WorldBossAttackView(View):
             await _safe_followup(
                 i,
                 content=(
-                    f"⚔️ Tu infliges `{damage}` dégâts à **{boss['title']}** !{elem_wb_str}\n"
+                    f"⚔️ Tu infliges `{damage}` dégâts à **{boss['title']}** !{elem_wb_str}{voice_wb_str}\n"
                     f"🩸 HP : `{new_hp}/{max_hp}` ({(new_hp/max_hp*100):.0f}%){phase_msg}"
                 ),
             )
@@ -63946,15 +63949,11 @@ async def _create_combat_arena(guild, kind: str, title: str, voice_count: int = 
             overwrites={guild.default_role: pub_txt, me: bot_ow},
             reason=f"Arène de combat ({kind})")
         created.append(txt)
-        for i in range(max(1, int(voice_count))):
-            vc = await guild.create_voice_channel(
-                name=("🔊 Combat" if i == 0 else f"🔊 Combat {i + 1}"),
-                category=cat,
-                overwrites={guild.default_role: pub_voice, me: bot_ow},
-                reason=f"Arène de combat ({kind})")
-            created.append(vc)
-            if first_voice is None:
-                first_voice = vc
+        # Phase 235.9 : on NE crée PLUS de vocaux d'événement (ils ne servaient à
+        # rien et s'empilaient vides en bas du serveur). Arène = catégorie + salon
+        # TEXTE seul. Le bonus de combat passe par « être connecté à un vocal »
+        # (n'importe lequel) → boost de dégâts aléatoire dans le handler d'attaque.
+        # (voice_count / pub_voice conservés pour la compat de signature)
     except Exception as ex:
         print(f"[_create_combat_arena {kind}] {ex}")
         for ch in reversed(created):
@@ -63974,9 +63973,9 @@ async def _create_combat_arena(guild, kind: str, title: str, voice_count: int = 
         if not isinstance(target, discord.TextChannel):
             target = await _ensure_combat_reports_channel(guild)
         if isinstance(target, discord.TextChannel) and target.id != txt.id:
-            _vc_line = f"\n🔊 Farm en vocal → {first_voice.mention}" if first_voice else ""
             am = await target.send(
-                f"⚔️ **{safe}** — le combat commence !\n💬 Arène → {txt.mention}{_vc_line}",
+                f"⚔️ **{safe}** — le combat commence !\n💬 Arène → {txt.mention}"
+                f"\n🔊 Astuce : connecte-toi à **n'importe quel vocal** pendant le combat → **bonus de dégâts** sur le boss !",
                 allowed_mentions=discord.AllowedMentions.none())
             alert_ch_id, alert_msg_id = target.id, am.id
     except Exception as ex:
