@@ -351,8 +351,11 @@ class _DBConnection:
             if exc_type is None:
                 try:
                     await self._conn.commit()
-                except:
-                    pass
+                except Exception as _commit_ex:
+                    # Phase 235.5 : ne plus AVALER silencieusement un échec de
+                    # commit (disque plein, lock SQLite, statement invalide) —
+                    # logger pour pouvoir diagnostiquer un « ça n'a pas sauvegardé ».
+                    print(f"[DBPool commit] {type(_commit_ex).__name__}: {_commit_ex}")
             await self._pool._put(self._conn)
         return False
 
@@ -2429,6 +2432,16 @@ async def db_init():
             theme TEXT,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             closed_at DATETIME
+        )''')
+
+        # Phase 235.5 : vocaux temporaires « Voc Build » (join-to-create) persistés
+        # pour le nettoyage au reboot (sinon ils s'accumulaient vides en bas du serveur).
+        await db.execute('''CREATE TABLE IF NOT EXISTS temp_voice_rooms (
+            guild_id INTEGER,
+            channel_id INTEGER PRIMARY KEY,
+            hub_id INTEGER,
+            owner_id INTEGER,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )''')
 
         await db.execute('''CREATE TABLE IF NOT EXISTS irl_seasons_active (
@@ -16271,8 +16284,13 @@ class DelegationMembersPanelV2(LayoutView):
                 if last_msg:
                     try:
                         last_dt = datetime.fromisoformat(last_msg.replace('Z', '+00:00'))
-                        last_dt_naive = last_dt.replace(tzinfo=None) if last_dt.tzinfo else last_dt
-                        days_ago = (now_dt - last_dt_naive).days
+                        # Phase 235.5 : normaliser en AWARE UTC (ne PAS stripper le
+                        # fuseau). now_dt = now() est aware ; soustraire un datetime
+                        # NAÏF levait « can't subtract offset-naive and offset-aware
+                        # datetimes » → le compteur AFK affichait « ? » pour tous.
+                        if last_dt.tzinfo is None:
+                            last_dt = last_dt.replace(tzinfo=timezone.utc)
+                        days_ago = (now_dt - last_dt).days
                         if days_ago >= threshold_days:
                             members_lines.append(f"💤 {m.mention}{tag} · _AFK `{days_ago}j`_")
                             afk_count += 1
@@ -29737,12 +29755,14 @@ class GiveawayParticipateView(View):
                     if "Participants" in field.name:
                         embed.set_field_at(idx, name="👥 Participants", value=f"```{count}```", inline=True)
                         break
-                # Utiliser webhook_edit si le message vient d'un webhook
+                # Phase 235.5 : le giveaway est posté par un WEBHOOK → i.message.edit()
+                # échoue (403 50005, avalé silencieusement) et le compteur de
+                # participants ne s'incrémentait JAMAIS. On passe par webhook_edit()
+                # qui édite via le webhook (avec fallback fetch_message().edit()).
                 try:
-                    await i.message.edit(embed=embed)
-                except discord.Forbidden:
-                    # Message envoyé par webhook, on ne peut pas l'éditer directement
-                    pass
+                    await webhook_edit(i.channel, 'giveaway', i.message.id, embed=embed)
+                except Exception as _ge:
+                    print(f"[giveaway participate edit] {_ge}")
             except Exception as e:
                 print(f"Erreur update embed: {e}")
             
@@ -41239,6 +41259,9 @@ async def on_ready():
     # Phase 62 : vocaux thématiques cleanup + IRL season check
     if not thematic_voice_cleanup_task.is_running():
         thematic_voice_cleanup_task.start()
+    # Phase 235.5 : watchdog des vocaux temporaires « Voc Build » (anti-orphelins reboot)
+    if not temp_voice_watchdog.is_running():
+        temp_voice_watchdog.start()
     if not irl_season_check_task.is_running():
         irl_season_check_task.start()
     # Phase 63 : capsule unlock + npc whisper + anniversary
@@ -54860,6 +54883,70 @@ async def cleanup_deals_task():
 async def before_cleanup_deals():
     await bot.wait_until_ready()
 
+
+async def _forget_temp_voice_room(channel_id):
+    """Oublie un vocal temporaire (ligne DB)."""
+    try:
+        async with get_db() as _db:
+            await _db.execute(
+                "DELETE FROM temp_voice_rooms WHERE channel_id=?", (channel_id,))
+            await _db.commit()
+    except Exception as ex:
+        print(f"[temp_voice forget] {ex}")
+
+
+@tasks.loop(minutes=5)
+async def temp_voice_watchdog():
+    """Phase 235.5 : nettoie les vocaux temporaires « Voc Build » ORPHELINS.
+
+    L'état ne vivait que dans le dict mémoire `temp_voice_channels` → après un
+    reboot, tout vocal temporaire déjà vide (ou devenu vide pendant que le bot
+    était hors-ligne) n'était JAMAIS supprimé et s'empilait en bas du serveur
+    (plainte récurrente de l'owner). On rejoue la vérité depuis `temp_voice_rooms` :
+    salon disparu → on oublie la ligne ; salon vide → on le supprime + oublie ;
+    salon vivant → on re-synchronise le dict mémoire (perdu au reboot) pour que la
+    suppression-à-la-sortie refonctionne. 1re itération immédiate au boot.
+    """
+    try:
+        async with get_db() as _db:
+            async with _db.execute(
+                "SELECT guild_id, channel_id, hub_id, owner_id FROM temp_voice_rooms"
+            ) as cur:
+                rows = await cur.fetchall()
+        for gid, ch_id, hub_id, owner_id in rows:
+            try:
+                guild = bot.get_guild(int(gid))
+                if guild is None:
+                    continue
+                ch = guild.get_channel(int(ch_id))
+                if ch is None:
+                    temp_voice_channels.pop(int(ch_id), None)
+                    await _forget_temp_voice_room(int(ch_id))
+                    continue
+                if len(ch.members) == 0:
+                    try:
+                        await ch.delete(reason="Vocal temporaire vide (watchdog)")
+                    except Exception:
+                        pass
+                    temp_voice_channels.pop(int(ch_id), None)
+                    await _forget_temp_voice_room(int(ch_id))
+                elif int(ch_id) not in temp_voice_channels:
+                    temp_voice_channels[int(ch_id)] = {
+                        'owner': int(owner_id or 0),
+                        'hub_id': int(hub_id or 0),
+                        'created_at': now(),
+                    }
+            except Exception as ex:
+                print(f"[temp_voice_watchdog room={ch_id}] {ex}")
+    except Exception as ex:
+        print(f"[temp_voice_watchdog] {ex}")
+
+
+@temp_voice_watchdog.before_loop
+async def before_temp_voice_watchdog():
+    await bot.wait_until_ready()
+
+
 # Mise à jour activité sur vocal + Vocaux Temporaires
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -55034,6 +55121,19 @@ async def on_voice_state_update(member, before, after):
                                 'hub_id': after.channel.id,
                                 'created_at': now(),
                             }
+                            # Phase 235.5 : persister en DB pour le nettoyage au reboot
+                            # (anti-orphelins — plainte récurrente des salons en bas).
+                            try:
+                                async with get_db() as _tvdb:
+                                    await _tvdb.execute(
+                                        "INSERT OR REPLACE INTO temp_voice_rooms"
+                                        "(guild_id, channel_id, hub_id, owner_id) "
+                                        "VALUES(?,?,?,?)",
+                                        (member.guild.id, new_channel.id,
+                                         after.channel.id, member.id))
+                                    await _tvdb.commit()
+                            except Exception as _tvex:
+                                print(f"[TEMP VOICE persist] {_tvex}")
                             # Déplacer le membre DANS son salon. Si le bot n'a pas
                             # « Déplacer des membres », on le prévient en DM.
                             try:
@@ -55060,11 +55160,12 @@ async def on_voice_state_update(member, before, after):
                     channel = member.guild.get_channel(before.channel.id)
                     if channel and len(channel.members) == 0:
                         await channel.delete(reason="Vocal temporaire vide")
-                        del temp_voice_channels[before.channel.id]
+                        temp_voice_channels.pop(before.channel.id, None)
+                        await _forget_temp_voice_room(before.channel.id)
                         print(f"[TEMP VOICE] Supprimé vocal vide: {before.channel.name}")
                 except discord.NotFound:
-                    if before.channel.id in temp_voice_channels:
-                        del temp_voice_channels[before.channel.id]
+                    temp_voice_channels.pop(before.channel.id, None)
+                    await _forget_temp_voice_room(before.channel.id)
                 except Exception as ex:
                     print(f"[TEMP VOICE] Erreur suppression: {ex}")
                     
