@@ -1060,11 +1060,60 @@ class CouncilVoteButton(
                 pass
 
 
+class CouncilVotePublicButton(
+    discord.ui.DynamicItem[Button],
+    template=r"cvote_pub:(?P<session_id>\d+):(?P<option_idx>\d+)",
+):
+    """Phase 235.21 : bouton de vote PUBLIC, posé DIRECTEMENT sous l'annonce du Conseil
+    (fini « va dans le Codex pour voter » → personne n'y arrivait). N'importe quel
+    membre clique → son vote est enregistré (record_vote gère « déjà voté »/immuable).
+    Pas de user_id dans le custom_id → un seul jeu de boutons pour tout le serveur."""
+    def __init__(self, session_id: int, option_idx: int):
+        super().__init__(Button(
+            label="Voter",
+            style=discord.ButtonStyle.primary,
+            custom_id=f"cvote_pub:{session_id}:{option_idx}",
+        ))
+        self.session_id = session_id
+        self.option_idx = option_idx
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["session_id"]), int(match["option_idx"]))
+
+    async def callback(self, btn_i: discord.Interaction):
+        try:
+            await btn_i.response.defer(ephemeral=True)
+        except (discord.NotFound, discord.HTTPException, discord.InteractionResponded):
+            pass
+        if btn_i.guild is None:
+            try:
+                await btn_i.followup.send("❌ Serveur uniquement.", ephemeral=True)
+            except Exception:
+                pass
+            return
+        try:
+            result = await record_vote(
+                btn_i.guild.id, self.session_id, btn_i.user.id, self.option_idx)
+            if result.get("error"):
+                await btn_i.followup.send(f"❌ {result['error']}", ephemeral=True)
+                return
+            await btn_i.followup.send(
+                f"✅ **Vote pris en compte** : {result.get('option_label', '?')}\n"
+                f"_Résultat à la fermeture du Conseil._", ephemeral=True)
+        except Exception as ex:
+            print(f"[cvote_pub callback] {ex}")
+            try:
+                await btn_i.followup.send("❌ Erreur, réessaie.", ephemeral=True)
+            except Exception:
+                pass
+
+
 def register_persistent_views(bot_instance):
     if bot_instance is None:
         return
     try:
-        bot_instance.add_dynamic_items(CouncilVoteButton)
+        bot_instance.add_dynamic_items(CouncilVoteButton, CouncilVotePublicButton)
     except Exception as ex:
         print(f"[weekly_council register_persistent_views] {ex}")
 
@@ -1099,26 +1148,40 @@ async def _announce_council_open(
     ch = await _find_chronicle_channel(guild)
     if not ch:
         return
-    msg = (
-        f"🗳️ **CONSEIL DES ANCIENS — *{council['title']}***\n\n"
-        f"_{council['context']}_\n\n"
-        f"**❓ {council['question']}**\n\n"
-    )
+    # Phase 235.21 : vote EN UN CLIC sous l'annonce (boutons publics) — fini « va dans
+    # le Codex ». Texte court : contexte + question + options, vote 👇 juste en dessous.
+    LayoutView = _v2['LayoutView']
+    v2_title = _v2['v2_title']
+    v2_body = _v2['v2_body']
+    v2_container = _v2['v2_container']
+
+    body = f"_{council['context']}_\n\n**❓ {council['question']}**\n"
     for opt in council["options"]:
-        msg += f"{opt['label']} — _{opt['description']}_\n\n"
-    msg += (
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"_⏱️ Fermeture : **mercredi 23h59 FR**._\n"
-        f"_📖 Va dans le Codex (hub) pour voter._"
-    )
+        body += f"\n{opt['label']} — _{opt['description']}_"
+    body += "\n\n_⏱️ Fermeture mercredi 23h59 · 1 vote/membre · vote ci-dessous 👇_"
+
+    items = [
+        v2_title(f"🗳️ CONSEIL DES ANCIENS — {council['title']}"),
+        v2_body(body),
+    ]
+    vote_buttons = [
+        Button(label=(opt["label"])[:80], style=discord.ButtonStyle.primary,
+               custom_id=f"cvote_pub:{session_id}:{idx}")
+        for idx, opt in enumerate(council["options"])
+    ]
+
+    class _CouncilAnnounce(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=None)
+            self.add_item(v2_container(*items, color=ui_v2.Palette.INFO))
+            for i in range(0, len(vote_buttons), 5):
+                self.add_item(discord.ui.ActionRow(*vote_buttons[i:i + 5]))
+
     try:
-        _t, _, _b = msg.partition("\n\n")
-        await ch.send(
-            view=ui_v2.recap_view(_t.replace("**", "").replace("*", ""), _b or msg,
-                                  color=ui_v2.Palette.INFO),
-            allowed_mentions=discord.AllowedMentions.none())
-    except Exception:
-        pass
+        await ch.send(view=_CouncilAnnounce(),
+                      allowed_mentions=discord.AllowedMentions.none())
+    except Exception as ex:
+        print(f"[_announce_council_open] {ex}")
 
 
 async def _announce_council_closed(
