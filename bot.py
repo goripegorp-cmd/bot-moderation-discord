@@ -10643,6 +10643,14 @@ async def _end_active_event(guild, *, victory: bool, reason: str = ""):
             except Exception as ex:
                 print(f"[event recap fallback] {ex}")
 
+        # Phase 235.17 : salon de combat ÉPHÉMÈRE — si plus aucun event ne tourne,
+        # supprimer « ⚔️-combat » après un court délai (le temps de souffler). Le
+        # récap est déjà dans « 📜-chroniques-combat » (permanent).
+        try:
+            asyncio.create_task(_maybe_delete_idle_combat_channel(guild, grace_seconds=60))
+        except Exception:
+            pass
+
         # ─── Phase 31 : Difficulté progressive ───
         try:
             duration_used_sec = None
@@ -63917,12 +63925,10 @@ async def _create_combat_arena(guild, kind: str, title: str, voice_count: int = 
 
 
 async def _delete_combat_arena(guild, text_channel_id: int, grace_seconds: int = 120):
-    """Phase 235.10 : le combat s'affiche désormais dans le salon PERMANENT
-    « ⚔️-combat », qui n'est JAMAIS supprimé. Ici on se contente d'OUBLIER la/les
-    ligne(s) combat_arenas de cet event. GARDE-FOUS : on ne supprime JAMAIS le salon
-    permanent (cfg combat_channel_id) ; on ne supprime une catégorie « ⚔️ … » que si
-    c'est une ANCIENNE arène éphémère (category_id != 0 → migration des données
-    d'avant). Idempotent / fail-open."""
+    """Oublie la/les ligne(s) combat_arenas de cet event + supprime une éventuelle
+    ANCIENNE catégorie éphémère « ⚔️ … » (category_id != 0). Phase 235.17 : à la toute
+    fin, tente de supprimer le salon « ⚔️-combat » s'il est devenu IDLE (plus aucun
+    event) → salon de combat ÉPHÉMÈRE (recréé au prochain spawn). Idempotent / fail-open."""
     if guild is None or not text_channel_id:
         return
     try:
@@ -63973,7 +63979,7 @@ async def _delete_combat_arena(guild, text_channel_id: int, grace_seconds: int =
                     await cat.delete(reason="Fin du combat (ancienne catégorie)")
                 except Exception:
                     pass
-    # Oublier la/les ligne(s) — le salon permanent reste intact.
+    # Oublier la/les ligne(s) combat_arenas de cet event.
     try:
         async with get_db() as db:
             await db.execute(
@@ -63982,6 +63988,9 @@ async def _delete_combat_arena(guild, text_channel_id: int, grace_seconds: int =
             await db.commit()
     except Exception:
         pass
+    # Phase 235.17 : salon de combat ÉPHÉMÈRE → si plus aucun event ne tourne, on
+    # supprime « ⚔️-combat » (recréé au prochain spawn). idle-safe + fail-open.
+    await _maybe_delete_idle_combat_channel(guild)
 
 
 def _arena_public_overwrites(guild):
@@ -64109,6 +64118,47 @@ async def _ensure_combat_channel(guild):
     except Exception as ex:
         print(f"[_ensure_combat_channel] {ex}")
         return None
+
+
+async def _maybe_delete_idle_combat_channel(guild, grace_seconds: int = 0):
+    """Phase 235.17 : salon « ⚔️-combat » ÉPHÉMÈRE (demande owner : il doit DISPARAÎTRE
+    quand aucun event ne tourne, pas juste se vider). On le supprime dès qu'AUCUN combat
+    n'est en cours (boss raid / world boss / boss du jour / climax / invasion / mob) ;
+    il est recréé à la volée par _ensure_combat_channel au prochain spawn. Le journal
+    « 📜-chroniques-combat » reste, lui, PERMANENT. Fail-open : au moindre doute on GARDE
+    le salon (JAMAIS de suppression pendant un combat). Le salon étant unique (réutilisé
+    via cfg), il ne s'accumule pas."""
+    if guild is None:
+        return
+    try:
+        if grace_seconds and grace_seconds > 0:
+            await asyncio.sleep(grace_seconds)
+    except Exception:
+        pass
+    try:
+        # Un combat tourne encore (mob inclus) → on garde le salon.
+        if await _has_any_major_event_running(guild.id, include_mobs=True):
+            return
+    except Exception:
+        return  # fail-open : dans le doute, ne rien supprimer
+    try:
+        ch_id = int((await cfg(guild.id)).get('combat_channel_id', 0) or 0)
+    except Exception:
+        ch_id = 0
+    if not ch_id:
+        return
+    ch = guild.get_channel(ch_id)
+    try:
+        # Double garde : on ne supprime QUE le salon de combat (par son nom).
+        if ch is not None and getattr(ch, 'name', '') == "⚔️-combat":
+            await ch.delete(reason="Phase 235.17 : salon de combat éphémère — aucun event en cours")
+    except Exception as ex:
+        print(f"[_maybe_delete_idle_combat_channel] {ex}")
+    # Oublier l'id en cfg → le prochain event recrée un salon neuf.
+    try:
+        await db_set(guild.id, 'combat_channel_id', 0)
+    except Exception:
+        pass
 
 
 async def _post_combat_report(guild, title: str, body: str = "", color: int = 0x2ECC71):
