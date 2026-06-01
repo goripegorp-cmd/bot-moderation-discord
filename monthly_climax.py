@@ -625,6 +625,18 @@ async def record_attack(
 
     if damage <= 0:
         damage = random.randint(ATTACK_DAMAGE_MIN, ATTACK_DAMAGE_MAX)
+    # Phase 235.10 : BOOST VOCAL — connecté à N'IMPORTE QUEL vocal → bonus de dégâts
+    # aléatoire (+12-30 %, plafonné). Même règle que Boss Raid / World Boss / Boss du jour.
+    voice_bonus = 0
+    try:
+        _g = _bot.get_guild(guild_id) if _bot is not None else None
+        _m = _g.get_member(user_id) if _g is not None else None
+        if _m and getattr(_m, "voice", None) and _m.voice.channel is not None:
+            voice_bonus = int(damage * (random.uniform(1.12, 1.30) - 1.0))
+            if voice_bonus > 0:
+                damage += voice_bonus
+    except Exception:
+        voice_bonus = 0
     # Capé pour ne pas overkill
     damage = min(damage, active["hp_current"])
 
@@ -669,6 +681,7 @@ async def record_attack(
             "damage": damage,
             "boss_dead": True,
             "attack_count": attacks_done + 1,
+            "voice_bonus": voice_bonus,
         }
 
     return {
@@ -680,6 +693,7 @@ async def record_attack(
         "attack_count": attacks_done + 1,
         "max_attacks": MAX_ATTACKS_PER_USER,
         "boss_dead": updated["hp_current"] <= 0,
+        "voice_bonus": voice_bonus,
     }
 
 
@@ -1023,8 +1037,10 @@ class ClimaxAttackButton(
                 return
 
             view = await build_climax_panel(btn_i.guild.id, btn_i.user.id)
+            _vb = int(result.get("voice_bonus", 0) or 0)
+            _vn = (f" · 🔊 **Boost vocal** +`{_vb}`" if _vb > 0 else "")
             msg = (
-                f"⚔️ **{result['damage']} dégâts** infligés !\n"
+                f"⚔️ **{result['damage']} dégâts** infligés !{_vn}\n"
                 f"_Attaques : `{result['attack_count']}/{result.get('max_attacks', MAX_ATTACKS_PER_USER)}`._"
             )
             if result.get("boss_dead"):
