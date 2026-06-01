@@ -71,6 +71,7 @@ _arena_create_fn = None  # Phase 210 : async (guild, kind, title) -> salon texte
 _report_fn = None  # Phase 223 : async (guild, title, body) -> rapport dans « chroniques-combat »
 _arena_delete_fn = None  # Phase 210 : async (guild, text_channel_id) -> supprime l'arène
 _event_busy_fn = None  # Phase 230 : async (guild_id) -> True si un AUTRE event de combat tourne (injecté)
+_event_mention_fn = None  # Phase 235.24 : async (guild, type) -> mention rôles opt-in (/notify + 🔔)
 
 # Phase 235.16 : WARM-UP — léger sas de préparation au spawn (« le combat commence
 # dans X s » demandé par l'owner : recevoir le ping, lire le butin, s'équiper,
@@ -221,10 +222,10 @@ def list_boss_ids() -> list[str]:
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
           inventory_fn=None, events_channel_fn=None, notif_check_fn=None,
           cleanup_register_fn=None, arena_create_fn=None, arena_delete_fn=None,
-          report_fn=None, event_busy_fn=None):
+          report_fn=None, event_busy_fn=None, event_mention_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _inventory_fn
     global _events_channel_fn, _notif_check_fn, _cleanup_register_fn
-    global _arena_create_fn, _arena_delete_fn, _report_fn, _event_busy_fn
+    global _arena_create_fn, _arena_delete_fn, _report_fn, _event_busy_fn, _event_mention_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -242,6 +243,8 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
     _report_fn = report_fn
     # Phase 230 : verrou global « un seul event de combat à la fois »
     _event_busy_fn = event_busy_fn
+    # Phase 235.24 : mention des rôles opt-in (/notify + 🔔 par-type) au spawn
+    _event_mention_fn = event_mention_fn
 
 
 async def init_db():
@@ -701,11 +704,20 @@ async def trigger_daily_boss(
     # Tout est fail-open : une erreur ici ne doit JAMAIS empêcher le spawn.
     try:
         ping_line = await _smart_combat_ping(guild)
-        if ping_line:
+        # Phase 235.24 : préfixe les rôles opt-in (/notify + 🔔 Boss) → s'abonner sert
+        # vraiment. Envoyé même sans actif (les abonnés sont prévenus). roles=True.
+        role_mention = ""
+        if _event_mention_fn is not None:
+            try:
+                role_mention = await _event_mention_fn(guild, 'daily_boss')
+            except Exception:
+                role_mention = ""
+        ping_full = "\n".join([p for p in (role_mention, ping_line) if p])
+        if ping_full:
             ping_msg = await ch.send(
-                ping_line,
+                ping_full,
                 allowed_mentions=discord.AllowedMentions(
-                    users=True, everyone=False, roles=False),
+                    users=True, everyone=False, roles=True),
             )
             if ping_msg and _cleanup_register_fn is not None:
                 try:

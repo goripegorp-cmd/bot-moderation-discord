@@ -40891,7 +40891,8 @@ async def on_ready():
                                       arena_create_fn=_create_combat_arena,
                                       arena_delete_fn=_delete_combat_arena,
                                       report_fn=_post_combat_report,
-                                      event_busy_fn=_has_any_major_event_running)
+                                      event_busy_fn=_has_any_major_event_running,
+                                      event_mention_fn=_get_event_mention)
             await daily_bosses_module.init_db()
             daily_bosses_module.register_persistent_views(bot)
             if not daily_bosses_module.daily_boss_task.is_running():
