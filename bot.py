@@ -10970,6 +10970,18 @@ class TreasureClaimView(View):
                         ephemeral=True)
             except Exception:
                 pass
+            # Phase 235.26 : chance d'un ŒUF de familier (acquisition via events).
+            try:
+                import random as _rnd
+                if _rnd.random() < 0.15:
+                    _eg = await pet_eggs_module.grant_egg(i.guild.id, i.user.id, source="treasure")
+                    if _eg:
+                        await i.followup.send(
+                            f"🥚 **Bonus !** Un **œuf {pet_eggs_module.rarity_label(_eg[0])}** "
+                            f"est apparu — fais-le éclore via `/pet action:oeufs`.",
+                            ephemeral=True)
+            except Exception:
+                pass
             tr = pool[self.treasure_idx]
             if tr.get('claimed_by'):
                 claimer = i.guild.get_member(int(tr['claimed_by']))
@@ -58149,10 +58161,14 @@ async def wheel_cmd(i: discord.Interaction):
     app_commands.Choice(name="🍖 feed — nourrir mon pet (coût: 50 🪙)", value="feed"),
     app_commands.Choice(name="✏️ rename — renommer mon pet actif", value="rename"),
     app_commands.Choice(name="📚 list — liste de tous les pets disponibles", value="list"),
+    app_commands.Choice(name="🥚 oeufs — voir et faire éclore mes œufs", value="oeufs"),
 ])
 @app_commands.choices(pet_choice=[
+    # Phase 235.26 : SEULEMENT les pets achetables (les ~44 familiers d'œuf
+    # n'ont ni 'price' ni 'forms' → KeyError, et 50 > la limite Discord de 25
+    # choix). Les familiers d'œuf s'équipent via le panneau /pet action:oeufs.
     app_commands.Choice(name=f"{p['emoji']} {p['name']} ({p['price']} 🪙)", value=p['id'])
-    for p in eng41.PETS
+    for p in eng41.buyable_pets()
 ])
 async def pet_cmd(
     i: discord.Interaction,
@@ -58170,12 +58186,13 @@ async def pet_cmd(
 
         if act == "list":
             _pet_lines = []
-            for p in eng41.PETS:
+            for p in eng41.buyable_pets():
                 _pet_lines.append(
                     f"{p['emoji']} **{p['name']}** — `{p['price']}` 🪙\n"
                     f"  _{p['description']}_\n"
                     f"  Forme finale : {p['form_emojis'][4]} **{p['forms'][4]}**"
                 )
+            _egg_total = len([p for p in eng41.PETS if p.get('egg_only')])
             _pets_text = "\n\n".join(_pet_lines)
 
             class _PetListLayout(LayoutView):
@@ -58193,9 +58210,108 @@ async def pet_cmd(
                         "Choisis-en un avec `/pet action:buy pet_choice:<nom>`.\n"
                         "Chaque pet évolue avec l'XP — tu peux le faire grandir jusqu'à sa forme finale."
                     ))
+                    items.append(v2_divider())
+                    items.append(v2_body(
+                        f"**╔═══ 🥚  {_egg_total} FAMILIERS RARES EN PLUS  ═══╗**\n"
+                        f"Ces familiers ne s'achètent PAS : ils éclosent d'**œufs** "
+                        f"gagnés en participant aux events. Ouvre **`/pet action:oeufs`** "
+                        f"pour voir tes œufs et les faire éclore. _Les plus rares sont "
+                        f"très durs à obtenir — sur le long terme !_"
+                    ))
                     self.add_item(v2_container(*items, color=0xE67E22))
 
             return await i.followup.send(view=_PetListLayout(), ephemeral=True)
+
+        if act == "oeufs":
+            # Phase 235.26 : panneau ŒUFS — voir + faire éclore. Réutilise /pet
+            # (pas de nouvelle slash command → pas de risque CommandLimitReached).
+            eggs = await pet_eggs_module.list_eggs(gid, uid)
+            _eggs = eggs
+            _ready = [e for e in eggs if e['ready']]
+            _uid, _gid = uid, gid
+
+            def _egg_line(e):
+                lbl = pet_eggs_module.rarity_label(e['rarity'])
+                if e['ready']:
+                    return f"{lbl} — **prêt à éclore ✅**"
+                return f"{lbl} — éclôt <t:{e['hatch_ts']}:R>"
+
+            async def _do_hatch(btn_i: discord.Interaction):
+                if btn_i.user.id != _uid:
+                    return await btn_i.response.send_message(
+                        "❌ Ce panneau n'est pas pour toi.", ephemeral=True)
+                try:
+                    if not btn_i.response.is_done():
+                        await btn_i.response.defer(ephemeral=True)
+                except Exception:
+                    pass
+                try:
+                    cur = await pet_eggs_module.list_eggs(_gid, _uid)
+                    rdy = [e for e in cur if e['ready']]
+                    if not rdy:
+                        return await btn_i.followup.send(
+                            "⏳ Aucun œuf prêt pour l'instant.", ephemeral=True)
+                    results = []
+                    for e in rdy[:10]:
+                        res = await pet_eggs_module.hatch_egg(_gid, _uid, e['id'])
+                        if not res or res.get('error'):
+                            continue
+                        rl = pet_eggs_module.rarity_label(res.get('rarity', ''))
+                        if res.get('duplicate'):
+                            results.append(f"{rl} → doublon, **+{res.get('coins', 0)} 🪙**")
+                        else:
+                            p = res.get('pet') or {}
+                            extra = " · **équipé** ✅" if res.get('activated') else ""
+                            results.append(
+                                f"{rl} → {p.get('emoji', '🐾')} **{p.get('name', '?')}**{extra}")
+                    body = ("🐣 **Éclosion !**\n" + "\n".join(results)) if results else "Rien à éclore."
+                    body += ("\n\n_Pour équiper un familier : `/pet action:setactive`._")
+                    await btn_i.followup.send(body[:1900], ephemeral=True)
+                except Exception as ex:
+                    print(f"[pet oeufs hatch] {ex}")
+                    try:
+                        await btn_i.followup.send("❌ Erreur pendant l'éclosion.", ephemeral=True)
+                    except Exception:
+                        pass
+
+            class _HatchBtn(discord.ui.Button):
+                def __init__(self):
+                    super().__init__(
+                        label=f"🐣 Faire éclore ({len(_ready)})",
+                        style=discord.ButtonStyle.success,
+                        custom_id=f"petegg_hatch_{_uid}",
+                    )
+
+                async def callback(self, btn_i: discord.Interaction):
+                    await _do_hatch(btn_i)
+
+            class _EggsLayout(LayoutView):
+                def __init__(self):
+                    super().__init__(timeout=300)
+                    items = []
+                    items.append(v2_title("🥚  MES ŒUFS"))
+                    items.append(v2_subtitle(
+                        "Gagne des œufs en participant aux events — ils éclosent avec le temps"))
+                    items.append(v2_divider())
+                    if not _eggs:
+                        items.append(v2_body(
+                            "_Tu n'as aucun œuf pour l'instant._\n"
+                            "🎯 **Participe aux events** (boss, trésors, mobs, quiz…) pour en gagner.\n"
+                            "Plus l'œuf est rare, plus l'incubation est longue — mais le familier "
+                            "est puissant ! _Les meilleurs sont rarissimes : sur le long terme._"
+                        ))
+                    else:
+                        _lines = "\n".join(_egg_line(e) for e in _eggs[:20])
+                        items.append(v2_body(f"**Tes œufs ({len(_eggs)})**\n{_lines}"))
+                        if len(_eggs) > 20:
+                            items.append(v2_body(f"_+ {len(_eggs) - 20} autres…_"))
+                    items.append(v2_divider())
+                    items.append(v2_body(f"🐣 **{len(_ready)}** œuf(s) prêt(s) à éclore"))
+                    if _ready:
+                        items.append(discord.ui.ActionRow(_HatchBtn()))
+                    self.add_item(v2_container(*items, color=0xF1C40F))
+
+            return await i.followup.send(view=_EggsLayout(), ephemeral=True)
 
         if act == "show":
             pet = await _get_active_pet(gid, uid)

@@ -917,6 +917,18 @@ async def _process_attack(btn_i: discord.Interaction, mob_id: int):
         except Exception:
             pass
 
+        # Phase 235.26 : petite chance d'un ŒUF de familier (mobs = source fréquente).
+        try:
+            import random as _rnd, pet_eggs as _pe
+            if _rnd.random() < 0.04:
+                _eg = await _pe.grant_egg(btn_i.guild.id, btn_i.user.id, source="mob")
+                if _eg:
+                    await btn_i.followup.send(
+                        f"🥚 Un **œuf {_pe.rarity_label(_eg[0])}** est tombé ! "
+                        f"`/pet action:oeufs` pour le faire éclore.", ephemeral=True)
+        except Exception:
+            pass
+
         mob_def = get_mob_def(mob_kind)
         if not mob_def:
             return
