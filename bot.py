@@ -45937,6 +45937,12 @@ async def event_cmd(i: discord.Interaction):
             return await i.response.send_message(
                 "🎪 La commande `/event` s'utilise depuis le serveur, pas en message privé.",
                 ephemeral=True)
+        # Phase 235.7 : defer immédiat (cf /inventory) — la construction du
+        # panneau (lecture inventaire + ~20 composants V2) pouvait dépasser
+        # les 3 s sur mobile → interaction expirée en silence. ACK direct,
+        # réponses via followup dans les 3 branches.
+        if not i.response.is_done():
+            await i.response.defer(ephemeral=True)
         c = await cfg(i.guild.id)
         enabled = bool(c.get('event_enabled', False))
 
@@ -45964,7 +45970,7 @@ async def event_cmd(i: discord.Interaction):
                     ))
                     self.add_item(v2_container(*items, color=0x95A5A6))
 
-            return await i.response.send_message(view=_EventDisabledLayout(), ephemeral=True)
+            return await i.followup.send(view=_EventDisabledLayout(), ephemeral=True)
 
         # ─── Cas 2 : Pas d'event actif → afficher équipement + prochain spawn ───
         if not row:
@@ -46095,7 +46101,7 @@ async def event_cmd(i: discord.Interaction):
 
                     self.add_item(v2_container(*items, color=0x5865F2))
 
-            return await i.response.send_message(view=_EventIdleLayout(), ephemeral=True)
+            return await i.followup.send(view=_EventIdleLayout(), ephemeral=True)
 
         # ─── Cas 3 : Event actif → afficher boss + bouton vers arène ───
         boss = json.loads(row[1]) if row[1] else {}
@@ -46181,13 +46187,15 @@ async def event_cmd(i: discord.Interaction):
 
                 self.add_item(v2_container(*items, color=0xE74C3C))
 
-        await i.response.send_message(view=_EventActiveLayout(), ephemeral=True)
+        await i.followup.send(view=_EventActiveLayout(), ephemeral=True)
     except Exception as ex:
         print(f"[/event V2] {ex}")
         import traceback; traceback.print_exc()
         try:
             if not i.response.is_done():
                 await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            else:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
         except Exception:
             pass
 
@@ -46197,6 +46205,14 @@ async def inventory_cmd(i: discord.Interaction):
     """Phase 95 AMPLIFY : Inventaire en LayoutView V2 magnifique avec sections
     groupées par thème (Équipement / Stats / Économie / Progression)."""
     try:
+        # Phase 235.7 : defer IMMÉDIAT. Sans accusé de réception, la construction
+        # du panneau (lectures DB + ~25 composants V2) pouvait dépasser la fenêtre
+        # de 3 s de Discord sur mobile / DB lente → l'interaction expirait en
+        # silence (« rien ne se passe du tout » — bug signalé, surtout sur
+        # téléphone). On ACK tout de suite, puis on répond via followup (fenêtre
+        # de 15 min). Le garde is_done() couvre l'appel via le bouton Actualiser.
+        if not i.response.is_done():
+            await i.response.defer(ephemeral=True)
         inv = await _get_or_create_inventory(i.guild.id, i.user.id)
         w = inv.get('weapon', {}) or {}
         a = inv.get('armor', {}) or {}
@@ -46547,12 +46563,15 @@ async def inventory_cmd(i: discord.Interaction):
 
                 self.add_item(v2_container(*items, color=0x5865F2))
 
-        await i.response.send_message(view=_InventoryLayout(), ephemeral=True)
+        # Phase 235.7 : on a deferred plus haut → on répond via followup.
+        await i.followup.send(view=_InventoryLayout(), ephemeral=True)
     except Exception as ex:
         print(f"[/inventory V2] {ex}")
         try:
             if not i.response.is_done():
                 await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            else:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
         except Exception:
             pass
 
@@ -48313,6 +48332,11 @@ async def craft_cmd(i: discord.Interaction):
 async def badges_cmd(i: discord.Interaction):
     """Phase 31 + Phase 95 AMPLIFY : badges en LayoutView V2 magnifique."""
     try:
+        # Phase 235.7 : defer immédiat (cf /inventory) — sinon la construction
+        # du panneau dépassait les 3 s sur mobile → interaction expirée en
+        # silence (« rien ne se passe »). ACK direct, réponse via followup.
+        if not i.response.is_done():
+            await i.response.defer(ephemeral=True)
         async with get_db() as db:
             async with db.execute(
                 'SELECT badge_id, unlocked_at FROM player_badges WHERE guild_id=? AND user_id=? ORDER BY unlocked_at DESC',
@@ -48507,12 +48531,14 @@ async def badges_cmd(i: discord.Interaction):
 
                 self.add_item(v2_container(*items, color=rank_color))
 
-        await i.response.send_message(view=_BadgesLayout(), ephemeral=True)
+        await i.followup.send(view=_BadgesLayout(), ephemeral=True)
     except Exception as ex:
         print(f"[/badges V2] {ex}")
         try:
             if not i.response.is_done():
                 await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+            else:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
         except Exception:
             pass
 
