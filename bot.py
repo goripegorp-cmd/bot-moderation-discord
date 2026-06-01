@@ -13037,7 +13037,15 @@ async def _get_event_mention(guild, event_type: str) -> str:
                 if role:
                     mentions.append(role.mention)
 
-        return " ".join(mentions) if mentions else ""
+        if not mentions:
+            return ""
+        # Phase 235.7 : rappel DISCRET sous CHAQUE ping d'événement. Beaucoup de
+        # joueurs ignorent qu'ils peuvent s'abonner/désabonner → le rôle
+        # « 📢 Tous les Événements » avait 0 membre. On indique la commande
+        # /notify (prendre OU retirer le rôle) en sous-texte, juste sous le ping.
+        return (" ".join(mentions)
+                + "\n-# 🔔 Tu veux recevoir (ou ne plus recevoir) ces alertes "
+                  "d'événements ? Fais **/notify** pour prendre ou retirer le rôle.")
     except Exception as ex:
         print(f"[_get_event_mention] {ex}")
         return ""
