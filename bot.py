@@ -9044,77 +9044,19 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
             event_id = cur.lastrowid
             await db.commit()
 
-        # ─── 1. Sauvegarder les permissions @everyone de chaque salon ───
-        # CRITIQUE : on doit pouvoir RESTAURER EXACTEMENT l'état d'origine.
-        # On détecte l'overwrite via `ch.overwrites` (dict) qui est l'API
-        # définitive — pas via `overwrites_for()` qui crée un objet vide si absent.
-        async with get_db() as db:
-            everyone_role = guild.default_role
-            for ch in guild.channels:
-                # On ne touche pas aux catégories (gérées via héritage)
-                if isinstance(ch, discord.CategoryChannel):
-                    continue
-                try:
-                    # Détection robuste : @everyone est-il dans le dict des overwrites ?
-                    had_overwrite = 1 if everyone_role in ch.overwrites else 0
-                    if had_overwrite:
-                        overw = ch.overwrites[everyone_role]
-                        allow_val, deny_val = overw.pair()
-                        allow_int, deny_int = allow_val.value, deny_val.value
-                    else:
-                        allow_int, deny_int = 0, 0
-                    await db.execute(
-                        'INSERT OR REPLACE INTO event_channel_snapshots(event_id, channel_id, had_overwrite, allow_value, deny_value) '
-                        'VALUES (?,?,?,?,?)',
-                        (event_id, ch.id, had_overwrite, allow_int, deny_int),
-                    )
-                except Exception as ex:
-                    print(f"[event start snapshot ch={ch.id}] {ex}")
-            await db.commit()
-
-        # ─── 2. Créer l'arène (catégorie au-dessus de tout, salon visible) ───
-        try:
-            arena_overwrites = {
-                guild.default_role: discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True,
-                    read_message_history=True,
-                    add_reactions=True,
-                ),
-                guild.me: discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True,
-                    manage_messages=True,
-                    embed_links=True,
-                ),
-            }
-            # Phase 219 : CATÉGORIE éphémère créée EN PREMIER, tout EN HAUT
-            # (position=0), avec le salon texte ET les vocaux DEDANS. Sinon les
-            # vocaux (créés plus bas) atterrissent tout en bas du serveur, détachés
-            # du texte. On regroupe donc tout dans une seule catégorie en haut.
-            arena_category = await guild.create_category(
-                name=f"⚔️ {arena_name}"[:90], position=0,
-                overwrites=arena_overwrites,
-                reason=f"Boss Raid event {event_id} — catégorie d'arène",
-            )
-            try:
-                await arena_category.edit(position=0)
-            except Exception:
-                pass
-            arena_channel = await guild.create_text_channel(
-                name=arena_name[:90],
-                category=arena_category,
-                overwrites=arena_overwrites,
-                reason=f"Boss Raid event {event_id}",
-            )
-        except discord.Forbidden:
-            # Phase 201 : échec post-INSERT → nettoyer la ligne event (sinon fantôme)
+        # ─── 1+2. Phase 235.10 : arène = salon PERMANENT et VISIBLE « ⚔️-combat » ───
+        # Avant : on SNAPSHOTAIT les permissions de tous les salons, on créait une
+        # catégorie/salon « ⚔️ {boss} » éphémère, puis on MASQUAIT tout le reste du
+        # serveur (vue « arène » qui prenait le serveur en otage + salons restés
+        # masqués si crash + arène qui coulait en bas, invisible via l'onboarding).
+        # Maintenant : le boss s'affiche dans LE salon de combat permanent (créé +
+        # « suivi » une fois → visible pour toujours). Plus de snapshot, plus de
+        # masquage, plus de salon créé/supprimé.
+        arena_category = None
+        arena_channel = await _ensure_combat_channel(guild)
+        if arena_channel is None:
             await _mark_event_ended(event_id)
-            return {"ok": False, "error": "Permission manage_channels refusée"}
-        except Exception as ex:
-            # Phase 201 : échec post-INSERT → nettoyer la ligne event (sinon fantôme)
-            await _mark_event_ended(event_id)
-            return {"ok": False, "error": f"Création arène échouée : {ex}"}
+            return {"ok": False, "error": "Salon de combat « ⚔️-combat » introuvable (perm Gérer les salons ?)"}
 
         # ─── 4. Envoyer le message d'arène avec boutons ───
         try:
@@ -9165,28 +9107,11 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
         except Exception as ex:
             print(f"[event start send arena] {ex}")
 
-        # ─── 3. Masquer tous les autres salons pour @everyone ───
-        # Phase 201 : on masque SEULEMENT APRÈS confirmation de l'arène + panneau.
-        # Avant, le masquage se faisait juste après la création du salon ; si la
-        # suite échouait, les salons restaient masqués (rien ne pouvait spawn
-        # nulle part). On ne masque donc que si le panneau est bien parti.
-        if 'arena_msg' in locals():
-            for ch in guild.channels:
-                if isinstance(ch, discord.CategoryChannel):
-                    continue
-                if ch.id == arena_channel.id:
-                    continue
-                try:
-                    # On ajoute simplement view_channel=False à l'overwrite @everyone
-                    overw = ch.overwrites_for(guild.default_role)
-                    overw.view_channel = False
-                    await ch.set_permissions(guild.default_role, overwrite=overw, reason=f"Event {event_id} mask")
-                except discord.Forbidden:
-                    # Pas grave si certains salons ne sont pas modifiables (déjà privés)
-                    continue
-                except Exception as ex:
-                    print(f"[event start mask ch={ch.id}] {ex}")
-                    continue
+        # ─── 3. Phase 235.10 : PLUS de masquage des autres salons ───
+        # Le boss vit dans le salon PERMANENT « ⚔️-combat » → on ne cache plus rien,
+        # le reste du serveur reste accessible pendant le combat (fini la vue
+        # « arène » qui prenait le serveur en otage + le risque de salons restés
+        # masqués après un crash).
 
         # Phase 235.9 : PLUS de zones vocales créées. L'owner : « le système de
         # vocaux créés ne marche pas, ça traîne en bas du serveur ». Le combat
@@ -10599,33 +10524,53 @@ async def _end_active_event(guild, *, victory: bool, reason: str = ""):
         except Exception as ex:
             print(f"[event end voice zones cleanup] {ex}")
 
-        # ─── Supprimer le salon arène + SA CATÉGORIE (Phase 219 : tout détruire) ───
+        # ─── Phase 235.10 : fin d'event — fermeture du panneau ───
+        # Le Boss Raid s'affiche dans le salon PERMANENT « ⚔️-combat » → on ne
+        # supprime PLUS le salon : on retire juste le PANNEAU live (HP/ATTAQUER) et
+        # on poste le récap. Le salon reste visible pour la suite. Pour les vieilles
+        # arènes éphémères « ⚔️ {boss} » (trésor/quiz ou données d'avant migration),
+        # on garde l'ancien comportement (supprimer le salon + sa catégorie).
+        try:
+            _perm_id = int((await cfg(guild.id)).get('combat_channel_id', 0) or 0)
+        except Exception:
+            _perm_id = 0
         arena_ch = guild.get_channel(arena_ch_id) if arena_ch_id else None
-        # On capture la catégorie AVANT de supprimer le salon (sinon plus de ref).
-        arena_cat = arena_ch.category if arena_ch else None
-        if arena_ch:
-            # Envoyer un dernier message dans l'arène avant de la fermer
+        if arena_ch and _perm_id and arena_ch_id == _perm_id:
+            # Salon PERMANENT → on GARDE le salon. Supprimer le panneau live + récap.
             try:
-                await arena_ch.send(embed=recap_embed)
-                await asyncio.sleep(10)  # laisser le temps de lire
+                if arena_msg_id:
+                    _pm = await arena_ch.fetch_message(arena_msg_id)
+                    await _pm.delete()
             except Exception:
                 pass
             try:
-                await arena_ch.delete(reason=f"Event {event_id} terminé")
-            except Exception as ex:
-                print(f"[event arena delete] {ex}")
-        # Phase 219 : détruire la CATÉGORIE d'arène + tout résidu (vocaux non
-        # listés, salons restants) → garantit que RIEN ne traîne après l'event.
-        if arena_cat is not None:
-            try:
-                for _child in list(getattr(arena_cat, 'channels', [])):
-                    try:
-                        await _child.delete(reason=f"Event {event_id} terminé — résidu arène")
-                    except Exception:
-                        pass
-                await arena_cat.delete(reason=f"Event {event_id} terminé — catégorie arène")
-            except Exception as ex:
-                print(f"[event arena category delete] {ex}")
+                await arena_ch.send(embed=recap_embed)
+            except Exception:
+                pass
+        else:
+            # Ancienne arène ÉPHÉMÈRE (catégorie « ⚔️ {nom} ») → supprimer salon +
+            # catégorie (migration / trésor / quiz). On capture la catégorie AVANT.
+            arena_cat = arena_ch.category if arena_ch else None
+            if arena_ch:
+                try:
+                    await arena_ch.send(embed=recap_embed)
+                    await asyncio.sleep(10)
+                except Exception:
+                    pass
+                try:
+                    await arena_ch.delete(reason=f"Event {event_id} terminé")
+                except Exception as ex:
+                    print(f"[event arena delete] {ex}")
+            if arena_cat is not None:
+                try:
+                    for _child in list(getattr(arena_cat, 'channels', [])):
+                        try:
+                            await _child.delete(reason=f"Event {event_id} terminé — résidu arène")
+                        except Exception:
+                            pass
+                    await arena_cat.delete(reason=f"Event {event_id} terminé — catégorie arène")
+                except Exception as ex:
+                    print(f"[event arena category delete] {ex}")
 
         # Salon log
         if log_ch:
@@ -39444,6 +39389,17 @@ async def _boot_cleanup_active_events():
     orphans_to_delete = []  # list of (channel_id, message_id)
     perm_snapshots = []     # list of (guild_id, channel_id, had_overwrite, allow, deny)
     arena_chans_to_delete = []  # Phase 219 : (guild_id, arena_channel_id) à DÉTRUIRE (+ leur catégorie)
+    # Phase 235.10 : ne JAMAIS détruire le salon PERMANENT « ⚔️-combat » au boot
+    # (le Boss Raid y vit désormais). On mappe l'id permanent par guild pour l'exclure.
+    _perm_ids = {}
+    try:
+        for _g in list(bot.guilds):
+            try:
+                _perm_ids[int(_g.id)] = int((await cfg(_g.id)).get('combat_channel_id', 0) or 0)
+            except Exception:
+                _perm_ids[int(_g.id)] = 0
+    except Exception:
+        pass
     try:
         async with get_db() as db:
             # events (Boss Raid + Treasure + Quiz)
@@ -39455,9 +39411,11 @@ async def _boot_cleanup_active_events():
             for eid, gid, ch, msg in event_rows:
                 if ch and msg:
                     orphans_to_delete.append((int(ch), int(msg)))
-                # Phase 219 : l'arène masquante (boss raid/trésor/quiz) est un salon
-                # CRÉÉ pour l'event → on le détruit au boot (+ sa catégorie).
-                if ch and gid:
+                # Phase 219/235.10 : l'arène ÉPHÉMÈRE (vieux boss raid / trésor /
+                # quiz) est détruite au boot (+ sa catégorie). MAIS on ne touche
+                # JAMAIS le salon PERMANENT « ⚔️-combat » (le boss raid y vit
+                # désormais — on supprime juste son panneau via orphans_to_delete).
+                if ch and gid and int(ch) != _perm_ids.get(int(gid), 0):
                     arena_chans_to_delete.append((int(gid), int(ch)))
                 # Charger snapshots de perms pour cet event
                 try:
