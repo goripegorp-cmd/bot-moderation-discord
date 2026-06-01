@@ -15408,8 +15408,32 @@ _SUPERVISED_LOOP_NAMES = [
     "golden_hour_announce_task", "hub_live_events_refresh_task",
     "auction_settler_task", "reversibles_failsafe", "persistent_msg_cleaner",
     "marketplace_expire_cleaner", "hub_orphan_cleaner_task", "db_optimizer_task",
-    "comeback_dm_task",
+    "comeback_dm_task", "combat_channel_sweeper",
 ]
+
+
+@tasks.loop(minutes=7)
+async def combat_channel_sweeper():
+    """Phase 235.17 : FILET DE SÉCURITÉ — garantit que le salon « ⚔️-combat »
+    ÉPHÉMÈRE finit TOUJOURS par DISPARAÎTRE dès que plus aucun event ne tourne, MÊME
+    si la fin normale a été ratée : mob qui despawn (pas tué), cleanup par le watchdog,
+    reboot, ou event abandonné. Sans ce balayage, le salon pouvait traîner (plainte
+    récurrente owner « les salons ne disparaissent pas »). Idle-safe : ne supprime
+    JAMAIS pendant un combat (garde `_has_any_major_event_running(include_mobs=True)`
+    dans `_maybe_delete_idle_combat_channel`). Fail-open."""
+    try:
+        for g in list(bot.guilds):
+            try:
+                await _maybe_delete_idle_combat_channel(g)
+            except Exception:
+                continue
+    except Exception as ex:
+        print(f"[combat_channel_sweeper] {ex}")
+
+
+@combat_channel_sweeper.before_loop
+async def _combat_channel_sweeper_wait():
+    await bot.wait_until_ready()
 
 
 @tasks.loop(minutes=5)
