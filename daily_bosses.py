@@ -938,6 +938,16 @@ async def record_boss_attack(guild_id: int, user_id: int) -> dict:
                 "level_locked": True,
             }
 
+    # Phase 235.25 : GATE D'ACTIVITÉ (s'ajoute au niveau). Boss du jour = 🟡 (20 pts/7 j).
+    try:
+        import activity_system as _act
+        _aok, _asc, _aneed = await _act.check_gate(guild_id, user_id, "daily_boss")
+        if not _aok:
+            return {"error": _act.block_message("daily_boss", _asc, _aneed),
+                    "activity_locked": True}
+    except Exception:
+        pass
+
     event_id = active["event_id"]
     attacks_done = await _user_attack_count(event_id, user_id)
     if attacks_done >= MAX_ATTACKS_PER_USER:

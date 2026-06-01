@@ -66,6 +66,13 @@ _CLEANUP_AFTER_DAYS = 21  # purge des buckets plus vieux que ça
 _MSG_DEBOUNCE_SECONDS = 4
 _last_msg_ts: dict = {}   # (guild_id, user_id) -> datetime du dernier message compté
 
+# Grâce de démarrage : tant qu'un serveur n'a pas ROLLING_DAYS jours de recul,
+# on n'applique PAS les paliers élevés (🟡/🔴) — sinon, juste après l'activation,
+# plus personne ne pourrait toucher un boss le temps que les scores grimpent.
+# Le palier 🟢 (3) reste TOUJOURS appliqué (trivial, exclut juste les AFK total).
+# Cache mémoire : une fois la fenêtre pleine, ça le reste.
+_window_full_cache: dict = {}  # guild_id -> True
+
 
 def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -147,6 +154,33 @@ def tier_label(event_type) -> str:
     return TIER_LABELS.get(required_points(event_type), "🟢 Base")
 
 
+async def _window_is_full(guild_id) -> bool:
+    """True si le serveur a ≥ ROLLING_DAYS jours d'historique d'activité.
+
+    Grâce de démarrage (cf. _window_full_cache) : tant que c'est faux, on ne
+    bloque pas les paliers 🟡/🔴. Le palier 🟢 reste appliqué. FAIL-OPEN."""
+    if _window_full_cache.get(guild_id):
+        return True
+    if _get_db is None:
+        return True
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT MIN(day) FROM activity_score WHERE guild_id=?",
+                (int(guild_id),),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row or not row[0]:
+            return False
+        first = datetime.strptime(row[0], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        full = (datetime.now(timezone.utc) - first).days >= (ROLLING_DAYS - 1)
+        if full:
+            _window_full_cache[guild_id] = True
+        return full
+    except Exception:
+        return True
+
+
 async def check_gate(guild_id, user_id, event_type):
     """Retourne (ok: bool, score: int, needed: int).
 
@@ -157,6 +191,10 @@ async def check_gate(guild_id, user_id, event_type):
     try:
         needed = required_points(event_type)
         score = await get_score(guild_id, user_id)
+        # Grâce de démarrage : paliers élevés non bloquants tant que la fenêtre
+        # 7 j manque de recul (le palier 🟢 base, lui, est toujours appliqué).
+        if needed > TIER_BASE and not await _window_is_full(guild_id):
+            return (True, score, needed)
         return (score >= needed, score, needed)
     except Exception as ex:
         print(f"[activity check_gate] {ex}")

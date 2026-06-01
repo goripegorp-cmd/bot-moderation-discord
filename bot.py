@@ -9751,6 +9751,18 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
                 ephemeral=True,
             )
 
+        # Phase 235.25 : GATE D'ACTIVITÉ (s'ajoute au gate de niveau). Boss Raid =
+        # palier 🟡 (20 pts sur 7 j). Grâce de démarrage + fail-open côté module.
+        try:
+            _aok, _asc, _aneed = await activity_system_module.check_gate(
+                i.guild.id, i.user.id, "boss")
+            if not _aok:
+                return await i.followup.send(
+                    activity_system_module.block_message("boss", _asc, _aneed),
+                    ephemeral=True)
+        except Exception:
+            pass
+
         # Phase 235.13 : WARM-UP — le boss est invulnérable les premières secondes
         # (léger cooldown de préparation demandé par l'owner : recevoir le ping,
         # lire le loot, s'équiper, rejoindre un vocal). Fail-open : pas d'entrée
@@ -60245,6 +60257,18 @@ class WorldBossAttackView(View):
                         f"et fais tes **quêtes** `/daily` — tu y seras vite, et le butin en vaut la peine !"
                     ),
                 )
+
+            # Phase 235.25 : GATE D'ACTIVITÉ — World Boss = palier 🔴 (60 pts/7 j),
+            # s'ajoute au niveau 10. Grâce de démarrage + fail-open côté module.
+            try:
+                _aok, _asc, _aneed = await activity_system_module.check_gate(
+                    i.guild.id, i.user.id, "world_boss")
+                if not _aok:
+                    return await _safe_followup(
+                        i, content=activity_system_module.block_message(
+                            "world_boss", _asc, _aneed))
+            except Exception:
+                pass
 
             # Cooldown 10s par user pour éviter le spam
             async with get_db() as db:

@@ -679,6 +679,16 @@ async def record_attack(
             "attack_count": attacks_done,
         }
 
+    # Phase 235.25 : GATE D'ACTIVITÉ (s'ajoute au niveau 10). Climax = 🔴 (60 pts/7 j).
+    try:
+        import activity_system as _act
+        _aok, _asc, _aneed = await _act.check_gate(guild_id, user_id, "climax")
+        if not _aok:
+            return {"error": _act.block_message("climax", _asc, _aneed),
+                    "attack_count": attacks_done}
+    except Exception:
+        pass
+
     if damage <= 0:
         damage = random.randint(ATTACK_DAMAGE_MIN, ATTACK_DAMAGE_MAX)
     # Phase 235.10 : BOOST VOCAL — connecté à N'IMPORTE QUEL vocal → bonus de dégâts
