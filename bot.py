@@ -59555,6 +59555,12 @@ async def _p41_open_daily(i: discord.Interaction):
                 items.append(v2_subtitle(
                     f"🔥 Streak `{cur_streak}` jour(s) · Record `{best_streak}`"
                 ))
+                try:
+                    _sline = eng41.streak_progress_line(cur_streak)
+                except Exception:
+                    _sline = ""
+                if _sline:
+                    items.append(v2_body(_sline))
                 items.append(v2_divider())
 
                 # ─── Groupe : Quêtes en cours ───
@@ -69358,6 +69364,12 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
         cur_streak = int(streak_row[0]) if streak_row else 0
         best_streak = int(streak_row[1]) if streak_row else 0
 
+        # Phase 237 : ligne « prochain palier de streak » (motivation visuelle)
+        try:
+            _streak_next = eng41.streak_progress_line(cur_streak)
+        except Exception:
+            _streak_next = ""
+
         stats = await _get_user_stats41(gid, uid)
 
         # Achievements unlocked count
@@ -69540,6 +69552,7 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
                     f"⚔️ **Boss vaincus :** `{bosses}`\n"
                     f"🏅 **Achievements :** `{ach_count}/{ach_total}` ({ach_pct}%)\n"
                     f"🔥 **Streak actuel :** `{cur_streak}` j  ·  Record : `{best_streak}` j"
+                    + (f"\n{_streak_next}" if _streak_next else "")
                 ))
 
                 # ═══ ACTIVITÉ (7 JOURS) — clé d'accès aux events ═══

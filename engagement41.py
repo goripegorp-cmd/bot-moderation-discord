@@ -121,6 +121,44 @@ def streak_milestone_reached(prev_streak: int, new_streak: int) -> Optional[dict
     return None
 
 
+def next_streak_milestone(current_streak: int) -> Optional[dict]:
+    """Prochain palier de streak au-dessus du streak actuel (None si max atteint)."""
+    for s in sorted(STREAK_REWARDS.keys()):
+        if current_streak < s:
+            return {**STREAK_REWARDS[s], 'days': s}
+    return None
+
+
+def streak_progress_line(current_streak: int) -> str:
+    """Ligne MOTIVANTE : prochain palier + barre de progression + récompense.
+
+    Phase 237 — rend le streak « vivant » (on voit l'objectif et le gain, pas
+    juste un nombre). FAIL-OPEN : renvoie '' en cas d'erreur."""
+    try:
+        cur = max(0, int(current_streak or 0))
+        nxt = next_streak_milestone(cur)
+        if not nxt:
+            return "🌟 **Palier max atteint (IMMORTEL) — légende vivante !**"
+        prevs = [s for s in STREAK_REWARDS if s <= cur]
+        base = max(prevs) if prevs else 0
+        target = int(nxt['days'])
+        span = max(1, target - base)
+        done = max(0, cur - base)
+        frac = max(0.0, min(1.0, done / span))
+        seg = 10
+        filled = max(0, min(seg, int(round(frac * seg))))
+        bar = "▰" * filled + "▱" * (seg - filled)
+        remaining = max(0, target - cur)
+        item = nxt.get('item')
+        reward = f"+{int(nxt['coins']):,} 🪙" + (f" + loot {item}" if item else "")
+        return (
+            f"⏭️ Prochain palier : **{nxt['label']}** dans `{remaining} j`\n"
+            f"{bar}  ({reward})"
+        )
+    except Exception:
+        return ""
+
+
 # =============================================================================
 # ACHIEVEMENTS / HAUTS FAITS — catalogue 80+
 # =============================================================================
