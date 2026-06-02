@@ -8197,7 +8197,7 @@ def _format_loadout_lines(inv: dict) -> list:
 class _EquipSelect(discord.ui.Select):
     """Sélecteur : équipe un objet du coffre (ephemeral, re-render au choix)."""
 
-    def __init__(self, stash: list):
+    def __init__(self, stash: list, player_level: int = 0):
         options = []
         for (sid, slot, item) in stash[:25]:
             emo, label = _SLOT_META.get(slot, ('📦', slot))
@@ -8209,9 +8209,13 @@ class _EquipSelect(discord.ui.Select):
                 bits.append(f"+{item['def']}def")
             if item.get('crit'):
                 bits.append(f"+{item['crit']}%cr")
-            # Phase 235.27 : niveau requis (dérivé de la rareté)
+            # Phase 248b : ✅/🔒 CONDITIONNEL selon le niveau du joueur (pas juste le
+            # niveau requis) → on voit d'un coup d'œil ce qu'on peut équiper MAINTENANT.
             _rq = _required_level_for_item(item)
-            _rqs = f" · 🔒niv.{_rq}" if _rq > 1 else ""
+            if _rq > 1 and int(player_level or 0) < _rq:
+                _rqs = f" · 🔒 niv.{_rq}"
+            else:
+                _rqs = " · ✅ équipable"
             desc = f"{label} · {rr}{_rqs}" + ((" · " + " ".join(bits)) if bits else "")
             options.append(discord.SelectOption(
                 label=str(item.get('name', '?'))[:90] or '?',
@@ -8369,8 +8373,10 @@ class EquipmentLayoutV2(LayoutView):
     """Phase 179b : panneau ÉQUIPEMENT (loadout + équiper depuis le coffre).
     Ephemeral, donc réservé au joueur qui l'ouvre."""
 
-    def __init__(self, guild, user_id: int, inv: dict, stash: list, totals: dict):
+    def __init__(self, guild, user_id: int, inv: dict, stash: list, totals: dict,
+                 player_level: int = 0):
         super().__init__(timeout=300)
+        self._player_level = int(player_level or 0)
         # Phase 217 : coffre TRIÉ par rareté décroissante (meilleurs en premier).
         try:
             stash = sorted(stash, key=lambda t: (-_rarity_rank(t[2]), t[1]))
@@ -8397,9 +8403,18 @@ class EquipmentLayoutV2(LayoutView):
             parts = [f"{events2026.RARITY_EMOJIS.get(r, '')} {rc[r]}"
                      for r in ("divine", "mythique", "légendaire", "épique", "rare", "commune")
                      if rc.get(r)]
+            # Phase 248b : compteur équipable MAINTENANT vs verrouillé (selon niveau).
+            _eq_now = sum(1 for (_s, _sl, _it) in stash
+                          if _required_level_for_item(_it) <= int(player_level or 0))
+            _locked = len(stash) - _eq_now
+            _eq_line = (
+                f"\n✅ **{_eq_now}** équipable(s) à ton niveau (`{player_level}`)"
+                + (f" · 🔒 **{_locked}** à débloquer" if _locked else "")
+            )
             items.append(v2_body(
-                f"_🎒 **{len(stash)}** objet(s) — " + " · ".join(parts) + "\n"
-                "Équipe-en un, ou **vends-le au marchand** pour des 🪙 ci-dessous. "
+                f"_🎒 **{len(stash)}** objet(s) — " + " · ".join(parts) + "_"
+                + _eq_line + "\n"
+                "_Équipe-en un, ou **vends-le au marchand** pour des 🪙 ci-dessous. "
                 "🔒 Aucun échange entre joueurs._"
             ))
         else:
@@ -8409,7 +8424,7 @@ class EquipmentLayoutV2(LayoutView):
             ))
         self.add_item(v2_container(*items, color=0x9B59B6))
         if stash:
-            self.add_item(discord.ui.ActionRow(_EquipSelect(stash)))
+            self.add_item(discord.ui.ActionRow(_EquipSelect(stash, player_level)))
             # Phase 217 : vendre au marchand (item par item)
             self.add_item(discord.ui.ActionRow(_SellSelect(stash)))
             # Phase 224 : vente EN LOT par palier (commun / commun+rare) — déclutter
@@ -8424,7 +8439,19 @@ class EquipmentLayoutV2(LayoutView):
             totals = events2026.inventory_total_stats(inv)
         except Exception:
             totals = {"atk": 0, "def": 0, "crit": 0}
-        return cls(guild, user_id, inv, stash, totals)
+        # Phase 248b : niveau du joueur → affichage ✅/🔒 conditionnel dans le coffre
+        _plvl = 0
+        try:
+            async with get_db() as _db:
+                async with _db.execute(
+                    "SELECT level FROM economy WHERE guild_id=? AND user_id=?",
+                    (guild.id, user_id),
+                ) as _c:
+                    _r = await _c.fetchone()
+            _plvl = int(_r[0]) if _r and _r[0] else 0
+        except Exception:
+            _plvl = 0
+        return cls(guild, user_id, inv, stash, totals, _plvl)
 
 
 async def _open_equipment(i: discord.Interaction):
