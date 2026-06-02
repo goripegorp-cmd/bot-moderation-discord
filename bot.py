@@ -10278,12 +10278,48 @@ async def _handle_pet_assist(i: discord.Interaction, event_id: int):
         _pet_assist_cooldown[key] = now_ts
 
         lvl = int(pet.get('level', 1) or 1)
+        # Phase 235.29 : PERKS MIXTES. Le 🐾 marche pour TOUS les familiers (avant,
+        # seuls les 'boss_damage' avaient un effet → 40+ familiers ne servaient à
+        # rien). On lit le bonus PROPRE du familier + son perk_type :
+        #   • ACTIF  → grosse salve de dégâts (burst).
+        #   • PASSIF → salve plus douce MAIS SOIGNE le joueur (sustain).
+        # Tout fail-open.
         try:
-            bonus = await _apply_pet_bonus(i.guild.id, i.user.id, 'boss_damage')
+            pet_bonus = float(pet.get('bonus_value', 0.0) or 0.0)
         except Exception:
-            bonus = 0.0
-        pet_dmg = int((15 + lvl * 6) * (1.0 + (bonus or 0.0)))
-        pet_dmg = max(5, min(pet_dmg, 600))  # garde-fous
+            pet_bonus = 0.0
+        perk = str(pet.get('perk_type', 'passive') or 'passive')
+        if perk == 'active':
+            pet_dmg = int((20 + lvl * 7) * (1.0 + pet_bonus * 2.0))
+        else:
+            pet_dmg = int((12 + lvl * 5) * (1.0 + pet_bonus))
+        pet_dmg = max(5, min(pet_dmg, 800))  # garde-fous
+        bonus = pet_bonus  # rétro-compat affichage
+        # Soin (familiers PASSIFS) : le 🐾 rend des PV au joueur (UPDATE direct,
+        # capé à max_hp). Fail-open : toute erreur → pas de soin, jamais de crash.
+        heal_done = 0
+        if perk != 'active':
+            try:
+                async with get_db() as _hdb:
+                    async with _hdb.execute(
+                        'SELECT hp, max_hp FROM player_inventory WHERE guild_id=? AND user_id=?',
+                        (i.guild.id, i.user.id),
+                    ) as _hc:
+                        _hr = await _hc.fetchone()
+                if _hr:
+                    _chp = int(_hr[0] or 0)
+                    _mhp = int(_hr[1] or 100)
+                    if _chp < _mhp:
+                        heal_done = min(_mhp - _chp, int(10 + lvl * 3 + _mhp * pet_bonus))
+                        if heal_done > 0:
+                            async with get_db() as _hdb:
+                                await _hdb.execute(
+                                    'UPDATE player_inventory SET hp=? WHERE guild_id=? AND user_id=?',
+                                    (_chp + heal_done, i.guild.id, i.user.id),
+                                )
+                                await _hdb.commit()
+            except Exception:
+                heal_done = 0
 
         new_hp = max(0, int(boss.get('current_hp', 0)) - pet_dmg)
         boss['current_hp'] = new_hp
@@ -10307,9 +10343,15 @@ async def _handle_pet_assist(i: discord.Interaction, event_id: int):
             pass
 
         pet_label = f"{pet.get('emoji', '🐾')} {pet_name}"
+        if heal_done > 0:
+            _extra = f"\n💚 Familier **passif** — il te **soigne de `{heal_done}` PV** !"
+        elif perk == 'active':
+            _extra = "\n⚡ Familier **actif** — grosse salve !"
+        else:
+            _extra = ("\n_(bonus de familier appliqué)_" if bonus else "")
         await i.followup.send(
             f"🐾 **{pet_label}** bondit au combat et inflige `{pet_dmg}` dégâts au boss !"
-            + ("\n_(bonus de familier appliqué)_" if bonus else ""),
+            + _extra,
             ephemeral=True,
         )
         try:
