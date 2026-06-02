@@ -41320,7 +41320,11 @@ async def on_ready():
             if not getattr(bot, "_activity_listener_added", False):
                 bot.add_listener(activity_system_module.on_message_activity, "on_message")
                 bot._activity_listener_added = True
-            print("[Phase 235.25] activity_system OK (tracking messages + vocal)")
+            # Phase 235.32 : crédit VOCAL en TEMPS RÉEL (fix « pas assez de vocal »
+            # alors qu'on est en vocal — le vocal n'était compté qu'à la déconnexion).
+            if not voice_activity_ticker.is_running():
+                voice_activity_ticker.start()
+            print("[Phase 235.25] activity_system OK (messages live + vocal temps réel)")
         except Exception as ex:
             print(f"[on_ready 235.25 activity_system] {ex}")
 
@@ -56710,7 +56714,7 @@ class LeaderboardTabsView(LayoutView):
         b_msg.callback = lambda ix: self._switch_tab(ix, 'messages')
         b_voice = Button(label="🎤 Vocal", style=discord.ButtonStyle.secondary, custom_id="lb_voice")
         b_voice.callback = lambda ix: self._switch_tab(ix, 'voice')
-        b_act = Button(label="🔥 Activité 7j", style=discord.ButtonStyle.secondary, custom_id="lb_activity")
+        b_act = Button(label="🔥 Activité 14j", style=discord.ButtonStyle.secondary, custom_id="lb_activity")
         b_act.callback = lambda ix: self._switch_tab(ix, 'activity')
         self.add_item(v2_container(
             discord.ui.ActionRow(b_coins, b_msg, b_voice, b_act),
@@ -56734,7 +56738,7 @@ class LeaderboardTabsView(LayoutView):
             'coins':    ("🪙 Plus riches",    "Classement par pièces (coins + banque)"),
             'messages': ("💬 Plus actifs",     "Classement par nombre de messages"),
             'voice':    ("🎤 Rois du vocal",   "Classement par temps en vocal"),
-            'activity': ("🔥 Activité (7 jours)", "Score glissant — la clé d'accès aux events"),
+            'activity': ("🔥 Activité (14 jours)", "Score glissant — la clé d'accès aux events"),
         }
         title, subtitle = title_map.get(self.tab, title_map['coins'])
 
@@ -56779,7 +56783,7 @@ class LeaderboardTabsView(LayoutView):
         )
         b_voice.callback = lambda ix: self._switch_tab(ix, 'voice')
         b_act = Button(
-            label="🔥 Activité 7j",
+            label="🔥 Activité 14j",
             style=(discord.ButtonStyle.primary if self.tab == 'activity' else discord.ButtonStyle.secondary),
             disabled=(self.tab == 'activity'),
             custom_id="lb_activity",
@@ -62383,7 +62387,7 @@ def _build_daily_agenda_text(now) -> str:
     lines.append("__☀️ Échauffement du jour__")
     lines.append(
         "Sois actif pour débloquer les events : **1 message = 1 pt · 1 min en vocal = 1 pt** "
-        "(score glissant sur 7 j, visible dans `/profile`). Quelques messages ouvrent déjà "
+        "(score glissant sur 14 j, visible dans `/profile`). Quelques messages ouvrent déjà "
         "les events 🟢 ; reste régulier pour les Boss 🟡 et le Grandiose 🔴."
     )
     lines.append("")
@@ -69647,7 +69651,7 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
                 # ═══ ACTIVITÉ (7 JOURS) — clé d'accès aux events ═══
                 if activity_text:
                     items.append(v2_divider())
-                    items.append(v2_body("**╔═══ 📊  ACTIVITÉ (7 JOURS)  ═══╗**"))
+                    items.append(v2_body("**╔═══ 📊  ACTIVITÉ (14 JOURS)  ═══╗**"))
                     items.append(v2_body(activity_text))
 
                 # ═══ NAVIGATION (sections accessory, uniquement pour son propre profil) ═══
@@ -75655,14 +75659,12 @@ async def _track_voice_state(member, before, after):
                                 getattr(before, 'self_deaf', False)
                             )
                             if not is_afk:
-                                # Phase 235.25 : +1 point d'ACTIVITÉ par minute de
-                                # vocal (le vocal compense l'écrit pour l'accès aux
-                                # events). Déjà filtré anti-AFK juste au-dessus.
-                                try:
-                                    await activity_system_module.add_voice_minutes(
-                                        member.guild.id, member.id, minutes)
-                                except Exception:
-                                    pass
+                                # Phase 235.32 : le crédit d'activité VOCALE se fait
+                                # désormais EN TEMPS RÉEL via voice_activity_ticker
+                                # (toutes les 5 min) — PLUS à la déconnexion. Sinon un
+                                # membre toujours EN vocal pendant un event avait 0 pt
+                                # → bloqué à tort. On ne crédite plus ici (anti
+                                # double-comptage ; les coins/goals restent ci-dessous).
                                 # Cap quotidien : 100 coins/jour de voice
                                 today = datetime.now(timezone.utc).strftime(
                                     "%Y-%m-%d"
@@ -75719,6 +75721,46 @@ async def _track_voice_state(member, before, after):
             _voice_session_starts[key] = datetime.now(timezone.utc)
     except Exception as ex:
         print(f"[_track_voice_state] {ex}")
+
+
+@tasks.loop(minutes=5)
+async def voice_activity_ticker():
+    """Phase 235.32 : crédite l'activité VOCALE EN TEMPS RÉEL.
+
+    Avant, le vocal n'était crédité qu'à la DÉCONNEXION → un membre toujours EN
+    vocal pendant un événement avait 0 point vocal et se faisait bloquer (« pas
+    assez de vocal »). Désormais, toutes les 5 min : +5 pts d'activité à chaque
+    membre connecté en vocal et NON-AFK (pas self_mute + self_deaf). 1 min ≈ 1 pt.
+    FAIL-OPEN par guild — n'impacte jamais le reste du bot."""
+    try:
+        for guild in list(bot.guilds):
+            try:
+                channels = list(guild.voice_channels) + list(
+                    getattr(guild, 'stage_channels', []) or []
+                )
+                for vc in channels:
+                    for m in list(getattr(vc, 'members', []) or []):
+                        if m.bot:
+                            continue
+                        vs = getattr(m, 'voice', None)
+                        if vs is None:
+                            continue
+                        # Anti-AFK : muet ET sourd → on ne crédite pas.
+                        if getattr(vs, 'self_mute', False) and getattr(vs, 'self_deaf', False):
+                            continue
+                        try:
+                            await activity_system_module.add_voice_minutes(guild.id, m.id, 5)
+                        except Exception:
+                            pass
+            except Exception as ex:
+                print(f"[voice_activity_ticker guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[voice_activity_ticker] {ex}")
+
+
+@voice_activity_ticker.before_loop
+async def _voice_ticker_wait():
+    await bot.wait_until_ready()
 
 
 # Phase 235.2 (FIX VOCAUX TEMPORAIRES) : ceci était un 2e « @bot.event

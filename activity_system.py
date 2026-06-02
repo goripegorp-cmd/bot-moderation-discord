@@ -4,11 +4,12 @@ Cahier des charges owner : pour PARTICIPER à un événement, il faut être VRAI
 actif sur le serveur. Le palier monte avec la rareté de l'event :
 
   🟢 Base          (Trésor Flash, Boîte mystère, Mob, Quiz)   = 3 points
-  🟡 Intermédiaire (Boss du jour, Boss Raid)                  = 20 points
-  🔴 Grandiose     (World Boss, Climax, Invasion)             = 60 points
+  🟡 Intermédiaire (Boss du jour, Boss Raid)                  = 10 points
+  🔴 Grandiose     (World Boss, Climax, Invasion)             = 25 points
 
-Score = somme GLISSANTE sur 7 jours. 1 message = 1 point · 1 minute de vocal =
-1 point (le vocal COMPENSE l'écrit). Ce gate s'ajoute AU-DESSUS du gate de niveau.
+Score = somme GLISSANTE sur 14 jours. 1 message = 1 point · 1 minute de vocal =
+1 point, crédité en TEMPS RÉEL (le vocal COMPENSE l'écrit — soit l'un SEUL, soit
+l'autre SEUL suffit). Ce gate s'ajoute AU-DESSUS du gate de niveau.
 
 Principes :
 - La barre n'est JAMAIS nulle mais TRIVIALE pour le base (3 messages ≈ rien,
@@ -29,8 +30,11 @@ _get_db = None
 
 # ─── Paliers d'activité (points) ───
 TIER_BASE = 3
-TIER_INTER = 20
-TIER_GRAND = 60
+# Phase 235.32 : paliers ABAISSÉS (20→10, 60→25). Des membres clairement actifs
+# étaient bloqués juste au bord du seuil. Combiné à la fenêtre 14 j + au crédit
+# vocal en TEMPS RÉEL, « soit l'écrit SEUL, soit le vocal SEUL » suffit largement.
+TIER_INTER = 10
+TIER_GRAND = 25
 
 TIER_LABELS = {
     TIER_BASE: "🟢 Base",
@@ -59,8 +63,9 @@ EVENT_TIERS = {
     "invasion": TIER_GRAND,
 }
 
-ROLLING_DAYS = 7          # fenêtre glissante
-_CLEANUP_AFTER_DAYS = 21  # purge des buckets plus vieux que ça
+ROLLING_DAYS = 14         # Phase 235.32 : 7→14 j — l'activité s'ACCUMULE plus
+                          # longtemps (plus besoin d'être actif TOUS les jours).
+_CLEANUP_AFTER_DAYS = 30  # purge des buckets plus vieux que ça (> ROLLING_DAYS)
 
 # Phase 235.25b : anti double-comptage UNIQUEMENT. Avant, un debounce de 4 s
 # « avalait » les messages rapprochés → « j'écris 3 messages mais il n'en compte
@@ -233,7 +238,7 @@ def block_message(event_type, score, needed) -> str:
     tier = TIER_LABELS.get(int(needed), "")
     base = (
         f"🌱 **Presque !** Cet événement {tier} demande "
-        f"**{needed} points d'activité** sur 7 jours — tu en as **{score}**.\n"
+        f"**{needed} points d'activité** sur 14 jours — tu en as **{score}**.\n"
     )
     if needed <= TIER_BASE:
         tip = (
