@@ -9936,6 +9936,42 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
         except Exception:
             pass
 
+        # Phase 241 : 🤝 BONUS D'ALLIANCE — quand plusieurs membres d'une MÊME
+        # alliance combattent le même boss, ils gagnent un bonus de dégâts (jeu
+        # coordonné récompensé ; cosmétique, pas de P2P). +5 %/allié au-delà de 2,
+        # plafonné à +20 %. FAIL-OPEN STRICT : la MOINDRE erreur → aucun bonus et le
+        # combat continue exactement comme avant (le combat ne casse JAMAIS).
+        alliance_str = ""
+        try:
+            async with get_db() as _adb:
+                async with _adb.execute(
+                    "SELECT am.alliance_id FROM alliance_members am "
+                    "JOIN alliances a ON a.id = am.alliance_id "
+                    "WHERE am.user_id=? AND a.guild_id=? AND a.dissolved=0 LIMIT 1",
+                    (i.user.id, i.guild.id),
+                ) as _ac:
+                    _arow = await _ac.fetchone()
+                if _arow and _arow[0]:
+                    async with _adb.execute(
+                        "SELECT COUNT(DISTINCT ep.user_id) FROM event_participants ep "
+                        "JOIN alliance_members am ON am.user_id = ep.user_id "
+                        "WHERE ep.event_id=? AND am.alliance_id=? AND ep.user_id<>?",
+                        (event_id, int(_arow[0]), i.user.id),
+                    ) as _mc:
+                        _mrow = await _mc.fetchone()
+                    _allies = (int(_mrow[0] or 0) if _mrow else 0) + 1  # + l'attaquant
+                    if _allies >= 3:
+                        _apct = min(0.20, 0.05 * (_allies - 2))
+                        _abonus = int(damage * _apct)
+                        if _abonus > 0:
+                            damage += _abonus
+                            alliance_str = (
+                                f"\n🤝 **Synergie d'alliance** ! +`{_abonus}` dégâts "
+                                f"(+{int(round(_apct * 100))} % · {_allies} alliés au combat)"
+                            )
+        except Exception:
+            pass
+
         # Appliquer les dégâts au boss
         new_hp = max(0, int(boss.get('current_hp', 0)) - damage)
         boss['current_hp'] = new_hp
@@ -10190,7 +10226,7 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
         bonus_str = ("\n_" + " · ".join(bonus_parts) + "_") if bonus_parts else ""
 
         await i.followup.send(
-            f"⚔️ Tu infliges `{damage}` dégâts au boss !{crit_str}{double_str}{elem_str}{voice_str}{bonus_str}{retal_str}",
+            f"⚔️ Tu infliges `{damage}` dégâts au boss !{crit_str}{double_str}{elem_str}{voice_str}{alliance_str}{bonus_str}{retal_str}",
             ephemeral=True,
         )
 
