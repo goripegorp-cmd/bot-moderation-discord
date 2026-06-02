@@ -52,6 +52,9 @@ PRIORITY_LEVELS = {
 }
 DEFAULT_INACTIVITY_DAYS = 7
 AUTO_CLOSE_CHECK_HOURS = 24
+# Phase 245 : rappel SLA — un ticket OUVERT et NON PRIS EN CHARGE depuis ce délai
+# déclenche UN rappel staff (un seul, jamais de spam). Vérification toutes les 2 h.
+SLA_UNCLAIMED_HOURS = 24
 
 
 # Références injectées
@@ -109,6 +112,10 @@ async def _ensure_tables():
             await db.execute('''CREATE TABLE IF NOT EXISTS ticket_auto_close_config (
                 guild_id INTEGER PRIMARY KEY,
                 inactivity_days INTEGER DEFAULT 7
+            )''')
+            await db.execute('''CREATE TABLE IF NOT EXISTS ticket_sla_reminded (
+                channel_id INTEGER PRIMARY KEY,
+                reminded_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )''')
             await db.commit()
         _tables_initialized = True
@@ -684,6 +691,92 @@ async def auto_close_inactive_task():
 
 @auto_close_inactive_task.before_loop
 async def _before():
+    if _bot is not None:
+        await _bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SLA — rappel staff sur les tickets non pris en charge (Phase 245)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def _mark_sla_reminded(channel_id: int):
+    """Marque un ticket comme « rappel SLA envoyé » (1 seule fois → jamais de spam)."""
+    if _get_db is None:
+        return
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT INTO ticket_sla_reminded(channel_id, reminded_at) "
+                "VALUES(?, CURRENT_TIMESTAMP) ON CONFLICT(channel_id) DO NOTHING",
+                (int(channel_id),),
+            )
+            await db.commit()
+    except Exception:
+        pass
+
+
+@tasks.loop(hours=2)
+async def sla_reminder_task():
+    """Toutes les 2 h : poste UN rappel dans les tickets OUVERTS et NON PRIS EN
+    CHARGE (claimed_by vide) depuis plus de SLA_UNCLAIMED_HOURS. Ping le rôle
+    staff (ticket_staff) s'il est configuré. 1 rappel max par ticket. FAIL-OPEN :
+    une erreur par guild/ticket ne casse jamais le loop."""
+    if _bot is None or _get_db is None:
+        return
+    try:
+        await _ensure_tables()
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(hours=SLA_UNCLAIMED_HOURS)
+        ).isoformat()
+        for guild in list(_bot.guilds):
+            try:
+                async with _get_db() as db:
+                    async with db.execute(
+                        "SELECT t.channel_id FROM tickets t "
+                        "LEFT JOIN ticket_sla_reminded r ON r.channel_id = t.channel_id "
+                        "WHERE t.guild_id=? AND t.status='open' "
+                        "AND (t.claimed_by IS NULL OR t.claimed_by=0) "
+                        "AND t.created_at < ? AND r.channel_id IS NULL "
+                        "LIMIT 25",
+                        (guild.id, cutoff),
+                    ) as cur:
+                        rows = await cur.fetchall()
+                if not rows:
+                    continue
+                # Rôle staff à mentionner (best-effort ; sans ping si non configuré).
+                staff_mention = ""
+                try:
+                    if _db_get is not None:
+                        rid = await _db_get(guild.id, 'ticket_staff', 0)
+                        role = guild.get_role(int(rid)) if rid else None
+                        if role:
+                            staff_mention = role.mention + " "
+                except Exception:
+                    staff_mention = ""
+                for (ch_id,) in rows:
+                    ch = _bot.get_channel(int(ch_id))
+                    if not isinstance(ch, discord.TextChannel):
+                        # Salon disparu → on marque quand même pour ne pas reboucler.
+                        await _mark_sla_reminded(int(ch_id))
+                        continue
+                    try:
+                        await ch.send(
+                            f"⏰ {staff_mention}**Ticket en attente** — ouvert depuis plus de "
+                            f"`{SLA_UNCLAIMED_HOURS}h` **sans prise en charge**. Un membre du "
+                            f"staff peut le **réclamer** pour s'en occuper. 🙏",
+                            allowed_mentions=discord.AllowedMentions(roles=True),
+                        )
+                    except Exception:
+                        pass
+                    await _mark_sla_reminded(int(ch_id))
+            except Exception as ex:
+                print(f"[tickets_enhance sla guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[tickets_enhance sla_reminder_task] {ex}")
+
+
+@sla_reminder_task.before_loop
+async def _sla_before():
     if _bot is not None:
         await _bot.wait_until_ready()
 

@@ -40675,6 +40675,9 @@ async def on_ready():
         )
         if not tix_module.auto_close_inactive_task.is_running():
             tix_module.auto_close_inactive_task.start()
+        # Phase 245 : rappel SLA sur les tickets non pris en charge
+        if not tix_module.sla_reminder_task.is_running():
+            tix_module.sla_reminder_task.start()
     except Exception as ex:
         print(f"[on_ready tix setup] {ex}")
     # Phase 139 : Observabilité (daily report + anomalies + retention)
