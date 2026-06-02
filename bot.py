@@ -49471,6 +49471,21 @@ async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
     e.set_thumbnail(url=membre.display_avatar.url)
     e.set_footer(text=f"DB id: {infraction_id} · pas de rôle attribué")
 
+    # Phase 244 : bannière récidiviste — aide à une modération COHÉRENTE entre
+    # modérateurs (simple suggestion, non bloquant ; le staff reste libre).
+    if warn_count >= 5:
+        e.add_field(
+            name="📈 Suggestion d'escalade",
+            value="🔴 **Récidiviste lourd** — envisage un **mute long**, voire un kick/ban.",
+            inline=False,
+        )
+    elif warn_count >= 3:
+        e.add_field(
+            name="📈 Suggestion d'escalade",
+            value="🟠 **Récidiviste** — envisage un **mute** plutôt qu'un énième warn.",
+            inline=False,
+        )
+
     await i.response.send_message(embed=e)
 
     # Log unifié
@@ -49936,6 +49951,42 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
     else:
         items.append(v2_body("✅ _Casier vierge — aucune infraction enregistrée_"))
 
+    # 🗒️ Notes internes (non-punitives) — Phase 243
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT content, mod_id, created_at FROM mod_notes "
+                "WHERE guild_id=? AND user_id=? ORDER BY id DESC LIMIT 5",
+                (i.guild.id, membre.id),
+            ) as c:
+                note_rows = await c.fetchall()
+    except Exception:
+        note_rows = []
+    if note_rows:
+        items.append(v2_divider())
+        items.append(v2_title("🗒️ Notes internes (staff)", level=3))
+        nlines = []
+        for (content, mod_id, created_at) in note_rows:
+            mm = i.guild.get_member(mod_id) if mod_id else None
+            mtxt = mm.mention if mm else (f"<@{mod_id}>" if mod_id else "_?_")
+            try:
+                ndt = (datetime.fromisoformat(str(created_at).replace('Z', '+00:00'))
+                       if created_at else now())
+                if ndt.tzinfo is None:
+                    ndt = ndt.replace(tzinfo=timezone.utc)
+                drel = f"<t:{int(ndt.timestamp())}:R>"
+            except Exception:
+                drel = ""
+            ctext = (content or "").strip()
+            if len(ctext) > 200:
+                ctext = ctext[:200] + "…"
+            nlines.append(f"• {ctext}\n   _— {mtxt} · {drel}_")
+        items.append(v2_body("\n".join(nlines)))
+        items.append(v2_subtitle(
+            "_Notes non-punitives : contexte interne, n'affectent pas le casier. "
+            "Ajoute-en avec_ `/mod note`."
+        ))
+
     items.append(v2_divider())
     items.append(v2_subtitle(
         f"Consulté par {i.user.display_name} · {now().strftime('%d/%m/%Y %H:%M')}"
@@ -49946,6 +49997,56 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
     await i.response.send_message(view=view)
 
     await send_mod_log(i.guild, 'infractions', i.user, membre, extra=f"Total: {len(rows)} infractions")
+
+
+@mod_group.command(name="note", description="🗒️ Note interne sur un membre (contexte, sans le sanctionner)")
+@app_commands.describe(membre="Le membre concerné", texte="La note (contexte, observation, suivi…)")
+async def mod_note_cmd(i: discord.Interaction, membre: discord.Member, texte: str):
+    # Note NON-PUNITIVE : scratchpad staff. N'attribue aucun rôle, n'affecte pas
+    # le casier — sert juste à partager du contexte entre modérateurs (Phase 243).
+    if not await check_mod_perm(i, 'mod_infractions_role'):
+        return await i.response.send_message("❌ Vous n'avez pas la permission", ephemeral=True)
+    texte = (texte or "").strip()
+    if not texte:
+        return await i.response.send_message("❌ Note vide.", ephemeral=True)
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "CREATE TABLE IF NOT EXISTS mod_notes ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, user_id INTEGER, "
+                "mod_id INTEGER, content TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)"
+            )
+            await db.execute(
+                "INSERT INTO mod_notes(guild_id, user_id, mod_id, content) VALUES(?,?,?,?)",
+                (i.guild.id, membre.id, i.user.id, texte[:500]),
+            )
+            await db.commit()
+            async with db.execute(
+                "SELECT COUNT(*) FROM mod_notes WHERE guild_id=? AND user_id=?",
+                (i.guild.id, membre.id),
+            ) as c:
+                ncount = (await c.fetchone())[0]
+    except Exception as ex:
+        print(f"[/mod note] {ex}")
+        return await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+
+    e = discord.Embed(
+        title="🗒️ Note interne ajoutée",
+        description=(
+            f"Note enregistrée sur {membre.mention} — visible par le staff via "
+            f"`/infractions`.\n_Non-punitive : aucun rôle, aucun impact sur le casier._"
+        ),
+        color=discord.Color.light_grey(),
+        timestamp=now(),
+    )
+    e.add_field(name="📝 Note", value=texte[:1024], inline=False)
+    e.add_field(name="🗂️ Total notes", value=f"`{ncount}`", inline=True)
+    e.set_thumbnail(url=membre.display_avatar.url)
+    await i.response.send_message(embed=e, ephemeral=True)
+    try:
+        await send_mod_log(i.guild, 'note', i.user, membre, texte, extra=f"Total notes: {ncount}")
+    except Exception:
+        pass
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                        🚫 TICKET BLACKLIST COMMAND
