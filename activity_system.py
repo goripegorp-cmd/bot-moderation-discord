@@ -65,7 +65,9 @@ EVENT_TIERS = {
 
 ROLLING_DAYS = 14         # Phase 235.32 : 7→14 j — l'activité s'ACCUMULE plus
                           # longtemps (plus besoin d'être actif TOUS les jours).
-_CLEANUP_AFTER_DAYS = 30  # purge des buckets plus vieux que ça (> ROLLING_DAYS)
+_CLEANUP_AFTER_DAYS = 40  # purge des buckets plus vieux que ça (> ROLLING_DAYS ;
+                          # 40 j garde tout le mois précédent pour le snapshot des
+                          # titres saisonniers — cf. seasonal_titles.py)
 
 # Phase 235.25b : anti double-comptage UNIQUEMENT. Avant, un debounce de 4 s
 # « avalait » les messages rapprochés → « j'écris 3 messages mais il n'en compte

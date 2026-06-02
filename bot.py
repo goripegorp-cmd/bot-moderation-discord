@@ -186,6 +186,7 @@ import hero_journey as hero_journey_module  # Phase 235.19 : Parcours de l'Avent
 import activity_system as activity_system_module  # Phase 235.25 : gate d'activité (clé d'accès aux events)
 import pet_eggs as pet_eggs_module  # Phase 235.26 : œufs de familiers (acquisition par éclosion)
 import combat_recall as combat_recall_module  # Phase 235.25c : rappel des participants aux combats
+import seasonal_titles as seasonal_titles_module  # Phase 242 : champion d'activité du mois
 import dm_notify as dm_notify_module  # Phase 235.31 : notifs d'event en MP (opt-in strict)
 # Phase 170.2-3 : NPCs vivants + rencontres quotidiennes
 import npc_personalities as npc_personalities_module
@@ -41364,6 +41365,15 @@ async def on_ready():
         except Exception as ex:
             print(f"[on_ready 235.25 activity_system] {ex}")
 
+        # Phase 242 : Titres saisonniers (champion d'activité du mois) — module
+        # autonome, snapshot LAZY au /profile, ne touche ni le combat ni le gate.
+        try:
+            seasonal_titles_module.setup(get_db)
+            await seasonal_titles_module.init_db()
+            print("[Phase 242] seasonal_titles OK (champion d'activité du mois)")
+        except Exception as ex:
+            print(f"[on_ready 242 seasonal_titles] {ex}")
+
         # Phase 235.26 : 🥚 Œufs de familiers — acquisition par éclosion (le #1
         # reproche owner : « on ne savait pas comment en avoir »). Catalogue
         # étendu à ~50 familiers (engagement41.PETS, egg_only). Module backend.
@@ -69549,6 +69559,14 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
             print(f"[/profile activity] {_aex}")
             activity_text = ""
 
+        # Phase 242 : titre « Champion d'activité du mois » (snapshot lazy, fail-open)
+        try:
+            await seasonal_titles_module.ensure_snapshot(gid)
+            _champion_badge = await seasonal_titles_module.get_user_badge(gid, uid)
+        except Exception as _cbex:
+            print(f"[/profile champion] {_cbex}")
+            _champion_badge = ""
+
         class _GotoInventoryBtn(discord.ui.Button):
             def __init__(self):
                 super().__init__(
@@ -69622,6 +69640,9 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
                     f"💰 **En main :** `{coins:,}` 🪙"
                     + (f"\n🏦 **Banque :** `{bank:,}` 🪙" if bank else "")
                 ))
+                # Phase 242 : titre Champion d'activité du mois (s'il en a un)
+                if _champion_badge:
+                    items.append(v2_body(_champion_badge))
 
                 items.append(v2_divider())
 
