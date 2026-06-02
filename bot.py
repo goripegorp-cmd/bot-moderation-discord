@@ -62372,6 +62372,15 @@ def _build_daily_agenda_text(now) -> str:
     lines = []
     lines.append("Voici les rendez-vous combat d'aujourd'hui — prépare ton stuff et sois là. 💪")
     lines.append("")
+    # Phase 239 : échauffement du jour — nudge d'activité (clé d'accès aux events),
+    # intégré ICI plutôt qu'en post séparé pour ne PAS ajouter de notification.
+    lines.append("__☀️ Échauffement du jour__")
+    lines.append(
+        "Sois actif pour débloquer les events : **1 message = 1 pt · 1 min en vocal = 1 pt** "
+        "(score glissant sur 7 j, visible dans `/profile`). Quelques messages ouvrent déjà "
+        "les events 🟢 ; reste régulier pour les Boss 🟡 et le Grandiose 🔴."
+    )
+    lines.append("")
     lines.append("__⚔️ Boss du jour__")
     try:
         boss_hours = list(daily_bosses_module.BOSS_HOURS)
