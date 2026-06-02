@@ -56677,7 +56677,7 @@ async def check_expired_restrictions():
 async def before_check_restrictions():
     await bot.wait_until_ready()
 
-@bot.tree.command(name="leaderboard", description="🏆 Classement du serveur (pièces, messages, vocal)")
+@bot.tree.command(name="leaderboard", description="🏆 Classement du serveur (pièces, messages, vocal, activité)")
 async def leaderboard_cmd(i: discord.Interaction):
     """Phase 26.4 : leaderboard à onglets (pièces / messages / vocal).
     Accessible à tout le monde sur le serveur.
@@ -56704,8 +56704,10 @@ class LeaderboardTabsView(LayoutView):
         b_msg.callback = lambda ix: self._switch_tab(ix, 'messages')
         b_voice = Button(label="🎤 Vocal", style=discord.ButtonStyle.secondary, custom_id="lb_voice")
         b_voice.callback = lambda ix: self._switch_tab(ix, 'voice')
+        b_act = Button(label="🔥 Activité 7j", style=discord.ButtonStyle.secondary, custom_id="lb_activity")
+        b_act.callback = lambda ix: self._switch_tab(ix, 'activity')
         self.add_item(v2_container(
-            discord.ui.ActionRow(b_coins, b_msg, b_voice),
+            discord.ui.ActionRow(b_coins, b_msg, b_voice, b_act),
             color=Palette.PREMIUM,
         ))
 
@@ -56726,6 +56728,7 @@ class LeaderboardTabsView(LayoutView):
             'coins':    ("🪙 Plus riches",    "Classement par pièces (coins + banque)"),
             'messages': ("💬 Plus actifs",     "Classement par nombre de messages"),
             'voice':    ("🎤 Rois du vocal",   "Classement par temps en vocal"),
+            'activity': ("🔥 Activité (7 jours)", "Score glissant — la clé d'accès aux events"),
         }
         title, subtitle = title_map.get(self.tab, title_map['coins'])
 
@@ -56769,6 +56772,13 @@ class LeaderboardTabsView(LayoutView):
             custom_id="lb_voice",
         )
         b_voice.callback = lambda ix: self._switch_tab(ix, 'voice')
+        b_act = Button(
+            label="🔥 Activité 7j",
+            style=(discord.ButtonStyle.primary if self.tab == 'activity' else discord.ButtonStyle.secondary),
+            disabled=(self.tab == 'activity'),
+            custom_id="lb_activity",
+        )
+        b_act.callback = lambda ix: self._switch_tab(ix, 'activity')
 
         # ── Construction ──
         items = []
@@ -56795,7 +56805,7 @@ class LeaderboardTabsView(LayoutView):
             items.append(v2_body("\n".join(rest_lines)))
 
         items.append(v2_divider())
-        items.append(discord.ui.ActionRow(b_coins, b_msg, b_voice))
+        items.append(discord.ui.ActionRow(b_coins, b_msg, b_voice, b_act))
 
         self.add_item(v2_container(*items, color=Palette.PREMIUM))
 
@@ -56807,6 +56817,20 @@ class LeaderboardTabsView(LayoutView):
     async def _fetch_top(self):
         """Retourne la liste [ {user_id, value_str, extra}, ... ] selon l'onglet."""
         rows_out = []
+        # 🔥 Activité (7j) — Phase 240 : source = activity_system (connexion dédiée,
+        # gérée hors du `async with get_db()` partagé pour éviter toute imbrication).
+        if self.tab == 'activity':
+            try:
+                top = await activity_system_module.top_scores(self.guild.id, 10)
+                for user_id, pts in top:
+                    rows_out.append({
+                        'user_id': user_id,
+                        'value_str': f"`{pts}` pts",
+                        'extra': '7 derniers jours',
+                    })
+            except Exception as ex:
+                print(f"[LeaderboardTabsView activity] {ex}")
+            return rows_out
         try:
             async with get_db() as db:
                 if self.tab == 'coins':

@@ -151,6 +151,27 @@ async def get_score(guild_id, user_id) -> int:
         return 0
 
 
+async def top_scores(guild_id, limit=10):
+    """Top N joueurs par score d'activité glissant (7 j) → [(user_id, points), …].
+
+    Sert au classement « 🔥 Activité » (rend le gate d'accès aux events
+    compétitif et visible). FAIL-OPEN : [] sur erreur."""
+    if _get_db is None:
+        return []
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT user_id, COALESCE(SUM(points), 0) AS pts FROM activity_score "
+                "WHERE guild_id=? AND day >= ? GROUP BY user_id "
+                "HAVING pts > 0 ORDER BY pts DESC LIMIT ?",
+                (int(guild_id), _window_start(), int(limit)),
+            ) as cur:
+                return [(int(r[0]), int(r[1] or 0)) for r in await cur.fetchall()]
+    except Exception as ex:
+        print(f"[activity top_scores] {ex}")
+        return []
+
+
 def required_points(event_type) -> int:
     return EVENT_TIERS.get((event_type or "").lower(), TIER_BASE)
 
