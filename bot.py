@@ -69274,6 +69274,15 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
         _target_id = target.id
         _is_self = (_viewer_id == _target_id)
 
+        # Phase 236 : bloc « Mon activité (7 j) » — clé d'accès aux events (fail-open)
+        try:
+            activity_text = await activity_system_module.profile_summary_text(
+                gid, uid, is_self=_is_self
+            )
+        except Exception as _aex:
+            print(f"[/profile activity] {_aex}")
+            activity_text = ""
+
         class _GotoInventoryBtn(discord.ui.Button):
             def __init__(self):
                 super().__init__(
@@ -69407,6 +69416,12 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
                     f"🏅 **Achievements :** `{ach_count}/{ach_total}` ({ach_pct}%)\n"
                     f"🔥 **Streak actuel :** `{cur_streak}` j  ·  Record : `{best_streak}` j"
                 ))
+
+                # ═══ ACTIVITÉ (7 JOURS) — clé d'accès aux events ═══
+                if activity_text:
+                    items.append(v2_divider())
+                    items.append(v2_body("**╔═══ 📊  ACTIVITÉ (7 JOURS)  ═══╗**"))
+                    items.append(v2_body(activity_text))
 
                 # ═══ NAVIGATION (sections accessory, uniquement pour son propre profil) ═══
                 if _is_self:

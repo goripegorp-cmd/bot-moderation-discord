@@ -228,6 +228,68 @@ def block_message(event_type, score, needed) -> str:
     return base + tip
 
 
+# ─── PRÉSENTATION (panneau « Mon activité » / profil / récap hebdo) ───
+def render_bar(score, *, target=TIER_GRAND, segments=12) -> str:
+    """Barre de progression visuelle vers le palier max (🔴 Grandiose = 60)."""
+    try:
+        t = max(1, int(target))
+        frac = max(0.0, min(1.0, float(score) / t))
+        filled = max(0, min(segments, int(round(frac * segments))))
+        return "▰" * filled + "▱" * (segments - filled)
+    except Exception:
+        return "▱" * segments
+
+
+async def profile_summary_text(guild_id, user_id, *, is_self=True) -> str:
+    """Bloc texte « Mon activité (7 j) » : score + barre + paliers ouverts +
+    prochain objectif clair (« +X messages pour débloquer 🟡 »).
+
+    Réutilisable (profil, panneau dédié, récap hebdo). FAIL-OPEN : renvoie ''
+    si quoi que ce soit échoue → le profil s'affiche quand même."""
+    try:
+        score = await get_score(guild_id, user_id)
+        window_full = await _window_is_full(guild_id)
+        bar = render_bar(score)
+
+        base_ok = score >= TIER_BASE
+        inter_ok = (not window_full) or score >= TIER_INTER
+        grand_ok = (not window_full) or score >= TIER_GRAND
+
+        def _mark(ok, need):
+            return "✅ ouvert" if ok else f"🔒 {need} pts"
+
+        lines = [
+            f"**Score :** `{score}` pts  ·  _1 message = 1 pt · 1 min vocal = 1 pt_",
+            bar,
+            "",
+            f"🟢 **Base** _(mob · trésor · quiz)_ — {_mark(base_ok, TIER_BASE)}",
+            f"🟡 **Boss** _(boss du jour · raid)_ — {_mark(inter_ok, TIER_INTER)}",
+            f"🔴 **Grandiose** _(world boss · climax · invasion)_ — {_mark(grand_ok, TIER_GRAND)}",
+        ]
+
+        if is_self:
+            if not base_ok:
+                miss = TIER_BASE - score
+                lines.append(f"\n💬 **+{miss} message(s)** et les events 🟢 s'ouvrent !")
+            elif window_full and not inter_ok:
+                miss = TIER_INTER - score
+                lines.append(f"\n💬 **+{miss} pts** pour débloquer les **Boss 🟡** "
+                             f"(1 message OU 1 min vocal = 1 pt).")
+            elif window_full and not grand_ok:
+                miss = TIER_GRAND - score
+                lines.append(f"\n💬 **+{miss} pts** pour débloquer le **Grandiose 🔴**.")
+            elif not window_full:
+                lines.append("\n🎁 _Grâce de démarrage : 🟡/🔴 ouverts en attendant "
+                             "7 j d'historique d'activité._")
+            else:
+                lines.append("\n🌟 **Tous les events te sont ouverts — continue comme ça !**")
+
+        return "\n".join(lines)
+    except Exception as ex:
+        print(f"[activity profile_summary_text] {ex}")
+        return ""
+
+
 # ─── HOOKS DE COLLECTE ───
 async def on_message_activity(message):
     """Listener ADDITIF sur on_message : +1 point / message (debounce anti-spam).
