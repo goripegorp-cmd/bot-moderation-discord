@@ -806,6 +806,24 @@ async def resolve_climax(event_id: int) -> Optional[dict]:
     killed = hp_current <= 0
     final_status = "killed" if killed else "expired"
 
+    # FIX audit 2026 : claim ATOMIQUE du statut final AVANT toute distribution
+    # (coins + titres). Le garde `status != "active"` ci-dessus est une LECTURE
+    # non-atomique : 2 appels concurrents (coup fatal + watchdog) peuvent tous deux
+    # le franchir. Ici un seul gagne le claim `AND status='active'` ; l'autre
+    # s'arrête → pas de double coins/titre. FAIL-OPEN ; l'UPDATE final reste un filet.
+    try:
+        async with _get_db() as db:
+            _rc = await db.execute(
+                "UPDATE climax_events SET status=?, ended_at=CURRENT_TIMESTAMP "
+                "WHERE id=? AND status='active'",
+                (final_status, event_id),
+            )
+            await db.commit()
+        if getattr(_rc, "rowcount", 0) != 1:
+            return None
+    except Exception:
+        pass
+
     # Get attackers ranked
     try:
         async with _get_db() as db:

@@ -1,0 +1,22 @@
+Audit fix batch 3 : verrous anti-double-recompense sur les 5 finalizers de combat
+
+Architecture DB (pool 20 conn, WAL, autocommit-off, AUCUN row-lock / BEGIN
+IMMEDIATE) -> tout schema "lire l'etat -> verifier -> ecrire" sur 2 connexions
+est RACY si 2 clics quasi-simultanes (ex. dernier coup joueur + assist familier,
+ou coup fatal + watchdog d'expiration). Les finalizers payaient AVANT de marquer
+l'event termine, sans claim conditionnel -> double-paiement possible.
+
+Correctif (contained, additif, FAIL-OPEN -- ne casse jamais le combat) : claim
+ATOMIQUE UPDATE ... SET ended/status WHERE id=? AND <encore-actif> + garde sur
+rowcount AVANT toute distribution. Un seul appel gagne le claim ; l'autre stop.
+
+- _end_world_boss (bot.py)            : claim ended=1 WHERE ended=0 avant distrib
+- _end_active_event (boss raid)       : UPDATE early existant rendu atomique (+AND ended=0 +rowcount)
+- _on_mob_killed (mob_hunts)          : claim status='killed' WHERE status='alive' en tete (fail-open)
+- resolve_daily_boss (daily_bosses)   : claim status WHERE status='alive' ; UPDATE final = filet
+- resolve_climax (monthly_climax)     : claim status WHERE status='active' ; UPDATE final = filet
+
++ activity_system : purge 40j->62j (un snapshot mensuel de titres saisonniers
+  tire tard ne peut plus perdre les buckets de debut de mois).
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>

@@ -1108,6 +1108,24 @@ async def _on_mob_killed(
     if not guild:
         return
 
+    # FIX audit 2026 : claim ATOMIQUE de la mise à mort AVANT de distribuer le
+    # moindre drop. Si 2 coups fatals quasi-simultanés (dernier joueur + assist
+    # familier) appellent ce finalizer, un seul passe le claim `AND status='alive'`
+    # ; l'autre s'arrête → impossible de payer le pool de loot deux fois.
+    # FAIL-OPEN : si le claim plante (DB), on NE bloque PAS (un mob tué doit payer).
+    try:
+        async with _get_db() as db:
+            _kc = await db.execute(
+                "UPDATE mob_spawns SET status='killed', "
+                "killed_at=CURRENT_TIMESTAMP WHERE id=? AND status='alive'",
+                (mob_id,),
+            )
+            await db.commit()
+        if getattr(_kc, "rowcount", 0) != 1:
+            return
+    except Exception:
+        pass
+
     # Bonus alliance : combien d'attackers sont dans la même alliance ?
     alliance_counts: dict[int, int] = {}  # alliance_id → count
     user_alliances: dict[int, Optional[int]] = {}

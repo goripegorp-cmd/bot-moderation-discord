@@ -10630,12 +10630,17 @@ async def _end_active_event(guild, *, victory: bool, reason: str = ""):
             arena_ch_id = int(row[2] or 0)
             arena_msg_id = int(row[3] or 0)
 
-            # Marquer ended
-            await db.execute(
-                'UPDATE events SET ended=1, victory=? WHERE id=?',
+            # Marquer ended — claim ATOMIQUE (`AND ended=0` + rowcount) AVANT toute
+            # distribution de récompenses : si 2 coups fatals quasi-simultanés
+            # appellent ce finalizer (ex. dernier joueur + assist familier), un seul
+            # gagne le claim ; l'autre s'arrête → zéro double-récompense (audit 2026).
+            _ec = await db.execute(
+                'UPDATE events SET ended=1, victory=? WHERE id=? AND ended=0',
                 (1 if victory else 0, event_id),
             )
             await db.commit()
+            if getattr(_ec, "rowcount", 0) != 1:
+                return
 
             # Récupérer participants
             async with db.execute(
@@ -61642,6 +61647,18 @@ async def _end_world_boss(guild, wb_id: int, victory: bool, reason: str = ""):
         boss_id, ch_id, _wb_panel_msg_id = row
         boss = ev42.get_world_boss(boss_id)
         if not boss:
+            return
+
+        # FIX audit : claim ATOMIQUE de la finalisation AVANT toute distribution de
+        # récompenses (anti double-payout si 2 coups fatals quasi-simultanés). Si une
+        # autre course a déjà finalisé ce world boss, rowcount=0 → on s'arrête net.
+        async with get_db() as db:
+            _fc = await db.execute(
+                "UPDATE world_bosses SET ended=1, victory=? WHERE id=? AND ended=0",
+                (1 if victory else 0, wb_id),
+            )
+            await db.commit()
+        if getattr(_fc, "rowcount", 0) != 1:
             return
 
         # Récupérer les attaquants triés

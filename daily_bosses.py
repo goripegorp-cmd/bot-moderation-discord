@@ -1075,6 +1075,25 @@ async def resolve_daily_boss(event_id: int) -> Optional[dict]:
     killed = int(hp_current) <= 0
     final_status = "killed" if killed else "expired"
 
+    # FIX audit 2026 : claim ATOMIQUE du statut final AVANT toute distribution. Le
+    # garde `status != "alive"` ci-dessus est une LECTURE non-atomique : 2 appels
+    # concurrents (coup fatal + watchdog d'expiration) peuvent tous deux le
+    # franchir. Ici un seul gagne le claim `AND status='alive'` ; l'autre s'arrête
+    # → pas de double coins/œuf. FAIL-OPEN : si le claim plante, on continue (un
+    # boss résolu doit payer) et l'UPDATE final plus bas sert de filet.
+    try:
+        async with _get_db() as db:
+            _rc = await db.execute(
+                "UPDATE daily_boss_events SET status=?, ended_at=CURRENT_TIMESTAMP "
+                "WHERE id=? AND status='alive'",
+                (final_status, event_id),
+            )
+            await db.commit()
+        if getattr(_rc, "rowcount", 0) != 1:
+            return None
+    except Exception:
+        pass
+
     # Attackers classés
     try:
         async with _get_db() as db:
