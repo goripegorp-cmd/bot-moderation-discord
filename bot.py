@@ -187,6 +187,7 @@ import activity_system as activity_system_module  # Phase 235.25 : gate d'activi
 import pet_eggs as pet_eggs_module  # Phase 235.26 : œufs de familiers (acquisition par éclosion)
 import combat_recall as combat_recall_module  # Phase 235.25c : rappel des participants aux combats
 import seasonal_titles as seasonal_titles_module  # Phase 242 : champion d'activité du mois
+import cosmetics as cosmetics_module  # Phase 249 : sink éco — titres cosmétiques
 import dm_notify as dm_notify_module  # Phase 235.31 : notifs d'event en MP (opt-in strict)
 # Phase 170.2-3 : NPCs vivants + rencontres quotidiennes
 import npc_personalities as npc_personalities_module
@@ -41466,6 +41467,14 @@ async def on_ready():
         except Exception as ex:
             print(f"[on_ready 242 seasonal_titles] {ex}")
 
+        # Phase 249 : sink économique — titres cosmétiques (anti-inflation)
+        try:
+            cosmetics_module.setup(get_db)
+            await cosmetics_module.init_db()
+            print("[Phase 249] cosmetics OK (sink titres cosmétiques)")
+        except Exception as ex:
+            print(f"[on_ready 249 cosmetics] {ex}")
+
         # Phase 235.26 : 🥚 Œufs de familiers — acquisition par éclosion (le #1
         # reproche owner : « on ne savait pas comment en avoir »). Catalogue
         # étendu à ~50 familiers (engagement41.PETS, egg_only). Module backend.
@@ -69685,6 +69694,12 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
             print(f"[/profile champion] {_cbex}")
             _champion_badge = ""
 
+        # Phase 249 : titre cosmétique équipé (sink éco), affiché dans l'identité
+        try:
+            _cosmetic_title = await cosmetics_module.active_label(gid, uid)
+        except Exception:
+            _cosmetic_title = ""
+
         class _GotoInventoryBtn(discord.ui.Button):
             def __init__(self):
                 super().__init__(
@@ -69761,6 +69776,9 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
                 # Phase 242 : titre Champion d'activité du mois (s'il en a un)
                 if _champion_badge:
                     items.append(v2_body(_champion_badge))
+                # Phase 249 : titre cosmétique équipé (s'il en a un)
+                if _cosmetic_title:
+                    items.append(v2_body(f"✨ Titre : {_cosmetic_title}"))
 
                 items.append(v2_divider())
 
@@ -79388,6 +79406,122 @@ async def _open_weather_panel(i: discord.Interaction):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 249 — BOUTIQUE DE TITRES COSMÉTIQUES (sink économique anti-inflation)
+# ═══════════════════════════════════════════════════════════════════════════════
+async def _cosm_balance(guild_id, user_id) -> int:
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT coins FROM economy WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id),
+            ) as c:
+                r = await c.fetchone()
+        return int(r[0]) if r and r[0] else 0
+    except Exception:
+        return 0
+
+
+class CosmeticsPanelV2(LayoutView):
+    """Phase 249 : boutique de titres cosmétiques (sink éco). Ephemeral, per-user.
+    Clique un titre = l'acheter (si non possédé) ou l'équiper (si possédé)."""
+
+    def __init__(self, user_id: int, owned: list, active: str, balance: int, notice: str = ""):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        items = [v2_title("✨ Titres cosmétiques")]
+        if notice:
+            items.append(v2_body(f"💬 {notice}"))
+        items.append(v2_subtitle(
+            f"Un **titre de profil** purement déco (zéro impact jeu). "
+            f"Solde : `{int(balance):,}` 🪙"
+        ))
+        items.append(v2_divider())
+        lines = []
+        for (key, emo, label, price) in cosmetics_module.TITLES:
+            if key == active:
+                lines.append(f"{emo} **{label}** — ⭐ _équipé_")
+            elif key in owned:
+                lines.append(f"{emo} **{label}** — ✅ _possédé (clique pour équiper)_")
+            else:
+                aff = "🟢" if balance >= price else "🔒"
+                lines.append(f"{emo} **{label}** — {aff} `{int(price):,}` 🪙")
+        items.append(v2_body("\n".join(lines)))
+        items.append(v2_divider())
+        items.append(v2_body(
+            "_Clique un titre : **achète-le** (si tu ne l'as pas) ou **équipe-le** "
+            "(si tu l'as). 🔒 = pas assez de pièces. Aucun échange entre joueurs._"
+        ))
+        self.add_item(v2_container(*items, color=0xF1C40F))
+
+        btns = []
+        for (key, emo, label, price) in cosmetics_module.TITLES:
+            is_active = (key == active)
+            owned_it = key in owned
+            style = (discord.ButtonStyle.success if is_active
+                     else discord.ButtonStyle.primary if owned_it
+                     else discord.ButtonStyle.secondary)
+            b = Button(label=f"{emo} {label}"[:80], style=style,
+                       custom_id=f"cosm_{key}", disabled=is_active)
+            b.callback = self._make_cb(key)
+            btns.append(b)
+        for n in range(0, len(btns), 3):
+            self.add_item(discord.ui.ActionRow(*btns[n:n + 3]))
+        if active:
+            rb = Button(label="Retirer le titre", emoji="🚫",
+                        style=discord.ButtonStyle.danger, custom_id="cosm_off")
+            rb.callback = self._cb_unequip
+            self.add_item(discord.ui.ActionRow(rb))
+
+    async def interaction_check(self, i):
+        return i.user.id == self.user_id
+
+    async def _refresh(self, i, msg):
+        owned, active = await cosmetics_module.get_state(i.guild.id, i.user.id)
+        bal = await _cosm_balance(i.guild.id, i.user.id)
+        view = CosmeticsPanelV2(self.user_id, owned, active, bal, notice=msg)
+        try:
+            await i.response.edit_message(view=view)
+        except Exception:
+            try:
+                await i.edit_original_response(view=view)
+            except Exception:
+                pass
+
+    def _make_cb(self, key):
+        async def _cb(i):
+            try:
+                owned, _active = await cosmetics_module.get_state(i.guild.id, i.user.id)
+                if key in owned:
+                    _ok, msg = await cosmetics_module.set_active(i.guild.id, i.user.id, key)
+                else:
+                    _ok, msg = await cosmetics_module.buy(i.guild.id, i.user.id, key)
+                await self._refresh(i, msg)
+            except Exception as ex:
+                print(f"[cosmetics cb] {ex}")
+        return _cb
+
+    async def _cb_unequip(self, i):
+        try:
+            _ok, msg = await cosmetics_module.set_active(i.guild.id, i.user.id, "")
+            await self._refresh(i, msg)
+        except Exception:
+            pass
+
+
+async def _open_cosmetics_panel(i: discord.Interaction):
+    """Ouvre la boutique de titres cosmétiques (sink éco), ephemeral."""
+    if not await _safe_defer(i):
+        return
+    try:
+        owned, active = await cosmetics_module.get_state(i.guild.id, i.user.id)
+        bal = await _cosm_balance(i.guild.id, i.user.id)
+        await _safe_followup(i, view=CosmeticsPanelV2(i.user.id, owned, active, bal))
+    except Exception as ex:
+        print(f"[_open_cosmetics_panel] {ex}")
+        await _safe_followup(i, content="❌ Impossible d'ouvrir la boutique de titres.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 70 — HUB COMPONENTS V2 : LayoutView avec sections + boutons accessory
 #  Le hub d'engagement et ses sub-hubs passent au design moderne Discord 2024.
@@ -79771,6 +79905,7 @@ class ToolsLayoutV2(LayoutView):
             _mk("🏦 Banque", discord.ButtonStyle.success, "toolv2_bank", self._on_bank),
             _mk("💎 Mes loots", discord.ButtonStyle.primary, "toolv2_loots", self._on_loots),
             _mk("🤝 Alliance", discord.ButtonStyle.success, "toolv2_alli", self._on_alliance),
+            _mk("✨ Titres", discord.ButtonStyle.secondary, "toolv2_titles", self._on_titles),
         ))
 
         items.append(v2_body("**⚔️ Compétitif**"))
@@ -79808,6 +79943,7 @@ class ToolsLayoutV2(LayoutView):
     async def _on_bank(self, i):     await _open_bank_panel(i)
     async def _on_loots(self, i):    await _open_loots_panel(i)
     async def _on_alliance(self, i): await _open_alliance_panel(i)
+    async def _on_titles(self, i):   await _open_cosmetics_panel(i)
     async def _on_pvp(self, i):      await _open_pvp_panel(i)
     async def _on_class(self, i):    await _open_class_panel(i)
     async def _on_shoutout(self, i): await _open_shoutout_make_panel(i)
