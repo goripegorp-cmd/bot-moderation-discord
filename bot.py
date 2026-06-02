@@ -9313,20 +9313,12 @@ async def _setup_arena(guild, event_id: int, arena_name: str):
                 pass
         return None
 
-    # 3. Masquer tous les autres salons
-    for ch in guild.channels:
-        if isinstance(ch, discord.CategoryChannel) or ch.id == arena_channel.id:
-            continue
-        try:
-            overw = ch.overwrites_for(everyone_role)
-            overw.view_channel = False
-            await ch.set_permissions(everyone_role, overwrite=overw, reason=f"Event {event_id} mask")
-        except discord.Forbidden:
-            continue
-        except Exception as ex:
-            print(f"[_setup_arena mask ch={ch.id}] {ex}")
-            continue
-
+    # 3. Phase 235.28 : ON NE MASQUE PLUS LES SALONS. Directive owner — les
+    # salons texte @everyone DOIVENT rester visibles pendant un event. Sinon
+    # les gens pas encore actifs (ou ceux qui ne participent pas) se retrouvent
+    # face à un serveur vide : ils ne voient rien et ne peuvent même pas écrire
+    # pour devenir éligibles → blocage total. Le combat vit dans SON salon dédié ;
+    # tout le reste du serveur reste accessible. (Boucle de masquage supprimée.)
     return arena_channel
 
 
@@ -9792,7 +9784,9 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
         # niveau 5 → un nouveau ne peut pas rafler le gros loot sans progresser un
         # peu. Les mobs / la boîte mystère / le trésor restent OUVERTS à tous (porte
         # d'entrée pour farmer de l'XP). Fail-open : erreur de lecture → on laisse.
-        _BR_MIN_LVL = 5
+        _BR_MIN_LVL = 0  # Phase 235.28 : niveau-pour-PARTICIPER RETIRÉ (catch-22 :
+        # il fallait des events pour monter, et du niveau pour faire les events →
+        # serveur bloqué). L'accès est désormais géré par l'ACTIVITÉ (messages).
         try:
             _br_lvl = int((await get_user_economy(i.guild.id, i.user.id)).get('level', 1) or 1)
         except Exception:
@@ -14414,7 +14408,13 @@ async def _temporarily_unmask_channel(guild, channel_id: int) -> bool:
 async def _re_mask_channel_after_light_event(guild, channel_id: int):
     """Phase 38 : après qu'un light event finit, re-applique view_channel=False
     sur @everyone si un raid est toujours actif ET si le refcount tombe à 0.
+
+    Phase 235.28 : DÉSACTIVÉ (no-op). Directive owner — on ne masque PLUS JAMAIS
+    les salons @everyone, ils restent toujours visibles. C'était la cause du
+    « tous les salons disparaissent » (re-mask en boucle après chaque trésor /
+    boîte mystère pendant qu'un raid tournait).
     """
+    return
     try:
         key = (guild.id, int(channel_id))
         current = _light_event_visible.get(key, 0)
@@ -60608,7 +60608,8 @@ class WorldBossAttackView(View):
             # Phase 235.12 : GATING DE NIVEAU — le World Boss (plus gros loot du
             # serveur) demande le niveau 10. Récompense la progression et empêche
             # un nouveau de faceroll le contenu le plus dur. Fail-open.
-            _WB_MIN_LVL = 10
+            _WB_MIN_LVL = 0  # Phase 235.28 : niveau-pour-PARTICIPER RETIRÉ (catch-22).
+            # L'accès est géré par l'ACTIVITÉ (messages), plus par le niveau.
             try:
                 _wb_lvl = int((await get_user_economy(i.guild.id, i.user.id)).get('level', 1) or 1)
             except Exception:

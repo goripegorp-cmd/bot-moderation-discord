@@ -672,7 +672,10 @@ async def record_attack(
         _clvl = int((_lr[0] if _lr and _lr[0] else 1) or 1)
     except Exception:
         _clvl = 999
-    if _clvl < 10:
+    # Phase 235.28 : niveau-pour-PARTICIPER RETIRÉ (directive owner — catch-22).
+    # L'accès est géré par l'ACTIVITÉ (messages), pas par le niveau. Bloc gardé
+    # désactivé (`if False`) pour préserver la structure sans rien casser.
+    if False and _clvl < 10:
         return {
             "error": (f"🔒 Le **Climax** demande le **niveau 10** (tu es niveau **{_clvl}**). "
                       f"Farme les mobs, le boss du jour et fais `/daily` pour monter !"),

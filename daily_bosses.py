@@ -925,8 +925,10 @@ async def record_boss_attack(guild_id: int, user_id: int) -> dict:
             "warmup": True,
         }
 
-    # ─── GATING DE NIVEAU ───
-    if boss["min_level"] > 0:
+    # ─── GATING DE NIVEAU — Phase 235.28 : RETIRÉ (directive owner, catch-22).
+    # L'accès est géré par l'ACTIVITÉ (messages), pas par le niveau. Désactivé
+    # via `if False` pour garder la structure intacte.
+    if False and boss["min_level"] > 0:
         user_lvl = await get_user_level(guild_id, user_id)
         if user_lvl < boss["min_level"]:
             return {
