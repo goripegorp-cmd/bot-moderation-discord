@@ -13963,14 +13963,18 @@ async def _send_onboarding_dm(member):
         embed = discord.Embed(
             title=f"👋 Bienvenue sur {guild.name} !",
             description=(
-                "Ce serveur a un **système d'événements communautaires** :\n"
-                "⚔️ Boss Raids · 💎 Chasses au trésor · 🎓 Quiz · 📦 Mystery Boxes\n"
-                "🎁 Cadeaux personnels · ⚔️ Duels PvP entre membres\n\n"
-                "**Avec :**\n"
-                "🪙 Économie (pièces, boutique d'équipements)\n"
-                "🏅 Badges déblocables · 👑 Rangs (Champion / Vice / Troisième)\n"
-                "🛡️ 6 classes (Tank, DPS, Healer, Mage, Rogue, Bard)\n\n"
-                "Configure-toi en 30 secondes ↓"
+                "Bienvenue dans une **aventure communautaire** ! Voici l'essentiel en "
+                "**30 secondes** :\n\n"
+                "🎯 **Le principe :** sois **actif** — écris des messages **OU** passe du "
+                "temps en vocal — et ça débloque l'accès aux **événements** "
+                "(⚔️ Boss Raids · 💎 Trésors · 🎓 Quiz · 🌍 World Boss…) où tu gagnes "
+                "loot, pièces et familiers. _L'un OU l'autre suffit, pas besoin des deux._\n\n"
+                "🎮 **Tout est dans `/hub`** : quêtes du jour, ton compagnon 🐾, ta "
+                "progression, tes events — zéro commande à retenir, tout en boutons.\n\n"
+                "📊 **`/profile`** te montre ton activité et ce qu'il te reste pour "
+                "débloquer le prochain palier d'events.\n\n"
+                "Configure-toi ci-dessous (classe + notifs), puis lance ton "
+                "**🧭 Parcours d'aventurier** !"
             ),
             color=0x5865F2,
         )
