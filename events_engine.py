@@ -398,6 +398,13 @@ HELMETS = [
     {"name": "Couronne ancienne", "emoji": "👑", "rarity": "légendaire", "def": 18, "atk": 3, "weight": 1},
 ]
 
+# Phase 235.30b : casques end-game (mythique/divine). Schéma EXACT (name/emoji/
+# rarity/def/weight) → aucune itération ne plante (_bias_pool lit rarity+weight).
+HELMETS.extend([
+    {"name": "Masque du Phénix",   "emoji": "🔥", "rarity": "mythique",   "def": 28, "atk": 5, "weight": 1},
+    {"name": "Couronne Cosmique",  "emoji": "🌌", "rarity": "divine",     "def": 42, "atk": 8, "weight": 1},
+])
+
 BOOTS_LIST = [
     {"name": "Sandales de toile",  "emoji": "🥿", "rarity": "commune",    "def": 1, "weight": 40},
     {"name": "Bottes en cuir",     "emoji": "🥾", "rarity": "commune",    "def": 2, "weight": 35},
@@ -405,6 +412,12 @@ BOOTS_LIST = [
     {"name": "Bottes de vitesse",  "emoji": "🏃", "rarity": "épique",     "def": 9, "crit": 5, "weight": 6},
     {"name": "Bottes ailées",      "emoji": "🪽", "rarity": "légendaire", "def": 14, "crit": 10, "weight": 1},
 ]
+
+# Phase 235.30b : bottes end-game (mythique/divine).
+BOOTS_LIST.extend([
+    {"name": "Bottes du Vide",     "emoji": "🕳️", "rarity": "mythique",   "def": 22, "crit": 14, "weight": 1},
+    {"name": "Pas de l'Éternité",  "emoji": "♾️", "rarity": "divine",     "def": 32, "crit": 20, "weight": 1},
+])
 
 ACCESSORIES = [
     {"name": "Bracelet en cuir",     "emoji": "💍", "rarity": "commune",    "atk": 1, "weight": 40},
@@ -414,6 +427,12 @@ ACCESSORIES = [
     {"name": "Amulette divine",      "emoji": "🌟", "rarity": "légendaire", "atk": 15, "crit": 10, "weight": 1},
 ]
 
+# Phase 235.30b : accessoires end-game (mythique/divine).
+ACCESSORIES.extend([
+    {"name": "Sceau du Dragon",      "emoji": "🐲", "rarity": "mythique",   "atk": 24, "crit": 14, "weight": 1},
+    {"name": "Cœur des Étoiles",     "emoji": "💫", "rarity": "divine",     "atk": 36, "crit": 20, "weight": 1},
+])
+
 TRINKETS = [
     {"name": "Pierre porte-bonheur", "emoji": "🪨", "rarity": "commune",    "crit": 2, "weight": 40},
     {"name": "Fiole d'huile",        "emoji": "🍶", "rarity": "commune",    "crit": 3, "weight": 35},
@@ -421,6 +440,12 @@ TRINKETS = [
     {"name": "Cristal magique",      "emoji": "🔮", "rarity": "épique",     "crit": 12, "atk": 3, "weight": 6},
     {"name": "Œil de dragon",        "emoji": "🐉", "rarity": "légendaire", "crit": 20, "atk": 5, "weight": 1},
 ]
+
+# Phase 235.30b : trinkets end-game (mythique/divine).
+TRINKETS.extend([
+    {"name": "Larme du Kraken",      "emoji": "🦑", "rarity": "mythique",   "crit": 30, "atk": 8, "weight": 1},
+    {"name": "Fragment de Genèse",   "emoji": "✨", "rarity": "divine",     "crit": 45, "atk": 12, "weight": 1},
+])
 
 
 def _bias_pool(pool: list, rarity_bias: float) -> list:
