@@ -186,6 +186,7 @@ import hero_journey as hero_journey_module  # Phase 235.19 : Parcours de l'Avent
 import activity_system as activity_system_module  # Phase 235.25 : gate d'activité (clé d'accès aux events)
 import pet_eggs as pet_eggs_module  # Phase 235.26 : œufs de familiers (acquisition par éclosion)
 import combat_recall as combat_recall_module  # Phase 235.25c : rappel des participants aux combats
+import dm_notify as dm_notify_module  # Phase 235.31 : notifs d'event en MP (opt-in strict)
 # Phase 170.2-3 : NPCs vivants + rencontres quotidiennes
 import npc_personalities as npc_personalities_module
 import daily_encounters as daily_encounters_module
@@ -13287,6 +13288,57 @@ class EventNotifyButton(discord.ui.DynamicItem[Button],
 
     async def callback(self, i: discord.Interaction):
         await _toggle_event_notify(i, self.etype)
+
+
+class DMNotifyButton(discord.ui.DynamicItem[Button],
+                     template=r"dmnotif:(?P<gid>\d+)"):
+    """Phase 235.31 : 📩 OPT-IN STRICT aux notifs d'event en MP. 1er clic = abonné,
+    2e clic = stop. Persistant (DynamicItem) → marche aussi DANS le MP du bot
+    (i.guild y est None, donc on porte le guild_id dans le custom_id)."""
+    def __init__(self, gid: int):
+        super().__init__(Button(label="📩 Notifs MP (on/off)",
+                                style=discord.ButtonStyle.secondary,
+                                custom_id=f"dmnotif:{int(gid)}"))
+        self.gid = int(gid)
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["gid"]))
+
+    async def callback(self, i: discord.Interaction):
+        try:
+            new = await dm_notify_module.toggle_optin(self.gid, i.user.id)
+        except Exception:
+            new = None
+        if new is True:
+            msg = ("📩 **C'est noté !** Tu recevras un **MP privé** quand un GROS "
+                   "événement démarre (boss raid, world boss, climax…).\n"
+                   "_Re-clique pour arrêter — jamais de spam, c'est strictement toi qui choisis._")
+        elif new is False:
+            msg = ("🔕 Ok, tu ne recevras **plus** de MP d'événement. "
+                   "(Re-clique « 📩 Notifs MP » quand tu veux pour réactiver.)")
+        else:
+            msg = "❌ Petit souci, réessaie."
+        try:
+            await i.response.send_message(msg, ephemeral=True)
+        except Exception:
+            try:
+                await i.followup.send(msg, ephemeral=True)
+            except Exception:
+                pass
+
+
+def _dm_optin_view(guild):
+    """View jetable portant le bouton 📩 (capté par le DynamicItem DMNotifyButton).
+    Jointe au message de ping in-channel ET aux MP (pour stopper depuis le MP)."""
+    try:
+        if guild is None:
+            return None
+        v = discord.ui.View(timeout=None)
+        v.add_item(DMNotifyButton(guild.id))
+        return v
+    except Exception:
+        return None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -41290,6 +41342,15 @@ async def on_ready():
         except Exception as ex:
             print(f"[on_ready 235.25c combat_recall] {ex}")
 
+        # Phase 235.31 : 📩 Notifs d'event en MP (OPT-IN STRICT, anti-mass-DM).
+        try:
+            dm_notify_module.setup(get_db)
+            await dm_notify_module.init_db()
+            bot.add_dynamic_items(DMNotifyButton)
+            print("[Phase 235.31] dm_notify OK (MP opt-in)")
+        except Exception as ex:
+            print(f"[on_ready 235.31 dm_notify] {ex}")
+
         # Phase 235.22 : bouton « 🔔 Me notifier » par type (opt-in, persistant).
         try:
             bot.add_dynamic_items(EventNotifyButton)
@@ -59089,6 +59150,16 @@ async def _ping_active_members(guild, channel, *, notif_key='boss_raid',
             except Exception:
                 continue
             chosen.append(uid)
+        # Phase 235.31 : MP PRIVÉ aux opt-in (events significatifs seulement —
+        # boss/world boss/climax/invasion/daily boss ; throttlé + capé + cooldown
+        # par user + fail-open). Strictement opt-in → zéro MP de masse.
+        try:
+            await dm_notify_module.notify_event_dm(
+                guild, (intro or "Un événement vient de démarrer !"),
+                channel, notif_key=notif_key,
+                view_factory=lambda: _dm_optin_view(guild))
+        except Exception:
+            pass
         # Phase 235.24 : on ping AUSSI les rôles opt-in (/notify + 🔔 par-type) de CE
         # type d'event → même si AUCUN actif n'est choisi, les abonnés sont prévenus.
         role_mention = ""
@@ -59124,6 +59195,7 @@ async def _ping_active_members(guild, channel, *, notif_key='boss_raid',
         try:
             msg = await channel.send(
                 line,
+                view=_dm_optin_view(guild),  # Phase 235.31 : bouton 📩 opt-in MP
                 allowed_mentions=discord.AllowedMentions(
                     users=True, everyone=False, roles=True),
             )
