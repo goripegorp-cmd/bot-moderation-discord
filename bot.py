@@ -41652,6 +41652,9 @@ async def on_ready():
     # Phase 195 : Programme du jour (annonce quotidienne calme du planning combat)
     if not daily_agenda_dispatcher.is_running():
         daily_agenda_dispatcher.start()
+    # Phase 238 : récap hebdo en MP (opt-in strict)
+    if not weekly_activity_recap_task.is_running():
+        weekly_activity_recap_task.start()
 
     # Phase 43 : Trésor Flash + Rituel du Soir + Tag Royale + Anniversaire
     if not flash_treasure_dispatcher.is_running():
@@ -62515,6 +62518,80 @@ async def daily_agenda_dispatcher():
 
 @daily_agenda_dispatcher.before_loop
 async def _daily_agenda_wait():
+    await bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 238 — RÉCAP HEBDO EN MP (strictement opt-in, réutilise « 📩 Notifs MP »)
+# ═══════════════════════════════════════════════════════════════════════════════
+async def _build_weekly_recap_dm_text(member) -> str:
+    """Corps du récap hebdo (MP) pour un membre. Renvoie '' s'il est INACTIF cette
+    semaine (→ on ne le DM pas). Réutilise le bloc « Mon activité » (score, barre,
+    paliers) + son rang. FAIL-OPEN."""
+    try:
+        guild = member.guild
+        gid, uid = guild.id, member.id
+        score = await activity_system_module.get_score(gid, uid)
+        if score <= 0:
+            return ""  # inactif cette semaine → pas de MP (jamais de « tu n'as rien fait »)
+        rank = 0
+        try:
+            top = await activity_system_module.top_scores(gid, 100)
+            for idx, (u, _p) in enumerate(top, start=1):
+                if int(u) == uid:
+                    rank = idx
+                    break
+        except Exception:
+            rank = 0
+        summary = await activity_system_module.profile_summary_text(gid, uid, is_self=True)
+        rank_line = (
+            f"\n🏆 Tu es **#{rank}** au classement activité cette semaine !"
+            if rank else ""
+        )
+        return (
+            f"📬 **Ton récap de la semaine — {getattr(guild, 'name', 'le serveur')}**\n\n"
+            f"{summary}{rank_line}\n\n"
+            f"_Tu reçois ce MP car tu as activé les notifs privées (📩). "
+            f"Re-clique « 📩 Notifs MP » sur le serveur pour arrêter à tout moment._"
+        )
+    except Exception as ex:
+        print(f"[_build_weekly_recap_dm_text] {ex}")
+        return ""
+
+
+@tasks.loop(hours=1)
+async def weekly_activity_recap_task():
+    """Lundi ~10h Europe/Paris : DM un récap d'activité aux membres OPT-IN MP (📩)
+    et ACTIFS cette semaine. Strictement opt-in (réutilise dm_event_optin) → aucun
+    MP de masse. Cappé + throttlé dans dm_notify. Anti-doublon par guild via le
+    marqueur cfg 'weekly_recap_last_date'. Fail-open par guild."""
+    try:
+        from zoneinfo import ZoneInfo as _ZI
+        tz = _ZI('Europe/Paris')
+    except Exception:
+        tz = timezone.utc
+    nowp = datetime.now(tz)
+    if nowp.weekday() != 0 or nowp.hour != 10:
+        return
+    day = nowp.strftime('%Y-%m-%d')
+    for guild in list(bot.guilds):
+        try:
+            c = await cfg(guild.id)
+            if str(c.get('weekly_recap_last_date', '') or '') == day:
+                continue
+            # Marqueur AVANT envoi (anti double-DM si le loop repasse dans l'heure).
+            await db_set(guild.id, 'weekly_recap_last_date', day)
+            sent = await dm_notify_module.send_weekly_recaps(
+                guild, _build_weekly_recap_dm_text
+            )
+            if sent:
+                print(f"[WEEKLY RECAP] guild={guild.id} sent={sent}")
+        except Exception as ex:
+            print(f"[weekly_activity_recap_task guild={guild.id}] {ex}")
+
+
+@weekly_activity_recap_task.before_loop
+async def _weekly_recap_wait():
     await bot.wait_until_ready()
 
 

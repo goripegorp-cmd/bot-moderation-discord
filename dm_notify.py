@@ -151,3 +151,45 @@ async def notify_event_dm(guild, title: str, channel, *, notif_key="boss",
     except Exception as ex:
         print(f"[dm_notify notify_event_dm] {ex}")
         return 0
+
+
+async def send_weekly_recaps(guild, build_text, *, cap=40) -> int:
+    """Phase 238 : DM un RÉCAP HEBDO aux membres OPT-IN MP (dm_event_optin
+    enabled=1) — les MÊMES qui ont cliqué « 📩 Notifs MP ». Strictement opt-in,
+    donc aucun MP de masse. `build_text(member)` (coroutine) renvoie le corps du
+    MP (ou '' pour sauter ce membre, ex. inactif). Cappé + throttlé + fail-open.
+    Retourne le nombre de MP envoyés."""
+    if _get_db is None or guild is None:
+        return 0
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT user_id FROM dm_event_optin "
+                "WHERE guild_id=? AND enabled=1 LIMIT ?",
+                (guild.id, int(cap)),
+            ) as cur:
+                rows = await cur.fetchall()
+        if not rows:
+            return 0
+        sent = 0
+        for r in rows:
+            uid = int(r[0])
+            m = guild.get_member(uid)
+            if m is None or m.bot:
+                continue
+            try:
+                body = await build_text(m)
+            except Exception:
+                body = ""
+            if not body:
+                continue
+            try:
+                await m.send(body)
+                sent += 1
+                await asyncio.sleep(_DM_DELAY)  # respect rate-limit Discord
+            except Exception:
+                continue
+        return sent
+    except Exception as ex:
+        print(f"[dm_notify send_weekly_recaps] {ex}")
+        return 0
