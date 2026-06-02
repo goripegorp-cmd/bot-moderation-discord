@@ -57985,6 +57985,32 @@ class DailyQuestView(View):
                     await add_coins(self.guild_id, self.user_id, int(ms['coins']))
                 except Exception:
                     pass
+                # Phase 248c : œuf de familier BONUS au palier (meilleur sur gros paliers)
+                try:
+                    _days = int(ms.get('days', 0) or 0)
+                    _tier = "grand" if _days >= 30 else "boss"
+                    _eg = await pet_eggs_module.grant_event_egg(
+                        self.guild_id, self.user_id, source="quest_streak", tier=_tier)
+                    if _eg:
+                        lines.append(
+                            f"🥚 **Œuf {pet_eggs_module.rarity_label(_eg[0])} offert !** "
+                            f"→ fais-le éclore via `/pet action:oeufs`"
+                        )
+                except Exception:
+                    pass
+            else:
+                # Phase 248c : petite chance d'œuf à CHAQUE réclamation de quêtes
+                try:
+                    if random.random() < 0.08:
+                        _eg = await pet_eggs_module.grant_event_egg(
+                            self.guild_id, self.user_id, source="quest")
+                        if _eg:
+                            lines.append(
+                                f"🥚 **Bonus :** un **œuf {pet_eggs_module.rarity_label(_eg[0])}** ! "
+                                f"→ `/pet action:oeufs`"
+                            )
+                except Exception:
+                    pass
             await i.followup.send("\n".join(lines), ephemeral=True)
 
             # Phase 150.2 : track style solo + saga contribution

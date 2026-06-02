@@ -80,12 +80,24 @@ def rarity_label(rarity: str) -> str:
     return f"{emo} {name}"
 
 
-def roll_egg_rarity() -> str:
-    """Tire une rareté d'œuf au hasard (pondéré, mythique rarissime)."""
-    total = sum(EGG_WEIGHTS.values())
+# Phase 248c : poids par TIER de source — plus l'event est rare, MEILLEURS sont
+# les œufs (mais le mythique reste toujours rarissime). 'base' = drops courants
+# (mob/trésor/quête), 'boss' = boss du jour/raid, 'grand' = world boss/climax.
+_TIER_WEIGHTS = {
+    "base":  EGG_WEIGHTS,
+    "boss":  {'common': 30.0, 'rare': 40.0, 'epic': 22.0, 'legendary': 6.0, 'mythic': 2.0},
+    "grand": {'common': 10.0, 'rare': 30.0, 'epic': 38.0, 'legendary': 17.0, 'mythic': 5.0},
+}
+
+
+def roll_egg_rarity(tier: str = "base") -> str:
+    """Tire une rareté d'œuf (pondéré). `tier` : base / boss / grand — plus l'event
+    est rare, meilleurs les œufs. Mythique toujours rarissime."""
+    weights = _TIER_WEIGHTS.get(tier, EGG_WEIGHTS)
+    total = sum(weights.values())
     r = random.uniform(0, total)
     acc = 0.0
-    for rar, w in EGG_WEIGHTS.items():
+    for rar, w in weights.items():
         acc += w
         if r <= acc:
             return rar
@@ -128,6 +140,14 @@ async def grant_egg(guild_id, user_id, rarity=None, source="event"):
     except Exception as ex:
         print(f"[pet_eggs grant_egg] {ex}")
         return None
+
+
+async def grant_event_egg(guild_id, user_id, source="event", tier="base"):
+    """Donne un œuf dont la rareté est tirée selon le TIER de la source — les
+    events rares (boss/grand) donnent de meilleurs œufs. Renvoie (rarity, hatch_at)
+    ou None. Convenience par-dessus grant_egg."""
+    return await grant_egg(guild_id, user_id,
+                           rarity=roll_egg_rarity(tier), source=source)
 
 
 async def list_eggs(guild_id, user_id):
