@@ -320,7 +320,7 @@ async def trigger_invasion(guild: discord.Guild) -> bool:
         try:
             await _active_ping_fn(
                 guild, ch, cap=10, cleanup_seconds=INVASION_DURATION_MIN * 60,
-                intro="🚨 **INVASION DU SERVEUR** — tous à l'arène,")
+                intro="🚨 **INVASION DU SERVEUR** — tous à l'arène,", notif_key='invasion')
         except Exception as ex:
             print(f"[world_invasion active_ping] {ex}")
 

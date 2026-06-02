@@ -233,11 +233,16 @@ async def hatch_egg(guild_id, user_id, egg_id):
                 # rareté sans familier défini → compensation
                 pet = None
 
-            # Marque l'œuf éclos
-            await db.execute(
-                "UPDATE pet_eggs SET hatched=1, result_pet_id=? WHERE id=?",
+            # Marque l'œuf éclos — claim ATOMIQUE (`AND hatched=0`) : si une course
+            # (double-clic 🐣) a déjà éclos cet œuf, rowcount=0 → on annule pour ne
+            # PAS donner deux fois le familier / les pièces de compensation (audit 2026).
+            _hc = await db.execute(
+                "UPDATE pet_eggs SET hatched=1, result_pet_id=? WHERE id=? AND hatched=0",
                 ((pet['id'] if pet else None), int(egg_id)),
             )
+            if getattr(_hc, "rowcount", 0) != 1:
+                await db.commit()
+                return {'error': "Cet œuf a déjà éclos."}
 
             if pet and not duplicate:
                 # Active automatiquement SEULEMENT si le joueur n'a aucun pet actif.

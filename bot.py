@@ -50151,7 +50151,9 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
 
     view = LayoutView(timeout=None)
     view.add_item(v2_container(*items, color=Palette.INFO))
-    await i.response.send_message(view=view)
+    # FIX audit : EPHEMERAL — la fiche contient les NOTES INTERNES staff
+    # (« 🗒️ Notes internes ») qui ne doivent PAS être visibles publiquement.
+    await i.response.send_message(view=view, ephemeral=True)
 
     await send_mod_log(i.guild, 'infractions', i.user, membre, extra=f"Total: {len(rows)} infractions")
 
@@ -77026,16 +77028,22 @@ async def bank_withdraw_cmd(i: discord.Interaction, deposit_id: int):
             days = 0
         interest = int(amount * 0.01 * days)
         total = amount + interest
+        # FIX audit : claim ATOMIQUE du retrait AVANT de créditer (anti double-spend).
+        # `WHERE id=? AND withdrawn=0` → si une course a déjà retiré, rowcount=0 et on
+        # ne crédite rien (avant : crédit puis UPDATE sans garde → double au double-clic).
+        async with get_db() as db:
+            _wc = await db.execute(
+                "UPDATE user_bank_deposits SET withdrawn=1, withdrawn_at=CURRENT_TIMESTAMP "
+                "WHERE id=? AND withdrawn=0",
+                (deposit_id,),
+            )
+            await db.commit()
+        if getattr(_wc, "rowcount", 0) != 1:
+            return await _safe_followup(i, content="⏱️ Déjà retiré.")
         try:
             await add_coins(i.guild.id, i.user.id, total)
         except Exception:
             pass
-        async with get_db() as db:
-            await db.execute(
-                "UPDATE user_bank_deposits SET withdrawn=1, withdrawn_at=CURRENT_TIMESTAMP WHERE id=?",
-                (deposit_id,),
-            )
-            await db.commit()
         await _safe_followup(
             i,
             content=(
@@ -78588,16 +78596,20 @@ class BankWithdrawSelectView(View):
                 days = 0
             interest = int(amount * 0.01 * days)
             total = amount + interest
+            # FIX audit : claim ATOMIQUE avant crédit (anti double-spend, cf. /bank_withdraw)
+            async with get_db() as db:
+                _wc2 = await db.execute(
+                    "UPDATE user_bank_deposits SET withdrawn=1, withdrawn_at=CURRENT_TIMESTAMP "
+                    "WHERE id=? AND withdrawn=0",
+                    (did,),
+                )
+                await db.commit()
+            if getattr(_wc2, "rowcount", 0) != 1:
+                return await _safe_followup(i, content="⏱️ Déjà retiré.")
             try:
                 await add_coins(i.guild.id, i.user.id, total)
             except Exception:
                 pass
-            async with get_db() as db:
-                await db.execute(
-                    "UPDATE user_bank_deposits SET withdrawn=1, withdrawn_at=CURRENT_TIMESTAMP WHERE id=?",
-                    (did,),
-                )
-                await db.commit()
             await _safe_followup(
                 i,
                 content=f"✅ Retiré : `{total:,}` 🪙 (principal {amount:,} + intérêts {interest:,} sur {days}j).",

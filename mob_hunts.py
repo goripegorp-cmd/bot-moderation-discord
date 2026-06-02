@@ -728,7 +728,7 @@ async def spawn_mob(guild: discord.Guild) -> bool:
                             f"défie en combat singulier —")
                     await _active_ping_fn(
                         guild, ch, cap=ping_cap, cooldown_hours=ping_cooldown,
-                        cleanup_seconds=900, intro=ping_intro)
+                        cleanup_seconds=900, intro=ping_intro, notif_key='mob')
                 except Exception as ex:
                     print(f"[spawn_mob active_ping] {ex}")
 
