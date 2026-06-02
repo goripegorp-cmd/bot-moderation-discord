@@ -10218,7 +10218,30 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
             except Exception as ex:
                 print(f"[boss_kill phase153/163/166] {ex}")
 
-            # Phase 163 : si drop saisonnier → DM digest "drop_collected"
+            # Phase 157 : community goal tracking
+            try:
+                await community_goals_module.record_action(
+                    i.guild.id, i.user.id, "boss_kill",
+                )
+            except Exception as ex:
+                print(f"[boss_kill community_goal] {ex}")
+
+            # Phase 144 : roll drop saisonnier sur le coup final (5% chance)
+            seasonal_drop = None
+            try:
+                seasonal_drop = season_module.maybe_drop_seasonal(extra_chance=0.05)
+                if seasonal_drop:
+                    await season_module.log_drop_claim(
+                        i.guild.id, i.user.id, seasonal_drop
+                    )
+            except Exception as ex:
+                print(f"[boss_raid seasonal_drop] {ex}")
+
+            # Phase 163 : si drop saisonnier → DM digest "drop_collected".
+            # Phase 248d FIX : ce bloc était AU-DESSUS du roll ci-dessus → il lisait
+            # `seasonal_drop` AVANT son assignation (NameError silencieux : le digest
+            # ne partait jamais). Déplacé ICI, après le roll. `seasonal_drop` est
+            # désormais toujours défini avant usage.
             if seasonal_drop:
                 try:
                     await dm_digest_module.enqueue(
@@ -10229,25 +10252,6 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
                     )
                 except Exception:
                     pass
-
-            # Phase 157 : community goal tracking
-            try:
-                await community_goals_module.record_action(
-                    i.guild.id, i.user.id, "boss_kill",
-                )
-            except Exception as ex:
-                print(f"[boss_kill community_goal] {ex}")
-
-            # Phase 144 : roll drop saisonnier sur le coup final (8% chance)
-            seasonal_drop = None
-            try:
-                seasonal_drop = season_module.maybe_drop_seasonal(extra_chance=0.05)
-                if seasonal_drop:
-                    await season_module.log_drop_claim(
-                        i.guild.id, i.user.id, seasonal_drop
-                    )
-            except Exception as ex:
-                print(f"[boss_raid seasonal_drop] {ex}")
 
             # Broadcast "Killing Blow" dans l'arène
             try:
