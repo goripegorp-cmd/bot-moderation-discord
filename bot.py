@@ -59149,6 +59149,15 @@ async def _ping_active_members(guild, channel, *, notif_key='boss_raid',
                     continue
             except Exception:
                 continue
+            # Phase 235.32 : RESPECTER les abonnements PAR TYPE (🔔). Si le membre
+            # a choisi des types précis (ex. « 🔔 Boss » seulement), on ne le ping
+            # PAS pour les autres types (mob/trésor…) même s'il est actif/rappelé.
+            try:
+                _cat = _EVENT_TYPE_TO_NOTIFY.get((notif_key or "").lower())
+                if _cat and await _member_blocks_category(m, _cat):
+                    continue
+            except Exception:
+                pass
             chosen.append(uid)
         # Phase 235.31 : MP PRIVÉ aux opt-in (events significatifs seulement —
         # boss/world boss/climax/invasion/daily boss ; throttlé + capé + cooldown
@@ -69528,6 +69537,35 @@ async def _member_wants_notif(guild_id: int, user_id: int, category: str) -> boo
     """Helper public — l'auto-promote l'utilise pour filtrer les pings."""
     prefs = await _get_notif_prefs(guild_id, user_id)
     return prefs.get(category, True)
+
+
+async def _member_blocks_category(member, category: str) -> bool:
+    """Phase 235.32 : RESPECTE LES CHOIX PAR TYPE (boutons 🔔). Si le membre s'est
+    abonné à des types PRÉCIS (≥1 rôle 🔔 par-type), on ne le ping QUE pour ces
+    types-là → s'il a pris « 🔔 Boss » uniquement, il ne sera PAS pingé comme
+    « membre actif » pour les mobs/trésors. S'il n'a AUCUN rôle 🔔 par-type, on ne
+    bloque pas (il garde le ping de visibilité des actifs). FAIL-OPEN.
+
+    `category` = catégorie de notif de l'event (boss/mob/chest/...), cf.
+    _EVENT_TYPE_TO_NOTIFY. Retourne True = NE PAS pinger ce membre pour cet event."""
+    try:
+        if member is None or not category:
+            return False
+        guild = getattr(member, "guild", None)
+        if guild is None:
+            return False
+        c = await cfg(guild.id)
+        member_role_ids = {r.id for r in getattr(member, "roles", [])}
+        subscribed = set()
+        any_type_role = False
+        for cat in _EVENT_NOTIFY_TYPES:
+            rid = int(c.get(f"notify_type_{cat}_id", 0) or 0)
+            if rid and rid in member_role_ids:
+                any_type_role = True
+                subscribed.add(cat)
+        if not any_type_role:
+            return False  # aucun choix par-type → ping de visibilité conservé
+        return category not in subscribed  # choix faits → bloque hors de ses types
 
 
 class NotifPrefsView(View):
