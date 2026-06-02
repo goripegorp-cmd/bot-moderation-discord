@@ -419,7 +419,7 @@ async def collect_ticket_stats(guild_id: int) -> dict:
         return out
     await _ensure_tables()
     try:
-        cutoff_7d = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        cutoff_7d = (datetime.now(timezone.utc) - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
         async with _get_db() as db:
             # Total + status
             async with db.execute(
@@ -669,9 +669,12 @@ async def auto_close_inactive_task():
         for guild in list(_bot.guilds):
             try:
                 days = await get_inactivity_days(guild.id)
+                # FIX audit : format ALIGNÉ sur SQLite CURRENT_TIMESTAMP
+                # ('YYYY-MM-DD HH:MM:SS'). `.isoformat()` produisait '…T…+00:00'
+                # → comparaison lexicographique faussée (fermait des tickets trop tôt).
                 cutoff = (
                     datetime.now(timezone.utc) - timedelta(days=days)
-                ).isoformat()
+                ).strftime('%Y-%m-%d %H:%M:%S')
                 async with _get_db() as db:
                     async with db.execute(
                         "SELECT t.channel_id FROM tickets t "
@@ -725,9 +728,10 @@ async def sla_reminder_task():
         return
     try:
         await _ensure_tables()
+        # FIX audit : format ALIGNÉ sur SQLite CURRENT_TIMESTAMP (cf. auto_close)
         cutoff = (
             datetime.now(timezone.utc) - timedelta(hours=SLA_UNCLAIMED_HOURS)
-        ).isoformat()
+        ).strftime('%Y-%m-%d %H:%M:%S')
         for guild in list(_bot.guilds):
             try:
                 async with _get_db() as db:
@@ -747,7 +751,10 @@ async def sla_reminder_task():
                 staff_mention = ""
                 try:
                     if _db_get is not None:
-                        rid = await _db_get(guild.id, 'ticket_staff', 0)
+                        # FIX audit : db_get prend 1 SEUL arg et renvoie le dict de
+                        # config (db_set en prend 3, pas db_get) → l'appel 3-args
+                        # levait un TypeError silencieux et le staff n'était JAMAIS ping.
+                        rid = (await _db_get(guild.id) or {}).get('ticket_staff', 0)
                         role = guild.get_role(int(rid)) if rid else None
                         if role:
                             staff_mention = role.mention + " "

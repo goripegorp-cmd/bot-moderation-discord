@@ -119,12 +119,17 @@ async def buy(guild_id, user_id, key):
             bal = int(rr[0]) if rr and rr[0] else 0
             if bal < price:
                 return False, f"Il te manque `{price - bal:,}` 🪙 (prix : `{price:,}` 🪙)."
-            # Débit + possession + équipe — MÊME transaction (pas de double-dépense)
-            owned.append(key)
-            await db.execute(
-                "UPDATE economy SET coins = coins - ? WHERE guild_id=? AND user_id=?",
-                (price, gid, uid),
+            # Débit ATOMIQUE et CONDITIONNEL (`coins >= price`) : empêche le double-clic
+            # de débiter deux fois ou de passer le solde NÉGATIF (audit 2026). Si une
+            # course a déjà débité, rowcount=0 → on annule l'achat (rien n'est donné).
+            _dc = await db.execute(
+                "UPDATE economy SET coins = coins - ? "
+                "WHERE guild_id=? AND user_id=? AND coins >= ?",
+                (price, gid, uid, price),
             )
+            if getattr(_dc, "rowcount", 0) != 1:
+                return False, f"Solde insuffisant ou achat déjà en cours (prix : `{price:,}` 🪙)."
+            owned.append(key)
             await db.execute(
                 "INSERT INTO user_cosmetics(guild_id, user_id, owned, active) "
                 "VALUES(?,?,?,?) ON CONFLICT(guild_id, user_id) DO UPDATE SET "
