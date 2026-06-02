@@ -50,6 +50,7 @@ DB :
 """
 from __future__ import annotations
 
+import asyncio
 import random
 import re
 from datetime import datetime, timedelta, timezone
@@ -705,6 +706,13 @@ async def generate_and_send_letters_for_guild(guild_id: int) -> int:
     npc_id = _pick_npc_for_week()
     week_key = _current_week_key()
     sent_count = 0
+    # FIX audit : THROTTLE + CAP anti mass-DM (ToS Discord). Sans espacement, on
+    # balançait les DM des abonnés en rafale → risque de rate-limit / flag « envoi
+    # massif ». On espace chaque DM (~1.2 s) et on borne le nombre par passage ;
+    # le surplus éventuel attend la semaine suivante (cadence hebdo, opt-in strict).
+    _MAX_LETTERS_PER_RUN = 40
+    _DM_THROTTLE_SECONDS = 1.2
+    attempts = 0
 
     # Lire les abonnés
     subscribers: list[int] = []
@@ -737,8 +745,14 @@ async def generate_and_send_letters_for_guild(guild_id: int) -> int:
             letter = await _pick_letter_for_mood(npc_id, mood)
             if not letter:
                 continue
+            # Cap par passage : ne jamais balancer des centaines de DM d'un coup.
+            if attempts >= _MAX_LETTERS_PER_RUN:
+                print(f"[npc_letters] cap {_MAX_LETTERS_PER_RUN} DM atteint "
+                      f"guild={guild_id} — reste reporté à la semaine prochaine")
+                break
             # Send
             delivered = await _send_letter_to_user(guild, uid, letter, npc_id)
+            attempts += 1
             # Log
             try:
                 async with _get_db() as db:
@@ -754,6 +768,8 @@ async def generate_and_send_letters_for_guild(guild_id: int) -> int:
                 pass
             if delivered:
                 sent_count += 1
+            # Throttle : espacer les DM (anti rate-limit / anti-flag mass-DM Discord).
+            await asyncio.sleep(_DM_THROTTLE_SECONDS)
         except Exception as ex:
             print(f"[generate_and_send g={guild_id} u={uid}] {ex}")
             continue

@@ -15910,6 +15910,11 @@ _SUPERVISED_LOOP_NAMES = [
     "auction_settler_task", "reversibles_failsafe", "persistent_msg_cleaner",
     "marketplace_expire_cleaner", "hub_orphan_cleaner_task", "db_optimizer_task",
     "comeback_dm_task", "combat_channel_sweeper",
+    # FIX audit : ces 2 boucles n'étaient PAS supervisées. voice_activity_ticker
+    # crédite l'activité VOCALE en temps réel — si elle meurt (exception non gérée),
+    # le vocal cesse d'être compté et des membres actifs en vocal se retrouvent
+    # BLOQUÉS au gate des events (la régression qu'on venait de corriger). À surveiller.
+    "voice_activity_ticker", "weekly_activity_recap_task",
 ]
 
 
@@ -33997,6 +34002,33 @@ async def add_coins(guild_id, user_id, amount):
             row = await cursor.fetchone()
             return row[0] if row else 0
 
+async def add_bank(guild_id, user_id, amount):
+    """Modifie le solde BANCAIRE de manière ATOMIQUE (relatif), comme add_coins.
+
+    FIX audit 2026 : les déductions de banque (forge / affinage / réparation /
+    trade) faisaient `update_user_economy(bank=<solde_lu> - X)` — une écriture
+    ABSOLUE qui écrase toute modif concurrente du solde (lost-update : double-clic
+    forge, ou tâche d'intérêts bancaires qui crédite au même instant). Ici on
+    applique un delta relatif borné à 0 → jamais négatif, jamais de perte d'écriture.
+    Renvoie le nouveau solde bancaire.
+    """
+    async with get_db() as db:
+        await db.execute(
+            'INSERT OR IGNORE INTO economy (guild_id, user_id, coins, bank, xp, level) VALUES (?, ?, 0, 0, 0, 1)',
+            (guild_id, user_id)
+        )
+        await db.execute(
+            'UPDATE economy SET bank = MAX(0, bank + ?) WHERE guild_id=? AND user_id=?',
+            (amount, guild_id, user_id)
+        )
+        await db.commit()
+        async with db.execute(
+            'SELECT bank FROM economy WHERE guild_id=? AND user_id=?',
+            (guild_id, user_id)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
 async def add_xp(guild_id, user_id, amount, channel=None):
     """Ajoute de l'XP et vérifie le level up"""
     eco = await get_user_economy(guild_id, user_id)
@@ -47130,10 +47162,7 @@ async def repair_cmd(i: discord.Interaction):
                     if from_hand > 0:
                         await add_coins(btn_i.guild.id, btn_i.user.id, -from_hand)
                     if from_bank > 0:
-                        await update_user_economy(
-                            btn_i.guild.id, btn_i.user.id,
-                            bank=bank2 - from_bank,
-                        )
+                        await add_bank(btn_i.guild.id, btn_i.user.id, -from_bank)
                     # Réparer
                     events2026.repair_all_inventory(inv2)
                     await _save_inventory(btn_i.guild.id, btn_i.user.id, inv2)
@@ -47878,7 +47907,7 @@ async def _finalize_trade(btn_i: discord.Interaction, trade_id: str, accept: boo
             if from_hand > 0:
                 await add_coins(guild_id, a_id, -from_hand)
             if from_bank > 0:
-                await update_user_economy(guild_id, a_id, bank=bank_a - from_bank)
+                await add_bank(guild_id, a_id, -from_bank)
             # Ajouter à B
             await add_coins(guild_id, b_id, coins_bonus)
 
@@ -48148,7 +48177,7 @@ async def _place_bid(btn_i: discord.Interaction, ah_id: int, increment_pct: int)
         if from_hand > 0:
             await add_coins(btn_i.guild.id, btn_i.user.id, -from_hand)
         if from_bank > 0:
-            await update_user_economy(btn_i.guild.id, btn_i.user.id, bank=bank - from_bank)
+            await add_bank(btn_i.guild.id, btn_i.user.id, -from_bank)
 
         # Rembourser l'ancien top_bidder
         if top_bidder_id and bids_count > 0:
@@ -48532,7 +48561,7 @@ async def craft_cmd(i: discord.Interaction):
                     if from_hand > 0:
                         await add_coins(btn_i.guild.id, btn_i.user.id, -from_hand)
                     if from_bank > 0:
-                        await update_user_economy(btn_i.guild.id, btn_i.user.id, bank=bank2 - from_bank)
+                        await add_bank(btn_i.guild.id, btn_i.user.id, -from_bank)
 
                     # Tenter l'affinage
                     success, result_item = events2026.attempt_refine(item_now)
@@ -48639,7 +48668,7 @@ async def craft_cmd(i: discord.Interaction):
                     if from_hand > 0:
                         await add_coins(btn_i.guild.id, btn_i.user.id, -from_hand)
                     if from_bank > 0:
-                        await update_user_economy(btn_i.guild.id, btn_i.user.id, bank=bank2 - from_bank)
+                        await add_bank(btn_i.guild.id, btn_i.user.id, -from_bank)
 
                     res = events2026.attempt_enhance(item_now)
                     inv2[self.slot_key] = item_now
@@ -49857,6 +49886,14 @@ async def direction_cmd(i: discord.Interaction, membre: discord.Member, duree: i
         return await i.response.send_message("❌ Impossible de restreindre le propriétaire du serveur.", ephemeral=True)
     if membre.top_role >= i.guild.me.top_role:
         return await i.response.send_message("❌ Ce membre a un rôle trop élevé pour être restreint.", ephemeral=True)
+    # FIX audit : garde de HIÉRARCHIE appelant-vs-cible (comme /mod warn et /mod mute).
+    # Sans elle, un modérateur autorisé pouvait restreindre un membre de rang ÉGAL ou
+    # SUPÉRIEUR au sien (escalade de privilège). L'owner et le super-owner passent outre.
+    if (membre.top_role >= i.user.top_role
+            and i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID):
+        return await i.response.send_message(
+            "❌ Vous ne pouvez pas restreindre un membre de rang égal ou supérieur au vôtre.",
+            ephemeral=True)
 
     await i.response.defer(ephemeral=True)
 
