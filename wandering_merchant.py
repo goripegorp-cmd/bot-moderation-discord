@@ -507,8 +507,11 @@ async def _process_purchase(btn_i: discord.Interaction, visit_id: int, item_id: 
             await _add_coins(btn_i.guild.id, btn_i.user.id, -from_hand)
         if from_bank > 0:
             async with _get_db() as db:
+                # FIX audit (re-check) : borne à 0 (`MAX(0, …)`) — comme add_bank dans
+                # bot.py. Sans le plancher, un débit concurrent ou un double-clic
+                # pouvait rendre la banque NÉGATIVE. Relatif → pas de lost-update.
                 await db.execute(
-                    "UPDATE economy SET bank=bank-? "
+                    "UPDATE economy SET bank = MAX(0, bank - ?) "
                     "WHERE guild_id=? AND user_id=?",
                     (from_bank, btn_i.guild.id, btn_i.user.id),
                 )
