@@ -69566,6 +69566,8 @@ async def _member_blocks_category(member, category: str) -> bool:
         if not any_type_role:
             return False  # aucun choix par-type → ping de visibilité conservé
         return category not in subscribed  # choix faits → bloque hors de ses types
+    except Exception:
+        return False  # FAIL-OPEN : en cas d'erreur, on ne bloque jamais
 
 
 class NotifPrefsView(View):
