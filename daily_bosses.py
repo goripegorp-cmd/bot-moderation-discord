@@ -1100,6 +1100,18 @@ async def resolve_daily_boss(event_id: int) -> Optional[dict]:
                 await _add_coins(guild_id, uid, coins)
         except Exception:
             pass
+        # Phase 248c : œuf de familier sur kill du boss du jour (top 3 = meilleur
+        # tier + chance plus haute). Récompense le farm des boss. FAIL-OPEN.
+        if killed:
+            try:
+                import random as _rnd
+                import pet_eggs as _pe
+                if _rnd.random() < (0.35 if i < 3 else 0.15):
+                    await _pe.grant_event_egg(
+                        guild_id, uid, source="daily_boss",
+                        tier=("grand" if i < 3 else "boss"))
+            except Exception:
+                pass
         rewards.append({"user_id": uid, "damage": dmg, "coins": coins,
                         "rank": i + 1})
 
