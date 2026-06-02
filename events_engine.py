@@ -216,7 +216,7 @@ WEAPONS.extend([
     {"name": "Arc de chasse",          "atk": 8,   "rarity": "commune",    "emoji": "🏹", "weight": 28},
     {"name": "Arc long elfique",       "atk": 16,  "rarity": "rare",       "emoji": "🏹", "weight": 13, "element": "ice"},
     {"name": "Arc-tempête",            "atk": 26,  "rarity": "épique",     "emoji": "🌩️", "weight": 6,  "element": "lightning"},
-    {"name": "Arc du Crépuscule",      "atk": 44,  "rarity": "légendaire", "emoji": "🌒", "weight": 2,  "element": "shadow"},
+    {"name": "Arc du Crépuscule Éternel","atk": 44,  "rarity": "légendaire", "emoji": "🌒", "weight": 2,  "element": "shadow"},
     {"name": "Arc Solaire d'Apollon",  "atk": 67,  "rarity": "mythique",   "emoji": "☀️", "weight": 1,  "element": "holy"},
     # 🪄 Bâtons / sceptres
     {"name": "Bâton d'apprenti",       "atk": 7,   "rarity": "commune",    "emoji": "🪄", "weight": 28},

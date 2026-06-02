@@ -160,7 +160,7 @@ async def get_score(guild_id, user_id) -> int:
 
 
 async def top_scores(guild_id, limit=10):
-    """Top N joueurs par score d'activité glissant (7 j) → [(user_id, points), …].
+    """Top N joueurs par score d'activité glissant (14 j) → [(user_id, points), …].
 
     Sert au classement « 🔥 Activité » (rend le gate d'accès aux events
     compétitif et visible). FAIL-OPEN : [] sur erreur."""
@@ -270,7 +270,7 @@ def render_bar(score, *, target=TIER_GRAND, segments=12) -> str:
 
 
 async def profile_summary_text(guild_id, user_id, *, is_self=True) -> str:
-    """Bloc texte « Mon activité (7 j) » : score + barre + paliers ouverts +
+    """Bloc texte « Mon activité (14 j) » : score + barre + paliers ouverts +
     prochain objectif clair (« +X messages pour débloquer 🟡 »).
 
     Réutilisable (profil, panneau dédié, récap hebdo). FAIL-OPEN : renvoie ''
@@ -309,7 +309,7 @@ async def profile_summary_text(guild_id, user_id, *, is_self=True) -> str:
                 lines.append(f"\n💬 **+{miss} pts** pour débloquer le **Grandiose 🔴**.")
             elif not window_full:
                 lines.append("\n🎁 _Grâce de démarrage : 🟡/🔴 ouverts en attendant "
-                             "7 j d'historique d'activité._")
+                             "14 j d'historique d'activité._")
             else:
                 lines.append("\n🌟 **Tous les events te sont ouverts — continue comme ça !**")
 

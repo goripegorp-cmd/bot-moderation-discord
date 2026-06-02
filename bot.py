@@ -57018,7 +57018,7 @@ class LeaderboardTabsView(LayoutView):
     async def _fetch_top(self):
         """Retourne la liste [ {user_id, value_str, extra}, ... ] selon l'onglet."""
         rows_out = []
-        # 🔥 Activité (7j) — Phase 240 : source = activity_system (connexion dédiée,
+        # 🔥 Activité (14j) — Phase 240 : source = activity_system (connexion dédiée,
         # gérée hors du `async with get_db()` partagé pour éviter toute imbrication).
         if self.tab == 'activity':
             try:
@@ -57027,7 +57027,7 @@ class LeaderboardTabsView(LayoutView):
                     rows_out.append({
                         'user_id': user_id,
                         'value_str': f"`{pts}` pts",
-                        'extra': '7 derniers jours',
+                        'extra': '14 derniers jours',
                     })
             except Exception as ex:
                 print(f"[LeaderboardTabsView activity] {ex}")
