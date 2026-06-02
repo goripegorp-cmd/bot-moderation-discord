@@ -206,6 +206,39 @@ WEAPONS = [
     {"name": "Aube Infinie",          "atk": 120,"rarity": "divine",     "emoji": "☀️", "weight": 1,  "element": "fire"},
 ]
 
+# Phase 235.30 : EXPANSION du catalogue d'armes (arcs / bâtons / grimoires /
+# mêlée) par rareté. MÊME schéma EXACT (name/atk/rarity/emoji/weight + element
+# optionnel) → aucune itération ne plante (random_weapon/_bias_pool lisent
+# w["rarity"] et w["weight"] en bracket). atk alignés sur les tiers existants ;
+# weight petit pour les hautes raretés = drop minuscule (rétention long terme).
+WEAPONS.extend([
+    # 🏹 Arcs
+    {"name": "Arc de chasse",          "atk": 8,   "rarity": "commune",    "emoji": "🏹", "weight": 28},
+    {"name": "Arc long elfique",       "atk": 16,  "rarity": "rare",       "emoji": "🏹", "weight": 13, "element": "ice"},
+    {"name": "Arc-tempête",            "atk": 26,  "rarity": "épique",     "emoji": "🌩️", "weight": 6,  "element": "lightning"},
+    {"name": "Arc du Crépuscule",      "atk": 44,  "rarity": "légendaire", "emoji": "🌒", "weight": 2,  "element": "shadow"},
+    {"name": "Arc Solaire d'Apollon",  "atk": 67,  "rarity": "mythique",   "emoji": "☀️", "weight": 1,  "element": "holy"},
+    # 🪄 Bâtons / sceptres
+    {"name": "Bâton d'apprenti",       "atk": 7,   "rarity": "commune",    "emoji": "🪄", "weight": 28},
+    {"name": "Sceptre de givre",       "atk": 15,  "rarity": "rare",       "emoji": "❄️", "weight": 13, "element": "ice"},
+    {"name": "Bâton de foudre",        "atk": 25,  "rarity": "épique",     "emoji": "⚡", "weight": 6,  "element": "lightning"},
+    {"name": "Sceptre du Vide",        "atk": 46,  "rarity": "légendaire", "emoji": "🕳️", "weight": 2,  "element": "shadow"},
+    {"name": "Bâton de l'Archimage",   "atk": 64,  "rarity": "mythique",   "emoji": "🌌", "weight": 1,  "element": "lightning"},
+    # 📖 Grimoires
+    {"name": "Grimoire poussiéreux",   "atk": 9,   "rarity": "commune",    "emoji": "📖", "weight": 26},
+    {"name": "Grimoire des flammes",   "atk": 18,  "rarity": "rare",       "emoji": "📕", "weight": 12, "element": "fire"},
+    {"name": "Codex maudit",           "atk": 28,  "rarity": "épique",     "emoji": "📓", "weight": 6,  "element": "poison"},
+    {"name": "Grimoire interdit",      "atk": 47,  "rarity": "légendaire", "emoji": "📚", "weight": 2,  "element": "shadow"},
+    {"name": "Livre de la Genèse",     "atk": 70,  "rarity": "mythique",   "emoji": "📜", "weight": 1,  "element": "holy"},
+    # ⚔️ Mêlée additionnelle
+    {"name": "Hachette ébréchée",      "atk": 6,   "rarity": "commune",    "emoji": "🪓", "weight": 30},
+    {"name": "Masse cloutée",          "atk": 12,  "rarity": "rare",       "emoji": "🔨", "weight": 14},
+    {"name": "Lance du dragon",        "atk": 24,  "rarity": "épique",     "emoji": "🐉", "weight": 6,  "element": "fire"},
+    {"name": "Faux de l'âme",          "atk": 48,  "rarity": "légendaire", "emoji": "💀", "weight": 2,  "element": "shadow"},
+    {"name": "Marteau du Titan",       "atk": 69,  "rarity": "mythique",   "emoji": "🌋", "weight": 1,  "element": "fire"},
+    {"name": "Excalibur Véritable",    "atk": 115, "rarity": "divine",     "emoji": "🗡️", "weight": 1,  "element": "holy"},
+])
+
 # Phase 180 : ÉLÉMENTS d'armes — proc en combat (DoT-flavored : burst élémentaire
 # bonus appliqué au coup, fréquence + puissance liées à la rareté de l'arme).
 ELEMENTS = {
@@ -267,6 +300,19 @@ ARMOR = [
     # Divines
     {"name": "Égide Cosmique",        "def": 80, "rarity": "divine",     "emoji": "🌠", "weight": 1},
 ]
+
+# Phase 235.30 : EXPANSION armures (même schéma EXACT name/def/rarity/emoji/weight).
+ARMOR.extend([
+    {"name": "Veste rembourrée",       "def": 3,  "rarity": "commune",    "emoji": "🧥", "weight": 30},
+    {"name": "Harnais de cuir clouté", "def": 6,  "rarity": "commune",    "emoji": "🦺", "weight": 26},
+    {"name": "Plastron de garde",      "def": 10, "rarity": "rare",       "emoji": "🛡️", "weight": 14},
+    {"name": "Robe du mage de guerre", "def": 12, "rarity": "rare",       "emoji": "🧙", "weight": 12},
+    {"name": "Armure de glace",        "def": 19, "rarity": "épique",     "emoji": "❄️", "weight": 6},
+    {"name": "Carapace du golem",      "def": 21, "rarity": "épique",     "emoji": "🗿", "weight": 5},
+    {"name": "Parure du Léviathan",    "def": 33, "rarity": "légendaire", "emoji": "🐙", "weight": 2},
+    {"name": "Armure du Vide",         "def": 52, "rarity": "mythique",   "emoji": "🕳️", "weight": 1},
+    {"name": "Carapace Cosmique",      "def": 85, "rarity": "divine",     "emoji": "🌌", "weight": 1},
+])
 
 RARITY_COLORS = {
     "commune":    0x95A5A6,
