@@ -8516,14 +8516,45 @@ class EventsHubPanelV2(LayoutView):
         b_back = Button(label="🔙 Retour", style=discord.ButtonStyle.secondary, custom_id="evhub_back")
         b_back.callback = self._cb_back
 
+        # Phase 247/248 : bloc OWNER — visibilité du système d'ACTIVITÉ (le gate qui
+        # ouvre les events) + quick-action. Lecture seule : les seuils restent
+        # pilotés par le code (valeurs réglées) pour t'éviter de re-casser le gate.
+        act_lines = [
+            f"🟢 Base `{activity_system_module.TIER_BASE}` · "
+            f"🟡 Boss `{activity_system_module.TIER_INTER}` · "
+            f"🔴 Grandiose `{activity_system_module.TIER_GRAND}` pts "
+            f"(score glissant sur {activity_system_module.ROLLING_DAYS} j)",
+            "_1 message = 1 pt · 1 min vocal = 1 pt (temps réel) — l'un OU l'autre suffit._",
+        ]
+        try:
+            _podium = await seasonal_titles_module.current_podium(self.g.id, 3)
+            if _podium:
+                _medals = ["🥇", "🥈", "🥉"]
+                _pod = " · ".join(
+                    f"{_medals[idx]} <@{uid}> `{pts}`"
+                    for idx, (uid, pts) in enumerate(_podium)
+                )
+                act_lines.append(f"**Podium d'activité du mois :** {_pod}")
+        except Exception:
+            pass
+
+        b_force = Button(
+            label="🎲 Forcer un Boss Raid",
+            style=discord.ButtonStyle.success,
+            custom_id="evhub_force_boss",
+        )
+        b_force.callback = self._cb_force_boss
+
         items = [
             v2_title("🎪 Configuration des événements"),
             v2_subtitle("État de chaque événement ci-dessous — choisis-en un dans le menu pour le configurer"),
             v2_divider(),
             v2_body("\n".join(lines)),
             v2_divider(),
+            v2_body("**📊 Système d'activité (clé d'accès aux events)**\n" + "\n".join(act_lines)),
+            v2_divider(),
             discord.ui.ActionRow(sel),
-            discord.ui.ActionRow(b_back),
+            discord.ui.ActionRow(b_force, b_back),
         ]
         self.add_item(v2_container(*items, color=Palette.PRIMARY))
 
@@ -8550,6 +8581,32 @@ class EventsHubPanelV2(LayoutView):
     async def _cb_back(self, i):
         v = MainPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
+
+    async def _cb_force_boss(self, i):
+        # Quick-action owner : forcer un Boss Raid (réutilise _start_boss_raid,
+        # exactement comme /owner event). Gate owner/super-owner. FAIL-OPEN.
+        if i.user.id != self.g.owner_id and i.user.id != SUPER_OWNER_ID:
+            return await i.response.send_message(
+                "⛔ Réservé au propriétaire du serveur.", ephemeral=True
+            )
+        try:
+            await i.response.defer(ephemeral=True)
+            result = await _start_boss_raid(self.g, i.user.id, manual=True)
+            if result.get('ok'):
+                await i.followup.send(
+                    f"⚔️ **Boss Raid lancé !** → <#{result['arena_channel_id']}>",
+                    ephemeral=True,
+                )
+            else:
+                await i.followup.send(
+                    f"❌ Impossible : `{result.get('error', '?')}`", ephemeral=True
+                )
+        except Exception as ex:
+            print(f"[EventsHubPanelV2 _cb_force_boss] {ex}")
+            try:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
 
 
 class EventTypeConfigPanelV2(LayoutView):
