@@ -58564,16 +58564,28 @@ async def _do_wheel_spin(i: discord.Interaction):
     luck = await _apply_pet_bonus(i.guild.id, i.user.id, 'wheel_luck')
     reward = eng41.spin_wheel(luck_bonus=luck)
 
-    # Persister le spin
+    # Persister le spin — CLAIM ATOMIQUE (Phase 251.6) : 2 clics rapprochés ne
+    # donnent PAS 2 spins le même jour. On insère la ligne si absente (INSERT OR
+    # IGNORE), puis on n'incrémente QUE si ≥ 24 h depuis le dernier spin —
+    # julianday() compare quel que soit le format stocké (T-ISO ou espace).
+    # rowcount=0 → cooldown actif / course perdue → on s'arrête AVANT add_coins.
+    _now_s = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
     async with get_db() as db:
         await db.execute(
-            'INSERT INTO wheel_log(guild_id, user_id, last_spin_at, total_spins) VALUES(?,?,?,1) '
-            'ON CONFLICT(guild_id, user_id) DO UPDATE SET '
-            'last_spin_at=?, total_spins=total_spins+1',
-            (i.guild.id, i.user.id, datetime.now(timezone.utc).isoformat(),
-             datetime.now(timezone.utc).isoformat()),
+            'INSERT OR IGNORE INTO wheel_log(guild_id, user_id, last_spin_at, total_spins) '
+            'VALUES(?,?,NULL,0)',
+            (i.guild.id, i.user.id),
+        )
+        _wc = await db.execute(
+            'UPDATE wheel_log SET last_spin_at=?, total_spins=total_spins+1 '
+            'WHERE guild_id=? AND user_id=? '
+            'AND (last_spin_at IS NULL OR julianday(?) - julianday(last_spin_at) >= 1.0)',
+            (_now_s, i.guild.id, i.user.id, _now_s),
         )
         await db.commit()
+    if getattr(_wc, "rowcount", 0) != 1:
+        return await i.followup.send(
+            "⏱️ Déjà spin aujourd'hui ! Reviens dans 24 h.", ephemeral=True)
 
     # Tracker
     await _incr_stat_p41(i.guild.id, i.user.id, 'wheel_spins', 1)
