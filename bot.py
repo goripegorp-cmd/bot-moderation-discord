@@ -68188,7 +68188,27 @@ async def _get_season_progress(guild_id: int, user_id: int) -> dict:
         return {'season_id': season_id, 'points': 0, 'claimed': [], 'role_id': 0}
 
 
+_reward_claim_locks: dict = {}  # Phase 251.8 : verrou par (type,guild,user) anti double-clic
+
+
+def _reward_lock(key):
+    """asyncio.Lock partagé pour `key` — sérialise les claims concurrents d'un même
+    joueur (le bot = 1 process/1 event loop) → le read-modify-write des listes de
+    tiers/quêtes hebdo/mensuelles ne peut plus payer deux fois sur un double-clic."""
+    lk = _reward_claim_locks.get(key)
+    if lk is None:
+        lk = _reward_claim_locks[key] = asyncio.Lock()
+    return lk
+
+
 async def _claim_season_tiers(guild, user_id: int) -> dict:
+    """Wrapper anti double-clic : sérialise les réclamations concurrentes du même
+    joueur AVANT le read-modify-write de la liste de tiers (Phase 251.8)."""
+    async with _reward_lock(('season', guild.id, user_id)):
+        return await _claim_season_tiers_locked(guild, user_id)
+
+
+async def _claim_season_tiers_locked(guild, user_id: int) -> dict:
     """Reclame tous les tiers atteints mais pas encore claim. Retourne :
     {'claimed': [tier dicts], 'coins_total': int, 'role_granted': str?}.
     """
@@ -68498,6 +68518,12 @@ async def _update_weekly_progress(guild_id: int, user_id: int, metric: str, amou
 
 
 async def _claim_weekly_quests(guild_id: int, user_id: int) -> dict:
+    """Wrapper anti double-clic (Phase 251.8) : sérialise les claims concurrents."""
+    async with _reward_lock(('weekly', guild_id, user_id)):
+        return await _claim_weekly_quests_locked(guild_id, user_id)
+
+
+async def _claim_weekly_quests_locked(guild_id: int, user_id: int) -> dict:
     """Claim toutes les weekly quests complétées."""
     week = _current_week_str()
     coins = 0
@@ -68602,6 +68628,12 @@ async def _update_monthly_progress(guild_id: int, user_id: int, metric: str, amo
 
 
 async def _claim_monthly_quest(guild_id: int, user_id: int) -> dict:
+    """Wrapper anti double-clic (Phase 251.8) : sérialise les claims concurrents."""
+    async with _reward_lock(('monthly', guild_id, user_id)):
+        return await _claim_monthly_quest_locked(guild_id, user_id)
+
+
+async def _claim_monthly_quest_locked(guild_id: int, user_id: int) -> dict:
     month = _current_month_str()
     try:
         async with get_db() as db:
