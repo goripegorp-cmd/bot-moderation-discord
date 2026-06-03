@@ -12244,6 +12244,26 @@ async def _mark_personal_event_completed(guild_id: int, user_id: int, log_id: in
         print(f"[_mark_personal_event_completed] {ex}")
 
 
+async def _claim_personal_event(log_id: int) -> bool:
+    """Phase 251.4 — CLAIM ATOMIQUE d'un event perso (anti argent-infini).
+    Passe `claimed` 0→1 en UNE requête conditionnelle et renvoie True UNIQUEMENT si
+    ce claim a réussi (= 1re fois). Empêche : ré-ouverture du même event, double-clic,
+    re-réponse après reboot — tout vit en DB, pas en RAM. À appeler AVANT toute
+    distribution de pièces. FAIL-CLOSED : en cas d'erreur on renvoie False (on ne
+    distribue PAS — mieux vaut rater une récompense que créer de l'argent infini)."""
+    try:
+        async with get_db() as db:
+            cur = await db.execute(
+                'UPDATE personal_events_log SET claimed=1 WHERE id=? AND claimed=0',
+                (int(log_id),),
+            )
+            await db.commit()
+            return getattr(cur, "rowcount", 0) == 1
+    except Exception as ex:
+        print(f"[_claim_personal_event] {ex}")
+        return False
+
+
 class PersonalEventOpenView(View):
     """View PERSISTANTE (timeout=None) pour les événements personnels.
 
@@ -12314,6 +12334,10 @@ class PersonalEventOpenView(View):
 
             # Type : gift et tip → reward direct
             if ev_type == 'gift':
+                # CLAIM ATOMIQUE avant de payer (anti double-clic / ré-ouverture).
+                if not await _claim_personal_event(self.event_log_id):
+                    return await i.followup.send(
+                        "⚠️ Tu as déjà récupéré cet événement.", ephemeral=True)
                 coins = int(ev_data.get('coins', 50))
                 try:
                     await add_coins(guild_id, i.user.id, coins)
@@ -12332,6 +12356,10 @@ class PersonalEventOpenView(View):
                 return
 
             if ev_type == 'tip':
+                # CLAIM ATOMIQUE avant de payer (anti double-clic / ré-ouverture).
+                if not await _claim_personal_event(self.event_log_id):
+                    return await i.followup.send(
+                        "⚠️ Tu as déjà récupéré cet événement.", ephemeral=True)
                 coins = int(ev_data.get('coins', 50))
                 try:
                     await add_coins(guild_id, i.user.id, coins)
@@ -12411,6 +12439,12 @@ class _PersonalQuestionView(View):
             if self.answered:
                 return await i.response.send_message("⚠️ Tu as déjà répondu.", ephemeral=True)
             self.answered = True
+            # CLAIM ATOMIQUE en DB (anti argent-infini) : le flag self.answered ne vit
+            # qu'en RAM → perdu si la vue est recréée en RÉ-OUVRANT l'event (le bug).
+            # Le claim DB sur le log_id est la VRAIE garde : 1 récompense / event, à vie.
+            if not await _claim_personal_event(self.log_id):
+                return await i.response.send_message(
+                    "⚠️ Tu as déjà fait cet événement.", ephemeral=True)
 
             if idx == self.correct_idx:
                 try:
