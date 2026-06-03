@@ -62449,13 +62449,18 @@ class RiddleAnswerView(View):
                 # Marquer la réponse
                 async with get_db() as db:
                     if is_correct and not first_winner:
-                        # Premier à trouver !
-                        await db.execute(
+                        # Premier à trouver ! CLAIM ATOMIQUE (`AND first_winner_id IS NULL`
+                        # + rowcount) : 2 bonnes réponses quasi-simultanées ne donnent PAS
+                        # 2 jackpots (course au double-clic / 2 joueurs en même temps).
+                        _wc = await db.execute(
                             'UPDATE daily_riddles_log SET first_winner_id=?, winner_at=CURRENT_TIMESTAMP, '
-                            'answered_count=answered_count+1 WHERE guild_id=? AND day=?',
+                            'answered_count=answered_count+1 WHERE guild_id=? AND day=? AND first_winner_id IS NULL',
                             (i.user.id, i.guild.id, day),
                         )
                         await db.commit()
+                        if getattr(_wc, "rowcount", 0) != 1:
+                            return await _safe_followup(
+                                i, content="✅ Quelqu'un vient de trouver juste avant toi !")
 
                         # Phase 95 AMPLIFY : Streak system
                         # Compter combien de jours CONSÉCUTIFS user a gagné (avant aujourd'hui)
