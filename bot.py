@@ -11311,18 +11311,6 @@ class TreasureClaimView(View):
                         ephemeral=True)
             except Exception:
                 pass
-            # Phase 235.26 : chance d'un ŒUF de familier (acquisition via events).
-            try:
-                import random as _rnd
-                if _rnd.random() < 0.15:
-                    _eg = await pet_eggs_module.grant_egg(i.guild.id, i.user.id, source="treasure")
-                    if _eg:
-                        await i.followup.send(
-                            f"🥚 **Bonus !** Un **œuf {pet_eggs_module.rarity_label(_eg[0])}** "
-                            f"est apparu — fais-le éclore via `/pet action:oeufs`.",
-                            ephemeral=True)
-            except Exception:
-                pass
             tr = pool[self.treasure_idx]
             if tr.get('claimed_by'):
                 claimer = i.guild.get_member(int(tr['claimed_by']))
@@ -11334,6 +11322,22 @@ class TreasureClaimView(View):
                 return await i.followup.send("🤖 Les bots ne peuvent pas réclamer.", ephemeral=True)
 
             tr['claimed_by'] = i.user.id
+
+            # Phase 235.26 : chance d'un ŒUF de familier — APRÈS le claim (FIX Phase
+            # 251.6 : avant, le tirage 15% se faisait sur CHAQUE clic, AVANT le check
+            # « déjà réclamé » → tous les perdants/re-clics farmaient des œufs. Désormais
+            # SEUL le gagnant qui vient de poser claimed_by tire son œuf bonus).
+            try:
+                import random as _rnd
+                if _rnd.random() < 0.15:
+                    _eg = await pet_eggs_module.grant_egg(i.guild.id, i.user.id, source="treasure")
+                    if _eg:
+                        await i.followup.send(
+                            f"🥚 **Bonus !** Un **œuf {pet_eggs_module.rarity_label(_eg[0])}** "
+                            f"est apparu — fais-le éclore via `/pet action:oeufs`.",
+                            ephemeral=True)
+            except Exception:
+                pass
 
             # Distribuer la loot immédiatement
             coins = int(tr.get('coins', 0))
@@ -57809,11 +57813,16 @@ async def _claim_completed_quests(guild_id: int, user_id: int) -> dict:
             tmpl = next((t for t in eng41.DAILY_QUEST_TEMPLATES if t.id == quest_id), None)
             if not tmpl:
                 continue
-            await db.execute(
+            # CLAIM ATOMIQUE (Phase 251.6) : `AND claimed=0` + rowcount → 2 clics
+            # rapprochés sur « Réclamer » ne paient PAS deux fois (la 2e course voit
+            # claimed=1 déjà posé → rowcount=0 → on saute, pas d'accumulation).
+            _qc = await db.execute(
                 'UPDATE daily_quest_progress SET claimed=1 '
-                'WHERE guild_id=? AND user_id=? AND day=? AND quest_id=?',
+                'WHERE guild_id=? AND user_id=? AND day=? AND quest_id=? AND claimed=0',
                 (guild_id, user_id, today, quest_id),
             )
+            if getattr(_qc, "rowcount", 0) != 1:
+                continue
             coins_total += tmpl.reward_coins
             xp_total += tmpl.reward_xp
             claimed_count += 1
@@ -76753,27 +76762,28 @@ class AdventClaimView(View):
                 day = datetime.now(ZoneInfo("Europe/Paris")).day
             except Exception:
                 day = datetime.now(timezone.utc).day
-            # Déjà claim aujourd'hui ?
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT 1 FROM advent_calendar WHERE guild_id=? AND day=? AND user_id=?",
-                    (i.guild.id, day, i.user.id),
-                ) as cur:
-                    if await cur.fetchone():
-                        return await _safe_followup(i, content="⏱️ Tu as déjà claim aujourd'hui. Reviens demain !")
             # Reward random selon jour (plus tu avances, plus c'est gros)
             base = 50 + day * 10
             reward = base + random.randint(0, base // 2)
+            # CLAIM ATOMIQUE (Phase 251.6, anti double-clic) : on INSÈRE la ligne du
+            # jour UNIQUEMENT si elle n'existe pas, et on ne paie QUE si l'insert a
+            # gagné (rowcount=1). SQLite sérialise les écritures → 2 clics rapprochés
+            # ne donnent JAMAIS 2 récompenses. Plus de SELECT-puis-INSERT racy.
+            async with get_db() as db:
+                cur = await db.execute(
+                    "INSERT INTO advent_calendar(guild_id, day, user_id, reward_coins) "
+                    "SELECT ?, ?, ?, ? WHERE NOT EXISTS ("
+                    "SELECT 1 FROM advent_calendar WHERE guild_id=? AND day=? AND user_id=?)",
+                    (i.guild.id, day, i.user.id, reward,
+                     i.guild.id, day, i.user.id),
+                )
+                await db.commit()
+            if getattr(cur, "rowcount", 0) != 1:
+                return await _safe_followup(i, content="⏱️ Tu as déjà claim aujourd'hui. Reviens demain !")
             try:
                 await add_coins(i.guild.id, i.user.id, reward)
             except Exception:
                 pass
-            async with get_db() as db:
-                await db.execute(
-                    "INSERT INTO advent_calendar(guild_id, day, user_id, reward_coins) VALUES(?,?,?,?)",
-                    (i.guild.id, day, i.user.id, reward),
-                )
-                await db.commit()
             await _safe_followup(
                 i,
                 content=(
