@@ -16,13 +16,21 @@ except ModuleNotFoundError:
 # Réversible SANS redeploy : variable d'env VERBOSE_LOGS=1 → tout réafficher.
 import sys as _sys
 import os as _os
+import re as _re
 import logging
 
 class _QuietStdout:
-    _ERR = ('error', 'erreur', 'exception', 'traceback', 'forbidden', 'failed',
-            'échec', 'echec', 'warning', 'warn', 'critical', 'fatal', 'denied',
-            'unclosed', 'cannot', 'invalid', 'crash', 'httpexception', 'refus',
-            '❌', '⚠', '🛑', '‼')
+    # Marqueurs d'erreur FORTS (peu ambigus). NB : on NE met PAS le mot « error »
+    # nu — il apparaît dans des noms anodins (ex. « error_logger ») et causait des
+    # faux positifs. Les vraies erreurs restent gardées par le fail-safe (tag
+    # inconnu en minuscules, cf. _emit) ou par ces marqueurs.
+    _ERR = ('traceback', 'exception', 'forbidden', 'failed', 'critical', 'fatal',
+            'denied', 'errno', 'timeout', 'unclosed', 'httpexception', 'erreur',
+            'échec', 'echec', 'warning', '❌', '⚠', '🛑', '‼')
+    # Tag de STATUT tout en MAJUSCULES (ex. [DB OPTIMIZER], [CAMOUFLAGE APPLY]) =
+    # info de routine → masqué. Les tags d'ERREUR sont en minuscules (nom de
+    # fonction/module, ex. [pet_eggs hatch_egg]) → gardés par le fail-safe (règle 4).
+    _INFO_TAG_RE = _re.compile(r'^\[[A-Z0-9 ._/:+\-]{2,}\]')
     _INFO_START = ('✅', '🚀', '🔒', '👑', '🎙', '🛡', '🎮', '🗑', '👥', '📋',
                    '🎵', '🔴', '🔗', '✨', '🧹', '🎤', '🌐', '📢', '🎁', '📨',
                    '🛒', '🔊', '⚔', '🏆', '🎯', '📊', '💰', '🎉', '🐾', '🥚',
@@ -36,13 +44,22 @@ class _QuietStdout:
         self._buf = ''
 
     def _emit(self, line):
-        # True = ligne à AFFICHER. Erreur connue → oui. Sinon INFO connue → non.
-        # Tout le reste (inconnu) → oui (fail-safe : on ne masque jamais l'inattendu).
-        low = line.lower()
+        # True = ligne à AFFICHER.
+        st = line.strip()
+        if not st:
+            return False
+        low = st.lower()
+        # 1) marqueur d'erreur fort → toujours afficher
         if any(m in low for m in self._ERR):
             return True
-        st = line.strip()
-        return bool(st) and not any(st.startswith(p) for p in self._INFO_START)
+        # 2) préfixe INFO connu (emoji succès, liste de commandes, tag de boot) → masquer
+        if any(st.startswith(p) for p in self._INFO_START):
+            return False
+        # 3) tag de statut tout en MAJUSCULES ([DB OPTIMIZER], [CAMOUFLAGE APPLY]…) → masquer
+        if self._INFO_TAG_RE.match(st):
+            return False
+        # 4) inconnu (souvent un except « [module_func] … » en minuscules) → afficher (fail-safe)
+        return True
 
     def write(self, s):
         # Bufferise par LIGNE : print() écrit le texte puis le « \n » séparément,
