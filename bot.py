@@ -10599,9 +10599,22 @@ async def _handle_pet_assist(i: discord.Interaction, event_id: int):
             pass
 
 
-async def _refresh_boss_message(guild, event_id: int):
-    """Met à jour le message du boss avec les nouveaux HP."""
+_br_panel_refresh: dict[int, float] = {}  # Phase 251.3 anti-429 : throttle refresh boss raid
+
+
+async def _refresh_boss_message(guild, event_id: int, *, force: bool = False):
+    """Met à jour le message du boss avec les nouveaux HP.
+    Phase 251.3 — ANTI-429 : THROTTLE (1 refresh / 4 s sauf force) — sinon chaque
+    clic d'attaque ré-éditait le panneau → tempête de 429 sous le feu."""
     try:
+        if not force:
+            try:
+                _now = datetime.now(timezone.utc).timestamp()
+                if _now - _br_panel_refresh.get(event_id, 0.0) < 4.0:
+                    return
+                _br_panel_refresh[event_id] = _now
+            except Exception:
+                pass
         async with get_db() as db:
             async with db.execute(
                 'SELECT boss_json, arena_channel_id, arena_message_id, ends_at FROM events WHERE id=?',
@@ -10630,10 +10643,8 @@ async def _refresh_boss_message(guild, event_id: int):
         ch = guild.get_channel(ch_id)
         if not ch:
             return
-        try:
-            msg = await ch.fetch_message(msg_id)
-        except Exception:
-            return
+        # PartialMessage : édite SANS fetch (PATCH seul, plus de GET) — anti-429.
+        msg = ch.get_partial_message(msg_id)
 
         # Phase 74+75 : edit avec LayoutView V2 (HP + ATTAQUER + Top + phase warning live)
         # Phase 75 : récupérer la phase_warning active depuis cache si présente
@@ -61617,13 +61628,27 @@ async def _build_world_boss_embed(guild, wb_id: int) -> Optional[discord.Embed]:
         return None
 
 
-async def _refresh_world_boss_message(guild, wb_id: int):
+_wb_panel_refresh: dict[int, float] = {}  # Phase 251.3 anti-429 : throttle refresh world boss
+
+
+async def _refresh_world_boss_message(guild, wb_id: int, *, force: bool = False):
     """Update le message d'arène avec le nouvel HP.
 
     Phase 78 : tente d'abord LayoutView V2 (WorldBossArenaLayoutV2), fallback
     embed legacy si la construction échoue ou si Discord rejette la V2.
+    Phase 251.3 — ANTI-429 : THROTTLE (1 refresh / 4 s sauf force) + édition via
+    PartialMessage (PATCH seul, plus de GET fetch_message) → fini la tempête de 429
+    quand beaucoup de joueurs attaquent en rafale.
     """
     try:
+        if not force:
+            try:
+                _now = datetime.now(timezone.utc).timestamp()
+                if _now - _wb_panel_refresh.get(wb_id, 0.0) < 4.0:
+                    return
+                _wb_panel_refresh[wb_id] = _now
+            except Exception:
+                pass
         async with get_db() as db:
             async with db.execute(
                 'SELECT arena_channel_id, arena_message_id FROM world_bosses WHERE id=?',
@@ -61638,10 +61663,8 @@ async def _refresh_world_boss_message(guild, wb_id: int):
         ch = guild.get_channel(int(ch_id))
         if not ch:
             return
-        try:
-            msg = await ch.fetch_message(int(msg_id))
-        except Exception:
-            return
+        # PartialMessage : édite SANS fetch (PATCH seul, plus de GET).
+        msg = ch.get_partial_message(int(msg_id))
         # Phase 78 : tenter LayoutView V2 d'abord
         try:
             layout = await _build_world_boss_layout(guild, wb_id)

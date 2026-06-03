@@ -985,17 +985,18 @@ async def _process_attack(btn_i: discord.Interaction, mob_id: int):
             return
 
         # Edit le message pour refléter new HP
+        # Phase 251.3 — ANTI-429 : édition via PartialMessage (PATCH seul, ZÉRO GET
+        # fetch_message) → plus de tempête de `GET .../messages` 429 sous le feu.
         try:
             guild = btn_i.guild
             ch = guild.get_channel(int(ch_id))
             if ch and msg_id:
                 try:
-                    msg = await ch.fetch_message(int(msg_id))
                     new_layout = await _build_updated_layout(
                         mob_def, new_hp, int(hp_max), bool(is_elite), mob_id
                     )
                     if new_layout:
-                        await msg.edit(view=new_layout)
+                        await ch.get_partial_message(int(msg_id)).edit(view=new_layout)
                 except discord.NotFound:
                     pass
                 except Exception as ex:

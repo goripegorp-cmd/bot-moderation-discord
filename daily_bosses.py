@@ -80,6 +80,15 @@ _event_mention_fn = None  # Phase 235.24 : async (guild, type) -> mention rôles
 _DBOSS_WARMUP_SECONDS = 20
 _warmup_until: dict[int, float] = {}
 
+# Phase 251.3 — ANTI-429 : avant, CHAQUE clic d'attaque re-fetchait (GET) + ré-éditait
+# (PATCH) le panneau → sous le feu (beaucoup d'attaquants rapprochés) = TEMPÊTE de
+# 429 (rate limit Discord) sur ce message. On THROTTLE le refresh : au plus 1 fois
+# toutes les N s (les attaques rapprochées sont coalescées ; l'attaquant voit ses
+# HP exacts dans sa réponse privée de toute façon). + édition via PartialMessage
+# (PATCH seul, ZÉRO GET). { event_id: epoch_dernier_refresh }.
+_last_panel_refresh: dict[int, float] = {}
+_PANEL_REFRESH_MIN_INTERVAL = 4.0
+
 # Phase 196 : mention intelligente rotative — paramètres anti-spam.
 PING_MAX_USERS = 8          # cap dur de mentions par spawn (TOS Discord)
 PING_COOLDOWN_HOURS = 8     # un même membre n'est ping qu'une fois / ~8h
@@ -861,10 +870,23 @@ async def _post_boss_panel(
         return None
 
 
-async def _refresh_boss_panel(guild: discord.Guild, event_id: int) -> None:
+async def _refresh_boss_panel(guild: discord.Guild, event_id: int, *,
+                              force: bool = False) -> None:
     """Met à jour le panneau du boss (HP/dégâts) SANS rien retirer : Phase 235.16,
     on réutilise le builder COMPLET → le descriptif + butin + how-to-play RESTENT
-    affichés (avant, le refresh les décapait → « le message disparaît »)."""
+    affichés (avant, le refresh les décapait → « le message disparaît »).
+
+    Phase 251.3 — ANTI-429 : THROTTLE (au plus 1 refresh / _PANEL_REFRESH_MIN_INTERVAL s,
+    sauf `force`) + édition via PartialMessage (PATCH seul, plus de GET fetch_message)."""
+    # THROTTLE : coalesce les attaques rapprochées (sinon tempête de 429).
+    if not force:
+        try:
+            _now = datetime.now(timezone.utc).timestamp()
+            if _now - _last_panel_refresh.get(event_id, 0.0) < _PANEL_REFRESH_MIN_INTERVAL:
+                return
+            _last_panel_refresh[event_id] = _now
+        except Exception:
+            pass
     active = await get_active_boss(guild.id)
     if not active or active["event_id"] != event_id:
         return
@@ -873,10 +895,6 @@ async def _refresh_boss_panel(guild: discord.Guild, event_id: int) -> None:
         return
     ch = guild.get_channel(active["channel_id"])
     if not ch:
-        return
-    try:
-        msg = await ch.fetch_message(active["message_id"])
-    except Exception:
         return
     if _v2 is None:
         return
@@ -887,7 +905,9 @@ async def _refresh_boss_panel(guild: discord.Guild, event_id: int) -> None:
         warmup_ts=_warmup_until.get(event_id),
         alive=active["hp_current"] > 0)
     try:
-        await msg.edit(view=layout)
+        # PartialMessage : édite SANS fetch (PATCH seul, plus de GET = moitié des 429
+        # en moins). Le panneau est un message du BOT → éditable ainsi.
+        await ch.get_partial_message(int(active["message_id"])).edit(view=layout)
     except Exception:
         pass
 
