@@ -10679,7 +10679,8 @@ async def _handle_pet_assist(i: discord.Interaction, event_id: int):
         if not pet:
             return await i.followup.send(
                 "🐾 Tu n'as **pas de familier actif**.\n"
-                "_Adopte/active un familier (hub → 🐾) pour qu'il combatte à tes côtés !_",
+                "_Équipe-en un dans ton `/inventory` (menu 🐾) — il combattra à tes côtés ! "
+                "Pas encore de familier ? Gagne des **œufs** en event, éclos-les via `/pet`._",
                 ephemeral=True,
             )
 
@@ -59059,18 +59060,17 @@ async def wheel_cmd(i: discord.Interaction):
 )
 @app_commands.describe(
     action="Action à effectuer",
-    pet_choice="Pet à acheter ou équiper (pour buy/setactive)",
+    pet_choice="Pet à acheter (pour buy)",
     nom="Nouveau nom (pour rename)",
 )
 @app_commands.choices(action=[
-    app_commands.Choice(name="📋 show — voir mon pet actif", value="show"),
-    app_commands.Choice(name="🛒 buy — acheter un nouveau pet", value="buy"),
-    app_commands.Choice(name="🔄 setactive — équiper un de mes pets", value="setactive"),
-    app_commands.Choice(name="🍖 feed — nourrir mon pet (coût: 50 🪙)", value="feed"),
-    app_commands.Choice(name="✏️ rename — renommer mon pet actif", value="rename"),
-    app_commands.Choice(name="📚 list — liste de tous les pets disponibles", value="list"),
+    app_commands.Choice(name="🐾 collection — voir & ÉQUIPER mes familiers", value="collection"),
     app_commands.Choice(name="🥚 oeufs — voir et faire éclore mes œufs", value="oeufs"),
-    app_commands.Choice(name="🐾 collection — mes familiers + équiper", value="collection"),
+    app_commands.Choice(name="📋 show — voir mon familier actif", value="show"),
+    app_commands.Choice(name="🛒 buy — acheter un nouveau familier", value="buy"),
+    app_commands.Choice(name="🍖 feed — nourrir mon familier (coût: 50 🪙)", value="feed"),
+    app_commands.Choice(name="✏️ rename — renommer mon familier actif", value="rename"),
+    app_commands.Choice(name="📚 list — catalogue des familiers", value="list"),
 ])
 @app_commands.choices(pet_choice=[
     # Phase 235.26 : SEULEMENT les pets achetables (les ~44 familiers d'œuf
@@ -59174,7 +59174,7 @@ async def pet_cmd(
                             results.append(
                                 f"{rl} → {p.get('emoji', '🐾')} **{p.get('name', '?')}**{extra}")
                     body = ("🐣 **Éclosion !**\n" + "\n".join(results)) if results else "Rien à éclore."
-                    body += ("\n\n_Pour équiper un familier : `/pet action:setactive`._")
+                    body += ("\n\n_Pour équiper un familier : `/pet action:collection` ou ton `/inventory`._")
                     await btn_i.followup.send(body[:1900], ephemeral=True)
                 except Exception as ex:
                     print(f"[pet oeufs hatch] {ex}")
@@ -59374,7 +59374,7 @@ async def pet_cmd(
             if already:
                 return await i.followup.send(
                     f"⚠️ Tu possèdes déjà **{pet_def['name']}**. "
-                    f"Utilise `/pet setactive pet_choice:{pet_def['id']}` pour l'équiper.",
+                    f"Équipe-le via `/pet action:collection` ou ton `/inventory`.",
                     ephemeral=True,
                 )
             # Check coins
@@ -69864,7 +69864,7 @@ async def _sell_pet_cmd_DEPRECATED(i):
         if is_active:
             return await _safe_followup(
                 i,
-                content="❌ Tu ne peux pas vendre ton pet ACTIF. Désactive-le d'abord via `/pet action:setactive`.",
+                content="❌ Tu ne peux pas vendre ton familier ACTIF. Équipe-en un autre d'abord via `/pet action:collection`.",
             )
 
         pet_def = eng41.get_pet(pet.value)
