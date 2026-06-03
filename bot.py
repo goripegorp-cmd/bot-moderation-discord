@@ -8474,67 +8474,269 @@ class _BulkSellSelect(discord.ui.Select):
                 pass
 
 
-class EquipmentLayoutV2(LayoutView):
-    """Phase 179b : panneau ÉQUIPEMENT (loadout + équiper depuis le coffre).
-    Ephemeral, donc réservé au joueur qui l'ouvre."""
+# ───────── Phase 252 : inventaire au propre — déséquiper + familier intégrés ─────────
 
-    def __init__(self, guild, user_id: int, inv: dict, stash: list, totals: dict,
-                 player_level: int = 0):
+async def _unequip_slot(guild_id: int, user_id: int, slot: str):
+    """Déséquipe l'objet du `slot` → il retourne au coffre. Renvoie (ok, nom)."""
+    try:
+        inv = await _get_or_create_inventory(guild_id, user_id)
+        it = inv.get(slot) or {}
+        if not it or not it.get("name"):
+            return (False, None)
+        inv[slot] = {}
+        await _save_inventory(guild_id, user_id, inv)
+        await _stash_add(guild_id, user_id, it)
+        return (True, it.get("name", "?"))
+    except Exception as ex:
+        print(f"[_unequip_slot] {ex}")
+        return (False, None)
+
+
+_PET_BONUS_LABEL = {
+    'rare_loot': "loot rare", 'boss_damage': "dégâts boss", 'msg_xp': "XP messages",
+    'duel_attack': "attaque PvP", 'wheel_luck': "chance roue", 'global': "tout",
+}
+
+
+def _pet_short_label(pet: dict) -> str:
+    """Phrase COURTE : « +12% dégâts boss · 💚 passif »."""
+    try:
+        bk = _PET_BONUS_LABEL.get(str(pet.get('bonus_kind', '')), "bonus")
+        bv = int(round(float(pet.get('bonus_value', 0) or 0) * 100))
+        perk = "🐾 actif" if str(pet.get('perk_type', 'passive')) == 'active' else "💚 passif"
+        return f"+{bv}% {bk} · {perk}"
+    except Exception:
+        return "familier"
+
+
+async def _list_owned_pets(guild_id: int, user_id: int) -> list:
+    """[(pet_id, level, is_active, pet_def)] des familiers possédés. Défensif."""
+    out = []
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT pet_id, level, is_active FROM user_pets "
+                "WHERE guild_id=? AND user_id=?", (guild_id, user_id),
+            ) as cur:
+                rows = await cur.fetchall()
+        for pid, lvl, act in rows:
+            try:
+                pdef = eng41.get_pet(pid)
+            except Exception:
+                pdef = None
+            if pdef:
+                out.append((pid, int(lvl or 1), bool(act), pdef))
+    except Exception as ex:
+        print(f"[_list_owned_pets] {ex}")
+    return out
+
+
+async def _set_active_pet(guild_id: int, user_id: int, pet_id: str) -> bool:
+    """Équipe (rend actif) un familier — un seul à la fois. Renvoie ok."""
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE user_pets SET is_active=0 WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id))
+            cur = await db.execute(
+                "UPDATE user_pets SET is_active=1 "
+                "WHERE guild_id=? AND user_id=? AND pet_id=?",
+                (guild_id, user_id, str(pet_id)))
+            await db.commit()
+            return getattr(cur, "rowcount", 0) == 1
+    except Exception as ex:
+        print(f"[_set_active_pet] {ex}")
+        return False
+
+
+# Aide COURTE, phrases simples : quoi utiliser, et pourquoi.
+_INVENTORY_HELP = (
+    "🎒 **Aide — Inventaire & Familiers**\n\n"
+    "**Équiper / déséquiper**\n"
+    "• Menu **⚔️ Équiper** → sors une pièce du coffre.\n"
+    "• Menu **🧤 Déséquiper** → la pièce repart au coffre.\n"
+    "• `🔒 niv.X` = niveau requis (plus c'est rare, plus il faut être haut niveau).\n\n"
+    "**Familier 🐾**\n"
+    "• Menu **🐾 Équiper un familier** → 1 seul actif à la fois.\n"
+    "• En **combat**, clique le bouton **🐾 Familier** : il frappe le boss "
+    "(et te soigne s'il est 💚 passif). 1 fois toutes les 90 s.\n"
+    "• Pour en **obtenir** : gagne des **œufs** dans les events, puis fais-les "
+    "éclore avec **/pet**.\n\n"
+    "**Vendre 💰** → transforme le stuff en trop en 🪙. Aucun échange entre joueurs."
+)
+
+
+class _UnequipSelect(discord.ui.Select):
+    """Déséquipe un objet porté → retour au coffre."""
+    def __init__(self, inv: dict):
+        options = []
+        for slot, (emo, label) in _SLOT_META.items():
+            it = inv.get(slot) or {}
+            if it and it.get('name'):
+                options.append(discord.SelectOption(
+                    label=f"{label} : {str(it.get('name'))[:80]}"[:100],
+                    value=slot, emoji=emo,
+                    description="Retire cet objet (→ coffre)"))
+        if not options:
+            options = [discord.SelectOption(label="(rien d'équipé)", value="none")]
+        super().__init__(placeholder="🧤 Déséquiper un objet…",
+                         options=options, min_values=1, max_values=1)
+
+    async def callback(self, i: discord.Interaction):
+        try:
+            if self.values[0] == "none":
+                return await i.response.defer()
+            ok, name = await _unequip_slot(i.guild.id, i.user.id, self.values[0])
+            new_view = await EquipmentLayoutV2.create(i.guild, i.user.id)
+            await i.response.edit_message(view=new_view)
+            if ok:
+                await i.followup.send(
+                    f"🧤 **{name}** déséquipé — rangé au coffre.", ephemeral=True)
+        except Exception as ex:
+            print(f"[_UnequipSelect] {ex}")
+
+
+class _PetEquipSelect(discord.ui.Select):
+    """Équipe (rend actif) un familier possédé — 1 seul à la fois."""
+    def __init__(self, pets: list):
+        options = []
+        for (pid, lvl, act, pdef) in pets[:25]:
+            mark = "✅ " if act else ""
+            options.append(discord.SelectOption(
+                label=f"{mark}{str(pdef.get('name', '?'))[:80]}"[:100],
+                value=str(pid),
+                emoji=(pdef.get('emoji') or None),
+                description=_pet_short_label(pdef)[:100]))
+        if not options:
+            options = [discord.SelectOption(
+                label="(aucun familier — gagne des œufs en event)", value="none")]
+        super().__init__(placeholder="🐾 Équiper un familier…",
+                         options=options, min_values=1, max_values=1)
+
+    async def callback(self, i: discord.Interaction):
+        try:
+            if self.values[0] == "none":
+                return await i.response.defer()
+            ok = await _set_active_pet(i.guild.id, i.user.id, self.values[0])
+            new_view = await EquipmentLayoutV2.create(i.guild, i.user.id)
+            await i.response.edit_message(view=new_view)
+            if ok:
+                await i.followup.send(
+                    "🐾 Familier équipé ! En **combat**, clique le bouton **🐾 Familier** "
+                    "pour qu'il attaque le boss (1× / 90 s).", ephemeral=True)
+        except Exception as ex:
+            print(f"[_PetEquipSelect] {ex}")
+
+
+class _SellPanelV2(LayoutView):
+    """Sous-panneau VENDRE (au marchand) — ouvert depuis l'inventaire."""
+    def __init__(self, guild, user_id: int, stash: list):
         super().__init__(timeout=300)
-        self._player_level = int(player_level or 0)
-        # Phase 217 : coffre TRIÉ par rareté décroissante (meilleurs en premier).
+        items = [
+            v2_title("💰 Vendre au marchand"),
+            v2_body("_Choisis un objet (ou un lot) à vendre contre des 🪙. "
+                    "🔒 Aucun échange entre joueurs._"),
+        ]
+        self.add_item(v2_container(*items, color=0xE67E22))
+        if stash:
+            self.add_item(discord.ui.ActionRow(_SellSelect(stash)))
+            if any(_rarity_rank(t[2]) <= 1 for t in stash):
+                self.add_item(discord.ui.ActionRow(_BulkSellSelect(stash)))
+        _back = Button(label="🔙 Retour à l'inventaire",
+                       style=discord.ButtonStyle.secondary)
+
+        async def _go_back(i: discord.Interaction):
+            try:
+                v = await EquipmentLayoutV2.create(i.guild, i.user.id)
+                await i.response.edit_message(view=v)
+            except Exception:
+                pass
+        _back.callback = _go_back
+        self.add_item(discord.ui.ActionRow(_back))
+
+    @classmethod
+    async def create(cls, guild, user_id: int):
+        stash = await _stash_list(guild.id, user_id)
         try:
             stash = sorted(stash, key=lambda t: (-_rarity_rank(t[2]), t[1]))
         except Exception:
             pass
-        items = []
-        items.append(v2_title("🎒 Mon Équipement"))
+        return cls(guild, user_id, stash)
+
+
+class EquipmentLayoutV2(LayoutView):
+    """Phase 179b/252 : panneau INVENTAIRE (loadout + équiper/déséquiper + familier).
+    Ephemeral, donc réservé au joueur qui l'ouvre."""
+
+    def __init__(self, guild, user_id: int, inv: dict, stash: list, totals: dict,
+                 player_level: int = 0, owned_pets: list = None):
+        super().__init__(timeout=300)
+        self._player_level = int(player_level or 0)
+        owned_pets = owned_pets or []
+        try:
+            stash = sorted(stash, key=lambda t: (-_rarity_rank(t[2]), t[1]))
+        except Exception:
+            pass
+        _active = next((p for p in owned_pets if p[2]), None)
+
+        items = [v2_title("🎒 Mon Inventaire")]
         items.append(v2_body("\n".join(_format_loadout_lines(inv))))
-        items.append(v2_divider())
-        tot_line = (
-            f"**⚡ Puissance totale** : `+{totals.get('atk', 0)}` ATK · "
-            f"`+{totals.get('def', 0)}` DEF · `+{totals.get('crit', 0)}%` crit"
-        )
-        if totals.get('set_name'):
-            tot_line += f"\n{totals.get('set_emoji', '')} Set actif : **{totals['set_name']}**"
-        items.append(v2_body(tot_line))
-        items.append(v2_divider())
-        if stash:
-            # Phase 217 : répartition par RARETÉ (classer le stuff d'un coup d'œil)
-            rc = {}
-            for (_s, _sl, _it) in stash:
-                k = _canon_rarity(_it.get('rarity'))
-                rc[k] = rc.get(k, 0) + 1
-            parts = [f"{events2026.RARITY_EMOJIS.get(r, '')} {rc[r]}"
-                     for r in ("divine", "mythique", "légendaire", "épique", "rare", "commune")
-                     if rc.get(r)]
-            # Phase 248b : compteur équipable MAINTENANT vs verrouillé (selon niveau).
-            _eq_now = sum(1 for (_s, _sl, _it) in stash
-                          if _required_level_for_item(_it) <= int(player_level or 0))
-            _locked = len(stash) - _eq_now
-            _eq_line = (
-                f"\n✅ **{_eq_now}** équipable(s) à ton niveau (`{player_level}`)"
-                + (f" · 🔒 **{_locked}** à débloquer" if _locked else "")
-            )
+        _set = (f"\n{totals.get('set_emoji', '')} Set : **{totals['set_name']}**"
+                if totals.get('set_name') else "")
+        items.append(v2_body(
+            f"**⚡ Puissance** : `+{totals.get('atk', 0)}` ATK · "
+            f"`+{totals.get('def', 0)}` DEF · `+{totals.get('crit', 0)}%` crit" + _set))
+        # Familier — INTÉGRÉ ici (fini le /hub séparé).
+        if _active:
+            _pd = _active[3]
             items.append(v2_body(
-                f"_🎒 **{len(stash)}** objet(s) — " + " · ".join(parts) + "_"
-                + _eq_line + "\n"
-                "_Équipe-en un, ou **vends-le au marchand** pour des 🪙 ci-dessous. "
-                "🔒 Aucun échange entre joueurs._"
-            ))
+                f"🐾 **Familier** : {_pd.get('emoji', '')} {_pd.get('name', '?')} "
+                f"_({_pet_short_label(_pd)})_ — en combat, bouton **🐾**."))
+        elif owned_pets:
+            items.append(v2_body(
+                "🐾 **Familier** : aucun équipé — choisis-en un ci-dessous ⬇️"))
         else:
             items.append(v2_body(
-                "_🎒 Coffre vide — bats des boss et des mobs pour collecter du stuff "
-                "et bâtir ton arsenal !_"
-            ))
+                "🐾 **Familier** : aucun — gagne des **œufs** en event, éclos via **/pet**."))
+        if stash:
+            items.append(v2_body(f"_📦 Coffre : **{len(stash)}** objet(s). "
+                                 f"`🔒 niv.X` = niveau requis._"))
+        else:
+            items.append(v2_body("_📦 Coffre vide — bats des boss et des mobs pour du stuff._"))
+        items.append(v2_body("_💡 **❓ Aide** explique tout en 10 s._"))
         self.add_item(v2_container(*items, color=0x9B59B6))
+
+        # Menus déroulants : Équiper · Déséquiper · Familier
         if stash:
             self.add_item(discord.ui.ActionRow(_EquipSelect(stash, player_level)))
-            # Phase 217 : vendre au marchand (item par item)
-            self.add_item(discord.ui.ActionRow(_SellSelect(stash)))
-            # Phase 224 : vente EN LOT par palier (commun / commun+rare) — déclutter
-            if any(_rarity_rank(t[2]) <= 1 for t in stash):
-                self.add_item(discord.ui.ActionRow(_BulkSellSelect(stash)))
+        if any((inv.get(s) or {}).get('name') for s in _SLOT_META):
+            self.add_item(discord.ui.ActionRow(_UnequipSelect(inv)))
+        if owned_pets:
+            self.add_item(discord.ui.ActionRow(_PetEquipSelect(owned_pets)))
+
+        # Barre de boutons : Vendre (→ sous-panneau) · Aide
+        _btns = []
+        if stash:
+            _sell = Button(label="💰 Vendre", style=discord.ButtonStyle.secondary)
+
+            async def _open_sell(i: discord.Interaction):
+                try:
+                    v = await _SellPanelV2.create(i.guild, i.user.id)
+                    await i.response.edit_message(view=v)
+                except Exception:
+                    pass
+            _sell.callback = _open_sell
+            _btns.append(_sell)
+        _help = Button(label="❓ Aide", style=discord.ButtonStyle.primary)
+
+        async def _show_help(i: discord.Interaction):
+            try:
+                await i.response.send_message(_INVENTORY_HELP, ephemeral=True)
+            except Exception:
+                pass
+        _help.callback = _show_help
+        _btns.append(_help)
+        self.add_item(discord.ui.ActionRow(*_btns))
 
     @classmethod
     async def create(cls, guild, user_id: int):
@@ -8544,7 +8746,6 @@ class EquipmentLayoutV2(LayoutView):
             totals = events2026.inventory_total_stats(inv)
         except Exception:
             totals = {"atk": 0, "def": 0, "crit": 0}
-        # Phase 248b : niveau du joueur → affichage ✅/🔒 conditionnel dans le coffre
         _plvl = 0
         try:
             async with get_db() as _db:
@@ -8556,7 +8757,8 @@ class EquipmentLayoutV2(LayoutView):
             _plvl = int(_r[0]) if _r and _r[0] else 0
         except Exception:
             _plvl = 0
-        return cls(guild, user_id, inv, stash, totals, _plvl)
+        owned_pets = await _list_owned_pets(guild.id, user_id)
+        return cls(guild, user_id, inv, stash, totals, _plvl, owned_pets)
 
 
 async def _open_equipment(i: discord.Interaction):
