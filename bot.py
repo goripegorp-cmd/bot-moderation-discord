@@ -5,6 +5,80 @@ except ModuleNotFoundError:
     import sys
     sys.modules['audioop'] = audioop
 
+# ─── Logs propres : ne garder QUE les erreurs (Phase 251) ───
+# L'owner veut des logs Railway lisibles : uniquement erreurs/avertissements, pas
+# le bruit INFO du boot (bannière, liste des commandes, lignes ✅ / [Phase] OK,
+# events de routine). On filtre stdout au plus tôt.
+# RÈGLE FAIL-SAFE (jamais masquer une vraie erreur) :
+#   • une ligne avec un marqueur d'erreur → TOUJOURS affichée ;
+#   • une ligne INCONNUE → affichée aussi (on ne devine pas qu'elle est anodine) ;
+#   • seules les lignes INFO CONNUES (préfixe succès/tag de boot) sont avalées.
+# Réversible SANS redeploy : variable d'env VERBOSE_LOGS=1 → tout réafficher.
+import sys as _sys
+import os as _os
+import logging
+
+class _QuietStdout:
+    _ERR = ('error', 'erreur', 'exception', 'traceback', 'forbidden', 'failed',
+            'échec', 'echec', 'warning', 'warn', 'critical', 'fatal', 'denied',
+            'unclosed', 'cannot', 'invalid', 'crash', 'httpexception', 'refus',
+            '❌', '⚠', '🛑', '‼')
+    _INFO_START = ('✅', '🚀', '🔒', '👑', '🎙', '🛡', '🎮', '🗑', '👥', '📋',
+                   '🎵', '🔴', '🔗', '✨', '🧹', '🎤', '🌐', '📢', '🎁', '📨',
+                   '🛒', '🔊', '⚔', '🏆', '🎯', '📊', '💰', '🎉', '🐾', '🥚',
+                   '- /', '[Phase', '[2026]', '[PERSONAL EVENT', '[FLASH TREASURE',
+                   '[MYSTERY BOX', '[TREASURE', '[QUIZ', '[COMEBACK', '[RIDDLE',
+                   '[PERSIST CLEANUP', '[BOOT CLEANUP', '[cleanup_old_db_data',
+                   '[WORLD BOSS', '[MOB', '[DAILY', '[INVASION', '[CLIMAX', '[VOICE')
+
+    def __init__(self, real):
+        self._real = real
+        self._buf = ''
+
+    def _emit(self, line):
+        # True = ligne à AFFICHER. Erreur connue → oui. Sinon INFO connue → non.
+        # Tout le reste (inconnu) → oui (fail-safe : on ne masque jamais l'inattendu).
+        low = line.lower()
+        if any(m in low for m in self._ERR):
+            return True
+        st = line.strip()
+        return bool(st) and not any(st.startswith(p) for p in self._INFO_START)
+
+    def write(self, s):
+        # Bufferise par LIGNE : print() écrit le texte puis le « \n » séparément,
+        # donc on n'évalue qu'une fois la ligne complète (sinon on couperait le
+        # retour à la ligne des erreurs gardées).
+        try:
+            self._buf += s
+            if '\n' not in self._buf:
+                return len(s)
+            *lines, self._buf = self._buf.split('\n')
+            out = [ln for ln in lines if self._emit(ln)]
+            if out:
+                self._real.write('\n'.join(out) + '\n')
+            return len(s)
+        except Exception:
+            try:
+                return self._real.write(s)
+            except Exception:
+                return 0
+
+    def flush(self):
+        try:
+            return self._real.flush()
+        except Exception:
+            return None
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+if _os.getenv('VERBOSE_LOGS', '0') != '1':
+    try:
+        _sys.stdout = _QuietStdout(_sys.stdout)
+    except Exception:
+        pass
+
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
@@ -15942,10 +16016,14 @@ async def _combat_channel_sweeper_wait():
     await bot.wait_until_ready()
 
 
+_supervisor_did_first_pass = False  # FIX logs : 1er tour = démarrage au boot → silencieux
+
+
 @tasks.loop(minutes=5)
 async def task_supervisor():
     """Phase 203 — Ressuscite les boucles critiques mortes (exception non gérée
     → la loop s'arrête à vie). Garantit que le serveur reste vivant sans reboot."""
+    global _supervisor_did_first_pass
     restarted = []
     # Boucles définies dans bot.py
     for name in _SUPERVISED_LOOP_NAMES:
@@ -15970,8 +16048,12 @@ async def task_supervisor():
                 restarted.append(f"{mod_name}.{attr}")
         except Exception as ex:
             print(f"[task_supervisor {mod_name}.{attr}] {ex}")
-    if restarted:
+    # 1er passage = boot : toutes les boucles sont « non lancées », c'est NORMAL
+    # (le superviseur les démarre) → on NE log PAS (ce n'est pas une mort). À partir
+    # du 2e tour seulement, une résurrection = vraie tâche morte → à signaler.
+    if restarted and _supervisor_did_first_pass:
         print(f"[task_supervisor] ⚠️ RESSUSCITÉ {len(restarted)} tâche(s) morte(s) : {', '.join(restarted)}")
+    _supervisor_did_first_pass = True
 
 
 @task_supervisor.before_loop
@@ -81599,4 +81681,7 @@ if __name__ == "__main__":
         print("❌ ERREUR: BOT_TOKEN non défini dans le fichier .env !")
         print("   Créez un fichier .env avec: BOT_TOKEN=votre_token_ici")
         exit(1)
-    bot.run(TOKEN)
+    # Logs propres : discord.py en WARNING (supprime les [INFO] discord.client /
+    # gateway de routine ; garde warnings + erreurs). VERBOSE_LOGS=1 → INFO complet.
+    _dlevel = logging.INFO if _os.getenv('VERBOSE_LOGS', '0') == '1' else logging.WARNING
+    bot.run(TOKEN, log_level=_dlevel)
