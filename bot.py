@@ -24,13 +24,25 @@ class _QuietStdout:
     # nu — il apparaît dans des noms anodins (ex. « error_logger ») et causait des
     # faux positifs. Les vraies erreurs restent gardées par le fail-safe (tag
     # inconnu en minuscules, cf. _emit) ou par ces marqueurs.
-    _ERR = ('traceback', 'exception', 'forbidden', 'failed', 'critical', 'fatal',
-            'denied', 'errno', 'timeout', 'unclosed', 'httpexception', 'erreur',
-            'échec', 'echec', 'warning', '❌', '⚠', '🛑', '‼')
-    # Tag de STATUT tout en MAJUSCULES (ex. [DB OPTIMIZER], [CAMOUFLAGE APPLY]) =
-    # info de routine → masqué. Les tags d'ERREUR sont en minuscules (nom de
-    # fonction/module, ex. [pet_eggs hatch_egg]) → gardés par le fail-safe (règle 4).
+    # (A) Mots d'erreur NON ambigus (recherche directe) → toujours afficher.
+    _ERR = ('traceback', 'exception', 'httpexception', 'critical', 'fatal',
+            'errno', 'unclosed', 'erreur', 'échec', 'echec', '❌', '⚠', '🛑', '‼')
+    # error/forbidden/failed/denied/warning EN TANT QUE MOT — mais PAS un identifiant
+    # (« error_logger ») ni un compteur à ZÉRO (« 'errors': 0 », « forbidden=0 »).
+    # Un compteur NON nul (« 'errors': 3 ») reste une vraie erreur → gardé.
+    _ERR_RE = _re.compile(
+        r"(errors?|forbidden|failed|denied|warnings?)(?!\w)(?!['\"]?\s*[:=]\s*0\b)",
+        _re.IGNORECASE)
+    # Tag de STATUT tout en MAJUSCULES ([DB OPTIMIZER], [PERSIST CLEANUP]…) = info.
     _INFO_TAG_RE = _re.compile(r'^\[[A-Z0-9 ._/:+\-]{2,}\]')
+    # Ligne « [tag_minuscule] … » contenant un mot de STATUT de routine = info
+    # (spawn/OK/deleted…), pas une erreur. Les erreurs gardent un tag minuscule
+    # SANS verbe de statut (ex. [saga_lifecycle_task] can't subtract…) → fail-safe.
+    _INFO_VERBS = (' ok', 'okay', 'spawn', 'deleted', 'scanned', 'loaded', 'restored',
+                   'dropped', 'sent ', 'ready', 'init', 'applied', 'backup', 'rows',
+                   'cleanup', 'started', 'synced', 'prêt', 'activé', 'enabled',
+                   'disabled', 'skipped', 'updated', 'created', 'posted', 'granted',
+                   'reloaded', 'wired', 'setup', 'opt-in', 'opt in')
     _INFO_START = ('✅', '🚀', '🔒', '👑', '🎙', '🛡', '🎮', '🗑', '👥', '📋',
                    '🎵', '🔴', '🔗', '✨', '🧹', '🎤', '🌐', '📢', '🎁', '📨',
                    '🛒', '🔊', '⚔', '🏆', '🎯', '📊', '💰', '🎉', '🐾', '🥚',
@@ -49,16 +61,17 @@ class _QuietStdout:
         if not st:
             return False
         low = st.lower()
-        # 1) marqueur d'erreur fort → toujours afficher
-        if any(m in low for m in self._ERR):
+        # (A) erreur EXPLICITE (mot d'erreur non ambigu OU compteur non nul) → afficher
+        if any(m in low for m in self._ERR) or self._ERR_RE.search(low):
             return True
-        # 2) préfixe INFO connu (emoji succès, liste de commandes, tag de boot) → masquer
-        if any(st.startswith(p) for p in self._INFO_START):
+        # (B) INFO connue → masquer
+        if any(st.startswith(p) for p in self._INFO_START):       # emoji succès / tag connu
             return False
-        # 3) tag de statut tout en MAJUSCULES ([DB OPTIMIZER], [CAMOUFLAGE APPLY]…) → masquer
-        if self._INFO_TAG_RE.match(st):
+        if self._INFO_TAG_RE.match(st):                            # [TAG EN MAJUSCULES]
             return False
-        # 4) inconnu (souvent un except « [module_func] … » en minuscules) → afficher (fail-safe)
+        if st[:1] == '[' and any(v in low for v in self._INFO_VERBS):  # [tag] + verbe de statut
+            return False
+        # (C) inconnu (souvent un except « [module_func] {ex} » sans verbe) → afficher (fail-safe)
         return True
 
     def write(self, s):
