@@ -711,13 +711,18 @@ def _build_wave_view(run_id, guild_id, vc_ids, state, pstate, label, is_boss):
                     retal_note = (f"\n🩸 Le {'boss' if is_boss else 'mob'} riposte : "
                                   f"-{taken} PV (il te reste **{ps['hp']}** PV).")
 
-            # Réactualise le panneau (même message)
-            self._render()
-            try:
-                if self._msg:
-                    await self._msg.edit(view=self)
-            except Exception:
-                pass
+            # Réactualise le panneau — THROTTLE anti-429 (Phase 251.10) : 1 edit / 2 s
+            # max, SAUF coup final (« Vaincu » montré tout de suite). Plusieurs joueurs
+            # qui frappent en rafale ne floodent plus l'API (chacun voit ses dégâts
+            # exacts dans sa réponse privée). self._msg est stocké → zéro fetch.
+            if state["done"] or time.time() - getattr(self, "_last_edit", 0.0) >= 2.0:
+                self._last_edit = time.time()
+                self._render()
+                try:
+                    if self._msg:
+                        await self._msg.edit(view=self)
+                except Exception:
+                    pass
             proc_str = (f" {proc['emoji']} {proc['name']} +{proc['bonus']}" if proc else "")
             vc_str = f" 🔊+{int(VOICE_BONUS * 100)}%" if in_vc else ""
             tail = " — **coup final !**" if state["done"] else ""
@@ -885,12 +890,15 @@ def _build_dispersion_view(run_id, guild_id, rooms, pstate):
                 else:
                     retal_note = (f"\n🩸 Le mob riposte : -{taken} PV "
                                   f"(il te reste **{ps['hp']}** PV).")
-            self._render()
-            try:
-                if self._msg:
-                    await self._msg.edit(view=self)
-            except Exception:
-                pass
+            # THROTTLE anti-429 (Phase 251.10) : 1 edit / 2 s max, sauf salle nettoyée.
+            if room["done"] or time.time() - getattr(self, "_last_edit", 0.0) >= 2.0:
+                self._last_edit = time.time()
+                self._render()
+                try:
+                    if self._msg:
+                        await self._msg.edit(view=self)
+                except Exception:
+                    pass
             proc_str = (f" {proc['emoji']} {proc['name']} +{proc['bonus']}" if proc else "")
             tail = " — **salle nettoyée !**" if room["done"] else ""
             try:
