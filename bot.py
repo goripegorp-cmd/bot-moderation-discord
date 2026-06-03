@@ -9991,7 +9991,7 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
             )
 
         # Phase 235.25 : GATE D'ACTIVITÉ (s'ajoute au gate de niveau). Boss Raid =
-        # palier 🟡 (20 pts sur 7 j). Grâce de démarrage + fail-open côté module.
+        # palier 🟡 (10 pts sur 14 j). Grâce de démarrage + fail-open côté module.
         try:
             _aok, _asc, _aneed = await activity_system_module.check_gate(
                 i.guild.id, i.user.id, "boss")
@@ -11301,7 +11301,7 @@ class TreasureClaimView(View):
             pool = _treasure_pool.get(self.event_id, [])
             if self.treasure_idx >= len(pool):
                 return await i.followup.send("❌ Ce trésor n'existe plus.", ephemeral=True)
-            # Phase 235.25 : GATE D'ACTIVITÉ 🟢 base (3 pts/7 j).
+            # Phase 235.25 : GATE D'ACTIVITÉ 🟢 base (3 pts/14 j).
             try:
                 _aok, _asc, _aneed = await activity_system_module.check_gate(
                     i.guild.id, i.user.id, "treasure")
@@ -11712,7 +11712,7 @@ class QuizAnswerView(View):
             if i.user.bot:
                 return await i.followup.send("🤖 Les bots ne peuvent pas répondre.", ephemeral=True)
 
-            # Phase 235.25 : GATE D'ACTIVITÉ 🟢 base (3 pts/7 j).
+            # Phase 235.25 : GATE D'ACTIVITÉ 🟢 base (3 pts/14 j).
             try:
                 _aok, _asc, _aneed = await activity_system_module.check_gate(
                     i.guild.id, i.user.id, "quiz")
@@ -14875,7 +14875,7 @@ class MysteryBoxView(View):
                 return await i.followup.send("❌ Cette boîte n'est plus disponible.", ephemeral=True)
             if i.user.bot:
                 return await i.followup.send("🤖 Les bots ne peuvent pas ouvrir.", ephemeral=True)
-            # Phase 235.25 : GATE D'ACTIVITÉ 🟢 base (3 pts/7 j).
+            # Phase 235.25 : GATE D'ACTIVITÉ 🟢 base (3 pts/14 j).
             try:
                 _aok, _asc, _aneed = await activity_system_module.check_gate(
                     i.guild.id, i.user.id, "mystery")
@@ -61283,7 +61283,7 @@ class WorldBossAttackView(View):
                     ),
                 )
 
-            # Phase 235.25 : GATE D'ACTIVITÉ — World Boss = palier 🔴 (60 pts/7 j),
+            # Phase 235.25 : GATE D'ACTIVITÉ — World Boss = palier 🔴 (25 pts/14 j),
             # s'ajoute au niveau 10. Grâce de démarrage + fail-open côté module.
             try:
                 _aok, _asc, _aneed = await activity_system_module.check_gate(

@@ -107,7 +107,7 @@ async def init_db():
                 CREATE TABLE IF NOT EXISTS dm_digest_prefs (
                     guild_id INTEGER NOT NULL,
                     user_id INTEGER NOT NULL,
-                    digest_enabled INTEGER DEFAULT 1,
+                    digest_enabled INTEGER DEFAULT 0,
                     digest_hour INTEGER DEFAULT 18,
                     last_digest_at TIMESTAMP,
                     opt_out_categories TEXT DEFAULT '[]',
@@ -128,7 +128,10 @@ async def init_db():
 async def get_prefs(guild_id: int, user_id: int) -> dict:
     """Récupère les prefs DM (avec defaults si absent)."""
     out = {
-        "digest_enabled": True,
+        # Phase 251.9 : OPT-IN STRICT — aucun DM digest tant que l'user ne l'a pas
+        # activé explicitement (bouton « Activer le récap »). Conforme à la règle
+        # « tous les DM en opt-in ». (Avant : True = opt-out = DM par défaut.)
+        "digest_enabled": False,
         "digest_hour": 18,
         "last_digest_at": None,
         "opt_out_categories": [],
@@ -191,6 +194,26 @@ async def toggle_category(
     except Exception as ex:
         print(f"[dm_digest toggle_category] {ex}")
         return await get_prefs(guild_id, user_id)
+
+
+async def set_digest_enabled(guild_id: int, user_id: int, enabled: bool) -> bool:
+    """Active / coupe le récap DM quotidien (interrupteur MAÎTRE opt-in, Phase 251.9).
+    Tant que ce n'est pas True, `send_digest_for_user` ne DM rien. Renvoie l'état posé."""
+    if _get_db is None:
+        return False
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT INTO dm_digest_prefs (guild_id, user_id, digest_enabled) "
+                "VALUES (?, ?, ?) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET digest_enabled = ?",
+                (guild_id, user_id, 1 if enabled else 0, 1 if enabled else 0),
+            )
+            await db.commit()
+        return bool(enabled)
+    except Exception as ex:
+        print(f"[dm_digest set_digest_enabled] {ex}")
+        return False
 
 
 # ─── Enqueue ───────────────────────────────────────────────────────────────
@@ -421,12 +444,15 @@ def build_prefs_panel(member: discord.Member):
         async def populate(self):
             prefs = await get_prefs(member.guild.id, member.id)
             opt_out = set(prefs.get("opt_out_categories", []))
+            digest_on = bool(prefs.get("digest_enabled", False))
             items = []
             items.append(v2_title("🔔  Mes DMs"))
             items.append(v2_body(
-                "_Le bot t'envoie 1 DM digest par jour à 18h FR avec ton "
-                "récap. Tu peux désactiver les catégories qui ne t'intéressent "
-                "pas._"
+                "_Récap quotidien en DM (18h FR) de TON activité. **Opt-in** : tu "
+                "ne reçois **rien** tant que tu ne l'as pas activé ci-dessous._"
+            ))
+            items.append(v2_body(
+                f"**Récap quotidien : {'🔔 ACTIVÉ' if digest_on else '🔕 désactivé'}**"
             ))
             items.append(v2_divider())
             for cat_key, (emoji, label) in CATEGORIES.items():
@@ -466,6 +492,33 @@ def build_prefs_panel(member: discord.Member):
                 _btns.append(btn)
             for _k in range(0, len(_btns), 5):
                 self.add_item(discord.ui.ActionRow(*_btns[_k:_k + 5]))
+
+            # Phase 251.9 : interrupteur MAÎTRE opt-in (active/coupe tout le récap DM).
+            master_btn = Button(
+                label=("Couper le récap quotidien" if digest_on
+                       else "Activer le récap quotidien"),
+                emoji="🔔",
+                style=(discord.ButtonStyle.danger if digest_on
+                       else discord.ButtonStyle.success),
+                custom_id=f"digest_master_{member.id}",
+            )
+
+            async def _master_cb(i_inter: discord.Interaction):
+                if i_inter.user.id != member.id:
+                    return await i_inter.response.send_message(
+                        "🔒 Pas pour toi.", ephemeral=True)
+                new_state = await set_digest_enabled(
+                    i_inter.guild.id, member.id, not digest_on)
+                await i_inter.response.send_message(
+                    ("✅ Récap quotidien **activé** — tu recevras ton récap à 18h FR. "
+                     "Réouvre le panel pour gérer les catégories."
+                     if new_state else
+                     "🔕 Récap quotidien **coupé** — plus aucun DM de récap."),
+                    ephemeral=True,
+                )
+
+            master_btn.callback = _master_cb
+            self.add_item(discord.ui.ActionRow(master_btn))
 
     return _PrefsPanel()
 
