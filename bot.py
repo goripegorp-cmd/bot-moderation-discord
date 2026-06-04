@@ -1303,6 +1303,7 @@ async def db_init():
             "boots_json TEXT DEFAULT '{}'",
             "accessory_json TEXT DEFAULT '{}'",
             "trinket_json TEXT DEFAULT '{}'",
+            "cosmetic_tint TEXT DEFAULT ''",
         ):
             col_name = col_def.split()[0]
             try:
@@ -8677,6 +8678,90 @@ class _SellPanelV2(LayoutView):
         return cls(guild, user_id, stash)
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Phase 251.22 — TEINTES COSMÉTIQUES (#3). Customisation PURE du perso : recolore le
+# panneau /inventory + affiche une ligne « 🎨 Teinte ». ZÉRO stat, ZÉRO éco. Choix
+# gratuit ; quelques teintes prestige réservées par NIVEAU (chase cosmétique, 0 éco).
+# ═══════════════════════════════════════════════════════════════════════════
+COSMETIC_TINTS = [
+    {"key": "none",      "name": "Aucune",      "emoji": "▫️", "color": 0x9B59B6, "min_level": 0},
+    {"key": "ecarlate",  "name": "Écarlate",    "emoji": "🔴", "color": 0xE74C3C, "min_level": 0},
+    {"key": "azur",      "name": "Azur",        "emoji": "🔵", "color": 0x3498DB, "min_level": 0},
+    {"key": "emeraude",  "name": "Émeraude",    "emoji": "🟢", "color": 0x2ECC71, "min_level": 0},
+    {"key": "ambre",     "name": "Ambre",       "emoji": "🟠", "color": 0xE67E22, "min_level": 0},
+    {"key": "amethyste", "name": "Améthyste",   "emoji": "🟣", "color": 0x9B59B6, "min_level": 0},
+    {"key": "onyx",      "name": "Onyx",        "emoji": "⚫", "color": 0x2C2F33, "min_level": 5},
+    {"key": "or",        "name": "Or",          "emoji": "🟡", "color": 0xF1C40F, "min_level": 15},
+    {"key": "prisme",    "name": "Prismatique", "emoji": "🌈", "color": 0xE91E63, "min_level": 25},
+    {"key": "divin",     "name": "Doré-Divin",  "emoji": "✨", "color": 0xF9E79F, "min_level": 40},
+]
+_TINT_BY_KEY = {t["key"]: t for t in COSMETIC_TINTS}
+
+
+async def _get_tint(guild_id: int, user_id: int) -> dict:
+    """Teinte cosmétique choisie (dict du catalogue), défaut 'none'. Lecture seule."""
+    key = ""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT cosmetic_tint FROM player_inventory WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id)) as cur:
+                r = await cur.fetchone()
+        key = (r[0] if r and r[0] else "") or ""
+    except Exception:
+        key = ""
+    return _TINT_BY_KEY.get(key) or _TINT_BY_KEY["none"]
+
+
+async def _set_tint(guild_id: int, user_id: int, key: str) -> bool:
+    """Pose la teinte (cosmétique). Garantit la ligne inv. True si OK."""
+    if key not in _TINT_BY_KEY:
+        return False
+    try:
+        await _get_or_create_inventory(guild_id, user_id)
+        async with get_db() as db:
+            await db.execute(
+                "UPDATE player_inventory SET cosmetic_tint=? WHERE guild_id=? AND user_id=?",
+                (key, guild_id, user_id))
+            await db.commit()
+        return True
+    except Exception:
+        return False
+
+
+class _TintSelect(discord.ui.Select):
+    """Select cosmétique : choisir sa teinte (gate par niveau, fail-closed)."""
+    def __init__(self, player_level: int, current_key: str):
+        self._lvl = int(player_level or 0)
+        opts = []
+        for t in COSMETIC_TINTS:
+            locked = self._lvl < int(t.get("min_level", 0) or 0)
+            label = t["name"] + (f" · 🔒 niv.{t['min_level']}" if locked else "")
+            opts.append(discord.SelectOption(
+                label=label[:100], value=t["key"], emoji=t["emoji"],
+                default=(t["key"] == current_key)))
+        super().__init__(placeholder="🎨 Choisis ta teinte…",
+                         options=opts, min_values=1, max_values=1)
+
+    async def callback(self, i: discord.Interaction):
+        try:
+            key = self.values[0]
+            t = _TINT_BY_KEY.get(key) or {}
+            if self._lvl < int(t.get("min_level", 0) or 0):
+                return await i.response.send_message(
+                    f"🔒 La teinte **{t.get('name', '?')}** demande le niveau "
+                    f"**{t.get('min_level', 0)}**.", ephemeral=True)
+            ok = await _set_tint(i.guild.id, i.user.id, key)
+            await i.response.send_message(
+                (f"🎨 Teinte **{t.get('name', '?')}** appliquée ! Rouvre `/inventory`."
+                 if ok else "❌ Erreur, réessaie."), ephemeral=True)
+        except Exception:
+            try:
+                await i.response.send_message("❌ Erreur, réessaie.", ephemeral=True)
+            except Exception:
+                pass
+
+
 async def _build_codex_lines(guild_id: int, user_id: int) -> str:
     """Phase 251.21 : Codex de collection — combien de pièces d'équipement DISTINCTES
     le joueur a découvertes (loot_history + équipé + coffre) sur le total du catalogue,
@@ -8740,10 +8825,12 @@ class EquipmentLayoutV2(LayoutView):
     Ephemeral, donc réservé au joueur qui l'ouvre."""
 
     def __init__(self, guild, user_id: int, inv: dict, stash: list, totals: dict,
-                 player_level: int = 0, owned_pets: list = None):
+                 player_level: int = 0, owned_pets: list = None, tint: dict = None):
         super().__init__(timeout=300)
         self._player_level = int(player_level or 0)
         owned_pets = owned_pets or []
+        _tint = tint or {}
+        _tint_color = int(_tint.get('color', 0x9B59B6) or 0x9B59B6)
         try:
             stash = sorted(stash, key=lambda t: (-_rarity_rank(t[2]), t[1]))
         except Exception:
@@ -8782,8 +8869,11 @@ class EquipmentLayoutV2(LayoutView):
                                  f"`🔒 niv.X` = niveau requis._"))
         else:
             items.append(v2_body("_📦 Coffre vide — bats des boss et des mobs pour du stuff._"))
+        if _tint.get('key') and _tint.get('key') != 'none':
+            items.append(v2_body(
+                f"🎨 Teinte : {_tint.get('emoji', '')} **{_tint.get('name', '')}**"))
         items.append(v2_body("_💡 **❓ Aide** explique tout en 10 s._"))
-        self.add_item(v2_container(*items, color=0x9B59B6))
+        self.add_item(v2_container(*items, color=_tint_color))
 
         # Menus déroulants : Équiper · Déséquiper · Familier
         if stash:
@@ -8826,6 +8916,22 @@ class EquipmentLayoutV2(LayoutView):
                 pass
         _codex.callback = _show_codex
         _btns.append(_codex)
+        # Phase 251.22 : bouton Teinte (customisation cosmétique, ouvre un Select éphémère).
+        _tint_btn = Button(label="🎨 Teinte", style=discord.ButtonStyle.secondary)
+        _lvl_for_tint = self._player_level
+
+        async def _open_tint(i: discord.Interaction):
+            try:
+                cur = await _get_tint(i.guild.id, i.user.id)
+                v = discord.ui.View(timeout=120)
+                v.add_item(_TintSelect(_lvl_for_tint, cur.get('key', 'none')))
+                await i.response.send_message(
+                    "🎨 **Choisis ta teinte** _(cosmétique — n'affecte pas tes stats)_ :",
+                    view=v, ephemeral=True)
+            except Exception:
+                pass
+        _tint_btn.callback = _open_tint
+        _btns.append(_tint_btn)
         self.add_item(discord.ui.ActionRow(*_btns))
 
     @classmethod
@@ -8848,7 +8954,8 @@ class EquipmentLayoutV2(LayoutView):
         except Exception:
             _plvl = 0
         owned_pets = await _list_owned_pets(guild.id, user_id)
-        return cls(guild, user_id, inv, stash, totals, _plvl, owned_pets)
+        tint = await _get_tint(guild.id, user_id)
+        return cls(guild, user_id, inv, stash, totals, _plvl, owned_pets, tint)
 
 
 async def _open_equipment(i: discord.Interaction):
