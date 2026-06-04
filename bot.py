@@ -47145,6 +47145,7 @@ async def inventory_cmd(i: discord.Interaction):
         a = inv.get('armor', {}) or {}
         # Phase 95 : nouveaux slots futurs (Helmet/Boots/Accessory/Trinket)
         h = inv.get('helmet', {}) or {}
+        lg = inv.get('legs', {}) or {}   # Phase 251.19 : slot jambières
         b = inv.get('boots', {}) or {}
         acc = inv.get('accessory', {}) or {}
         tri = inv.get('trinket', {}) or {}
@@ -47303,6 +47304,7 @@ async def inventory_cmd(i: discord.Interaction):
 
                     for slot_label, slot_item, slot_emoji_default in [
                         ("🎩 Casque", h, '⚪'),
+                        ("🦵 Jambières", lg, '⚪'),
                         ("👢 Bottes", b, '⚪'),
                         ("💍 Accessoire", acc, '⚪'),
                         ("🔮 Trinket", tri, '⚪'),
@@ -47536,6 +47538,7 @@ async def repair_cmd(i: discord.Interaction):
             ("weapon", "⚔️ Arme"),
             ("armor", "🛡️ Armure"),
             ("helmet", "🎩 Casque"),
+            ("legs", "🦵 Jambières"),
             ("boots", "👢 Bottes"),
             ("accessory", "💍 Accessoire"),
             ("trinket", "🔮 Trinket"),
@@ -47732,6 +47735,7 @@ def _trade_slot_choices():
         app_commands.Choice(name="⚔️ Arme",       value="weapon"),
         app_commands.Choice(name="🛡️ Armure",     value="armor"),
         app_commands.Choice(name="🎩 Casque",     value="helmet"),
+        app_commands.Choice(name="🦵 Jambières",  value="legs"),
         app_commands.Choice(name="👢 Bottes",     value="boots"),
         app_commands.Choice(name="💍 Accessoire", value="accessory"),
         app_commands.Choice(name="🔮 Trinket",    value="trinket"),
@@ -47781,6 +47785,7 @@ _PHASE117_SWAP_SLOT_CHOICES = [
     ("weapon",    "⚔️ Arme"),
     ("armor",     "🛡️ Armure"),
     ("helmet",    "🎩 Casque"),
+    ("legs",      "🦵 Jambières"),
     ("boots",     "👢 Bottes"),
     ("accessory", "💍 Accessoire"),
     ("trinket",   "🔮 Trinket"),
@@ -48696,6 +48701,7 @@ async def _auction_create(i: discord.Interaction):
         ("weapon", "⚔️ Arme"),
         ("armor", "🛡️ Armure"),
         ("helmet", "🎩 Casque"),
+        ("legs", "🦵 Jambières"),
         ("boots", "👢 Bottes"),
         ("accessory", "💍 Accessoire"),
         ("trinket", "🔮 Trinket"),
@@ -48936,6 +48942,7 @@ async def craft_cmd(i: discord.Interaction):
             ("weapon", "⚔️ Arme"),
             ("armor", "🛡️ Armure"),
             ("helmet", "🎩 Casque"),
+            ("legs", "🦵 Jambières"),
             ("boots", "👢 Bottes"),
             ("accessory", "💍 Accessoire"),
             ("trinket", "🔮 Trinket"),
