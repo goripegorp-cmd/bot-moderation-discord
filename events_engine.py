@@ -447,6 +447,114 @@ TRINKETS.extend([
     {"name": "Fragment de Genèse",   "emoji": "✨", "rarity": "divine",     "crit": 45, "atk": 12, "weight": 1},
 ])
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Phase 251.13 — EXPANSION MASSIVE de l'équipement (demande owner : « beaucoup
+# plus d'équipements, on a l'impression d'en gagner que 3-4 / toujours les mêmes »).
+# APPEND-ONLY + MÊME schéma EXACT que les pools ci-dessus (toutes les itérations
+# lisent rarity/weight/atk/def/crit en bracket → zéro risque de KeyError). Plus de
+# variété par rareté = bien moins de doublons ressentis + plus de customisation.
+# Règle owner : raretés hautes = weight minuscule (drop rarissime, rétention longue).
+# ═══════════════════════════════════════════════════════════════════════════
+WEAPONS.extend([
+    # Communes (variété early-game → on ne voit plus toujours la même)
+    {"name": "Épée courte",           "atk": 8,   "rarity": "commune",    "emoji": "🗡️", "weight": 28},
+    {"name": "Hache de bûcheron",     "atk": 9,   "rarity": "commune",    "emoji": "🪓", "weight": 26},
+    {"name": "Trident de pêcheur",    "atk": 7,   "rarity": "commune",    "emoji": "🔱", "weight": 26},
+    {"name": "Fléau rustique",        "atk": 9,   "rarity": "commune",    "emoji": "⛓️", "weight": 24},
+    {"name": "Marteau de forge",      "atk": 8,   "rarity": "commune",    "emoji": "🔨", "weight": 26},
+    # Rares
+    {"name": "Rapière du duelliste",  "atk": 13,  "rarity": "rare",       "emoji": "🤺", "weight": 14},
+    {"name": "Katana du voyageur",    "atk": 15,  "rarity": "rare",       "emoji": "🗡️", "weight": 12},
+    {"name": "Masse étoilée",         "atk": 16,  "rarity": "rare",       "emoji": "🌟", "weight": 11},
+    {"name": "Lance de flammes",      "atk": 15,  "rarity": "rare",       "emoji": "🔥", "weight": 11, "element": "fire"},
+    {"name": "Sabre du corsaire",     "atk": 14,  "rarity": "rare",       "emoji": "⚓", "weight": 12},
+    {"name": "Faux des moissons",     "atk": 17,  "rarity": "rare",       "emoji": "🌾", "weight": 10},
+    # Épiques
+    {"name": "Trident de Poséidon",   "atk": 26,  "rarity": "épique",     "emoji": "🔱", "weight": 5, "element": "ice"},
+    {"name": "Katana spectral",       "atk": 25,  "rarity": "épique",     "emoji": "👺", "weight": 5, "element": "shadow"},
+    {"name": "Marteau sismique",      "atk": 28,  "rarity": "épique",     "emoji": "🌋", "weight": 4, "element": "fire"},
+    {"name": "Lance-foudre",          "atk": 27,  "rarity": "épique",     "emoji": "⚡", "weight": 4, "element": "lightning"},
+    {"name": "Hache du berserker",    "atk": 29,  "rarity": "épique",     "emoji": "🪓", "weight": 4},
+    # Légendaires
+    {"name": "Gungnir",               "atk": 43,  "rarity": "légendaire", "emoji": "🔱", "weight": 2, "element": "lightning"},
+    {"name": "Durandal",              "atk": 46,  "rarity": "légendaire", "emoji": "⚔️", "weight": 1, "element": "holy"},
+    {"name": "Croc de Fenrir",        "atk": 45,  "rarity": "légendaire", "emoji": "🐺", "weight": 1, "element": "ice"},
+    # Mythiques
+    {"name": "Faucheuse d'Étoiles",   "atk": 67,  "rarity": "mythique",   "emoji": "💫", "weight": 1, "element": "holy"},
+    {"name": "Lame d'Obsidienne",     "atk": 64,  "rarity": "mythique",   "emoji": "⬛", "weight": 1, "element": "shadow"},
+    # Divine
+    {"name": "Volonté du Démiurge",   "atk": 118, "rarity": "divine",     "emoji": "🔆", "weight": 1, "element": "holy"},
+])
+
+ARMOR.extend([
+    {"name": "Tunique de lin",        "def": 3,  "rarity": "commune",    "emoji": "👕", "weight": 28},
+    {"name": "Gilet matelassé",       "def": 5,  "rarity": "commune",    "emoji": "🧥", "weight": 26},
+    {"name": "Brigandine",            "def": 6,  "rarity": "commune",    "emoji": "🦺", "weight": 24},
+    {"name": "Cotte de mailles",      "def": 10, "rarity": "rare",       "emoji": "⛓️", "weight": 14},
+    {"name": "Plastron runique",      "def": 12, "rarity": "rare",       "emoji": "🛡️", "weight": 11},
+    {"name": "Armure de sang-froid",  "def": 20, "rarity": "épique",     "emoji": "🩸", "weight": 5},
+    {"name": "Carapace de tortue",    "def": 22, "rarity": "épique",     "emoji": "🐢", "weight": 5},
+    {"name": "Armure du Crépuscule",  "def": 34, "rarity": "légendaire", "emoji": "🌒", "weight": 2},
+    {"name": "Plastron du Titan",     "def": 36, "rarity": "légendaire", "emoji": "🗿", "weight": 1},
+    {"name": "Armure stellaire",      "def": 54, "rarity": "mythique",   "emoji": "🌟", "weight": 1},
+    {"name": "Égide du Créateur",     "def": 88, "rarity": "divine",     "emoji": "👁️", "weight": 1},
+])
+
+HELMETS.extend([
+    {"name": "Bonnet de laine",       "emoji": "🧶", "rarity": "commune",    "def": 2,  "weight": 38},
+    {"name": "Chapeau de cuir",       "emoji": "🤠", "rarity": "commune",    "def": 3,  "weight": 34},
+    {"name": "Casque à plumes",       "emoji": "🪖", "rarity": "commune",    "def": 4,  "weight": 30},
+    {"name": "Heaume de fer",         "emoji": "⛑️", "rarity": "rare",       "def": 7,  "weight": 17},
+    {"name": "Capuche de l'assassin", "emoji": "🥷", "rarity": "rare",       "def": 6,  "crit": 4, "weight": 15},
+    {"name": "Chapeau de sorcier",    "emoji": "🧙", "rarity": "rare",       "def": 6,  "atk": 3, "weight": 14},
+    {"name": "Heaume dragon",         "emoji": "🐲", "rarity": "épique",     "def": 13, "atk": 4, "weight": 5},
+    {"name": "Couronne de givre",     "emoji": "❄️", "rarity": "épique",     "def": 12, "crit": 6, "weight": 5},
+    {"name": "Couronne du Roi-Liche", "emoji": "💀", "rarity": "légendaire", "def": 20, "atk": 5, "weight": 1},
+    {"name": "Auréole sacrée",        "emoji": "😇", "rarity": "légendaire", "def": 19, "crit": 9, "weight": 1},
+    {"name": "Diadème du Vide",       "emoji": "🕳️", "rarity": "mythique",   "def": 30, "atk": 6, "weight": 1},
+    {"name": "Couronne de Genèse",    "emoji": "🌟", "rarity": "divine",     "def": 46, "atk": 9, "weight": 1},
+])
+
+BOOTS_LIST.extend([
+    {"name": "Chaussons de toile",    "emoji": "🩴", "rarity": "commune",    "def": 1,  "weight": 38},
+    {"name": "Souliers de marche",    "emoji": "👟", "rarity": "commune",    "def": 2,  "weight": 34},
+    {"name": "Bottes cloutées",       "emoji": "🥾", "rarity": "commune",    "def": 3,  "weight": 30},
+    {"name": "Grèves d'acier",        "emoji": "🦿", "rarity": "rare",       "def": 6,  "weight": 16},
+    {"name": "Bottes du voleur",      "emoji": "🥷", "rarity": "rare",       "def": 5,  "crit": 5, "weight": 14},
+    {"name": "Bottes de braise",      "emoji": "🔥", "rarity": "épique",     "def": 10, "crit": 6, "weight": 5},
+    {"name": "Sandales d'Hermès",     "emoji": "🪽", "rarity": "épique",     "def": 9,  "crit": 8, "weight": 5},
+    {"name": "Bottes du Cataclysme",  "emoji": "🌋", "rarity": "légendaire", "def": 16, "crit": 11, "weight": 1},
+    {"name": "Foulées d'Astre",       "emoji": "💫", "rarity": "mythique",   "def": 24, "crit": 16, "weight": 1},
+    {"name": "Pas du Créateur",       "emoji": "👁️", "rarity": "divine",     "def": 34, "crit": 22, "weight": 1},
+])
+
+ACCESSORIES.extend([
+    {"name": "Bague de cuivre",       "emoji": "💍", "rarity": "commune",    "atk": 1,  "weight": 38},
+    {"name": "Pendentif de bois",     "emoji": "📿", "rarity": "commune",    "atk": 2,  "weight": 34},
+    {"name": "Broche d'argent",       "emoji": "📛", "rarity": "commune",    "atk": 2,  "weight": 30},
+    {"name": "Anneau de force",       "emoji": "💪", "rarity": "rare",       "atk": 6,  "weight": 16},
+    {"name": "Médaillon du loup",     "emoji": "🐺", "rarity": "rare",       "atk": 5,  "crit": 4, "weight": 14},
+    {"name": "Bague de braise",       "emoji": "🔥", "rarity": "épique",     "atk": 10, "crit": 6, "weight": 5},
+    {"name": "Talisman d'orage",      "emoji": "⚡", "rarity": "épique",     "atk": 11, "crit": 5, "weight": 5},
+    {"name": "Anneau du Dragon",      "emoji": "🐲", "rarity": "légendaire", "atk": 16, "crit": 11, "weight": 1},
+    {"name": "Cœur de Phénix",        "emoji": "❤️", "rarity": "légendaire", "atk": 17, "crit": 9, "weight": 1},
+    {"name": "Sceau Astral",          "emoji": "🌌", "rarity": "mythique",   "atk": 26, "crit": 15, "weight": 1},
+    {"name": "Anneau de Genèse",      "emoji": "✨", "rarity": "divine",     "atk": 38, "crit": 22, "weight": 1},
+])
+
+TRINKETS.extend([
+    {"name": "Trèfle séché",          "emoji": "🍀", "rarity": "commune",    "crit": 2,  "weight": 38},
+    {"name": "Dé porte-bonheur",      "emoji": "🎲", "rarity": "commune",    "crit": 3,  "weight": 34},
+    {"name": "Bougie votive",         "emoji": "🕯️", "rarity": "commune",    "crit": 3,  "weight": 30},
+    {"name": "Sablier fêlé",          "emoji": "⏳", "rarity": "rare",       "crit": 8,  "weight": 16},
+    {"name": "Boussole enchantée",    "emoji": "🧭", "rarity": "rare",       "crit": 7,  "atk": 2, "weight": 14},
+    {"name": "Lanterne d'âme",        "emoji": "🏮", "rarity": "épique",     "crit": 14, "atk": 4, "weight": 5},
+    {"name": "Prisme arcanique",      "emoji": "🔮", "rarity": "épique",     "crit": 13, "atk": 5, "weight": 5},
+    {"name": "Totem du Chaman",       "emoji": "🪬", "rarity": "légendaire", "crit": 22, "atk": 6, "weight": 1},
+    {"name": "Larme d'Étoile",        "emoji": "💧", "rarity": "mythique",   "crit": 32, "atk": 9, "weight": 1},
+    {"name": "Étincelle de Genèse",   "emoji": "🎇", "rarity": "divine",     "crit": 46, "atk": 13, "weight": 1},
+])
+
 
 def _bias_pool(pool: list, rarity_bias: float) -> list:
     """Helper : applique un bias de rareté à un pool."""
