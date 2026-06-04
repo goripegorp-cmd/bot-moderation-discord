@@ -53231,8 +53231,10 @@ async def generate_stat_graph(stats, days, username):
         ax2.spines['right'].set_color('#57F287')
         ax2.spines['top'].set_visible(False)
         
-        # Titre
-        plt.title(f'📊 Activité de {username}', color='white', fontsize=14, fontweight='bold', pad=15)
+        # Titre — Phase 251.18 : PAS d'emoji dans le texte matplotlib (la police
+        # DejaVu n'a aucun glyphe emoji → UserWarning "Glyph … missing" + carré tofu
+        # dans l'image). L'emoji vit dans le message Discord, pas dans le PNG rendu.
+        plt.title(f'Activité de {username}', color='white', fontsize=14, fontweight='bold', pad=15)
         
         # Légende
         fig.legend(loc='upper right', bbox_to_anchor=(0.98, 0.98), facecolor='#36393f', edgecolor='white', labelcolor='white')
@@ -53282,10 +53284,10 @@ async def generate_detailed_stat_graph(guild, member, days):
             colors = ['#5865F2', '#57F287', '#FEE75C', '#ED4245', '#9B59B6']
             ax1.pie(sizes, labels=labels, colors=colors[:len(sizes)], autopct='%1.1f%%',
                    textprops={'color': 'white', 'fontsize': 9})
-            ax1.set_title('📝 Top Salons Écrits', color='white', fontsize=12, fontweight='bold')
+            ax1.set_title('Top Salons Écrits', color='white', fontsize=12, fontweight='bold')
         else:
             ax1.text(0.5, 0.5, 'Aucune donnée', ha='center', va='center', color='white', fontsize=12)
-            ax1.set_title('📝 Top Salons Écrits', color='white', fontsize=12, fontweight='bold')
+            ax1.set_title('Top Salons Écrits', color='white', fontsize=12, fontweight='bold')
         
         # 2. Camembert des salons vocaux (haut droit)
         ax2 = axes[0, 1]
@@ -53303,10 +53305,10 @@ async def generate_detailed_stat_graph(guild, member, days):
             colors = ['#57F287', '#5865F2', '#FEE75C', '#ED4245', '#9B59B6']
             ax2.pie(sizes, labels=labels, colors=colors[:len(sizes)], autopct='%1.1f%%',
                    textprops={'color': 'white', 'fontsize': 9})
-            ax2.set_title('🎤 Top Salons Vocaux', color='white', fontsize=12, fontweight='bold')
+            ax2.set_title('Top Salons Vocaux', color='white', fontsize=12, fontweight='bold')
         else:
             ax2.text(0.5, 0.5, 'Aucune donnée', ha='center', va='center', color='white', fontsize=12)
-            ax2.set_title('🎤 Top Salons Vocaux', color='white', fontsize=12, fontweight='bold')
+            ax2.set_title('Top Salons Vocaux', color='white', fontsize=12, fontweight='bold')
         
         # 3. Courbe d'activité messages (bas gauche)
         ax3 = axes[1, 0]
@@ -53324,7 +53326,7 @@ async def generate_detailed_stat_graph(guild, member, days):
         ax3.plot(range(len(dates)), messages, color='#5865F2', linewidth=2, marker='o', markersize=4)
         ax3.set_xlabel('Date', color='white', fontsize=10)
         ax3.set_ylabel('Messages', color='white', fontsize=10)
-        ax3.set_title('💬 Messages par jour', color='white', fontsize=12, fontweight='bold')
+        ax3.set_title('Messages par jour', color='white', fontsize=12, fontweight='bold')
         ax3.tick_params(colors='white')
         ax3.set_xticks(range(0, len(dates), max(1, len(dates)//7)))
         ax3.set_xticklabels([dates[i] for i in range(0, len(dates), max(1, len(dates)//7))], rotation=45, fontsize=8)
@@ -53348,7 +53350,7 @@ async def generate_detailed_stat_graph(guild, member, days):
         ax4.plot(range(len(dates)), vocal, color='#57F287', linewidth=2, marker='o', markersize=4)
         ax4.set_xlabel('Date', color='white', fontsize=10)
         ax4.set_ylabel('Minutes', color='white', fontsize=10)
-        ax4.set_title('🎤 Temps vocal par jour', color='white', fontsize=12, fontweight='bold')
+        ax4.set_title('Temps vocal par jour', color='white', fontsize=12, fontweight='bold')
         ax4.tick_params(colors='white')
         ax4.set_xticks(range(0, len(dates), max(1, len(dates)//7)))
         ax4.set_xticklabels([dates[i] for i in range(0, len(dates), max(1, len(dates)//7))], rotation=45, fontsize=8)
@@ -53359,7 +53361,7 @@ async def generate_detailed_stat_graph(guild, member, days):
         ax4.grid(True, alpha=0.2, color='white')
         
         # Titre principal
-        fig.suptitle(f'📊 Statistiques détaillées de {member.display_name}', 
+        fig.suptitle(f'Statistiques détaillées de {member.display_name}',
                     color='white', fontsize=16, fontweight='bold', y=0.98)
         
         # Sauvegarder — Phase 172 : rendu hors boucle asyncio (thread + lock)
@@ -54538,7 +54540,12 @@ async def check_twitter_feeds(session, guild, data):
                     print(f"[TWITTER] Syndication API échouée pour @{username}: {ex}")
 
             if not tweet_id:
-                print(f"[TWITTER] ⚠️ Aucune source disponible pour @{username}")
+                # Phase 251.18 : condition ATTENDUE (Twitter n'a plus d'API gratuite ;
+                # repli manuel/embed déjà en place). On retire le ⚠️ pour que le filtre
+                # de logs propres (_QuietStdout) masque cette ligne [TWITTER] de routine
+                # en mode normal — visible uniquement en VERBOSE_LOGS. Le vrai avis owner
+                # passe par _warn_api_dead (une fois par session), pas par ce print.
+                print(f"[TWITTER] aucune source pour @{username} (repli manuel)")
                 # Phase 3.8 : warn UNE seule fois par session que Nitter+Syndication sont morts
                 try:
                     await _warn_api_dead(
