@@ -601,27 +601,57 @@ def random_trinket(rarity_bias: float = 1.0) -> dict:
     return item
 
 
-def random_gear_any(rarity_bias: float = 1.0) -> dict:
-    """Phase 102 : tire un item dans n'importe quel slot (6 types).
+# Phase 251.14 — NOUVEAU SLOT : JAMBIÈRES (jambes). Demande owner : pouvoir voir/
+# équiper casque / torse / JAMBES / pieds. Même schéma EXACT que les autres armures
+# (def/rarity/emoji/weight + crit/atk optionnels → aucune itération ne plante). Wiré
+# combat via EQUIPMENT_SLOTS, UI via _SLOT_META (bot.py), drops via random_gear_any.
+LEGGINGS = [
+    {"name": "Pantalon de toile",     "emoji": "👖", "rarity": "commune",    "def": 2,  "weight": 40},
+    {"name": "Jambières de cuir",     "emoji": "🦵", "rarity": "commune",    "def": 3,  "weight": 35},
+    {"name": "Chausses rembourrées",  "emoji": "🩳", "rarity": "commune",    "def": 4,  "weight": 30},
+    {"name": "Grèves de bronze",      "emoji": "🦿", "rarity": "rare",       "def": 7,  "weight": 17},
+    {"name": "Jambières de mailles",  "emoji": "⛓️", "rarity": "rare",       "def": 8,  "weight": 14},
+    {"name": "Cuissardes du rôdeur",  "emoji": "🥾", "rarity": "rare",       "def": 6,  "crit": 4, "weight": 13},
+    {"name": "Jambières dragonines",  "emoji": "🐲", "rarity": "épique",     "def": 14, "weight": 6},
+    {"name": "Jambières de givre",    "emoji": "❄️", "rarity": "épique",     "def": 13, "crit": 5, "weight": 5},
+    {"name": "Cuissards du Titan",    "emoji": "🗿", "rarity": "légendaire", "def": 22, "weight": 2},
+    {"name": "Jambières célestes",    "emoji": "🪶", "rarity": "légendaire", "def": 20, "crit": 8, "weight": 1},
+    {"name": "Grèves du Vide",        "emoji": "🕳️", "rarity": "mythique",   "def": 34, "atk": 4, "weight": 1},
+    {"name": "Jambières de Genèse",   "emoji": "✨", "rarity": "divine",     "def": 52, "atk": 7, "weight": 1},
+]
 
-    Pondération équilibrée : weapon/armor 25% chacun, helmet/boots/accessory/trinket
-    12.5% chacun (les nouveaux slots droppent moins souvent que weapon/armor).
+
+def random_leggings(rarity_bias: float = 1.0) -> dict:
+    """Phase 251.14 : génère des jambières aléatoires (slot 'legs')."""
+    pool = _bias_pool(LEGGINGS, rarity_bias)
+    item = dict(_weighted_choice(pool))
+    item["slot"] = "legs"
+    return item
+
+
+def random_gear_any(rarity_bias: float = 1.0) -> dict:
+    """Phase 102 : tire un item dans n'importe quel slot (7 types depuis Phase 251.14).
+
+    Pondération : weapon/armor ~22% chacun, helmet/legs/boots/accessory/trinket ~11%
+    chacun (les pièces d'armure droppent un peu moins souvent que weapon/armor).
 
     Phase 104 : applique un enchantment aléatoire (30% chance sur épique+,
     60% chance sur légendaire+).
     """
     r = random.random()
-    if r < 0.25:
+    if r < 0.22:
         item = random_weapon(rarity_bias)
         item["slot"] = "weapon"
-    elif r < 0.50:
+    elif r < 0.44:
         item = random_armor(rarity_bias)
         item["slot"] = "armor"
-    elif r < 0.625:
+    elif r < 0.55:
         item = random_helmet(rarity_bias)
-    elif r < 0.75:
+    elif r < 0.66:
+        item = random_leggings(rarity_bias)
+    elif r < 0.77:
         item = random_boots(rarity_bias)
-    elif r < 0.875:
+    elif r < 0.885:
         item = random_accessory(rarity_bias)
     else:
         item = random_trinket(rarity_bias)
@@ -802,7 +832,7 @@ def gear_total_stats(item: dict) -> dict:
 #
 # Note : seul le PLUS HAUT set actif est compté (pas cumulatif).
 
-EQUIPMENT_SLOTS = ["weapon", "armor", "helmet", "boots", "accessory", "trinket"]
+EQUIPMENT_SLOTS = ["weapon", "armor", "helmet", "legs", "boots", "accessory", "trinket"]
 
 
 def compute_set_bonus(inventory: dict) -> dict:
@@ -1192,6 +1222,7 @@ def attempt_refine(item: dict, roll: Optional[float] = None) -> tuple:
         "weapon": WEAPONS,
         "armor": ARMOR,
         "helmet": HELMETS,
+        "legs": LEGGINGS,
         "boots": BOOTS_LIST,
         "accessory": ACCESSORIES,
         "trinket": TRINKETS,
@@ -2335,6 +2366,8 @@ __all__ = [
     "CLASSES", "VOICE_ZONES",
     # Phase 102 : nouveaux slots équipement
     "HELMETS", "BOOTS_LIST", "ACCESSORIES", "TRINKETS",
+    # Phase 251.14 : slot jambières
+    "LEGGINGS", "random_leggings",
     # Phase 104 : enchantments
     "ENCHANTMENTS",
     # Generators

@@ -1299,6 +1299,7 @@ async def db_init():
         # ALTER TABLE idempotent — try/except si colonne déjà existante
         for col_def in (
             "helmet_json TEXT DEFAULT '{}'",
+            "legs_json TEXT DEFAULT '{}'",
             "boots_json TEXT DEFAULT '{}'",
             "accessory_json TEXT DEFAULT '{}'",
             "trinket_json TEXT DEFAULT '{}'",
@@ -7883,7 +7884,7 @@ async def _get_or_create_inventory(guild_id: int, user_id: int) -> dict:
         try:
             async with db.execute(
                 'SELECT hp, max_hp, weapon_json, armor_json, kills, total_damage, '
-                'helmet_json, boots_json, accessory_json, trinket_json '
+                'helmet_json, boots_json, accessory_json, trinket_json, legs_json '
                 'FROM player_inventory WHERE guild_id=? AND user_id=?',
                 (guild_id, user_id),
             ) as cur:
@@ -7898,6 +7899,7 @@ async def _get_or_create_inventory(guild_id: int, user_id: int) -> dict:
                     'boots': json.loads(row[7]) if row[7] else {},
                     'accessory': json.loads(row[8]) if row[8] else {},
                     'trinket': json.loads(row[9]) if row[9] else {},
+                    'legs': json.loads(row[10]) if len(row) > 10 and row[10] else {},
                 }
         except Exception:
             # Fallback : ALTER TABLE pas encore appliquée → utiliser ancien schema
@@ -7913,7 +7915,7 @@ async def _get_or_create_inventory(guild_id: int, user_id: int) -> dict:
                     'weapon': json.loads(row[2]) if row[2] else {},
                     'armor': json.loads(row[3]) if row[3] else {},
                     'kills': row[4], 'total_damage': row[5],
-                    'helmet': {}, 'boots': {}, 'accessory': {}, 'trinket': {},
+                    'helmet': {}, 'boots': {}, 'accessory': {}, 'trinket': {}, 'legs': {},
                 }
         # Création par défaut
         await db.execute(
@@ -7924,7 +7926,7 @@ async def _get_or_create_inventory(guild_id: int, user_id: int) -> dict:
     return {
         'hp': 100, 'max_hp': 100, 'weapon': {}, 'armor': {},
         'kills': 0, 'total_damage': 0,
-        'helmet': {}, 'boots': {}, 'accessory': {}, 'trinket': {},
+        'helmet': {}, 'boots': {}, 'accessory': {}, 'trinket': {}, 'legs': {},
     }
 
 
@@ -7971,7 +7973,7 @@ async def _save_inventory(guild_id: int, user_id: int, inv: dict):
             await db.execute(
                 'UPDATE player_inventory SET '
                 'hp=?, max_hp=?, weapon_json=?, armor_json=?, kills=?, total_damage=?, '
-                'helmet_json=?, boots_json=?, accessory_json=?, trinket_json=?, '
+                'helmet_json=?, boots_json=?, accessory_json=?, trinket_json=?, legs_json=?, '
                 'updated_at=CURRENT_TIMESTAMP '
                 'WHERE guild_id=? AND user_id=?',
                 (
@@ -7980,6 +7982,7 @@ async def _save_inventory(guild_id: int, user_id: int, inv: dict):
                     int(inv.get('kills', 0)), int(inv.get('total_damage', 0)),
                     json.dumps(inv.get('helmet', {})), json.dumps(inv.get('boots', {})),
                     json.dumps(inv.get('accessory', {})), json.dumps(inv.get('trinket', {})),
+                    json.dumps(inv.get('legs', {})),
                     guild_id, user_id,
                 ),
             )
@@ -8233,11 +8236,12 @@ async def _acquire_gear(guild_id: int, user_id: int, item: dict) -> str:
 
 _SLOT_META = {
     'weapon':    ('⚔️', 'Arme'),
-    'armor':     ('🛡️', 'Armure'),
+    'armor':     ('🛡️', 'Torse'),
     'helmet':    ('⛑️', 'Casque'),
+    'legs':      ('🦵', 'Jambières'),
     'boots':     ('🥾', 'Bottes'),
     'accessory': ('💍', 'Accessoire'),
-    'trinket':   ('🔮', 'Babiole'),
+    'trinket':   ('🔮', 'Talisman'),
 }
 
 
@@ -48176,7 +48180,7 @@ async def _check_phase113_badges(guild: discord.Guild, user_id: int):
         # Check has_divine : un item équipé de rareté divine ?
         inv = await _get_or_create_inventory(guild.id, user_id)
         has_divine = False
-        for slot_key in ("weapon", "armor", "helmet", "boots", "accessory", "trinket"):
+        for slot_key in ("weapon", "armor", "helmet", "legs", "boots", "accessory", "trinket"):
             it = inv.get(slot_key) or {}
             if (it.get("rarity") or "").lower() == "divine":
                 has_divine = True
@@ -65938,7 +65942,7 @@ async def _hero_check(kind: str, guild_id: int, user_id: int) -> bool:
             return bool(r and r[0])
         if kind == "equip":
             inv = await _get_or_create_inventory(guild_id, user_id)
-            for slot in ("weapon", "armor", "helmet", "boots", "accessory", "trinket"):
+            for slot in ("weapon", "armor", "helmet", "legs", "boots", "accessory", "trinket"):
                 if (inv.get(slot) or {}).get("name"):
                     return True
             return False
