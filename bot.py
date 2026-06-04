@@ -10931,16 +10931,26 @@ async def _find_event_recap_channel(guild, exclude_ids=None):
     return None
 
 
-async def _end_active_event(guild, *, victory: bool, reason: str = ""):
-    """Termine l'event actif : restaure les salons, distribue les récompenses, supprime l'arène."""
+async def _end_active_event(guild, *, victory: bool, reason: str = "", event_id: Optional[int] = None):
+    """Termine l'event actif : restaure les salons, distribue les récompenses, supprime l'arène.
+
+    event_id : si fourni, termine CET event précis (et pas « le dernier actif ») — utilisé
+    par les checkers de timeout pour ne JAMAIS risquer de tuer un autre event (cf. Phase 91)."""
     try:
         # Charger l'event
         async with get_db() as db:
-            async with db.execute(
-                'SELECT id, boss_json, arena_channel_id, arena_message_id FROM events WHERE guild_id=? AND ended=0 ORDER BY id DESC LIMIT 1',
-                (guild.id,),
-            ) as cur:
-                row = await cur.fetchone()
+            if event_id is not None:
+                async with db.execute(
+                    'SELECT id, boss_json, arena_channel_id, arena_message_id FROM events WHERE id=? AND ended=0',
+                    (event_id,),
+                ) as cur:
+                    row = await cur.fetchone()
+            else:
+                async with db.execute(
+                    'SELECT id, boss_json, arena_channel_id, arena_message_id FROM events WHERE guild_id=? AND ended=0 ORDER BY id DESC LIMIT 1',
+                    (guild.id,),
+                ) as cur:
+                    row = await cur.fetchone()
             if not row:
                 return
             event_id = row[0]
@@ -15505,13 +15515,24 @@ async def event_timeout_checker():
                 rows = await cur.fetchall()
         for event_id, guild_id in rows:
             try:
-                # Phase 91 : UPDATE direct par event_id (pas _end_active_event qui kill latest)
+                # Phase 251.11 : TEARDOWN COMPLET ciblé par event_id (supprime salon +
+                # catégorie d'arène + warm-up + récap, claim atomique). Avant (hotfix
+                # Phase 91), on se contentait de ended=1 → le salon « 💎-chasse-au-trésor »
+                # / l'arène + son warm-up + les trésors RESTAIENT = « l'event ne se termine
+                # pas » (bug owner). On cible event_id → aucun risque de tuer un autre
+                # event. FAIL-OPEN : filet ended=1 ci-dessous si _end_active_event no-op.
+                guild = bot.get_guild(int(guild_id)) if guild_id else None
+                if guild:
+                    try:
+                        await _end_active_event(guild, victory=False, reason="⏰ Temps écoulé", event_id=event_id)
+                    except Exception as ex2:
+                        print(f"[event_timeout_checker teardown ev={event_id}] {ex2}")
                 async with get_db() as db:
                     await db.execute(
                         'UPDATE events SET ended=1 WHERE id=?', (event_id,),
                     )
                     await db.commit()
-                print(f"[event_timeout_checker] event {event_id} timed out → ended")
+                print(f"[event_timeout_checker] event {event_id} timed out → teardown + ended")
             except Exception as ex:
                 print(f"[event_timeout_checker row={event_id}] {ex}")
     except Exception as ex:
@@ -15975,23 +15996,95 @@ async def stale_event_cleanup():
         # DÉJÀ inactifs (ends_at dépassé) ou des fantômes sans message vieux de
         # 30 min → ZÉRO risque pour un event réellement en cours.
         try:
+            # julianday() parse l'ISO avec fuseau (+00:00) et microsecondes de façon
+            # FIABLE — contrairement à datetime() qui pouvait renvoyer NULL sur certains
+            # formats → l'event n'expirait jamais (cause du « ça ne se termine pas »).
             async with get_db() as db:
                 async with db.execute(
                     "SELECT id, guild_id FROM events WHERE ended=0 AND ("
-                    "(ends_at IS NOT NULL AND datetime(ends_at) <= datetime('now')) "
-                    "OR (arena_message_id IS NULL AND datetime(started_at) <= datetime('now','-30 minutes'))"
+                    "(ends_at IS NOT NULL AND julianday(ends_at) <= julianday('now')) "
+                    "OR (arena_message_id IS NULL AND julianday(started_at) <= julianday('now','-30 minutes'))"
                     ") LIMIT 50"
                 ) as cur:
                     dead_rows = await cur.fetchall()
             for ev_id, g_id in dead_rows:
                 guild = bot.get_guild(int(g_id)) if g_id else None
+                # Phase 251.11 : TEARDOWN COMPLET (pas juste ended=1). Avant, le watchdog
+                # se contentait de marquer ended → le salon dédié (« 💎-chasse-au-trésor »
+                # / arène) + son message de warm-up + les trésors RESTAIENT visibles =
+                # « la chasse ne se termine pas ». _end_active_event supprime salon +
+                # catégorie + panneau, poste le récap, et claim ATOMIQUE (zéro double
+                # récompense). Il termine le DERNIER event actif du guild = celui-ci
+                # (verrou 1 event/guild). FAIL-OPEN : on garde le filet ended=1 ci-dessous.
+                if guild:
+                    try:
+                        await _end_active_event(guild, victory=False, reason="⏰ Temps écoulé", event_id=ev_id)
+                    except Exception as ex2:
+                        print(f"[stale_cleanup WATCHDOG teardown ev={ev_id}] {ex2}")
                 n = await _restore_event_masks(guild, ev_id) if guild else 0
                 async with get_db() as db:
                     await db.execute('UPDATE events SET ended=1 WHERE id=?', (ev_id,))
                     await db.commit()
-                print(f"[stale_cleanup WATCHDOG] event {ev_id} expiré/fantôme → ended + {n} salon(s) démasqué(s)")
+                print(f"[stale_cleanup WATCHDOG] event {ev_id} expiré/fantôme → teardown + ended + {n} salon(s)")
         except Exception as ex:
             print(f"[stale_cleanup watchdog block] {ex}")
+
+        # ─── 0.a2 SALONS D'ARÈNE d'events DÉJÀ terminés mais NON supprimés ──
+        # Phase 251.11 : FILET pour les arènes laissées par l'ANCIEN bug (event marqué
+        # ended SANS teardown → « la chasse ne se termine pas », salon + warm-up à vie).
+        # On reprend l'arena_channel_id STOCKÉ des events terminés récemment : si le
+        # salon existe ENCORE, on le supprime (+ sa catégorie « ⚔️ … » éphémère), puis
+        # on remet arena_channel_id=0 pour ne pas re-balayer. PRÉCIS (par id, zéro
+        # devinette de nom). Le salon PERMANENT « ⚔️-combat » (== combat_channel_id) est
+        # épargné. Un event proprement terminé a déjà son salon supprimé → get_channel
+        # renvoie None → no-op : ça n'agit QUE sur un vrai résidu.
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT id, guild_id, arena_channel_id FROM events "
+                    "WHERE ended=1 AND arena_channel_id IS NOT NULL AND arena_channel_id>0 "
+                    "AND julianday('now') - julianday(COALESCE(ends_at, started_at)) < 2 "
+                    "LIMIT 50"
+                ) as cur:
+                    ended_rows = await cur.fetchall()
+            for ev_id, g_id, ach_id in ended_rows:
+                guild = bot.get_guild(int(g_id)) if g_id else None
+                if not guild:
+                    continue
+                ch = guild.get_channel(int(ach_id)) if ach_id else None
+                if ch is None:
+                    # déjà supprimé (fin normale) → on solde le champ et on passe
+                    async with get_db() as db:
+                        await db.execute('UPDATE events SET arena_channel_id=0 WHERE id=?', (ev_id,))
+                        await db.commit()
+                    continue
+                try:
+                    perm_id = int((await cfg(guild.id)).get('combat_channel_id', 0) or 0)
+                except Exception:
+                    perm_id = 0
+                if perm_id and int(ach_id) == perm_id:
+                    continue  # salon de combat PERMANENT : jamais supprimé
+                cat = ch.category
+                try:
+                    await ch.delete(reason=f"Arène event {ev_id} terminé — résidu nettoyé")
+                except Exception:
+                    pass
+                if cat is not None and str(getattr(cat, 'name', '') or '').startswith("⚔️ "):
+                    try:
+                        for _c in list(getattr(cat, 'channels', [])):
+                            try:
+                                await _c.delete(reason="Résidu arène")
+                            except Exception:
+                                pass
+                        await cat.delete(reason=f"Catégorie arène event {ev_id} — résidu")
+                    except Exception:
+                        pass
+                async with get_db() as db:
+                    await db.execute('UPDATE events SET arena_channel_id=0 WHERE id=?', (ev_id,))
+                    await db.commit()
+                print(f"[stale_cleanup ORPHAN ARENA] event {ev_id} terminé → salon arène résiduel supprimé")
+        except Exception as ex:
+            print(f"[stale_cleanup orphan ended-arena block] {ex}")
 
         # ─── 0.b ARÈNES DE COMBAT ORPHELINES (Phase 210) ───────────────────
         # Catégorie+salons d'un boss/invasion dont la résolution n'a jamais
@@ -70373,14 +70466,17 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
                     style_emoji = profile_module.STYLE_EMOJI.get(
                         style, "⚖️"
                     )
+                    # IS_COMPONENTS_V2 interdit content + view sur le MÊME message
+                    # (400 50035). On envoie le style en message texte SÉPARÉ, puis le
+                    # panneau V2 seul (sans content).
                     await i.followup.send(
                         content=(
                             f"_Style de jeu détecté :_ "
                             f"{style_emoji} **{style_label}**"
                         ),
-                        view=perso_panel,
                         ephemeral=True,
                     )
+                    await i.followup.send(view=perso_panel, ephemeral=True)
             except Exception as ex:
                 print(f"[/profile perso_panel] {ex}")
 

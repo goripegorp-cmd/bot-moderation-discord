@@ -656,22 +656,26 @@ def _build_wave_view(run_id, guild_id, vc_ids, state, pstate, label, is_boss):
                 await i.response.defer()  # ack (DeferredMessageUpdate, pas de "thinking")
             except Exception:
                 pass
+            now = time.time()
+            key = (run_id, i.user.id)
+            # Anti-spam UNIVERSEL (Phase 251.11) : 1 action / ATTACK_CD_SEC, placé EN
+            # TÊTE → protège TOUS les chemins. Clic trop rapide → SILENCE (déjà ACK via
+            # defer()). Sous le feu, répondre à CHAQUE clic noyé = 1 requête webhook/clic
+            # → 429 GLOBAL sur l'app (la tempête vue dans les logs). On ne répond plus
+            # aux clics throttlés : le joueur reclique, c'est tout.
+            if now - _dgn_click_cd.get(key, 0) < ATTACK_CD_SEC:
+                return
+            _dgn_click_cd[key] = now
             if state["done"]:
                 return await i.followup.send("💀 Déjà vaincu !", ephemeral=True)
             if not await _is_member(run_id, i.user.id):
                 return await i.followup.send("❌ Ce donjon n'est pas le tien.", ephemeral=True)
-            now = time.time()
             ps = pstate.setdefault(i.user.id, {"hp": DUNGEON_PLAYER_HP, "down_until": 0.0})
             # À terre ? (mort temporaire — réapparition)
             if ps["down_until"] > now:
                 return await i.followup.send(
                     f"💀 Tu es à terre ! Réapparition <t:{int(ps['down_until'])}:R>.",
                     ephemeral=True)
-            key = (run_id, i.user.id)
-            if now - _dgn_click_cd.get(key, 0) < ATTACK_CD_SEC:
-                return await i.followup.send("⏱️ Doucement ! Attends une seconde.",
-                                             ephemeral=True)
-            _dgn_click_cd[key] = now
 
             atk_bonus, deff, proc = await _combat_profile(guild_id, i.user.id)
             base = random.randint(40, 90) if is_boss else random.randint(25, 55)
@@ -836,6 +840,15 @@ def _build_dispersion_view(run_id, guild_id, rooms, pstate):
             room = next((r for r in rooms if r["idx"] == idx), None)
             if room is None:
                 return
+            now = time.time()
+            key = (run_id, i.user.id, idx)  # cooldown par salle
+            # Anti-spam UNIVERSEL (Phase 251.11) : 1 action / ATTACK_CD_SEC, EN TÊTE →
+            # protège TOUS les chemins (done / pas membre / pas dans le vocal / à terre).
+            # Clic trop rapide → SILENCE (déjà ACK via defer()). Avant, un joueur HORS
+            # vocal qui spammait renvoyait 1 followup/clic → 429 GLOBAL sur l'app.
+            if now - _dgn_click_cd.get(key, 0) < ATTACK_CD_SEC:
+                return
+            _dgn_click_cd[key] = now
             if room["done"]:
                 return await i.followup.send("💀 Salle déjà nettoyée !", ephemeral=True)
             if not await _is_member(run_id, i.user.id):
@@ -850,17 +863,11 @@ def _build_dispersion_view(run_id, guild_id, rooms, pstate):
                 return await i.followup.send(
                     f"🔊 Rejoins le vocal **{room['vc_name']}** pour frapper son mob !",
                     ephemeral=True)
-            now = time.time()
             ps = pstate.setdefault(i.user.id, {"hp": DUNGEON_PLAYER_HP, "down_until": 0.0})
             if ps["down_until"] > now:
                 return await i.followup.send(
                     f"💀 Tu es à terre ! Réapparition <t:{int(ps['down_until'])}:R>.",
                     ephemeral=True)
-            key = (run_id, i.user.id, idx)  # cooldown par salle
-            if now - _dgn_click_cd.get(key, 0) < ATTACK_CD_SEC:
-                return await i.followup.send("⏱️ Doucement ! Attends une seconde.",
-                                             ephemeral=True)
-            _dgn_click_cd[key] = now
 
             atk_bonus, deff, proc = await _combat_profile(guild_id, i.user.id)
             base = random.randint(25, 55)
