@@ -26163,15 +26163,21 @@ class AdsRedditChannelSelect(Select):
 
 # ─────────────────────────────── TWITTER/X ───────────────────────────────
 
-# Liste d'instances Nitter fonctionnelles (2026)
-# Audit live (Phase 3.0b) : nitter.net est l'instance la plus stable.
-# xcancel.com en backup, les autres tombent souvent.
+# Instances Nitter — liste VÉRIFIÉE juin 2026 (sources sûres : wiki officiel
+# github.com/zedeus/nitter + tracker status.d420.de). Nitter a été officiellement
+# ARRÊTÉ en 2024 (X a coupé les guest accounts) ; il ne reste que des instances
+# communautaires INTERMITTENTES, souvent bloquées depuis une IP datacenter (Railway).
+# On en garde plusieurs et on prend la 1re qui répond ; si TOUTES échouent → fallback
+# Twitter Syndication, puis mode manuel (jamais de crash). xcancel.com = la plus stable.
+# Retirées car MORTES : nitter.net, nitter.cz, nitter.privacydev.net.
 NITTER_INSTANCES = [
-    "nitter.net",
     "xcancel.com",
     "nitter.poast.org",
-    "nitter.cz",
-    "nitter.privacydev.net",
+    "nitter.privacyredirect.com",
+    "nitter.space",
+    "nitter.tiekoetter.com",
+    "nitter.catsarch.com",
+    "lightbrd.com",
 ]
 # Fallback RSS-Bridge si Nitter échoue
 RSS_BRIDGE_URLS = [
