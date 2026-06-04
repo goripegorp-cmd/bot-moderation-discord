@@ -88,6 +88,12 @@ _warmup_until: dict[int, float] = {}
 # (PATCH seul, ZÉRO GET). { event_id: epoch_dernier_refresh }.
 _last_panel_refresh: dict[int, float] = {}
 _PANEL_REFRESH_MIN_INTERVAL = 4.0
+# Phase 251.24 — ANTI-429 : cooldown d'attaque PAR JOUEUR. Un boss à gros HP invite au
+# MATRAQUAGE du bouton ; chaque clic = defer + followup (2 requêtes) que discord.py
+# re-essaie en boucle sur 429 → tempête globale. On coalesce les clics rapprochés d'un
+# même joueur AVANT toute requête réseau (un clic noyé coûte ZÉRO requête).
+_last_user_attack: dict[tuple, float] = {}
+_ATTACK_COOLDOWN = 2.0
 
 # Phase 196 : mention intelligente rotative — paramètres anti-spam.
 PING_MAX_USERS = 8          # cap dur de mentions par spawn (TOS Discord)
@@ -1296,6 +1302,18 @@ class DailyBossAttackButton(
         return cls(int(match["event_id"]))
 
     async def callback(self, btn_i: discord.Interaction):
+        # Phase 251.24 — ANTI-429 : cooldown PAR JOUEUR, AVANT tout appel réseau.
+        # Un clic trop rapproché est ignoré SILENCIEUSEMENT (zéro requête) → coupe net
+        # le matraquage qui, sinon, déclenche une tempête de 429 amplifiée par les retries.
+        try:
+            _key = (btn_i.guild.id if btn_i.guild else 0,
+                    btn_i.user.id if btn_i.user else 0)
+            _now = datetime.now(timezone.utc).timestamp()
+            if _now - _last_user_attack.get(_key, 0.0) < _ATTACK_COOLDOWN:
+                return
+            _last_user_attack[_key] = _now
+        except Exception:
+            pass
         try:
             await btn_i.response.defer(ephemeral=True)
         except (discord.NotFound, discord.HTTPException, discord.InteractionResponded):

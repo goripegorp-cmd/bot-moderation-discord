@@ -10345,8 +10345,34 @@ RESPAWN_SEC = 300          # délai de réapparition après un K.O. (5 min)
 _player_respawn = {}       # (guild_id, user_id) -> timestamp de réapparition
 
 
+# Phase 251.24 — ANTI-429 : cooldown d'attaque PAR JOUEUR, partagé par le Boss Raid et
+# le World Boss. Un boss à gros HP invite au matraquage du bouton ; chaque clic =
+# defer + followup (2 requêtes) que discord.py re-essaie sur 429 → tempête globale. On
+# coalesce les clics rapprochés d'un même joueur AVANT toute requête (clic noyé = 0 requête).
+_boss_attack_cooldown: dict = {}
+_BOSS_ATTACK_CD = 2.0
+
+
+def _boss_atk_too_soon(i: discord.Interaction, scope: str) -> bool:
+    """True si CE joueur a cliqué « Attaquer » il y a moins de _BOSS_ATTACK_CD s."""
+    try:
+        key = (scope,
+               i.guild.id if i.guild else 0,
+               i.user.id if i.user else 0)
+        now = time.time()
+        if now - _boss_attack_cooldown.get(key, 0.0) < _BOSS_ATTACK_CD:
+            return True
+        _boss_attack_cooldown[key] = now
+    except Exception:
+        pass
+    return False
+
+
 async def _handle_boss_attack(i: discord.Interaction, event_id: int):
     """Gère un clic sur le bouton Attaquer."""
+    # Phase 251.24 anti-429 : cooldown PAR JOUEUR avant tout réseau (anti-matraquage).
+    if _boss_atk_too_soon(i, "raid"):
+        return
     try:
         # ACK immédiat pour éviter "Échec de l'interaction" (Discord 3s timeout)
         try:
@@ -61776,6 +61802,9 @@ class WorldBossAttackView(View):
         self.add_item(b2)
 
     async def _on_attack(self, i: discord.Interaction):
+        # Phase 251.24 anti-429 : cooldown PAR JOUEUR avant tout réseau (anti-matraquage).
+        if _boss_atk_too_soon(i, "wb"):
+            return
         if not await _safe_defer(i):
             return
         try:
