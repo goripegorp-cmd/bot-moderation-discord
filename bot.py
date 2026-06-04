@@ -8677,6 +8677,64 @@ class _SellPanelV2(LayoutView):
         return cls(guild, user_id, stash)
 
 
+async def _build_codex_lines(guild_id: int, user_id: int) -> str:
+    """Phase 251.21 : Codex de collection — combien de pièces d'équipement DISTINCTES
+    le joueur a découvertes (loot_history + équipé + coffre) sur le total du catalogue,
+    réparti par rareté. LECTURE SEULE (zéro impact combat/éco). Objectif de complétion."""
+    try:
+        catalog = events2026.all_gear_catalog()
+    except Exception:
+        return "📖 Codex momentanément indisponible."
+    discovered = set()
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT DISTINCT item_name FROM loot_history WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id)) as cur:
+                discovered |= {r[0] for r in await cur.fetchall() if r and r[0]}
+            async with db.execute(
+                "SELECT item_json FROM player_stash WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id)) as cur:
+                for (ij,) in await cur.fetchall():
+                    try:
+                        nm = (json.loads(ij) or {}).get('name')
+                        if nm:
+                            discovered.add(nm)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    try:
+        inv = await _get_or_create_inventory(guild_id, user_id)
+        for slot in ("weapon", "armor", "helmet", "legs", "boots", "accessory", "trinket"):
+            nm = (inv.get(slot) or {}).get('name')
+            if nm:
+                discovered.add(nm)
+    except Exception:
+        pass
+    order = ["commune", "rare", "épique", "légendaire", "mythique", "divine"]
+    emo = {"commune": "⚪", "rare": "🔵", "épique": "🟣",
+           "légendaire": "🟡", "mythique": "🔴", "divine": "🌟"}
+    by_r = {r: [0, 0] for r in order}
+    for it in catalog:
+        r = (it.get('rarity') or 'commune').lower()
+        if r not in by_r:
+            by_r[r] = [0, 0]
+        by_r[r][1] += 1
+        if it.get('name') in discovered:
+            by_r[r][0] += 1
+    tot_f = sum(v[0] for v in by_r.values())
+    tot_t = sum(v[1] for v in by_r.values())
+    lines = [f"📖 **Codex de collection** — `{tot_f}/{tot_t}` pièces découvertes\n"]
+    for r in order:
+        f, t = by_r[r]
+        if t:
+            lines.append(f"{emo.get(r, '')} {r.capitalize()} : `{f}/{t}`")
+    lines.append("\n_Découvre-les en gagnant du loot (boss, trésors, donjons…). "
+                 "Les plus rares sont un défi sur le long terme !_")
+    return "\n".join(lines)
+
+
 class EquipmentLayoutV2(LayoutView):
     """Phase 179b/252 : panneau INVENTAIRE (loadout + équiper/déséquiper + familier).
     Ephemeral, donc réservé au joueur qui l'ouvre."""
@@ -8757,6 +8815,17 @@ class EquipmentLayoutV2(LayoutView):
                 pass
         _help.callback = _show_help
         _btns.append(_help)
+        # Phase 251.21 : Codex de collection (objectif de complétion — lecture seule).
+        _codex = Button(label="📖 Codex", style=discord.ButtonStyle.secondary)
+
+        async def _show_codex(i: discord.Interaction):
+            try:
+                await i.response.send_message(
+                    await _build_codex_lines(i.guild.id, i.user.id), ephemeral=True)
+            except Exception:
+                pass
+        _codex.callback = _show_codex
+        _btns.append(_codex)
         self.add_item(discord.ui.ActionRow(*_btns))
 
     @classmethod

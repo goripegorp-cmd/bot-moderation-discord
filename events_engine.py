@@ -978,6 +978,12 @@ def themed_set_bonus(inventory: dict) -> dict:
             "atk": 0, "def": 0, "crit": 0, "count": count, "active": False}
 
 
+def all_gear_catalog() -> list:
+    """Phase 251.21 : TOUT l'équipement (toutes pièces, tous slots) pour le Codex de
+    collection. Chaque entrée a au moins name + rarity. Lecture seule."""
+    return WEAPONS + ARMOR + HELMETS + LEGGINGS + BOOTS_LIST + ACCESSORIES + TRINKETS
+
+
 def inventory_total_stats(inventory: dict) -> dict:
     """Phase 106 : stats TOTALES (gear + set bonus) pour l'inventaire complet.
 
@@ -2456,7 +2462,7 @@ __all__ = [
     "random_helmet", "random_boots", "random_accessory", "random_trinket",
     "random_gear_any", "random_enchantment", "gear_total_stats",
     "compute_set_bonus", "inventory_total_stats", "EQUIPMENT_SLOTS",
-    "SET_THEMES", "themed_set_bonus", "themed_set_progress",
+    "SET_THEMES", "themed_set_bonus", "themed_set_progress", "all_gear_catalog",
     # Phase 180 : éléments d'armes + proc DoT
     "ELEMENTS", "roll_elemental_proc",
     # Phase 181 : amélioration +1..+10 (forge pro)
