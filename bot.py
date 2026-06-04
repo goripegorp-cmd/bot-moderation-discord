@@ -8696,9 +8696,17 @@ class EquipmentLayoutV2(LayoutView):
         items.append(v2_body("\n".join(_format_loadout_lines(inv))))
         _set = (f"\n{totals.get('set_emoji', '')} Set : **{totals['set_name']}**"
                 if totals.get('set_name') else "")
+        # Phase 251.20 : set THÉMATIQUE (casque+torse+jambes+pieds d'un même thème).
+        _tn, _tc, _ta = totals.get('theme_name', ''), totals.get('theme_count', 0), totals.get('theme_active')
+        if _ta:
+            _theme = f"\n🏅 Set **{_tn}** COMPLET ✅ — bonus actif !"
+        elif _tn and _tc >= 2:
+            _theme = f"\n🧩 Set **{_tn}** : `{_tc}/4` — réunis les 4 pièces pour le bonus"
+        else:
+            _theme = ""
         items.append(v2_body(
             f"**⚡ Puissance** : `+{totals.get('atk', 0)}` ATK · "
-            f"`+{totals.get('def', 0)}` DEF · `+{totals.get('crit', 0)}%` crit" + _set))
+            f"`+{totals.get('def', 0)}` DEF · `+{totals.get('crit', 0)}%` crit" + _set + _theme))
         # Familier — INTÉGRÉ ici (fini le /hub séparé).
         if _active:
             _pd = _active[3]

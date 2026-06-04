@@ -923,6 +923,61 @@ def compute_set_bonus(inventory: dict) -> dict:
     }
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Phase 251.20 — SETS D'ARMURE THÉMATIQUES (demande owner #2). Porter les 4 pièces
+# casque + torse + jambes + pieds d'un même thème = bonus MODESTE (règle rétention)
+# + objectif de collection « complète le set ». S'AJOUTE au bonus par rareté ci-dessus.
+# ═══════════════════════════════════════════════════════════════════════════
+# 2 paires de bottes pour compléter les sets Dragon et Givre (les 3 autres pièces de
+# chaque set existent déjà). Schéma EXACT (name/emoji/rarity/def/weight + crit).
+BOOTS_LIST.extend([
+    {"name": "Bottes draconiques",   "emoji": "🐲", "rarity": "épique", "def": 11, "crit": 5, "weight": 5},
+    {"name": "Bottes de givre",      "emoji": "❄️", "rarity": "épique", "def": 12, "crit": 4, "weight": 5},
+])
+
+SET_THEMES = {
+    "neant": {"name": "Néant", "emoji": "🕳️",
+              "pieces": {"helmet": "Diadème du Vide", "armor": "Armure du Vide",
+                         "legs": "Grèves du Vide", "boots": "Bottes du Vide"},
+              "atk": 15, "def": 15, "crit": 8},
+    "dragon": {"name": "Dragon", "emoji": "🐲",
+               "pieces": {"helmet": "Heaume dragon", "armor": "Armure dragonique",
+                          "legs": "Jambières dragonines", "boots": "Bottes draconiques"},
+               "atk": 8, "def": 4, "crit": 6},
+    "givre": {"name": "Givre", "emoji": "❄️",
+              "pieces": {"helmet": "Couronne de givre", "armor": "Armure de glace",
+                         "legs": "Jambières de givre", "boots": "Bottes de givre"},
+              "atk": 0, "def": 12, "crit": 6},
+}
+
+
+def themed_set_progress(inventory: dict):
+    """Meilleur set thématique en cours : (theme_dict|None, count 0-4). 4 = complet."""
+    if not inventory:
+        return (None, 0)
+    best, best_count = None, 0
+    for theme in SET_THEMES.values():
+        cnt = 0
+        for slot, pname in theme["pieces"].items():
+            it = inventory.get(slot) or {}
+            if it and it.get("name") == pname and not is_item_broken(it):
+                cnt += 1
+        if cnt > best_count:
+            best, best_count = theme, cnt
+    return (best, best_count)
+
+
+def themed_set_bonus(inventory: dict) -> dict:
+    """Bonus du set thématique COMPLET (4/4) sinon zéros.
+    Retourne {name, emoji, atk, def, crit, count, active}."""
+    theme, count = themed_set_progress(inventory)
+    if theme and count >= 4:
+        return {"name": theme["name"], "emoji": theme["emoji"], "atk": theme["atk"],
+                "def": theme["def"], "crit": theme["crit"], "count": 4, "active": True}
+    return {"name": theme["name"] if theme else "", "emoji": theme["emoji"] if theme else "",
+            "atk": 0, "def": 0, "crit": 0, "count": count, "active": False}
+
+
 def inventory_total_stats(inventory: dict) -> dict:
     """Phase 106 : stats TOTALES (gear + set bonus) pour l'inventaire complet.
 
@@ -956,6 +1011,12 @@ def inventory_total_stats(inventory: dict) -> dict:
     total_crit += set_bonus["crit"]
     total_hp_bonus += set_bonus["hp_bonus"]
 
+    # Phase 251.20 : set THÉMATIQUE complet (4/4) → bonus modeste EN PLUS du set rareté.
+    theme_bonus = themed_set_bonus(inventory)
+    total_atk += theme_bonus["atk"]
+    total_def += theme_bonus["def"]
+    total_crit += theme_bonus["crit"]
+
     return {
         "atk": total_atk,
         "def": total_def,
@@ -965,6 +1026,10 @@ def inventory_total_stats(inventory: dict) -> dict:
         "set_name": set_bonus["name"],
         "set_emoji": set_bonus["emoji"],
         "set_desc": set_bonus["desc"],
+        "theme_name": theme_bonus["name"],
+        "theme_emoji": theme_bonus["emoji"],
+        "theme_count": theme_bonus["count"],
+        "theme_active": theme_bonus["active"],
     }
 
 
@@ -2391,6 +2456,7 @@ __all__ = [
     "random_helmet", "random_boots", "random_accessory", "random_trinket",
     "random_gear_any", "random_enchantment", "gear_total_stats",
     "compute_set_bonus", "inventory_total_stats", "EQUIPMENT_SLOTS",
+    "SET_THEMES", "themed_set_bonus", "themed_set_progress",
     # Phase 180 : éléments d'armes + proc DoT
     "ELEMENTS", "roll_elemental_proc",
     # Phase 181 : amélioration +1..+10 (forge pro)
