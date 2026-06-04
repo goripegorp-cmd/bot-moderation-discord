@@ -123,6 +123,14 @@ def setup(
     _db_get = db_get_fn
     _v2 = v2_helpers
     _add_coins = add_coins_fn
+    # Phase 251.23 : enregistre le bouton de vote PERSISTANT (DynamicItem) pour que
+    # les clics SURVIVENT à un reboot. Sans ça, après chaque redéploiement la vue en
+    # mémoire est morte → « ❌ Échec de l'interaction » (le sondage vit 24h, bien
+    # au-delà d'un restart). Le DynamicItem matche le custom_id `prompt_vote_*` au clic.
+    try:
+        bot_instance.add_dynamic_items(_PromptVoteButton)
+    except Exception:
+        pass
 
 
 async def init_db():
@@ -266,6 +274,34 @@ async def post_now(guild: discord.Guild) -> bool:
         return False
 
 
+class _PromptVoteButton(
+    discord.ui.DynamicItem[Button],
+    template=r"prompt_vote_(?P<pid>[0-9]+)_(?P<idx>[0-9]+)",
+):
+    """Bouton de vote PERSISTANT (Phase 251.23) — capté par son custom_id même
+    APRÈS un reboot (le sondage du jour vit 24h). On reconstruit prompt_id + index
+    depuis le custom_id ; le libellé de l'option est relu en DB au clic."""
+    def __init__(self, prompt_id: int, choice_idx: int,
+                 label: str = "Vote", emoji=None):
+        self.prompt_id = int(prompt_id)
+        self.choice_idx = int(choice_idx)
+        super().__init__(
+            Button(
+                label=(label or "Vote")[:80],
+                emoji=emoji,
+                style=discord.ButtonStyle.primary,
+                custom_id=f"prompt_vote_{int(prompt_id)}_{int(choice_idx)}",
+            )
+        )
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["pid"]), int(match["idx"]))
+
+    async def callback(self, i: discord.Interaction):
+        await _on_vote_click(i, self.prompt_id, self.choice_idx)
+
+
 def _build_vote_view(prompt_id: int, q_data: dict):
     """View avec les boutons-réponses."""
     from discord.ui import View
@@ -284,9 +320,8 @@ def _build_vote_view(prompt_id: int, q_data: dict):
                     custom_id=f"prompt_vote_{prompt_id}_{idx}",
                 )
 
-                async def _cb(i: discord.Interaction, choice_idx=idx,
-                              choice_text=opt):
-                    await _on_vote_click(i, prompt_id, choice_idx, choice_text)
+                async def _cb(i: discord.Interaction, choice_idx=idx):
+                    await _on_vote_click(i, prompt_id, choice_idx)
 
                 btn.callback = _cb
                 self.add_item(btn)
@@ -296,15 +331,15 @@ def _build_vote_view(prompt_id: int, q_data: dict):
 
 async def _on_vote_click(
     i: discord.Interaction, prompt_id: int, choice_idx: int,
-    choice_text: str,
 ):
-    """Handle vote click."""
+    """Gère un clic de vote. Le libellé de l'option est relu en DB depuis l'index
+    → robuste APRÈS un reboot (le DynamicItem ne connaît que prompt_id + index)."""
     if _get_db is None:
         return
     try:
         async with _get_db() as db:
             async with db.execute(
-                "SELECT votes_jsonb, status FROM daily_prompts "
+                "SELECT votes_jsonb, status, options_jsonb FROM daily_prompts "
                 "WHERE id=?",
                 (prompt_id,),
             ) as cur:
@@ -317,6 +352,15 @@ async def _on_vote_click(
             return await i.response.send_message(
                 "🔒 Le vote est terminé.", ephemeral=True
             )
+        try:
+            opts = json.loads(row[2] or "[]")
+        except Exception:
+            opts = []
+        if not (0 <= choice_idx < len(opts)):
+            return await i.response.send_message(
+                "❌ Choix invalide.", ephemeral=True
+            )
+        choice_text = opts[choice_idx]
         votes = json.loads(row[0] or "{}")
         uid = str(i.user.id)
         if uid in votes:
