@@ -1613,6 +1613,15 @@ async def db_init():
             answered_count INTEGER DEFAULT 0,
             PRIMARY KEY (guild_id, day)
         )''')
+        # Phase 251.15 : claim PAR JOUEUR de la consolation d'énigme (anti-spam de la
+        # bonne réponse → +50 à chaque clic). 1 ligne = ce joueur a déjà été récompensé
+        # pour l'énigme de ce jour. INSERT OR IGNORE + rowcount = paiement unique.
+        await db.execute('''CREATE TABLE IF NOT EXISTS daily_riddle_answered (
+            guild_id INTEGER NOT NULL,
+            day TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            PRIMARY KEY (guild_id, day, user_id)
+        )''')
 
         # Voice Chaos : log des chaos appliqués pour éviter de re-frapper le même vocal
         await db.execute('''CREATE TABLE IF NOT EXISTS voice_chaos_log (
@@ -62936,7 +62945,29 @@ class RiddleAnswerView(View):
                         await db.commit()
 
                 if is_correct:
-                    # Bonne réponse mais trop tard
+                    # Bonne réponse mais trop tard → consolation 50 🪙, UNE SEULE FOIS
+                    # par joueur. Phase 251.15 : AVANT, on pouvait SPAM la bonne réponse
+                    # et toucher +50 à CHAQUE clic (exploit vu en prod, screenshot owner).
+                    # CLAIM ATOMIQUE par (guild, jour, user) : si déjà réclamé → 0 pièce.
+                    # FAIL-CLOSED : si la DB échoue, on NE paie PAS (jamais d'argent à tort).
+                    _consol_ok = False
+                    try:
+                        async with get_db() as db_c:
+                            _cc = await db_c.execute(
+                                'INSERT OR IGNORE INTO daily_riddle_answered(guild_id, day, user_id) '
+                                'VALUES(?,?,?)', (i.guild.id, day, i.user.id))
+                            await db_c.commit()
+                            _consol_ok = (getattr(_cc, "rowcount", 0) == 1)
+                    except Exception:
+                        _consol_ok = False
+                    if not _consol_ok:
+                        return await _safe_followup(
+                            i,
+                            content=(
+                                f"✅ Tu avais déjà répondu juste aujourd'hui — pas de "
+                                f"double récompense.\n\n_Explication :_ {riddle['explanation']}"
+                            ),
+                        )
                     try:
                         await add_coins(i.guild.id, i.user.id, 50)
                     except Exception:

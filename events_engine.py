@@ -2330,6 +2330,22 @@ def generate_shop_rotation(seed: int = None) -> list[dict]:
     """
     rng = random.Random(seed) if seed is not None else random
 
+    def _rng_weighted(catalog):
+        # Phase 251.15 : tirage pondéré DÉTERMINISTE via `rng` (le seed de semaine).
+        # AVANT : on appelait _weighted_choice() qui utilise le `random` GLOBAL → le
+        # seed était ignoré → le shop se re-tirait à CHAQUE appel de /event_shop au
+        # lieu d'être stable sur 7 jours (bug owner). Ici on respecte le seed.
+        total = sum(it.get("weight", 1) for it in catalog)
+        if total <= 0:
+            return rng.choice(catalog)
+        r = rng.uniform(0, total)
+        acc = 0.0
+        for it in catalog:
+            acc += it.get("weight", 1)
+            if r <= acc:
+                return it
+        return catalog[-1]
+
     def pick(catalog, n):
         # Plus la rareté est haute, plus le prix monte
         picked = []
@@ -2337,7 +2353,7 @@ def generate_shop_rotation(seed: int = None) -> list[dict]:
         attempts = 0
         while len(picked) < n and attempts < 50:
             attempts += 1
-            it = dict(_weighted_choice(catalog))
+            it = dict(_rng_weighted(catalog))
             if it["name"] in seen:
                 continue
             seen.add(it["name"])
