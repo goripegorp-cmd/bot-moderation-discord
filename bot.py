@@ -58248,11 +58248,17 @@ async def _unlock_achievement(guild_id: int, user_id: int, achievement_id: str) 
     if not ach:
         return False
     async with get_db() as db:
-        await db.execute(
+        _ic = await db.execute(
             'INSERT OR IGNORE INTO achievements_unlocked(guild_id, user_id, achievement_id) VALUES(?,?,?)',
             (guild_id, user_id, achievement_id),
         )
         await db.commit()
+    # Phase 251.16 : claim ATOMIQUE — on ne paie/notifie QUE si l'INSERT a réellement
+    # créé la ligne (rowcount==1). Avant, 2 déblocages concurrents passaient le SELECT
+    # `_is_achievement_unlocked` puis payaient 2× les coins (race read-then-write).
+    # INSERT OR IGNORE → rowcount=1 si inséré, 0 si déjà présent. FAIL-CLOSED implicite.
+    if getattr(_ic, "rowcount", 0) != 1:
+        return False
     # Reward coins
     if ach.reward_coins > 0:
         try:
@@ -63854,39 +63860,43 @@ class EveningRitualView(View):
                 if not i.guild:
                     return await _safe_followup(i, content="❌ Serveur uniquement.")
                 day = _today_str_p41()
-                async with get_db() as db:
-                    async with db.execute(
-                        'SELECT counts_json, participants_json FROM evening_rituals '
-                        'WHERE guild_id=? AND day=?',
-                        (i.guild.id, day),
-                    ) as cur:
-                        row = await cur.fetchone()
-                if not row:
-                    return await _safe_followup(i, content="❌ Rituel non lancé aujourd'hui.")
-                counts = {}
-                participants = []
-                try:
-                    counts = json.loads(row[0] or '{}')
-                    participants = json.loads(row[1] or '[]')
-                except Exception:
-                    pass
-                if i.user.id in participants:
-                    return await _safe_followup(i, content="🌙 Tu as déjà partagé ton humeur aujourd'hui.")
-                # Incrémenter
-                counts[key] = counts.get(key, 0) + 1
-                participants.append(i.user.id)
-                async with get_db() as db:
-                    await db.execute(
-                        'UPDATE evening_rituals SET counts_json=?, participants_json=? '
-                        'WHERE guild_id=? AND day=?',
-                        (json.dumps(counts), json.dumps(participants), i.guild.id, day),
-                    )
-                    await db.commit()
-                # Donner 5 coins
-                try:
-                    await add_coins(i.guild.id, i.user.id, 5)
-                except Exception:
-                    pass
+                # Phase 251.16 : verrou PAR JOUEUR autour de lecture→check→écriture→paiement.
+                # Avant, le read-modify-write de participants_json sur 2 connexions pouvait
+                # créditer 5🪙 DEUX FOIS sur un double-clic quasi-simultané (race). Sérialisé.
+                async with _reward_lock(('ritual', i.guild.id, i.user.id, day)):
+                    async with get_db() as db:
+                        async with db.execute(
+                            'SELECT counts_json, participants_json FROM evening_rituals '
+                            'WHERE guild_id=? AND day=?',
+                            (i.guild.id, day),
+                        ) as cur:
+                            row = await cur.fetchone()
+                    if not row:
+                        return await _safe_followup(i, content="❌ Rituel non lancé aujourd'hui.")
+                    counts = {}
+                    participants = []
+                    try:
+                        counts = json.loads(row[0] or '{}')
+                        participants = json.loads(row[1] or '[]')
+                    except Exception:
+                        pass
+                    if i.user.id in participants:
+                        return await _safe_followup(i, content="🌙 Tu as déjà partagé ton humeur aujourd'hui.")
+                    # Incrémenter
+                    counts[key] = counts.get(key, 0) + 1
+                    participants.append(i.user.id)
+                    async with get_db() as db:
+                        await db.execute(
+                            'UPDATE evening_rituals SET counts_json=?, participants_json=? '
+                            'WHERE guild_id=? AND day=?',
+                            (json.dumps(counts), json.dumps(participants), i.guild.id, day),
+                        )
+                        await db.commit()
+                    # Donner 5 coins (UNE seule fois — protégé par le verrou + le check ci-dessus)
+                    try:
+                        await add_coins(i.guild.id, i.user.id, 5)
+                    except Exception:
+                        pass
                 await _safe_followup(
                     i,
                     content=(
