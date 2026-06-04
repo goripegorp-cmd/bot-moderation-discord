@@ -59758,15 +59758,42 @@ async def confess_setup_cmd(i: discord.Interaction, channel: discord.TextChannel
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
+# Phase 251.17 : DISJONCTEUR anti-tempête 429 GLOBALE. Quand Discord renvoie un 429
+# GLOBAL (error code 0 = trop de requêtes au total — vu sous forte charge, aggravé par
+# l'incident réseau Railway US West), CHAQUE nouvelle requête d'interaction ne fait
+# qu'allonger une file déjà vouée à l'échec → le bot s'auto-DDoS. Dès qu'un 429 est
+# ATTRAPÉ (discord.py a déjà épuisé ses retries internes → c'est une limite SOUTENUE),
+# on arme un court backoff : pendant ~5 s, _safe_defer/_safe_followup S'ABSTIENNENT
+# d'appeler l'API → la file Discord se vide et le bot se ré-auto-soigne. ZÉRO impact
+# hors tempête (_GLOBAL_RL_UNTIL reste à 0 tant qu'aucun 429 n'est attrapé).
+_GLOBAL_RL_UNTIL = 0.0
+
+
+def _global_rl_active() -> bool:
+    return time.time() < _GLOBAL_RL_UNTIL
+
+
+def _arm_global_rl_backoff(ex, seconds: float = 5.0):
+    global _GLOBAL_RL_UNTIL
+    try:
+        if isinstance(ex, discord.HTTPException) and getattr(ex, 'status', None) == 429:
+            _GLOBAL_RL_UNTIL = max(_GLOBAL_RL_UNTIL, time.time() + seconds)
+    except Exception:
+        pass
+
+
 async def _safe_defer(i: discord.Interaction, ephemeral: bool = True) -> bool:
     """Defer une interaction si pas déjà fait. Retourne True si OK, False si déjà mort."""
+    if _global_rl_active():
+        return False  # backoff global : ne pas empiler une requête vouée au 429
     try:
         if not i.response.is_done():
             await i.response.defer(ephemeral=ephemeral)
         return True
     except discord.InteractionResponded:
         return True
-    except (discord.NotFound, discord.HTTPException):
+    except (discord.NotFound, discord.HTTPException) as ex:
+        _arm_global_rl_backoff(ex)
         return False
     except Exception as ex:
         print(f"[_safe_defer] {ex}")
@@ -59775,11 +59802,14 @@ async def _safe_defer(i: discord.Interaction, ephemeral: bool = True) -> bool:
 
 async def _safe_followup(i: discord.Interaction, **kwargs) -> bool:
     """Envoie un followup safe. Retourne True si OK."""
+    if _global_rl_active():
+        return False  # backoff global (Phase 251.17) : ne pas aggraver la tempête 429
     try:
         kwargs.setdefault('ephemeral', True)
         await i.followup.send(**kwargs)
         return True
     except (discord.NotFound, discord.HTTPException) as ex:
+        _arm_global_rl_backoff(ex)
         print(f"[_safe_followup] {ex}")
         return False
     except Exception as ex:
