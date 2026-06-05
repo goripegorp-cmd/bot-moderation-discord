@@ -5,7 +5,7 @@ import community_goals
 
 
 def test_goal_templates_cover_all_event_kinds():
-    """Les 8 templates couvrent tous les types d'event hookés."""
+    """Les templates couvrent tous les types d'event hookés."""
     expected_kinds = {
         "boss_kill",
         "treasure_open",
@@ -14,6 +14,7 @@ def test_goal_templates_cover_all_event_kinds():
         "wheel_spin",
         "riddle_solve",
         "mystery_open",
+        "messages",       # Phase 254-extra : objectif collectif de messages
         "voice_minutes",
     }
     actual_kinds = {t["kind"] for t in community_goals.GOAL_TEMPLATES}
