@@ -274,6 +274,8 @@ import member_risk as member_risk_module
 import error_logger as error_logger_module
 # Phase 169.1 : Mob Hunts (combat fréquent multi-user)
 import mob_hunts as mob_hunts_module
+# Phase 256 Lot 3 : event COLLABORATIF « La Faille Convergente » (gate activité 🟡)
+import rift_events as rift_events_module
 # Phase 173.2 : Boss du jour, 4×/jour, gating de niveau
 import daily_bosses as daily_bosses_module
 import activity_rewards as activity_rewards_module
@@ -16770,7 +16772,9 @@ async def task_supervisor():
                            ("daily_bosses_module", "daily_boss_task"),
                            ("event_notif_role_module", "event_role_task"),
                            ("conversation_starters_module", "conv_starter_task"),
-                           ("hero_journey_module", "hero_journey_task")):
+                           ("hero_journey_module", "hero_journey_task"),
+                           ("rift_events_module", "rift_spawn_task"),
+                           ("rift_events_module", "rift_watchdog")):
         try:
             mod = globals().get(mod_name)
             lo = getattr(mod, attr, None) if mod is not None else None
@@ -42112,6 +42116,26 @@ async def on_ready():
             await alliance_war_module.boot_cleanup()
         except Exception as ex:
             print(f"[on_ready 254 alliance_war] {ex}")
+
+        # Phase 256 Lot 3 : event COLLABORATIF « La Faille Convergente » (gate 🟡,
+        # ≥4 scelleurs distincts requis → impossible en solo). Module isolé, fail-open.
+        try:
+            rift_events_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
+                                     inventory_fn=_get_or_create_inventory,
+                                     active_ping_fn=_ping_active_members,
+                                     arena_create_fn=_create_combat_arena,
+                                     arena_delete_fn=_delete_combat_arena,
+                                     report_fn=_post_combat_report,
+                                     event_busy_fn=_has_any_major_event_running)
+            await rift_events_module.init_db()
+            rift_events_module.register_persistent_views(bot)
+            await rift_events_module.boot_cleanup()
+            if not rift_events_module.rift_spawn_task.is_running():
+                rift_events_module.rift_spawn_task.start()
+            if not rift_events_module.rift_watchdog.is_running():
+                rift_events_module.rift_watchdog.start()
+        except Exception as ex:
+            print(f"[on_ready 256 rift_events] {ex}")
 
         # Phase 184 : Donjons instanciés (lobby groupe → salons dédiés → vagues)
         try:

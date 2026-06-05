@@ -57,6 +57,7 @@ EVENT_TIERS = {
     "daily_boss": TIER_INTER,
     "boss": TIER_INTER,
     "boss_raid": TIER_INTER,
+    "rift": TIER_INTER,  # Phase 256 Lot 3 : event collaboratif « Faille Convergente »
     # 🔴 Grandiose — réservé aux vrais actifs de la semaine
     "world_boss": TIER_GRAND,
     "climax": TIER_GRAND,
