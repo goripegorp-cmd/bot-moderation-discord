@@ -1780,6 +1780,18 @@ async def db_init():
             status TEXT DEFAULT 'pending'  -- pending | accepted | refused | expired
         )''')
 
+        # Phase 253 : POINTS DE COMBAT d'alliance. Chaque attaque de boss d'un membre
+        # crédite SON alliance → classement + concours. Table dédiée (reset de saison
+        # = simple DELETE/UPDATE, sans toucher au schéma des alliances).
+        await db.execute('''CREATE TABLE IF NOT EXISTS alliance_combat_points (
+            guild_id INTEGER NOT NULL,
+            alliance_id INTEGER NOT NULL,
+            points INTEGER DEFAULT 0,
+            boss_hits INTEGER DEFAULT 0,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (guild_id, alliance_id)
+        )''')
+
         # Game Nights : tracking pour cleanup salons + éviter double creation
         await db.execute('''CREATE TABLE IF NOT EXISTS game_nights (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -10373,6 +10385,73 @@ def _boss_atk_too_soon(i: discord.Interaction, scope: str) -> bool:
     return False
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Phase 253 — POINTS DE COMBAT D'ALLIANCE. Chaque attaque de boss d'un membre
+# d'alliance crédite son alliance (10 % des dégâts, min 1) → classement & concours.
+# TOUT fail-open : une erreur ici ne casse JAMAIS le combat (priorité absolue).
+# ═══════════════════════════════════════════════════════════════════════════
+async def _get_user_alliance_id(guild_id: int, user_id: int):
+    """ID de l'alliance (non dissoute) du membre, ou None. Requête légère (hot path)."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT am.alliance_id FROM alliance_members am "
+                "JOIN alliances a ON a.id = am.alliance_id "
+                "WHERE am.user_id=? AND a.guild_id=? AND a.dissolved=0 LIMIT 1",
+                (user_id, guild_id),
+            ) as cur:
+                row = await cur.fetchone()
+        return int(row[0]) if row and row[0] else None
+    except Exception:
+        return None
+
+
+async def _award_alliance_combat_points(guild_id: int, user_id: int, damage: int):
+    """Crédite l'alliance de l'attaquant : points = 10 % des dégâts (min 1). Upsert
+    ATOMIQUE. FAIL-OPEN strict : aucune exception ne remonte (le combat ne casse jamais)."""
+    try:
+        aid = await _get_user_alliance_id(guild_id, user_id)
+        if not aid:
+            return
+        pts = max(1, int(damage) // 10)
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO alliance_combat_points (guild_id, alliance_id, points, boss_hits) "
+                "VALUES (?, ?, ?, 1) "
+                "ON CONFLICT(guild_id, alliance_id) DO UPDATE SET "
+                "points = points + ?, boss_hits = boss_hits + 1, updated_at = CURRENT_TIMESTAMP",
+                (guild_id, aid, pts, pts),
+            )
+            await db.commit()
+    except Exception:
+        pass
+
+
+async def _alliance_combat_ranking_lines(guild, top: int = 8) -> str:
+    """Classement des alliances par points de combat (texte prêt à afficher)."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT a.name, a.emoji, acp.points, acp.boss_hits "
+                "FROM alliance_combat_points acp "
+                "JOIN alliances a ON a.id = acp.alliance_id "
+                "WHERE acp.guild_id=? AND a.dissolved=0 AND acp.points > 0 "
+                "ORDER BY acp.points DESC LIMIT ?",
+                (guild.id, int(top)),
+            ) as cur:
+                rows = await cur.fetchall()
+        if not rows:
+            return "_Aucun point encore — attaquez des boss en équipe pour faire grimper votre alliance !_"
+        medals = ["🥇", "🥈", "🥉"]
+        out = []
+        for idx, (name, emoji, points, hits) in enumerate(rows):
+            rank = medals[idx] if idx < 3 else f"`#{idx + 1}`"
+            out.append(f"{rank} {emoji or '🤝'} **{name}** — `{int(points or 0):,}` pts _({int(hits or 0)} coups)_")
+        return "\n".join(out)
+    except Exception:
+        return "_Classement momentanément indisponible._"
+
+
 async def _handle_boss_attack(i: discord.Interaction, event_id: int):
     """Gère un clic sur le bouton Attaquer."""
     # Phase 251.24 anti-429 : cooldown PAR JOUEUR avant tout réseau (anti-matraquage).
@@ -10611,6 +10690,9 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
                 (event_id, i.user.id, damage, now_ts, damage, now_ts),
             )
             await db.commit()
+
+        # Phase 253 : crédite l'alliance de l'attaquant (classement de combat). Fail-open.
+        await _award_alliance_combat_points(i.guild.id, i.user.id, damage)
 
         # Update inventory total damage
         inv['total_damage'] = inv.get('total_damage', 0) + damage
@@ -41962,7 +42044,8 @@ async def on_ready():
                                       arena_delete_fn=_delete_combat_arena,
                                       report_fn=_post_combat_report,
                                       event_busy_fn=_has_any_major_event_running,
-                                      event_mention_fn=_get_event_mention)
+                                      event_mention_fn=_get_event_mention,
+                                      alliance_points_fn=_award_alliance_combat_points)
             await daily_bosses_module.init_db()
             daily_bosses_module.register_persistent_views(bot)
             if not daily_bosses_module.daily_boss_task.is_running():
@@ -61964,6 +62047,9 @@ class WorldBossAttackView(View):
                 )
                 await db.commit()
 
+            # Phase 253 : crédite l'alliance de l'attaquant (classement de combat). Fail-open.
+            await _award_alliance_combat_points(i.guild.id, i.user.id, damage)
+
             # Track stats Phase 41 : événement participé + pet XP
             try:
                 await _incr_stat_p41(i.guild.id, i.user.id, 'events_participated', 1)
@@ -67069,6 +67155,8 @@ async def _p46_open_alliances(i: discord.Interaction):
     try:
         if not i.guild:
             return await _safe_followup(i, content="❌ Serveur uniquement.")
+        # Phase 253 : classement de combat des alliances (affiché dans les 2 vues).
+        _rank_txt = await _alliance_combat_ranking_lines(i.guild)
         alliance = await _get_user_alliance(i.guild.id, i.user.id)
         if alliance:
             # Membre actif : afficher l'alliance + boutons gestion
@@ -67086,6 +67174,7 @@ async def _p46_open_alliances(i: discord.Interaction):
                     f"**Membres ({len(members)}/{_ALLIANCE_MAX_MEMBERS}) :**\n"
                     + "\n".join(member_lines)
                     + f"\n\n📍 **Salon privé :** <#{alliance['channel_id']}>"
+                    + f"\n\n🏆 **Classement combat des alliances**\n{_rank_txt}"
                 ),
                 color=0x9B59B6,
             )
@@ -67111,6 +67200,7 @@ async def _p46_open_alliances(i: discord.Interaction):
                 f"**Sur ce serveur :** {cnt} / {_ALLIANCE_MAX_PER_GUILD} alliances\n"
                 + (f"📬 **Tu as {pending} invitation(s) en attente** — clique 'Mes invitations'\n" if pending else "")
                 + "\n_Tu n'es dans aucune alliance pour l'instant._"
+                + f"\n\n🏆 **Classement combat des alliances**\n{_rank_txt}"
             ),
             color=0x9B59B6,
         )

@@ -72,6 +72,7 @@ _report_fn = None  # Phase 223 : async (guild, title, body) -> rapport dans « c
 _arena_delete_fn = None  # Phase 210 : async (guild, text_channel_id) -> supprime l'arène
 _event_busy_fn = None  # Phase 230 : async (guild_id) -> True si un AUTRE event de combat tourne (injecté)
 _event_mention_fn = None  # Phase 235.24 : async (guild, type) -> mention rôles opt-in (/notify + 🔔)
+_alliance_points_fn = None  # Phase 253 : async (guild_id, user_id, damage) -> crédite l'alliance
 
 # Phase 235.16 : WARM-UP — léger sas de préparation au spawn (« le combat commence
 # dans X s » demandé par l'owner : recevoir le ping, lire le butin, s'équiper,
@@ -278,10 +279,12 @@ def list_boss_ids() -> list[str]:
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
           inventory_fn=None, events_channel_fn=None, notif_check_fn=None,
           cleanup_register_fn=None, arena_create_fn=None, arena_delete_fn=None,
-          report_fn=None, event_busy_fn=None, event_mention_fn=None):
+          report_fn=None, event_busy_fn=None, event_mention_fn=None,
+          alliance_points_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _inventory_fn
     global _events_channel_fn, _notif_check_fn, _cleanup_register_fn
     global _arena_create_fn, _arena_delete_fn, _report_fn, _event_busy_fn, _event_mention_fn
+    global _alliance_points_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -301,6 +304,8 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
     _event_busy_fn = event_busy_fn
     # Phase 235.24 : mention des rôles opt-in (/notify + 🔔 par-type) au spawn
     _event_mention_fn = event_mention_fn
+    # Phase 253 : crédit des points d'alliance au combat (injecté depuis bot.py)
+    _alliance_points_fn = alliance_points_fn
 
 
 async def init_db():
@@ -1093,6 +1098,13 @@ async def record_boss_attack(guild_id: int, user_id: int) -> dict:
         await _se.on_boss_damage(guild_id, damage, user_id)
     except Exception:
         pass
+
+    # Phase 253 : crédite l'alliance de l'attaquant (classement de combat). Fail-open.
+    if _alliance_points_fn is not None:
+        try:
+            await _alliance_points_fn(guild_id, user_id, damage)
+        except Exception:
+            pass
 
     updated = await get_active_boss(guild_id)
     boss_dead = (updated is None) or (updated["hp_current"] <= 0)
