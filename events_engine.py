@@ -1229,6 +1229,60 @@ TRINKETS.extend([
 ])
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 256 — EXPANSION ÉQUIPEMENT (+30 pièces : 7 slots · toutes raretés · éléments)
+# APPEND-ONLY, schéma EXACT : name + stat + rarity + weight sont OBLIGATOIRES (lus en
+# bracket par random_weapon/random_armor/_bias_pool → KeyError sinon). Les familles
+# Crépuscule / Braise / Polaire sont complètes sur 4 slots (helmet/armor/legs/boots)
+# pour alimenter les SET_THEMES du lot suivant. Raretés ∈ RARITY_ORDER ; hautes
+# raretés weight=1 (drop minuscule = chase, rétention).
+# ═══════════════════════════════════════════════════════════════════════════════
+WEAPONS.extend([
+    {"name": "Lame de Braise",           "atk": 15,  "rarity": "rare",       "emoji": "🔥", "weight": 12, "element": "fire"},
+    {"name": "Grimoire du Venin",        "atk": 14,  "rarity": "rare",       "emoji": "📓", "weight": 12, "element": "poison"},
+    {"name": "Faux du Crépuscule",       "atk": 24,  "rarity": "épique",     "emoji": "🌑", "weight": 5,  "element": "shadow"},
+    {"name": "Arc Polaire du Chasseur",  "atk": 23,  "rarity": "épique",     "emoji": "🏹", "weight": 5,  "element": "ice"},
+    {"name": "Fouet de Foudre",          "atk": 42,  "rarity": "légendaire", "emoji": "⚡", "weight": 2,  "element": "lightning"},
+    {"name": "Sceptre Sacré",            "atk": 44,  "rarity": "légendaire", "emoji": "✨", "weight": 2,  "element": "holy"},
+    {"name": "Dague du Néant",           "atk": 64,  "rarity": "mythique",   "emoji": "🗡️", "weight": 1,  "element": "shadow"},
+    {"name": "Marteau Magmatique",       "atk": 66,  "rarity": "mythique",   "emoji": "🌋", "weight": 1,  "element": "fire"},
+    {"name": "Lame Aurore-Céleste",      "atk": 156, "rarity": "céleste",    "emoji": "🌠", "weight": 1,  "element": "holy"},
+    {"name": "Genèse du Vide",           "atk": 210, "rarity": "primordial", "emoji": "🪐", "weight": 1,  "element": "shadow"},
+])
+ARMOR.extend([
+    {"name": "Carapace Polaire",         "def": 19,  "rarity": "épique",     "emoji": "❄️", "weight": 5},
+    {"name": "Plastron du Crépuscule",   "def": 18,  "rarity": "épique",     "emoji": "🌑", "weight": 5},
+    {"name": "Cuirasse de Braise",       "def": 32,  "rarity": "légendaire", "emoji": "🔥", "weight": 2},
+    {"name": "Manteau Sacré",            "def": 33,  "rarity": "légendaire", "emoji": "✨", "weight": 2},
+    {"name": "Égide de l'Orage",         "def": 52,  "rarity": "mythique",   "emoji": "⚡", "weight": 1},
+])
+HELMETS.extend([
+    {"name": "Casque de Braise",         "emoji": "🔥", "rarity": "rare",       "def": 8,  "atk": 3,  "weight": 12},
+    {"name": "Heaume du Crépuscule",     "emoji": "🌑", "rarity": "épique",     "def": 13, "crit": 4, "weight": 5},
+    {"name": "Couronne Polaire",         "emoji": "❄️", "rarity": "épique",     "def": 14,            "weight": 5},
+    {"name": "Diadème Sacré",            "emoji": "✨", "rarity": "légendaire", "def": 22, "crit": 6, "weight": 2},
+])
+LEGGINGS.extend([
+    {"name": "Cuissards Polaires",       "emoji": "❄️", "rarity": "épique",     "def": 16, "crit": 4, "weight": 5},
+    {"name": "Grèves du Crépuscule",     "emoji": "🌑", "rarity": "épique",     "def": 15, "crit": 5, "weight": 5},
+    {"name": "Jambières de Braise",      "emoji": "🔥", "rarity": "légendaire", "def": 30, "atk": 6,  "weight": 2},
+])
+BOOTS_LIST.extend([
+    {"name": "Bottes de Braise",         "emoji": "🔥", "rarity": "rare",       "def": 6,  "crit": 4,  "weight": 12},
+    {"name": "Bottes du Crépuscule",     "emoji": "🌑", "rarity": "épique",     "def": 10, "crit": 6,  "weight": 5},
+    {"name": "Bottes Polaires",          "emoji": "❄️", "rarity": "épique",     "def": 11, "crit": 5,  "weight": 5},
+    {"name": "Foulées de l'Orage",       "emoji": "⚡", "rarity": "mythique",   "def": 24, "crit": 14, "weight": 1},
+])
+ACCESSORIES.extend([
+    {"name": "Amulette du Venin",        "emoji": "☠️", "rarity": "légendaire", "atk": 38, "crit": 10, "weight": 2},
+    {"name": "Anneau de Braise",         "emoji": "🔥", "rarity": "mythique",   "atk": 60, "crit": 14, "weight": 1},
+])
+TRINKETS.extend([
+    {"name": "Fiole de Foudre",          "emoji": "⚡", "rarity": "légendaire", "crit": 40, "atk": 8,  "weight": 2},
+    {"name": "Larme du Néant",           "emoji": "🕳️", "rarity": "mythique",   "crit": 58, "atk": 16, "weight": 1},
+])
+
+
 def all_gear_catalog() -> list:
     """Phase 251.21 : TOUT l'équipement (toutes pièces, tous slots) pour le Codex de
     collection. Chaque entrée a au moins name + rarity. Lecture seule."""

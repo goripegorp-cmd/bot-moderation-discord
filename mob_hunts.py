@@ -349,6 +349,58 @@ MOB_CATALOG.extend([
      "item_pool": ["soul_shard", "ectoplasm"], "color": 0x5499C7, "nocturnal": True},
 ])
 
+# Phase 256 — EXPANSION MOBS (+15 : 12 jour / 3 nuit). APPEND-ONLY, schéma EXACT
+# (8 champs obligatoires). hp_base ∈ [30,250] (test), drop_coins/damage_per_click =
+# 2-tuples (unpack en bracket à :802/1081/1177), item_pool = ids EXISTANTS uniquement
+# (flavor, pas du gear), id UNIQUE (cultist déjà pris → zealot).
+MOB_CATALOG.extend([
+    {"id": "imp", "name": "Diablotin", "emoji": "👿", "hp_base": 70,
+     "damage_per_click": (10, 22), "drop_coins": (60, 150), "drop_item_chance": 0.12,
+     "item_pool": ["fang", "soul_shard"], "color": 0x8E44AD},
+    {"id": "kobold", "name": "Kobold Pillard", "emoji": "🦎", "hp_base": 55,
+     "damage_per_click": (8, 18), "drop_coins": (45, 120), "drop_item_chance": 0.10,
+     "item_pool": ["dagger", "rope"], "color": 0x7D6608},
+    {"id": "giant_crab", "name": "Crabe Géant", "emoji": "🦀", "hp_base": 120,
+     "damage_per_click": (12, 24), "drop_coins": (80, 190), "drop_item_chance": 0.12,
+     "item_pool": ["silver_scale", "common_gem"], "color": 0xCB4335},
+    {"id": "treant_sapling", "name": "Jeune Tréant", "emoji": "🌱", "hp_base": 95,
+     "damage_per_click": (10, 20), "drop_coins": (55, 140), "drop_item_chance": 0.13,
+     "item_pool": ["fur", "potion"], "color": 0x196F3D},
+    {"id": "cave_bat", "name": "Chauve-souris des Cavernes", "emoji": "🦇", "hp_base": 45,
+     "damage_per_click": (8, 16), "drop_coins": (40, 100), "drop_item_chance": 0.10,
+     "item_pool": ["leather_wing", "bone"], "color": 0x515A5A},
+    {"id": "stone_golem_minor", "name": "Golem de Pierre Mineur", "emoji": "🗿", "hp_base": 160,
+     "damage_per_click": (14, 28), "drop_coins": (95, 210), "drop_item_chance": 0.14,
+     "item_pool": ["stone_eye", "stone_club"], "color": 0x717D7E},
+    {"id": "zealot", "name": "Fanatique Encapuchonné", "emoji": "🕯️", "hp_base": 90,
+     "damage_per_click": (12, 24), "drop_coins": (70, 170), "drop_item_chance": 0.12,
+     "item_pool": ["tattered_cloak", "spell_scroll"], "color": 0x6C3483},
+    {"id": "swamp_lizard", "name": "Lézard des Marais", "emoji": "🐊", "hp_base": 110,
+     "damage_per_click": (12, 22), "drop_coins": (65, 160), "drop_item_chance": 0.12,
+     "item_pool": ["venom_sac", "silk"], "color": 0x1E8449},
+    {"id": "ice_sprite", "name": "Lutin de Givre", "emoji": "❄️", "hp_base": 80,
+     "damage_per_click": (10, 20), "drop_coins": (75, 180), "drop_item_chance": 0.13,
+     "item_pool": ["mana_crystal", "common_gem"], "color": 0x5DADE2},
+    {"id": "fire_beetle", "name": "Scarabée de Feu", "emoji": "🪲", "hp_base": 100,
+     "damage_per_click": (12, 24), "drop_coins": (70, 165), "drop_item_chance": 0.12,
+     "item_pool": ["soul_ember", "fang"], "color": 0xCA6F1E},
+    {"id": "bandit_archer", "name": "Archer Bandit", "emoji": "🏹", "hp_base": 105,
+     "damage_per_click": (14, 26), "drop_coins": (90, 200), "drop_item_chance": 0.13,
+     "item_pool": ["rusty_sword", "coin_pouch"], "color": 0x935116},
+    {"id": "young_wyvern", "name": "Jeune Wyverne", "emoji": "🐲", "hp_base": 180,
+     "damage_per_click": (16, 32), "drop_coins": (110, 240), "drop_item_chance": 0.15,
+     "item_pool": ["wing_fragment", "silver_scale"], "color": 0x2471A3},
+    {"id": "grave_ghoul", "name": "Goule des Tombes", "emoji": "🧟", "hp_base": 130,
+     "damage_per_click": (14, 28), "drop_coins": (120, 260), "drop_item_chance": 0.16,
+     "item_pool": ["ectoplasm", "soul_ember"], "color": 0x4A235A, "nocturnal": True},
+    {"id": "lunar_wolf", "name": "Loup Lunaire", "emoji": "🌙", "hp_base": 140,
+     "damage_per_click": (15, 30), "drop_coins": (130, 280), "drop_item_chance": 0.16,
+     "item_pool": ["night_fang", "moon_dust"], "color": 0x2C3E50, "nocturnal": True},
+    {"id": "crypt_spider", "name": "Araignée des Cryptes", "emoji": "🕸️", "hp_base": 115,
+     "damage_per_click": (13, 26), "drop_coins": (110, 240), "drop_item_chance": 0.15,
+     "item_pool": ["silk", "venom_sac"], "color": 0x512E5F, "nocturnal": True},
+])
+
 
 def _is_nocturnal(mob: dict) -> bool:
     return bool(mob.get("nocturnal", False))

@@ -255,6 +255,48 @@ DAILY_BOSS_CATALOG.extend([
      "description": "Une entité primordiale qui consume les étoiles. L'ultime défi collectif du serveur.",
      "min_level": 18, "hp_base": 22000, "lifetime_min": 95, "color": 0xBE2EDD},
 ])
+# Phase 256 — EXPANSION BOSS DU JOUR (+12). Schéma EXACT (9 champs). min_level UNIQUES
+# et inutilisés (10,14,16,17,19→26) + hp_base STRICTEMENT croissant avec min_level →
+# l'invariant test_phase_173 (levels ET hps triés croissants) reste vrai après le sort.
+# Ids uniques. Allonge fortement la rotation `% len` ⇒ bien moins de répétitions.
+DAILY_BOSS_CATALOG.extend([
+    {"id": "loup_alpha", "name": "Loup Alpha de la Meute", "emoji": "🐺", "tier": "Difficile",
+     "description": "Le chef d'une meute affamée mène la charge. Encerclez-le tous ensemble.",
+     "min_level": 10, "hp_base": 13700, "lifetime_min": 65, "color": 0x839192},
+    {"id": "golem_argile", "name": "Golem d'Argile Runique", "emoji": "🧱", "tier": "Difficile+",
+     "description": "Un golem gravé de runes instables. Brisez son noyau avant qu'il ne durcisse.",
+     "min_level": 14, "hp_base": 17000, "lifetime_min": 72, "color": 0xA04000},
+    {"id": "spectre_brume", "name": "Spectre de Brume", "emoji": "👻", "tier": "Très difficile",
+     "description": "Une ombre tapie dans le brouillard, qui se dissipe si on la laisse respirer. Frappez ensemble.",
+     "min_level": 16, "hp_base": 20000, "lifetime_min": 78, "color": 0x5D6D7E},
+    {"id": "araignee_matriarche", "name": "Matriarche Arachnéenne", "emoji": "🕷️", "tier": "Très difficile",
+     "description": "La reine des cavernes crache un venin corrosif. Frappez vite et nombreux.",
+     "min_level": 17, "hp_base": 21000, "lifetime_min": 80, "color": 0x4A235A},
+    {"id": "golem_foudre", "name": "Golem de Foudre", "emoji": "⚡", "tier": "Très difficile+",
+     "description": "Un titan d'acier chargé d'orage. Visez entre deux décharges, tous ensemble.",
+     "min_level": 19, "hp_base": 23000, "lifetime_min": 82, "color": 0xF1C40F},
+    {"id": "vampire_ancien", "name": "Vampire Ancien", "emoji": "🧛", "tier": "Légendaire",
+     "description": "Un seigneur de la nuit qui draine la vie de ses assaillants. Submergez-le en masse.",
+     "min_level": 20, "hp_base": 24000, "lifetime_min": 85, "color": 0x7B241C},
+    {"id": "behemoth_glace", "name": "Béhémoth de Glace", "emoji": "🧊", "tier": "Légendaire",
+     "description": "Une montagne vivante de givre. Sa carapace ne cède que sous les coups répétés du serveur.",
+     "min_level": 21, "hp_base": 25500, "lifetime_min": 88, "color": 0x5DADE2},
+    {"id": "demon_braises", "name": "Démon des Braises", "emoji": "😈", "tier": "Légendaire+",
+     "description": "Un démon ardent surgi des forges infernales. Toute l'alliance doit converger.",
+     "min_level": 22, "hp_base": 27000, "lifetime_min": 90, "color": 0xE74C3C},
+    {"id": "seraphin_dechu", "name": "Séraphin Déchu", "emoji": "😇", "tier": "Légendaire+",
+     "description": "Un ange tombé, ses ailes brisées rayonnant encore. Un défi pour les plus actifs.",
+     "min_level": 23, "hp_base": 28500, "lifetime_min": 95, "color": 0xF4D03F},
+    {"id": "roi_liche", "name": "Roi-Liche", "emoji": "💀", "tier": "Mythique",
+     "description": "Le monarque mort-vivant lève une armée d'ombres. Le serveur entier doit s'unir.",
+     "min_level": 24, "hp_base": 30000, "lifetime_min": 100, "color": 0x1C2833},
+    {"id": "wyrm_tempete", "name": "Wyrm de Tempête", "emoji": "🐲", "tier": "Mythique",
+     "description": "Un dragon-serpent chevauchant l'ouragan. Coordonnez vos frappes entre les éclairs.",
+     "min_level": 25, "hp_base": 31500, "lifetime_min": 105, "color": 0x2980B9},
+    {"id": "avatar_neant", "name": "Avatar du Néant", "emoji": "🪐", "tier": "Mythique+",
+     "description": "L'incarnation du vide qui consume toute lumière. L'ultime épreuve collective du serveur.",
+     "min_level": 26, "hp_base": 33000, "lifetime_min": 110, "color": 0x6C3483},
+])
 # Phase 252.B : on RE-TRIE le catalogue par min_level croissant après l'extend.
 # Invariant attendu (test_phase_173 test_boss_difficulty_progression) + créneau matin
 # « accessible » cohérent + rotation _pick_boss_for_slot saine. sort() stable.
