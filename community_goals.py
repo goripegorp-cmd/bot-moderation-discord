@@ -167,28 +167,46 @@ async def get_current_goal(guild_id: int) -> Optional[dict]:
         return None
 
 
+# Phase 255 (audit) : record_action est désormais appelé pour CHAQUE message
+# (objectif "messages") → la lecture-modification-écriture n'était PAS atomique
+# (pool sans row-lock) : 2 messages quasi simultanés perdaient un incrément et la
+# liste de contributeurs JSON pouvait s'écraser. Un verrou PAR GUILD sérialise
+# l'opération (le bot = 1 seul process) → zéro perte, zéro écrasement.
+_record_locks: dict = {}
+
+
+def _get_record_lock(guild_id: int) -> asyncio.Lock:
+    lock = _record_locks.get(guild_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _record_locks[guild_id] = lock
+    return lock
+
+
 async def record_action(
     guild_id: int, user_id: int, action_kind: str, count: int = 1,
 ):
-    """À hooker depuis les events. Si un objectif actif matche, incrémente."""
-    goal = await get_current_goal(guild_id)
-    if not goal or goal["kind"] != action_kind:
-        return
-    try:
-        contributors = goal["contributors"]
-        uid_str = str(user_id)
-        contributors[uid_str] = int(contributors.get(uid_str, 0)) + count
-        new_progress = goal["progress"] + count
+    """À hooker depuis les events. Si un objectif actif matche, incrémente.
+    Sérialisé par guild (verrou) → pas de lost-update sous le flux de messages."""
+    async with _get_record_lock(guild_id):
+        goal = await get_current_goal(guild_id)
+        if not goal or goal["kind"] != action_kind:
+            return
+        try:
+            contributors = goal["contributors"]
+            uid_str = str(user_id)
+            contributors[uid_str] = int(contributors.get(uid_str, 0)) + count
+            new_progress = goal["progress"] + count
 
-        async with _get_db() as db:
-            await db.execute(
-                "UPDATE community_goals SET progress=?, "
-                "contributors_jsonb=? WHERE id=?",
-                (new_progress, json.dumps(contributors), goal["id"]),
-            )
-            await db.commit()
-    except Exception as ex:
-        print(f"[community_goals record_action {action_kind}] {ex}")
+            async with _get_db() as db:
+                await db.execute(
+                    "UPDATE community_goals SET progress=?, "
+                    "contributors_jsonb=? WHERE id=?",
+                    (new_progress, json.dumps(contributors), goal["id"]),
+                )
+                await db.commit()
+        except Exception as ex:
+            print(f"[community_goals record_action {action_kind}] {ex}")
 
 
 async def create_weekly_goal(guild: discord.Guild) -> bool:

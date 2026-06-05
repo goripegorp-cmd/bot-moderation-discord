@@ -10706,7 +10706,8 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
             pass
 
         # Appliquer les dégâts au boss
-        new_hp = max(0, int(boss.get('current_hp', 0)) - damage)
+        _old_hp = int(boss.get('current_hp', 0))
+        new_hp = max(0, _old_hp - damage)
         boss['current_hp'] = new_hp
         final_blow = (new_hp == 0)
 
@@ -10725,8 +10726,10 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
             )
             await db.commit()
 
-        # Phase 253 : crédite l'alliance de l'attaquant (classement de combat). Fail-open.
-        await _award_alliance_combat_points(i.guild.id, i.user.id, damage)
+        # Phase 253 (corrigé Phase 255) : crédite l'alliance sur les dégâts RÉELLEMENT
+        # infligés (plafonnés aux PV restants), comme le boss du jour — pas de gonflage
+        # du classement sur un coup de grâce en overkill.
+        await _award_alliance_combat_points(i.guild.id, i.user.id, _old_hp - new_hp)
 
         # Update inventory total damage
         inv['total_damage'] = inv.get('total_damage', 0) + damage
@@ -48109,6 +48112,8 @@ def _format_trade_item(item: dict, slot: str) -> str:
         "légendaire": "🟠",
         "mythique": "🔴",
         "divine": "💎",
+        "céleste": "🌠",
+        "primordial": "🪐",
     }
     badge = badges.get(rarity, "⚪")
     try:
@@ -48854,6 +48859,7 @@ async def _auction_browse(i: discord.Interaction):
         rarity_emoji = {
             "commune": "⚪", "rare": "🔵", "épique": "🟣",
             "légendaire": "🟠", "mythique": "🔴", "divine": "💎",
+            "céleste": "🌠", "primordial": "🪐",
         }.get(rarity, "⚪")
         seconds_left = max(0, ends_at - now_ts)
         if seconds_left > 3600:
@@ -49183,6 +49189,7 @@ async def _auction_create(i: discord.Interaction):
                 rarity_emoji = {
                     "commune": "⚪", "rare": "🔵", "épique": "🟣",
                     "légendaire": "🟠", "mythique": "🔴", "divine": "💎",
+                    "céleste": "🌠", "primordial": "🪐",
                 }.get(rarity, "⚪")
                 emoji = item.get("emoji", "⚪")
                 name = item.get("name", "?")
@@ -49410,6 +49417,7 @@ async def craft_cmd(i: discord.Interaction):
                         rarity_emojis = {
                             "commune": "⚪", "rare": "🔵", "épique": "🟣",
                             "légendaire": "🟠", "mythique": "🔴", "divine": "💎",
+                            "céleste": "🌠", "primordial": "🪐",
                         }
                         badge = rarity_emojis.get(new_rarity.lower(), "✨")
 
@@ -49580,6 +49588,7 @@ async def craft_cmd(i: discord.Interaction):
                     rarity_emojis = {
                         "commune": "⚪", "rare": "🔵", "épique": "🟣",
                         "légendaire": "🟠", "mythique": "🔴", "divine": "💎",
+                        "céleste": "🌠", "primordial": "🪐",
                     }
                     for slot_key, slot_label, item, recipe in eligible[:4]:  # Phase 235.14 : cap (limite 40 composants V2 → /craft plantait)
                         emoji = item.get("emoji", "⚪")
@@ -62110,8 +62119,10 @@ class WorldBossAttackView(View):
                 )
                 await db.commit()
 
-            # Phase 253 : crédite l'alliance de l'attaquant (classement de combat). Fail-open.
-            await _award_alliance_combat_points(i.guild.id, i.user.id, damage)
+            # Phase 253 (corrigé Phase 255) : crédite l'alliance sur les dégâts RÉELLEMENT
+            # infligés (plafonnés aux PV restants), comme le boss du jour — pas de gonflage
+            # du classement sur un coup de grâce en overkill.
+            await _award_alliance_combat_points(i.guild.id, i.user.id, hp - new_hp)
 
             # Track stats Phase 41 : événement participé + pet XP
             try:

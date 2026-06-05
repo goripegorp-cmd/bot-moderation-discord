@@ -44,7 +44,9 @@ _gear_stats = None             # callable(inv) -> {atk, def, ...}
 _WAR_MAX_HP = 5000
 _ACTION_CD = 3.0               # cooldown par joueur (s) — anti-spam / anti-429
 _REFRESH_MIN = 4.0             # throttle du refresh de panneau (s)
-_WIN_REWARD = 500              # pièces par membre de l'alliance gagnante (modeste)
+_WIN_REWARD = 500              # pièces par PARTICIPANT de l'alliance gagnante (modeste)
+_WAR_COOLDOWN_HOURS = 6.0      # Phase 255 (audit) : délai mini entre 2 tournois pour
+                               # une même alliance — anti-farm (start→end→start en boucle).
 
 _last_action: dict = {}        # {(war_id, user_id): epoch}
 _last_refresh: dict = {}       # {war_id: epoch}
@@ -88,6 +90,16 @@ async def init_db():
                     ended_at TIMESTAMP
                 )
             """)
+            # Phase 255 (audit) : qui a RÉELLEMENT participé (cliqué ⚔️/🛡️) à chaque
+            # tournoi → seuls eux sont payés (avant : toute l'alliance, même les AFK).
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS alliance_war_participants (
+                    war_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    alliance_id INTEGER,
+                    PRIMARY KEY (war_id, user_id)
+                )
+            """)
             await db.commit()
     except Exception as ex:
         print(f"[alliance_war init_db] {ex}")
@@ -129,6 +141,22 @@ async def _active_war_for_alliance(guild_id: int, alliance_id: int) -> Optional[
         return int(r[0]) if r else None
     except Exception:
         return None
+
+
+async def _recent_war_for_alliance(guild_id: int, alliance_id: int) -> bool:
+    """Phase 255 (audit) : True si l'alliance a un tournoi actif OU terminé dans la
+    fenêtre de cooldown → bloque les boucles start→end→start (farm de pièces)."""
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM alliance_wars WHERE guild_id=? AND (a_id=? OR b_id=?) "
+                "AND julianday('now') - julianday(COALESCE(ended_at, started_at)) < ? "
+                "LIMIT 1",
+                (guild_id, alliance_id, alliance_id, _WAR_COOLDOWN_HOURS / 24.0)) as c:
+                r = await c.fetchone()
+        return bool(r)
+    except Exception:
+        return False
 
 
 def _build_panel(war: dict):
@@ -216,6 +244,9 @@ async def start_war(guild, a_id: int, b_id: int, channel) -> dict:
         return {"ok": False, "error": "Alliance introuvable."}
     if await _active_war_for_alliance(guild.id, a_id) or await _active_war_for_alliance(guild.id, b_id):
         return {"ok": False, "error": "Une de ces alliances est déjà dans un tournoi actif."}
+    # Phase 255 (audit) : cooldown anti-farm — pas de relance immédiate start→end→start.
+    if await _recent_war_for_alliance(guild.id, a_id) or await _recent_war_for_alliance(guild.id, b_id):
+        return {"ok": False, "error": f"Une de ces alliances a déjà fait un tournoi il y a moins de {int(_WAR_COOLDOWN_HOURS)} h — réessaie plus tard."}
     try:
         async with _get_db() as db:
             cur = await db.execute(
@@ -286,6 +317,11 @@ async def _record_action(i: discord.Interaction, war_id: int, kind: str):
                 await db.execute(
                     f"UPDATE alliance_wars SET {col}=MIN(max_hp,{col}+?) "
                     f"WHERE id=? AND status='active'", (power, war_id))
+            # Phase 255 (audit) : marque le joueur comme PARTICIPANT (seuls les
+            # participants seront payés à la fin — fini la paie aux AFK).
+            await db.execute(
+                "INSERT OR IGNORE INTO alliance_war_participants (war_id, user_id, alliance_id) "
+                "VALUES (?,?,?)", (war_id, i.user.id, int(my_alliance)))
             await db.commit()
         war2 = await _get_war(war_id)
         if war2 and war2["status"] == "active" and (war2["hp_a"] <= 0 or war2["hp_b"] <= 0):
@@ -313,13 +349,16 @@ async def _end_war(guild, war_id: int, winner_id: int):
             await db.commit()
             if not getattr(cur, "rowcount", 0):
                 return
-        # Récompense modeste aux membres de l'alliance gagnante.
+        # Récompense modeste — Phase 255 (audit) : SEULEMENT aux PARTICIPANTS de
+        # l'alliance gagnante (ceux qui ont cliqué ⚔️/🛡️ pendant CE tournoi), plus
+        # à toute la liste de membres (qui payait même les AFK + aggravait le farm).
         if _add_coins is not None:
             try:
                 async with _get_db() as db:
                     async with db.execute(
-                        "SELECT user_id FROM alliance_members WHERE alliance_id=?",
-                        (int(winner_id),)) as c:
+                        "SELECT user_id FROM alliance_war_participants "
+                        "WHERE war_id=? AND alliance_id=?",
+                        (war_id, int(winner_id))) as c:
                         rows = await c.fetchall()
                 for (uid,) in rows:
                     try:

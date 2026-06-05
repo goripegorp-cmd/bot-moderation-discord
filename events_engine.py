@@ -809,6 +809,12 @@ def random_gear_any(rarity_bias: float = 1.0) -> dict:
         "légendaire": 0.60,
         "mythique": 0.85,
         "divine": 1.0,
+        # Phase 255 (audit) : les 2 raretés au-dessus de divine doivent au moins
+        # égaler divine — sinon les items chase NE pouvaient JAMAIS être enchantés
+        # (.get → 0.0) = inversion de la courbe de rareté.
+        "céleste": 1.0,
+        "celeste": 1.0,
+        "primordial": 1.0,
     }.get(rarity, 0.0)
     if random.random() < enchant_chance:
         item["enchant"] = random_enchantment(rarity_bias)
