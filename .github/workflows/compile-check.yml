@@ -33,10 +33,14 @@ jobs:
           fi
           echo "✅ All Python files compile cleanly"
 
-      - name: Install dependencies (full prod set)
+      - name: Install dependencies (prod set, minus py3.13-only audioop-lts)
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          # audioop-lts is a py3.13+ backport; CI runs 3.12 where `audioop` is stdlib,
+          # so discord.py imports fine without it. Install everything else so the
+          # import check below has the real production dependencies.
+          grep -viE '^audioop-lts' requirements.txt > /tmp/req-ci.txt
+          pip install -r /tmp/req-ci.txt
 
       - name: Import check (executes module-level code — catches CommandLimitReached / NameError that syntax-check misses)
         env:
