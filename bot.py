@@ -61938,6 +61938,19 @@ async def _has_any_major_event_running(guild_id: int, include_mobs: bool = False
                         return True
             except Exception:
                 pass
+            # Phase 256 Lot 3 (audit) : une FAILLE active compte comme event en cours
+            # → (a) garde le salon ⚔️-combat PARTAGÉ vivant (sinon un autre teardown le
+            # supprimait sous la faille), (b) sérialise la faille avec les gros boss.
+            try:
+                async with db.execute(
+                    "SELECT 1 FROM rift_events WHERE guild_id=? AND ended=0 "
+                    "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now')) LIMIT 1",
+                    (guild_id,),
+                ) as cur:
+                    if await cur.fetchone():
+                        return True
+            except Exception:
+                pass
             if include_mobs:
                 try:
                     async with db.execute(

@@ -469,6 +469,11 @@ async def _end_rift(guild, rift_id: int, victory: bool):
                         "SELECT user_id, energy_added FROM rift_contributors "
                         "WHERE rift_id=? ORDER BY energy_added DESC", (rift_id,)) as c:
                         rows = await c.fetchall()
+                # Phase 256 (audit) : pas de consolation sur une faille ÉCHOUÉE sans
+                # collaboration réelle (< 2 scelleurs distincts) — un clic solo sur une
+                # faille ratée ne paie rien. La victoire (≥4 distincts) reste payée.
+                if not victory and len(rows) < 2:
+                    rows = []
                 top3 = {int(u) for (u, _e) in rows[:3]}
                 for (uid, _e) in rows:
                     uid = int(uid)
