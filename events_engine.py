@@ -1693,6 +1693,12 @@ def compute_rewards(
                         gear = random_armor()
                     gear["slot"] = slot
 
+        # Phase 254-aff.B : jet aléatoire (qualité + affixes) sur le gear final dropé.
+        # Ce chemin (récompenses Boss Raid) appelle random_weapon/armor DIRECTEMENT,
+        # hors random_gear_any → on roule ici pour que 100 % des drops aient un roll.
+        if gear:
+            roll_item_quality(gear)
+
         rewards.append({
             "user_id": p["user_id"],
             "damage": dmg,
