@@ -33,18 +33,32 @@ jobs:
           fi
           echo "✅ All Python files compile cleanly"
 
-      - name: Verify critical imports
+      - name: Install dependencies (full prod set)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Import check (executes module-level code — catches CommandLimitReached / NameError that syntax-check misses)
+        env:
+          BOT_TOKEN: dummy-token-for-import-check-only
+          MPLBACKEND: Agg
         run: |
           python -c "
-          import ast, sys
-          for f in ['bot.py', 'unified_logger.py', 'social_gallery.py', 'tracking_layer.py']:
-              try:
-                  with open(f, encoding='utf-8') as fh:
-                      ast.parse(fh.read(), filename=f)
-                  print(f'✅ {f}: AST OK')
-              except SyntaxError as e:
-                  print(f'❌ {f}: {e}')
-                  sys.exit(1)
+          import sys, traceback
+          # py_compile only checks SYNTAX. Importing bot.py executes its module-level
+          # code: every app_commands registration, the bot construction, and every
+          # 'import X' it performs. That reproduces a real boot's import phase — so this
+          # step catches CommandLimitReached (>25 subcmds / >100 top-level cmds),
+          # NameError, and ImportError that the syntax check cannot see. bot.run() is
+          # guarded by 'if __name__ == \"__main__\"', so the bot never connects here.
+          try:
+              import bot
+          except Exception as e:
+              print('::error::import bot FAILED at module load — THIS WOULD CRASH THE BOOT')
+              print(f'   {type(e).__name__}: {e}')
+              traceback.print_exc()
+              sys.exit(1)
+          print('OK: import bot — commands register and all boot-path modules load cleanly')
           "
 
       - name: Lint imports (best-effort)
