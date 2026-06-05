@@ -274,8 +274,9 @@ import member_risk as member_risk_module
 import error_logger as error_logger_module
 # Phase 169.1 : Mob Hunts (combat fréquent multi-user)
 import mob_hunts as mob_hunts_module
-# Phase 256 Lot 3 : event COLLABORATIF « La Faille Convergente » (gate activité 🟡)
+# Phase 256 Lot 3 : events COLLABORATIFS (Faille 🟡 / Caravane 🟢)
 import rift_events as rift_events_module
+import caravan_events as caravan_events_module
 # Phase 173.2 : Boss du jour, 4×/jour, gating de niveau
 import daily_bosses as daily_bosses_module
 import activity_rewards as activity_rewards_module
@@ -16774,7 +16775,9 @@ async def task_supervisor():
                            ("conversation_starters_module", "conv_starter_task"),
                            ("hero_journey_module", "hero_journey_task"),
                            ("rift_events_module", "rift_spawn_task"),
-                           ("rift_events_module", "rift_watchdog")):
+                           ("rift_events_module", "rift_watchdog"),
+                           ("caravan_events_module", "caravan_spawn_task"),
+                           ("caravan_events_module", "caravan_watchdog")):
         try:
             mod = globals().get(mod_name)
             lo = getattr(mod, attr, None) if mod is not None else None
@@ -42137,6 +42140,25 @@ async def on_ready():
         except Exception as ex:
             print(f"[on_ready 256 rift_events] {ex}")
 
+        # Phase 256 Lot 3 : event COLLABORATIF « La Caravane des Trois Sceaux »
+        # (3 sceaux tenus simultanément par 3 joueurs distincts ; gate 🟢). Fail-open.
+        try:
+            caravan_events_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
+                                        active_ping_fn=_ping_active_members,
+                                        arena_create_fn=_create_combat_arena,
+                                        arena_delete_fn=_delete_combat_arena,
+                                        report_fn=_post_combat_report,
+                                        event_busy_fn=_has_any_major_event_running)
+            await caravan_events_module.init_db()
+            caravan_events_module.register_persistent_views(bot)
+            await caravan_events_module.boot_cleanup()
+            if not caravan_events_module.caravan_spawn_task.is_running():
+                caravan_events_module.caravan_spawn_task.start()
+            if not caravan_events_module.caravan_watchdog.is_running():
+                caravan_events_module.caravan_watchdog.start()
+        except Exception as ex:
+            print(f"[on_ready 256 caravan_events] {ex}")
+
         # Phase 184 : Donjons instanciés (lobby groupe → salons dédiés → vagues)
         try:
             dungeon_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
@@ -61944,6 +61966,17 @@ async def _has_any_major_event_running(guild_id: int, include_mobs: bool = False
             try:
                 async with db.execute(
                     "SELECT 1 FROM rift_events WHERE guild_id=? AND ended=0 "
+                    "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now')) LIMIT 1",
+                    (guild_id,),
+                ) as cur:
+                    if await cur.fetchone():
+                        return True
+            except Exception:
+                pass
+            # Phase 256 Lot 3 : une CARAVANE active compte aussi (même salon partagé).
+            try:
+                async with db.execute(
+                    "SELECT 1 FROM caravan_events WHERE guild_id=? AND ended=0 "
                     "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now')) LIMIT 1",
                     (guild_id,),
                 ) as cur:
