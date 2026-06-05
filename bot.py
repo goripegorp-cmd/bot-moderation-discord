@@ -8019,6 +8019,7 @@ async def _save_inventory(guild_id: int, user_id: int, inv: dict):
 _RARITY_RANK = {
     "commune": 0, "rare": 1, "épique": 2, "epique": 2,
     "légendaire": 3, "legendaire": 3, "mythique": 4, "divine": 5,
+    "céleste": 6, "celeste": 6, "primordial": 7,
 }
 
 
@@ -8029,7 +8030,8 @@ def _rarity_rank(item) -> int:
 def _canon_rarity(r) -> str:
     """Rareté canonique (accentuée) pour l'affichage / RARITY_EMOJIS."""
     r = str(r or "commune").lower()
-    return {"epique": "épique", "legendaire": "légendaire"}.get(r, r)
+    return {"epique": "épique", "legendaire": "légendaire",
+            "celeste": "céleste"}.get(r, r)
 
 
 # ── Phase 217 : VENTE au MARCHAND (système) — PAS de trading joueur↔joueur ──
@@ -8041,6 +8043,7 @@ _SELL_VALUE = {
     "épique": 220, "epique": 220,
     "légendaire": 650, "legendaire": 650,
     "mythique": 1800, "divine": 5000,
+    "céleste": 12000, "celeste": 12000, "primordial": 30000,
 }
 
 
@@ -8266,6 +8269,7 @@ _EQUIP_LEVEL_BY_RARITY = {
     "légendaire": 25, "legendaire": 25, "legendary": 25,
     "mythique": 40, "mythic": 40,
     "divine": 60,
+    "céleste": 75, "celeste": 75, "primordial": 90,
 }
 
 
@@ -8797,9 +8801,10 @@ async def _build_codex_lines(guild_id: int, user_id: int) -> str:
                 discovered.add(nm)
     except Exception:
         pass
-    order = ["commune", "rare", "épique", "légendaire", "mythique", "divine"]
+    order = ["commune", "rare", "épique", "légendaire", "mythique", "divine", "céleste", "primordial"]
     emo = {"commune": "⚪", "rare": "🔵", "épique": "🟣",
-           "légendaire": "🟡", "mythique": "🔴", "divine": "🌟"}
+           "légendaire": "🟡", "mythique": "🔴", "divine": "🌟",
+           "céleste": "🌠", "primordial": "🪐"}
     by_r = {r: [0, 0] for r in order}
     for it in catalog:
         r = (it.get('rarity') or 'commune').lower()
@@ -11562,7 +11567,7 @@ async def _check_badges_and_ranks(guild, participants: list, victory: bool, tier
                 weapon = inv.get('weapon', {}) or {}
                 armor = inv.get('armor', {}) or {}
                 # Phase 39 : "has_legendary" inclut désormais mythique/divine aussi
-                hi_rarities = ('légendaire', 'mythique', 'divine')
+                hi_rarities = ('légendaire', 'mythique', 'divine', 'céleste', 'primordial')
                 has_legendary = (weapon.get('rarity') in hi_rarities) or (armor.get('rarity') in hi_rarities)
 
                 # 4. Crit streak in-mem
@@ -48406,7 +48411,7 @@ async def _check_phase113_badges(guild: discord.Guild, user_id: int):
         has_divine = False
         for slot_key in ("weapon", "armor", "helmet", "legs", "boots", "accessory", "trinket"):
             it = inv.get(slot_key) or {}
-            if (it.get("rarity") or "").lower() == "divine":
+            if (it.get("rarity") or "").lower() in ("divine", "céleste", "celeste", "primordial"):
                 has_divine = True
                 break
 

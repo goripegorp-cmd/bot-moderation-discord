@@ -321,6 +321,8 @@ RARITY_COLORS = {
     "légendaire": 0xF1C40F,
     "mythique":   0xE74C3C,
     "divine":     0xFFFFFF,
+    "céleste":    0x48DBFB,
+    "primordial": 0xBE2EDD,
 }
 
 RARITY_EMOJIS = {
@@ -330,6 +332,8 @@ RARITY_EMOJIS = {
     "légendaire": "🟡",
     "mythique":   "🔴",
     "divine":     "🌟",
+    "céleste":    "🌠",
+    "primordial": "🪐",
 }
 
 # Phase 39 : ordre numérique des raretés (utilisé pour comparaisons + soft cap)
@@ -340,6 +344,8 @@ RARITY_ORDER = {
     "légendaire": 3,
     "mythique":   4,
     "divine":     5,
+    "céleste":    6,
+    "primordial": 7,
 }
 
 
@@ -743,6 +749,7 @@ ENHANCE_SUCCESS_PCT = {
 _ENHANCE_BASE_COST = {
     "commune": 150, "rare": 400, "épique": 1000, "epique": 1000,
     "légendaire": 2500, "legendaire": 2500, "mythique": 6000, "divine": 15000,
+    "céleste": 35000, "celeste": 35000, "primordial": 80000,
 }
 
 
@@ -846,7 +853,9 @@ def compute_set_bonus(inventory: dict) -> dict:
                 "hp_bonus": 0, "desc": "", "color": 0x95A5A6, "tier_count": 0}
 
     # Compter par rareté
-    counts = {"commune": 0, "rare": 0, "épique": 0, "légendaire": 0, "mythique": 0, "divine": 0}
+    # Phase 252 : + céleste/primordial (au-dessus de divine).
+    counts = {"commune": 0, "rare": 0, "épique": 0, "légendaire": 0,
+              "mythique": 0, "divine": 0, "céleste": 0, "primordial": 0}
     for slot in EQUIPMENT_SLOTS:
         item = inventory.get(slot) or {}
         if not item or not item.get("name"):
@@ -857,41 +866,58 @@ def compute_set_bonus(inventory: dict) -> dict:
             r = "épique"
         elif r == "legendaire":
             r = "légendaire"
+        elif r == "celeste":
+            r = "céleste"
         if r in counts:
             counts[r] += 1
 
+    # Phase 252 : les pièces célestes/primordiales = top absolu (comptent aussi
+    # comme high-tier pour les sets existants).
+    _hi = counts["céleste"] + counts["primordial"]
+
     # Détecter le plus haut set actif (du plus haut au plus bas)
+    # 3+ céleste/primordial → Échos Primordiaux (set ULTIME)
+    if _hi >= 3:
+        return {
+            "name": "Échos Primordiaux",
+            "emoji": "🌌",
+            "atk": 45, "def": 30, "crit": 22, "hp_bonus": 80,
+            "desc": "3+ pièces célestes/primordiales — la puissance des origines",
+            "color": 0xBE2EDD,
+            "tier_count": _hi,
+        }
+
     # 6 mythique → Divin
-    if counts["mythique"] >= 6:
+    if counts["mythique"] + _hi >= 6:
         return {
             "name": "Divin",
             "emoji": "🌌",
             "atk": 30, "def": 20, "crit": 15, "hp_bonus": 50,
             "desc": "6 items mythiques équipés — bonus FULL DIVIN",
             "color": 0xE74C3C,
-            "tier_count": counts["mythique"],
+            "tier_count": counts["mythique"] + _hi,
         }
 
     # 4+ légendaire → Champion Suprême
-    if counts["légendaire"] + counts["mythique"] >= 4:
+    if counts["légendaire"] + counts["mythique"] + _hi >= 4:
         return {
             "name": "Champion Suprême",
             "emoji": "⚡",
             "atk": 20, "def": 10, "crit": 10, "hp_bonus": 25,
             "desc": "4+ items légendaires/mythiques équipés",
             "color": 0xF1C40F,
-            "tier_count": counts["légendaire"] + counts["mythique"],
+            "tier_count": counts["légendaire"] + counts["mythique"] + _hi,
         }
 
     # 2+ légendaire → Champion
-    if counts["légendaire"] + counts["mythique"] >= 2:
+    if counts["légendaire"] + counts["mythique"] + _hi >= 2:
         return {
             "name": "Champion",
             "emoji": "🔥",
             "atk": 15, "def": 5, "crit": 5, "hp_bonus": 15,
             "desc": "2+ items légendaires/mythiques équipés",
             "color": 0xE67E22,
-            "tier_count": counts["légendaire"] + counts["mythique"],
+            "tier_count": counts["légendaire"] + counts["mythique"] + _hi,
         }
 
     # 2+ épique → Vétéran
@@ -976,6 +1002,71 @@ def themed_set_bonus(inventory: dict) -> dict:
                 "def": theme["def"], "crit": theme["crit"], "count": 4, "active": True}
     return {"name": theme["name"] if theme else "", "emoji": theme["emoji"] if theme else "",
             "atk": 0, "def": 0, "crit": 0, "count": count, "active": False}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Phase 252 — EXPANSION : +2 raretés AU-DESSUS de divine (🌠 Céleste rang 6,
+# 🪐 Primordial rang 7) + grosse vague d'équipement sur les 7 slots. APPEND-ONLY,
+# schéma EXACT (name/emoji/rarity/atk|def|crit/weight) → zéro KeyError. Céleste &
+# Primordial = DROP-ONLY (aucune recette de forge ne les cible) + weight=1 (rarissime,
+# chase end-game, rétention longue). Plus de variété = bien moins de doublons ressentis.
+# ═══════════════════════════════════════════════════════════════════════════
+WEAPONS.extend([
+    {"name": "Hachette de bûcheron",  "emoji": "🪓", "rarity": "commune",    "atk": 7,   "weight": 30},
+    {"name": "Trident rouillé",       "emoji": "🔱", "rarity": "commune",    "atk": 9,   "weight": 28},
+    {"name": "Rapière de duelliste",  "emoji": "🤺", "rarity": "rare",       "atk": 15,  "weight": 14},
+    {"name": "Marteau de forgeron",   "emoji": "🔨", "rarity": "rare",       "atk": 17,  "weight": 12},
+    {"name": "Lame spectrale",        "emoji": "👻", "rarity": "épique",     "atk": 26,  "weight": 5},
+    {"name": "Arc-tempête",           "emoji": "🏹", "rarity": "épique",     "atk": 24,  "weight": 5},
+    {"name": "Hache du Berserker",    "emoji": "🪓", "rarity": "légendaire", "atk": 44,  "weight": 2},
+    {"name": "Trident de l'Abysse",   "emoji": "🔱", "rarity": "légendaire", "atk": 47,  "weight": 1},
+    {"name": "Faux des Âmes",         "emoji": "☠️", "rarity": "mythique",   "atk": 66,  "weight": 1},
+    {"name": "Sceptre du Néant",      "emoji": "🪄", "rarity": "mythique",   "atk": 62,  "weight": 1},
+    {"name": "Lame de l'Aube Vraie",  "emoji": "🌅", "rarity": "divine",     "atk": 105, "weight": 1},
+    {"name": "Éclat Céleste",         "emoji": "🌠", "rarity": "céleste",    "atk": 150, "weight": 1},
+    {"name": "Aurore des Cieux",      "emoji": "🌠", "rarity": "céleste",    "atk": 162, "weight": 1},
+    {"name": "Genèse, Lame Première", "emoji": "🪐", "rarity": "primordial", "atk": 210, "weight": 1},
+])
+ARMOR.extend([
+    {"name": "Tunique matelassée",    "emoji": "🧥", "rarity": "commune",    "def": 4,   "weight": 30},
+    {"name": "Cotte de mailles fine", "emoji": "⛓️", "rarity": "rare",       "def": 11,  "weight": 14},
+    {"name": "Armure de guerre",      "emoji": "🛡️", "rarity": "épique",     "def": 19,  "weight": 5},
+    {"name": "Égide du Colosse",      "emoji": "🛡️", "rarity": "légendaire", "def": 33,  "weight": 2},
+    {"name": "Carapace du Néant",     "emoji": "🕳️", "rarity": "mythique",   "def": 53,  "weight": 1},
+    {"name": "Plastron de l'Aube",    "emoji": "🌅", "rarity": "divine",     "def": 82,  "weight": 1},
+    {"name": "Égide Céleste",         "emoji": "🌠", "rarity": "céleste",    "def": 108, "weight": 1},
+    {"name": "Carapace Primordiale",  "emoji": "🪐", "rarity": "primordial", "def": 140, "weight": 1},
+])
+HELMETS.extend([
+    {"name": "Casque à cornes",       "emoji": "🪖", "rarity": "rare",       "def": 7,   "weight": 16},
+    {"name": "Heaume du Néant",       "emoji": "🕳️", "rarity": "mythique",   "def": 30,  "atk": 6,  "weight": 1},
+    {"name": "Diadème Céleste",       "emoji": "🌠", "rarity": "céleste",    "def": 55,  "atk": 10, "weight": 1},
+    {"name": "Couronne Primordiale",  "emoji": "🪐", "rarity": "primordial", "def": 70,  "atk": 14, "weight": 1},
+])
+LEGGINGS.extend([
+    {"name": "Jambières d'assaut",    "emoji": "🦿", "rarity": "épique",     "def": 15,  "weight": 5},
+    {"name": "Grèves du Phénix",      "emoji": "🔥", "rarity": "mythique",   "def": 36,  "crit": 6,  "weight": 1},
+    {"name": "Cuissards Célestes",    "emoji": "🌠", "rarity": "céleste",    "def": 68,  "crit": 10, "weight": 1},
+    {"name": "Grèves Primordiales",   "emoji": "🪐", "rarity": "primordial", "def": 88,  "crit": 14, "weight": 1},
+])
+BOOTS_LIST.extend([
+    {"name": "Bottes de plaque",      "emoji": "🥾", "rarity": "rare",       "def": 6,   "weight": 16},
+    {"name": "Bottes du Phénix",      "emoji": "🔥", "rarity": "mythique",   "def": 24,  "crit": 15, "weight": 1},
+    {"name": "Foulées Célestes",      "emoji": "🌠", "rarity": "céleste",    "def": 42,  "crit": 22, "weight": 1},
+    {"name": "Pas du Primordial",     "emoji": "🪐", "rarity": "primordial", "def": 55,  "crit": 28, "weight": 1},
+])
+ACCESSORIES.extend([
+    {"name": "Bague de saphir",       "emoji": "💍", "rarity": "rare",       "atk": 6,   "weight": 16},
+    {"name": "Talisman du Néant",     "emoji": "🕳️", "rarity": "mythique",   "atk": 26,  "crit": 16, "weight": 1},
+    {"name": "Anneau Céleste",        "emoji": "🌠", "rarity": "céleste",    "atk": 48,  "crit": 24, "weight": 1},
+    {"name": "Sceau Primordial",      "emoji": "🪐", "rarity": "primordial", "atk": 62,  "crit": 30, "weight": 1},
+])
+TRINKETS.extend([
+    {"name": "Dé porte-bonheur",      "emoji": "🎲", "rarity": "rare",       "crit": 8,  "weight": 16},
+    {"name": "Relique du Néant",      "emoji": "🕳️", "rarity": "mythique",   "crit": 32, "atk": 9,  "weight": 1},
+    {"name": "Astre Céleste",         "emoji": "🌠", "rarity": "céleste",    "crit": 58, "atk": 14, "weight": 1},
+    {"name": "Étincelle Primordiale", "emoji": "🪐", "rarity": "primordial", "crit": 75, "atk": 18, "weight": 1},
+])
 
 
 def all_gear_catalog() -> list:
@@ -1070,6 +1161,8 @@ DURABILITY_MAX_BY_RARITY = {
     "legendaire": 120,  # alias
     "mythique": 200,
     "divine": 300,
+    "céleste": 400,
+    "primordial": 500,
 }
 
 REPAIR_COST_PER_POINT = {
@@ -1081,6 +1174,8 @@ REPAIR_COST_PER_POINT = {
     "legendaire": 25,
     "mythique": 50,
     "divine": 100,
+    "céleste": 180,
+    "primordial": 280,
 }
 
 
