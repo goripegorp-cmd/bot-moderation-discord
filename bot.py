@@ -42872,37 +42872,11 @@ async def on_interaction(interaction: discord.Interaction):
     except Exception as ex:
         print(f"Erreur on_interaction auto_help: {ex}")
 
-@owner_group.command(name="tournoi", description="⚔️ [Owner] Lance un tournoi PvP entre 2 alliances")
-@app_commands.describe(alliance1="Nom exact de la 1ère alliance", alliance2="Nom exact de la 2ème alliance")
-async def owner_tournoi_cmd(i: discord.Interaction, alliance1: str, alliance2: str):
-    if not i.guild:
-        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
-    if (i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID
-            and not i.user.guild_permissions.administrator):
-        return await i.response.send_message("❌ Owner / Admin requis.", ephemeral=True)
-    await i.response.defer(ephemeral=True)
-    try:
-        async with get_db() as db:
-            async with db.execute(
-                "SELECT id, name FROM alliances WHERE guild_id=? AND dissolved=0",
-                (i.guild.id,)) as c:
-                rows = await c.fetchall()
-        by_name = {str(n).strip().lower(): int(aid) for aid, n in rows}
-        a_id = by_name.get(alliance1.strip().lower())
-        b_id = by_name.get(alliance2.strip().lower())
-        if not a_id or not b_id:
-            disp = ", ".join(str(n) for _, n in rows) or "_(aucune alliance)_"
-            return await i.followup.send(
-                f"❌ Alliance introuvable. Alliances du serveur : {disp}", ephemeral=True)
-        res = await alliance_war_module.start_war(i.guild, a_id, b_id, i.channel)
-        if res.get("ok"):
-            await i.followup.send(
-                "⚔️ **Tournoi lancé !** Le panneau est posté dans ce salon — "
-                "les membres des 2 alliances peuvent attaquer / défendre.", ephemeral=True)
-        else:
-            await i.followup.send(f"❌ {res.get('error', 'Erreur')}", ephemeral=True)
-    except Exception as ex:
-        await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+# Phase 254 HOTFIX : le lancement du tournoi N'EST PLUS une sous-commande /owner —
+# le groupe /owner était DÉJÀ à la limite Discord de 25 sous-commandes (ajouter
+# `tournoi` faisait planter `faction_war` à l'import → crash-loop, et la CI ne voit
+# pas les erreurs d'import runtime). Le lancement repasse par un BOUTON admin
+# (alliance_war.start_war), zéro coût sur l'arbre de commandes — voir commit suivant.
 
 
 @owner_group.command(name="sync", description="🔄 Synchroniser les commandes (Admin)")
