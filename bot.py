@@ -235,6 +235,7 @@ import owner_digest as owner_digest_module
 import reputation as reputation_module
 import pet_evolution as pet_evo_module
 import daily_prompt as daily_prompt_module
+import alliance_war as alliance_war_module
 import onboarding_journey as onboarding_module
 import mentor_bonus as mentor_bonus_module
 # Phase 154 : Sécurité 2026++ — honeypot + behavior anomaly
@@ -10422,6 +10423,19 @@ async def _get_user_alliance_id(guild_id: int, user_id: int):
             ) as cur:
                 row = await cur.fetchone()
         return int(row[0]) if row and row[0] else None
+    except Exception:
+        return None
+
+
+async def _get_alliance_by_id(guild_id: int, alliance_id: int):
+    """Alliance (non dissoute) par id → {id, name, emoji} | None. Pour le tournoi PvP (254)."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, name, emoji FROM alliances WHERE id=? AND guild_id=? AND dissolved=0",
+                (int(alliance_id), guild_id)) as cur:
+                r = await cur.fetchone()
+        return {"id": r[0], "name": r[1], "emoji": (r[2] or "🤝")} if r else None
     except Exception:
         return None
 
@@ -42073,6 +42087,20 @@ async def on_ready():
         except Exception as ex:
             print(f"[on_ready 173.2 daily_bosses] {ex}")
 
+        # Phase 254 : Tournoi PvP Alliance vs Alliance (module isolé, fail-open).
+        try:
+            alliance_war_module.setup(
+                bot, get_db, _v2h, add_coins_fn=add_coins,
+                alliance_by_id_fn=_get_alliance_by_id,
+                user_alliance_id_fn=_get_user_alliance_id,
+                inventory_fn=_get_or_create_inventory,
+                gear_stats_fn=events2026.inventory_total_stats)
+            await alliance_war_module.init_db()
+            alliance_war_module.register_persistent_views(bot)
+            await alliance_war_module.boot_cleanup()
+        except Exception as ex:
+            print(f"[on_ready 254 alliance_war] {ex}")
+
         # Phase 184 : Donjons instanciés (lobby groupe → salons dédiés → vagues)
         try:
             dungeon_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
@@ -42843,6 +42871,39 @@ async def on_interaction(interaction: discord.Interaction):
                 pass
     except Exception as ex:
         print(f"Erreur on_interaction auto_help: {ex}")
+
+@owner_group.command(name="tournoi", description="⚔️ [Owner] Lance un tournoi PvP entre 2 alliances")
+@app_commands.describe(alliance1="Nom exact de la 1ère alliance", alliance2="Nom exact de la 2ème alliance")
+async def owner_tournoi_cmd(i: discord.Interaction, alliance1: str, alliance2: str):
+    if not i.guild:
+        return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+    if (i.user.id != i.guild.owner_id and i.user.id != SUPER_OWNER_ID
+            and not i.user.guild_permissions.administrator):
+        return await i.response.send_message("❌ Owner / Admin requis.", ephemeral=True)
+    await i.response.defer(ephemeral=True)
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, name FROM alliances WHERE guild_id=? AND dissolved=0",
+                (i.guild.id,)) as c:
+                rows = await c.fetchall()
+        by_name = {str(n).strip().lower(): int(aid) for aid, n in rows}
+        a_id = by_name.get(alliance1.strip().lower())
+        b_id = by_name.get(alliance2.strip().lower())
+        if not a_id or not b_id:
+            disp = ", ".join(str(n) for _, n in rows) or "_(aucune alliance)_"
+            return await i.followup.send(
+                f"❌ Alliance introuvable. Alliances du serveur : {disp}", ephemeral=True)
+        res = await alliance_war_module.start_war(i.guild, a_id, b_id, i.channel)
+        if res.get("ok"):
+            await i.followup.send(
+                "⚔️ **Tournoi lancé !** Le panneau est posté dans ce salon — "
+                "les membres des 2 alliances peuvent attaquer / défendre.", ephemeral=True)
+        else:
+            await i.followup.send(f"❌ {res.get('error', 'Erreur')}", ephemeral=True)
+    except Exception as ex:
+        await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+
 
 @owner_group.command(name="sync", description="🔄 Synchroniser les commandes (Admin)")
 async def sync_cmd(i: discord.Interaction):
