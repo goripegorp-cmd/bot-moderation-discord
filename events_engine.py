@@ -280,6 +280,66 @@ ELEMENTS = {
 }
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Phase 254-elem — AVANTAGE ÉLÉMENTAIRE. Les boss ont un élément (déduit de leur NOM,
+# thématique, sans toucher aux catalogues) ; une arme de l'élément qui CONTRE celui du
+# boss inflige +25 %. ADDITIF & SÛR : `elemental_advantage` renvoie 1.0 par défaut et au
+# plus 1.25 → ça ne peut QU'AJOUTER un bonus, jamais réduire les dégâts (zéro régression).
+# ═══════════════════════════════════════════════════════════════════════════
+ELEMENT_COUNTERS = {
+    "fire":   "ice",     # le feu est contré par la glace
+    "ice":    "fire",    # la glace est contrée par le feu
+    "shadow": "holy",    # l'ombre est purifiée par la lumière
+    "holy":   "shadow",  # la lumière est corrompue par l'ombre
+    "poison": "holy",    # le poison est purifié par la lumière
+    # lightning : pas de contre dédié (avantage neutre)
+}
+
+_BOSS_ELEMENT_KEYWORDS = [
+    (("dragon", "cendre", "lave", "feu", "flamme", "phénix", "phenix", "magma",
+      "ardent", "infernal", "démon", "demon", "soleil"), "fire"),
+    (("glace", "givre", "gel", "liche", "kraken", "polaire", "blizzard", "abyss",
+      "abyssal", "léviathan", "leviathan"), "ice"),
+    (("foudre", "tonnerre", "titan", "orage", "éclair", "eclair", "tempête",
+      "tempete", "chaos", "élémentaire", "elementaire"), "lightning"),
+    (("ombre", "spectre", "néant", "neant", "mort", "squelette", "faucheur",
+      "éclipse", "eclipse", "vampire", "ténèbres", "tenebres", "déchu", "dechu",
+      "maudit", "ombres"), "shadow"),
+    (("céleste", "celeste", "séraphin", "seraphin", "ange", "archonte", "divin",
+      "sacré", "sacre", "lumière", "lumiere", "colosse"), "holy"),
+    (("poison", "venin", "venimeu", "toxic", "marais", "hydre", "araignée",
+      "araignee", "scorpion", "frelon", "gobelin"), "poison"),
+]
+
+
+def element_for_boss(name) -> Optional[str]:
+    """Déduit l'élément d'un boss depuis son nom (thématique). None si indéterminé."""
+    try:
+        n = (name or "").lower()
+        if not n:
+            return None
+        for kws, el in _BOSS_ELEMENT_KEYWORDS:
+            if any(k in n for k in kws):
+                return el
+        return None
+    except Exception:
+        return None
+
+
+def elemental_advantage(weapon, boss_element) -> float:
+    """Multiplicateur de dégâts si l'élément de l'arme CONTRE celui du boss.
+    SÛR : 1.25 sur bon match, sinon 1.0 (jamais < 1.0 → ne peut pas réduire les dégâts)."""
+    try:
+        if not boss_element or not weapon:
+            return 1.0
+        wel = (weapon.get("element") or "").lower()
+        if wel and ELEMENT_COUNTERS.get(boss_element) == wel:
+            return 1.25
+    except Exception:
+        pass
+    return 1.0
+
+
 def roll_elemental_proc(weapon: Optional[dict]) -> Optional[dict]:
     """Phase 180 : si l'arme a un élément, tente un PROC (burst élémentaire).
 

@@ -1043,6 +1043,7 @@ async def record_boss_attack(guild_id: int, user_id: int) -> dict:
     # élémentaire de l'arme), comme sur le Boss Raid → ton stuff/forge/éléments
     # servent aussi contre les boss du jour.
     elem_proc = None
+    elem_adv = False  # Phase 254-elem : avantage élémentaire appliqué ?
     if _inventory_fn is not None:
         try:
             import events_engine as _ev
@@ -1052,6 +1053,15 @@ async def record_boss_attack(guild_id: int, user_id: int) -> dict:
             if _p:
                 damage += int(_p.get("bonus", 0) or 0)
                 elem_proc = _p
+            # Phase 254-elem : avantage élémentaire (arme contre l'élément du boss).
+            # Additif/SÛR : ×1.0 si pas d'avantage, ×1.25 sinon — ne réduit JAMAIS.
+            _bdef254 = get_boss_def(active.get("boss_id"))
+            _adv254 = _ev.elemental_advantage(
+                inv.get("weapon"),
+                _ev.element_for_boss(_bdef254.get("name") if _bdef254 else None))
+            if _adv254 > 1.0:
+                damage = int(damage * _adv254)
+                elem_adv = True
         except Exception:
             pass
     # Phase 235.10 : BOOST VOCAL — être connecté à N'IMPORTE QUEL vocal donne un
@@ -1112,7 +1122,7 @@ async def record_boss_attack(guild_id: int, user_id: int) -> dict:
         await resolve_daily_boss(event_id)
         return {"success": True, "damage": damage, "boss_dead": True,
                 "attack_count": attacks_done + 1, "elem": elem_proc,
-                "voice_bonus": voice_bonus}
+                "voice_bonus": voice_bonus, "elem_adv": elem_adv}
 
     return {
         "success": True,
@@ -1124,6 +1134,7 @@ async def record_boss_attack(guild_id: int, user_id: int) -> dict:
         "boss_dead": False,
         "elem": elem_proc,
         "voice_bonus": voice_bonus,
+        "elem_adv": elem_adv,
     }
 
 
@@ -1400,16 +1411,19 @@ class DailyBossAttackButton(
             # Phase 235.10 : note de BOOST VOCAL (si connecté à un vocal)
             _vb = int(result.get("voice_bonus", 0) or 0)
             _voice_note = (f"\n🔊 **Boost vocal** ! +`{_vb}` dégâts" if _vb > 0 else "")
+            # Phase 254-elem : note d'avantage élémentaire
+            _adv_note = ("\n🗡️ **Avantage élémentaire** ! +25 % (ton arme contre l'élément du boss)"
+                         if result.get("elem_adv") else "")
             if result.get("boss_dead"):
                 await btn_i.followup.send(
                     f"⚔️ **{result['damage']} dégâts** — coup final ! "
-                    f"Le boss est tombé, récompenses distribuées. 🎉{_elem_note}{_voice_note}",
+                    f"Le boss est tombé, récompenses distribuées. 🎉{_elem_note}{_voice_note}{_adv_note}",
                     ephemeral=True,
                 )
             else:
                 pct = int(result["hp_current"] * 100 / max(1, result["hp_max"]))
                 await btn_i.followup.send(
-                    f"⚔️ **{result['damage']} dégâts** infligés !{_elem_note}{_voice_note}\n"
+                    f"⚔️ **{result['damage']} dégâts** infligés !{_elem_note}{_voice_note}{_adv_note}\n"
                     f"_Boss : `{result['hp_current']:,}/{result['hp_max']:,}` HP "
                     f"({pct}%) · tes attaques : "
                     f"`{result['attack_count']}/{result['max_attacks']}`_",
