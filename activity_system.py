@@ -60,6 +60,7 @@ EVENT_TIERS = {
     "rift": TIER_INTER,  # Phase 256 Lot 3 : event collaboratif « Faille Convergente »
     # 🟢 Base (la coordination est le vrai défi, pas l'activité)
     "caravan": TIER_BASE,  # Phase 256 Lot 3 : « Caravane des Trois Sceaux »
+    "chain": TIER_INTER,   # Phase 256 Lot 3 : « Chaîne d'Invocation » (relais)
     # 🔴 Grandiose — réservé aux vrais actifs de la semaine
     "world_boss": TIER_GRAND,
     "climax": TIER_GRAND,
