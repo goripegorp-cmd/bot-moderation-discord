@@ -67211,6 +67211,44 @@ class AllianceNoMemberView(View):
             print(f"[AllianceNoMemberView _on_invites] {ex}")
 
 
+class _AllianceWarLaunchSelect(discord.ui.Select):
+    """Phase 254 : sélecteur admin pour opposer 2 alliances dans un tournoi PvP
+    (remplace l'ex-sous-commande /owner tournoi retirée au hotfix — zéro coût d'arbre)."""
+    def __init__(self, alliances):
+        opts = [
+            discord.SelectOption(label=str(n)[:100], value=str(aid), emoji=(e or "🤝"))
+            for aid, n, e in alliances[:25]
+        ]
+        super().__init__(placeholder="Choisis 2 alliances à opposer…",
+                         options=opts, min_values=2, max_values=2)
+
+    async def callback(self, i: discord.Interaction):
+        try:
+            await i.response.defer(ephemeral=True)
+        except Exception:
+            pass
+        try:
+            res = await alliance_war_module.start_war(
+                i.guild, int(self.values[0]), int(self.values[1]), i.channel)
+            if res.get("ok"):
+                await i.followup.send(
+                    "⚔️ **Tournoi lancé !** Le panneau est posté dans ce salon — "
+                    "les membres des 2 alliances peuvent attaquer / défendre.", ephemeral=True)
+            else:
+                await i.followup.send(f"❌ {res.get('error', 'Erreur')}", ephemeral=True)
+        except Exception as ex:
+            try:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
+class _AllianceWarLaunchView(discord.ui.View):
+    def __init__(self, alliances):
+        super().__init__(timeout=180)
+        self.add_item(_AllianceWarLaunchSelect(alliances))
+
+
 async def _p46_open_alliances(i: discord.Interaction):
     """Helper appelé par le hub button 🤝 Mes alliances."""
     if not await _safe_defer(i):
@@ -67220,6 +67258,23 @@ async def _p46_open_alliances(i: discord.Interaction):
             return await _safe_followup(i, content="❌ Serveur uniquement.")
         # Phase 253 : classement de combat des alliances (affiché dans les 2 vues).
         _rank_txt = await _alliance_combat_ranking_lines(i.guild)
+        # Phase 254 : lanceur de TOURNOI PvP réservé admin/owner (remplace l'ex
+        # /owner tournoi retiré au hotfix). Éphémère séparé, seulement si ≥2 alliances.
+        try:
+            if (i.user.id == i.guild.owner_id or i.user.id == SUPER_OWNER_ID
+                    or i.user.guild_permissions.administrator):
+                async with get_db() as _wdb:
+                    async with _wdb.execute(
+                        "SELECT id, name, emoji FROM alliances WHERE guild_id=? AND "
+                        "dissolved=0 ORDER BY name LIMIT 25", (i.guild.id,)) as _wc:
+                        _alist = [(r[0], r[1], r[2]) for r in await _wc.fetchall()]
+                if len(_alist) >= 2:
+                    await _safe_followup(
+                        i,
+                        content="⚔️ **[Admin] Lancer un tournoi PvP Alliance** — choisis 2 alliances :",
+                        view=_AllianceWarLaunchView(_alist))
+        except Exception:
+            pass
         alliance = await _get_user_alliance(i.guild.id, i.user.id)
         if alliance:
             # Membre actif : afficher l'alliance + boutons gestion
