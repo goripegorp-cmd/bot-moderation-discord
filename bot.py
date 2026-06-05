@@ -8731,6 +8731,15 @@ COSMETIC_TINTS = [
     {"key": "or",        "name": "Or",          "emoji": "🟡", "color": 0xF1C40F, "min_level": 15},
     {"key": "prisme",    "name": "Prismatique", "emoji": "🌈", "color": 0xE91E63, "min_level": 25},
     {"key": "divin",     "name": "Doré-Divin",  "emoji": "✨", "color": 0xF9E79F, "min_level": 40},
+    # Phase 256 Lot 2 — +7 teintes (familles élémentaires). Total 17 ≤ 25 (cap Select OK).
+    # ZÉRO stat / ZÉRO éco ; gate par niveau croissant = chase cosmétique.
+    {"key": "crepuscule","name": "Crépuscule",  "emoji": "🌑", "color": 0x4B0082, "min_level": 8},
+    {"key": "braise",    "name": "Braise",      "emoji": "🔥", "color": 0xE25822, "min_level": 10},
+    {"key": "polaire",   "name": "Polaire",     "emoji": "❄️", "color": 0x48DBFB, "min_level": 12},
+    {"key": "venin",     "name": "Venin",       "emoji": "☠️", "color": 0x6AAB3D, "min_level": 18},
+    {"key": "orage",     "name": "Orage",       "emoji": "⚡", "color": 0xF4D03F, "min_level": 20},
+    {"key": "neant",     "name": "Néant",       "emoji": "🕳️", "color": 0xBE2EDD, "min_level": 30},
+    {"key": "celeste",   "name": "Céleste",     "emoji": "🌠", "color": 0x5DADE2, "min_level": 45},
 ]
 _TINT_BY_KEY = {t["key"]: t for t in COSMETIC_TINTS}
 

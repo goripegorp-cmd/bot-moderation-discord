@@ -133,6 +133,42 @@ BOSS_CATALOG.extend([
      "lore": "Tombé des cieux, le Séraphin Déchu déploie ses six ailes incandescentes pour punir les présomptueux.", "image": None},
 ])
 
+# Phase 256 Lot 2 — +10 TYPES de boss raid (random_boss). Schéma EXACT : hp_scale lu en
+# bracket (mandatory, 0.8–1.5), abilities=3, lore, image=None. Noms UNIQUES (l'épithète
+# saisonnier varie par-dessus). Allonge la variété des raids.
+BOSS_CATALOG.extend([
+    {"name": "🐺 Loup-Garou Ancestral", "emoji": "🐺", "color": 0x6E2C00, "hp_scale": 0.9,
+     "abilities": ["Hurlement lunaire", "Griffes lacérantes", "Frénésie"],
+     "lore": "Sous la pleine lune, la bête ancestrale se dresse, ses crocs luisant d'une faim millénaire.", "image": None},
+    {"name": "🦴 Colosse d'Ossements", "emoji": "🦴", "color": 0xD7DBDD, "hp_scale": 1.15,
+     "abilities": ["Avalanche d'os", "Étreinte squelettique", "Réassemblage"],
+     "lore": "Mille squelettes fusionnent en un géant cliquetant, animé par une rancune sans fin.", "image": None},
+    {"name": "🌪️ Élémentaire de Tempête", "emoji": "🌪️", "color": 0x5DADE2, "hp_scale": 1.05,
+     "abilities": ["Bourrasque", "Vortex", "Œil du cyclone"],
+     "lore": "Un tourbillon prend conscience et arrache tout sur son passage dans un rugissement de vent.", "image": None},
+    {"name": "🕷️ Tisseuse des Abysses", "emoji": "🕷️", "color": 0x4A235A, "hp_scale": 1.0,
+     "abilities": ["Toile gluante", "Injection paralysante", "Ponte"],
+     "lore": "Au fond du gouffre, une araignée colossale tisse un linceul pour le serveur entier.", "image": None},
+    {"name": "🔱 Léviathan des Récifs", "emoji": "🔱", "color": 0x148F77, "hp_scale": 1.25,
+     "abilities": ["Lame de fond", "Tentacules", "Chant des sirènes"],
+     "lore": "Les récifs tremblent : une créature antédiluvienne émerge, couverte de coraux et de fureur.", "image": None},
+    {"name": "🦅 Roc des Cimes", "emoji": "🦅", "color": 0xB7950B, "hp_scale": 0.95,
+     "abilities": ["Piqué foudroyant", "Serres d'acier", "Cri assourdissant"],
+     "lore": "Un rapace gigantesque obscurcit le soleil, ses serres capables de soulever un bœuf.", "image": None},
+    {"name": "🐗 Sanglier Titanesque", "emoji": "🐗", "color": 0x935116, "hp_scale": 0.85,
+     "abilities": ["Charge dévastatrice", "Piétinement", "Furie sauvage"],
+     "lore": "Une bête sylvestre devenue colossale fonce, rien ne semble pouvoir l'arrêter.", "image": None},
+    {"name": "🧟 Colosse Putride", "emoji": "🧟", "color": 0x4D5360, "hp_scale": 1.1,
+     "abilities": ["Miasme", "Poigne pourrissante", "Vague de charogne"],
+     "lore": "Une montagne de chair en décomposition se traîne, répandant une puanteur mortelle.", "image": None},
+    {"name": "🦏 Béhémoth Cuirassé", "emoji": "🦏", "color": 0x7B7D7D, "hp_scale": 1.3,
+     "abilities": ["Charge blindée", "Carapace réfléchissante", "Séisme"],
+     "lore": "Un mastodonte recouvert de plaques d'acier avance, indifférent aux coups qui pleuvent sur lui.", "image": None},
+    {"name": "🐍 Basilic Pétrifiant", "emoji": "🐍", "color": 0x239B56, "hp_scale": 1.2,
+     "abilities": ["Regard pétrifiant", "Crachat acide", "Morsure venimeuse"],
+     "lore": "Le roi des serpents ouvre les yeux ; quiconque croise son regard se change en pierre.", "image": None},
+])
+
 
 # =============================================================================
 # Phase 176 — NOMS DE BOSS ÉPIQUES (uniques + thématiques par saison)
@@ -1134,6 +1170,21 @@ SET_THEMES = {
               "pieces": {"helmet": "Couronne de givre", "armor": "Armure de glace",
                          "legs": "Jambières de givre", "boots": "Bottes de givre"},
               "atk": 0, "def": 12, "crit": 6},
+    # Phase 256 Lot 2 — 3 nouveaux sets. Les 4 pièces de chaque set ont été ajoutées au
+    # Lot 1 (familles complètes helmet/armor/legs/boots) → noms EXACTS présents. Bonus
+    # MODESTES (bande existante : atk≤15 / def≤15 / crit≤8). Set actif uniquement à 4/4.
+    "crepuscule": {"name": "Crépuscule", "emoji": "🌑",
+                   "pieces": {"helmet": "Heaume du Crépuscule", "armor": "Plastron du Crépuscule",
+                              "legs": "Grèves du Crépuscule", "boots": "Bottes du Crépuscule"},
+                   "atk": 12, "def": 8, "crit": 8},
+    "braise": {"name": "Braise", "emoji": "🔥",
+               "pieces": {"helmet": "Casque de Braise", "armor": "Cuirasse de Braise",
+                          "legs": "Jambières de Braise", "boots": "Bottes de Braise"},
+               "atk": 14, "def": 6, "crit": 4},
+    "polaire": {"name": "Polaire", "emoji": "❄️",
+                "pieces": {"helmet": "Couronne Polaire", "armor": "Carapace Polaire",
+                           "legs": "Cuissards Polaires", "boots": "Bottes Polaires"},
+                "atk": 4, "def": 14, "crit": 6},
 }
 
 
