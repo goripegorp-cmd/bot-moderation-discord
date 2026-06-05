@@ -396,6 +396,55 @@ def _weighted_choice(items: list[dict]) -> dict:
     return items[-1]
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Phase 254 — AFFIXES / JETS ALÉATOIRES. À chaque DROP, l'item reçoit une QUALITÉ
+# (80-120 % appliqué aux stats de base) + 0..N AFFIXES (petits bonus selon la rareté).
+# ⇒ deux items du même nom diffèrent → chasse au « roll parfait ». RÉTRO-COMPAT TOTALE :
+# un item sans champ quality/affixes = quality 100 + 0 affixe (cf. gear_total_stats),
+# donc l'existant n'est JAMAIS modifié ; seuls les NOUVEAUX drops sont « roulés ».
+# ═══════════════════════════════════════════════════════════════════════════
+AFFIX_POOL = [
+    {"label": "⚔️ Vigueur",  "stat": "atk"},
+    {"label": "🛡️ Garde",    "stat": "def"},
+    {"label": "🎯 Précision", "stat": "crit"},
+    {"label": "❤️ Vitalité",  "stat": "hp_bonus"},
+]
+AFFIX_SLOTS = {
+    "commune": 0, "rare": 1, "épique": 1, "légendaire": 2,
+    "mythique": 2, "divine": 3, "céleste": 3, "primordial": 4,
+}
+
+
+def roll_item_quality(item: dict, rng=None) -> dict:
+    """Phase 254 : attache une QUALITÉ (80-120 %) + des AFFIXES aléatoires à un item
+    fraîchement droppé. Modifie l'item EN PLACE et le retourne. Fail-safe."""
+    try:
+        r = rng or random
+        rarity = (item.get("rarity") or "commune").lower()
+        rarity = {"epique": "épique", "legendaire": "légendaire",
+                  "celeste": "céleste"}.get(rarity, rarity)
+        item["quality"] = r.randint(80, 120)
+        n = int(AFFIX_SLOTS.get(rarity, 0) or 0)
+        if n <= 0:
+            return item
+        rank = RARITY_ORDER.get(rarity, 0)
+        affixes = []
+        for _ in range(n):
+            a = r.choice(AFFIX_POOL)
+            stat = a["stat"]
+            if stat == "crit":
+                val = r.randint(2, 4 + rank)
+            elif stat == "hp_bonus":
+                val = r.randint(5, 10 + rank * 3)
+            else:  # atk / def
+                val = r.randint(2, 5 + rank * 2)
+            affixes.append({"label": a["label"], stat: int(val)})
+        item["affixes"] = affixes
+    except Exception:
+        pass
+    return item
+
+
 def random_weapon(rarity_bias: float = 1.0) -> dict:
     """Génère une arme aléatoire (rarity_bias > 1 = plus rare)."""
     # Bias : ajuster les weights pour favoriser les rares
@@ -704,6 +753,8 @@ def random_gear_any(rarity_bias: float = 1.0) -> dict:
     if random.random() < enchant_chance:
         item["enchant"] = random_enchantment(rarity_bias)
 
+    # Phase 254 : jet aléatoire (qualité + affixes) → chaque drop devient unique.
+    roll_item_quality(item)
     return item
 
 
@@ -837,6 +888,13 @@ def gear_total_stats(item: dict) -> dict:
     base_atk = int(item.get("atk", 0) or 0)
     base_def = int(item.get("def", 0) or 0)
     base_crit = int(item.get("crit", 0) or 0)
+    # Phase 254 : QUALITÉ (jet aléatoire au drop, % sur les stats de base). Défaut 100
+    # → un item SANS ce champ (tout l'existant) est traité EXACTEMENT comme avant.
+    _q = int(item.get("quality", 100) or 100)
+    if _q != 100:
+        base_atk = int(round(base_atk * _q / 100.0))
+        base_def = int(round(base_def * _q / 100.0))
+        base_crit = int(round(base_crit * _q / 100.0))
     # Phase 181 : multiplicateur d'amélioration sur les stats de BASE
     _lvl = get_upgrade_level(item)
     if _lvl:
@@ -845,11 +903,18 @@ def gear_total_stats(item: dict) -> dict:
         base_def = int(round(base_def * _mult))
         base_crit = int(round(base_crit * _mult))
     enchant = item.get("enchant") or {}
+    # Phase 254 : AFFIXES (bonus fixes aléatoires au drop, en plus). Liste vide par défaut.
+    aff_atk = aff_def = aff_crit = aff_hp = 0
+    for _af in (item.get("affixes") or []):
+        aff_atk += int(_af.get("atk", 0) or 0)
+        aff_def += int(_af.get("def", 0) or 0)
+        aff_crit += int(_af.get("crit", 0) or 0)
+        aff_hp += int(_af.get("hp_bonus", 0) or 0)
     return {
-        "atk": base_atk + int(enchant.get("atk_bonus", 0) or 0),
-        "def": base_def + int(enchant.get("def_bonus", 0) or 0),
-        "crit": base_crit + int(enchant.get("crit_bonus", 0) or 0),
-        "hp_bonus": int(enchant.get("hp_bonus", 0) or 0),
+        "atk": base_atk + int(enchant.get("atk_bonus", 0) or 0) + aff_atk,
+        "def": base_def + int(enchant.get("def_bonus", 0) or 0) + aff_def,
+        "crit": base_crit + int(enchant.get("crit_bonus", 0) or 0) + aff_crit,
+        "hp_bonus": int(enchant.get("hp_bonus", 0) or 0) + aff_hp,
         "lifesteal": float(enchant.get("lifesteal", 0.0) or 0.0),
     }
 

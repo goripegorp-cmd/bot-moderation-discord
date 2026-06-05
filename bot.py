@@ -8303,17 +8303,29 @@ def _format_loadout_lines(inv: dict) -> list:
         it = inv.get(slot) or {}
         if it and it.get('name'):
             rr = events2026.RARITY_EMOJIS.get(it.get('rarity', 'commune'), '')
+            # Phase 254 : stats EFFECTIVES (base × qualité + amélioration + enchant + affixes).
+            try:
+                _eff = events2026.gear_total_stats(it)
+            except Exception:
+                _eff = {"atk": it.get('atk', 0), "def": it.get('def', 0), "crit": it.get('crit', 0)}
             bits = []
-            if it.get('atk'):
-                bits.append(f"+{it['atk']} ATK")
-            if it.get('def'):
-                bits.append(f"+{it['def']} DEF")
-            if it.get('crit'):
-                bits.append(f"+{it['crit']}% crit")
+            if _eff.get('atk'):
+                bits.append(f"+{_eff['atk']} ATK")
+            if _eff.get('def'):
+                bits.append(f"+{_eff['def']} DEF")
+            if _eff.get('crit'):
+                bits.append(f"+{_eff['crit']}% crit")
             stat_s = (" · " + " · ".join(bits)) if bits else ""
             # Phase 181 : niveau d'amélioration (+N)
             _lvl = int(it.get('upgrade_level', 0) or 0)
             lvl_badge = f" **+{_lvl}**" if _lvl else ""
+            # Phase 254 : badge QUALITÉ (jet aléatoire au drop) — explique pourquoi 2 items
+            # du même nom diffèrent. 100% = neutre (pas affiché) ; ✨/🌟 = excellent roll.
+            _q = int(it.get('quality', 100) or 100)
+            q_badge = ""
+            if _q != 100:
+                _qe = " 🌟" if _q >= 115 else (" ✨" if _q >= 105 else "")
+                q_badge = f" · `Q{_q}%`{_qe}"
             # Phase 180 : badge élémentaire (arme)
             el = it.get('element')
             el_badge = ""
@@ -8323,7 +8335,15 @@ def _format_loadout_lines(inv: dict) -> list:
                     el_badge = f" · {_em['emoji']} {_em['name']}"
             except Exception:
                 pass
-            lines.append(f"{emo} **{label}** : {rr}{it.get('emoji', '')} {it['name']}{lvl_badge}{stat_s}{el_badge}")
+            # Phase 254 : libellés d'affixes (les valeurs sont déjà dans les stats effectives).
+            _affs = it.get('affixes') or []
+            aff_s = ""
+            try:
+                if _affs:
+                    aff_s = " · " + ", ".join(str(_a.get('label', '')) for _a in _affs if _a.get('label'))
+            except Exception:
+                aff_s = ""
+            lines.append(f"{emo} **{label}** : {rr}{it.get('emoji', '')} {it['name']}{lvl_badge}{stat_s}{q_badge}{el_badge}{aff_s}")
         else:
             lines.append(f"{emo} **{label}** : _vide_")
     return lines
