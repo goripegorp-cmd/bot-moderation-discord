@@ -254,6 +254,10 @@ DAILY_BOSS_CATALOG.extend([
      "description": "Une entité primordiale qui consume les étoiles. L'ultime défi collectif du serveur.",
      "min_level": 18, "hp_base": 22000, "lifetime_min": 95, "color": 0xBE2EDD},
 ])
+# Phase 252.B : on RE-TRIE le catalogue par min_level croissant après l'extend.
+# Invariant attendu (test_phase_173 test_boss_difficulty_progression) + créneau matin
+# « accessible » cohérent + rotation _pick_boss_for_slot saine. sort() stable.
+DAILY_BOSS_CATALOG.sort(key=lambda _b: int(_b.get("min_level", 0) or 0))
 
 
 def get_boss_def(boss_id: str) -> Optional[dict]:
