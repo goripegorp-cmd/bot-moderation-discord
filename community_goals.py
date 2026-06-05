@@ -71,6 +71,10 @@ GOAL_TEMPLATES = [
      "label": "Résoudre **20** énigmes"},
     {"kind": "mystery_open", "target": 40, "emoji": "📦",
      "label": "Ouvrir **40** Mystery Box"},
+    # Phase 254-extra : objectif de MESSAGES collectif (demande owner #1 : "des events
+    # où il faut un certain nombre de messages, c'est ça qui lance l'activité").
+    {"kind": "messages", "target": 300, "emoji": "💬",
+     "label": "Envoyer **300** messages dans le chat ensemble"},
     {"kind": "voice_minutes", "target": 1000, "emoji": "🎙️",
      "label": "Cumuler **1000 minutes** en vocal"},
 ]

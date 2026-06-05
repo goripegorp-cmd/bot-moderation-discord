@@ -58195,6 +58195,14 @@ async def _2026_on_message_track(msg: discord.Message):
         await activity2026.track_message(msg.guild.id, msg.author.id, msg.channel.id)
     except Exception:
         pass
+    # Phase 254-extra : objectif COLLECTIF de messages (community_goals). N'avance QUE si
+    # l'objectif hebdo actif est de type "messages" (record_action early-return sinon).
+    # ≥2 caractères pour ignorer le spam d'un seul caractère. Fail-open.
+    try:
+        if len((msg.content or "").strip()) >= 2:
+            await community_goals_module.record_action(msg.guild.id, msg.author.id, "messages")
+    except Exception:
+        pass
 
 
 async def _2026_on_voice_state_track(member, before, after):
