@@ -218,6 +218,43 @@ DAILY_BOSS_CATALOG = [
     },
 ]
 
+# Phase 252.B — +10 boss du jour. La sélection `_pick_boss_for_slot` fait une rotation
+# déterministe `% len(DAILY_BOSS_CATALOG)` → en allongeant le catalogue, le cycle est
+# bien plus long ⇒ BIEN moins de répétitions (plainte owner). Schéma EXACT (9 champs).
+# Les 2 premiers (min_level<=3) alimentent aussi le créneau « accessible » du matin (9h).
+DAILY_BOSS_CATALOG.extend([
+    {"id": "sanglier_geant", "name": "Sanglier Géant", "emoji": "🐗", "tier": "Facile",
+     "description": "Une bête furieuse qui ravage les champs. Idéal pour démarrer la journée à plusieurs.",
+     "min_level": 1, "hp_base": 3500, "lifetime_min": 45, "color": 0x9C640C},
+    {"id": "essaim_frelons", "name": "Essaim de Frelons", "emoji": "🐝", "tier": "Facile+",
+     "description": "Un nuage de frelons géants. Frappez vite et souvent pour le disperser.",
+     "min_level": 2, "hp_base": 4200, "lifetime_min": 45, "color": 0xF39C12},
+    {"id": "ent_ancien", "name": "Ent Ancien", "emoji": "🌳", "tier": "Moyen",
+     "description": "Un arbre éveillé, lent mais à l'écorce coriace. La coordination paie.",
+     "min_level": 4, "hp_base": 6500, "lifetime_min": 55, "color": 0x196F3D},
+    {"id": "liche_glacee", "name": "Liche Glacée", "emoji": "❄️", "tier": "Moyen+",
+     "description": "Une liche qui gèle ses assaillants. Brisez sa carapace de givre ensemble.",
+     "min_level": 6, "hp_base": 9000, "lifetime_min": 60, "color": 0x5DADE2},
+    {"id": "minotaure", "name": "Minotaure du Labyrinthe", "emoji": "🐂", "tier": "Difficile",
+     "description": "Un minotaure enragé qui charge tout ce qui bouge. Tenez bon en groupe.",
+     "min_level": 7, "hp_base": 10500, "lifetime_min": 65, "color": 0x873600},
+    {"id": "kraken_abyssal", "name": "Kraken Abyssal", "emoji": "🦑", "tier": "Difficile+",
+     "description": "Le kraken remonte des abysses, ses tentacules balayant l'arène. Visez les points faibles.",
+     "min_level": 9, "hp_base": 13000, "lifetime_min": 70, "color": 0x1A5276},
+    {"id": "golem_lave", "name": "Golem de Lave", "emoji": "🌋", "tier": "Très difficile",
+     "description": "Un colosse de roche en fusion. Sa chaleur brûle — il faut toute l'alliance.",
+     "min_level": 11, "hp_base": 14500, "lifetime_min": 75, "color": 0xD35400},
+    {"id": "archonte_dechu", "name": "Archonte Déchu", "emoji": "😈", "tier": "Très difficile+",
+     "description": "Un ange déchu assoiffé de vengeance. Seuls les plus actifs en viennent à bout.",
+     "min_level": 13, "hp_base": 16000, "lifetime_min": 80, "color": 0x7D3C98},
+    {"id": "colosse_celeste", "name": "Colosse Céleste", "emoji": "🌠", "tier": "Légendaire",
+     "description": "Un gardien tombé des cieux. Le serveur entier doit converger — récompenses célestes.",
+     "min_level": 15, "hp_base": 19000, "lifetime_min": 90, "color": 0x48DBFB},
+    {"id": "devoreur_mondes", "name": "Dévoreur de Mondes", "emoji": "🪐", "tier": "Mythique",
+     "description": "Une entité primordiale qui consume les étoiles. L'ultime défi collectif du serveur.",
+     "min_level": 18, "hp_base": 22000, "lifetime_min": 95, "color": 0xBE2EDD},
+])
+
 
 def get_boss_def(boss_id: str) -> Optional[dict]:
     for b in DAILY_BOSS_CATALOG:

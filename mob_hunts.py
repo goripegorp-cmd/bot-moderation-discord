@@ -312,6 +312,43 @@ MOB_CATALOG = [
     },
 ]
 
+# Phase 252.B — +10 mobs (7 de jour + 3 nocturnes). Schéma EXACT ; les nocturnes
+# portent "nocturnal": True (les autres l'omettent → _is_nocturnal renvoie False).
+# item_pool = ids RÉUTILISÉS de mobs existants (zéro nouvelle référence) → plus de
+# variété de spawns, bien moins de doublons ressentis.
+MOB_CATALOG.extend([
+    {"id": "boar", "name": "Sanglier furieux", "emoji": "🐗", "hp_base": 95,
+     "damage_per_click": (12, 26), "drop_coins": (45, 130), "drop_item_chance": 0.10,
+     "item_pool": ["fang", "fur"], "color": 0x9C640C},
+    {"id": "hornet", "name": "Frelon géant", "emoji": "🐝", "hp_base": 70,
+     "damage_per_click": (14, 28), "drop_coins": (50, 140), "drop_item_chance": 0.11,
+     "item_pool": ["venom_sac", "silk"], "color": 0xF39C12},
+    {"id": "mushroom", "name": "Champignon mutant", "emoji": "🍄", "hp_base": 120,
+     "damage_per_click": (10, 22), "drop_coins": (60, 160), "drop_item_chance": 0.12,
+     "item_pool": ["potion", "common_gem"], "color": 0xC0392B},
+    {"id": "harpy", "name": "Harpie", "emoji": "🦅", "hp_base": 135,
+     "damage_per_click": (16, 33), "drop_coins": (90, 230), "drop_item_chance": 0.13,
+     "item_pool": ["fur", "wing_fragment"], "color": 0xAF7AC5},
+    {"id": "ogre", "name": "Ogre brutal", "emoji": "👹", "hp_base": 210,
+     "damage_per_click": (22, 46), "drop_coins": (160, 400), "drop_item_chance": 0.16,
+     "item_pool": ["stone_club", "troll_hide"], "color": 0x6E2C00},
+    {"id": "cultist", "name": "Cultiste fanatique", "emoji": "🧎", "hp_base": 145,
+     "damage_per_click": (15, 32), "drop_coins": (100, 260), "drop_item_chance": 0.14,
+     "item_pool": ["spell_scroll", "soul_shard"], "color": 0x512E5F},
+    {"id": "clay_golem", "name": "Golem d'argile", "emoji": "🗿", "hp_base": 190,
+     "damage_per_click": (14, 30), "drop_coins": (120, 300), "drop_item_chance": 0.14,
+     "item_pool": ["stone_eye", "mana_crystal"], "color": 0xA04000},
+    {"id": "will_o_wisp", "name": "Feu Follet", "emoji": "🔥", "hp_base": 100,
+     "damage_per_click": (16, 34), "drop_coins": (170, 400), "drop_item_chance": 0.20,
+     "item_pool": ["soul_ember", "ghost_dust"], "color": 0x48C9B0, "nocturnal": True},
+    {"id": "night_serpent", "name": "Serpent des Ombres", "emoji": "🐍", "hp_base": 150,
+     "damage_per_click": (18, 38), "drop_coins": (180, 420), "drop_item_chance": 0.18,
+     "item_pool": ["venom_sac", "shadow_pelt"], "color": 0x1C2833, "nocturnal": True},
+    {"id": "specter_knight", "name": "Chevalier Spectral", "emoji": "⚔️", "hp_base": 185,
+     "damage_per_click": (20, 42), "drop_coins": (220, 520), "drop_item_chance": 0.20,
+     "item_pool": ["soul_shard", "ectoplasm"], "color": 0x5499C7, "nocturnal": True},
+])
+
 
 def _is_nocturnal(mob: dict) -> bool:
     return bool(mob.get("nocturnal", False))

@@ -104,6 +104,35 @@ BOSS_CATALOG = [
     },
 ]
 
+# Phase 252.B — +8 TYPES de world boss (plus de variété, moins de répétition ; les
+# noms épiques + épithètes saisonniers de la Phase 176 varient déjà par-dessus).
+BOSS_CATALOG.extend([
+    {"name": "🌋 Seigneur du Magma", "emoji": "🌋", "color": 0xD35400, "hp_scale": 1.4,
+     "abilities": ["Éruption", "Coulée de lave", "Onde sismique"],
+     "lore": "La terre se fend et le Seigneur du Magma s'élève, son corps en fusion irradiant une chaleur mortelle.", "image": None},
+    {"name": "🐙 Hydre des Profondeurs", "emoji": "🐙", "color": 0x1ABC9C, "hp_scale": 1.1,
+     "abilities": ["Étreinte abyssale", "Jet d'encre", "Raz-de-marée"],
+     "lore": "Des abysses sans fond surgit une hydre tentaculaire, chacune de ses têtes hurlant une marée de fureur.", "image": None},
+    {"name": "⚡ Titan de Foudre", "emoji": "⚡", "color": 0xF1C40F, "hp_scale": 1.2,
+     "abilities": ["Fracas de tonnerre", "Chaîne d'éclairs", "Tempête statique"],
+     "lore": "Le ciel se déchire : un Titan de pure foudre prend forme, chaque pas faisant trembler l'atmosphère.", "image": None},
+    {"name": "🌑 Faucheur des Éclipses", "emoji": "🌑", "color": 0x34495E, "hp_scale": 1.35,
+     "abilities": ["Faux d'ombre", "Voile d'éclipse", "Moisson des âmes"],
+     "lore": "Quand la lune dévore le soleil, le Faucheur apparaît pour récolter ce que la lumière a abandonné.", "image": None},
+    {"name": "🐲 Wyverne Venimeuse", "emoji": "🐲", "color": 0x27AE60, "hp_scale": 1.0,
+     "abilities": ["Crachat acide", "Dard empoisonné", "Vol en piqué"],
+     "lore": "Une wyverne au dard suintant fond du ciel, laissant une traînée de venin corrosif dans son sillage.", "image": None},
+    {"name": "🦂 Scorpion Colossal", "emoji": "🦂", "color": 0xCA6F1E, "hp_scale": 0.95,
+     "abilities": ["Pinces broyeuses", "Dard mortel", "Carapace impénétrable"],
+     "lore": "Le sable se soulève : un scorpion gros comme une colline avance, ses pinces claquant comme le tonnerre.", "image": None},
+    {"name": "👁️ Œil du Néant", "emoji": "👁️", "color": 0x6C3483, "hp_scale": 1.45,
+     "abilities": ["Regard annihilant", "Rayon du vide", "Distorsion"],
+     "lore": "Une faille s'ouvre sur le rien absolu ; un œil titanesque vous fixe, et tout ce qu'il voit s'efface.", "image": None},
+    {"name": "🌟 Séraphin Déchu", "emoji": "🌟", "color": 0xF7DC6F, "hp_scale": 1.3,
+     "abilities": ["Jugement céleste", "Ailes tranchantes", "Lumière brûlante"],
+     "lore": "Tombé des cieux, le Séraphin Déchu déploie ses six ailes incandescentes pour punir les présomptueux.", "image": None},
+])
+
 
 # =============================================================================
 # Phase 176 — NOMS DE BOSS ÉPIQUES (uniques + thématiques par saison)
@@ -1435,6 +1464,9 @@ def attempt_refine(item: dict, roll: Optional[float] = None) -> tuple:
     return True, new_item
 
 
+_last_boss_name = None  # Phase 252.B : mémorise le dernier type de world boss (anti-répétition)
+
+
 def random_boss(difficulty: int = 100, season_key: Optional[str] = None) -> dict:
     """Boss aléatoire. `difficulty` = facteur 50-500 (100 = normal).
 
@@ -1442,7 +1474,12 @@ def random_boss(difficulty: int = 100, season_key: Optional[str] = None) -> dict
     par la saison). Le type d'origine ("Dragon Ancestral"...) est conservé dans
     `archetype` pour le lore, et l'emoji du type est gardé en tête du nom.
     """
-    template = dict(random.choice(BOSS_CATALOG))
+    # Phase 252.B : anti-répétition — évite de re-tirer le MÊME type qu'à la fois
+    # précédente (plus de variété ressentie ; fail-safe si un seul type dispo).
+    global _last_boss_name
+    _pool = [b for b in BOSS_CATALOG if b.get("name") != _last_boss_name] or BOSS_CATALOG
+    template = dict(random.choice(_pool))
+    _last_boss_name = template.get("name")
     base_hp = int(800 * template["hp_scale"])
     final_hp = int(base_hp * (difficulty / 100.0))
     template["max_hp"] = max(100, final_hp)
