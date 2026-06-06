@@ -294,6 +294,7 @@ import codex_chronicle as codex_chronicle_module
 import hero_journey as hero_journey_module  # Phase 235.19 : Parcours de l'Aventurier (onboarding crescendo)
 import activity_system as activity_system_module  # Phase 235.25 : gate d'activité (clé d'accès aux events)
 import pet_eggs as pet_eggs_module  # Phase 235.26 : œufs de familiers (acquisition par éclosion)
+import citadelle as citadelle_module  # Phase 259 : La Cité (customisation/build/économie long terme)
 import combat_recall as combat_recall_module  # Phase 235.25c : rappel des participants aux combats
 import seasonal_titles as seasonal_titles_module  # Phase 242 : champion d'activité du mois
 import cosmetics as cosmetics_module  # Phase 249 : sink éco — titres cosmétiques
@@ -42916,6 +42917,27 @@ async def on_ready():
         except Exception as ex:
             print(f"[on_ready 235.26 pet_eggs] {ex}")
 
+        # Phase 259 : 🏛️ La Cité — socle customisation / build / économie long terme.
+        # Tout en boutons (menu cite:*), un DynamicItem persistant, monnaie cosmétique.
+        try:
+            citadelle_module.setup(
+                get_db,
+                v2_helpers={
+                    "LayoutView": LayoutView,
+                    "title": v2_title,
+                    "subtitle": v2_subtitle,
+                    "body": v2_body,
+                    "divider": v2_divider,
+                    "container": v2_container,
+                },
+                add_coins_fn=add_coins,
+            )
+            await citadelle_module.init_db()
+            citadelle_module.register_persistent_views(bot)
+            print("[Phase 259] citadelle OK (La Cité)")
+        except Exception as ex:
+            print(f"[on_ready 259 citadelle] {ex}")
+
         # Phase 235.25c : 🔁 Rappel des participants aux combats (rétention) —
         # mémorise qui combat → re-ping au prochain event du même genre, via
         # _ping_active_members (qui respecte l'opt-out 🔔 / /notify).
@@ -81663,8 +81685,8 @@ class HubPinnedLayoutV2(LayoutView):
         b = Button(label="Ouvrir", style=discord.ButtonStyle.secondary, custom_id="hub_tools")
         b.callback = _v2_delegate_to(EngagementHubView, '_on_tools')
         items.append(_section_with_button(
-            "🧰  Outils",
-            "Banque · Loots · PvP · Classe RP · Alliance · Hall of Fame",
+            "🧰  Outils  ·  🏛️ La Cité",
+            "🏛️ La Cité (customisation · build · richesse) · Banque · Loots · PvP · Classe RP · Alliance",
             b,
         ))
 
@@ -81713,6 +81735,12 @@ class ToolsLayoutV2(LayoutView):
             btn = Button(label=label, style=style, custom_id=cid)
             btn.callback = cb
             return btn
+
+        # Phase 259 : entrée vers La Cité (customisation / build / économie long terme).
+        items.append(v2_body("**🏛️ La Cité** — customisation infinie · construction · richesse (NOUVEAU)"))
+        items.append(discord.ui.ActionRow(
+            _mk("🏛️ Ouvrir La Cité", discord.ButtonStyle.primary, "toolv2_cite", self._on_cite),
+        ))
 
         items.append(v2_body("**💰 Économie**"))
         items.append(discord.ui.ActionRow(
@@ -81766,6 +81794,7 @@ class ToolsLayoutV2(LayoutView):
     async def _on_hof(self, i):      await _open_hof_panel(i)
     async def _on_voice(self, i):    await _open_voice_top_panel(i)
     async def _on_weather(self, i):  await _open_weather_panel(i)
+    async def _on_cite(self, i):     await citadelle_module.open_hub(i)  # Phase 259
 
     async def _on_close(self, i):
         try:
