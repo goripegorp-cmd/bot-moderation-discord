@@ -14553,7 +14553,19 @@ async def _post_event_echo(guild, arena_channel, event_kind: str, exclude_channe
         kind_labels = {
             'boss_raid': ('⚔️', 'Un **Boss Raid** vient de commencer !'),
             'treasure_hunt': ('💎', 'Une **Chasse au Trésor** vient de démarrer !'),
+            'treasure': ('💎', 'Une **Chasse au Trésor** vient de démarrer !'),
             'quiz': ('🎓', 'Un **Quiz communautaire** vient de démarrer !'),
+            'mystery_box': ('📦', 'Une **Boîte Mystère** vient d\'apparaître !'),
+            # Phase 257.1 : echo des events qui ne pingent plus en masse → visibles
+            # pour les présents (sans ping). Auto-supprimé en 30 min.
+            'mob': ('🐗', 'Une **Chasse aux mobs** vient de commencer !'),
+            'daily_boss': ('👹', 'Le **Boss du Jour** vient d\'apparaître !'),
+            'world_boss': ('🌍', 'Un **World Boss** vient de surgir !'),
+            'climax': ('🔥', 'Un **Boss Climax** vient de se réveiller !'),
+            'invasion': ('🚨', 'Une **Invasion** frappe le serveur !'),
+            'rift': ('🌀', 'Une **Faille Convergente** s\'ouvre !'),
+            'caravan': ('🐫', 'La **Caravane des Trois Sceaux** passe !'),
+            'chain': ('🔗', 'Une **Chaîne d\'Invocation** commence !'),
         }
         emoji, label = kind_labels.get(event_kind, ('🚨', "Un **événement** vient de commencer !"))
         arena_link = f"<#{arena_channel.id}>" if arena_channel else "le salon dédié"
@@ -14858,6 +14870,79 @@ async def _send_onboarding_dm(member):
             print(f"[ONBOARDING DM] {ex}")
     except Exception as ex:
         print(f"[_send_onboarding_dm] {ex}")
+
+
+async def _post_onboarding_welcome(member):
+    """Phase 257.1 — ACCUEIL EN SALON (remplace le MP d'onboarding coupé Phase 257 ;
+    objectif : ATTIRER les nouveaux en leur faisant comprendre tout de suite qu'il y
+    a des EVENTS, SANS aucun MP). Poste UN message de bienvenue dans le salon d'accueil
+    (welcome_channel > salon système > 1er salon « chatty » écrivable) avec le panneau
+    OnboardingView (boutons hub / parcours / notifs). Mentionne UNIQUEMENT le nouveau
+    venu (1 mention de bienvenue, normale — pas un ping de masse). Fail-open."""
+    try:
+        if member is None or getattr(member, 'bot', False):
+            return
+        guild = member.guild
+        c = await cfg(guild.id)
+        if not c.get('event_enabled', False):
+            return  # events désactivés sur ce serveur → pas d'intro events
+        me = guild.me
+
+        def _ok(x):
+            try:
+                return (x is not None and me is not None
+                        and x.permissions_for(me).send_messages)
+            except Exception:
+                return False
+
+        ch = None
+        wid = int(c.get('welcome_channel', 0) or 0)
+        if wid:
+            ch = guild.get_channel(wid)
+        if not _ok(ch):
+            ch = guild.system_channel if _ok(guild.system_channel) else None
+        if not _ok(ch):
+            ch = None
+            for cand in guild.text_channels:
+                try:
+                    if _ok(cand) and await _is_chatty_channel(cand):
+                        ch = cand
+                        break
+                except Exception:
+                    continue
+        if ch is None:
+            return
+
+        embed = discord.Embed(
+            title=f"👋 Bienvenue {member.display_name} sur {guild.name} !",
+            description=(
+                "Bienvenue dans une **aventure communautaire** ! L'essentiel en "
+                "**30 secondes** :\n\n"
+                "🎯 **Le principe :** sois **actif** — écris des messages **OU** passe "
+                "du temps en vocal — et ça débloque l'accès aux **événements** "
+                "(⚔️ Boss Raids · 💎 Trésors · 🎓 Quiz · 🌍 World Boss…) où tu gagnes "
+                "loot, pièces et familiers. _L'un OU l'autre suffit._\n\n"
+                "🎮 **Tout est dans `/hub`** : quêtes du jour, ton compagnon 🐾, ta "
+                "progression, tes events — zéro commande à retenir, tout en boutons.\n\n"
+                "👇 Configure-toi (classe + notifs) et lance ton "
+                "**🧭 Parcours d'aventurier** !"
+            ),
+            color=0x5865F2,
+        )
+        embed.set_footer(text=f"{guild.name} · clique un bouton pour commencer")
+        try:
+            await ch.send(
+                content=member.mention,
+                embed=embed,
+                view=OnboardingView(guild.id, member.id),
+                allowed_mentions=discord.AllowedMentions(
+                    users=True, roles=False, everyone=False),
+            )
+            print(f"[ONBOARDING WELCOME] guild={guild.id} user={member.id} salon={ch.id}")
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+    except Exception as ex:
+        print(f"[_post_onboarding_welcome] {ex}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -45197,14 +45282,15 @@ async def on_member_join(m):
     except Exception as ex:
         print(f"[welcome] {ex}")
 
-    # ═══ Phase 40 : Onboarding DM (3 min après l'arrivée, en background) ═══
-    # ⚠️ AUDIT fix : on store la task dans un set pour éviter le GC mid-sleep
+    # ═══ Phase 257.1 : ACCUEIL EN SALON (remplace le MP d'onboarding — zéro MP) ═══
+    # Le nouveau venu comprend tout de suite qu'il y a des EVENTS, en salon, avec
+    # boutons hub/parcours. (L'ancien _send_onboarding_dm est neutralisé Phase 257.)
     try:
-        t = asyncio.create_task(_send_onboarding_dm(m))
+        t = asyncio.create_task(_post_onboarding_welcome(m))
         _pending_onboardings.add(t)
         t.add_done_callback(_pending_onboardings.discard)
     except Exception as ex:
-        print(f"[onboarding_dm schedule] {ex}")
+        print(f"[onboarding_welcome schedule] {ex}")
 
     # ═══ Phase 64 : alt detection heuristic ═══
     try:
@@ -60599,6 +60685,14 @@ async def _ping_active_members(guild, channel, *, notif_key='boss_raid',
     except Exception:
         cooldown_hours = 4
     try:
+        # Phase 257.1 : ÉCHO SILENCIEUX (zéro ping) dans les salons actifs → les
+        # PRÉSENTS voient l'event même si le ping de masse est coupé (mentions
+        # restreintes Phase 257). Couvre tous les events passant par ce helper
+        # (mob / invasion / rift / caravan / chain). Auto-supprimé 30 min. Fail-open.
+        try:
+            await _post_event_echo(guild, channel, (notif_key or '').lower())
+        except Exception:
+            pass
         chosen = []
         # Phase 235.25c : RAPPEL des participants passés EN PRIORITÉ (directive
         # rétention owner) — d'abord ceux qui ont DÉJÀ combattu (combat_recall),
