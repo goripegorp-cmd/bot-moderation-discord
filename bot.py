@@ -12766,10 +12766,18 @@ async def _start_any_event(guild, triggered_by_id: int, event_type: str, *, manu
     except Exception:
         pass
     if event_type == 'boss_raid':
+        # _start_boss_raid fait SON PROPRE claim atomique (ne pas double-claim ici,
+        # sinon le 2e claim verrait sa propre ligne → rowcount=0 → bail à tort).
         result = await _start_boss_raid(guild, triggered_by_id, manual=manual)
     elif event_type == 'treasure_hunt':
+        # Phase 262 : claim atomique anti-course TOCTOU (trésor n'a pas de claim interne).
+        if not await _claim_combat_lock(guild.id, 'treasure_hunt'):
+            return {"ok": False, "error": "⏳ Un événement démarre à l'instant — réessaie dans un moment."}
         result = await _start_treasure_hunt(guild, triggered_by_id, manual=manual)
     elif event_type == 'quiz':
+        # Phase 262 : claim atomique anti-course TOCTOU (quiz n'a pas de claim interne).
+        if not await _claim_combat_lock(guild.id, 'quiz'):
+            return {"ok": False, "error": "⏳ Un événement démarre à l'instant — réessaie dans un moment."}
         result = await _start_quiz(guild, triggered_by_id, manual=manual)
     else:
         return {"ok": False, "error": f"Type inconnu : {event_type}"}
@@ -62766,7 +62774,7 @@ async def _has_any_major_event_running(guild_id: int, include_mobs: bool = False
             try:
                 async with db.execute(
                     "SELECT 1 FROM invasion_events WHERE guild_id=? AND status='active' "
-                    "AND datetime(started_at) > datetime('now', '-60 minutes') LIMIT 1",
+                    "AND datetime(started_at) > datetime('now', '-35 minutes') LIMIT 1",
                     (guild_id,),
                 ) as cur:
                     if await cur.fetchone():
@@ -62814,9 +62822,10 @@ async def _claim_combat_lock(guild_id: int, event_type: str = "?", event_id: int
     """Phase 262 : CLAIM ATOMIQUE de spawn (anti-course TOCTOU). À appeler JUSTE APRÈS
     le check _has_any_major_event_running et AVANT toute création d'arène/INSERT.
 
-    Retourne True si le claim est acquis (on peut spawn), False sinon (un autre spawn
-    a déjà claim dans la même fenêtre → on N'EMPILE PAS). FAIL-CLOSED : sur erreur DB,
-    retourne False (un event manqué est moins grave qu'un doublon empilé).
+    Retourne True si le claim est acquis (on peut spawn), False UNIQUEMENT sur CONFLIT
+    (un autre spawn a déjà claim dans la même fenêtre → on N'EMPILE PAS). FAIL-OPEN sur
+    ERREUR INFRA (exception : table absente / DB lockée) → retourne True : un claim cassé
+    ne doit JAMAIS figer TOUS les events (le verrou-grâce sérialise déjà, cauchemar 174.1).
 
     Le pool DB n'a pas de row-lock, mais SQLite sérialise les écritures → l'INSERT
     ON CONFLICT(guild_id) DO NOTHING ne réussit (rowcount=1) que pour UN seul des
