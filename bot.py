@@ -62826,6 +62826,14 @@ class WorldBossAttackView(View):
         )
         b2.callback = self._on_top
         self.add_item(b2)
+        # Phase 261 (3/4) : APPUI FAMILIER — le familier actif frappe le World Boss.
+        b3 = Button(
+            label="🐾 Familier",
+            style=discord.ButtonStyle.success,
+            custom_id="wb_pet",
+        )
+        b3.callback = self._on_pet
+        self.add_item(b3)
 
     async def _on_attack(self, i: discord.Interaction):
         # Phase 257.3 : ACK D'ABORD (defer) — acquitter le clic AVANT le cooldown, sinon
@@ -63042,6 +63050,110 @@ class WorldBossAttackView(View):
             print(f"[WorldBossAttackView _on_attack] {ex}")
             await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
+    async def _on_pet(self, i: discord.Interaction):
+        """Phase 261 (3/4) : APPUI FAMILIER sur le World Boss. Le familier actif
+        frappe le boss (et SOIGNE le joueur si passif). ACK D'ABORD + cooldown
+        anti-429 PAR JOUEUR, puis cœur partagé _pet_strike (cooldown 90 s). FAIL-OPEN :
+        une erreur ici ne casse jamais le combat (bouton ⚔️ inchangé)."""
+        if not await _safe_defer(i):
+            return
+        if _boss_atk_too_soon(i, "wb_pet"):
+            return
+        try:
+            if not i.guild:
+                return await _safe_followup(i, content="❌ Serveur uniquement.")
+            # World boss actif (singleton) — mêmes colonnes que _on_attack.
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT id, boss_id, hp, max_hp FROM world_bosses '
+                    'WHERE guild_id=? AND ended=0 ORDER BY started_at DESC LIMIT 1',
+                    (i.guild.id,),
+                ) as cur:
+                    row = await cur.fetchone()
+            if not row:
+                return await _safe_followup(i, content="ℹ️ Aucun World Boss actif.")
+            wb_id, boss_id, hp, max_hp = row
+            boss = ev42.get_world_boss(boss_id)
+            if not boss:
+                return await _safe_followup(i, content="❌ Boss inconnu.")
+            if hp <= 0:
+                return await _safe_followup(i, content="✅ Le boss est déjà mort !")
+            # Warm-up : le familier patiente aussi pendant le sas de préparation.
+            _wb_wu = _wb_warmup_until.get(wb_id, 0)
+            if _wb_wu and time.time() < _wb_wu:
+                return await _safe_followup(
+                    i,
+                    content=(
+                        f"⏳ **Le World Boss se prépare !** Le combat commence <t:{int(_wb_wu)}:R>.\n"
+                        f"Ton familier piaffe d'impatience…"
+                    ),
+                )
+
+            # Cœur partagé : applique le cooldown 90 s, calcule la salve, soigne si passif.
+            res = await _pet_strike(i.guild.id, i.user.id)
+            if not res.get("ok"):
+                return await _safe_followup(i, content=res.get("msg", "🐾 Familier indisponible."))
+            dmg = int(res.get("dmg", 0) or 0)
+
+            # Applique les dégâts du familier ATOMIQUEMENT (pool sans row-lock), puis relit.
+            async with get_db() as db:
+                await db.execute(
+                    'UPDATE world_bosses SET hp=MAX(0, hp-?) WHERE id=? AND ended=0',
+                    (dmg, wb_id),
+                )
+                # Crédite le classement SANS gonfler attacks_count (c'est le familier).
+                await db.execute(
+                    'INSERT INTO world_boss_attackers(world_boss_id, user_id, damage_dealt, attacks_count, last_attack_at) '
+                    'VALUES(?,?,?,0,CURRENT_TIMESTAMP) '
+                    'ON CONFLICT(world_boss_id, user_id) DO UPDATE SET '
+                    'damage_dealt=damage_dealt+?, last_attack_at=CURRENT_TIMESTAMP',
+                    (wb_id, i.user.id, dmg, dmg),
+                )
+                await db.commit()
+                async with db.execute('SELECT hp FROM world_bosses WHERE id=?', (wb_id,)) as cur:
+                    _hr = await cur.fetchone()
+            new_hp = int(_hr[0]) if _hr else max(0, hp - dmg)
+
+            # Crédite l'alliance sur les dégâts RÉELLEMENT infligés (capés aux PV).
+            try:
+                await _award_alliance_combat_points(i.guild.id, i.user.id, max(0, hp - new_hp))
+            except Exception:
+                pass
+            try:
+                await _incr_stat_p41(i.guild.id, i.user.id, 'events_participated', 1)
+            except Exception:
+                pass
+
+            note = res.get("note", "")
+            label = res.get("label", "🐾 Familier")
+            extra = f"\n{note}" if note else ""
+
+            if new_hp <= 0:
+                await _end_world_boss(i.guild, wb_id, victory=True)
+                return await _safe_followup(
+                    i,
+                    content=(
+                        f"🐾 **{label}** porte le **COUP FATAL** — `{dmg}` dégâts !{extra}\n"
+                        f"💀 **{boss['title']}** est vaincu — le serveur a triomphé !"
+                    ),
+                )
+
+            await _safe_followup(
+                i,
+                content=(
+                    f"🐾 **{label}** frappe **{boss['title']}** — `{dmg}` dégâts !{extra}\n"
+                    f"🩸 HP : `{new_hp:,}/{max_hp:,}` ({(new_hp / max(1, max_hp) * 100):.0f}%)\n"
+                    f"_Continue avec ⚔️ pendant que ton familier récupère (90 s)._"
+                ),
+            )
+            try:
+                await _refresh_world_boss_message(i.guild, wb_id)
+            except Exception as ex:
+                print(f"[_on_pet wb _refresh] {ex}")
+        except Exception as ex:
+            print(f"[WorldBossAttackView _on_pet] {ex}")
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
     async def _on_top(self, i: discord.Interaction):
         if not await _safe_defer(i):
             return
@@ -63189,14 +63301,25 @@ class WorldBossArenaLayoutV2(LayoutView):
 
         items.append(v2_divider())
 
-        # Bouton TOP 10 en ActionRow (en bas) — Phase 88 : independent + delegate
+        # Boutons du bas — Phase 88 : independent + delegate.
+        # Phase 261 (3/4) : APPUI FAMILIER (🐾) à côté du TOP, seulement si le boss vit.
+        _row_btns = []
+        if hp > 0:
+            pet_btn = Button(
+                label="🐾 Familier",
+                style=discord.ButtonStyle.success,
+                custom_id="wb_pet",
+            )
+            pet_btn.callback = _v2_delegate_to(WorldBossAttackView, '_on_pet')
+            _row_btns.append(pet_btn)
         top_btn = Button(
             label="📊 Voir le top 10",
             style=discord.ButtonStyle.secondary,
             custom_id="wb_top",
         )
         top_btn.callback = _v2_delegate_to(WorldBossAttackView, '_on_top')
-        items.append(discord.ui.ActionRow(top_btn))
+        _row_btns.append(top_btn)
+        items.append(discord.ui.ActionRow(*_row_btns))
 
         self.add_item(v2_container(*items, color=color))
 
