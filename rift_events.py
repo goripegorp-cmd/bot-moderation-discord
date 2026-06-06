@@ -42,6 +42,7 @@ _arena_create_fn = None
 _arena_delete_fn = None
 _report_fn = None
 _event_busy_fn = None
+_pet_strike_fn = None  # Phase 261b : async (guild_id, user_id) -> coeur partage _pet_strike (bot.py)
 
 # ─── Réglages (volontairement modestes — rétention) ───────────────────────────
 _EVENT_TYPE = "rift"
@@ -61,13 +62,16 @@ _COLOR = 0x8E44AD
 
 _last_click: dict = {}        # {(rift_id, user_id): epoch}
 _last_refresh: dict = {}      # {rift_id: epoch}
+_last_pet_click: dict = {}    # {(rift_id, user_id): epoch} — anti-429 sur le bouton 🐾
+_PET_CLICK_CD = 2.0
 
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
           inventory_fn=None, active_ping_fn=None, arena_create_fn=None,
-          arena_delete_fn=None, report_fn=None, event_busy_fn=None):
+          arena_delete_fn=None, report_fn=None, event_busy_fn=None,
+          pet_strike_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _inventory_fn, _active_ping_fn
-    global _arena_create_fn, _arena_delete_fn, _report_fn, _event_busy_fn
+    global _arena_create_fn, _arena_delete_fn, _report_fn, _event_busy_fn, _pet_strike_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -79,8 +83,9 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
     _arena_delete_fn = arena_delete_fn
     _report_fn = report_fn
     _event_busy_fn = event_busy_fn
+    _pet_strike_fn = pet_strike_fn
     try:
-        bot_instance.add_dynamic_items(RiftChannelButton, RiftTopButton)
+        bot_instance.add_dynamic_items(RiftChannelButton, RiftTopButton, RiftPetButton)
     except Exception:
         pass
 
@@ -225,10 +230,13 @@ def _build_panel(rift: dict, distinct: int):
                              custom_id=f"rift_channel:{rid}")
                 _top = Button(label="🏆 Top scelleurs", style=discord.ButtonStyle.secondary,
                               custom_id=f"rift_top:{rid}")
+                # Phase 261b : APPUI FAMILIER — canalise de l'énergie via le familier actif.
+                _pet = Button(label="🐾 Familier", style=discord.ButtonStyle.success,
+                              custom_id=f"rift_pet:{rid}")
                 # Phase 258.8 : toggle 🔔 (catégorie collab) — capté par EventNotifyButton.
                 _notif = Button(label="🔔", style=discord.ButtonStyle.secondary,
                                 custom_id="evtnotif:collab")
-                self.add_item(discord.ui.ActionRow(_ch, _top, _notif))
+                self.add_item(discord.ui.ActionRow(_ch, _pet, _top, _notif))
 
     return _RiftPanel()
 
@@ -428,6 +436,85 @@ async def _handle_channel(i: discord.Interaction, rift_id: int):
         print(f"[rift channel] {ex}")
 
 
+async def _handle_pet(i: discord.Interaction, rift_id: int):
+    """Phase 261b : APPUI FAMILIER sur la Faille — le familier actif CANALISE de
+    l'énergie dans la faille (contribution directe au compteur partagé). Cooldown
+    90 s côté _pet_strike + soin passif harmless. FAIL-OPEN, anti-429."""
+    try:
+        await i.response.defer(ephemeral=True)
+    except Exception:
+        pass
+    # Anti-429 : un clic noyé (< _PET_CLICK_CD s) ne coûte AUCUN followup.
+    try:
+        key = (rift_id, i.user.id)
+        now = datetime.now(timezone.utc).timestamp()
+        if now - _last_pet_click.get(key, 0.0) < _PET_CLICK_CD:
+            return
+        _last_pet_click[key] = now
+    except Exception:
+        pass
+    try:
+        if i.guild is None:
+            return
+        if _pet_strike_fn is None:
+            return await i.followup.send("🐾 Familier indisponible un instant.", ephemeral=True)
+        rift = await _get_rift(rift_id)
+        if not rift or rift["ended"]:
+            return await i.followup.send("🔒 Cette faille est déjà refermée.", ephemeral=True)
+        # Verrou d'ACTIVITÉ (fail-open) — même porte que le bouton Canaliser.
+        try:
+            ok, score, needed = await _act.check_gate(i.guild.id, i.user.id, _EVENT_TYPE)
+            if not ok:
+                return await i.followup.send(_act.block_message(_EVENT_TYPE, score, needed),
+                                             ephemeral=True)
+        except Exception:
+            pass
+        # Cœur partagé : familier actif + cooldown 90 s + soin passif. FAIL-OPEN.
+        res = await _pet_strike_fn(i.guild.id, i.user.id)
+        if not res.get("ok"):
+            return await i.followup.send(res.get("msg", "🐾 Familier indisponible."), ephemeral=True)
+        # Énergie canalisée par le familier = sa salve (modeste, gated 90 s).
+        energy_add = max(1, int(res.get("dmg", 0) or 0))
+        label = res.get("label", "🐾 Familier")
+        note = res.get("note", "")
+        # Écriture ATOMIQUE (décroissance + ajout), uniquement si la faille vit.
+        async with _get_db() as db:
+            cur = await db.execute(
+                "UPDATE rift_events SET "
+                " energy = MAX(0, energy "
+                "   - CAST((julianday('now') - julianday(last_decay_at)) * 1440 * ? AS INTEGER) "
+                "   + ?), "
+                " last_decay_at = CURRENT_TIMESTAMP "
+                "WHERE id=? AND ended=0",
+                (_DECAY_PER_MIN, energy_add, rift_id))
+            if getattr(cur, "rowcount", 0) != 1:
+                await db.commit()
+                return await i.followup.send("🔒 Cette faille est déjà refermée.", ephemeral=True)
+            await db.execute(
+                "INSERT INTO rift_contributors(rift_id, user_id, energy_added, clicks, last_at) "
+                "VALUES(?,?,?,1,CURRENT_TIMESTAMP) "
+                "ON CONFLICT(rift_id, user_id) DO UPDATE SET "
+                "energy_added = energy_added + ?, clicks = clicks + 1, last_at = CURRENT_TIMESTAMP",
+                (rift_id, i.user.id, energy_add, energy_add))
+            await db.commit()
+        rift2 = await _get_rift(rift_id)
+        distinct = await _distinct_count(rift_id)
+        cur_energy = int(rift2["energy"] or 0) if rift2 else 0
+        _extra = f"\n{note}" if note else ""
+        if rift2 and not rift2["ended"] and cur_energy >= int(rift2["target"] or _TARGET) \
+                and distinct >= _MIN_DISTINCT:
+            await _end_rift(i.guild, rift_id, victory=True)
+            return await i.followup.send(
+                f"🐾 **{label}** canalise **+{energy_add} énergie**{_extra} — "
+                f"et la faille est **SCELLÉE** ! 🎉", ephemeral=True)
+        await _refresh_panel(i.guild, rift_id)
+        await i.followup.send(
+            f"🐾 **{label}** canalise **+{energy_add} énergie** dans la faille !{_extra} "
+            f"({cur_energy:,}/{int(rift2['target']) if rift2 else _TARGET:,})", ephemeral=True)
+    except Exception as ex:
+        print(f"[rift pet] {ex}")
+
+
 async def _handle_top(i: discord.Interaction, rift_id: int):
     try:
         await i.response.defer(ephemeral=True)
@@ -574,9 +661,25 @@ class RiftTopButton(discord.ui.DynamicItem[Button],
         await _handle_top(i, self.rift_id)
 
 
+class RiftPetButton(discord.ui.DynamicItem[Button],
+                    template=r"rift_pet:(?P<rid>\d+)"):
+    """Phase 261b : bouton APPUI FAMILIER (persistent) de la Faille."""
+    def __init__(self, rift_id: int):
+        self.rift_id = int(rift_id)
+        super().__init__(Button(label="🐾 Familier", style=discord.ButtonStyle.success,
+                                custom_id=f"rift_pet:{int(rift_id)}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["rid"]))
+
+    async def callback(self, i: discord.Interaction):
+        await _handle_pet(i, self.rift_id)
+
+
 def register_persistent_views(bot_instance):
     try:
-        bot_instance.add_dynamic_items(RiftChannelButton, RiftTopButton)
+        bot_instance.add_dynamic_items(RiftChannelButton, RiftTopButton, RiftPetButton)
     except Exception:
         pass
 

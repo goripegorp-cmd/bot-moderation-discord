@@ -35,6 +35,7 @@ _arena_create_fn = None
 _arena_delete_fn = None
 _report_fn = None
 _event_busy_fn = None
+_pet_strike_fn = None  # Phase 261b : async (guild_id, user_id) -> coeur partage _pet_strike (bot.py)
 
 # ─── Réglages (modestes) ──────────────────────────────────────────────────────
 _EVENT_TYPE = "caravan"
@@ -55,13 +56,16 @@ _ROLE_META = {"porteur": ("🎒", "Porteur"), "gardien": ("🛡️", "Gardien"),
 
 _last_click: dict = {}        # {(carav_id, user_id): epoch}
 _last_refresh: dict = {}      # {carav_id: epoch}
+_last_pet_click: dict = {}    # {(carav_id, user_id): epoch} — anti-429 sur le bouton 🐾
+_PET_CLICK_CD = 2.0
+_PET_HOLD_BONUS = 30          # secondes de tenue ajoutées par l'appui familier
 
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
           active_ping_fn=None, arena_create_fn=None, arena_delete_fn=None,
-          report_fn=None, event_busy_fn=None):
+          report_fn=None, event_busy_fn=None, pet_strike_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _active_ping_fn
-    global _arena_create_fn, _arena_delete_fn, _report_fn, _event_busy_fn
+    global _arena_create_fn, _arena_delete_fn, _report_fn, _event_busy_fn, _pet_strike_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -72,8 +76,9 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
     _arena_delete_fn = arena_delete_fn
     _report_fn = report_fn
     _event_busy_fn = event_busy_fn
+    _pet_strike_fn = pet_strike_fn
     try:
-        bot_instance.add_dynamic_items(CaravanRoleButton)
+        bot_instance.add_dynamic_items(CaravanRoleButton, CaravanPetButton)
     except Exception:
         pass
 
@@ -223,6 +228,9 @@ def _build_panel(carav: dict, roles: dict):
                     btns.append(Button(label=f"{emoji} {label}",
                                        style=discord.ButtonStyle.secondary,
                                        custom_id=f"carav_role:{cid}:{r}"))
+                # Phase 261b : APPUI FAMILIER — maintient le sceau que tu tiens (+30 s).
+                btns.append(Button(label="🐾 Familier", style=discord.ButtonStyle.success,
+                                   custom_id=f"carav_pet:{cid}"))
                 # Phase 258.8 : toggle 🔔 (catégorie collab) — capté par EventNotifyButton.
                 btns.append(Button(label="🔔", style=discord.ButtonStyle.secondary,
                                    custom_id="evtnotif:collab"))
@@ -438,6 +446,80 @@ async def _handle_role(i: discord.Interaction, carav_id: int, role: str):
         print(f"[caravan role] {ex}")
 
 
+async def _handle_pet(i: discord.Interaction, carav_id: int):
+    """Phase 261b : APPUI FAMILIER sur la Caravane. La caravane se gagne avec 3
+    sceaux tenus par 3 joueurs DISTINCTS — un familier ne peut donc PAS tenir un
+    sceau (ça casserait la coordination). À la place, le familier **PROLONGE** le
+    sceau que TU tiens déjà (+30 s) : il garde la position pendant que le trio se
+    forme. Support pur, additif, ne crée jamais de faux porteur. Cooldown 90 s côté
+    _pet_strike + soin passif harmless. FAIL-OPEN, anti-429."""
+    try:
+        await i.response.defer(ephemeral=True)
+    except Exception:
+        pass
+    try:
+        key = (carav_id, i.user.id)
+        nowf = datetime.now(timezone.utc).timestamp()
+        if nowf - _last_pet_click.get(key, 0.0) < _PET_CLICK_CD:
+            return
+        _last_pet_click[key] = nowf
+    except Exception:
+        pass
+    try:
+        if i.guild is None:
+            return
+        if _pet_strike_fn is None:
+            return await i.followup.send("🐾 Familier indisponible un instant.", ephemeral=True)
+        carav = await _get_carav(carav_id)
+        if not carav or carav["ended"]:
+            return await i.followup.send("🔒 Cette caravane est déjà partie.", ephemeral=True)
+        try:
+            ok, score, needed = await _act.check_gate(i.guild.id, i.user.id, _EVENT_TYPE)
+            if not ok:
+                return await i.followup.send(_act.block_message(_EVENT_TYPE, score, needed),
+                                             ephemeral=True)
+        except Exception:
+            pass
+        uid = i.user.id
+        now = int(time.time())
+        # Le familier ne peut prolonger QUE le sceau que le joueur tient déjà.
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT role FROM caravan_roles WHERE carav_id=? AND holder_id=? AND hold_until>?",
+                (carav_id, uid, now)) as c:
+                mine = await c.fetchone()
+            if not mine:
+                await db.commit()
+                return await i.followup.send(
+                    "🐾 Ton familier veut aider — mais **tiens d'abord un sceau** "
+                    "(bouton du rôle) ! Il le **maintiendra** ensuite pour toi.",
+                    ephemeral=True)
+            myrole = mine[0]
+            # Cœur partagé : familier actif + cooldown 90 s + soin passif. FAIL-OPEN.
+            res = await _pet_strike_fn(i.guild.id, uid)
+            if not res.get("ok"):
+                await db.commit()
+                return await i.followup.send(res.get("msg", "🐾 Familier indisponible."),
+                                             ephemeral=True)
+            # Prolonge ATOMIQUEMENT la tenue du sceau (uniquement si toujours à moi).
+            await db.execute(
+                "UPDATE caravan_roles SET hold_until = hold_until + ? "
+                "WHERE carav_id=? AND role=? AND holder_id=? AND hold_until>?",
+                (_PET_HOLD_BONUS, carav_id, myrole, uid, now))
+            await db.commit()
+        emoji, label = _ROLE_META.get(myrole, ("🤝", myrole))
+        plabel = res.get("label", "🐾 Familier")
+        note = res.get("note", "")
+        _extra = f"\n{note}" if note else ""
+        await _refresh_panel(i.guild, carav_id, force=False)
+        await i.followup.send(
+            f"🐾 **{plabel}** maintient ton sceau **{emoji} {label}** "
+            f"(+{_PET_HOLD_BONUS}s) — laisse le temps au trio de se former !{_extra}",
+            ephemeral=True)
+    except Exception as ex:
+        print(f"[caravan pet] {ex}")
+
+
 # ─── Fin (atomique, claim-once, fail-closed) ───────────────────────────────────
 async def _end_caravan(guild, carav_id: int, victory: bool):
     try:
@@ -538,9 +620,25 @@ class CaravanRoleButton(discord.ui.DynamicItem[Button],
         await _handle_role(i, self.carav_id, self.role)
 
 
+class CaravanPetButton(discord.ui.DynamicItem[Button],
+                       template=r"carav_pet:(?P<cid>\d+)"):
+    """Phase 261b : bouton APPUI FAMILIER (persistent) de la Caravane."""
+    def __init__(self, carav_id: int):
+        self.carav_id = int(carav_id)
+        super().__init__(Button(label="🐾 Familier", style=discord.ButtonStyle.success,
+                                custom_id=f"carav_pet:{int(carav_id)}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["cid"]))
+
+    async def callback(self, i: discord.Interaction):
+        await _handle_pet(i, self.carav_id)
+
+
 def register_persistent_views(bot_instance):
     try:
-        bot_instance.add_dynamic_items(CaravanRoleButton)
+        bot_instance.add_dynamic_items(CaravanRoleButton, CaravanPetButton)
     except Exception:
         pass
 

@@ -34,6 +34,7 @@ _arena_create_fn = None
 _arena_delete_fn = None
 _report_fn = None
 _event_busy_fn = None
+_pet_strike_fn = None  # Phase 261b : async (guild_id, user_id) -> coeur partage _pet_strike (bot.py)
 
 # ─── Réglages (modestes) ──────────────────────────────────────────────────────
 _EVENT_TYPE = "chain"
@@ -48,12 +49,16 @@ _PER_LINK = 20
 _PER_LINK_CAP = 10
 _COLOR = 0x16A085
 
+_last_pet_click: dict = {}    # {(chain_id, user_id): epoch} — anti-429 sur le bouton 🐾
+_PET_CLICK_CD = 2.0
+_PET_TIME_BONUS = 25          # secondes de répit ajoutées par l'appui familier
+
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
           active_ping_fn=None, arena_create_fn=None, arena_delete_fn=None,
-          report_fn=None, event_busy_fn=None):
+          report_fn=None, event_busy_fn=None, pet_strike_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _active_ping_fn
-    global _arena_create_fn, _arena_delete_fn, _report_fn, _event_busy_fn
+    global _arena_create_fn, _arena_delete_fn, _report_fn, _event_busy_fn, _pet_strike_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -64,8 +69,9 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
     _arena_delete_fn = arena_delete_fn
     _report_fn = report_fn
     _event_busy_fn = event_busy_fn
+    _pet_strike_fn = pet_strike_fn
     try:
-        bot_instance.add_dynamic_items(ChainLinkButton)
+        bot_instance.add_dynamic_items(ChainLinkButton, ChainPetButton)
     except Exception:
         pass
 
@@ -188,6 +194,9 @@ def _build_panel(chain: dict):
                 self.add_item(discord.ui.ActionRow(
                     Button(label="🔗 Ajouter un maillon", style=discord.ButtonStyle.success,
                            custom_id=f"chain_link:{cid}"),
+                    # Phase 261b : APPUI FAMILIER — repousse la rupture de la chaîne (+25 s).
+                    Button(label="🐾 Familier", style=discord.ButtonStyle.success,
+                           custom_id=f"chain_pet:{cid}"),
                     # Phase 258.8 : toggle 🔔 (catégorie collab) — capté par EventNotifyButton.
                     Button(label="🔔", style=discord.ButtonStyle.secondary,
                            custom_id="evtnotif:collab")))
@@ -373,6 +382,68 @@ async def _handle_link(i: discord.Interaction, chain_id: int):
         print(f"[chain link] {ex}")
 
 
+async def _handle_pet(i: discord.Interaction, chain_id: int):
+    """Phase 261b : APPUI FAMILIER sur la Chaîne. La chaîne est un RELAIS (un joueur
+    ne peut pas poser 2 maillons d'affilée) — un familier ne pose donc PAS de maillon
+    (ça casserait l'alternance). À la place, le familier **RENFORCE la chaîne** en
+    repoussant le délai de rupture (+25 s) : il achète du temps à l'équipe pour
+    trouver le prochain relayeur. Support pur, n'ajoute aucun maillon, ne touche pas
+    l'alternance. Cooldown 90 s côté _pet_strike + soin passif. FAIL-OPEN, anti-429."""
+    try:
+        await i.response.defer(ephemeral=True)
+    except Exception:
+        pass
+    try:
+        key = (chain_id, i.user.id)
+        nowf = datetime.now(timezone.utc).timestamp()
+        if nowf - _last_pet_click.get(key, 0.0) < _PET_CLICK_CD:
+            return
+        _last_pet_click[key] = nowf
+    except Exception:
+        pass
+    try:
+        if i.guild is None:
+            return
+        if _pet_strike_fn is None:
+            return await i.followup.send("🐾 Familier indisponible un instant.", ephemeral=True)
+        chain = await _get_chain(chain_id)
+        if not chain or chain["ended"]:
+            return await i.followup.send("🔒 Cette chaîne est déjà terminée.", ephemeral=True)
+        try:
+            ok, score, needed = await _act.check_gate(i.guild.id, i.user.id, _EVENT_TYPE)
+            if not ok:
+                return await i.followup.send(_act.block_message(_EVENT_TYPE, score, needed),
+                                             ephemeral=True)
+        except Exception:
+            pass
+        # Cœur partagé : familier actif + cooldown 90 s + soin passif. FAIL-OPEN.
+        res = await _pet_strike_fn(i.guild.id, i.user.id)
+        if not res.get("ok"):
+            return await i.followup.send(res.get("msg", "🐾 Familier indisponible."), ephemeral=True)
+        # Repousse ATOMIQUEMENT le délai (uniquement si la chaîne vit encore).
+        async with _get_db() as db:
+            cur = await db.execute(
+                "UPDATE chain_events SET ends_at=datetime(ends_at, ?) "
+                "WHERE id=? AND ended=0 AND datetime(ends_at) > datetime('now')",
+                (f"+{_PET_TIME_BONUS} seconds", chain_id))
+            await db.commit()
+            ok_ext = (getattr(cur, "rowcount", 0) == 1)
+        if not ok_ext:
+            return await i.followup.send(
+                "⛓️ La chaîne vient de se rompre ou se terminer — trop tard pour ton familier.",
+                ephemeral=True)
+        plabel = res.get("label", "🐾 Familier")
+        note = res.get("note", "")
+        _extra = f"\n{note}" if note else ""
+        await _refresh_panel(i.guild, chain_id)
+        await i.followup.send(
+            f"🐾 **{plabel}** renforce la chaîne — **+{_PET_TIME_BONUS}s** de répit "
+            f"avant la rupture ! Vite, posez le prochain maillon en relais.{_extra}",
+            ephemeral=True)
+    except Exception as ex:
+        print(f"[chain pet] {ex}")
+
+
 # ─── Fin (atomique, claim-once, fail-closed) ───────────────────────────────────
 async def _end_chain(guild, chain_id: int, victory: bool):
     try:
@@ -462,9 +533,26 @@ class ChainLinkButton(discord.ui.DynamicItem[Button],
         await _handle_link(i, self.chain_id)
 
 
+class ChainPetButton(discord.ui.DynamicItem[Button],
+                     template=r"chain_pet:(?P<cid>\d+)"):
+    """Phase 261b : bouton APPUI FAMILIER (persistent) de la Chaîne."""
+    def __init__(self, chain_id: int):
+        self.chain_id = int(chain_id)
+        super().__init__(Button(label="🐾 Familier",
+                                style=discord.ButtonStyle.success,
+                                custom_id=f"chain_pet:{int(chain_id)}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["cid"]))
+
+    async def callback(self, i: discord.Interaction):
+        await _handle_pet(i, self.chain_id)
+
+
 def register_persistent_views(bot_instance):
     try:
-        bot_instance.add_dynamic_items(ChainLinkButton)
+        bot_instance.add_dynamic_items(ChainLinkButton, ChainPetButton)
     except Exception:
         pass
 

@@ -42779,7 +42779,8 @@ async def on_ready():
                                      arena_create_fn=_create_combat_arena,
                                      arena_delete_fn=_delete_combat_arena,
                                      report_fn=_post_combat_report,
-                                     event_busy_fn=_has_any_major_event_running)
+                                     event_busy_fn=_has_any_major_event_running,
+                                     pet_strike_fn=_pet_strike)
             await rift_events_module.init_db()
             rift_events_module.register_persistent_views(bot)
             await rift_events_module.boot_cleanup()
@@ -42798,7 +42799,8 @@ async def on_ready():
                                         arena_create_fn=_create_combat_arena,
                                         arena_delete_fn=_delete_combat_arena,
                                         report_fn=_post_combat_report,
-                                        event_busy_fn=_has_any_major_event_running)
+                                        event_busy_fn=_has_any_major_event_running,
+                                        pet_strike_fn=_pet_strike)
             await caravan_events_module.init_db()
             caravan_events_module.register_persistent_views(bot)
             await caravan_events_module.boot_cleanup()
@@ -42817,7 +42819,8 @@ async def on_ready():
                                       arena_create_fn=_create_combat_arena,
                                       arena_delete_fn=_delete_combat_arena,
                                       report_fn=_post_combat_report,
-                                      event_busy_fn=_has_any_major_event_running)
+                                      event_busy_fn=_has_any_major_event_running,
+                                      pet_strike_fn=_pet_strike)
             await chain_events_module.init_db()
             chain_events_module.register_persistent_views(bot)
             await chain_events_module.boot_cleanup()
