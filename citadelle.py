@@ -319,6 +319,13 @@ async def award(guild_id: int, user_id: int, eclats: int = 0, materials: dict | 
         if eclats:
             await grant_eclats(guild_id, user_id, eclats)
             await grant_passe_points(guild_id, user_id, eclats)  # Phase E : alimente la passe
+            # Phase H : boucle event → build — 50 % de chance de lâcher un matériau.
+            if random.random() < 0.5:
+                try:
+                    _mk = random.choice([v[2] for v in PROFESSIONS.values()])
+                    await grant_material(guild_id, user_id, _mk, 1)
+                except Exception:
+                    pass
         for mk, q in (materials or {}).items():
             await grant_material(guild_id, user_id, mk, q)
     except Exception as ex:
@@ -660,6 +667,14 @@ async def build_carte_panel(i: discord.Interaction, status: str | None = None):
     name_line = f"{f_border} **{name}** {f_border}".strip()
     dye_txt = dye_label(dye_k) if dye_k and dye_k != "none" else "_aucune_"
     devise_txt = f"_« {devise} »_" if devise and devise != "none" else "_(pas encore de devise)_"
+    title_k = active.get("cite_title")
+    title_line = ""
+    try:
+        if title_k and title_k in CITE_TITLES:
+            _te, _tl = CITE_TITLES[title_k]
+            title_line = f"\n🏷️ Titre : **{_te} {_tl}**"
+    except Exception:
+        title_line = ""
 
     items = [v2_title("🪪  Carte de Joueur")]
     if status:
@@ -668,7 +683,7 @@ async def build_carte_panel(i: discord.Interaction, status: str | None = None):
     items.append(v2_divider())
     # ─ Aperçu de la carte ─
     items.append(v2_body(
-        f"{emblem_string(active)}  {name_line}\n"
+        f"{emblem_string(active)}  {name_line}{title_line}\n"
         f"🎨 Thème : **{t_emoji} {t_name}**  ·  🖼️ Cadre : **{f_emoji} {f_name}**\n"
         f"🩹 Teinture : {dye_txt}\n"
         f"{devise_txt}"
@@ -1379,6 +1394,108 @@ async def _metiers(i: discord.Interaction, args: list):
     await _nav(i, await build_metiers_panel(i, status))
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PHASE H — Collections & Reliques (compléter un set = titre PERMANENT)
+# ═══════════════════════════════════════════════════════════════════════════════
+CITE_TITLES = {
+    "maitre_couleurs": ("🎨", "Maître des Couleurs"),
+    "batisseur":       ("🏛️", "Bâtisseur de la Cité"),
+    "heraldiste":      ("🛡️", "Maître Héraldiste"),
+}
+# key -> (emoji, nom, kind, [clés requises], titre_clé, éclats)
+COLLECTIONS = {
+    "teinturier": ("🎨", "Toutes les Teintures", "dye",
+                   list(DYES.keys()), "maitre_couleurs", 200),
+    "architecte": ("🏯", "Tous les Modules du Sanctuaire", "sanctuaire_module",
+                   list(SANCTU_MODULES.keys()), "batisseur", 300),
+    "heraldiste": ("🛡️", "Tous les Symboles d'Emblème", "emb_symbol",
+                   list(EMB_SYMBOLS.keys()), "heraldiste", 200),
+}
+_COLL_ORDER = list(COLLECTIONS.keys())
+
+
+async def _collection_claim(gid: int, uid: int, key: str) -> str:
+    c = COLLECTIONS.get(key)
+    if not c:
+        return "❓ Collection inconnue."
+    emoji, name, kind, required, title_key, eclats = c
+    owned = set(await owned_cosmetics(gid, uid, kind))
+    have = sum(1 for k in required if k in owned)
+    if have < len(required):
+        return f"🔒 **{name}** : encore `{len(required) - have}` à débloquer ({have}/{len(required)})."
+    # claim ATOMIQUE : grant_cosmetic renvoie True uniquement si NOUVEAU
+    if not await grant_cosmetic(gid, uid, "collection_claimed", key):
+        return "✅ Récompense déjà réclamée."
+    await grant_cosmetic(gid, uid, "title", title_key)
+    await set_active(gid, uid, "cite_title", title_key)
+    if eclats:
+        await grant_eclats(gid, uid, eclats)
+    te, tl = CITE_TITLES.get(title_key, ("🏷️", "Titre"))
+    return f"🏆 **{name}** complétée ! Titre **{te} {tl}** débloqué + {eclats} {ECLATS_EMOJI} !"
+
+
+async def build_collections_panel(i: discord.Interaction, status: str | None = None):
+    LayoutView = _v2.get("LayoutView")
+    v2_title = _v2.get("title"); v2_subtitle = _v2.get("subtitle"); v2_body = _v2.get("body")
+    v2_divider = _v2.get("divider"); v2_container = _v2.get("container")
+    if not all((LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container)):
+        return None
+    gid, uid = i.guild.id, i.user.id
+    claimed = set(await owned_cosmetics(gid, uid, "collection_claimed"))
+
+    items = [v2_title("📜  Collections & Reliques")]
+    if status:
+        items.append(v2_body(status))
+    items.append(v2_subtitle("Complète un set (via la Forge, le Sanctuaire, les Emblèmes…) → titre PERMANENT."))
+    lines = []
+    completable = []
+    for k in _COLL_ORDER:
+        emoji, name, kind, required, title_key, eclats = COLLECTIONS[k]
+        owned = set(await owned_cosmetics(gid, uid, kind))
+        have = sum(1 for rk in required if rk in owned)
+        full = have >= len(required)
+        if k in claimed:
+            mark = "✅"
+        elif full:
+            mark = "🏆"
+            completable.append(k)
+        else:
+            mark = "🔒"
+        te, tl = CITE_TITLES.get(title_key, ("🏷️", "Titre"))
+        lines.append(f"{mark} **{emoji} {name}** — `{have}/{len(required)}` → titre **{te} {tl}** + {eclats} {ECLATS_EMOJI}")
+    items.append(v2_body("\n".join(lines)))
+    items.append(v2_divider())
+
+    if completable:
+        row = []
+        for k in completable[:5]:
+            row.append(Button(label=f"🏆 Réclamer {COLLECTIONS[k][1][:16]}",
+                              style=discord.ButtonStyle.success,
+                              custom_id=f"cite:collections:claim:{k}"))
+            if len(row) == 5:
+                items.append(discord.ui.ActionRow(*row)); row = []
+        if row:
+            items.append(discord.ui.ActionRow(*row))
+    else:
+        items.append(v2_body("-# Continue à collectionner pour compléter un set !"))
+    items.append(_retour_row())
+
+    class _Coll(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=600)
+            self.add_item(v2_container(*items, color=0xE67E22))
+
+    return _Coll()
+
+
+async def _collections(i: discord.Interaction, args: list):
+    gid, uid = i.guild.id, i.user.id
+    status = None
+    if len(args) >= 2 and args[0] == "claim":
+        status = await _collection_claim(gid, uid, args[1])
+    await _nav(i, await build_collections_panel(i, status))
+
+
 # Registre des salles OUVERTES (les autres → teaser). On le remplit phase par phase.
 _SECTION_HANDLERS = {
     "forge": _forge,
@@ -1387,6 +1504,7 @@ _SECTION_HANDLERS = {
     "passe": _passe,
     "sanctuaire": _sanctuaire,
     "metiers": _metiers,
+    "collections": _collections,
 }
 
 
