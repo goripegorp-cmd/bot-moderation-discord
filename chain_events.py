@@ -187,7 +187,10 @@ def _build_panel(chain: dict):
             if not ended:
                 self.add_item(discord.ui.ActionRow(
                     Button(label="🔗 Ajouter un maillon", style=discord.ButtonStyle.success,
-                           custom_id=f"chain_link:{cid}")))
+                           custom_id=f"chain_link:{cid}"),
+                    # Phase 258.8 : toggle 🔔 (catégorie collab) — capté par EventNotifyButton.
+                    Button(label="🔔", style=discord.ButtonStyle.secondary,
+                           custom_id="evtnotif:collab")))
 
     return _ChainPanel()
 

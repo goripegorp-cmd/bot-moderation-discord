@@ -931,7 +931,7 @@ def _build_boss_layout(
         if warmup_ts and warmup_ts > datetime.now(timezone.utc).timestamp():
             items.insert(3, v2_body(
                 f"⏰ **Le combat commence <t:{int(warmup_ts)}:R>** — équipe ton meilleur "
-                f"stuff (`/inventory`) et **rejoins un vocal** (bonus de dégâts) !"))
+                f"stuff (`/inventory`) et **rejoins un vocal** : 🔊 **+25-60 % de dégâts** !"))
     except Exception:
         pass
 

@@ -1242,7 +1242,7 @@ async def _announce_climax_open(
     )
     if warmup_ts:
         msg += (f"\n\n⏰ **Le combat commence <t:{int(warmup_ts)}:R>** — "
-                f"équipez-vous (`/inventory`) et rejoignez un vocal (bonus de dégâts) !")
+                f"équipez-vous et **rejoignez un vocal** : 🔊 **+25-60 % de dégâts** !")
     try:
         _t, _, _b = msg.partition("\n\n")
         await ch.send(

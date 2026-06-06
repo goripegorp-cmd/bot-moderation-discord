@@ -225,7 +225,10 @@ def _build_panel(rift: dict, distinct: int):
                              custom_id=f"rift_channel:{rid}")
                 _top = Button(label="🏆 Top scelleurs", style=discord.ButtonStyle.secondary,
                               custom_id=f"rift_top:{rid}")
-                self.add_item(discord.ui.ActionRow(_ch, _top))
+                # Phase 258.8 : toggle 🔔 (catégorie collab) — capté par EventNotifyButton.
+                _notif = Button(label="🔔", style=discord.ButtonStyle.secondary,
+                                custom_id="evtnotif:collab")
+                self.add_item(discord.ui.ActionRow(_ch, _top, _notif))
 
     return _RiftPanel()
 

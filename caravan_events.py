@@ -223,6 +223,9 @@ def _build_panel(carav: dict, roles: dict):
                     btns.append(Button(label=f"{emoji} {label}",
                                        style=discord.ButtonStyle.secondary,
                                        custom_id=f"carav_role:{cid}:{r}"))
+                # Phase 258.8 : toggle 🔔 (catégorie collab) — capté par EventNotifyButton.
+                btns.append(Button(label="🔔", style=discord.ButtonStyle.secondary,
+                                   custom_id="evtnotif:collab"))
                 self.add_item(discord.ui.ActionRow(*btns))
 
     return _CaravPanel()

@@ -9819,6 +9819,17 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
             # visible, les actifs la voient forcément.
         except Exception as ex:
             print(f"[event start send arena] {ex}")
+            # Phase 258.8 : si le PANNEAU n'a jamais été envoyé, ne PAS laisser un
+            # event « fantôme » (ended=0, ends_at futur) bloquer _has_any_major_event_running
+            # → sinon TOUS les combats seraient gelés jusqu'à l'expiration. On clôt
+            # l'event UNIQUEMENT si le panneau n'est pas parti (sinon le combat est
+            # bel et bien lancé et visible — on n'y touche pas).
+            if 'arena_msg' not in locals() or arena_msg is None:
+                try:
+                    await _mark_event_ended(event_id)
+                except Exception:
+                    pass
+                return {"ok": False, "error": "Panneau d'arène non envoyé — event clôturé (aucun combat bloqué)"}
 
         # ─── 3. Phase 235.10 : PLUS de masquage des autres salons ───
         # Le boss vit dans le salon PERMANENT « ⚔️-combat » → on ne cache plus rien,
