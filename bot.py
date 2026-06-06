@@ -42995,6 +42995,7 @@ async def on_ready():
                 event_busy_fn=_has_any_major_event_running,
                 report_fn=_post_combat_report,
                 event_mention_fn=_get_event_mention,
+                pet_strike_fn=_pet_strike,
             )
             await monthly_climax_module.init_db()
             monthly_climax_module.register_persistent_views(bot)

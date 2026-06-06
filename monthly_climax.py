@@ -75,6 +75,9 @@ _arena_delete_fn = None  # async (guild, text_channel_id) -> supprime l'arène
 _event_busy_fn = None  # Phase 230 : async (guild_id) -> True si un AUTRE event de combat tourne (injecté)
 _report_fn = None  # Phase 235.15 : async (guild, title, body) -> récap consolidé dans « 📜 chroniques-combat »
 _event_mention_fn = None  # Phase 235.24 : async (guild, type) -> mention rôles opt-in (/notify + 🔔)
+_pet_strike_fn = None  # Phase 261 (4/4) : async (guild_id, user_id) -> coeur partagé _pet_strike (bot.py)
+_last_pet_click: dict[tuple, float] = {}  # anti-429 par (guild,user) sur le bouton 🐾 climax
+_PET_CLICK_CD = 2.0
 # Phase 235.16 : warm-up climax (clé = event_id) — sas de préparation au spawn.
 _CLIMAX_WARMUP_SECONDS = 25
 _warmup_until: dict[int, float] = {}
@@ -290,10 +293,11 @@ def setup(
     bot_instance, get_db_fn, db_get_fn, v2_helpers: dict,
     story_module=None, npc_module=None, add_coins_fn=None,
     arena_create_fn=None, arena_delete_fn=None, event_busy_fn=None,
-    report_fn=None, event_mention_fn=None,
+    report_fn=None, event_mention_fn=None, pet_strike_fn=None,
 ):
     global _bot, _get_db, _db_get, _v2, _story, _npc, _add_coins
     global _arena_create_fn, _arena_delete_fn, _event_busy_fn, _report_fn, _event_mention_fn
+    global _pet_strike_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -788,6 +792,79 @@ async def record_attack(
     }
 
 
+async def record_pet_assist(guild_id: int, user_id: int) -> dict:
+    """Phase 261 (4/4) : APPUI FAMILIER sur le Climax. Le familier actif (via le
+    cœur partagé _pet_strike_fn injecté depuis bot.py) frappe le boss et SOIGNE le
+    joueur si passif. NE consomme PAS le quota d'attaques (attack_count inchangé) :
+    c'est un appui bonus, pas une attaque manuelle. Cooldown 90 s côté _pet_strike.
+    FAIL-OPEN : une erreur ici ne casse jamais le combat."""
+    if _get_db is None:
+        return {"error": "DB indisponible"}
+    if _pet_strike_fn is None:
+        return {"error": "Familier indisponible un instant, réessaie."}
+    active = await get_active_climax(guild_id)
+    if not active:
+        return {"error": "Aucun climax actif"}
+    event_id = active["event_id"]
+    if active["hp_current"] <= 0:
+        return {"error": "Boss déjà tombé"}
+    # Warm-up : le familier patiente aussi pendant le sas de préparation.
+    _wu = _warmup_until.get(event_id, 0)
+    if _wu and datetime.now(timezone.utc).timestamp() < _wu:
+        return {
+            "error": (f"⏳ **Le Climax se prépare !** Le combat commence <t:{int(_wu)}:R>.\n"
+                      f"Ton familier piaffe d'impatience…"),
+            "warmup": True,
+        }
+
+    # Cœur partagé : applique le cooldown 90 s, calcule la salve, soigne si passif.
+    res = await _pet_strike_fn(guild_id, user_id)
+    if not res.get("ok"):
+        return {"error": res.get("msg", "🐾 Familier indisponible.")}
+    dmg = int(res.get("dmg", 0) or 0)
+    dmg = min(dmg, active["hp_current"])  # pas d'overkill (cohérent avec record_attack)
+
+    try:
+        async with _get_db() as db:
+            # Crédite le classement SANS consommer le quota (attack_count inchangé).
+            await db.execute(
+                "INSERT INTO climax_attackers "
+                "(event_id, user_id, damage_dealt, attack_count) "
+                "VALUES (?, ?, ?, 0) "
+                "ON CONFLICT(event_id, user_id) DO UPDATE SET "
+                "damage_dealt = damage_dealt + ?, "
+                "last_attack_at = CURRENT_TIMESTAMP",
+                (event_id, user_id, dmg, dmg),
+            )
+            await db.execute(
+                "UPDATE climax_events SET "
+                "hp_current = MAX(0, hp_current - ?), "
+                "damage_total = damage_total + ? "
+                "WHERE id=?",
+                (dmg, dmg, event_id),
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[record_pet_assist] {ex}")
+        return {"error": str(ex)}
+
+    # Alimente la Chronique (boss_damage), comme une attaque normale.
+    if _story is not None:
+        try:
+            await _story.on_boss_damage(guild_id, dmg, user_id)
+        except Exception:
+            pass
+
+    updated = await get_active_climax(guild_id)
+    if not updated:
+        await resolve_climax(event_id)
+        return {"success": True, "damage": dmg, "boss_dead": True,
+                "label": res.get("label", "🐾 Familier"), "note": res.get("note", "")}
+    return {"success": True, "damage": dmg, "hp_current": updated["hp_current"],
+            "hp_max": updated["hp_max"], "boss_dead": updated["hp_current"] <= 0,
+            "label": res.get("label", "🐾 Familier"), "note": res.get("note", "")}
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  Resolve
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1078,17 +1155,29 @@ async def build_climax_panel(
             self.add_item(v2_container(*items, color=0xD32F2F))
 
     layout = _ClimaxLayout()
+    # Phase 208 FIX : boutons dans un ActionRow (type 1). Un Button/DynamicItem
+    # brut au top-level d'un LayoutView V2 = 400 "Invalid Form Body". On crée des
+    # Buttons BRUTS avec les MÊMES label/style/custom_id que les DynamicItems
+    # enregistrés ; le clic reste capté par le DynamicItem (persistance).
+    _row_btns = []
     if my_attacks < MAX_ATTACKS_PER_USER and active["hp_current"] > 0:
-        # Phase 208 FIX : bouton dans un ActionRow (type 1). Un Button/DynamicItem
-        # brut au top-level d'un LayoutView V2 = 400 "Invalid Form Body". On crée
-        # un Button BRUT avec le MÊME label/style/custom_id que ClimaxAttackButton
-        # (DynamicItem) ; le clic reste capté par le DynamicItem enregistré.
-        btn = Button(
+        atk_btn = Button(
             label="⚔️ Attaquer",
             style=discord.ButtonStyle.danger,
             custom_id=f"climax_atk:{active['event_id']}:{user_id}",
         )
-        layout.add_item(discord.ui.ActionRow(btn))
+        _row_btns.append(atk_btn)
+    # Phase 261 (4/4) : APPUI FAMILIER — disponible tant que le boss vit, MÊME si le
+    # quota d'attaques manuelles est épuisé (l'appui familier ne consomme pas le quota).
+    if active["hp_current"] > 0:
+        pet_btn = Button(
+            label="🐾 Familier",
+            style=discord.ButtonStyle.success,
+            custom_id=f"climax_pet:{active['event_id']}:{user_id}",
+        )
+        _row_btns.append(pet_btn)
+    if _row_btns:
+        layout.add_item(discord.ui.ActionRow(*_row_btns))
 
     return layout
 
@@ -1184,6 +1273,101 @@ class ClimaxAttackButton(
                 pass
 
 
+class ClimaxPetButton(
+    discord.ui.DynamicItem[Button],
+    template=r"climax_pet:(?P<event_id>\d+):(?P<user_id>\d+)",
+):
+    """Phase 261 (4/4) : bouton APPUI FAMILIER (persistent) du Climax. Le familier
+    actif frappe le boss et soigne le joueur si passif — sans consommer le quota."""
+
+    def __init__(self, event_id: int, user_id: int):
+        super().__init__(
+            Button(
+                label="🐾 Familier",
+                style=discord.ButtonStyle.success,
+                custom_id=f"climax_pet:{event_id}:{user_id}",
+            )
+        )
+        self.event_id = event_id
+        self.user_id = user_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["event_id"]), int(match["user_id"]))
+
+    async def callback(self, btn_i: discord.Interaction):
+        if btn_i.user.id != self.user_id:
+            try:
+                return await btn_i.response.send_message(
+                    "🔒 Ouvre ton propre Boss depuis le Codex.",
+                    ephemeral=True,
+                )
+            except Exception:
+                return
+
+        # ACK D'ABORD — acquitter le clic avant tout (anti « Échec de l'interaction »).
+        try:
+            await btn_i.response.defer(ephemeral=True)
+        except (discord.NotFound, discord.HTTPException, discord.InteractionResponded):
+            pass
+
+        if btn_i.guild is None:
+            try:
+                await btn_i.followup.send("❌ Serveur uniquement.", ephemeral=True)
+            except Exception:
+                pass
+            return
+
+        # Anti-429 : un clic noyé (< _PET_CLICK_CD s) ne coûte AUCUN followup.
+        try:
+            _k = (btn_i.guild.id, btn_i.user.id)
+            _now = datetime.now(timezone.utc).timestamp()
+            if _now - _last_pet_click.get(_k, 0.0) < _PET_CLICK_CD:
+                return
+            _last_pet_click[_k] = _now
+        except Exception:
+            pass
+
+        try:
+            active = await get_active_climax(btn_i.guild.id)
+            if not active or active["event_id"] != self.event_id:
+                await btn_i.followup.send(
+                    "❌ Boss inactif ou différent.", ephemeral=True
+                )
+                return
+
+            result = await record_pet_assist(btn_i.guild.id, btn_i.user.id)
+            if result.get("error"):
+                await btn_i.followup.send(f"🐾 {result['error']}", ephemeral=True)
+                return
+
+            view = await build_climax_panel(btn_i.guild.id, btn_i.user.id)
+            label = result.get("label", "🐾 Familier")
+            note = result.get("note", "")
+            _extra = f"\n{note}" if note else ""
+            msg = f"🐾 **{label}** frappe le boss — `{result['damage']}` dégâts !{_extra}"
+            if result.get("boss_dead"):
+                msg += "\n\n💀 **Le boss est tombé !** Les récompenses seront distribuées."
+
+            if view:
+                try:
+                    await btn_i.edit_original_response(
+                        view=view, content=None, attachments=[],
+                    )
+                except Exception:
+                    pass
+            try:
+                await btn_i.followup.send(msg, ephemeral=True)
+            except Exception:
+                pass
+        except Exception as ex:
+            print(f"[climax_pet callback] {ex}")
+            try:
+                await btn_i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
 def register_persistent_views(bot_instance):
     if bot_instance is None:
         return
@@ -1191,6 +1375,10 @@ def register_persistent_views(bot_instance):
         bot_instance.add_dynamic_items(ClimaxAttackButton)
     except Exception as ex:
         print(f"[monthly_climax register_persistent_views] {ex}")
+    try:
+        bot_instance.add_dynamic_items(ClimaxPetButton)
+    except Exception as ex:
+        print(f"[monthly_climax register_persistent_views pet] {ex}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
