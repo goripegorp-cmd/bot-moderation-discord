@@ -895,11 +895,10 @@ async def _post_mob_message(
             "stuff** et regroupez-vous en vocal — ce monstre tombe en équipe."
         ))
     items.append(v2_divider())
-    items.append(v2_body(_ev.how_to_play('mob')))
+    # Phase 258.2 : aide COURTE (quoi faire + quoi avoir + bonus) — fini les pavés.
     items.append(v2_body(
-        "_🐾 Simple créature — **ce n'est PAS un boss** : aucun salon n'est masqué, "
-        "le serveur reste ouvert. Loot proportionnel aux dégâts · "
-        "**bonus alliance** si 2+ alliés frappent._"
+        "🎯 Clique **⚔️ Attaquer** · 🎒 ton meilleur stuff · "
+        "🤝 +bonus à 2+ alliés · 💰 loot selon tes dégâts"
     ))
 
     color = 0xFFD700 if is_elite else mob_def.get("color", 0x95A5A6)

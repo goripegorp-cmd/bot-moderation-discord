@@ -12154,16 +12154,15 @@ async def _start_treasure_hunt(guild, triggered_by_id: int, *, manual: bool = Fa
         intro_embed = discord.Embed(
             title="💎 CHASSE AU TRÉSOR !",
             description=(
-                f"_Des trésors apparaîtront ici toutes les ~{max(1, duration_min // 10)} minutes._\n\n"
-                f"⚠️ **Premier arrivé, premier servi !**\n"
-                f"Clique sur **💎 Récupérer !** dès qu'un trésor apparaît.\n\n"
-                f"⏰ Se termine <t:{int(ends_at_dt.timestamp())}:R>"
+                f"👥 Tout le monde · ⚡ **Premier arrivé = gagne**\n"
+                f"🎯 Clique **💎 Récupérer** dès qu'un trésor apparaît\n"
+                f"⏰ Fin <t:{int(ends_at_dt.timestamp())}:R>"
             ),
             color=0xF1C40F,
             timestamp=datetime.now(timezone.utc),
         )
         intro_embed.set_footer(text=f"{guild.name} · Chasse au Trésor", icon_url=(guild.icon.url if guild.icon else None))
-        intro_embed.add_field(name="🕹️ Comment jouer", value=events2026.how_to_play('treasure', with_title=False), inline=False)
+        # Phase 258.2 : « Comment jouer » retiré → tout est déjà dans la description courte.
         try:
             ping_str = await _get_event_mention(guild, 'treasure_hunt')
             # Phase 48.4.A : smart mention — respecte opt-out + affinité par event_kind
@@ -12476,16 +12475,15 @@ async def _start_quiz(guild, triggered_by_id: int, *, manual: bool = False) -> d
         intro_embed = discord.Embed(
             title="🎓 QUIZ COMMUNAUTAIRE !",
             description=(
-                f"**{nb_questions}** questions vont être posées.\n\n"
-                f"⚡ **Le premier à cliquer la bonne réponse** gagne `200` 🪙\n"
-                f"Les suivants : `100` 🪙 par bonne réponse.\n\n"
-                f"⏰ Première question dans **10 secondes** !"
+                f"👥 Tout le monde · 🧠 **{nb_questions} questions**\n"
+                f"🎯 1er à la bonne réponse = `200` 🪙 · les autres `100` 🪙\n"
+                f"⏰ 1re question dans **10 s** !"
             ),
             color=0x3498DB,
             timestamp=datetime.now(timezone.utc),
         )
         intro_embed.set_footer(text=f"{guild.name} · Quiz", icon_url=(guild.icon.url if guild.icon else None))
-        intro_embed.add_field(name="🕹️ Comment jouer", value=events2026.how_to_play('quiz', with_title=False), inline=False)
+        # Phase 258.2 : « Comment jouer » retiré → tout est déjà dans la description courte.
         try:
             ping_str = await _get_event_mention(guild, 'quiz')
             # Phase 48.4.A : smart mention — respecte opt-out + affinité par event_kind
