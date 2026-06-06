@@ -590,9 +590,216 @@ async def _forge(i: discord.Interaction, args: list):
     await _nav(i, await build_forge_panel(gid, uid, status))
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PHASE C — Carte de Joueur (identité cosmétique : thème + cadre + devise)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Thèmes = couleur d'accent de la carte. key -> (emoji, nom, couleur, prix Éclats)
+THEMES = {
+    "defaut":  ("⬜", "Ardoise",  0x2B2D31,   0),
+    "or":      ("🟡", "Doré",     0xCBA135,   0),
+    "azur":    ("🔵", "Azur",     0x3498DB,  60),
+    "sang":    ("🔴", "Sang",     0xC0392B,  60),
+    "foret":   ("🟢", "Forêt",    0x27AE60,  60),
+    "royal":   ("🟣", "Royal",    0x8E44AD, 100),
+    "abysse":  ("🟦", "Abysse",   0x1F3A93, 150),
+    "prisme":  ("🌈", "Prisme",   0xE91E63, 400),
+}
+_THEME_ORDER = list(THEMES.keys())
+# Cadres = bordure décorative. key -> (emoji, nom, prix Éclats)
+FRAMES = {
+    "aucun":    ("▫️", "Aucun",     0),
+    "etoiles":  ("✨", "Étoilé",   40),
+    "flammes":  ("🔥", "Flammes",  60),
+    "laurier":  ("🌿", "Laurier",  60),
+    "cristaux": ("💠", "Cristaux", 120),
+    "couronne": ("👑", "Couronne", 150),
+}
+_FRAME_ORDER = list(FRAMES.keys())
+
+
+def _sanitize_devise(txt: str) -> str:
+    txt = (txt or "").replace("\n", " ").replace("`", "'").replace("@", "＠")
+    return txt.strip()[:80]
+
+
+async def build_carte_panel(i: discord.Interaction, status: str | None = None):
+    LayoutView = _v2.get("LayoutView")
+    v2_title = _v2.get("title"); v2_subtitle = _v2.get("subtitle"); v2_body = _v2.get("body")
+    v2_divider = _v2.get("divider"); v2_container = _v2.get("container")
+    if not all((LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container)):
+        return None
+    gid, uid = i.guild.id, i.user.id
+    eclats = await get_eclats(gid, uid)
+    active = await get_active(gid, uid)
+    theme_k = active.get("theme", "defaut") if active.get("theme") in THEMES else "defaut"
+    frame_k = active.get("frame", "aucun") if active.get("frame") in FRAMES else "aucun"
+    dye_k = active.get("dye", "none")
+    devise = active.get("devise", "none")
+    t_emoji, t_name, t_color, _ = THEMES[theme_k]
+    f_emoji, f_name, _ = FRAMES[frame_k]
+    f_border = "" if frame_k == "aucun" else f_emoji
+    name = getattr(i.user, "display_name", "Aventurier")
+    name_line = f"{f_border} **{name}** {f_border}".strip()
+    dye_txt = dye_label(dye_k) if dye_k and dye_k != "none" else "_aucune_"
+    devise_txt = f"_« {devise} »_" if devise and devise != "none" else "_(pas encore de devise)_"
+
+    items = [v2_title("🪪  Carte de Joueur")]
+    if status:
+        items.append(v2_body(status))
+    items.append(v2_subtitle("Compose ton identité — 100 % cosmétique, visible par tous."))
+    items.append(v2_divider())
+    # ─ Aperçu de la carte ─
+    items.append(v2_body(
+        f"{name_line}\n"
+        f"🎨 Thème : **{t_emoji} {t_name}**  ·  🖼️ Cadre : **{f_emoji} {f_name}**\n"
+        f"🩹 Teinture : {dye_txt}\n"
+        f"{devise_txt}"
+    ))
+    items.append(v2_divider())
+    items.append(v2_body(
+        f"{ECLATS_EMOJI} **{ECLATS_NAME} :** `{eclats:,}`\n"
+        f"-# Personnalise via les boutons ci-dessous."
+    ))
+    items.append(discord.ui.ActionRow(
+        Button(label="🎨 Thème", style=discord.ButtonStyle.primary, custom_id="cite:carte:theme"),
+        Button(label="🖼️ Cadre", style=discord.ButtonStyle.primary, custom_id="cite:carte:frame"),
+        Button(label="✍️ Devise", style=discord.ButtonStyle.success, custom_id="cite:carte:devise"),
+    ))
+    items.append(_retour_row())
+
+    class _Carte(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=600)
+            self.add_item(v2_container(*items, color=t_color))
+
+    return _Carte()
+
+
+async def _build_picker(i, kind: str, status: str | None = None):
+    """Panneau de choix générique pour thème/cadre (boutons achat+équipe)."""
+    LayoutView = _v2.get("LayoutView")
+    v2_title = _v2.get("title"); v2_subtitle = _v2.get("subtitle"); v2_body = _v2.get("body")
+    v2_divider = _v2.get("divider"); v2_container = _v2.get("container")
+    gid, uid = i.guild.id, i.user.id
+    eclats = await get_eclats(gid, uid)
+    owned = set(await owned_cosmetics(gid, uid, kind))
+    active = (await get_active(gid, uid)).get(kind, "defaut" if kind == "theme" else "aucun")
+    if kind == "theme":
+        catalog, order, title, slot_emoji = THEMES, _THEME_ORDER, "🎨  Thème de la carte", "🎨"
+    else:
+        catalog, order, title, slot_emoji = FRAMES, _FRAME_ORDER, "🖼️  Cadre de la carte", "🖼️"
+
+    items = [v2_title(title)]
+    if status:
+        items.append(v2_body(status))
+    items.append(v2_subtitle("Possédé ✅ = applique en 1 clic · sinon coûte des Éclats (gratuit = ⭐)."))
+    legend_parts = []
+    for k in order:
+        meta = catalog[k]
+        emoji, nm = meta[0], meta[1]
+        price = meta[-1]
+        tag = " ✅" if (k in owned or price == 0) else f" `{price}`"
+        legend_parts.append(f"{emoji} {nm}{tag}")
+    items.append(v2_body("  ·  ".join(legend_parts)))
+    items.append(v2_body(f"{ECLATS_EMOJI} **{ECLATS_NAME} :** `{eclats:,}`"))
+    items.append(v2_divider())
+
+    row = []
+    for k in order:
+        meta = catalog[k]
+        emoji, nm = meta[0], meta[1]
+        style = (discord.ButtonStyle.success if k == active
+                 else discord.ButtonStyle.primary if (k in owned or meta[-1] == 0)
+                 else discord.ButtonStyle.secondary)
+        row.append(Button(label=nm[:18], emoji=emoji, style=style,
+                          custom_id=f"cite:carte:{kind}:eq:{k}"))
+        if len(row) == 4:
+            items.append(discord.ui.ActionRow(*row)); row = []
+    if row:
+        items.append(discord.ui.ActionRow(*row))
+    items.append(discord.ui.ActionRow(
+        Button(label="⬅️ Retour à la carte", style=discord.ButtonStyle.secondary, custom_id="cite:carte"),
+    ))
+
+    color = THEMES[active][2] if (kind == "theme" and active in THEMES) else 0xCBA135
+
+    class _Picker(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=600)
+            self.add_item(v2_container(*items, color=color))
+
+    return _Picker()
+
+
+async def _carte_apply(gid: int, uid: int, kind: str, key: str) -> str:
+    catalog = THEMES if kind == "theme" else FRAMES
+    meta = catalog.get(key)
+    if not meta:
+        return "❓ Choix inconnu."
+    emoji, nm = meta[0], meta[1]
+    price = meta[-1]
+    owned = await owned_cosmetics(gid, uid, kind)
+    if key in owned or price == 0:
+        await set_active(gid, uid, kind, key)
+        return f"✅ **{emoji} {nm}** appliqué !"
+    if await spend_eclats(gid, uid, price):
+        await grant_cosmetic(gid, uid, kind, key)
+        await set_active(gid, uid, kind, key)
+        return f"🛒 **{emoji} {nm}** acheté et appliqué ! (−{price} {ECLATS_EMOJI})"
+    bal = await get_eclats(gid, uid)
+    return f"❌ Il te manque des {ECLATS_EMOJI} — **{nm}** coûte `{price}`, tu as `{bal}`."
+
+
+class _DeviseModal(discord.ui.Modal, title="✍️ Ta devise"):
+    devise = discord.ui.TextInput(
+        label="Ta devise (80 caractères max)",
+        placeholder="Ex : Toujours plus haut !",
+        required=False, max_length=80, style=discord.TextStyle.short,
+    )
+
+    def __init__(self, current: str = ""):
+        super().__init__()
+        if current and current != "none":
+            self.devise.default = current
+
+    async def on_submit(self, i: discord.Interaction):
+        try:
+            txt = _sanitize_devise(self.devise.value)
+            await set_active(i.guild.id, i.user.id, "devise", txt if txt else "none")
+            status = "✍️ Devise mise à jour !" if txt else "✍️ Devise effacée."
+            await _nav(i, await build_carte_panel(i, status))
+        except Exception as ex:
+            print(f"[citadelle DeviseModal] {ex}")
+            try:
+                await i.response.send_message("❌ Erreur, réessaie.", ephemeral=True)
+            except Exception:
+                pass
+
+
+async def _carte(i: discord.Interaction, args: list):
+    gid, uid = i.guild.id, i.user.id
+    if not args:
+        return await _nav(i, await build_carte_panel(i))
+    head = args[0]
+    if head in ("theme", "frame"):
+        if len(args) >= 3 and args[1] == "eq":
+            status = await _carte_apply(gid, uid, head, args[2])
+            return await _nav(i, await _build_picker(i, head, status))
+        return await _nav(i, await _build_picker(i, head))
+    if head == "devise":
+        current = (await get_active(gid, uid)).get("devise", "")
+        try:
+            return await i.response.send_modal(_DeviseModal(current))
+        except Exception as ex:
+            print(f"[citadelle carte devise modal] {ex}")
+            return await _nav(i, await build_carte_panel(i))
+    return await _nav(i, await build_carte_panel(i))
+
+
 # Registre des salles OUVERTES (les autres → teaser). On le remplit phase par phase.
 _SECTION_HANDLERS = {
     "forge": _forge,
+    "carte": _carte,
 }
 
 
