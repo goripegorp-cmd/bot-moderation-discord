@@ -611,8 +611,12 @@ async def trigger_climax(guild_id: int) -> Optional[int]:
                     _nv.add_item(Button(
                         label="🔕 Plus aucun event", style=discord.ButtonStyle.secondary,
                         custom_id="events_optout"))
-                    await ch.send(_cm, view=_nv, allowed_mentions=discord.AllowedMentions(
-                        roles=True, users=True, everyone=False))
+                    # Phase 260.1 : delete_after = durée du climax → le message-ping
+                    # ne survit JAMAIS à l'event (anti ghost ping si le salon persiste,
+                    # ex. fallback chroniques). La notif a été consommée pendant l'event.
+                    await ch.send(_cm, view=_nv, delete_after=CLIMAX_DURATION_HOURS * 3600,
+                                  allowed_mentions=discord.AllowedMentions(
+                                      roles=True, users=True, everyone=False))
             except Exception:
                 pass
 

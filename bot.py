@@ -14179,28 +14179,35 @@ async def _get_event_mention(guild, event_type: str) -> str:
         mentions = []
         et = (event_type or '').lower()
 
-        # (1) Rôle 🔔 par-type (opt-in) — toujours (create=False → n'existe que si
-        #     ≥1 abonné). Pas soumis à la cadence : ces gens l'ont explicitement voulu.
+        # (1) Rôle 🔔 par-type (opt-in) — create=False → n'existe que si ≥1 abonné.
+        #     Pas soumis à la cadence : ces gens l'ont explicitement voulu. On NE
+        #     mentionne PAS un rôle VIDE (tous désabonnés) → évite un ping fantôme
+        #     qui ne touche personne mais affiche un nom de rôle confus.
         try:
             _cat = _EVENT_TYPE_TO_NOTIFY.get(et)
             if _cat:
                 _tr = await _event_notify_role(guild, _cat, create=False)
-                if _tr and _tr.mention not in mentions:
+                if _tr and any(not m.bot for m in _tr.members) and _tr.mention not in mentions:
                     mentions.append(_tr.mention)
         except Exception:
             pass
 
-        # (2) Rôle @Tous (tout le monde, opt-out) → pour TOUS les events, mais cadencé.
-        #     + @Important en plus pour les GROS events.
+        # (2) Rôle @Tous (opt-out, touche tout le monde) → RÉSERVÉ AUX GROS ÉVÉNEMENTS
+        #     (Phase 260.1 — directive owner : un lambda ne doit PAS recevoir 30 pings
+        #     pour 30 events). Les events FRÉQUENTS (mob, trésor, quiz, boîte, boss du
+        #     jour, énigme…) ne pingent QUE le 🔔 par-type ci-dessus + l'écho silencieux ;
+        #     ils n'atteignent JAMAIS @Tous. Les events RARES/MAJEURS (boss raid, world
+        #     boss, climax, invasion, faille/caravane/chaîne) pingent @Tous, à cadence.
         try:
-            c = await cfg(guild.id)
-            all_role = guild.get_role(int(c.get('notify_role_all_id', 0) or 0))
-            imp_role = guild.get_role(int(c.get('notify_role_important_id', 0) or 0))
-            if all_role and await _role_ping_allowed(guild.id, et):
-                if et in _BIG_EVENT_TYPES and imp_role and imp_role.mention not in mentions:
-                    mentions.append(imp_role.mention)
-                if all_role.mention not in mentions:
-                    mentions.append(all_role.mention)
+            if et in _BIG_EVENT_TYPES:
+                c = await cfg(guild.id)
+                all_role = guild.get_role(int(c.get('notify_role_all_id', 0) or 0))
+                imp_role = guild.get_role(int(c.get('notify_role_important_id', 0) or 0))
+                if all_role and await _role_ping_allowed(guild.id, et):
+                    if imp_role and imp_role.mention not in mentions:
+                        mentions.append(imp_role.mention)
+                    if all_role.mention not in mentions:
+                        mentions.append(all_role.mention)
         except Exception:
             pass
 
@@ -63687,34 +63694,27 @@ async def world_boss_scheduler():
                         hub_id = int(c.get('hub_channel', 0) or 0)
                         hub_ch = guild.get_channel(hub_id) if hub_id else None
                         if hub_ch and await _is_chatty_channel(hub_ch):
-                            ping_str = await _get_event_mention(guild, 'world_boss')
-                            try:
-                                wakeup_line = await _build_wakeup_mention_line_smart(
-                                    guild, 'world_boss', max_count=3,
-                                )
-                            except Exception:
-                                wakeup_line = ""
+                            # Phase 260.1 : le pré-hype est un SIMPLE rappel VISIBLE, SANS
+                            # aucun ping. Le vrai ping @Événements a lieu au SPAWN (30 min
+                            # plus tard) dans l'arène éphémère → zéro ghost ping dans le hub
+                            # permanent, et le pré-hype ne consomme pas la cadence du spawn.
                             # Calc target ts (21h ce soir)
                             target_dt = now_local.replace(hour=21, minute=0, second=0, microsecond=0)
                             target_ts = int(target_dt.timestamp())
                             hype_msg = (
                                 f"🌍 ⚠️ **WORLD BOSS HEBDOMADAIRE — DANS 30 MINUTES** ⚠️\n"
-                                + (f"{ping_str}\n" if ping_str else "")
-                                + wakeup_line
                                 + f"\n⏰ Apparition : <t:{target_ts}:R>\n"
                                 f"💪 Préparez votre équipement, votre vocal et votre classe RP !\n"
                                 f"🏆 Top 3 attaquants : récompense légendaire\n"
                                 f"💎 1% chance loot unique pour le top damager\n"
                                 f"⏱️ Durée : **90 minutes** — coordination collective requise\n\n"
-                                f"-# 💡 Trop de pings ? Bouton 🔕 ci-dessous."
+                                f"-# 🔔 Veux être prévenu au lancement ? Bouton 🔔 ci-dessous."
                             )
                             LIFETIME_HYPE = 3600  # 1h (cover 20h30 → 21h30)
                             try:
                                 hm = await hub_ch.send(
                                     hype_msg,
-                                    allowed_mentions=discord.AllowedMentions(
-                                        roles=True, users=True, everyone=False,
-                                    ),
+                                    allowed_mentions=discord.AllowedMentions.none(),
                                     delete_after=LIFETIME_HYPE,
                                     view=EventsOptOutView('world_boss'),
                                 )
