@@ -1047,6 +1047,20 @@ async def _process_attack(btn_i: discord.Interaction, mob_id: int):
             except Exception:
                 pass
 
+        # Phase 258 : BONUS VOCAL — inciter FORTEMENT à se connecter (beaucoup + de
+        # dégâts). +25 à +60 % si le membre est dans n'importe quel salon vocal.
+        _voice_note = ""
+        try:
+            _mm = btn_i.user if isinstance(btn_i.user, discord.Member) else (
+                btn_i.guild.get_member(btn_i.user.id) if btn_i.guild else None)
+            if _mm and getattr(_mm, "voice", None) and _mm.voice.channel is not None:
+                _vb = int(dmg * (random.uniform(1.25, 1.60) - 1.0))
+                if _vb > 0:
+                    dmg += _vb
+                    _voice_note = f" 🔊 +{_vb} (vocal)"
+        except Exception:
+            pass
+
         new_hp = max(0, int(hp_curr) - dmg)
 
         # Update mob + attacker dans une seule transaction
@@ -1101,7 +1115,7 @@ async def _process_attack(btn_i: discord.Interaction, mob_id: int):
             await btn_i.followup.send(
                 f"⚔️ Tu infliges **{dmg}** dégâts à "
                 f"{mob_def['emoji']} **{mob_def['name']}** "
-                f"({new_hp}/{hp_max} HP).{_en}",
+                f"({new_hp}/{hp_max} HP).{_en}{_voice_note}",
                 ephemeral=True,
             )
         except Exception:

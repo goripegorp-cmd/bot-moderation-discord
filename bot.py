@@ -9796,7 +9796,7 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
                         + (f"\n{ping_str}" if ping_str else "")
                         + wakeup_line
                         + f"\n⏰ **Le combat commence <t:{_warm_ts}:R>** — équipez votre meilleur "
-                          f"stuff (`/inventory`) et **rejoignez un vocal** pour le bonus de dégâts !"
+                          f"stuff (`/inventory`) et **rejoignez un vocal** : 🔊 **+25 à +60 % de dégâts** !"
                         + "\n🎁 **Butin** : équipement du 🟢 commun au 🟡 légendaire "
                           "(meilleure place au classement = meilleure pièce) + des 🪙."
                         + "\n-# 💡 Trop de pings ? Bouton 🔕 ci-dessous."
@@ -10691,7 +10691,7 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
         try:
             _mem = i.user if isinstance(i.user, discord.Member) else i.guild.get_member(i.user.id)
             if _mem and getattr(_mem, 'voice', None) and _mem.voice.channel is not None:
-                _vmult = random.uniform(1.12, 1.30)
+                _vmult = random.uniform(_VOICE_COMBAT_MIN, _VOICE_COMBAT_MAX)
                 _vbonus = int(damage * (_vmult - 1.0))
                 if _vbonus > 0:
                     damage += _vbonus
@@ -11962,6 +11962,10 @@ class TreasureClaimView(View):
 
             # Distribuer la loot immédiatement
             coins = int(tr.get('coins', 0))
+            # Phase 258 : BONUS VOCAL sur les 🪙 — incite fortement à se connecter.
+            _vc_bonus = _voice_coin_bonus(i.user, coins)
+            if _vc_bonus:
+                coins += _vc_bonus
             try:
                 await add_coins(i.guild.id, i.user.id, coins)
             except Exception:
@@ -12002,6 +12006,12 @@ class TreasureClaimView(View):
                 child.label = f"✅ Récupéré par {i.user.display_name[:30]}"
             try:
                 await i.message.edit(view=self)
+            except Exception:
+                pass
+            # Phase 258 : coffre réclamé → on le RETIRE vite (10 s). Serveur propre :
+            # plus de messages « ✅ Récupéré » morts qui s'empilent dans l'arène.
+            try:
+                _schedule_delete(i.message, 10)
             except Exception:
                 pass
 
@@ -12084,7 +12094,9 @@ class TreasureClaimView(View):
 
             await i.followup.send(
                 f"💎 Tu as récupéré **{tr.get('name', 'Trésor')}** !\n"
-                f"+`{coins}` 🪙{gear_msg}{seasonal_line}",
+                f"+`{coins}` 🪙"
+                + (f" 🔊 _(+{_vc_bonus} bonus vocal)_" if _vc_bonus else "")
+                + f"{gear_msg}{seasonal_line}",
                 ephemeral=True,
             )
 
@@ -12158,6 +12170,7 @@ async def _start_treasure_hunt(guild, triggered_by_id: int, *, manual: bool = Fa
             description=(
                 f"👥 Tout le monde · ⚡ **Premier arrivé = gagne**\n"
                 f"🎯 Clique **💎 Récupérer** dès qu'un trésor apparaît\n"
+                f"🔊 En vocal = **+50 % 🪙**\n"
                 f"⏰ Fin <t:{int(ends_at_dt.timestamp())}:R>"
             ),
             color=0xF1C40F,
@@ -12393,15 +12406,21 @@ class QuizAnswerView(View):
                     await db.commit()
 
                 # Coins (base + first bonus + speed bonus)
+                # Phase 258 : BONUS VOCAL sur les 🪙 — incite à se connecter en vocal.
+                _coins_award = total_score
+                _vc_bonus = _voice_coin_bonus(i.user, _coins_award)
+                if _vc_bonus:
+                    _coins_award += _vc_bonus
                 try:
-                    await add_coins(i.guild.id, i.user.id, total_score)
+                    await add_coins(i.guild.id, i.user.id, _coins_award)
                 except Exception:
                     pass
 
                 first_str = " 🥇 1er à trouver !" if first_bonus else ""
                 await i.followup.send(
                     f"✅ **Bonne réponse !**{first_str}{speed_label}\n"
-                    f"💰 +`{total_score}` 🪙 (base 100 + 1er `{first_bonus}` + speed `{speed_bonus}`)",
+                    f"💰 +`{_coins_award}` 🪙 (base 100 + 1er `{first_bonus}` + speed `{speed_bonus}`)"
+                    + (f" 🔊 _(+{_vc_bonus} bonus vocal)_" if _vc_bonus else ""),
                     ephemeral=True,
                 )
 
@@ -12480,6 +12499,7 @@ async def _start_quiz(guild, triggered_by_id: int, *, manual: bool = False) -> d
             description=(
                 f"👥 Tout le monde · 🧠 **{nb_questions} questions**\n"
                 f"🎯 1er à la bonne réponse = `200` 🪙 · les autres `100` 🪙\n"
+                f"🔊 En vocal = **+50 % 🪙**\n"
                 f"⏰ 1re question dans **10 s** !"
             ),
             color=0x3498DB,
@@ -15837,6 +15857,12 @@ class MysteryBoxView(View):
                     f"+`{coins}` 🪙"
                 )
 
+            # Phase 258 : BONUS VOCAL sur les 🪙 — incite fortement à se connecter.
+            _vc_bonus = _voice_coin_bonus(i.user, coins)
+            if _vc_bonus:
+                coins += _vc_bonus
+                reward_msg += f"\n🔊 **Bonus vocal** +`{_vc_bonus}` 🪙 !"
+
             try:
                 await add_coins(i.guild.id, i.user.id, coins)
             except Exception:
@@ -15957,6 +15983,12 @@ class MysteryBoxView(View):
                             self.add_item(v2_container(*items, color=box_color))
 
                     await i.message.edit(view=_MysteryDoneLayout())
+                    # Phase 258 : boîte vidée → ne peut plus rien drop → on la
+                    # SUPPRIME après 10 s (serveur propre, pas de coffre mort).
+                    try:
+                        _schedule_delete(i.message, 10)
+                    except Exception:
+                        pass
                 except Exception:
                     pass
         except Exception as ex:
@@ -16083,6 +16115,7 @@ async def _drop_mystery_box(guild) -> bool:
                         ),
                         v2_divider(),
                         v2_body(f"**Rareté :** {rarity_label}"),
+                        v2_body("🔊 En vocal = **+50 % 🪙** sur ta récompense !"),
                     ]
                     # Phase 88 : button indépendant avec callback délégué
                     open_btn = Button(
@@ -60826,6 +60859,37 @@ def _schedule_delete(message, delay_seconds: int):
         print(f"[_schedule_delete] {ex}")
 
 
+# ─── Phase 258 : BONUS VOCAL — inciter FORTEMENT à se connecter en vocal ──────
+# Owner : « force les gens à se connecter en vocal ; chaque event/action donne
+# BEAUCOUP plus en vocal ». Bonus de combat amplifié (+25→+60 % de dégâts, avant
+# +12→+30 %) ET étendu aux 🪙 des events non-combat (+50 %).
+_VOICE_COMBAT_MIN = 1.25   # +25 % mini de dégâts en vocal
+_VOICE_COMBAT_MAX = 1.60   # +60 % maxi de dégâts en vocal
+_VOICE_COIN_MULT = 1.50    # +50 % de 🪙 en vocal (trésor / quiz / boîte / flash)
+
+
+def _member_in_voice(member) -> bool:
+    """True si le membre est connecté à un salon vocal (n'importe lequel)."""
+    try:
+        return bool(member is not None
+                    and getattr(member, 'voice', None) is not None
+                    and member.voice.channel is not None)
+    except Exception:
+        return False
+
+
+def _voice_coin_bonus(member, coins: int) -> int:
+    """Renvoie le BONUS de 🪙 (pas le total) si le membre est en vocal, sinon 0.
+    FAIL-SAFE : toute erreur → 0 (jamais de crash de la distribution de récompense)."""
+    try:
+        c = int(coins or 0)
+        if c > 0 and _member_in_voice(member):
+            return int(c * (_VOICE_COIN_MULT - 1.0))
+    except Exception:
+        pass
+    return 0
+
+
 # ─── Phase 47.3 : delete persistant (survit aux redémarrages bot) ─────────────
 
 
@@ -62703,7 +62767,7 @@ class WorldBossAttackView(View):
             try:
                 _wm = i.user if isinstance(i.user, discord.Member) else i.guild.get_member(i.user.id)
                 if _wm and getattr(_wm, 'voice', None) and _wm.voice.channel is not None:
-                    _wvmult = random.uniform(1.12, 1.30)
+                    _wvmult = random.uniform(_VOICE_COMBAT_MIN, _VOICE_COMBAT_MAX)
                     _wvbonus = int(damage * (_wvmult - 1.0))
                     if _wvbonus > 0:
                         damage += _wvbonus
@@ -63168,7 +63232,7 @@ async def _start_world_boss(guild) -> dict:
             + (f"{ping_str}\n" if ping_str else "")
             + wakeup_line
             + f"\n⏰ **Le combat commence <t:{_wb_warm}:R>** — équipez votre meilleur stuff "
-              f"(`/inventory`) et **rejoignez un vocal** (bonus de dégâts) !"
+              f"(`/inventory`) et **rejoignez un vocal** : 🔊 **+25 à +60 % de dégâts** !"
             + "\n🎁 **Butin** : 🪙 pour tous (bonus top 3) · **10 % de loot UNIQUE** "
               "pour le meilleur combattant !"
             + "\n-# 💡 Trop de pings ? Bouton 🔕 ci-dessous."
@@ -63609,6 +63673,11 @@ async def _apply_voice_chaos(guild) -> bool:
     - Skip les vocaux déjà touchés dans les dernières 2h
     - Effet temporaire et toujours réversible
     """
+    # Phase 258 : DÉSACTIVÉ. L'owner ne veut PLUS qu'on renomme les vocaux OCCUPÉS
+    # des membres (« je ne vois pas l'intérêt, ça dérange ceux qui sont en vocal »).
+    # Le Voice Chaos n'était qu'un gimmick de renommage → neutralisé (no-op).
+    # On ne touche PLUS JAMAIS au nom d'un vocal où des gens discutent.
+    return False
     try:
         c = await cfg(guild.id)
         if not c.get('voice_chaos_enabled', True):
@@ -64593,6 +64662,10 @@ class FlashTreasureView(View):
                 streak_bonus = 0
 
             total_reward = int(reward) + streak_bonus
+            # Phase 258 : BONUS VOCAL sur les 🪙 — incite fortement à se connecter.
+            _vc_bonus = _voice_coin_bonus(i.user, total_reward)
+            if _vc_bonus:
+                total_reward += _vc_bonus
 
             # Donner les coins (base + streak bonus)
             try:
@@ -64600,9 +64673,9 @@ class FlashTreasureView(View):
             except Exception:
                 pass
 
-            # Update le message d'origine : afficher le winner + chrono delete (90s)
-            # Reste visible pour que tout le monde voie qui a gagné, puis se purge proprement
-            LIFETIME_POST_GRAB = 90
+            # Update le message d'origine : afficher le winner puis SUPPRESSION RAPIDE.
+            # Phase 258 : 10 s (avant 90 s) → serveur propre, pas de trésor mort qui traîne.
+            LIFETIME_POST_GRAB = 10
             try:
                 disabled_view = View(timeout=1)
                 disabled_btn = Button(
@@ -64794,7 +64867,7 @@ async def _spawn_flash_treasure(guild) -> bool:
                     try:
                         old_msg = await ch_obj.fetch_message(msg_id)
                         if old_msg:
-                            LIFETIME_EXPIRED = 60
+                            LIFETIME_EXPIRED = 10  # Phase 258 : trésor non saisi → purge rapide (serveur propre)
                             disabled_view = View(timeout=1)
                             disabled_btn = Button(
                                 label="💨 Trésor envolé",
@@ -66344,7 +66417,10 @@ async def _revert_spotlight(spotlight_id: int):
             return
         guild = bot.get_guild(int(gid))
         vc = guild.get_channel(int(ch_id)) if guild else None
-        if vc and isinstance(vc, discord.VoiceChannel) and orig_name:
+        # Phase 258 : le spotlight ne renomme plus → ne ré-édite QUE si un nom
+        # « ⭐- » résiduel traîne (ancien spotlight d'avant la 258). Sinon no-op.
+        if (vc and isinstance(vc, discord.VoiceChannel) and orig_name
+                and vc.name != orig_name[:100]):
             try:
                 await vc.edit(name=orig_name[:100], reason="Voice Spotlight Phase 45 revert")
             except Exception as ex:
@@ -66405,14 +66481,9 @@ async def _apply_voice_spotlight(guild) -> bool:
             spotlight_id = cur.lastrowid
             await db.commit()
 
-        try:
-            await vc.edit(name=new_name, reason="Voice Spotlight Phase 45")
-        except Exception as ex:
-            print(f"[_apply_voice_spotlight edit] {ex}")
-            async with get_db() as db:
-                await db.execute('UPDATE voice_spotlight SET reverted=1 WHERE id=?', (spotlight_id,))
-                await db.commit()
-            return False
+        # Phase 258 : on NE RENOMME PLUS le vocal (owner : « ne pas déranger ceux
+        # qui sont en vocal »). On garde UNIQUEMENT l'annonce qui invite à les
+        # REJOINDRE — c'est le « tu peux venir en vocal » voulu, sans toucher au salon.
 
         # Annonce discrète dans le hub — durée alignée sur le spotlight (15 min)
         try:

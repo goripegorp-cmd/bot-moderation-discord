@@ -373,7 +373,7 @@ async def _handle_channel(i: discord.Interaction, rift_id: int):
         voice_note = ""
         try:
             if i.user.voice and i.user.voice.channel:
-                mult = random.uniform(1.12, 1.30)
+                mult = random.uniform(1.25, 1.60)
                 energy_add = int(energy_add * mult)
                 voice_note = f" 🔊 _(boost vocal +{int((mult - 1) * 100)}%)_"
         except Exception:

@@ -719,7 +719,7 @@ async def record_attack(
         _g = _bot.get_guild(guild_id) if _bot is not None else None
         _m = _g.get_member(user_id) if _g is not None else None
         if _m and getattr(_m, "voice", None) and _m.voice.channel is not None:
-            voice_bonus = int(damage * (random.uniform(1.12, 1.30) - 1.0))
+            voice_bonus = int(damage * (random.uniform(1.25, 1.60) - 1.0))
             if voice_bonus > 0:
                 damage += voice_bonus
     except Exception:
