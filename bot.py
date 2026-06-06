@@ -14151,9 +14151,9 @@ async def _get_event_mention(guild, event_type: str) -> str:
 
         if not mentions:
             return ""
-        # Rappel DISCRET : 1 clic 🔕 (bouton sous le ping) ou /notify pour se désabonner.
+        # Rappel DISCRET : 1 clic sur le bouton 🔕 sous le ping pour se désabonner (zéro commande).
         return (" ".join(mentions)
-                + "\n-# 🔕 Trop de pings ? Clique **🔕** sous l'event (ou **/notify**) "
+                + "\n-# 🔕 Trop de pings ? Clique le bouton **🔕** sous l'event "
                   "→ tu ne seras plus notifié.")
     except Exception as ex:
         print(f"[_get_event_mention] {ex}")
