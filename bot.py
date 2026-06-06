@@ -11459,15 +11459,32 @@ async def _end_active_event(guild, *, victory: bool, reason: str = "", event_id:
                 # Phase 180 : conserver l'élément de l'arme (🔥☠️❄️…)
                 if gear.get('element'):
                     item['element'] = gear['element']
+                # Phase 256 (FIX) : PRÉSERVER qualité + affixes du jet (Phase 254-aff).
+                # Ils étaient PERDUS ici (item reconstruit sans ces champs) → le stuff
+                # gagné perdait son bonus de qualité/affixes = système d'affixes à moitié
+                # cassé sur les drops de boss raid. On les recopie + on les AFFICHE.
+                _q = int(gear.get('quality', 100) or 100)
+                _affx = gear.get('affixes') or []
+                if _q != 100:
+                    item['quality'] = _q
+                if _affx:
+                    item['affixes'] = _affx
+                _qbits = []
+                if _q >= 105:
+                    _qbits.append(("🌟" if _q >= 115 else "✨") + f"Q{_q}%")
+                _alabels = ", ".join(a.get('label', '') for a in _affx if isinstance(a, dict) and a.get('label'))
+                if _alabels:
+                    _qbits.append(_alabels)
+                _qa = (" _(" + " · ".join(_qbits) + ")_") if _qbits else ""
                 _re = events2026.RARITY_EMOJIS.get(gear['rarity'], '')
                 if (not cur_gear or not cur_gear.get('name')) or _rarity_rank(item) > _rarity_rank(cur_gear):
                     if cur_gear and cur_gear.get('name'):
                         await _stash_add(guild.id, uid, cur_gear)  # ancien → coffre
                     inv[slot] = item
-                    gear_str = f"+ {_re} **{gear['emoji']} {gear['name']}** ({gear['rarity']}) · revente `{_sell_value(gear)}` 🪙 — équipé !"
+                    gear_str = f"+ {_re} **{gear['emoji']} {gear['name']}**{_qa} ({gear['rarity']}) · revente `{_sell_value(gear)}` 🪙 — équipé !"
                 else:
                     await _stash_add(guild.id, uid, item)  # rangé au coffre
-                    gear_str = f"+ {_re} **{gear['emoji']} {gear['name']}** ({gear['rarity']}) · revente `{_sell_value(gear)}` 🪙 — 🎒 coffre"
+                    gear_str = f"+ {_re} **{gear['emoji']} {gear['name']}**{_qa} ({gear['rarity']}) · revente `{_sell_value(gear)}` 🪙 — 🎒 coffre"
                 # Compter kill si victory + top 3
                 if victory and r['rank'] <= 3:
                     inv['kills'] = inv.get('kills', 0) + 1
