@@ -42727,7 +42727,8 @@ async def on_ready():
                                report_fn=_post_combat_report,
                                arena_create_fn=_create_combat_arena,
                                arena_delete_fn=_delete_combat_arena,
-                               event_busy_fn=_has_any_major_event_running)
+                               event_busy_fn=_has_any_major_event_running,
+                               pet_strike_fn=_pet_strike)
         await mob_hunts_module.init_db()
         mob_hunts_module.register_persistent_views(bot)
         if not mob_hunts_module.spawn_task.is_running():

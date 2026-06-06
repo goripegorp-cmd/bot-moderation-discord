@@ -406,12 +406,18 @@ def _is_nocturnal(mob: dict) -> bool:
     return bool(mob.get("nocturnal", False))
 
 
+_pet_strike_fn = None  # Phase 261 : async (guild_id, user_id) -> dict assist familier (injecté)
+_last_pet_click = {}   # Phase 261 : anti-429 du bouton 🐾 (par joueur)
+_PET_CLICK_CD = 2.0
+
+
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
           inventory_fn=None, active_ping_fn=None, arena_ensure_fn=None, report_fn=None,
-          arena_create_fn=None, arena_delete_fn=None, event_busy_fn=None):
+          arena_create_fn=None, arena_delete_fn=None, event_busy_fn=None,
+          pet_strike_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _inventory_fn, _active_ping_fn
     global _arena_ensure_fn, _report_fn, _arena_create_fn, _arena_delete_fn
-    global _event_busy_fn
+    global _event_busy_fn, _pet_strike_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -424,6 +430,7 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
     _arena_create_fn = arena_create_fn
     _arena_delete_fn = arena_delete_fn
     _event_busy_fn = event_busy_fn
+    _pet_strike_fn = pet_strike_fn  # Phase 261 : assist familier (cœur partagé bot.py)
 
 
 async def init_db():
@@ -917,7 +924,12 @@ async def _post_mob_message(
         label="🔔 Me notifier", style=discord.ButtonStyle.secondary,
         custom_id="evtnotif:mob",
     )
-    items.append(discord.ui.ActionRow(attack_btn, notify_btn))
+    # Phase 261 : bouton 🐾 Familier (capté par MobPetButton) — le familier frappe aussi.
+    pet_btn = Button(
+        label="🐾 Familier", style=discord.ButtonStyle.success,
+        custom_id=f"mob_pet:{mob_db_id}",
+    )
+    items.append(discord.ui.ActionRow(attack_btn, pet_btn, notify_btn))
 
     class _MobLayout(LayoutView):
         def __init__(self):
@@ -1170,7 +1182,12 @@ async def _build_updated_layout(
         label="⚔️ Attaquer", style=discord.ButtonStyle.danger,
         custom_id=f"mob_attack:{mob_id}",
     )
-    items.append(discord.ui.ActionRow(attack_btn))
+    # Phase 261 : bouton 🐾 Familier persiste aussi après chaque refresh d'HP.
+    pet_btn = Button(
+        label="🐾 Familier", style=discord.ButtonStyle.success,
+        custom_id=f"mob_pet:{mob_id}",
+    )
+    items.append(discord.ui.ActionRow(attack_btn, pet_btn))
 
     class _MobLayout(LayoutView):
         def __init__(self):
@@ -1511,6 +1528,126 @@ async def _wait_ready():
         await _bot.wait_until_ready()
 
 
+async def _mob_pet_assist(btn_i: discord.Interaction, mob_id: int):
+    """Phase 261 : le FAMILIER frappe le mob (assist). Réutilise le cœur PARTAGÉ
+    _pet_strike_fn (familier actif + cooldown 90 s + soin passif). Applique les dégâts
+    à mob_spawns SANS consommer de quota, déclenche _on_mob_killed si le mob tombe."""
+    if _get_db is None or _pet_strike_fn is None:
+        return
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT guild_id, mob_kind, message_id, channel_id, is_elite, hp_max, hp_current, status "
+                "FROM mob_spawns WHERE id=?",
+                (mob_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return await btn_i.followup.send("❌ Mob introuvable.", ephemeral=True)
+        gid, mob_kind, msg_id, ch_id, is_elite, hp_max, hp_curr, status = row
+        if status != "alive":
+            return await btn_i.followup.send("💀 Ce mob est déjà mort.", ephemeral=True)
+
+        strike = await _pet_strike_fn(btn_i.guild.id, btn_i.user.id)
+        if not strike.get("ok"):
+            return await btn_i.followup.send(strike.get("msg", "🐾 Indisponible."), ephemeral=True)
+        dmg = max(0, min(int(strike.get("dmg", 0) or 0), int(hp_curr)))
+        new_hp = max(0, int(hp_curr) - dmg)
+        async with _get_db() as db:
+            await db.execute("UPDATE mob_spawns SET hp_current=? WHERE id=?", (new_hp, mob_id))
+            await db.execute(
+                "INSERT INTO mob_attackers (mob_id, user_id, damage_dealt, attacks_count) "
+                "VALUES (?, ?, ?, 0) "
+                "ON CONFLICT(mob_id, user_id) DO UPDATE SET "
+                "damage_dealt = damage_dealt + ?, last_attack_at = CURRENT_TIMESTAMP",
+                (mob_id, btn_i.user.id, dmg, dmg),
+            )
+            await db.commit()
+
+        mob_def = get_mob_def(mob_kind)
+        note = strike.get("note", "")
+        label = strike.get("label", "Familier")
+        if new_hp <= 0:
+            try:
+                await _on_mob_killed(btn_i, mob_id, mob_def, bool(is_elite), int(hp_max))
+            except Exception as ex:
+                print(f"[mob_pet on_killed] {ex}")
+            await btn_i.followup.send(
+                f"🐾 **{label}** porte le coup fatal — "
+                f"{mob_def['emoji']} **{mob_def['name']}** tombe ! (`{dmg}` dégâts)"
+                + (f"\n{note}" if note else ""),
+                ephemeral=True,
+            )
+            return
+        # Rafraîchit le panneau (PATCH seul, anti-429).
+        try:
+            guild = btn_i.guild
+            ch = guild.get_channel(int(ch_id)) if ch_id else None
+            if ch and msg_id:
+                new_layout = await _build_updated_layout(
+                    mob_def, new_hp, int(hp_max), bool(is_elite), mob_id)
+                if new_layout:
+                    await ch.get_partial_message(int(msg_id)).edit(view=new_layout)
+        except Exception:
+            pass
+        await btn_i.followup.send(
+            f"🐾 **{label}** inflige `{dmg}` dégâts à "
+            f"{mob_def['emoji']} **{mob_def['name']}** ({new_hp}/{hp_max} HP)."
+            + (f"\n{note}" if note else ""),
+            ephemeral=True,
+        )
+    except Exception as ex:
+        print(f"[_mob_pet_assist] {ex}")
+        try:
+            await btn_i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+class MobPetButton(discord.ui.DynamicItem[Button], template=r"mob_pet:(?P<mob_id>\d+)"):
+    """Phase 261 : bouton 🐾 Familier sur les mobs (persistent, defer-first)."""
+
+    def __init__(self, mob_id: int):
+        super().__init__(
+            Button(label="🐾 Familier", style=discord.ButtonStyle.success,
+                   custom_id=f"mob_pet:{mob_id}")
+        )
+        self.mob_id = mob_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["mob_id"]))
+
+    async def callback(self, btn_i: discord.Interaction):
+        try:
+            await btn_i.response.defer(ephemeral=True)
+        except Exception:
+            pass
+        # Anti-429 : cooldown léger PAR JOUEUR (clic noyé = 0 followup).
+        try:
+            _key = (btn_i.guild.id if btn_i.guild else 0, btn_i.user.id if btn_i.user else 0)
+            _now = _time.time()
+            if _now - _last_pet_click.get(_key, 0.0) < _PET_CLICK_CD:
+                return
+            _last_pet_click[_key] = _now
+        except Exception:
+            pass
+        if btn_i.guild is None:
+            try:
+                await btn_i.followup.send("❌ Serveur uniquement.", ephemeral=True)
+            except Exception:
+                pass
+            return
+        try:
+            await _mob_pet_assist(btn_i, self.mob_id)
+        except Exception as ex:
+            print(f"[mob_pet callback] {ex}")
+            try:
+                await btn_i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
 def register_persistent_views(bot_instance):
     """À appeler dans on_ready après init_db. Enregistre le DynamicItem
     qui matche les custom_ids mob_attack_*."""
@@ -1518,6 +1655,7 @@ def register_persistent_views(bot_instance):
         return
     try:
         bot_instance.add_dynamic_items(MobAttackButton)
+        bot_instance.add_dynamic_items(MobPetButton)  # Phase 261 : 🐾 Familier
     except Exception as ex:
         print(f"[mob_hunts register_persistent_views] {ex}")
 
