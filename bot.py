@@ -1186,6 +1186,19 @@ async def db_init():
             last_work DATETIME,
             PRIMARY KEY (guild_id, user_id)
         )''')
+        # Phase 260 : echos « Rejoins-nous dans #salon » postés en chat → supprimés
+        # dès que le salon de combat lié est supprimé (sinon ils pointent vers
+        # #inconnu et polluent le chat).
+        await db.execute('''CREATE TABLE IF NOT EXISTS event_echo_msgs (
+            guild_id INTEGER,
+            arena_channel_id INTEGER,
+            echo_channel_id INTEGER,
+            echo_message_id INTEGER
+        )''')
+        await db.execute(
+            'CREATE INDEX IF NOT EXISTS idx_event_echo_arena '
+            'ON event_echo_msgs(arena_channel_id)'
+        )
         
         # Table des niveaux (pour récompenses automatiques)
         await db.execute('''CREATE TABLE IF NOT EXISTS level_rewards (
@@ -14709,18 +14722,33 @@ async def _post_event_echo(guild, arena_channel, event_kind: str, exclude_channe
             f"➡️ Rejoins-nous dans {arena_link} pour participer !\n"
             f"_Ce message disparaît dans 30 min._"
         )
+        arena_id = arena_channel.id if arena_channel else 0
         for ch in channels:
             try:
                 echo_msg = await ch.send(
                     content=content,
                     allowed_mentions=discord.AllowedMentions.none(),
-                    delete_after=1800,  # 30 min
+                    delete_after=1800,  # 30 min (filet ; supprimé avant si le salon meurt)
                 )
                 # Phase 56 : register pour cleanup garanti même si bot crash
                 try:
                     await _register_for_cleanup(echo_msg, 1800, f'event_echo_{event_kind}')
                 except Exception:
                     pass
+                # Phase 260 : lier l'echo au salon de combat → suppression IMMÉDIATE
+                # quand ce salon est supprimé (fini les « Rejoins #inconnu » morts).
+                if arena_id:
+                    try:
+                        async with get_db() as db:
+                            await db.execute(
+                                'INSERT INTO event_echo_msgs '
+                                '(guild_id, arena_channel_id, echo_channel_id, echo_message_id) '
+                                'VALUES (?,?,?,?)',
+                                (guild.id, arena_id, ch.id, echo_msg.id),
+                            )
+                            await db.commit()
+                    except Exception:
+                        pass
             except discord.Forbidden:
                 continue
             except Exception as ex:
@@ -14728,6 +14756,39 @@ async def _post_event_echo(guild, arena_channel, event_kind: str, exclude_channe
                 continue
     except Exception as ex:
         print(f"[_post_event_echo] {ex}")
+
+
+async def _purge_event_echoes(channel) -> None:
+    """Phase 260 : supprime les echos « Rejoins-nous dans #X » liés à un salon de
+    combat dès que ce salon est supprimé (évite les liens morts #inconnu en chat)."""
+    try:
+        guild = getattr(channel, "guild", None)
+        if guild is None:
+            return
+        async with get_db() as db:
+            try:
+                async with db.execute(
+                    'SELECT echo_channel_id, echo_message_id FROM event_echo_msgs '
+                    'WHERE arena_channel_id=?', (channel.id,),
+                ) as cur:
+                    rows = await cur.fetchall()
+            except Exception:
+                return  # table pas encore créée → rien à purger
+            if not rows:
+                return
+            await db.execute('DELETE FROM event_echo_msgs WHERE arena_channel_id=?', (channel.id,))
+            await db.commit()
+        for ech_cid, ech_mid in rows:
+            try:
+                ech = guild.get_channel(int(ech_cid))
+                if ech is not None:
+                    await ech.get_partial_message(int(ech_mid)).delete()
+            except (discord.NotFound, discord.Forbidden):
+                pass
+            except Exception:
+                pass
+    except Exception as ex:
+        print(f"[_purge_event_echoes] {ex}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -45809,6 +45870,12 @@ async def on_guild_channel_create(channel):
 
 @bot.event
 async def on_guild_channel_delete(channel):
+    # Phase 260 : un salon de combat supprimé → on efface les echos « Rejoins-nous
+    # dans #X » qu'il avait générés en chat (sinon ils pointent vers #inconnu).
+    try:
+        await _purge_event_echoes(channel)
+    except Exception as ex:
+        print(f"[on_guild_channel_delete purge echoes] {ex}")
     try:
         if channel.guild is None:
             return
