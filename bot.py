@@ -10664,6 +10664,21 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
         except Exception:
             pass
 
+        # Phase 256 : AVANTAGE ÉLÉMENTAIRE étendu au Boss Raid (déjà sur le boss du
+        # jour) — si l'arme CONTRE l'élément du boss (déduit de son nom/archétype),
+        # +25 %. Additif/SÛR : ×1.0 sinon, jamais <1.0 → ne réduit jamais les dégâts.
+        try:
+            _adv = events2026.elemental_advantage(
+                inv.get('weapon'),
+                events2026.element_for_boss(boss.get('archetype') or boss.get('name')))
+            if _adv > 1.0:
+                _abefore = damage
+                damage = int(damage * _adv)
+                elem_str += (f"\n🗡️ **Avantage élémentaire** ! +`{damage - _abefore}` "
+                             f"dégâts (+25 % · ton arme contre l'élément du boss)")
+        except Exception:
+            pass
+
         # Phase 235.9 : BOOST VOCAL — être connecté à N'IMPORTE QUEL vocal du
         # serveur donne un bonus de dégâts ALÉATOIRE (+12 % à +30 %). Plafonné →
         # impossible de one-shot le boss juste en se connectant. Remplace les
@@ -62198,6 +62213,15 @@ class WorldBossAttackView(View):
                         f"\n{_wproc['emoji']} **{_wproc['name']}** ! "
                         f"+`{_wproc['bonus']}` dégâts élémentaires"
                     )
+                # Phase 256 : AVANTAGE ÉLÉMENTAIRE étendu au World Boss (arme contre
+                # l'élément du boss, déduit de son nom). +25 %, additif/SÛR (jamais <1.0).
+                _wadv = events2026.elemental_advantage(
+                    _winv.get('weapon'), events2026.element_for_boss(boss.get('name')))
+                if _wadv > 1.0:
+                    _wbefore = damage
+                    damage = int(damage * _wadv)
+                    elem_wb_str += (f"\n🗡️ **Avantage élémentaire** ! +`{damage - _wbefore}` "
+                                    f"dégâts (+25 % · ton arme contre l'élément du boss)")
             except Exception:
                 pass
 
