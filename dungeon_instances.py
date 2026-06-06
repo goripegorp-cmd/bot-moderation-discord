@@ -78,15 +78,48 @@ DGN_RETAL_CHANCE = 0.30       # proba que le mob riposte quand on le frappe
 DGN_BOSS_RETAL_CHANCE = 0.42  # le boss riposte plus souvent/plus fort
 DGN_RESPAWN_SEC = 30          # à terre : temps avant de pouvoir réattaquer
 
-# Mobs de donjon (HP scalé selon la taille du groupe au lancement)
+# Mobs de donjon (HP scalé selon la taille du groupe au lancement). Phase 257.6 :
+# catalogue ÉLARGI (5 → 24) → chaque run pioche des mobs au hasard (random.sample),
+# donc les donjons se renouvellent énormément (« beaucoup plus de donjons »).
 DUNGEON_MOBS = [
-    {"emoji": "🐀", "name": "Rat des cavernes", "hp": 220},
-    {"emoji": "🦇", "name": "Nuée de chauves-souris", "hp": 320},
+    {"emoji": "🐀", "name": "Rat des cavernes", "hp": 200},
+    {"emoji": "🦇", "name": "Nuée de chauves-souris", "hp": 300},
     {"emoji": "🕷️", "name": "Araignée géante", "hp": 420},
     {"emoji": "💀", "name": "Garde squelette", "hp": 480},
     {"emoji": "👹", "name": "Ogre des profondeurs", "hp": 600},
+    {"emoji": "🪲", "name": "Scarabée carapace", "hp": 260},
+    {"emoji": "🐍", "name": "Serpent des tunnels", "hp": 340},
+    {"emoji": "🧟", "name": "Goule affamée", "hp": 460},
+    {"emoji": "🦂", "name": "Scorpion venimeux", "hp": 380},
+    {"emoji": "🐺", "name": "Loup des abysses", "hp": 410},
+    {"emoji": "👻", "name": "Spectre errant", "hp": 350},
+    {"emoji": "🏹", "name": "Archer squelette", "hp": 440},
+    {"emoji": "🧌", "name": "Troll des grottes", "hp": 660},
+    {"emoji": "🔥", "name": "Élémentaire de braise", "hp": 520},
+    {"emoji": "❄️", "name": "Élémentaire de givre", "hp": 520},
+    {"emoji": "🗿", "name": "Gargouille foudroyante", "hp": 560},
+    {"emoji": "🪨", "name": "Golem de pierre", "hp": 700},
+    {"emoji": "🍄", "name": "Myconide toxique", "hp": 300},
+    {"emoji": "🦟", "name": "Essaim parasite", "hp": 280},
+    {"emoji": "🐙", "name": "Tentacule des profondeurs", "hp": 580},
+    {"emoji": "🥷", "name": "Assassin de l'ombre", "hp": 470},
+    {"emoji": "🧊", "name": "Liche mineure", "hp": 540},
+    {"emoji": "🧛", "name": "Vampire de crypte", "hp": 500},
+    {"emoji": "🐗", "name": "Sanglier enragé", "hp": 360},
 ]
-DUNGEON_BOSS = {"emoji": "🐲", "name": "Gardien du Donjon", "hp": 1400}
+# Boss de donjon : pioché au hasard par run → vraie variété (Phase 257.6).
+DUNGEON_BOSSES = [
+    {"emoji": "🐲", "name": "Gardien du Donjon", "hp": 1400},
+    {"emoji": "☠️", "name": "Seigneur des Ossements", "hp": 1600},
+    {"emoji": "🔥", "name": "Drake de Lave", "hp": 1800},
+    {"emoji": "❄️", "name": "Tyran de Glace", "hp": 1700},
+    {"emoji": "👁️", "name": "Œil du Néant", "hp": 1500},
+    {"emoji": "🕸️", "name": "Matriarche Arachnide", "hp": 1550},
+    {"emoji": "🧟", "name": "Colosse Putride", "hp": 2000},
+    {"emoji": "⚡", "name": "Avatar de l'Orage", "hp": 1750},
+]
+# Rétro-compat (export + défaut) : 1er boss du pool.
+DUNGEON_BOSS = DUNGEON_BOSSES[0]
 
 # Lobby en mémoire : guild_id -> dict(host_id, members:set, channel, message, view)
 _lobbies: dict = {}
@@ -427,7 +460,7 @@ async def _launch_dungeon(guild_id: int):
     mob_plan = random.sample(DUNGEON_MOBS, k=min(n_waves, len(DUNGEON_MOBS)))
     mob_plan.sort(key=lambda m: m["hp"])                          # difficulté croissante
     encounters = [dict(m, is_boss=False) for m in mob_plan]
-    encounters.append(dict(DUNGEON_BOSS, is_boss=True))           # boss = dernière salle
+    encounters.append(dict(random.choice(DUNGEON_BOSSES), is_boss=True))  # boss aléatoire = dernière salle
 
     # Création ATOMIQUE : si une étape échoue, on supprime TOUT ce qui a déjà été
     # créé (sinon catégorie/salons orphelins SANS enregistrement DB → jamais

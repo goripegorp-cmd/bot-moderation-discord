@@ -81720,6 +81720,13 @@ class CompetitionsLayoutV2(LayoutView):
 
     async def _on_dungeon(self, i):
         # Phase 184 : ouvre un lobby de donjon public dans le salon courant
+        # Phase 257.6 : ACK D'ABORD (defer) — start_dungeon_lobby() fait du réseau/DB
+        # (création de salon privé, etc.) qui peut dépasser 3 s → sans defer, le clic
+        # affiche « Échec de l'interaction ». On défère puis on répond en followup.
+        try:
+            await i.response.defer(ephemeral=True)
+        except Exception:
+            pass
         try:
             # Phase 191 : interrupteur Hub Événements — Donjons
             if not bool((await cfg(i.guild.id)).get('dungeon_enabled', True)):
@@ -81730,12 +81737,12 @@ class CompetitionsLayoutV2(LayoutView):
             ok = False
         try:
             if ok:
-                await i.response.send_message(
+                await i.followup.send(
                     "🏰 **Lobby de donjon ouvert dans ce salon !** Les aventuriers "
                     "peuvent cliquer pour rejoindre (4 max). Lancement auto sous peu.",
                     ephemeral=True)
             else:
-                await i.response.send_message(
+                await i.followup.send(
                     "⏳ Impossible d'ouvrir un donjon ici : un donjon est déjà en "
                     "formation ou actif, ou ce salon ne convient pas. Réessaie dans "
                     "un salon de discussion.", ephemeral=True)
