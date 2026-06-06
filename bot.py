@@ -14060,6 +14060,9 @@ async def _backfill_events_role(guild):
 # collaboratifs) ne pingent QUE les volontaires abonnés au 🔔 par-type.
 _BIG_EVENT_TYPES = {
     'boss_raid', 'world_boss', 'climax', 'monthly_climax', 'invasion', 'world_invasion',
+    # Phase 257.5 : events COLLABORATIFS = rares (~hebdo) ET ils ont besoin d'une
+    # FOULE pour réussir → ils méritent le ping @Tous (plafonné 6 h comme les bosses).
+    'rift', 'caravan', 'chain',
 }
 _BIG_EVENT_PING_MIN_HOURS = 6   # 1 ping @Tous / 6 h MAX, tous gros events confondus
 
@@ -14155,6 +14158,7 @@ _EVENT_NOTIFY_TYPES = {
     "mob":        ("🔔 Chasses", "Chasses aux mobs"),
     "invasion":   ("🔔 Invasions", "Invasions du serveur"),
     "council":    ("🔔 Conseil", "Conseil des Anciens"),
+    "collab":     ("🔔 Events Collaboratifs", "Faille Convergente / Caravane / Chaîne"),
 }
 
 # event_type interne → catégorie de notif (pour le ping au spawn via _get_event_mention).
@@ -14165,6 +14169,8 @@ _EVENT_TYPE_TO_NOTIFY = {
     "quiz": "minigame", "riddle": "minigame", "daily_riddle": "minigame",
     "mob": "mob", "mob_hunt": "mob",
     "invasion": "invasion", "world_invasion": "invasion", "council": "council",
+    # Phase 257.5 : events collaboratifs → catégorie 🔔 dédiée (en plus du ping @Tous).
+    "rift": "collab", "caravan": "collab", "chain": "collab",
 }
 
 
