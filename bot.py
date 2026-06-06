@@ -60554,6 +60554,11 @@ async def _ping_active_members(guild, channel, *, notif_key='boss_raid',
                     await _register_for_cleanup(msg, cleanup_seconds, 'combat_ping')
                 except Exception:
                     pass
+        except (discord.NotFound, discord.Forbidden):
+            # Salon éphémère supprimé entre-temps / pas de droits → le ping est
+            # inutile : on n'affiche RIEN (logs « que les erreurs » propres). C'est
+            # le 404 Unknown Channel (10003) qui polluait les logs Railway.
+            pass
         except Exception as ex:
             print(f"[_ping_active_members send] {ex}")
             return 0
