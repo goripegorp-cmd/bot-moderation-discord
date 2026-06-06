@@ -9799,9 +9799,10 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
                           f"stuff (`/inventory`) et **rejoignez un vocal** pour le bonus de dégâts !"
                         + "\n🎁 **Butin** : équipement du 🟢 commun au 🟡 légendaire "
                           "(meilleure place au classement = meilleure pièce) + des 🪙."
-                        + "\n-# 💡 Pas envie d'être ping ? `/notifs` pour choisir quoi recevoir."
+                        + "\n-# 💡 Trop de pings ? Bouton 🔕 ci-dessous."
                     ),
                     allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=False),
+                    view=EventsOptOutView('boss_raid'),
                 )
             except Exception as ex:
                 print(f"[event start announce] {ex}")
@@ -12181,6 +12182,7 @@ async def _start_treasure_hunt(guild, triggered_by_id: int, *, manual: bool = Fa
                 ),
                 embed=intro_embed,
                 allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=False),
+                view=EventsOptOutView('treasure_hunt'),
             )
             async with get_db() as db:
                 await db.execute(
@@ -12502,6 +12504,7 @@ async def _start_quiz(guild, triggered_by_id: int, *, manual: bool = False) -> d
                 ),
                 embed=intro_embed,
                 allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=False),
+                view=EventsOptOutView('quiz'),
             )
             async with get_db() as db:
                 await db.execute(
@@ -63168,7 +63171,7 @@ async def _start_world_boss(guild) -> dict:
               f"(`/inventory`) et **rejoignez un vocal** (bonus de dégâts) !"
             + "\n🎁 **Butin** : 🪙 pour tous (bonus top 3) · **10 % de loot UNIQUE** "
               "pour le meilleur combattant !"
-            + "\n_Pas envie d'être ping ? `/notifs` pour choisir précisément quoi recevoir._"
+            + "\n-# 💡 Trop de pings ? Bouton 🔕 ci-dessous."
         )
         try:
             layout = await _build_world_boss_layout(guild, wb_id)
@@ -63524,7 +63527,7 @@ async def world_boss_scheduler():
                                 f"🏆 Top 3 attaquants : récompense légendaire\n"
                                 f"💎 1% chance loot unique pour le top damager\n"
                                 f"⏱️ Durée : **90 minutes** — coordination collective requise\n\n"
-                                f"_Pas envie d'être ping ? `/notifs` pour gérer._"
+                                f"-# 💡 Trop de pings ? Bouton 🔕 ci-dessous."
                             )
                             LIFETIME_HYPE = 3600  # 1h (cover 20h30 → 21h30)
                             try:
@@ -63534,6 +63537,7 @@ async def world_boss_scheduler():
                                         roles=True, users=True, everyone=False,
                                     ),
                                     delete_after=LIFETIME_HYPE,
+                                    view=EventsOptOutView('world_boss'),
                                 )
                                 try:
                                     await _register_for_cleanup(hm, LIFETIME_HYPE, 'world_boss_hype')

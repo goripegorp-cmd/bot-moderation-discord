@@ -600,7 +600,18 @@ async def trigger_climax(guild_id: int) -> Optional[int]:
             try:
                 _cm = await _event_mention_fn(guild, 'climax')
                 if _cm:
-                    await ch.send(_cm, allowed_mentions=discord.AllowedMentions(
+                    # Phase 258.3 : bouton 🔔/🔕 SOUS le ping (zéro commande). Boutons
+                    # NUS → captés par les handlers globaux de bot.py : `evtnotif:climax`
+                    # par le DynamicItem EventNotifyButton, `events_optout` par la vue
+                    # persistante EventsOptOutView. Pas d'import croisé nécessaire.
+                    _nv = discord.ui.View(timeout=None)
+                    _nv.add_item(Button(
+                        label="🔔 Me notifier (Climax)", style=discord.ButtonStyle.success,
+                        custom_id="evtnotif:climax"))
+                    _nv.add_item(Button(
+                        label="🔕 Plus aucun event", style=discord.ButtonStyle.secondary,
+                        custom_id="events_optout"))
+                    await ch.send(_cm, view=_nv, allowed_mentions=discord.AllowedMentions(
                         roles=True, users=True, everyone=False))
             except Exception:
                 pass
