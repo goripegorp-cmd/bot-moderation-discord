@@ -1913,7 +1913,194 @@ async def _marche(i: discord.Interaction, args: list):
     await _nav(i, await build_marche_panel(i, status))
 
 
-# Registre des salles OUVERTES (les autres → teaser). On le remplit phase par phase.
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PHASE K — Maîtrises (rangs à vie) + Panthéon (classement) + Rivalités (mises)
+# ═══════════════════════════════════════════════════════════════════════════════
+MASTERY_TIERS = [
+    (500,   "🔰", "Initié de la Cité",  "m_inite"),
+    (2000,  "⚜️", "Artisan de la Cité", "m_artisan"),
+    (6000,  "💠", "Maître de la Cité",   "m_maitre"),
+    (15000, "👑", "Grand Maître",        "m_grandmaitre"),
+    (40000, "🌌", "Légende de la Cité",  "m_legende"),
+]
+# Les titres de maîtrise s'affichent aussi sur la Carte.
+CITE_TITLES.update({tk: (em, nm) for _th, em, nm, tk in MASTERY_TIERS})
+
+
+async def _sync_mastery_titles(gid: int, uid: int, points: int) -> None:
+    for th, _em, _nm, tk in MASTERY_TIERS:
+        if points >= th:
+            await grant_cosmetic(gid, uid, "title", tk)
+
+
+async def build_maitrises_panel(i: discord.Interaction, status: str | None = None):
+    LayoutView = _v2.get("LayoutView")
+    v2_title = _v2.get("title"); v2_subtitle = _v2.get("subtitle"); v2_body = _v2.get("body")
+    v2_divider = _v2.get("divider"); v2_container = _v2.get("container")
+    if not all((LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container)):
+        return None
+    gid, uid = i.guild.id, i.user.id
+    pts = await get_mastery(gid, uid)
+    await _sync_mastery_titles(gid, uid, pts)
+    rank_idx = sum(1 for th, *_ in MASTERY_TIERS if pts >= th)
+    rank_label = f"{MASTERY_TIERS[rank_idx-1][1]} {MASTERY_TIERS[rank_idx-1][2]}" if rank_idx > 0 else "🌱 Novice"
+    nxt = MASTERY_TIERS[rank_idx] if rank_idx < len(MASTERY_TIERS) else None
+
+    items = [v2_title("🏆  Maîtrises de la Cité")]
+    if status:
+        items.append(v2_body(status))
+    items.append(v2_subtitle("Cumul à vie — jamais remis à zéro. Chaque palier débloque un titre permanent."))
+    line = f"**Rang : {rank_label}**  ·  Points de maîtrise : `{pts:,}`"
+    if nxt:
+        line += f"\n➡️ Prochain : **{nxt[1]} {nxt[2]}** à `{nxt[0]:,}` (`{nxt[0]-pts:,}` restants)"
+    else:
+        line += "\n🌌 **Maîtrise ultime atteinte — tu es une Légende !**"
+    items.append(v2_body(line))
+    items.append(v2_body("\n".join(
+        f"{'✅' if pts >= th else '🔒'} {em} **{nm}** _(≥{th:,})_" for th, em, nm, _tk in MASTERY_TIERS)))
+    items.append(v2_divider())
+    items.append(discord.ui.ActionRow(
+        Button(label="🏷️ Afficher mon plus haut titre", style=discord.ButtonStyle.primary,
+               custom_id="cite:maitrises:show"),
+    ))
+    items.append(_retour_row())
+
+    class _Mait(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=600)
+            self.add_item(v2_container(*items, color=0xD4AF37))
+
+    return _Mait()
+
+
+async def _maitrises(i: discord.Interaction, args: list):
+    gid, uid = i.guild.id, i.user.id
+    status = None
+    if args and args[0] == "show":
+        owned = set(await owned_cosmetics(gid, uid, "title"))
+        chosen = None
+        for th, _em, _nm, tk in reversed(MASTERY_TIERS):
+            if tk in owned:
+                chosen = tk
+                break
+        if chosen:
+            await set_active(gid, uid, "cite_title", chosen)
+            te, tl = CITE_TITLES.get(chosen, ("🏷️", "Titre"))
+            status = f"🏷️ Titre **{te} {tl}** affiché sur ta carte !"
+        else:
+            status = "🔒 Atteins un palier de maîtrise pour débloquer un titre."
+    await _nav(i, await build_maitrises_panel(i, status))
+
+
+async def build_pantheon_panel(i: discord.Interaction, status: str | None = None):
+    LayoutView = _v2.get("LayoutView")
+    v2_title = _v2.get("title"); v2_subtitle = _v2.get("subtitle"); v2_body = _v2.get("body")
+    v2_divider = _v2.get("divider"); v2_container = _v2.get("container")
+    if not all((LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container)):
+        return None
+    gid, uid = i.guild.id, i.user.id
+    rows = []
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT user_id, points FROM citadelle_mastery "
+                "WHERE guild_id=? AND points>0 ORDER BY points DESC LIMIT 10",
+                (int(gid),)) as cur:
+                rows = await cur.fetchall()
+    except Exception:
+        rows = []
+    medals = ["🥇", "🥈", "🥉"]
+    lines = []
+    for idx, (ruid, pts) in enumerate(rows):
+        m = i.guild.get_member(int(ruid))
+        nm = m.display_name if m else f"Joueur {ruid}"
+        mark = medals[idx] if idx < 3 else f"`#{idx+1}`"
+        lines.append(f"{mark} **{nm}** — `{int(pts):,}` pts")
+    body = "\n".join(lines) if lines else "_Personne au Panthéon pour l'instant — sois le premier !_"
+    me_pts = await get_mastery(gid, uid)
+
+    items = [v2_title("🏛️  Panthéon de la Cité")]
+    if status:
+        items.append(v2_body(status))
+    items.append(v2_subtitle("Les plus grands bâtisseurs du serveur, par maîtrise totale."))
+    items.append(v2_body(body))
+    items.append(v2_divider())
+    items.append(v2_body(f"⭐ **Toi :** `{me_pts:,}` points de maîtrise"))
+    items.append(_retour_row())
+
+    class _Panth(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=600)
+            self.add_item(v2_container(*items, color=0xB8860B))
+
+    return _Panth()
+
+
+async def _pantheon(i: discord.Interaction, args: list):
+    await _nav(i, await build_pantheon_panel(i))
+
+
+_RIVAL_BETS = (20, 50, 100)
+
+
+async def _rivalites_bet(gid: int, uid: int, amount: int) -> str:
+    if amount not in _RIVAL_BETS:
+        return "❓ Mise invalide."
+    if not await spend_eclats(gid, uid, amount):
+        bal = await get_eclats(gid, uid)
+        return f"❌ Il te faut `{amount}` {ECLATS_EMOJI} (tu as `{bal}`)."
+    if random.random() < 0.5:
+        await grant_eclats(gid, uid, amount * 2)
+        return f"🎉 **GAGNÉ !** Mise doublée → +`{amount}` {ECLATS_EMOJI} net !"
+    return f"💀 **Perdu...** la mise de `{amount}` {ECLATS_EMOJI} est cédée. Retente ta chance !"
+
+
+async def build_rivalites_panel(i: discord.Interaction, status: str | None = None):
+    LayoutView = _v2.get("LayoutView")
+    v2_title = _v2.get("title"); v2_subtitle = _v2.get("subtitle"); v2_body = _v2.get("body")
+    v2_divider = _v2.get("divider"); v2_container = _v2.get("container")
+    if not all((LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container)):
+        return None
+    gid, uid = i.guild.id, i.user.id
+    eclats = await get_eclats(gid, uid)
+
+    items = [v2_title("⚔️  Rivalités & Mises")]
+    if status:
+        items.append(v2_body(status))
+    items.append(v2_subtitle("Le Défi de la Cité : mise des Éclats, 50 % de chance de doubler. 100 % volontaire."))
+    items.append(v2_body(
+        f"{ECLATS_EMOJI} **Tes Éclats :** `{eclats:,}`\n"
+        f"-# Choisis ta mise. Gagne = ×2 · Perds = la mise est cédée. (Duels joueur-contre-joueur : bientôt.)"
+    ))
+    items.append(v2_divider())
+    items.append(discord.ui.ActionRow(*[
+        Button(label=f"🎲 Miser {b} ✨", style=discord.ButtonStyle.danger,
+               custom_id=f"cite:rivalites:bet:{b}")
+        for b in _RIVAL_BETS
+    ]))
+    items.append(_retour_row())
+
+    class _Rival(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=600)
+            self.add_item(v2_container(*items, color=0xC0392B))
+
+    return _Rival()
+
+
+async def _rivalites(i: discord.Interaction, args: list):
+    gid, uid = i.guild.id, i.user.id
+    status = None
+    if len(args) >= 2 and args[0] == "bet":
+        try:
+            amount = int(args[1])
+        except Exception:
+            amount = 0
+        status = await _rivalites_bet(gid, uid, amount)
+    await _nav(i, await build_rivalites_panel(i, status))
+
+
+# Registre des salles OUVERTES — TOUTES ouvertes (Phases A→K). 🎉
 _SECTION_HANDLERS = {
     "forge": _forge,
     "carte": _carte,
@@ -1926,6 +2113,9 @@ _SECTION_HANDLERS = {
     "domaine": _domaine,
     "revenus": _revenus,
     "marche": _marche,
+    "maitrises": _maitrises,
+    "pantheon": _pantheon,
+    "rivalites": _rivalites,
 }
 
 
