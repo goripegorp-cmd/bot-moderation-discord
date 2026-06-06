@@ -390,68 +390,232 @@ async def open_hub(i: discord.Interaction):
             pass
 
 
-async def _route(i: discord.Interaction, section: str):
-    """Routage d'un bouton cite:<section>. ACK EN TÊTE → jamais d'échec d'interaction."""
-    try:
-        if not i.response.is_done():
-            await i.response.defer(ephemeral=True)
-    except Exception:
-        pass
-
-    if section == "home":
-        return await _send_hub_followup(i)
-
-    meta = SECTIONS.get(section)
-    if not meta:
+async def _nav(i: discord.Interaction, view):
+    """Navigue/rafraîchit le panneau IN-PLACE (edit_message = ACK) ; fallback followup.
+    Garantit l'ACK → jamais d'« Échec de l'interaction »."""
+    if view is None:
         try:
-            await i.followup.send("❓ Salle inconnue.", ephemeral=True)
+            if not i.response.is_done():
+                await i.response.send_message("❌ Panneau indisponible, réessaie.", ephemeral=True)
         except Exception:
             pass
         return
+    try:
+        if not i.response.is_done():
+            await i.response.edit_message(view=view)
+            return
+    except Exception:
+        pass
+    try:
+        await i.edit_original_response(view=view)
+    except Exception:
+        try:
+            await i.followup.send(view=view, ephemeral=True)
+        except Exception:
+            pass
 
-    emoji, label, phase, teaser = meta
-    msg = (
-        f"{emoji} **{label}**\n"
-        f"{teaser}\n\n"
-        f"🔒 _En cours de construction — ouverture imminente (Phase {phase})._\n"
-        f"-# Tes {ECLATS_EMOJI} {ECLATS_NAME} et tes 🧱 matériaux t'y attendront : rien n'est perdu."
+
+def _retour_row():
+    return discord.ui.ActionRow(
+        Button(label="⬅️ Retour à la Cité", style=discord.ButtonStyle.secondary, custom_id="cite:home")
     )
-    try:
-        await i.followup.send(msg, ephemeral=True)
-    except Exception as ex:
-        print(f"[citadelle _route {section}] {ex}")
 
 
-async def _send_hub_followup(i: discord.Interaction):
+def _build_soon_panel(section: str):
+    LayoutView = _v2.get("LayoutView")
+    v2_title = _v2.get("title")
+    v2_body = _v2.get("body")
+    v2_divider = _v2.get("divider")
+    v2_container = _v2.get("container")
+    meta = SECTIONS.get(section)
+    if not (LayoutView and v2_title and v2_body and v2_divider and v2_container and meta):
+        return None
+    emoji, label, phase, teaser = meta
+    items = [
+        v2_title(f"{emoji}  {label}"),
+        v2_body(teaser),
+        v2_divider(),
+        v2_body(
+            f"🔒 **En cours de construction** — ouverture imminente _(Phase {phase})_.\n"
+            f"-# Tes {ECLATS_EMOJI} {ECLATS_NAME} et tes 🧱 matériaux t'y attendront : rien n'est perdu."
+        ),
+        _retour_row(),
+    ]
+
+    class _Soon(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=600)
+            self.add_item(v2_container(*items, color=0x6E7681))
+
+    return _Soon()
+
+
+async def _route(i: discord.Interaction, rest: str):
+    """Routage de tout `cite:<rest>` (menu + sous-actions). Navigation IN-PLACE."""
+    parts = (rest or "home").split(":")
+    section = parts[0] or "home"
+    args = parts[1:]
+    if i.guild is None:
+        try:
+            if not i.response.is_done():
+                await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+        except Exception:
+            pass
+        return
     try:
-        if i.guild is None:
-            return await i.followup.send("❌ Serveur uniquement.", ephemeral=True)
-        view = await build_hub(i.guild.id, i.user.id)
-        if view is None:
-            return await i.followup.send("❌ La Cité est momentanément indisponible.", ephemeral=True)
-        await i.followup.send(view=view, ephemeral=True)
+        if section == "home":
+            return await _nav(i, await build_hub(i.guild.id, i.user.id))
+        handler = _SECTION_HANDLERS.get(section)
+        if handler is not None:
+            return await handler(i, args)
+        return await _nav(i, _build_soon_panel(section))
     except Exception as ex:
-        print(f"[citadelle _send_hub_followup] {ex}")
+        print(f"[citadelle _route {rest}] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message("❌ Erreur, réessaie.", ephemeral=True)
+            else:
+                await i.followup.send("❌ Erreur, réessaie.", ephemeral=True)
+        except Exception:
+            pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PHASE B — Forge d'Apparence (teintures cosmétiques, 0 impact sur les stats)
+# ═══════════════════════════════════════════════════════════════════════════════
+# key -> (emoji, nom, prix en Éclats de Création). 100 % COSMÉTIQUE.
+DYES = {
+    "azur":      ("🔵", "Azur Royal",    40),
+    "cramoisi":  ("🔴", "Cramoisi",      40),
+    "emeraude":  ("🟢", "Émeraude",      40),
+    "ambre":     ("🟠", "Ambre",         60),
+    "amethyste": ("🟣", "Améthyste",     60),
+    "ivoire":    ("⚪", "Ivoire",        60),
+    "onyx":      ("⚫", "Onyx",          80),
+    "turquoise": ("🩵", "Turquoise",    120),
+    "rose":      ("🩷", "Rose Pâle",    120),
+    "or":        ("🟡", "Or Pur",       160),
+    "prisme":    ("🌈", "Prisme",       400),
+    "abyssal":   ("🟦", "Bleu Abyssal", 650),
+}
+_DYE_ORDER = list(DYES.keys())
+
+
+def dye_label(key: str) -> str:
+    d = DYES.get(key)
+    return f"{d[0]} {d[1]}" if d else ""
+
+
+async def _forge_apply(gid: int, uid: int, key: str) -> str:
+    if key == "none":
+        await set_active(gid, uid, "dye", "none")
+        return "🚫 Teinture retirée — apparence d'origine."
+    d = DYES.get(key)
+    if not d:
+        return "❓ Teinture inconnue."
+    emoji, name, price = d
+    owned = await owned_cosmetics(gid, uid, "dye")
+    if key in owned:
+        await set_active(gid, uid, "dye", key)
+        return f"✅ Teinture **{emoji} {name}** appliquée !"
+    if await spend_eclats(gid, uid, price):
+        await grant_cosmetic(gid, uid, "dye", key)
+        await set_active(gid, uid, "dye", key)
+        return f"🛒 **{emoji} {name}** achetée et appliquée ! (−{price} {ECLATS_EMOJI})"
+    bal = await get_eclats(gid, uid)
+    return f"❌ Il te manque des {ECLATS_EMOJI} — **{name}** coûte `{price}`, tu as `{bal}`."
+
+
+async def build_forge_panel(gid: int, uid: int, status: str | None = None):
+    LayoutView = _v2.get("LayoutView")
+    v2_title = _v2.get("title")
+    v2_subtitle = _v2.get("subtitle")
+    v2_body = _v2.get("body")
+    v2_divider = _v2.get("divider")
+    v2_container = _v2.get("container")
+    if not all((LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container)):
+        return None
+    eclats = await get_eclats(gid, uid)
+    owned = set(await owned_cosmetics(gid, uid, "dye"))
+    active = (await get_active(gid, uid)).get("dye", "none")
+    active_txt = dye_label(active) if active and active != "none" else "_aucune_"
+
+    items = [v2_title("🎨  Forge d'Apparence")]
+    if status:
+        items.append(v2_body(status))
+    items.append(v2_subtitle("Teintures 100 % cosmétiques — elles ne changent JAMAIS tes stats."))
+    items.append(v2_body(
+        f"{ECLATS_EMOJI} **{ECLATS_NAME} :** `{eclats:,}`  ·  🎨 **Teinture actuelle :** {active_txt}\n"
+        f"-# Possédée ✅ = applique en 1 clic · sinon elle coûte des {ECLATS_EMOJI} (prix ci-dessous)."
+    ))
+    legend = "  ·  ".join(
+        f"{DYES[k][0]} {DYES[k][1]} `{DYES[k][2]}`" + (" ✅" if k in owned else "")
+        for k in _DYE_ORDER
+    )
+    items.append(v2_body(legend))
+    items.append(v2_divider())
+
+    row = []
+    for k in _DYE_ORDER:
+        emoji, name, _price = DYES[k]
+        style = (discord.ButtonStyle.success if k == active
+                 else discord.ButtonStyle.primary if k in owned
+                 else discord.ButtonStyle.secondary)
+        row.append(Button(label=name[:20], emoji=emoji, style=style, custom_id=f"cite:forge:eq:{k}"))
+        if len(row) == 4:
+            items.append(discord.ui.ActionRow(*row))
+            row = []
+    if row:
+        items.append(discord.ui.ActionRow(*row))
+
+    items.append(discord.ui.ActionRow(
+        Button(label="🚫 Retirer", style=discord.ButtonStyle.danger, custom_id="cite:forge:eq:none"),
+        Button(label="⬅️ Retour à la Cité", style=discord.ButtonStyle.secondary, custom_id="cite:home"),
+    ))
+
+    class _Forge(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=600)
+            self.add_item(v2_container(*items, color=0xCBA135))
+
+    return _Forge()
+
+
+async def _forge(i: discord.Interaction, args: list):
+    gid, uid = i.guild.id, i.user.id
+    status = None
+    if args and args[0] == "eq":
+        key = args[1] if len(args) > 1 else "none"
+        status = await _forge_apply(gid, uid, key)
+    await _nav(i, await build_forge_panel(gid, uid, status))
+
+
+# Registre des salles OUVERTES (les autres → teaser). On le remplit phase par phase.
+_SECTION_HANDLERS = {
+    "forge": _forge,
+}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Bouton persistant unique : capte TOUS les `cite:<section>` (menu + entrée)
 # ═══════════════════════════════════════════════════════════════════════════════
-class CitadelleButton(discord.ui.DynamicItem[Button], template=r"cite:(?P<section>[a-z_]+)"):
-    def __init__(self, section: str):
+class CitadelleButton(discord.ui.DynamicItem[Button], template=r"cite:(?P<rest>.+)"):
+    """Capte TOUT `cite:<rest>` (menu + sous-actions) → un seul item persistant."""
+
+    def __init__(self, rest: str):
         super().__init__(
             Button(label="Cité", style=discord.ButtonStyle.secondary,
-                   custom_id=f"cite:{section}")
+                   custom_id=f"cite:{rest}")
         )
-        self.section = section
+        self.rest = rest
 
     @classmethod
     async def from_custom_id(cls, interaction, item, match):
-        return cls(match["section"])
+        return cls(match["rest"])
 
     async def callback(self, i: discord.Interaction):
         try:
-            await _route(i, self.section)
+            await _route(i, self.rest)
         except Exception as ex:
             print(f"[CitadelleButton callback] {ex}")
             try:

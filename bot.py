@@ -11982,6 +11982,11 @@ class TreasureClaimView(View):
                 await add_coins(i.guild.id, i.user.id, coins)
             except Exception:
                 pass
+            # Phase 259 : trickle d'Éclats de Création (boucle event → customisation Cité).
+            try:
+                await citadelle_module.award(i.guild.id, i.user.id, eclats=5)
+            except Exception:
+                pass
             gear_msg = ""
             if tr.get('gear'):
                 gear = tr['gear']
@@ -12425,6 +12430,11 @@ class QuizAnswerView(View):
                     _coins_award += _vc_bonus
                 try:
                     await add_coins(i.guild.id, i.user.id, _coins_award)
+                except Exception:
+                    pass
+                # Phase 259 : trickle d'Éclats de Création (boucle event → Cité).
+                try:
+                    await citadelle_module.award(i.guild.id, i.user.id, eclats=5)
                 except Exception:
                     pass
 
@@ -15877,6 +15887,11 @@ class MysteryBoxView(View):
 
             try:
                 await add_coins(i.guild.id, i.user.id, coins)
+            except Exception:
+                pass
+            # Phase 259 : trickle d'Éclats de Création (boucle event → customisation Cité).
+            try:
+                await citadelle_module.award(i.guild.id, i.user.id, eclats=8)
             except Exception:
                 pass
 
@@ -64703,6 +64718,11 @@ class FlashTreasureView(View):
             # Donner les coins (base + streak bonus)
             try:
                 await add_coins(i.guild.id, i.user.id, total_reward)
+            except Exception:
+                pass
+            # Phase 259 : trickle d'Éclats de Création (boucle event → Cité).
+            try:
+                await citadelle_module.award(i.guild.id, i.user.id, eclats=5)
             except Exception:
                 pass
 
