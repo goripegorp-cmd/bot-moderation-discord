@@ -135,6 +135,17 @@ async def init_db():
                 "CREATE TABLE IF NOT EXISTS citadelle_domaine ("
                 "guild_id INTEGER PRIMARY KEY, points INTEGER DEFAULT 0)"
             )
+            # Phase J : rente quotidienne (revenu passif) · Phase K : maîtrise (cumul à vie)
+            await db.execute(
+                "CREATE TABLE IF NOT EXISTS citadelle_rente ("
+                "guild_id INTEGER, user_id INTEGER, last REAL DEFAULT 0, "
+                "PRIMARY KEY (guild_id, user_id))"
+            )
+            await db.execute(
+                "CREATE TABLE IF NOT EXISTS citadelle_mastery ("
+                "guild_id INTEGER, user_id INTEGER, points INTEGER DEFAULT 0, "
+                "PRIMARY KEY (guild_id, user_id))"
+            )
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_cite_cosmo "
                 "ON citadelle_cosmetics(guild_id, user_id, kind)"
@@ -329,6 +340,7 @@ async def award(guild_id: int, user_id: int, eclats: int = 0, materials: dict | 
         if eclats:
             await grant_eclats(guild_id, user_id, eclats)
             await grant_passe_points(guild_id, user_id, eclats)  # Phase E : alimente la passe
+            await grant_mastery(guild_id, user_id, eclats)       # Phase K : maîtrise (cumul à vie)
             # Phase H : boucle event → build — 50 % de chance de lâcher un matériau.
             if random.random() < 0.5:
                 try:
@@ -1686,6 +1698,221 @@ async def _domaine(i: discord.Interaction, args: list):
     await _nav(i, await build_domaine_panel(i, status))
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PHASE K (helpers) — Maîtrise (cumul à vie, jamais remis à zéro)
+# ═══════════════════════════════════════════════════════════════════════════════
+async def get_mastery(gid: int, uid: int) -> int:
+    if _get_db is None:
+        return 0
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT points FROM citadelle_mastery WHERE guild_id=? AND user_id=?",
+                (int(gid), int(uid))) as cur:
+                row = await cur.fetchone()
+        return int(row[0]) if row else 0
+    except Exception:
+        return 0
+
+
+async def grant_mastery(gid: int, uid: int, n: int) -> None:
+    if _get_db is None or not n:
+        return
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT INTO citadelle_mastery (guild_id, user_id, points) VALUES (?,?,?) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET points = MAX(0, points + ?)",
+                (int(gid), int(uid), int(n), int(n)))
+            await db.commit()
+    except Exception as ex:
+        print(f"[citadelle grant_mastery] {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PHASE J — Revenus passifs (rente quotidienne) + Marché du Vendeur (matériaux ↔ Éclats)
+# ═══════════════════════════════════════════════════════════════════════════════
+_RENTE_COOLDOWN = 72000.0   # ~20 h
+
+
+async def _rente_collect(gid: int, uid: int) -> str:
+    now = datetime.now(timezone.utc).timestamp()
+    worked = False
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO citadelle_rente (guild_id, user_id, last) VALUES (?,?,0)",
+                (int(gid), int(uid)))
+            cur = await db.execute(
+                "UPDATE citadelle_rente SET last = ? "
+                "WHERE guild_id=? AND user_id=? AND (? - last) >= ?",
+                (now, int(gid), int(uid), now, _RENTE_COOLDOWN))
+            await db.commit()
+            worked = getattr(cur, "rowcount", 0) == 1
+    except Exception as ex:
+        print(f"[citadelle _rente_collect] {ex}")
+        return "❌ Erreur, réessaie."
+    if not worked:
+        return "🌙 Rente déjà perçue aujourd'hui — reviens demain."
+    sanctu = len(await owned_cosmetics(gid, uid, "sanctuaire_module"))
+    titles = len(await owned_cosmetics(gid, uid, "title"))
+    gain = 15 + sanctu * 2 + titles * 5
+    await award(gid, uid, eclats=gain)
+    return f"💰 Rente perçue : **+{gain} {ECLATS_EMOJI}** (sanctuaire {sanctu}, titres {titles})."
+
+
+async def build_revenus_panel(i: discord.Interaction, status: str | None = None):
+    LayoutView = _v2.get("LayoutView")
+    v2_title = _v2.get("title"); v2_subtitle = _v2.get("subtitle"); v2_body = _v2.get("body")
+    v2_divider = _v2.get("divider"); v2_container = _v2.get("container")
+    if not all((LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container)):
+        return None
+    gid, uid = i.guild.id, i.user.id
+    now = datetime.now(timezone.utc).timestamp()
+    sanctu = len(await owned_cosmetics(gid, uid, "sanctuaire_module"))
+    titles = len(await owned_cosmetics(gid, uid, "title"))
+    gain = 15 + sanctu * 2 + titles * 5
+    ready = True
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT last FROM citadelle_rente WHERE guild_id=? AND user_id=?",
+                (int(gid), int(uid))) as cur:
+                row = await cur.fetchone()
+        last = float(row[0]) if row else 0.0
+        ready = (now - last) >= _RENTE_COOLDOWN
+        remain_h = max(0, int((_RENTE_COOLDOWN - (now - last)) // 3600) + 1)
+    except Exception:
+        remain_h = 0
+
+    items = [v2_title("💰  Revenus Passifs")]
+    if status:
+        items.append(v2_body(status))
+    items.append(v2_subtitle("Être fidèle paie : ta rente grandit avec ton Sanctuaire et tes titres."))
+    items.append(v2_body(
+        f"🏯 Sanctuaire : `{sanctu}` (+{sanctu*2})  ·  🏷️ Titres : `{titles}` (+{titles*5})\n"
+        f"**💵 Rente du jour : `{gain}` {ECLATS_EMOJI}**\n"
+        + ("✅ **Disponible !**" if ready else f"🌙 Prochaine dans ~`{remain_h}h`")
+    ))
+    items.append(v2_divider())
+    items.append(discord.ui.ActionRow(
+        Button(label="💰 Percevoir ma rente",
+               style=discord.ButtonStyle.success if ready else discord.ButtonStyle.secondary,
+               custom_id="cite:revenus:collect"),
+    ))
+    items.append(_retour_row())
+
+    class _Rev(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=600)
+            self.add_item(v2_container(*items, color=0x2E7D32))
+
+    return _Rev()
+
+
+async def _revenus(i: discord.Interaction, args: list):
+    gid, uid = i.guild.id, i.user.id
+    status = None
+    if args and args[0] == "collect":
+        status = await _rente_collect(gid, uid)
+    await _nav(i, await build_revenus_panel(i, status))
+
+
+def _market_day_rate() -> int:
+    try:
+        seed = int(datetime.now(timezone.utc).strftime("%Y%m%d"))
+    except Exception:
+        seed = 0
+    return 3 + (seed % 4)   # 3 à 6 Éclats / matériau, change chaque jour
+
+
+_MARKET_BUY_COST = 30
+
+
+async def _market_sell_all(gid: int, uid: int) -> str:
+    rate = _market_day_rate()
+    total = 0
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT COALESCE(SUM(qty),0) FROM citadelle_materials "
+                "WHERE guild_id=? AND user_id=? AND qty>0", (int(gid), int(uid))) as cur:
+                row = await cur.fetchone()
+            total = int(row[0]) if row else 0
+            if total <= 0:
+                return "📦 Tu n'as aucun matériau à vendre."
+            await db.execute(
+                "DELETE FROM citadelle_materials WHERE guild_id=? AND user_id=?",
+                (int(gid), int(uid)))
+            await db.commit()
+    except Exception as ex:
+        print(f"[citadelle _market_sell_all] {ex}")
+        return "❌ Erreur, réessaie."
+    gain = total * rate
+    await grant_eclats(gid, uid, gain)
+    return f"💰 Vendu `{total}` matériaux × `{rate}` = **+{gain} {ECLATS_EMOJI}** !"
+
+
+async def _market_buy(gid: int, uid: int) -> str:
+    if not await spend_eclats(gid, uid, _MARKET_BUY_COST):
+        bal = await get_eclats(gid, uid)
+        return f"❌ Il te faut `{_MARKET_BUY_COST}` {ECLATS_EMOJI} (tu as `{bal}`)."
+    got = {}
+    for _ in range(3):
+        mk = random.choice([v[2] for v in PROFESSIONS.values()])
+        await grant_material(gid, uid, mk, 1)
+        got[mk] = got.get(mk, 0) + 1
+    desc = ", ".join(f"{q} {k}" for k, q in got.items())
+    return f"🛒 Lot acheté : {desc} (−{_MARKET_BUY_COST} {ECLATS_EMOJI})."
+
+
+async def build_marche_panel(i: discord.Interaction, status: str | None = None):
+    LayoutView = _v2.get("LayoutView")
+    v2_title = _v2.get("title"); v2_subtitle = _v2.get("subtitle"); v2_body = _v2.get("body")
+    v2_divider = _v2.get("divider"); v2_container = _v2.get("container")
+    if not all((LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container)):
+        return None
+    gid, uid = i.guild.id, i.user.id
+    eclats = await get_eclats(gid, uid)
+    mats = await get_materials(gid, uid)
+    total = sum(mats.values()) if mats else 0
+    rate = _market_day_rate()
+
+    items = [v2_title("🛒  Marché du Vendeur")]
+    if status:
+        items.append(v2_body(status))
+    items.append(v2_subtitle("Échange avec le vendeur (jamais entre joueurs). Le cours change chaque jour."))
+    items.append(v2_body(
+        f"📈 **Cours du jour : `{rate}` {ECLATS_EMOJI} / matériau**\n"
+        f"🧱 Tes matériaux : `{total}`  ·  {ECLATS_EMOJI} `{eclats:,}`"
+    ))
+    items.append(v2_divider())
+    items.append(discord.ui.ActionRow(
+        Button(label=f"💰 Tout vendre (×{rate})", style=discord.ButtonStyle.success,
+               custom_id="cite:marche:sell"),
+        Button(label=f"🛒 Acheter un lot ({_MARKET_BUY_COST} ✨)", style=discord.ButtonStyle.primary,
+               custom_id="cite:marche:buy"),
+    ))
+    items.append(_retour_row())
+
+    class _Marche(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=600)
+            self.add_item(v2_container(*items, color=0x00897B))
+
+    return _Marche()
+
+
+async def _marche(i: discord.Interaction, args: list):
+    gid, uid = i.guild.id, i.user.id
+    status = None
+    if args and args[0] == "sell":
+        status = await _market_sell_all(gid, uid)
+    elif args and args[0] == "buy":
+        status = await _market_buy(gid, uid)
+    await _nav(i, await build_marche_panel(i, status))
+
+
 # Registre des salles OUVERTES (les autres → teaser). On le remplit phase par phase.
 _SECTION_HANDLERS = {
     "forge": _forge,
@@ -1697,6 +1924,8 @@ _SECTION_HANDLERS = {
     "collections": _collections,
     "jardin": _jardin,
     "domaine": _domaine,
+    "revenus": _revenus,
+    "marche": _marche,
 }
 
 
