@@ -11274,10 +11274,13 @@ async def _pet_strike(guild_id: int, user_id: int) -> dict:
                     if _chp < _mhp:
                         heal_done = min(_mhp - _chp, int(10 + lvl * 3 + _mhp * pet_bonus))
                         if heal_done > 0:
+                            # Phase 261 : écriture ATOMIQUE (pool sans row-lock) — MIN(max_hp,…)
+                            # clampe en SQL → ne clobbe pas une riposte/soin concurrent (lost-update).
                             async with get_db() as _hdb:
                                 await _hdb.execute(
-                                    'UPDATE player_inventory SET hp=? WHERE guild_id=? AND user_id=?',
-                                    (_chp + heal_done, guild_id, user_id),
+                                    'UPDATE player_inventory SET hp=MIN(max_hp, hp + ?) '
+                                    'WHERE guild_id=? AND user_id=? AND hp < max_hp',
+                                    (heal_done, guild_id, user_id),
                                 )
                                 await _hdb.commit()
             except Exception:

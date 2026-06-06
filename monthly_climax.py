@@ -314,6 +314,8 @@ def setup(
     _report_fn = report_fn
     # Phase 235.24 : mention des rôles opt-in (/notify + 🔔 Climax) au spawn
     _event_mention_fn = event_mention_fn
+    # Phase 261 (4/4) : cœur partagé d'appui familier (sinon record_pet_assist bail).
+    _pet_strike_fn = pet_strike_fn
 
 
 async def init_db():
