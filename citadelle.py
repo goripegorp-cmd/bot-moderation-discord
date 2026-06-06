@@ -20,6 +20,7 @@ ouverte affiche un teaser clair et encourageant (le menu explique tout dès J1).
 
 from __future__ import annotations
 
+import random
 from datetime import datetime, timezone
 
 import discord
@@ -116,6 +117,13 @@ async def init_db():
                 "guild_id INTEGER, user_id INTEGER, season TEXT, "
                 "points INTEGER DEFAULT 0, claimed TEXT DEFAULT '', "
                 "PRIMARY KEY (guild_id, user_id, season))"
+            )
+            # Phase G : Métiers (professions non-combat à niveaux indépendants)
+            await db.execute(
+                "CREATE TABLE IF NOT EXISTS citadelle_professions ("
+                "guild_id INTEGER, user_id INTEGER, prof TEXT, "
+                "xp INTEGER DEFAULT 0, last_work REAL DEFAULT 0, "
+                "PRIMARY KEY (guild_id, user_id, prof))"
             )
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_cite_cosmo "
@@ -1232,6 +1240,145 @@ async def _sanctuaire(i: discord.Interaction, args: list):
     await _nav(i, await build_sanctu_panel(i, status))
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PHASE G — Métiers & Récolte (professions non-combat, produisent des matériaux)
+# ═══════════════════════════════════════════════════════════════════════════════
+# key -> (emoji, nom, mat_key, mat_emoji). « Travailler » = +XP + matériaux (cooldown).
+PROFESSIONS = {
+    "mineur":     ("⛏️", "Mineur",     "minerai", "⛏️"),
+    "herboriste": ("🌿", "Herboriste", "herbe",   "🌿"),
+    "pecheur":    ("🎣", "Pêcheur",    "poisson", "🐟"),
+    "forgeron":   ("🔨", "Forgeron",   "lingot",  "🧱"),
+    "enchanteur": ("✨", "Enchanteur", "essence", "🔮"),
+}
+_PROF_ORDER = list(PROFESSIONS.keys())
+_PROF_COOLDOWN = 3600.0   # 1 h entre deux récoltes par métier
+_PROF_XP_GAIN = 12        # XP par récolte
+_PROF_XP_PER_LVL = 100    # 100 XP / niveau
+
+
+def _prof_level(xp: int) -> int:
+    return 1 + int(xp) // _PROF_XP_PER_LVL
+
+
+async def get_professions(gid: int, uid: int) -> dict:
+    """{prof: (xp, last_work)} — auto-crée les lignes manquantes."""
+    out = {}
+    if _get_db is None:
+        return {k: (0, 0.0) for k in _PROF_ORDER}
+    try:
+        async with _get_db() as db:
+            for k in _PROF_ORDER:
+                await db.execute(
+                    "INSERT OR IGNORE INTO citadelle_professions (guild_id, user_id, prof, xp, last_work) "
+                    "VALUES (?,?,?,0,0)", (int(gid), int(uid), k))
+            await db.commit()
+            async with db.execute(
+                "SELECT prof, xp, last_work FROM citadelle_professions "
+                "WHERE guild_id=? AND user_id=?", (int(gid), int(uid))) as cur:
+                rows = await cur.fetchall()
+        for prof, xp, lw in rows:
+            out[prof] = (int(xp or 0), float(lw or 0))
+    except Exception:
+        pass
+    for k in _PROF_ORDER:
+        out.setdefault(k, (0, 0.0))
+    return out
+
+
+async def _prof_work(gid: int, uid: int, prof: str) -> str:
+    d = PROFESSIONS.get(prof)
+    if not d:
+        return "❓ Métier inconnu."
+    emoji, name, mat_key, mat_emoji = d
+    now = datetime.now(timezone.utc).timestamp()
+    worked = False
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO citadelle_professions (guild_id, user_id, prof, xp, last_work) "
+                "VALUES (?,?,?,0,0)", (int(gid), int(uid), prof))
+            cur = await db.execute(
+                "UPDATE citadelle_professions SET xp = xp + ?, last_work = ? "
+                "WHERE guild_id=? AND user_id=? AND prof=? AND (? - last_work) >= ?",
+                (_PROF_XP_GAIN, now, int(gid), int(uid), prof, now, _PROF_COOLDOWN))
+            await db.commit()
+            worked = getattr(cur, "rowcount", 0) == 1
+    except Exception as ex:
+        print(f"[citadelle _prof_work] {ex}")
+        return "❌ Erreur, réessaie."
+    if not worked:
+        return f"⏳ **{emoji} {name}** se repose encore — reviens un peu plus tard."
+    qty = random.randint(1, 3)
+    await grant_material(gid, uid, mat_key, qty)
+    # petite chance d'Éclats bonus (alimente aussi la passe)
+    bonus = 2 if random.random() < 0.5 else 0
+    if bonus:
+        await award(gid, uid, eclats=bonus)
+    extra = f" · +{bonus} {ECLATS_EMOJI}" if bonus else ""
+    return f"{emoji} **{name}** : +{qty} {mat_emoji} {mat_key} · +{_PROF_XP_GAIN} XP{extra}"
+
+
+async def build_metiers_panel(i: discord.Interaction, status: str | None = None):
+    LayoutView = _v2.get("LayoutView")
+    v2_title = _v2.get("title"); v2_subtitle = _v2.get("subtitle"); v2_body = _v2.get("body")
+    v2_divider = _v2.get("divider"); v2_container = _v2.get("container")
+    if not all((LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container)):
+        return None
+    gid, uid = i.guild.id, i.user.id
+    profs = await get_professions(gid, uid)
+    mats = await get_materials(gid, uid)
+    now = datetime.now(timezone.utc).timestamp()
+
+    items = [v2_title("⚒️  Métiers & Récolte")]
+    if status:
+        items.append(v2_body(status))
+    items.append(v2_subtitle("Un vrai chemin SANS combat. Récolte (1×/h par métier) → XP + matériaux."))
+    lines = []
+    for k in _PROF_ORDER:
+        emoji, name, mat_key, mat_emoji = PROFESSIONS[k]
+        xp, lw = profs.get(k, (0, 0.0))
+        lvl = _prof_level(xp)
+        into = int(xp) % _PROF_XP_PER_LVL
+        ready = (now - lw) >= _PROF_COOLDOWN
+        when = "✅ prêt" if ready else f"⏳ {int((_PROF_COOLDOWN - (now - lw)) // 60) + 1} min"
+        lines.append(f"{emoji} **{name}** — Niv `{lvl}` ({into}/{_PROF_XP_PER_LVL} XP) · {when}")
+    items.append(v2_body("\n".join(lines)))
+    if mats:
+        mat_line = "  ·  ".join(f"`{q}` {k}" for k, q in sorted(mats.items()))
+        items.append(v2_body(f"🧱 **Tes matériaux :** {mat_line}"))
+    items.append(v2_divider())
+
+    row = []
+    for k in _PROF_ORDER:
+        emoji, name, _mk, _me = PROFESSIONS[k]
+        xp, lw = profs.get(k, (0, 0.0))
+        ready = (now - lw) >= _PROF_COOLDOWN
+        row.append(Button(label=f"{name}", emoji=emoji,
+                          style=discord.ButtonStyle.success if ready else discord.ButtonStyle.secondary,
+                          custom_id=f"cite:metiers:work:{k}"))
+        if len(row) == 5:
+            items.append(discord.ui.ActionRow(*row)); row = []
+    if row:
+        items.append(discord.ui.ActionRow(*row))
+    items.append(_retour_row())
+
+    class _Metiers(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=600)
+            self.add_item(v2_container(*items, color=0x6D4C41))
+
+    return _Metiers()
+
+
+async def _metiers(i: discord.Interaction, args: list):
+    gid, uid = i.guild.id, i.user.id
+    status = None
+    if len(args) >= 2 and args[0] == "work":
+        status = await _prof_work(gid, uid, args[1])
+    await _nav(i, await build_metiers_panel(i, status))
+
+
 # Registre des salles OUVERTES (les autres → teaser). On le remplit phase par phase.
 _SECTION_HANDLERS = {
     "forge": _forge,
@@ -1239,6 +1386,7 @@ _SECTION_HANDLERS = {
     "emblemes": _emblemes,
     "passe": _passe,
     "sanctuaire": _sanctuaire,
+    "metiers": _metiers,
 }
 
 
