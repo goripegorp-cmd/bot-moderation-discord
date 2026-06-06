@@ -156,8 +156,8 @@ def _build_panel(chain: dict):
 
     items = [
         v2_title("🔗  LA CHAÎNE D'INVOCATION"),
-        v2_subtitle("_Posez les maillons à tour de rôle : chaque maillon doit venir "
-                    "d'un joueur DIFFÉRENT des 2 derniers. Ne laissez pas la chaîne se rompre !_"),
+        v2_subtitle("👥 Relais : chaque maillon = un joueur **≠ des 2 derniers** "
+                    "· 12 maillons = gagné · ne casse pas la chaîne !"),
         v2_divider(),
     ]
     if ended:

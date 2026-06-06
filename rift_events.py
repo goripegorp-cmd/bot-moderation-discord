@@ -186,8 +186,8 @@ def _build_panel(rift: dict, distinct: int):
 
     items = [
         v2_title("🌀  LA FAILLE CONVERGENTE"),
-        v2_subtitle("_Une faille déchire le ciel d'Abylumis. Canalisez votre énergie "
-                    "ENSEMBLE pour la sceller — seul, c'est impossible._"),
+        v2_subtitle("👥 **4+ joueurs** · ⚡ Cliquez **Canaliser** ENSEMBLE pour sceller "
+                    "· 🔊 vocal = +20%"),
         v2_divider(),
     ]
     if ended:
