@@ -14033,6 +14033,7 @@ async def _backfill_events_role(guild):
         except Exception:
             pass
         added = 0
+        attempted = 0
         for member in list(guild.members):
             try:
                 if member.bot or role in member.roles:
@@ -14041,75 +14042,88 @@ async def _backfill_events_role(guild):
                 # via /notifs) → on ne le réabonne pas de force. Défaut = True.
                 if not await _member_wants_notif(guild.id, member.id, 'events'):
                     continue
+                attempted += 1
                 await member.add_roles(
                     role, reason="Phase 256 : abonnement events par défaut (opt-out)")
                 added += 1
                 await asyncio.sleep(0.6)   # throttle doux anti rate-limit
             except Exception:
                 continue
+        # Phase 258 : si on AVAIT des membres à abonner mais que TOUT a échoué, le bot
+        # n'a probablement pas « Gérer les rôles » OU son rôle est SOUS « 📢 Tous les
+        # Événements » dans la hiérarchie. On NE pose PAS le flag → réessai au prochain
+        # boot une fois corrigé (sinon le rôle reste vide et les events ne touchent
+        # personne — c'est exactement le bug « 2-3 mentionnés sur des centaines »).
+        if attempted > 0 and added == 0:
+            print(f"[events_role_backfill] {guild.name}: ÉCHEC ({attempted} membres, 0 ajout) "
+                  f"— vérifie la perm « Gérer les rôles » + la hiérarchie du rôle du bot. "
+                  f"Non marqué → réessai au prochain boot.")
+            return
         await db_set(guild.id, 'events_role_backfilled', 1)
         print(f"[events_role_backfill] {guild.name}: +{added} membres abonnés (opt-out)")
     except Exception as ex:
         print(f"[events_role_backfill] {ex}")
 
 
-# Phase 257 — MENTIONS RESTREINTES (directive owner : « les mentions sont très
-# relou »). Seuls les GROS events rares pingent le rôle « 📢 Tous les Événements »
-# (qui notifie TOUT le serveur, opt-out), et ce ping est PLAFONNÉ globalement.
-# Les petits events fréquents (trésor, quiz, mystery, mob, boss du jour, events
-# collaboratifs) ne pingent QUE les volontaires abonnés au 🔔 par-type.
+# Phase 258 — MENTION MÉTHODIQUE (directive owner : « les events ne touchent que
+# 2-3 personnes sur des centaines »). PRINCIPE : tout le monde a le rôle
+# « 📢 Tous les Événements » par défaut (opt-out, auto-attribué + backfill), et
+# TOUS les events pingent ce rôle → on touche tout le monde. La modération du spam
+# se fait par (a) une CADENCE intelligente (un même TYPE max 1×/4 h + plancher 45 min
+# entre 2 pings tous types confondus) et (b) un OPT-OUT 1 clic (🔕). Ceux qui se
+# désabonnent = ne veulent pas (signal) ; ceux qui restent = OK pour être prévenus.
 _BIG_EVENT_TYPES = {
     'boss_raid', 'world_boss', 'climax', 'monthly_climax', 'invasion', 'world_invasion',
-    # Phase 257.5 : events COLLABORATIFS = rares (~hebdo) ET ils ont besoin d'une
-    # FOULE pour réussir → ils méritent le ping @Tous (plafonné 6 h comme les bosses).
     'rift', 'caravan', 'chain',
 }
-_BIG_EVENT_PING_MIN_HOURS = 6   # 1 ping @Tous / 6 h MAX, tous gros events confondus
+_ROLE_PING_TYPE_HOURS = 4       # un même TYPE d'event ne re-ping le rôle qu'1×/4 h
+_ROLE_PING_GLOBAL_MIN = 45      # plancher : ≥45 min entre 2 pings de rôle (tous types)
 
 
-async def _big_event_ping_allowed(guild_id) -> bool:
-    """Phase 257 : PLAFOND GLOBAL du ping @Tous. Le rôle « 📢 Tous les Événements »
-    (qui notifie tout le serveur) ne peut être mentionné qu'une fois toutes les
-    _BIG_EVENT_PING_MIN_HOURS — tous gros events confondus — pour ne JAMAIS spammer,
-    même si plusieurs gros events tombent rapprochés. Claim : lecture→écriture du
-    timestamp en cfg (les gros events sont rares → course négligeable). FAIL-OPEN :
-    sur erreur, on autorise (un gros event rare mérite son ping)."""
+async def _role_ping_allowed(guild_id, event_type: str) -> bool:
+    """Phase 258 : CADENCE intelligente du ping @Événements (qui touche tout le monde).
+    TOUS les events peuvent pinger le rôle, MAIS : (a) un même TYPE au plus 1×/4 h,
+    (b) plancher global de 45 min entre 2 pings tous types confondus → on touche tout
+    le monde pour une VARIÉTÉ d'events sans matraquer. Claim lecture→écriture en cfg.
+    FAIL-OPEN : sur erreur → on autorise (mieux vaut prévenir que rater)."""
     try:
+        et = (event_type or 'event').lower()
         c = await cfg(guild_id)
-        last = c.get('last_big_event_ping_ts')
         nowdt = datetime.now(timezone.utc)
-        if last:
+
+        def _too_recent(key, seconds):
+            v = c.get(key)
+            if not v:
+                return False
             try:
-                ld = datetime.fromisoformat(str(last))
-                if ld.tzinfo is None:
-                    ld = ld.replace(tzinfo=timezone.utc)
-                if (nowdt - ld) < timedelta(hours=_BIG_EVENT_PING_MIN_HOURS):
-                    return False
+                d = datetime.fromisoformat(str(v))
+                if d.tzinfo is None:
+                    d = d.replace(tzinfo=timezone.utc)
+                return (nowdt - d).total_seconds() < seconds
             except Exception:
-                pass
-        await db_set(guild_id, 'last_big_event_ping_ts', nowdt.isoformat())
+                return False
+
+        if _too_recent('last_role_ping_global', _ROLE_PING_GLOBAL_MIN * 60):
+            return False
+        if _too_recent(f'last_role_ping_{et}', _ROLE_PING_TYPE_HOURS * 3600):
+            return False
+        await db_set(guild_id, 'last_role_ping_global', nowdt.isoformat())
+        await db_set(guild_id, f'last_role_ping_{et}', nowdt.isoformat())
         return True
     except Exception:
         return True
 
 
 async def _get_event_mention(guild, event_type: str) -> str:
-    """Phase 257 : mention PRO et restreinte pour le spawn d'un event.
-
-    - GROS events rares (boss raid, world boss, climax, invasion) → ping le rôle
-      « 📢 Tous les Événements » (+ @Important), qui touche TOUT le monde (opt-out),
-      MAIS plafonné à 1 ping / 6 h tous gros events confondus (_big_event_ping_allowed).
-    - PETITS events fréquents (trésor, quiz, mystery, mob, boss du jour, collaboratifs)
-      → AUCUN ping de masse : seuls les volontaires abonnés au 🔔 par-type sont notifiés.
-    AUCUNE mention individuelle de membre (gérée ailleurs, désormais désactivée).
-    """
+    """Phase 258 : mention de spawn — touche TOUT LE MONDE (rôle opt-out) pour TOUS
+    les events, à cadence intelligente (cf. _role_ping_allowed). + rôle 🔔 par-type
+    pour les volontaires. AUCUNE mention individuelle de membre."""
     try:
         mentions = []
         et = (event_type or '').lower()
-        is_big = et in _BIG_EVENT_TYPES
 
-        # (1) Rôle 🔔 par-type (opt-in PUR) — toujours autorisé : le membre l'a demandé.
-        # create=False → n'existe que si ≥1 membre abonné → zéro spam.
+        # (1) Rôle 🔔 par-type (opt-in) — toujours (create=False → n'existe que si
+        #     ≥1 abonné). Pas soumis à la cadence : ces gens l'ont explicitement voulu.
         try:
             _cat = _EVENT_TYPE_TO_NOTIFY.get(et)
             if _cat:
@@ -14119,27 +14133,74 @@ async def _get_event_mention(guild, event_type: str) -> str:
         except Exception:
             pass
 
-        # (2) Rôle @Tous (+ @Important) — UNIQUEMENT pour les GROS events, ET plafonné.
-        if is_big:
+        # (2) Rôle @Tous (tout le monde, opt-out) → pour TOUS les events, mais cadencé.
+        #     + @Important en plus pour les GROS events.
+        try:
             c = await cfg(guild.id)
             all_role = guild.get_role(int(c.get('notify_role_all_id', 0) or 0))
             imp_role = guild.get_role(int(c.get('notify_role_important_id', 0) or 0))
-            # Ne consomme le plafond QUE si un vrai rôle existe à mentionner.
-            if (all_role or imp_role) and await _big_event_ping_allowed(guild.id):
-                if imp_role and imp_role.mention not in mentions:
+            if all_role and await _role_ping_allowed(guild.id, et):
+                if et in _BIG_EVENT_TYPES and imp_role and imp_role.mention not in mentions:
                     mentions.append(imp_role.mention)
-                if all_role and all_role.mention not in mentions:
+                if all_role.mention not in mentions:
                     mentions.append(all_role.mention)
+        except Exception:
+            pass
 
         if not mentions:
             return ""
-        # Rappel DISCRET : le bouton « 🔔 Me notifier » abonne/désabonne en 1 clic.
+        # Rappel DISCRET : 1 clic 🔕 (bouton sous le ping) ou /notify pour se désabonner.
         return (" ".join(mentions)
-                + "\n-# 🔔 Règle tes alertes : bouton **Me notifier** sous l'event "
-                  "(ou **/notify**). Reclique = désabonné.")
+                + "\n-# 🔕 Trop de pings ? Clique **🔕** sous l'event (ou **/notify**) "
+                  "→ tu ne seras plus notifié.")
     except Exception as ex:
         print(f"[_get_event_mention] {ex}")
         return ""
+
+
+class EventsOptOutView(View):
+    """Phase 258 : bouton 🔕 attaché au ping d'event → 1 clic = ne plus être notifié
+    (retire le rôle « 📢 Tous les Événements » + « 🔔 Important » + coupe la préférence
+    'events'). Persistant (custom_id stable → survit aux reboots). Permet à l'owner de
+    « savoir qui ne veut pas » : ceux qui cliquent se désabonnent, les autres restent."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+        b = Button(label="🔕 Ne plus me notifier", style=discord.ButtonStyle.secondary,
+                   custom_id="events_optout")
+        b.callback = self._on_optout
+        self.add_item(b)
+
+    async def _on_optout(self, i: discord.Interaction):
+        try:
+            await i.response.defer(ephemeral=True)
+        except Exception:
+            pass
+        try:
+            if i.guild is None or not isinstance(i.user, discord.Member):
+                return
+            c = await cfg(i.guild.id)
+            for tier in ('all', 'important'):
+                rid = int(c.get(f'notify_role_{tier}_id', 0) or 0)
+                if not rid:
+                    continue
+                r = i.guild.get_role(rid)
+                if r and r in i.user.roles:
+                    try:
+                        await i.user.remove_roles(r, reason="opt-out events (bouton 🔕)")
+                    except Exception:
+                        pass
+            try:
+                await _set_notif_pref(i.guild.id, i.user.id, 'events', False)
+                await event_notif_role_module.sync_member(i.guild, i.user, False)
+            except Exception:
+                pass
+            await i.followup.send(
+                "🔕 **C'est noté — tu ne seras plus notifié des événements.**\n"
+                "Tu peux revenir quand tu veux : `/notify niveau:📢 Tous les événements`.",
+                ephemeral=True)
+        except Exception as ex:
+            print(f"[EventsOptOutView] {ex}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -41566,6 +41627,7 @@ async def on_ready():
     # Phase 40 — views persistantes (custom_ids stables, callbacks utilisent i.user.id)
     try:
         bot.add_view(OnboardingView())
+        bot.add_view(EventsOptOutView())  # Phase 258 : bouton 🔕 sous les pings d'event
     except Exception as ex:
         print(f"[on_ready add_view OnboardingView] {ex}")
     # Phase 41 — confessions persistent view
@@ -60935,9 +60997,11 @@ async def _ping_active_members(guild, channel, *, notif_key='boss_raid',
         line = "\n".join(parts)
         try:
             # Phase 256 : plus de bouton « 📩 opt-in MP » (on ne fait PLUS de MP
-            # d'événement). Le ping = une mention de rôle propre, rien d'autre.
+            # d'événement). Phase 258 : bouton 🔕 « ne plus me notifier » sous le ping
+            # (1 clic = opt-out propre, sans commande).
             msg = await channel.send(
                 line,
+                view=EventsOptOutView(),
                 allowed_mentions=discord.AllowedMentions(
                     users=True, everyone=False, roles=True),
             )
