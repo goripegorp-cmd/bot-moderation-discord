@@ -125,6 +125,16 @@ async def init_db():
                 "xp INTEGER DEFAULT 0, last_work REAL DEFAULT 0, "
                 "PRIMARY KEY (guild_id, user_id, prof))"
             )
+            # Phase I : Jardin (récolte idle quotidienne) + Domaine collectif du serveur
+            await db.execute(
+                "CREATE TABLE IF NOT EXISTS citadelle_garden ("
+                "guild_id INTEGER, user_id INTEGER, last REAL DEFAULT 0, "
+                "PRIMARY KEY (guild_id, user_id))"
+            )
+            await db.execute(
+                "CREATE TABLE IF NOT EXISTS citadelle_domaine ("
+                "guild_id INTEGER PRIMARY KEY, points INTEGER DEFAULT 0)"
+            )
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_cite_cosmo "
                 "ON citadelle_cosmetics(guild_id, user_id, kind)"
@@ -1496,6 +1506,186 @@ async def _collections(i: discord.Interaction, args: list):
     await _nav(i, await build_collections_panel(i, status))
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PHASE I — Jardin & Élevage (récolte idle) + Domaine collectif (build serveur)
+# ═══════════════════════════════════════════════════════════════════════════════
+_GARDEN_COOLDOWN = 72000.0   # ~20 h : une récolte par jour
+
+
+async def _garden_harvest(gid: int, uid: int) -> str:
+    now = datetime.now(timezone.utc).timestamp()
+    worked = False
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO citadelle_garden (guild_id, user_id, last) VALUES (?,?,0)",
+                (int(gid), int(uid)))
+            cur = await db.execute(
+                "UPDATE citadelle_garden SET last = ? "
+                "WHERE guild_id=? AND user_id=? AND (? - last) >= ?",
+                (now, int(gid), int(uid), now, _GARDEN_COOLDOWN))
+            await db.commit()
+            worked = getattr(cur, "rowcount", 0) == 1
+    except Exception as ex:
+        print(f"[citadelle _garden_harvest] {ex}")
+        return "❌ Erreur, réessaie."
+    if not worked:
+        return "🌙 Ton jardin a déjà été récolté aujourd'hui — reviens demain."
+    sanctu = len(await owned_cosmetics(gid, uid, "sanctuaire_module"))
+    eclats = 10 + sanctu * 3   # le sanctuaire booste le rendement (lie F → revenu)
+    await award(gid, uid, eclats=eclats)
+    mat = random.choice([v[2] for v in PROFESSIONS.values()])
+    qty = 1 + (1 if random.random() < 0.5 else 0)
+    await grant_material(gid, uid, mat, qty)
+    boost = f" _(boost sanctuaire +{sanctu*3})_" if sanctu else ""
+    return f"🌿 Récolte du jardin : +{eclats} {ECLATS_EMOJI}{boost} · +{qty} {mat}"
+
+
+async def build_jardin_panel(i: discord.Interaction, status: str | None = None):
+    LayoutView = _v2.get("LayoutView")
+    v2_title = _v2.get("title"); v2_subtitle = _v2.get("subtitle"); v2_body = _v2.get("body")
+    v2_divider = _v2.get("divider"); v2_container = _v2.get("container")
+    if not all((LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container)):
+        return None
+    gid, uid = i.guild.id, i.user.id
+    now = datetime.now(timezone.utc).timestamp()
+    ready = True
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT last FROM citadelle_garden WHERE guild_id=? AND user_id=?",
+                (int(gid), int(uid))) as cur:
+                row = await cur.fetchone()
+        last = float(row[0]) if row else 0.0
+        ready = (now - last) >= _GARDEN_COOLDOWN
+        remain_h = max(0, int((_GARDEN_COOLDOWN - (now - last)) // 3600) + 1)
+    except Exception:
+        remain_h = 0
+    sanctu = len(await owned_cosmetics(gid, uid, "sanctuaire_module"))
+
+    items = [v2_title("🌿  Jardin & Élevage")]
+    if status:
+        items.append(v2_body(status))
+    items.append(v2_subtitle("Reviens chaque jour récolter — plus ton Sanctuaire est grand, plus ça rapporte."))
+    items.append(v2_body(
+        f"🏯 Niveau sanctuaire : `{sanctu}` → rendement `{10 + sanctu*3}` {ECLATS_EMOJI}/jour\n"
+        + ("✅ **Prêt à récolter !**" if ready else f"🌙 Prochaine récolte dans ~`{remain_h}h`")
+    ))
+    items.append(v2_divider())
+    items.append(discord.ui.ActionRow(
+        Button(label="🌿 Récolter le jardin",
+               style=discord.ButtonStyle.success if ready else discord.ButtonStyle.secondary,
+               custom_id="cite:jardin:harvest"),
+    ))
+    items.append(_retour_row())
+
+    class _Jardin(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=600)
+            self.add_item(v2_container(*items, color=0x2E7D32))
+
+    return _Jardin()
+
+
+async def _jardin(i: discord.Interaction, args: list):
+    gid, uid = i.guild.id, i.user.id
+    status = None
+    if args and args[0] == "harvest":
+        status = await _garden_harvest(gid, uid)
+    await _nav(i, await build_jardin_panel(i, status))
+
+
+# ─── Domaine collectif du serveur (Grand Œuvre commun) ─────────────────────────
+DOMAINE_TIERS = [
+    (500,   "🏗️ Fondations"),
+    (2000,  "🏛️ Grandes Portes"),
+    (5000,  "🗼 Tour de Guet"),
+    (12000, "🏰 Citadelle Dorée"),
+    (25000, "🌟 Merveille de la Cité"),
+]
+_DOMAINE_GIVE = 50  # Éclats par contribution
+
+
+async def get_domaine(gid: int) -> int:
+    if _get_db is None:
+        return 0
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT points FROM citadelle_domaine WHERE guild_id=?", (int(gid),)) as cur:
+                row = await cur.fetchone()
+        return int(row[0]) if row else 0
+    except Exception:
+        return 0
+
+
+async def _domaine_give(gid: int, uid: int) -> str:
+    if not await spend_eclats(gid, uid, _DOMAINE_GIVE):
+        bal = await get_eclats(gid, uid)
+        return f"❌ Il te faut `{_DOMAINE_GIVE}` {ECLATS_EMOJI} pour contribuer (tu as `{bal}`)."
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT INTO citadelle_domaine (guild_id, points) VALUES (?, ?) "
+                "ON CONFLICT(guild_id) DO UPDATE SET points = points + ?",
+                (int(gid), _DOMAINE_GIVE, _DOMAINE_GIVE))
+            await db.commit()
+    except Exception as ex:
+        print(f"[citadelle _domaine_give] {ex}")
+    # contribuer fait aussi avancer la passe perso
+    await grant_passe_points(gid, uid, _DOMAINE_GIVE)
+    return f"🤝 Merci ! Tu as offert `{_DOMAINE_GIVE}` {ECLATS_EMOJI} au Grand Œuvre du serveur."
+
+
+async def build_domaine_panel(i: discord.Interaction, status: str | None = None):
+    LayoutView = _v2.get("LayoutView")
+    v2_title = _v2.get("title"); v2_subtitle = _v2.get("subtitle"); v2_body = _v2.get("body")
+    v2_divider = _v2.get("divider"); v2_container = _v2.get("container")
+    if not all((LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container)):
+        return None
+    gid, uid = i.guild.id, i.user.id
+    pts = await get_domaine(gid)
+    eclats = await get_eclats(gid, uid)
+    tier_idx = sum(1 for th, _ in DOMAINE_TIERS if pts >= th)
+    cur_label = DOMAINE_TIERS[tier_idx - 1][1] if tier_idx > 0 else "🚧 Chantier"
+    nxt = DOMAINE_TIERS[tier_idx] if tier_idx < len(DOMAINE_TIERS) else None
+
+    items = [v2_title("🏰  Domaine — Grand Œuvre du serveur")]
+    if status:
+        items.append(v2_body(status))
+    items.append(v2_subtitle("Tout le monde contribue à un monument commun. Un objectif collectif qui grandit avec vous."))
+    lines = [f"🏆 **Palier actuel : {cur_label}**", f"📊 **Contribution totale : `{pts:,}`** points"]
+    if nxt:
+        lines.append(f"➡️ Prochain : **{nxt[1]}** à `{nxt[0]:,}` (`{nxt[0]-pts:,}` restants)")
+    else:
+        lines.append("🌟 **Merveille atteinte — le serveur est entré dans la légende !**")
+    items.append(v2_body("\n".join(lines)))
+    items.append(v2_body("\n".join(
+        f"{'✅' if pts >= th else '🔒'} {lbl} _(≥{th:,})_" for th, lbl in DOMAINE_TIERS)))
+    items.append(v2_divider())
+    items.append(v2_body(f"{ECLATS_EMOJI} **Tes Éclats :** `{eclats:,}`"))
+    items.append(discord.ui.ActionRow(
+        Button(label=f"🤝 Contribuer ({_DOMAINE_GIVE} ✨)", style=discord.ButtonStyle.success,
+               custom_id="cite:domaine:give"),
+    ))
+    items.append(_retour_row())
+
+    class _Domaine(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=600)
+            self.add_item(v2_container(*items, color=0x455A64))
+
+    return _Domaine()
+
+
+async def _domaine(i: discord.Interaction, args: list):
+    gid, uid = i.guild.id, i.user.id
+    status = None
+    if args and args[0] == "give":
+        status = await _domaine_give(gid, uid)
+    await _nav(i, await build_domaine_panel(i, status))
+
+
 # Registre des salles OUVERTES (les autres → teaser). On le remplit phase par phase.
 _SECTION_HANDLERS = {
     "forge": _forge,
@@ -1505,6 +1695,8 @@ _SECTION_HANDLERS = {
     "sanctuaire": _sanctuaire,
     "metiers": _metiers,
     "collections": _collections,
+    "jardin": _jardin,
+    "domaine": _domaine,
 }
 
 
