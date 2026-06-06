@@ -62684,6 +62684,13 @@ async def _track_reaction_p41(payload):
 # ─── ANTI-SPAM GLOBAL : 1 event majeur en cours max ────────────────────────────
 
 
+_EVENT_BUSY_GRACE = "-25 minutes"  # Phase 262 : un event EXPIRÉ mais non encore RÉSOLU
+# (finalizer/teardown pas encore passé) compte ENCORE comme « en cours » pendant cette
+# grâce → empêche un NOUVEAU boss de spawn par-dessus un event pas démantelé (cause racine
+# du chevauchement). Au-delà → ignoré (anti-figement, leçon Phase 174.1 ; toutes les boucles
+# de résolution tournent ≤ 15 min, bien sous la grâce de 25 min).
+
+
 async def _has_any_major_event_running(guild_id: int, include_mobs: bool = False) -> bool:
     """SOURCE DE VÉRITÉ UNIQUE (Phase 230) : un événement de combat est-il
     réellement EN COURS sur ce serveur ? Couvre TOUTES les tables d'events :
@@ -62709,76 +62716,61 @@ async def _has_any_major_event_running(guild_id: int, include_mobs: bool = False
     boss du jour, qui est une ancre fixe, serait sans cesse repoussé)."""
     try:
         async with get_db() as db:
-            async with db.execute(
-                'SELECT 1 FROM events WHERE guild_id=? AND ended=0 '
-                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now')) LIMIT 1",
-                (guild_id,),
-            ) as cur:
-                if await cur.fetchone():
-                    return True
-            async with db.execute(
-                'SELECT 1 FROM world_bosses WHERE guild_id=? AND ended=0 '
-                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now')) LIMIT 1",
-                (guild_id,),
-            ) as cur:
-                if await cur.fetchone():
-                    return True
+            g = _EVENT_BUSY_GRACE  # Phase 262 : grâce expiré-mais-non-résolu
+
+            async def _busy(sql: str) -> bool:
+                # Helper : True si la requête (params = guild_id, grâce) trouve une ligne.
+                # try/except → table absente sur vieux schéma = on n'empêche rien.
+                try:
+                    async with db.execute(sql, (guild_id, g)) as cur:
+                        return (await cur.fetchone()) is not None
+                except Exception:
+                    return False
+
+            if await _busy(
+                "SELECT 1 FROM events WHERE guild_id=? AND ended=0 "
+                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now', ?)) LIMIT 1"):
+                return True
+            if await _busy(
+                "SELECT 1 FROM world_bosses WHERE guild_id=? AND ended=0 "
+                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now', ?)) LIMIT 1"):
+                return True
+            if await _busy(
+                "SELECT 1 FROM daily_boss_events WHERE guild_id=? AND status='alive' "
+                "AND (expires_at IS NULL OR datetime(expires_at) > datetime('now', ?)) LIMIT 1"):
+                return True
+            if await _busy(
+                "SELECT 1 FROM climax_events WHERE guild_id=? AND status='active' "
+                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now', ?)) LIMIT 1"):
+                return True
+            # Phase 262 : INVASION (table invasion_events sans colonne ends_at/expires_at →
+            # on borne sur started_at : active ET démarrée il y a < 60 min = en cours).
             try:
                 async with db.execute(
-                    "SELECT 1 FROM daily_boss_events WHERE guild_id=? AND status='alive' "
-                    "AND (expires_at IS NULL OR datetime(expires_at) > datetime('now')) LIMIT 1",
-                    (guild_id,),
-                ) as cur:
-                    if await cur.fetchone():
-                        return True
-            except Exception:
-                pass  # table absente sur un vieux schéma → on n'empêche rien
-            try:
-                async with db.execute(
-                    "SELECT 1 FROM climax_events WHERE guild_id=? AND status='active' "
-                    "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now')) LIMIT 1",
-                    (guild_id,),
-                ) as cur:
-                    if await cur.fetchone():
-                        return True
-            except Exception:
-                pass
-            # Phase 256 Lot 3 (audit) : une FAILLE active compte comme event en cours
-            # → (a) garde le salon ⚔️-combat PARTAGÉ vivant (sinon un autre teardown le
-            # supprimait sous la faille), (b) sérialise la faille avec les gros boss.
-            try:
-                async with db.execute(
-                    "SELECT 1 FROM rift_events WHERE guild_id=? AND ended=0 "
-                    "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now')) LIMIT 1",
+                    "SELECT 1 FROM invasion_events WHERE guild_id=? AND status='active' "
+                    "AND datetime(started_at) > datetime('now', '-60 minutes') LIMIT 1",
                     (guild_id,),
                 ) as cur:
                     if await cur.fetchone():
                         return True
             except Exception:
                 pass
-            # Phase 256 Lot 3 : une CARAVANE active compte aussi (même salon partagé).
-            try:
-                async with db.execute(
-                    "SELECT 1 FROM caravan_events WHERE guild_id=? AND ended=0 "
-                    "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now')) LIMIT 1",
-                    (guild_id,),
-                ) as cur:
-                    if await cur.fetchone():
-                        return True
-            except Exception:
-                pass
-            # Phase 256 Lot 3 : une CHAÎNE active compte aussi (même salon partagé).
-            try:
-                async with db.execute(
-                    "SELECT 1 FROM chain_events WHERE guild_id=? AND ended=0 "
-                    "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now')) LIMIT 1",
-                    (guild_id,),
-                ) as cur:
-                    if await cur.fetchone():
-                        return True
-            except Exception:
-                pass
+            # Phase 256 Lot 3 : FAILLE / CARAVANE / CHAÎNE actives comptent aussi (même
+            # salon ⚔️-combat partagé) → sérialisées avec les gros boss.
+            if await _busy(
+                "SELECT 1 FROM rift_events WHERE guild_id=? AND ended=0 "
+                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now', ?)) LIMIT 1"):
+                return True
+            if await _busy(
+                "SELECT 1 FROM caravan_events WHERE guild_id=? AND ended=0 "
+                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now', ?)) LIMIT 1"):
+                return True
+            if await _busy(
+                "SELECT 1 FROM chain_events WHERE guild_id=? AND ended=0 "
+                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now', ?)) LIMIT 1"):
+                return True
             if include_mobs:
+                # Mob = remplissage éphémère → PAS de grâce (ne doit pas sur-bloquer).
                 try:
                     async with db.execute(
                         "SELECT 1 FROM mob_spawns WHERE guild_id=? AND status='alive' "
