@@ -63715,7 +63715,7 @@ def _build_daily_agenda_text(now) -> str:
         else:
             weekly.append("• 🐲 **World Boss** ce soir à **21h** — coordination de tout le serveur !")
     if wd == 4:
-        weekly.append("• 🎮 **Game Night** ce soir à **21h** — mini-jeux en vocal, viens jouer !")
+        weekly.append("• 🎮 **Game Night** ce soir à **21h** — mini-jeux dans le chat, viens gagner des 🪙 !")
     # Énigme du jour : tous les jours vers 10h.
     weekly.append("• 🧠 **Énigme du jour** vers **10h** — premier à trouver, gros jackpot 🪙.")
     if weekly:
@@ -67507,14 +67507,6 @@ async def _start_game_night(guild) -> bool:
         # (créée en haut du serveur si besoin). Respecte event_arena_category.
         category = await _ensure_events_category(guild)
 
-        overwrites_vc = {
-            guild.default_role: discord.PermissionOverwrite(
-                view_channel=True, connect=True, speak=True,
-            ),
-            guild.me: discord.PermissionOverwrite(
-                view_channel=True, connect=True, speak=True, manage_channels=True,
-            ),
-        }
         overwrites_text = {
             guild.default_role: discord.PermissionOverwrite(
                 view_channel=True, send_messages=True, read_message_history=True,
@@ -67525,44 +67517,29 @@ async def _start_game_night(guild) -> bool:
             ),
         }
 
+        # Phase 256 : Game Night = mini-jeux 100 % TEXTE → plus de salon VOCAL (inutile,
+        # plainte owner). UN SEUL salon créé.
         vc = None
         try:
-            vc = await guild.create_voice_channel(
-                name="🎮 Game Night",
-                category=category,
-                overwrites=overwrites_vc,
-                reason="Game Night Phase 46",
-            )
             tc = await guild.create_text_channel(
                 name="🎮-game-night",
                 category=category,
                 overwrites=overwrites_text,
-                topic="Mini-jeux de la Game Night du vendredi !",
+                topic="Mini-jeux de la Game Night — réponds vite pour gagner des 🪙 !",
                 reason="Game Night Phase 46",
             )
         except discord.Forbidden:
             print(f"[_start_game_night] Permission denied guild={guild.id}")
-            # Phase 235.6 : rollback du vocal orphelin si le texte échoue
-            if vc is not None:
-                try:
-                    await vc.delete(reason="Rollback Game Night incomplète")
-                except Exception:
-                    pass
             return False
         except Exception as ex:
             print(f"[_start_game_night create_channels] {ex}")
-            if vc is not None:
-                try:
-                    await vc.delete(reason="Rollback Game Night incomplète")
-                except Exception:
-                    pass
             return False
 
         ends_at = datetime.now(timezone.utc) + timedelta(hours=2, minutes=30)
         async with get_db() as db:
             cur = await db.execute(
                 "INSERT INTO game_nights(guild_id, voice_channel_id, text_channel_id, ends_at) VALUES(?,?,?,?)",
-                (guild.id, vc.id, tc.id, ends_at.isoformat()),
+                (guild.id, None, tc.id, ends_at.isoformat()),
             )
             gn_id = cur.lastrowid
             await db.commit()
@@ -67581,22 +67558,19 @@ async def _start_game_night(guild) -> bool:
                 # Phase 79 : LayoutView V2 — sections clean + chrono inline
                 _gn_remaining = int((ends_at - datetime.now(timezone.utc)).total_seconds())
                 _gn_end_ts = int(ends_at.timestamp())
-                _vc_id, _tc_id = vc.id, tc.id
+                _tc_id = tc.id
 
                 class _GnAnnounceLayout(LayoutView):
                     def __init__(self):
                         super().__init__(timeout=None)
                         items = [
                             v2_title("🎮 Game Night — Ça commence !"),
-                            v2_subtitle("Soirée mini-jeux + vocal du vendredi"),
+                            v2_subtitle("Soirée mini-jeux — réponds vite, gagne des 🪙"),
                             v2_divider(),
+                            v2_body(f"💬 **Salon :** <#{_tc_id}>"),
                             v2_body(
-                                f"🎙️ **Vocal :** <#{_vc_id}>\n"
-                                f"💬 **Chat :** <#{_tc_id}>"
-                            ),
-                            v2_body(
-                                f"Le bot lancera des **mini-jeux** dans le chat toutes les ~12 min.\n"
-                                f"Rejoins le vocal pour en profiter à fond !"
+                                f"Le bot lance un **mini-jeu** dans le chat toutes les "
+                                f"~12 min — sois le plus rapide pour gagner des 🪙 !"
                             ),
                             v2_divider(),
                             v2_body(f"⏱️ Termine <t:{_gn_end_ts}:R>"),
@@ -67631,7 +67605,7 @@ async def _start_game_night(guild) -> bool:
                         v2_divider(),
                         v2_body(
                             f"⏱️ Soirée jusqu'à <t:{_gn_end_ts_w}:t> — "
-                            f"les 2 salons seront supprimés ensuite."
+                            f"ce salon sera supprimé ensuite."
                         ),
                     ]
                     self.add_item(v2_container(*items, color=0xE91E63))
@@ -68964,9 +68938,12 @@ async def _check_game_night_sync_react(payload):
         print(f"[_check_game_night_sync_react] {ex}")
 
 
-@tasks.loop(minutes=30)
+@tasks.loop(minutes=12)
 async def game_night_dispatcher():
-    """Vendredi 21h FR : start. 23h30 FR : end. Pendant : ~12 prompts toutes les 12-15min."""
+    """Démarrage AUTO vendredi 21h FR. MAIS les mini-jeux (+ la fin par ends_at) tournent
+    pour TOUTE Game Night active, QUEL QUE SOIT LE JOUR (ex. démarrage manuel/forcé) —
+    avant, tout était bloqué derrière le filtre « vendredi » donc une Game Night
+    démarrée un autre jour n'avait JAMAIS de mini-jeux. Cadence ~12 min (= la loop)."""
     try:
         try:
             from zoneinfo import ZoneInfo as _ZI
@@ -68974,37 +68951,31 @@ async def game_night_dispatcher():
         except Exception:
             tz = timezone.utc
         now_local = datetime.now(tz)
-        if now_local.weekday() != 4:  # vendredi
-            return
-        if now_local.hour == 21:
+        # 1) Démarrage AUTOMATIQUE : vendredi 21h. Le guard _has_active_game_night
+        #    empêche les doublons sur les ticks suivants de l'heure 21.
+        if now_local.weekday() == 4 and now_local.hour == 21:
             for guild in bot.guilds:
                 try:
                     await _start_game_night(guild)
                 except Exception as ex:
                     print(f"[game_night_dispatcher start guild={guild.id}] {ex}")
-        elif now_local.hour == 23 and now_local.minute >= 30:
-            # End all active
-            async with get_db() as db:
-                async with db.execute(
-                    "SELECT id FROM game_nights WHERE ended=0",
-                ) as cur:
-                    rows = await cur.fetchall()
-            for (gn_id,) in rows:
-                await _end_game_night(int(gn_id))
-        else:
-            # Pendant la soirée : prompt random toutes les 12-15 min
-            # On tire 50% chance par tick de 30min (donc ~1 prompt par tick en moyenne sur les 5 ticks)
-            if 21 <= now_local.hour < 23 and random.random() < 0.6:
-                async with get_db() as db:
-                    async with db.execute(
-                        "SELECT id FROM game_nights WHERE ended=0",
-                    ) as cur:
-                        rows = await cur.fetchall()
-                for (gn_id,) in rows:
-                    try:
-                        await _post_game_night_prompt(int(gn_id))
-                    except Exception as ex:
-                        print(f"[game_night prompt gn={gn_id}] {ex}")
+        # 2) Pour CHAQUE Game Night active (n'importe quel jour) : fin si expirée
+        #    (ends_at dépassé), sinon UN mini-jeu. ⇒ corrige « les mini-jeux
+        #    n'apparaissent pas » sur les Game Night démarrées hors-vendredi.
+        now_iso = datetime.now(timezone.utc).isoformat()
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT id, ends_at FROM game_nights WHERE ended=0",
+            ) as cur:
+                rows = await cur.fetchall()
+        for (gn_id, ends_at) in rows:
+            try:
+                if ends_at and str(ends_at) <= now_iso:
+                    await _end_game_night(int(gn_id))
+                else:
+                    await _post_game_night_prompt(int(gn_id))
+            except Exception as ex:
+                print(f"[game_night tick gn={gn_id}] {ex}")
     except Exception as ex:
         print(f"[game_night_dispatcher] {ex}")
 
