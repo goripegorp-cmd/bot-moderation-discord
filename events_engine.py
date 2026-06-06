@@ -376,6 +376,21 @@ def elemental_advantage(weapon, boss_element) -> float:
     return 1.0
 
 
+def elemental_resistance(armor, boss_element) -> float:
+    """Phase 256 : pendant DÉFENSIF de l'avantage. Si l'élément de l'ARMURE contre
+    celui du boss, la riposte est réduite (×0.75 = −25 %). SÛR : 1.0 sinon (jamais
+    >1.0 → ne peut pas augmenter les dégâts subis). Armure sans élément → 1.0."""
+    try:
+        if not boss_element or not armor:
+            return 1.0
+        ael = (armor.get("element") or "").lower()
+        if ael and ELEMENT_COUNTERS.get(boss_element) == ael:
+            return 0.75
+    except Exception:
+        pass
+    return 1.0
+
+
 def roll_elemental_proc(weapon: Optional[dict]) -> Optional[dict]:
     """Phase 180 : si l'arme a un élément, tente un PROC (burst élémentaire).
 
@@ -1301,11 +1316,11 @@ WEAPONS.extend([
     {"name": "Genèse du Vide",           "atk": 210, "rarity": "primordial", "emoji": "🪐", "weight": 1,  "element": "shadow"},
 ])
 ARMOR.extend([
-    {"name": "Carapace Polaire",         "def": 19,  "rarity": "épique",     "emoji": "❄️", "weight": 5},
-    {"name": "Plastron du Crépuscule",   "def": 18,  "rarity": "épique",     "emoji": "🌑", "weight": 5},
-    {"name": "Cuirasse de Braise",       "def": 32,  "rarity": "légendaire", "emoji": "🔥", "weight": 2},
-    {"name": "Manteau Sacré",            "def": 33,  "rarity": "légendaire", "emoji": "✨", "weight": 2},
-    {"name": "Égide de l'Orage",         "def": 52,  "rarity": "mythique",   "emoji": "⚡", "weight": 1},
+    {"name": "Carapace Polaire",         "def": 19,  "rarity": "épique",     "emoji": "❄️", "weight": 5, "element": "ice"},
+    {"name": "Plastron du Crépuscule",   "def": 18,  "rarity": "épique",     "emoji": "🌑", "weight": 5, "element": "shadow"},
+    {"name": "Cuirasse de Braise",       "def": 32,  "rarity": "légendaire", "emoji": "🔥", "weight": 2, "element": "fire"},
+    {"name": "Manteau Sacré",            "def": 33,  "rarity": "légendaire", "emoji": "✨", "weight": 2, "element": "holy"},
+    {"name": "Égide de l'Orage",         "def": 52,  "rarity": "mythique",   "emoji": "⚡", "weight": 1, "element": "lightning"},
 ])
 HELMETS.extend([
     {"name": "Casque de Braise",         "emoji": "🔥", "rarity": "rare",       "def": 8,  "atk": 3,  "weight": 12},

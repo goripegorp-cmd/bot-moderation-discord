@@ -10777,6 +10777,19 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
                 dmg_taken = max(1, raw - _pdef // 2)
                 if voice_zone_id == 'defense':
                     dmg_taken = max(1, int(dmg_taken * 0.5))  # 🛡️ Zone Défense −50%
+                # Phase 256 : RÉSISTANCE ÉLÉMENTAIRE D'ARMURE — si l'élément de ton
+                # armure CONTRE celui du boss, la riposte fait −25 % (pendant défensif
+                # de l'avantage offensif). SÛR (×1.0 sinon), fail-open.
+                _res_applied = False
+                try:
+                    _res = events2026.elemental_resistance(
+                        inv.get('armor'),
+                        events2026.element_for_boss(boss.get('archetype') or boss.get('name')))
+                    if _res < 1.0:
+                        dmg_taken = max(1, int(dmg_taken * _res))
+                        _res_applied = True
+                except Exception:
+                    pass
                 cur_hp = int(inv.get('hp', 100) or 100)
                 new_php = cur_hp - dmg_taken
                 if new_php <= 0:
