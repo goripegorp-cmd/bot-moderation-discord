@@ -16361,6 +16361,25 @@ async def _collect_live_events(guild_id: int) -> list:
     except Exception:
         pass
 
+    # Boss du jour (daily_boss_events) — Phase 257.1 : ajouté à la tuile live
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT boss_id, hp_current, hp_max FROM daily_boss_events "
+                "WHERE guild_id=? AND status='alive' "
+                "AND datetime(expires_at) > datetime('now') "
+                "ORDER BY id DESC LIMIT 1",
+                (guild_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if row:
+            bid, chp, mhp = row
+            chp = int(chp or 0)
+            mhp = int(mhp or 1)
+            lines.append(f"👹 **Boss du Jour** · {bid} {chp}/{mhp} HP")
+    except Exception:
+        pass
+
     # Voice chaos (récent : appliqué dans les dernières 30 min)
     try:
         async with get_db() as db:
@@ -42337,7 +42356,8 @@ async def on_ready():
                                       report_fn=_post_combat_report,
                                       event_busy_fn=_has_any_major_event_running,
                                       event_mention_fn=_get_event_mention,
-                                      alliance_points_fn=_award_alliance_combat_points)
+                                      alliance_points_fn=_award_alliance_combat_points,
+                                      echo_fn=_post_event_echo)
             await daily_bosses_module.init_db()
             daily_bosses_module.register_persistent_views(bot)
             if not daily_bosses_module.daily_boss_task.is_running():

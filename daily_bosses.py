@@ -72,6 +72,7 @@ _report_fn = None  # Phase 223 : async (guild, title, body) -> rapport dans « c
 _arena_delete_fn = None  # Phase 210 : async (guild, text_channel_id) -> supprime l'arène
 _event_busy_fn = None  # Phase 230 : async (guild_id) -> True si un AUTRE event de combat tourne (injecté)
 _event_mention_fn = None  # Phase 235.24 : async (guild, type) -> mention rôles opt-in (/notify + 🔔)
+_echo_fn = None  # Phase 257.1 : async (guild, channel, kind) -> écho silencieux salons actifs
 _alliance_points_fn = None  # Phase 253 : async (guild_id, user_id, damage) -> crédite l'alliance
 
 # Phase 235.16 : WARM-UP — léger sas de préparation au spawn (« le combat commence
@@ -322,11 +323,11 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
           inventory_fn=None, events_channel_fn=None, notif_check_fn=None,
           cleanup_register_fn=None, arena_create_fn=None, arena_delete_fn=None,
           report_fn=None, event_busy_fn=None, event_mention_fn=None,
-          alliance_points_fn=None):
+          alliance_points_fn=None, echo_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _inventory_fn
     global _events_channel_fn, _notif_check_fn, _cleanup_register_fn
     global _arena_create_fn, _arena_delete_fn, _report_fn, _event_busy_fn, _event_mention_fn
-    global _alliance_points_fn
+    global _alliance_points_fn, _echo_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -348,6 +349,7 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
     _event_mention_fn = event_mention_fn
     # Phase 253 : crédit des points d'alliance au combat (injecté depuis bot.py)
     _alliance_points_fn = alliance_points_fn
+    _echo_fn = echo_fn
 
 
 async def init_db():
@@ -804,6 +806,14 @@ async def trigger_daily_boss(
                     msg, int(boss["lifetime_min"]) * 60 + 3600, 'boss_panel')
             except Exception:
                 pass
+
+    # Phase 257.1 : ÉCHO SILENCIEUX (sans ping) dans les salons actifs → le Boss
+    # du Jour est VISIBLE pour les présents sans déranger personne. Fail-open.
+    if _echo_fn is not None:
+        try:
+            await _echo_fn(guild, ch, 'daily_boss')
+        except Exception:
+            pass
 
     # Phase 196 : ping intelligent rotatif APRÈS le panneau (un LayoutView V2 ne
     # peut PAS porter de content/mention → message séparé). Cap 5, opt-out
