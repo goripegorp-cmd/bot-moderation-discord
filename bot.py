@@ -1199,7 +1199,20 @@ async def db_init():
             'CREATE INDEX IF NOT EXISTS idx_event_echo_arena '
             'ON event_echo_msgs(arena_channel_id)'
         )
-        
+
+        # Phase 262 : VERROU DE SPAWN ATOMIQUE (1 seul event de combat à la fois).
+        # PK guild_id → l'INSERT ON CONFLICT DO NOTHING ne réussit que pour le 1er
+        # spawn concurrent (les autres voient rowcount=0 → bail). Court-vécu : le
+        # claim auto-expire (TTL) après que l'event soit inséré ; au-delà, c'est le
+        # verrou _has_any_major_event_running (lecture des tables d'events) qui
+        # sérialise. Pas de release explicite nécessaire (auto-expiration).
+        await db.execute('''CREATE TABLE IF NOT EXISTS active_combat_lock (
+            guild_id INTEGER PRIMARY KEY,
+            event_type TEXT,
+            event_id INTEGER DEFAULT 0,
+            claimed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
+
         # Table des niveaux (pour récompenses automatiques)
         await db.execute('''CREATE TABLE IF NOT EXISTS level_rewards (
             guild_id INTEGER,
@@ -9726,6 +9739,9 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
         # cacherait aussi une arène de mob). Fail-open (anti-serveur-mort) via le helper.
         if await _has_any_major_event_running(guild.id, include_mobs=True):
             return {"ok": False, "error": "⏳ Un événement de combat est déjà en cours — attends qu'il se termine (ou que son timer expire)."}
+        # Phase 262 : CLAIM ATOMIQUE anti-course TOCTOU (2 spawns simultanés).
+        if not await _claim_combat_lock(guild.id, 'boss_raid'):
+            return {"ok": False, "error": "⏳ Un événement de combat démarre à l'instant — réessaie dans un moment."}
 
         # Permissions du bot
         me = guild.me
@@ -42751,7 +42767,8 @@ async def on_ready():
                                       event_mention_fn=_get_event_mention,
                                       alliance_points_fn=_award_alliance_combat_points,
                                       echo_fn=_post_event_echo,
-                                      pet_strike_fn=_pet_strike)
+                                      pet_strike_fn=_pet_strike,
+                                      claim_lock_fn=_claim_combat_lock)
             await daily_bosses_module.init_db()
             daily_bosses_module.register_persistent_views(bot)
             if not daily_bosses_module.daily_boss_task.is_running():
@@ -43002,6 +43019,7 @@ async def on_ready():
                 report_fn=_post_combat_report,
                 event_mention_fn=_get_event_mention,
                 pet_strike_fn=_pet_strike,
+                claim_lock_fn=_claim_combat_lock,
             )
             await monthly_climax_module.init_db()
             monthly_climax_module.register_persistent_views(bot)
@@ -62786,6 +62804,53 @@ async def _has_any_major_event_running(guild_id: int, include_mobs: bool = False
     return False
 
 
+_COMBAT_CLAIM_TTL = "-90 seconds"  # Phase 262 : durée de vie d'un claim de spawn. Court : il
+# ne sert qu'à bloquer la course TOCTOU (2 spawns simultanés AVANT que l'un ait inséré sa
+# ligne). Passé ce délai, l'event est inséré et c'est _has_any_major_event_running (grâce)
+# qui sérialise. Pas de release explicite requis (auto-expiration).
+
+
+async def _claim_combat_lock(guild_id: int, event_type: str = "?", event_id: int = 0) -> bool:
+    """Phase 262 : CLAIM ATOMIQUE de spawn (anti-course TOCTOU). À appeler JUSTE APRÈS
+    le check _has_any_major_event_running et AVANT toute création d'arène/INSERT.
+
+    Retourne True si le claim est acquis (on peut spawn), False sinon (un autre spawn
+    a déjà claim dans la même fenêtre → on N'EMPILE PAS). FAIL-CLOSED : sur erreur DB,
+    retourne False (un event manqué est moins grave qu'un doublon empilé).
+
+    Le pool DB n'a pas de row-lock, mais SQLite sérialise les écritures → l'INSERT
+    ON CONFLICT(guild_id) DO NOTHING ne réussit (rowcount=1) que pour UN seul des
+    spawns concurrents ; les autres voient rowcount=0."""
+    try:
+        async with get_db() as db:
+            # 1) Purge le claim PÉRIMÉ (> TTL) → anti-figement si un spawn a échoué après claim.
+            await db.execute(
+                "DELETE FROM active_combat_lock WHERE guild_id=? AND claimed_at < datetime('now', ?)",
+                (guild_id, _COMBAT_CLAIM_TTL))
+            # 2) Claim atomique conditionnel.
+            cur = await db.execute(
+                "INSERT INTO active_combat_lock(guild_id, event_type, event_id, claimed_at) "
+                "VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(guild_id) DO NOTHING",
+                (guild_id, str(event_type or "?"), int(event_id or 0)))
+            await db.commit()
+            return getattr(cur, "rowcount", 0) == 1
+    except Exception as ex:
+        print(f"[_claim_combat_lock] {ex}")
+        return False  # FAIL-CLOSED : pas de spawn en cas de doute.
+
+
+async def _release_combat_lock(guild_id: int) -> None:
+    """Phase 262 : libère le claim de spawn (OPTIONNEL — il auto-expire en 90 s).
+    Appelé par les finalizers pour permettre au PROCHAIN event de démarrer sans
+    attendre le TTL. Sans danger si la ligne n'existe plus."""
+    try:
+        async with get_db() as db:
+            await db.execute("DELETE FROM active_combat_lock WHERE guild_id=?", (guild_id,))
+            await db.commit()
+    except Exception:
+        pass
+
+
 # ─── VOICE PROTECTION (fondateurs / staff) ─────────────────────────────────────
 
 
@@ -63497,6 +63562,9 @@ async def _start_world_boss(guild) -> dict:
             return {'ok': False, 'error': 'events désactivés'}
         if await _has_any_major_event_running(guild.id):
             return {'ok': False, 'error': 'un event majeur est déjà en cours'}
+        # Phase 262 : CLAIM ATOMIQUE anti-course TOCTOU (2 spawns simultanés).
+        if not await _claim_combat_lock(guild.id, 'world_boss'):
+            return {'ok': False, 'error': 'un event démarre à l\'instant, réessaie'}
 
         # Phase 188 : range l'arène dans LA catégorie « 🎪 Événements » (créée en
         # haut du serveur si besoin). Respecte event_arena_category si configurée.

@@ -66,6 +66,7 @@ _report_fn = None  # Phase 223 : rapports de fin → salon « 📜 chroniques-co
 _arena_create_fn = None  # Phase 228 : crée une arène ÉPHÉMÈRE dédiée par mob (injecté)
 _arena_delete_fn = None  # Phase 228 : supprime l'arène éphémère du mob à la fin (injecté)
 _event_busy_fn = None  # Phase 230 : async (guild_id) -> True si un AUTRE event de combat tourne (injecté)
+_claim_lock_fn = None  # Phase 262 : async (guild_id, type) -> True si claim de spawn acquis (injecté)
 
 # Spawn interval (random entre min et max minutes)
 # Phase 173.1 : plus fréquent (18-30 min au lieu de 30-45) → bien plus de
@@ -414,10 +415,10 @@ _PET_CLICK_CD = 2.0
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
           inventory_fn=None, active_ping_fn=None, arena_ensure_fn=None, report_fn=None,
           arena_create_fn=None, arena_delete_fn=None, event_busy_fn=None,
-          pet_strike_fn=None):
+          pet_strike_fn=None, claim_lock_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _inventory_fn, _active_ping_fn
     global _arena_ensure_fn, _report_fn, _arena_create_fn, _arena_delete_fn
-    global _event_busy_fn, _pet_strike_fn
+    global _event_busy_fn, _pet_strike_fn, _claim_lock_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -431,6 +432,7 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
     _arena_delete_fn = arena_delete_fn
     _event_busy_fn = event_busy_fn
     _pet_strike_fn = pet_strike_fn  # Phase 261 : assist familier (cœur partagé bot.py)
+    _claim_lock_fn = claim_lock_fn  # Phase 262 : claim atomique de spawn (anti-course TOCTOU)
 
 
 async def init_db():

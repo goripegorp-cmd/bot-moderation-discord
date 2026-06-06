@@ -73,6 +73,7 @@ _add_coins = None
 _arena_create_fn = None  # async (guild, kind, title) -> salon texte dédié
 _arena_delete_fn = None  # async (guild, text_channel_id) -> supprime l'arène
 _event_busy_fn = None  # Phase 230 : async (guild_id) -> True si un AUTRE event de combat tourne (injecté)
+_claim_lock_fn = None  # Phase 262 : async (guild_id, type) -> True si claim de spawn acquis (injecté)
 _report_fn = None  # Phase 235.15 : async (guild, title, body) -> récap consolidé dans « 📜 chroniques-combat »
 _event_mention_fn = None  # Phase 235.24 : async (guild, type) -> mention rôles opt-in (/notify + 🔔)
 _pet_strike_fn = None  # Phase 261 (4/4) : async (guild_id, user_id) -> coeur partagé _pet_strike (bot.py)
@@ -294,10 +295,11 @@ def setup(
     story_module=None, npc_module=None, add_coins_fn=None,
     arena_create_fn=None, arena_delete_fn=None, event_busy_fn=None,
     report_fn=None, event_mention_fn=None, pet_strike_fn=None,
+    claim_lock_fn=None,
 ):
     global _bot, _get_db, _db_get, _v2, _story, _npc, _add_coins
     global _arena_create_fn, _arena_delete_fn, _event_busy_fn, _report_fn, _event_mention_fn
-    global _pet_strike_fn
+    global _pet_strike_fn, _claim_lock_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -316,6 +318,8 @@ def setup(
     _event_mention_fn = event_mention_fn
     # Phase 261 (4/4) : cœur partagé d'appui familier (sinon record_pet_assist bail).
     _pet_strike_fn = pet_strike_fn
+    # Phase 262 : claim atomique de spawn (anti-course TOCTOU).
+    _claim_lock_fn = claim_lock_fn
 
 
 async def init_db():
@@ -543,6 +547,14 @@ async def trigger_climax(guild_id: int) -> Optional[int]:
                 return None
         except Exception:
             pass
+    # Phase 262 : CLAIM ATOMIQUE — anti-course TOCTOU (2 spawns simultanés qui passent
+    # tous deux le verrou avant insertion). Si un autre event vient de claim → bail.
+    if _claim_lock_fn is not None:
+        try:
+            if not await _claim_lock_fn(guild_id, 'climax'):
+                return None
+        except Exception:
+            return None  # fail-closed : en cas de doute, ne pas spawn (évite le doublon)
 
     # Get state
     state = await _story.get_state(guild_id)
