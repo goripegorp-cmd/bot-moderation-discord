@@ -14003,6 +14003,51 @@ async def _ensure_notify_role(guild, tier: str) -> Optional[discord.Role]:
         return None
 
 
+async def _backfill_events_role(guild):
+    """Phase 256 : abonne TOUS les membres existants au rôle « 📢 Tous les
+    Événements » (opt-out) — UNE seule fois par serveur (flag de config) — pour
+    que les pings d'événements atteignent l'intégralité du serveur, y compris
+    les membres INACTIFS et HORS-LIGNE. Idempotent, throttlé (anti-429),
+    fail-open. Opt-out individuel ensuite : /notify niveau:🔕 Aucun.
+    À l'arrivée d'un nouveau membre, on_member_join l'abonne aussi."""
+    try:
+        if guild is None:
+            return
+        c = await cfg(guild.id)
+        if int(c.get('events_role_backfilled', 0) or 0) == 1:
+            return
+        role = await _ensure_notify_role(guild, 'all')
+        if role is None:
+            # Perm « Gérer les rôles » manquante → on NE pose PAS le flag, on
+            # réessaiera au prochain boot une fois la perm accordée.
+            return
+        # S'assurer que le cache des membres est peuplé (intent members requis).
+        try:
+            if not guild.chunked:
+                await guild.chunk()
+        except Exception:
+            pass
+        added = 0
+        for member in list(guild.members):
+            try:
+                if member.bot or role in member.roles:
+                    continue
+                # Respecter un opt-out PRÉALABLE (membre ayant coupé « events »
+                # via /notifs) → on ne le réabonne pas de force. Défaut = True.
+                if not await _member_wants_notif(guild.id, member.id, 'events'):
+                    continue
+                await member.add_roles(
+                    role, reason="Phase 256 : abonnement events par défaut (opt-out)")
+                added += 1
+                await asyncio.sleep(0.6)   # throttle doux anti rate-limit
+            except Exception:
+                continue
+        await db_set(guild.id, 'events_role_backfilled', 1)
+        print(f"[events_role_backfill] {guild.name}: +{added} membres abonnés (opt-out)")
+    except Exception as ex:
+        print(f"[events_role_backfill] {ex}")
+
+
 async def _get_event_mention(guild, event_type: str) -> str:
     """Phase 39 : retourne la string de mention appropriée pour ce type d'event.
 
@@ -15015,13 +15060,13 @@ async def restore_active_comebacks():
 
 @bot.tree.command(
     name="notify",
-    description="🔔 Active/désactive les notifications pour les événements"
+    description="🔔 Règle tes notifs d'événements (activées par défaut — 🔕 pour te désabonner)"
 )
 @app_commands.describe(niveau="Niveau de notifications souhaité")
 @app_commands.choices(niveau=[
+    app_commands.Choice(name="📢 Tous les événements — pings complets (par défaut)", value="all"),
     app_commands.Choice(name="🔔 Important — seulement les gros raids", value="important"),
-    app_commands.Choice(name="📢 Tous les événements — pings complets", value="all"),
-    app_commands.Choice(name="🔕 Aucun — désactiver toutes les notifs", value="off"),
+    app_commands.Choice(name="🔕 Aucun — me désabonner de tous les pings", value="off"),
 ])
 async def notify_cmd(i: discord.Interaction, niveau: app_commands.Choice[str]):
     try:
@@ -15044,10 +15089,16 @@ async def notify_cmd(i: discord.Interaction, niveau: app_commands.Choice[str]):
                             removed.append(role.name)
                         except Exception:
                             pass
-            if removed:
-                msg = f"🔕 **Notifications désactivées.**\nRôles retirés : {', '.join(removed)}"
-            else:
-                msg = "🔕 Tu n'avais aucun rôle de notification actif."
+            # Phase 256 : refléter l'opt-out dans la préférence « events » (cohérence
+            # totale avec /notifs et le filtre des mentions individuelles).
+            try:
+                await _set_notif_pref(guild.id, member.id, 'events', False)
+                await event_notif_role_module.sync_member(guild, member, False)
+            except Exception:
+                pass
+            msg = ("🔕 **Tu es désabonné des notifications d'événements.**\n"
+                   "Tu ne seras plus jamais ping pour les events.\n\n"
+                   "💡 Pour réactiver : `/notify niveau:📢 Tous les événements`.")
             return await i.followup.send(msg, ephemeral=True)
 
         # Activer un tier
@@ -15095,11 +15146,18 @@ async def notify_cmd(i: discord.Interaction, niveau: app_commands.Choice[str]):
                 ephemeral=True,
             )
         else:  # all
+            # Phase 256 : réactiver la préférence « events » → cohérence /notifs +
+            # filtre des mentions individuelles, et resynchro du rôle 🔔 legacy.
+            try:
+                await _set_notif_pref(guild.id, member.id, 'events', True)
+                await event_notif_role_module.sync_member(guild, member, True)
+            except Exception:
+                pass
             await i.followup.send(
                 f"📢 **Notifications activées : {target_role.mention}**\n\n"
                 f"Tu seras ping pour **TOUS les événements** :\n"
                 f"⚔️ Boss Raids · 💎 Chasses au trésor · 🎓 Quiz · 📦 Mystery Boxes\n\n"
-                f"_Tu peux désactiver à tout moment avec `/notify niveau:🔕 Aucun`._",
+                f"_Tu peux te désabonner à tout moment avec `/notify niveau:🔕 Aucun`._",
                 ephemeral=True,
             )
     except Exception as ex:
@@ -42226,6 +42284,18 @@ async def on_ready():
         except Exception as ex:
             print(f"[on_ready 256 chain_events] {ex}")
 
+        # Phase 256 : SYSTÈME DE MENTION PRO — abonne TOUS les membres existants
+        # au rôle « 📢 Tous les Événements » (opt-out) une fois par serveur, pour
+        # que chaque event mentionne l'intégralité du serveur (même inactifs /
+        # hors-ligne). Guardé par flag global → ne se relance pas aux reconnexions.
+        try:
+            if not getattr(bot, '_events_role_backfill_started', False):
+                bot._events_role_backfill_started = True
+                for _g in list(bot.guilds):
+                    asyncio.create_task(_backfill_events_role(_g))
+        except Exception as ex:
+            print(f"[on_ready 256 events_role_backfill] {ex}")
+
         # Phase 184 : Donjons instanciés (lobby groupe → salons dédiés → vagues)
         try:
             dungeon_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
@@ -44853,6 +44923,22 @@ async def on_member_join(m):
             await onboarding_module.start_for_member(m)
         except Exception as ex:
             print(f"[on_member_join onboarding] {ex}")
+
+    # ═══ Phase 256 : rôle « 📢 Tous les Événements » OPT-OUT ═══
+    # Chaque nouveau membre est abonné PAR DÉFAUT au rôle de notification des
+    # events → les nouveaux arrivants comprennent tout de suite qu'il se passe
+    # des choses (ils sont ping au 1er event). Opt-out : /notify niveau:🔕 Aucun.
+    if not m.bot:
+        try:
+            # Respecter un opt-out persistant (membre revenu après s'être désabonné
+            # via /notifs). Défaut pour un nouveau venu = True → il est abonné.
+            if await _member_wants_notif(m.guild.id, m.id, 'events'):
+                _ev_role = await _ensure_notify_role(m.guild, 'all')
+                if _ev_role and _ev_role not in m.roles:
+                    await m.add_roles(
+                        _ev_role, reason="Phase 256 : abonnement events par défaut (opt-out)")
+        except Exception as ex:
+            print(f"[on_member_join events_role] {ex}")
 
     # ═══ Phase 139 : Observabilité (join tracking pour retention) ═══
     try:
@@ -60545,20 +60631,19 @@ async def _ping_active_members(guild, channel, *, notif_key='boss_raid',
             except Exception:
                 pass
             chosen.append(uid)
-        # Phase 235.31 : MP PRIVÉ aux opt-in (events significatifs seulement —
-        # boss/world boss/climax/invasion/daily boss ; throttlé + capé + cooldown
-        # par user + fail-open). Strictement opt-in → zéro MP de masse.
-        try:
-            await dm_notify_module.notify_event_dm(
-                guild, (intro or "Un événement vient de démarrer !"),
-                channel, notif_key=notif_key,
-                view_factory=lambda: _dm_optin_view(guild))
-        except Exception:
-            pass
+        # Phase 256 : PLUS AUCUN MP d'événement (directive owner — les messages
+        # privés sont trop intrusifs et relous). La notification passe UNIQUEMENT
+        # par la mention du rôle « 📢 Tous les Événements » ci-dessous, qui est
+        # désormais OPT-OUT (auto-attribué à l'arrivée + backfill de tous les
+        # membres) → un seul ping propre qui atteint TOUT LE MONDE : actifs,
+        # inactifs, hors-ligne ET nouveaux arrivants. Opt-out : /notify niveau:🔕.
         # Phase 235.24 : on ping AUSSI les rôles opt-in (/notify + 🔔 par-type) de CE
         # type d'event → même si AUCUN actif n'est choisi, les abonnés sont prévenus.
         role_mention = ""
         try:
+            # Phase 256 : garantir que le rôle events opt-out EXISTE (créé au besoin)
+            # pour que CHAQUE event mentionne bien tout le monde, dès le 1er spawn.
+            await _ensure_notify_role(guild, 'all')
             role_mention = await _get_event_mention(guild, notif_key)
         except Exception:
             role_mention = ""
@@ -60588,9 +60673,10 @@ async def _ping_active_members(guild, channel, *, notif_key='boss_raid',
                 f"venez tenter votre chance !")
         line = "\n".join(parts)
         try:
+            # Phase 256 : plus de bouton « 📩 opt-in MP » (on ne fait PLUS de MP
+            # d'événement). Le ping = une mention de rôle propre, rien d'autre.
             msg = await channel.send(
                 line,
-                view=_dm_optin_view(guild),  # Phase 235.31 : bouton 📩 opt-in MP
                 allowed_mentions=discord.AllowedMentions(
                     users=True, everyone=False, roles=True),
             )
@@ -71334,6 +71420,18 @@ async def notifs_cmd(i: discord.Interaction):
                         try:
                             await event_notif_role_module.sync_member(
                                 ii.guild, ii.user, new_val)
+                        except Exception:
+                            pass
+                        # Phase 256 : piloter AUSSI le rôle « 📢 Tous les Événements »
+                        # (celui qui est mentionné à CHAQUE event) → opt-out cohérent
+                        # entre /notifs et /notify, et entre la préférence et le rôle.
+                        try:
+                            _allr = await _ensure_notify_role(ii.guild, 'all')
+                            if _allr and isinstance(ii.user, discord.Member):
+                                if new_val and _allr not in ii.user.roles:
+                                    await ii.user.add_roles(_allr, reason="opt-in events (/notifs)")
+                                elif (not new_val) and _allr in ii.user.roles:
+                                    await ii.user.remove_roles(_allr, reason="opt-out events (/notifs)")
                         except Exception:
                             pass
                     label_ = next((l for c, _e, l in _NOTIF_CATEGORIES if c == cat), cat)
