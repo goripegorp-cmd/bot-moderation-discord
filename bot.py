@@ -10501,18 +10501,20 @@ async def _alliance_combat_ranking_lines(guild, top: int = 8) -> str:
 
 async def _handle_boss_attack(i: discord.Interaction, event_id: int):
     """Gère un clic sur le bouton Attaquer."""
-    # Phase 251.24 anti-429 : cooldown PAR JOUEUR avant tout réseau (anti-matraquage).
+    # Phase 257.3 : ACK D'ABORD (defer) — acquitter le clic AVANT le cooldown, sinon
+    # un clic noyé par le cooldown affiche « Échec de l'interaction ». Le defer est une
+    # requête légère (route interaction) → pas de tempête 429 ; l'anti-429 reste assuré
+    # car un clic noyé ne fait AUCUN followup.
+    try:
+        await i.response.defer(ephemeral=True)
+    except discord.InteractionResponded:
+        pass
+    except Exception:
+        pass
+    # Phase 251.24 anti-429 : cooldown PAR JOUEUR APRÈS l'ack (clic noyé = 0 followup).
     if _boss_atk_too_soon(i, "raid"):
         return
     try:
-        # ACK immédiat pour éviter "Échec de l'interaction" (Discord 3s timeout)
-        try:
-            await i.response.defer(ephemeral=True)
-        except discord.InteractionResponded:
-            pass
-        except Exception:
-            pass
-
         # Charger l'event
         async with get_db() as db:
             async with db.execute(
@@ -62377,10 +62379,12 @@ class WorldBossAttackView(View):
         self.add_item(b2)
 
     async def _on_attack(self, i: discord.Interaction):
-        # Phase 251.24 anti-429 : cooldown PAR JOUEUR avant tout réseau (anti-matraquage).
-        if _boss_atk_too_soon(i, "wb"):
-            return
+        # Phase 257.3 : ACK D'ABORD (defer) — acquitter le clic AVANT le cooldown, sinon
+        # un clic noyé affiche « Échec de l'interaction ». Defer = requête légère.
         if not await _safe_defer(i):
+            return
+        # Phase 251.24 anti-429 : cooldown PAR JOUEUR APRÈS l'ack (clic noyé = 0 followup).
+        if _boss_atk_too_soon(i, "wb"):
             return
         try:
             if not i.guild:

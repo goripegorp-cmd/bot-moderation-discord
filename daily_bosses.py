@@ -1422,9 +1422,15 @@ class DailyBossAttackButton(
         return cls(int(match["event_id"]))
 
     async def callback(self, btn_i: discord.Interaction):
-        # Phase 251.24 — ANTI-429 : cooldown PAR JOUEUR, AVANT tout appel réseau.
-        # Un clic trop rapproché est ignoré SILENCIEUSEMENT (zéro requête) → coupe net
-        # le matraquage qui, sinon, déclenche une tempête de 429 amplifiée par les retries.
+        # Phase 257.3 : ACK D'ABORD (defer) — acquitter le clic AVANT le cooldown, sinon
+        # un clic noyé affiche « Échec de l'interaction ». Defer = requête légère (route
+        # interaction, PAS la webhook) → pas de tempête 429 ; l'anti-429 reste assuré car
+        # un clic noyé ne fait AUCUN followup.
+        try:
+            await btn_i.response.defer(ephemeral=True)
+        except (discord.NotFound, discord.HTTPException, discord.InteractionResponded):
+            pass
+        # Phase 251.24 — ANTI-429 : cooldown PAR JOUEUR APRÈS l'ack (clic noyé = 0 followup).
         try:
             _key = (btn_i.guild.id if btn_i.guild else 0,
                     btn_i.user.id if btn_i.user else 0)
@@ -1433,10 +1439,6 @@ class DailyBossAttackButton(
                 return
             _last_user_attack[_key] = _now
         except Exception:
-            pass
-        try:
-            await btn_i.response.defer(ephemeral=True)
-        except (discord.NotFound, discord.HTTPException, discord.InteractionResponded):
             pass
 
         if btn_i.guild is None:

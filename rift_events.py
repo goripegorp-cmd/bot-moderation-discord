@@ -337,17 +337,21 @@ async def spawn_rift(guild: discord.Guild) -> bool:
 
 # ─── Contribution (le bouton Canaliser) ────────────────────────────────────────
 async def _handle_channel(i: discord.Interaction, rift_id: int):
-    # 1) Cooldown PAR JOUEUR en TÊTE, avant tout réseau (anti-429).
+    # Phase 257.3 : ACK D'ABORD (defer) — on acquitte le clic AVANT le cooldown, sinon
+    # un clic noyé par le cooldown n'est jamais acquitté → « Échec de l'interaction ».
+    # Le defer est une requête LÉGÈRE (route interaction, PAS la webhook) → aucun risque
+    # de tempête 429 ; l'anti-429 reste assuré car un clic noyé ne fait AUCUN followup.
+    try:
+        await i.response.defer(ephemeral=True)
+    except Exception:
+        pass
+    # Cooldown PAR JOUEUR APRÈS l'ack → clic noyé = AUCUNE erreur + AUCUN followup.
     try:
         key = (rift_id, i.user.id)
         now = datetime.now(timezone.utc).timestamp()
         if now - _last_click.get(key, 0.0) < _CLICK_CD:
             return
         _last_click[key] = now
-    except Exception:
-        pass
-    try:
-        await i.response.defer(ephemeral=True)
     except Exception:
         pass
     try:

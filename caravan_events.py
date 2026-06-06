@@ -334,19 +334,22 @@ async def spawn_caravan(guild: discord.Guild) -> bool:
 
 # ─── Claim d'un sceau (le bouton) ──────────────────────────────────────────────
 async def _handle_role(i: discord.Interaction, carav_id: int, role: str):
+    # Phase 257.3 : ACK D'ABORD (defer) — acquitter le clic AVANT toute garde/cooldown,
+    # sinon un clic noyé affiche « Échec de l'interaction ». Defer = requête légère ;
+    # l'anti-429 reste assuré (un clic noyé ne fait aucun followup).
+    try:
+        await i.response.defer(ephemeral=True)
+    except Exception:
+        pass
     if role not in _ROLE_META:
         return
-    # Cooldown PAR JOUEUR en tête (anti-429).
+    # Cooldown PAR JOUEUR APRÈS l'ack → clic noyé = AUCUNE erreur + AUCUN followup.
     try:
         key = (carav_id, i.user.id)
         nowf = datetime.now(timezone.utc).timestamp()
         if nowf - _last_click.get(key, 0.0) < _CLICK_CD:
             return
         _last_click[key] = nowf
-    except Exception:
-        pass
-    try:
-        await i.response.defer(ephemeral=True)
     except Exception:
         pass
     try:

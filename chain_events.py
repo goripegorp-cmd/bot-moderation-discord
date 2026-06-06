@@ -296,16 +296,20 @@ async def spawn_chain(guild: discord.Guild) -> bool:
 
 # ─── Ajout d'un maillon (le bouton) ────────────────────────────────────────────
 async def _handle_link(i: discord.Interaction, chain_id: int):
+    # Phase 257.3 : ACK D'ABORD (defer) — acquitter le clic AVANT le cooldown, sinon
+    # un clic noyé affiche « Échec de l'interaction ». Defer = requête légère ;
+    # l'anti-429 reste assuré (un clic noyé ne fait aucun followup).
+    try:
+        await i.response.defer(ephemeral=True)
+    except Exception:
+        pass
+    # Cooldown PAR JOUEUR APRÈS l'ack → clic noyé = AUCUNE erreur + AUCUN followup.
     try:
         key = (chain_id, i.user.id)
         nowf = datetime.now(timezone.utc).timestamp()
         if nowf - _last_click.get(key, 0.0) < _CLICK_CD:
             return
         _last_click[key] = nowf
-    except Exception:
-        pass
-    try:
-        await i.response.defer(ephemeral=True)
     except Exception:
         pass
     try:
