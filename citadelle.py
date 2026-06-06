@@ -1139,12 +1139,106 @@ async def _passe(i: discord.Interaction, args: list):
     await _nav(i, await build_passe_panel(i, status))
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PHASE F — Sanctuaire Personnel (housing : on collecte et place des modules)
+# ═══════════════════════════════════════════════════════════════════════════════
+# key -> (emoji, nom, prix Éclats). Les modules possédés sont « placés » dans le sanctuaire.
+SANCTU_MODULES = {
+    "cheminee":     ("🔥", "Cheminée",            60),
+    "biblio":       ("📚", "Bibliothèque",        80),
+    "jardin":       ("🌳", "Jardin intérieur",    80),
+    "statue":       ("🗿", "Statue",             100),
+    "armes":        ("⚔️", "Salle d'armes",      120),
+    "autel":        ("🕯️", "Autel",             120),
+    "trophees":     ("🏆", "Galerie de trophées", 150),
+    "fontaine":     ("⛲", "Fontaine",           150),
+    "chambre":      ("🛏️", "Chambre royale",     200),
+    "observatoire": ("🔭", "Observatoire",       220),
+    "forge_perso":  ("🔨", "Forge privée",       250),
+    "trone":        ("🐉", "Trône du Dragon",    500),
+}
+_SANCTU_ORDER = list(SANCTU_MODULES.keys())
+
+
+async def _sanctu_buy(gid: int, uid: int, key: str) -> str:
+    d = SANCTU_MODULES.get(key)
+    if not d:
+        return "❓ Module inconnu."
+    emoji, name, price = d
+    owned = await owned_cosmetics(gid, uid, "sanctuaire_module")
+    if key in owned:
+        return f"🏯 **{emoji} {name}** est déjà construit dans ton sanctuaire."
+    if await spend_eclats(gid, uid, price):
+        await grant_cosmetic(gid, uid, "sanctuaire_module", key)
+        return f"🏗️ **{emoji} {name}** construit ! (−{price} {ECLATS_EMOJI})"
+    bal = await get_eclats(gid, uid)
+    return f"❌ Il te manque des {ECLATS_EMOJI} — **{name}** coûte `{price}`, tu as `{bal}`."
+
+
+async def build_sanctu_panel(i: discord.Interaction, status: str | None = None):
+    LayoutView = _v2.get("LayoutView")
+    v2_title = _v2.get("title"); v2_subtitle = _v2.get("subtitle"); v2_body = _v2.get("body")
+    v2_divider = _v2.get("divider"); v2_container = _v2.get("container")
+    if not all((LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container)):
+        return None
+    gid, uid = i.guild.id, i.user.id
+    eclats = await get_eclats(gid, uid)
+    owned = set(await owned_cosmetics(gid, uid, "sanctuaire_module"))
+    placed = "  ".join(SANCTU_MODULES[k][0] for k in _SANCTU_ORDER if k in owned)
+    placed_display = placed if placed else "_(sanctuaire encore vide — construis ton premier module !)_"
+
+    items = [v2_title("🏯  Sanctuaire Personnel")]
+    if status:
+        items.append(v2_body(status))
+    items.append(v2_subtitle("Bâtis ton espace : chaque module construit y reste à vie."))
+    items.append(v2_body(
+        f"**🏛️ Niveau du sanctuaire : `{len(owned)}/{len(SANCTU_MODULES)}`**\n"
+        f"{placed_display}"
+    ))
+    items.append(v2_divider())
+    legend = "  ·  ".join(
+        f"{SANCTU_MODULES[k][0]} {SANCTU_MODULES[k][1]}" + (" ✅" if k in owned else f" `{SANCTU_MODULES[k][2]}`")
+        for k in _SANCTU_ORDER
+    )
+    items.append(v2_body(legend))
+    items.append(v2_body(f"{ECLATS_EMOJI} **{ECLATS_NAME} :** `{eclats:,}`"))
+    items.append(v2_divider())
+
+    row = []
+    for k in _SANCTU_ORDER:
+        emoji, name, _price = SANCTU_MODULES[k]
+        style = discord.ButtonStyle.success if k in owned else discord.ButtonStyle.secondary
+        row.append(Button(label=name[:18], emoji=emoji, style=style,
+                          custom_id=f"cite:sanctuaire:buy:{k}"))
+        if len(row) == 4:
+            items.append(discord.ui.ActionRow(*row)); row = []
+    if row:
+        items.append(discord.ui.ActionRow(*row))
+    items.append(_retour_row())
+
+    class _Sanctu(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=600)
+            self.add_item(v2_container(*items, color=0x8E5A2B))
+
+    return _Sanctu()
+
+
+async def _sanctuaire(i: discord.Interaction, args: list):
+    gid, uid = i.guild.id, i.user.id
+    status = None
+    if len(args) >= 2 and args[0] == "buy":
+        status = await _sanctu_buy(gid, uid, args[1])
+    await _nav(i, await build_sanctu_panel(i, status))
+
+
 # Registre des salles OUVERTES (les autres → teaser). On le remplit phase par phase.
 _SECTION_HANDLERS = {
     "forge": _forge,
     "carte": _carte,
     "emblemes": _emblemes,
     "passe": _passe,
+    "sanctuaire": _sanctuaire,
 }
 
 
