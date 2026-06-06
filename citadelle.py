@@ -20,6 +20,8 @@ ouverte affiche un teaser clair et encourageant (le menu explique tout dès J1).
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import discord
 from discord.ui import Button
 
@@ -107,6 +109,13 @@ async def init_db():
                 "CREATE TABLE IF NOT EXISTS citadelle_active ("
                 "guild_id INTEGER, user_id INTEGER, slot TEXT, item_key TEXT, "
                 "PRIMARY KEY (guild_id, user_id, slot))"
+            )
+            # Phase E : Passe de Saison (track cosmétique gratuit, reset mensuel)
+            await db.execute(
+                "CREATE TABLE IF NOT EXISTS citadelle_passe ("
+                "guild_id INTEGER, user_id INTEGER, season TEXT, "
+                "points INTEGER DEFAULT 0, claimed TEXT DEFAULT '', "
+                "PRIMARY KEY (guild_id, user_id, season))"
             )
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_cite_cosmo "
@@ -301,6 +310,7 @@ async def award(guild_id: int, user_id: int, eclats: int = 0, materials: dict | 
     try:
         if eclats:
             await grant_eclats(guild_id, user_id, eclats)
+            await grant_passe_points(guild_id, user_id, eclats)  # Phase E : alimente la passe
         for mk, q in (materials or {}).items():
             await grant_material(guild_id, user_id, mk, q)
     except Exception as ex:
@@ -971,11 +981,170 @@ async def _emblemes(i: discord.Interaction, args: list):
     return await _nav(i, await build_embleme_panel(i))
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PHASE E — Passe de Saison de la Cité (GRATUITE, reset mensuel, 100 % cosmétique)
+# ═══════════════════════════════════════════════════════════════════════════════
+def _season_key() -> str:
+    now = datetime.now(timezone.utc)
+    return f"{now.year:04d}-{now.month:02d}"
+
+
+# Paliers : (seuil_points, label, éclats, [(kind, key) cosmétiques à débloquer])
+PASSE_TIERS = [
+    (20,  "30 Éclats",                  30, []),
+    (50,  "Teinture Turquoise",          0, [("dye", "turquoise")]),
+    (90,  "50 Éclats",                  50, []),
+    (140, "Cadre Étoilé",                0, [("frame", "etoiles")]),
+    (200, "80 Éclats",                  80, []),
+    (280, "Thème Royal",                 0, [("theme", "royal")]),
+    (370, "Symbole Dragon",              0, [("emb_symbol", "dragon")]),
+    (480, "120 Éclats",                120, []),
+    (620, "Cadre Couronne",              0, [("frame", "couronne")]),
+    (800, "Thème Prisme + 200 Éclats", 200, [("theme", "prisme")]),
+]
+
+
+async def get_passe(gid: int, uid: int):
+    """(points, set(claimed_idx)) pour la SAISON COURANTE (auto-crée la ligne)."""
+    season = _season_key()
+    if _get_db is None:
+        return 0, set()
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO citadelle_passe (guild_id, user_id, season, points, claimed) "
+                "VALUES (?,?,?,0,'')", (int(gid), int(uid), season))
+            await db.commit()
+            async with db.execute(
+                "SELECT points, claimed FROM citadelle_passe "
+                "WHERE guild_id=? AND user_id=? AND season=?",
+                (int(gid), int(uid), season)) as cur:
+                row = await cur.fetchone()
+        pts = int(row[0]) if row else 0
+        claimed = set(int(x) for x in (row[1] or "").split(",") if x.strip().isdigit())
+        return pts, claimed
+    except Exception:
+        return 0, set()
+
+
+async def grant_passe_points(gid: int, uid: int, n: int) -> None:
+    if _get_db is None or not n:
+        return
+    season = _season_key()
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT INTO citadelle_passe (guild_id, user_id, season, points, claimed) "
+                "VALUES (?,?,?,?,'') "
+                "ON CONFLICT(guild_id, user_id, season) DO UPDATE SET points = MAX(0, points + ?)",
+                (int(gid), int(uid), season, int(n), int(n)))
+            await db.commit()
+    except Exception as ex:
+        print(f"[citadelle grant_passe_points] {ex}")
+
+
+async def _passe_claim(gid: int, uid: int, idx: int) -> str:
+    if idx < 0 or idx >= len(PASSE_TIERS):
+        return "❓ Palier inconnu."
+    threshold, label, eclats, grants = PASSE_TIERS[idx]
+    pts, claimed = await get_passe(gid, uid)
+    if idx in claimed:
+        return "✅ Palier déjà réclamé."
+    if pts < threshold:
+        return f"🔒 Palier {idx+1} : il te faut `{threshold}` pts (tu as `{pts}`)."
+    season = _season_key()
+    ok = False
+    try:
+        async with _get_db() as db:
+            cur = await db.execute(
+                "UPDATE citadelle_passe SET claimed = claimed || ? "
+                "WHERE guild_id=? AND user_id=? AND season=? AND points >= ? "
+                "AND (',' || claimed || ',') NOT LIKE ?",
+                (f"{idx},", int(gid), int(uid), season, threshold, f"%,{idx},%"))
+            await db.commit()
+            ok = getattr(cur, "rowcount", 0) == 1
+    except Exception as ex:
+        print(f"[citadelle _passe_claim] {ex}")
+        return "❌ Erreur, réessaie."
+    if not ok:
+        return "✅ Palier déjà réclamé."
+    if eclats:
+        await grant_eclats(gid, uid, eclats)
+    for kind, key in grants:
+        await grant_cosmetic(gid, uid, kind, key)
+    return f"🎁 Palier {idx+1} réclamé : **{label}** !"
+
+
+async def build_passe_panel(i: discord.Interaction, status: str | None = None):
+    LayoutView = _v2.get("LayoutView")
+    v2_title = _v2.get("title"); v2_subtitle = _v2.get("subtitle"); v2_body = _v2.get("body")
+    v2_divider = _v2.get("divider"); v2_container = _v2.get("container")
+    if not all((LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container)):
+        return None
+    gid, uid = i.guild.id, i.user.id
+    pts, claimed = await get_passe(gid, uid)
+    season = _season_key()
+
+    items = [v2_title(f"🎟️  Passe de Saison — {season}")]
+    if status:
+        items.append(v2_body(status))
+    items.append(v2_subtitle("GRATUITE. Gagne des points en participant aux events/à l'activité → réclame des récompenses cosmétiques. Remise à zéro chaque mois."))
+    items.append(v2_body(f"⭐ **Points de passe :** `{pts}`"))
+    items.append(v2_divider())
+
+    lines = []
+    claimable = []
+    for idx, (th, label, _ec, _gr) in enumerate(PASSE_TIERS):
+        if idx in claimed:
+            mark = "✅"
+        elif pts >= th:
+            mark = "🎁"
+            claimable.append(idx)
+        else:
+            mark = "🔒"
+        lines.append(f"{mark} **P{idx+1}** _(≥{th} pts)_ — {label}")
+    items.append(v2_body("\n".join(lines)))
+    items.append(v2_divider())
+
+    if claimable:
+        row = []
+        for idx in claimable[:10]:
+            row.append(Button(label=f"🎁 Réclamer P{idx+1}", style=discord.ButtonStyle.success,
+                              custom_id=f"cite:passe:claim:{idx}"))
+            if len(row) == 5:
+                items.append(discord.ui.ActionRow(*row)); row = []
+        if row:
+            items.append(discord.ui.ActionRow(*row))
+    else:
+        items.append(v2_body("-# Continue à participer pour atteindre le prochain palier !"))
+    items.append(_retour_row())
+
+    class _Passe(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=600)
+            self.add_item(v2_container(*items, color=0x9B59B6))
+
+    return _Passe()
+
+
+async def _passe(i: discord.Interaction, args: list):
+    gid, uid = i.guild.id, i.user.id
+    status = None
+    if len(args) >= 2 and args[0] == "claim":
+        try:
+            idx = int(args[1])
+        except Exception:
+            idx = -1
+        status = await _passe_claim(gid, uid, idx)
+    await _nav(i, await build_passe_panel(i, status))
+
+
 # Registre des salles OUVERTES (les autres → teaser). On le remplit phase par phase.
 _SECTION_HANDLERS = {
     "forge": _forge,
     "carte": _carte,
     "emblemes": _emblemes,
+    "passe": _passe,
 }
 
 
