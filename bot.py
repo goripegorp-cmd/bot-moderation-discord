@@ -62836,7 +62836,12 @@ async def _claim_combat_lock(guild_id: int, event_type: str = "?", event_id: int
             return getattr(cur, "rowcount", 0) == 1
     except Exception as ex:
         print(f"[_claim_combat_lock] {ex}")
-        return False  # FAIL-CLOSED : pas de spawn en cas de doute.
+        # FAIL-OPEN sur ERREUR INFRA (table absente / DB lockée) : on autorise le spawn
+        # et on laisse le verrou-grâce _has_any_major_event_running sérialiser. Un
+        # claim cassé ne doit JAMAIS figer TOUS les events (cauchemar Phase 174.1).
+        # NB : un CONFLIT légitime (un autre event tient le verrou) renvoie rowcount=0
+        # plus haut (return False) → ce n'est PAS ce chemin d'exception.
+        return True
 
 
 async def _release_combat_lock(guild_id: int) -> None:

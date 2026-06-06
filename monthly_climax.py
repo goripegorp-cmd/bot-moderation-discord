@@ -552,9 +552,9 @@ async def trigger_climax(guild_id: int) -> Optional[int]:
     if _claim_lock_fn is not None:
         try:
             if not await _claim_lock_fn(guild_id, 'climax'):
-                return None
+                return None  # CONFLIT : un autre event tient déjà le verrou → on n'empile pas
         except Exception:
-            return None  # fail-closed : en cas de doute, ne pas spawn (évite le doublon)
+            pass  # erreur infra du claim → fail-OPEN (le verrou-grâce a déjà filtré)
 
     # Get state
     state = await _story.get_state(guild_id)

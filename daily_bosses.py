@@ -755,9 +755,9 @@ async def trigger_daily_boss(
     if _claim_lock_fn is not None:
         try:
             if not await _claim_lock_fn(guild.id, 'daily_boss'):
-                return None
+                return None  # CONFLIT : un autre event tient déjà le verrou → on n'empile pas
         except Exception:
-            return None  # fail-closed : en cas de doute, ne pas spawn (évite le doublon)
+            pass  # erreur infra du claim → fail-OPEN (le verrou-grâce a déjà filtré)
 
     boss = get_boss_def(boss_id) if boss_id else _pick_boss_for_slot()
     if not boss:
