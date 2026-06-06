@@ -488,6 +488,10 @@ async def _smart_combat_ping(guild: discord.Guild, exclude_opt_out: bool = True)
     Retourne une courte ligne `🔔 <@id> … — venez tenter votre chance !` ou
     une chaîne vide si personne n'est éligible. FAIL-OPEN : toute erreur → "".
     """
+    # Phase 257 : DÉSACTIVÉ — plus AUCUNE mention individuelle de membre (directive
+    # owner : « les mentions sont très relou »). Le boss du jour reste visible dans
+    # le salon ; seuls les volontaires abonnés au 🔔 par-type sont notifiés.
+    return ""
     if _get_db is None or guild is None:
         return ""
     try:

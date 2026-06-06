@@ -98,6 +98,8 @@ async def notify_event_dm(guild, title: str, channel, *, notif_key="boss",
     """DM les membres OPT-IN (events significatifs seulement). Throttlé + capé +
     fail-open. `view_factory()` → une View optionnelle (bouton stop) jointe au MP.
     Retourne le nombre de MP envoyés."""
+    # Phase 257 : MP d'ÉVÉNEMENT DÉSACTIVÉ (directive owner — zéro MP membre).
+    return 0
     if _get_db is None or guild is None:
         return 0
     if (notif_key or "").lower() not in _DM_EVENT_TYPES:
@@ -159,6 +161,8 @@ async def send_weekly_recaps(guild, build_text, *, cap=40) -> int:
     donc aucun MP de masse. `build_text(member)` (coroutine) renvoie le corps du
     MP (ou '' pour sauter ce membre, ex. inactif). Cappé + throttlé + fail-open.
     Retourne le nombre de MP envoyés."""
+    # Phase 257 : RÉCAP HEBDO EN MP DÉSACTIVÉ (directive owner — zéro MP membre).
+    return 0
     if _get_db is None or guild is None:
         return 0
     try:

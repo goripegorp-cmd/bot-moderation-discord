@@ -697,6 +697,8 @@ async def _send_letter_to_user(
 
 async def generate_and_send_letters_for_guild(guild_id: int) -> int:
     """Envoie les lettres de la semaine aux abonnés actifs. Retourne le count."""
+    # Phase 257 : LETTRES PNJ EN MP DÉSACTIVÉES (directive owner — zéro MP membre).
+    return 0
     if _bot is None or _get_db is None:
         return 0
     guild = _bot.get_guild(guild_id)

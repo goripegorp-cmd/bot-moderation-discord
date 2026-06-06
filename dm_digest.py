@@ -273,6 +273,8 @@ async def send_urgent_now(
 async def send_digest_for_user(member: discord.Member) -> int:
     """Envoie le digest accumulé pour un user. Renvoie le nb d'items envoyés.
     Mark items as sent."""
+    # Phase 257 : DIGEST MP DÉSACTIVÉ (directive owner — zéro MP membre).
+    return 0
     if member is None or member.bot or _get_db is None or _v2 is None:
         return 0
     try:

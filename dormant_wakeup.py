@@ -225,6 +225,8 @@ async def _send_dormant_dm(
 
     Retourne True si DM envoyé OK.
     """
+    # Phase 257 : WAKE-UP MP DÉSACTIVÉ (directive owner — zéro MP membre).
+    return False
     if _get_db is None or not member or member.bot:
         return False
     try:

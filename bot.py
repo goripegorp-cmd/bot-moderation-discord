@@ -11793,10 +11793,9 @@ async def _check_badges_and_ranks(guild, participants: list, victory: bool, tier
                         badge_lines.append(f"{b['emoji']} **{b['name']}** — _{b['desc']}_")
                 if badge_lines:
                     try:
-                        await member.send(
-                            f"🎉 **Nouveaux badges débloqués sur {guild.name} !**\n\n" +
-                            "\n".join(badge_lines)
-                        )
+                        # Phase 257 : DM de badges DÉSACTIVÉ (directive owner — zéro
+                        # MP membre). Les badges restent visibles via /achievements.
+                        pass
                     except Exception:
                         pass  # DM fermés
 
@@ -13132,6 +13131,10 @@ async def personal_event_dispatcher():
     Choisit un membre actif récent et lui propose un événement personnel.
     Phase 35 : passé de 15min → 10min checks pour plus de fréquence.
     """
+    # Phase 257 : ÉVÉNEMENTS PERSO (MP + ping individuel en salon) DÉSACTIVÉS
+    # (directive owner — zéro MP membre, zéro mention individuelle). Les events
+    # publics (boss/trésor/quiz/world boss…) font vivre le serveur sans déranger.
+    return
     try:
         for guild in bot.guilds:
             try:
@@ -14048,51 +14051,84 @@ async def _backfill_events_role(guild):
         print(f"[events_role_backfill] {ex}")
 
 
-async def _get_event_mention(guild, event_type: str) -> str:
-    """Phase 39 : retourne la string de mention appropriée pour ce type d'event.
+# Phase 257 — MENTIONS RESTREINTES (directive owner : « les mentions sont très
+# relou »). Seuls les GROS events rares pingent le rôle « 📢 Tous les Événements »
+# (qui notifie TOUT le serveur, opt-out), et ce ping est PLAFONNÉ globalement.
+# Les petits events fréquents (trésor, quiz, mystery, mob, boss du jour, events
+# collaboratifs) ne pingent QUE les volontaires abonnés au 🔔 par-type.
+_BIG_EVENT_TYPES = {
+    'boss_raid', 'world_boss', 'climax', 'monthly_climax', 'invasion', 'world_invasion',
+}
+_BIG_EVENT_PING_MIN_HOURS = 6   # 1 ping @Tous / 6 h MAX, tous gros events confondus
 
-    event_type : 'boss_raid' / 'treasure_hunt' / 'quiz' / 'mystery_box'
-    Pour boss_raid : ping @Important + @All
-    Pour autres : ping @All uniquement
+
+async def _big_event_ping_allowed(guild_id) -> bool:
+    """Phase 257 : PLAFOND GLOBAL du ping @Tous. Le rôle « 📢 Tous les Événements »
+    (qui notifie tout le serveur) ne peut être mentionné qu'une fois toutes les
+    _BIG_EVENT_PING_MIN_HOURS — tous gros events confondus — pour ne JAMAIS spammer,
+    même si plusieurs gros events tombent rapprochés. Claim : lecture→écriture du
+    timestamp en cfg (les gros events sont rares → course négligeable). FAIL-OPEN :
+    sur erreur, on autorise (un gros event rare mérite son ping)."""
+    try:
+        c = await cfg(guild_id)
+        last = c.get('last_big_event_ping_ts')
+        nowdt = datetime.now(timezone.utc)
+        if last:
+            try:
+                ld = datetime.fromisoformat(str(last))
+                if ld.tzinfo is None:
+                    ld = ld.replace(tzinfo=timezone.utc)
+                if (nowdt - ld) < timedelta(hours=_BIG_EVENT_PING_MIN_HOURS):
+                    return False
+            except Exception:
+                pass
+        await db_set(guild_id, 'last_big_event_ping_ts', nowdt.isoformat())
+        return True
+    except Exception:
+        return True
+
+
+async def _get_event_mention(guild, event_type: str) -> str:
+    """Phase 257 : mention PRO et restreinte pour le spawn d'un event.
+
+    - GROS events rares (boss raid, world boss, climax, invasion) → ping le rôle
+      « 📢 Tous les Événements » (+ @Important), qui touche TOUT le monde (opt-out),
+      MAIS plafonné à 1 ping / 6 h tous gros events confondus (_big_event_ping_allowed).
+    - PETITS events fréquents (trésor, quiz, mystery, mob, boss du jour, collaboratifs)
+      → AUCUN ping de masse : seuls les volontaires abonnés au 🔔 par-type sont notifiés.
+    AUCUNE mention individuelle de membre (gérée ailleurs, désormais désactivée).
     """
     try:
         mentions = []
-        c = await cfg(guild.id)
-        all_role_id = int(c.get('notify_role_all_id', 0) or 0)
-        important_role_id = int(c.get('notify_role_important_id', 0) or 0)
+        et = (event_type or '').lower()
+        is_big = et in _BIG_EVENT_TYPES
 
-        if event_type == 'boss_raid':
-            # Big event → ping les 2 tiers
-            if important_role_id:
-                role = guild.get_role(important_role_id)
-                if role:
-                    mentions.append(role.mention)
-            if all_role_id:
-                role = guild.get_role(all_role_id)
-                if role:
-                    mentions.append(role.mention)
-        else:
-            # Light event → ping seulement le tier "all"
-            if all_role_id:
-                role = guild.get_role(all_role_id)
-                if role:
-                    mentions.append(role.mention)
-
-        # Phase 235.22 : ping AUSSI le rôle 🔔 par-type (opt-in via le bouton « Me
-        # notifier » sous l'event). create=False → le rôle n'existe que si ≥1 membre
-        # s'est abonné → on ne ping QUE les volontaires (zéro spam aléatoire).
+        # (1) Rôle 🔔 par-type (opt-in PUR) — toujours autorisé : le membre l'a demandé.
+        # create=False → n'existe que si ≥1 membre abonné → zéro spam.
         try:
-            _cat = _EVENT_TYPE_TO_NOTIFY.get(event_type)
+            _cat = _EVENT_TYPE_TO_NOTIFY.get(et)
             if _cat:
                 _tr = await _event_notify_role(guild, _cat, create=False)
                 if _tr and _tr.mention not in mentions:
                     mentions.append(_tr.mention)
         except Exception:
             pass
+
+        # (2) Rôle @Tous (+ @Important) — UNIQUEMENT pour les GROS events, ET plafonné.
+        if is_big:
+            c = await cfg(guild.id)
+            all_role = guild.get_role(int(c.get('notify_role_all_id', 0) or 0))
+            imp_role = guild.get_role(int(c.get('notify_role_important_id', 0) or 0))
+            # Ne consomme le plafond QUE si un vrai rôle existe à mentionner.
+            if (all_role or imp_role) and await _big_event_ping_allowed(guild.id):
+                if imp_role and imp_role.mention not in mentions:
+                    mentions.append(imp_role.mention)
+                if all_role and all_role.mention not in mentions:
+                    mentions.append(all_role.mention)
+
         if not mentions:
             return ""
-        # Phase 235.7/22 : rappel DISCRET sous chaque ping. Le bouton « 🔔 Me notifier »
-        # (dans le panneau de l'event) abonne/désabonne en 1 clic pour CE type précis.
+        # Rappel DISCRET : le bouton « 🔔 Me notifier » abonne/désabonne en 1 clic.
         return (" ".join(mentions)
                 + "\n-# 🔔 Règle tes alertes : bouton **Me notifier** sous l'event "
                   "(ou **/notify**). Reclique = désabonné.")
@@ -14438,6 +14474,10 @@ async def _build_wakeup_mention_line(guild, max_count: int = 3) -> str:
 
     Retourne "" si aucun candidat (pas de wake-up nécessaire).
     """
+    # Phase 257 : DÉSACTIVÉ — plus AUCUNE mention individuelle de membre (directive
+    # owner : « les mentions sont très relou »). La visibilité des events passe par
+    # le rôle @Tous (gros events seulement, plafonné) + le 🔔 par-type opt-in.
+    return ""
     # Hard cap : jamais plus de 3 mentions individuelles dans 1 message
     safe_max = min(max_count, 3)
     candidates = await _get_wakeup_candidates(guild, max_count=safe_max)
@@ -14769,6 +14809,11 @@ async def _send_onboarding_dm(member):
     But : présenter le système d'events au nouveau membre, lui faire choisir
     sa classe et son niveau de notifications. 3 boutons clairs.
     """
+    # Phase 257 : DM d'onboarding DÉSACTIVÉ (directive owner — zéro MP membre). Les
+    # nouveaux sont accueillis dans le salon de bienvenue + abonnés au rôle events
+    # (Phase 256) → ils voient les events sans recevoir de MP. Le choix de classe /
+    # les réglages restent accessibles via le hub.
+    return
     try:
         await asyncio.sleep(180)  # 3 min de délai (laisser le membre s'installer)
 
@@ -14921,6 +14966,9 @@ async def comeback_dm_task():
     - Pas reçu de comeback DM dans les 7 derniers jours
     - Étaient un peu actifs avant (au moins 5 messages cumulés)
     """
+    # Phase 257 : COMEBACK EN MP DÉSACTIVÉ (directive owner — zéro MP membre). Les
+    # dormants sont ramenés par la vie du serveur (events visibles), pas par MP.
+    return
     try:
         for guild in bot.guilds:
             try:
@@ -48819,10 +48867,9 @@ async def _check_phase113_badges(guild: discord.Guild, user_id: int):
                         lines.append(f"{b['emoji']} **{b['name']}** — _{b['desc']}_")
                 if lines:
                     try:
-                        await member.send(
-                            f"🎉 **Nouveaux badges débloqués sur {guild.name} !**\n\n"
-                            + "\n".join(lines)
-                        )
+                        # Phase 257 : DM de badges DÉSACTIVÉ (directive owner — zéro
+                        # MP membre). Les badges restent visibles via /achievements.
+                        pass
                     except Exception:
                         pass
         except Exception:
@@ -58897,7 +58944,10 @@ async def _notify_achievement_unlock(guild_id: int, user_id: int, ach):
             timestamp=datetime.now(timezone.utc),
         )
         e.set_footer(text=f"{guild.name} · /achievements pour voir tout")
-        await member.send(embed=e)
+        # Phase 257 : DM d'achievement DÉSACTIVÉ (directive owner — zéro MP membre).
+        # L'achievement reste visible via /achievements + annonce publique discrète
+        # pour les raretés epic+ ci-dessous.
+        pass
     except Exception:
         pass
 
@@ -60582,7 +60632,10 @@ async def _ping_active_members(guild, channel, *, notif_key='boss_raid',
                 active_ids = [int(r[0]) for r in await cur.fetchall()]
         _cd_cut = datetime.now(timezone.utc) - timedelta(hours=int(cooldown_hours))
         _seen = set()
-        for uid in (recalled_ids + active_ids):
+        # Phase 257 : mentions INDIVIDUELLES DÉSACTIVÉES (directive owner — « les
+        # mentions sont très relou »). `chosen` reste vide → la notification passe
+        # UNIQUEMENT par le rôle (gros events @Tous plafonné, sinon 🔔 par-type).
+        for uid in ():
             if len(chosen) >= cap:
                 break
             if uid in _seen:
@@ -65449,6 +65502,9 @@ async def _push_daily_quest_to_member(guild, member) -> bool:
 
     Retourne True si envoyé, False si skipped (DM fermé, déjà push, etc.).
     """
+    # Phase 257 : PUSH QUÊTE DU JOUR EN MP DÉSACTIVÉ (directive owner — zéro MP
+    # membre). Les quêtes restent visibles dans le hub (panneau « Mon activité »).
+    return False
     try:
         c = await cfg(guild.id)
         if not c.get('event_enabled', False):
@@ -70400,6 +70456,9 @@ async def _build_wakeup_mention_line_smart(guild, event_kind: str, max_count: in
     `reward_hint` (optionnel) : si fourni, on précise « tenter de gagner X ».
     Cap 3 mentions max + cooldown 48h + opt-out (TOS Discord respect).
     """
+    # Phase 257 : DÉSACTIVÉ — plus AUCUNE mention individuelle de membre (directive
+    # owner). La portée des events passe par le rôle @Tous (gros events, plafonné).
+    return ""
     try:
         all_candidates = await _get_wakeup_candidates(guild, max_count=20)
         if not all_candidates:
@@ -75550,6 +75609,9 @@ async def _build_user_recap_dm(guild_id: int, user_id: int) -> Optional[discord.
 @tasks.loop(hours=1)
 async def weekly_recap_task():
     """Dimanche entre 21h-22h FR, envoie un recap DM à chaque actif de la semaine."""
+    # Phase 257 : RÉCAP HEBDO EN MP DÉSACTIVÉ (directive owner — zéro MP membre).
+    # Le récap reste consultable dans le hub (panneau « Mon activité »).
+    return
     try:
         try:
             from zoneinfo import ZoneInfo

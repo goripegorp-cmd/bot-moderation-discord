@@ -398,7 +398,7 @@ async def hero_journey_task():
                     msg = (f"🧭 **{guild.name}** — palier validé : **{last['key']}** "
                            f"(+`{gained}` 🪙) !{nxt_txt}")
                 try:
-                    await member.send(msg, view=_JourneyEntryView())
+                    pass  # Phase 257 : notification MP DÉSACTIVÉE (zéro MP membre)
                 except Exception:
                     pass  # DM fermés → tant pis, le bouton onboarding reste dispo
             except Exception:
