@@ -650,7 +650,7 @@ async def build_carte_panel(i: discord.Interaction, status: str | None = None):
     items.append(v2_divider())
     # ─ Aperçu de la carte ─
     items.append(v2_body(
-        f"{name_line}\n"
+        f"{emblem_string(active)}  {name_line}\n"
         f"🎨 Thème : **{t_emoji} {t_name}**  ·  🖼️ Cadre : **{f_emoji} {f_name}**\n"
         f"🩹 Teinture : {dye_txt}\n"
         f"{devise_txt}"
@@ -796,10 +796,186 @@ async def _carte(i: discord.Interaction, args: list):
     return await _nav(i, await build_carte_panel(i))
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PHASE D — Atelier d'Emblèmes (forme × symbole × couleur ≈ 384 combinaisons)
+# ═══════════════════════════════════════════════════════════════════════════════
+EMB_SHAPES = {
+    "ecu":      ("🛡️", "Écu",       0),
+    "banniere": ("🚩", "Bannière",  0),
+    "sceau":    ("🔰", "Sceau",    60),
+    "blason":   ("🏵️", "Blason",  100),
+}
+EMB_SYMBOLS = {
+    "epee":     ("⚔️", "Épées",     0),
+    "etoile":   ("🌟", "Étoile",    0),
+    "loup":     ("🐺", "Loup",     40),
+    "aigle":    ("🦅", "Aigle",    60),
+    "flamme":   ("🔥", "Flamme",   40),
+    "lune":     ("🌙", "Lune",     40),
+    "soleil":   ("☀️", "Soleil",   40),
+    "foudre":   ("⚡", "Foudre",   60),
+    "rose":     ("🌹", "Rose",     40),
+    "dragon":   ("🐉", "Dragon",   80),
+    "crane":    ("💀", "Crâne",    80),
+    "couronne": ("👑", "Couronne", 150),
+}
+EMB_COLORS = {
+    "or":     ("🟡", "Or",     0xCBA135,   0),
+    "azur":   ("🔵", "Azur",   0x3498DB,   0),
+    "sang":   ("🔴", "Sang",   0xC0392B,  40),
+    "foret":  ("🟢", "Forêt",  0x27AE60,  40),
+    "onyx":   ("⚫", "Onyx",   0x2B2D31,  60),
+    "argent": ("⚪", "Argent", 0xBDC3C7,  60),
+    "royal":  ("🟣", "Royal",  0x8E44AD,  80),
+    "prisme": ("🌈", "Prisme", 0xE91E63, 300),
+}
+_EMB_CATS = {
+    "shape":  (EMB_SHAPES,  list(EMB_SHAPES),  "Forme",    "emb_shape",  "ecu"),
+    "symbol": (EMB_SYMBOLS, list(EMB_SYMBOLS), "Symbole",  "emb_symbol", "epee"),
+    "color":  (EMB_COLORS,  list(EMB_COLORS),  "Couleur",  "emb_color",  "or"),
+}
+
+
+def _emb_state(active: dict):
+    sh = active.get("emb_shape", "ecu") if active.get("emb_shape") in EMB_SHAPES else "ecu"
+    sy = active.get("emb_symbol", "epee") if active.get("emb_symbol") in EMB_SYMBOLS else "epee"
+    co = active.get("emb_color", "or") if active.get("emb_color") in EMB_COLORS else "or"
+    return sh, sy, co
+
+
+def emblem_string(active: dict) -> str:
+    sh, sy, co = _emb_state(active)
+    return f"{EMB_COLORS[co][0]}{EMB_SHAPES[sh][0]}{EMB_SYMBOLS[sy][0]}"
+
+
+async def build_embleme_panel(i: discord.Interaction, status: str | None = None):
+    LayoutView = _v2.get("LayoutView")
+    v2_title = _v2.get("title"); v2_subtitle = _v2.get("subtitle"); v2_body = _v2.get("body")
+    v2_divider = _v2.get("divider"); v2_container = _v2.get("container")
+    if not all((LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container)):
+        return None
+    gid, uid = i.guild.id, i.user.id
+    eclats = await get_eclats(gid, uid)
+    active = await get_active(gid, uid)
+    sh, sy, co = _emb_state(active)
+    color = EMB_COLORS[co][2]
+
+    items = [v2_title("🛡️  Atelier d'Emblèmes")]
+    if status:
+        items.append(v2_body(status))
+    items.append(v2_subtitle("Compose un emblème unique — forme × symbole × couleur (cosmétique)."))
+    items.append(v2_divider())
+    items.append(v2_body(
+        f"# {emblem_string(active)}\n"
+        f"🛡️ Forme : **{EMB_SHAPES[sh][1]}**  ·  ✨ Symbole : **{EMB_SYMBOLS[sy][1]}**  ·  "
+        f"🎨 Couleur : **{EMB_COLORS[co][1]}**"
+    ))
+    items.append(v2_divider())
+    items.append(v2_body(f"{ECLATS_EMOJI} **{ECLATS_NAME} :** `{eclats:,}`"))
+    items.append(discord.ui.ActionRow(
+        Button(label="🛡️ Forme", style=discord.ButtonStyle.primary, custom_id="cite:emblemes:shape"),
+        Button(label="✨ Symbole", style=discord.ButtonStyle.primary, custom_id="cite:emblemes:symbol"),
+        Button(label="🎨 Couleur", style=discord.ButtonStyle.primary, custom_id="cite:emblemes:color"),
+    ))
+    items.append(_retour_row())
+
+    class _Emb(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=600)
+            self.add_item(v2_container(*items, color=color))
+
+    return _Emb()
+
+
+async def _build_emb_picker(i: discord.Interaction, cat: str, status: str | None = None):
+    LayoutView = _v2.get("LayoutView")
+    v2_title = _v2.get("title"); v2_subtitle = _v2.get("subtitle"); v2_body = _v2.get("body")
+    v2_divider = _v2.get("divider"); v2_container = _v2.get("container")
+    info = _EMB_CATS.get(cat)
+    if not info:
+        return await build_embleme_panel(i)
+    catalog, order, label, slot, default = info
+    gid, uid = i.guild.id, i.user.id
+    eclats = await get_eclats(gid, uid)
+    owned = set(await owned_cosmetics(gid, uid, slot))
+    active = (await get_active(gid, uid)).get(slot, default)
+
+    items = [v2_title(f"{label} de l'emblème")]
+    if status:
+        items.append(v2_body(status))
+    items.append(v2_subtitle("Possédé ✅ ou gratuit ⭐ = applique en 1 clic · sinon coûte des Éclats."))
+    legend = "  ·  ".join(
+        f"{catalog[k][0]} {catalog[k][1]}" + (" ✅" if (k in owned or catalog[k][-1] == 0) else f" `{catalog[k][-1]}`")
+        for k in order
+    )
+    items.append(v2_body(legend))
+    items.append(v2_body(f"{ECLATS_EMOJI} **{ECLATS_NAME} :** `{eclats:,}`"))
+    items.append(v2_divider())
+
+    row = []
+    for k in order:
+        meta = catalog[k]
+        style = (discord.ButtonStyle.success if k == active
+                 else discord.ButtonStyle.primary if (k in owned or meta[-1] == 0)
+                 else discord.ButtonStyle.secondary)
+        row.append(Button(label=meta[1][:18], emoji=meta[0], style=style,
+                          custom_id=f"cite:emblemes:{cat}:eq:{k}"))
+        if len(row) == 4:
+            items.append(discord.ui.ActionRow(*row)); row = []
+    if row:
+        items.append(discord.ui.ActionRow(*row))
+    items.append(discord.ui.ActionRow(
+        Button(label="⬅️ Retour à l'emblème", style=discord.ButtonStyle.secondary, custom_id="cite:emblemes"),
+    ))
+
+    class _EmbPick(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=600)
+            self.add_item(v2_container(*items, color=0xCBA135))
+
+    return _EmbPick()
+
+
+async def _emb_apply(gid: int, uid: int, cat: str, key: str) -> str:
+    info = _EMB_CATS.get(cat)
+    if not info:
+        return "❓ Catégorie inconnue."
+    catalog, _order, _label, slot, _default = info
+    meta = catalog.get(key)
+    if not meta:
+        return "❓ Choix inconnu."
+    emoji, nm = meta[0], meta[1]
+    price = meta[-1]
+    owned = await owned_cosmetics(gid, uid, slot)
+    if key in owned or price == 0:
+        await set_active(gid, uid, slot, key)
+        return f"✅ **{emoji} {nm}** appliqué !"
+    if await spend_eclats(gid, uid, price):
+        await grant_cosmetic(gid, uid, slot, key)
+        await set_active(gid, uid, slot, key)
+        return f"🛒 **{emoji} {nm}** acheté et appliqué ! (−{price} {ECLATS_EMOJI})"
+    bal = await get_eclats(gid, uid)
+    return f"❌ Il te manque des {ECLATS_EMOJI} — **{nm}** coûte `{price}`, tu as `{bal}`."
+
+
+async def _emblemes(i: discord.Interaction, args: list):
+    gid, uid = i.guild.id, i.user.id
+    if not args:
+        return await _nav(i, await build_embleme_panel(i))
+    cat = args[0]
+    if cat in _EMB_CATS:
+        if len(args) >= 3 and args[1] == "eq":
+            status = await _emb_apply(gid, uid, cat, args[2])
+            return await _nav(i, await _build_emb_picker(i, cat, status))
+        return await _nav(i, await _build_emb_picker(i, cat))
+    return await _nav(i, await build_embleme_panel(i))
+
+
 # Registre des salles OUVERTES (les autres → teaser). On le remplit phase par phase.
 _SECTION_HANDLERS = {
     "forge": _forge,
     "carte": _carte,
+    "emblemes": _emblemes,
 }
 
 
