@@ -64708,6 +64708,8 @@ class FlashTreasureView(View):
 
             # Phase 94 : message de succès avec streak
             success_msg = f"⚡ **Tu as saisi le trésor !**\n💰 **+{total_reward}** 🪙 ajoutés à ton solde."
+            if _vc_bonus:
+                success_msg += f" 🔊 _(+{_vc_bonus} bonus vocal)_"
             if streak_count > 0:
                 success_msg += (
                     f"\n🔥 **Streak ×{streak_count + 1}** — bonus `+{streak_bonus}` 🪙 "
@@ -66418,9 +66420,12 @@ async def _revert_spotlight(spotlight_id: int):
         guild = bot.get_guild(int(gid))
         vc = guild.get_channel(int(ch_id)) if guild else None
         # Phase 258 : le spotlight ne renomme plus → ne ré-édite QUE si un nom
-        # « ⭐- » résiduel traîne (ancien spotlight d'avant la 258). Sinon no-op.
+        # « ⭐- » résiduel traîne (ancien spotlight d'avant la 258) ET QUE le vocal
+        # est VIDE (directive owner ABSOLUE : ne JAMAIS toucher un vocal occupé). Un
+        # résidu sur un vocal occupé sera nettoyé quand il se videra (ou à la main).
         if (vc and isinstance(vc, discord.VoiceChannel) and orig_name
-                and vc.name != orig_name[:100]):
+                and vc.name != orig_name[:100]
+                and not [m for m in vc.members if not m.bot]):
             try:
                 await vc.edit(name=orig_name[:100], reason="Voice Spotlight Phase 45 revert")
             except Exception as ex:
