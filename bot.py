@@ -11218,6 +11218,87 @@ async def _handle_pet_assist(i: discord.Interaction, event_id: int):
             pass
 
 
+async def _pet_strike(guild_id: int, user_id: int) -> dict:
+    """Phase 261 : CŒUR PARTAGÉ de l'assist familier (réutilisé par TOUS les events de
+    combat : boss du jour, world boss, climax, mobs…). Gère : familier actif + cooldown
+    90 s PARTAGÉ (_pet_assist_cooldown) + salve (actif=burst / passif=salve douce + SOIN
+    du joueur) + XP du pet. FAIL-OPEN.
+
+    Renvoie un dict :
+      {ok:True, dmg, heal, label, note}  → le familier peut frapper (dégâts à appliquer
+                                            par l'appelant sur SON événement)
+      {ok:False, msg}                    → pas de familier / en cooldown (msg à afficher)
+    """
+    try:
+        pet = await _get_active_pet(guild_id, user_id)
+        if not pet:
+            return {"ok": False, "msg": (
+                "🐾 Tu n'as **pas de familier actif**.\n"
+                "_Équipe-en un dans ton `/inventory` (menu 🐾) — il combattra à tes côtés ! "
+                "Pas encore de familier ? Gagne des **œufs** en event, éclos-les via `/pet`._")}
+        key = (guild_id, user_id)
+        now_ts = time.time()
+        CD = 90
+        last = _pet_assist_cooldown.get(key, 0)
+        pet_name = pet.get('custom_name') or pet.get('name', 'Familier')
+        if now_ts - last < CD:
+            remaining = int(CD - (now_ts - last))
+            return {"ok": False, "msg": (
+                f"🐾 **{pet_name}** reprend son souffle — encore `{remaining}s` "
+                f"avant de pouvoir réintervenir.")}
+        _pet_assist_cooldown[key] = now_ts
+        lvl = int(pet.get('level', 1) or 1)
+        try:
+            pet_bonus = float(pet.get('bonus_value', 0.0) or 0.0)
+        except Exception:
+            pet_bonus = 0.0
+        perk = str(pet.get('perk_type', 'passive') or 'passive')
+        if perk == 'active':
+            pet_dmg = int((20 + lvl * 7) * (1.0 + pet_bonus * 2.0))
+        else:
+            pet_dmg = int((12 + lvl * 5) * (1.0 + pet_bonus))
+        pet_dmg = max(5, min(pet_dmg, 800))
+        # Soin (familiers PASSIFS) : rend des PV au joueur (UPDATE direct, capé à max_hp).
+        heal_done = 0
+        if perk != 'active':
+            try:
+                async with get_db() as _hdb:
+                    async with _hdb.execute(
+                        'SELECT hp, max_hp FROM player_inventory WHERE guild_id=? AND user_id=?',
+                        (guild_id, user_id),
+                    ) as _hc:
+                        _hr = await _hc.fetchone()
+                if _hr:
+                    _chp = int(_hr[0] or 0)
+                    _mhp = int(_hr[1] or 100)
+                    if _chp < _mhp:
+                        heal_done = min(_mhp - _chp, int(10 + lvl * 3 + _mhp * pet_bonus))
+                        if heal_done > 0:
+                            async with get_db() as _hdb:
+                                await _hdb.execute(
+                                    'UPDATE player_inventory SET hp=? WHERE guild_id=? AND user_id=?',
+                                    (_chp + heal_done, guild_id, user_id),
+                                )
+                                await _hdb.commit()
+            except Exception:
+                heal_done = 0
+        try:
+            await _pet_evo_award(guild_id, user_id, 'pet_assist')
+        except Exception:
+            pass
+        if heal_done > 0:
+            note = f"💚 Familier **passif** — il te **soigne de `{heal_done}` PV** !"
+        elif perk == 'active':
+            note = "⚡ Familier **actif** — grosse salve !"
+        else:
+            note = ""
+        return {"ok": True, "dmg": pet_dmg, "heal": heal_done,
+                "label": f"{pet.get('emoji', '🐾')} {pet_name}", "note": note}
+    except Exception as ex:
+        print(f"[_pet_strike] {ex}")
+        return {"ok": False, "msg": "🐾 Familier indisponible un instant, réessaie."}
+
+
 _br_panel_refresh: dict[int, float] = {}  # Phase 251.3 anti-429 : throttle refresh boss raid
 
 
@@ -42665,7 +42746,8 @@ async def on_ready():
                                       event_busy_fn=_has_any_major_event_running,
                                       event_mention_fn=_get_event_mention,
                                       alliance_points_fn=_award_alliance_combat_points,
-                                      echo_fn=_post_event_echo)
+                                      echo_fn=_post_event_echo,
+                                      pet_strike_fn=_pet_strike)
             await daily_bosses_module.init_db()
             daily_bosses_module.register_persistent_views(bot)
             if not daily_bosses_module.daily_boss_task.is_running():

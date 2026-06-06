@@ -74,6 +74,8 @@ _event_busy_fn = None  # Phase 230 : async (guild_id) -> True si un AUTRE event 
 _event_mention_fn = None  # Phase 235.24 : async (guild, type) -> mention rôles opt-in (/notify + 🔔)
 _echo_fn = None  # Phase 257.1 : async (guild, channel, kind) -> écho silencieux salons actifs
 _alliance_points_fn = None  # Phase 253 : async (guild_id, user_id, damage) -> crédite l'alliance
+_pet_strike_fn = None  # Phase 261 : async (guild_id, user_id) -> dict assist familier (injecté)
+_last_pet_click = {}  # Phase 261 : (guild_id, user_id) -> ts (anti-429 du bouton 🐾)
 
 # Phase 235.16 : WARM-UP — léger sas de préparation au spawn (« le combat commence
 # dans X s » demandé par l'owner : recevoir le ping, lire le butin, s'équiper,
@@ -323,11 +325,11 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
           inventory_fn=None, events_channel_fn=None, notif_check_fn=None,
           cleanup_register_fn=None, arena_create_fn=None, arena_delete_fn=None,
           report_fn=None, event_busy_fn=None, event_mention_fn=None,
-          alliance_points_fn=None, echo_fn=None):
+          alliance_points_fn=None, echo_fn=None, pet_strike_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _inventory_fn
     global _events_channel_fn, _notif_check_fn, _cleanup_register_fn
     global _arena_create_fn, _arena_delete_fn, _report_fn, _event_busy_fn, _event_mention_fn
-    global _alliance_points_fn, _echo_fn
+    global _alliance_points_fn, _echo_fn, _pet_strike_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -350,6 +352,7 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
     # Phase 253 : crédit des points d'alliance au combat (injecté depuis bot.py)
     _alliance_points_fn = alliance_points_fn
     _echo_fn = echo_fn
+    _pet_strike_fn = pet_strike_fn  # Phase 261 : assist familier (cœur partagé bot.py)
 
 
 async def init_db():
@@ -944,6 +947,8 @@ def _build_boss_layout(
         items.append(discord.ui.ActionRow(
             Button(label="⚔️ Attaquer", style=discord.ButtonStyle.danger,
                    custom_id=f"dboss_atk:{event_id}"),
+            Button(label="🐾 Familier", style=discord.ButtonStyle.success,
+                   custom_id=f"dboss_pet:{event_id}"),
             Button(label="🔔 Me notifier", style=discord.ButtonStyle.secondary,
                    custom_id="evtnotif:boss"),
         ))
@@ -1495,11 +1500,123 @@ class DailyBossAttackButton(
                 pass
 
 
+async def record_pet_assist(guild_id: int, user_id: int) -> dict:
+    """Phase 261 : le FAMILIER du joueur frappe le boss du jour (assist).
+    Réutilise le cœur PARTAGÉ _pet_strike_fn (familier actif + cooldown 90 s + soin
+    passif), applique les dégâts à daily_boss_events SANS consommer le quota
+    d'attaques, crédite l'alliance, et résout si le boss tombe. FAIL-OPEN."""
+    if _get_db is None or _pet_strike_fn is None:
+        return {"ok": False, "msg": "🐾 Familier indisponible un instant."}
+    active = await get_active_boss(guild_id)
+    if not active:
+        return {"ok": False, "msg": "❌ Aucun boss du jour actif."}
+    event_id = active["event_id"]
+    _wu = _warmup_until.get(event_id, 0)
+    if _wu and datetime.now(timezone.utc).timestamp() < _wu:
+        return {"ok": False, "msg": "⏳ Le boss se prépare — ton familier patiente un instant."}
+    strike = await _pet_strike_fn(guild_id, user_id)
+    if not strike.get("ok"):
+        return {"ok": False, "msg": strike.get("msg", "🐾 Familier indisponible.")}
+    dmg = max(0, min(int(strike.get("dmg", 0) or 0), int(active["hp_current"])))
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT INTO daily_boss_attackers (event_id, user_id, damage_dealt, attack_count) "
+                "VALUES (?, ?, ?, 0) "
+                "ON CONFLICT(event_id, user_id) DO UPDATE SET "
+                "damage_dealt = damage_dealt + ?, last_attack_at = CURRENT_TIMESTAMP",
+                (event_id, user_id, dmg, dmg),
+            )
+            await db.execute(
+                "UPDATE daily_boss_events SET hp_current = MAX(0, hp_current - ?), "
+                "damage_total = damage_total + ? WHERE id=?",
+                (dmg, dmg, event_id),
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[record_pet_assist] {ex}")
+        return {"ok": False, "msg": "❌ Erreur, réessaie."}
+    if _alliance_points_fn is not None and dmg > 0:
+        try:
+            await _alliance_points_fn(guild_id, user_id, dmg)
+        except Exception:
+            pass
+    updated = await get_active_boss(guild_id)
+    dead = (updated is None) or (updated["hp_current"] <= 0)
+    if dead:
+        try:
+            await resolve_daily_boss(event_id)
+        except Exception:
+            pass
+    text = f"🐾 **{strike.get('label', 'Familier')}** bondit et inflige `{dmg}` dégâts au boss !"
+    if strike.get("note"):
+        text += f"\n{strike['note']}"
+    if dead:
+        text += "\n🎉 **Coup final — boss vaincu !**"
+    return {"ok": True, "text": text}
+
+
+class DailyBossPetButton(
+    discord.ui.DynamicItem[Button],
+    template=r"dboss_pet:(?P<event_id>\d+)",
+):
+    """Phase 261 : bouton 🐾 Familier sur le boss du jour (persistent, defer-first)."""
+
+    def __init__(self, event_id: int):
+        super().__init__(
+            Button(label="🐾 Familier", style=discord.ButtonStyle.success,
+                   custom_id=f"dboss_pet:{event_id}")
+        )
+        self.event_id = event_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["event_id"]))
+
+    async def callback(self, btn_i: discord.Interaction):
+        try:
+            await btn_i.response.defer(ephemeral=True)
+        except (discord.NotFound, discord.HTTPException, discord.InteractionResponded):
+            pass
+        # Anti-429 : cooldown léger PAR JOUEUR (dédié au 🐾) AVANT tout followup.
+        try:
+            _key = (btn_i.guild.id if btn_i.guild else 0, btn_i.user.id if btn_i.user else 0)
+            _now = datetime.now(timezone.utc).timestamp()
+            if _now - _last_pet_click.get(_key, 0.0) < _ATTACK_COOLDOWN:
+                return
+            _last_pet_click[_key] = _now
+        except Exception:
+            pass
+        if btn_i.guild is None:
+            try:
+                await btn_i.followup.send("❌ Serveur uniquement.", ephemeral=True)
+            except Exception:
+                pass
+            return
+        try:
+            res = await record_pet_assist(btn_i.guild.id, btn_i.user.id)
+            if not res.get("ok"):
+                await btn_i.followup.send(res.get("msg", "🐾 Indisponible."), ephemeral=True)
+                return
+            try:
+                await _refresh_boss_panel(btn_i.guild, self.event_id)
+            except Exception:
+                pass
+            await btn_i.followup.send(res["text"], ephemeral=True)
+        except Exception as ex:
+            print(f"[dboss_pet callback] {ex}")
+            try:
+                await btn_i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
 def register_persistent_views(bot_instance):
     if bot_instance is None:
         return
     try:
         bot_instance.add_dynamic_items(DailyBossAttackButton)
+        bot_instance.add_dynamic_items(DailyBossPetButton)  # Phase 261 : 🐾 Familier
     except Exception as ex:
         print(f"[daily_bosses register_persistent_views] {ex}")
 
