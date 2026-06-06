@@ -11262,7 +11262,7 @@ async def _refresh_boss_message(guild, event_id: int, *, force: bool = False):
 # ─────────────────────────── Helper envoi V2 + ping ───────────────────────────
 
 async def _send_layout_with_ping(channel, layout_view, ping_content=None, *,
-                                 allowed_mentions=None, delete_after=None):
+                                 allowed_mentions=None, delete_after=None, ping_view=None):
     """Phase 175 : envoie un panneau Components V2 (LayoutView) + un ping optionnel.
 
     ⚠️ BUG SYSTÉMIQUE corrigé : un LayoutView V2 NE PEUT PAS coexister avec du
@@ -11277,6 +11277,7 @@ async def _send_layout_with_ping(channel, layout_view, ping_content=None, *,
         try:
             await channel.send(
                 content=ping_content,
+                view=ping_view,  # Phase 258.2 : bouton 🔔/🔕 sous le ping (None = aucun)
                 allowed_mentions=allowed_mentions or discord.AllowedMentions.none(),
                 delete_after=delete_after,
             )
@@ -14162,12 +14163,33 @@ class EventsOptOutView(View):
     'events'). Persistant (custom_id stable → survit aux reboots). Permet à l'owner de
     « savoir qui ne veut pas » : ceux qui cliquent se désabonnent, les autres restent."""
 
-    def __init__(self):
+    def __init__(self, event_type: str = None):
         super().__init__(timeout=None)
-        b = Button(label="🔕 Ne plus me notifier", style=discord.ButtonStyle.secondary,
+        # Phase 258.2 : 🔔 toggle PAR-TYPE — « être ping pour CE type d'event ou non ».
+        # custom_id evtnotif:<cat> → géré EN LIVE par ce callback (defer-first) ET par le
+        # DynamicItem EventNotifyButton après reboot → jamais d'« Échec de l'interaction ».
+        self._cat = None
+        try:
+            if event_type:
+                self._cat = _EVENT_TYPE_TO_NOTIFY.get(str(event_type).lower())
+        except Exception:
+            self._cat = None
+        if self._cat:
+            nb = Button(label="🔔 Me notifier (ce type)", style=discord.ButtonStyle.success,
+                        custom_id=f"evtnotif:{self._cat}")
+            nb.callback = self._on_notify
+            self.add_item(nb)
+        b = Button(label="🔕 Plus aucun event", style=discord.ButtonStyle.secondary,
                    custom_id="events_optout")
         b.callback = self._on_optout
         self.add_item(b)
+
+    async def _on_notify(self, i: discord.Interaction):
+        # _toggle_event_notify défère en TÊTE → pas d'échec d'interaction.
+        try:
+            await _toggle_event_notify(i, self._cat)
+        except Exception as ex:
+            print(f"[EventsOptOutView notify] {ex}")
 
     async def _on_optout(self, i: discord.Interaction):
         try:
@@ -16081,6 +16103,7 @@ async def _drop_mystery_box(guild) -> bool:
                 ch, _MysteryLayout(), send_content,
                 allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False),
                 delete_after=LIFETIME,
+                ping_view=EventsOptOutView('mystery_box'),
             )
             # Phase 69 : register persistent — survit au reboot
             try:
@@ -60999,7 +61022,7 @@ async def _ping_active_members(guild, channel, *, notif_key='boss_raid',
             # (1 clic = opt-out propre, sans commande).
             msg = await channel.send(
                 line,
-                view=EventsOptOutView(),
+                view=EventsOptOutView(notif_key),
                 allowed_mentions=discord.AllowedMentions(
                     users=True, everyone=False, roles=True),
             )
@@ -63154,6 +63177,7 @@ async def _start_world_boss(guild) -> dict:
                 msg = await _send_layout_with_ping(
                     arena_ch, layout, send_content,
                     allowed_mentions=discord.AllowedMentions(roles=True, users=True, everyone=False),
+                    ping_view=EventsOptOutView('world_boss'),
                 )
             else:
                 # Fallback embed legacy si build échoue
@@ -68055,6 +68079,7 @@ async def _start_game_night(guild) -> bool:
                     hub_ch, _GnAnnounceLayout(), wakeup_line if wakeup_line else None,
                     allowed_mentions=discord.AllowedMentions(users=True, roles=False, everyone=False),
                     delete_after=LIFETIME_ANNOUNCE,
+                    ping_view=EventsOptOutView('game_night'),
                 )
                 await _register_for_cleanup(gn_announce_msg, LIFETIME_ANNOUNCE, 'game_night_announce')
         except Exception as ex:
