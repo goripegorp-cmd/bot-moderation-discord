@@ -16382,6 +16382,92 @@ async def _collect_live_events(guild_id: int) -> list:
     except Exception:
         pass
 
+    # Phase 257.4 : compléter la tuile avec TOUS les types d'events restants.
+    # Mob hunts (mob_spawns)
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM mob_spawns WHERE guild_id=? AND status='alive' "
+                "AND datetime(expires_at) > datetime('now')",
+                (guild_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if row and int(row[0] or 0) > 0:
+            lines.append(f"🐗 **{int(row[0])} mob(s)** en chasse")
+    except Exception:
+        pass
+
+    # Boss Climax mensuel (climax_events)
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT boss_id, hp_current, hp_max FROM climax_events "
+                "WHERE guild_id=? AND status='active' "
+                "AND datetime(ends_at) > datetime('now') ORDER BY id DESC LIMIT 1",
+                (guild_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if row:
+            bid, chp, mhp = row
+            lines.append(f"🔥 **Boss Climax** · {bid} {int(chp or 0)}/{int(mhp or 1)} HP")
+    except Exception:
+        pass
+
+    # Invasion du serveur (invasion_events)
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM invasion_events WHERE guild_id=? AND status='active' "
+                "ORDER BY id DESC LIMIT 1",
+                (guild_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if row:
+            lines.append("🚨 **Invasion du serveur** en cours — tous à l'arène !")
+    except Exception:
+        pass
+
+    # Events COLLABORATIFS (rift / caravane / chaîne) — ils ont besoin de monde
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT energy, target FROM rift_events WHERE guild_id=? AND ended=0 "
+                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now')) "
+                "ORDER BY id DESC LIMIT 1",
+                (guild_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if row:
+            lines.append(f"🌀 **Faille Convergente** · {int(row[0] or 0):,}/{int(row[1] or 1):,} énergie")
+    except Exception:
+        pass
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT stage, stages_target FROM caravan_events WHERE guild_id=? AND ended=0 "
+                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now')) "
+                "ORDER BY id DESC LIMIT 1",
+                (guild_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if row:
+            lines.append(f"🐫 **Caravane des Trois Sceaux** · étape {int(row[0] or 0)}/{int(row[1] or 1)}")
+    except Exception:
+        pass
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT links, target FROM chain_events WHERE guild_id=? AND ended=0 "
+                "AND (ends_at IS NULL OR datetime(ends_at) > datetime('now')) "
+                "ORDER BY id DESC LIMIT 1",
+                (guild_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        if row:
+            lines.append(f"🔗 **Chaîne d'Invocation** · {int(row[0] or 0)}/{int(row[1] or 1)} maillons")
+    except Exception:
+        pass
+
     # Voice chaos (récent : appliqué dans les dernières 30 min)
     try:
         async with get_db() as db:
