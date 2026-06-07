@@ -42938,7 +42938,9 @@ async def on_ready():
 
             solo_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
                               player_power_fn=_solo_player_power, grant_egg_fn=_solo_grant_egg,
-                              active_pet_fn=_get_active_pet, give_pet_xp_fn=_give_pet_xp)
+                              active_pet_fn=_get_active_pet, give_pet_xp_fn=_give_pet_xp,
+                              list_eggs_fn=pet_eggs_module.list_eggs,
+                              hatch_now_fn=pet_eggs_module.hatch_now)
             await solo_module.init_db()
             await solo_module.boot_cleanup()  # ferme les runs/salons solo orphelins (reboot)
             solo_module.register_persistent_views(bot)

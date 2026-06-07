@@ -277,3 +277,24 @@ async def hatch_egg(guild_id, user_id, egg_id):
     except Exception as ex:
         print(f"[pet_eggs hatch_egg] {ex}")
         return {'error': "Erreur pendant l'éclosion."}
+
+
+async def hatch_now(guild_id, user_id, egg_id):
+    """Comme hatch_egg mais SANS attendre le timer : l'œuf est rendu prêt puis éclos.
+    Sert à l'Incubation Active (l'ACTIVITÉ du joueur remplace l'attente passive du
+    système /pet). Le claim atomique de hatch_egg garantit l'éclosion exactement-une-
+    fois (anti double-clic). Renvoie le même dict que hatch_egg."""
+    if _get_db is None:
+        return {'error': "Système indisponible."}
+    try:
+        past = (_now() - timedelta(seconds=5)).isoformat()
+        async with _get_db() as db:
+            await db.execute(
+                "UPDATE pet_eggs SET hatch_at=? "
+                "WHERE id=? AND guild_id=? AND user_id=? AND hatched=0",
+                (past, int(egg_id), int(guild_id), int(user_id)),
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[pet_eggs hatch_now] {ex}")
+    return await hatch_egg(guild_id, user_id, egg_id)

@@ -37,6 +37,8 @@ _player_power_fn = None      # async (gid, uid) -> {"atk": int, "deff": int}  (o
 _grant_egg_fn = None         # async (gid, uid, rarity=None) -> bool            (optionnel)
 _active_pet_fn = None         # async (gid, uid) -> dict|None (familier actif)   (optionnel)
 _give_pet_xp_fn = None        # async (gid, uid, amount) -> None                 (optionnel)
+_list_eggs_fn = None          # async (gid, uid) -> [ {id,rarity,ready,...}, … ] (optionnel)
+_hatch_now_fn = None          # async (gid, uid, egg_id) -> dict résultat        (optionnel)
 
 # ─── Reglages (volontairement modestes — retention long terme) ─────────────────
 _CATEGORY_NAME = "🌑 Aventures Solo"
@@ -148,12 +150,30 @@ _INV_CASES = [
                   ("🎨", "Faussaire de Génie"), ("🍷", "Échanson Jaloux")]},
 ]
 
+# ─── Forge du Défi (trempe push-your-luck : tu mises tes GAINS non encaissés) ───
+# Aucune mise du portefeuille : tu ne risques QUE le butin accumulé non encaissé
+# (le lingot se brise = tu perds ce butin, jamais tes pièces réelles). FAIL-CLOSED.
+_FORGE_KIND = "forge"
+_FORGE_MAX = 6
+_FORGE_RATES = [1.00, 0.85, 0.72, 0.58, 0.45, 0.33]  # proba de réussite par palier
+_FORGE_GAIN = 16            # × (palier+1) ajouté au butin à chaque trempe réussie
+_FORGE_COOLDOWN_MIN = 30
+_FORGE_TIERS = ["Lingot brut", "Lame affûtée", "Acier trempé", "Arme runique",
+                "Relique mythique", "Éclat stellaire"]
+
+# ─── Incubation Active (couver un œuf EXISTANT par l'activité, pas l'attente) ───
+# Complète /pet (incubation par le TEMPS) : ici les CLICS remplacent l'attente.
+_INCUBATION_KIND = "incubation"
+_INCUB_CLICKS = 20         # clics pour faire éclore l'œuf (activité = vitesse)
+_INCUB_COOLDOWN_MIN = 0    # pas de cooldown : limité par l'œuf consommé + 1 run/joueur
+
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict,
           add_coins_fn=None, player_power_fn=None, grant_egg_fn=None,
-          active_pet_fn=None, give_pet_xp_fn=None):
+          active_pet_fn=None, give_pet_xp_fn=None,
+          list_eggs_fn=None, hatch_now_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _player_power_fn, _grant_egg_fn
-    global _active_pet_fn, _give_pet_xp_fn
+    global _active_pet_fn, _give_pet_xp_fn, _list_eggs_fn, _hatch_now_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -163,6 +183,8 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict,
     _grant_egg_fn = grant_egg_fn
     _active_pet_fn = active_pet_fn
     _give_pet_xp_fn = give_pet_xp_fn
+    _list_eggs_fn = list_eggs_fn
+    _hatch_now_fn = hatch_now_fn
 
 
 async def init_db():
@@ -417,6 +439,8 @@ async def open_solo_hub(i: discord.Interaction):
     cd_sn = await _cooldown_remaining(i.guild.id, i.user.id, _SANCTUARY_KIND, _COOLDOWN_MIN)
     cd_mr = await _cooldown_remaining(i.guild.id, i.user.id, _MIRROR_KIND, _MIRROR_COOLDOWN_MIN)
     cd_iv = await _cooldown_remaining(i.guild.id, i.user.id, _INVESTIGATE_KIND, _COOLDOWN_MIN)
+    cd_fg = await _cooldown_remaining(i.guild.id, i.user.id, _FORGE_KIND, _FORGE_COOLDOWN_MIN)
+    cd_ic = await _cooldown_remaining(i.guild.id, i.user.id, _INCUBATION_KIND, _INCUB_COOLDOWN_MIN)
     items = [
         v2_title("🌑  Aventures Solo"),
         v2_subtitle("Des défis RIEN QUE pour toi — ton propre salon, à ton rythme, "
@@ -452,6 +476,17 @@ async def open_solo_hub(i: discord.Interaction):
             "**🔍 Enquête Perso**\n"
             "_Trouve le coupable. Accuse tôt = prime de flair (+risque) ; cherche des indices = plus sûr._"
             + (f"\n⏳ _dispo dans {cd_iv} min_" if cd_iv > 0 else "")
+        ),
+        v2_body(
+            "**🔨 Forge du Défi**\n"
+            "_Trempe push-your-luck : tente d'améliorer, encaisse quand tu veux. Échec = tu perds "
+            "le butin NON encaissé (jamais tes pièces réelles)._"
+            + (f"\n⏳ _dispo dans {cd_fg} min_" if cd_fg > 0 else "")
+        ),
+        v2_body(
+            "**🥚 Incubation Active**\n"
+            "_Tu as un œuf ? Couve-le à la force du clic — ton activité éclôt le familier bien "
+            "plus vite que l'attente._"
         ),
     ]
 
@@ -489,8 +524,18 @@ async def open_solo_hub(i: discord.Interaction):
                 style=(discord.ButtonStyle.secondary if cd_iv > 0 else discord.ButtonStyle.primary),
                 custom_id="solo_start:investigate", disabled=cd_iv > 0)
             b6.callback = _on_start_investigate_click
-            self.add_item(discord.ui.ActionRow(b1, b2, b3))
-            self.add_item(discord.ui.ActionRow(b4, b5, b6))
+            b7 = discord.ui.Button(
+                label=("⏳ Forge" if cd_fg > 0 else "🔨 Forge"),
+                style=(discord.ButtonStyle.secondary if cd_fg > 0 else discord.ButtonStyle.danger),
+                custom_id="solo_start:forge", disabled=cd_fg > 0)
+            b7.callback = _on_start_forge_click
+            b8 = discord.ui.Button(
+                label="🥚 Incubation",
+                style=discord.ButtonStyle.primary,
+                custom_id="solo_start:incubation")
+            b8.callback = _on_start_incubation_click
+            self.add_item(discord.ui.ActionRow(b1, b2, b3, b4))
+            self.add_item(discord.ui.ActionRow(b5, b6, b7, b8))
 
     await _safe_followup(i, view=_SoloHub())
 
@@ -1850,6 +1895,356 @@ async def _on_inv_accuse(i: discord.Interaction):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  FORGE DU DÉFI (trempe push-your-luck — tu ne risques QUE tes gains non encaissés)
+# ═══════════════════════════════════════════════════════════════════════════════
+def _forge_rate(tier: int) -> float:
+    return _FORGE_RATES[min(tier, len(_FORGE_RATES) - 1)]
+
+
+def _forge_tier_name(tier: int) -> str:
+    return _FORGE_TIERS[min(tier, len(_FORGE_TIERS) - 1)]
+
+
+async def _on_start_forge_click(i: discord.Interaction):
+    await start_forge(i)
+
+
+async def start_forge(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    if _click_too_soon(i.user.id):
+        return
+    try:
+        if i.guild is None:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        member = i.user if isinstance(i.user, discord.Member) else i.guild.get_member(i.user.id)
+        if member is None:
+            return await _safe_followup(i, content="❌ Membre introuvable.")
+        if await _user_active_run(i.guild.id, i.user.id, _FORGE_KIND):
+            return await _safe_followup(i, content="🔨 Tu as déjà une trempe en cours — termine-la d'abord.")
+        cd = await _cooldown_remaining(i.guild.id, i.user.id, _FORGE_KIND, _FORGE_COOLDOWN_MIN)
+        if cd > 0:
+            return await _safe_followup(i, content=f"⏳ Prochaine forge dans `{cd}` min.")
+        if await _active_run_count(i.guild.id) >= _MAX_ACTIVE_RUNS:
+            return await _safe_followup(i, content="🌑 Trop d'aventures en cours sur le serveur — réessaie dans un instant.")
+        if not i.guild.me.guild_permissions.manage_channels:
+            return await _safe_followup(i, content="❌ Le bot n'a pas la permission « Gérer les salons ».")
+
+        ch = await _create_solo_channel(i.guild, member, "🔨-forge")
+        if ch is None:
+            return await _safe_followup(i, content="❌ Impossible de créer ton salon, réessaie.")
+        try:
+            async with _get_db() as db:
+                cur = await db.execute(
+                    "INSERT INTO solo_runs(guild_id, user_id, kind, channel_id, status, "
+                    "depth, hp, hp_max, mob_hp, mob_hp_max, coins_pending) "
+                    "VALUES(?,?,?,?,'active',0,0,0,0,0,0)",
+                    (i.guild.id, i.user.id, _FORGE_KIND, ch.id))
+                run_id = cur.lastrowid
+                await db.commit()
+        except Exception as ex:
+            print(f"[solo forge INSERT] {ex}")
+            try:
+                await ch.delete(reason="échec init forge")
+            except Exception:
+                pass
+            return await _safe_followup(i, content="❌ Erreur au lancement, réessaie.")
+        await _stamp_cooldown(i.guild.id, i.user.id, _FORGE_KIND)
+        run = await _get_run(run_id)
+        try:
+            await ch.send(view=_build_forge_view(run))
+        except Exception as ex:
+            print(f"[solo forge send] {ex}")
+        await _safe_followup(i, content=f"🔨 {member.mention} ta forge t'attend : {ch.mention}")
+    except Exception as ex:
+        print(f"[start_forge] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+def _build_forge_view(run: dict):
+    LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container = _v2get()
+    tier = int(run["depth"])
+    pending = int(run["coins_pending"])
+    rate = _forge_rate(tier)
+    next_gain = _FORGE_GAIN * (tier + 1)
+    items = [
+        v2_title(f"🔨 Forge du Défi — {_forge_tier_name(tier)}"),
+        v2_subtitle(f"Palier {tier + 1}/{_FORGE_MAX} · butin non encaissé : {pending} 🪙"),
+        v2_divider(),
+        v2_body(f"Tu chauffes le métal… **Tenter la trempe** = chance de réussite "
+                f"**{int(rate * 100)}%** (+{next_gain} 🪙 au butin).\n"
+                f"⚠️ Échec = le lingot **se brise** et tu perds le butin NON encaissé "
+                f"(jamais tes pièces réelles)."),
+        v2_divider(),
+        v2_body("🔨 **Tenter la trempe** (risque) · 💰 **Encaisser** ton butin et t'arrêter."),
+    ]
+
+    class _ForgeView(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=_RUN_TTL_SEC)
+            self.add_item(v2_container(*items, color=0xCA6F1E))
+            t = discord.ui.Button(label=f"🔨 Tenter ({int(rate * 100)}%)",
+                                  style=discord.ButtonStyle.danger,
+                                  custom_id=f"forge_temper:{run['id']}")
+            c = discord.ui.Button(label=f"💰 Encaisser ({pending} 🪙)",
+                                  style=discord.ButtonStyle.success,
+                                  custom_id=f"forge_collect:{run['id']}")
+            t.callback = _on_forge_temper
+            c.callback = _on_forge_collect
+            self.add_item(discord.ui.ActionRow(t, c))
+
+    return _ForgeView()
+
+
+async def _on_forge_temper(i: discord.Interaction):
+    rid = _parse_rid(i)
+    if rid is None:
+        return
+    if _click_too_soon(i.user.id):
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
+        return
+    run = await _get_run(rid)
+    if not _owns_run(i, run):
+        try:
+            return await i.response.edit_message(view=None)
+        except Exception:
+            return
+    try:
+        gid, uid = run["guild_id"], run["user_id"]
+        tier = int(run["depth"])
+        if random.random() < _forge_rate(tier):
+            gain = _FORGE_GAIN * (tier + 1)
+            new_pending = int(run["coins_pending"]) + gain
+            new_tier = tier + 1
+            if new_tier >= _FORGE_MAX:
+                total = new_pending + gain  # chef-d'œuvre : bonus de maîtrise
+                won = await _close_run(rid)
+                if won and _add_coins is not None:
+                    try:
+                        await _add_coins(gid, uid, total)
+                    except Exception:
+                        pass
+                return await _safe_edit(
+                    i, f"🏆 **Chef-d'œuvre !** Tu forges un **{_forge_tier_name(_FORGE_MAX - 1)}** parfait.\n"
+                       f"Butin encaissé : **+{total}** 🪙\n_Ce salon se ferme._")
+            async with _get_db() as db:
+                await db.execute(
+                    "UPDATE solo_runs SET depth=?, coins_pending=? WHERE id=? AND status='active'",
+                    (new_tier, new_pending, rid))
+                await db.commit()
+            run2 = await _get_run(rid)
+            try:
+                return await i.response.edit_message(view=_build_forge_view(run2))
+            except Exception:
+                return
+        # Échec → le lingot se brise, perte du butin NON encaissé (zéro pièce réelle perdue).
+        lost = int(run["coins_pending"])
+        await _close_run(rid)
+        return await _safe_edit(
+            i, f"💥 **Le lingot se brise !** Tu perds le butin non encaissé "
+               f"(**{lost}** 🪙 envolés — mais zéro pièce de ta bourse).\n"
+               f"_La forge est impitoyable. Ce salon se ferme._")
+    except Exception as ex:
+        print(f"[_on_forge_temper] {ex}")
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
+
+
+async def _on_forge_collect(i: discord.Interaction):
+    rid = _parse_rid(i)
+    if rid is None:
+        return
+    if _click_too_soon(i.user.id):
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
+        return
+    run = await _get_run(rid)
+    if not _owns_run(i, run):
+        try:
+            return await i.response.edit_message(view=None)
+        except Exception:
+            return
+    try:
+        gid, uid = run["guild_id"], run["user_id"]
+        total = int(run["coins_pending"])
+        won = await _close_run(rid)
+        if won and total > 0 and _add_coins is not None:
+            try:
+                await _add_coins(gid, uid, total)
+            except Exception:
+                pass
+        await _safe_edit(
+            i, f"💰 **Trempe encaissée !** Tu repars avec **+{total}** 🪙 bien mérités.\n"
+               f"_Sage forgeron. Ce salon se ferme._")
+    except Exception as ex:
+        print(f"[_on_forge_collect] {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  INCUBATION ACTIVE (couver un œuf existant : l'activité remplace l'attente)
+# ═══════════════════════════════════════════════════════════════════════════════
+async def _on_start_incubation_click(i: discord.Interaction):
+    await start_incubation(i)
+
+
+async def start_incubation(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    if _click_too_soon(i.user.id):
+        return
+    try:
+        if i.guild is None:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        member = i.user if isinstance(i.user, discord.Member) else i.guild.get_member(i.user.id)
+        if member is None:
+            return await _safe_followup(i, content="❌ Membre introuvable.")
+        if _list_eggs_fn is None or _hatch_now_fn is None:
+            return await _safe_followup(i, content="🥚 Système d'œufs indisponible un instant.")
+        if await _user_active_run(i.guild.id, i.user.id, _INCUBATION_KIND):
+            return await _safe_followup(i, content="🥚 Tu couves déjà un œuf — termine-le d'abord.")
+        # Besoin d'au moins un œuf NON éclos. On couve celui le + proche d'éclore.
+        try:
+            eggs = await _list_eggs_fn(i.guild.id, i.user.id)
+        except Exception:
+            eggs = []
+        if not eggs:
+            return await _safe_followup(
+                i, content="🥚 Tu n'as pas d'œuf à couver ! Gagne-en via les events/quêtes "
+                           "(drops de combat, trésors…), puis reviens.")
+        egg_id = int(eggs[0]["id"])
+        if await _active_run_count(i.guild.id) >= _MAX_ACTIVE_RUNS:
+            return await _safe_followup(i, content="🌑 Trop d'aventures en cours sur le serveur — réessaie dans un instant.")
+        if not i.guild.me.guild_permissions.manage_channels:
+            return await _safe_followup(i, content="❌ Le bot n'a pas la permission « Gérer les salons ».")
+
+        ch = await _create_solo_channel(i.guild, member, "🥚-incubation")
+        if ch is None:
+            return await _safe_followup(i, content="❌ Impossible de créer ton salon, réessaie.")
+        try:
+            async with _get_db() as db:
+                # depth=clics faits ; hp_max=clics requis ; mob_hp=egg_id (réf. de l'œuf couvé).
+                cur = await db.execute(
+                    "INSERT INTO solo_runs(guild_id, user_id, kind, channel_id, status, "
+                    "depth, hp, hp_max, mob_hp, mob_hp_max, coins_pending) "
+                    "VALUES(?,?,?,?,'active',0,0,?,?,0,0)",
+                    (i.guild.id, i.user.id, _INCUBATION_KIND, ch.id, _INCUB_CLICKS, egg_id))
+                run_id = cur.lastrowid
+                await db.commit()
+        except Exception as ex:
+            print(f"[solo incubation INSERT] {ex}")
+            try:
+                await ch.delete(reason="échec init incubation")
+            except Exception:
+                pass
+            return await _safe_followup(i, content="❌ Erreur au lancement, réessaie.")
+        await _stamp_cooldown(i.guild.id, i.user.id, _INCUBATION_KIND)
+        run = await _get_run(run_id)
+        try:
+            await ch.send(view=_build_incubation_view(run))
+        except Exception as ex:
+            print(f"[solo incubation send] {ex}")
+        await _safe_followup(
+            i, content=f"🥚 {member.mention} ton nid t'attend : {ch.mention} — "
+                       f"_clique pour couver, le familier éclos rejoint ta collection._")
+    except Exception as ex:
+        print(f"[start_incubation] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+def _build_incubation_view(run: dict):
+    LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container = _v2get()
+    done = int(run["depth"])
+    req = max(1, int(run["hp_max"]))
+    items = [
+        v2_title("🥚 Incubation Active"),
+        v2_subtitle(f"Couvée : {min(done, req)}/{req}"),
+        v2_divider(),
+        v2_body(f"`{_bar(done, req)}`\n"
+                f"Continue de **couver** : ton activité réchauffe l'œuf bien plus vite "
+                f"que l'attente passive. Mystère sur ce qui éclora… 🐣"),
+    ]
+
+    class _IncubView(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=_RUN_TTL_SEC)
+            self.add_item(v2_container(*items, color=0xF1C40F))
+            b = discord.ui.Button(label="🐣 Couver", style=discord.ButtonStyle.primary,
+                                  custom_id=f"incub_warm:{run['id']}")
+            b.callback = _on_incub_click
+            self.add_item(discord.ui.ActionRow(b))
+
+    return _IncubView()
+
+
+async def _on_incub_click(i: discord.Interaction):
+    rid = _parse_rid(i)
+    if rid is None:
+        return
+    if _click_too_soon(i.user.id):
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
+        return
+    run = await _get_run(rid)
+    if not _owns_run(i, run):
+        try:
+            return await i.response.edit_message(view=None)
+        except Exception:
+            return
+    try:
+        gid, uid = run["guild_id"], run["user_id"]
+        egg_id = int(run["mob_hp"])
+        req = max(1, int(run["hp_max"]))
+        new_done = int(run["depth"]) + 1
+        if new_done >= req:
+            won = await _close_run(rid)  # claim atomique → éclosion exactement une fois
+            if not won:
+                return
+            res = {}
+            try:
+                res = await _hatch_now_fn(gid, uid, egg_id) or {}
+            except Exception as ex:
+                print(f"[incub hatch] {ex}")
+            if res.get("error"):
+                txt = f"🥚 L'œuf refuse d'éclore : {res['error']}\n_Ce salon se ferme._"
+            elif res.get("duplicate"):
+                txt = (f"🥚 **Éclosion !** Tu possèdes déjà ce familier → "
+                       f"**+{res.get('coins', 0)}** 🪙 de compensation.\n_Ce salon se ferme._")
+            elif res.get("ok") and res.get("pet"):
+                p = res["pet"]
+                act = " — **équipé automatiquement** !" if res.get("activated") else ""
+                txt = (f"🎉 **Éclosion !** Tu obtiens **{p.get('emoji', '🐾')} "
+                       f"{p.get('name', 'familier')}** ({res.get('rarity', '?')}){act}\n"
+                       f"_Retrouve-le dans `/pet`. Ce salon se ferme._")
+            else:
+                txt = "🥚 **Éclosion terminée !** Vérifie ta collection `/pet`.\n_Ce salon se ferme._"
+            return await _safe_edit(i, txt)
+        async with _get_db() as db:
+            await db.execute("UPDATE solo_runs SET depth=? WHERE id=? AND status='active'",
+                             (new_done, rid))
+            await db.commit()
+        run2 = await _get_run(rid)
+        try:
+            return await i.response.edit_message(view=_build_incubation_view(run2))
+        except Exception:
+            return
+    except Exception as ex:
+        print(f"[_on_incub_click] {ex}")
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  Bouton d'ENTREE persistant (a placer dans un hub)
 # ═══════════════════════════════════════════════════════════════════════════════
 class SoloOpenButton(discord.ui.DynamicItem[discord.ui.Button],
@@ -1872,5 +2267,5 @@ __all__ = [
     "setup", "init_db", "register_persistent_views", "boot_cleanup",
     "solo_watchdog", "open_solo_hub", "start_shadow_dungeon", "start_treasure_solo",
     "start_pet_trial", "start_sanctuary", "start_mirror", "start_investigate",
-    "SoloOpenButton",
+    "start_forge", "start_incubation", "SoloOpenButton",
 ]
