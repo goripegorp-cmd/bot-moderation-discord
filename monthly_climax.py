@@ -746,6 +746,15 @@ async def record_attack(
                 damage += voice_bonus
     except Exception:
         voice_bonus = 0
+    # Phase 269 : actions de combat (⚡ Charger / 📣 Crier) — multiplicateur SORTANT
+    # additif (>= 1.0). FAIL-OPEN : une erreur → ×1.0. Scope du cri = event_id.
+    try:
+        import combat_actions as _ca
+        _amult = _ca.consume_charge_mult(guild_id, user_id) * _ca.shout_mult(guild_id, event_id)
+        if _amult != 1.0:
+            damage = int(damage * _amult)
+    except Exception:
+        pass
     # Capé pour ne pas overkill
     damage = min(damage, active["hp_current"])
 
@@ -1190,6 +1199,12 @@ async def build_climax_panel(
             custom_id=f"climax_pet:{active['event_id']}:{user_id}",
         )
         _row_btns.append(pet_btn)
+        # Phase 269 : ⚡ Charger / 📣 Crier (captés par combat_actions). Scope = event_id
+        # SEUL (le template cba_* n'a qu'un groupe → pas de user_id dans le custom_id).
+        _row_btns.append(Button(label="⚡ Charger", style=discord.ButtonStyle.primary,
+                                custom_id=f"cba_charge:{active['event_id']}"))
+        _row_btns.append(Button(label="📣 Crier", style=discord.ButtonStyle.secondary,
+                                custom_id=f"cba_shout:{active['event_id']}"))
     if _row_btns:
         layout.add_item(discord.ui.ActionRow(*_row_btns))
 

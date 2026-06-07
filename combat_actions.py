@@ -146,11 +146,9 @@ class CombatChargeButton(
                 return
             ok, wait = _arm_charge(i.guild.id, i.user.id)
             if not ok:
-                try:
-                    await i.followup.send(f"⏳ Tu pourras recharger dans `{wait}` s.",
-                                          ephemeral=True)
-                except Exception:
-                    pass
+                # Revue 269 / règle anti-429 251.24 : un clic rejeté par cooldown
+                # ne fait JAMAIS de followup (discord.py réessaie les followups sur
+                # 429 → amplification). Le defer a déjà acquitté l'interaction.
                 return
             try:
                 await i.followup.send(
@@ -191,12 +189,8 @@ class CombatShoutButton(
             scope = _parse_scope(i)
             ok, wait = _arm_shout(i.guild.id, scope)
             if not ok:
-                try:
-                    await i.followup.send(
-                        f"📣 Quelqu'un vient de crier — le buff d'équipe est déjà actif ! "
-                        f"(prochain cri dans `{wait}` s)", ephemeral=True)
-                except Exception:
-                    pass
+                # Revue 269 / règle anti-429 251.24 : clic rejeté par cooldown =
+                # ZÉRO followup. Le buff d'équipe est de toute façon déjà actif.
                 return
             try:
                 await i.followup.send(
