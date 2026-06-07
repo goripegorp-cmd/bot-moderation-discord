@@ -10222,6 +10222,19 @@ class BossArenaLayoutV2(LayoutView):
         )
         notify_btn.callback = self._on_notify
         items.append(discord.ui.ActionRow(inv_btn, pet_btn, notify_btn))
+        # Phase 269 : 2e rangée — actions de combat (⚡ Charger / 🛡️ Garde / 📣 Crier),
+        # seulement si le boss vit. Callbacks délégués au helper combat_actions.
+        if hp > 0:
+            charge_btn = Button(label="⚡ Charger", style=discord.ButtonStyle.primary,
+                                custom_id=f"boss_charge_{self.event_id}")
+            charge_btn.callback = self._on_charge
+            defend_btn = Button(label="🛡️ Garde", style=discord.ButtonStyle.secondary,
+                                custom_id=f"boss_defend_{self.event_id}")
+            defend_btn.callback = self._on_defend
+            shout_btn = Button(label="📣 Crier", style=discord.ButtonStyle.secondary,
+                               custom_id=f"boss_shout_{self.event_id}")
+            shout_btn.callback = self._on_shout
+            items.append(discord.ui.ActionRow(charge_btn, defend_btn, shout_btn))
 
         self.add_item(v2_container(*items, color=color))
 
@@ -10244,6 +10257,24 @@ class BossArenaLayoutV2(LayoutView):
     async def _on_notify(self, i: discord.Interaction):
         """Phase 235.22 : abonne/désabonne au rôle de notif « Boss »."""
         await _toggle_event_notify(i, "boss")
+
+    async def _on_charge(self, i: discord.Interaction):
+        try:
+            await combat_actions_module.do_charge(i)
+        except Exception as ex:
+            print(f"[boss_charge] {ex}")
+
+    async def _on_defend(self, i: discord.Interaction):
+        try:
+            await combat_actions_module.do_defend(i)
+        except Exception as ex:
+            print(f"[boss_defend] {ex}")
+
+    async def _on_shout(self, i: discord.Interaction):
+        try:
+            await combat_actions_module.do_shout(i, self.event_id)
+        except Exception as ex:
+            print(f"[boss_shout] {ex}")
 
 
 # ─────────────────────────── BOUTON ATTAQUE ───────────────────────────
@@ -10280,6 +10311,22 @@ class BossAttackView(View):
         b_pet.callback = self._on_pet
         self.add_item(b_pet)
 
+        # Phase 269 : actions de combat (⚡ Charger / 🛡️ Garde / 📣 Crier) — persistance
+        # reboot. La Garde (-35% dégâts subis) n'a de sens QUE sur le boss raid (seul
+        # event avec riposte). Délèguent au helper combat_actions (anti-429 inchangé).
+        b_charge = Button(label="⚡ Charger", style=discord.ButtonStyle.primary,
+                          custom_id=f"boss_charge_{event_id}")
+        b_charge.callback = self._on_charge
+        self.add_item(b_charge)
+        b_defend = Button(label="🛡️ Garde", style=discord.ButtonStyle.secondary,
+                          custom_id=f"boss_defend_{event_id}")
+        b_defend.callback = self._on_defend
+        self.add_item(b_defend)
+        b_shout = Button(label="📣 Crier", style=discord.ButtonStyle.secondary,
+                         custom_id=f"boss_shout_{event_id}")
+        b_shout.callback = self._on_shout
+        self.add_item(b_shout)
+
     async def _on_attack(self, i: discord.Interaction):
         await _handle_boss_attack(i, self.event_id)
 
@@ -10290,6 +10337,24 @@ class BossAttackView(View):
     async def _on_pet(self, i: discord.Interaction):
         # Phase 182 : fait intervenir le familier dans le combat
         await _handle_pet_assist(i, self.event_id)
+
+    async def _on_charge(self, i: discord.Interaction):
+        try:
+            await combat_actions_module.do_charge(i)
+        except Exception as ex:
+            print(f"[boss_charge] {ex}")
+
+    async def _on_defend(self, i: discord.Interaction):
+        try:
+            await combat_actions_module.do_defend(i)
+        except Exception as ex:
+            print(f"[boss_defend] {ex}")
+
+    async def _on_shout(self, i: discord.Interaction):
+        try:
+            await combat_actions_module.do_shout(i, self.event_id)
+        except Exception as ex:
+            print(f"[boss_shout] {ex}")
 
 
 async def _boss_phase_attacks(guild, event_id: int):
@@ -10801,6 +10866,16 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
         except Exception:
             pass
 
+        # Phase 269 : actions de combat (⚡ Charger / 📣 Crier) — multiplicateur SORTANT
+        # additif (>= 1.0). FAIL-OPEN. Scope du cri = event_id.
+        try:
+            _amult = (combat_actions_module.consume_charge_mult(i.guild.id, i.user.id)
+                      * combat_actions_module.shout_mult(i.guild.id, event_id))
+            if _amult != 1.0:
+                damage = int(damage * _amult)
+        except Exception:
+            pass
+
         # Appliquer les dégâts au boss
         _old_hp = int(boss.get('current_hp', 0))
         new_hp = max(0, _old_hp - damage)
@@ -10856,6 +10931,14 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
                     if _res < 1.0:
                         dmg_taken = max(1, int(dmg_taken * _res))
                         _res_applied = True
+                except Exception:
+                    pass
+                # Phase 269 : 🛡️ Garde — posture défensive (-35% dégâts subis si active).
+                # SÛR (×1.0 sinon, ne fait jamais empirer). FAIL-OPEN.
+                try:
+                    _gmult = combat_actions_module.defend_mult(i.guild.id, i.user.id)
+                    if _gmult < 1.0:
+                        dmg_taken = max(1, int(dmg_taken * _gmult))
                 except Exception:
                     pass
                 cur_hp = int(inv.get('hp', 100) or 100)

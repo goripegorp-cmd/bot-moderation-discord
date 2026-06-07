@@ -38,12 +38,19 @@ _CHARGE_CD = 12.0         # s : cooldown PAR JOUEUR
 _SHOUT_MULT = 1.10        # ×1.10 dégâts d'équipe
 _SHOUT_TTL = 12.0         # s : durée du buff collectif
 _SHOUT_CD = 25.0          # s : cooldown PAR EVENT (partagé par tout le serveur)
+# 🛡️ Garde : réduit les dégâts SUBIS (riposte). N'a de sens que là où le boss
+# riposte (boss raid). Multiplicateur ENTRANT < 1.0 (ne fait JAMAIS empirer).
+_DEFEND_MULT = 0.65       # ×0.65 dégâts subis (= -35 %) pendant la garde
+_DEFEND_TTL = 15.0        # s : durée de la posture défensive
+_DEFEND_CD = 10.0         # s : cooldown PAR JOUEUR
 
 # ─── État en mémoire ───────────────────────────────────────────────────────────
 _charge = {}       # (gid, uid)   -> expire_ts (attaque chargée en attente)
 _shout = {}        # (gid, scope) -> expire_ts (buff d'équipe actif)
+_defend = {}       # (gid, uid)   -> expire_ts (posture défensive active)
 _charge_cd = {}    # (gid, uid)   -> last_ts
 _shout_cd = {}     # (gid, scope) -> last_ts
+_defend_cd = {}    # (gid, uid)   -> last_ts
 
 
 def _now() -> float:
@@ -87,6 +94,22 @@ def shout_mult(guild_id, scope_id) -> float:
     return 1.0
 
 
+def defend_mult(guild_id, user_id) -> float:
+    """Multiplicateur de dégâts SUBIS (riposte) : <1.0 si la garde est active, sinon
+    1.0. Ne consomme pas (la posture protège pendant _DEFEND_TTL s). À appliquer dans
+    le calcul de la riposte du boss : incoming = int(incoming * defend_mult(gid, uid))."""
+    try:
+        k = (int(guild_id), int(user_id))
+        exp = _defend.get(k, 0.0)
+        if exp and _now() < exp:
+            return _DEFEND_MULT
+        if exp:
+            _defend.pop(k, None)
+    except Exception:
+        pass
+    return 1.0
+
+
 # ─── Armement (appelé par les boutons) ───────────────────────────────────────────
 def _arm_charge(guild_id, user_id):
     """(ok, wait_s). Pose une attaque chargée si le cooldown joueur le permet."""
@@ -109,6 +132,18 @@ def _arm_shout(guild_id, scope_id):
         return (False, int(_SHOUT_CD - (now - last)) + 1)
     _shout_cd[k] = now
     _shout[k] = now + _SHOUT_TTL
+    return (True, 0)
+
+
+def _arm_defend(guild_id, user_id):
+    """(ok, wait_s). Active la posture défensive si le cooldown joueur le permet."""
+    k = (int(guild_id), int(user_id))
+    now = _now()
+    last = _defend_cd.get(k, 0.0)
+    if now - last < _DEFEND_CD:
+        return (False, int(_DEFEND_CD - (now - last)) + 1)
+    _defend_cd[k] = now
+    _defend[k] = now + _DEFEND_TTL
     return (True, 0)
 
 
@@ -178,6 +213,27 @@ async def do_shout(i: discord.Interaction, scope: int):
         print(f"[cba_shout] {ex}")
 
 
+async def do_defend(i: discord.Interaction):
+    try:
+        try:
+            await i.response.defer(ephemeral=True)
+        except Exception:
+            pass
+        if i.guild is None:
+            return
+        ok, _wait = _arm_defend(i.guild.id, i.user.id)
+        if not ok:
+            return  # cooldown → aucun followup (anti-429)
+        try:
+            await i.followup.send(
+                f"🛡️ **En garde !** Tu encaisses **-{int((1 - _DEFEND_MULT) * 100)} %** de "
+                f"dégâts pendant {int(_DEFEND_TTL)} s.", ephemeral=True)
+        except Exception:
+            pass
+    except Exception as ex:
+        print(f"[cba_defend] {ex}")
+
+
 # ─── Boutons persistants (DynamicItem — match du custom_id, survit au reboot) ────
 class CombatChargeButton(
     discord.ui.DynamicItem[discord.ui.Button],
@@ -219,17 +275,39 @@ class CombatShoutButton(
         await do_shout(i, _parse_scope(i))
 
 
+class CombatDefendButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"cba_defend:(?P<scope>\d+)",
+):
+    def __init__(self, scope: int = 0):
+        super().__init__(
+            discord.ui.Button(label="🛡️ Garde", style=discord.ButtonStyle.secondary,
+                              custom_id=f"cba_defend:{scope}"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        try:
+            return cls(int(match["scope"]))
+        except Exception:
+            return cls(0)
+
+    async def callback(self, i: discord.Interaction):
+        await do_defend(i)
+
+
 def register_persistent_views(bot_instance):
     """Enregistre les boutons d'action de combat (match du custom_id au clic)."""
     if bot_instance is None:
         return
     try:
-        bot_instance.add_dynamic_items(CombatChargeButton, CombatShoutButton)
+        bot_instance.add_dynamic_items(
+            CombatChargeButton, CombatShoutButton, CombatDefendButton)
     except Exception as ex:
         print(f"[combat_actions register] {ex}")
 
 
 __all__ = [
     "setup", "register_persistent_views", "consume_charge_mult", "shout_mult",
-    "do_charge", "do_shout", "CombatChargeButton", "CombatShoutButton",
+    "defend_mult", "do_charge", "do_shout", "do_defend",
+    "CombatChargeButton", "CombatShoutButton", "CombatDefendButton",
 ]
