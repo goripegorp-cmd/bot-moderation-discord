@@ -25,13 +25,17 @@ class _QuietStdout:
     # faux positifs. Les vraies erreurs restent gardées par le fail-safe (tag
     # inconnu en minuscules, cf. _emit) ou par ces marqueurs.
     # (A) Mots d'erreur NON ambigus (recherche directe) → toujours afficher.
-    _ERR = ('traceback', 'exception', 'httpexception', 'critical', 'fatal',
-            'errno', 'unclosed', 'erreur', 'échec', 'echec', '❌', '⚠', '🛑', '‼')
-    # error/forbidden/failed/denied/warning EN TANT QUE MOT — mais PAS un identifiant
-    # (« error_logger ») ni un compteur à ZÉRO (« 'errors': 0 », « forbidden=0 »).
-    # Un compteur NON nul (« 'errors': 3 ») reste une vraie erreur → gardé.
+    # NB : critical/fatal/errno NE sont PAS ici en sous-chaîne nue — ils apparaissent
+    # dans des noms anodins (ex. backup « critical_2026-06-07.json.gz ») et causaient
+    # un faux positif. Ils sont gardés par _ERR_RE en FRONTIÈRE DE MOT ci-dessous.
+    _ERR = ('traceback', 'exception', 'httpexception',
+            'unclosed', 'erreur', 'échec', 'echec', '❌', '⚠', '🛑', '‼')
+    # error/forbidden/failed/denied/warning/critical/fatal/errno EN TANT QUE MOT —
+    # mais PAS un identifiant/nom de fichier (« error_logger », « critical_2026 ») ni
+    # un compteur à ZÉRO (« 'errors': 0 »). Un compteur NON nul reste une vraie erreur.
     _ERR_RE = _re.compile(
-        r"(errors?|forbidden|failed|denied|warnings?)(?!\w)(?!['\"]?\s*[:=]\s*0\b)",
+        r"(errors?|forbidden|failed|denied|warnings?|critical|fatal|errno)"
+        r"(?!\w)(?!['\"]?\s*[:=]\s*0\b)",
         _re.IGNORECASE)
     # Tag de STATUT tout en MAJUSCULES ([DB OPTIMIZER], [PERSIST CLEANUP]…) = info.
     _INFO_TAG_RE = _re.compile(r'^\[[A-Z0-9 ._/:+\-]{2,}\]')
@@ -42,7 +46,8 @@ class _QuietStdout:
                    'dropped', 'sent ', 'ready', 'init', 'applied', 'backup', 'rows',
                    'cleanup', 'started', 'synced', 'prêt', 'activé', 'enabled',
                    'disabled', 'skipped', 'updated', 'created', 'posted', 'granted',
-                   'reloaded', 'wired', 'setup', 'opt-in', 'opt in')
+                   'reloaded', 'wired', 'setup', 'opt-in', 'opt in',
+                   'trigger', 'resolve', 'hatched', 'claimed')
     _INFO_START = ('✅', '🚀', '🔒', '👑', '🎙', '🛡', '🎮', '🗑', '👥', '📋',
                    '🎵', '🔴', '🔗', '✨', '🧹', '🎤', '🌐', '📢', '🎁', '📨',
                    '🛒', '🔊', '⚔', '🏆', '🎯', '📊', '💰', '🎉', '🐾', '🥚',
