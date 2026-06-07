@@ -4241,13 +4241,24 @@ async def is_fully_immune(member):
     return False
 
 async def sanction(m, action, dur, reason, g):
+    # Phase 263 : ne plus AVALER silencieusement les échecs (perms/hiérarchie) — logguer
+    # explicitement + renvoyer True/False. Les call sites qui ignorent le retour restent
+    # inchangés ; ceux qui veulent réagir peuvent désormais détecter l'échec.
     try:
         if action == 'delete':
             pass  # Message déjà supprimé, pas de sanction sur le membre
         elif action == 'mute': await m.timeout(timedelta(minutes=dur), reason=reason)
         elif action == 'kick': await m.kick(reason=reason)
         elif action == 'ban': await m.ban(reason=reason)
-    except: pass
+        return True
+    except discord.Forbidden:
+        print(f"❌ [sanction] Forbidden : '{action}' impossible sur {getattr(m, 'id', '?')} "
+              f"(permissions/hiérarchie de rôles insuffisantes).")
+    except discord.HTTPException as ex:
+        print(f"❌ [sanction] HTTPException sur '{action}' : {ex}")
+    except Exception as ex:
+        print(f"❌ [sanction] erreur sur '{action}' : {ex}")
+    return False
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -4940,7 +4951,18 @@ class TicketCreateButton(Button):
                 await i.response.defer(ephemeral=True)
                 ch, err = await create_ticket(i, self.pid)
                 await i.followup.send(err if err else f"✅ Ticket créé: {ch.mention}", ephemeral=True)
-        except: pass
+        except Exception as ex:
+            # Phase 263 : TOUJOURS accuser réception même si cfg/DB plante AVANT l'ack,
+            # sinon « Échec de l'interaction » et le bouton paraît cassé.
+            print(f"[TicketCreateButton] {ex}")
+            try:
+                _msg = "❌ Erreur lors de la création du ticket. Réessaie dans un instant."
+                if not i.response.is_done():
+                    await i.response.send_message(_msg, ephemeral=True)
+                else:
+                    await i.followup.send(_msg, ephemeral=True)
+            except Exception:
+                pass
 
 class TicketCreateView(View):
     def __init__(self, pid):
@@ -11178,10 +11200,13 @@ async def _handle_pet_assist(i: discord.Interaction, event_id: int):
                     if _chp < _mhp:
                         heal_done = min(_mhp - _chp, int(10 + lvl * 3 + _mhp * pet_bonus))
                         if heal_done > 0:
+                            # Phase 263 : soin ATOMIQUE (pool sans row-lock) — MIN(max_hp,…)
+                            # clampe en SQL → n'écrase pas une riposte/soin concurrent (lost-update).
                             async with get_db() as _hdb:
                                 await _hdb.execute(
-                                    'UPDATE player_inventory SET hp=? WHERE guild_id=? AND user_id=?',
-                                    (_chp + heal_done, i.guild.id, i.user.id),
+                                    'UPDATE player_inventory SET hp=MIN(max_hp, hp + ?) '
+                                    'WHERE guild_id=? AND user_id=? AND hp < max_hp',
+                                    (heal_done, i.guild.id, i.user.id),
                                 )
                                 await _hdb.commit()
             except Exception:
