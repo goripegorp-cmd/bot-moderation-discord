@@ -62,6 +62,40 @@ _DG_ROOMS = [
 _DG_MOBS = ["Rôdeur d'ombre", "Goule affamée", "Spectre rancunier",
             "Liche mineure", "Effroi rampant", "Gardien des abysses"]
 
+# ─── Chasse au Trésor Solo (énigmes) ───────────────────────────────────────────
+_TREASURE_KIND = "treasure_solo"
+_TS_STEPS = 3                 # 3 énigmes progressives
+_TS_COINS_PER_STEP = 28       # x (étape+1)
+# Énigmes : question + 4 options + index de la bonne réponse. Le pool est tiré
+# DÉTERMINISTE par run_id (Random(run_id)) → pas besoin de stocker la séquence, et
+# le custom_id du bouton porte l'INDEX de l'option (pas « correct/faux ») → zéro fuite.
+_RIDDLES = [
+    {"q": "Je grandis quand on me nourrit, mais je meurs si on me donne à boire. Qui suis-je ?",
+     "opts": ["Le feu", "L'eau", "Le vent", "La terre"], "correct": 0},
+    {"q": "Plus j'ai de gardiens, moins je suis en sécurité. Que suis-je ?",
+     "opts": ["Un secret", "Un trésor", "Un roi", "Une forteresse"], "correct": 0},
+    {"q": "Quel est le seul trésor qui grandit quand on le partage ?",
+     "opts": ["L'or", "Le savoir", "Les gemmes", "Le pouvoir"], "correct": 1},
+    {"q": "Je parle sans bouche et j'entends sans oreilles. Qui suis-je ?",
+     "opts": ["L'écho", "Le miroir", "L'ombre", "Le rêve"], "correct": 0},
+    {"q": "Je passe sans jamais revenir, je guéris et je détruis. Qui suis-je ?",
+     "opts": ["Le temps", "Le vent", "La rivière", "La nuit"], "correct": 0},
+    {"q": "Combien de fois peut-on soustraire 5 du nombre 25 ?",
+     "opts": ["Une seule fois", "Cinq fois", "Vingt-cinq fois", "Zéro"], "correct": 0},
+    {"q": "Qu'attrape-t-on sans jamais pouvoir le lancer ?",
+     "opts": ["Un rhume", "Une balle", "Un poisson", "Un papillon"], "correct": 0},
+    {"q": "Elle te suit le jour, disparaît la nuit, et s'allonge au couchant. Qui ?",
+     "opts": ["Ton ombre", "La lune", "Le temps", "Ton reflet"], "correct": 0},
+    {"q": "Plus on en prend, plus on en laisse derrière soi. Quoi ?",
+     "opts": ["Des pas", "Des miettes", "Des souvenirs", "Des pièces"], "correct": 0},
+    {"q": "Quelle clé n'ouvre pourtant aucune porte ?",
+     "opts": ["Une clé de sol", "Une clé en or", "Une clé rouillée", "Un trousseau"], "correct": 0},
+    {"q": "Plus je sèche, plus je suis mouillée. Que suis-je ?",
+     "opts": ["Une serviette", "Une éponge", "Une rivière", "La pluie"], "correct": 0},
+    {"q": "On me casse toujours avant de m'utiliser. Que suis-je ?",
+     "opts": ["Un œuf", "Une promesse", "Un record", "Une noix"], "correct": 0},
+]
+
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict,
           add_coins_fn=None, player_power_fn=None, grant_egg_fn=None):
@@ -313,43 +347,50 @@ def _v2get():
 
 
 async def open_solo_hub(i: discord.Interaction):
-    """Panneau ephemere listant les aventures solo dispo + bouton Lancer."""
-    try:
-        if not await _safe_defer(i):
-            return
-    except Exception:
-        pass
+    """Panneau ephemere listant les aventures solo dispo + boutons Lancer."""
+    if not await _safe_defer(i):
+        return
+    if i.guild is None:  # garde MP (defense en profondeur)
+        return await _safe_followup(i, content="❌ Serveur uniquement.")
     LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container = _v2get()
     if not all((LayoutView, v2_title, v2_body, v2_container)):
         return await _safe_followup(i, content="❌ UI indisponible un instant, réessaie.")
-    cd = await _cooldown_remaining(i.guild.id, i.user.id, _DUNGEON_KIND, _COOLDOWN_MIN)
+    cd_dg = await _cooldown_remaining(i.guild.id, i.user.id, _DUNGEON_KIND, _COOLDOWN_MIN)
+    cd_ts = await _cooldown_remaining(i.guild.id, i.user.id, _TREASURE_KIND, _COOLDOWN_MIN)
     items = [
         v2_title("🌑  Aventures Solo"),
         v2_subtitle("Des défis RIEN QUE pour toi — ton propre salon, à ton rythme, "
-                    "sans attendre les autres."),
+                    "sans attendre personne. Plusieurs joueurs en parallèle."),
         v2_divider(),
         v2_body(
             "**🗝️ Donjon de l'Ombre**\n"
-            "_Descente à étages : à chaque salle, choisis de **descendre** (plus de risque, "
-            "plus de butin) ou d'**extraire** ton butin et repartir. Tombe avant d'extraire "
-            "= tu perds la moitié. Pousse ta chance !_"
+            "_Descente à étages : **descends** (+risque, +butin) ou **extrais** ton butin "
+            "et repars sain. Tombe avant d'extraire = moitié perdue. Pousse ta chance !_"
+            + (f"\n⏳ _dispo dans {cd_dg} min_" if cd_dg > 0 else "")
+        ),
+        v2_body(
+            "**💎 Chasse au Trésor**\n"
+            "_3 énigmes de plus en plus payantes. Bonne réponse = tu avances et empoches ; "
+            "une erreur et tu repars avec la moitié de tes gains. Réfléchis bien !_"
+            + (f"\n⏳ _dispo dans {cd_ts} min_" if cd_ts > 0 else "")
         ),
     ]
-    if cd > 0:
-        items.append(v2_body(f"⏳ Donjon dispo dans `{cd}` min (cooldown)."))
 
     class _SoloHub(LayoutView):
         def __init__(self):
             super().__init__(timeout=300)
             self.add_item(v2_container(*items, color=0x6C3483))
-            b = discord.ui.Button(
-                label=("⏳ Donjon (cooldown)" if cd > 0 else "🗝️ Entrer dans le Donjon"),
-                style=discord.ButtonStyle.success if cd <= 0 else discord.ButtonStyle.secondary,
-                custom_id="solo_start:shadow_dungeon",
-                disabled=cd > 0,
-            )
-            b.callback = _on_start_dungeon_click
-            self.add_item(discord.ui.ActionRow(b))
+            b1 = discord.ui.Button(
+                label=("⏳ Donjon" if cd_dg > 0 else "🗝️ Donjon de l'Ombre"),
+                style=(discord.ButtonStyle.secondary if cd_dg > 0 else discord.ButtonStyle.success),
+                custom_id="solo_start:shadow_dungeon", disabled=cd_dg > 0)
+            b1.callback = _on_start_dungeon_click
+            b2 = discord.ui.Button(
+                label=("⏳ Trésor" if cd_ts > 0 else "💎 Chasse au Trésor"),
+                style=(discord.ButtonStyle.secondary if cd_ts > 0 else discord.ButtonStyle.primary),
+                custom_id="solo_start:treasure_solo", disabled=cd_ts > 0)
+            b2.callback = _on_start_treasure_click
+            self.add_item(discord.ui.ActionRow(b1, b2))
 
     await _safe_followup(i, view=_SoloHub())
 
@@ -728,6 +769,185 @@ async def _safe_edit(i: discord.Interaction, text: str):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  CHASSE AU TRESOR SOLO (énigmes déterministes par run_id)
+# ═══════════════════════════════════════════════════════════════════════════════
+def _ts_riddle_indices(run_id: int):
+    """3 indices d'énigmes DÉTERMINISTES pour ce run (seed=run_id) → recalculables
+    sans stockage. random.Random est déterministe (≠ random global interdit ici)."""
+    try:
+        return random.Random(int(run_id)).sample(range(len(_RIDDLES)), _TS_STEPS)
+    except Exception:
+        return list(range(_TS_STEPS))
+
+
+def _ts_riddle_at(run_id: int, step: int):
+    idxs = _ts_riddle_indices(run_id)
+    return _RIDDLES[idxs[max(0, min(step, len(idxs) - 1))]]
+
+
+async def _on_start_treasure_click(i: discord.Interaction):
+    await start_treasure_solo(i)
+
+
+async def start_treasure_solo(i: discord.Interaction):
+    """Lance une Chasse au Trésor SOLO dans un salon prive. PARALLELE (zero verrou global)."""
+    if not await _safe_defer(i):
+        return
+    if _click_too_soon(i.user.id):
+        return
+    try:
+        if i.guild is None:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        member = i.user if isinstance(i.user, discord.Member) else i.guild.get_member(i.user.id)
+        if member is None:
+            return await _safe_followup(i, content="❌ Membre introuvable.")
+        if await _user_active_run(i.guild.id, i.user.id, _TREASURE_KIND):
+            return await _safe_followup(
+                i, content="💎 Tu as déjà une chasse en cours — termine-la d'abord.")
+        cd = await _cooldown_remaining(i.guild.id, i.user.id, _TREASURE_KIND, _COOLDOWN_MIN)
+        if cd > 0:
+            return await _safe_followup(i, content=f"⏳ Prochaine chasse dans `{cd}` min.")
+        if await _active_run_count(i.guild.id) >= _MAX_ACTIVE_RUNS:
+            return await _safe_followup(
+                i, content="🌑 Trop d'aventures en cours sur le serveur — réessaie dans un instant.")
+        if not i.guild.me.guild_permissions.manage_channels:
+            return await _safe_followup(i, content="❌ Le bot n'a pas la permission « Gérer les salons ».")
+
+        ch = await _create_solo_channel(i.guild, member, "💎-trésor")
+        if ch is None:
+            return await _safe_followup(i, content="❌ Impossible de créer ton salon, réessaie.")
+        try:
+            async with _get_db() as db:
+                cur = await db.execute(
+                    "INSERT INTO solo_runs(guild_id, user_id, kind, channel_id, status, "
+                    "depth, hp, hp_max, mob_hp, mob_hp_max, coins_pending) "
+                    "VALUES(?,?,?,?,'active',0,0,0,0,0,0)",
+                    (i.guild.id, i.user.id, _TREASURE_KIND, ch.id))
+                run_id = cur.lastrowid
+                await db.commit()
+        except Exception as ex:
+            print(f"[solo treasure INSERT] {ex}")
+            try:
+                await ch.delete(reason="échec init trésor")
+            except Exception:
+                pass
+            return await _safe_followup(i, content="❌ Erreur au lancement, réessaie.")
+
+        await _stamp_cooldown(i.guild.id, i.user.id, _TREASURE_KIND)
+        run = await _get_run(run_id)
+        try:
+            await ch.send(view=_build_treasure_view(run))
+        except Exception as ex:
+            print(f"[solo treasure send] {ex}")
+        await _safe_followup(i, content=f"💎 {member.mention} ta chasse t'attend : {ch.mention}")
+    except Exception as ex:
+        print(f"[start_treasure_solo] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+def _build_treasure_view(run: dict):
+    LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container = _v2get()
+    step = int(run["depth"])
+    riddle = _ts_riddle_at(run["id"], step)
+    items = [
+        v2_title(f"💎 Chasse au Trésor — Énigme {step + 1}/{_TS_STEPS}"),
+        v2_subtitle(f"🎒 Gains sécurisés : {run['coins_pending']} 🪙  ·  une erreur = moitié perdue"),
+        v2_divider(),
+        v2_body(f"**🧩 {riddle['q']}**"),
+        v2_body("_Choisis la bonne réponse ci-dessous._"),
+    ]
+
+    class _TsView(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=_RUN_TTL_SEC)
+            self.add_item(v2_container(*items, color=0xC49A2B))
+            row = []
+            for idx, opt in enumerate(riddle["opts"][:5]):
+                b = discord.ui.Button(label=str(opt)[:78], style=discord.ButtonStyle.secondary,
+                                      custom_id=f"tsolo_ans:{run['id']}:{idx}")
+                b.callback = _on_ts_answer
+                row.append(b)
+            self.add_item(discord.ui.ActionRow(*row))
+
+    return _TsView()
+
+
+async def _on_ts_answer(i: discord.Interaction):
+    rid = _parse_rid(i)
+    if rid is None:
+        return
+    if _click_too_soon(i.user.id):
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
+        return
+    try:
+        opt_idx = int((i.data or {}).get("custom_id", "").split(":")[2])
+    except Exception:
+        opt_idx = -1
+    run = await _get_run(rid)
+    if not _owns_run(i, run):
+        try:
+            return await i.response.edit_message(view=None)
+        except Exception:
+            return
+    try:
+        gid, uid = run["guild_id"], run["user_id"]
+        step = int(run["depth"])
+        riddle = _ts_riddle_at(rid, step)
+        correct = int(riddle.get("correct", 0))
+        if opt_idx == correct:
+            gain = _TS_COINS_PER_STEP * (step + 1)
+            new_coins = int(run["coins_pending"]) + gain
+            new_step = step + 1
+            if new_step >= _TS_STEPS:
+                bonus = _TS_COINS_PER_STEP * _TS_STEPS
+                total = new_coins + bonus
+                won = await _close_run(rid)
+                if won and _add_coins is not None:
+                    try:
+                        await _add_coins(gid, uid, total)
+                    except Exception:
+                        pass
+                egg_txt = await _maybe_grant_egg(gid, uid, _TS_STEPS) if won else ""
+                return await _safe_edit(
+                    i,
+                    f"🏆 **Trésor découvert !** Les 3 énigmes résolues — coffre ouvert !\n"
+                    f"Butin total : **+{total}** 🪙{egg_txt}\n_Ce salon se ferme. Reviens demain !_")
+            async with _get_db() as db:
+                await db.execute(
+                    "UPDATE solo_runs SET depth=?, coins_pending=? WHERE id=? AND status='active'",
+                    (new_step, new_coins, rid))
+                await db.commit()
+            run2 = await _get_run(rid)
+            try:
+                return await i.response.edit_message(view=_build_treasure_view(run2))
+            except Exception:
+                return
+        else:
+            # Mauvaise réponse → fin de la chasse, consolation = moitié des gains.
+            kept = int(run["coins_pending"]) // 2
+            good = riddle["opts"][correct] if 0 <= correct < len(riddle["opts"]) else "?"
+            won = await _close_run(rid)
+            if won and kept > 0 and _add_coins is not None:
+                try:
+                    await _add_coins(gid, uid, kept)
+                except Exception:
+                    pass
+            return await _safe_edit(
+                i,
+                f"❌ **Mauvaise réponse !** La bonne était : **{good}**.\n"
+                f"Tu repars avec la moitié de tes gains : **+{kept}** 🪙.\n_Ce salon se ferme._")
+    except Exception as ex:
+        print(f"[_on_ts_answer] {ex}")
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  Bouton d'ENTREE persistant (a placer dans un hub)
 # ═══════════════════════════════════════════════════════════════════════════════
 class SoloOpenButton(discord.ui.DynamicItem[discord.ui.Button],
@@ -748,5 +968,6 @@ class SoloOpenButton(discord.ui.DynamicItem[discord.ui.Button],
 
 __all__ = [
     "setup", "init_db", "register_persistent_views", "boot_cleanup",
-    "solo_watchdog", "open_solo_hub", "start_shadow_dungeon", "SoloOpenButton",
+    "solo_watchdog", "open_solo_hub", "start_shadow_dungeon", "start_treasure_solo",
+    "SoloOpenButton",
 ]
