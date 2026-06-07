@@ -24362,12 +24362,17 @@ class AddImmuneUserModal(Modal, title="➕ Ajouter un utilisateur immunisé"):
         self.u = u
     
     async def on_submit(self, i):
+        # Phase 263 : valider l'ID + feedback explicite (avant : int() invalide avalé en silence).
+        raw = (self.uid.value or "").strip()
+        if not raw.isdigit():
+            return await i.response.send_message("❌ ID invalide — chiffres uniquement.", ephemeral=True)
         try:
-            user_id = int(self.uid.value)
+            user_id = int(raw)
             async with get_db() as db:
                 await db.execute('INSERT OR IGNORE INTO immune_users VALUES(?,?)', (self.g.id, user_id))
                 await db.commit()
-        except: pass
+        except Exception as ex:
+            print(f"[AddImmuneUserModal] {ex}")
         v = ImmunePanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
 
