@@ -76131,8 +76131,12 @@ class ConfessReplyModal(Modal):
                 await db.commit()
             try:
                 LIFETIME = 24 * 3600
+                # Phase 263 : échappe le markdown du contenu user re-affiché (anti
+                # social-engineering visuel / faux formatage). Mentions déjà neutralisées
+                # par allowed_mentions.none() plus bas.
+                _safe_content = discord.utils.escape_markdown(content)
                 e = discord.Embed(
-                    description=f"💬 _Réponse à la confession #{self.confession_id} :_\n\n{content}",
+                    description=f"💬 _Réponse à la confession #{self.confession_id} :_\n\n{_safe_content}",
                     color=0x57F287,
                     timestamp=datetime.now(timezone.utc),
                 )
