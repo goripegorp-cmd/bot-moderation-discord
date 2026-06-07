@@ -931,7 +931,12 @@ async def _post_mob_message(
         label="🐾 Familier", style=discord.ButtonStyle.success,
         custom_id=f"mob_pet:{mob_db_id}",
     )
-    items.append(discord.ui.ActionRow(attack_btn, pet_btn, notify_btn))
+    # Phase 269 : ⚡ Charger / 📣 Crier (captés par combat_actions). 5 boutons max → OK.
+    charge_btn = Button(label="⚡ Charger", style=discord.ButtonStyle.primary,
+                        custom_id=f"cba_charge:{mob_db_id}")
+    shout_btn = Button(label="📣 Crier", style=discord.ButtonStyle.secondary,
+                       custom_id=f"cba_shout:{mob_db_id}")
+    items.append(discord.ui.ActionRow(attack_btn, pet_btn, charge_btn, shout_btn, notify_btn))
 
     class _MobLayout(LayoutView):
         def __init__(self):
@@ -1075,6 +1080,16 @@ async def _process_attack(btn_i: discord.Interaction, mob_id: int):
         except Exception:
             pass
 
+        # Phase 269 : actions de combat (⚡ Charger / 📣 Crier) — multiplicateur SORTANT
+        # additif (>= 1.0). FAIL-OPEN : une erreur → ×1.0. Scope du cri = mob_id.
+        try:
+            import combat_actions as _ca
+            _amult = _ca.consume_charge_mult(gid, btn_i.user.id) * _ca.shout_mult(gid, mob_id)
+            if _amult != 1.0:
+                dmg = int(dmg * _amult)
+        except Exception:
+            pass
+
         new_hp = max(0, int(hp_curr) - dmg)
 
         # Update mob + attacker dans une seule transaction
@@ -1189,7 +1204,12 @@ async def _build_updated_layout(
         label="🐾 Familier", style=discord.ButtonStyle.success,
         custom_id=f"mob_pet:{mob_id}",
     )
-    items.append(discord.ui.ActionRow(attack_btn, pet_btn))
+    # Phase 269 : ⚡ Charger / 📣 Crier (captés par combat_actions).
+    charge_btn = Button(label="⚡ Charger", style=discord.ButtonStyle.primary,
+                        custom_id=f"cba_charge:{mob_id}")
+    shout_btn = Button(label="📣 Crier", style=discord.ButtonStyle.secondary,
+                       custom_id=f"cba_shout:{mob_id}")
+    items.append(discord.ui.ActionRow(attack_btn, pet_btn, charge_btn, shout_btn))
 
     class _MobLayout(LayoutView):
         def __init__(self):
