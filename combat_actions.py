@@ -119,6 +119,65 @@ def _parse_scope(i: discord.Interaction) -> int:
         return 0
 
 
+# ─── Handlers PUBLICS (partagés par les DynamicItem ET les Views classiques) ─────
+# Permet de câbler les actions aussi bien sur les panneaux V2 (boutons bruts +
+# DynamicItem) que sur les Views discord.ui classiques (ex. World Boss) qui lient
+# leurs propres callbacks. Règle anti-429 251.24 : clic rejeté = ZÉRO followup.
+async def do_charge(i: discord.Interaction):
+    try:
+        try:
+            await i.response.defer(ephemeral=True)
+        except Exception:
+            pass
+        if i.guild is None:
+            return
+        ok, _wait = _arm_charge(i.guild.id, i.user.id)
+        if not ok:
+            return  # cooldown → aucun followup (anti-429)
+        try:
+            await i.followup.send(
+                f"⚡ **Chargé !** Ta **prochaine attaque** infligera "
+                f"**+{int((_CHARGE_MULT - 1) * 100)} %** de dégâts "
+                f"(dans les {int(_CHARGE_TTL)} s — frappe vite !).",
+                ephemeral=True)
+        except Exception:
+            pass
+    except Exception as ex:
+        print(f"[cba_charge] {ex}")
+
+
+async def do_shout(i: discord.Interaction, scope: int):
+    try:
+        try:
+            await i.response.defer(ephemeral=True)
+        except Exception:
+            pass
+        if i.guild is None:
+            return
+        ok, _wait = _arm_shout(i.guild.id, int(scope or 0))
+        if not ok:
+            return  # cooldown event → aucun followup (le buff est déjà actif)
+        try:
+            await i.followup.send(
+                f"📣 **Tu galvanises l'équipe !** +{int((_SHOUT_MULT - 1) * 100)} % de "
+                f"dégâts pour **tous** pendant {int(_SHOUT_TTL)} s.", ephemeral=True)
+        except Exception:
+            pass
+        # Écho public fail-soft, SANS ping, auto-supprimé (1 max / _SHOUT_CD s par event).
+        try:
+            nm = discord.utils.escape_markdown(getattr(i.user, "display_name", "Un héros"))
+            if i.channel is not None:
+                await i.channel.send(
+                    f"📣 **{nm}** galvanise les troupes — **+{int((_SHOUT_MULT - 1) * 100)} % "
+                    f"de dégâts pour tous** pendant {int(_SHOUT_TTL)} s ! 🔥",
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=_SHOUT_TTL)
+        except Exception:
+            pass
+    except Exception as ex:
+        print(f"[cba_shout] {ex}")
+
+
 # ─── Boutons persistants (DynamicItem — match du custom_id, survit au reboot) ────
 class CombatChargeButton(
     discord.ui.DynamicItem[discord.ui.Button],
@@ -137,29 +196,7 @@ class CombatChargeButton(
             return cls(0)
 
     async def callback(self, i: discord.Interaction):
-        try:
-            try:
-                await i.response.defer(ephemeral=True)
-            except Exception:
-                pass
-            if i.guild is None:
-                return
-            ok, wait = _arm_charge(i.guild.id, i.user.id)
-            if not ok:
-                # Revue 269 / règle anti-429 251.24 : un clic rejeté par cooldown
-                # ne fait JAMAIS de followup (discord.py réessaie les followups sur
-                # 429 → amplification). Le defer a déjà acquitté l'interaction.
-                return
-            try:
-                await i.followup.send(
-                    f"⚡ **Chargé !** Ta **prochaine attaque** infligera "
-                    f"**+{int((_CHARGE_MULT - 1) * 100)} %** de dégâts "
-                    f"(dans les {int(_CHARGE_TTL)} s — frappe vite !).",
-                    ephemeral=True)
-            except Exception:
-                pass
-        except Exception as ex:
-            print(f"[cba_charge] {ex}")
+        await do_charge(i)
 
 
 class CombatShoutButton(
@@ -179,38 +216,7 @@ class CombatShoutButton(
             return cls(0)
 
     async def callback(self, i: discord.Interaction):
-        try:
-            try:
-                await i.response.defer(ephemeral=True)
-            except Exception:
-                pass
-            if i.guild is None:
-                return
-            scope = _parse_scope(i)
-            ok, wait = _arm_shout(i.guild.id, scope)
-            if not ok:
-                # Revue 269 / règle anti-429 251.24 : clic rejeté par cooldown =
-                # ZÉRO followup. Le buff d'équipe est de toute façon déjà actif.
-                return
-            try:
-                await i.followup.send(
-                    f"📣 **Tu galvanises l'équipe !** +{int((_SHOUT_MULT - 1) * 100)} % de "
-                    f"dégâts pour **tous** pendant {int(_SHOUT_TTL)} s.", ephemeral=True)
-            except Exception:
-                pass
-            # Écho public fail-soft, SANS ping, auto-supprimé (1 max / _SHOUT_CD s par event).
-            try:
-                nm = discord.utils.escape_markdown(getattr(i.user, "display_name", "Un héros"))
-                if i.channel is not None:
-                    await i.channel.send(
-                        f"📣 **{nm}** galvanise les troupes — **+{int((_SHOUT_MULT - 1) * 100)} % "
-                        f"de dégâts pour tous** pendant {int(_SHOUT_TTL)} s ! 🔥",
-                        allowed_mentions=discord.AllowedMentions.none(),
-                        delete_after=_SHOUT_TTL)
-            except Exception:
-                pass
-        except Exception as ex:
-            print(f"[cba_shout] {ex}")
+        await do_shout(i, _parse_scope(i))
 
 
 def register_persistent_views(bot_instance):
@@ -225,5 +231,5 @@ def register_persistent_views(bot_instance):
 
 __all__ = [
     "setup", "register_persistent_views", "consume_charge_mult", "shout_mult",
-    "CombatChargeButton", "CombatShoutButton",
+    "do_charge", "do_shout", "CombatChargeButton", "CombatShoutButton",
 ]

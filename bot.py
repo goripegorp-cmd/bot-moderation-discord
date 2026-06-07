@@ -62989,6 +62989,29 @@ class WorldBossAttackView(View):
         )
         b3.callback = self._on_pet
         self.add_item(b3)
+        # Phase 269 : ⚡ Charger / 📣 Crier (actions de combat universelles). Vue
+        # persistante → ces custom_id sont aussi captés après reboot. Scope du cri
+        # = 0 (un seul World Boss par guilde).
+        b4 = Button(label="⚡ Charger", style=discord.ButtonStyle.primary,
+                    custom_id="wb_charge")
+        b4.callback = self._on_charge
+        self.add_item(b4)
+        b5 = Button(label="📣 Crier", style=discord.ButtonStyle.secondary,
+                    custom_id="wb_shout")
+        b5.callback = self._on_shout
+        self.add_item(b5)
+
+    async def _on_charge(self, i: discord.Interaction):
+        try:
+            await combat_actions_module.do_charge(i)
+        except Exception as ex:
+            print(f"[wb_charge] {ex}")
+
+    async def _on_shout(self, i: discord.Interaction):
+        try:
+            await combat_actions_module.do_shout(i, 0)
+        except Exception as ex:
+            print(f"[wb_shout] {ex}")
 
     async def _on_attack(self, i: discord.Interaction):
         # Phase 257.3 : ACK D'ABORD (defer) — acquitter le clic AVANT le cooldown, sinon
@@ -63141,6 +63164,16 @@ class WorldBossAttackView(View):
                         damage += _wvbonus
                         voice_wb_str = (f"\n🔊 **Boost vocal** ! +`{_wvbonus}` dégâts "
                                         f"(+{int(round((_wvmult - 1.0) * 100))} %)")
+            except Exception:
+                pass
+
+            # Phase 269 : actions de combat (⚡ Charger / 📣 Crier) — multiplicateur
+            # SORTANT additif (>= 1.0). FAIL-OPEN. Scope du cri = 0 (un World Boss/guilde).
+            try:
+                _amult = (combat_actions_module.consume_charge_mult(i.guild.id, i.user.id)
+                          * combat_actions_module.shout_mult(i.guild.id, 0))
+                if _amult != 1.0:
+                    damage = int(damage * _amult)
             except Exception:
                 pass
 
@@ -63467,6 +63500,16 @@ class WorldBossArenaLayoutV2(LayoutView):
             )
             pet_btn.callback = _v2_delegate_to(WorldBossAttackView, '_on_pet')
             _row_btns.append(pet_btn)
+            # Phase 269 : ⚡ Charger / 📣 Crier (actions de combat). Délégués à la vue
+            # persistante (clics captés après reboot via ses custom_id wb_charge/wb_shout).
+            _cbtn = Button(label="⚡ Charger", style=discord.ButtonStyle.primary,
+                           custom_id="wb_charge")
+            _cbtn.callback = _v2_delegate_to(WorldBossAttackView, '_on_charge')
+            _row_btns.append(_cbtn)
+            _sbtn = Button(label="📣 Crier", style=discord.ButtonStyle.secondary,
+                           custom_id="wb_shout")
+            _sbtn.callback = _v2_delegate_to(WorldBossAttackView, '_on_shout')
+            _row_btns.append(_sbtn)
         top_btn = Button(
             label="📊 Voir le top 10",
             style=discord.ButtonStyle.secondary,
