@@ -283,6 +283,7 @@ import daily_bosses as daily_bosses_module
 import activity_rewards as activity_rewards_module
 import event_notif_role as event_notif_role_module
 import dungeon_instances as dungeon_module
+import solo_instances as solo_module  # Phase 264 : events SOLO parallèles (Donjon de l'Ombre…)
 # Phase 169.2 : Marchand itinérant quotidien
 import wandering_merchant as wandering_merchant_module
 # Phase 169.3 : World Invasion mensuelle
@@ -17476,7 +17477,8 @@ async def task_supervisor():
                            ("caravan_events_module", "caravan_spawn_task"),
                            ("caravan_events_module", "caravan_watchdog"),
                            ("chain_events_module", "chain_spawn_task"),
-                           ("chain_events_module", "chain_watchdog")):
+                           ("chain_events_module", "chain_watchdog"),
+                           ("solo_module", "solo_watchdog")):
         try:
             mod = globals().get(mod_name)
             lo = getattr(mod, attr, None) if mod is not None else None
@@ -42913,6 +42915,35 @@ async def on_ready():
                 dungeon_module.dungeon_timeout_task.start()
         except Exception as ex:
             print(f"[on_ready 184 dungeon] {ex}")
+
+        # Phase 264 : EVENTS SOLO PARALLELES (Donjon de l'Ombre) — instances perso, 1
+        # salon par joueur, tournent EN PARALLELE sans toucher le verrou global. Cleanup
+        # triple couche (fin de run + watchdog 5 min + boot_cleanup). Entree : sous-hub
+        # « Compétitions » → 🌑 Aventures Solo.
+        try:
+            async def _solo_player_power(_gid, _uid):
+                try:
+                    _inv = await _get_or_create_inventory(_gid, _uid)
+                    _st = events2026.inventory_total_stats(_inv)
+                    return {"atk": int(_st.get('atk', 0) or 0), "deff": int(_st.get('def', 0) or 0)}
+                except Exception:
+                    return {"atk": 0, "deff": 0}
+
+            async def _solo_grant_egg(_gid, _uid):
+                try:
+                    return await pet_eggs_module.grant_egg(_gid, _uid, source="solo_dungeon")
+                except Exception:
+                    return None
+
+            solo_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
+                              player_power_fn=_solo_player_power, grant_egg_fn=_solo_grant_egg)
+            await solo_module.init_db()
+            await solo_module.boot_cleanup()  # ferme les runs/salons solo orphelins (reboot)
+            solo_module.register_persistent_views(bot)
+            if not solo_module.solo_watchdog.is_running():
+                solo_module.solo_watchdog.start()
+        except Exception as ex:
+            print(f"[on_ready 264 solo] {ex}")
 
         # Phase 174.2 : Récompenses VIP des plus actifs (messages + vocal)
         try:
@@ -82317,6 +82348,17 @@ class CompetitionsLayoutV2(LayoutView):
             "+20% dégâts en vocal · butin partagé", b,
         ))
 
+        # Phase 264 : EVENTS SOLO PARALLELES — chacun son salon, à son rythme, sans
+        # attendre le verrou global. Donjon de l'Ombre (push-your-luck).
+        b = Button(label="🌑 Entrer", style=discord.ButtonStyle.primary,
+                   custom_id="compv2_solo")
+        b.callback = self._on_solo
+        items.append(_section_with_button(
+            "🌑 Aventures Solo",
+            "**Donjon de l'Ombre** : TON salon perso, en parallèle (zéro file d'attente). "
+            "Descends étage par étage, ou extrais ton butin avant de tomber. Pousse ta chance !", b,
+        ))
+
         items.append(v2_divider())
         items.append(v2_body(
             "_Auto-tracking : tu n'as rien à valider, c'est calculé en temps réel._"
@@ -82333,6 +82375,7 @@ class CompetitionsLayoutV2(LayoutView):
     async def _on_bingo(self, i):       await _open_bingo_panel(i)
     async def _on_predictions(self, i): await _open_predictions_panel(i)
     async def _on_faction_war(self, i): await _open_faction_war_panel(i)
+    async def _on_solo(self, i):        await solo_module.open_solo_hub(i)  # Phase 264
 
     async def _on_dungeon(self, i):
         # Phase 184 : ouvre un lobby de donjon public dans le salon courant
