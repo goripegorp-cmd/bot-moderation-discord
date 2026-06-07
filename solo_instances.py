@@ -21,6 +21,7 @@ Le module est AUTONOME : il n'ajoute AUCUNE commande slash (entree par bouton de
 """
 from __future__ import annotations
 
+import asyncio
 import random
 from datetime import datetime, timezone
 
@@ -326,43 +327,93 @@ async def _create_solo_channel(guild: discord.Guild, member: discord.Member, slu
         return None
 
 
-async def _close_run(run_id: int) -> bool:
-    """Ferme un run de facon IDEMPOTENTE (claim atomique) + supprime le salon.
-    Sans danger si appele plusieurs fois (watchdog + fin + boot).
+_RESULT_LINGER_SEC = 7          # le panneau de résultat reste visible avant fermeture
+_pending_closes: set = set()    # garde une réf aux tâches de fermeture différée (anti-GC)
 
-    Retourne True UNIQUEMENT si CE call a remporte le claim (rowcount==1) → l'appelant
-    ne paie la recompense QUE dans ce cas (exactly-once, anti double-pay sous double-clic
-    / chemins concurrents). False si deja ferme par un autre chemin, ou erreur."""
+
+async def _claim_run(run_id: int) -> bool:
+    """Claim ATOMIQUE de fin de run (exactly-once). UPDATE status='ended' WHERE
+    status='active' → True SSI ce call a gagné (rowcount==1). NE supprime PAS le
+    salon (le `channel_id` reste pour la suppression ultérieure)."""
     try:
         async with _get_db() as db:
-            # Claim atomique : un seul appelant « gagne » la fermeture.
             cur = await db.execute(
                 "UPDATE solo_runs SET status='ended' WHERE id=? AND status='active'",
                 (run_id,))
             await db.commit()
-            if getattr(cur, "rowcount", 0) != 1:
-                return False  # deja ferme par un autre chemin → NE PAS re-payer
-            async with db.execute(
-                "SELECT guild_id, channel_id FROM solo_runs WHERE id=?", (run_id,)) as c:
-                row = await c.fetchone()
-        if row:
-            gid, ch_id = int(row[0]), int(row[1] or 0)
-            g = _bot.get_guild(gid) if _bot else None
-            if g and ch_id:
-                ch = g.get_channel(ch_id)
-                if ch is not None:
-                    try:
-                        await ch.delete(reason="Aventure solo terminée")
-                    except Exception:
-                        pass
-        return True
+            return getattr(cur, "rowcount", 0) == 1
     except Exception as ex:
-        print(f"[solo _close_run] {ex}")
+        print(f"[solo _claim_run] {ex}")
         return False
 
 
+async def _delete_run_channel(run_id: int):
+    """Supprime le salon du run (idempotent) + met channel_id=0 pour ne plus le
+    re-traiter. Sans danger si déjà supprimé (get_channel→None = no-op)."""
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT guild_id, channel_id FROM solo_runs WHERE id=?", (run_id,)) as c:
+                row = await c.fetchone()
+            if not row:
+                return
+            gid, ch_id = int(row[0]), int(row[1] or 0)
+            if ch_id == 0:
+                return  # déjà nettoyé
+            await db.execute("UPDATE solo_runs SET channel_id=0 WHERE id=?", (run_id,))
+            await db.commit()
+        g = _bot.get_guild(gid) if _bot else None
+        if g:
+            ch = g.get_channel(ch_id)
+            if ch is not None:
+                try:
+                    await ch.delete(reason="Aventure solo terminée")
+                except Exception:
+                    pass
+    except Exception as ex:
+        print(f"[solo _delete_run_channel] {ex}")
+
+
+async def _delayed_close(run_id: int):
+    """Attend _RESULT_LINGER_SEC (le joueur savoure son résultat) puis supprime le
+    salon. Filet de sécurité si la tâche est perdue (reboot) : le watchdog +
+    boot_cleanup balaient aussi les runs 'ended' dont le salon traîne encore."""
+    try:
+        await asyncio.sleep(_RESULT_LINGER_SEC)
+    except Exception:
+        pass
+    await _delete_run_channel(run_id)
+
+
+async def _close_run(run_id: int) -> bool:
+    """Termine un run (claim atomique exactly-once) en LAISSANT le panneau de
+    résultat visible ~_RESULT_LINGER_SEC s, puis supprime le salon. Retourne True
+    SSI ce call a gagné le claim → l'appelant ne paie la récompense QUE dans ce cas
+    (anti double-pay). Utilisé par TOUS les chemins de fin d'event (victoire/défaite/
+    extraction/abandon)."""
+    won = await _claim_run(run_id)
+    if won:
+        try:
+            t = asyncio.create_task(_delayed_close(run_id))
+            _pending_closes.add(t)
+            t.add_done_callback(_pending_closes.discard)
+        except Exception:
+            await _delete_run_channel(run_id)  # fallback : suppression immédiate
+    return won
+
+
+async def _close_run_now(run_id: int) -> bool:
+    """Comme _close_run mais supprime le salon IMMÉDIATEMENT (watchdog / boot_cleanup
+    — aucun panneau de résultat à montrer pour un run abandonné/orphelin). Idempotent."""
+    won = await _claim_run(run_id)
+    await _delete_run_channel(run_id)  # supprime même si claim perdu (idempotent)
+    return won
+
+
 async def boot_cleanup():
-    """Au boot : ferme tous les runs solo 'active' (salons orphelins potentiels)."""
+    """Au boot : ferme tous les runs solo 'active' (salons orphelins potentiels)
+    + balaie les runs 'ended' dont le salon traîne encore (tâche de fermeture
+    différée perdue lors d'un reboot pendant le délai de résultat)."""
     if _get_db is None:
         return
     try:
@@ -370,18 +421,24 @@ async def boot_cleanup():
             async with db.execute(
                 "SELECT id FROM solo_runs WHERE status='active'") as cur:
                 ids = [int(r[0]) for r in await cur.fetchall()]
+            async with db.execute(
+                "SELECT id FROM solo_runs WHERE status='ended' AND channel_id != 0") as cur:
+                stale = [int(r[0]) for r in await cur.fetchall()]
         for rid in ids:
-            await _close_run(rid)
-        if ids:
-            print(f"[solo boot_cleanup] {len(ids)} run(s) solo orphelin(s) nettoye(s)")
+            await _close_run_now(rid)
+        for rid in stale:
+            await _delete_run_channel(rid)
+        if ids or stale:
+            print(f"[solo boot_cleanup] {len(ids)} actif(s) + {len(stale)} salon(s) résiduel(s) nettoyé(s)")
     except Exception as ex:
         print(f"[solo boot_cleanup] {ex}")
 
 
 @tasks.loop(minutes=5)
 async def solo_watchdog():
-    """Ferme tout run actif depuis > _RUN_TTL_SEC (abandon). 1 seul watchdog pour
-    TOUS les types d'events solo."""
+    """Ferme tout run actif depuis > _RUN_TTL_SEC (abandon) + filet de sécurité :
+    supprime les salons des runs 'ended' restés ouverts (tâche différée perdue).
+    1 seul watchdog pour TOUS les types d'events solo."""
     if _get_db is None:
         return
     try:
@@ -391,8 +448,17 @@ async def solo_watchdog():
                 "datetime(started_at) < datetime('now', ?)",
                 (f'-{_RUN_TTL_SEC} seconds',)) as cur:
                 ids = [int(r[0]) for r in await cur.fetchall()]
+            # Filet : runs terminés dont le salon n'a pas encore été supprimé et
+            # dont le délai de résultat est largement écoulé (évite de couper un
+            # linger en cours ; started_at ancien ⇒ le run est fini depuis longtemps).
+            async with db.execute(
+                "SELECT id FROM solo_runs WHERE status='ended' AND channel_id != 0 AND "
+                "datetime(started_at) < datetime('now', '-60 seconds')") as cur:
+                stale = [int(r[0]) for r in await cur.fetchall()]
         for rid in ids:
-            await _close_run(rid)
+            await _close_run_now(rid)
+        for rid in stale:
+            await _delete_run_channel(rid)
     except Exception as ex:
         print(f"[solo_watchdog] {ex}")
 
