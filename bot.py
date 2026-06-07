@@ -16946,8 +16946,9 @@ async def hub_live_events_refresh_task():
                 if live_msg_id:
                     # Edit existing
                     try:
-                        msg = await channel.fetch_message(live_msg_id)
-                        await msg.edit(view=view)
+                        # Phase 263 anti-429 : PATCH SEUL via get_partial_message (zéro GET)
+                        # — cette loop tourne 1×/min sur TOUS les serveurs (règle anti-429).
+                        await channel.get_partial_message(live_msg_id).edit(view=view)
                         _hub_live_events_sig_cache[guild.id] = sig
                     except (discord.NotFound, discord.Forbidden):
                         # Re-poste
@@ -42834,8 +42835,8 @@ async def on_ready():
                                      report_fn=_post_combat_report,
                                      event_busy_fn=_has_any_major_event_running,
                                      pet_strike_fn=_pet_strike)
+            rift_events_module.register_persistent_views(bot)  # Phase 263 : AVANT init_db (vues OK même si init_db lève)
             await rift_events_module.init_db()
-            rift_events_module.register_persistent_views(bot)
             await rift_events_module.boot_cleanup()
             if not rift_events_module.rift_spawn_task.is_running():
                 rift_events_module.rift_spawn_task.start()
@@ -42854,8 +42855,8 @@ async def on_ready():
                                         report_fn=_post_combat_report,
                                         event_busy_fn=_has_any_major_event_running,
                                         pet_strike_fn=_pet_strike)
+            caravan_events_module.register_persistent_views(bot)  # Phase 263 : AVANT init_db (vues OK même si init_db lève)
             await caravan_events_module.init_db()
-            caravan_events_module.register_persistent_views(bot)
             await caravan_events_module.boot_cleanup()
             if not caravan_events_module.caravan_spawn_task.is_running():
                 caravan_events_module.caravan_spawn_task.start()
@@ -42874,8 +42875,8 @@ async def on_ready():
                                       report_fn=_post_combat_report,
                                       event_busy_fn=_has_any_major_event_running,
                                       pet_strike_fn=_pet_strike)
+            chain_events_module.register_persistent_views(bot)  # Phase 263 : AVANT init_db (vues OK même si init_db lève)
             await chain_events_module.init_db()
-            chain_events_module.register_persistent_views(bot)
             await chain_events_module.boot_cleanup()
             if not chain_events_module.chain_spawn_task.is_running():
                 chain_events_module.chain_spawn_task.start()

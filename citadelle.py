@@ -1841,13 +1841,19 @@ async def _market_sell_all(gid: int, uid: int) -> str:
             total = int(row[0]) if row else 0
             if total <= 0:
                 return "📦 Tu n'as aucun matériau à vendre."
-            await db.execute(
-                "DELETE FROM citadelle_materials WHERE guild_id=? AND user_id=?",
+            # Phase 263 : DELETE ATOMIQUE — on ne crédite QUE si ce DELETE a vraiment
+            # retiré des lignes (rowcount>0). Un 2e appel concurrent (double-clic) voit
+            # rowcount=0 (inventaire déjà vidé par le 1er) → AUCUN double-crédit.
+            _dc = await db.execute(
+                "DELETE FROM citadelle_materials WHERE guild_id=? AND user_id=? AND qty>0",
                 (int(gid), int(uid)))
+            _deleted = getattr(_dc, "rowcount", 0) or 0
             await db.commit()
     except Exception as ex:
         print(f"[citadelle _market_sell_all] {ex}")
         return "❌ Erreur, réessaie."
+    if _deleted <= 0:
+        return "📦 Tu n'as aucun matériau à vendre."
     gain = total * rate
     await grant_eclats(gid, uid, gain)
     return f"💰 Vendu `{total}` matériaux × `{rate}` = **+{gain} {ECLATS_EMOJI}** !"
