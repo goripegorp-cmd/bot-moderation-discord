@@ -82356,9 +82356,9 @@ class CompetitionsLayoutV2(LayoutView):
         b.callback = self._on_solo
         items.append(_section_with_button(
             "🌑 Aventures Solo",
-            "TON salon perso, en parallèle (zéro file d'attente) : **Donjon de l'Ombre** "
-            "(push-your-luck) · **Chasse au Trésor** (énigmes) · **Défi du Familier** "
-            "(ton compagnon combat). À ton rythme, quand tu veux.", b,
+            "TON salon perso, en parallèle (zéro file d'attente) : **Donjon**, **Trésor**, "
+            "**Défi du Familier**, **Sanctuaire d'Épreuves**, **Arène Miroir**, **Enquête Perso**. "
+            "À ton rythme, quand tu veux.", b,
         ))
 
         items.append(v2_divider())

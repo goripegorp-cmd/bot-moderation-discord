@@ -111,6 +111,43 @@ _PT_ENEMIES = [
     ("👻", "Spectre du dojo"), ("🐲", "Drakeling captif"),
 ]
 
+# ─── Sanctuaire d'Épreuves (survie à vagues, push-your-luck) ────────────────────
+_SANCTUARY_KIND = "sanctuary"
+_SANC_MAX_WAVES = 6
+_SANC_PLAYER_HP = 150
+_SANC_MOB_BASE_HP = 70
+_SANC_MOB_BASE_ATK = 15
+_SANC_COINS_PER_WAVE = 22       # x (vague+1)
+_SANC_HEAL_FRAC = 0.30          # soin après chaque vague nettoyée
+_SANC_MOBS = ["Gargouille mineure", "Spectre des catacombes", "Golem érodé",
+              "Bête ancestrale", "Champion déchu", "Gardien du Seuil"]
+
+# ─── Arène Miroir (combat contre un clone EXACT de tes stats) ───────────────────
+_MIRROR_KIND = "mirror"
+_MIRROR_MAX_TURNS = 14
+_MIRROR_BASE_HP = 110           # + def*2 → la def compte
+_MIRROR_WIN_COINS = 90
+_MIRROR_COOLDOWN_MIN = 90       # long : prestige rare
+
+# ─── Enquête Perso (déduction + gamble : accuser tôt = plus de gain, +risque) ───
+_INVESTIGATE_KIND = "investigate"
+_INV_WIN_COINS = 45             # base modeste
+_INV_RISK_BONUS = 18            # par indice NON utilisé (accuser tôt = +risque/+gain)
+_INV_CASES = [
+    {"scene": "Le trésor scellé du marchand elfe a disparu de sa réserve.",
+     "suspects": [("🏹", "Rôdeur des Bois"), ("🗿", "Golem Gardien"),
+                  ("🧙", "Mage Noir"), ("🩸", "Acolyte Maudit")]},
+    {"scene": "Les archives interdites de la guilde ont été dérobées dans la nuit.",
+     "suspects": [("📜", "Scribe Ambitieux"), ("🛡️", "Garde Soudoyé"),
+                  ("🕯️", "Mage de Cour"), ("🎭", "Espion Masqué")]},
+    {"scene": "Le reliquaire du temple a été vidé sans briser le sceau sacré.",
+     "suspects": [("⛪", "Prêtre Déchu"), ("🐀", "Voleur des Égouts"),
+                  ("👑", "Noble Endetté"), ("🔮", "Oracle Corrompu")]},
+    {"scene": "La gemme de la couronne a été remplacée par une copie.",
+     "suspects": [("💎", "Joaillier Royal"), ("🗝️", "Chambellan"),
+                  ("🎨", "Faussaire de Génie"), ("🍷", "Échanson Jaloux")]},
+]
+
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict,
           add_coins_fn=None, player_power_fn=None, grant_egg_fn=None,
@@ -377,6 +414,9 @@ async def open_solo_hub(i: discord.Interaction):
     cd_dg = await _cooldown_remaining(i.guild.id, i.user.id, _DUNGEON_KIND, _COOLDOWN_MIN)
     cd_ts = await _cooldown_remaining(i.guild.id, i.user.id, _TREASURE_KIND, _COOLDOWN_MIN)
     cd_pt = await _cooldown_remaining(i.guild.id, i.user.id, _PETTRIAL_KIND, _COOLDOWN_MIN)
+    cd_sn = await _cooldown_remaining(i.guild.id, i.user.id, _SANCTUARY_KIND, _COOLDOWN_MIN)
+    cd_mr = await _cooldown_remaining(i.guild.id, i.user.id, _MIRROR_KIND, _MIRROR_COOLDOWN_MIN)
+    cd_iv = await _cooldown_remaining(i.guild.id, i.user.id, _INVESTIGATE_KIND, _COOLDOWN_MIN)
     items = [
         v2_title("🌑  Aventures Solo"),
         v2_subtitle("Des défis RIEN QUE pour toi — ton propre salon, à ton rythme, "
@@ -385,20 +425,33 @@ async def open_solo_hub(i: discord.Interaction):
         v2_body(
             "**🗝️ Donjon de l'Ombre**\n"
             "_Descente à étages : **descends** (+risque, +butin) ou **extrais** ton butin "
-            "et repars sain. Tombe avant d'extraire = moitié perdue. Pousse ta chance !_"
+            "et repars sain. Tombe avant d'extraire = moitié perdue._"
             + (f"\n⏳ _dispo dans {cd_dg} min_" if cd_dg > 0 else "")
         ),
         v2_body(
             "**💎 Chasse au Trésor**\n"
-            "_3 énigmes de plus en plus payantes. Bonne réponse = tu avances et empoches ; "
-            "une erreur et tu repars avec la moitié de tes gains. Réfléchis bien !_"
+            "_3 énigmes de plus en plus payantes. Une erreur et tu repars avec la moitié._"
             + (f"\n⏳ _dispo dans {cd_ts} min_" if cd_ts > 0 else "")
         ),
         v2_body(
             "**🐾 Défi du Familier**\n"
-            "_Ici c'est TON familier qui combat ! Déchaîne-le contre un adversaire à sa mesure. "
-            "Actif = grosse salve, passif = frappe douce + te soigne. Récompense ton compagnon !_"
+            "_Ici c'est TON familier qui combat ! Actif = grosse salve, passif = soigne._"
             + (f"\n⏳ _dispo dans {cd_pt} min_" if cd_pt > 0 else "")
+        ),
+        v2_body(
+            "**🏛️ Sanctuaire d'Épreuves**\n"
+            "_Survis aux vagues qui s'accélèrent. Sécurise ton butin avant de tomber._"
+            + (f"\n⏳ _dispo dans {cd_sn} min_" if cd_sn > 0 else "")
+        ),
+        v2_body(
+            "**🪞 Arène Miroir**\n"
+            "_Affronte un clone EXACT de tes stats — tu frappes en premier. Prestige rare._"
+            + (f"\n⏳ _dispo dans {cd_mr} min_" if cd_mr > 0 else "")
+        ),
+        v2_body(
+            "**🔍 Enquête Perso**\n"
+            "_Trouve le coupable. Accuse tôt = prime de flair (+risque) ; cherche des indices = plus sûr._"
+            + (f"\n⏳ _dispo dans {cd_iv} min_" if cd_iv > 0 else "")
         ),
     ]
 
@@ -407,21 +460,37 @@ async def open_solo_hub(i: discord.Interaction):
             super().__init__(timeout=300)
             self.add_item(v2_container(*items, color=0x6C3483))
             b1 = discord.ui.Button(
-                label=("⏳ Donjon" if cd_dg > 0 else "🗝️ Donjon de l'Ombre"),
+                label=("⏳ Donjon" if cd_dg > 0 else "🗝️ Donjon"),
                 style=(discord.ButtonStyle.secondary if cd_dg > 0 else discord.ButtonStyle.success),
                 custom_id="solo_start:shadow_dungeon", disabled=cd_dg > 0)
             b1.callback = _on_start_dungeon_click
             b2 = discord.ui.Button(
-                label=("⏳ Trésor" if cd_ts > 0 else "💎 Chasse au Trésor"),
+                label=("⏳ Trésor" if cd_ts > 0 else "💎 Trésor"),
                 style=(discord.ButtonStyle.secondary if cd_ts > 0 else discord.ButtonStyle.primary),
                 custom_id="solo_start:treasure_solo", disabled=cd_ts > 0)
             b2.callback = _on_start_treasure_click
             b3 = discord.ui.Button(
-                label=("⏳ Familier" if cd_pt > 0 else "🐾 Défi du Familier"),
+                label=("⏳ Familier" if cd_pt > 0 else "🐾 Familier"),
                 style=(discord.ButtonStyle.secondary if cd_pt > 0 else discord.ButtonStyle.success),
                 custom_id="solo_start:pet_trial", disabled=cd_pt > 0)
             b3.callback = _on_start_pettrial_click
+            b4 = discord.ui.Button(
+                label=("⏳ Sanctuaire" if cd_sn > 0 else "🏛️ Sanctuaire"),
+                style=(discord.ButtonStyle.secondary if cd_sn > 0 else discord.ButtonStyle.danger),
+                custom_id="solo_start:sanctuary", disabled=cd_sn > 0)
+            b4.callback = _on_start_sanctuary_click
+            b5 = discord.ui.Button(
+                label=("⏳ Miroir" if cd_mr > 0 else "🪞 Miroir"),
+                style=(discord.ButtonStyle.secondary if cd_mr > 0 else discord.ButtonStyle.danger),
+                custom_id="solo_start:mirror", disabled=cd_mr > 0)
+            b5.callback = _on_start_mirror_click
+            b6 = discord.ui.Button(
+                label=("⏳ Enquête" if cd_iv > 0 else "🔍 Enquête"),
+                style=(discord.ButtonStyle.secondary if cd_iv > 0 else discord.ButtonStyle.primary),
+                custom_id="solo_start:investigate", disabled=cd_iv > 0)
+            b6.callback = _on_start_investigate_click
             self.add_item(discord.ui.ActionRow(b1, b2, b3))
+            self.add_item(discord.ui.ActionRow(b4, b5, b6))
 
     await _safe_followup(i, view=_SoloHub())
 
@@ -1185,6 +1254,602 @@ async def _on_pt_strike(i: discord.Interaction):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  SANCTUAIRE D'ÉPREUVES (survie à vagues — push-your-luck collectif solo)
+# ═══════════════════════════════════════════════════════════════════════════════
+def _sanctuary_mob_for_wave(wave: int):
+    idx = min(wave, len(_SANC_MOBS) - 1)
+    return {
+        "name": _SANC_MOBS[idx],
+        "hp": int(_SANC_MOB_BASE_HP * (1.0 + wave * 0.7)),
+        "atk": int(_SANC_MOB_BASE_ATK * (1.0 + wave * 0.5)),
+    }
+
+
+async def _on_start_sanctuary_click(i: discord.Interaction):
+    await start_sanctuary(i)
+
+
+async def start_sanctuary(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    if _click_too_soon(i.user.id):
+        return
+    try:
+        if i.guild is None:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        member = i.user if isinstance(i.user, discord.Member) else i.guild.get_member(i.user.id)
+        if member is None:
+            return await _safe_followup(i, content="❌ Membre introuvable.")
+        if await _user_active_run(i.guild.id, i.user.id, _SANCTUARY_KIND):
+            return await _safe_followup(i, content="🏛️ Tu as déjà une épreuve en cours — termine-la d'abord.")
+        cd = await _cooldown_remaining(i.guild.id, i.user.id, _SANCTUARY_KIND, _COOLDOWN_MIN)
+        if cd > 0:
+            return await _safe_followup(i, content=f"⏳ Prochaine épreuve dans `{cd}` min.")
+        if await _active_run_count(i.guild.id) >= _MAX_ACTIVE_RUNS:
+            return await _safe_followup(i, content="🌑 Trop d'aventures en cours sur le serveur — réessaie dans un instant.")
+        if not i.guild.me.guild_permissions.manage_channels:
+            return await _safe_followup(i, content="❌ Le bot n'a pas la permission « Gérer les salons ».")
+
+        ch = await _create_solo_channel(i.guild, member, "🏛️-sanctuaire")
+        if ch is None:
+            return await _safe_followup(i, content="❌ Impossible de créer ton salon, réessaie.")
+        mob = _sanctuary_mob_for_wave(0)
+        try:
+            async with _get_db() as db:
+                cur = await db.execute(
+                    "INSERT INTO solo_runs(guild_id, user_id, kind, channel_id, status, "
+                    "depth, hp, hp_max, mob_hp, mob_hp_max, coins_pending) "
+                    "VALUES(?,?,?,?,'active',0,?,?,?,?,0)",
+                    (i.guild.id, i.user.id, _SANCTUARY_KIND, ch.id, _SANC_PLAYER_HP, _SANC_PLAYER_HP,
+                     mob["hp"], mob["hp"]))
+                run_id = cur.lastrowid
+                await db.commit()
+        except Exception as ex:
+            print(f"[solo sanctuary INSERT] {ex}")
+            try:
+                await ch.delete(reason="échec init sanctuaire")
+            except Exception:
+                pass
+            return await _safe_followup(i, content="❌ Erreur au lancement, réessaie.")
+        await _stamp_cooldown(i.guild.id, i.user.id, _SANCTUARY_KIND)
+        run = await _get_run(run_id)
+        try:
+            await ch.send(view=_build_sanctuary_view(run))
+        except Exception as ex:
+            print(f"[solo sanctuary send] {ex}")
+        await _safe_followup(i, content=f"🏛️ {member.mention} ton épreuve t'attend : {ch.mention}")
+    except Exception as ex:
+        print(f"[start_sanctuary] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+def _build_sanctuary_view(run: dict):
+    LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container = _v2get()
+    wave = int(run["depth"])
+    mob = _sanctuary_mob_for_wave(wave)
+    items = [
+        v2_title(f"🏛️ Sanctuaire d'Épreuves — Vague {wave + 1}/{_SANC_MAX_WAVES}"),
+        v2_subtitle("Survis aux vagues ou sécurise ton butin avant de tomber."),
+        v2_divider(),
+        v2_body(f"**⚔️ {mob['name']}**\n"
+                f"❤️ `{_bar(run['mob_hp'], run['mob_hp_max'])}` `{max(0, run['mob_hp'])}/{run['mob_hp_max']}`"),
+        v2_body(f"**🛡️ Toi**\n"
+                f"❤️ `{_bar(run['hp'], run['hp_max'])}` `{max(0, run['hp'])}/{run['hp_max']}`\n"
+                f"🎒 Butin sécurisable : **{run['coins_pending']}** 🪙"),
+        v2_divider(),
+        v2_body("⚔️ **Combattre** la vague (chaque victoire te soigne un peu et augmente le butin) · "
+                "🎒 **Sécuriser** pour repartir avec ton butin. Tomber = moitié perdue."),
+    ]
+
+    class _SancView(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=_RUN_TTL_SEC)
+            self.add_item(v2_container(*items, color=0x8E44AD))
+            fight = discord.ui.Button(label="⚔️ Combattre", style=discord.ButtonStyle.danger,
+                                      custom_id=f"sanc_fight:{run['id']}")
+            save = discord.ui.Button(label=f"🎒 Sécuriser ({run['coins_pending']} 🪙)",
+                                     style=discord.ButtonStyle.success,
+                                     custom_id=f"sanc_save:{run['id']}")
+            fight.callback = _on_sanc_fight
+            save.callback = _on_sanc_save
+            self.add_item(discord.ui.ActionRow(fight, save))
+
+    return _SancView()
+
+
+async def _on_sanc_fight(i: discord.Interaction):
+    rid = _parse_rid(i)
+    if rid is None:
+        return
+    if _click_too_soon(i.user.id):
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
+        return
+    run = await _get_run(rid)
+    if not _owns_run(i, run):
+        try:
+            return await i.response.edit_message(view=None)
+        except Exception:
+            return
+    try:
+        gid, uid = run["guild_id"], run["user_id"]
+        atk, deff = await _player_atk_def(gid, uid)
+        dmg = int(random.uniform(0.85, 1.15) * max(8, atk))
+        mob = _sanctuary_mob_for_wave(int(run["depth"]))
+        new_mob_hp = max(0, int(run["mob_hp"]) - dmg)
+        if new_mob_hp > 0:
+            retal = max(4, int(mob["atk"] * random.uniform(0.8, 1.1)) - deff // 2)
+            new_hp = int(run["hp"]) - retal
+            if new_hp <= 0:
+                kept = int(run["coins_pending"]) // 2
+                won = await _close_run(rid)
+                if won and kept > 0 and _add_coins is not None:
+                    try:
+                        await _add_coins(gid, uid, kept)
+                    except Exception:
+                        pass
+                return await _safe_edit(
+                    i, f"💀 **Tu es tombé** à la vague {int(run['depth']) + 1}…\n"
+                       f"Tu repars avec la moitié du butin : **+{kept}** 🪙.\n_Ce salon se ferme._")
+            async with _get_db() as db:
+                await db.execute("UPDATE solo_runs SET mob_hp=?, hp=? WHERE id=? AND status='active'",
+                                 (new_mob_hp, new_hp, rid))
+                await db.commit()
+            run2 = await _get_run(rid)
+            try:
+                return await i.response.edit_message(view=_build_sanctuary_view(run2))
+            except Exception:
+                return
+        # vague nettoyée (le mob meurt → pas de riposte ce tour)
+        wave = int(run["depth"])
+        gain = _SANC_COINS_PER_WAVE * (wave + 1)
+        new_wave = wave + 1
+        new_coins = int(run["coins_pending"]) + gain
+        if new_wave >= _SANC_MAX_WAVES:
+            total = new_coins + gain  # bonus de fin
+            won = await _close_run(rid)
+            if won and _add_coins is not None:
+                try:
+                    await _add_coins(gid, uid, total)
+                except Exception:
+                    pass
+            egg_txt = await _maybe_grant_egg(gid, uid, new_wave) if won else ""
+            return await _safe_edit(
+                i, f"🏆 **Tu as conquis le Sanctuaire !** Toutes les vagues vaincues.\n"
+                   f"Butin total : **+{total}** 🪙{egg_txt}\n_Honneur à toi. Ce salon se ferme._")
+        healed = min(int(run["hp_max"]), int(run["hp"]) + int(int(run["hp_max"]) * _SANC_HEAL_FRAC))
+        nmob = _sanctuary_mob_for_wave(new_wave)
+        async with _get_db() as db:
+            await db.execute(
+                "UPDATE solo_runs SET depth=?, coins_pending=?, hp=?, mob_hp=?, mob_hp_max=? "
+                "WHERE id=? AND status='active'",
+                (new_wave, new_coins, healed, nmob["hp"], nmob["hp"], rid))
+            await db.commit()
+        run2 = await _get_run(rid)
+        try:
+            return await i.response.edit_message(view=_build_sanctuary_view(run2))
+        except Exception:
+            return
+    except Exception as ex:
+        print(f"[_on_sanc_fight] {ex}")
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
+
+
+async def _on_sanc_save(i: discord.Interaction):
+    rid = _parse_rid(i)
+    if rid is None:
+        return
+    if _click_too_soon(i.user.id):
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
+        return
+    run = await _get_run(rid)
+    if not _owns_run(i, run):
+        try:
+            return await i.response.edit_message(view=None)
+        except Exception:
+            return
+    try:
+        gid, uid = run["guild_id"], run["user_id"]
+        total = int(run["coins_pending"])
+        won = await _close_run(rid)
+        if won and total > 0 and _add_coins is not None:
+            try:
+                await _add_coins(gid, uid, total)
+            except Exception:
+                pass
+        egg_txt = await _maybe_grant_egg(gid, uid, int(run["depth"])) if (won and int(run["depth"]) >= 2) else ""
+        await _safe_edit(
+            i, f"🎒 **Butin sécurisé !** Tu quittes le Sanctuaire avec **+{total}** 🪙"
+               f"{egg_txt}\n_Sage décision. Ce salon se ferme._")
+    except Exception as ex:
+        print(f"[_on_sanc_save] {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ARÈNE MIROIR (affronte un clone EXACT de tes stats — tu frappes en premier)
+# ═══════════════════════════════════════════════════════════════════════════════
+def _mirror_dmg(atk: int, deff: int) -> int:
+    return max(4, int(random.uniform(0.85, 1.15) * max(8, atk)) - deff // 3)
+
+
+async def _on_start_mirror_click(i: discord.Interaction):
+    await start_mirror(i)
+
+
+async def start_mirror(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    if _click_too_soon(i.user.id):
+        return
+    try:
+        if i.guild is None:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        member = i.user if isinstance(i.user, discord.Member) else i.guild.get_member(i.user.id)
+        if member is None:
+            return await _safe_followup(i, content="❌ Membre introuvable.")
+        if await _user_active_run(i.guild.id, i.user.id, _MIRROR_KIND):
+            return await _safe_followup(i, content="🪞 Ton reflet t'attend déjà — termine ce duel d'abord.")
+        cd = await _cooldown_remaining(i.guild.id, i.user.id, _MIRROR_KIND, _MIRROR_COOLDOWN_MIN)
+        if cd > 0:
+            return await _safe_followup(i, content=f"⏳ Prochain duel miroir dans `{cd}` min.")
+        if await _active_run_count(i.guild.id) >= _MAX_ACTIVE_RUNS:
+            return await _safe_followup(i, content="🌑 Trop d'aventures en cours sur le serveur — réessaie dans un instant.")
+        if not i.guild.me.guild_permissions.manage_channels:
+            return await _safe_followup(i, content="❌ Le bot n'a pas la permission « Gérer les salons ».")
+
+        atk, deff = await _player_atk_def(i.guild.id, i.user.id)
+        hp = _MIRROR_BASE_HP + deff * 2  # clone identique → même HP
+        ch = await _create_solo_channel(i.guild, member, "🪞-arène-miroir")
+        if ch is None:
+            return await _safe_followup(i, content="❌ Impossible de créer ton salon, réessaie.")
+        try:
+            async with _get_db() as db:
+                cur = await db.execute(
+                    "INSERT INTO solo_runs(guild_id, user_id, kind, channel_id, status, "
+                    "depth, hp, hp_max, mob_hp, mob_hp_max, coins_pending) "
+                    "VALUES(?,?,?,?,'active',0,?,?,?,?,0)",
+                    (i.guild.id, i.user.id, _MIRROR_KIND, ch.id, hp, hp, hp, hp))
+                run_id = cur.lastrowid
+                await db.commit()
+        except Exception as ex:
+            print(f"[solo mirror INSERT] {ex}")
+            try:
+                await ch.delete(reason="échec init miroir")
+            except Exception:
+                pass
+            return await _safe_followup(i, content="❌ Erreur au lancement, réessaie.")
+        await _stamp_cooldown(i.guild.id, i.user.id, _MIRROR_KIND)
+        run = await _get_run(run_id)
+        try:
+            await ch.send(view=_build_mirror_view(run))
+        except Exception as ex:
+            print(f"[solo mirror send] {ex}")
+        await _safe_followup(i, content=f"🪞 {member.mention} ton reflet t'attend : {ch.mention}")
+    except Exception as ex:
+        print(f"[start_mirror] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+def _build_mirror_view(run: dict):
+    LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container = _v2get()
+    turn = int(run["depth"])
+    items = [
+        v2_title("🪞 Arène Miroir — ton reflet"),
+        v2_subtitle(f"Échange {turn + 1}/{_MIRROR_MAX_TURNS} · stats identiques, mais tu frappes en premier."),
+        v2_divider(),
+        v2_body(f"**🪞 Ton Reflet**\n"
+                f"❤️ `{_bar(run['mob_hp'], run['mob_hp_max'])}` `{max(0, run['mob_hp'])}/{run['mob_hp_max']}`"),
+        v2_body(f"**🛡️ Toi**\n"
+                f"❤️ `{_bar(run['hp'], run['hp_max'])}` `{max(0, run['hp'])}/{run['hp_max']}`"),
+        v2_divider(),
+        v2_body("⚔️ **Frappe** ton reflet. Il riposte avec TES armes. Le premier à tomber perd — "
+                "ton avantage : tu frappes en premier."),
+    ]
+
+    class _MirrorView(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=_RUN_TTL_SEC)
+            self.add_item(v2_container(*items, color=0x34495E))
+            b = discord.ui.Button(label="⚔️ Frapper", style=discord.ButtonStyle.danger,
+                                  custom_id=f"mirror_strike:{run['id']}")
+            b.callback = _on_mirror_strike
+            self.add_item(discord.ui.ActionRow(b))
+
+    return _MirrorView()
+
+
+async def _on_mirror_strike(i: discord.Interaction):
+    rid = _parse_rid(i)
+    if rid is None:
+        return
+    if _click_too_soon(i.user.id):
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
+        return
+    run = await _get_run(rid)
+    if not _owns_run(i, run):
+        try:
+            return await i.response.edit_message(view=None)
+        except Exception:
+            return
+    try:
+        gid, uid = run["guild_id"], run["user_id"]
+        atk, deff = await _player_atk_def(gid, uid)  # le clone partage TES stats à jour
+        # Toi → reflet (avantage : tu frappes en premier)
+        new_clone_hp = max(0, int(run["mob_hp"]) - _mirror_dmg(atk, deff))
+        if new_clone_hp <= 0:
+            won = await _close_run(rid)
+            if won and _add_coins is not None:
+                try:
+                    await _add_coins(gid, uid, _MIRROR_WIN_COINS)
+                except Exception:
+                    pass
+            return await _safe_edit(
+                i, f"🏆 **Tu as vaincu ton reflet !** Preuve de ta supériorité.\n"
+                   f"Récompense : **+{_MIRROR_WIN_COINS}** 🪙\n_Honneur rare. Ce salon se ferme._")
+        # Le reflet riposte avec les mêmes stats
+        new_hp = int(run["hp"]) - _mirror_dmg(atk, deff)
+        turn = int(run["depth"]) + 1
+        if new_hp <= 0:
+            await _close_run(rid)
+            return await _safe_edit(
+                i, "💀 **Ton reflet t'a vaincu.** Cette fois, il était toi en mieux…\n"
+                   "_Reviens plus fort (meilleur équipement). Ce salon se ferme._")
+        if turn >= _MIRROR_MAX_TURNS:
+            await _close_run(rid)
+            return await _safe_edit(
+                i, "⏳ **Épuisement** : aucun des deux ne cède. Le duel s'achève sans vainqueur.\n"
+                   "_Affûte ton équipement et reviens. Ce salon se ferme._")
+        async with _get_db() as db:
+            await db.execute("UPDATE solo_runs SET mob_hp=?, hp=?, depth=? WHERE id=? AND status='active'",
+                             (new_clone_hp, new_hp, turn, rid))
+            await db.commit()
+        run2 = await _get_run(rid)
+        try:
+            return await i.response.edit_message(view=_build_mirror_view(run2))
+        except Exception:
+            return
+    except Exception as ex:
+        print(f"[_on_mirror_strike] {ex}")
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ENQUÊTE PERSO (déduction : indices éliminent les innocents ; accuser tôt = gamble)
+# ═══════════════════════════════════════════════════════════════════════════════
+def _inv_setup(run_id: int):
+    """Déterministe par run_id : (case, culprit_idx, innocents_order). Le culpable
+    et l'ordre d'élimination des innocents NE sont JAMAIS dans le custom_id."""
+    rng = random.Random(int(run_id) * 2654435761 & 0xFFFFFFFF)
+    case = _INV_CASES[rng.randrange(len(_INV_CASES))]
+    n = len(case["suspects"])
+    culprit = rng.randrange(n)
+    innocents = [j for j in range(n) if j != culprit]
+    rng.shuffle(innocents)
+    return case, culprit, innocents
+
+
+async def _on_start_investigate_click(i: discord.Interaction):
+    await start_investigate(i)
+
+
+async def start_investigate(i: discord.Interaction):
+    if not await _safe_defer(i):
+        return
+    if _click_too_soon(i.user.id):
+        return
+    try:
+        if i.guild is None:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        member = i.user if isinstance(i.user, discord.Member) else i.guild.get_member(i.user.id)
+        if member is None:
+            return await _safe_followup(i, content="❌ Membre introuvable.")
+        if await _user_active_run(i.guild.id, i.user.id, _INVESTIGATE_KIND):
+            return await _safe_followup(i, content="🔍 Tu as déjà une enquête en cours — résous-la d'abord.")
+        cd = await _cooldown_remaining(i.guild.id, i.user.id, _INVESTIGATE_KIND, _COOLDOWN_MIN)
+        if cd > 0:
+            return await _safe_followup(i, content=f"⏳ Prochaine enquête dans `{cd}` min.")
+        if await _active_run_count(i.guild.id) >= _MAX_ACTIVE_RUNS:
+            return await _safe_followup(i, content="🌑 Trop d'aventures en cours sur le serveur — réessaie dans un instant.")
+        if not i.guild.me.guild_permissions.manage_channels:
+            return await _safe_followup(i, content="❌ Le bot n'a pas la permission « Gérer les salons ».")
+
+        ch = await _create_solo_channel(i.guild, member, "🔍-enquête")
+        if ch is None:
+            return await _safe_followup(i, content="❌ Impossible de créer ton salon, réessaie.")
+        try:
+            async with _get_db() as db:
+                cur = await db.execute(
+                    "INSERT INTO solo_runs(guild_id, user_id, kind, channel_id, status, "
+                    "depth, hp, hp_max, mob_hp, mob_hp_max, coins_pending) "
+                    "VALUES(?,?,?,?,'active',0,0,0,0,0,0)",
+                    (i.guild.id, i.user.id, _INVESTIGATE_KIND, ch.id))
+                run_id = cur.lastrowid
+                await db.commit()
+        except Exception as ex:
+            print(f"[solo investigate INSERT] {ex}")
+            try:
+                await ch.delete(reason="échec init enquête")
+            except Exception:
+                pass
+            return await _safe_followup(i, content="❌ Erreur au lancement, réessaie.")
+        await _stamp_cooldown(i.guild.id, i.user.id, _INVESTIGATE_KIND)
+        run = await _get_run(run_id)
+        try:
+            await ch.send(view=_build_investigate_view(run))
+        except Exception as ex:
+            print(f"[solo investigate send] {ex}")
+        await _safe_followup(i, content=f"🔍 {member.mention} ton enquête t'attend : {ch.mention}")
+    except Exception as ex:
+        print(f"[start_investigate] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+def _build_investigate_view(run: dict):
+    LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container = _v2get()
+    case, culprit, innocents = _inv_setup(run["id"])
+    clues_found = int(run["depth"])
+    max_clues = len(innocents)  # = n-1 ; après tout, seul le coupable reste
+    eliminated = set(innocents[:clues_found])
+    remaining = [j for j in range(len(case["suspects"])) if j not in eliminated]
+    potential_bonus = (max_clues - clues_found) * _INV_RISK_BONUS
+
+    susp_lines = []
+    for j, (em, nm) in enumerate(case["suspects"]):
+        if j in eliminated:
+            susp_lines.append(f"~~{em} {nm}~~ ✅ disculpé")
+        else:
+            susp_lines.append(f"{em} **{nm}**")
+
+    items = [
+        v2_title("🔍 Enquête Perso"),
+        v2_subtitle(f"Indices recueillis : {clues_found}/{max_clues}"),
+        v2_divider(),
+        v2_body(f"📜 _{case['scene']}_"),
+        v2_body("**Suspects :**\n" + "\n".join(susp_lines)),
+        v2_divider(),
+        v2_body(f"🔎 **Cherche un indice** (disculpe un innocent) — sûr mais moins payant.\n"
+                f"⚖️ **Accuse** un suspect maintenant : +**{potential_bonus}** 🪙 de prime de flair "
+                f"(plus tu accuses tôt, plus c'est risqué… et payant)."),
+    ]
+
+    class _InvView(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=_RUN_TTL_SEC)
+            self.add_item(v2_container(*items, color=0x16A085))
+            rows = []
+            if clues_found < max_clues:
+                clue_btn = discord.ui.Button(label="🔎 Chercher un indice",
+                                             style=discord.ButtonStyle.primary,
+                                             custom_id=f"inv_clue:{run['id']}")
+                clue_btn.callback = _on_inv_clue
+                rows.append(discord.ui.ActionRow(clue_btn))
+            # Boutons d'accusation (uniquement les suspects encore en lice ; max 4)
+            accuse_btns = []
+            for j in remaining:
+                em, nm = case["suspects"][j]
+                b = discord.ui.Button(label=f"⚖️ {nm}", emoji=em,
+                                      style=discord.ButtonStyle.danger,
+                                      custom_id=f"inv_accuse:{run['id']}:{j}")
+                b.callback = _on_inv_accuse
+                accuse_btns.append(b)
+            # <=5 boutons/row ; 4 suspects → 1 row suffit
+            rows.append(discord.ui.ActionRow(*accuse_btns[:5]))
+            for r in rows:
+                self.add_item(r)
+
+    return _InvView()
+
+
+async def _on_inv_clue(i: discord.Interaction):
+    rid = _parse_rid(i)
+    if rid is None:
+        return
+    if _click_too_soon(i.user.id):
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
+        return
+    run = await _get_run(rid)
+    if not _owns_run(i, run):
+        try:
+            return await i.response.edit_message(view=None)
+        except Exception:
+            return
+    try:
+        case, culprit, innocents = _inv_setup(rid)
+        clues_found = int(run["depth"])
+        if clues_found >= len(innocents):
+            run2 = await _get_run(rid)
+            try:
+                return await i.response.edit_message(view=_build_investigate_view(run2))
+            except Exception:
+                return
+        new_depth = clues_found + 1
+        async with _get_db() as db:
+            await db.execute("UPDATE solo_runs SET depth=? WHERE id=? AND status='active'",
+                             (new_depth, rid))
+            await db.commit()
+        run2 = await _get_run(rid)
+        try:
+            return await i.response.edit_message(view=_build_investigate_view(run2))
+        except Exception:
+            return
+    except Exception as ex:
+        print(f"[_on_inv_clue] {ex}")
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
+
+
+async def _on_inv_accuse(i: discord.Interaction):
+    rid = _parse_rid(i)
+    if rid is None:
+        return
+    if _click_too_soon(i.user.id):
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
+        return
+    run = await _get_run(rid)
+    if not _owns_run(i, run):
+        try:
+            return await i.response.edit_message(view=None)
+        except Exception:
+            return
+    try:
+        # index accusé = 3e segment du custom_id
+        try:
+            accused = int((i.data or {}).get("custom_id", "").split(":")[2])
+        except Exception:
+            accused = -1
+        gid, uid = run["guild_id"], run["user_id"]
+        case, culprit, innocents = _inv_setup(rid)
+        clues_found = int(run["depth"])
+        max_clues = len(innocents)
+        em, nm = case["suspects"][culprit] if 0 <= culprit < len(case["suspects"]) else ("❓", "?")
+        if accused == culprit:
+            bonus = (max_clues - clues_found) * _INV_RISK_BONUS
+            total = _INV_WIN_COINS + max(0, bonus)
+            won = await _close_run(rid)
+            if won and _add_coins is not None:
+                try:
+                    await _add_coins(gid, uid, total)
+                except Exception:
+                    pass
+            egg_txt = await _maybe_grant_egg(gid, uid, 3) if won else ""
+            return await _safe_edit(
+                i, f"🎉 **Élémentaire !** Le coupable était bien {em} **{nm}**.\n"
+                   f"Récompense : **+{total}** 🪙{egg_txt}\n_Affaire classée. Ce salon se ferme._")
+        await _close_run(rid)
+        return await _safe_edit(
+            i, f"❌ **Mauvaise déduction…** Le vrai coupable était {em} **{nm}**.\n"
+               f"Tu repars bredouille. _Ce salon se ferme — la prochaine sera la bonne !_")
+    except Exception as ex:
+        print(f"[_on_inv_accuse] {ex}")
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  Bouton d'ENTREE persistant (a placer dans un hub)
 # ═══════════════════════════════════════════════════════════════════════════════
 class SoloOpenButton(discord.ui.DynamicItem[discord.ui.Button],
@@ -1206,5 +1871,6 @@ class SoloOpenButton(discord.ui.DynamicItem[discord.ui.Button],
 __all__ = [
     "setup", "init_db", "register_persistent_views", "boot_cleanup",
     "solo_watchdog", "open_solo_hub", "start_shadow_dungeon", "start_treasure_solo",
-    "start_pet_trial", "SoloOpenButton",
+    "start_pet_trial", "start_sanctuary", "start_mirror", "start_investigate",
+    "SoloOpenButton",
 ]
