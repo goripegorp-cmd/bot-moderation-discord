@@ -956,11 +956,18 @@ def _build_boss_layout(
     if alive:
         # Phase 235.22 : bouton « 🔔 Me notifier » (type boss) DANS le panneau — toggle
         # le rôle de notif en 1 clic. custom_id capté par EventNotifyButton (bot.py).
+        # Phase 269 : ⚡ Charger (+dégâts ta prochaine attaque) & 📣 Crier (buff
+        # d'équipe) — clics captés par les DynamicItem CombatChargeButton /
+        # CombatShoutButton (combat_actions). 5 boutons max/row → OK.
         items.append(discord.ui.ActionRow(
             Button(label="⚔️ Attaquer", style=discord.ButtonStyle.danger,
                    custom_id=f"dboss_atk:{event_id}"),
             Button(label="🐾 Familier", style=discord.ButtonStyle.success,
                    custom_id=f"dboss_pet:{event_id}"),
+            Button(label="⚡ Charger", style=discord.ButtonStyle.primary,
+                   custom_id=f"cba_charge:{event_id}"),
+            Button(label="📣 Crier", style=discord.ButtonStyle.secondary,
+                   custom_id=f"cba_shout:{event_id}"),
             Button(label="🔔 Me notifier", style=discord.ButtonStyle.secondary,
                    custom_id="evtnotif:boss"),
         ))
@@ -1150,6 +1157,15 @@ async def record_boss_attack(guild_id: int, user_id: int) -> dict:
                 damage += voice_bonus
     except Exception:
         voice_bonus = 0
+    # Phase 269 : actions de combat (⚡ Charger / 📣 Crier) — multiplicateurs SORTANTS
+    # additifs (>= 1.0, ne réduisent jamais). FAIL-OPEN : une erreur → ×1.0.
+    try:
+        import combat_actions as _ca
+        _amult = _ca.consume_charge_mult(guild_id, user_id) * _ca.shout_mult(guild_id, event_id)
+        if _amult != 1.0:
+            damage = int(damage * _amult)
+    except Exception:
+        pass
     damage = min(damage, active["hp_current"])
 
     try:

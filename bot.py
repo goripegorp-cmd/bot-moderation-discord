@@ -280,6 +280,7 @@ import caravan_events as caravan_events_module
 import chain_events as chain_events_module
 # Phase 173.2 : Boss du jour, 4×/jour, gating de niveau
 import daily_bosses as daily_bosses_module
+import combat_actions as combat_actions_module  # Phase 269 : actions de combat universelles (⚡/📣)
 import activity_rewards as activity_rewards_module
 import event_notif_role as event_notif_role_module
 import dungeon_instances as dungeon_module
@@ -42817,6 +42818,14 @@ async def on_ready():
                 daily_bosses_module.daily_boss_task.start()
         except Exception as ex:
             print(f"[on_ready 173.2 daily_bosses] {ex}")
+
+        # Phase 269 : actions de combat universelles (⚡ Charger / 📣 Crier) — boutons
+        # persistants partagés (DynamicItem match du custom_id). 1er module câblé : boss
+        # du jour. Extension aux autres events de combat dans les phases suivantes.
+        try:
+            combat_actions_module.register_persistent_views(bot)
+        except Exception as ex:
+            print(f"[on_ready 269 combat_actions] {ex}")
 
         # Phase 254 : Tournoi PvP Alliance vs Alliance (module isolé, fail-open).
         try:
