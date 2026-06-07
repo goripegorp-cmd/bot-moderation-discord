@@ -35,6 +35,8 @@ _v2 = None
 _add_coins = None
 _player_power_fn = None      # async (gid, uid) -> {"atk": int, "deff": int}  (optionnel)
 _grant_egg_fn = None         # async (gid, uid, rarity=None) -> bool            (optionnel)
+_active_pet_fn = None         # async (gid, uid) -> dict|None (familier actif)   (optionnel)
+_give_pet_xp_fn = None        # async (gid, uid, amount) -> None                 (optionnel)
 
 # ─── Reglages (volontairement modestes — retention long terme) ─────────────────
 _CATEGORY_NAME = "🌑 Aventures Solo"
@@ -96,10 +98,25 @@ _RIDDLES = [
      "opts": ["Un œuf", "Une promesse", "Un record", "Une noix"], "correct": 0},
 ]
 
+# ─── Défi du Familier (TON familier combat, toi tu le déchaînes) ────────────────
+_PETTRIAL_KIND = "pet_trial"
+_PT_PLAYER_HP = 120          # PV LOCAUX du run (≠ PV combat global)
+_PT_ENEMY_BASE_HP = 200
+_PT_ENEMY_BASE_ATK = 14
+_PT_MAX_TURNS = 14
+_PT_WIN_COINS = 80           # récompense modeste à la victoire
+_PT_WIN_PET_XP = 6
+_PT_ENEMIES = [
+    ("🎯", "Mannequin runique"), ("🗿", "Golem d'entraînement"),
+    ("👻", "Spectre du dojo"), ("🐲", "Drakeling captif"),
+]
+
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict,
-          add_coins_fn=None, player_power_fn=None, grant_egg_fn=None):
+          add_coins_fn=None, player_power_fn=None, grant_egg_fn=None,
+          active_pet_fn=None, give_pet_xp_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _player_power_fn, _grant_egg_fn
+    global _active_pet_fn, _give_pet_xp_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -107,6 +124,8 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict,
     _add_coins = add_coins_fn
     _player_power_fn = player_power_fn
     _grant_egg_fn = grant_egg_fn
+    _active_pet_fn = active_pet_fn
+    _give_pet_xp_fn = give_pet_xp_fn
 
 
 async def init_db():
@@ -357,6 +376,7 @@ async def open_solo_hub(i: discord.Interaction):
         return await _safe_followup(i, content="❌ UI indisponible un instant, réessaie.")
     cd_dg = await _cooldown_remaining(i.guild.id, i.user.id, _DUNGEON_KIND, _COOLDOWN_MIN)
     cd_ts = await _cooldown_remaining(i.guild.id, i.user.id, _TREASURE_KIND, _COOLDOWN_MIN)
+    cd_pt = await _cooldown_remaining(i.guild.id, i.user.id, _PETTRIAL_KIND, _COOLDOWN_MIN)
     items = [
         v2_title("🌑  Aventures Solo"),
         v2_subtitle("Des défis RIEN QUE pour toi — ton propre salon, à ton rythme, "
@@ -374,6 +394,12 @@ async def open_solo_hub(i: discord.Interaction):
             "une erreur et tu repars avec la moitié de tes gains. Réfléchis bien !_"
             + (f"\n⏳ _dispo dans {cd_ts} min_" if cd_ts > 0 else "")
         ),
+        v2_body(
+            "**🐾 Défi du Familier**\n"
+            "_Ici c'est TON familier qui combat ! Déchaîne-le contre un adversaire à sa mesure. "
+            "Actif = grosse salve, passif = frappe douce + te soigne. Récompense ton compagnon !_"
+            + (f"\n⏳ _dispo dans {cd_pt} min_" if cd_pt > 0 else "")
+        ),
     ]
 
     class _SoloHub(LayoutView):
@@ -390,7 +416,12 @@ async def open_solo_hub(i: discord.Interaction):
                 style=(discord.ButtonStyle.secondary if cd_ts > 0 else discord.ButtonStyle.primary),
                 custom_id="solo_start:treasure_solo", disabled=cd_ts > 0)
             b2.callback = _on_start_treasure_click
-            self.add_item(discord.ui.ActionRow(b1, b2))
+            b3 = discord.ui.Button(
+                label=("⏳ Familier" if cd_pt > 0 else "🐾 Défi du Familier"),
+                style=(discord.ButtonStyle.secondary if cd_pt > 0 else discord.ButtonStyle.success),
+                custom_id="solo_start:pet_trial", disabled=cd_pt > 0)
+            b3.callback = _on_start_pettrial_click
+            self.add_item(discord.ui.ActionRow(b1, b2, b3))
 
     await _safe_followup(i, view=_SoloHub())
 
@@ -948,6 +979,212 @@ async def _on_ts_answer(i: discord.Interaction):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  DÉFI DU FAMILIER (ton familier combat — tu le déchaînes au bon moment)
+# ═══════════════════════════════════════════════════════════════════════════════
+def _pt_enemy_for(run_id: int):
+    try:
+        return random.Random(int(run_id) + 7).choice(_PT_ENEMIES)
+    except Exception:
+        return _PT_ENEMIES[0]
+
+
+def _pt_pet_damage(pet: dict):
+    """Salve du familier selon son perk : actif = grosse salve ; passif = salve douce
+    + SOIGNE le run. Retourne (dmg, heal, is_active)."""
+    lvl = int(pet.get("level", 1) or 1)
+    try:
+        bonus = float(pet.get("bonus_value", 0.0) or 0.0)
+    except Exception:
+        bonus = 0.0
+    perk = str(pet.get("perk_type", "passive") or "passive")
+    if perk == "active":
+        dmg = int((30 + lvl * 8) * (1.0 + bonus * 2.0))
+        heal = 0
+    else:
+        dmg = int((18 + lvl * 6) * (1.0 + bonus))
+        heal = int(10 + lvl * 3)
+    return max(6, min(dmg, 900)), heal, (perk == "active")
+
+
+def _pet_label(pet: dict) -> str:
+    return f"{pet.get('emoji', '🐾')} {pet.get('custom_name') or pet.get('name', 'Familier')}"
+
+
+async def _on_start_pettrial_click(i: discord.Interaction):
+    await start_pet_trial(i)
+
+
+async def start_pet_trial(i: discord.Interaction):
+    """Lance un Défi du Familier SOLO (salon prive, parallèle). Demande un familier actif."""
+    if not await _safe_defer(i):
+        return
+    if _click_too_soon(i.user.id):
+        return
+    try:
+        if i.guild is None:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        member = i.user if isinstance(i.user, discord.Member) else i.guild.get_member(i.user.id)
+        if member is None:
+            return await _safe_followup(i, content="❌ Membre introuvable.")
+        if _active_pet_fn is None:
+            return await _safe_followup(i, content="🐾 Système de familiers indisponible un instant.")
+        pet = await _active_pet_fn(i.guild.id, i.user.id)
+        if not pet:
+            return await _safe_followup(
+                i, content="🐾 Équipe d'abord un **familier** (menu `/pet`) — c'est LUI qui se bat ici !")
+        if await _user_active_run(i.guild.id, i.user.id, _PETTRIAL_KIND):
+            return await _safe_followup(
+                i, content="🐾 Tu as déjà un défi en cours — termine-le d'abord.")
+        cd = await _cooldown_remaining(i.guild.id, i.user.id, _PETTRIAL_KIND, _COOLDOWN_MIN)
+        if cd > 0:
+            return await _safe_followup(i, content=f"⏳ Prochain défi dans `{cd}` min.")
+        if await _active_run_count(i.guild.id) >= _MAX_ACTIVE_RUNS:
+            return await _safe_followup(
+                i, content="🌑 Trop d'aventures en cours sur le serveur — réessaie dans un instant.")
+        if not i.guild.me.guild_permissions.manage_channels:
+            return await _safe_followup(i, content="❌ Le bot n'a pas la permission « Gérer les salons ».")
+
+        ch = await _create_solo_channel(i.guild, member, "🐾-défi")
+        if ch is None:
+            return await _safe_followup(i, content="❌ Impossible de créer ton salon, réessaie.")
+        lvl = int(pet.get("level", 1) or 1)
+        enemy_hp = _PT_ENEMY_BASE_HP + lvl * 10  # le défi monte avec ton familier
+        try:
+            async with _get_db() as db:
+                cur = await db.execute(
+                    "INSERT INTO solo_runs(guild_id, user_id, kind, channel_id, status, "
+                    "depth, hp, hp_max, mob_hp, mob_hp_max, coins_pending) "
+                    "VALUES(?,?,?,?,'active',0,?,?,?,?,0)",
+                    (i.guild.id, i.user.id, _PETTRIAL_KIND, ch.id, _PT_PLAYER_HP, _PT_PLAYER_HP,
+                     enemy_hp, enemy_hp))
+                run_id = cur.lastrowid
+                await db.commit()
+        except Exception as ex:
+            print(f"[solo pettrial INSERT] {ex}")
+            try:
+                await ch.delete(reason="échec init défi")
+            except Exception:
+                pass
+            return await _safe_followup(i, content="❌ Erreur au lancement, réessaie.")
+
+        await _stamp_cooldown(i.guild.id, i.user.id, _PETTRIAL_KIND)
+        run = await _get_run(run_id)
+        try:
+            await ch.send(view=_build_pettrial_view(run, pet))
+        except Exception as ex:
+            print(f"[solo pettrial send] {ex}")
+        await _safe_followup(i, content=f"🐾 {member.mention} ton défi t'attend : {ch.mention}")
+    except Exception as ex:
+        print(f"[start_pet_trial] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+def _build_pettrial_view(run: dict, pet: dict):
+    LayoutView, v2_title, v2_subtitle, v2_body, v2_divider, v2_container = _v2get()
+    enemy_em, enemy_name = _pt_enemy_for(run["id"])
+    turn = int(run["depth"])
+    perk = str((pet or {}).get("perk_type", "passive") or "passive")
+    perk_txt = ("⚡ actif — grosse salve" if perk == "active"
+                else "💚 passif — salve douce + te soigne")
+    items = [
+        v2_title(f"🐾 Défi du Familier — {_pet_label(pet)}"),
+        v2_subtitle(f"Tour {turn + 1}/{_PT_MAX_TURNS} · ton familier : _{perk_txt}_"),
+        v2_divider(),
+        v2_body(f"**{enemy_em} {enemy_name}**\n"
+                f"❤️ `{_bar(run['mob_hp'], run['mob_hp_max'])}` `{max(0, run['mob_hp'])}/{run['mob_hp_max']}`"),
+        v2_body(f"**🛡️ Toi**\n"
+                f"❤️ `{_bar(run['hp'], run['hp_max'])}` `{max(0, run['hp'])}/{run['hp_max']}`"),
+        v2_divider(),
+        v2_body("🐾 **Déchaîne ton familier** : abats l'adversaire avant que tes PV ne tombent. "
+                "Un familier actif frappe fort ; un passif frappe plus doux mais te soigne."),
+    ]
+
+    class _PtView(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=_RUN_TTL_SEC)
+            self.add_item(v2_container(*items, color=0x2E8B57))
+            b = discord.ui.Button(label="🐾 Déchaîner le familier",
+                                  style=discord.ButtonStyle.success,
+                                  custom_id=f"pttr:{run['id']}")
+            b.callback = _on_pt_strike
+            self.add_item(discord.ui.ActionRow(b))
+
+    return _PtView()
+
+
+async def _on_pt_strike(i: discord.Interaction):
+    rid = _parse_rid(i)
+    if rid is None:
+        return
+    if _click_too_soon(i.user.id):
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
+        return
+    run = await _get_run(rid)
+    if not _owns_run(i, run):
+        try:
+            return await i.response.edit_message(view=None)
+        except Exception:
+            return
+    try:
+        gid, uid = run["guild_id"], run["user_id"]
+        pet = await _active_pet_fn(gid, uid) if _active_pet_fn is not None else None
+        if not pet:
+            await _close_run(rid)
+            return await _safe_edit(
+                i, "🐾 Tu n'as plus de familier équipé — défi annulé. _Ce salon se ferme._")
+        dmg, heal, _is_active = _pt_pet_damage(pet)
+        new_enemy_hp = max(0, int(run["mob_hp"]) - dmg)
+        if new_enemy_hp <= 0:
+            won = await _close_run(rid)
+            if won:
+                if _add_coins is not None:
+                    try:
+                        await _add_coins(gid, uid, _PT_WIN_COINS)
+                    except Exception:
+                        pass
+                if _give_pet_xp_fn is not None:
+                    try:
+                        await _give_pet_xp_fn(gid, uid, _PT_WIN_PET_XP)
+                    except Exception:
+                        pass
+            return await _safe_edit(
+                i,
+                f"🏆 **{_pet_label(pet)}** triomphe ! Salve finale de `{dmg}` dégâts.\n"
+                f"Récompense : **+{_PT_WIN_COINS}** 🪙 + XP pour ton familier.\n_Ce salon se ferme._")
+        # L'adversaire riposte (le soin passif s'applique avant la riposte).
+        enemy_atk = _PT_ENEMY_BASE_ATK + max(0, (int(run["mob_hp_max"]) - _PT_ENEMY_BASE_HP)) // 15
+        new_hp = min(int(run["hp_max"]), int(run["hp"]) + heal) - enemy_atk
+        turn = int(run["depth"]) + 1
+        if new_hp <= 0 or turn >= _PT_MAX_TURNS:
+            await _close_run(rid)
+            reason = ("💀 Tes PV sont tombés" if new_hp <= 0
+                      else "⏳ L'adversaire a tenu trop longtemps")
+            return await _safe_edit(
+                i,
+                f"{reason} — **{_pet_label(pet)}** se replie cette fois.\n"
+                f"_Entraîne ton familier (combats, événements) et reviens plus fort. Ce salon se ferme._")
+        async with _get_db() as db:
+            await db.execute(
+                "UPDATE solo_runs SET mob_hp=?, hp=?, depth=? WHERE id=? AND status='active'",
+                (new_enemy_hp, new_hp, turn, rid))
+            await db.commit()
+        run2 = await _get_run(rid)
+        try:
+            return await i.response.edit_message(view=_build_pettrial_view(run2, pet))
+        except Exception:
+            return
+    except Exception as ex:
+        print(f"[_on_pt_strike] {ex}")
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  Bouton d'ENTREE persistant (a placer dans un hub)
 # ═══════════════════════════════════════════════════════════════════════════════
 class SoloOpenButton(discord.ui.DynamicItem[discord.ui.Button],
@@ -969,5 +1206,5 @@ class SoloOpenButton(discord.ui.DynamicItem[discord.ui.Button],
 __all__ = [
     "setup", "init_db", "register_persistent_views", "boot_cleanup",
     "solo_watchdog", "open_solo_hub", "start_shadow_dungeon", "start_treasure_solo",
-    "SoloOpenButton",
+    "start_pet_trial", "SoloOpenButton",
 ]
