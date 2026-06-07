@@ -214,9 +214,13 @@ async def _create_solo_channel(guild: discord.Guild, member: discord.Member, slu
         return None
 
 
-async def _close_run(run_id: int):
+async def _close_run(run_id: int) -> bool:
     """Ferme un run de facon IDEMPOTENTE (claim atomique) + supprime le salon.
-    Sans danger si appele plusieurs fois (watchdog + fin + boot)."""
+    Sans danger si appele plusieurs fois (watchdog + fin + boot).
+
+    Retourne True UNIQUEMENT si CE call a remporte le claim (rowcount==1) → l'appelant
+    ne paie la recompense QUE dans ce cas (exactly-once, anti double-pay sous double-clic
+    / chemins concurrents). False si deja ferme par un autre chemin, ou erreur."""
     try:
         async with _get_db() as db:
             # Claim atomique : un seul appelant « gagne » la fermeture.
@@ -225,23 +229,24 @@ async def _close_run(run_id: int):
                 (run_id,))
             await db.commit()
             if getattr(cur, "rowcount", 0) != 1:
-                return  # deja ferme par un autre chemin
+                return False  # deja ferme par un autre chemin → NE PAS re-payer
             async with db.execute(
                 "SELECT guild_id, channel_id FROM solo_runs WHERE id=?", (run_id,)) as c:
                 row = await c.fetchone()
-        if not row:
-            return
-        gid, ch_id = int(row[0]), int(row[1] or 0)
-        g = _bot.get_guild(gid) if _bot else None
-        if g and ch_id:
-            ch = g.get_channel(ch_id)
-            if ch is not None:
-                try:
-                    await ch.delete(reason="Aventure solo terminée")
-                except Exception:
-                    pass
+        if row:
+            gid, ch_id = int(row[0]), int(row[1] or 0)
+            g = _bot.get_guild(gid) if _bot else None
+            if g and ch_id:
+                ch = g.get_channel(ch_id)
+                if ch is not None:
+                    try:
+                        await ch.delete(reason="Aventure solo terminée")
+                    except Exception:
+                        pass
+        return True
     except Exception as ex:
         print(f"[solo _close_run] {ex}")
+        return False
 
 
 async def boot_cleanup():
@@ -301,8 +306,10 @@ def register_persistent_views(bot_instance):
 #  HUB SOLO (panneau d'entree, ephemeral)
 # ═══════════════════════════════════════════════════════════════════════════════
 def _v2get():
-    return (_v2.get("LayoutView"), _v2.get("title"), _v2.get("subtitle"),
-            _v2.get("body"), _v2.get("divider"), _v2.get("container"))
+    # Phase 264 FIX : les clés du dict _v2h sont PRÉFIXÉES « v2_ » (cf. bot.py:42473)
+    # — utiliser "title"/"body" renvoyait None → module mort (hub/panneau jamais rendus).
+    return (_v2.get("LayoutView"), _v2.get("v2_title"), _v2.get("v2_subtitle"),
+            _v2.get("v2_body"), _v2.get("v2_divider"), _v2.get("v2_container"))
 
 
 async def open_solo_hub(i: discord.Interaction):
@@ -576,8 +583,8 @@ async def _on_dg_attack(i: discord.Interaction):
             if new_hp <= 0:
                 # MORT avant extraction → perd la moitie du butin securisable.
                 kept = int(run["coins_pending"]) // 2
-                await _close_run(rid)
-                if kept > 0 and _add_coins is not None:
+                won = await _close_run(rid)
+                if won and kept > 0 and _add_coins is not None:
                     try:
                         await _add_coins(gid, uid, kept)
                     except Exception:
@@ -608,13 +615,13 @@ async def _on_dg_attack(i: discord.Interaction):
                 # FOND ATTEINT → extraction auto victorieuse + bonus + chance d'oeuf.
                 bonus = gain  # bonus de fond
                 total = new_coins + bonus
-                await _close_run(rid)
-                if _add_coins is not None:
+                won = await _close_run(rid)
+                if won and _add_coins is not None:
                     try:
                         await _add_coins(gid, uid, total)
                     except Exception:
                         pass
-                egg_txt = await _maybe_grant_egg(gid, uid, new_depth)
+                egg_txt = await _maybe_grant_egg(gid, uid, new_depth) if won else ""
                 return await _safe_edit(
                     i,
                     f"🏆 **Tu as atteint le fond du Donjon de l'Ombre !**\n"
@@ -644,6 +651,12 @@ async def _on_dg_attack(i: discord.Interaction):
 async def _on_dg_extract(i: discord.Interaction):
     rid = _parse_rid(i)
     if rid is None:
+        return
+    if _click_too_soon(i.user.id):  # Phase 264 : anti double-clic (comme l'attaque)
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
         return
     run = await _get_run(rid)
     if not _owns_run(i, run):
