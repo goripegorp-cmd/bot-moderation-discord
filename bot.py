@@ -17407,6 +17407,7 @@ _SUPERVISED_LOOP_NAMES = [
     "personal_event_dispatcher", "light_events_dispatcher",
     "world_boss_scheduler", "world_boss_timeout_checker",
     "voice_chaos_dispatcher", "daily_riddle_dispatcher", "daily_agenda_dispatcher",
+    "weekly_herald_dispatcher",
     "flash_treasure_dispatcher", "evening_ritual_dispatcher",
     "tag_royale_starter", "tag_royale_timeout_checker", "server_anniversary_checker",
     "daily_quest_push_dispatcher", "channel_camouflage_dispatcher",
@@ -43518,6 +43519,8 @@ async def on_ready():
     # Phase 195 : Programme du jour (annonce quotidienne calme du planning combat)
     if not daily_agenda_dispatcher.is_running():
         daily_agenda_dispatcher.start()
+    if not weekly_herald_dispatcher.is_running():
+        weekly_herald_dispatcher.start()
     # Phase 238 : récap hebdo en MP (opt-in strict)
     if not weekly_activity_recap_task.is_running():
         weekly_activity_recap_task.start()
@@ -64850,6 +64853,135 @@ async def daily_agenda_dispatcher():
                 print(f"[daily_agenda_dispatcher guild={guild.id}] {ex}")
     except Exception as ex:
         print(f"[daily_agenda_dispatcher] {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  HÉRAUT DE LA SEMAINE (Phase 266 — anti-bruit : UN seul post hebdo consolidé)
+#  Remplace l'éparpillement de petites annonces par UN récap hebdomadaire unique.
+#  Sans ping (allowed_mentions=none → rien à opt-out), auto-supprimé en fin de
+#  semaine. Réutilise toute l'infra du daily_agenda (salon/cleanup/anti-doublon).
+# ═══════════════════════════════════════════════════════════════════════════════
+def _build_weekly_herald_text(now, top_section: str) -> str:
+    """Corps du Héraut hebdo. `now` = datetime Europe/Paris ; `top_section` = bloc
+    classement déjà rendu (peut être vide)."""
+    lines = []
+    lines.append("Le tour d'horizon de la semaine — tout ce qui t'attend, en un seul message. 📯")
+    lines.append("")
+    if top_section:
+        lines.append("__🔥 Top activité (14 derniers jours)__")
+        lines.append(top_section)
+        lines.append("")
+    lines.append("__📅 La semaine qui vient__")
+    lines.append("• ⚔️ **Boss du jour** chaque jour (9h, 12h, 17h, 21h, 1h)")
+    lines.append("• 🗡️ **Mobs** en continu (un groupe environ toutes les 18-30 min)")
+    lines.append("• 🧠 **Énigme du jour** vers 10h — premier à trouver, jackpot 🪙")
+    lines.append("• 🎮 **Game Night** vendredi 21h · 🐲 **World Boss / 🌍 Invasion** samedi 21h")
+    lines.append("")
+    lines.append("__🌑 Toujours dispo : Aventures Solo__")
+    lines.append("Ton propre salon, à ton rythme, sans file d'attente : Donjon de l'Ombre, "
+                 "Chasse au Trésor, Défi du Familier, Sanctuaire d'Épreuves, Arène Miroir, "
+                 "Enquête Perso. _Ouvre le Hub → Compétitions → 🌑 Aventures Solo._")
+    lines.append("")
+    lines.append("__💡 Pour participer aux events__")
+    lines.append("Sois actif : **1 message = 1 pt · 1 min en vocal = 1 pt** (score glissant 14 j, "
+                 "visible dans `/profile`). Régularité = accès aux Boss 🟡 et au Grandiose 🔴.")
+    lines.append("")
+    lines.append("_Bonne semaine à toutes et à tous — on se retrouve en jeu !_")
+    return "\n".join(lines)
+
+
+async def _post_weekly_herald(guild) -> bool:
+    """Poste le « Héraut de la Semaine » (au plus une fois par semaine ISO).
+    Salon recap configuré (mêmes helpers que daily_agenda), sans ping, auto-purgé
+    en fin de semaine. FAIL-OPEN par guild."""
+    try:
+        c = await cfg(guild.id)
+        if not c.get('weekly_herald_enabled', True):
+            return False
+        # Anti-doublon par semaine ISO (marqueur cfg).
+        wk = datetime.now(_TZ_P41).strftime('%G-W%V')
+        if str(c.get('weekly_herald_last_week', '') or '') == wk:
+            return False
+        ch = await _find_event_recap_channel(guild)
+        if not ch:
+            try:
+                cat = await _ensure_events_category(guild)
+                me = guild.me
+                if cat:
+                    for cand in cat.text_channels:
+                        try:
+                            if me and cand.permissions_for(me).send_messages:
+                                ch = cand
+                                break
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+        if not ch:
+            return False
+        # Top 3 actifs (pingless : on n'@-mentionne PAS, juste les noms échappés).
+        top_section = ""
+        try:
+            top = await activity_system_module.top_scores(guild.id, 3)
+            if top:
+                medals = ["🥇", "🥈", "🥉"]
+                rows = []
+                for idx, (uid, pts) in enumerate(top):
+                    m = guild.get_member(int(uid))
+                    nm = discord.utils.escape_markdown(m.display_name) if m else f"Membre {uid}"
+                    rows.append(f"{medals[idx] if idx < 3 else '•'} {nm} — **{pts}** pts")
+                top_section = "\n".join(rows)
+        except Exception as ex:
+            print(f"[weekly_herald top] {ex}")
+        now = datetime.now(_TZ_P41)
+        body = _build_weekly_herald_text(now, top_section)
+        panel = v2_recap_view(
+            "📯 Héraut de la Semaine",
+            body,
+            color=Palette.INFO,
+            footer="Récap hebdo · se supprime en fin de semaine",
+        )
+        try:
+            msg = await ch.send(view=panel, allowed_mentions=discord.AllowedMentions.none())
+            await _register_for_cleanup(msg, 6 * 24 * 3600, 'weekly_herald')
+        except Exception as ex:
+            print(f"[_post_weekly_herald send] {ex}")
+            return False
+        try:
+            await db_set(guild.id, 'weekly_herald_last_week', wk)
+        except Exception as ex:
+            print(f"[_post_weekly_herald mark] {ex}")
+        print(f"[WEEKLY HERALD] guild={guild.id} ch={ch.id} week={wk}")
+        return True
+    except Exception as ex:
+        print(f"[_post_weekly_herald] {ex}")
+        return False
+
+
+@tasks.loop(minutes=30)
+async def weekly_herald_dispatcher():
+    """Phase 266 : poste le Héraut hebdo le DIMANCHE 18h Europe/Paris (créneau calme,
+    hors des autres tâches : daily_agenda 8h, recap perso 10h lundi, VIP 11h lundi,
+    lettres NPC 18h dimanche restent en DM). Skip serveurs abandonnés. Try/except
+    par guild : l'échec d'un guild ne casse jamais le loop."""
+    try:
+        from zoneinfo import ZoneInfo as _ZI
+        tz = _ZI('Europe/Paris')
+    except Exception:
+        tz = timezone.utc
+    nowp = datetime.now(tz)
+    if nowp.weekday() != 6 or nowp.hour != 18:  # dimanche 18h
+        return
+    try:
+        for guild in bot.guilds:
+            try:
+                if not await _guild_recently_active(guild.id, minutes=4320, min_users=1):
+                    continue
+                await _post_weekly_herald(guild)
+            except Exception as ex:
+                print(f"[weekly_herald_dispatcher guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[weekly_herald_dispatcher] {ex}")
 
 
 @daily_agenda_dispatcher.before_loop
