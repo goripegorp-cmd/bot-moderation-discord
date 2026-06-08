@@ -82503,10 +82503,16 @@ class HubPinnedLayoutV2(LayoutView):
 
         # Phase 271 : entrée DIRECTE « Aventures Solo » (découvrabilité — plus enterrée
         # sous Compétitions). ActionRow compact (+2) ; le divider pré-footer retiré
-        # compense → on reste sous la limite Discord 40. Callback délégué (cohérent).
+        # compense → on reste sous la limite Discord 40.
+        # FIX (revue Lot 2-4) : custom_id = "solo:open" → capté par le DynamicItem PERSISTANT
+        # solo_instances.SoloOpenButton (template r"solo:open", enregistré au boot via
+        # solo_module.register_persistent_views). Le hub épinglé n'est PAS ré-enregistré au
+        # boot, donc l'ancien custom_id "hub_solo_open" + callback en mémoire mourait à
+        # chaque reboot Railway → « Échec de l'interaction ». Le DynamicItem, lui, survit
+        # aux reboots (dispatch_dynamic_items le matche avant la vue en mémoire) et appelle
+        # open_solo_hub (qui defer lui-même) — donc plus de callback délégué à poser ici.
         _solo_btn = Button(label="🌑 Aventures Solo (défis perso)",
-                           style=discord.ButtonStyle.success, custom_id="hub_solo_open")
-        _solo_btn.callback = _v2_delegate_to(EngagementHubView, '_on_solo')
+                           style=discord.ButtonStyle.success, custom_id="solo:open")
         items.append(discord.ui.ActionRow(_solo_btn))
 
         # ═══ FOOTER ═══

@@ -153,7 +153,10 @@ async def _build_snapshot(guild) -> dict:
 
     # ── Modération (30 j) ────────────────────────────────────────────────
     try:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=_MOD_WINDOW_DAYS)).isoformat()
+        # Format ALIGNÉ sur CURRENT_TIMESTAMP de SQLite ('YYYY-MM-DD HH:MM:SS', espace,
+        # sans fuseau). .isoformat() mettrait un 'T' + offset → comparaison lexicographique
+        # faussée au jour-frontière (piège datetime naïf, cf. MEMORY Phase 250).
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=_MOD_WINDOW_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
         async with _get_db() as db:
             async with db.execute(
                 "SELECT type, COUNT(*) FROM infractions "

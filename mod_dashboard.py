@@ -91,8 +91,11 @@ async def _collect_stats(guild_id: int, days: int = WINDOW_DAYS) -> dict:
     if _get_db is None:
         return out
 
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    cutoff_24h = (datetime.now(timezone.utc) - timedelta(hours=RECENT_ACTIVITY_HOURS)).isoformat()
+    # Format ALIGNÉ sur CURRENT_TIMESTAMP ('YYYY-MM-DD HH:MM:SS', espace, sans fuseau) —
+    # comme tickets_enhance. .isoformat() (séparateur 'T' + offset) faussait la comparaison
+    # lexicographique au jour-frontière : recent_24h sous-comptait tout le jour du cutoff.
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    cutoff_24h = (datetime.now(timezone.utc) - timedelta(hours=RECENT_ACTIVITY_HOURS)).strftime("%Y-%m-%d %H:%M:%S")
 
     try:
         async with _get_db() as db:
