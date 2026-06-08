@@ -251,10 +251,48 @@ def _build_layout(stats: dict, guild) -> discord.ui.LayoutView | None:
 
             items.append(v2_divider())
             items.append(v2_body(
-                "_💡 `/mod infractions @user` pour la fiche complète d'un membre_"
+                "_💡 `/mod infractions @user` pour la fiche complète d'un membre_\n"
+                "_📤 Exporte un instantané du serveur (joueurs, économie, activité, "
+                "modération) en fichier via les boutons ci-dessous._"
             ))
 
             self.add_item(v2_container(*items, color=0x9B59B6))
+
+            # Lot 4 — Export owner (lecture seule). Boutons NUS → ActionRow obligatoire
+            # (un bouton ne peut pas être un enfant top-level d'une LayoutView). La vue
+            # est éphémère (timeout=300), donc un callback lié suffit (pas de DynamicItem).
+            # Lazy import d'owner_export → zéro couplage d'ordre d'import.
+            try:
+                btn_json = discord.ui.Button(
+                    label="Export JSON", emoji="📤",
+                    style=discord.ButtonStyle.secondary,
+                    custom_id="modash_export_json",
+                )
+                btn_csv = discord.ui.Button(
+                    label="Export CSV", emoji="📊",
+                    style=discord.ButtonStyle.secondary,
+                    custom_id="modash_export_csv",
+                )
+
+                async def _cb_json(inter: discord.Interaction):
+                    try:
+                        import owner_export as _oe
+                        await _oe.send_export(inter, fmt="json")
+                    except Exception as _ex:
+                        print(f"[mod_dashboard export json] {_ex}")
+
+                async def _cb_csv(inter: discord.Interaction):
+                    try:
+                        import owner_export as _oe
+                        await _oe.send_export(inter, fmt="csv")
+                    except Exception as _ex:
+                        print(f"[mod_dashboard export csv] {_ex}")
+
+                btn_json.callback = _cb_json
+                btn_csv.callback = _cb_csv
+                self.add_item(discord.ui.ActionRow(btn_json, btn_csv))
+            except Exception as _ex:
+                print(f"[mod_dashboard export buttons] {_ex}")
 
     return _ModDashboardLayout()
 

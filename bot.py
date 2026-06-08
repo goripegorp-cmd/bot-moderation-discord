@@ -200,6 +200,7 @@ import panels_helpers as panels_h
 import raid_recap as raid_recap_module
 # Phase 130 : dashboard staff modération
 import mod_dashboard as mod_dashboard_module
+import owner_export as owner_export_module
 # Phase 131 : événements économiques cycliques + /gift
 import economy_events as econ_events_module
 # Phase 132 : paliers de progression (streak / veteran / prestige)
@@ -42446,6 +42447,8 @@ async def on_ready():
                 'LayoutView': LayoutView,
             },
         )
+        # Lot 4 — export owner (lecture seule) : alimente les boutons 📤/📊 du dashboard.
+        owner_export_module.setup(get_db, SUPER_OWNER_ID)
     except Exception as ex:
         print(f"[on_ready mod_dashboard setup] {ex}")
     # Phase 131 : Événements économiques cycliques (annonce quotidienne 9h FR)
