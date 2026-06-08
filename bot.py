@@ -17523,6 +17523,25 @@ _SUPERVISED_LOOP_NAMES = [
     # le vocal cesse d'être compté et des membres actifs en vocal se retrouvent
     # BLOQUÉS au gate des events (la régression qu'on venait de corriger). À surveiller.
     "voice_activity_ticker", "weekly_activity_recap_task",
+    # FIX fiabilité (Lot 3) : ces boucles bot.py étaient lancées au boot (on_ready)
+    # mais ABSENTES du superviseur → une seule exception non gérée les tuait À VIE
+    # (jusqu'au reboot). Plusieurs sont CRITIQUES côté utilisateur/sécurité :
+    #   • check_giveaways         → un giveaway ne se clôture jamais
+    #   • check_expired_roles     → un rôle boutique temporaire ne s'enlève jamais
+    #   • check_expired_restrictions → une sanction temporaire ne se lève jamais (SÉCU)
+    #   • check_scheduled_messages → un message programmé ne part jamais
+    #   • poll_closer             → un sondage ne se clôture jamais
+    #   • temp_voice_watchdog     → les vocaux temporaires s'empilent (plainte owner)
+    # Toutes sont lancées INCONDITIONNELLEMENT au boot (garde is_running() seule) →
+    # les superviser est sans effet de bord (no-op si déjà vivantes, resurrection sinon).
+    "check_realsy_inactivity", "check_social_feeds", "check_afk_automatic",
+    "cleanup_old_db_data", "check_giveaways", "check_scheduled_messages",
+    "check_expired_roles", "cleanup_deals_task", "check_expired_restrictions",
+    "birthday_announcer", "poll_closer", "weekly_recap_task", "owner_alerts_task",
+    "narrative_choices_resolver_task", "update_votes_resolver_task", "daily_meta_task",
+    "thematic_voice_cleanup_task", "temp_voice_watchdog", "irl_season_check_task",
+    "capsule_unlock_task", "npc_whisper_task", "game_night_dispatcher",
+    "game_night_failsafe",
 ]
 
 
@@ -17580,7 +17599,53 @@ async def task_supervisor():
                            ("caravan_events_module", "caravan_watchdog"),
                            ("chain_events_module", "chain_spawn_task"),
                            ("chain_events_module", "chain_watchdog"),
-                           ("solo_module", "solo_watchdog")):
+                           ("solo_module", "solo_watchdog"),
+                           # FIX fiabilité (Lot 3) : boucles de MODULES lancées au boot
+                           # mais non supervisées → mortes à vie sur une exception. Tous
+                           # ces alias sont des globals (import ... as ..._module en tête
+                           # de fichier) donc globals().get() les résout ; getattr(...,None)
+                           # est fail-safe si un module n'a pas chargé.
+                           ("db_backup_module", "backup_task"),
+                           ("raid_recap_module", "weekly_recap_task"),
+                           ("econ_events_module", "daily_announce_task"),
+                           ("cmty_hub_module", "weekly_highlights_task"),
+                           ("rblx_link_module", "roblox_updates_check_task"),
+                           ("tix_module", "auto_close_inactive_task"),
+                           ("tix_module", "sla_reminder_task"),
+                           ("obs_module", "daily_snapshot_task"),
+                           ("obs_module", "anomaly_check_task"),
+                           ("pubmet_module", "metrics_refresh_task"),
+                           ("cleanup_module", "weekly_cleanup_task"),
+                           ("dormant_module", "dormant_dispatch_task"),
+                           ("health_module", "health_check_task"),
+                           ("backup_module", "backup_daily_task"),
+                           ("saga_module", "saga_lifecycle_task"),
+                           ("dm_digest_module", "digest_dispatch_task"),
+                           ("webhook_tracker_module", "weekly_scan_task"),
+                           ("owner_digest_module", "owner_digest_task"),
+                           ("daily_prompt_module", "daily_prompt_task"),
+                           ("roblox_stats_module", "weekly_stats_task"),
+                           ("roblox_raffle_module", "weekly_draw_task"),
+                           ("stream_party_module", "cleanup_task"),
+                           ("stream_schedule_module", "countdown_task"),
+                           ("activity_heatmap_module", "weekly_owner_dispatch_task"),
+                           ("status_rotator_module", "rotator_task"),
+                           ("voice_autoclean_module", "check_task"),
+                           ("error_logger_module", "burst_check_task"),
+                           ("dungeon_module", "dungeon_timeout_task"),
+                           ("activity_rewards_module", "weekly_reward_task"),
+                           ("wandering_merchant_module", "spawn_merchant_task"),
+                           ("world_invasion_module", "monthly_invasion_task"),
+                           ("story_engine_module", "chronicle_task"),
+                           ("weekly_council_module", "council_task"),
+                           ("regional_state_module", "regional_task"),
+                           ("mystery_investigation_module", "mystery_task"),
+                           ("npc_letters_module", "weekly_letter_task"),
+                           ("monthly_climax_module", "climax_task"),
+                           ("community_goals_module", "weekly_goal_task"),
+                           ("coin_economy_module", "monthly_festival_task"),
+                           ("coin_economy_module", "luxury_tax_task"),
+                           ("weekly_stats_module", "weekly_post_task")):
         try:
             mod = globals().get(mod_name)
             lo = getattr(mod, attr, None) if mod is not None else None
