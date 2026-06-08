@@ -160,8 +160,8 @@ async def _collect_stats(guild_id: int, days: int = WINDOW_DAYS) -> dict:
 # RENDERING
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _build_layout(stats: dict, guild) -> discord.ui.LayoutView | None:
-    """Construit le LayoutView V2 du dashboard."""
+def _build_layout(stats: dict, guild, tickets: dict | None = None) -> discord.ui.LayoutView | None:
+    """Construit le LayoutView V2 du dashboard. `tickets` = stats tickets optionnelles."""
     if _v2_helpers is None:
         return None
 
@@ -241,6 +241,26 @@ def _build_layout(stats: dict, guild) -> discord.ui.LayoutView | None:
                     )
                 items.append(v2_body("\n".join(lines)))
 
+            # 🎫 Tickets (Lot 4 — "dashboard staff = tickets + sanctions")
+            if tickets:
+                items.append(v2_divider())
+                items.append(v2_body("**╔═══ 🎫  TICKETS  ═══╗**"))
+                unclaimed = int(tickets.get("unclaimed", 0) or 0)
+                unclaimed_txt = f" · 🙋 `{unclaimed}` non pris en charge" if unclaimed else ""
+                items.append(v2_body(
+                    f"🟢 **Ouverts :** `{tickets.get('open', 0)}`{unclaimed_txt}\n"
+                    f"✅ **Fermés :** `{tickets.get('closed', 0)}`\n"
+                    f"🆕 **7 derniers jours :** `{tickets.get('recent_7d', 0)}`"
+                ))
+                t_staff = tickets.get("top_staff") or []
+                if t_staff:
+                    medals = ["🥇", "🥈", "🥉", "▪️", "▪️"]
+                    lines = []
+                    for idx, s in enumerate(t_staff[:5]):
+                        medal = medals[idx] if idx < 5 else "▪️"
+                        lines.append(f"{medal} <@{s['user_id']}> · `{s['count']}` ticket(s)")
+                    items.append(v2_body("**🛡️ Top support :**\n" + "\n".join(lines)))
+
             # Cas où aucune activité
             if stats["total"] == 0:
                 items.append(v2_divider())
@@ -313,7 +333,15 @@ async def show(interaction: discord.Interaction, days: int = WINDOW_DAYS) -> boo
 
     try:
         stats = await _collect_stats(interaction.guild.id, days=days)
-        view = _build_layout(stats, interaction.guild)
+        # Lot 4 : agrège AUSSI les tickets (réutilise tickets_enhance, déjà setup au boot).
+        # Défensif : si le module/table manque, le dashboard s'affiche sans la section.
+        tickets = None
+        try:
+            import tickets_enhance as _tix
+            tickets = await _tix.collect_ticket_stats(interaction.guild.id)
+        except Exception as _tex:
+            print(f"[mod_dashboard tickets] {_tex}")
+        view = _build_layout(stats, interaction.guild, tickets=tickets)
         if view is None:
             await interaction.response.send_message(
                 "❌ Dashboard indisponible (module non initialisé).",
