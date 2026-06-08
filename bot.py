@@ -55,6 +55,16 @@ class _QuietStdout:
                    '[MYSTERY BOX', '[TREASURE', '[QUIZ', '[COMEBACK', '[RIDDLE',
                    '[PERSIST CLEANUP', '[BOOT CLEANUP', '[cleanup_old_db_data',
                    '[WORLD BOSS', '[MOB', '[DAILY', '[INVASION', '[CLIMAX', '[VOICE')
+    # Tags de SOUS-SYSTÈME dont les lignes sont du STATUT de routine (compteurs,
+    # envois planifiés, récaps…), JAMAIS des crashs. Vérifié : leurs vraies erreurs
+    # sortent soit avec un mot d'erreur (ex. « [backup_lite] échec : … » → gardé par
+    # rule A qui passe AVANT), soit sous un tag de FONCTION distinct (ex.
+    # [record_boss_attack]) capté par le fail-safe. On masque « [tag] … » en gros.
+    # NB : on liste UNIQUEMENT le tag EXACT « [module] » (fermé par ']'). Les erreurs
+    # de ces modules sortent sous « [module fonction] {ex} » (espace, pas ']') ou avec
+    # un mot d'erreur → JAMAIS masquées par erreur. Conservateur : tags vérifiés only.
+    _INFO_TAGS = ('[backup_lite]', '[event_notif_role]', '[owner_alert]',
+                  '[owner_digest]', '[activity_rewards]', '[daily_bosses]')
 
     def __init__(self, real):
         self._real = real
@@ -70,6 +80,8 @@ class _QuietStdout:
         if any(m in low for m in self._ERR) or self._ERR_RE.search(low):
             return True
         # (B) INFO connue → masquer
+        if any(st.startswith(t) for t in self._INFO_TAGS):        # sous-système de routine connu
+            return False
         if any(st.startswith(p) for p in self._INFO_START):       # emoji succès / tag connu
             return False
         if self._INFO_TAG_RE.match(st):                            # [TAG EN MAJUSCULES]
