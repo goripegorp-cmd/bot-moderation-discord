@@ -17667,6 +17667,14 @@ async def _task_supervisor_wait():
     await bot.wait_until_ready()
 
 
+# QUIS CUSTODIET — le superviseur est le SEUL point unique de défaillance de tout le
+# filet de résurrection : s'il meurt, plus rien ne ressuscite. Son corps est déjà
+# protégé par un try/except PAR boucle, mais on ajoute une ceinture+bretelles : avec
+# reconnect=True (défaut de @tasks.loop), add_exception_type(Exception) fait que TOUTE
+# exception non gérée le fait DORMIR puis RÉESSAYER au lieu de s'arrêter à vie.
+task_supervisor.add_exception_type(Exception)
+
+
 async def _guild_recently_active(guild_id, minutes: int = 120, min_users: int = 1) -> bool:
     """Phase 194 — OFFRE À LA DEMANDE : le serveur a-t-il eu de l'activité humaine
     récente (≥ min_users membres ayant parlé dans les `minutes` dernières) ?
