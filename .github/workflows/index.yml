@@ -1,19 +1,22 @@
 name: Symbol Index
 
-# Regenerates INDEX.md (grep-able symbol map for navigation) on every push that
-# touches Python. Commits the refreshed index back to main.
+# Regenerates INDEX.md (grep-able symbol map for navigation) once a DAY and on demand,
+# then commits the refreshed index back to main.
 #
-# LOOP SAFETY (two independent guards):
-#   1. `paths: ['**.py']` — a commit that changes only INDEX.md (a .md file) does
-#      NOT match, so the auto-commit never re-triggers this workflow.
-#   2. The commit message carries `[skip ci]`, which GitHub Actions honours.
-# The commit is also skipped entirely when INDEX.md is byte-identical (diff-guard),
-# which it always is when the code did not change (generate_index.py is deterministic).
+# WHY DAILY, NOT PER-PUSH: a single edit near the top of bot.py shifts thousands of
+# downstream line numbers, so a per-push regen produced ~12k-line INDEX.md diffs on
+# EVERY commit (noisy history) and forced a pull-before-push dance. Line numbers in
+# INDEX.md are only hints (use Grep for the live location), so once-a-day freshness is
+# plenty. Need it fresher right now? Run the workflow manually (workflow_dispatch).
+#
+# LOOP SAFETY: the regen commit carries `[skip ci]` (honoured by GitHub Actions) and
+# there is NO `push` trigger here, so the auto-commit can never re-trigger the workflow.
+# The commit is also skipped when INDEX.md is byte-identical (diff-guard); the generator
+# is deterministic (no timestamps).
 
 on:
-  push:
-    branches: [main]
-    paths: ['**.py']
+  schedule:
+    - cron: '0 4 * * *'   # 04:00 UTC daily
   workflow_dispatch:
 
 permissions:
