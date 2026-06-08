@@ -1,0 +1,69 @@
+name: Symbol Index
+
+# Regenerates INDEX.md (grep-able symbol map for navigation) on every push that
+# touches Python. Commits the refreshed index back to main.
+#
+# LOOP SAFETY (two independent guards):
+#   1. `paths: ['**.py']` — a commit that changes only INDEX.md (a .md file) does
+#      NOT match, so the auto-commit never re-triggers this workflow.
+#   2. The commit message carries `[skip ci]`, which GitHub Actions honours.
+# The commit is also skipped entirely when INDEX.md is byte-identical (diff-guard),
+# which it always is when the code did not change (generate_index.py is deterministic).
+
+on:
+  push:
+    branches: [main]
+    paths: ['**.py']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: symbol-index
+  cancel-in-progress: false
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Regenerate INDEX.md
+        run: python generate_index.py
+
+      - name: Ruff lint (non-blocking — report only)
+        run: |
+          python -m pip install --upgrade pip >/dev/null
+          pip install ruff >/dev/null
+          echo "::group::ruff check (informational, never fails the build)"
+          ruff check . --output-format=concise > ruff-report.txt 2>&1 || true
+          echo "Top issues:"
+          head -80 ruff-report.txt || true
+          echo "Total issues: $(wc -l < ruff-report.txt)"
+          echo "::endgroup::"
+
+      - name: Commit INDEX.md if it changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- INDEX.md; then
+            echo "INDEX.md unchanged — nothing to commit."
+          else
+            git add INDEX.md
+            git commit -m "chore: regenerate INDEX.md [skip ci]"
+            # Best-effort push: if main has branch protection that rejects the
+            # bot push, degrade gracefully (job stays green; INDEX.md just won't
+            # auto-update) rather than showing a spurious red X every push.
+            if git push; then
+              echo "INDEX.md updated and pushed."
+            else
+              echo "::warning::Could not push INDEX.md (branch protection?). Regenerate locally with: python generate_index.py"
+            fi
+          fi
