@@ -53,10 +53,14 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git diff --quiet -- INDEX.md; then
+          # Stage first, then compare the index against HEAD. `git diff --quiet -- PATH`
+          # alone does NOT detect a brand-new *untracked* INDEX.md (git diff only sees
+          # tracked paths), so the first generation would be silently skipped. Staging
+          # then `git diff --cached --quiet` correctly detects both new and changed files.
+          git add INDEX.md
+          if git diff --cached --quiet -- INDEX.md; then
             echo "INDEX.md unchanged — nothing to commit."
           else
-            git add INDEX.md
             git commit -m "chore: regenerate INDEX.md [skip ci]"
             # Best-effort push: if main has branch protection that rejects the
             # bot push, degrade gracefully (job stays green; INDEX.md just won't
