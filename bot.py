@@ -62525,6 +62525,14 @@ class EngagementHubView(View):
         # Phase 65 : ouvre le sub-hub Outils (regroupe tout ce qui était slash)
         await _open_tools_panel(i)
 
+    async def _on_solo(self, i: discord.Interaction):
+        # Phase 271 : ouvre DIRECTEMENT les Aventures Solo (8 défis perso, salon privé).
+        # Découvrabilité : entrée top-level dans le hub épinglé (plus enterré sous Compét).
+        try:
+            await solo_module.open_solo_hub(i)
+        except Exception as ex:
+            print(f"[hub_solo] {ex}")
+
     async def _on_chronicle(self, i: discord.Interaction):
         # Phase 170.1 : ouvre le Codex de la Chronique d'Abylumis
         try:
@@ -82417,12 +82425,19 @@ class HubPinnedLayoutV2(LayoutView):
             b,
         ))
 
-        items.append(v2_divider())
+        # Phase 271 : entrée DIRECTE « Aventures Solo » (découvrabilité — plus enterrée
+        # sous Compétitions). ActionRow compact (+2) ; le divider pré-footer retiré
+        # compense → on reste sous la limite Discord 40. Callback délégué (cohérent).
+        _solo_btn = Button(label="🌑 Aventures Solo (défis perso)",
+                           style=discord.ButtonStyle.success, custom_id="hub_solo_open")
+        _solo_btn.callback = _v2_delegate_to(EngagementHubView, '_on_solo')
+        items.append(discord.ui.ActionRow(_solo_btn))
 
         # ═══ FOOTER ═══
         items.append(v2_body(
-            "_💡 Tout est éphémère : toi seul vois la réponse._\n"
-            "_🎮 Bonne aventure sur le serveur !_"
+            "_🌑 8 aventures SOLO (donjon · trésor · familier · énigme · forge…) : "
+            "TON salon privé, quand tu veux, en parallèle._\n"
+            "_💡 Tout est éphémère : toi seul vois la réponse._"
         ))
 
         # Phase 88 : couleur Discord blurple

@@ -507,10 +507,19 @@ async def open_solo_hub(i: discord.Interaction):
     cd_iv = await _cooldown_remaining(i.guild.id, i.user.id, _INVESTIGATE_KIND, _COOLDOWN_MIN)
     cd_fg = await _cooldown_remaining(i.guild.id, i.user.id, _FORGE_KIND, _FORGE_COOLDOWN_MIN)
     cd_ic = await _cooldown_remaining(i.guild.id, i.user.id, _INCUBATION_KIND, _INCUB_COOLDOWN_MIN)
+    # Phase 271 : preuve sociale — compte LIVE des aventures en cours (frais, à l'ouverture,
+    # zéro coût de refresh). « Tu n'es pas seul » → incite à se lancer.
+    try:
+        _active_now = await _active_run_count(i.guild.id)
+    except Exception:
+        _active_now = 0
+    _live_line = (f"🌑 **{_active_now}** aventure(s) solo en cours sur le serveur — rejoins le mouvement !"
+                  if _active_now > 0 else "🌑 _Sois le premier à lancer une aventure solo aujourd'hui !_")
     items = [
         v2_title("🌑  Aventures Solo"),
         v2_subtitle("Des défis RIEN QUE pour toi — ton propre salon, à ton rythme, "
                     "sans attendre personne. Plusieurs joueurs en parallèle."),
+        v2_body(_live_line),
         v2_divider(),
         v2_body(
             "**🗝️ Donjon de l'Ombre**\n"
