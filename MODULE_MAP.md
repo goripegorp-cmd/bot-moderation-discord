@@ -93,6 +93,8 @@ stops forever if it ever raises — that is a recurring class of bug.
 | **Notifications / digests / DMs** | `event_notif_role.py` · `dm_notify.py` · `dm_digest.py` · `owner_digest.py` · `npc_letters.py` |
 | **Components-V2 helpers / admin panels / setup** | `panels_helpers.py` · `admin_panels_v2.py` · `setup_wizard.py` · `help_system.py` · `help_faq.py` · `roles_panel.py` · `ux_polish.py` · `event_followup.py` |
 | **Owner observability / health / logging** | `observability.py` · `health_server.py` · `health_check.py` · `error_logger.py` · `unified_logger.py` · `weekly_stats.py` |
+| **Owner data export (JSON/CSV, read-only)** | `owner_export.py` (buttons on the mod dashboard, `mod_dashboard.py`) |
+| **Staff moderation dashboard** | `mod_dashboard.py` (`/owner mod_stats`) |
 | **Backups / cleanup / rate limit** | `backup_lite.py` · `db_backup.py` · `data_cleanup.py` · `rate_limiter.py` |
 
 ## 5. Events architecture (read before touching combat)
@@ -136,4 +138,4 @@ stops forever if it ever raises — that is a recurring class of bug.
 | `compile-check.yml` | py_compile every file **+ `import bot`** (executes module-level code) | **authoritative for boot** — catches `CommandLimitReached`, `NameError`, `ImportError` |
 | `pytest.yml` | pytest smoke (`tests/`) | regression guard |
 | `sql-audit.yml` | SQL-injection audit | security guard |
-| `index.yml` | regenerate **INDEX.md** + ruff lint (non-blocking) | navigation aid; auto-commits INDEX.md back (`[skip ci]`, loop-safe) |
+| `index.yml` | regenerate **INDEX.md** + ruff lint (non-blocking) | navigation aid; **daily 04:00 UTC + manual dispatch** (not per-push), auto-commits INDEX.md back (`[skip ci]`, loop-safe) |
