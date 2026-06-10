@@ -122,9 +122,13 @@ async def init_db():
 # ─── Helpers ────────────────────────────────────────────────────────────────
 
 def _normalize(s: str) -> str:
-    """Normalise un nom : lowercase + NFKD + collapse homoglyphs."""
+    """Normalise un nom : collapse homoglyphs + lowercase + NFKD + strip."""
     if not s:
         return ""
+    # FIX sécu P2-5 : collapse les homoglyphes AVANT de purger le non-ASCII.
+    # Sinon 'Оwпеr' (О,п,е cyrilliques) était vidé par le strip ligne suivante
+    # → la table HOMOGLYPHS ne servait jamais sur les pseudos full-cyrillique.
+    s = _collapse_homoglyphs(s)
     # NFKD : décompose accents/variantes
     s = unicodedata.normalize("NFKD", s)
     # Vire les zero-width et caractères de contrôle

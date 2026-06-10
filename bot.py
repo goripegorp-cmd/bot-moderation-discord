@@ -4703,18 +4703,62 @@ def check_invite(ct):
     m = re.search(r'discord\.gg/\w+|discord\.com/invite/\w+|discordapp\.com/invite/\w+', ct, re.I)
     return (True, m.group()) if m else (False, None)
 
+# FIX sécu P1-1 : normalisation anti-obfuscation pour la détection de liens.
+# Les regex/substrings de phishing cassaient sur : homoglyphes (disсord = с cyrillique),
+# zero-width (disc​ord), points Unicode (discord．com U+FF0E), défang ([.] / hxxp).
+# On scanne EN PLUS une copie normalisée (defense in depth) sans toucher le scan brut.
+_ZERO_WIDTH_RE = re.compile('[​‌‍⁠﻿]')   # ZWSP, ZWNJ, ZWJ, WJ, BOM
+_DOT_LOOKALIKE_RE = re.compile('[。․．·‧]')  # 。 ․ ． · ‧
+_DEFANG_DOT_RE = re.compile(r'\s*[\[\(\{]\s*\.\s*[\]\)\}]\s*')          # [.]  (.)  {.}
+_DEFANG_SCHEME_RE = re.compile(r'\bh(?:xx|XX)p(s?)://', re.IGNORECASE)  # hxxp:// -> http://
+
+
+def _normalize_for_scan(text: str) -> str:
+    """Renvoie une version dé-obfusquée du texte pour la détection de liens malveillants.
+    Neutralise homoglyphes + zero-width + points Unicode + défang. Best-effort : utilisée
+    EN PLUS du scan du texte brut, jamais à la place (defense in depth)."""
+    if not text:
+        return ""
+    try:
+        import impersonation_detector as _imp
+        s = _imp._collapse_homoglyphs(text)
+    except Exception:
+        s = text
+    try:
+        s = unicodedata.normalize('NFKC', s)
+    except Exception:
+        pass
+    s = _ZERO_WIDTH_RE.sub('', s)
+    s = _DOT_LOOKALIKE_RE.sub('.', s)
+    s = _DEFANG_DOT_RE.sub('.', s)
+    s = _DEFANG_SCHEME_RE.sub(r'http\1://', s)
+    return s
+
+
 def check_phishing(ct):
     """Vérification de phishing améliorée"""
     # Utiliser la fonction avancée
     found, detail, ptype = advanced_phishing_check(ct)
     if found:
         return True, detail
-    
-    # Fallback sur les domaines basiques
+
+    # FIX sécu P1-1 : re-scan sur la version normalisée (anti-homoglyphe/zero-width/[.]/hxxp)
+    norm = _normalize_for_scan(ct)
+    if norm and norm != ct:
+        found, detail, ptype = advanced_phishing_check(norm)
+        if found:
+            return True, detail
+
+    # Fallback sur les domaines basiques (brut PUIS normalisé)
     ct_lower = ct.lower()
     for d in PHISHING_DOMAINS:
         if d in ct_lower:
             return True, d
+    norm_lower = norm.lower()
+    if norm_lower and norm_lower != ct_lower:
+        for d in PHISHING_DOMAINS:
+            if d in norm_lower:
+                return True, d
     return False, None
 
 def check_scam(ct):
@@ -46476,6 +46520,60 @@ async def on_bulk_message_delete(messages):
         print(f"[UNIFIED LOG on_bulk_message_delete] {ex}")
 
 
+async def _scan_security_on_edit(after) -> bool:
+    """Rejoue la chaîne de scan sécurité de on_message sur un message ÉDITÉ.
+
+    FIX sécu 2026 (audit P0-2/P0-4) : toute la détection (token/webhook/grabber/
+    phishing/scam) ne tournait qu'à la CRÉATION du message. Un membre pouvait poster
+    un message anodin puis l'ÉDITER pour y injecter un webhook, un token, un lien de
+    phishing ou un lien masqué → aucun re-scan, aucune suppression, aucune révocation.
+    On rejoue ici EXACTEMENT les mêmes scanners que on_message, sur `after`.
+    Retourne True si un scanner a agi (message supprimé/sanctionné) → l'appelant NE
+    doit alors PAS logger `after.content` en clair. Fail-safe : une exception d'un
+    scanner ne bloque jamais la chaîne (sécurité best-effort, comme on_message)."""
+    if after.author is None or after.author.bot or not after.content:
+        return False
+    # 1) Scanners de secrets/grabber auto-suppresseurs (mêmes que on_message:46741-46773)
+    for _mod, _name in (
+        (honeypot_module, "honeypot"),
+        (anti_token_leak_module, "anti_token_leak"),
+        (webhook_leak_module, "webhook_leak"),
+        (token_grabber_module, "token_grabber"),
+    ):
+        try:
+            if await _mod.on_message_hook(after):
+                return True  # message déjà supprimé par le scanner
+        except Exception as ex:
+            print(f"[on_message_edit {_name}] {ex}")
+    # 2) Phishing / liens masqués / scam (mêmes vérifs que on_message:46979-47017)
+    try:
+        c = await cfg(after.guild.id)
+        ct = after.content or ""
+        if c.get('anti_phishing'):
+            f, d = check_phishing(ct)
+            if f:
+                await after.delete()
+                await send_log(after.guild, 'anti_phishing', after.author, after, "Lien de phishing détecté (édition)", f"`{d}`")
+                await sanction(after.author, c.get('phishing_action', 'delete'), c.get('phishing_mute_duration', 60), "Phishing (édition)", after.guild)
+                return True
+            f_mask, d_mask = check_masked_links(ct)
+            if f_mask:
+                await after.delete()
+                await send_log(after.guild, 'anti_phishing', after.author, after, "Lien masqué détecté (édition)", f"`{d_mask}`")
+                await sanction(after.author, c.get('phishing_action', 'delete'), c.get('phishing_mute_duration', 60), "Lien masqué phishing (édition)", after.guild)
+                return True
+        if c.get('anti_scam'):
+            f, p = check_scam(ct)
+            if f:
+                await after.delete()
+                await send_log(after.guild, 'anti_scam', after.author, after, "Message de scam détecté (édition)", f"`{p}`")
+                await sanction(after.author, c.get('scam_action', 'mute'), c.get('scam_mute_duration', 60), "Scam (édition)", after.guild)
+                return True
+    except Exception as ex:
+        print(f"[on_message_edit phishing/scam] {ex}")
+    return False
+
+
 @bot.event
 async def on_message_edit(before, after):
     """Log les éditions de messages (skip bots, ignore embeds-only updates)."""
@@ -46485,6 +46583,14 @@ async def on_message_edit(before, after):
         # Ignore si contenu identique (Discord renvoie on_message_edit pour les previews d'embed)
         if (before.content or "") == (after.content or ""):
             return
+        # FIX sécu P0-2 : re-scanner le contenu ÉDITÉ AVANT de logger. Si un scanner
+        # agit (phishing/token/webhook/scam), on stoppe ici → on ne recopie PAS le
+        # contenu malveillant en clair dans le salon de logs.
+        try:
+            if await _scan_security_on_edit(after):
+                return
+        except Exception as _ex:
+            print(f"[on_message_edit rescan] {_ex}")
         await ulogger2026.log_event(
             bot, before.guild, ulogger2026.EventType.MSG_EDIT,
             description=(
