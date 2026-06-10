@@ -8438,8 +8438,17 @@ async def _stash_equip(guild_id: int, user_id: int, stash_id: int):
                 return (False, None, None)
             slot = row[0]
             new_item = json.loads(row[1]) if row[1] else {}
-            await db.execute("DELETE FROM player_stash WHERE id=?", (stash_id,))
+            # FIX sécu (claim atomique anti-dup) : le DELETE conditionne sur la ligne
+            # ENCORE présente + check rowcount. Sous double-clic concurrent, un seul
+            # appel supprime réellement la ligne ; le 2e voit rowcount=0 et abandonne
+            # AVANT de toucher l'inventaire (sinon l'ancien gear était re-stashé 2×).
+            cur2 = await db.execute(
+                "DELETE FROM player_stash WHERE id=? AND guild_id=? AND user_id=?",
+                (stash_id, guild_id, user_id),
+            )
             await db.commit()
+            if (cur2.rowcount or 0) != 1:
+                return (False, None, None)
         inv = await _get_or_create_inventory(guild_id, user_id)
         old_item = inv.get(slot) or {}
         inv[slot] = new_item
@@ -8467,8 +8476,16 @@ async def _stash_sell(guild_id: int, user_id: int, stash_id: int):
                 return (False, None, 0)
             item = json.loads(row[0]) if row[0] else {}
             value = _sell_value(item)
-            await db.execute("DELETE FROM player_stash WHERE id=?", (stash_id,))
+            # FIX sécu (claim atomique anti-dup) : DELETE conditionnel + rowcount.
+            # Seul le clic qui supprime RÉELLEMENT la ligne crédite ; un 2e clic
+            # concurrent voit rowcount=0 et bail AVANT add_coins (sinon vente payée 2×).
+            cur2 = await db.execute(
+                "DELETE FROM player_stash WHERE id=? AND guild_id=? AND user_id=?",
+                (stash_id, guild_id, user_id),
+            )
             await db.commit()
+            if (cur2.rowcount or 0) != 1:
+                return (False, None, 0)
         try:
             await add_coins(guild_id, user_id, value)
         except Exception as ex:
@@ -8494,9 +8511,19 @@ async def _stash_sell_bulk(guild_id: int, user_id: int, max_rank: int = 0):
         if ids:
             placeholders = ",".join("?" for _ in ids)
             async with get_db() as db:
-                await db.execute(
+                cur = await db.execute(
                     f"DELETE FROM player_stash WHERE id IN ({placeholders})", ids)
                 await db.commit()
+            # FIX sécu (claim atomique anti-dup) : on ne crédite QUE les lignes
+            # réellement supprimées par CE clic. Deux ventes-en-lot concurrentes se
+            # partagent les lignes ; le total est mis à l'échelle du rowcount réel →
+            # impossible de créditer 2× le même objet (un 2e clic identique voit 0).
+            deleted = cur.rowcount or 0
+            if deleted <= 0:
+                return (0, 0)
+            if deleted < len(ids):
+                total = int(round(total * deleted / len(ids)))
+                sold = deleted
             if total > 0:
                 try:
                     await add_coins(guild_id, user_id, total)
@@ -79812,15 +79839,26 @@ class HeistJoinView(View):
         if not await _safe_defer(i):
             return
         try:
+            # FIX sécu (claim atomique anti double-payout) : bascule recruiting->resolving
+            # de façon ATOMIQUE. Seul le 1er clic gagne le claim (rowcount==1) ; les clics
+            # concurrents voient rowcount=0 et abandonnent AVANT toute distribution de pièces
+            # (sinon le pot était versé 2×/N× à toute l'équipe). Cf. pattern Phase 250.
             async with get_db() as db:
+                claim = await db.execute(
+                    "UPDATE heists SET status='resolving' WHERE id=? AND status='recruiting'",
+                    (self.hid,),
+                )
+                await db.commit()
+                if (claim.rowcount or 0) != 1:
+                    return await _safe_followup(i, content="⏱️ Déjà lancé / inexistant.")
                 async with db.execute(
-                    "SELECT status, pool_total, channel_id FROM heists WHERE id=?",
+                    "SELECT pool_total, channel_id FROM heists WHERE id=?",
                     (self.hid,),
                 ) as cur:
                     row = await cur.fetchone()
-            if not row or row[0] != 'recruiting':
-                return await _safe_followup(i, content="⏱️ Déjà lancé / inexistant.")
-            pool, channel_id = int(row[1]), int(row[2])
+            if not row:
+                return await _safe_followup(i, content="⏱️ Inexistant.")
+            pool, channel_id = int(row[0]), int(row[1])
             # Au moins 3 participants
             async with get_db() as db:
                 async with db.execute(
@@ -79829,6 +79867,18 @@ class HeistJoinView(View):
                 ) as cur:
                     parts = await cur.fetchall()
             if len(parts) < 3:
+                # Pas assez de monde : on REND le claim (resolving -> recruiting) pour
+                # que le braquage reste lançable quand d'autres rejoignent. Sinon le
+                # claim atomique l'aurait verrouillé à vie.
+                try:
+                    async with get_db() as db:
+                        await db.execute(
+                            "UPDATE heists SET status='recruiting' WHERE id=? AND status='resolving'",
+                            (self.hid,),
+                        )
+                        await db.commit()
+                except Exception:
+                    pass
                 return await _safe_followup(i, content=f"❌ Min 3 participants ({len(parts)} actuels).")
             # Phase 101 : success rate + payout selon target tier
             target_id_l = _heist_targets.get(self.hid, 'small')
@@ -80456,6 +80506,17 @@ class DuelAcceptView(View):
                     )
                     await db.commit()
                 return await _safe_followup(i, content="❌ Un des deux n'a plus assez de coins. Duel annulé.")
+            # FIX sécu (claim atomique anti double-débit) : bascule pending->active AVANT
+            # de débiter. Un 2e clic « Accepter » concurrent voit rowcount=0 et n'enlève
+            # pas une mise supplémentaire aux joueurs (sinon double prélèvement perdu).
+            async with get_db() as db:
+                _claim = await db.execute(
+                    "UPDATE pvp_duels SET status='active' WHERE id=? AND status='pending'",
+                    (self.did,),
+                )
+                await db.commit()
+                if (_claim.rowcount or 0) != 1:
+                    return await _safe_followup(i, content="⏱️ Duel déjà traité.")
             # Débiter les 2
             try:
                 await add_coins(i.guild.id, ch_id, -stake)
@@ -80540,6 +80601,19 @@ async def duel_report_cmd(i: discord.Interaction, duel_id: int, gagnant: discord
         if gagnant.id not in (ch_id, cd_id):
             return await _safe_followup(i, content="❌ Le gagnant doit être un des participants.")
         loser_id = cd_id if gagnant.id == ch_id else ch_id
+        # FIX sécu (claim atomique anti double-payout) : bascule active->resolved AVANT
+        # de payer. Seul le 1er report gagne le claim (rowcount==1) ; un report
+        # concurrent (les 2 joueurs, ou double-fire) voit 0 et NE PAIE PAS — sinon le
+        # pot stake*2 était crédité 2× (mint de pièces). Cf. pattern Phase 250.
+        async with get_db() as db:
+            _claim = await db.execute(
+                "UPDATE pvp_duels SET status='resolved', winner_id=?, resolved_at=CURRENT_TIMESTAMP "
+                "WHERE id=? AND status='active'",
+                (gagnant.id, duel_id),
+            )
+            await db.commit()
+            if (_claim.rowcount or 0) != 1:
+                return await _safe_followup(i, content="⏱️ Duel déjà résolu.")
         # Payout : winner reçoit 2 * stake
         try:
             await add_coins(i.guild.id, gagnant.id, stake * 2)
@@ -83882,21 +83956,19 @@ async def _alliance_deposit_coins(guild_id: int, alliance_id: int,
     if amount <= 0:
         return False
     try:
-        # Check balance user
+        # FIX sécu (débit atomique) : on retire les pièces du joueur de façon
+        # CONDITIONNELLE (coins>=amount) + check rowcount AVANT de créditer le trésor.
+        # Sinon deux dépôts concurrents créditaient 2×amount au trésor alors que le
+        # solde joueur n'est débité qu'une fois (floor MAX(0,…)) → création de pièces.
+        # Même pattern que _alliance_withdraw_coins (déjà atomique).
         async with get_db() as db:
-            async with db.execute(
-                "SELECT coins FROM economy WHERE guild_id=? AND user_id=?",
-                (guild_id, user_id),
-            ) as cur:
-                row = await cur.fetchone()
-        bal = int(row[0]) if row else 0
-        if bal < amount:
-            return False
-        # Débit user
-        try:
-            await add_coins(guild_id, user_id, -amount)
-        except Exception:
-            return False
+            cur = await db.execute(
+                "UPDATE economy SET coins = coins - ? WHERE guild_id=? AND user_id=? AND coins >= ?",
+                (amount, guild_id, user_id, amount),
+            )
+            await db.commit()
+            if (cur.rowcount or 0) != 1:
+                return False  # solde insuffisant OU débit déjà appliqué (course)
         # Crédit treasury (upsert)
         async with get_db() as db:
             await db.execute(

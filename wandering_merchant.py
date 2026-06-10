@@ -472,10 +472,33 @@ async def _process_purchase(btn_i: discord.Interaction, visit_id: int, item_id: 
     if not row:
         return await btn_i.followup.send("❌ Item introuvable.", ephemeral=True)
     stock_id, qty, price, item_data = row
-    if int(qty) <= 0:
-        return await btn_i.followup.send(
-            "❌ Stock épuisé sur cet item.", ephemeral=True
+    # FIX sécu (réservation atomique du stock anti-dup) : on décrémente DE SUITE de
+    # façon CONDITIONNELLE (qty_remaining>0) + check rowcount. Deux clics concurrents
+    # sur le DERNIER exemplaire ne peuvent plus tous deux passer (l'un voit rowcount=0)
+    # → fini les 2 items livrés pour 1 stock + stock négatif. On rend le stock (+1) si
+    # le débit échoue ou si les fonds manquent.
+    async with _get_db() as db:
+        _claim = await db.execute(
+            "UPDATE merchant_stock SET qty_remaining=qty_remaining-1 "
+            "WHERE id=? AND qty_remaining>0",
+            (stock_id,),
         )
+        await db.commit()
+        if (_claim.rowcount or 0) != 1:
+            return await btn_i.followup.send(
+                "❌ Stock épuisé sur cet item.", ephemeral=True
+            )
+
+    async def _give_back_stock():
+        try:
+            async with _get_db() as _db:
+                await _db.execute(
+                    "UPDATE merchant_stock SET qty_remaining=qty_remaining+1 WHERE id=?",
+                    (stock_id,),
+                )
+                await _db.commit()
+        except Exception:
+            pass
 
     # Check coins
     try:
@@ -493,6 +516,7 @@ async def _process_purchase(btn_i: discord.Interaction, visit_id: int, item_id: 
         hand, bank = 0, 0
 
     if hand + bank < int(price):
+        await _give_back_stock()  # on rend le stock réservé : pas d'achat
         return await btn_i.followup.send(
             f"💸 Fonds insuffisants : tu as `{hand + bank:,}` 🪙 "
             f"mais l'item coûte `{int(price):,}` 🪙.",
@@ -517,18 +541,14 @@ async def _process_purchase(btn_i: discord.Interaction, visit_id: int, item_id: 
                 )
                 await db.commit()
     except Exception as ex:
+        await _give_back_stock()  # débit échoué : on rend le stock réservé
         return await btn_i.followup.send(
             f"❌ Échec du débit : `{ex}`", ephemeral=True
         )
 
-    # Décrémente le stock
+    # Stock DÉJÀ décrémenté atomiquement plus haut (réservation) : on log juste l'achat.
     try:
         async with _get_db() as db:
-            await db.execute(
-                "UPDATE merchant_stock SET qty_remaining=qty_remaining-1 "
-                "WHERE id=?",
-                (stock_id,),
-            )
             await db.execute(
                 "INSERT INTO merchant_purchases "
                 "(guild_id, visit_id, user_id, item_id, price_paid) "
