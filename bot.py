@@ -19298,12 +19298,15 @@ class LogsPanelV2(LayoutView):
             # Phase 158 : bouton Salons sécurité (honeypot, staff sanction)
             b_sec = Button(label="🛡️ Salons sécurité", style=discord.ButtonStyle.primary, custom_id="logsv2_sec")
             b_sec.callback = self._cb_security_channels
+            # Phase 268 : router chaque catégorie vers un salon dédié
+            b_route = Button(label="🎯 Salon par catégorie", style=discord.ButtonStyle.primary, custom_id="logsv2_route")
+            b_route.callback = self._cb_routing
             b_clear = Button(label="⚪ Désactiver", style=discord.ButtonStyle.danger, custom_id="logsv2_clear")
             b_clear.callback = self._cb_disable
             b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2_back")
             b_back.callback = self._cb_back
             items.append(discord.ui.ActionRow(b_chan, b_cats, b_events, b_excl))
-            items.append(discord.ui.ActionRow(b_sec, b_clear, b_back))
+            items.append(discord.ui.ActionRow(b_sec, b_route, b_clear, b_back))
         else:
             b_chan = Button(label="📍 Définir le salon", style=discord.ButtonStyle.success, custom_id="logsv2_chan")
             b_chan.callback = self._cb_set_channel
@@ -19338,6 +19341,11 @@ class LogsPanelV2(LayoutView):
 
     async def _cb_categories(self, i):
         v = LogsCategoriesPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+    async def _cb_routing(self, i):
+        # Phase 268 : routage par catégorie (1 salon par type de log)
+        v = LogsRoutingPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
 
     async def _cb_events(self, i):
@@ -19533,6 +19541,107 @@ class SecurityChannelsPanelV2(LayoutView):
             f"Choisis le salon pour **{label}** :",
             view=view, ephemeral=True,
         )
+
+    async def _cb_back(self, i):
+        v = LogsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+_LOG_CAT_EMOJIS = {
+    "Modération": "🔨", "Sécurité": "🛡️", "Membres": "👥",
+    "Messages": "💬", "Vocal": "🎤", "Serveur": "🏷️",
+    "Tickets": "🎫", "Config": "⚙️",
+}
+
+
+class LogsRoutingPanelV2(LayoutView):
+    """Phase 268 (demande owner) : router CHAQUE catégorie de logs vers un salon
+    dédié. Sans routage explicite, une catégorie retombe sur le salon global."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        global_id = await ulogger2026.get_log_channel(self.g.id)
+        cat_map = await ulogger2026.get_category_channels(self.g.id)
+        g_ch = self.g.get_channel(global_id) if global_id else None
+
+        self.clear_items()
+        items: list = []
+        items.append(v2_title("🎯 Salon par catégorie"))
+        items.append(v2_subtitle("Envoie chaque type de log dans le salon de ton choix"))
+        items.append(v2_divider())
+        items.append(v2_body(
+            f"🌐 **Salon global** (par défaut) : "
+            f"{g_ch.mention if g_ch else '⚪ non défini'}"
+        ))
+        lines = []
+        for cat in ulogger2026.LOG_CATEGORIES:
+            emoji = _LOG_CAT_EMOJIS.get(cat, "📋")
+            cid = cat_map.get(cat)
+            if cid:
+                ch = self.g.get_channel(cid)
+                dest = ch.mention if ch else f"⚠️ introuvable (`{cid}`)"
+            else:
+                dest = "_→ salon global_"
+            lines.append(f"{emoji} **{cat}** · {dest}")
+        items.append(v2_body("\n".join(lines)))
+        items.append(v2_divider())
+        items.append(v2_subtitle("Choisis une catégorie, puis son salon dédié"))
+
+        opts = [
+            discord.SelectOption(label=cat, value=cat, emoji=_LOG_CAT_EMOJIS.get(cat, "📋"))
+            for cat in ulogger2026.LOG_CATEGORIES
+        ]
+        sel = Select(
+            placeholder="Catégorie à router…",
+            min_values=1, max_values=1,
+            options=opts,
+        )
+        sel.callback = self._cb_pick
+        items.append(discord.ui.ActionRow(sel))
+
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsroute_back")
+        b_back.callback = self._cb_back
+        items.append(discord.ui.ActionRow(b_back))
+
+        self.add_item(v2_container(*items, color=Palette.INFO))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_pick(self, i):
+        try:
+            cat = (i.data.get('values') or [None])[0]
+        except Exception:
+            cat = None
+        if not cat or cat not in ulogger2026.LOG_CATEGORIES:
+            return await self.render_to(i, edit=True)
+
+        async def _save_cat_channel(guild_id, channel_id):
+            # channel_id == 0 ⇒ on retire le routage (retour au salon global)
+            await ulogger2026.set_category_channel(guild_id, cat, int(channel_id or 0))
+
+        v = V2GenericChannelPicker(
+            self.u, self.g,
+            config_key=f"_logcat_{cat}",  # ignoré : save_fn gère tout
+            return_panel_factory=lambda: LogsRoutingPanelV2(self.u, self.g),
+            title=f"🎯 Salon pour « {cat} »",
+            description=(
+                f"Choisis le salon où arriveront les logs **{cat}**.\n"
+                f"_Efface la sélection pour repasser au salon global._"
+            ),
+            color=0x3498DB,
+            save_fn=_save_cat_channel,
+        )
+        await v.render_to(i, edit=True)
 
     async def _cb_back(self, i):
         v = LogsPanelV2(self.u, self.g)

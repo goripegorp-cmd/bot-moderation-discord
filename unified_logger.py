@@ -237,6 +237,71 @@ async def set_enabled_categories(guild_id: int, categories: set[str]) -> None:
 
 
 # =============================================================================
+# ROUTAGE PAR CATEGORIE (Phase 268 — demande owner : 1 salon par type de log)
+# =============================================================================
+# Chaque categorie de logs (Modération, Sécurité, Membres, Messages, Vocal,
+# Serveur, Tickets, Config) peut etre envoyee dans un salon DEDIE. Si aucun salon
+# n'est defini pour une categorie, on retombe sur le salon GLOBAL (set_log_channel).
+
+# Liste canonique des categories (ordre d'affichage), derivee de EVENT_META.
+LOG_CATEGORIES: list[str] = []
+for _m in EVENT_META.values():
+    if _m["cat"] not in LOG_CATEGORIES:
+        LOG_CATEGORIES.append(_m["cat"])
+
+
+async def get_category_channels(guild_id: int) -> dict[str, int]:
+    """Retourne { categorie: channel_id } pour les categories routees explicitement."""
+    p = _cfg_path(guild_id)
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        raw = data.get("category_channels", {}) or {}
+        out: dict[str, int] = {}
+        for k, v in raw.items():
+            try:
+                cid = int(v)
+                if cid:
+                    out[str(k)] = cid
+            except (TypeError, ValueError):
+                continue
+        return out
+    except Exception:
+        return {}
+
+
+async def set_category_channel(guild_id: int, category: str, channel_id: Optional[int]) -> None:
+    """Route une categorie vers un salon. channel_id None/0 => retire le routage
+    (la categorie retombe alors sur le salon global)."""
+    p = _cfg_path(guild_id)
+    try:
+        data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except Exception:
+        data = {}
+    cc = data.get("category_channels", {}) or {}
+    if channel_id:
+        cc[str(category)] = int(channel_id)
+    else:
+        cc.pop(str(category), None)
+    data["category_channels"] = cc
+    data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+async def resolve_channel_for_category(guild_id: int, category: Optional[str]) -> Optional[int]:
+    """Salon cible pour une categorie : salon dedie si defini, sinon salon global."""
+    if category:
+        try:
+            cc = await get_category_channels(guild_id)
+            if category in cc:
+                return cc[category]
+        except Exception:
+            pass
+    return await get_log_channel(guild_id)
+
+
+# =============================================================================
 # PHASE 26.3 : EXCLUSIONS PAR EVENEMENT + EVENEMENTS DESACTIVES PRECISEMENT
 # =============================================================================
 
@@ -405,21 +470,23 @@ async def log_event(
     content: Optional[str] = None,
     extra: Optional[dict] = None,
 ) -> Optional[discord.Message]:
-    """Envoie un log dans le salon unifie. Retourne le message envoye ou None."""
+    """Envoie un log dans le salon de la categorie (sinon salon global). Retourne le message ou None."""
     try:
-        chan_id = await get_log_channel(guild.id)
-        if chan_id is None:
-            return None
-        target = bot.get_channel(chan_id)
-        if target is None:
-            return None
-
-        # Verifier que la categorie est activee
         meta = EVENT_META.get(event_type)
+
+        # Verifier que la categorie est activee (avant toute resolution de salon)
         if meta:
             enabled = await get_enabled_categories(guild.id)
             if meta["cat"] not in enabled:
                 return None
+
+        # Phase 268 : routage PAR CATEGORIE (salon dedie si configure, sinon global).
+        chan_id = await resolve_channel_for_category(guild.id, meta["cat"] if meta else None)
+        if not chan_id:
+            return None
+        target = bot.get_channel(int(chan_id))
+        if target is None:
+            return None
 
         # Phase 26.3 : event-type desactive specifiquement ?
         try:
