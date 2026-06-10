@@ -17611,7 +17611,8 @@ async def task_supervisor():
                            ("econ_events_module", "daily_announce_task"),
                            ("cmty_hub_module", "weekly_highlights_task"),
                            ("rblx_link_module", "roblox_updates_check_task"),
-                           ("tix_module", "auto_close_inactive_task"),
+                           # auto_close_inactive_task NON supervisée : désactivée (no-op,
+                           # plus lancée au boot) — le bot ne ferme jamais un ticket.
                            ("tix_module", "sla_reminder_task"),
                            ("obs_module", "daily_snapshot_task"),
                            ("obs_module", "anomaly_check_task"),
@@ -42551,9 +42552,10 @@ async def on_ready():
                 'LayoutView': LayoutView,
             },
         )
-        if not tix_module.auto_close_inactive_task.is_running():
-            tix_module.auto_close_inactive_task.start()
-        # Phase 245 : rappel SLA sur les tickets non pris en charge
+        # AUTO-CLOSE DÉSACTIVÉ (directive owner) : le bot ne ferme JAMAIS un ticket pour
+        # inactivité — on NE LANCE PAS auto_close_inactive_task (elle est de toute façon
+        # devenue un no-op). Les tickets restent ouverts aussi longtemps que voulu.
+        # Phase 245 : rappel SLA sur les tickets non pris en charge (SEUL rappel conservé).
         if not tix_module.sla_reminder_task.is_running():
             tix_module.sla_reminder_task.start()
     except Exception as ex:
@@ -44982,19 +44984,23 @@ async def ticket_stats_cmd(i: discord.Interaction):
 
 @ticket_group.command(
     name="auto_close_config",
-    description="⏱️ [Staff] Configurer l'auto-close inactivité (jours)",
+    description="ℹ️ [Staff] L'auto-fermeture des tickets est désactivée (info)",
 )
-@app_commands.describe(jours="Nombre de jours d'inactivité avant fermeture auto (1-90)")
-async def ticket_auto_close_cmd(i: discord.Interaction, jours: int):
+@app_commands.describe(jours="(sans effet) — la fermeture auto est désactivée")
+async def ticket_auto_close_cmd(i: discord.Interaction, jours: int = 0):
     if not i.guild or not isinstance(i.user, discord.Member):
         return await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
     if not _tix_is_staff(i.user):
         return await i.response.send_message("❌ Staff uniquement.", ephemeral=True)
     try:
-        d = max(1, min(90, int(jours or 7)))
-        ok = await tix_module.set_inactivity_days(i.guild.id, d)
+        # DÉSACTIVÉ (directive owner) : le bot ne ferme JAMAIS un ticket pour inactivité.
+        # On n'arme plus aucune fermeture auto ; la commande devient purement informative.
         await i.response.send_message(
-            f"{'✅' if ok else '❌'} Auto-close réglé à **`{d}` jours** d'inactivité.",
+            "ℹ️ **L'auto-fermeture des tickets est désactivée.** Le bot ne ferme jamais "
+            "un ticket pour inactivité — ils restent ouverts aussi longtemps que nécessaire. "
+            "La fermeture est **100 % manuelle** (bouton 🔒 par le staff).\n"
+            "_Rappel automatique conservé : le staff est pingé si un ticket n'est **pas pris "
+            "en charge**._",
             ephemeral=True,
         )
     except Exception as ex:

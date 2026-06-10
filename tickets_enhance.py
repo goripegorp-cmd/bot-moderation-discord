@@ -661,35 +661,13 @@ async def _try_close_channel(channel_id: int):
 
 @tasks.loop(hours=AUTO_CLOSE_CHECK_HOURS)
 async def auto_close_inactive_task():
-    """Tourne chaque 24h : ferme les tickets sans activité depuis N jours."""
-    if _bot is None or _get_db is None:
-        return
-    try:
-        await _ensure_tables()
-        for guild in list(_bot.guilds):
-            try:
-                days = await get_inactivity_days(guild.id)
-                # FIX audit : format ALIGNÉ sur SQLite CURRENT_TIMESTAMP
-                # ('YYYY-MM-DD HH:MM:SS'). `.isoformat()` produisait '…T…+00:00'
-                # → comparaison lexicographique faussée (fermait des tickets trop tôt).
-                cutoff = (
-                    datetime.now(timezone.utc) - timedelta(days=days)
-                ).strftime('%Y-%m-%d %H:%M:%S')
-                async with _get_db() as db:
-                    async with db.execute(
-                        "SELECT t.channel_id FROM tickets t "
-                        "LEFT JOIN ticket_extras te ON te.channel_id = t.channel_id "
-                        "WHERE t.guild_id=? AND t.status='open' AND "
-                        "COALESCE(te.last_activity_at, t.created_at) < ?",
-                        (guild.id, cutoff),
-                    ) as cur:
-                        rows = await cur.fetchall()
-                for (ch_id,) in rows:
-                    await _try_close_channel(int(ch_id))
-            except Exception as ex:
-                print(f"[tickets_enhance auto_close guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[tickets_enhance auto_close_inactive_task] {ex}")
+    """DÉSACTIVÉ (directive owner) : le bot ne ferme JAMAIS un ticket pour inactivité.
+    Les tickets peuvent rester ouverts aussi longtemps que nécessaire — c'est VOULU.
+    Boucle conservée en no-op (références boot/historique préservées, zéro risque de
+    NameError) ; elle n'est même plus lancée au boot. Le SEUL rappel automatique sur
+    les tickets = `sla_reminder_task` (ping staff sur un ticket NON PRIS EN CHARGE).
+    La fermeture reste 100 % MANUELLE (bouton 🔒 par le staff)."""
+    return
 
 
 @auto_close_inactive_task.before_loop
