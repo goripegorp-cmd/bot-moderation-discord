@@ -15593,26 +15593,18 @@ async def _post_onboarding_welcome(member):
         if ch is None:
             return
 
+        # Phase 268 (demande owner) : message d'accueil COMPACT — une seule ligne pour
+        # ne pas noyer le chat lors des vagues d'arrivées. Le détail (principe d'activité,
+        # events, hub) reste accessible via les boutons ci-dessous (Parcours/hub/notifs).
         embed = discord.Embed(
-            title=f"👋 Bienvenue {member.display_name} sur {guild.name} !",
             description=(
-                "Bienvenue dans une **aventure communautaire** ! L'essentiel en "
-                "**30 secondes** :\n\n"
-                "🎯 **Le principe :** sois **actif** — écris des messages **OU** passe "
-                "du temps en vocal — et ça débloque l'accès aux **événements** "
-                "(⚔️ Boss Raids · 💎 Trésors · 🎓 Quiz · 🌍 World Boss…) où tu gagnes "
-                "loot, pièces et familiers. _L'un OU l'autre suffit._\n\n"
-                "🎮 **Tout est dans `/hub`** : quêtes du jour, ton compagnon 🐾, ta "
-                "progression, tes events — zéro commande à retenir, tout en boutons.\n\n"
-                "👇 Configure-toi (classe + notifs) et lance ton "
-                "**🧭 Parcours d'aventurier** !"
+                f"👋 Bienvenue {member.mention} ! Sois **actif** (chat ou vocal) pour "
+                f"débloquer les **événements** et gagner loot & familiers — tout est dans `/hub`."
             ),
             color=0x5865F2,
         )
-        embed.set_footer(text=f"{guild.name} · clique un bouton pour commencer")
         try:
             await ch.send(
-                content=member.mention,
                 embed=embed,
                 view=OnboardingView(guild.id, member.id),
                 allowed_mentions=discord.AllowedMentions(
@@ -46518,10 +46510,10 @@ async def _handle_welcome(member):
         )
     except Exception as ex:
         text = f"👋 Bienvenue {member.mention} ! _(erreur template: {ex})_"
-    e = discord.Embed(description=text, color=0x57F287, timestamp=datetime.now(timezone.utc))
-    e.set_author(name=f"👋 Bienvenue", icon_url=member.display_avatar.url)
-    e.set_thumbnail(url=member.display_avatar.url)
-    e.set_footer(text=f"{member.guild.name} · {member.guild.member_count} membres", icon_url=(member.guild.icon.url if member.guild.icon else None))
+    # Phase 268 (demande owner) : embed COMPACT — pas de grande vignette d'avatar ni
+    # de footer volumineux, pour ne pas occuper trop de place lors des vagues d'arrivées.
+    e = discord.Embed(description=text, color=0x57F287)
+    e.set_author(name="👋 Bienvenue", icon_url=member.display_avatar.url)
     try:
         _wv = _welcome_quick_buttons(member.guild)
         if _wv is not None:
