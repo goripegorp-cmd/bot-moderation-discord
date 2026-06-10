@@ -4281,6 +4281,33 @@ async def sanction(m, action, dur, reason, g):
     return False
 
 
+async def _dm_sanction(member, guild, action_label, reason, duration_text=None):
+    """DM SYSTÉMATIQUE au membre sanctionné (quick-win pro) : type + raison + durée +
+    comment contester. Transparence = standard d'une modération pro. FAIL-SOFT : si les
+    DM du membre sont fermés, on ignore silencieusement (jamais d'erreur). Pour un BAN,
+    appeler AVANT de bannir (sinon le membre est déjà parti et ne reçoit rien)."""
+    try:
+        if member is None or getattr(member, 'bot', False):
+            return
+        lines = [
+            f"Tu as reçu une sanction sur **{guild.name}**.",
+            f"**Type :** {action_label}",
+        ]
+        if duration_text:
+            lines.append(f"**Durée :** {duration_text}")
+        lines.append(f"**Raison :** {reason or 'Non précisée'}")
+        lines.append("")
+        lines.append("_Tu penses que c'est une erreur ? Ouvre un **ticket** sur le serveur "
+                     "pour en parler au staff._")
+        e = discord.Embed(title="🔔 Sanction reçue", description="\n".join(lines),
+                          color=0xE67E22, timestamp=now())
+        if guild.icon:
+            e.set_footer(text=guild.name, icon_url=guild.icon.url)
+        await member.send(embed=e)
+    except Exception:
+        pass
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 #  Phase 24 : système progressif de strikes badwords
 # ═════════════════════════════════════════════════════════════════════════════
@@ -51688,6 +51715,9 @@ async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
 
     await i.response.send_message(embed=e)
 
+    # DM systématique au membre (quick-win pro) : transparence raison + contestation.
+    await _dm_sanction(membre, i.guild, "Avertissement ⚠️", raison)
+
     # Log unifié
     await send_mod_log(
         i.guild, 'warn', i.user, membre, raison,
@@ -51817,7 +51847,10 @@ async def mute_cmd(i: discord.Interaction, membre: discord.Member, duree: int, u
         return await i.response.send_message("❌ Je ne peux pas mute ce membre (permissions)", ephemeral=True)
     except Exception as ex:
         return await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
-    
+
+    # DM systématique au membre (quick-win pro) : type + durée + raison + contestation.
+    await _dm_sanction(membre, i.guild, "Mute 🔇", raison, duration_text=dur_txt)
+
     # Enregistrer l'infraction
     async with get_db() as db:
         await db.execute(
