@@ -188,7 +188,11 @@ async def on_reaction_hook(payload: discord.RawReactionActionEvent) -> bool:
             return False  # déjà fait par une autre task en parallèle
 
         # Build le message highlight
-        content_preview = (msg.content or "")[:800]
+        # FIX sécu : on ÉCHAPPE le markdown du message d'origine avant de le reposter
+        # via le bot (salon à forte visibilité). Sinon un membre pouvait glisser un
+        # faux-lien `[discord.gg/x](url)` ou de l'enrobage markdown crédibilisé par le
+        # bot. Les pings de masse sont déjà bloqués par allowed_mentions (auteur seul).
+        content_preview = discord.utils.escape_markdown((msg.content or "")[:800])
         attach_str = ""
         if msg.attachments:
             attach_str = f"\n📎 {len(msg.attachments)} pièce(s) jointe(s)"

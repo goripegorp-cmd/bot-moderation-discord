@@ -4802,6 +4802,15 @@ async def check_spam(msg, mx, intv):
     if key not in spam_tracker: spam_tracker[key] = []
     spam_tracker[key] = [t for t in spam_tracker[key] if (n - t).total_seconds() < intv]
     spam_tracker[key].append(n)
+    # FIX sécu (anti-fuite mémoire / DoS) : éviction paresseuse des clés mortes.
+    # Sans ça, chaque (guild,user) ayant écrit UNE fois gardait une entrée à vie →
+    # un raid de comptes jetables faisait gonfler le dict sans borne (OOM sur longue
+    # uptime). On purge quand le dict dépasse 5000 clés (timestamps tous périmés).
+    if len(spam_tracker) > 5000:
+        _cut = 3600  # 1 h : large devant n'importe quel intervalle anti-spam
+        for _k in [k for k, v in spam_tracker.items()
+                   if not v or (n - v[-1]).total_seconds() > _cut]:
+            spam_tracker.pop(_k, None)
     return len(spam_tracker[key]) > mx
 
 def check_channel_cfg(msg, conf):
@@ -5749,7 +5758,17 @@ def check_compromised_behavior(user_id, guild_id, content, has_mentions_everyone
     """Détecte si un compte semble compromis basé sur son comportement"""
     key = (guild_id, user_id)
     current_time = now()
-    
+
+    # FIX sécu (anti-fuite mémoire / DoS) : purge paresseuse des entrées mortes
+    # (>5 min sans message) quand le cache dépasse 5000 clés. Sans ça, chaque auteur
+    # gardait une entrée à vie → croissance non bornée sur raid de jetables / uptime.
+    if len(compromised_cache) > 5000:
+        for _k in [k for k, v in compromised_cache.items()
+                   if not v.get('messages')
+                   or (current_time - v['messages'][-1]['time']).total_seconds() > 300]:
+            if _k != key:
+                compromised_cache.pop(_k, None)
+
     # Initialiser le cache
     if key not in compromised_cache:
         compromised_cache[key] = {
@@ -59818,6 +59837,13 @@ bot.add_listener(_2026_start_activity_flush, "on_ready")
 # ═══════════════════════════════════════════════════════════════════════════════
 
 import hmac as _hmac_p41
+# FIX sécu : clé HMAC des confessions = secret DÉDIÉ (env CONFESSION_HMAC_KEY), JAMAIS
+# le token du bot. Avec l'ancien seed `TOKEN[:16]`, une fuite du token ou de la DB
+# permettait de dé-anonymiser rétroactivement CHAQUE confession (HMAC rejouable). À
+# défaut d'env, clé aléatoire par boot : anonymat parfait (l'anti-doublon, soft, se
+# réinitialise au reboot — acceptable). Définir CONFESSION_HMAC_KEY en env pour le
+# rendre stable entre reboots sans jamais réutiliser le token.
+_CONFESSION_HMAC_KEY = os.getenv('CONFESSION_HMAC_KEY') or secrets.token_hex(32)
 
 # Timezone serveur (Europe/Paris par défaut — comme le reste du bot)
 try:
@@ -60620,8 +60646,9 @@ class ConfessionModal(Modal):
                     row = await cur.fetchone()
                 conf_num = int(row[0]) if row else 1
 
-            # Hash anonymisé (HMAC avec un secret stable par guild — pas reverse-able)
-            secret = f"conf_{i.guild.id}_{TOKEN[:16] if TOKEN else 'noseed'}"
+            # Hash anonymisé (HMAC avec une clé DÉDIÉE hors-token, par guild — non
+            # réversible même si le token du bot fuit). Cf. _CONFESSION_HMAC_KEY.
+            secret = f"conf_{i.guild.id}_{_CONFESSION_HMAC_KEY}"
             user_hash = _hmac_p41.new(
                 secret.encode(),
                 f"{i.user.id}".encode(),

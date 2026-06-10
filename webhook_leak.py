@@ -179,8 +179,12 @@ async def on_message_hook(message: discord.Message) -> bool:
             print(f"[webhook_leak delete] {ex}")
 
         # 2) Auto-revoke chaque webhook leaked
+        # FIX sécu (anti-amplification 429) : on CAPE à 5 révocations par message.
+        # Sans borne, un message bourré de fausses URL webhook (~60 possibles dans
+        # 2000 car.) déclenchait autant de DELETE sortants hors du rate-limiter de
+        # discord.py → risque de 429 global auto-infligé (self-DoS).
         revoke_results = []
-        for url, wid, token in matches:
+        for url, wid, token in matches[:5]:
             ok, status = await _try_revoke_webhook(wid, token)
             revoke_results.append((url, wid, ok, status))
 
