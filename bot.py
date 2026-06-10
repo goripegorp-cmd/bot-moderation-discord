@@ -7475,6 +7475,7 @@ class WelcomeGoodbyePanelV2(LayoutView):
         g_ch = self.g.get_channel(int(c.get('goodbye_channel', 0) or 0))
         w_msg = c.get('welcome_message', '') or ''
         g_msg = c.get('goodbye_message', '') or ''
+        w_role = self.g.get_role(int(c.get('welcome_autorole', 0) or 0))
 
         self.clear_items()
 
@@ -7510,6 +7511,14 @@ class WelcomeGoodbyePanelV2(LayoutView):
         )
         g_ch_select.callback = lambda i: self._set_channel(i, 'goodbye_channel')
 
+        # Auto-rôle à l'arrivée (quick-win pro) : rôle « Membre » neutre donné à chaque
+        # nouveau. min_values=0 → re-sélectionner vide = désactiver. Appliqué dans on_member_join.
+        w_role_select = discord.ui.RoleSelect(
+            placeholder=f"🎭 Auto-rôle à l'arrivée : {(w_role.name if w_role else 'aucun')}",
+            min_values=0, max_values=1, custom_id="wg_w_role",
+        )
+        w_role_select.callback = lambda i: self._set_autorole(i)
+
         b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="wg_back")
         b_back.callback = self._cb_back
 
@@ -7519,6 +7528,7 @@ class WelcomeGoodbyePanelV2(LayoutView):
             v2_divider(),
             v2_body(
                 f"**👋 Welcome** · {'🟢' if w_on else '⚪'} · salon : {w_ch.mention if w_ch else '_aucun_'}\n"
+                f"🎭 Auto-rôle à l'arrivée : {w_role.mention if w_role else '_aucun_'}\n"
                 f"```{w_msg[:200]}```\n"
                 f"**😢 Goodbye** · {'🟢' if g_on else '⚪'} · salon : {g_ch.mention if g_ch else '_aucun_'}\n"
                 f"```{g_msg[:200]}```"
@@ -7529,6 +7539,7 @@ class WelcomeGoodbyePanelV2(LayoutView):
             ),
             v2_divider(),
             discord.ui.ActionRow(w_ch_select),
+            discord.ui.ActionRow(w_role_select),
             discord.ui.ActionRow(b_w_tog, b_w_msg),
             v2_divider(),
             discord.ui.ActionRow(g_ch_select),
@@ -7568,6 +7579,16 @@ class WelcomeGoodbyePanelV2(LayoutView):
             await self.render_to(i, edit=True)
         except Exception as ex:
             print(f"[WelcomeGoodbyePanelV2 _set_channel {key}] {ex}")
+
+    async def _set_autorole(self, i):
+        """Définit (ou retire si vide) le rôle auto-attribué à chaque nouveau membre."""
+        try:
+            vals = i.data.get('values', [])
+            role_id = int(vals[0]) if vals else 0
+            await db_set(self.g.id, 'welcome_autorole', role_id)
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[WelcomeGoodbyePanelV2 _set_autorole] {ex}")
 
     async def _cb_back(self, i):
         v = CentrePanelV2(self.u, self.g)
@@ -45873,6 +45894,22 @@ async def on_member_join(m):
         asyncio.create_task(member_risk_module.on_member_join(m))
     except Exception as ex:
         print(f"[on_member_join member_risk] {ex}")
+
+    # AUTO-RÔLE à l'arrivée (quick-win pro) : donne le rôle « Membre » configuré
+    # (welcome_autorole) à chaque nouveau. FAIL-SAFE : no-op si non configuré / rôle
+    # introuvable / au-dessus du bot / géré par une intégration / perms manquantes.
+    try:
+        if not m.bot:
+            c = await cfg(m.guild.id)
+            rid = int(c.get('welcome_autorole', 0) or 0)
+            if rid:
+                role = m.guild.get_role(rid)
+                me = m.guild.me
+                if (role and me and me.guild_permissions.manage_roles
+                        and not role.managed and role < me.top_role and role not in m.roles):
+                    await m.add_roles(role, reason="Auto-rôle d'arrivée (welcome)")
+    except Exception as ex:
+        print(f"[on_member_join autorole] {ex}")
 
     # ═══ Tracking stats journalières ═══
     try:
