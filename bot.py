@@ -4989,6 +4989,95 @@ class TicketCreateView(View):
         super().__init__(timeout=None)
         self.add_item(TicketCreateButton(pid))
 
+
+async def _ticket_transcript_file(ch, tid):
+    """Transcript .txt RÉUTILISABLE d'un salon de ticket (log + DM au créateur).
+    Renvoie un discord.File, ou None si la lecture de l'historique échoue."""
+    try:
+        lines = []
+        async for m in ch.history(limit=500, oldest_first=True):
+            stamp = m.created_at.strftime('%Y-%m-%d %H:%M')
+            body = m.content or ''
+            if m.attachments:
+                body += ' ' + ' '.join(a.url for a in m.attachments)
+            if not body.strip():
+                body = '[média/embed]'
+            lines.append(f"[{stamp}] {m.author.display_name}: {body}")
+        if not lines:
+            lines = ["(aucun message)"]
+        header = f"Transcript du ticket #{tid}\n" + "=" * 40 + "\n\n"
+        data = header + "\n".join(lines)
+        return discord.File(io.BytesIO(data.encode('utf-8')), filename=f"ticket-{tid}.txt")
+    except Exception:
+        return None
+
+
+class TicketCloseModal(Modal):
+    """Fermeture de ticket EN 2 TEMPS (quick-win pro) : le bouton 🔒 ouvre ce modal —
+    la SOUMISSION = la confirmation, le ✖ annule (fini le delete instantané sans filet).
+    À la fermeture : transcript .txt envoyé en DM au CRÉATEUR + récap (avec transcript)
+    dans le salon de logs, puis suppression après un court délai. NB : ceci n'a RIEN à
+    voir avec l'auto-close (désactivé) — c'est une fermeture 100 % MANUELLE par le staff."""
+    def __init__(self, tk):
+        super().__init__(title="🔒 Fermer le ticket")
+        self.tk = tk
+        self.reason = TextInput(
+            label="Raison de fermeture (optionnel)",
+            placeholder="Ex. Résolu · doublon · pas de réponse… (laisse vide si tu veux)",
+            style=discord.TextStyle.paragraph, required=False, max_length=500)
+        self.add_item(self.reason)
+
+    async def on_submit(self, i):
+        try:
+            await i.response.defer()
+        except Exception:
+            pass
+        ch = i.channel
+        tk = self.tk
+        reason = (self.reason.value or '').strip() or "Aucune raison précisée"
+        tid = tk.get('id', '?')
+        # 1) Log staff (envoie déjà l'embed + transcript dans le salon de logs).
+        try:
+            tu_log = i.guild.get_member(tk['user'])
+            await send_ticket_log(i.guild, 'close', tu_log or tk['user'], tk, closer=i.user, ch=ch)
+        except Exception:
+            pass
+        # 2) Transcript en DM au CRÉATEUR (fallback silencieux si DM fermés).
+        try:
+            creator = i.guild.get_member(tk['user'])
+            if creator:
+                f = await _ticket_transcript_file(ch, tid)
+                dm_txt = (
+                    f"🔒 Ton ticket **#{tid}** sur **{i.guild.name}** a été fermé par "
+                    f"**{i.user.display_name}**.\n**Raison :** {reason}\n\n"
+                    f"_Transcript de la conversation ci-joint. Tu peux rouvrir un ticket "
+                    f"si tu as encore besoin d'aide._")
+                try:
+                    await creator.send(content=dm_txt, file=f) if f else await creator.send(content=dm_txt)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # 3) Marquer fermé (DB) + annonce dans le salon + suppression différée.
+        try:
+            async with get_db() as db:
+                await db.execute("UPDATE tickets SET status='closed' WHERE channel_id=?", (ch.id,))
+                await db.commit()
+        except Exception:
+            pass
+        try:
+            await ch.send(
+                f"🔒 **Ticket fermé** par {i.user.mention}\n**Raison :** {reason}\n"
+                f"_Transcript envoyé en MP au créateur. Suppression du salon dans 5 s…_")
+        except Exception:
+            pass
+        await asyncio.sleep(5)
+        try:
+            await ch.delete()
+        except Exception:
+            pass
+
+
 class TicketControlView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -5220,15 +5309,19 @@ class TicketControlView(View):
                 if not (is_s or is_o or is_a or is_immune):
                     return await i.response.send_message("❌ Seul le staff peut fermer", ephemeral=True)
             
-            tu = i.guild.get_member(tk['user'])
-            await send_ticket_log(i.guild, 'close', tu or tk['user'], tk, closer=i.user, ch=i.channel)
-            async with get_db() as db:
-                await db.execute("UPDATE tickets SET status='closed' WHERE channel_id=?", (i.channel.id,))
-                await db.commit()
-            await i.response.send_message("🔒 Fermeture dans 3 secondes...")
-            await asyncio.sleep(3)
-            await i.channel.delete()
-        except: pass
+            # FERMETURE EN 2 TEMPS (quick-win pro) : on ouvre un modal (raison + confirmation)
+            # au lieu de supprimer le salon instantanément. Le travail réel (log + transcript
+            # DM au créateur + suppression) se fait dans TicketCloseModal.on_submit.
+            await i.response.send_modal(TicketCloseModal(tk))
+        except Exception as _tk_ex:
+            print(f"[ticket_close] {type(_tk_ex).__name__}: {_tk_ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{_tk_ex}`", ephemeral=True)
+                else:
+                    await i.followup.send(f"❌ Erreur : `{_tk_ex}`", ephemeral=True)
+            except Exception:
+                pass
 
 class AddStaffView(View):
     def __init__(self, opts, chid):
@@ -59293,8 +59386,33 @@ async def _2026_on_reaction_add_track(reaction, user):
         pass
 
 
+async def _voice_log_listener(member, before, after):
+    """LOG VOCAL (quick-win pro) : émet VOICE_JOIN/LEAVE/MOVE dans le salon de logs
+    unifié — la catégorie « Vocal » existait mais AUCUN émetteur ne la remplissait.
+    Listener ADDITIF (jamais un 2e @bot.event — piège connu). FAIL-SAFE : log_event
+    no-op tout seul si les logs ne sont pas configurés / la catégorie désactivée.
+    On ignore les bots et les simples changements mute/sourdine (anti-spam)."""
+    try:
+        if member is None or member.bot or getattr(member, 'guild', None) is None:
+            return
+        b = before.channel if before else None
+        a = after.channel if after else None
+        if b is None and a is not None:
+            et, desc, ch = ulogger2026.EventType.VOICE_JOIN, f"🎤 {member.mention} a rejoint **{a.name}**", a
+        elif b is not None and a is None:
+            et, desc, ch = ulogger2026.EventType.VOICE_LEAVE, f"🚪 {member.mention} a quitté **{b.name}**", b
+        elif b is not None and a is not None and b.id != a.id:
+            et, desc, ch = ulogger2026.EventType.VOICE_MOVE, f"↔️ {member.mention} : **{b.name}** → **{a.name}**", a
+        else:
+            return  # mute/sourdine/stream uniquement → on ne loggue pas (anti-bruit)
+        await ulogger2026.log_event(bot, member.guild, et, description=desc, user=member, channel=ch)
+    except Exception as ex:
+        print(f"[voice_log] {ex}")
+
+
 bot.add_listener(_2026_on_message_track, "on_message")
 bot.add_listener(_2026_on_voice_state_track, "on_voice_state_update")
+bot.add_listener(_voice_log_listener, "on_voice_state_update")
 bot.add_listener(_2026_on_reaction_add_track, "on_reaction_add")
 
 
