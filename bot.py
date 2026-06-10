@@ -5554,9 +5554,20 @@ def check_masked_links(content):
     """Détecte les liens markdown masqués : [texte légitime](url malveillante)"""
     # Pattern : [texte contenant un domaine](url réelle)
     masked = re.findall(r'\[([^\]]+)\]\((https?://[^)]+)\)', content)
+    _dom_re = r'(?:https?://)?([a-zA-Z0-9][-a-zA-Z0-9]*\.(?:com|gg|gift|org|net|tv|io|co)(?:/\S*)?)'
     for display_text, real_url in masked:
-        # Extraire le domaine du texte affiché (s'il contient un domaine)
-        display_domains = re.findall(r'(?:https?://)?([a-zA-Z0-9][-a-zA-Z0-9]*\.(?:com|gg|gift|org|net|tv|io|co)(?:/\S*)?)', display_text)
+        # FIX sécu 2026 : neutraliser les HOMOGLYPHES du texte affiché AVANT extraction.
+        # Sinon `[diѕcord.com](url-malveillante)` (ѕ = U+0455 cyrillique) passait : la regex
+        # ASCII cassait sur le caractère exotique et se ré-ancrait sur `cord.com` (non
+        # reconnu comme domaine de confiance) → non signalé. `_collapse_homoglyphs` mappe
+        # ѕ→s, і→i, о→o, а→a… en gardant les points.
+        try:
+            import impersonation_detector as _imp
+            display_norm = _imp._collapse_homoglyphs(display_text)
+        except Exception:
+            display_norm = display_text
+        # Extraire sur la version normalisée ET brute (defense in depth).
+        display_domains = re.findall(_dom_re, display_norm) + re.findall(_dom_re, display_text)
         if not display_domains:
             continue
         # Extraire le domaine de l'URL réelle
@@ -31900,6 +31911,17 @@ class CompromisedAccountActionView(View):
             print(f"[CompromisedAccountActionView _update_dossier] {ex}")
 
 
+# Verrou par giveaway (message_id) pour sérialiser les écritures concurrentes
+# de la liste de participants — le pool SQLite n'a pas de row-lock, donc un
+# double-clic / deux participants simultanés provoquerait un lost-update
+# (le dernier writer écrase le participant du premier). Cf. AUDIT sécu Phase 251.
+_giveaway_locks = {}
+
+
+def _gw_lock(mid):
+    return _giveaway_locks.setdefault(mid, asyncio.Lock())
+
+
 class GiveawayParticipateView(View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -32091,15 +32113,32 @@ class GiveawayParticipateView(View):
                     return await i.response.send_message(error_msg, ephemeral=True)
             
             # ═══════════════ ÉTAPE 3: Ajouter le participant ═══════════════
-            giveaway_data['participants'].append(i.user.id)
-            
+            # Section critique sérialisée par message_id : on relit la liste
+            # À JOUR sous le verrou (le snapshot de l'ÉTAPE 1 est périmé après
+            # tous les await de vérification de conditions), on déduplique, on
+            # ajoute, puis on écrit — sinon deux clics concurrents s'écrasent.
             try:
-                async with get_db() as db:
-                    await db.execute(
-                        'UPDATE giveaways SET participants=? WHERE id=?',
-                        (json.dumps(giveaway_data['participants']), giveaway_data['id'])
-                    )
-                    await db.commit()
+                async with _gw_lock(i.message.id):
+                    async with get_db() as db:
+                        async with db.execute(
+                            'SELECT participants, ended FROM giveaways WHERE id=?',
+                            (giveaway_data['id'],)
+                        ) as cursor:
+                            fresh = await cursor.fetchone()
+                        if not fresh:
+                            return await i.response.send_message("❌ Cadeau introuvable", ephemeral=True)
+                        if fresh[1]:
+                            return await i.response.send_message("❌ Ce cadeau est terminé !", ephemeral=True)
+                        current = json.loads(fresh[0]) if fresh[0] else []
+                        if i.user.id in current:
+                            return await i.response.send_message("✅ Vous participez déjà !", ephemeral=True)
+                        current.append(i.user.id)
+                        await db.execute(
+                            'UPDATE giveaways SET participants=? WHERE id=?',
+                            (json.dumps(current), giveaway_data['id'])
+                        )
+                        await db.commit()
+                        giveaway_data['participants'] = current
             except Exception as e:
                 print(f"Erreur update participants: {e}")
                 return await i.response.send_message("❌ Erreur lors de l'enregistrement", ephemeral=True)
@@ -41712,13 +41751,15 @@ SendPanelView = SendPanelPaginatedView
 async def update_realsy_activity(guild_id, user_id):
     """Met à jour la dernière activité d'un utilisateur avec le rôle Realsy"""
     try:
+        # PERF (revue totale) : un seul UPDATE — il est déjà no-op si la ligne n'existe pas
+        # (WHERE guild_id/user_id). Le SELECT d'existence préalable était un round-trip DB
+        # redondant sur le hot path on_message. Idempotent, aucune valeur économique ici.
         async with get_db() as db:
-            async with db.execute('SELECT user_id FROM realsy_tracking WHERE guild_id=? AND user_id=?', 
-                (guild_id, user_id)) as c:
-                if await c.fetchone():
-                    await db.execute('UPDATE realsy_tracking SET last_activity=?, warn_count=0 WHERE guild_id=? AND user_id=?',
-                        (now().isoformat(), guild_id, user_id))
-                    await db.commit()
+            await db.execute(
+                'UPDATE realsy_tracking SET last_activity=?, warn_count=0 '
+                'WHERE guild_id=? AND user_id=?',
+                (now().isoformat(), guild_id, user_id))
+            await db.commit()
     except:
         pass
 
@@ -46783,9 +46824,12 @@ async def on_message(msg):
     if msg.author.bot:
         return
     
-    # Relay Discord - Vérifier si ce salon est suivi par d'autres serveurs
-    await relay_discord_message(msg)
-    
+    # Relay Discord - Vérifier si ce salon est suivi par d'autres serveurs.
+    # PERF (revue totale) : backgroundé (create_task) — relay_discord_message scanne
+    # guild_config + json.loads par guild ; le sortir du chemin BLOQUANT on_message évite
+    # de retarder le traitement de CHAQUE message. Lecture seule + webhook_send, try/except interne.
+    asyncio.create_task(relay_discord_message(msg))
+
     # Mise à jour activité Realsy
     await update_realsy_activity(msg.guild.id, msg.author.id)
     
@@ -78075,6 +78119,15 @@ async def _check_auto_slow_mode(msg):
     try:
         cid = msg.channel.id
         now_ts = datetime.now(timezone.utc).timestamp()
+        # MÉMOIRE (revue totale) : éviction paresseuse — sans purge, ce dict module-level
+        # grossit à vie (1 clé/salon-ou-thread ayant reçu un msg ; les threads éphémères
+        # fuient). Quand il dépasse 2000 clés, on retire celles inactives depuis > 5 min
+        # (inutiles pour le calcul 60s). Auto-contenu : pas de 2e @bot.event (piège mémoire).
+        if len(_channel_msg_rates) > 2000:
+            _cut = now_ts - 300
+            for _k, _v in list(_channel_msg_rates.items()):
+                if not _v or _v[-1] < _cut:
+                    _channel_msg_rates.pop(_k, None)
         timestamps = _channel_msg_rates.setdefault(cid, [])
         # Purge old (> 60s)
         timestamps = [t for t in timestamps if t > now_ts - 60]

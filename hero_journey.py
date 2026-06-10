@@ -208,8 +208,12 @@ def _progress_bar(done_count: int, total: int) -> str:
     return filled + empty
 
 
-async def _build_panel(guild_id: int, user_id: int):
-    """Construit le panneau V2 du Parcours (étape courante + progression)."""
+async def _build_panel(guild_id: int, user_id: int, note: str = ""):
+    """Construit le panneau V2 du Parcours (étape courante + progression).
+
+    `note` (optionnel) : message « ✅ palier(s) validé(s) » injecté EN TÊTE du panneau
+    sous forme de TextDisplay. On NE le passe JAMAIS via `content=` : une LayoutView
+    (IS_COMPONENTS_V2) rejette `content` → 400 50035 (cf. Phase 251.11)."""
     if _v2 is None:
         return None
     LayoutView = _v2['LayoutView']
@@ -232,6 +236,9 @@ async def _build_panel(guild_id: int, user_id: int):
                     f"`{_progress_bar(min(step, total), total)}`"),
         v2_divider(),
     ]
+    # Note de complétion en TextDisplay DANS le panneau (jamais via content=, cf. docstring).
+    if note:
+        items[0:0] = [v2_body(note.strip()), v2_divider()]
 
     if done:
         items.append(v2_body(
@@ -297,22 +304,28 @@ async def open_panel(interaction: discord.Interaction):
         completed = await evaluate(g, u)
     except Exception:
         completed = []
-    panel = await _build_panel(g, u)
     note = ""
     if completed:
         gained = sum(int(s.get("coins", 0)) for s in completed)
         note = (f"✅ **{len(completed)} palier(s) validé(s)** (+`{gained}` 🪙) !\n"
                 if gained else f"✅ **{len(completed)} palier(s) validé(s)** !\n")
+    # La note est injectée DANS le panneau (TextDisplay) — jamais via content= avec une
+    # LayoutView (IS_COMPONENTS_V2 ⇒ 400 50035). content= reste uniquement sur le repli
+    # texte (panel is None), où aucun composant V2 n'est en jeu.
+    panel = await _build_panel(g, u, note=note)
     try:
         if panel is not None:
-            await interaction.response.send_message(content=(note or None), view=panel, ephemeral=True)
+            await interaction.response.send_message(view=panel, ephemeral=True)
         else:
             await interaction.response.send_message(
                 content=(note or "🧭 Parcours indisponible pour le moment."), ephemeral=True)
     except (discord.InteractionResponded, discord.HTTPException):
         try:
             if panel is not None:
-                await interaction.followup.send(content=(note or None), view=panel, ephemeral=True)
+                await interaction.followup.send(view=panel, ephemeral=True)
+            else:
+                await interaction.followup.send(
+                    content=(note or "🧭 Parcours indisponible pour le moment."), ephemeral=True)
         except Exception:
             pass
     except Exception as ex:
