@@ -33,9 +33,10 @@ from typing import Optional
 
 import discord
 
+import owner_ids as _owner_ids  # FIX sécu : source UNIQUE de super-owners
+
 # ─── Config ────────────────────────────────────────────────────────────────
 _bot = None
-SUPER_OWNER_ID = 1027544786068783194
 
 # (max_count, window_seconds)
 LIMITS = {
@@ -62,7 +63,7 @@ def setup(bot_instance):
 
 def _is_exempt(user_id: int) -> bool:
     """Owner / super-owner / bot lui-même = exempts."""
-    if user_id == SUPER_OWNER_ID:
+    if _owner_ids.is_super_owner(user_id):
         return True
     if _bot is not None:
         try:

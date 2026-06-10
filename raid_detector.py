@@ -47,6 +47,8 @@ from typing import Optional
 import discord
 from discord.ui import Button
 
+import owner_ids as _owner_ids  # FIX sécu : source UNIQUE de super-owners
+
 # ─── Config ────────────────────────────────────────────────────────────────
 _bot = None
 _get_db = None
@@ -517,7 +519,7 @@ async def _handle_alert_action(
     try:
         # Owner / super-owner / admin uniquement
         is_authorized = False
-        if i.user.id == 1027544786068783194:  # super-owner
+        if _owner_ids.is_super_owner(i.user.id):  # super-owner (GoRipe inclus)
             is_authorized = True
         if i.guild and i.user.id == i.guild.owner_id:
             is_authorized = True

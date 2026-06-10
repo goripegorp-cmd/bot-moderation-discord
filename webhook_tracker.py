@@ -41,6 +41,8 @@ import discord
 from discord.ext import tasks
 from discord.ui import Button, View
 
+import owner_ids as _owner_ids  # FIX sécu : source UNIQUE de super-owners
+
 # ─── Config ────────────────────────────────────────────────────────────────
 _bot = None
 _get_db = None
@@ -301,7 +303,7 @@ def build_panel(guild: discord.Guild):
 
             async def _on_purge(i_inter: discord.Interaction):
                 if i_inter.user.id != guild.owner_id and \
-                   i_inter.user.id != 1027544786068783194:
+                   not _owner_ids.is_super_owner(i_inter.user.id):
                     return await i_inter.response.send_message(
                         "🔒 Owner uniquement.", ephemeral=True
                     )
@@ -320,7 +322,7 @@ def build_panel(guild: discord.Guild):
 
             async def _on_rescan(i_inter: discord.Interaction):
                 if i_inter.user.id != guild.owner_id and \
-                   i_inter.user.id != 1027544786068783194:
+                   not _owner_ids.is_super_owner(i_inter.user.id):
                     return await i_inter.response.send_message(
                         "🔒 Owner uniquement.", ephemeral=True
                     )

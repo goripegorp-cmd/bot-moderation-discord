@@ -32,8 +32,8 @@ DB tables :
                       panel_message_id)
 
 ⚠️ RULES.md :
-- Owner et super-owner (ID 1027544786068783194) ne peuvent JAMAIS être
-  kick/ban via ce panel (sécurité absolue).
+- Owner du serveur et super-owners (voir owner_ids.SUPER_OWNER_IDS — GoRipe
+  inclus) ne peuvent JAMAIS être kick/ban via ce panel (sécurité absolue).
 - Les boutons vérifient `manage_messages` pour autoriser le click.
 """
 from __future__ import annotations
@@ -52,7 +52,7 @@ _get_db = None
 _db_get = None
 _v2 = None
 
-SUPER_OWNER_ID = 1027544786068783194
+import owner_ids as _owner_ids  # FIX sécu : source UNIQUE (incluait GoRipe non protégé avant)
 STAFF_CHANNEL_NAME = "🚨-actions-staff"
 STAFF_CATEGORY_HINT = "🛡️ Modération"
 
@@ -283,18 +283,25 @@ async def _handle_sanction_click(
 ):
     """Traite le clic sur un bouton de sanction."""
     try:
-        # Permission check
+        # Garde MP (contrainte projet : i.guild est None en message privé).
+        if i.guild is None:
+            return await i.response.send_message(
+                "🔒 Action serveur uniquement.", ephemeral=True
+            )
+        # Permission check — FAIL-CLOSED : toute exception OU permission manquante => REFUS.
+        # (Avant : un `except Exception: pass` avalait l'erreur et laissait l'exécution
+        # appliquer la sanction = gate fail-open. Audit revue totale.)
         try:
-            perms = i.channel.permissions_for(i.user)
-            is_super = i.user.id == SUPER_OWNER_ID or \
-                       i.user.id == (i.guild.owner_id if i.guild else 0)
-            if not (is_super or perms.manage_messages or
-                    perms.kick_members or perms.ban_members):
-                return await i.response.send_message(
-                    "🔒 Permission staff requise.", ephemeral=True
-                )
+            perms = i.channel.permissions_for(i.user) if i.channel else None
+            is_super = _owner_ids.is_super_owner(i.user.id) or i.user.id == i.guild.owner_id
+            ok = is_super or (perms is not None and (
+                perms.manage_messages or perms.kick_members or perms.ban_members))
         except Exception:
-            pass
+            ok = False
+        if not ok:
+            return await i.response.send_message(
+                "🔒 Permission staff requise.", ephemeral=True
+            )
 
         # Charge la sanction
         if _get_db is None:
@@ -318,8 +325,8 @@ async def _handle_sanction_click(
                 f"ℹ️ Déjà traité : `{already_done}`.", ephemeral=True
             )
 
-        # Protection owner/super-owner
-        if target_id in (SUPER_OWNER_ID, i.guild.owner_id) \
+        # Protection owner/super-owner (GoRipe désormais inclus via owner_ids)
+        if (_owner_ids.is_super_owner(target_id) or target_id == i.guild.owner_id) \
            and action in ("kick", "ban"):
             return await i.response.send_message(
                 "🔒 Impossible de kick/ban l'owner ou super-owner.",
