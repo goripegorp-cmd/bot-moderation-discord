@@ -106,6 +106,24 @@ def is_protected_threshold(amount: int, action_type: str) -> bool:
     return amount >= threshold
 
 
+# FIX sécu : actions « sortie d'argent » (transfert / retrait) où le 2FA doit être
+# FAIL-CLOSED — refuser si on ne peut PAS confirmer (DM fermés OU exception). Sinon
+# un compte piraté désactivait tout le 2FA en bloquant simplement les DM du bot.
+# Les actions « vers soi » (claim, achat) restent fail-open (UX). Cf. audit P0-4.
+FAIL_CLOSED_ACTIONS = {
+    "transfer_coins", "bank_withdraw", "alliance_vault_withdraw", "marketplace_sell",
+}
+FAIL_CLOSED_AMOUNT = 50000
+
+
+def _is_high_risk(amount: int, action_type: str) -> bool:
+    """True si l'action est assez sensible pour exiger un 2FA FAIL-CLOSED."""
+    try:
+        return action_type in FAIL_CLOSED_ACTIONS or int(amount or 0) >= FAIL_CLOSED_AMOUNT
+    except Exception:
+        return True  # dans le doute sur une action protégée : on ferme
+
+
 def is_protected_rarity(rarity: str) -> bool:
     """True si l'item est trop rare pour passer sans 2FA."""
     if not rarity:
@@ -174,10 +192,11 @@ async def request_confirmation(
     """Envoie un DM 2FA au membre. Renvoie True si confirmé dans la
     fenêtre de temps, False sinon (timeout, refus, ou pas de DM possible).
 
-    Si le user n'accepte pas les DMs → fallback gracieux : on retourne
-    True (on autorise quand même, sinon on bloque pour de bon les
-    utilisateurs ayant fermé leurs DMs). On log que la 2FA n'a pas pu
-    être envoyée.
+    Si le DM est impossible (DMs fermés) ou si le système 2FA lève une
+    exception : FAIL-CLOSED pour les actions sensibles (_is_high_risk :
+    transfert/retrait/gros montant) → on REFUSE, car un compte piraté ne
+    doit pas pouvoir contourner le 2FA en coupant ses DM. Pour les petites
+    actions « vers soi », fail-open conservé (UX). Cf. audit sécu P0-4.
     """
     if member is None or member.bot:
         return True
@@ -224,18 +243,26 @@ async def request_confirmation(
             except (discord.Forbidden, discord.HTTPException):
                 dm_sent = False
         if not dm_sent:
-            # DMs fermés → fail-open (sinon on bloque les actions
-            # légitimes). On log mais on continue.
+            # DMs fermés → on NE peut pas confirmer. FAIL-CLOSED sur les actions
+            # sensibles (sortie d'argent / gros montant) : on REFUSE. Sinon un
+            # compte piraté couperait ses DM pour contourner tout le 2FA. Pour les
+            # petites actions « vers soi », on garde le fail-open (UX).
+            high_risk = _is_high_risk(amount, action_type)
             try:
                 async with _get_db() as db:
                     await db.execute(
-                        "UPDATE twofa_confirmations SET status='dm_blocked' "
-                        "WHERE id=?",
-                        (conf_id,),
+                        "UPDATE twofa_confirmations SET status=? WHERE id=?",
+                        ("dm_blocked_refused" if high_risk else "dm_blocked", conf_id),
                     )
                     await db.commit()
             except Exception:
                 pass
+            if high_risk:
+                print(
+                    f"⚠️ 2FA FAIL-CLOSED : DM impossible pour {member.id} "
+                    f"(action={action_type}, montant={amount}) → action REFUSÉE."
+                )
+                return False
             return True
 
         # Wait result
@@ -259,7 +286,15 @@ async def request_confirmation(
         return confirmed
     except Exception as ex:
         print(f"[twofa_vault request_confirmation] {ex}")
-        # Fail-open en cas d'erreur du système 2FA
+        # FIX sécu : sur une exception du système 2FA, FAIL-CLOSED pour les actions
+        # sensibles (un attaquant ne doit pas pouvoir provoquer une erreur pour
+        # contourner le 2FA). Fail-open conservé pour le reste (ne pas bloquer le jeu).
+        if _is_high_risk(amount, action_type):
+            print(
+                f"⚠️ 2FA FAIL-CLOSED (exception) action={action_type} "
+                f"montant={amount} → REFUSÉE."
+            )
+            return False
         return True
 
 
