@@ -12,17 +12,18 @@ UNION des deux IDs connus (personne ne perd l'accès = pas de lockout), + overri
 variable d'environnement `EXTRA_OWNER_IDS` (IDs séparés par virgules) pour ajouter/gérer
 des co-owners SANS toucher au code.
 
-⚠️ OWNER : si l'un de ces 2 IDs de base n'est PAS un compte de confiance à toi, retire-le
-de `_BASE_OWNER_IDS` ci-dessous (1 ligne) — la revue n'a pas pu vérifier que
-1027544786068783194 est bien à toi.
+CONFIRMÉ PAR L'OWNER (2026-06-10) : le SEUL compte super-owner est 781205382923288593
+(GoRipe). L'ID legacy 1027544786068783194 n'a PAS été reconnu par l'owner → RETIRÉ du
+cercle super-owner (durcissement « le plus sécurisé » : on ne laisse aucun compte non
+confirmé détenir ces pouvoirs). Pour rajouter un co-owner sans toucher au code, utiliser
+la variable d'environnement `EXTRA_OWNER_IDS` (IDs séparés par virgules).
 """
 from __future__ import annotations
 
 import os
 
-# 781205382923288593  = GoRipe (référence canonique de bot.py:407)
-# 1027544786068783194 = super-owner historique présent dans 5 modules
-_BASE_OWNER_IDS = {781205382923288593, 1027544786068783194}
+# 781205382923288593 = GoRipe — UNIQUE super-owner confirmé (cf. en-tête).
+_BASE_OWNER_IDS = {781205382923288593}
 
 
 def _load() -> set:
