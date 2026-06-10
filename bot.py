@@ -45806,6 +45806,36 @@ async def on_member_update(before, after):
     except Exception as ex:
         print(f"[on_member_update impersonation] {ex}")
 
+    # LOGS unifiés (quick-win pro) : changements de RÔLES et de PSEUDO — donnée d'audit
+    # clé (« qui a donné le rôle Staff ? »). DANS ce handler existant (jamais un 2e
+    # @bot.event). FAIL-SAFE : log_event no-op si logs non configurés / catégorie off.
+    try:
+        if not after.bot:
+            default_role = after.guild.default_role
+            bset, aset = set(before.roles), set(after.roles)
+            added = [r for r in after.roles if r not in bset and r != default_role]
+            removed = [r for r in before.roles if r not in aset and r != default_role]
+            if added or removed:
+                parts = []
+                if added:
+                    parts.append("➕ " + ", ".join(r.mention for r in added[:10]))
+                if removed:
+                    parts.append("➖ " + ", ".join(r.mention for r in removed[:10]))
+                await ulogger2026.log_event(
+                    bot, after.guild, ulogger2026.EventType.MEMBER_UPDATE,
+                    description=f"🎭 Rôles de {after.mention} modifiés :\n" + "\n".join(parts),
+                    user=after,
+                )
+            if (before.nick or '') != (after.nick or ''):
+                await ulogger2026.log_event(
+                    bot, after.guild, ulogger2026.EventType.MEMBER_UPDATE,
+                    description=(f"✏️ Pseudo de {after.mention} : "
+                                 f"`{before.nick or before.name}` → `{after.nick or after.name}`"),
+                    user=after,
+                )
+    except Exception as ex:
+        print(f"[on_member_update log] {ex}")
+
 
 @bot.event
 async def on_user_update(before, after):
@@ -46300,6 +46330,39 @@ async def _handle_antiraid_join(member):
     _recent_joins[member.guild.id] = []
 
 
+def _welcome_quick_buttons(guild):
+    """Boutons d'accueil LINK (Règlement · Rôles · Présente-toi · Support) — quick-win pro.
+    Salons DÉTECTÉS par nom (zéro config requise) : un bouton n'apparaît que si son salon
+    existe (dégradation propre). Boutons URL = persistants par nature (aucun dispatch →
+    survivent aux reboots, pas de « Échec de l'interaction »)."""
+    try:
+        def find(*kw):
+            for ch in guild.text_channels:
+                n = (ch.name or '').lower()
+                if any(k in n for k in kw):
+                    return ch
+            return None
+        specs = [
+            ("📜 Règlement", find('règlement', 'reglement', 'rules', 'règles', 'regles')),
+            ("🎭 Rôles", find('rôle', 'role', 'roles')),
+            ("👋 Présente-toi", find('présent', 'present', 'introduce', 'intro')),
+            ("🎫 Support", find('support', 'ticket', 'aide', 'help')),
+        ]
+        btns = []
+        for label, ch in specs:
+            if ch:
+                url = f"https://discord.com/channels/{guild.id}/{ch.id}"
+                btns.append(discord.ui.Button(label=label, style=discord.ButtonStyle.link, url=url))
+        if not btns:
+            return None
+        v = discord.ui.View(timeout=None)
+        for b in btns[:5]:
+            v.add_item(b)
+        return v
+    except Exception:
+        return None
+
+
 async def _handle_welcome(member):
     """Phase 28.3 — envoie le message de welcome."""
     c = await cfg(member.guild.id)
@@ -46329,7 +46392,11 @@ async def _handle_welcome(member):
     e.set_thumbnail(url=member.display_avatar.url)
     e.set_footer(text=f"{member.guild.name} · {member.guild.member_count} membres", icon_url=(member.guild.icon.url if member.guild.icon else None))
     try:
-        await ch.send(content=member.mention, embed=e)
+        _wv = _welcome_quick_buttons(member.guild)
+        if _wv is not None:
+            await ch.send(content=member.mention, embed=e, view=_wv)
+        else:
+            await ch.send(content=member.mention, embed=e)
     except Exception as ex:
         print(f"[welcome send] {ex}")
 
