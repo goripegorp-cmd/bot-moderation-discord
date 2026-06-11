@@ -312,10 +312,9 @@ async def send_digest_for_user(member: discord.Member) -> int:
         v2_container = _v2['v2_container']
 
         items = []
-        items.append(v2_title("🌟  Ton récap du jour"))
+        items.append(v2_title("🌟 Ton récap du jour"))
         items.append(v2_subtitle(
-            f"_Serveur **{member.guild.name}** · "
-            f"{len(rows)} notification(s)_"
+            f"-# {member.guild.name} · {len(rows)} notification(s)"
         ))
         items.append(v2_divider())
 
@@ -324,16 +323,17 @@ async def send_digest_for_user(member: discord.Member) -> int:
             if not entries:
                 continue
             emoji, label = CATEGORIES[cat]
-            items.append(v2_body(f"{emoji} **{label}** ({len(entries)})"))
+            block = [f"{emoji} **{label}** ({len(entries)})"]
             # Cap à 3 entries par catégorie pour pas spammer
             for entry in entries[:3]:
-                items.append(v2_body(f"• {entry[:200]}"))
+                block.append(f"• {entry[:200]}")
             if len(entries) > 3:
-                items.append(v2_body(f"_+ {len(entries) - 3} autre(s)…_"))
+                block.append(f"-# + {len(entries) - 3} autre(s)…")
+            items.append(v2_body("\n".join(block)))
 
         items.append(v2_divider())
         items.append(v2_body(
-            "_💡 Configure tes notifs via le bouton ❓ dans /hub._"
+            "-# 💡 Configure tes notifs via le bouton ❓ dans /hub."
         ))
 
         class _DigestPanel(LayoutView):
@@ -448,18 +448,18 @@ def build_prefs_panel(member: discord.Member):
             opt_out = set(prefs.get("opt_out_categories", []))
             digest_on = bool(prefs.get("digest_enabled", False))
             items = []
-            items.append(v2_title("🔔  Mes DMs"))
+            items.append(v2_title("🔔 Mes DMs"))
             items.append(v2_body(
-                "_Récap quotidien en DM (18h FR) de TON activité. **Opt-in** : tu "
-                "ne reçois **rien** tant que tu ne l'as pas activé ci-dessous._"
-            ))
-            items.append(v2_body(
-                f"**Récap quotidien : {'🔔 ACTIVÉ' if digest_on else '🔕 désactivé'}**"
+                f"Récap quotidien (18h FR) de ton activité · "
+                f"{'🔔 **activé**' if digest_on else '🔕 **désactivé**'}\n"
+                "-# Opt-in : rien n'est envoyé tant que tu ne l'actives pas."
             ))
             items.append(v2_divider())
+            cat_lines = []
             for cat_key, (emoji, label) in CATEGORIES.items():
                 status = "🔇 OFF" if cat_key in opt_out else "🔔 ON"
-                items.append(v2_body(f"{emoji} {label} — `{status}`"))
+                cat_lines.append(f"{emoji} {label} — `{status}`")
+            items.append(v2_body("\n".join(cat_lines)))
             self.add_item(v2_container(*items, color=0x3498DB))
 
             # Boutons toggle par catégorie — Phase 235.5 : groupés en ActionRow

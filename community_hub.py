@@ -543,22 +543,22 @@ def _build_highlights_layout(stats: dict, guild):
         def __init__(self):
             super().__init__(timeout=None)
             items = []
-            items.append(v2_title("✨  HIGHLIGHTS DE LA SEMAINE"))
+            items.append(v2_title("✨ Highlights de la semaine"))
             items.append(v2_subtitle(
-                f"_Les MVPs de {guild.name} cette semaine_"
+                f"-# Les MVPs de {guild.name} cette semaine"
             ))
             items.append(v2_divider())
 
             sections = [
-                ("💬  TOP CHATTERS", stats["top_chatters"], "messages"),
-                ("🎤  TOP VOCAUX", stats["top_voice"], "min vocaux"),
-                ("🏆  TOP CHAMPIONS", stats["top_event_winners"], "victoires"),
+                ("💬 Top chatters", stats["top_chatters"], "messages"),
+                ("🎤 Top vocaux", stats["top_voice"], "min vocaux"),
+                ("🏆 Top champions", stats["top_event_winners"], "victoires"),
             ]
             empty_all = True
             for header, rows, unit in sections:
                 items.append(v2_body(f"### {header}"))
                 if not rows:
-                    items.append(v2_body("_Personne n'a marqué cette semaine._"))
+                    items.append(v2_body("_Personne cette semaine._"))
                 else:
                     empty_all = False
                     lines = []
@@ -572,12 +572,11 @@ def _build_highlights_layout(stats: dict, guild):
 
             if empty_all:
                 items.append(v2_body(
-                    "_Aucune activité notable cette semaine — semaine tranquille._"
+                    "_Semaine tranquille — aucune activité notable._"
                 ))
             else:
                 items.append(v2_body(
-                    "_💡 Continue à participer pour figurer dans le top de la "
-                    "semaine prochaine !_"
+                    "-# 💡 Participe pour figurer dans le top de la semaine prochaine."
                 ))
 
             self.add_item(v2_container(*items, color=0xFFD700))
@@ -678,19 +677,19 @@ def build_wiki_entry_panel(entry: dict, author_user=None):
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title(f"📖  {entry['title']}"))
+            items.append(v2_title(f"📖 {entry['title']}"))
             author_label = (
                 author_user.display_name if author_user
                 else f"<@{entry['author_id']}>"
             )
             items.append(v2_subtitle(
-                f"_Slug `{entry['slug']}` · {entry['views']} vues · par {author_label}_"
+                f"-# `{entry['slug']}` · {entry['views']} vues · par {author_label}"
             ))
             items.append(v2_divider())
             items.append(v2_body(entry["content"]))
             items.append(v2_divider())
             items.append(v2_body(
-                "_💡 `/community wiki_list` pour voir toutes les entrées._"
+                "-# 💡 `/community wiki_list` pour toutes les entrées."
             ))
             self.add_item(v2_container(*items, color=0x3498DB))
 
@@ -712,28 +711,28 @@ def build_wiki_list_panel(entries: list, query: str = ""):
             super().__init__(timeout=300)
             items = []
             if query:
-                items.append(v2_title("🔍  RÉSULTATS DE RECHERCHE"))
-                items.append(v2_subtitle(f"_Pour : `{query}`_"))
+                items.append(v2_title("🔍 Résultats de recherche"))
+                items.append(v2_subtitle(f"-# Pour : `{query}`"))
             else:
-                items.append(v2_title("📚  WIKI DU SERVEUR"))
-                items.append(v2_subtitle("_Les entrées les plus consultées_"))
+                items.append(v2_title("📚 Wiki du serveur"))
+                items.append(v2_subtitle("-# Les entrées les plus consultées"))
             items.append(v2_divider())
 
             if entries:
                 lines = []
                 for e in entries:
                     lines.append(
-                        f"• **{e['title']}** _(slug `{e['slug']}` · {e['views']} vues)_"
+                        f"• **{e['title']}** · `{e['slug']}` · {e['views']} vues"
                     )
                 items.append(v2_body("\n".join(lines)))
             else:
                 items.append(v2_body(
-                    "_Aucune entrée pour l'instant. Demande au staff d'en créer._"
+                    "_Aucune entrée pour l'instant._"
                 ))
 
             items.append(v2_divider())
             items.append(v2_body(
-                "_💡 `/community wiki <slug>` pour ouvrir une entrée précise._"
+                "-# 💡 `/community wiki <slug>` pour ouvrir une entrée."
             ))
             self.add_item(v2_container(*items, color=0x3498DB))
 
@@ -750,10 +749,10 @@ def build_roadmap_panel(items_list: list, status_filter: Optional[str] = None):
     v2_divider = _v2_helpers['v2_divider']
     v2_container = _v2_helpers['v2_container']
 
-    title_label = "🗺️  ROADMAP COMMUNAUTAIRE"
+    title_label = "🗺️ Roadmap communautaire"
     if status_filter and status_filter in ROADMAP_STATUSES:
         emoji, label = ROADMAP_STATUSES[status_filter]
-        title_label = f"{emoji}  ROADMAP — {label.upper()}"
+        title_label = f"{emoji} Roadmap · {label}"
 
     class _RoadmapLayout(LayoutView):
         def __init__(self):
@@ -761,7 +760,7 @@ def build_roadmap_panel(items_list: list, status_filter: Optional[str] = None):
             items = []
             items.append(v2_title(title_label))
             items.append(v2_subtitle(
-                "_Les suggestions de la communauté, triées par votes_"
+                "-# Suggestions de la communauté, triées par votes"
             ))
             items.append(v2_divider())
 
@@ -781,13 +780,12 @@ def build_roadmap_panel(items_list: list, status_filter: Optional[str] = None):
                 items.append(v2_body("\n\n".join(lines)))
             else:
                 items.append(v2_body(
-                    "_Aucune suggestion pour l'instant. "
-                    "Sois le premier avec `/community suggest`._"
+                    "_Aucune suggestion pour l'instant — sois le premier avec `/community suggest`._"
                 ))
 
             items.append(v2_divider())
             items.append(v2_body(
-                "_💡 `/community vote <id> <up|down>` pour voter sur un item._"
+                "-# 💡 `/community vote <id> <up|down>` pour voter."
             ))
             self.add_item(v2_container(*items, color=0x9B59B6))
 

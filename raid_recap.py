@@ -166,14 +166,14 @@ def _build_layout(stats: dict, guild) -> discord.ui.LayoutView | None:
         def __init__(self):
             super().__init__(timeout=None)
             items = []
-            items.append(v2_title("🏆  RÉCAP DES BOSS RAIDS"))
+            items.append(v2_title("🏆 Récap des Boss Raids"))
             items.append(v2_subtitle(
-                f"_Les 7 derniers jours sur {guild.name}_"
+                f"Les 7 derniers jours sur {guild.name}"
             ))
             items.append(v2_divider())
 
             # Stats globales
-            items.append(v2_body("### 📊 CETTE SEMAINE"))
+            items.append(v2_body("### 📊 Cette semaine"))
             items.append(v2_body(
                 f"💀 **Boss vaincus :** `{stats['events_count']}`\n"
                 f"💥 **Dégâts cumulés :** `{stats['total_damage']:,}`\n"
@@ -184,7 +184,7 @@ def _build_layout(stats: dict, guild) -> discord.ui.LayoutView | None:
             if stats.get("top_damager"):
                 td = stats["top_damager"]
                 items.append(v2_divider())
-                items.append(v2_body("### 🥇 TOP DAMAGER"))
+                items.append(v2_body("### 🥇 Top damager"))
                 items.append(v2_body(
                     f"🏆 <@{td['user_id']}> · `{td['damage']:,}` dégâts cumulés\n"
                     f"_Le titan de la semaine. Chapeau bas._"
@@ -193,7 +193,7 @@ def _build_layout(stats: dict, guild) -> discord.ui.LayoutView | None:
             # Top participants
             if stats.get("top_participants"):
                 items.append(v2_divider())
-                items.append(v2_body("### 🎖️ MVPs DE PARTICIPATION"))
+                items.append(v2_body("### 🎖️ MVP de participation"))
                 medals = ["🥇", "🥈", "🥉"]
                 lines = []
                 for idx, p in enumerate(stats["top_participants"][:3]):
@@ -205,9 +205,7 @@ def _build_layout(stats: dict, guild) -> discord.ui.LayoutView | None:
 
             items.append(v2_divider())
             items.append(v2_body(
-                "_💡 Continue d'attaquer les boss pour figurer dans le récap "
-                "de la semaine prochaine ! Le top damager gagne un bonus "
-                "spécial le mois prochain._"
+                "-# Attaque les boss pour figurer au prochain récap · le top damager gagne un bonus."
             ))
 
             self.add_item(v2_container(*items, color=0xFFD700))

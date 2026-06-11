@@ -657,11 +657,10 @@ async def share_clue_publicly(
                 "error": "Salon Chronique introuvable"}
 
     msg = (
-        f"📜 **UN MEMBRE PARTAGE UN INDICE** 📜\n\n"
+        f"📜 **Un membre partage un indice**\n\n"
         f"_Mystère : **{mystery['title']}***  · fragment "
         f"{int(clue_idx) + 1}/{len(mystery['fragments'])}\n\n"
         f"{text}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
         f"_Qui possède un autre fragment ? Parlez-en en chat !_"
     )
 
@@ -723,9 +722,9 @@ async def build_mysteries_panel(
     revealed_ids = {r["mystery_id"] for r in revelations}
     available = await _available_mysteries_for_act(guild_id)
 
-    items = [v2_title("🔮  MYSTÈRES & INDICES")]
+    items = [v2_title("🔮 Mystères & indices")]
     items.append(v2_subtitle(
-        f"_Mystères révélés : {len(revelations)}/{len(MYSTERY_CATALOG)}_"
+        f"_Mystères révélés {len(revelations)}/{len(MYSTERY_CATALOG)}_"
     ))
     items.append(v2_divider())
 
@@ -776,8 +775,7 @@ async def build_mysteries_panel(
 
     items.append(v2_divider())
     items.append(v2_body(
-        "_💡 Utilise les boutons ci-dessous pour partager publiquement "
-        "un de tes indices et inviter les autres à compléter le mystère._"
+        "-# Partage un indice pour inviter les autres à compléter le mystère."
     ))
 
     class _MysteriesLayout(LayoutView):

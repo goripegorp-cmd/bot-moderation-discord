@@ -269,22 +269,20 @@ async def create_weekly_goal(guild: discord.Guild) -> bool:
         v2_container = _v2['v2_container']
 
         items = [
-            v2_title(f"{tpl['emoji']}  Objectif collectif de la semaine"),
+            v2_title(f"{tpl['emoji']} Objectif collectif de la semaine"),
             v2_subtitle(
-                f"_Tout le serveur ensemble — fin dimanche 22h FR_"
+                f"-# Tout le serveur ensemble · fin dimanche 22h FR"
             ),
             v2_divider(),
             v2_body(f"### {tpl['label']}"),
             v2_body(
-                f"**Progression actuelle :** `0 / {tpl['target']}`"
+                f"Progression : `0 / {tpl['target']}`"
             ),
             v2_divider(),
             v2_body(
-                f"**🎁  Récompenses si atteint :**\n"
-                f"• Tous les contributeurs : `+{REWARD_CONTRIBUTOR}` 🪙\n"
-                f"• Top 3 contributeurs : `+{REWARD_TOP3}` 🪙 chacun\n\n"
-                f"_Si pas atteint, consolation de `+{REWARD_CONSOLATION}` 🪙 "
-                f"pour tous les participants._"
+                f"### 🎁 Récompenses si atteint\n"
+                f"Tous · `+{REWARD_CONTRIBUTOR}` 🪙 · Top 3 · `+{REWARD_TOP3}` 🪙\n"
+                f"-# Sinon, consolation `+{REWARD_CONSOLATION}` 🪙 pour les participants."
             ),
         ]
 
@@ -391,27 +389,23 @@ async def close_weekly_goal(guild: discord.Guild) -> dict:
 
                     items = []
                     if achieved:
-                        items.append(v2_title(f"🎉  Objectif atteint !"))
+                        items.append(v2_title("🎉 Objectif atteint !"))
                         items.append(v2_body(
-                            f"{emoji} **{label}** — accompli !\n\n"
-                            f"`{progress} / {target}` avec "
-                            f"**{len(contributors)}** participants.\n\n"
-                            f"💰 **{out['coins_distributed']:,}** coins "
-                            f"distribués."
+                            f"{emoji} **{label}** — accompli\n"
+                            f"`{progress} / {target}` · **{len(contributors)}** participants · "
+                            f"💰 **{out['coins_distributed']:,}** 🪙 distribués"
                         ))
                     else:
-                        items.append(v2_title(f"⏰  Objectif manqué"))
+                        items.append(v2_title("⏰ Objectif manqué"))
                         items.append(v2_body(
-                            f"{emoji} **{label}**\n\n"
-                            f"`{progress} / {target}` — manqué de "
-                            f"`{target - progress}`.\n\n"
-                            f"Mais **{len(contributors)}** participants "
-                            f"reçoivent `+{REWARD_CONSOLATION}` coins de "
-                            f"consolation."
+                            f"{emoji} **{label}**\n"
+                            f"`{progress} / {target}` · manqué de `{target - progress}`\n"
+                            f"-# **{len(contributors)}** participants reçoivent "
+                            f"`+{REWARD_CONSOLATION}` 🪙 de consolation."
                         ))
                     items.append(v2_divider())
                     items.append(v2_body(
-                        "_Nouvel objectif lundi matin 10h FR._"
+                        "-# Nouvel objectif lundi 10h FR."
                     ))
 
                     class _ResultPanel(LayoutView):
@@ -452,7 +446,7 @@ def build_goal_panel(guild_id: int):
             goal = await get_current_goal(guild_id)
             items = []
             if not goal:
-                items.append(v2_title("🎯  Aucun objectif actif"))
+                items.append(v2_title("🎯 Aucun objectif actif"))
                 items.append(v2_body(
                     "_L'objectif de la semaine arrive lundi 10h FR._"
                 ))
@@ -460,17 +454,16 @@ def build_goal_panel(guild_id: int):
                 return
 
             items.append(v2_title(
-                f"{goal['emoji']}  Objectif collectif"
+                f"{goal['emoji']} Objectif collectif"
             ))
-            items.append(v2_subtitle(f"_{goal['label']}_"))
+            items.append(v2_subtitle(f"-# {goal['label']}"))
             items.append(v2_divider())
 
             pct = int(goal["progress"] * 100 / max(1, goal["target"]))
             bar_filled = int(pct / 5)
             bar = "█" * bar_filled + "░" * (20 - bar_filled)
             items.append(v2_body(
-                f"**Progression :** `{goal['progress']} / "
-                f"{goal['target']}` ({pct}%)\n`{bar}`"
+                f"`{goal['progress']} / {goal['target']}` · {pct}%\n`{bar}`"
             ))
 
             # Top contributors
@@ -480,18 +473,17 @@ def build_goal_panel(guild_id: int):
             )[:5]
             if top:
                 items.append(v2_divider())
-                items.append(v2_body("**🏅  Top contributeurs :**"))
+                items.append(v2_body("### 🏅 Top contributeurs"))
+                lines = []
                 for i, (uid_str, count) in enumerate(top, 1):
                     medal = ["🥇", "🥈", "🥉"][i - 1] if i <= 3 else f"`{i}.`"
-                    items.append(v2_body(
-                        f"{medal} <@{uid_str}> — `{count}` actions"
-                    ))
+                    lines.append(f"{medal} <@{uid_str}> — `{count}` actions")
+                items.append(v2_body("\n".join(lines)))
 
             items.append(v2_divider())
             items.append(v2_body(
-                f"**🎁  Récompenses si atteint :**\n"
-                f"• Tous : `+{REWARD_CONTRIBUTOR}` 🪙\n"
-                f"• Top 3 : `+{REWARD_TOP3}` 🪙 bonus chacun"
+                f"### 🎁 Récompenses si atteint\n"
+                f"Tous · `+{REWARD_CONTRIBUTOR}` 🪙 · Top 3 · `+{REWARD_TOP3}` 🪙 bonus"
             ))
             self.add_item(v2_container(*items, color=0x3498DB))
 

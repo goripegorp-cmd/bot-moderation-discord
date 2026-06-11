@@ -562,43 +562,36 @@ def build_link_instructions_panel(
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title("🔗  VÉRIFICATION ROBLOX"))
+            items.append(v2_title("🔗 Vérification Roblox"))
             items.append(v2_subtitle(
-                f"_Procédure pour lier ton Discord à **{roblox_username}**_"
+                f"-# Lier ton Discord à **{roblox_username}**"
             ))
             items.append(v2_divider())
 
-            items.append(v2_body("### 📝 ÉTAPE 1 — TON CODE"))
+            items.append(v2_body("### 📝 Ton code"))
             items.append(v2_body(
-                f"Voici ton code de vérification (valable {LINK_CODE_TTL_MINUTES} min) :\n\n"
-                f"# `{code}`\n\n"
-                f"_Garde-le précieusement — il est unique à toi._"
+                f"# `{code}`\n"
+                f"-# Valable {LINK_CODE_TTL_MINUTES} min · unique à toi"
             ))
 
             items.append(v2_divider())
-            items.append(v2_body("### 🌐 ÉTAPE 2 — COLLE-LE"))
+            items.append(v2_body("### 🌐 Colle-le dans ta bio"))
             items.append(v2_body(
-                f"1. Va sur ton **profil Roblox** :\n"
-                f"   https://www.roblox.com/users/profile\n"
-                f"2. Clique sur le **crayon** à côté de ta description\n"
-                f"3. **Colle le code** quelque part dans ta bio (n'importe où)\n"
-                f"4. Sauvegarde"
+                f"1. Profil Roblox → https://www.roblox.com/users/profile\n"
+                f"2. Crayon à côté de la description\n"
+                f"3. Colle le code n'importe où, puis sauvegarde"
             ))
 
             items.append(v2_divider())
-            items.append(v2_body("### ✅ ÉTAPE 3 — VALIDE"))
+            items.append(v2_body("### ✅ Valide"))
             items.append(v2_body(
-                f"De retour ici, tape :\n\n"
-                f"# `/roblox verify`\n\n"
-                f"_Le bot lira ta bio et confirmera le lien. "
-                f"Une fois lié, tu peux retirer le code de ta bio._"
+                f"# `/roblox verify`\n"
+                f"-# Le bot lira ta bio. Une fois lié, le code peut être retiré."
             ))
 
             items.append(v2_divider())
             items.append(v2_body(
-                "_💡 Sécurité : ce code prouve que tu contrôles bien le "
-                "compte Roblox. Personne d'autre ne peut le mettre dans "
-                "sa bio sans avoir accès à ton compte._"
+                "-# 💡 Ce code prouve que tu contrôles bien le compte Roblox."
             ))
 
             self.add_item(v2_container(*items, color=0x00A2FF))
@@ -627,29 +620,20 @@ def build_profile_panel(
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title(f"🎮  PROFIL ROBLOX DE {member.display_name.upper()}"))
+            items.append(v2_title(f"🎮 Profil Roblox · {member.display_name}"))
             items.append(v2_subtitle(
-                f"_Compte vérifié via code dans la bio_"
+                f"-# Compte vérifié via code dans la bio"
             ))
             items.append(v2_divider())
 
             items.append(v2_body(
-                f"👤 **Username :** [`{rblx_user}`](https://www.roblox.com/users/{rblx_id}/profile)\n"
-                f"✨ **Display name :** `{rblx_disp}`\n"
-                f"🆔 **User ID :** `{rblx_id}`\n"
-                f"📅 **Lié depuis :** {link_info.get('verified_at', '?')}"
+                f"👤 [`{rblx_user}`](https://www.roblox.com/users/{rblx_id}/profile) · ✨ `{rblx_disp}`\n"
+                f"🆔 `{rblx_id}` · 📅 Lié depuis {link_info.get('verified_at', '?')}"
             ))
 
             items.append(v2_divider())
             items.append(v2_body(
-                f"🔗 **Lien public :**\n"
-                f"https://www.roblox.com/users/{rblx_id}/profile"
-            ))
-
-            items.append(v2_divider())
-            items.append(v2_body(
-                "_💡 `/roblox unlink` pour retirer le lien."
-                " `/roblox link <username>` pour le changer._"
+                f"🔗 https://www.roblox.com/users/{rblx_id}/profile"
             ))
 
             self.add_item(v2_container(*items, color=0x00A2FF))
@@ -672,16 +656,15 @@ def build_games_panel(games: list[dict], guild_name: str = ""):
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title("🎮  GAME LIBRARY ROBLOX"))
+            items.append(v2_title("🎮 Game library Roblox"))
             items.append(v2_subtitle(
-                f"_Les jeux suivis pour ce serveur ({len(games)})_"
+                f"-# Jeux suivis pour ce serveur · {len(games)}"
             ))
             items.append(v2_divider())
 
             if not games:
                 items.append(v2_body(
-                    "_Aucun jeu tracké. Staff peut ajouter avec "
-                    "`/roblox add_game <universe_id>`._"
+                    "_Aucun jeu tracké pour l'instant._"
                 ))
             else:
                 lines = []
@@ -705,8 +688,7 @@ def build_games_panel(games: list[dict], guild_name: str = ""):
 
             items.append(v2_divider())
             items.append(v2_body(
-                "_💡 L'universe ID se trouve dans l'URL du studio "
-                "(Game Settings → Basic Info → place ID + Universe)._"
+                "-# 💡 Universe ID : Studio → Game Settings → Basic Info."
             ))
 
             self.add_item(v2_container(*items, color=0x00A2FF))
@@ -743,31 +725,21 @@ def build_update_notification_panel(
         def __init__(self):
             super().__init__(timeout=None)
             items = []
-            items.append(v2_title("🚀  MISE À JOUR ROBLOX DÉTECTÉE"))
+            items.append(v2_title("🚀 Mise à jour Roblox"))
             items.append(v2_subtitle(
-                f"_Le jeu **{name}** vient d'être mis à jour_"
+                f"-# **{name}** vient d'être mis à jour"
             ))
             items.append(v2_divider())
 
             items.append(v2_body(
-                f"🎮 **Jeu :** `{name}`\n"
-                f"📅 **Dernière update :** `{short_new}`\n"
-                f"👥 **Joueurs actuels :** `{playing:,}`\n"
-                f"👁️ **Visites totales :** `{visits:,}`"
+                f"📅 MAJ `{short_new}` · 👥 `{playing:,}` en ligne · 👁️ `{visits:,}` visites"
             ))
 
             if place_id:
                 items.append(v2_divider())
                 items.append(v2_body(
-                    f"🔗 **Lien direct :**\n"
-                    f"https://www.roblox.com/games/{place_id}"
+                    f"🔗 https://www.roblox.com/games/{place_id}"
                 ))
-
-            items.append(v2_divider())
-            items.append(v2_body(
-                "_💡 Cette notification est postée automatiquement quand le "
-                "studio Roblox publie une nouvelle version du jeu._"
-            ))
 
             self.add_item(v2_container(*items, color=0x00A2FF))
 

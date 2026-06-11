@@ -242,26 +242,18 @@ def build_risk_panel(guild: discord.Guild):
             risky = await get_risky_members_this_week(guild.id)
 
             items = []
-            items.append(v2_title("🤖  Joins à risque (7j)"))
+            items.append(v2_title("🤖 Joins à risque"))
             items.append(v2_subtitle(
-                f"_{len(risky)} membre(s) avec score ≥ {RISK_THRESHOLD} "
-                f"non encore reviewé(s)_"
+                f"7 jours · {len(risky)} membre(s) score ≥ {RISK_THRESHOLD}"
             ))
             items.append(v2_divider())
 
             if not risky:
                 items.append(v2_body(
                     "✅ **Aucun join à risque cette semaine.**\n"
-                    "_Le serveur attire des comptes établis. Continue comme ça._"
+                    "_Le serveur attire des comptes établis._"
                 ))
             else:
-                items.append(v2_body(
-                    "_Score basé sur : âge compte, avatar, pattern nom, "
-                    "velocity joins. **Aucune action auto** — c'est juste "
-                    "pour ta visibilité._"
-                ))
-                items.append(v2_divider())
-
                 for r in risky[:10]:
                     member = guild.get_member(r["user_id"])
                     name = (
@@ -284,6 +276,10 @@ def build_risk_panel(guild: discord.Guild):
                     items.append(v2_body(
                         f"_+ {len(risky) - 10} autre(s) non affichés._"
                     ))
+                items.append(v2_divider())
+                items.append(v2_body(
+                    "-# Score : âge compte, avatar, nom, velocity · aucune action auto"
+                ))
 
             self.add_item(v2_container(*items, color=0xE67E22))
 

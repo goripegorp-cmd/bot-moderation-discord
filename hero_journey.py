@@ -231,8 +231,8 @@ async def _build_panel(guild_id: int, user_id: int, note: str = ""):
     total = len(STEPS)
 
     items = [
-        v2_title("🧭  LE PARCOURS DE L'AVENTURIER"),
-        v2_subtitle(f"Progression : **{min(step, total)} / {total}**  "
+        v2_title("🧭 Le parcours de l'aventurier"),
+        v2_subtitle(f"-# Progression : **{min(step, total)} / {total}** "
                     f"`{_progress_bar(min(step, total), total)}`"),
         v2_divider(),
     ]

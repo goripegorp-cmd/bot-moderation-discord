@@ -293,13 +293,10 @@ async def trigger_invasion(guild: discord.Guild) -> bool:
 
     # Annonce
     announce_text = (
-        f"🚨 **INVASION DU SERVEUR !** 🚨\n\n"
-        f"**{INVASION_MOBS_COUNT} mobs élite** apparaissent dans l'arène !\n"
-        f"Vous avez **{INVASION_DURATION_MIN} minutes** pour tous les vaincre.\n\n"
-        f"_Tous les attackers reçoivent un drop garanti._\n"
-        f"_Top 3 dégâts cumulés = drop **légendaire**._\n"
-        f"_Bonus alliance : +30% qualité si 3+ membres d'une alliance participent._\n\n"
-        f"⚔️ **Bonne chance !**"
+        f"🚨 **Invasion du serveur !**\n"
+        f"**{INVASION_MOBS_COUNT} mobs élite** dans l'arène · "
+        f"**{INVASION_DURATION_MIN} min** pour tous les vaincre.\n"
+        f"-# Drop garanti pour tous · top 3 dégâts = légendaire · +30% qualité à 3+ alliés."
     )
     msg = None
     try:
@@ -485,13 +482,13 @@ async def _post_resolution(
         return
 
     if all_killed:
-        title = "🏆 **INVASION REPOUSSÉE !**"
+        title = "🏆 **Invasion repoussée !**"
         subtitle = (
             f"Les {INVASION_MOBS_COUNT} mobs élite ont été vaincus à temps. "
             f"Le serveur est sauf !"
         )
     else:
-        title = "💀 **INVASION : ÉCHEC PARTIEL**"
+        title = "💀 **Invasion : échec partiel**"
         subtitle = (
             f"Seulement {mobs_killed}/{INVASION_MOBS_COUNT} mobs vaincus. "
             f"Récompenses de consolation distribuées."

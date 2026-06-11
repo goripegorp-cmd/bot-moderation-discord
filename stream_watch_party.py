@@ -144,27 +144,18 @@ async def on_creator_live_start(
                 v2_container = _v2['v2_container']
 
                 items = [
-                    v2_title(f"🔴  LIVE EN COURS — {streamer_name}"),
+                    v2_title(f"🔴 Live en cours · {streamer_name}"),
                     v2_subtitle(
-                        f"_Plateforme : **{platform.title()}** · "
-                        f"Buff XP×2 actif pendant tout le live_"
+                        f"{platform.title()} · buff XP×2 actif pendant tout le live"
                     ),
                     v2_divider(),
                     v2_body(
-                        f"**🎮 Regarder le live :**\n"
-                        f"{stream_url}"
+                        f"**🎮 Regarder le live**\n{stream_url}"
                     ),
                     v2_divider(),
                     v2_body(
-                        "**⚡  BUFF ACTIF pendant le live**\n"
-                        "• Tous les coins gagnés sont **× 2**\n"
-                        "• XP gagnés sont **× 2**\n"
-                        "• Drops saisonniers : **+5%** chance bonus"
-                    ),
-                    v2_divider(),
-                    v2_body(
-                        "_Discute du live ici. Le panel sera mis à jour "
-                        "à la fin du stream._"
+                        "### ⚡ Buff actif\n"
+                        "💰 Coins **×2** · ✨ XP **×2** · 🎁 Drops saisonniers **+5%**"
                     ),
                 ]
 

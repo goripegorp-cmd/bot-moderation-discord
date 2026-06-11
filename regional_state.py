@@ -773,11 +773,10 @@ async def build_regions_panel(
     debuff = await get_server_debuff(guild_id)
     active_patrol = await get_active_patrol(guild_id)
 
-    items = [v2_title("🌍  RÉGIONS DU MONDE")]
+    items = [v2_title("🌍 Régions du monde")]
     items.append(v2_subtitle(
-        f"_État des 5 régions du royaume._\n"
-        f"_Debuff serveur : {debuff['loot_penalty_pct']:+d}% loot "
-        f"(régions tombées : {debuff['fallen_count']}/5)_"
+        f"_Debuff serveur {debuff['loot_penalty_pct']:+d}% loot · "
+        f"régions tombées {debuff['fallen_count']}/5_"
     ))
     items.append(v2_divider())
 
@@ -795,16 +794,15 @@ async def build_regions_panel(
 
     if active_patrol:
         d = get_region_def(active_patrol["region_id"]) or {}
-        reclaim_tag = " (RECONQUÊTE)" if active_patrol["is_reclaim"] else ""
+        reclaim_tag = " (reconquête)" if active_patrol["is_reclaim"] else ""
         items.append(v2_body(
-            f"🚨 **PATROUILLE ACTIVE{reclaim_tag}** — {d.get('emoji', '?')} {d.get('name', '?')}\n"
-            f"Défense : `{active_patrol['defense_total']}/{active_patrol['target']}` "
-            f"({int(active_patrol['defense_total'] * 100 / max(1, active_patrol['target']))}%)\n"
-            f"_Clique 🛡️ Défendre ci-dessous pour participer._"
+            f"🚨 **Patrouille active{reclaim_tag}** — {d.get('emoji', '?')} {d.get('name', '?')}\n"
+            f"Défense `{active_patrol['defense_total']}/{active_patrol['target']}` "
+            f"({int(active_patrol['defense_total'] * 100 / max(1, active_patrol['target']))}%)"
         ))
     else:
         items.append(v2_body(
-            "_⏱️ Prochaine patrouille : **mercredi 19h FR**._"
+            "-# Prochaine patrouille : mercredi 19h FR."
         ))
 
     class _RegionsLayout(LayoutView):
@@ -863,10 +861,10 @@ async def build_patrol_panel(
             pass
 
     pct = int(active["defense_total"] * 100 / max(1, active["target"]))
-    reclaim_tag = " (RECONQUÊTE)" if active["is_reclaim"] else ""
+    reclaim_tag = " (reconquête)" if active["is_reclaim"] else ""
 
     items = [
-        v2_title(f"🛡️  PATROUILLE{reclaim_tag}"),
+        v2_title(f"🛡️ Patrouille{reclaim_tag}"),
         v2_subtitle(
             f"_{region.get('emoji', '?')} **{region.get('name', '?')}** est menacée._"
         ),
@@ -879,14 +877,11 @@ async def build_patrol_panel(
             f"`{active['defense_total']:,} / {active['target']:,}` ({pct}%)"
         ),
         v2_body(
-            f"**🛡️ Ta contribution**\n"
-            f"`{my_contribution} / {MAX_POINTS_PER_USER}` pts\n"
-            f"_Max {MAX_POINTS_PER_USER} par membre par patrouille._"
+            f"**🛡️ Ta contribution** · `{my_contribution} / {MAX_POINTS_PER_USER}` pts"
         ),
         v2_divider(),
         v2_body(
-            f"_⏱️ Fermeture : `{active['closes_at']}`_\n"
-            f"_Chaque clic = +1 point + +1 progression Chronique._"
+            f"-# Chaque clic = +1 point + +1 Chronique · ferme `{active['closes_at']}`"
         ),
     ]
 
@@ -1049,15 +1044,13 @@ async def _announce_patrol_open(
     if not ch:
         return
     region = get_region_def(region_id) or {}
-    head = "🚨 **RECONQUÊTE** " if is_reclaim else "🚨 **PATROUILLE** "
+    head = "🚨 **Reconquête** " if is_reclaim else "🚨 **Patrouille** "
     msg = (
         f"{head}— {region.get('emoji', '?')} **{region.get('name', '?')}**\n\n"
         f"_{region.get('description', '…')}_\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🎯 Objectif : `{target}` points de défense\n"
-        f"⏱️ Fermeture : dans **{PATROL_DURATION_HOURS}h**\n"
-        f"🛡️ Max **{MAX_POINTS_PER_USER}** pts par membre\n\n"
-        f"_📖 Va dans le Codex → 🌍 Régions pour défendre._"
+        f"🎯 Objectif `{target}` pts · ⏱️ ferme dans {PATROL_DURATION_HOURS}h · "
+        f"🛡️ max {MAX_POINTS_PER_USER} pts/membre\n\n"
+        f"_📖 Codex → 🌍 Régions pour défendre._"
     )
     try:
         _t, _, _b = msg.partition("\n\n")
@@ -1081,12 +1074,12 @@ async def _announce_patrol_closed(
     if success:
         if is_reclaim:
             head = (
-                f"🎉 **RECONQUÊTE RÉUSSIE** — "
+                f"🎉 **Reconquête réussie** — "
                 f"{region.get('emoji', '?')} {region.get('name', '?')}"
             )
         else:
             head = (
-                f"🎉 **PATROUILLE RÉUSSIE** — "
+                f"🎉 **Patrouille réussie** — "
                 f"{region.get('emoji', '?')} {region.get('name', '?')}"
             )
         body = (

@@ -925,8 +925,8 @@ def _build_boss_layout(
         hp_block += f"\n⚔️ Dégâts totaux infligés : `{int(damage_total):,}`"
 
     items = [
-        v2_title(f"{boss['emoji']}  BOSS DU JOUR : {boss['name']}"),
-        v2_subtitle(f"_Difficulté : {boss['tier']} · {lvl_txt}_"),
+        v2_title(f"{boss['emoji']} Boss du jour — {boss['name']}"),
+        v2_subtitle(f"Difficulté : {boss['tier']} · {lvl_txt}"),
         v2_divider(),
         v2_body(f"_{boss['description']}_"),
         v2_divider(),

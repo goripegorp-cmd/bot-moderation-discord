@@ -724,6 +724,7 @@ def build_alert_panel(guild: discord.Guild, alert_id: int):
         return None
     LayoutView = _v2['LayoutView']
     v2_title = _v2['v2_title']
+    v2_subtitle = _v2['v2_subtitle']
     v2_body = _v2['v2_body']
     v2_divider = _v2['v2_divider']
     v2_container = _v2['v2_container']
@@ -732,20 +733,20 @@ def build_alert_panel(guild: discord.Guild, alert_id: int):
         def __init__(self):
             super().__init__(timeout=600)
             items = []
-            items.append(v2_title("🚨  ALERTE RAID"))
-            items.append(v2_body(
-                f"Serveur : **{guild.name}**\n"
-                f"Alert ID : `{alert_id}`\n\n"
-                f"Le système a détecté **5+** comptes suspects qui ont "
-                f"rejoint en moins de **{CLUSTER_WINDOW_MIN} min**.\n"
-                f"Signatures combinées : âge compte, avatar, pseudo, twins."
+            items.append(v2_title("🚨 Alerte raid"))
+            items.append(v2_subtitle(
+                f"{guild.name} · ID `{alert_id}`"
             ))
             items.append(v2_divider())
             items.append(v2_body(
-                "**Décision :**\n"
-                "• `Lockdown 30 min` — désactive invites + rôle Vérification\n"
-                "• `Ignorer` — faux positif (surge live/partenariat)\n"
-                "• `Voir détails` — liste des comptes suspects"
+                f"**5+** comptes suspects ont rejoint en moins de "
+                f"**{CLUSTER_WINDOW_MIN} min**.\n"
+                f"-# Signatures : âge compte · avatar · pseudo · twins"
+            ))
+            items.append(v2_divider())
+            items.append(v2_body(
+                "🔒 **Lockdown** invites + rôle Vérification · "
+                "✅ **Ignorer** faux positif · 📋 **Détails** comptes suspects"
             ))
             self.add_item(v2_container(*items, color=0xE74C3C))
 

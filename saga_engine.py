@@ -486,9 +486,9 @@ def build_saga_panel(guild_id: int, owner_id: int = 0):
             saga = await get_active_saga(self.guild_id)
             items = []
             if not saga:
-                items.append(v2_title("📜  AUCUNE SAGA ACTIVE"))
+                items.append(v2_title("📜 Aucune saga active"))
                 items.append(v2_body(
-                    "_Pas de saga en cours. La prochaine démarre lundi à 18h FR._"
+                    "_La prochaine saga démarre lundi 18h FR._"
                 ))
                 self.add_item(v2_container(*items, color=0x95A5A6))
                 return
@@ -507,15 +507,14 @@ def build_saga_panel(guild_id: int, owner_id: int = 0):
             bar = "█" * (pct // 5) + "░" * (20 - pct // 5)
             items.append(v2_divider())
             items.append(v2_body(
-                f"**Fragments collectés :** "
+                f"**🧩 Fragments** · "
                 f"`{saga['fragments_collected']} / {saga['fragments_target']}`\n"
                 f"`{bar}` {pct}%"
             ))
 
             items.append(v2_divider())
             items.append(v2_body(
-                "_Participe via les events du serveur (boss, treasures, "
-                "duels) — chaque victoire ajoute des fragments à la saga._"
+                "-# Chaque victoire en event (boss, trésors, duels) ajoute des fragments."
             ))
 
             self.add_item(v2_container(*items, color=saga["color"]))

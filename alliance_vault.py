@@ -435,37 +435,34 @@ async def build_vault_panel(alliance: dict):
             super().__init__(timeout=300)
             block = []
             emoji = alliance.get("emoji") or "🏰"
-            block.append(v2_title(f"{emoji}  COFFRE — {alliance['name'].upper()}"))
-            block.append(v2_subtitle(
-                "_Gestion du trésor et du stockage partagés_"
-            ))
+            block.append(v2_title(f"{emoji} Coffre · {alliance['name']}"))
             block.append(v2_divider())
 
             # Trésorerie
-            block.append(v2_body("### 💰 TRÉSORERIE"))
+            block.append(v2_body("### 💰 Trésorerie"))
             block.append(v2_body(
-                f"🪙 **Coins en réserve :** `{treasury:,}`\n"
-                f"📦 **Items stockés :** `{item_total}` / `{VAULT_MAX_ITEMS}`"
+                f"🪙 Coins en réserve · `{treasury:,}`\n"
+                f"📦 Items stockés · `{item_total}` / `{VAULT_MAX_ITEMS}`"
             ))
 
             # Activité récente
             block.append(v2_divider())
             block.append(v2_body(
-                f"### 📊 ACTIVITÉ ({activity['window_days']}j)"
+                f"### 📊 Activité ({activity['window_days']}j)"
             ))
             block.append(v2_body(
-                f"📥 Coins déposés : `+{activity['deposit_coins_total']:,}`\n"
-                f"📤 Coins retirés : `-{activity['withdraw_coins_total']:,}`\n"
-                f"📦 Items déposés : `{activity['items_deposited']}`\n"
-                f"📤 Items retirés : `{activity['items_withdrawn']}`\n"
-                f"👥 Membres actifs : `{activity['unique_active_members']}`"
+                f"📥 Déposés `+{activity['deposit_coins_total']:,}` · "
+                f"📤 Retirés `-{activity['withdraw_coins_total']:,}`\n"
+                f"📦 Items `+{activity['items_deposited']}` · "
+                f"📤 `-{activity['items_withdrawn']}` · "
+                f"👥 Actifs `{activity['unique_active_members']}`"
             ))
 
             # Items du coffre
             if items:
                 block.append(v2_divider())
                 block.append(v2_body(
-                    f"### 📦 ITEMS RÉCENTS ({len(items)})"
+                    f"### 📦 Items récents ({len(items)})"
                 ))
                 lines = []
                 rarity_emoji = {
@@ -492,7 +489,7 @@ async def build_vault_panel(alliance: dict):
             # Top contributeurs
             if contribs:
                 block.append(v2_divider())
-                block.append(v2_body("### 🏆 TOP CONTRIBUTEURS"))
+                block.append(v2_body("### 🏆 Top contributeurs"))
                 medals = ["🥇", "🥈", "🥉", "▪️", "▪️"]
                 lines = []
                 for idx, c in enumerate(contribs[:5]):
@@ -502,11 +499,6 @@ async def build_vault_panel(alliance: dict):
                         f"sur `{c['deposit_count']}` dépôt(s)"
                     )
                 block.append(v2_body("\n".join(lines)))
-
-            block.append(v2_divider())
-            block.append(v2_body(
-                "_💡 Utilise les boutons d'alliance dans le hub pour déposer/retirer._"
-            ))
 
             self.add_item(v2_container(*block, color=0xF39C12))
 
@@ -532,9 +524,9 @@ async def build_audit_panel(alliance: dict, limit: int = AUDIT_DEFAULT_LIMIT):
             super().__init__(timeout=300)
             block = []
             emoji = alliance.get("emoji") or "🏰"
-            block.append(v2_title(f"{emoji}  HISTORIQUE — {alliance['name'].upper()}"))
+            block.append(v2_title(f"{emoji} Historique · {alliance['name']}"))
             block.append(v2_subtitle(
-                f"_Les {limit} dernières actions de l'alliance_"
+                f"-# Les {limit} dernières actions de l'alliance"
             ))
             block.append(v2_divider())
 
@@ -564,11 +556,6 @@ async def build_audit_panel(alliance: dict, limit: int = AUDIT_DEFAULT_LIMIT):
                     )
                 block.append(v2_body("\n\n".join(formatted)))
 
-            block.append(v2_divider())
-            block.append(v2_body(
-                f"_Affichage des {len(lines)} dernières lignes._"
-            ))
-
             self.add_item(v2_container(*block, color=0x7F8C8D))
 
     return _AuditPanel()
@@ -594,15 +581,15 @@ async def build_contribs_panel(alliance: dict):
             super().__init__(timeout=300)
             block = []
             emoji = alliance.get("emoji") or "🏰"
-            block.append(v2_title(f"{emoji}  CONTRIBUTEURS — {alliance['name'].upper()}"))
+            block.append(v2_title(f"{emoji} Contributeurs · {alliance['name']}"))
             block.append(v2_subtitle(
-                f"_Top {CONTRIB_TOP_LIMIT} membres ayant le plus contribué (lifetime)_"
+                f"-# Top {CONTRIB_TOP_LIMIT} contributeurs lifetime"
             ))
             block.append(v2_divider())
 
             block.append(v2_body(
-                f"🪙 **Trésorerie actuelle :** `{treasury:,}` coins\n"
-                f"🏆 **Contributeurs lifetime :** `{len(contribs)}`"
+                f"🪙 Trésorerie · `{treasury:,}` coins · "
+                f"🏆 Contributeurs · `{len(contribs)}`"
             ))
             block.append(v2_divider())
 
@@ -626,8 +613,7 @@ async def build_contribs_panel(alliance: dict):
 
             block.append(v2_divider())
             block.append(v2_body(
-                "_💡 Plus tu contribues, plus tu montes dans le classement. "
-                "Le top 3 reçoit des bonus de saison._"
+                "-# Le top 3 reçoit des bonus de saison."
             ))
 
             self.add_item(v2_container(*block, color=0xFFD700))

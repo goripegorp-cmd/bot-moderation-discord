@@ -882,11 +882,10 @@ async def build_council_panel(
         v2_body = _v2['v2_body']
         v2_container = _v2['v2_container']
         items = [
-            v2_title("🗳️  CONSEIL DES ANCIENS"),
+            v2_title("🗳️ Conseil des Anciens"),
             v2_body(
-                "_Aucun conseil n'est ouvert actuellement._\n\n"
-                "Le prochain conseil ouvrira **lundi 20h FR**. "
-                "Reviens à ce moment-là pour participer au choix collectif."
+                "_Aucun conseil ouvert._\n\n"
+                "Le prochain ouvre **lundi 20h FR**."
             ),
         ]
 
@@ -913,9 +912,9 @@ async def build_council_panel(
     user_voted = await has_user_voted(active["session_id"], user_id)
 
     items = [
-        v2_title(f"🗳️  {council['title']}"),
+        v2_title(f"🗳️ {council['title']}"),
         v2_subtitle(
-            f"_Conseil des Anciens — Total des voix : {total}_"
+            f"_Conseil des Anciens · {total} voix_"
         ),
         v2_divider(),
         v2_body(f"_{council['context']}_"),
@@ -936,14 +935,13 @@ async def build_council_panel(
         ))
 
     items.append(v2_divider())
-    items.append(v2_body(
-        f"_⏱️ Fermeture : `{active['closes_at']}`_ \n"
-        f"_1 vote par membre. Le vote est immuable._"
-    ))
-
     if user_voted is not None:
         items.append(v2_body(
-            "_✅ Tu as déjà voté. Le résultat sera annoncé à la fermeture._"
+            f"-# ✅ Vote enregistré · résultat à la fermeture · ferme `{active['closes_at']}`"
+        ))
+    else:
+        items.append(v2_body(
+            f"-# 1 vote/membre, immuable · ferme `{active['closes_at']}`"
         ))
 
     class _CouncilLayout(LayoutView):
@@ -1161,7 +1159,7 @@ async def _announce_council_open(
     body += "\n\n_⏱️ Fermeture mercredi 23h59 · 1 vote/membre · vote ci-dessous 👇_"
 
     items = [
-        v2_title(f"🗳️ CONSEIL DES ANCIENS — {council['title']}"),
+        v2_title(f"🗳️ Conseil des Anciens — {council['title']}"),
         v2_body(body),
     ]
     vote_buttons = [
@@ -1192,12 +1190,10 @@ async def _announce_council_closed(
     if not ch:
         return
     msg = (
-        f"🎉 **CONSEIL CLOS — *{council['title']}***\n\n"
+        f"🎉 **Conseil clos — *{council['title']}***\n\n"
         f"_{total_votes} membres ont voté._\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
         f"**🏆 Voie choisie :** {winner['label']}\n\n"
         f"_{winner['description']}_\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
         f"**📊 Détail des votes :**\n"
     )
     for idx, opt in enumerate(council["options"]):

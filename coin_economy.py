@@ -182,19 +182,15 @@ async def start_festival(guild: discord.Guild) -> bool:
                     v2_container = _v2['v2_container']
 
                     items = [
-                        v2_title("🎉  FESTIVAL DES PRIX"),
+                        v2_title("🎉 Festival des prix"),
                         v2_subtitle(
-                            f"_Tous les prix shop **× 0.5** pendant "
-                            f"**{FESTIVAL_DURATION_HOURS}h**_"
+                            f"-# Tous les prix shop **× 0.5** pendant **{FESTIVAL_DURATION_HOURS}h**"
                         ),
                         v2_divider(),
                         v2_body(
-                            "**🛒  Profite des soldes mensuelles !**\n\n"
-                            "• Tous les items shop sont **2× moins chers**\n"
-                            "• Marketplace : commissions réduites\n"
-                            "• Item rare/épique : enfin abordables\n\n"
-                            "_Festival se termine dans 48h. Reviens "
-                            "le 1er dimanche du mois prochain._"
+                            "### 🛒 Soldes mensuelles\n"
+                            "Items shop **2× moins chers** · marketplace à commissions réduites\n"
+                            "-# Se termine dans 48h · revient le 1er dimanche du mois."
                         ),
                     ]
 

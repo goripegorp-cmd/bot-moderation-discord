@@ -516,9 +516,9 @@ async def open_solo_hub(i: discord.Interaction):
     _live_line = (f"🌑 **{_active_now}** aventure(s) solo en cours sur le serveur — rejoins le mouvement !"
                   if _active_now > 0 else "🌑 _Sois le premier à lancer une aventure solo aujourd'hui !_")
     items = [
-        v2_title("🌑  Aventures Solo"),
-        v2_subtitle("Des défis RIEN QUE pour toi — ton propre salon, à ton rythme, "
-                    "sans attendre personne. Plusieurs joueurs en parallèle."),
+        v2_title("🌑 Aventures Solo"),
+        v2_subtitle("Des défis rien que pour toi — ton salon, à ton rythme, "
+                    "plusieurs joueurs en parallèle."),
         v2_body(_live_line),
         v2_divider(),
         v2_body(
@@ -789,8 +789,7 @@ def _build_dungeon_view(run: dict):
             f"🎒 Butin sécurisable : **{run['coins_pending']}** 🪙  ·  Profondeur : **{depth + 1}/{_DG_MAX_DEPTH}**"
         ),
         v2_divider(),
-        v2_body("⚔️ **Attaque** pour vaincre le monstre · 🎒 **Extrais** pour repartir "
-                "avec ton butin (sain et sauf) · plus tu descends, meilleur est le loot."),
+        v2_body("⚔️ Attaque pour vaincre · 🎒 Extrais pour repartir sain · plus tu descends, meilleur est le loot."),
     ]
 
     class _DgView(LayoutView):
@@ -1074,7 +1073,6 @@ def _build_treasure_view(run: dict):
         v2_subtitle(f"🎒 Gains sécurisés : {run['coins_pending']} 🪙  ·  une erreur = moitié perdue"),
         v2_divider(),
         v2_body(f"**🧩 {riddle['q']}**"),
-        v2_body("_Choisis la bonne réponse ci-dessous._"),
     ]
 
     class _TsView(LayoutView):
@@ -1284,8 +1282,7 @@ def _build_pettrial_view(run: dict, pet: dict):
         v2_body(f"**🛡️ Toi**\n"
                 f"❤️ `{_bar(run['hp'], run['hp_max'])}` `{max(0, run['hp'])}/{run['hp_max']}`"),
         v2_divider(),
-        v2_body("🐾 **Déchaîne ton familier** : abats l'adversaire avant que tes PV ne tombent. "
-                "Un familier actif frappe fort ; un passif frappe plus doux mais te soigne."),
+        v2_body("🐾 Abats l'adversaire avant que tes PV ne tombent."),
     ]
 
     class _PtView(LayoutView):
@@ -1457,8 +1454,7 @@ def _build_sanctuary_view(run: dict):
                 f"❤️ `{_bar(run['hp'], run['hp_max'])}` `{max(0, run['hp'])}/{run['hp_max']}`\n"
                 f"🎒 Butin sécurisable : **{run['coins_pending']}** 🪙"),
         v2_divider(),
-        v2_body("⚔️ **Combattre** la vague (chaque victoire te soigne un peu et augmente le butin) · "
-                "🎒 **Sécuriser** pour repartir avec ton butin. Tomber = moitié perdue."),
+        v2_body("⚔️ Combattre (chaque victoire soigne + augmente le butin) · 🎒 Sécuriser pour repartir · tomber = moitié perdue."),
     ]
 
     class _SancView(LayoutView):
@@ -1670,8 +1666,7 @@ def _build_mirror_view(run: dict):
         v2_body(f"**🛡️ Toi**\n"
                 f"❤️ `{_bar(run['hp'], run['hp_max'])}` `{max(0, run['hp'])}/{run['hp_max']}`"),
         v2_divider(),
-        v2_body("⚔️ **Frappe** ton reflet. Il riposte avec TES armes. Le premier à tomber perd — "
-                "ton avantage : tu frappes en premier."),
+        v2_body("⚔️ Frappe ton reflet. Il riposte avec tes armes — le premier à tomber perd."),
     ]
 
     class _MirrorView(LayoutView):
@@ -2046,12 +2041,10 @@ def _build_forge_view(run: dict):
         v2_title(f"🔨 Forge du Défi — {_forge_tier_name(tier)}"),
         v2_subtitle(f"Palier {tier + 1}/{_FORGE_MAX} · butin non encaissé : {pending} 🪙"),
         v2_divider(),
-        v2_body(f"Tu chauffes le métal… **Tenter la trempe** = chance de réussite "
-                f"**{int(rate * 100)}%** (+{next_gain} 🪙 au butin).\n"
-                f"⚠️ Échec = le lingot **se brise** et tu perds le butin NON encaissé "
+        v2_body(f"Tu chauffes le métal… **Tenter** = {int(rate * 100)}% de réussite "
+                f"(+{next_gain} 🪙).\n"
+                f"⚠️ Échec = le lingot se brise, tu perds le butin non encaissé "
                 f"(jamais tes pièces réelles)."),
-        v2_divider(),
-        v2_body("🔨 **Tenter la trempe** (risque) · 💰 **Encaisser** ton butin et t'arrêter."),
     ]
 
     class _ForgeView(LayoutView):

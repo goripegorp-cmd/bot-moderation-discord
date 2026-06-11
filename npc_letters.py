@@ -812,10 +812,9 @@ async def build_letters_panel(
     subscribed = await is_subscribed(guild_id, user_id)
     history = await get_letters_history(guild_id, user_id, limit=8)
 
-    items = [v2_title("✉️  LETTRES DES NPCs")]
+    items = [v2_title("✉️ Lettres des NPCs")]
     items.append(v2_subtitle(
-        f"_Chaque dimanche 18h FR, un NPC t'écrit en DM._\n"
-        f"_Contenu personnalisé selon ton mood avec ce NPC._"
+        f"_Chaque dimanche 18h FR, un NPC t'écrit en DM (contenu selon ton mood)._"
     ))
     items.append(v2_divider())
 
@@ -829,10 +828,9 @@ async def build_letters_panel(
         ))
     else:
         items.append(v2_body(
-            "🔴 **Tu n'es PAS abonné aux lettres.**\n\n"
-            "_Pour recevoir les lettres en DM, clique « S'abonner » "
-            "ci-dessous. Tu peux te désabonner à tout moment._\n\n"
-            "_Conformité RGPD : opt-in strict, aucun DM sans consentement._"
+            "🔴 **Tu n'es pas abonné aux lettres.**\n\n"
+            "_Abonne-toi pour recevoir les lettres en DM (désabonnable à tout moment)._\n\n"
+            "_RGPD : opt-in strict, aucun DM sans consentement._"
         ))
 
     items.append(v2_divider())

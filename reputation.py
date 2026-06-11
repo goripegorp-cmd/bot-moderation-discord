@@ -281,17 +281,15 @@ def build_reputation_panel(member: discord.Member):
             rep = await get_reputation(member.guild.id, member.id)
             top = await get_top_n(member.guild.id, 5)
             items = []
-            items.append(v2_title(f"{rep['tier']['emoji']}  Réputation"))
+            items.append(v2_title(f"{rep['tier']['emoji']} Réputation"))
             items.append(v2_subtitle(
-                f"_Joueur **{member.display_name}** · "
-                f"`{rep['total_points']:,}` points cumulés_"
+                f"-# {member.display_name} · `{rep['total_points']:,}` points cumulés"
             ))
             items.append(v2_divider())
 
             # Tier actuel + progression
             items.append(v2_body(
-                f"**Tier actuel :** {rep['tier']['emoji']} "
-                f"**{rep['tier']['name']}**"
+                f"Tier · {rep['tier']['emoji']} **{rep['tier']['name']}**"
             ))
             if rep.get("next_tier"):
                 nt = rep["next_tier"]
@@ -300,8 +298,8 @@ def build_reputation_panel(member: discord.Member):
                 filled = int(rep["progress_to_next"] * bar_len)
                 bar = "█" * filled + "░" * (bar_len - filled)
                 items.append(v2_body(
-                    f"**Prochain :** {nt['emoji']} **{nt['name']}** "
-                    f"à `{nt['min']:,}` points\n`{bar}` {pct}%"
+                    f"Prochain · {nt['emoji']} **{nt['name']}** à `{nt['min']:,}` pts\n"
+                    f"`{bar}` {pct}%"
                 ))
             else:
                 items.append(v2_body(
@@ -311,21 +309,21 @@ def build_reputation_panel(member: discord.Member):
             # Top 5
             if top:
                 items.append(v2_divider())
-                items.append(v2_body("**🏅  Top 5 réputation du serveur**"))
+                items.append(v2_body("### 🏅 Top 5 réputation du serveur"))
+                lines = []
                 for i, u in enumerate(top, 1):
                     m = member.guild.get_member(u["user_id"])
                     name = m.display_name if m else f"User-{u['user_id']}"
                     tier = get_tier(u["total_points"])
                     medal = ["🥇", "🥈", "🥉"][i - 1] if i <= 3 else f"`{i}.`"
-                    items.append(v2_body(
-                        f"{medal} **{name}** {tier['emoji']} — "
-                        f"`{u['total_points']:,}` pts"
-                    ))
+                    lines.append(
+                        f"{medal} **{name}** {tier['emoji']} — `{u['total_points']:,}` pts"
+                    )
+                items.append(v2_body("\n".join(lines)))
 
             items.append(v2_divider())
             items.append(v2_body(
-                "_💡 La réputation se gagne en participant aux events, "
-                "boss raids, duels, sagas, etc._"
+                "-# 💡 La réputation se gagne en participant : events, boss, duels, sagas."
             ))
             self.add_item(v2_container(*items, color=rep["tier"]["color"]))
 

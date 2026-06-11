@@ -135,7 +135,7 @@ def build_followup_view(
 
 def build_followup_panel(
     owner_id: int, event_kind: str, summary_text: str,
-    title: str = "🎉  Bien joué !", color: int = 0xFFD700,
+    title: str = "🎉 Bien joué !", color: int = 0xFFD700,
 ):
     """LayoutView V2 complet : texte de résumé + boutons cliquables.
 
@@ -167,9 +167,7 @@ def build_followup_panel(
 
             if handlers:
                 items.append(v2_divider())
-                items.append(v2_body(
-                    "_💡 Continue ton aventure — clique sur un bouton :_"
-                ))
+                items.append(v2_body("-# Continue ton aventure :"))
 
             # Container avec le texte
             self.add_item(v2_container(*items, color=color))

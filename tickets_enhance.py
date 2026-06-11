@@ -510,16 +510,15 @@ def build_templates_panel(templates: list, guild_name: str = ""):
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title("📋  TEMPLATES DE RÉPONSE"))
+            items.append(v2_title("📋 Templates de réponse"))
             items.append(v2_subtitle(
-                f"_Réponses pré-rédigées du staff ({len(templates)})_"
+                f"Réponses pré-rédigées du staff · {len(templates)}"
             ))
             items.append(v2_divider())
 
             if not templates:
                 items.append(v2_body(
-                    "_Aucun template. Staff peut en créer avec "
-                    "`/ticket template_add`._"
+                    "_Aucun template pour l'instant._"
                 ))
             else:
                 lines = []
@@ -528,16 +527,9 @@ def build_templates_panel(templates: list, guild_name: str = ""):
                     if len(t["content"]) > 80:
                         preview += "…"
                     lines.append(
-                        f"📝 **`{t['name']}`** _(par <@{t['added_by']}>)_\n"
-                        f"   _{preview}_"
+                        f"📝 **`{t['name']}`** · _{preview}_"
                     )
-                items.append(v2_body("\n\n".join(lines)))
-
-            items.append(v2_divider())
-            items.append(v2_body(
-                "_💡 `/ticket reply <name>` pour utiliser un template "
-                "dans un ticket._"
-            ))
+                items.append(v2_body("\n".join(lines)))
 
             self.add_item(v2_container(*items, color=0x3498DB))
 
@@ -558,26 +550,26 @@ def build_stats_panel(stats: dict, guild_name: str = ""):
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title("📊  DASHBOARD TICKETS"))
+            items.append(v2_title("📊 Tickets"))
             items.append(v2_subtitle(
-                f"_Statistiques du système ticket — {guild_name}_"
+                f"Statistiques du support · {guild_name}"
             ))
             items.append(v2_divider())
 
             # Overview
-            items.append(v2_body("### 📋 ÉTAT GLOBAL"))
+            items.append(v2_body("### 📋 État global"))
             items.append(v2_body(
-                f"📊 **Total :** `{stats['total']}`\n"
-                f"🟢 **Ouverts :** `{stats['open']}`\n"
-                f"🔒 **Fermés :** `{stats['closed']}`\n"
-                f"⚠️ **Sans claim :** `{stats['unclaimed']}`\n"
-                f"📅 **Nouveaux 7j :** `{stats['recent_7d']}`"
+                f"📊 **Total** `{stats['total']}` · "
+                f"🟢 **Ouverts** `{stats['open']}` · "
+                f"🔒 **Fermés** `{stats['closed']}` · "
+                f"⚠️ **Sans claim** `{stats['unclaimed']}` · "
+                f"📅 **7j** `{stats['recent_7d']}`"
             ))
 
             # Priorité distribution
             if stats["by_priority"]:
                 items.append(v2_divider())
-                items.append(v2_body("### 🚨 PAR PRIORITÉ (ouverts)"))
+                items.append(v2_body("### 🚨 Par priorité"))
                 lines = []
                 for prio, cnt in sorted(
                     stats["by_priority"].items(),
@@ -585,13 +577,13 @@ def build_stats_panel(stats: dict, guild_name: str = ""):
                     if x[0] in ("urgent", "high", "normal", "low") else 99,
                 ):
                     emoji, label = PRIORITY_LEVELS.get(prio, ("⚪", prio.upper()))
-                    lines.append(f"{emoji} **{label}** : `{cnt}`")
-                items.append(v2_body("\n".join(lines)))
+                    lines.append(f"{emoji} **{label}** `{cnt}`")
+                items.append(v2_body(" · ".join(lines)))
 
             # Avg resolution
             if stats["avg_resolution_hours"] > 0:
                 items.append(v2_divider())
-                items.append(v2_body("### ⏱️ TEMPS DE RÉSOLUTION"))
+                items.append(v2_body("### ⏱️ Temps de résolution"))
                 avg_h = stats["avg_resolution_hours"]
                 if avg_h < 1:
                     avg_str = f"`{int(avg_h * 60)}` min"
@@ -599,12 +591,12 @@ def build_stats_panel(stats: dict, guild_name: str = ""):
                     avg_str = f"`{avg_h}` heures"
                 else:
                     avg_str = f"`{avg_h / 24:.1f}` jours"
-                items.append(v2_body(f"📈 **Moyenne :** {avg_str}"))
+                items.append(v2_body(f"📈 **Moyenne** {avg_str}"))
 
             # Top staff
             if stats["top_staff"]:
                 items.append(v2_divider())
-                items.append(v2_body("### 🛡️ TOP STAFF"))
+                items.append(v2_body("### 🛡️ Top support"))
                 medals = ["🥇", "🥈", "🥉", "▪️", "▪️"]
                 lines = []
                 for idx, s in enumerate(stats["top_staff"][:5]):
@@ -613,11 +605,6 @@ def build_stats_panel(stats: dict, guild_name: str = ""):
                         f"{medal} <@{s['user_id']}> · `{s['count']}` claim(s)"
                     )
                 items.append(v2_body("\n".join(lines)))
-
-            items.append(v2_divider())
-            items.append(v2_body(
-                "_💡 `/ticket priority <level>` dans un ticket pour le tagger._"
-            ))
 
             self.add_item(v2_container(*items, color=0x9B59B6))
 

@@ -355,14 +355,12 @@ def _lobby_text(lob: dict) -> str:
         names.append(m.mention if m else f"<@{uid}>")
     roster = "\n".join(f"• {n}" for n in names) if names else "_(personne encore)_"
     return (
-        f"🏰 **UN DONJON SE FORME !**\n"
-        f"_Groupe de **{MAX_PARTY} max** — cliquez pour rejoindre. Lancement auto "
-        f"dans ~{LOBBY_WAIT_SEC // 60} min, ou dès que le groupe le décide._\n\n"
+        f"🏰 **Un donjon se forme !**\n"
+        f"-# Groupe de {MAX_PARTY} max · lancement auto dans ~{LOBBY_WAIT_SEC // 60} min, "
+        f"ou dès que le groupe le décide.\n\n"
         f"**Aventuriers ({len(lob['members'])}/{MAX_PARTY}) :**\n{roster}\n\n"
-        f"_Une fois lancé : un salon + **plusieurs salles vocales** privées. "
-        f"Dispersez-vous : chaque salle abrite un mob qu'on ne frappe que depuis "
-        f"SON vocal, puis regroupez-vous pour le boss. Ils **ripostent** (on peut "
-        f"tomber !), butin partagé. Équipe ton meilleur stuff (🎒) !_"
+        f"-# Vagues de mobs salle par salle (vocal = +20% dégâts), puis le boss. "
+        f"Ils ripostent — équipe ton meilleur stuff (🎒)."
     )
 
 

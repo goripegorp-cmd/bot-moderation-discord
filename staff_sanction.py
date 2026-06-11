@@ -440,9 +440,9 @@ def _build_panel_view(_v2_helpers: dict, sanction_id: int, target: discord.Membe
         def __init__(self):
             super().__init__(timeout=None)
             items = []
-            items.append(v2_title("🚨  ACTION STAFF REQUISE"))
+            items.append(v2_title("🚨 Action staff requise"))
             items.append(v2_subtitle(
-                f"**Source :** `{source}` · **Sanction ID :** `{sanction_id}`"
+                f"Source `{source}` · ID `{sanction_id}`"
             ))
             items.append(v2_divider())
 
@@ -468,7 +468,7 @@ def _build_panel_view(_v2_helpers: dict, sanction_id: int, target: discord.Membe
 
             items.append(v2_divider())
             items.append(v2_body(
-                "_Choisis l'action finale. Le panel se supprime ensuite._"
+                "-# Choisis l'action finale · le panel se supprime ensuite"
             ))
             self.add_item(v2_container(*items, color=0xE74C3C))
 

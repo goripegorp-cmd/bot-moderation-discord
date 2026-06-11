@@ -296,17 +296,16 @@ def build_duo_panel(member: discord.Member):
         async def populate(self):
             status = await get_duo_status(member.guild.id, member.id)
             items = []
-            items.append(v2_title("🤝  Mentorat actif"))
+            items.append(v2_title("🤝 Mentorat actif"))
             if not status["duos"]:
                 items.append(v2_body(
-                    "_Tu n'as pas encore de mentor ou d'apprenti. "
-                    "Utilise `/mentor_invite` pour démarrer une relation._"
+                    "_Pas encore de mentor ou d'apprenti — `/mentor_invite` pour démarrer._"
                 ))
                 self.add_item(v2_container(*items, color=0x95A5A6))
                 return
 
             items.append(v2_body(
-                f"_Tu as **{len(status['duos'])}** relation(s) active(s)_"
+                f"-# **{len(status['duos'])}** relation(s) active(s)"
             ))
             items.append(v2_divider())
 
@@ -314,19 +313,15 @@ def build_duo_panel(member: discord.Member):
                 partner = member.guild.get_member(duo["partner_id"])
                 pname = partner.display_name if partner else f"User-{duo['partner_id']}"
                 role_emoji = "📚" if duo["role"] == "mentor" else "🎓"
-                items.append(v2_body(
-                    f"{role_emoji} **{pname}** _(tu es {duo['role']})_"
-                ))
-                items.append(v2_body(
-                    f"   • Events partagés : `{duo['events_count']}`"
-                ))
+                line = (
+                    f"{role_emoji} **{pname}** · tu es {duo['role']} · "
+                    f"`{duo['events_count']}` events partagés"
+                )
                 if duo["badge"]:
-                    items.append(v2_body(f"   • {duo['badge']} ✨"))
+                    line += f"\n-# {duo['badge']} ✨"
                 else:
-                    items.append(v2_body(
-                        "   _Continuez d'enchainer les events ensemble pour "
-                        "débloquer des badges et bonus_"
-                    ))
+                    line += "\n-# Enchaînez les events pour débloquer badges et bonus."
+                items.append(v2_body(line))
 
             self.add_item(v2_container(*items, color=0x2ECC71))
 

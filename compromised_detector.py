@@ -316,10 +316,8 @@ def build_dossier_embed(
     e = discord.Embed(
         title="🚨 Compte suspect détecté",
         description=(
-            f"{level}\n\n"
-            f"**Score de compromission** : `{score}/100`\n"
-            f"_Le bot ne signale QUE les comptes au score ≥60. Tu décides._\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            f"{level} · **Score** `{score}/100`\n"
+            f"-# Le bot ne signale que les comptes au score ≥ 60 · tu décides"
         ),
         color=color,
         timestamp=datetime.now(timezone.utc),
@@ -385,13 +383,10 @@ def build_dossier_embed(
     )
 
     e.add_field(
-        name="🛠️ Actions disponibles",
+        name="🛠️ Actions",
         value=(
-            "Utilise les boutons ci-dessous pour décider :\n"
-            "• **🔇 Mute 24h** — précaution rapide en cas de doute\n"
-            "• **👢 Kick** — expulsion (le compte peut revenir)\n"
-            "• **🔨 Ban** — bannissement définitif (cas confirmé)\n"
-            "• **✅ Faux positif** — ferme l'alerte sans action"
+            "🔇 **Mute 24h** précaution · 👢 **Kick** expulsion · "
+            "🔨 **Ban** définitif · ✅ **Faux positif** ferme l'alerte"
         ),
         inline=False,
     )

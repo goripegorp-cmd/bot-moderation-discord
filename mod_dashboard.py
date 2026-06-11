@@ -190,25 +190,24 @@ def _build_layout(stats: dict, guild, tickets: dict | None = None) -> discord.ui
             super().__init__(timeout=300)
             items = []
 
-            items.append(v2_title("🛡️  DASHBOARD MODÉRATION"))
+            items.append(v2_title("🛡️ Modération"))
             items.append(v2_subtitle(
-                f"Période : **{stats['window_days']} derniers jours** · "
-                f"{guild.name}"
+                f"{stats['window_days']} derniers jours · {guild.name}"
             ))
             items.append(v2_divider())
 
             # Stats globales
-            items.append(v2_body("### 📊 ACTIVITÉ GLOBALE"))
+            items.append(v2_body("### 📊 Activité globale"))
             items.append(v2_body(
-                f"📋 **Total sanctions :** `{stats['total']}`\n"
-                f"⏱️ **Dernières 24h :** `{stats['recent_24h']}`\n"
-                f"⚠️ **Warns sur la période :** `{stats['active_warns']}`"
+                f"📋 **Total** `{stats['total']}` · "
+                f"⏱️ **24h** `{stats['recent_24h']}` · "
+                f"⚠️ **Warns** `{stats['active_warns']}`"
             ))
 
             # Breakdown par type
             if stats["by_type"]:
                 items.append(v2_divider())
-                items.append(v2_body("### 📝 PAR TYPE"))
+                items.append(v2_body("### 📝 Par type"))
                 lines = []
                 for typ, cnt in sorted(
                     stats["by_type"].items(), key=lambda x: -x[1]
@@ -274,9 +273,7 @@ def _build_layout(stats: dict, guild, tickets: dict | None = None) -> discord.ui
 
             items.append(v2_divider())
             items.append(v2_body(
-                "_💡 `/mod infractions @user` pour la fiche complète d'un membre_\n"
-                "_📤 Exporte un instantané du serveur (joueurs, économie, activité, "
-                "modération) en fichier via les boutons ci-dessous._"
+                "-# Exporte un instantané du serveur via les boutons"
             ))
 
             self.add_item(v2_container(*items, color=0x9B59B6))

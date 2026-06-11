@@ -481,9 +481,9 @@ def build_stats_panel(stats: dict, guild_name: str = ""):
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title("💌  RÉVEIL DES DORMANTS"))
+            items.append(v2_title("💌 Réveil des dormants"))
             items.append(v2_subtitle(
-                f"_Stats sur {stats['window_days']} derniers jours — {guild_name}_"
+                f"Stats sur {stats['window_days']} derniers jours · {guild_name}"
             ))
             items.append(v2_divider())
 
@@ -496,7 +496,7 @@ def build_stats_panel(stats: dict, guild_name: str = ""):
 
             items.append(v2_divider())
             items.append(v2_body(
-                f"### ⚙️ CONFIGURATION\n"
+                f"### ⚙️ Configuration\n"
                 f"• Seuil dormance : **{DORMANT_THRESHOLD_DAYS} jours** sans message\n"
                 f"• Cooldown DM : **{DM_COOLDOWN_DAYS} jours** entre 2 DMs/membre\n"
                 f"• Fenêtre comeback : **{COMEBACK_WINDOW_DAYS} jours** pour claim\n"
@@ -507,9 +507,7 @@ def build_stats_panel(stats: dict, guild_name: str = ""):
 
             items.append(v2_divider())
             items.append(v2_body(
-                "_💡 Le bot DM 1× par 30j max à un dormant. Si la personne "
-                "a désactivé les DMs ou bloqué le bot, on retry pas. Opt-out total "
-                "via `/notifs` sur le serveur._"
+                "-# DM 1× / 30j max par dormant · opt-out total via `/notifs`."
             ))
 
             self.add_item(v2_container(*items, color=0x9B59B6))

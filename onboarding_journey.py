@@ -280,36 +280,32 @@ def build_journey_panel(member: discord.Member):
 
             done_count = sum(prog["steps_done"])
             items = []
-            items.append(v2_title("🌟  Bienvenue ! Parcours de découverte"))
+            items.append(v2_title("🌟 Bienvenue · parcours de découverte"))
             items.append(v2_subtitle(
-                f"_{done_count}/5 étapes complétées · "
-                f"chaque étape = **+500 coins** · "
-                f"toutes = **+5000 bonus**_"
+                f"-# {done_count}/5 étapes · **+500** 🪙 chacune · toutes = **+5000** bonus"
             ))
             items.append(v2_divider())
 
+            step_lines = []
             for i, step in enumerate(STEPS):
                 done = prog["steps_done"][i]
                 check = "✅" if done else "⬜"
-                items.append(v2_body(
-                    f"{check} {step['emoji']} **{step['label']}** "
-                    f"_(+{step['reward']} coins)_"
-                ))
+                line = f"{check} {step['emoji']} **{step['label']}** · +{step['reward']} 🪙"
                 if not done:
-                    items.append(v2_body(f"   _{step['desc']}_"))
+                    line += f"\n-# {step['desc']}"
+                step_lines.append(line)
+            items.append(v2_body("\n".join(step_lines)))
 
             if prog["completed"]:
                 items.append(v2_divider())
                 items.append(v2_body(
-                    "🌟 **PARCOURS COMPLÉTÉ !** Tu as gagné le badge "
-                    "**Newcomer** et **+5000 coins bonus**. Bienvenue !"
+                    "🌟 **Parcours complété !** Badge **Newcomer** + **5000** 🪙 bonus. Bienvenue !"
                 ))
             elif done_count > 0:
                 items.append(v2_divider())
                 remaining = 5 - done_count
                 items.append(v2_body(
-                    f"💪 Encore **{remaining}** étape(s) pour débloquer "
-                    f"le bonus final de **5000 coins** !"
+                    f"💪 Encore **{remaining}** étape(s) pour le bonus final de **5000** 🪙 !"
                 ))
 
             # Phase 163.4 : fix — l'instruction "Commence par choisir ton
@@ -318,7 +314,7 @@ def build_journey_panel(member: discord.Member):
             # donc jamais affichée.
             if not prog["steps_done"][0]:
                 items.append(v2_divider())
-                items.append(v2_body("**👇 Commence par choisir ton pet :**"))
+                items.append(v2_body("👇 Choisis ton pet pour commencer"))
 
             self.add_item(v2_container(*items, color=0x9B59B6))
 

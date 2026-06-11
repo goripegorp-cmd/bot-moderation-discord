@@ -374,10 +374,9 @@ async def _post_merchant_panel(
     v2_container = _v2['v2_container']
 
     items_render = []
-    items_render.append(v2_title("🛒  MARCHAND ITINÉRANT"))
+    items_render.append(v2_title("🛒 Marchand itinérant"))
     items_render.append(v2_subtitle(
-        f"_Le marchand est de passage ! Il reste {VISIT_DURATION_HOURS}h._\n"
-        f"_Stock limité — premier arrivé, premier servi._"
+        f"De passage pour {VISIT_DURATION_HOURS}h · stock limité, premier arrivé premier servi."
     ))
     items_render.append(v2_divider())
 
@@ -389,8 +388,7 @@ async def _post_merchant_panel(
         ))
     items_render.append(v2_divider())
     items_render.append(v2_body(
-        "_💡 Le bot vend — aucun échange entre joueurs. "
-        "Stock se rechargera demain à 18h FR._"
+        "-# Le bot vend (aucun échange entre joueurs) · stock rechargé demain 18h FR."
     ))
 
     class _MerchantLayout(LayoutView):

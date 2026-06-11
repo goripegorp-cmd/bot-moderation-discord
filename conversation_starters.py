@@ -90,7 +90,7 @@ async def conv_starter_task():
                     description=starter,
                     color=0x9B59B6,
                 )
-                e.set_footer(text="_Une question lancée par le bot pour redémarrer la discussion._")
+                e.set_footer(text="Une question pour relancer la discussion")
                 try:
                     msg = await hub_ch.send(
                         embed=e,

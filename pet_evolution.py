@@ -307,10 +307,9 @@ def build_pet_evolution_panel(member: discord.Member, pet_slug: str):
             )
             skin = data["skin"]
             items = []
-            items.append(v2_title(f"{skin['emoji']}  {skin['name']}"))
+            items.append(v2_title(f"{skin['emoji']} {skin['name']}"))
             items.append(v2_subtitle(
-                f"_Niveau {data['level']} · "
-                f"{data['xp_total']:,} XP cumulés_"
+                f"-# Niveau {data['level']} · {data['xp_total']:,} XP cumulés"
             ))
             items.append(v2_divider())
 
@@ -323,26 +322,24 @@ def build_pet_evolution_panel(member: discord.Member, pet_slug: str):
                 pct = int(in_level * 100 / max(1, needed))
                 bar_filled = int((in_level / max(1, needed)) * 20)
                 bar = "█" * bar_filled + "░" * (20 - bar_filled)
-                items.append(v2_body(
-                    f"**Progression :** `{bar}` {pct}%\n"
-                    f"`{in_level}/{needed}` XP vers level **{data['level'] + 1}**"
-                ))
+                line = (
+                    f"`{bar}` {pct}% · `{in_level}/{needed}` XP vers le niveau **{data['level'] + 1}**"
+                )
+                # Skin upgrades à venir (fusionné sur la ligne de progression)
+                next_evol = None
+                for s in EVOLVED_SKINS.get(pet_slug, []):
+                    if s["min_lvl"] > data["level"]:
+                        next_evol = s
+                        break
+                if next_evol:
+                    line += (
+                        f"\n-# Prochaine évolution : {next_evol['emoji']} "
+                        f"**{next_evol['name']}** au niveau {next_evol['min_lvl']}"
+                    )
+                items.append(v2_body(line))
             else:
                 items.append(v2_body(
-                    "🌟 **Niveau maximum atteint !** "
-                    "Ton compagnon est désormais légendaire."
-                ))
-
-            # Skin upgrades à venir
-            next_evol = None
-            for s in EVOLVED_SKINS.get(pet_slug, []):
-                if s["min_lvl"] > data["level"]:
-                    next_evol = s
-                    break
-            if next_evol:
-                items.append(v2_body(
-                    f"_Prochaine évolution : {next_evol['emoji']} "
-                    f"**{next_evol['name']}** au niveau **{next_evol['min_lvl']}**_"
+                    "🌟 **Niveau maximum atteint !** Ton compagnon est désormais légendaire."
                 ))
 
             # Cooldown
@@ -355,8 +352,7 @@ def build_pet_evolution_panel(member: discord.Member, pet_slug: str):
                 ))
             else:
                 items.append(v2_body(
-                    f"✅ **Prêt à manger !** Clique sur 🍖 Nourrir pour "
-                    f"gagner `+{FEED_XP}` XP."
+                    f"✅ Prêt à manger — `+{FEED_XP}` XP au prochain repas."
                 ))
             self.add_item(v2_container(*items, color=0xE67E22))
 

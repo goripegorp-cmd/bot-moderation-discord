@@ -296,41 +296,32 @@ def build_raffle_panel(member: discord.Member):
         async def populate(self):
             data = await get_my_tickets(member.guild.id, member.id)
             items = []
-            items.append(v2_title("🎰  Loterie Roblox hebdo"))
+            items.append(v2_title("🎰 Loterie Roblox hebdo"))
             items.append(v2_subtitle(
-                f"_Semaine `{data['week']}` · Tirage dimanche 20h FR_"
+                f"-# Semaine `{data['week']}` · tirage dimanche 20h FR"
             ))
             items.append(v2_divider())
 
             if data["tickets"] > 0:
-                items.append(v2_body(
-                    f"🎟️ **Tes tickets : `{data['tickets']}`**"
-                ))
+                line = f"🎟️ **{data['tickets']}** ticket(s)"
                 if data["rank_estimate"]:
-                    items.append(v2_body(
-                        f"_Tu es classé **#{data['rank_estimate']}** des "
-                        f"participants_"
-                    ))
+                    line += f" · classé **#{data['rank_estimate']}**"
+                items.append(v2_body(line))
             else:
                 items.append(v2_body(
-                    "🎟️ **Aucun ticket cette semaine.**\n"
-                    "_Participe aux events pour en gagner._"
+                    "🎟️ Aucun ticket cette semaine — participe aux events pour en gagner."
                 ))
 
             items.append(v2_divider())
-            items.append(v2_body("**🏆  Comment gagner des tickets**"))
+            items.append(v2_body("### 🏆 Gagner des tickets"))
             items.append(v2_body(
-                "• 🔗 Compte Roblox lié : **+1** ticket/semaine auto\n"
-                "• 🎯 Claim quête quotidienne : **+1** par claim\n"
-                "• 📅 Vote daily prompt : **+1** par vote (~7/semaine)\n"
-                "• 📜 Top 5 saga : **+2**\n"
-                "• 📱 Tweet du jeu (claim manuel) : **+3**"
+                "🔗 Compte Roblox lié · **+1**/sem · 🎯 Quête quotidienne · **+1**\n"
+                "📅 Vote daily · **+1** · 📜 Top 5 saga · **+2** · 📱 Tweet du jeu · **+3**"
             ))
             items.append(v2_divider())
             items.append(v2_body(
-                "**🎁  Prix :**\n"
-                "🥇 `10 000` 🪙 · 🥈🥉 `5 000` 🪙 chacun · "
-                "**Top 4-10** : `1 000` 🪙"
+                "### 🎁 Prix\n"
+                "🥇 `10 000` 🪙 · 🥈🥉 `5 000` 🪙 · Top 4-10 `1 000` 🪙"
             ))
             self.add_item(v2_container(*items, color=0xE91E63))
 
@@ -407,9 +398,9 @@ async def _announce_winners(guild: discord.Guild, result: dict):
         v2_container = _v2['v2_container']
 
         items = []
-        items.append(v2_title("🎰  Tirage Loterie Roblox"))
+        items.append(v2_title("🎰 Tirage Loterie Roblox"))
         items.append(v2_subtitle(
-            f"_Bravo aux **{result['total_participants']}** participants !_"
+            f"-# Bravo aux **{result['total_participants']}** participants"
         ))
         items.append(v2_divider())
         for w in result["winners"][:5]:
@@ -421,8 +412,7 @@ async def _announce_winners(guild: discord.Guild, result: dict):
             ))
         items.append(v2_divider())
         items.append(v2_body(
-            "_Prochain tirage dimanche prochain 20h FR. "
-            "Tes tickets repartent à 0._"
+            "-# Prochain tirage dimanche 20h FR · les tickets repartent à 0."
         ))
 
         class _WinPanel(LayoutView):

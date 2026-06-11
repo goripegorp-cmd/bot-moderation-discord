@@ -1097,7 +1097,7 @@ async def build_climax_panel(
     active = await get_active_climax(guild_id)
     if not active:
         items = [
-            v2_title("⚔️  BOSS CLIMAX"),
+            v2_title("⚔️ Boss Climax"),
             v2_body(
                 "_Aucun boss n'est actif._\n\n"
                 "Le prochain Boss Climax apparaîtra le **1er samedi du "
@@ -1143,9 +1143,9 @@ async def build_climax_panel(
 
     pct = int(active["hp_current"] * 100 / max(1, active["hp_max"]))
     items = [
-        v2_title(f"⚔️  BOSS CLIMAX : {boss.get('emoji', '?')}  {boss.get('name', '?')}"),
+        v2_title(f"⚔️ Boss Climax — {boss.get('emoji', '?')} {boss.get('name', '?')}"),
         v2_subtitle(
-            f"_Chapitre {active['chapter_id']} · Boss thématique du mois_"
+            f"Chapitre {active['chapter_id']} · boss thématique du mois"
         ),
         v2_divider(),
         v2_body(f"_{boss.get('description', '…')}_"),
@@ -1445,20 +1445,16 @@ async def _announce_climax_open(
     if not ch:
         return
     msg = (
-        f"⚔️ **BOSS CLIMAX DU MOIS** ⚔️\n\n"
+        f"⚔️ **Boss Climax du mois**\n\n"
         f"{boss['emoji']} **{boss['name']}**\n"
         f"_{boss['description']}_\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"❤️ HP : `{boss['hp_base']:,}`\n"
-        f"⏱️ Durée : **{CLIMAX_DURATION_HOURS}h** "
-        f"(ferme le `{ends_at.isoformat()}`)\n"
-        f"⚔️ Max **{MAX_ATTACKS_PER_USER}** attaques par membre\n\n"
+        f"❤️ HP : `{boss['hp_base']:,}` · ⏱️ {CLIMAX_DURATION_HOURS}h · "
+        f"⚔️ max {MAX_ATTACKS_PER_USER} attaques/membre\n\n"
         f"**Récompenses :**\n"
         f"🏅 Top 3 : titre permanent **« {boss.get('winning_title', '?')} »** + "
         f"`{TOP3_BONUS_COINS}` 🪙 bonus\n"
         f"🎖️ Participation : titre **« {boss.get('participation_title', '?')} »** + "
         f"`{PARTICIPATION_BONUS_COINS}` 🪙\n\n"
-        f"_📖 Va dans le Codex → ⚔️ Boss pour attaquer._\n\n"
         f"_« {boss.get('lore', '')} »_"
     )
     if warmup_ts:

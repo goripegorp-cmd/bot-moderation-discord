@@ -533,16 +533,15 @@ def build_best_posts_panel(
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title("🏆  BEST POSTS DE LA SEMAINE"))
+            items.append(v2_title("🏆 Best posts"))
             items.append(v2_subtitle(
-                f"_Posts du bot avec le plus d'engagement (7j) — {guild_name}_"
+                f"Plus d'engagement sur 7j · {guild_name}"
             ))
             items.append(v2_divider())
 
             if not posts:
                 items.append(v2_body(
-                    "_Aucun post tracké pour l'instant. "
-                    "Active le tracking via `/publish track on`._"
+                    "_Aucun post tracké pour l'instant._"
                 ))
             else:
                 medals = ["🥇", "🥈", "🥉"]
@@ -562,20 +561,19 @@ def build_best_posts_panel(
                         except Exception:
                             pass
                     line = (
-                        f"{medal} _Score `{int(p['score'])}` · "
-                        f"💬 `{p['replies']}` · 👍 `{p['reactions']}`_\n"
-                        f"   📅 {_format_short_dt(p['posted_at'])} · "
+                        f"{medal} **Score `{int(p['score'])}`** · "
+                        f"💬 `{p['replies']}` · 👍 `{p['reactions']}` · "
+                        f"📅 {_format_short_dt(p['posted_at'])} · "
                         f"<#{p['channel_id']}>"
                     )
                     if link:
-                        line += f"\n   [`Lien direct`]({link})"
+                        line += f" · [lien]({link})"
                     lines.append(line)
-                items.append(v2_body("\n\n".join(lines)))
+                items.append(v2_body("\n".join(lines)))
 
             items.append(v2_divider())
             items.append(v2_body(
-                f"_💡 Score = reactions + replies × {int(ENGAGEMENT_REPLY_WEIGHT)}. "
-                f"Refresh auto chaque 24h._"
+                f"-# Score = reactions + replies × {int(ENGAGEMENT_REPLY_WEIGHT)} · refresh 24h"
             ))
 
             self.add_item(v2_container(*items, color=0xF1C40F))
@@ -598,31 +596,24 @@ def build_groups_panel(groups: list[dict], guild_name: str = ""):
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title("📢  GROUPES DE CROSS-POST"))
+            items.append(v2_title("📢 Cross-post"))
             items.append(v2_subtitle(
-                f"_Groupes de salons configurés sur {guild_name}_"
+                f"Groupes de salons configurés · {guild_name}"
             ))
             items.append(v2_divider())
 
             if not groups:
                 items.append(v2_body(
-                    "_Aucun groupe configuré. Staff peut en créer avec "
-                    "`/publish cross_create <nom>`._"
+                    "_Aucun groupe configuré pour l'instant._"
                 ))
             else:
                 lines = []
                 for g in groups:
                     lines.append(
-                        f"📢 **`{g['name']}`** (id `{g['id']}`)\n"
-                        f"   _{g['target_count']} salon(s) ciblé(s)_"
+                        f"📢 **`{g['name']}`** · id `{g['id']}` · "
+                        f"_{g['target_count']} salon(s)_"
                     )
-                items.append(v2_body("\n\n".join(lines)))
-
-            items.append(v2_divider())
-            items.append(v2_body(
-                "_💡 `/publish cross_send <name> <message>` pour envoyer "
-                "à tous les salons d'un groupe._"
-            ))
+                items.append(v2_body("\n".join(lines)))
 
             self.add_item(v2_container(*items, color=0x3498DB))
 
@@ -646,29 +637,28 @@ def build_metrics_panel(post: dict, guild_name: str = ""):
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title("📊  MÉTRIQUES POST"))
+            items.append(v2_title("📊 Métriques post"))
             items.append(v2_subtitle(
-                f"_Stats d'engagement du post `{post['message_id']}`_"
+                f"Engagement du post `{post['message_id']}`"
             ))
             items.append(v2_divider())
 
             items.append(v2_body(
-                f"📅 **Posté le :** `{post['posted_at']}`\n"
-                f"📍 **Salon :** <#{post['channel_id']}>\n"
-                f"🔄 **Dernier refresh :** `{post.get('last_metrics_at', 'jamais')}`"
+                f"📅 **Posté** `{post['posted_at']}` · "
+                f"📍 <#{post['channel_id']}> · "
+                f"🔄 **Refresh** `{post.get('last_metrics_at', 'jamais')}`"
             ))
             items.append(v2_divider())
 
             items.append(v2_body(
-                f"👍 **Reactions :** `{post['reactions']}`\n"
-                f"💬 **Replies (thread) :** `{post['replies']}`\n"
-                f"🏆 **Score engagement :** `{int(score)}`"
+                f"👍 **Reactions** `{post['reactions']}` · "
+                f"💬 **Replies** `{post['replies']}` · "
+                f"🏆 **Score** `{int(score)}`"
             ))
 
             items.append(v2_divider())
             items.append(v2_body(
-                "_💡 Score = reactions + replies × 2. "
-                "Refresh auto toutes les 24h._"
+                "-# Score = reactions + replies × 2 · refresh 24h"
             ))
 
             self.add_item(v2_container(*items, color=0xF1C40F))

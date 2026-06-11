@@ -376,9 +376,9 @@ async def post_weekly_recap(guild: discord.Guild) -> bool:
         v2_container = _v2['v2_container']
 
         items = []
-        items.append(v2_title("📊  Stats hebdo Roblox"))
+        items.append(v2_title("📊 Stats hebdo Roblox"))
         items.append(v2_subtitle(
-            f"_Récap des **{len(all_stats)}** jeu(x) trackés cette semaine_"
+            f"-# {len(all_stats)} jeu(x) trackés cette semaine"
         ))
         items.append(v2_divider())
 
@@ -390,19 +390,15 @@ async def post_weekly_recap(guild: discord.Guild) -> bool:
                 else (f"📉 `{delta_v:,}`" if delta_v < 0 else "➖ `0`")
             )
             items.append(v2_body(
-                f"### 🎮 **{s['name']}**\n"
-                f"• Visites totales : `{s['visits']:,}` ({delta_v_str} 7j)\n"
-                f"• Online maintenant : `{s['playing']:,}` joueurs\n"
-                f"• Favoris : `{s['favorites']:,}` "
-                f"(+`{g['delta_favorites']}` 7j)\n"
-                f"• Ratio votes : "
+                f"### 🎮 {s['name']}\n"
+                f"🚀 `{s['visits']:,}` visites ({delta_v_str} 7j) · 👥 `{s['playing']:,}` en ligne\n"
+                f"⭐ `{s['favorites']:,}` favoris (+`{g['delta_favorites']}`) · "
                 f"👍 `{s['up_votes']:,}` / 👎 `{s['down_votes']:,}`"
             ))
             items.append(v2_divider())
 
         items.append(v2_body(
-            "_Récap auto chaque dimanche 19h FR. "
-            "Ajoute un jeu via `/owner game_add`._"
+            "-# Récap auto chaque dimanche 19h FR."
         ))
 
         class _RecapPanel(LayoutView):

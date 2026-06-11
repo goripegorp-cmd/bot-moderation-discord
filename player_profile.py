@@ -236,14 +236,12 @@ def build_personalization_panel(member: discord.Member):
         def __init__(self):
             super().__init__(timeout=180)
             items = []
-            items.append(v2_title("🎯  Personnalisation"))
+            items.append(v2_title("🎯 Personnalisation"))
             items.append(v2_body(
-                "Le bot peut adapter ses suggestions d'events à ton style "
-                "de jeu (PvP, collecteur, social, solo).\n\n"
-                "Tu peux désactiver cette personnalisation à tout moment."
+                "Le bot peut adapter ses suggestions d'events à ton style de jeu "
+                "(PvP, collecteur, social, solo).\n"
+                "-# Désactivable à tout moment."
             ))
-            items.append(v2_divider())
-            items.append(v2_body("_Clique pour activer/désactiver._"))
             self.add_item(v2_container(*items, color=0x3498DB))
 
             b = Button(

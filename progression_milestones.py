@@ -365,15 +365,15 @@ async def _build_layout(
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title(f"🏅  PROGRESSION DE {member.display_name.upper()}"))
+            items.append(v2_title(f"🏅 Progression · {member.display_name}"))
             items.append(v2_subtitle(
-                f"_Tes paliers, ton ancienneté, ton prestige_"
+                "-# Tes paliers, ton ancienneté, ton prestige"
             ))
             items.append(v2_divider())
 
             # Récompenses qui viennent d'être attribuées
             if awarded_now:
-                items.append(v2_body("### 🎉 PALIERS DÉBLOQUÉS"))
+                items.append(v2_body("### 🎉 Paliers débloqués"))
                 lines = []
                 total_coin_reward = 0
                 for entry in awarded_now:
@@ -392,10 +392,10 @@ async def _build_layout(
                 items.append(v2_divider())
 
             # Streak
-            items.append(v2_body("### 🔥 STREAK QUOTIDIEN"))
+            items.append(v2_body("### 🔥 Streak quotidien"))
             items.append(v2_body(
-                f"⚡ Streak actuel : **`{cur_streak}`** jours\n"
-                f"🏆 Meilleur streak : **`{best_streak}`** jours"
+                f"⚡ Actuel · **`{cur_streak}`** j · "
+                f"🏆 Record · **`{best_streak}`** j"
             ))
             if next_streak:
                 items.append(v2_body(
@@ -411,9 +411,9 @@ async def _build_layout(
 
             # Veteran
             items.append(v2_divider())
-            items.append(v2_body("### 🌿 ANCIENNETÉ SUR LE SERVEUR"))
+            items.append(v2_body("### 🌿 Ancienneté"))
             items.append(v2_body(
-                f"📅 Membre depuis : **`{days_server}`** jours"
+                f"📅 Membre depuis · **`{days_server}`** jours"
             ))
             if next_vet:
                 items.append(v2_body(
@@ -429,16 +429,15 @@ async def _build_layout(
 
             # Prestige
             items.append(v2_divider())
-            items.append(v2_body("### 👑 PRESTIGE"))
+            items.append(v2_body("### 👑 Prestige"))
             title = prestige_title(prestige_rank)
             coin_mult = prestige_coin_mult(prestige_rank)
             xp_mult = prestige_xp_mult(prestige_rank)
             if prestige_rank > 0:
                 items.append(v2_body(
-                    f"⭐ Rang : **{prestige_rank}**"
+                    f"⭐ Rang **{prestige_rank}**"
                     f"{f' — _{title}_' if title else ''}\n"
-                    f"💰 Bonus coins permanent : **×{coin_mult:.2f}**\n"
-                    f"📈 Bonus XP permanent : **×{xp_mult:.2f}**"
+                    f"💰 Coins **×{coin_mult:.2f}** · 📈 XP **×{xp_mult:.2f}** _(permanent)_"
                 ))
             else:
                 items.append(v2_body(
@@ -451,8 +450,8 @@ async def _build_layout(
             total_avail = len(STREAK_MILESTONES) + len(VETERAN_MILESTONES)
             items.append(v2_divider())
             items.append(v2_body(
-                f"📋 **Paliers débloqués :** `{total_claimed}` / `{total_avail}`\n"
-                f"_💡 Reviens chaque jour pour faire monter ton streak !_"
+                f"📋 Paliers débloqués · `{total_claimed}` / `{total_avail}`\n"
+                f"-# Reviens chaque jour pour faire monter ton streak."
             ))
 
             self.add_item(v2_container(*items, color=0xFFD700))

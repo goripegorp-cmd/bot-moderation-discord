@@ -161,8 +161,8 @@ def _build_panel(chain: dict):
     ends_epoch = _epoch_of(chain.get("ends_at"))
 
     items = [
-        v2_title("🔗  LA CHAÎNE D'INVOCATION"),
-        v2_subtitle("👥 Relais : chaque maillon = un joueur **≠ des 2 derniers** "
+        v2_title("🔗 La Chaîne d'invocation"),
+        v2_subtitle("👥 Relais : chaque maillon = un joueur ≠ des 2 derniers "
                     "· 12 maillons = gagné · ne casse pas la chaîne !"),
         v2_divider(),
     ]

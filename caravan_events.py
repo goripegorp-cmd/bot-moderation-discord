@@ -186,8 +186,8 @@ def _build_panel(carav: dict, roles: dict):
         ends_epoch = 0
 
     items = [
-        v2_title("🐫  LA CARAVANE DES TROIS SCEAUX"),
-        v2_subtitle("👥 **3 joueurs** tiennent les 3 sceaux EN MÊME TEMPS "
+        v2_title("🐫 La Caravane des trois sceaux"),
+        v2_subtitle("👥 3 joueurs tiennent les 3 sceaux en même temps "
                     "(1 sceau/pers · ~90 s)"),
         v2_divider(),
     ]

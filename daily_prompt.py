@@ -242,8 +242,8 @@ async def post_now(guild: discord.Guild) -> bool:
         v2_container = _v2['v2_container']
 
         items = [
-            v2_title("📅  Question du jour"),
-            v2_subtitle("_Vote en cliquant — fin demain 18h. Tous les votants gagnent **+50 coins**._"),
+            v2_title("📅 Question du jour"),
+            v2_subtitle("Fin demain 18h · tous les votants gagnent +50 coins."),
             v2_divider(),
             v2_body(f"## {q_data['q']}"),
         ]

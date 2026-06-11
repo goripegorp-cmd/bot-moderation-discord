@@ -137,7 +137,7 @@ async def _build_page_current(guild_id: int) -> list:
     v2_divider = _v2['v2_divider']
 
     state = await _story.get_state(guild_id)
-    items = [v2_title("📖  LA CHRONIQUE D'ABYLUMIS")]
+    items = [v2_title("📖 La Chronique d'Abylumis")]
     if not state:
         items.append(v2_body("_La Chronique n'a pas encore commencé._"))
         return items
@@ -200,10 +200,9 @@ async def _build_page_current(guild_id: int) -> list:
                 if council_def:
                     items.append(v2_divider())
                     items.append(v2_body(
-                        f"🗳️ **CONSEIL ACTIF — *{council_def['title']}***\n"
+                        f"🗳️ **Conseil actif — *{council_def['title']}***\n"
                         f"_{council_def['question']}_\n"
-                        f"`{active['total_votes']}` voix · ferme `{active['closes_at']}`\n\n"
-                        f"_Clique sur 🗳️ Conseil ci-dessous pour voter._"
+                        f"`{active['total_votes']}` voix · ferme `{active['closes_at']}`"
                     ))
         except Exception:
             pass
@@ -218,11 +217,10 @@ async def _build_page_current(guild_id: int) -> list:
                           / max(1, active_climax["hp_max"]))
                 items.append(v2_divider())
                 items.append(v2_body(
-                    f"⚔️ **BOSS CLIMAX ACTIF** ⚔️\n"
+                    f"⚔️ **Boss climax actif**\n"
                     f"{boss.get('emoji', '?')} **{boss.get('name', '?')}**\n"
-                    f"HP : `{active_climax['hp_current']:,}/{active_climax['hp_max']:,}` "
-                    f"({pct}%)\n\n"
-                    f"_Clique sur ⚔️ Boss ci-dessous pour attaquer._"
+                    f"HP `{active_climax['hp_current']:,}/{active_climax['hp_max']:,}` "
+                    f"({pct}%)"
                 ))
         except Exception:
             pass
@@ -233,14 +231,13 @@ async def _build_page_current(guild_id: int) -> list:
             patrol = await _regional.get_active_patrol(guild_id)
             if patrol:
                 region = _regional.get_region_def(patrol["region_id"]) or {}
-                reclaim = " (RECONQUÊTE)" if patrol["is_reclaim"] else ""
+                reclaim = " (reconquête)" if patrol["is_reclaim"] else ""
                 pct = int(patrol["defense_total"] * 100 / max(1, patrol["target"]))
                 items.append(v2_divider())
                 items.append(v2_body(
-                    f"🚨 **PATROUILLE ACTIVE{reclaim}**\n"
+                    f"🚨 **Patrouille active{reclaim}**\n"
                     f"{region.get('emoji', '?')} **{region.get('name', '?')}** est menacée.\n"
-                    f"Défense : `{patrol['defense_total']}/{patrol['target']}` ({pct}%)\n\n"
-                    f"_Clique sur 🌍 Régions ci-dessous pour défendre._"
+                    f"Défense `{patrol['defense_total']}/{patrol['target']}` ({pct}%)"
                 ))
 
             # Debuff serveur
@@ -263,7 +260,7 @@ async def _build_page_history(guild_id: int) -> list:
     v2_title = _v2['v2_title']
     v2_body = _v2['v2_body']
     v2_divider = _v2['v2_divider']
-    items = [v2_title("📚  HISTOIRE — CHAPITRES PASSÉS")]
+    items = [v2_title("📚 Histoire")]
 
     try:
         async with _get_db() as db:
@@ -305,9 +302,9 @@ async def _build_page_memoirs(guild_id: int) -> list:
     v2_body = _v2['v2_body']
     v2_divider = _v2['v2_divider']
 
-    items = [v2_title("📜  MÉMOIRES DES CENDRES")]
+    items = [v2_title("📜 Mémoires des Cendres")]
     items.append(v2_body(
-        "_Le serveur écrit son histoire. Voici les 30 dernières pages._"
+        "_Les 30 dernières pages de l'histoire du serveur._"
     ))
     items.append(v2_divider())
 
@@ -343,9 +340,9 @@ async def _build_page_welcome(guild_id: int) -> list:
     v2_divider = _v2['v2_divider']
 
     items = [
-        v2_title("🌟  BIENVENUE DANS LA CHRONIQUE"),
+        v2_title("🌟 Bienvenue dans la Chronique"),
         v2_subtitle(
-            "_Tu es nouveau ? Cette page t'explique tout en 1 minute._"
+            "_Tout ce qu'il faut savoir en 1 minute._"
         ),
         v2_divider(),
     ]
@@ -365,8 +362,7 @@ async def _build_page_welcome(guild_id: int) -> list:
 
     items.append(v2_body(
         "**🎭 Où en est le serveur ?**\n\n"
-        f"Actuellement : **Acte {current_act}**, chapitre **{current_chap_id}**.\n\n"
-        "_Clique sur 📖 Chapitre ci-dessous pour voir l'état détaillé._"
+        f"Actuellement : **Acte {current_act}**, chapitre **{current_chap_id}**."
     ))
     items.append(v2_divider())
 
@@ -434,9 +430,9 @@ async def _build_page_acts(guild_id: int) -> list:
     v2_divider = _v2['v2_divider']
     v2_subtitle = _v2['v2_subtitle']
 
-    items = [v2_title("🎭  LES TROIS ACTES")]
+    items = [v2_title("🎭 Les trois Actes")]
     items.append(v2_subtitle(
-        "_9 chapitres répartis sur 9 mois. Chaque Acte change le monde._"
+        "_9 chapitres sur 9 mois. Chaque Acte change le monde._"
     ))
     items.append(v2_divider())
 
@@ -496,11 +492,6 @@ async def build_codex_panel(
 
     if not items:
         items = [v2_body("_Codex indisponible._")]
-
-    items.append(v2_divider())
-    items.append(v2_body(
-        "_💡 Utilise les onglets ci-dessous pour naviguer dans le Codex._"
-    ))
 
     class _CodexLayout(LayoutView):
         def __init__(self):

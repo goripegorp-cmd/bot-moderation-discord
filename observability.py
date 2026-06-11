@@ -541,54 +541,48 @@ def build_daily_report_panel(snapshot: dict, prev_snapshot: Optional[dict],
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title(f"📊  RAPPORT QUOTIDIEN — {snapshot['day']}"))
+            items.append(v2_title(f"📊 Rapport du {snapshot['day']}"))
             items.append(v2_subtitle(
-                f"_État du serveur {guild_name} sur les dernières 24h_"
+                f"Dernières 24h · {guild_name}"
             ))
             items.append(v2_divider())
 
             # Members
-            items.append(v2_body("### 👥 MEMBRES"))
+            items.append(v2_body("### 👥 Membres"))
             items.append(v2_body(
-                f"📊 Total membres : `{snapshot['member_count']}` "
-                f"{_diff_str(snapshot['member_count'], prev.get('member_count', 0))}\n"
-                f"➕ Arrivées : `{snapshot['joined']}` "
-                f"{_diff_str(snapshot['joined'], prev.get('joined', 0))}\n"
-                f"➖ Départs : `{snapshot['left_count']}` "
-                f"{_diff_str(snapshot['left_count'], prev.get('left_count', 0))}\n"
-                f"📈 Net : `{snapshot['joined'] - snapshot['left_count']:+}`"
+                f"👥 **Total** `{snapshot['member_count']}` "
+                f"{_diff_str(snapshot['member_count'], prev.get('member_count', 0))} · "
+                f"➕ `{snapshot['joined']}` "
+                f"{_diff_str(snapshot['joined'], prev.get('joined', 0))} · "
+                f"➖ `{snapshot['left_count']}` "
+                f"{_diff_str(snapshot['left_count'], prev.get('left_count', 0))} · "
+                f"📈 **Net** `{snapshot['joined'] - snapshot['left_count']:+}`"
             ))
 
             # Mod
             items.append(v2_divider())
-            items.append(v2_body("### 🛡️ MODÉRATION"))
+            items.append(v2_body("### 🛡️ Modération"))
             items.append(v2_body(
-                f"⚠️ Infractions : `{snapshot['infractions']}` "
+                f"⚠️ **Infractions** `{snapshot['infractions']}` "
                 f"{_diff_str(snapshot['infractions'], prev.get('infractions', 0))}"
             ))
 
             # Tickets
             items.append(v2_divider())
-            items.append(v2_body("### 🎫 TICKETS"))
+            items.append(v2_body("### 🎫 Tickets"))
             items.append(v2_body(
-                f"🟢 Ouverts : `{snapshot['tickets_opened']}` "
-                f"{_diff_str(snapshot['tickets_opened'], prev.get('tickets_opened', 0))}\n"
-                f"🔒 Fermés : `{snapshot['tickets_closed']}` "
+                f"🟢 **Ouverts** `{snapshot['tickets_opened']}` "
+                f"{_diff_str(snapshot['tickets_opened'], prev.get('tickets_opened', 0))} · "
+                f"🔒 **Fermés** `{snapshot['tickets_closed']}` "
                 f"{_diff_str(snapshot['tickets_closed'], prev.get('tickets_closed', 0))}"
             ))
 
             # Events
             items.append(v2_divider())
-            items.append(v2_body("### 🎯 EVENTS"))
+            items.append(v2_body("### 🎯 Events"))
             items.append(v2_body(
-                f"🏆 Events terminés : `{snapshot['events_finished']}` "
+                f"🏆 **Terminés** `{snapshot['events_finished']}` "
                 f"{_diff_str(snapshot['events_finished'], prev.get('events_finished', 0))}"
-            ))
-
-            items.append(v2_divider())
-            items.append(v2_body(
-                "_💡 `/server retention` pour les courbes de rétention._\n"
-                "_💡 `/server anomalies` pour les alertes détectées._"
             ))
 
             self.add_item(v2_container(*items, color=0x2ECC71))
@@ -611,9 +605,9 @@ def build_history_panel(snapshots: list[dict], guild_name: str = ""):
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title("📈  HISTORIQUE DES SNAPSHOTS"))
+            items.append(v2_title("📈 Historique"))
             items.append(v2_subtitle(
-                f"_Les {len(snapshots)} derniers jours de {guild_name}_"
+                f"{len(snapshots)} derniers jours · {guild_name}"
             ))
             items.append(v2_divider())
 
@@ -626,18 +620,13 @@ def build_history_panel(snapshots: list[dict], guild_name: str = ""):
                 for s in snapshots:
                     lines.append(
                         f"📅 **`{s['day']}`** — "
-                        f"👥 `{s['member_count']}` membres · "
+                        f"👥 `{s['member_count']}` · "
                         f"➕`{s['joined']}` / ➖`{s['left_count']}` · "
-                        f"⚠️ `{s['infractions']}` mod · "
-                        f"🎫 `{s['tickets_opened']}` tickets · "
-                        f"🎯 `{s['events_finished']}` events"
+                        f"⚠️ `{s['infractions']}` · "
+                        f"🎫 `{s['tickets_opened']}` · "
+                        f"🎯 `{s['events_finished']}`"
                     )
-                items.append(v2_body("\n\n".join(lines)))
-
-            items.append(v2_divider())
-            items.append(v2_body(
-                "_💡 `/server report` pour le dernier rapport détaillé._"
-            ))
+                items.append(v2_body("\n".join(lines)))
 
             self.add_item(v2_container(*items, color=0x2ECC71))
 
@@ -659,16 +648,15 @@ def build_retention_panel(retention: dict, guild_name: str = ""):
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title("📉  RÉTENTION MEMBRES"))
+            items.append(v2_title("📉 Rétention"))
             items.append(v2_subtitle(
-                f"_Combien de nouveaux restent après N jours — {guild_name}_"
+                f"Membres restés après N jours · {guild_name}"
             ))
             items.append(v2_divider())
 
             items.append(v2_body(
-                f"📊 **Total membres trackés :** `{retention.get('total_tracked', 0)}`\n"
-                f"_(Seuls les membres ayant rejoint depuis l'activation du module "
-                f"sont comptés)_"
+                f"📊 **Membres trackés** `{retention.get('total_tracked', 0)}`\n"
+                f"-# Comptés depuis l'activation du module"
             ))
             items.append(v2_divider())
 
@@ -689,16 +677,14 @@ def build_retention_panel(retention: dict, guild_name: str = ""):
                     filled = round(pct / 100 * bar_len)
                     bar = "█" * filled + "░" * (bar_len - filled)
                     lines.append(
-                        f"⏱️ **Après {w} jours** : `{pct}%`\n"
-                        f"   `{bar}`\n"
-                        f"   _`{data['kept']}` restés sur `{data['eligible']}` éligibles_"
+                        f"⏱️ **{w}j** `{pct}%` `{bar}` "
+                        f"· _{data['kept']}/{data['eligible']}_"
                     )
-                items.append(v2_body("\n\n".join(lines)))
+                items.append(v2_body("\n".join(lines)))
 
             items.append(v2_divider())
             items.append(v2_body(
-                "_💡 Vise > 50% à 7j pour un bon onboarding, > 30% à 30j pour "
-                "une communauté saine._"
+                "-# Vise > 50% à 7j et > 30% à 30j pour une communauté saine"
             ))
 
             self.add_item(v2_container(*items, color=0x9B59B6))
@@ -723,31 +709,29 @@ def build_anomalies_panel(anomalies: list[dict], guild_name: str = ""):
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title("🚨  ANOMALIES DÉTECTÉES"))
+            items.append(v2_title("🚨 Anomalies"))
             items.append(v2_subtitle(
-                f"_Les {len(anomalies)} derniers signaux faibles — {guild_name}_"
+                f"{len(anomalies)} derniers signaux · {guild_name}"
             ))
             items.append(v2_divider())
 
             if not anomalies:
                 items.append(v2_body(
-                    "✨ _Aucune anomalie détectée récemment. Tout va bien !_"
+                    "✨ _Aucune anomalie récente. Tout va bien !_"
                 ))
             else:
                 lines = []
                 for a in anomalies[:10]:
                     em = severity_emoji.get(a["severity"], "🟡")
                     lines.append(
-                        f"{em} **{a['kind']}** _({a['severity']})_\n"
-                        f"   {a['detail']}\n"
-                        f"   _Détecté : {a['detected_at']}_"
+                        f"{em} **{a['kind']}** · {a['detail']}\n"
+                        f"-# {a['detected_at']}"
                     )
-                items.append(v2_body("\n\n".join(lines)))
+                items.append(v2_body("\n".join(lines)))
 
             items.append(v2_divider())
             items.append(v2_body(
-                "_💡 Check toutes les 6h vs moyenne des 7 jours précédents. "
-                "Spike > 2× ou drop < 50% déclenche un signal._"
+                "-# Check 6h · spike > 2× ou drop < 50% vs moyenne 7j"
             ))
 
             self.add_item(v2_container(*items, color=0xE74C3C))

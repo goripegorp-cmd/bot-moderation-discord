@@ -257,6 +257,7 @@ def build_faq_root():
     if _v2 is None:
         return None
     v2_title = _v2['v2_title']
+    v2_subtitle = _v2['v2_subtitle']
     v2_body = _v2['v2_body']
     v2_divider = _v2['v2_divider']
     LayoutView = _v2['LayoutView']
@@ -266,18 +267,9 @@ def build_faq_root():
         def __init__(self):
             super().__init__(timeout=600)
             items = [
-                v2_title("❓  Comment ça marche ?"),
-                v2_body(
-                    "_Bienvenue ! Choisis une catégorie pour découvrir "
-                    "les features du serveur. Tout est cliquable._"
-                ),
-                v2_divider(),
-                v2_body(
-                    "**Catégories disponibles :**\n"
-                    + "\n".join(
-                        f"{c['emoji']} **{c['title']}**"
-                        for c in FAQ_CATEGORIES
-                    )
+                v2_title("❓ Comment ça marche ?"),
+                v2_subtitle(
+                    "Choisis une catégorie pour découvrir les features"
                 ),
             ]
             self.add_item(v2_container(*items, color=0x3498DB))
@@ -337,8 +329,8 @@ def build_faq_category(cat_key: str):
         def __init__(self):
             super().__init__(timeout=600)
             items = [
-                v2_title(f"{cat['emoji']}  {cat['title']}"),
-                v2_body("_Choisis une question pour voir la réponse._"),
+                v2_title(f"{cat['emoji']} {cat['title']}"),
+                v2_body("_Choisis une question ci-dessous._"),
                 v2_divider(),
             ]
             for i, qa in enumerate(qa_list, 1):
@@ -389,7 +381,7 @@ def build_faq_answer(cat_key: str, qa_idx: int):
         def __init__(self):
             super().__init__(timeout=300)
             items = [
-                v2_title(f"💡  {qa['q']}"),
+                v2_title(f"💡 {qa['q']}"),
                 v2_divider(),
                 v2_body(qa["a"]),
             ]

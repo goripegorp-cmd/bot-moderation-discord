@@ -225,9 +225,9 @@ def build_levels_panel():
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title("🎙️  PALIERS VOCAUX"))
+            items.append(v2_title("🎙️ Paliers vocaux"))
             items.append(v2_subtitle(
-                "_Tous les paliers basés sur tes minutes vocales cumulées_"
+                "Récompenses sur tes minutes vocales cumulées"
             ))
             items.append(v2_divider())
 
@@ -235,16 +235,9 @@ def build_levels_panel():
             for m in VOICE_MILESTONES:
                 dur = _format_duration(m["minutes"])
                 lines.append(
-                    f"{m['emoji']} **{m['title']}** _({dur})_\n"
-                    f"   → `+{m['coins']:,}` coins"
+                    f"{m['emoji']} **{m['title']}** · _{dur}_ · `+{m['coins']:,}` coins"
                 )
-            items.append(v2_body("\n\n".join(lines)))
-
-            items.append(v2_divider())
-            items.append(v2_body(
-                "_💡 `/voice my_stats` pour voir tes minutes courantes._\n"
-                "_💡 `/voice claim` pour réclamer les paliers atteints._"
-            ))
+            items.append(v2_body("\n".join(lines)))
 
             self.add_item(v2_container(*items, color=0x5865F2))
 
@@ -274,64 +267,56 @@ async def build_stats_panel(
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title(f"🎧  STATS VOCALES DE {member.display_name.upper()}"))
+            items.append(v2_title(f"🎧 Stats vocales · {member.display_name}"))
             items.append(v2_subtitle(
-                "_Tes minutes vocales cumulées sur le serveur_"
+                "Tes minutes vocales cumulées sur le serveur"
             ))
             items.append(v2_divider())
 
             # Awarded maintenant ?
             if awarded_now:
-                items.append(v2_body("### 🎉 NOUVEAUX PALIERS"))
+                items.append(v2_body("### 🎉 Nouveaux paliers"))
                 lines = []
                 total_coins = 0
                 for entry in awarded_now:
                     m = entry["milestone"]
                     lines.append(
-                        f"{m['emoji']} **{m['title']}** "
-                        f"_({_format_duration(m['minutes'])})_ "
-                        f"→ +`{m['coins']:,}` coins"
+                        f"{m['emoji']} **{m['title']}** · "
+                        f"_{_format_duration(m['minutes'])}_ · "
+                        f"`+{m['coins']:,}` coins"
                     )
                     total_coins += int(m.get("coins", 0))
                 items.append(v2_body("\n".join(lines)))
                 if total_coins:
                     items.append(v2_body(
-                        f"💰 **Total reçu maintenant : `{total_coins:,}` coins**"
+                        f"💰 **Total reçu : `{total_coins:,}` coins**"
                     ))
                 items.append(v2_divider())
 
             # Stats actuelles
-            items.append(v2_body("### 📊 ACTIVITÉ ACTUELLE"))
+            items.append(v2_body("### 📊 Activité"))
             items.append(v2_body(
-                f"🎙️ **Minutes cumulées :** `{minutes:,}` min "
-                f"_({_format_duration(minutes)})_"
+                f"🎙️ **Cumulé** `{minutes:,}` min · _{_format_duration(minutes)}_ · "
+                f"📋 **Paliers** `{len(claimed)}`/`{len(VOICE_MILESTONES)}`"
             ))
 
             # Prochain palier
             if next_m:
                 items.append(v2_divider())
-                items.append(v2_body("### 🎯 PROCHAIN PALIER"))
+                items.append(v2_body("### 🎯 Prochain palier"))
                 remaining = next_m["minutes"] - minutes
                 items.append(v2_body(
-                    f"{next_m['emoji']} **{next_m['title']}** "
-                    f"_({_format_duration(next_m['minutes'])})_\n"
-                    f"{_progress_bar(minutes, next_m['minutes'])}\n"
-                    f"_Plus que `{_format_duration(remaining)}` à faire._\n"
-                    f"🎁 Récompense : `+{next_m['coins']:,}` coins"
+                    f"{next_m['emoji']} **{next_m['title']}** · "
+                    f"_{_format_duration(next_m['minutes'])}_ · "
+                    f"🎁 `+{next_m['coins']:,}` coins\n"
+                    f"{_progress_bar(minutes, next_m['minutes'])} · "
+                    f"plus que `{_format_duration(remaining)}`"
                 ))
             else:
                 items.append(v2_divider())
                 items.append(v2_body(
                     "👑 **Tous les paliers atteints !** Tu es une légende vocale."
                 ))
-
-            # Total claim
-            items.append(v2_divider())
-            items.append(v2_body(
-                f"📋 **Paliers débloqués :** "
-                f"`{len(claimed)}` / `{len(VOICE_MILESTONES)}`\n"
-                f"_💡 `/voice claim` pour récupérer les paliers en attente._"
-            ))
 
             self.add_item(v2_container(*items, color=0x5865F2))
 

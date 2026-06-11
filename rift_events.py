@@ -190,9 +190,8 @@ def _build_panel(rift: dict, distinct: int):
         ends_epoch = 0
 
     items = [
-        v2_title("🌀  LA FAILLE CONVERGENTE"),
-        v2_subtitle("👥 **4+ joueurs** · ⚡ Cliquez **Canaliser** ENSEMBLE pour sceller "
-                    "· 🔊 vocal = +20%"),
+        v2_title("🌀 La Faille convergente"),
+        v2_subtitle("👥 4+ joueurs · ⚡ Canalisez ensemble pour sceller · 🔊 vocal = +20%"),
         v2_divider(),
     ]
     if ended:

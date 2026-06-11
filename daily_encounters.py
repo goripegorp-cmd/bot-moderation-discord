@@ -1184,15 +1184,13 @@ async def build_encounter_panel(
     mood = await _npc.get_mood(guild_id, user_id, encounter["npc_id"])
 
     items = [
-        v2_title(f"{npc.get('emoji', '✨')}  {npc.get('name', '?')}"),
+        v2_title(f"{npc.get('emoji', '✨')} {npc.get('name', '?')}"),
         v2_subtitle(
-            f"_{npc.get('title', '')}_\n"
-            f"Relation : {_npc.mood_icon(mood)} {_npc.mood_label(mood)} ({mood}/100)"
+            f"_{npc.get('title', '')}_ · "
+            f"{_npc.mood_icon(mood)} {_npc.mood_label(mood)} ({mood}/100)"
         ),
         v2_divider(),
         v2_body(f"**{encounter['title']}**\n\n_{encounter['narrative']}_"),
-        v2_divider(),
-        v2_body("_Que choisis-tu ?_"),
     ]
 
     target_uid = view_user_id if view_user_id else user_id
@@ -1238,10 +1236,10 @@ async def _build_result_panel(
     new_mood = result["new_mood"]
 
     items = [
-        v2_title(f"{npc.get('emoji', '✨')}  {npc.get('name', '?')} répond"),
+        v2_title(f"{npc.get('emoji', '✨')} {npc.get('name', '?')} répond"),
         v2_subtitle(
-            f"_{npc.get('title', '')}_\n"
-            f"Relation : {_npc.mood_icon(new_mood)} {_npc.mood_label(new_mood)} ({new_mood}/100)"
+            f"_{npc.get('title', '')}_ · "
+            f"{_npc.mood_icon(new_mood)} {_npc.mood_label(new_mood)} ({new_mood}/100)"
         ),
         v2_divider(),
         v2_body(f"_{result['reply']}_"),
@@ -1250,9 +1248,8 @@ async def _build_result_panel(
     delta = int(result["mood_delta"])
     delta_str = f"+{delta}" if delta > 0 else str(delta)
     items.append(v2_body(
-        f"📊 Mood : `{delta_str}`\n"
-        f"💰 `+{result['coin_reward']}` 🪙\n"
-        f"📖 +1 progression Chronique"
+        f"📊 Mood `{delta_str}` · 💰 `+{result['coin_reward']}` 🪙 · "
+        f"📖 +1 Chronique"
     ))
 
     # Phase 170.6 : si un indice a été obtenu, le révéler en bonus
@@ -1260,16 +1257,14 @@ async def _build_result_panel(
     if clue:
         items.append(v2_divider())
         items.append(v2_body(
-            f"🔮 **TU AS REÇU UN FRAGMENT D'INDICE !**\n\n"
-            f"_Mystère : **{clue['mystery_title']}** "
-            f"(fragment {clue['clue_idx'] + 1}/{clue['total_fragments']})_\n\n"
-            f"{clue['clue_text']}\n\n"
-            f"_📖 Va dans 🔮 Mystères du Codex pour le partager publiquement "
-            f"et inviter les autres à compléter._"
+            f"🔮 **Fragment d'indice reçu**\n\n"
+            f"_{clue['mystery_title']} · fragment "
+            f"{clue['clue_idx'] + 1}/{clue['total_fragments']}_\n\n"
+            f"{clue['clue_text']}"
         ))
 
     items.append(v2_body(
-        "_Reviens demain pour une nouvelle rencontre._"
+        "-# Reviens demain pour une nouvelle rencontre."
     ))
 
     class _ResultLayout(LayoutView):

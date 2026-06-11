@@ -647,22 +647,21 @@ def build_season_panel(guild_name: str = ""):
             super().__init__(timeout=300)
             items = []
             items.append(v2_title(
-                f"{season['emoji']}  SAISON ACTIVE — {season['name'].upper()}"
+                f"{season['emoji']} Saison · {season['name']}"
             ))
             items.append(v2_subtitle(season["tagline"]))
             items.append(v2_divider())
 
             # Compteur jours restants
             items.append(v2_body(
-                f"⏳ **Reste : `{days_left}` jour(s)** avant changement de saison.\n"
-                f"_Profite des bonus et des drops exclusifs maintenant !_"
+                f"⏳ Reste **`{days_left}` jour(s)** avant changement de saison."
             ))
 
             # Bonus de saison
             mods = season.get("modifiers", {})
             if mods:
                 items.append(v2_divider())
-                items.append(v2_body("### ✨ BONUS DE SAISON"))
+                items.append(v2_body("### ✨ Bonus de saison"))
                 mod_labels = {
                     "boss_hp_mult": "🐲 Boss HP",
                     "boss_reward_mult": "🏆 Récompenses boss",
@@ -683,14 +682,14 @@ def build_season_panel(guild_name: str = ""):
                 lines = []
                 for key, mult in mods.items():
                     label = mod_labels.get(key, key)
-                    lines.append(f"• {label} : **×{mult}**")
-                items.append(v2_body("\n".join(lines)))
+                    lines.append(f"{label} ×{mult}")
+                items.append(v2_body(" · ".join(lines)))
 
             # Daily mystery modifier
             daily = current_daily_modifier()
             items.append(v2_divider())
             items.append(v2_body(
-                f"### {daily['emoji']} AUJOURD'HUI : {daily['label'].upper()}\n"
+                f"### {daily['emoji']} Aujourd'hui · {daily['label']}\n"
                 f"_{daily['tagline']}_"
             ))
             d_mods = daily.get("modifiers", {})
@@ -714,10 +713,10 @@ def build_season_panel(guild_name: str = ""):
                         "level_up_bonus": "⬆️ Level up",
                         "collective_event_bonus": "🤝 Collectifs",
                     }.get(key, key)
-                    d_lines.append(f"  · {label} ×{mult}")
-                items.append(v2_body("\n".join(d_lines)))
+                    d_lines.append(f"{label} ×{mult}")
+                items.append(v2_body(" · ".join(d_lines)))
             items.append(v2_body(
-                "_💡 Le bonus du jour change tous les matins — viens checker !_"
+                "-# Le bonus du jour change tous les matins."
             ))
 
             # Weekend special (si actif)
@@ -725,7 +724,7 @@ def build_season_panel(guild_name: str = ""):
             if weekend:
                 items.append(v2_divider())
                 items.append(v2_body(
-                    f"### 🎉 WEEKEND SPECIAL : {weekend['label'].upper()}\n"
+                    f"### 🎉 Weekend special · {weekend['label']}\n"
                     f"{weekend['emoji']} _{weekend['tagline']}_"
                 ))
                 w_mods = weekend.get("modifiers", {})
@@ -745,10 +744,10 @@ def build_season_panel(guild_name: str = ""):
                             "quest_reward_mult": "📜 Quêtes",
                             "daily_mult": "🎁 Daily",
                         }.get(key, key)
-                        w_lines.append(f"  · {label} ×{mult}")
-                    items.append(v2_body("\n".join(w_lines)))
+                        w_lines.append(f"{label} ×{mult}")
+                    items.append(v2_body(" · ".join(w_lines)))
                 items.append(v2_body(
-                    "_⏰ Ce bonus weekend s'arrête dimanche 23h._"
+                    "-# Ce bonus weekend s'arrête dimanche 23h."
                 ))
 
             # Drops exclusifs
@@ -756,7 +755,7 @@ def build_season_panel(guild_name: str = ""):
             if drops:
                 items.append(v2_divider())
                 items.append(v2_body(
-                    f"### 💎 DROPS EXCLUSIFS ({len(drops)})"
+                    f"### 💎 Drops exclusifs ({len(drops)})"
                 ))
                 rarity_emoji = {
                     "rare": "🔵", "épique": "🟣", "epique": "🟣",
@@ -779,14 +778,8 @@ def build_season_panel(guild_name: str = ""):
                     )
                 items.append(v2_body("\n\n".join(lines)))
                 items.append(v2_body(
-                    "_💡 Ces items ne droppent QUE pendant cette saison. "
-                    "Une fois la saison terminée, ils deviennent introuvables._"
+                    "-# Ces items ne droppent que pendant cette saison."
                 ))
-
-            items.append(v2_divider())
-            items.append(v2_body(
-                "_💡 `/season my_drops` pour voir ce que tu as déjà collecté._"
-            ))
 
             self.add_item(v2_container(*items, color=season["color"]))
 
@@ -813,10 +806,10 @@ def build_my_drops_panel(member, drops: list[dict], guild_name: str = ""):
             super().__init__(timeout=300)
             items = []
             items.append(v2_title(
-                f"{season['emoji']}  COLLECTION — {member.display_name.upper()}"
+                f"{season['emoji']} Collection · {member.display_name}"
             ))
             items.append(v2_subtitle(
-                f"_Tes drops de la saison **{season['name']}** ({len(drops)})_"
+                f"-# Tes drops de la saison {season['name']} ({len(drops)})"
             ))
             items.append(v2_divider())
 
@@ -824,16 +817,15 @@ def build_my_drops_panel(member, drops: list[dict], guild_name: str = ""):
             total_unique = len({d["name"] for d in drops})
             target = len(pool)
             items.append(v2_body(
-                f"📊 **Complétion :** `{total_unique}` / `{target}` items uniques\n"
-                f"📦 **Total drops claim :** `{len(drops)}` "
-                f"(certains items peuvent drop plusieurs fois)"
+                f"📊 Complétion · `{total_unique}` / `{target}` uniques · "
+                f"📦 Total · `{len(drops)}`"
             ))
 
             # Items pas encore collectés
             missing = [d for d in pool if d["name"] not in collected_names]
             if missing:
                 items.append(v2_divider())
-                items.append(v2_body("### ❓ ENCORE À DÉCOUVRIR"))
+                items.append(v2_body("### ❓ Encore à découvrir"))
                 lines = []
                 for d in missing[:6]:
                     lines.append(
@@ -846,7 +838,7 @@ def build_my_drops_panel(member, drops: list[dict], guild_name: str = ""):
             # Items collectés
             if drops:
                 items.append(v2_divider())
-                items.append(v2_body("### 🏆 TES TROUVAILLES"))
+                items.append(v2_body("### 🏆 Tes trouvailles"))
                 # Regrouper par nom (count occurrences)
                 grouped = {}
                 for d in drops:
@@ -870,8 +862,7 @@ def build_my_drops_panel(member, drops: list[dict], guild_name: str = ""):
 
             items.append(v2_divider())
             items.append(v2_body(
-                "_💡 Continue à participer aux events pour compléter ta collection._\n"
-                "_La saison se termine bientôt — fonce !_"
+                "-# Participe aux events pour compléter ta collection."
             ))
 
             self.add_item(v2_container(*items, color=season["color"]))

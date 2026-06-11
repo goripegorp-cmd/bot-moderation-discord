@@ -4962,16 +4962,12 @@ async def create_ticket(i, pid, ans=None):
         panel_name = pnl.get('name', 'Support')
         emb = discord.Embed(color=0x5865F2, timestamp=now())
         emb.set_author(name=f"🎫 Ticket #{tid} • {panel_name}", icon_url=i.guild.icon.url if i.guild.icon else None)
-        emb.description = (
-            f"**Créé par** {i.user.mention} (`{i.user.name}`)\n"
-            f"**Panel** `{panel_name}`\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        )
+        emb.description = f"Ouvert par {i.user.mention} · panel **{panel_name}**"
         emb.set_thumbnail(url=i.user.display_avatar.url)
         if ans:
             for t, a in ans.items():
                 emb.add_field(name=f"📝 {t}", value=a[:1024], inline=False)
-        emb.set_footer(text="⏳ En attente de prise en charge par un staff")
+        emb.set_footer(text="⏳ En attente du staff")
         mention = i.user.mention
         if staff: mention += f" {staff.mention}"
         await webhook_send(ch, 'ticket', content=mention, embed=emb, view=TicketControlView())
@@ -10429,11 +10425,8 @@ class BossArenaLayoutV2(LayoutView):
             )
             items.append(v2_divider())
             warn_text = (
-                f"## {pw.get('emoji', '⚡')} Phase d'attaque !\n"
-                f"**Cible :** {pw.get('targeted_zone_mention', '?')}\n"
-                f"_Le boss lance un **{pw.get('attack_name', 'attaque')}**{countdown_str}._\n"
-                f"➡️ Quitte cette zone !"
-                + (f"\n💡 Zone safe : {pw['safe_zone_mention']}" if pw.get('safe_zone_mention') else "")
+                f"{pw.get('emoji', '⚡')} **{pw.get('attack_name', 'Attaque')}**{countdown_str} sur {pw.get('targeted_zone_mention', '?')} — quitte la zone !"
+                + (f"\n-# Zone safe : {pw['safe_zone_mention']}" if pw.get('safe_zone_mention') else "")
             )
             items.append(v2_body(warn_text))
 
@@ -10457,9 +10450,9 @@ class BossArenaLayoutV2(LayoutView):
 
         items.append(v2_divider())
 
-        # Phase 187 : guide « comment jouer » pas-à-pas (seulement si boss vivant)
+        # Phase 187 : rappel compact (le bouton ⚔️ ATTAQUER porte l'action)
         if hp > 0:
-            items.append(v2_body(events2026.how_to_play('boss_raid')))
+            items.append(v2_body("-# ⚔️ Équipe ton meilleur stuff, puis frappe le boss."))
 
         # Boutons ÉQUIPEMENT + FAMILIER en bas (Action Row)
         # Phase 74 : custom_id ALIGNÉ avec BossAttackView (boss_inv_X) — voir HP section
@@ -13197,7 +13190,7 @@ class EventShopPanelV2(LayoutView):
 
         self.clear_items()
 
-        lines = ["**🛒 Boutique d'événement (rotation hebdomadaire)**\n"]
+        lines = []
         for idx, it in enumerate(items):
             rarity = it.get('rarity', 'commune')
             rar_emoji = events2026.RARITY_EMOJIS.get(rarity, '')
@@ -13229,11 +13222,7 @@ class EventShopPanelV2(LayoutView):
             v2_subtitle(f"Tu as `{coins:,}` 🪙 — rotation hebdomadaire"),
             v2_divider(),
             v2_body(items_block),
-            v2_body(
-                "_Les armes/armures achetés ici remplacent ton équipement "
-                "uniquement si la rareté est supérieure._\n"
-                "_Le shop change chaque semaine !_"
-            ),
+            v2_body("-# Un achat ne remplace ton équipement que si sa rareté est supérieure."),
             v2_divider(),
             discord.ui.ActionRow(*buttons[:3]),
             discord.ui.ActionRow(*buttons[3:6]) if len(buttons) > 3 else None,
@@ -14449,31 +14438,23 @@ async def vocal_optin_cmd(i: discord.Interaction):
                 super().__init__(timeout=300)
                 items = []
                 if _is_on:
-                    items.append(v2_title("🎤  DÉPLACEMENT VOCAL : ACTIVÉ"))
+                    items.append(v2_title("🎤 Déplacement vocal · activé"))
                     items.append(v2_subtitle("Tu seras déplacé automatiquement en zone safe pendant un Boss Raid"))
                     items.append(v2_divider())
-                    items.append(v2_body("### ✅ COMMENT ÇA FONCTIONNE"))
                     items.append(v2_body(
-                        "Pendant un **Boss Raid**, si tu es dans une zone vocale et que le boss "
-                        "**attaque cette zone**, le bot te déplacera automatiquement vers une zone "
-                        "safe pour te protéger des dégâts."
+                        "Pendant un **Boss Raid**, si le boss attaque ta zone vocale, le bot te "
+                        "déplace en zone safe pour t'éviter les dégâts.\n"
+                        "-# Désactivable à tout moment avec `/vocal_optin`."
                     ))
-                    items.append(v2_divider())
-                    items.append(v2_body("### 🔧 PRÉFÉRENCE"))
-                    items.append(v2_body("Tu peux désactiver à tout moment avec `/vocal_optin`."))
                 else:
-                    items.append(v2_title("🔘  DÉPLACEMENT VOCAL : DÉSACTIVÉ"))
+                    items.append(v2_title("🔘 Déplacement vocal · désactivé"))
                     items.append(v2_subtitle("Le bot ne te déplacera plus — tu recevras une notification à la place"))
                     items.append(v2_divider())
-                    items.append(v2_body("### ⚠️ À SAVOIR"))
                     items.append(v2_body(
-                        "Pendant un **Boss Raid**, si le boss attaque ta zone vocale, "
-                        "tu **ne seras pas déplacé** mais tu recevras une notification "
-                        "pour te déplacer manuellement."
+                        "Pendant un **Boss Raid**, tu **ne seras pas déplacé** : tu recevras une "
+                        "notification pour te déplacer toi-même.\n"
+                        "-# Réactivable à tout moment avec `/vocal_optin`."
                     ))
-                    items.append(v2_divider())
-                    items.append(v2_body("### 🔧 PRÉFÉRENCE"))
-                    items.append(v2_body("Réactive l'opt-in à tout moment avec `/vocal_optin`."))
                 self.add_item(v2_container(*items, color=0x3498DB))
 
         await i.followup.send(view=_VocalOptinLayout(), ephemeral=True)
@@ -15813,18 +15794,12 @@ async def comeback_dm_task():
                         embed = discord.Embed(
                             title=f"💙 Tu nous manques sur {guild.name} !",
                             description=(
-                                f"Hey {member.mention} ! Ça fait un moment qu'on ne t'a pas vu.\n\n"
-                                f"En attendant ton retour, on t'a réservé un **cadeau de comeback** :\n"
-                                f"🎁 **+`{bonus}` 🪙** à récupérer en 1 clic.\n\n"
-                                f"_Pendant que tu étais parti, plein de choses se sont passées :_\n"
-                                f"⚔️ Des boss ont été vaincus\n"
-                                f"💎 Des trésors ont été distribués\n"
-                                f"🎓 Des quiz ont eu lieu\n\n"
-                                f"**Reviens nous voir quand tu veux** — clique le bouton pour récupérer ton bonus !"
+                                f"Hey {member.mention} ! Ça fait un moment qu'on ne t'a pas vu.\n"
+                                f"On t'a réservé un cadeau de retour : 🎁 **+`{bonus}` 🪙**."
                             ),
                             color=0x5865F2,
                         )
-                        embed.set_footer(text=f"{guild.name} · Tu peux ignorer ce DM, on ne t'en voudra pas")
+                        embed.set_footer(text="💙 À bientôt")
 
                         view = ComebackClaimView(guild.id, user_id, bonus)
                         try:
@@ -16054,14 +16029,14 @@ async def help_cmd(i: discord.Interaction):
                 items = []
 
                 # ═══ HEADER ═══
-                items.append(v2_title("📖  AIDE — TOUTES LES COMMANDES"))
+                items.append(v2_title("📖 Aide"))
                 items.append(v2_subtitle(
                     f"_Toutes les fonctionnalités de {i.guild.name}_"
                 ))
                 items.append(v2_divider())
 
                 # ═══ GROUPE 1 — COMBAT & ÉQUIPEMENT ═══
-                items.append(v2_body("### ⚔️ COMBAT & ÉQUIPEMENT"))
+                items.append(v2_body("### ⚔️ Combat & équipement"))
                 items.append(v2_body(
                     "• `/event` — l'événement en cours + tes stats\n"
                     "• `/inventory` — ton équipement, set bonus, durabilité\n"
@@ -16073,7 +16048,7 @@ async def help_cmd(i: discord.Interaction):
                 items.append(v2_divider())
 
                 # ═══ GROUPE 2 — QUÊTES & PROGRESSION ═══
-                items.append(v2_body("### 📈 QUÊTES & PROGRESSION"))
+                items.append(v2_body("### 📈 Quêtes & progression"))
                 items.append(v2_body(
                     "• `/daily` — 3 quêtes du jour + streak\n"
                     "• `/weekly` — 5 quêtes de la semaine\n"
@@ -16087,7 +16062,7 @@ async def help_cmd(i: discord.Interaction):
                 items.append(v2_divider())
 
                 # ═══ GROUPE 3 — ÉCONOMIE & MARCHÉ ═══
-                items.append(v2_body("### 💰 ÉCONOMIE & MARCHÉ"))
+                items.append(v2_body("### 💰 Économie & marché"))
                 items.append(v2_body(
                     "• `/shop` — boutique de rôles\n"
                     "• `/bank deposit/withdraw/status` — banque (1%/jour)\n"
@@ -16100,7 +16075,7 @@ async def help_cmd(i: discord.Interaction):
                 items.append(v2_divider())
 
                 # ═══ GROUPE 4 — COMPÉTITIF & PvP ═══
-                items.append(v2_body("### 🏆 COMPÉTITIF & PvP"))
+                items.append(v2_body("### 🏆 Compétitif & PvP"))
                 items.append(v2_body(
                     "• `/duel @membre [mise]` — défier en combat 1v1\n"
                     "• `/duel_report` — reporter le gagnant\n"
@@ -16110,7 +16085,7 @@ async def help_cmd(i: discord.Interaction):
                 items.append(v2_divider())
 
                 # ═══ GROUPE 5 — SOCIAL & COMMUNAUTÉ ═══
-                items.append(v2_body("### 💬 SOCIAL & COMMUNAUTÉ"))
+                items.append(v2_body("### 💬 Social & communauté"))
                 items.append(v2_body(
                     "• `/poll <question> <options=A|B|C>` — sondage\n"
                     "• `/suggestion` — proposer une idée\n"
@@ -16122,7 +16097,7 @@ async def help_cmd(i: discord.Interaction):
                 items.append(v2_divider())
 
                 # ═══ GROUPE 6 — PERSONNEL & UTILITAIRES ═══
-                items.append(v2_body("### 🎨 PERSONNEL & UTILITAIRES"))
+                items.append(v2_body("### 🎨 Personnel & utilitaires"))
                 items.append(v2_body(
                     "• `/profile` — profil complet (level/prestige/saison)\n"
                     "• `/pet` — ton compagnon (acheter/évoluer)\n"
@@ -16137,7 +16112,7 @@ async def help_cmd(i: discord.Interaction):
                 items.append(v2_divider())
 
                 # ═══ GROUPE 7 — MODÉRATION (staff) ═══
-                items.append(v2_body("### 🛡️ MODÉRATION (STAFF)"))
+                items.append(v2_body("### 🛡️ Modération (staff)"))
                 items.append(v2_body(
                     "• `/mod warn @membre raison` — avertir\n"
                     "• `/mod mute @membre durée` — timeout\n"
@@ -16148,19 +16123,8 @@ async def help_cmd(i: discord.Interaction):
                 ))
                 items.append(v2_divider())
 
-                # ═══ ASTUCES ═══
-                items.append(v2_body("### 💡 ASTUCES"))
-                items.append(v2_body(
-                    "• Reste actif → tu reçois des **events personnels** aléatoires (cadeaux, devinettes)\n"
-                    "• Participe aux **Boss Raids** → coins + gear + badges\n"
-                    "• Achète ton équipement **avant** un raid pour faire +damage\n"
-                    "• Garde tes coins pour les **enchères rares** et **duels**\n"
-                    "• Vérifie `/hub` pour tout accéder en 1 clic"
-                ))
-                items.append(v2_divider())
-
                 # ═══ Navigation rapide ═══
-                items.append(v2_body("### 🚀 NAVIGATION RAPIDE"))
+                items.append(v2_body("### 🚀 Navigation rapide"))
                 items.append(v2_section(
                     v2_title("🎮  Hub d'engagement"),
                     v2_subtitle("Tout en 1 clic — quêtes, profil, achievements, etc."),
@@ -16174,8 +16138,7 @@ async def help_cmd(i: discord.Interaction):
 
                 items.append(v2_divider())
                 items.append(v2_body(
-                    f"_💡 **{i.guild.name}** · "
-                    f"{events2026.get_help_footer('general')}_"
+                    f"-# {i.guild.name} · {events2026.get_help_footer('general')}"
                 ))
 
                 self.add_item(v2_container(*items, color=0x5865F2))
@@ -17239,24 +17202,20 @@ class HubLiveEventsLayoutV2(LayoutView):
     def __init__(self, event_lines: list, last_updated_ts: int):
         super().__init__(timeout=None)
         items = []
-        items.append(v2_title("📡  EVENTS EN COURS"))
+        items.append(v2_title("📡 Events en cours"))
         items.append(v2_subtitle(
-            f"Actualisé <t:{last_updated_ts}:R>  ·  refresh auto chaque minute"
+            f"Actualisé <t:{last_updated_ts}:R>"
         ))
         items.append(v2_divider())
         if event_lines:
-            items.append(v2_body("### 🔥 ACTIF MAINTENANT"))
+            items.append(v2_body("### 🔥 Actif maintenant"))
             items.append(v2_body("\n".join(f"• {line}" for line in event_lines)))
         else:
             items.append(v2_body(
-                "### 😴 SILENCE…\n"
+                "### 😴 Silence…\n"
                 "_Aucun event en cours pour le moment._\n"
                 "_Reste actif — un boss/chasse/quiz peut spawn à tout moment !_"
             ))
-        items.append(v2_divider())
-        items.append(v2_body(
-            "_💡 Utilise les boutons du panneau du dessus pour participer dès qu'un event apparaît._"
-        ))
         self.add_item(v2_container(*items, color=0xE74C3C if event_lines else 0x95A5A6))
 
 
@@ -49072,57 +49031,48 @@ async def event_cmd(i: discord.Interaction):
                 def __init__(self):
                     super().__init__(timeout=600)
                     items = []
-                    items.append(v2_title(f"🎪  ÉVÉNEMENTS  ·  {i.user.display_name}"))
-                    items.append(v2_subtitle("Aucun event en cours — prépare-toi pour le prochain !"))
+                    items.append(v2_title("🎪 Événements"))
+                    items.append(v2_subtitle("Aucun event en cours — prépare-toi pour le prochain."))
                     items.append(v2_divider())
 
                     # Prochain spawn
-                    items.append(v2_body("### ⏰ PROCHAIN BOSS"))
-                    items.append(v2_body(
-                        f"**Spawn estimé :** {next_str}\n"
-                        f"_Reste actif dans les salons pour ne pas le rater._"
-                    ))
+                    items.append(v2_body("### ⏰ Prochain boss"))
+                    items.append(v2_body(f"**Spawn estimé :** {next_str}"))
 
                     items.append(v2_divider())
 
                     # Équipement résumé
-                    items.append(v2_body("### 🎒 ÉQUIPEMENT"))
+                    items.append(v2_body("### 🎒 Équipement"))
                     items.append(v2_body(
-                        f"⚔️ **Arme :** {w.get('emoji', '⚪')} {w.get('name', '_aucune_')} "
+                        f"⚔️ **Arme** {w.get('emoji', '⚪')} {w.get('name', '_aucune_')} "
                         f"· `+{w.get('atk', 0)}` ATK · _{w.get('rarity', '—')}_\n"
-                        f"🛡️ **Armure :** {a.get('emoji', '⚪')} {a.get('name', '_aucune_')} "
+                        f"🛡️ **Armure** {a.get('emoji', '⚪')} {a.get('name', '_aucune_')} "
                         f"· `+{a.get('def', 0)}` DEF · _{a.get('rarity', '—')}_"
                     ))
 
                     items.append(v2_divider())
 
                     # Stats combat
-                    items.append(v2_body("### 📊 STATS DE COMBAT"))
+                    items.append(v2_body("### 📊 Stats de combat"))
                     hp_bar = events2026.hp_bar(hp, max_hp, length=12)
                     items.append(v2_body(
-                        f"❤️ **HP :** `{hp_bar}` `{hp}/{max_hp}`\n"
-                        f"💀 **Boss vaincus :** `{kills}`\n"
-                        f"💥 **Dégâts cumulés :** `{total_dmg:,}`"
+                        f"❤️ **HP** `{hp_bar}` `{hp}/{max_hp}` · "
+                        f"💀 **Boss** `{kills}` · "
+                        f"💥 **Dégâts** `{total_dmg:,}`"
                     ))
 
                     items.append(v2_divider())
 
                     # Boutons navigation (sections accessory)
-                    items.append(v2_body("### 🔗 NAVIGATION"))
                     items.append(v2_section(
-                        v2_title("🎒  Inventaire complet"),
-                        v2_subtitle("Équipement détaillé, set bonus, durabilité"),
+                        v2_title("🎒 Inventaire complet"),
+                        v2_subtitle("Équipement détaillé · set bonus · durabilité"),
                         accessory=_InventoryBtn(),
                     ))
                     items.append(v2_section(
-                        v2_title("🏅  Hauts faits"),
-                        v2_subtitle("Tes badges débloqués + objectifs à venir"),
+                        v2_title("🏅 Hauts faits"),
+                        v2_subtitle("Badges débloqués · objectifs à venir"),
                         accessory=_BadgesBtn(),
-                    ))
-
-                    items.append(v2_divider())
-                    items.append(v2_body(
-                        "_💡 Quand un boss spawn, le bouton ⚔️ ATTAQUER apparaît dans l'arène._"
                     ))
 
                     self.add_item(v2_container(*items, color=0x5865F2))
@@ -49346,12 +49296,12 @@ async def inventory_cmd(i: discord.Interaction):
                 super().__init__(timeout=600)
                 items = []
                 # ─── HEADER ───
-                items.append(v2_title(f"🎒  INVENTAIRE  ·  {_user_name}"))
-                items.append(v2_subtitle(f"{power_tier}  ·  Puissance totale `{power_score}`"))
+                items.append(v2_title("🎒 Inventaire"))
+                items.append(v2_subtitle(f"{power_tier} · Puissance `{power_score}`"))
                 items.append(v2_divider())
 
                 # ─── GROUPE 1 : ÉQUIPEMENT PRINCIPAL ───
-                items.append(v2_body("### ⚔️ ÉQUIPEMENT"))
+                items.append(v2_body("### ⚔️ Équipement"))
 
                 # Helper : formatte une ligne enchantment si présent
                 def _enchant_line(item: dict) -> str:
@@ -49399,7 +49349,7 @@ async def inventory_cmd(i: discord.Interaction):
                 # Slots futurs (Helmet / Boots / Accessory / Trinket)
                 if any([h, b, acc, tri]):
                     items.append(v2_divider())
-                    items.append(v2_body("### 🎩 ACCESSOIRES"))
+                    items.append(v2_body("### 🎩 Accessoires"))
 
                     for slot_label, slot_item, slot_emoji_default in [
                         ("🎩 Casque", h, '⚪'),
@@ -49428,28 +49378,24 @@ async def inventory_cmd(i: discord.Interaction):
                 items.append(v2_divider())
 
                 # ─── GROUPE 2 : STATS COMBAT ───
-                items.append(v2_body("### ❤️ VITALITÉ"))
+                items.append(v2_body("### ❤️ Vitalité"))
                 # Phase 104 : afficher CRIT total + lifesteal si > 0
-                crit_line = f"\n**🎯 Critique**  `+{total_crit}%`" if total_crit > 0 else ""
+                crit_line = f" · 🎯 `+{total_crit}%` CRIT" if total_crit > 0 else ""
                 lifesteal_line = (
-                    f"\n**🩸 Lifesteal**  `+{int(total_lifesteal * 100)}%`"
+                    f" · 🩸 `+{int(total_lifesteal * 100)}%` vol de vie"
                     if total_lifesteal > 0 else ""
                 )
-                hp_bonus_line = f"\n**💚 HP bonus**  `+{total_hp_bonus}`" if total_hp_bonus > 0 else ""
+                hp_bonus_line = f" · 💚 `+{total_hp_bonus}` HP" if total_hp_bonus > 0 else ""
                 items.append(v2_body(
-                    f"**HP**  `{hp_bar}` `{hp}/{max_hp}`\n"
-                    f"**⚔️ ATK total**  `+{atk}`\n"
-                    f"**🛡️ DEF total**  `+{defe}`"
-                    f"{crit_line}{lifesteal_line}{hp_bonus_line}\n"
-                    f"**⚡ Puissance**  `{power_score}`  ({power_tier})\n"
-                    f"**💀 Boss vaincus**  `{kills}`\n"
-                    f"**💥 Dégâts à vie**  `{total_dmg:,}`"
+                    f"**HP** `{hp_bar}` `{hp}/{max_hp}`\n"
+                    f"⚔️ `+{atk}` ATK · 🛡️ `+{defe}` DEF{crit_line}{lifesteal_line}{hp_bonus_line}\n"
+                    f"⚡ `{power_score}` Puissance · 💀 `{kills}` boss · 💥 `{total_dmg:,}` dégâts à vie"
                 ))
 
                 # ─── Phase 106 : SET BONUS ACTIF ───
                 if set_bonus_info.get('name'):
                     items.append(v2_divider())
-                    items.append(v2_body("### 🏆 SET BONUS ACTIF"))
+                    items.append(v2_body("### 🏆 Set bonus actif"))
                     set_stats = []
                     if set_bonus_info['atk']: set_stats.append(f"+{set_bonus_info['atk']} ATK")
                     if set_bonus_info['def']: set_stats.append(f"+{set_bonus_info['def']} DEF")
@@ -49463,18 +49409,16 @@ async def inventory_cmd(i: discord.Interaction):
                 else:
                     items.append(v2_divider())
                     items.append(v2_body(
-                        "### 🏆 SET BONUS\n"
+                        "### 🏆 Set bonus\n"
                         "_⚪ Aucun set actif — équipe 2+ items rares pour activer **Apprenti** (+5 ATK)_"
                     ))
 
                 items.append(v2_divider())
 
                 # ─── GROUPE 3 : ÉCONOMIE ───
-                items.append(v2_body("### 💰 ÉCONOMIE"))
+                items.append(v2_body("### 💰 Économie"))
                 items.append(v2_body(
-                    f"🪙 **En main :**  `{coins:,}`\n"
-                    f"🏦 **Banque :**  `{bank:,}`\n"
-                    f"💎 **Total :**  `{total_wealth:,}` 🪙"
+                    f"🪙 `{coins:,}` en main · 🏦 `{bank:,}` banque · 💎 `{total_wealth:,}` total"
                 ))
 
                 items.append(v2_divider())
@@ -49569,24 +49513,13 @@ async def inventory_cmd(i: discord.Interaction):
                         except Exception:
                             pass
 
-                items.append(v2_body(
-                    "**⚡  ACTIONS**  ·  🎒 équiper/vendre · 🔧 réparer · ⚒️ forger · 🔄 actualiser"
-                ))
+                items.append(v2_body("### ⚡ Actions"))
                 items.append(discord.ui.ActionRow(
                     _EquipBtn(), _RepairBtn(), _ForgeBtn(),
                     panels_h.make_refresh_button(
                         _owner_id, _refresh_inv,
                         custom_id_prefix="phase128_inv_refresh",
                     ),
-                ))
-
-                items.append(v2_divider())
-
-                # ─── FOOTER ───
-                items.append(v2_body(
-                    "_💡 `/event` pour l'événement en cours · "
-                    "`/badges` pour les hauts faits · "
-                    "`/loots` pour les items uniques_"
                 ))
 
                 self.add_item(v2_container(*items, color=0x5865F2))
@@ -51289,20 +51222,16 @@ async def craft_cmd(i: discord.Interaction):
             def __init__(self):
                 super().__init__(timeout=180)
                 lay = []
-                lay.append(v2_title("⚒️  ATELIER DE FORGE"))
+                lay.append(v2_title("⚒️ Forge"))
                 lay.append(v2_subtitle(
-                    f"Tu as `{total_wealth:,}` 🪙  ·  "
-                    f"{len(eligible)} item(s) éligible(s) · "
-                    f"_4 max par section — rouvre /craft pour la suite_"
+                    f"`{total_wealth:,}` 🪙 · {len(eligible)} item(s) éligible(s)"
                 ))
                 # Phase 181b : AMÉLIORATION (+N) — sûre, montée en puissance
                 if enhance_eligible:
                     lay.append(v2_divider())
                     lay.append(v2_body(
-                        "### ⬆️ AMÉLIORATION (+1 → +10)\n"
-                        "_Renforce une pièce (**+8 % stats / niveau**). Échec **sans "
-                        "danger** jusqu'à +5 ; au-delà, un échec coûte 1 niveau "
-                        "(jamais de destruction)._"
+                        "### ⬆️ Amélioration (+1 → +10)\n"
+                        "_+8 % stats/niveau · sans risque jusqu'à +5, au-delà un échec coûte 1 niveau._"
                     ))
                     for slot_key, slot_label, item, lvl in enhance_eligible[:4]:  # Phase 235.14 : cap (limite 40 composants V2 → /craft plantait)
                         emoji = item.get("emoji", "⚪")
@@ -51322,10 +51251,8 @@ async def craft_cmd(i: discord.Interaction):
                 if eligible:
                     lay.append(v2_divider())
                     lay.append(v2_body(
-                        "### ⚠️ AFFINAGE DE RARETÉ\n"
-                        "_Monte la **rareté** d'un cran, mais **risqué** : en cas "
-                        "d'échec, l'item est **détruit**. Plus la cible est haute, "
-                        "plus l'échec est probable._"
+                        "### ⚠️ Affinage de rareté\n"
+                        "_Monte la rareté d'un cran — **risqué** : en cas d'échec, l'item est détruit._"
                     ))
                     rarity_emojis = {
                         "commune": "⚪", "rare": "🔵", "épique": "🟣",
@@ -51495,26 +51422,24 @@ async def badges_cmd(i: discord.Interaction):
             def __init__(self):
                 super().__init__(timeout=600)
                 items = []
-                items.append(v2_title(f"🏅  HAUTS FAITS  ·  {_user_name}"))
+                items.append(v2_title("🏅 Hauts faits"))
                 items.append(v2_subtitle(
-                    f"{badges_count}/{badges_total} débloqués  ·  {ach_tier}"
+                    f"{badges_count}/{badges_total} débloqués · {ach_tier}"
                 ))
                 items.append(v2_divider())
 
                 # Groupe 1 : Stats globales avec progress bar
-                items.append(v2_body("### 📊 TA PROGRESSION"))
+                items.append(v2_body("### 📊 Ta progression"))
                 items.append(v2_body(
-                    f"🏆 **Rang actuel :** {rank_name}\n"
-                    f"🏅 **Badges :** {progress_str}\n"
-                    f"💀 **Boss vaincus :** `{kills}`\n"
-                    f"💥 **Dégâts à vie :** `{total_dmg:,}`"
+                    f"🏆 **Rang** {rank_name} · 💀 `{kills}` boss · 💥 `{total_dmg:,}` dégâts à vie\n"
+                    f"🏅 **Badges** {progress_str}"
                 ))
 
                 items.append(v2_divider())
 
                 # Groupe 2 : Débloqués (scrollable jusqu'à 25)
                 items.append(v2_body(
-                    f"### ✅ DÉBLOQUÉS ({badges_count}/{badges_total})"
+                    f"### ✅ Débloqués ({badges_count}/{badges_total})"
                 ))
                 if unlocked_lines:
                     body = "\n".join(unlocked_lines)
@@ -51535,7 +51460,7 @@ async def badges_cmd(i: discord.Interaction):
                 if next_lines:
                     items.append(v2_divider())
                     items.append(v2_body(
-                        f"### 🎯 PROCHAINS OBJECTIFS"
+                        f"### 🎯 Prochains objectifs"
                     ))
                     items.append(v2_body(
                         "\n".join(next_lines)
@@ -51546,22 +51471,15 @@ async def badges_cmd(i: discord.Interaction):
                 items.append(v2_divider())
 
                 # Groupe 4 : Navigation (sections accessory)
-                items.append(v2_body("### 🔗 NAVIGATION"))
                 items.append(v2_section(
-                    v2_title("🎒  Mon inventaire"),
+                    v2_title("🎒 Mon inventaire"),
                     v2_subtitle("Équipement complet · set bonus · durabilité"),
                     accessory=_InventoryBtn(),
                 ))
                 items.append(v2_section(
-                    v2_title("🏆  Voir le classement"),
+                    v2_title("🏆 Voir le classement"),
                     v2_subtitle("Top joueurs du serveur (coins · messages · vocal)"),
                     accessory=_LeaderboardBtn(),
-                ))
-
-                items.append(v2_divider())
-                items.append(v2_body(
-                    f"_💡 **{_guild_name}** · "
-                    f"Les badges sont permanents et visibles sur ton profil._"
                 ))
 
                 self.add_item(v2_container(*items, color=rank_color))
@@ -51778,23 +51696,22 @@ async def loot_table_cmd(i: discord.Interaction):
             def __init__(self):
                 super().__init__(timeout=600)
                 items = []
-                items.append(v2_title("📜  LOOT TABLE  ·  Tous les drops"))
-                items.append(v2_subtitle("Vue exhaustive des récompenses possibles par event"))
+                items.append(v2_title("📜 Loot table"))
                 items.append(v2_divider())
 
                 # ─── MYSTERY BOX ───
-                items.append(v2_body("### 📦 MYSTERY BOX"))
+                items.append(v2_body("### 📦 Mystery box"))
                 if mb_types:
                     lines = []
                     total_weight = sum(b.get('weight', 0) for b in mb_types)
                     for box in mb_types:
                         weight_pct = int(box.get('weight', 0) * 100 / max(1, total_weight))
                         lines.append(
-                            f"{box.get('emoji', '📦')} **{box.get('name', '?')}**  ·  `{weight_pct}%`\n"
-                            f"   🪙 `{box.get('coins_min', 0)}-{box.get('coins_max', 0)}` 🪙  ·  "
-                            f"🎁 Gear `{int(box.get('gear_chance', 0) * 100)}%`"
+                            f"{box.get('emoji', '📦')} **{box.get('name', '?')}** · `{weight_pct}%` · "
+                            f"`{box.get('coins_min', 0)}-{box.get('coins_max', 0)}` 🪙 · "
+                            f"gear `{int(box.get('gear_chance', 0) * 100)}%`"
                         )
-                    items.append(v2_body("\n\n".join(lines)))
+                    items.append(v2_body("\n".join(lines)))
                     items.append(v2_body(
                         "_🌌 **Jackpot Mythique 1/100** : ×5 reward + upgrade gear en mythique_"
                     ))
@@ -51804,98 +51721,97 @@ async def loot_table_cmd(i: discord.Interaction):
                 items.append(v2_divider())
 
                 # ─── TREASURE HUNT ───
-                items.append(v2_body("### 💎 TREASURE HUNT"))
+                items.append(v2_body("### 💎 Treasure hunt"))
                 if tr_types:
                     lines = []
                     total_weight = sum(t.get('weight', 0) for t in tr_types)
                     for tr in tr_types:
                         weight_pct = int(tr.get('weight', 0) * 100 / max(1, total_weight))
                         lines.append(
-                            f"{tr.get('emoji', '📦')} **{tr.get('name', '?')}**  ·  `{weight_pct}%`\n"
-                            f"   🪙 `{tr.get('coins_min', 0)}-{tr.get('coins_max', 0)}` 🪙  ·  "
-                            f"🎁 Gear `{int(tr.get('gear_chance', 0) * 100)}%`"
+                            f"{tr.get('emoji', '📦')} **{tr.get('name', '?')}** · `{weight_pct}%` · "
+                            f"`{tr.get('coins_min', 0)}-{tr.get('coins_max', 0)}` 🪙 · "
+                            f"gear `{int(tr.get('gear_chance', 0) * 100)}%`"
                         )
-                    items.append(v2_body("\n\n".join(lines)))
+                    items.append(v2_body("\n".join(lines)))
                 else:
                     items.append(v2_body("_Catalogue indisponible._"))
 
                 items.append(v2_divider())
 
                 # ─── BOSS RAID ───
-                items.append(v2_body("### ⚔️ BOSS RAID"))
+                items.append(v2_body("### ⚔️ Boss raid"))
                 items.append(v2_body(
-                    "🥇 **Top 1 damager** : `1500` 🪙 + gear épique/légendaire\n"
-                    "🥈 **Top 2-3** : `1000-1200` 🪙 + gear rare/épique\n"
-                    "🎖️ **Participants** : `300-500` 🪙 + chance gear rare\n"
-                    "💀 **Last Hit (coup fatal) :** +`500` 🪙 BONUS instant !\n"
-                    "📊 _Récompense scale avec total damage + diversité de classe_"
+                    "🥇 **Top 1 damager** · `1500` 🪙 + gear épique/légendaire\n"
+                    "🥈 **Top 2-3** · `1000-1200` 🪙 + gear rare/épique\n"
+                    "🎖️ **Participants** · `300-500` 🪙 + chance gear rare\n"
+                    "💀 **Coup fatal** · `+500` 🪙 bonus\n"
+                    "_Récompense scale avec total damage + diversité de classe._"
                 ))
 
                 items.append(v2_divider())
 
                 # ─── WORLD BOSS ───
-                items.append(v2_body("### 🌍 WORLD BOSS"))
+                items.append(v2_body("### 🌍 World boss"))
                 items.append(v2_body(
-                    "🥇 **Top 3 damagers** : `2000` 🪙 + achievement `worldboss_kill`\n"
-                    "🎖️ **Participants** : `400` 🪙\n"
-                    "💎 **Top 1 damager** : **10% chance loot unique** 🌌\n"
-                    "💀 **Défaite** : consolation moitié `200` 🪙 pour tous\n"
-                    "_Hebdomadaire · samedi 21h FR · 90 min de combat_"
+                    "🥇 **Top 3 damagers** · `2000` 🪙 + achievement\n"
+                    "🎖️ **Participants** · `400` 🪙\n"
+                    "💎 **Top 1 damager** · 10% chance loot unique\n"
+                    "💀 **Défaite** · `200` 🪙 consolation pour tous\n"
+                    "_Hebdomadaire · samedi 21h FR · 90 min._"
                 ))
 
                 items.append(v2_divider())
 
                 # ─── FLASH TREASURE ───
-                items.append(v2_body("### ⚡ FLASH TREASURE"))
+                items.append(v2_body("### ⚡ Flash treasure"))
                 items.append(v2_body(
-                    "💰 **Base** : `100-500` 🪙 aléatoire\n"
-                    "🔥 **Streak bonus** : +10% par grab consécutif (cap +50%)\n"
-                    "_Premier arrivé, premier servi — fenêtre **60 secondes**_"
+                    "💰 **Base** · `100-500` 🪙 aléatoire\n"
+                    "🔥 **Streak** · +10% par grab consécutif (cap +50%)\n"
+                    "_Premier arrivé premier servi · fenêtre 60 s._"
                 ))
 
                 items.append(v2_divider())
 
                 # ─── DAILY RIDDLE ───
-                items.append(v2_body("### 🧠 DAILY RIDDLE"))
+                items.append(v2_body("### 🧠 Daily riddle"))
                 items.append(v2_body(
-                    "🏆 **Premier à trouver** : `500` 🪙 base\n"
-                    "✅ **Bonne réponse (tard)** : `50` 🪙 consolation\n"
-                    "🔥 **Streak ≥ 3 jours** : +`300` 🪙 bonus\n"
-                    "🌟 **Streak ≥ 7 jours** : +`1000` 🪙 bonus hebdo !\n"
-                    "_1 énigme/jour · matin Europe/Paris_"
+                    "🏆 **Premier à trouver** · `500` 🪙\n"
+                    "✅ **Bonne réponse (tard)** · `50` 🪙\n"
+                    "🔥 **Streak ≥ 3 jours** · `+300` 🪙\n"
+                    "🌟 **Streak ≥ 7 jours** · `+1000` 🪙\n"
+                    "_1 énigme/jour · matin Europe/Paris._"
                 ))
 
                 items.append(v2_divider())
 
                 # ─── QUIZ ───
-                items.append(v2_body("### 🎓 QUIZ COMMUNAUTAIRE"))
+                items.append(v2_body("### 🎓 Quiz communautaire"))
                 items.append(v2_body(
-                    "✅ **Base bonne réponse** : `100` 🪙\n"
-                    "🥇 **1er à trouver** : +`100` 🪙\n"
-                    "⚡ **Speed < 5s** : +`200` 🪙 ÉCLAIR !\n"
-                    "💨 **Speed < 10s** : +`100` 🪙 Rapide !\n"
-                    "⏱️ **Speed < 20s** : +`50` 🪙 Réfléchi\n"
-                    "_10 questions × 30s · final dans l'arène temporaire_"
+                    "✅ **Bonne réponse** · `100` 🪙\n"
+                    "🥇 **1er à trouver** · `+100` 🪙\n"
+                    "⚡ **Speed < 5 s** · `+200` 🪙\n"
+                    "💨 **Speed < 10 s** · `+100` 🪙\n"
+                    "⏱️ **Speed < 20 s** · `+50` 🪙\n"
+                    "_10 questions × 30 s · final dans l'arène temporaire._"
                 ))
 
                 items.append(v2_divider())
 
                 # ─── HEIST ───
-                items.append(v2_body("### 🚨 HEIST (Braquage)"))
+                items.append(v2_body("### 🚨 Heist (braquage)"))
                 items.append(v2_body(
-                    "💰 **Mise par joueur** : `50` 🪙\n"
-                    "📊 **Taux de réussite** : `50% + 10%` par joueur (max `90%`)\n"
-                    "✅ **Si réussi** : pool × 2 distribué selon rôle\n"
-                    "❌ **Si raté** : tout perdu (police arrive)\n"
-                    "_Min 3 joueurs · choisi son rôle (chacun a un share %)_"
+                    "💰 **Mise par joueur** · `50` 🪙\n"
+                    "📊 **Réussite** · `50% + 10%`/joueur (max `90%`)\n"
+                    "✅ **Réussi** · pool × 2 distribué selon rôle\n"
+                    "❌ **Raté** · tout perdu (police arrive)\n"
+                    "_Min 3 joueurs · chacun choisit son rôle (share %)._"
                 ))
 
                 items.append(v2_divider())
 
                 # ─── FOOTER ───
                 items.append(v2_body(
-                    "_💡 Plus la rareté est élevée, plus la chance de drop diminue_\n"
-                    "_📊 `/records` pour voir qui a gagné quoi (Top 5)_"
+                    "-# Plus la rareté est élevée, plus la chance de drop diminue."
                 ))
 
                 self.add_item(v2_container(*items, color=0xFFD700))
@@ -61394,24 +61310,18 @@ async def pet_cmd(
                 def __init__(self):
                     super().__init__(timeout=300)
                     items = []
-                    items.append(v2_title("🐾  PETS DISPONIBLES"))
-                    items.append(v2_subtitle("Tous les compagnons que tu peux adopter sur le serveur"))
+                    items.append(v2_title("🐾 Pets disponibles"))
+                    items.append(v2_subtitle("Tous les compagnons à adopter sur le serveur"))
                     items.append(v2_divider())
-                    items.append(v2_body("### 🛒 CATALOGUE"))
+                    items.append(v2_body("**🛒 Catalogue**"))
                     items.append(v2_body(_pets_text[:3500]))
                     items.append(v2_divider())
                     items.append(v2_body(
-                        "### 💡 COMMENT ADOPTER\n"
-                        "Choisis-en un avec `/pet action:buy pet_choice:<nom>`.\n"
-                        "Chaque pet évolue avec l'XP — tu peux le faire grandir jusqu'à sa forme finale."
+                        "**💡 Comment adopter** — `/pet action:buy pet_choice:<nom>` ; chaque pet évolue avec l'XP jusqu'à sa forme finale."
                     ))
                     items.append(v2_divider())
                     items.append(v2_body(
-                        f"### 🥚 {_egg_total} FAMILIERS RARES EN PLUS\n"
-                        f"Ces familiers ne s'achètent PAS : ils éclosent d'**œufs** "
-                        f"gagnés en participant aux events. Ouvre **`/pet action:oeufs`** "
-                        f"pour voir tes œufs et les faire éclore. _Les plus rares sont "
-                        f"très durs à obtenir — sur le long terme !_"
+                        f"**🥚 {_egg_total} familiers rares en plus** — pas à l'achat : ils éclosent d'**œufs** gagnés en event (`/pet action:oeufs`). _Les plus rares sont très durs à obtenir._"
                     ))
                     self.add_item(v2_container(*items, color=0xE67E22))
 
@@ -61623,22 +61533,16 @@ async def pet_cmd(
                 def __init__(self):
                     super().__init__(timeout=300)
                     items = []
-                    items.append(v2_title(f"🐾  {_pet['form_label']} · LV. {_pet['level']}"))
+                    items.append(v2_title(f"🐾 {_pet['form_label']} · Lv. {_pet['level']}"))
                     items.append(v2_subtitle(f"**{_pet['custom_name']}** _({_pet['name']})_"))
                     items.append(v2_divider())
-                    items.append(v2_body("### 📜 DESCRIPTION"))
                     items.append(v2_body(f"_{_pet['description']}_"))
-                    items.append(v2_divider())
-                    items.append(v2_body("### 📊 PROGRESSION"))
                     items.append(v2_body(
                         f"⭐ **XP :** {bar} `{_pet['xp']}/{_pet['next_level_xp']}`\n"
                         f"🍖 **Faim :** {hunger_bar} `{_pet['hunger']}/100` — _{hunger_label}_"
                     ))
-                    items.append(v2_divider())
                     items.append(v2_body(
-                        "### ⚠️ À SAVOIR\n"
-                        "Quand la **faim < 30**, les bonus du pet sont **réduits de 50%**.\n"
-                        "Nourris-le avec `/pet action:feed` (coût : 50 🪙)."
+                        "⚠️ Faim < 30 → bonus **réduits de 50%**. Nourris-le : `/pet action:feed` (50 🪙)."
                     ))
                     self.add_item(v2_container(*items, color=0xE67E22))
 
@@ -61694,22 +61598,12 @@ async def pet_cmd(
                 def __init__(self):
                     super().__init__(timeout=300)
                     items = []
-                    items.append(v2_title("🎉  PET ADOPTÉ"))
+                    items.append(v2_title("🎉 Pet adopté"))
                     items.append(v2_subtitle(f"**{_pd['emoji']} {_pd['name']}** rejoint ton équipe !"))
                     items.append(v2_divider())
-                    items.append(v2_body("### 🐾 TON NOUVEAU COMPAGNON"))
                     items.append(v2_body(
-                        f"**Nom :** {_pd['emoji']} **{_pd['name']}**\n"
-                        f"**Prix payé :** `{_pd['price']}` 🪙\n"
+                        f"{_pd['emoji']} **{_pd['name']}** · `{_pd['price']}` 🪙 payés\n"
                         f"_{_pd['description']}_"
-                    ))
-                    items.append(v2_divider())
-                    items.append(v2_body(
-                        "### 💡 PROCHAINES ÉTAPES\n"
-                        "• `/pet action:show` — voir ses stats\n"
-                        "• `/pet action:feed` — le nourrir (50 🪙)\n"
-                        "• `/pet action:rename` — lui donner un surnom\n"
-                        "_Ton pet gagne de l'XP en jouant — il évoluera avec toi._"
                     ))
                     self.add_item(v2_container(*items, color=0xE67E22))
 
@@ -66832,14 +66726,10 @@ async def _start_tag_royale(guild) -> bool:
         # pas polluer le salon ad vitam)
         LIFETIME_START = 6 * 3600
         e = discord.Embed(
-            title="🔗 TAG ROYALE — La chaîne d'amitié",
+            title="🔗 Tag Royale",
             description=(
-                f"{starter.mention} a été choisi(e) par le destin !\n\n"
-                f"**🎯 Ta mission :** mentionner **3 autres membres** dans ce salon dans les **prochaines 60 minutes**.\n\n"
-                f"Si tu réussis, ces 3 membres devront à leur tour tag 3 autres → "
-                f"si la chaîne dure **4 niveaux** (donc ~81 personnes), **TOUT LE MONDE gagne 200 🪙 !**\n\n"
-                f"⚠️ Si la chaîne reste 1h sans nouveau tag, c'est PERDU pour tous.\n\n"
-                f"_Active une vraie cohésion entre membres._\n\n"
+                f"{starter.mention}, tu es choisi(e) ! **Mentionne 3 membres** ici dans l'**heure**.\n"
+                f"Si la chaîne tient **4 niveaux**, **tout le monde gagne 200 🪙**. 1h sans tag = perdu.\n\n"
                 f"{_chrono_footer(LIFETIME_START)}"
             ),
             color=0xE91E63,
@@ -73087,16 +72977,13 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
 
                 # ═══ HEADER ═══
                 if _is_self:
-                    items.append(v2_title(f"📋  MON PROFIL"))
+                    items.append(v2_title(f"📋 Profil"))
                 else:
-                    items.append(v2_title(f"📋  PROFIL DE {target.display_name.upper()}"))
-                items.append(v2_subtitle(
-                    f"_Vue complète : level · prestige · saison · factions · stats_"
-                ))
+                    items.append(v2_title(f"📋 Profil de {target.display_name}"))
                 items.append(v2_divider())
 
                 # ═══ IDENTITÉ ═══
-                items.append(v2_body("### 🏅 IDENTITÉ"))
+                items.append(v2_body("### 🏅 Identité"))
                 items.append(v2_body(
                     f"**Niveau :** `{level}` · XP cumulés : `{xp:,}`\n"
                     f"**Prestige :** {prestige_str}\n"
@@ -73113,7 +73000,7 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
                 items.append(v2_divider())
 
                 # ═══ PASS DE SAISON ═══
-                items.append(v2_body("### 📆 PASS DE SAISON"))
+                items.append(v2_body("### 📆 Pass de saison"))
                 items.append(v2_body(
                     f"**Saison :** `{season_id}` · Palier `{season_tier}/20`\n"
                     f"**Points :** `{season_pts:,}`\n"
@@ -73123,7 +73010,7 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
                 # ═══ FACTIONS ═══
                 if factions_top:
                     items.append(v2_divider())
-                    items.append(v2_body("### 🏰 RENOMMÉES (top 2)"))
+                    items.append(v2_body("### 🏰 Renommées (top 2)"))
                     lines = []
                     for fd in factions_top:
                         f = fd['faction']
@@ -73138,7 +73025,7 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
                 # ═══ COMPAGNON ═══
                 if pet:
                     items.append(v2_divider())
-                    items.append(v2_body("### 🐾 COMPAGNON ACTIF"))
+                    items.append(v2_body("### 🐾 Compagnon actif"))
                     items.append(v2_body(
                         f"{pet['form_label']} — **{pet['custom_name']}** "
                         f"(Lv. {pet['level']})\n"
@@ -73151,7 +73038,7 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
                         "👑 Chef" if alliance.get('my_role') == 'leader' else "👤 Membre"
                     )
                     items.append(v2_divider())
-                    items.append(v2_body("### 🤝 ALLIANCE"))
+                    items.append(v2_body("### 🤝 Alliance"))
                     items.append(v2_body(
                         f"{alliance['emoji']} **{alliance['name']}** ({ally_role})\n"
                         f"📍 <#{alliance['channel_id']}>"
@@ -73159,7 +73046,7 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
 
                 # ═══ STATS GLOBALES ═══
                 items.append(v2_divider())
-                items.append(v2_body("### 📊 STATS GLOBALES"))
+                items.append(v2_body("### 📊 Stats globales"))
                 ach_total = max(1, len(eng41.ACHIEVEMENTS))
                 ach_pct = int((ach_count / ach_total) * 100) if ach_total else 0
                 items.append(v2_body(
@@ -73174,28 +73061,21 @@ async def profile_cmd(i: discord.Interaction, membre: Optional[discord.Member] =
                 # ═══ ACTIVITÉ (7 JOURS) — clé d'accès aux events ═══
                 if activity_text:
                     items.append(v2_divider())
-                    items.append(v2_body("### 📊 ACTIVITÉ (14 JOURS)"))
+                    items.append(v2_body("### 📊 Activité (14 jours)"))
                     items.append(v2_body(activity_text))
 
                 # ═══ NAVIGATION (sections accessory, uniquement pour son propre profil) ═══
                 if _is_self:
                     items.append(v2_divider())
-                    items.append(v2_body("### 🔗 NAVIGATION"))
+                    items.append(v2_body("### 🔗 Navigation"))
                     items.append(v2_section(
                         v2_title("🎒  Mon inventaire"),
-                        v2_subtitle("Équipement, set bonus, durabilité, actions rapides"),
                         accessory=_GotoInventoryBtn(),
                     ))
                     items.append(v2_section(
                         v2_title("🏅  Mes hauts faits"),
-                        v2_subtitle("Badges débloqués + prochains objectifs"),
                         accessory=_GotoBadgesBtn(),
                     ))
-
-                items.append(v2_divider())
-                items.append(v2_body(
-                    f"_💡 `/profile @membre` pour voir le profil d'un autre joueur._"
-                ))
 
                 self.add_item(v2_container(*items, color=color))
 
