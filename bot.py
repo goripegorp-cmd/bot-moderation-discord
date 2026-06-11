@@ -19254,6 +19254,7 @@ class LogsPanelV2(LayoutView):
         cats_enabled = await ulogger2026.get_enabled_categories(self.g.id)
         all_cats = sorted(set(m["cat"] for m in ulogger2026.EVENT_META.values()))
         log_ch = self.g.get_channel(chan_id) if chan_id else None
+        wh_mode = await ulogger2026.get_webhook_mode(self.g.id)
 
         self.clear_items()
 
@@ -19294,6 +19295,11 @@ class LogsPanelV2(LayoutView):
                 cats_lines.append(f"{icon} {emoji} {c}")
             items.append(v2_title("Catégories", level=3))
             items.append(v2_body("\n".join(cats_lines)))
+            items.append(v2_body(
+                "📡 **Mode webhook :** "
+                + ("🟢 ON — chaque catégorie a son expéditeur (« 🛡️ Sécurité »…)"
+                   if wh_mode else "⚪ OFF — envoi classique par le bot")
+            ))
 
         items.append(v2_divider())
 
@@ -19313,12 +19319,19 @@ class LogsPanelV2(LayoutView):
             # Phase 268 : router chaque catégorie vers un salon dédié
             b_route = Button(label="🎯 Salon par catégorie", style=discord.ButtonStyle.primary, custom_id="logsv2_route")
             b_route.callback = self._cb_routing
+            # Phase 268 : mode webhook (expéditeur au nom de la catégorie)
+            b_wh = Button(
+                label=("📡 Webhook : ON" if wh_mode else "📡 Webhook : OFF"),
+                style=(discord.ButtonStyle.success if wh_mode else discord.ButtonStyle.secondary),
+                custom_id="logsv2_wh",
+            )
+            b_wh.callback = self._cb_toggle_webhook
             b_clear = Button(label="⚪ Désactiver", style=discord.ButtonStyle.danger, custom_id="logsv2_clear")
             b_clear.callback = self._cb_disable
             b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsv2_back")
             b_back.callback = self._cb_back
             items.append(discord.ui.ActionRow(b_chan, b_cats, b_events, b_excl))
-            items.append(discord.ui.ActionRow(b_sec, b_route, b_clear, b_back))
+            items.append(discord.ui.ActionRow(b_sec, b_route, b_wh, b_clear, b_back))
         else:
             b_chan = Button(label="📍 Définir le salon", style=discord.ButtonStyle.success, custom_id="logsv2_chan")
             b_chan.callback = self._cb_set_channel
@@ -19359,6 +19372,15 @@ class LogsPanelV2(LayoutView):
         # Phase 268 : routage par catégorie (1 salon par type de log)
         v = LogsRoutingPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
+
+    async def _cb_toggle_webhook(self, i):
+        # Phase 268 : bascule le mode webhook (expéditeur au nom de la catégorie)
+        try:
+            cur = await ulogger2026.get_webhook_mode(self.g.id)
+            await ulogger2026.set_webhook_mode(self.g.id, not cur)
+        except Exception as ex:
+            print(f"[LogsPanelV2 toggle_webhook] {ex}")
+        await self.render_to(i, edit=True)
 
     async def _cb_events(self, i):
         # Phase 26.3 : toggle par event-type précis

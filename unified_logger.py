@@ -357,6 +357,66 @@ async def resolve_channel_for_event(guild_id: int, event_value: Optional[str],
 
 
 # =============================================================================
+# MODE WEBHOOK (Phase 268 — rendu "pro") : poster les logs via un webhook dont le
+# nom = la catégorie (« 🛡️ Sécurité », « 🔨 Modération »…). OFF par défaut →
+# aucun changement de comportement tant que l'owner ne l'active pas. Repli auto
+# sur l'envoi normal en cas d'échec.
+# =============================================================================
+
+_CAT_ICON = {
+    "Modération": "🔨", "Sécurité": "🛡️", "Membres": "👥", "Messages": "💬",
+    "Vocal": "🎤", "Serveur": "🏷️", "Tickets": "🎫", "Config": "⚙️",
+}
+_log_webhook_cache: dict = {}  # channel_id -> discord.Webhook
+
+
+async def get_webhook_mode(guild_id: int) -> bool:
+    p = _cfg_path(guild_id)
+    if not p.exists():
+        return False
+    try:
+        return bool(json.loads(p.read_text(encoding="utf-8")).get("webhook_mode", False))
+    except Exception:
+        return False
+
+
+async def set_webhook_mode(guild_id: int, on: bool) -> None:
+    p = _cfg_path(guild_id)
+    try:
+        data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except Exception:
+        data = {}
+    data["webhook_mode"] = bool(on)
+    data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+async def _get_or_create_log_webhook(channel):
+    """Webhook « Abylumis Logs » du salon (réutilisé si existant, sinon créé), mis en
+    cache par channel_id. Renvoie None si impossible (perms, type de salon)."""
+    try:
+        cid = channel.id
+        cached = _log_webhook_cache.get(cid)
+        if cached is not None:
+            return cached
+        if not hasattr(channel, "create_webhook"):
+            return None  # threads / types sans webhook
+        try:
+            for w in await channel.webhooks():
+                if w.name == "Abylumis Logs":
+                    _log_webhook_cache[cid] = w
+                    return w
+        except Exception:
+            pass
+        w = await channel.create_webhook(name="Abylumis Logs",
+                                         reason="Logs unifiés (mode webhook)")
+        _log_webhook_cache[cid] = w
+        return w
+    except Exception:
+        return None
+
+
+# =============================================================================
 # PHASE 26.3 : EXCLUSIONS PAR EVENEMENT + EVENEMENTS DESACTIVES PRECISEMENT
 # =============================================================================
 
@@ -575,6 +635,22 @@ async def log_event(
             content=content,
             extra=extra,
         )
+        # Mode webhook (Phase 268) : poster via un expéditeur au nom de la catégorie.
+        # OFF par défaut → on garde l'envoi normal. Repli auto sur target.send si échec.
+        try:
+            if meta and await get_webhook_mode(guild.id) and hasattr(target, "create_webhook"):
+                wh = await _get_or_create_log_webhook(target)
+                if wh is not None:
+                    cat = meta["cat"]
+                    uname = f"{_CAT_ICON.get(cat, '📋')} {cat}"[:80]
+                    av = guild.icon.url if guild.icon else None
+                    try:
+                        return await wh.send(embed=embed, username=uname,
+                                             avatar_url=av, wait=True)
+                    except Exception:
+                        _log_webhook_cache.pop(target.id, None)  # webhook périmé → repli
+        except Exception:
+            pass
         return await target.send(embed=embed)
     except Exception as ex:
         import traceback
