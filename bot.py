@@ -16551,9 +16551,10 @@ class MysteryBoxView(View):
 
 
 async def _drop_mystery_box(guild) -> bool:
-    """Drop une mystery box dans un salon actif aléatoire.
+    """Drop une mystery box. Le PANNEAU (bouton Ouvrir) va dans le salon partagé
+    ⚔️-combat ; une accroche 1-ligne pointe vers lui depuis un salon chatty actif.
 
-    Phase 41.2 : filtre strict — JAMAIS dans un ticket / annonce / RO / thread.
+    Phase 41.2 : filtre strict — l'accroche n'est JAMAIS dans un ticket / annonce / RO / thread.
     Phase 69 : ANTI-SPAM SAME TYPE — si une mystery box est DÉJÀ active dans
     cette guild, on n'en spawne pas une 2e (éviter doublons dans le chat).
     """
@@ -16616,7 +16617,14 @@ async def _drop_mystery_box(guild) -> bool:
             return False
 
         # Tirer un salon CHATTY parmi les actifs
-        ch = random.choice(candidates)
+        chatty_ch = ch = random.choice(candidates)
+        # Refonte caisses légères : le PANNEAU (bouton Ouvrir) va dans le salon partagé
+        # ⚔️-combat (via _ensure_combat_channel), PAS dans le salon chatty. chatty_ch ne
+        # sert plus qu'à l'accroche 1-ligne plus bas. Fail-open : si le salon partagé ne
+        # peut être créé (None) → on retombe sur le chatty (on ne perd jamais l'event).
+        panel_ch = await _ensure_combat_channel(guild)
+        if panel_ch is None:
+            panel_ch = chatty_ch
 
         # Générer la box
         box = events2026.random_mystery_box()
@@ -16632,8 +16640,12 @@ async def _drop_mystery_box(guild) -> bool:
             if box.get('gear'):
                 box['gear']['rarity'] = 'mythique'
 
-        # Phase 38 : si un raid est actif, dé-masquer temporairement ce salon
-        unmasked = await _temporarily_unmask_channel(guild, ch.id)
+        # Phase 38 : si un raid est actif, dé-masquer temporairement le salon du PANNEAU.
+        # Refonte : le panneau vit dans ⚔️-combat (panel_ch), salon partagé public jamais
+        # masqué par l'onboarding/raid → en pratique unmasked sera False (no-op). On garde
+        # la mécanique pour le cas fallback (panel_ch == chatty_ch). Les 3 références de
+        # (dé)masquage ci-dessous DOIVENT rester sur panel_ch.id pour rester cohérentes.
+        unmasked = await _temporarily_unmask_channel(guild, panel_ch.id)
 
         # Phase 77 + Phase 88 fix : LayoutView V2 — button INDÉPENDANT + delegate.
         # Phase 86 extrayait depuis MysteryBoxView → double-parenting → SEND échouait.
@@ -16685,9 +16697,10 @@ async def _drop_mystery_box(guild) -> bool:
             # Phase 39 : ping le rôle "all" si configuré
             ping_str = await _get_event_mention(guild, 'mystery_box')
             send_content = ping_str if ping_str else None
-            # Phase 175 : V2 + content interdit → ping séparé puis panneau V2
+            # Phase 175 : V2 + content interdit → ping séparé puis panneau V2.
+            # Refonte : panneau + son ping postés dans le salon partagé ⚔️-combat (panel_ch).
             msg = await _send_layout_with_ping(
-                ch, _MysteryLayout(), send_content,
+                panel_ch, _MysteryLayout(), send_content,
                 allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False),
                 delete_after=LIFETIME,
                 ping_view=EventsOptOutView('mystery_box'),
@@ -16699,9 +16712,9 @@ async def _drop_mystery_box(guild) -> bool:
                 pass
         except Exception as ex:
             print(f"[MysteryBox send V2] {ex}")
-            # En cas d'erreur, on déférence l'unmask
+            # En cas d'erreur, on déférence l'unmask (panel_ch — cohérent avec l'unmask ci-dessus)
             if unmasked:
-                await _re_mask_channel_after_light_event(guild, ch.id)
+                await _re_mask_channel_after_light_event(guild, panel_ch.id)
             return False
 
         # Phase 77 : pas de rebuild custom_id (déjà stable "mbox_open")
@@ -16714,8 +16727,21 @@ async def _drop_mystery_box(guild) -> bool:
             'gear': box.get('gear'),
             'opened_by': [],
             'guild_id': guild.id,  # Phase 69 : anti-doublon check
-            'channel_id': ch.id,   # Phase 89 : stale cleanup
+            'channel_id': panel_ch.id,   # Phase 89 : stale cleanup (salon RÉEL du panneau)
         }
+
+        # Refonte : accroche 1-ligne dans le salon chatty, pointant vers le panneau.
+        # Postée SEULEMENT si chatty_ch est distinct du panel (sinon fallback = double post).
+        # delete_after=LIFETIME (300s = durée de vie du panneau) → disparaît avec lui.
+        if chatty_ch is not None and chatty_ch.id != panel_ch.id:
+            try:
+                await chatty_ch.send(
+                    f"{box_emoji} **Boîte mystère** ouverte dans {panel_ch.mention} — viens tenter ta chance !",
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=LIFETIME,
+                )
+            except Exception:
+                pass
 
         # Auto-cleanup state dict après 5 min (le message est supprimé par delete_after)
         async def _cleanup_state():
@@ -16726,14 +16752,15 @@ async def _drop_mystery_box(guild) -> bool:
                 pass
             if unmasked:
                 try:
-                    await _re_mask_channel_after_light_event(guild, ch.id)
+                    # Re-masque le salon RÉELLEMENT démasqué (panel_ch — cohérent avec l'unmask)
+                    await _re_mask_channel_after_light_event(guild, panel_ch.id)
                 except Exception:
                     pass
         asyncio.create_task(_cleanup_state())
 
         try: await _track_event_engagement(guild.id, 'mystery_box', 'start')
         except Exception: pass
-        print(f"[MYSTERY BOX] guild={guild.id} dropped in #{ch.name}{' (temp unmask)' if unmasked else ''}")
+        print(f"[MYSTERY BOX] guild={guild.id} panel=#{panel_ch.name} teaser=#{chatty_ch.name}{' (temp unmask)' if unmasked else ''}")
         return True
     except Exception as ex:
         print(f"[_drop_mystery_box] {ex}")
@@ -66183,9 +66210,10 @@ class FlashTreasureView(View):
 
 
 async def _spawn_flash_treasure(guild) -> bool:
-    """Pop un trésor flash dans un salon actif aléatoire (chatty).
+    """Pop un trésor flash. Le PANNEAU (bouton Saisir) va dans le salon partagé
+    ⚔️-combat ; une accroche 1-ligne pointe vers lui depuis un salon chatty.
 
-    Fenêtre 60 secondes. Premier qui clique gagne 100-500 🪙.
+    Fenêtre 240 secondes (~4 min). Premier qui clique gagne 100-500 🪙.
     Le message est discret pour créer l'effet surveillance.
 
     Phase 69 : ANTI-SPAM same type — skip si un autre flash_treasure est déjà
@@ -66242,15 +66270,24 @@ async def _spawn_flash_treasure(guild) -> bool:
         if not candidates:
             return False
 
-        ch = random.choice(candidates)
+        chatty_ch = ch = random.choice(candidates)
+        # Refonte caisses légères : le PANNEAU (bouton Saisir) va dans le salon partagé
+        # ⚔️-combat (via _ensure_combat_channel), PAS dans le salon chatty. Le salon
+        # chatty (chatty_ch) sert UNIQUEMENT à l'accroche 1-ligne plus bas. Fail-open :
+        # si le salon partagé ne peut être créé (None) → on retombe sur le chatty (on ne
+        # perd jamais l'event).
+        panel_ch = await _ensure_combat_channel(guild)
+        if panel_ch is None:
+            panel_ch = chatty_ch
         reward = random.randint(100, 500)
-        expires_at = datetime.now(timezone.utc) + timedelta(seconds=60)
+        # Refonte : fenêtre 60s → 240s (~4 min) pour laisser le temps de la voir/saisir.
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=240)
 
-        # Trésor : annonce 60s pour saisir. Si personne, auto-delete 75s plus tard via _flash_cleanup
-        # Si saisi : éditer puis delete via _on_grab (90s d'affichage post-grab = juste assez pour
-        # voir qui a gagné). Le delete_after natif s'applique au "message en attente" : si
-        # personne ne grab, il disparaît à 60s.
-        LIFETIME_TREASURE = 60
+        # Trésor : annonce 240s pour saisir. Si personne, auto-delete 255s plus tard via _flash_cleanup
+        # (fenêtre + 15s de marge). Si saisi : éditer puis delete via _on_grab (~10s d'affichage
+        # post-grab = juste assez pour voir qui a gagné). Le delete_after natif s'applique au
+        # "message en attente" : si personne ne grab, il disparaît à 255s (> fenêtre 240s).
+        LIFETIME_TREASURE = 240
         # Phase 76 + Phase 88 fix : LayoutView V2 — button INDÉPENDANT + delegate
         # callback. Phase 86 essayait d'extraire depuis FlashTreasureView ce qui
         # créait du double-parenting → SEND échouait → events n'apparaissaient plus.
@@ -66272,39 +66309,58 @@ async def _spawn_flash_treasure(guild) -> bool:
                     grab_btn.callback = _v2_delegate_to(FlashTreasureView, '_on_grab')
                     items.append(_section_with_button(
                         "✨ Quelque chose brille...",
-                        f"Fenêtre : **60 secondes**\n{_claim_chrono(LIFETIME_TREASURE)}",
+                        f"Fenêtre : **4 minutes**\n{_claim_chrono(LIFETIME_TREASURE)}",
                         grab_btn,
                     ))
                     self.add_item(v2_container(*items, color=0xF1C40F))
 
             v2_view = _FlashLayout()
-            # Phase 69+76 : delete_after natif Discord + persistent registration
-            msg = await ch.send(
+            # Phase 69+76 : delete_after natif Discord + persistent registration.
+            # Refonte : panneau posté dans le salon partagé ⚔️-combat (panel_ch).
+            # delete_after 200→255 (> fenêtre 240s, sinon le panneau partirait avant la fin).
+            msg = await panel_ch.send(
                 view=v2_view,
                 allowed_mentions=discord.AllowedMentions.none(),
-                delete_after=200,
+                delete_after=255,
             )
             # Phase 69 : backup persistent (survit aux reboots)
             try:
-                await _register_for_cleanup(msg, 200, 'flash_treasure')
+                await _register_for_cleanup(msg, 255, 'flash_treasure')
             except Exception:
                 pass
         except Exception as ex:
             print(f"[_spawn_flash_treasure send V2] {ex}")
             return False
 
-        # Insérer en DB
+        # Insérer en DB — channel_id = panel_ch.id (le salon RÉEL du panneau), car
+        # _flash_cleanup / _on_grab re-fetchent le message via channel_id pour l'éditer.
         async with get_db() as db:
             await db.execute(
                 'INSERT INTO flash_treasures(guild_id, channel_id, message_id, reward_coins, expires_at) '
                 'VALUES(?,?,?,?,?)',
-                (guild.id, ch.id, msg.id, reward, expires_at.isoformat()),
+                (guild.id, panel_ch.id, msg.id, reward, expires_at.isoformat()),
             )
             await db.commit()
 
-        # Auto-cleanup après 90s : si pas saisi → message "Personne n'a saisi"
+        # Refonte : accroche 1-ligne dans le salon chatty, pointant vers le panneau.
+        # Postée SEULEMENT si chatty_ch est distinct du panel (sinon fallback = double post).
+        # delete_after=250 → s'auto-supprime ~10s après la fin de la fenêtre (240s). Pas de
+        # tracking DB : 1 ligne sans bouton, le delete_after natif suffit.
+        if chatty_ch is not None and chatty_ch.id != panel_ch.id:
+            try:
+                _fin_ts = int(expires_at.timestamp())
+                await chatty_ch.send(
+                    f"⚡ **Trésor flash** à saisir dans {panel_ch.mention} — premier arrivé gagne ! ⏳ <t:{_fin_ts}:R>",
+                    allowed_mentions=discord.AllowedMentions.none(),
+                    delete_after=250,
+                )
+            except Exception:
+                pass
+
+        # Auto-cleanup après 255s (= fenêtre 240s + 15s de marge) : si pas saisi → message
+        # "Personne n'a saisi". Le balayage se déclenche APRÈS l'expiration réelle de la fenêtre.
         async def _flash_cleanup(msg_id, ch_id, reward):
-            await asyncio.sleep(75)
+            await asyncio.sleep(255)
             try:
                 async with get_db() as db:
                     async with db.execute(
@@ -66352,11 +66408,12 @@ async def _spawn_flash_treasure(guild) -> bool:
                         pass
             except Exception as ex:
                 print(f"[_flash_cleanup] {ex}")
-        asyncio.create_task(_flash_cleanup(msg.id, ch.id, reward))
+        # Refonte : passer panel_ch.id (salon RÉEL du panneau) pour le re-fetch/édition.
+        asyncio.create_task(_flash_cleanup(msg.id, panel_ch.id, reward))
 
         try: await _track_event_engagement(guild.id, 'flash_treasure', 'start')
         except Exception: pass
-        print(f"[FLASH TREASURE] guild={guild.id} ch={ch.id} reward={reward}")
+        print(f"[FLASH TREASURE] guild={guild.id} panel_ch={panel_ch.id} chatty={chatty_ch.id} reward={reward}")
         return True
     except Exception as ex:
         print(f"[_spawn_flash_treasure] {ex}")
@@ -68486,6 +68543,35 @@ async def _ensure_combat_channel(guild):
         return None
 
 
+async def _has_active_light_crate(guild_id: int) -> bool:
+    """True si une caisse légère (trésor flash OU boîte mystère) est ACTIVE dans
+    cette guild → le salon ⚔️-combat ne doit pas être supprimé sous elle.
+    Volontairement HORS _has_any_major_event_running : une caisse NE doit PAS
+    bloquer un spawn de combat, seulement protéger le salon de la suppression idle."""
+    # Boîte mystère : dict RAM (clé msg.id → valeur avec 'guild_id')
+    try:
+        for _mid, _box in list(_mystery_boxes.items()):
+            if _box.get('guild_id') == guild_id:
+                return True
+    except Exception:
+        pass
+    # Trésor flash : ligne non terminée (ended=0) ET encore dans sa fenêtre.
+    # La borne datetime(expires_at) > now empêche qu'une ligne ended=0 périmée
+    # (cleanup raté) bloque le salon À VIE. Après claim/timeout, ended=1 → garde levée.
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM flash_treasures WHERE guild_id=? AND ended=0 "
+                "AND (expires_at IS NULL OR datetime(expires_at) > datetime('now')) LIMIT 1",
+                (guild_id,),
+            ) as cur:
+                if await cur.fetchone():
+                    return True
+    except Exception:
+        pass
+    return False
+
+
 async def _maybe_delete_idle_combat_channel(guild, grace_seconds: int = 0):
     """Phase 235.17 : salon « ⚔️-combat » ÉPHÉMÈRE (demande owner : il doit DISPARAÎTRE
     quand aucun event ne tourne, pas juste se vider). On le supprime dès qu'AUCUN combat
@@ -68507,6 +68593,15 @@ async def _maybe_delete_idle_combat_channel(guild, grace_seconds: int = 0):
             return
     except Exception:
         return  # fail-open : dans le doute, ne rien supprimer
+    # GARDE-VIE caisses légères : une caisse (trésor flash / boîte mystère) peut
+    # vivre dans ⚔️-combat SANS event de combat. Ne JAMAIS supprimer le salon sous
+    # elle. On NE touche PAS _has_any_major_event_running (sinon une caisse bloquerait
+    # les spawns de combat — non voulu) : check LOCAL et ciblé ici uniquement.
+    try:
+        if await _has_active_light_crate(guild.id):
+            return  # une caisse est ouverte ici → on garde le salon
+    except Exception:
+        return  # fail-open : au moindre doute, on NE supprime pas
     try:
         ch_id = int((await cfg(guild.id)).get('combat_channel_id', 0) or 0)
     except Exception:
