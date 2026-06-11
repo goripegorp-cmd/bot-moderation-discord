@@ -348,7 +348,9 @@ async def _global_view_on_error(self, interaction, error, item):
     _tb.print_exception(type(error), error, error.__traceback__)
     print(f"[VIEW ERROR] {self.__class__.__name__} -> {item}: {error}")
     try:
-        msg = f"❌ Erreur dans {self.__class__.__name__}: `{str(error)[:100]}`"
+        # FIX sécu P2-2 : message GÉNÉRIQUE à l'utilisateur (pas de nom de classe ni de
+        # texte d'exception → zéro fuite d'internals). Le détail reste dans les logs serveur.
+        msg = "❌ Une erreur est survenue. Réessaie, ou préviens le staff si ça persiste."
         if not interaction.response.is_done():
             await interaction.response.send_message(msg, ephemeral=True)
         else:
@@ -364,7 +366,8 @@ async def _global_modal_on_error(self, interaction, error):
     _tb.print_exception(type(error), error, error.__traceback__)
     print(f"[MODAL ERROR] {self.__class__.__name__}: {error}")
     try:
-        msg = f"❌ Erreur dans {self.__class__.__name__}: `{str(error)[:100]}`"
+        # FIX sécu P2-2 : message GÉNÉRIQUE (détail uniquement en logs serveur).
+        msg = "❌ Une erreur est survenue. Réessaie, ou préviens le staff si ça persiste."
         if not interaction.response.is_done():
             await interaction.response.send_message(msg, ephemeral=True)
         else:
@@ -46973,20 +46976,24 @@ async def relay_discord_message(msg):
                         if msg.author.display_avatar:
                             e.set_thumbnail(url=msg.author.display_avatar.url)
                         
-                        # Info du message
+                        # Info du message — FIX sécu P1-5 : on ÉCHAPPE le markdown du
+                        # contenu d'un AUTRE serveur avant de le réinjecter dans l'embed.
+                        # Les embeds rendent les liens masqués [texte](url) CLIQUABLES →
+                        # sans escape, un message relayé pouvait glisser un faux-lien de
+                        # phishing crédibilisé par « 📡 DISCORD • <serveur source> ».
                         e.add_field(
                             name="👤 Auteur",
-                            value=f"**{msg.author.display_name}**",
+                            value=f"**{_escape_md(msg.author.display_name, 60)}**",
                             inline=True
                         )
                         e.add_field(
                             name="📍 Salon",
-                            value=f"#{msg.channel.name}",
+                            value=f"#{_escape_md(msg.channel.name, 60)}",
                             inline=True
                         )
-                        
-                        # Contenu du message
-                        content = msg.content[:1500] if msg.content else ""
+
+                        # Contenu du message (échappé : pas de lien masqué / markdown injecté)
+                        content = _escape_md(msg.content, 1500) if msg.content else ""
                         if content:
                             e.add_field(
                                 name="💬 Message",
