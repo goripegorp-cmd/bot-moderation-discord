@@ -17887,6 +17887,9 @@ async def task_supervisor():
                            ("community_goals_module", "weekly_goal_task"),
                            ("coin_economy_module", "monthly_festival_task"),
                            ("coin_economy_module", "luxury_tax_task"),
+                           # FIX sécu P0 : expiration auto du lockdown anti-raid (sans
+                           # elle, un faux-raid verrouillait le serveur À VIE).
+                           ("raid_module", "lockdown_expiry_task"),
                            ("weekly_stats_module", "weekly_post_task")):
         try:
             mod = globals().get(mod_name)
@@ -43147,6 +43150,13 @@ async def on_ready():
         raid_module.setup(bot, get_db, db_get, _v2h)
         await raid_module.init_db()
         raid_module.register_persistent_views(bot)
+        # FIX sécu P0 : démarrer l'expiration auto du lockdown anti-raid (1re passe =
+        # récupération au boot : lève tout lockdown DÉJÀ expiré ; les actifs restent).
+        try:
+            if not raid_module.lockdown_expiry_task.is_running():
+                raid_module.lockdown_expiry_task.start()
+        except Exception as ex:
+            print(f"[on_ready raid lockdown_expiry start] {ex}")
 
         token_grabber_module.setup(
             bot, get_db, db_get, _v2h,

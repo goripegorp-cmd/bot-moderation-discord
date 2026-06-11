@@ -46,6 +46,7 @@ from typing import Optional
 
 import discord
 from discord.ui import Button
+from discord.ext import tasks
 
 import owner_ids as _owner_ids  # FIX sécu : source UNIQUE de super-owners
 
@@ -463,6 +464,66 @@ async def end_lockdown(guild: discord.Guild) -> bool:
     except Exception as ex:
         print(f"[raid_detector end_lockdown] {ex}")
         return False
+
+
+# ─── EXPIRATION AUTOMATIQUE DU LOCKDOWN (Phase 268 — fix sécu P0) ──────────
+# AVANT : run_lockdown écrivait `locked_until_<iso>` mais end_lockdown n'était
+# JAMAIS appelé et aucune boucle ne lisait l'échéance → un faux-raid pouvait
+# verrouiller le serveur + détruire les invitations À VIE. Cette tâche relit les
+# échéances et termine UNIQUEMENT les lockdowns EXPIRÉS (un lockdown encore dans
+# sa fenêtre reste actif). 1re passe = récupération au boot. FAIL-SAFE.
+
+@tasks.loop(minutes=2)
+async def lockdown_expiry_task():
+    if _bot is None or _get_db is None:
+        return
+    try:
+        now_dt = datetime.now(timezone.utc)
+        rows = []
+        try:
+            async with _get_db() as db:
+                async with db.execute(
+                    "SELECT DISTINCT guild_id, status FROM raid_alerts "
+                    "WHERE status LIKE 'locked_until_%'"
+                ) as cur:
+                    rows = await cur.fetchall()
+        except Exception as ex:
+            print(f"[lockdown_expiry read] {ex}")
+            return
+        for guild_id, status in rows:
+            try:
+                iso = str(status)[len("locked_until_"):]
+                exp = datetime.fromisoformat(iso)
+                if exp.tzinfo is None:
+                    exp = exp.replace(tzinfo=timezone.utc)
+                if now_dt < exp:
+                    continue  # lockdown encore actif dans sa fenêtre → on laisse
+                g = _bot.get_guild(int(guild_id))
+                if g is not None:
+                    await end_lockdown(g)
+                    print(f"[lockdown_expiry] lockdown expiré levé · guild={guild_id}")
+                else:
+                    # bot plus dans le serveur → on solde l'entrée pour ne pas boucler
+                    async with _get_db() as db:
+                        await db.execute(
+                            "UPDATE raid_alerts SET status='resolved' "
+                            "WHERE guild_id=? AND status LIKE 'locked%'",
+                            (int(guild_id),),
+                        )
+                        await db.commit()
+            except Exception as ex:
+                print(f"[lockdown_expiry one] {ex}")
+    except Exception as ex:
+        print(f"[lockdown_expiry] {ex}")
+
+
+@lockdown_expiry_task.before_loop
+async def _before_lockdown_expiry():
+    if _bot is not None:
+        try:
+            await _bot.wait_until_ready()
+        except Exception:
+            pass
 
 
 # ─── DynamicItem pour les boutons d'alerte raid (Phase 150) ───────────────
