@@ -372,8 +372,33 @@ async def run_lockdown(guild: discord.Guild, duration_min: int = 30) -> dict:
     """Active la quarantaine : désactive invites + crée rôle 'Vérification'
     pour les nouveaux arrivants pendant duration_min minutes.
     """
-    out = {"invites_disabled": 0, "verify_role_id": None, "errors": []}
+    out = {"invites_disabled": 0, "verify_role_id": None, "errors": [], "perm_warning": False}
     try:
+        # FIX sécu P1-3 : si le bot n'a PAS les perms critiques, le lockdown échoue en
+        # silence (un attaquant peut rogner ces perms pour neutraliser l'anti-raid).
+        # On DÉTECTE et on ALERTE le proprio du serveur en DM (best-effort) au lieu de
+        # se taire.
+        me = guild.me
+        if me is not None:
+            gp = me.guild_permissions
+            if not (gp.manage_roles and gp.manage_channels):
+                out["perm_warning"] = True
+                out["errors"].append(
+                    "PERMS MANQUANTES (manage_roles/manage_channels) — anti-raid INEFFICACE")
+                print(f"[run_lockdown] ⚠️ guild={guild.id} perms bot insuffisantes : "
+                      f"manage_roles={gp.manage_roles} manage_channels={gp.manage_channels}")
+                try:
+                    if guild.owner is not None:
+                        await guild.owner.send(
+                            f"⚠️ **Alerte sécurité — {guild.name}**\n"
+                            f"Un lockdown anti-raid a été déclenché mais **je n'ai pas les "
+                            f"permissions** `Gérer les rôles` / `Gérer les salons`. La "
+                            f"quarantaine est donc **inopérante**. Vérifie le rôle du bot "
+                            f"(quelqu'un a peut-être rogné mes permissions)."
+                        )
+                except Exception:
+                    pass
+
         # 1) Désactive toutes les invitations existantes
         try:
             invites = await guild.invites()
