@@ -15566,6 +15566,12 @@ async def _post_onboarding_welcome(member):
         c = await cfg(guild.id)
         if not c.get('event_enabled', False):
             return  # events désactivés sur ce serveur → pas d'intro events
+        # Phase 268 (demande owner — anti-clutter) : si un message de bienvenue CONFIGURÉ
+        # poste déjà (_handle_welcome), on n'ajoute PAS ce 2e message d'intro events.
+        # Les nouveaux sont de toute façon abonnés aux events (Phase 256) et l'onboarding
+        # complet (classe/notifs/Parcours) reste dans /hub → un seul message à l'arrivée.
+        if c.get('welcome_enabled', False):
+            return
         me = guild.me
 
         def _ok(x):
