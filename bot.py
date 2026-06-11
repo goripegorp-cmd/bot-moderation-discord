@@ -16748,15 +16748,16 @@ async def light_events_dispatcher():
         for guild in bot.guilds:
             try:
                 c = await cfg(guild.id)
-                if not c.get('event_enabled', False):
-                    continue
-                # Phase 191 : interrupteur Hub Événements — Boîte Mystère
+                # Caisse légère = loot « fun » DÉCOUPLÉ du moteur de combat (event_enabled) :
+                # elle suit son PROPRE interrupteur (mystery_box_enabled, défaut True) pour que
+                # le serveur ne soit JAMAIS vide, même quand les gros events de combat sont off.
                 if not bool(c.get('mystery_box_enabled', True)):
                     continue
                 if not _is_event_active_time(c):
                     continue
-                # 50% chance de drop à chaque tick (50% de chance toutes les 25min = ~1/50min)
-                if random.random() > 0.5:
+                # ~70 % de drop par tick (25 min) → une caisse toutes les ~35 min en heures
+                # actives. L'anti-doublon (1 box max à la fois) garantit que ça ne spamme JAMAIS.
+                if random.random() > 0.7:
                     continue
                 await _drop_mystery_box(guild)
             except Exception as ex:
@@ -66192,8 +66193,9 @@ async def _spawn_flash_treasure(guild) -> bool:
     """
     try:
         c = await cfg(guild.id)
-        if not c.get('event_enabled', False):
-            return False
+        # Trésor flash = loot « fun » DÉCOUPLÉ du moteur de combat (event_enabled) : suit son
+        # propre interrupteur (flash_treasure_enabled, défaut True) pour ne jamais laisser le
+        # serveur vide. Discret (zéro ping) + anti-doublon plus bas = jamais de spam.
         if not c.get('flash_treasure_enabled', True):
             return False
 
