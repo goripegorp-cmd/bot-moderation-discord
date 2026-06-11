@@ -301,6 +301,61 @@ async def resolve_channel_for_category(guild_id: int, category: Optional[str]) -
     return await get_log_channel(guild_id)
 
 
+# Routage encore plus fin : 1 salon pour un EVENT_TYPE precis (ex: sec.phishing seul).
+# Priorite de resolution : évènement précis > catégorie > salon global.
+
+async def get_event_channels(guild_id: int) -> dict[str, int]:
+    """Retourne { event_type_value: channel_id } pour les évènements routés explicitement."""
+    p = _cfg_path(guild_id)
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        raw = data.get("event_channels", {}) or {}
+        out: dict[str, int] = {}
+        for k, v in raw.items():
+            try:
+                cid = int(v)
+                if cid:
+                    out[str(k)] = cid
+            except (TypeError, ValueError):
+                continue
+        return out
+    except Exception:
+        return {}
+
+
+async def set_event_channel(guild_id: int, event_value: str, channel_id: Optional[int]) -> None:
+    """Route un évènement précis vers un salon. channel_id None/0 ⇒ retire l'override
+    (l'évènement retombe alors sur le salon de sa catégorie, sinon le salon global)."""
+    p = _cfg_path(guild_id)
+    try:
+        data = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+    except Exception:
+        data = {}
+    ec = data.get("event_channels", {}) or {}
+    if channel_id:
+        ec[str(event_value)] = int(channel_id)
+    else:
+        ec.pop(str(event_value), None)
+    data["event_channels"] = ec
+    data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    p.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+async def resolve_channel_for_event(guild_id: int, event_value: Optional[str],
+                                    category: Optional[str]) -> Optional[int]:
+    """Salon cible : override évènement si défini, sinon salon de catégorie, sinon global."""
+    if event_value:
+        try:
+            ec = await get_event_channels(guild_id)
+            if event_value in ec:
+                return ec[event_value]
+        except Exception:
+            pass
+    return await resolve_channel_for_category(guild_id, category)
+
+
 # =============================================================================
 # PHASE 26.3 : EXCLUSIONS PAR EVENEMENT + EVENEMENTS DESACTIVES PRECISEMENT
 # =============================================================================
@@ -480,8 +535,9 @@ async def log_event(
             if meta["cat"] not in enabled:
                 return None
 
-        # Phase 268 : routage PAR CATEGORIE (salon dedie si configure, sinon global).
-        chan_id = await resolve_channel_for_category(guild.id, meta["cat"] if meta else None)
+        # Phase 268 : routage évènement > catégorie > salon global.
+        _ev_val = getattr(event_type, "value", None) or (str(event_type) if event_type else None)
+        chan_id = await resolve_channel_for_event(guild.id, _ev_val, meta["cat"] if meta else None)
         if not chan_id:
             return None
         target = bot.get_channel(int(chan_id))

@@ -19612,9 +19612,11 @@ class LogsRoutingPanelV2(LayoutView):
         sel.callback = self._cb_pick
         items.append(discord.ui.ActionRow(sel))
 
+        b_ev = Button(label="🔬 Par évènement précis", style=discord.ButtonStyle.primary, custom_id="logsroute_ev")
+        b_ev.callback = self._cb_event_routing
         b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsroute_back")
         b_back.callback = self._cb_back
-        items.append(discord.ui.ActionRow(b_back))
+        items.append(discord.ui.ActionRow(b_ev, b_back))
 
         self.add_item(v2_container(*items, color=Palette.INFO))
 
@@ -19622,6 +19624,10 @@ class LogsRoutingPanelV2(LayoutView):
             await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
         else:
             await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_event_routing(self, i):
+        v = LogsEventRoutingPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
 
     async def _cb_pick(self, i):
         try:
@@ -19651,6 +19657,106 @@ class LogsRoutingPanelV2(LayoutView):
 
     async def _cb_back(self, i):
         v = LogsPanelV2(self.u, self.g)
+        await v.render_to(i, edit=True)
+
+
+class LogsEventRoutingPanelV2(LayoutView):
+    """Phase 268 — routage au niveau de l'ÉVÈNEMENT précis (ex: sec.phishing seul).
+    Priorité : override évènement > salon de catégorie > salon global."""
+
+    def __init__(self, u, g, cat=None):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+        self.cat = cat  # catégorie sélectionnée (filtre)
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        ev_map = await ulogger2026.get_event_channels(self.g.id)
+
+        self.clear_items()
+        items: list = []
+        items.append(v2_title("🔬 Salon par évènement précis"))
+        items.append(v2_subtitle("Encore plus fin : un salon dédié pour UN type d'évènement"))
+        items.append(v2_divider())
+
+        cat_opts = [
+            discord.SelectOption(label=c, value=c, emoji=_LOG_CAT_EMOJIS.get(c, "📋"),
+                                 default=(c == self.cat))
+            for c in ulogger2026.LOG_CATEGORIES
+        ]
+        cat_sel = Select(placeholder="1) Catégorie…", min_values=1, max_values=1, options=cat_opts)
+        cat_sel.callback = self._cb_cat
+        items.append(discord.ui.ActionRow(cat_sel))
+
+        if self.cat:
+            evs = [(et, m) for et, m in ulogger2026.EVENT_META.items() if m["cat"] == self.cat]
+            lines, ev_opts = [], []
+            for et, m in evs:
+                cid = ev_map.get(et.value)
+                if cid:
+                    ch = self.g.get_channel(cid)
+                    dest = ch.mention if ch else f"⚠️ introuvable (`{cid}`)"
+                else:
+                    dest = "_→ salon de catégorie / global_"
+                lines.append(f"{m['icon']} **{m['label']}** · {dest}")
+                ev_opts.append(discord.SelectOption(
+                    label=m["label"][:100], value=et.value, emoji=m["icon"]))
+            items.append(v2_body("\n".join(lines)))
+            ev_sel = Select(placeholder="2) Évènement à router…", min_values=1, max_values=1,
+                            options=ev_opts[:25])
+            ev_sel.callback = self._cb_event
+            items.append(discord.ui.ActionRow(ev_sel))
+
+        items.append(v2_divider())
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="logsevroute_back")
+        b_back.callback = self._cb_back
+        items.append(discord.ui.ActionRow(b_back))
+
+        self.add_item(v2_container(*items, color=Palette.INFO))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_cat(self, i):
+        try:
+            self.cat = (i.data.get('values') or [None])[0]
+        except Exception:
+            self.cat = None
+        await self.render_to(i, edit=True)
+
+    async def _cb_event(self, i):
+        try:
+            ev = (i.data.get('values') or [None])[0]
+        except Exception:
+            ev = None
+        if not ev:
+            return await self.render_to(i, edit=True)
+        cat = self.cat
+
+        async def _save_event_channel(guild_id, channel_id):
+            await ulogger2026.set_event_channel(guild_id, ev, int(channel_id or 0))
+
+        v = V2GenericChannelPicker(
+            self.u, self.g,
+            config_key=f"_logev_{ev}",  # ignoré : save_fn gère tout
+            return_panel_factory=lambda: LogsEventRoutingPanelV2(self.u, self.g, cat=cat),
+            title=f"🔬 Salon pour « {ev} »",
+            description=(
+                "Salon dédié à CET évènement (prioritaire sur la catégorie).\n"
+                "_Efface la sélection pour revenir au salon de catégorie._"
+            ),
+            color=0x3498DB,
+            save_fn=_save_event_channel,
+        )
+        await v.render_to(i, edit=True)
+
+    async def _cb_back(self, i):
+        v = LogsRoutingPanelV2(self.u, self.g)
         await v.render_to(i, edit=True)
 
 
