@@ -61,9 +61,10 @@ async def _health_handler(request):
         }
         if _bot is not None:
             try:
-                data["guilds"] = len(_bot.guilds)
+                # FIX sécu P2-3 : endpoint PUBLIC (Railway) → on ne divulgue PAS
+                # l'identité du bot ni l'échelle de déploiement à un scanner anonyme.
+                # On garde uniquement la latence (signe de vie), pas user/guilds.
                 data["latency_ms"] = round(_bot.latency * 1000, 1)
-                data["user"] = str(_bot.user) if _bot.user else None
             except Exception:
                 pass
         return web.json_response(data)
@@ -81,17 +82,11 @@ async def _stats_handler(request):
         }
         if _bot is not None:
             try:
-                data["guilds"] = len(_bot.guilds)
-                total_members = sum(g.member_count or 0 for g in _bot.guilds)
-                data["total_members"] = total_members
+                # FIX sécu P2-3 : endpoint PUBLIC → pas de divulgation de l'échelle
+                # (total_members sommé sur tous les serveurs) ni de l'identité du bot.
+                # On garde la latence seule (signe de vie). Évite aussi le recalcul
+                # O(guilds) à chaque hit (petit vecteur DoS).
                 data["latency_ms"] = round(_bot.latency * 1000, 1)
-                data["user"] = str(_bot.user) if _bot.user else None
-                # Compte des slash commands enregistrés
-                try:
-                    cmds = _bot.tree.get_commands()
-                    data["slash_commands_count"] = len(list(cmds))
-                except Exception:
-                    pass
             except Exception:
                 pass
         return web.json_response(data)
