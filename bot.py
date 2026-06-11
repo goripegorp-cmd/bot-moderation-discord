@@ -9237,7 +9237,6 @@ class EquipmentLayoutV2(LayoutView):
         if _tint.get('key') and _tint.get('key') != 'none':
             items.append(v2_body(
                 f"🎨 Teinte : {_tint.get('emoji', '')} **{_tint.get('name', '')}**"))
-        items.append(v2_body("_💡 **❓ Aide** explique tout en 10 s._"))
         self.add_item(v2_container(*items, color=_tint_color))
 
         # Menus déroulants : Équiper · Déséquiper · Familier
@@ -63018,7 +63017,7 @@ class EngagementHubView(View):
         super().__init__(timeout=None)
 
         b1 = Button(
-            label="📜 Mes quêtes du jour",
+            label="📜 Quêtes",
             style=discord.ButtonStyle.primary,
             custom_id="hub_quests",
             row=0,
@@ -63027,7 +63026,7 @@ class EngagementHubView(View):
         self.add_item(b1)
 
         b2 = Button(
-            label="🎰 Daily Wheel",
+            label="🎰 Roue du jour",
             style=discord.ButtonStyle.success,
             custom_id="hub_wheel",
             row=0,
@@ -63036,7 +63035,7 @@ class EngagementHubView(View):
         self.add_item(b2)
 
         b3 = Button(
-            label="🏆 Mes hauts faits",
+            label="🏆 Hauts faits",
             style=discord.ButtonStyle.secondary,
             custom_id="hub_achievements",
             row=1,
@@ -63045,7 +63044,7 @@ class EngagementHubView(View):
         self.add_item(b3)
 
         b4 = Button(
-            label="🐾 Mon compagnon",
+            label="🐾 Compagnon",
             style=discord.ButtonStyle.secondary,
             custom_id="hub_pet",
             row=1,
@@ -63054,7 +63053,7 @@ class EngagementHubView(View):
         self.add_item(b4)
 
         b5 = Button(
-            label="🤫 Confession anonyme",
+            label="🤫 Confession",
             style=discord.ButtonStyle.secondary,
             custom_id="hub_confess",
             row=2,
@@ -63064,7 +63063,7 @@ class EngagementHubView(View):
 
         # Phase 48.3.5 : 2 nouveaux boutons pour exposer Profile + Notifs
         b6 = Button(
-            label="👤 Mon profil",
+            label="👤 Profil",
             style=discord.ButtonStyle.primary,
             custom_id="hub_profile",
             row=2,
@@ -63073,7 +63072,7 @@ class EngagementHubView(View):
         self.add_item(b6)
 
         b7 = Button(
-            label="🔔 Mes notifications",
+            label="🔔 Notifs",
             style=discord.ButtonStyle.secondary,
             custom_id="hub_notifs",
             row=3,
@@ -63083,7 +63082,7 @@ class EngagementHubView(View):
 
         # Phase 49 : Histoire du serveur + Mission en cours
         b8 = Button(
-            label="📖 Histoire du serveur",
+            label="📖 Histoire",
             style=discord.ButtonStyle.secondary,
             custom_id="hub_lore",
             row=3,
@@ -63092,7 +63091,7 @@ class EngagementHubView(View):
         self.add_item(b8)
 
         b9 = Button(
-            label="🎯 Mission en cours",
+            label="🎯 Mission",
             style=discord.ButtonStyle.success,
             custom_id="hub_mission",
             row=3,
@@ -63112,7 +63111,7 @@ class EngagementHubView(View):
 
         # Phase 51 : Compétitions sub-panel (Bingo / Predictions / Faction War)
         b11 = Button(
-            label="🏆 Compétitions",
+            label="🥇 Compétitions",
             style=discord.ButtonStyle.danger,
             custom_id="hub_competitions",
             row=4,
@@ -63145,7 +63144,7 @@ class EngagementHubView(View):
         # row=3 est plein (notifs/lore/mission + patch p47 season/factions = 5).
         # row=4 a 4 boutons (roblox/compet/social/tools) → 1 place pour FAQ.
         b14 = Button(
-            label="❓ Comment ça marche ?",
+            label="❓ Aide",
             style=discord.ButtonStyle.primary,
             custom_id="hub_faq",
             row=4,
@@ -63154,7 +63153,7 @@ class EngagementHubView(View):
         self.add_item(b14)
 
         b15 = Button(
-            label="📜 Saga en cours",
+            label="📜 Saga",
             style=discord.ButtonStyle.success,
             custom_id="hub_saga",
             row=0,
@@ -63165,7 +63164,7 @@ class EngagementHubView(View):
         # Phase 159 : Discovery — expose les nouveaux modules
         # Row 1 has space (achievements + pet = 2, on peut en mettre 3 de plus)
         b16 = Button(
-            label="📊 Objectif communauté",
+            label="📊 Objectif",
             style=discord.ButtonStyle.success,
             custom_id="hub_community_goal",
             row=1,
@@ -63174,7 +63173,7 @@ class EngagementHubView(View):
         self.add_item(b16)
 
         b17 = Button(
-            label="⭐ Ma réputation",
+            label="⭐ Réputation",
             style=discord.ButtonStyle.secondary,
             custom_id="hub_reputation",
             row=1,
@@ -63183,7 +63182,7 @@ class EngagementHubView(View):
         self.add_item(b17)
 
         b18 = Button(
-            label="🎰 Mes tickets loterie",
+            label="🎟️ Loterie",
             style=discord.ButtonStyle.primary,
             custom_id="hub_raffle",
             row=1,
@@ -63194,7 +63193,7 @@ class EngagementHubView(View):
         # Row 2 a 2 boutons (confess + profile) + 2 patched (events_live + alliances)
         # = 4 utilisés, 1 free → on ajoute DM prefs
         b19 = Button(
-            label="🔔 Mes DMs",
+            label="✉️ Mes DMs",
             style=discord.ButtonStyle.secondary,
             custom_id="hub_dm_prefs",
             row=2,
@@ -63208,7 +63207,7 @@ class EngagementHubView(View):
         # est sur row 1 (j'ai vérifié), pas row 0. Donc row 0 = quests+wheel+saga = 3.
         # Ce bouton porte row 0 à 4. Reste 1 slot.
         b20 = Button(
-            label="📰 Mon récap 7j",
+            label="📰 Récap 7j",
             style=discord.ButtonStyle.primary,
             custom_id="hub_weekly_recap",
             row=0,
@@ -63218,7 +63217,7 @@ class EngagementHubView(View):
 
         # Phase 162.5 : Pulse serveur — utilise le dernier slot row 0
         b21 = Button(
-            label="📡 Pulse serveur",
+            label="📡 Pulse",
             style=discord.ButtonStyle.success,
             custom_id="hub_pulse",
             row=0,
@@ -63230,7 +63229,7 @@ class EngagementHubView(View):
         # Phase 169.7 : retour à row=2 — les monkey-patches Phase 43/46/47
         # qui surchargaient row=2/3 sont désactivés.
         b22 = Button(
-            label="📅 Streams programmés",
+            label="📅 Streams",
             style=discord.ButtonStyle.primary,
             custom_id="hub_stream_schedule",
             row=2,
@@ -63241,7 +63240,7 @@ class EngagementHubView(View):
         # Phase 166.2 : Birthday panel (qui a son anniv cette semaine ?)
         # Phase 169.7 : row=2 sécurisée maintenant que patches désactivés.
         b23 = Button(
-            label="🎂 Anniversaires",
+            label="🎂 Anniv.",
             style=discord.ButtonStyle.secondary,
             custom_id="hub_birthdays",
             row=2,
@@ -63263,7 +63262,7 @@ class EngagementHubView(View):
         # Phase 170.3 : Rencontre quotidienne avec un NPC (5-10 min)
         # Dernier slot row=3 → 5/5. Hub à 25/25 maintenant — limite Discord.
         b25 = Button(
-            label="🌟 Rencontre du jour",
+            label="🌟 Rencontre",
             style=discord.ButtonStyle.primary,
             custom_id="hub_encounter",
             row=3,
