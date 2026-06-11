@@ -1376,40 +1376,41 @@ async def _announce_resolution(
 ) -> None:
     name = boss["name"] if boss else "Le boss"
     emoji = boss["emoji"] if boss else "⚔️"
-    if killed:
-        head = f"🎉 **{emoji} {name} EST VAINCU !**"
-        body = (
-            f"_Le serveur a uni ses forces et triomphé._\n\n"
-            f"Dégâts totaux : `{dmg_total:,}` · Combattants : `{len(rewards)}`\n"
-        )
-    else:
-        head = f"⏳ **{emoji} {name} s'est retiré...**"
-        body = (
-            f"_Le temps a manqué. Le boss disparaît dans les ombres. Le serveur "
-            f"revient à la normale — réessayez au prochain boss !_\n\n"
-            f"Dégâts infligés : `{dmg_total:,} / {hp_max:,}` "
-            f"({int(dmg_total * 100 / max(1, hp_max))}%)\n"
-        )
 
-    if rewards:
-        # Phase 235.20 : on affiche TOUS les combattants (chacun qui a participé est
-        # un vainqueur), pas seulement le top 3. Médaille pour le podium, 🔸 sinon.
-        lines = ["\n**🏅 Combattants récompensés (tous !) :**"]
-        medals = ["🥇", "🥈", "🥉"]
-        for r in rewards[:30]:
-            member = ch.guild.get_member(r["user_id"]) if ch.guild else None
-            nm = member.display_name if member else f"User {r['user_id']}"
-            mark = medals[r["rank"] - 1] if r["rank"] <= 3 else "🔸"
-            lines.append(f"{mark} **{nm}** · `{r['damage']:,}` dmg · `{r['coins']:,}` 🪙")
-        if len(rewards) > 30:
-            lines.append(f"_+ {len(rewards) - 30} autres aussi récompensés._")
-        body += "\n".join(lines)
+    # Phase 258 : récap de fin de combat UNIQUE, compact et BORNÉ via le helper
+    # partagé ui_v2.combat_recap_view (même format/taille pour TOUS les events).
+    # On NE touche RIEN à l'économie : tout le monde reste payé (la boucle de
+    # rewards en amont a déjà crédité chacun) — seul l'AFFICHAGE est borné. La
+    # ligne « +N autres récompensés » rappelle que tous les participants le sont.
+    outcome = "win" if killed else "fail"
+    podium = []
+    for r in rewards[:3]:
+        member = ch.guild.get_member(r["user_id"]) if ch.guild else None
+        nm = member.display_name if member else f"User {r['user_id']}"
+        podium.append((nm, r["coins"]))
+    others_count = max(0, len(rewards) - 3)
+
+    # Texte compact équivalent pour la copie persistante des chroniques (borné).
+    head = f"{emoji} {name} " + ("EST VAINCU !" if killed else "s'est retiré...")
+    _medals = ["🥇", "🥈", "🥉"]
+    _lines = [
+        ("✅ Vaincu" if killed else "⏳ Non vaincu")
+        + f" · {len(rewards)} combattant" + ("s" if len(rewards) != 1 else "")
+        + (f" · `{dmg_total:,}` dégâts" if dmg_total else "")
+    ]
+    for _i, (nm, coins) in enumerate(podium):
+        _lines.append(f"{_medals[_i]} **{nm}** · `{coins:,}` 🪙")
+    if others_count:
+        _lines.append(f"🔸 _+{others_count} autres récompensés_")
+    body = "\n".join(_lines)
 
     try:
         msg = await ch.send(
-            view=ui_v2.recap_view(
-                head.replace("**", ""), body,
-                color=(ui_v2.Palette.SUCCESS if killed else ui_v2.Palette.NEUTRAL)),
+            view=ui_v2.combat_recap_view(
+                emoji, name, outcome, podium,
+                others_count=others_count,
+                participants=len(rewards),
+                total_damage=(dmg_total or None)),
             allowed_mentions=discord.AllowedMentions.none())
         # Phase 205 : le récap de fin s'auto-supprime (évite d'encombrer le
         # Discord avec les vieux « X s'est retiré / X est vaincu »).

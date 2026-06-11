@@ -966,8 +966,8 @@ async def _reward_party(run_id, guild_id, txt_id):
         rows = []
     guild = _bot.get_guild(guild_id) if _bot else None
     txt = guild.get_channel(txt_id) if guild else None
-    lines = []
-    medals = ["🥇", "🥈", "🥉"]
+    podium = []          # (display_name, coins) trié 1er→3e (max 3 utilisés)
+    total_damage = 0
     for idx, (uid, dmg) in enumerate(rows):
         reward = 400 + int(dmg)  # base + proportionnel aux dégâts
         if _add_coins is not None:
@@ -975,18 +975,22 @@ async def _reward_party(run_id, guild_id, txt_id):
                 await _add_coins(guild_id, int(uid), reward)
             except Exception:
                 pass
-        m = guild.get_member(int(uid)) if guild else None
-        nm = m.mention if m else f"<@{uid}>"
-        rank = medals[idx] if idx < 3 else f"`#{idx + 1}`"
-        lines.append(f"{rank} {nm} · `{int(dmg):,}` dégâts · **+{reward}** 🪙")
-    if txt and lines:
+        total_damage += int(dmg)
+        if idx < 3:
+            m = guild.get_member(int(uid)) if guild else None
+            nm = m.display_name if m else f"Joueur {uid}"
+            podium.append((nm, reward))
+    if txt and rows:
+        # Récap UNIQUE, compact et borné — même format que les autres events
+        # de combat. Économie inchangée : tout le monde reste payé ci-dessus,
+        # seul l'affichage est borné (« +N autres récompensés »).
         try:
             await txt.send(
-                view=ui_v2.recap_view(
-                    "🏆 Butin du donjon",
-                    "\n".join(lines[:10]),
-                    color=ui_v2.Palette.PREMIUM,
-                    footer="Donjon terminé — merci d'avoir joué !"),
+                view=ui_v2.combat_recap_view(
+                    "🏆", "Donjon", "win", podium,
+                    others_count=max(0, len(rows) - 3),
+                    participants=len(rows),
+                    total_damage=total_damage or None),
                 allowed_mentions=discord.AllowedMentions.none())
         except Exception:
             pass

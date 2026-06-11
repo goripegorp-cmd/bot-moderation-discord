@@ -1480,41 +1480,37 @@ async def _announce_climax_closed(
     ch = channel or await _find_chronicle_channel(guild)
     if not ch:
         return
-    if killed:
-        head = f"💀 **BOSS VAINCU** — {boss['emoji']} {boss['name']}"
-        body = (
-            f"_{boss.get('lore', '')}_\n\n"
-            f"Dégâts totaux : `{damage_total:,}` / `{hp_max:,}`\n"
-            f"Attackers : `{len(rewards)}`\n"
-        )
-    else:
-        head = f"⏳ **BOSS NON VAINCU** — {boss['emoji']} {boss['name']}"
-        body = (
-            f"_Le temps a manqué. Le boss s'est retiré._\n\n"
-            f"Dégâts totaux : `{damage_total:,}` / `{hp_max:,}` "
-            f"({int(damage_total * 100 / max(1, hp_max))}%)\n"
-            f"Attackers : `{len(rewards)}`\n"
-        )
 
-    if rewards:
-        # Phase 235.20 : TOUS les combattants affichés (chacun = vainqueur), pas que le top 3.
-        lines = ["\n**🏅 Combattants récompensés (tous !) :**"]
-        medals = ["🥇", "🥈", "🥉"]
-        for r in rewards[:30]:
-            member = guild.get_member(r["user_id"])
-            name = member.display_name if member else f"User {r['user_id']}"
-            mark = medals[r["rank"] - 1] if r["rank"] <= 3 else "🔸"
-            lines.append(
-                f"{mark} **{name}** · `{r['damage']:,}` dmg · `{r['coins']:,}` 🪙"
-                + (f" · titre **{r['title']}**" if r.get("title") else "")
-            )
-        body += "\n".join(lines)
-        if len(rewards) > 30:
-            body += f"\n\n_+ {len(rewards) - 30} autres aussi récompensés._"
+    # Phase 235.33 : récap de FIN d'event en format UNIQUE, compact et BORNÉ via
+    # ui_v2.combat_recap_view (même taille pour TOUS les events). On ne touche QUE
+    # l'affichage : tout le monde reste récompensé (la ligne « +N autres » le rappelle).
+    # `rewards` est déjà trié par rang (rank = i+1, dérivé des dégâts décroissants).
+    podium: list[tuple[str, int]] = []
+    for r in rewards[:3]:
+        member = guild.get_member(r["user_id"])
+        nm = member.display_name if member else f"User {r['user_id']}"
+        podium.append((nm, int(r.get("coins", 0))))
+    others_count = max(0, len(rewards) - 3)
+    participants = len(rewards)
+    outcome = "win" if killed else "fail"
 
-    body += "\n\n_📖 Tous les titres sont gravés dans le Codex._"
+    # Texte compact pour le journal persistant « 📜 chroniques-combat » (même bornage).
+    _head_clean = (
+        f"{'💀 BOSS VAINCU' if killed else '⏳ BOSS NON VAINCU'} — "
+        f"{boss['emoji']} {boss['name']}"
+    )
+    _medals = ["🥇", "🥈", "🥉"]
+    _body_lines = [
+        ("✅ Vaincu" if killed else "⏳ Non vaincu")
+        + f" · {participants} combattant" + ("s" if participants != 1 else "")
+        + f" · `{int(damage_total):,}` dégâts"
+    ]
+    for _i, (nm, coins) in enumerate(podium):
+        _body_lines.append(f"{_medals[_i]} **{nm}** · `{coins:,}` 🪙")
+    if others_count:
+        _body_lines.append(f"🔸 _+{others_count} autres récompensés_")
+    body = "\n".join(_body_lines)
 
-    _head_clean = head.replace("**", "")
     # Phase 235.15 : récap consolidé PERSISTANT → « 📜 chroniques-combat » (journal
     # commun à TOUS les events) = la source unique du récap.
     if _report_fn is not None:
@@ -1526,9 +1522,13 @@ async def _announce_climax_closed(
     # pas encombrer le salon de combat permanent.
     try:
         await ch.send(
-            view=ui_v2.recap_view(
-                _head_clean, body,
-                color=(ui_v2.Palette.SUCCESS if killed else ui_v2.Palette.NEUTRAL)),
+            view=ui_v2.combat_recap_view(
+                boss.get("emoji", "⚔️"), boss.get("name", "Boss Climax"),
+                outcome, podium,
+                others_count=others_count,
+                participants=participants,
+                total_damage=int(damage_total),
+            ),
             allowed_mentions=discord.AllowedMentions.none(),
             delete_after=3 * 3600,
         )

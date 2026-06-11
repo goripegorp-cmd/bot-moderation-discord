@@ -521,12 +521,27 @@ async def _post_resolution(
         except Exception:
             pass
     # Bref écho dans l'arène (closure pour les combattants), AUTO-supprimé pour ne
-    # pas encombrer le salon de combat permanent.
+    # pas encombrer le salon de combat permanent. Récap COMPACT et BORNÉ identique à
+    # tous les events de combat (helper partagé ui_v2.combat_recap_view) : ligne
+    # d'état + podium (max 3) + « +N autres récompensés ». L'économie est intacte —
+    # tout le monde reste payé, seul l'AFFICHAGE est borné (fail-open).
     try:
+        _podium = []
+        for r in rewards[:3]:
+            _m = ch.guild.get_member(r["user_id"])
+            _nm = _m.display_name if _m else f"User {r['user_id']}"
+            _podium.append((_nm, r["coins"]))
+        _others = max(0, len(rewards) - 3)
+        _total_dmg = sum(int(r.get("damage", 0) or 0) for r in rewards) or None
         await ch.send(
-            view=ui_v2.recap_view(
-                _title_clean, _body,
-                color=(ui_v2.Palette.SUCCESS if all_killed else ui_v2.Palette.WARNING)),
+            view=ui_v2.combat_recap_view(
+                "👹", "Invasion",
+                "win" if all_killed else "fail",
+                _podium,
+                others_count=_others,
+                participants=len(rewards),
+                total_damage=_total_dmg,
+            ),
             delete_after=3 * 3600)
     except Exception:
         pass

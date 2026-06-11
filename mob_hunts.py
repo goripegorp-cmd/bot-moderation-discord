@@ -1383,24 +1383,24 @@ async def _on_mob_killed(
 
     # Build kill message
     elite_prefix = "👑 ÉLITE " if is_elite else ""
-    title_msg = (
-        f"💀 **{elite_prefix}{mob_def['emoji']} {mob_def['name']}** est tombé !"
-    )
 
-    # Phase 235.20 : TOUS les combattants affichés (chacun = vainqueur), pas que le top 10.
-    lines = [title_msg, "", "**🏆 Tous les combattants récompensés :**"]
-    for r in rewards[:30]:
-        member = guild.get_member(r["user_id"])
-        name = member.display_name if member else f"User {r['user_id']}"
-        badge_top = " 🥇" if r["is_top"] else ""
-        badge_alli = " 🤝" if r["alliance_bonus"] else ""
-        item_str = f" + 🎁 `{r['item']}`" if r["item"] else ""
-        lines.append(
-            f"• **{name}**{badge_top}{badge_alli} : "
-            f"`{r['coins']}` 🪙{item_str} _(`{r['damage']}` dmg)_"
-        )
-    if len(rewards) > 30:
-        lines.append(f"_+ {len(rewards) - 30} autres aussi récompensés._")
+    # Phase 268 (demande owner) : récap de FIN borné & identique à TOUS les events
+    # de combat. On ne touche AUCUNE logique d'économie : tout le monde reste payé
+    # (rewards déjà distribué ci-dessus) ; SEUL l'AFFICHAGE est compacté via le
+    # helper partagé ui_v2.combat_recap_view (état + podium max 3 + « +N autres »).
+    # Fail-open : si la construction plante, on retombe sur un récap minimal.
+    _podium: list = []
+    try:
+        _ranked = sorted(rewards, key=lambda r: int(r.get("damage", 0)), reverse=True)
+        for r in _ranked[:3]:
+            member = guild.get_member(r["user_id"])
+            disp = member.display_name if member else f"User {r['user_id']}"
+            _podium.append((disp, int(r.get("coins", 0))))
+    except Exception:
+        _podium = []
+    _others_count = max(0, len(rewards) - 3)
+    _participants = len(rewards)
+    _total_damage = total_dmg if total_dmg and total_dmg > 1 else None
 
     # Edit le message original pour montrer le kill
     try:
@@ -1420,7 +1420,16 @@ async def _on_mob_killed(
                     # bel encadré V2 de récap (cohérent avec tout le bot).
                     _recap_title = (
                         f"💀 {elite_prefix}{mob_def['emoji']} {mob_def['name']} vaincu !")
-                    _recap_body = "\n".join(lines[2:]) if len(lines) > 2 else "\n".join(lines)
+                    # Corps texte BORNÉ pour les chroniques : même podium + « +N
+                    # autres » que le panneau (cohérent, jamais une liste de 30 noms).
+                    _medals = ("🥇", "🥈", "🥉")
+                    _body_lines = [
+                        f"{_medals[i]} **{nm}** · `{int(c):,}` 🪙"
+                        for i, (nm, c) in enumerate(_podium)
+                    ]
+                    if _others_count > 0:
+                        _body_lines.append(f"🔸 _+{_others_count} autres récompensés_")
+                    _recap_body = "\n".join(_body_lines) if _body_lines else "Aucun combattant."
                     # Phase 223 : le rapport PERSISTE dans « 📜 chroniques-combat »
                     # (informe au propre, hors de l'arène).
                     if _report_fn is not None:
@@ -1434,8 +1443,12 @@ async def _on_mob_killed(
                     # → on supprime le panneau après ~15 s, qu'il soit dans le salon
                     # permanent OU dans un salon dédié éphémère. Le récap reste, lui,
                     # dans « 📜 chroniques-combat » (journal persistant).
-                    await msg.edit(view=ui_v2.recap_view(
-                        _recap_title, _recap_body, color=ui_v2.Palette.SUCCESS))
+                    # Phase 268 : récap UNIQUE/borné via le helper partagé (même
+                    # format & taille pour TOUS les events de combat).
+                    await msg.edit(view=ui_v2.combat_recap_view(
+                        mob_def["emoji"], f"{elite_prefix}{mob_def['name']}",
+                        "win", _podium, others_count=_others_count,
+                        participants=_participants, total_damage=_total_damage))
                     try:
                         await msg.delete(delay=15)
                     except Exception:

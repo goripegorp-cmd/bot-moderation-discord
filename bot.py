@@ -148,6 +148,7 @@ from ui_v2 import (
     header as v2_header,
     info_card as v2_info_card,
     recap_view as v2_recap_view,
+    combat_recap_view as v2_combat_recap_view,
 )
 
 # ─── Modules redesign 2026 (Phase 0 + 1) ───
@@ -12088,22 +12089,30 @@ async def _end_active_event(guild, *, victory: bool, reason: str = "", event_id:
                     print(f"[event arena category delete] {ex}")
         # 3) UN SEUL récap consolidé → « 📜-chroniques-combat ». Plus de copie dans
         #    ⚔️-combat, plus de broadcast hub, plus de duplicata salon-log : fini le spam.
-        _report_body = (
-            f"👥 **{len(participants)}** combattant(s) · "
-            f"💥 **{sum(p['damage'] for p in participants):,}** dégâts au total"
-        )
-        if reward_lines:
-            # Phase 235.20 : TOUS les combattants affichés (chacun = vainqueur).
-            _report_body += "\n\n**🎁 Tous les combattants récompensés :**\n" + "\n".join(reward_lines[:30])
-            if len(reward_lines) > 30:
-                _report_body += f"\n_… + {len(reward_lines) - 30} autres aussi récompensés._"
-        if reason:
-            _report_body += f"\n\n_{reason}_"
+        #    Récap COMPACT et BORNÉ via ui_v2.combat_recap_view (même format/taille que
+        #    tous les events) : ligne d'état + podium (3 max) + « +N autres récompensés ».
+        #    On ne touche AUCUNE logique d'éco — tout le monde reste payé, on borne juste
+        #    l'AFFICHAGE. Fail-open (try/except, comme l'existant).
         _recap_posted = False
         try:
+            # Podium = 3 premiers (par rang) résolus en (display_name, pièces).
+            _top = sorted(rewards, key=lambda r: r.get('rank', 999))[:3]
+            _podium = []
+            for r in _top:
+                _m = guild.get_member(r['user_id'])
+                _nm = _m.display_name if _m else f"Membre {r['user_id']}"
+                _podium.append((_nm, int(r.get('coins', 0) or 0)))
+            _others = max(0, len(rewards) - 3)
+            _total_dmg = sum(p['damage'] for p in participants)
+            _outcome = "win" if victory else "fail"
+            _panel = v2_combat_recap_view(
+                "⚔️", boss.get('name', 'Boss Raid'), _outcome, _podium,
+                others_count=_others, participants=len(rewards),
+                total_damage=_total_dmg,
+            )
             _rep = await _post_combat_report(
-                guild, recap_title, _report_body,
-                0x2ECC71 if victory else 0x95A5A6)
+                guild, recap_title, "",
+                0x2ECC71 if victory else 0x95A5A6, view=_panel)
             _recap_posted = _rep is not None
         except Exception as ex:
             print(f"[event recap journal] {ex}")
@@ -64772,27 +64781,28 @@ async def _end_world_boss(guild, wb_id: int, victory: bool, reason: str = ""):
             else f"💀 {boss['title']} s'est échappé…"
         )
         try:
-            # Phase 235.20 : TOUS les combattants affichés (display_name → pas de
-            # ping de 30 personnes dans le récap).
-            medals = ["🥇", "🥈", "🥉"]
-            lines = []
-            for idx, (uid, dmg) in enumerate(attackers[:30]):
+            # Récap COMPACT et BORNÉ via ui_v2.combat_recap_view (même format/taille
+            # que tous les events) : ligne d'état + podium (3 max) + « +N autres
+            # récompensés ». Tout le monde reste payé (logique éco inchangée plus haut)
+            # — on borne juste l'AFFICHAGE. attackers est déjà trié par dégâts DESC.
+            # Pièces du podium = la récompense réellement versée au top 3.
+            _top_coins = int(boss['victory_reward_coins']) if victory else (int(boss['participation_reward_coins']) // 2)
+            podium = []
+            for uid, dmg in attackers[:3]:
                 m = guild.get_member(int(uid))
                 nm = m.display_name if m else f"User {uid}"
-                rank = medals[idx] if idx < 3 else "🔸"
-                lines.append(f"{rank} {nm} · `{int(dmg or 0):,}` dégâts")
-            desc = head + f"\n👥 **{len(attackers)} combattant(s)**"
-            if lines:
-                desc += "\n\n**🏆 Tous les combattants récompensés :**\n" + "\n".join(lines)
-                if len(attackers) > 30:
-                    desc += f"\n_… + {len(attackers) - 30} autres aussi récompensés._"
-            if victory:
-                desc += (
-                    f"\n\n💰 Récompenses : top 3 `{boss['victory_reward_coins']}` 🪙, "
-                    f"autres `{boss['participation_reward_coins']}` 🪙.")
+                podium.append((nm, _top_coins))
+            others = max(0, len(attackers) - 3)
+            total_dmg = sum(int(d or 0) for _u, d in attackers)
+            outcome = "win" if victory else "fail"
+            panel = v2_combat_recap_view(
+                "🌍", boss['title'], outcome, podium,
+                others_count=others, participants=len(attackers),
+                total_damage=total_dmg,
+            )
             await _post_combat_report(
-                guild, head, desc[:4000],
-                color=(0x2ECC71 if victory else 0x95A5A6))
+                guild, head, "",
+                color=(0x2ECC71 if victory else 0x95A5A6), view=panel)
         except Exception as ex:
             print(f"[world_boss recap journal] {ex}")
 
@@ -68565,17 +68575,23 @@ async def _hero_check(kind: str, guild_id: int, user_id: int) -> bool:
     return False
 
 
-async def _post_combat_report(guild, title: str, body: str = "", color: int = 0x2ECC71):
+async def _post_combat_report(guild, title: str, body: str = "", color: int = 0x2ECC71, *, view=None):
     """Phase 223 : poste un rapport de fin de combat dans « 📜 chroniques-combat »
     (rendu V2 propre). PERSISTANT (c'est le journal, pas d'auto-suppression).
     Fail-open. Injecté dans mob_hunts / daily_bosses comme report_fn ; appelé
-    directement pour le world boss."""
+    directement pour le world boss.
+
+    `view` (optionnel) : LayoutView V2 DÉJÀ construite à poster telle quelle
+    (ex. ui_v2.combat_recap_view). Si fourni, on l'envoie directement et `body`
+    sert UNIQUEMENT de repli texte si l'envoi de la view échoue. Sinon on rend
+    `body` via v2_recap_view comme avant (callers historiques inchangés)."""
     try:
         ch = await _ensure_combat_reports_channel(guild)
         if ch is None:
             return None
         try:
-            return await ch.send(view=v2_recap_view(title, body or "", color=color))
+            panel = view if view is not None else v2_recap_view(title, body or "", color=color)
+            return await ch.send(view=panel)
         except Exception:
             txt = f"**{title}**" + (f"\n{body}" if body else "")
             return await ch.send(txt[:1900])

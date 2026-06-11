@@ -247,6 +247,64 @@ def recap_view(
         safe_title, safe_desc, icon_url=icon_url, color=color, footer=footer))
 
 
+def combat_recap_view(
+    emoji: str,
+    name: str,
+    outcome: str,
+    podium: Sequence = (),
+    *,
+    others_count: int = 0,
+    participants: Optional[int] = None,
+    total_damage: Optional[int] = None,
+) -> "StaticPanel":
+    """Récap de fin d'événement de COMBAT — format UNIQUE, compact et BORNÉ,
+    identique pour TOUS les events (boss raid, world boss, boss du jour, mob,
+    climax, invasion, donjon). Toujours ~5-6 lignes quel que soit le nombre de
+    participants : ligne d'état + podium (max 3) + « +N autres récompensés ».
+
+    Tout le monde reste RÉCOMPENSÉ (la ligne « +N autres » le rappelle) — seul
+    l'AFFICHAGE est borné. Ce helper ne touche AUCUNE logique d'économie.
+
+        view = combat_recap_view("🐲", "Dragon des Cendres", "win",
+                                 [("Aria", 1200), ("Korr", 900)],
+                                 others_count=12, total_damage=45000)
+
+    Args:
+        outcome: "win" (vaincu) · "fail" (non vaincu) · "done" (terminé).
+        podium:  séquence de (nom_affiché, pièces) déjà triée du 1er au 3e.
+        others_count: nombre de participants au-delà du podium affiché.
+        participants: total de participants (sinon déduit de podium+others_count).
+        total_damage: dégâts cumulés (optionnel).
+    """
+    title = f"{(emoji or '').strip()} {(name or 'Événement').strip()}".strip()
+    out = (outcome or "done").lower()
+    if out == "win":
+        head, color = "✅ Vaincu", Palette.SUCCESS
+    elif out == "fail":
+        head, color = "⏳ Non vaincu", Palette.NEUTRAL
+    else:
+        head, color = "🏁 Terminé", Palette.PRIMARY
+    n = participants if participants is not None else (len(podium) + max(0, others_count))
+    meta = []
+    if n:
+        meta.append(f"{n} combattant" + ("s" if n > 1 else ""))
+    if total_damage:
+        meta.append(f"`{int(total_damage):,}` dégâts")
+    lines = [head + ((" · " + " · ".join(meta)) if meta else "")]
+    medals = ("🥇", "🥈", "🥉")
+    if podium:
+        lines.append("")
+        for i, entry in enumerate(list(podium)[:3]):
+            try:
+                nm, coins = entry
+                lines.append(f"{medals[i]} **{nm}** · `{int(coins):,}` 🪙")
+            except Exception:
+                continue
+        if others_count and others_count > 0:
+            lines.append(f"🔸 _+{int(others_count)} autres récompensés_")
+    return recap_view(title, "\n".join(lines), color=color)
+
+
 __all__ = [
     "Palette",
     "title",
@@ -265,4 +323,5 @@ __all__ = [
     "info_card",
     "StaticPanel",
     "recap_view",
+    "combat_recap_view",
 ]
