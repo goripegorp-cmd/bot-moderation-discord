@@ -496,7 +496,7 @@ def build_stats_panel(stats: dict, guild_name: str = ""):
 
             items.append(v2_divider())
             items.append(v2_body(
-                f"**╔═══ ⚙️  CONFIGURATION  ═══╗**\n"
+                f"### ⚙️ CONFIGURATION\n"
                 f"• Seuil dormance : **{DORMANT_THRESHOLD_DAYS} jours** sans message\n"
                 f"• Cooldown DM : **{DM_COOLDOWN_DAYS} jours** entre 2 DMs/membre\n"
                 f"• Fenêtre comeback : **{COMEBACK_WINDOW_DAYS} jours** pour claim\n"

@@ -662,7 +662,7 @@ def build_season_panel(guild_name: str = ""):
             mods = season.get("modifiers", {})
             if mods:
                 items.append(v2_divider())
-                items.append(v2_body("**╔═══ ✨  BONUS DE SAISON  ═══╗**"))
+                items.append(v2_body("### ✨ BONUS DE SAISON"))
                 mod_labels = {
                     "boss_hp_mult": "🐲 Boss HP",
                     "boss_reward_mult": "🏆 Récompenses boss",
@@ -690,7 +690,7 @@ def build_season_panel(guild_name: str = ""):
             daily = current_daily_modifier()
             items.append(v2_divider())
             items.append(v2_body(
-                f"**╔═══ {daily['emoji']}  AUJOURD'HUI : {daily['label'].upper()}  ═══╗**\n"
+                f"### {daily['emoji']} AUJOURD'HUI : {daily['label'].upper()}\n"
                 f"_{daily['tagline']}_"
             ))
             d_mods = daily.get("modifiers", {})
@@ -725,7 +725,7 @@ def build_season_panel(guild_name: str = ""):
             if weekend:
                 items.append(v2_divider())
                 items.append(v2_body(
-                    f"**╔═══ 🎉  WEEKEND SPECIAL : {weekend['label'].upper()}  ═══╗**\n"
+                    f"### 🎉 WEEKEND SPECIAL : {weekend['label'].upper()}\n"
                     f"{weekend['emoji']} _{weekend['tagline']}_"
                 ))
                 w_mods = weekend.get("modifiers", {})
@@ -756,7 +756,7 @@ def build_season_panel(guild_name: str = ""):
             if drops:
                 items.append(v2_divider())
                 items.append(v2_body(
-                    f"**╔═══ 💎  DROPS EXCLUSIFS ({len(drops)})  ═══╗**"
+                    f"### 💎 DROPS EXCLUSIFS ({len(drops)})"
                 ))
                 rarity_emoji = {
                     "rare": "🔵", "épique": "🟣", "epique": "🟣",
@@ -833,7 +833,7 @@ def build_my_drops_panel(member, drops: list[dict], guild_name: str = ""):
             missing = [d for d in pool if d["name"] not in collected_names]
             if missing:
                 items.append(v2_divider())
-                items.append(v2_body("**╔═══ ❓  ENCORE À DÉCOUVRIR  ═══╗**"))
+                items.append(v2_body("### ❓ ENCORE À DÉCOUVRIR"))
                 lines = []
                 for d in missing[:6]:
                     lines.append(
@@ -846,7 +846,7 @@ def build_my_drops_panel(member, drops: list[dict], guild_name: str = ""):
             # Items collectés
             if drops:
                 items.append(v2_divider())
-                items.append(v2_body("**╔═══ 🏆  TES TROUVAILLES  ═══╗**"))
+                items.append(v2_body("### 🏆 TES TROUVAILLES"))
                 # Regrouper par nom (count occurrences)
                 grouped = {}
                 for d in drops:

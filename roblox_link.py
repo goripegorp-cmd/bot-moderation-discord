@@ -568,7 +568,7 @@ def build_link_instructions_panel(
             ))
             items.append(v2_divider())
 
-            items.append(v2_body("**╔═══ 📝  ÉTAPE 1 — TON CODE  ═══╗**"))
+            items.append(v2_body("### 📝 ÉTAPE 1 — TON CODE"))
             items.append(v2_body(
                 f"Voici ton code de vérification (valable {LINK_CODE_TTL_MINUTES} min) :\n\n"
                 f"# `{code}`\n\n"
@@ -576,7 +576,7 @@ def build_link_instructions_panel(
             ))
 
             items.append(v2_divider())
-            items.append(v2_body("**╔═══ 🌐  ÉTAPE 2 — COLLE-LE  ═══╗**"))
+            items.append(v2_body("### 🌐 ÉTAPE 2 — COLLE-LE"))
             items.append(v2_body(
                 f"1. Va sur ton **profil Roblox** :\n"
                 f"   https://www.roblox.com/users/profile\n"
@@ -586,7 +586,7 @@ def build_link_instructions_panel(
             ))
 
             items.append(v2_divider())
-            items.append(v2_body("**╔═══ ✅  ÉTAPE 3 — VALIDE  ═══╗**"))
+            items.append(v2_body("### ✅ ÉTAPE 3 — VALIDE"))
             items.append(v2_body(
                 f"De retour ici, tape :\n\n"
                 f"# `/roblox verify`\n\n"

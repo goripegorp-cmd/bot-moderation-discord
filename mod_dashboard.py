@@ -198,7 +198,7 @@ def _build_layout(stats: dict, guild, tickets: dict | None = None) -> discord.ui
             items.append(v2_divider())
 
             # Stats globales
-            items.append(v2_body("**╔═══ 📊  ACTIVITÉ GLOBALE  ═══╗**"))
+            items.append(v2_body("### 📊 ACTIVITÉ GLOBALE"))
             items.append(v2_body(
                 f"📋 **Total sanctions :** `{stats['total']}`\n"
                 f"⏱️ **Dernières 24h :** `{stats['recent_24h']}`\n"
@@ -208,7 +208,7 @@ def _build_layout(stats: dict, guild, tickets: dict | None = None) -> discord.ui
             # Breakdown par type
             if stats["by_type"]:
                 items.append(v2_divider())
-                items.append(v2_body("**╔═══ 📝  PAR TYPE  ═══╗**"))
+                items.append(v2_body("### 📝 PAR TYPE"))
                 lines = []
                 for typ, cnt in sorted(
                     stats["by_type"].items(), key=lambda x: -x[1]
@@ -220,7 +220,7 @@ def _build_layout(stats: dict, guild, tickets: dict | None = None) -> discord.ui
             # Top staff
             if stats["top_staff"]:
                 items.append(v2_divider())
-                items.append(v2_body("**╔═══ 🛡️  TOP STAFF  ═══╗**"))
+                items.append(v2_body("### 🛡️ TOP STAFF"))
                 medals = ["🥇", "🥈", "🥉", "▪️", "▪️"]
                 lines = []
                 for idx, s in enumerate(stats["top_staff"][:TOP_STAFF_LIMIT]):
@@ -234,7 +234,7 @@ def _build_layout(stats: dict, guild, tickets: dict | None = None) -> discord.ui
             if stats["top_offenders"]:
                 items.append(v2_divider())
                 items.append(v2_body(
-                    "**╔═══ 👥  TOP RÉCIDIVISTES  ═══╗**"
+                    "### 👥 TOP RÉCIDIVISTES"
                 ))
                 lines = []
                 for o in stats["top_offenders"][:TOP_OFFENDERS_LIMIT]:
@@ -247,7 +247,7 @@ def _build_layout(stats: dict, guild, tickets: dict | None = None) -> discord.ui
             # 🎫 Tickets (Lot 4 — "dashboard staff = tickets + sanctions")
             if tickets:
                 items.append(v2_divider())
-                items.append(v2_body("**╔═══ 🎫  TICKETS  ═══╗**"))
+                items.append(v2_body("### 🎫 TICKETS"))
                 unclaimed = int(tickets.get("unclaimed", 0) or 0)
                 unclaimed_txt = f" · 🙋 `{unclaimed}` non pris en charge" if unclaimed else ""
                 items.append(v2_body(

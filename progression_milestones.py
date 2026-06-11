@@ -373,7 +373,7 @@ async def _build_layout(
 
             # Récompenses qui viennent d'être attribuées
             if awarded_now:
-                items.append(v2_body("**╔═══ 🎉  PALIERS DÉBLOQUÉS  ═══╗**"))
+                items.append(v2_body("### 🎉 PALIERS DÉBLOQUÉS"))
                 lines = []
                 total_coin_reward = 0
                 for entry in awarded_now:
@@ -392,7 +392,7 @@ async def _build_layout(
                 items.append(v2_divider())
 
             # Streak
-            items.append(v2_body("**╔═══ 🔥  STREAK QUOTIDIEN  ═══╗**"))
+            items.append(v2_body("### 🔥 STREAK QUOTIDIEN"))
             items.append(v2_body(
                 f"⚡ Streak actuel : **`{cur_streak}`** jours\n"
                 f"🏆 Meilleur streak : **`{best_streak}`** jours"
@@ -411,7 +411,7 @@ async def _build_layout(
 
             # Veteran
             items.append(v2_divider())
-            items.append(v2_body("**╔═══ 🌿  ANCIENNETÉ SUR LE SERVEUR  ═══╗**"))
+            items.append(v2_body("### 🌿 ANCIENNETÉ SUR LE SERVEUR"))
             items.append(v2_body(
                 f"📅 Membre depuis : **`{days_server}`** jours"
             ))
@@ -429,7 +429,7 @@ async def _build_layout(
 
             # Prestige
             items.append(v2_divider())
-            items.append(v2_body("**╔═══ 👑  PRESTIGE  ═══╗**"))
+            items.append(v2_body("### 👑 PRESTIGE"))
             title = prestige_title(prestige_rank)
             coin_mult = prestige_coin_mult(prestige_rank)
             xp_mult = prestige_xp_mult(prestige_rank)

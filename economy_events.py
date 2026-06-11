@@ -237,7 +237,7 @@ def build_layout(guild=None):
             items.append(v2_divider())
 
             # Détails actifs aujourd'hui
-            items.append(v2_body("**╔═══ ✨  AUJOURD'HUI  ═══╗**"))
+            items.append(v2_body("### ✨ AUJOURD'HUI"))
             bullets = []
             if ev.get("coin_mult") and ev["coin_mult"] != 1.0:
                 bullets.append(f"💰 Coins gagnés : **×{ev['coin_mult']}**")
@@ -260,7 +260,7 @@ def build_layout(guild=None):
             # Teasing du lendemain
             items.append(v2_divider())
             items.append(v2_body(
-                f"**╔═══ ⏭️  DEMAIN  ═══╗**\n"
+                f"### ⏭️ DEMAIN\n"
                 f"{tomorrow_ev['emoji']} **{tomorrow_ev['label']}**\n"
                 f"_{tomorrow_ev['tagline']}_"
             ))

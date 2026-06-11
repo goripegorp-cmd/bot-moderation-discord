@@ -548,7 +548,7 @@ def build_daily_report_panel(snapshot: dict, prev_snapshot: Optional[dict],
             items.append(v2_divider())
 
             # Members
-            items.append(v2_body("**╔═══ 👥  MEMBRES  ═══╗**"))
+            items.append(v2_body("### 👥 MEMBRES"))
             items.append(v2_body(
                 f"📊 Total membres : `{snapshot['member_count']}` "
                 f"{_diff_str(snapshot['member_count'], prev.get('member_count', 0))}\n"
@@ -561,7 +561,7 @@ def build_daily_report_panel(snapshot: dict, prev_snapshot: Optional[dict],
 
             # Mod
             items.append(v2_divider())
-            items.append(v2_body("**╔═══ 🛡️  MODÉRATION  ═══╗**"))
+            items.append(v2_body("### 🛡️ MODÉRATION"))
             items.append(v2_body(
                 f"⚠️ Infractions : `{snapshot['infractions']}` "
                 f"{_diff_str(snapshot['infractions'], prev.get('infractions', 0))}"
@@ -569,7 +569,7 @@ def build_daily_report_panel(snapshot: dict, prev_snapshot: Optional[dict],
 
             # Tickets
             items.append(v2_divider())
-            items.append(v2_body("**╔═══ 🎫  TICKETS  ═══╗**"))
+            items.append(v2_body("### 🎫 TICKETS"))
             items.append(v2_body(
                 f"🟢 Ouverts : `{snapshot['tickets_opened']}` "
                 f"{_diff_str(snapshot['tickets_opened'], prev.get('tickets_opened', 0))}\n"
@@ -579,7 +579,7 @@ def build_daily_report_panel(snapshot: dict, prev_snapshot: Optional[dict],
 
             # Events
             items.append(v2_divider())
-            items.append(v2_body("**╔═══ 🎯  EVENTS  ═══╗**"))
+            items.append(v2_body("### 🎯 EVENTS"))
             items.append(v2_body(
                 f"🏆 Events terminés : `{snapshot['events_finished']}` "
                 f"{_diff_str(snapshot['events_finished'], prev.get('events_finished', 0))}"

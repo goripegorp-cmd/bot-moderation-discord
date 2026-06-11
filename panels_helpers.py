@@ -157,8 +157,8 @@ def format_hp_bar(current: int, maximum: int, length: int = 20) -> str:
 
 
 def section_header(emoji: str, title: str) -> str:
-    """Génère un header de section pretty : **╔═══ 🏆  TITRE  ═══╗**."""
-    return f"**╔═══ {emoji}  {title.upper()}  ═══╗**"
+    """Génère un header de section pretty : ### 🏆 TITRE."""
+    return f"### {emoji} {title.upper()}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

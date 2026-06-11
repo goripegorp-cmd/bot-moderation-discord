@@ -565,7 +565,7 @@ def build_stats_panel(stats: dict, guild_name: str = ""):
             items.append(v2_divider())
 
             # Overview
-            items.append(v2_body("**╔═══ 📋  ÉTAT GLOBAL  ═══╗**"))
+            items.append(v2_body("### 📋 ÉTAT GLOBAL"))
             items.append(v2_body(
                 f"📊 **Total :** `{stats['total']}`\n"
                 f"🟢 **Ouverts :** `{stats['open']}`\n"
@@ -577,7 +577,7 @@ def build_stats_panel(stats: dict, guild_name: str = ""):
             # Priorité distribution
             if stats["by_priority"]:
                 items.append(v2_divider())
-                items.append(v2_body("**╔═══ 🚨  PAR PRIORITÉ (ouverts)  ═══╗**"))
+                items.append(v2_body("### 🚨 PAR PRIORITÉ (ouverts)"))
                 lines = []
                 for prio, cnt in sorted(
                     stats["by_priority"].items(),
@@ -591,7 +591,7 @@ def build_stats_panel(stats: dict, guild_name: str = ""):
             # Avg resolution
             if stats["avg_resolution_hours"] > 0:
                 items.append(v2_divider())
-                items.append(v2_body("**╔═══ ⏱️  TEMPS DE RÉSOLUTION  ═══╗**"))
+                items.append(v2_body("### ⏱️ TEMPS DE RÉSOLUTION"))
                 avg_h = stats["avg_resolution_hours"]
                 if avg_h < 1:
                     avg_str = f"`{int(avg_h * 60)}` min"
@@ -604,7 +604,7 @@ def build_stats_panel(stats: dict, guild_name: str = ""):
             # Top staff
             if stats["top_staff"]:
                 items.append(v2_divider())
-                items.append(v2_body("**╔═══ 🛡️  TOP STAFF  ═══╗**"))
+                items.append(v2_body("### 🛡️ TOP STAFF"))
                 medals = ["🥇", "🥈", "🥉", "▪️", "▪️"]
                 lines = []
                 for idx, s in enumerate(stats["top_staff"][:5]):

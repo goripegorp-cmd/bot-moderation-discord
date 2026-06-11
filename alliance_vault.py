@@ -442,7 +442,7 @@ async def build_vault_panel(alliance: dict):
             block.append(v2_divider())
 
             # Trésorerie
-            block.append(v2_body("**╔═══ 💰  TRÉSORERIE  ═══╗**"))
+            block.append(v2_body("### 💰 TRÉSORERIE"))
             block.append(v2_body(
                 f"🪙 **Coins en réserve :** `{treasury:,}`\n"
                 f"📦 **Items stockés :** `{item_total}` / `{VAULT_MAX_ITEMS}`"
@@ -451,7 +451,7 @@ async def build_vault_panel(alliance: dict):
             # Activité récente
             block.append(v2_divider())
             block.append(v2_body(
-                f"**╔═══ 📊  ACTIVITÉ ({activity['window_days']}j)  ═══╗**"
+                f"### 📊 ACTIVITÉ ({activity['window_days']}j)"
             ))
             block.append(v2_body(
                 f"📥 Coins déposés : `+{activity['deposit_coins_total']:,}`\n"
@@ -465,7 +465,7 @@ async def build_vault_panel(alliance: dict):
             if items:
                 block.append(v2_divider())
                 block.append(v2_body(
-                    f"**╔═══ 📦  ITEMS RÉCENTS ({len(items)})  ═══╗**"
+                    f"### 📦 ITEMS RÉCENTS ({len(items)})"
                 ))
                 lines = []
                 rarity_emoji = {
@@ -492,7 +492,7 @@ async def build_vault_panel(alliance: dict):
             # Top contributeurs
             if contribs:
                 block.append(v2_divider())
-                block.append(v2_body("**╔═══ 🏆  TOP CONTRIBUTEURS  ═══╗**"))
+                block.append(v2_body("### 🏆 TOP CONTRIBUTEURS"))
                 medals = ["🥇", "🥈", "🥉", "▪️", "▪️"]
                 lines = []
                 for idx, c in enumerate(contribs[:5]):

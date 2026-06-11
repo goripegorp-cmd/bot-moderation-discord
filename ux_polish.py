@@ -256,7 +256,7 @@ def build_themes_panel(current_theme_key: str = DEFAULT_THEME_KEY):
             ))
             items.append(v2_divider())
 
-            items.append(v2_body("**╔═══ 🎨  THÈMES DISPONIBLES  ═══╗**"))
+            items.append(v2_body("### 🎨 THÈMES DISPONIBLES"))
             lines = []
             for key, theme in THEMES.items():
                 marker = " ← _actuel_" if key == current_theme_key else ""

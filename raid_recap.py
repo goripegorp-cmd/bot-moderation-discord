@@ -173,7 +173,7 @@ def _build_layout(stats: dict, guild) -> discord.ui.LayoutView | None:
             items.append(v2_divider())
 
             # Stats globales
-            items.append(v2_body("**╔═══ 📊  CETTE SEMAINE  ═══╗**"))
+            items.append(v2_body("### 📊 CETTE SEMAINE"))
             items.append(v2_body(
                 f"💀 **Boss vaincus :** `{stats['events_count']}`\n"
                 f"💥 **Dégâts cumulés :** `{stats['total_damage']:,}`\n"
@@ -184,7 +184,7 @@ def _build_layout(stats: dict, guild) -> discord.ui.LayoutView | None:
             if stats.get("top_damager"):
                 td = stats["top_damager"]
                 items.append(v2_divider())
-                items.append(v2_body("**╔═══ 🥇  TOP DAMAGER  ═══╗**"))
+                items.append(v2_body("### 🥇 TOP DAMAGER"))
                 items.append(v2_body(
                     f"🏆 <@{td['user_id']}> · `{td['damage']:,}` dégâts cumulés\n"
                     f"_Le titan de la semaine. Chapeau bas._"
@@ -193,7 +193,7 @@ def _build_layout(stats: dict, guild) -> discord.ui.LayoutView | None:
             # Top participants
             if stats.get("top_participants"):
                 items.append(v2_divider())
-                items.append(v2_body("**╔═══ 🎖️  MVPs DE PARTICIPATION  ═══╗**"))
+                items.append(v2_body("### 🎖️ MVPs DE PARTICIPATION"))
                 medals = ["🥇", "🥈", "🥉"]
                 lines = []
                 for idx, p in enumerate(stats["top_participants"][:3]):

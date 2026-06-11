@@ -556,7 +556,7 @@ def _build_highlights_layout(stats: dict, guild):
             ]
             empty_all = True
             for header, rows, unit in sections:
-                items.append(v2_body(f"**╔═══ {header}  ═══╗**"))
+                items.append(v2_body(f"### {header}"))
                 if not rows:
                     items.append(v2_body("_Personne n'a marqué cette semaine._"))
                 else:

@@ -282,7 +282,7 @@ async def build_stats_panel(
 
             # Awarded maintenant ?
             if awarded_now:
-                items.append(v2_body("**╔═══ 🎉  NOUVEAUX PALIERS  ═══╗**"))
+                items.append(v2_body("### 🎉 NOUVEAUX PALIERS"))
                 lines = []
                 total_coins = 0
                 for entry in awarded_now:
@@ -301,7 +301,7 @@ async def build_stats_panel(
                 items.append(v2_divider())
 
             # Stats actuelles
-            items.append(v2_body("**╔═══ 📊  ACTIVITÉ ACTUELLE  ═══╗**"))
+            items.append(v2_body("### 📊 ACTIVITÉ ACTUELLE"))
             items.append(v2_body(
                 f"🎙️ **Minutes cumulées :** `{minutes:,}` min "
                 f"_({_format_duration(minutes)})_"
@@ -310,7 +310,7 @@ async def build_stats_panel(
             # Prochain palier
             if next_m:
                 items.append(v2_divider())
-                items.append(v2_body("**╔═══ 🎯  PROCHAIN PALIER  ═══╗**"))
+                items.append(v2_body("### 🎯 PROCHAIN PALIER"))
                 remaining = next_m["minutes"] - minutes
                 items.append(v2_body(
                     f"{next_m['emoji']} **{next_m['title']}** "
