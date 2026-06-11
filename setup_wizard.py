@@ -342,10 +342,8 @@ class WizardStep1(_WizardView):
             _subtitle(_progress_bar(1, self.TOTAL_STEPS)),
             _divider(),
             _body(
-                "Ce wizard va te guider en **6 étapes** pour configurer le bot.\n"
-                "Chaque étape se sauvegarde automatiquement — tu peux quitter et revenir plus tard.\n\n"
-                "**Étape 1/6 — Choisis un template**\n"
-                "_Le template applique des réglages par défaut sensés. Tu pourras tout modifier ensuite via_ `/admin`."
+                "Ce wizard te guide en **6 étapes** pour configurer le bot — chaque étape se sauvegarde automatiquement.\n"
+                "Choisis un template : il applique des réglages par défaut sensés, modifiables ensuite via `/admin`."
             ),
             _divider(),
             ui.ActionRow(sel),
@@ -531,14 +529,10 @@ class WizardStep4(_WizardView):
             _subtitle(_progress_bar(4, self.TOTAL_STEPS)),
             _divider(),
             _body(
-                "Choisis le niveau qui correspond le mieux a ton serveur.\n"
-                "Tu pourras affiner les seuils plus tard via `/admin → Protection`."
-            ),
-            _divider(),
-            _body(
                 "**🌱 Souple** — recommandé au démarrage. Aucune sanction auto, tout passe en log.\n"
                 "**⚖️ Équilibré** — recommandé pour la plupart. Warn/mute auto, ban très prudent.\n"
-                "**🛡️ Strict** — pour les serveurs visés par des raids. Actions auto plus rapides."
+                "**🛡️ Strict** — pour les serveurs visés par des raids. Actions auto plus rapides.\n"
+                "-# Seuils affinables ensuite via `/admin → Protection`."
             ),
             _divider(),
             _kv([("Niveau choisi", current_lbl)]),
@@ -695,8 +689,6 @@ class WizardStep6(_WizardView):
             _title("✔️ Récapitulatif"),
             _subtitle(_progress_bar(6, self.TOTAL_STEPS)),
             _divider(),
-            _body("Vérifie que tout est correct, puis clique **Appliquer**."),
-            _divider(),
             _kv([
                 ("📋 Template", tpl_label),
                 ("📜 Salon règles", rules.mention if rules else "—"),
@@ -708,10 +700,7 @@ class WizardStep6(_WizardView):
                 ("💬 Features actives", feats_str),
             ]),
             _divider(),
-            _body(
-                "_Une **sauvegarde automatique** sera créée avant l'application._\n"
-                "_Tu pourras restaurer l'état précédent via_ `/admin → Sauvegardes`."
-            ),
+            _subtitle("Une sauvegarde automatique est créée avant l'application (restaurable via `/admin → Sauvegardes`)."),
             _divider(),
             ui.ActionRow(b_back, b_apply),
         ]

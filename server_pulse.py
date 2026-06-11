@@ -273,14 +273,14 @@ def build_pulse_panel(guild: discord.Guild):
             p = await _collect_pulse(guild)
 
             items = []
-            items.append(v2_title(f"📡  Pulse de {guild.name}"))
+            items.append(v2_title(f"📡 Pulse de {guild.name}"))
             items.append(v2_subtitle(
                 f"_Live · {datetime.now().strftime('%H:%M')}_"
             ))
             items.append(v2_divider())
 
             # Membres
-            items.append(v2_body("**👥  Membres**"))
+            items.append(v2_body("**👥 Membres**"))
             online_str = (
                 f"online : `{p['members_online']:,}`"
                 if p['members_online'] > 0
@@ -294,7 +294,7 @@ def build_pulse_panel(guild: discord.Guild):
             items.append(v2_divider())
 
             # Activité
-            items.append(v2_body("**📊  Activité**"))
+            items.append(v2_body("**📊 Activité**"))
             items.append(v2_body(
                 f"• Messages dernière heure (~) : `{p['messages_last_hour']:,}`"
             ))
@@ -308,14 +308,14 @@ def build_pulse_panel(guild: discord.Guild):
 
             # Events
             if p.get("events_active"):
-                items.append(v2_body("**🔥  En cours**"))
+                items.append(v2_body("**🔥 En cours**"))
                 for e in p["events_active"]:
                     items.append(v2_body(f"• {e}"))
                 items.append(v2_divider())
 
             # Saison / Saga
             if p.get("season_name") or p.get("saga_info"):
-                items.append(v2_body("**🌸  Contexte serveur**"))
+                items.append(v2_body("**🌸 Contexte serveur**"))
                 if p.get("season_name"):
                     items.append(v2_body(f"• Saison : {p['season_name']}"))
                 if p.get("saga_info"):
@@ -369,15 +369,12 @@ def build_tip_panel():
 
     tip = get_tip_of_the_day()
     items = [
-        v2_title("💡  Astuce du jour"),
+        v2_title("💡 Astuce du jour"),
         v2_subtitle("_Nouvelle astuce chaque jour à minuit Paris_"),
         v2_divider(),
         v2_body(tip),
         v2_divider(),
-        v2_body(
-            "_Tip rotatif — tous les joueurs voient la même astuce "
-            "le même jour. Parfait pour lancer des conversations._"
-        ),
+        v2_body("-# Même astuce pour tous les joueurs chaque jour"),
     ]
 
     class _TipPanel(LayoutView):

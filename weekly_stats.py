@@ -298,7 +298,7 @@ def build_recap_panel(member: discord.Member):
         async def populate(self):
             s = await get_user_weekly_stats(member.guild.id, member.id)
             items = []
-            items.append(v2_title("📰  Ton récap des 7 derniers jours"))
+            items.append(v2_title("📰 Ton récap des 7 derniers jours"))
             style_e = STYLE_EMOJI.get(s["style"], "⚖️")
             style_l = STYLE_LABEL.get(s["style"], "Équilibré")
             items.append(v2_subtitle(
@@ -331,14 +331,14 @@ def build_recap_panel(member: discord.Member):
                     "via duel, quête ou boss"
                 )
             if suggestions:
-                items.append(v2_body("**👉  Prochaine étape**"))
+                items.append(v2_body("**👉 Prochaine étape**"))
                 # Affiche les 2 premières — focus, pas surcharge
                 for sug in suggestions[:2]:
                     items.append(v2_body(f"• {sug}"))
                 items.append(v2_divider())
 
             # Combat
-            items.append(v2_body("**⚔️  Combat**"))
+            items.append(v2_body("**⚔️ Combat**"))
             items.append(v2_body(
                 f"• Boss kills (coup final) : `{s['boss_kills_final']}`\n"
                 f"• Duels gagnés : `{s['duels_won']}`"
@@ -346,7 +346,7 @@ def build_recap_panel(member: discord.Member):
             items.append(v2_divider())
 
             # Économie / Collecte
-            items.append(v2_body("**💎  Collecte**"))
+            items.append(v2_body("**💎 Collecte**"))
             items.append(v2_body(
                 f"• Trésors récupérés : `{s['treasures']}`\n"
                 f"• Drops saisonniers : `{s['drops_collected']}`"
@@ -354,7 +354,7 @@ def build_recap_panel(member: discord.Member):
             items.append(v2_divider())
 
             # Solo
-            items.append(v2_body("**🎯  Solo / Daily**"))
+            items.append(v2_body("**🎯 Solo / Daily**"))
             items.append(v2_body(
                 f"• Quêtes complétées : `{s['quests_done']}`\n"
                 f"• Énigmes 1ère place : `{s['riddles_solved']}`"
@@ -362,7 +362,7 @@ def build_recap_panel(member: discord.Member):
             items.append(v2_divider())
 
             # Voice
-            items.append(v2_body("**🎙️  Voice activity**"))
+            items.append(v2_body("**🎙️ Voice activity**"))
             items.append(v2_body(
                 f"• Minutes en vocal : `{s['voice_minutes']:,}`\n"
                 f"• Coins voice gagnés : `{s['voice_coins_earned']}` 🪙"
@@ -405,7 +405,7 @@ def build_leaderboard_panel(guild: discord.Guild):
 
         async def populate(self):
             items = []
-            items.append(v2_title("🏆  Leaderboards de la semaine"))
+            items.append(v2_title("🏆 Leaderboards de la semaine"))
             items.append(v2_subtitle(
                 f"_Top 5 sur les 7 derniers jours · {guild.name}_"
             ))

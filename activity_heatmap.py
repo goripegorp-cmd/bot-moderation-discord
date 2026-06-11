@@ -222,7 +222,7 @@ def build_heatmap_panel(guild: discord.Guild):
             total_msgs = sum(sum(row) for row in matrix)
 
             items = []
-            items.append(v2_title("🗺️  Heatmap d'activité"))
+            items.append(v2_title("🗺️ Heatmap d'activité"))
             items.append(v2_subtitle(
                 f"_Quand ton serveur est actif (heures Paris) · "
                 f"{total_msgs:,} messages comptés_"

@@ -9438,7 +9438,7 @@ class EventsHubPanelV2(LayoutView):
 
         items = [
             v2_title("🎪 Configuration des événements"),
-            v2_subtitle("État de chaque événement ci-dessous — choisis-en un dans le menu pour le configurer"),
+            v2_subtitle("État de chaque événement · choisis-en un pour le configurer"),
             v2_divider(),
             v2_body("\n".join(lines)),
             v2_divider(),
@@ -19436,9 +19436,8 @@ class SecurityChannelsPanelV2(LayoutView):
             items.append(v2_body(f"_{desc}_"))
             items.append(v2_divider())
 
-        items.append(v2_body(
-            "_💡 Crée d'abord un salon dans Discord avec le nom et les "
-            "permissions que tu veux. Puis clique ci-dessous pour le lier._"
+        items.append(v2_subtitle(
+            "Crée le salon dans Discord, puis lie-le ici"
         ))
 
         self.add_item(v2_container(*items, color=0xE74C3C))
@@ -25179,7 +25178,6 @@ class CommandsPanelV2(LayoutView):
         items.append(v2_divider())
         items.append(v2_body("\n".join([rs_line, sg_line, tr_line, dir_line])))
         items.append(v2_divider())
-        items.append(v2_subtitle("Clique sur un système pour le configurer"))
         items.append(discord.ui.ActionRow(b_rs, b_sg, b_tr, b_dir))
         items.append(discord.ui.ActionRow(b_back))
 
@@ -28479,7 +28477,7 @@ class AdsRobloxPanelV2(LayoutView):
         b_back.callback = self._cb_back
 
         items: list = [
-            v2_title("🟢  Roblox UGC"),
+            v2_title("🟢 Roblox UGC"),
             v2_subtitle(f"`{len(users_lines)}` créateur(s) · `{len(groups_lines)}` groupe(s)"),
             v2_divider(),
             v2_body(f"📍 **Salon** · {dot(rblx_ch)}"),
@@ -28895,7 +28893,7 @@ class AdsDealsPanelV2(LayoutView):
         state_line = f"🔘 **Système activé** · `{active_deals}` deal(s) actif(s)" if enabled else "⚪ **Système désactivé**"
 
         items: list = [
-            v2_title("🎯  Game Deals"),
+            v2_title("🎯 Game Deals"),
             v2_subtitle("Promotions Steam · Epic · GOG · Humble · …"),
             v2_divider(),
             v2_body(state_line),
@@ -31459,8 +31457,6 @@ class GiveawayPanelV2(LayoutView):
             v2_title("🎁 Gestion des Cadeaux"),
             v2_subtitle(f"`{active_count}` cadeau(x) actif(s)"),
             v2_divider(),
-            v2_body("Crée des cadeaux pour récompenser ta communauté !"),
-            v2_divider(),
             v2_title("✨ Conditions personnalisables", level=3),
             v2_body(
                 "• 📝 Nombre minimum de messages\n"
@@ -31470,7 +31466,6 @@ class GiveawayPanelV2(LayoutView):
                 "• ❌ Pas AFK (configurable)"
             ),
             v2_divider(),
-            v2_subtitle("💡 Crée un cadeau avec ou sans conditions"),
             discord.ui.ActionRow(b_create, b_list, b_back),
         ]
 
@@ -35441,7 +35436,6 @@ class TempVoicePermissionsPanelV2(LayoutView):
                 f"👢 **Expulser membres** · {_icon('can_kick')}"
             ),
             v2_divider(),
-            v2_subtitle("Clique sur un bouton pour activer / désactiver la permission"),
             discord.ui.ActionRow(b_rename, b_limit, b_mute, b_kick),
             discord.ui.ActionRow(b_back),
         ]
@@ -40216,7 +40210,6 @@ class EditChanCfgV2(LayoutView):
                 "_Si activé, seules les commandes slash peuvent être utilisées._"
             ),
             v2_divider(),
-            v2_subtitle("Clique sur un bouton pour activer / désactiver"),
             discord.ui.ActionRow(b_msg, b_img, b_gif, b_emo, b_link),
             discord.ui.ActionRow(b_cmd, b_back),
         ]

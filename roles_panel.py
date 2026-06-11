@@ -202,10 +202,7 @@ class RolesPanelView(ui.LayoutView):
                 items.append(row)
 
         items.append(ui.Separator())
-        items.append(ui.TextDisplay(
-            "-# 💡 Clique sur un bouton pour activer/désactiver une notification. "
-            "Tes choix sont privés."
-        ))
+        items.append(ui.TextDisplay("-# Tes choix sont privés."))
 
         self.add_item(ui.Container(*items, accent_color=discord.Color(self.config.color)))
 

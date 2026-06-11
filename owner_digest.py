@@ -252,7 +252,7 @@ def _build_digest_panel(summary: dict):
     v2_container = _v2['v2_container']
 
     items = []
-    items.append(v2_title(f"📰  Récap quotidien — {summary['guild_name']}"))
+    items.append(v2_title(f"📰 Récap quotidien — {summary['guild_name']}"))
 
     # Membres
     new_n = len(summary["new_members_24h"])
@@ -266,7 +266,7 @@ def _build_digest_panel(summary: dict):
     sa = summary["security_alerts"]
     total_sec = sum(sa.values())
     if total_sec > 0:
-        items.append(v2_body("**🚨  Alertes sécurité (24h)**"))
+        items.append(v2_body("**🚨 Alertes sécurité (24h)**"))
         if sa["raid_alerts"] > 0:
             items.append(v2_body(
                 f"• 🛡️ Raid alerts : **{sa['raid_alerts']}**"
@@ -289,7 +289,7 @@ def _build_digest_panel(summary: dict):
         items.append(v2_divider())
 
     # Activité
-    items.append(v2_body("**📊  Activité (24h)**"))
+    items.append(v2_body("**📊 Activité (24h)**"))
     items.append(v2_body(
         f"• 💬 Messages : **{summary['msgs_24h']:,}**\n"
         f"• 🎙️ Minutes voice : **{summary['voice_minutes_24h']:,}**"
@@ -298,7 +298,7 @@ def _build_digest_panel(summary: dict):
 
     # Nouveaux membres
     if new_n > 0:
-        items.append(v2_body(f"**🆕  Nouveaux membres ({new_n})**"))
+        items.append(v2_body(f"**🆕 Nouveaux membres ({new_n})**"))
         for nm in summary["new_members_24h"][:5]:
             age = nm.get("age_days", 0)
             age_str = f"{age}j" if age < 90 else f"{age // 30}m"
@@ -333,10 +333,7 @@ def _build_digest_panel(summary: dict):
         ))
 
     items.append(v2_divider())
-    items.append(v2_body(
-        "_Récap auto chaque jour à 9h FR. "
-        "Configure via `/owner` (à venir)._"
-    ))
+    items.append(v2_body("-# Récap auto chaque jour à 9h FR"))
 
     class _DigestPanel(LayoutView):
         def __init__(self):

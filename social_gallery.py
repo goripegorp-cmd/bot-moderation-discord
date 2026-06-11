@@ -188,9 +188,8 @@ def build_gallery_view(
 
     if not posts:
         items.append(ui.TextDisplay(
-            "📭 **Aucune publication détectée pour le moment.**\n"
-            "-# Le bot vérifie automatiquement les nouveaux contenus toutes les 5 minutes. "
-            "Patiente, ou ajoute des comptes/groupes à suivre."
+            "📭 **Aucune publication pour le moment.**\n"
+            "-# Vérification automatique toutes les 5 minutes"
         ))
     else:
         # Chaque post = une Section avec thumbnail + texte propre
@@ -242,8 +241,7 @@ def build_gallery_view(
 
     # Footer
     items.append(ui.TextDisplay(
-        "-# 🔄 Cette galerie se met à jour automatiquement · "
-        "Clique sur un titre pour voir la publication originale"
+        "-# 🔄 Galerie mise à jour automatiquement"
     ))
 
     container = ui.Container(*items, accent_color=discord.Color(plat_info["color"]))

@@ -158,8 +158,6 @@ class AdminMasterPanelV2(_OwnerView):
                 ("💬 Engagement", _summary_community(comm_cfg)),
             ]),
             _divider(),
-            _subtitle("Choisis un module ci-dessous pour le configurer."),
-            _divider(),
             ui.ActionRow(b_perms, b_social, b_prot),
             ui.ActionRow(b_comm, b_close),
         ]
@@ -460,7 +458,6 @@ class CategoryEditPanel(_OwnerView):
                 ("Rôles DENY", deny_str),
             ]),
             _divider(),
-            _subtitle("Modifie le défaut, ou ajoute des rôles ALLOW/DENY."),
             ui.ActionRow(sel_default),
             ui.ActionRow(role_allow),
             ui.ActionRow(role_deny),
@@ -531,7 +528,6 @@ class SanctionablePanel(_OwnerView):
                 ("Membres immunisés", users_str),
             ]),
             _divider(),
-            _subtitle("Sélectionne un rôle ou un membre à ajouter."),
             ui.ActionRow(role_add),
             ui.ActionRow(user_add),
             ui.ActionRow(b_clear, b_back),
@@ -680,10 +676,7 @@ class SocialMediaPanelV2(_OwnerView):
             _title("Abonnements (10 premiers)", level=3),
             _body(subs_block),
             _divider(),
-            _subtitle(
-                "🔒 **Anti-doublons** : chaque post a un ID unique, jamais re-publié.\n"
-                "🧹 **Auto-clean** : si la source supprime, l'annonce Discord est supprimée."
-            ),
+            _subtitle("Anti-doublons (ID unique par post) et auto-clean si la source supprime."),
             _divider(),
             ui.ActionRow(b_add, b_manage, b_back),
         ]
