@@ -373,7 +373,7 @@ async def build_hub(guild_id: int, user_id: int):
     mat_total = sum(mats.values()) if mats else 0
 
     items = [
-        v2_title("🏛️  LA CITÉ"),
+        v2_title("🏛️ La Cité"),
         v2_subtitle("Ton espace de création, de construction et de richesse — tout en boutons"),
         v2_divider(),
         v2_body(

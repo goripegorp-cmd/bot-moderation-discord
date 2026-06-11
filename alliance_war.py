@@ -174,7 +174,7 @@ def _build_panel(war: dict):
     color = 0xF1C40F if ended else 0xE74C3C
 
     items = [
-        v2_title("⚔️  TOURNOI D'ALLIANCES"),
+        v2_title("⚔️ Tournoi d'alliances"),
         v2_subtitle("_Attaque l'alliance adverse · Défends la tienne. La 1ʳᵉ à 0 PV perd !_"),
         v2_divider(),
         v2_body(f"{war['a_emoji']} **{war['a_name']}**\n"

@@ -284,13 +284,15 @@ def combat_recap_view(
         head, color = "⏳ Non vaincu", Palette.NEUTRAL
     else:
         head, color = "🏁 Terminé", Palette.PRIMARY
+    # Récap volontairement MINIMAL (demande owner : « beaucoup plus simple, juste
+    # les infos essentielles ») : état + nombre de participants + qui a gagné +
+    # récompense. `total_damage` reste accepté pour compat d'appel mais n'est PLUS
+    # affiché (stat technique, non essentielle au joueur).
     n = participants if participants is not None else (len(podium) + max(0, others_count))
-    meta = []
+    head_line = head
     if n:
-        meta.append(f"{n} combattant" + ("s" if n > 1 else ""))
-    if total_damage:
-        meta.append(f"`{int(total_damage):,}` dégâts")
-    lines = [head + ((" · " + " · ".join(meta)) if meta else "")]
+        head_line += f" · {n} participant" + ("s" if n > 1 else "")
+    lines = [head_line]
     medals = ("🥇", "🥈", "🥉")
     if podium:
         lines.append("")

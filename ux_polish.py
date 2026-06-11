@@ -244,7 +244,7 @@ def build_themes_panel(current_theme_key: str = DEFAULT_THEME_KEY):
         def __init__(self):
             super().__init__(timeout=300)
             items = []
-            items.append(v2_title("🎨  THÈME PERSONNEL"))
+            items.append(v2_title("🎨 Thème personnel"))
             items.append(v2_subtitle(
                 f"_Couleur d'accent de tes panels ephemeral_"
             ))

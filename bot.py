@@ -4178,11 +4178,17 @@ class PaginatedChannelSelect(View):
             count = len(self.current_channels)
             content = f"✅ **{count} salon(s)** configuré(s) !" if count > 0 else "✅ Aucun salon configuré (commande désactivée)"
             if hasattr(v, 'render_to'):
-                await i.edit_original_response(content=content, view=v, embed=None, attachments=[])
+                # content= INTERDIT avec un message Components V2 (HTTP 400) → on
+                # ré-affiche le panneau seul, puis on confirme via un followup ephemeral.
+                await i.edit_original_response(view=v, embed=None, attachments=[])
+                try:
+                    await i.followup.send(content, ephemeral=True)
+                except Exception:
+                    pass
             else:
                 await i.edit_original_response(content=content, embed=await v.embed(), view=v, attachments=[])
-        except:
-            pass
+        except Exception as ex:
+            print(f"[picker _validate] {ex}")
     
     async def _clear(self, i: discord.Interaction):
         try:
@@ -44546,7 +44552,7 @@ async def _gift_cmd_DEPRECATED(i: discord.Interaction, membre: discord.Member, m
         # Réponse V2
         try:
             items = []
-            items.append(v2_title("🎁  GIFT ENVOYÉ"))
+            items.append(v2_title("🎁 Cadeau envoyé"))
             items.append(v2_subtitle(
                 f"_Pour {membre.display_name} — merci de la générosité !_"
             ))
@@ -48946,7 +48952,7 @@ async def event_cmd(i: discord.Interaction):
                 def __init__(self):
                     super().__init__(timeout=300)
                     items = []
-                    items.append(v2_title("🎪  ÉVÉNEMENTS"))
+                    items.append(v2_title("🎪 Événements"))
                     items.append(v2_subtitle("Le système est désactivé sur ce serveur"))
                     items.append(v2_divider())
                     items.append(v2_body(
@@ -49126,7 +49132,7 @@ async def event_cmd(i: discord.Interaction):
             def __init__(self):
                 super().__init__(timeout=300)
                 items = []
-                items.append(v2_title(f"⚔️  EVENT EN COURS  ·  {boss_name}"))
+                items.append(v2_title(f"⚔️ Event en cours  ·  {boss_name}"))
                 items.append(v2_subtitle("Le boss attend tes coups !"))
                 items.append(v2_divider())
 
@@ -49694,7 +49700,7 @@ async def repair_cmd(i: discord.Interaction):
             def __init__(self):
                 super().__init__(timeout=180)
                 lay = []
-                lay.append(v2_title("🔧  ATELIER DE RÉPARATION"))
+                lay.append(v2_title("🔧 Atelier de réparation"))
                 lay.append(v2_subtitle(
                     f"Coût total : `{total_cost:,}` 🪙  ·  Tu as `{total_wealth:,}` 🪙 (main + banque)"
                 ))
@@ -50136,7 +50142,7 @@ async def swap_cmd(
             def __init__(self):
                 super().__init__(timeout=_TRADE_TIMEOUT_SEC)
                 lay = []
-                lay.append(v2_title("🤝  PROPOSITION D'ÉCHANGE"))
+                lay.append(v2_title("🤝 Proposition d'échange"))
                 lay.append(v2_subtitle(
                     f"{i.user.mention} propose à {cible.mention}  ·  expire dans 3 min"
                 ))
@@ -50594,7 +50600,7 @@ async def _auction_browse(i: discord.Interaction):
         def __init__(self):
             super().__init__(timeout=300)
             lay = []
-            lay.append(v2_title("🔨  MAISON DES ENCHÈRES"))
+            lay.append(v2_title("🔨 Maison des enchères"))
             lay.append(v2_subtitle(
                 f"{len(rows)} enchère(s) active(s)  ·  commission `{AUCTION_COMMISSION_PCT}%`"
             ))
@@ -50857,7 +50863,7 @@ async def _auction_create(i: discord.Interaction):
         def __init__(self):
             super().__init__(timeout=180)
             lay = []
-            lay.append(v2_title("📤  METTRE EN VENTE"))
+            lay.append(v2_title("📤 Mettre en vente"))
             lay.append(v2_subtitle("Choisis le slot de l'item à vendre :"))
             lay.append(v2_divider())
             # Phase 121 : chaque slot = section avec bouton accessory (UX claire)
@@ -50948,7 +50954,7 @@ async def _auction_mine(i: discord.Interaction):
         def __init__(self):
             super().__init__(timeout=180)
             lay = []
-            lay.append(v2_title("📋  MES ENCHÈRES"))
+            lay.append(v2_title("📋 Mes enchères"))
             lay.append(v2_subtitle(f"{len(rows)} entrée(s) (10 max affichés)"))
             lay.append(v2_divider())
             lay.append(v2_body("\n\n".join(lines)))
@@ -51605,7 +51611,7 @@ async def records_cmd(i: discord.Interaction):
             def __init__(self):
                 super().__init__(timeout=600)
                 items = []
-                items.append(v2_title(f"🏆  HALL OF FAME  ·  {_guild_name}"))
+                items.append(v2_title(f"🏆 Hall of Fame  ·  {_guild_name}"))
                 items.append(v2_subtitle("Top 5 dans chaque catégorie · Records persistants du serveur"))
                 items.append(v2_divider())
 
@@ -51974,7 +51980,7 @@ async def server_stats_cmd(i: discord.Interaction):
                 items = []
 
                 # ─── HEADER ───
-                items.append(v2_title(f"📊  DASHBOARD  ·  {_guild_name}"))
+                items.append(v2_title(f"📊 Dashboard  ·  {_guild_name}"))
                 items.append(v2_subtitle(
                     f"`{member_count}` membres · `{channel_count}` salons · `{role_count}` rôles"
                 ))
@@ -54514,7 +54520,7 @@ class TradeBuilderViewV2(LayoutView):
         trade_view = LayoutView(timeout=None)
         trade_view.add_item(v2_container(
             v2_section(
-                v2_title(f"🔄 TRADE — {self.jeu.upper()}"),
+                v2_title(f"🔄 Trade — {self.jeu.upper()}"),
                 v2_subtitle(f"par {self.user.display_name} · <t:{int(now().timestamp())}:R>"),
                 accessory=v2_thumb(self.user.display_avatar.url),
             ),
@@ -54659,7 +54665,7 @@ class TradeBuilderView(View):
         trade_view = LayoutView(timeout=None)
         trade_view.add_item(v2_container(
             v2_section(
-                v2_title(f"🔄 TRADE — {self.jeu.upper()}"),
+                v2_title(f"🔄 Trade — {self.jeu.upper()}"),
                 v2_subtitle(f"par {self.user.display_name} · <t:{int(now().timestamp())}:R>"),
                 accessory=v2_thumb(self.user.display_avatar.url),
             ),
@@ -61396,7 +61402,7 @@ async def pet_cmd(
                 def __init__(self):
                     super().__init__(timeout=300)
                     items = []
-                    items.append(v2_title("🥚  MES ŒUFS"))
+                    items.append(v2_title("🥚 Mes œufs"))
                     items.append(v2_subtitle(
                         "Gagne des œufs en participant aux events — ils éclosent avec le temps"))
                     items.append(v2_divider())
@@ -61502,7 +61508,7 @@ async def pet_cmd(
                 def __init__(self):
                     super().__init__(timeout=300)
                     items = []
-                    items.append(v2_title(f"🐾  MA COLLECTION · {len(_owned)} familier(s)"))
+                    items.append(v2_title(f"🐾 Ma collection · {len(_owned)} familier(s)"))
                     items.append(v2_subtitle("1 seul équipé à la fois — choisis-le ci-dessous"))
                     items.append(v2_divider())
                     _lines = []
@@ -61642,7 +61648,7 @@ async def pet_cmd(
                 def __init__(self):
                     super().__init__(timeout=300)
                     items = []
-                    items.append(v2_title("🔄  PET ACTIF MIS À JOUR"))
+                    items.append(v2_title("🔄 Familier actif mis à jour"))
                     items.append(v2_subtitle(f"**{_pd['emoji']} {_pd['name']}** est maintenant ton compagnon actif"))
                     items.append(v2_divider())
                     items.append(v2_body("### ✨ ACTIF"))
@@ -61686,7 +61692,7 @@ async def pet_cmd(
                 def __init__(self):
                     super().__init__(timeout=300)
                     items = []
-                    items.append(v2_title("🍖  PET NOURRI"))
+                    items.append(v2_title("🍖 Familier nourri"))
                     items.append(v2_subtitle(f"**{_pet_name}** est repu et content !"))
                     items.append(v2_divider())
                     items.append(v2_body("### 🥩 REPAS"))
@@ -61721,7 +61727,7 @@ async def pet_cmd(
                 def __init__(self):
                     super().__init__(timeout=300)
                     items = []
-                    items.append(v2_title("✏️  PET RENOMMÉ"))
+                    items.append(v2_title("✏️ Familier renommé"))
                     items.append(v2_subtitle(f"Ton compagnon s'appelle désormais **{_new_name}**"))
                     items.append(v2_divider())
                     items.append(v2_body("### 🏷️ NOUVEAU NOM"))
@@ -62419,7 +62425,7 @@ async def _p41_open_daily(i: discord.Interaction):
             def __init__(self):
                 super().__init__(timeout=300)
                 items = []
-                items.append(v2_title(f"📜  QUÊTES JOURNALIÈRES  ·  {_today}"))
+                items.append(v2_title(f"📜 Quêtes journalières  ·  {_today}"))
                 items.append(v2_subtitle(
                     f"🔥 Streak `{cur_streak}` jour(s) · Record `{best_streak}`"
                 ))
@@ -71955,7 +71961,7 @@ async def prestige_cmd(i: discord.Interaction):
             def __init__(self):
                 super().__init__(timeout=60)
                 items = []
-                items.append(v2_title("🌟  PRESTIGE — TU ES PRÊT"))
+                items.append(v2_title("🌟 Prestige — tu es prêt"))
                 items.append(v2_subtitle("Tu atteins le seuil ultime. Renaître plus fort, ça se prépare."))
                 items.append(v2_divider())
                 items.append(v2_body("### 👑 TON RANG"))
@@ -71972,12 +71978,12 @@ async def prestige_cmd(i: discord.Interaction):
                 ))
                 items.append(v2_divider())
                 items.append(v2_section(
-                    v2_title("✅  CONFIRMER"),
+                    v2_title("✅ Confirmer"),
                     v2_subtitle("Lancer la cérémonie de Prestige. Action irréversible."),
                     accessory=_ConfirmBtn(),
                 ))
                 items.append(v2_section(
-                    v2_title("❌  ANNULER"),
+                    v2_title("❌ Annuler"),
                     v2_subtitle("Réfléchis encore — tu peux le faire plus tard."),
                     accessory=_CancelBtn(),
                 ))
@@ -72041,7 +72047,7 @@ async def weekly_cmd(i: discord.Interaction):
             def __init__(self):
                 super().__init__(timeout=300)
                 items = []
-                items.append(v2_title(f"📅  QUÊTES DE LA SEMAINE — {week}"))
+                items.append(v2_title(f"📅 Quêtes de la semaine — {week}"))
                 items.append(v2_subtitle(
                     "Les quêtes hebdo sont **plus dures** mais payent **bien plus** que les daily. Reset chaque lundi."
                 ))
@@ -72052,7 +72058,7 @@ async def weekly_cmd(i: discord.Interaction):
                 if total_pending > 0:
                     items.append(v2_divider())
                     items.append(v2_section(
-                        v2_title("🎁  À RÉCLAMER"),
+                        v2_title("🎁 À réclamer"),
                         v2_subtitle(f"`{total_pending}` 🪙 en attente"),
                         accessory=_ClaimBtn(),
                     ))
@@ -72109,7 +72115,7 @@ async def monthly_cmd(i: discord.Interaction):
             def __init__(self):
                 super().__init__(timeout=300)
                 items = []
-                items.append(v2_title(f"📆  MÉGA QUÊTE DU MOIS — {month}"))
+                items.append(v2_title(f"📆 Méga quête du mois — {month}"))
                 items.append(v2_subtitle("Un objectif épique, une grosse récompense, tout le mois pour l'accomplir."))
                 items.append(v2_divider())
                 items.append(v2_body("### 🎯 LA QUÊTE"))
@@ -72128,7 +72134,7 @@ async def monthly_cmd(i: discord.Interaction):
                 if _claimable:
                     items.append(v2_divider())
                     items.append(v2_section(
-                        v2_title("🎁  RÉCLAMER"),
+                        v2_title("🎁 Réclamer"),
                         v2_subtitle("Tu as terminé, viens chercher ta récompense !"),
                         accessory=_ClaimBtn(),
                     ))
@@ -72661,7 +72667,7 @@ async def _sell_pet_cmd_DEPRECATED(i):
             def __init__(self):
                 super().__init__(timeout=300)
                 items = []
-                items.append(v2_title("🛒  ANNONCE MARKETPLACE CRÉÉE"))
+                items.append(v2_title("🛒 Annonce marketplace créée"))
                 items.append(v2_subtitle(f"Ton pet **{custom_name}** est désormais en vente"))
                 items.append(v2_divider())
                 items.append(v2_body("### 📦 TON ANNONCE"))
@@ -72750,7 +72756,7 @@ async def _marketplace_cmd_DEPRECATED(i):
             def __init__(self):
                 super().__init__(timeout=300)
                 items = []
-                items.append(v2_title("🛒  MARKETPLACE — ANNONCES ACTIVES"))
+                items.append(v2_title("🛒 Marketplace — annonces actives"))
                 items.append(v2_subtitle("Les 10 dernières annonces postées sur le serveur"))
                 items.append(v2_divider())
                 items.append(v2_body("### 📦 ANNONCES"))
@@ -73332,7 +73338,7 @@ async def notifs_cmd(i: discord.Interaction):
                 # avant, qui FAISAIT CRASHER /notifs). Garde de la marge ; au-delà de
                 # ~11 catégories, il faudra paginer.
                 items = []
-                items.append(v2_title("🔔  TES NOTIFICATIONS"))
+                items.append(v2_title("🔔 Tes notifications"))
                 items.append(v2_subtitle("Active ou coupe précisément ce qui te ping. Clique pour basculer."))
                 items.append(v2_divider())
                 for cat, emoji, label in _NOTIF_CATEGORIES:
@@ -76729,7 +76735,7 @@ async def shoutout_cmd(i: discord.Interaction, membre: discord.Member,
             def __init__(self):
                 super().__init__(timeout=300)
                 items = []
-                items.append(v2_title("💝  SHOUTOUT ENVOYÉ"))
+                items.append(v2_title("💝 Shoutout envoyé"))
                 items.append(v2_subtitle(f"Tu as remercié **{membre.display_name}** publiquement"))
                 items.append(v2_divider())
                 items.append(v2_body("### 🌟 DÉTAILS"))
@@ -76951,7 +76957,7 @@ async def mentor_invite_cmd(i: discord.Interaction, nouveau_membre: discord.Memb
                 super().__init__(timeout=300)
                 items = []
                 if _d == 'failed':
-                    items.append(v2_title("❌  INVITATION ÉCHOUÉE"))
+                    items.append(v2_title("❌ Invitation échouée"))
                     items.append(v2_subtitle("Impossible de contacter le membre"))
                     items.append(v2_divider())
                     items.append(v2_body("### 🚧 PROBLÈME"))
@@ -76961,7 +76967,7 @@ async def mentor_invite_cmd(i: discord.Interaction, nouveau_membre: discord.Memb
                     ))
                     _color = 0xE74C3C
                 else:
-                    items.append(v2_title("🎓  INVITATION DE MENTORAT ENVOYÉE"))
+                    items.append(v2_title("🎓 Invitation de mentorat envoyée"))
                     items.append(v2_subtitle(f"Tu proposes de mentorer **{_apprentice.display_name}**"))
                     items.append(v2_divider())
                     items.append(v2_body("### 🎯 TON APPRENTI POTENTIEL"))
@@ -78631,7 +78637,7 @@ async def capsule_create_cmd(i: discord.Interaction, message: str, duree: str = 
             def __init__(self):
                 super().__init__(timeout=300)
                 items = []
-                items.append(v2_title("📦  CAPSULE TEMPORELLE SCELLÉE"))
+                items.append(v2_title("📦 Capsule temporelle scellée"))
                 items.append(v2_subtitle(f"Ton message au futur est en sécurité — capsule **#{cid}**"))
                 items.append(v2_divider())
                 items.append(v2_body("### 🔒 TA CAPSULE"))
@@ -78807,7 +78813,7 @@ async def hall_of_fame_cmd(i: discord.Interaction):
             def __init__(self):
                 super().__init__(timeout=300)
                 items = []
-                items.append(v2_title(f"🏛️  HALL OF FAME — {_guild_name}"))
+                items.append(v2_title(f"🏛️ Hall of Fame — {_guild_name}"))
                 items.append(v2_subtitle("Les exploits permanents du serveur, gravés dans la pierre."))
                 items.append(v2_divider())
                 items.append(v2_body("### 🏆 RECORDS LÉGENDAIRES"))
@@ -79260,7 +79266,7 @@ async def voice_top_cmd(i: discord.Interaction):
             def __init__(self):
                 super().__init__(timeout=300)
                 items = []
-                items.append(v2_title("🎙️  TOP 10 VOCAL — CETTE SEMAINE"))
+                items.append(v2_title("🎙️ Top 10 vocal — cette semaine"))
                 items.append(v2_subtitle("Les plus actifs en vocal ces 7 derniers jours"))
                 items.append(v2_divider())
                 items.append(v2_body("### 🏆 CLASSEMENT"))
@@ -79326,7 +79332,7 @@ async def voice_theme_cmd(i: discord.Interaction, theme: str):
             def __init__(self):
                 super().__init__(timeout=300)
                 items = []
-                items.append(v2_title("🎙️  VOCAL THÉMATIQUE CRÉÉ"))
+                items.append(v2_title("🎙️ Vocal thématique créé"))
                 items.append(v2_subtitle(f"Ton vocal **{_label}** est prêt — invite tes amis !"))
                 items.append(v2_divider())
                 items.append(v2_body("### 🎯 TON VOCAL"))
@@ -79714,7 +79720,7 @@ async def weather_cmd(i: discord.Interaction):
             def __init__(self):
                 super().__init__(timeout=300)
                 items = []
-                items.append(v2_title("📅  MÉTÉO & STREAK DU SERVEUR"))
+                items.append(v2_title("📅 Météo & streak du serveur"))
                 items.append(v2_subtitle("La vie collective du serveur, jour après jour."))
                 items.append(v2_divider())
                 items.append(v2_body("### 🔥 STREAK COLLECTIF"))
@@ -80467,7 +80473,7 @@ async def loots_cmd(i: discord.Interaction):
                 def __init__(self):
                     super().__init__(timeout=600)
                     items = [
-                        v2_title(f"💎  LOOTS UNIQUES  ·  {_user_name}"),
+                        v2_title(f"💎 Loots uniques  ·  {_user_name}"),
                         v2_subtitle("Items 1 exemplaire au monde · Drop ultra rare"),
                         v2_divider(),
                         v2_body(
@@ -80505,7 +80511,7 @@ async def loots_cmd(i: discord.Interaction):
             def __init__(self):
                 super().__init__(timeout=600)
                 items = []
-                items.append(v2_title(f"💎  LOOTS UNIQUES  ·  {_user_name}"))
+                items.append(v2_title(f"💎 Loots uniques  ·  {_user_name}"))
                 items.append(v2_subtitle(f"`{len(rows)}` items uniques au monde"))
                 items.append(v2_divider())
 
@@ -80805,7 +80811,7 @@ async def duel_report_cmd(i: discord.Interaction, duel_id: int, gagnant: discord
             def __init__(self):
                 super().__init__(timeout=300)
                 items = []
-                items.append(v2_title("⚔️  DUEL RÉSOLU"))
+                items.append(v2_title("⚔️ Duel résolu"))
                 items.append(v2_subtitle(f"**{_winner.display_name}** remporte le duel **#{duel_id}**"))
                 items.append(v2_divider())
                 items.append(v2_body("### 🏆 VAINQUEUR"))
@@ -80947,7 +80953,7 @@ async def pvp_top_cmd(i: discord.Interaction):
             def __init__(self):
                 super().__init__(timeout=300)
                 items = []
-                items.append(v2_title("📊  LADDER ELO PVP — TOP 10"))
+                items.append(v2_title("📊 Ladder ELO PvP — Top 10"))
                 items.append(v2_subtitle("Les meilleurs duellistes du serveur — saison en cours."))
                 items.append(v2_divider())
                 items.append(v2_body("### 🏆 TOP 10"))
@@ -83090,7 +83096,7 @@ class HubPinnedLayoutV2(LayoutView):
         items = []
 
         # ═══ HEADER ═══
-        items.append(v2_title("✨  🎮  HUB D'ENGAGEMENT  🎮  ✨"))
+        items.append(v2_title("🎮 Hub d'engagement"))
         items.append(v2_subtitle(
             "Tout ce qu'il faut pour vivre l'expérience — aucune commande à mémoriser"
         ))
