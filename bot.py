@@ -41962,7 +41962,7 @@ class SendPanelPaginatedView(LayoutView):
             mx = pnl.get('max', 1)
 
             embed_title = pnl.get('embed_title', '').strip() or f"🎫 {pnl.get('name', 'Support')}"
-            embed_desc = pnl.get('embed_description', '').strip() or "Cliquez sur le bouton ci-dessous pour créer un ticket."
+            embed_desc = pnl.get('embed_description', '').strip() or "Besoin d'aide ? Ouvre un ticket."
 
             auto_info = ""
             if qs:
@@ -54520,7 +54520,7 @@ class TradeBuilderViewV2(LayoutView):
         trade_view = LayoutView(timeout=None)
         trade_view.add_item(v2_container(
             v2_section(
-                v2_title(f"🔄 Trade — {self.jeu.upper()}"),
+                v2_title(f"🔄 Échange — {self.jeu}"),
                 v2_subtitle(f"par {self.user.display_name} · <t:{int(now().timestamp())}:R>"),
                 accessory=v2_thumb(self.user.display_avatar.url),
             ),
@@ -54665,7 +54665,7 @@ class TradeBuilderView(View):
         trade_view = LayoutView(timeout=None)
         trade_view.add_item(v2_container(
             v2_section(
-                v2_title(f"🔄 Trade — {self.jeu.upper()}"),
+                v2_title(f"🔄 Échange — {self.jeu}"),
                 v2_subtitle(f"par {self.user.display_name} · <t:{int(now().timestamp())}:R>"),
                 accessory=v2_thumb(self.user.display_avatar.url),
             ),
