@@ -174,7 +174,7 @@ import ambient53 as amb  # Phase 53 : heures dorées + recap DM + conversation s
 import lore57 as lore_v  # Phase 57 : lore vivant — choix narratifs + classes RP + crossover NPCs
 import protection_guards as guards2026
 import community_features as comm2026
-import admin_panels_v2 as panels2026
+import admin_panels_v2 as panels2026  # (set_social_manager uniquement ; /admin retiré)
 import antiscam as antiscam2026
 import activity_tracker as activity2026
 import setup_wizard as wizard2026
@@ -184,7 +184,6 @@ import social_liveness as liveness2026
 # Phase 46.1 : modules backup/architecture supprimés (server_architect,
 # architecture_builder, custom_blueprint, slash_commands_architecture) → libère
 # ~3600 lignes. Le serveur reste géré manuellement par l'owner.
-import roles_panel as rolespanel2026
 import unified_logger as ulogger2026
 import social_gallery as gallery2026
 import game_updates as gameupdates2026
@@ -52128,10 +52127,10 @@ async def check_mod_perm(i, cmd_key):
     if i.user.guild_permissions.administrator or i.user.id == i.guild.owner_id:
         return True
     
-    # ⚠️ Les immunisés ont accès à TOUTES les commandes de modération
-    if await is_fully_immune(i.user):
-        return True
-    
+    # Découplé (audit admin) : l'immunité exempte des FILTRES anti-spam/liens, elle ne
+    # confère PLUS de pouvoir de modération. La permission mod dérive UNIQUEMENT de
+    # admin Discord / owner / rôle mod configuré (sinon un VIP immunisé pour poster des
+    # liens pouvait warn/mute/kick — escalade de privilège non voulue).
     # Vérifier si l'utilisateur a le rôle configuré
     if role_id:
         role = i.guild.get_role(role_id)
@@ -59794,10 +59793,10 @@ async def cleardeals_cmd(i: discord.Interaction):
 # Branche les slashs (tableau de bord owner + wizard + commandes granulaires).
 # Tous les modules (permissions, social, protection, community) sont
 # accessibles depuis :
-#   /admin   - dashboard V2 (tout en panneaux)
+#   /configure - hub admin V2 UNIQUE (tout en panneaux)
 #   /setup   - wizard d'installation guidée
 #   /permissions, /social, /protection, /community - granular CLI
-panels2026.setup_admin_command(bot)
+# /admin RETIRÉ (audit admin) : il doublonnait /configure → 1 slot de commande libéré.
 wizard2026.setup_setup_command(bot)
 slashcmds2026.setup_all_commands(bot)
 # Phase 46.1 : slash_commands_architecture supprimé (système backup/rebuild retiré)
@@ -59888,16 +59887,8 @@ async def _2026_on_ready_addon():
         print(f"⚠️  [2026] Erreur init SocialMediaManager : {ex}")
         traceback.print_exc()
 
-    # Phase 3.1 : recharge les RolesPanelView persistantes pour qu'elles
-    # continuent de fonctionner apres un redemarrage du bot.
-    try:
-        count = await rolespanel2026.register_persistent_views(bot)
-        if count > 0:
-            print(f"✅ [2026] {count} roles panel(s) persistants rechargés")
-    except Exception as ex:
-        import traceback
-        print(f"⚠️  [2026] Erreur rechargement roles panels : {ex}")
-        traceback.print_exc()
+    # roles_panel SUPPRIMÉ (audit admin) : doublon du système Reaction Roles natif
+    # (ReactionRolesPanelV2), jamais branché à une UI de création → reloader retiré.
 
 
 bot.add_listener(_2026_on_ready_addon, "on_ready")
