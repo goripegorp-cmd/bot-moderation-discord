@@ -133,6 +133,20 @@ async def ensure_channel(guild: discord.Guild) -> Optional[discord.TextChannel]:
         for ch in guild.text_channels:
             if ch.name == STAFF_CHANNEL_NAME:
                 return ch
+        # 2bis. Fallback FINAL : le salon de logs de modération de base
+        # (mod_log_channel). GARANTIT qu'AUCUNE alerte des détecteurs sécu ne
+        # s'évapore si le salon staff dédié n'est pas configuré (cas le plus
+        # courant sur un serveur neuf) → le staff voit toujours QUI a un problème.
+        try:
+            if _db_get is not None:
+                data = await _db_get(guild.id)
+                mod_id = int(data.get("mod_log_channel", 0) or 0)
+                if mod_id:
+                    ch = guild.get_channel(mod_id)
+                    if ch:
+                        return ch
+        except Exception:
+            pass
         # 3. Plus de création auto — owner doit configurer
         print(
             f"[staff_sanction] Pas de salon configuré pour guild={guild.id}. "

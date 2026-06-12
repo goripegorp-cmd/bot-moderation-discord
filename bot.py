@@ -4399,6 +4399,19 @@ async def _badword_strike(msg, c):
             except Exception:
                 pass
 
+            # ALERTE escalade auto — mêmes paliers que /warn (3/5/10 exacts) :
+            # signale dans le salon de logs de base QUI accumule les warns auto.
+            if total_warns in (3, 5, 10):
+                _sev = "moyenne" if total_warns == 3 else ("haute" if total_warns == 5 else "critique")
+                try:
+                    await ulogger2026.log_member_escalation(
+                        bot, msg.guild, msg.author, total_warns, total_warns,
+                        reason="Filtre auto : mots interdits répétés",
+                        moderator=bot.user, severity=_sev,
+                    )
+                except Exception as _ex:
+                    print(f"[badword escalation] {_ex}")
+
             # ── Vérifier seuil de sanction ──
             sanction_threshold = max(1, int(c.get('badwords_sanction_threshold', 3) or 3))
             if total_warns >= sanction_threshold:
@@ -52233,6 +52246,19 @@ async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
         i.guild, 'warn', i.user, membre, raison,
         extra=f"Fiche {warn_id_str} · Total warns: {warn_count}",
     )
+
+    # ALERTE escalade — si le membre franchit un palier critique (3/5/10 warns
+    # EXACTEMENT), on le SIGNALE dans le salon de logs de base en nommant la
+    # personne. Égalité exacte = 1 alerte par franchissement (anti-spam).
+    if warn_count in (3, 5, 10):
+        _sev = "moyenne" if warn_count == 3 else ("haute" if warn_count == 5 else "critique")
+        try:
+            await ulogger2026.log_member_escalation(
+                bot, i.guild, membre, warn_count, warn_count,
+                reason=raison, moderator=i.user, severity=_sev,
+            )
+        except Exception as _ex:
+            print(f"[warn escalation] {_ex}")
 
 @mod_group.command(name="unwarn", description="✅ Supprimer un avertissement d'un membre")
 @app_commands.describe(membre="Le membre dont vous voulez supprimer un warn")
