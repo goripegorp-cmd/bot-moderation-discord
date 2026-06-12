@@ -80096,24 +80096,33 @@ class HeistJoinView(View):
                 bal = 0
             if bal < stake:
                 return await _safe_followup(i, content=f"❌ Solde min : {stake} 🪙 pour participer.")
-            # Anti-multi : un user max 1 rôle
+            # FIX audit (atomicité éco) : débit CONDITIONNEL d'abord (réserve la mise sans le
+            # plancher MAX(0,…) d'add_coins), puis INSERT OR IGNORE (PK heist_id,user_id) ;
+            # si le joueur avait déjà rejoint (course/double-clic), on REMBOURSE la mise.
+            # Avant : SELECT anti-dup non atomique + débit AVANT l'insert → double-clic =
+            # débité 2× mais inscrit/crédité 1× (mise perdue). Cf. claim atomique _launch.
             async with get_db() as db:
-                async with db.execute(
-                    "SELECT 1 FROM heist_participants WHERE heist_id=? AND user_id=?",
-                    (self.hid, i.user.id),
-                ) as cur:
-                    if await cur.fetchone():
-                        return await _safe_followup(i, content="⏱️ Tu participes déjà.")
-            # Insert participant + débit mise
-            try:
-                await add_coins(i.guild.id, i.user.id, -stake)
-            except Exception:
-                pass
+                _deb = await db.execute(
+                    "UPDATE economy SET coins = coins - ? WHERE guild_id=? AND user_id=? AND coins >= ?",
+                    (stake, i.guild.id, i.user.id, stake),
+                )
+                await db.commit()
+            if (getattr(_deb, "rowcount", 0) or 0) != 1:
+                return await _safe_followup(i, content=f"❌ Solde min : {stake} 🪙 pour participer.")
             async with get_db() as db:
-                await db.execute(
-                    "INSERT INTO heist_participants(heist_id, user_id, role) VALUES(?,?,?)",
+                _ins = await db.execute(
+                    "INSERT OR IGNORE INTO heist_participants(heist_id, user_id, role) VALUES(?,?,?)",
                     (self.hid, i.user.id, role_id),
                 )
+                await db.commit()
+            if (getattr(_ins, "rowcount", 0) or 0) != 1:
+                # Déjà inscrit (course) → on rend la mise débitée, aucune double-participation.
+                try:
+                    await add_coins(i.guild.id, i.user.id, stake)
+                except Exception:
+                    pass
+                return await _safe_followup(i, content="⏱️ Tu participes déjà.")
+            async with get_db() as db:
                 await db.execute(
                     "UPDATE heists SET pool_total = pool_total + ? WHERE id=?",
                     (stake, self.hid),
@@ -80366,10 +80375,18 @@ async def bank_deposit_cmd(i: discord.Interaction, montant: int):
             bal = 0
         if bal < montant:
             return await _safe_followup(i, content=f"❌ Solde insuffisant ({bal} 🪙).")
-        try:
-            await add_coins(i.guild.id, i.user.id, -montant)
-        except Exception:
-            pass
+        # FIX audit (atomicité éco) : débit CONDITIONNEL (coins>=montant) + check rowcount
+        # AVANT l'INSERT du dépôt. Sinon deux dépôts concurrents passaient tous deux le check,
+        # le débit plafonné add_coins (MAX(0,…)) ne prélevait qu'une fois MAIS 2 lignes étaient
+        # insérées → retrait double → création de pièces. Même pattern que _alliance_deposit_coins.
+        async with get_db() as db:
+            _deb = await db.execute(
+                "UPDATE economy SET coins = coins - ? WHERE guild_id=? AND user_id=? AND coins >= ?",
+                (montant, i.guild.id, i.user.id, montant),
+            )
+            await db.commit()
+        if (getattr(_deb, "rowcount", 0) or 0) != 1:
+            return await _safe_followup(i, content="❌ Solde insuffisant.")
         async with get_db() as db:
             cur = await db.execute(
                 "INSERT INTO user_bank_deposits(guild_id, user_id, amount) VALUES(?,?,?)",
@@ -81949,10 +81966,17 @@ class BankDepositModal(Modal):
                 bal = 0
             if bal < amt:
                 return await _safe_followup(i, content=f"❌ Solde insuffisant ({bal} 🪙).")
-            try:
-                await add_coins(i.guild.id, i.user.id, -amt)
-            except Exception:
-                pass
+            # FIX audit (atomicité éco) : débit CONDITIONNEL + rowcount AVANT l'INSERT
+            # (cf. bank_deposit_cmd / _alliance_deposit_coins). Anti création de pièces
+            # par dépôts concurrents (débit plafonné une fois mais 2 lignes insérées).
+            async with get_db() as db:
+                _deb = await db.execute(
+                    "UPDATE economy SET coins = coins - ? WHERE guild_id=? AND user_id=? AND coins >= ?",
+                    (amt, i.guild.id, i.user.id, amt),
+                )
+                await db.commit()
+            if (getattr(_deb, "rowcount", 0) or 0) != 1:
+                return await _safe_followup(i, content="❌ Solde insuffisant.")
             async with get_db() as db:
                 cur = await db.execute(
                     "INSERT INTO user_bank_deposits(guild_id, user_id, amount) VALUES(?,?,?)",

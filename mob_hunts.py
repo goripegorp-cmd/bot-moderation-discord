@@ -554,7 +554,7 @@ def _bot_can_send(guild: discord.Guild, ch: discord.TextChannel) -> bool:
 _ARENA_AVOID_KEYWORDS = (
     "ticket", "annonce", "announce", "log", "règl", "regl", "rule",
     "bienvenue", "welcome", "lecture", "read-only", "readonly", "info",
-    "staff", "admin", "mod-", "vocal", "voice",
+    "staff", "admin", "mod-", "vocal", "voice", "chronique",
 )
 
 
@@ -614,9 +614,15 @@ async def _find_arena_channel(guild: discord.Guild) -> Optional[discord.TextChan
     except Exception:
         pass
 
-    # 3. Recherche par nom (élargie : jeux/game/general aussi)
+    # 3. Recherche par nom (élargie : jeux/game/general aussi). On EXCLUT d'abord les
+    #    salons sérieux/journal (le journal « 📜-chroniques-combat » contient « combat »
+    #    → ne doit JAMAIS recevoir un panneau de combat live ; cf. _ARENA_AVOID_KEYWORDS,
+    #    qui inclut « chronique »). Sinon, en mode dégradé (pas de ⚔️-combat créé), le
+    #    mob atterrirait dans le journal permanent.
     for ch in guild.text_channels:
         n = (ch.name or "").lower()
+        if any(bad in n for bad in _ARENA_AVOID_KEYWORDS):
+            continue
         if any(k in n for k in ["arène", "arena", "combat", "boss",
                                  "jeu", "game", "chasse", "donjon", "dungeon"]):
             if _bot_can_send(guild, ch):
