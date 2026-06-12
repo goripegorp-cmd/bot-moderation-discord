@@ -210,12 +210,42 @@ async def post_now(guild: discord.Guild) -> bool:
                     target_channel = ch
                     break
         if target_channel is None:
+            # Fallback : 1er salon écrivable MAIS « chatty » — on EXCLUT explicitement
+            # tickets / logs / annonces / règlement / staff / accueil / arènes (ne JAMAIS
+            # poster une question du jour dans un salon sérieux, en lecture seule ou de combat).
+            _BAD = ("ticket", "log", "audit", "mod", "staff", "annonce", "announce",
+                    "rule", "règl", "regl", "welcome", "bienvenue", "info", "chronique",
+                    "combat", "arène", "arene", "vente", "shop", "boutique")
             for ch in guild.text_channels:
+                n = ch.name.lower()
+                if any(b in n for b in _BAD):
+                    continue
                 if ch.permissions_for(guild.me).send_messages:
                     target_channel = ch
                     break
         if target_channel is None:
             return False
+
+        # Nettoyage : supprime le message de la question PRÉCÉDENTE (DB-backed → survit
+        # aux redémarrages ; évite que les votes s'accumulent jour après jour dans le chat).
+        try:
+            async with _get_db() as db:
+                async with db.execute(
+                    "SELECT channel_id, message_id FROM daily_prompts "
+                    "WHERE guild_id=? AND message_id IS NOT NULL ORDER BY id DESC LIMIT 1",
+                    (guild.id,),
+                ) as _pc:
+                    _prev = await _pc.fetchone()
+            if _prev and _prev[0] and _prev[1]:
+                _pch = guild.get_channel(int(_prev[0]))
+                if _pch is not None:
+                    try:
+                        _pm = await _pch.fetch_message(int(_prev[1]))
+                        await _pm.delete()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
         # Insert + post
         async with _get_db() as db:

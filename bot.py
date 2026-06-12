@@ -65529,8 +65529,7 @@ async def _post_daily_riddle(guild) -> bool:
             color=0x9B59B6,
             timestamp=datetime.now(timezone.utc),
         )
-        e.set_footer(text=f"Énigme du {day}")
-        e.add_field(name="🕹️ Comment jouer", value=events2026.how_to_play('daily_riddle', with_title=False), inline=False)
+        e.set_footer(text=f"Énigme du {day} · clique la bonne réponse")
 
         view = RiddleAnswerView()
         try:
@@ -78270,13 +78269,14 @@ async def _resolve_narrative_choice(narrative_vote_id: int) -> Optional[dict]:
     try:
         async with get_db() as db:
             async with db.execute(
-                "SELECT guild_id, choice_id, channel_id, status FROM narrative_votes WHERE id=?",
+                "SELECT guild_id, choice_id, channel_id, status, message_id FROM narrative_votes WHERE id=?",
                 (narrative_vote_id,),
             ) as cur:
                 row = await cur.fetchone()
         if not row or row[3] != 'open':
             return None
         gid, choice_id, channel_id, _ = int(row[0]), row[1], int(row[2] or 0), row[3]
+        _orig_msg_id = int(row[4]) if row[4] else 0
         choice = lore_v.get_narrative_choice(choice_id)
         if not choice:
             return None
@@ -78347,6 +78347,14 @@ async def _resolve_narrative_choice(narrative_vote_id: int) -> Optional[dict]:
                     pass
             except Exception as ex:
                 print(f"[narrative resolve announce] {ex}")
+        # Supprime le message du VOTE d'origine (ses boutons ne servent plus une fois
+        # résolu ; évite qu'un embed de vote périmé traîne dans le hub indéfiniment).
+        if ch and _orig_msg_id:
+            try:
+                _ov = await ch.fetch_message(_orig_msg_id)
+                await _ov.delete()
+            except Exception:
+                pass
         print(f"[NARRATIVE RESOLVED] nv_id={narrative_vote_id} outcome={outcome_id}")
         return {"outcome_id": outcome_id, "choice": choice, "winning_opt": winning_opt}
     except Exception as ex:
