@@ -32,6 +32,7 @@ WINDOW_DAYS = 30           # Période de stats (par défaut 30 jours)
 TOP_STAFF_LIMIT = 5        # Top 5 staff
 TOP_OFFENDERS_LIMIT = 5    # Top 5 membres sanctionnés
 RECENT_ACTIVITY_HOURS = 24 # Activité dernière journée
+RECENT_ACTIONS_LIMIT = 8   # Journal "actions récentes" : N dernières sanctions du serveur
 
 
 # Raison templates — usables comme app_commands.Choice futurement
@@ -76,6 +77,7 @@ async def _collect_stats(guild_id: int, days: int = WINDOW_DAYS) -> dict:
             "top_offenders": list[{"user_id", "count"}],
             "recent_24h": int,
             "active_warns": int,  # warns sans unwarn
+            "recent_actions": list[{"type", "user_id", "mod_id", "reason", "created_at"}],
             "window_days": int,
         }
     """
@@ -86,6 +88,7 @@ async def _collect_stats(guild_id: int, days: int = WINDOW_DAYS) -> dict:
         "top_offenders": [],
         "recent_24h": 0,
         "active_warns": 0,
+        "recent_actions": [],
         "window_days": days,
     }
     if _get_db is None:
@@ -153,6 +156,27 @@ async def _collect_stats(guild_id: int, days: int = WINDOW_DAYS) -> dict:
             ) as cur:
                 row = await cur.fetchone()
             out["active_warns"] = int(row[0] or 0) if row else 0
+
+            # Journal "actions récentes" : les N dernières sanctions du serveur, tous
+            # types confondus, pour que le staff voie l'activité de modé d'un coup d'œil.
+            # Tri par id DESC (PK autoincrement) → ordre d'insertion fiable, même si deux
+            # sanctions partagent la même seconde dans created_at. Pas de fenêtre temporelle
+            # ici : on veut TOUJOURS les dernières, même si le serveur est calme.
+            async with db.execute(
+                "SELECT type, user_id, mod_id, reason, created_at FROM infractions "
+                "WHERE guild_id=? ORDER BY id DESC LIMIT ?",
+                (guild_id, RECENT_ACTIONS_LIMIT),
+            ) as cur:
+                out["recent_actions"] = [
+                    {
+                        "type": r[0] or "unknown",
+                        "user_id": int(r[1]) if r[1] is not None else None,
+                        "mod_id": int(r[2]) if r[2] is not None else None,
+                        "reason": r[3] or "",
+                        "created_at": r[4] or "",
+                    }
+                    for r in await cur.fetchall()
+                ]
     except Exception as ex:
         print(f"[mod_dashboard _collect_stats guild={guild_id}] {ex}")
 
@@ -241,6 +265,39 @@ def _build_layout(stats: dict, guild, tickets: dict | None = None) -> discord.ui
                     lines.append(
                         f"• <@{o['user_id']}> · `{o['count']}` sanction(s){warning}"
                     )
+                items.append(v2_body("\n".join(lines)))
+
+            # 🕑 Actions récentes — journal chronologique des dernières sanctions.
+            # Complète les stats agrégées : le staff voit QUI a sanctionné QUI et POURQUOI,
+            # pas juste des compteurs. Lecture seule (aucun bouton/action ici).
+            if stats.get("recent_actions"):
+                items.append(v2_divider())
+                items.append(v2_body("### 🕑 Actions récentes"))
+                lines = []
+                for a in stats["recent_actions"]:
+                    emo = type_emojis.get(a.get("type"), "▫️")
+                    typ = a.get("type") or "?"
+                    cible = f"<@{a['user_id']}>" if a.get("user_id") else "?"
+                    par = f" · par <@{a['mod_id']}>" if a.get("mod_id") else ""
+                    # created_at = 'YYYY-MM-DD HH:MM:SS' (UTC, comme CURRENT_TIMESTAMP).
+                    # On le rend en timestamp Discord relatif (<t:…:R>) → localisé par client,
+                    # zéro calcul de fuseau côté bot. Parse défensif : si ça échoue, on omet.
+                    when = ""
+                    raw = a.get("created_at") or ""
+                    if raw:
+                        try:
+                            dt = datetime.strptime(raw[:19], "%Y-%m-%d %H:%M:%S").replace(
+                                tzinfo=timezone.utc
+                            )
+                            when = f" · <t:{int(dt.timestamp())}:R>"
+                        except Exception:
+                            when = ""
+                    # Raison tronquée + nettoyée (évite de casser le markdown V2).
+                    reason = (a.get("reason") or "").replace("\n", " ").strip()
+                    if len(reason) > 60:
+                        reason = reason[:57] + "…"
+                    reason_txt = f"\n  ↳ _{reason}_" if reason else ""
+                    lines.append(f"{emo} **{typ}** {cible}{par}{when}{reason_txt}")
                 items.append(v2_body("\n".join(lines)))
 
             # 🎫 Tickets (Lot 4 — "dashboard staff = tickets + sanctions")

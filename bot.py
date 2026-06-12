@@ -426,6 +426,14 @@ def _matches_keyword_filter(title: str, keyword_filter: str) -> bool:
 spam_tracker = {}
 voice_join_tracker = {}  # {(guild_id, user_id): datetime} - pour tracker le temps en vocal
 
+# ─── Strikes progressifs anti-spam de mentions / spam de messages (rétention #1) ───
+# On AVERTIT gentiment aux 1er/2e écarts (pas de mute), on ne sanctionne+escalade qu'à
+# partir du 3e écart dans une fenêtre glissante. { (guild_id, user_id, kind) -> [datetime] }
+# où kind = 'mention' | 'spam'. Borné en mémoire comme spam_tracker (éviction paresseuse).
+_protection_strikes = {}
+_PROTECTION_STRIKE_WINDOW = 600   # 10 min : fenêtre glissante de comptage des écarts
+_PROTECTION_STRIKE_ESCALATE = 3   # 3e écart+ = sanction configurée + escalade staff
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           ⚡ POOL DE CONNEXIONS DB
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -4834,6 +4842,51 @@ async def check_spam(msg, mx, intv):
             spam_tracker.pop(_k, None)
     return len(spam_tracker[key]) > mx
 
+
+def _register_protection_strike(guild_id, user_id, kind):
+    """Enregistre un écart (spam/mentions) dans une fenêtre glissante et renvoie le
+    nombre d'écarts CUMULÉS de ce membre pour ce 'kind'. Sert à graduer la réponse :
+    1er/2e = simple avertissement, 3e+ = sanction + escalade staff.
+    Calque spam_tracker : fenêtre glissante + éviction paresseuse (anti-fuite mémoire /
+    DoS via comptes jetables). 100% sync, ne lève jamais."""
+    n = now()
+    key = (guild_id, user_id, kind)
+    bucket = _protection_strikes.get(key)
+    if bucket is None:
+        bucket = []
+        _protection_strikes[key] = bucket
+    # Purge les écarts hors fenêtre (10 min) puis ajoute l'écart courant.
+    bucket[:] = [t for t in bucket if (n - t).total_seconds() < _PROTECTION_STRIKE_WINDOW]
+    bucket.append(n)
+    # Éviction paresseuse des clés mortes (mêmes bornes/logique que spam_tracker).
+    if len(_protection_strikes) > 5000:
+        for _k in [k for k, v in list(_protection_strikes.items())
+                   if not v or (n - v[-1]).total_seconds() > _PROTECTION_STRIKE_WINDOW]:
+            _protection_strikes.pop(_k, None)
+    return len(bucket)
+
+
+async def _warn_calm_down(channel, text):
+    """Avertissement GENTIL posté DANS le salon (rétention : on calme, on ne brutalise
+    pas). Auto-supprimé ~10s. Calque exactement le pattern anti-phishing (webhook_send
+    'protection' + task de suppression). 100% fail-safe : ne lève jamais, ne casse pas
+    le pipeline on_message."""
+    try:
+        warn_e = discord.Embed(color=0xF1C40F, description=text)
+        warn_e.set_footer(text="🛡️ Protection — reste cool 🙏")
+        warn_msg = await webhook_send(channel, 'protection', embed=warn_e)
+        if warn_msg:
+            async def _del_warn(m):
+                await asyncio.sleep(10)
+                try:
+                    await m.delete()
+                except Exception:
+                    pass
+            asyncio.create_task(_del_warn(warn_msg))
+    except Exception as ex:
+        print(f"[_warn_calm_down] {ex}")
+
+
 def check_channel_cfg(msg, conf):
     if not conf: return False, None
     ct = (msg.content or "").strip()
@@ -4903,8 +4956,8 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
         c = await cfg(g.id)
         lch = g.get_channel(c.get('ticket_log', 0))
         if not lch: return
-        colors = {'create': C.GREEN, 'claim': C.BLUE, 'close': C.RED, 'leave': C.ORANGE, 'add_staff': C.PURPLE, 'blacklist': 0xE74C3C}
-        titles = {'create': '🎫 Ticket Créé', 'claim': '🙋 Ticket Pris', 'close': '🔒 Ticket Fermé', 'leave': '🚪 Utilisateur Parti', 'add_staff': '➕ Staff Ajouté', 'blacklist': '🚫 Membre Blacklisté'}
+        colors = {'create': C.GREEN, 'claim': C.BLUE, 'close': C.RED, 'leave': C.ORANGE, 'add_staff': C.PURPLE, 'blacklist': 0xE74C3C, 'priority': C.GOLD, 'note': C.BLURPLE}
+        titles = {'create': '🎫 Ticket Créé', 'claim': '🙋 Ticket Pris', 'close': '🔒 Ticket Fermé', 'leave': '🚪 Utilisateur Parti', 'add_staff': '➕ Staff Ajouté', 'blacklist': '🚫 Membre Blacklisté', 'priority': '🚩 Priorité Changée', 'note': '📌 Note Interne'}
         e = discord.Embed(title=titles.get(lt, '🎫'), color=colors.get(lt, C.BLURPLE), timestamp=now())
         e.add_field(name="🎫 Ticket", value=f"#{ti.get('id', '?')}", inline=True)
         uid = user.id if hasattr(user, 'id') else user
@@ -4915,6 +4968,23 @@ async def send_ticket_log(g, lt, user, ti, extra=None, closer=None, ch=None):
             e.add_field(name="🔒 Fermé par", value=closer.mention, inline=True)
         elif lt == 'add_staff' and extra:
             e.add_field(name="➕ Staff ajouté", value=f"<@{extra}>", inline=True)
+        elif lt == 'priority' and extra:
+            # extra = (staff_id, "🔴 URGENT") : qui a changé + le nouveau niveau.
+            try:
+                _sid, _plabel = extra
+            except (TypeError, ValueError):
+                _sid, _plabel = extra, '?'
+            e.add_field(name="🚩 Changé par", value=f"<@{_sid}>", inline=True)
+            e.add_field(name="🎯 Niveau", value=str(_plabel), inline=True)
+        elif lt == 'note' and extra:
+            # extra = (staff_id, "texte de la note") : passage de relais entre staff.
+            try:
+                _sid, _ntxt = extra
+            except (TypeError, ValueError):
+                _sid, _ntxt = extra, ''
+            e.add_field(name="📌 Par", value=f"<@{_sid}>", inline=True)
+            if _ntxt:
+                e.add_field(name="📝 Note", value=str(_ntxt)[:1024], inline=False)
         elif lt == 'blacklist' and extra:
             e.add_field(name="🚫 Blacklisté par", value=f"<@{extra}>", inline=True)
             # Ajouter le nom du panel
@@ -5115,12 +5185,15 @@ class TicketCloseModal(Modal):
     À la fermeture : transcript .txt envoyé en DM au CRÉATEUR + récap (avec transcript)
     dans le salon de logs, puis suppression après un court délai. NB : ceci n'a RIEN à
     voir avec l'auto-close (désactivé) — c'est une fermeture 100 % MANUELLE par le staff."""
-    def __init__(self, tk):
+    def __init__(self, tk, prefill: str = ""):
         super().__init__(title="🔒 Fermer le ticket")
         self.tk = tk
+        # `prefill` = motif rapide pré-rempli (cliqué dans TicketCloseReasonView) ;
+        # le staff peut le garder, le compléter ou l'effacer avant de soumettre.
         self.reason = TextInput(
             label="Raison de fermeture (optionnel)",
             placeholder="Ex. Résolu · doublon · pas de réponse… (laisse vide si tu veux)",
+            default=(prefill or None),
             style=discord.TextStyle.paragraph, required=False, max_length=500)
         self.add_item(self.reason)
 
@@ -5344,6 +5417,66 @@ class TicketControlView(View):
             except Exception:
                 pass
 
+    @discord.ui.button(label="🚩 Priorité", style=discord.ButtonStyle.secondary, custom_id="ticket_ctrl_priority")
+    async def priority(self, i, btn):
+        # POURQUOI : la priorité existait UNIQUEMENT via la slash command /ticket priority.
+        # On l'expose en BOUTON pour que le staff la change en 1 clic depuis le ticket lui-même.
+        # Réutilise le backend tickets_enhance (set_priority + renommage salon + PRIORITY_LEVELS).
+        # Defer-first impossible (on ouvre une vue éphémère) → send_message direct, try/except complet.
+        try:
+            tk = await get_ticket(i.channel.id)
+            if not tk:
+                return await i.response.send_message("❌ Ticket non trouvé", ephemeral=True)
+            # Garde staff : même logique que les autres boutons (immunisé / owner / admin / rôle staff).
+            is_immune = await is_fully_immune(i.user)
+            is_o = i.user.id == i.guild.owner_id
+            is_a = i.user.guild_permissions.administrator
+            c = await cfg(i.guild.id)
+            sr = i.guild.get_role(c.get('ticket_staff', 0))
+            is_s = sr and sr in i.user.roles
+            if not (is_s or is_o or is_a or is_immune):
+                return await i.response.send_message("❌ Réservé au staff", ephemeral=True)
+            await i.response.send_message(
+                "🚩 **Choisis la priorité** de ce ticket :",
+                view=TicketPriorityView(i.channel.id), ephemeral=True)
+        except Exception as _tk_ex:
+            print(f"[ticket_btn priority] {type(_tk_ex).__name__}: {_tk_ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
+                else:
+                    await i.followup.send(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+    @discord.ui.button(label="📌 Note interne", style=discord.ButtonStyle.secondary, custom_id="ticket_ctrl_note")
+    async def internal_note(self, i, btn):
+        # POURQUOI : passage de relais entre staff. Ouvre un modal ; la note est postée
+        # DANS le salon du ticket → elle entre AUTOMATIQUEMENT dans le transcript (qui lit
+        # l'historique du salon). Aucune fermeture, aucune action destructrice.
+        try:
+            tk = await get_ticket(i.channel.id)
+            if not tk:
+                return await i.response.send_message("❌ Ticket non trouvé", ephemeral=True)
+            is_immune = await is_fully_immune(i.user)
+            is_o = i.user.id == i.guild.owner_id
+            is_a = i.user.guild_permissions.administrator
+            c = await cfg(i.guild.id)
+            sr = i.guild.get_role(c.get('ticket_staff', 0))
+            is_s = sr and sr in i.user.roles
+            if not (is_s or is_o or is_a or is_immune):
+                return await i.response.send_message("❌ Réservé au staff", ephemeral=True)
+            await i.response.send_modal(TicketNoteModal(tk))
+        except Exception as _tk_ex:
+            print(f"[ticket_btn note] {type(_tk_ex).__name__}: {_tk_ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
+                else:
+                    await i.followup.send(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
+            except Exception:
+                pass
+
     @discord.ui.button(label="🚫 Blacklist", style=discord.ButtonStyle.secondary, custom_id="ticket_ctrl_blacklist")
     async def blacklist_user(self, i, btn):
         """Blacklist le créateur du ticket sur ce panel"""
@@ -5452,7 +5585,13 @@ class TicketControlView(View):
             # FERMETURE EN 2 TEMPS (quick-win pro) : on ouvre un modal (raison + confirmation)
             # au lieu de supprimer le salon instantanément. Le travail réel (log + transcript
             # DM au créateur + suppression) se fait dans TicketCloseModal.on_submit.
-            await i.response.send_modal(TicketCloseModal(tk))
+            # MOTIFS RAPIDES : on propose d'abord un petit choix éphémère (résolu / doublon /
+            # pas de réponse / hors-sujet / autre) qui pré-remplit le modal — gain de temps
+            # staff sans casser le flux 2-temps (le modal reste la confirmation finale).
+            await i.response.send_message(
+                "🔒 **Fermer ce ticket** — choisis un motif rapide (il pré-remplira la raison, "
+                "que tu pourras éditer) :",
+                view=TicketCloseReasonView(tk), ephemeral=True)
         except Exception as _tk_ex:
             print(f"[ticket_close] {type(_tk_ex).__name__}: {_tk_ex}")
             try:
@@ -5572,6 +5711,172 @@ class TransferTicketSelect(Select):
                     await i.followup.send(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
             except Exception:
                 pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#       🚩 PRIORITÉ TICKET (bouton) — réutilise le backend tickets_enhance
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TicketPriorityView(View):
+    """Vue éphémère (timeout 60s) : un select des 4 niveaux de priorité.
+    Ouverte par le bouton 🚩 Priorité de TicketControlView."""
+    def __init__(self, chid):
+        super().__init__(timeout=60)
+        self.add_item(TicketPrioritySelect(chid))
+
+
+class TicketPrioritySelect(Select):
+    def __init__(self, chid):
+        # Construit les options depuis PRIORITY_LEVELS pour rester cohérent avec
+        # la slash command /ticket priority (même libellés, mêmes emojis).
+        opts = []
+        try:
+            for val, (emoji, label) in tix_module.PRIORITY_LEVELS.items():
+                opts.append(discord.SelectOption(label=label.capitalize(), value=val, emoji=emoji))
+        except Exception:
+            # Fallback défensif si le module n'est pas chargé (ne casse jamais l'UI).
+            opts = [
+                discord.SelectOption(label="Urgent", value="urgent", emoji="🔴"),
+                discord.SelectOption(label="Haute", value="high", emoji="🟠"),
+                discord.SelectOption(label="Normale", value="normal", emoji="🟡"),
+                discord.SelectOption(label="Basse", value="low", emoji="🔵"),
+            ]
+        super().__init__(placeholder="Choisir le niveau de priorité…", options=opts, min_values=1, max_values=1)
+        self.chid = chid
+
+    async def callback(self, i):
+        try:
+            await i.response.defer(ephemeral=True)  # defer-first : anti « Échec interaction »
+            level = self.values[0]
+            ch = i.guild.get_channel(self.chid)
+            if not ch:
+                return await i.followup.send("❌ Salon introuvable", ephemeral=True)
+            # Backend partagé : persiste la priorité + renomme le salon (préfixe emoji).
+            await tix_module.set_priority(self.chid, level)
+            await tix_module.update_channel_name_for_priority(ch, level)
+            emoji, label = tix_module.PRIORITY_LEVELS.get(level, ("⚪", level.upper()))
+            await i.followup.send(f"✅ Priorité réglée : {emoji} **{label}**", ephemeral=True)
+            # Trace visible dans le salon (entre au transcript) + log staff.
+            try:
+                pr_e = discord.Embed(color=C.GOLD, description=f"🚩 Priorité passée à {emoji} **{label}** par {i.user.mention}")
+                pr_e.timestamp = now()
+                await webhook_send(ch, 'ticket', embed=pr_e)
+            except Exception:
+                pass
+            tk = await get_ticket(self.chid)
+            if tk:
+                await send_ticket_log(i.guild, 'priority', tk['user'], tk, extra=(i.user.id, f"{emoji} {label}"))
+        except Exception as _tk_ex:
+            print(f"[ticket_priority_select] {type(_tk_ex).__name__}: {_tk_ex}")
+            try:
+                await i.followup.send(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#       📌 NOTE INTERNE STAFF (passage de relais) — postée dans le ticket
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TicketNoteModal(Modal):
+    """Note interne staff : modal → message épinglé visuellement dans le salon du
+    ticket (donc inclus au transcript). Sert au passage de relais entre staff.
+    Jamais de fermeture, jamais d'action destructrice."""
+    def __init__(self, tk):
+        super().__init__(title="📌 Note interne (staff)")
+        self.tk = tk
+        self.note = TextInput(
+            label="Note de relais",
+            placeholder="Ex. Client recontacté · en attente d'une preuve · escaladé à @admin…",
+            style=discord.TextStyle.paragraph, required=True, max_length=1000)
+        self.add_item(self.note)
+
+    async def on_submit(self, i):
+        try:
+            await i.response.defer(ephemeral=True)  # defer-first
+        except Exception:
+            pass
+        txt = (self.note.value or '').strip()
+        if not txt:
+            try:
+                await i.followup.send("❌ Note vide.", ephemeral=True)
+            except Exception:
+                pass
+            return
+        ch = i.channel
+        try:
+            note_e = discord.Embed(
+                title="📌 Note interne (staff)",
+                description=txt[:4000],
+                color=C.BLURPLE, timestamp=now())
+            note_e.set_footer(text=f"Ajoutée par {i.user.display_name}")
+            if hasattr(i.user, 'display_avatar'):
+                note_e.set_author(name=i.user.display_name, icon_url=i.user.display_avatar.url)
+            # Postée par webhook 'ticket' comme le reste → cohérence + entre au transcript.
+            await webhook_send(ch, 'ticket', embed=note_e)
+            await i.followup.send("✅ Note interne ajoutée au ticket.", ephemeral=True)
+        except Exception as _tk_ex:
+            print(f"[ticket_note_submit] {type(_tk_ex).__name__}: {_tk_ex}")
+            try:
+                await i.followup.send(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
+            except Exception:
+                pass
+            return
+        # Log staff (la note figure aussi dans le salon de logs pour traçabilité).
+        try:
+            await send_ticket_log(i.guild, 'note', self.tk['user'], self.tk, extra=(i.user.id, txt))
+        except Exception:
+            pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#       🔒 MOTIFS DE FERMETURE RAPIDES — pré-remplissent TicketCloseModal
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Motifs courants : chaque entrée pré-remplit la raison du modal de fermeture.
+TICKET_CLOSE_REASONS = [
+    ("✅ Résolu", "Résolu"),
+    ("📑 Doublon", "Doublon d'un autre ticket"),
+    ("🔇 Pas de réponse", "Pas de réponse de l'utilisateur"),
+    ("🚫 Hors-sujet", "Demande hors-sujet"),
+    ("✍️ Autre raison…", ""),  # ouvre le modal vide pour saisie libre
+]
+
+
+class TicketCloseReasonView(View):
+    """Vue éphémère (timeout 60s) montrée AVANT le modal de fermeture : un select
+    de motifs rapides. Le choix ouvre TicketCloseModal pré-rempli → le flux 2-temps
+    (modal = confirmation) reste intact, on gagne juste du temps de saisie."""
+    def __init__(self, tk):
+        super().__init__(timeout=60)
+        self.add_item(TicketCloseReasonSelect(tk))
+
+
+class TicketCloseReasonSelect(Select):
+    def __init__(self, tk):
+        opts = [discord.SelectOption(label=lbl, value=str(idx))
+                for idx, (lbl, _) in enumerate(TICKET_CLOSE_REASONS)]
+        super().__init__(placeholder="Motif rapide (ou « Autre » pour saisie libre)…",
+                         options=opts, min_values=1, max_values=1)
+        self.tk = tk
+
+    async def callback(self, i):
+        # On NE defer PAS ici : un select callback peut directement répondre par un
+        # modal (send_modal), ce qui acquitte l'interaction. C'est le 2e temps du flux.
+        try:
+            idx = int(self.values[0])
+            _, prefill = TICKET_CLOSE_REASONS[idx]
+            await i.response.send_modal(TicketCloseModal(self.tk, prefill=prefill))
+        except Exception as _tk_ex:
+            print(f"[ticket_close_reason] {type(_tk_ex).__name__}: {_tk_ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
+                else:
+                    await i.followup.send(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
+            except Exception:
+                pass
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           🏠 MAIN PANEL
@@ -47117,12 +47422,43 @@ async def on_message(msg):
                     return
 
         # Anti-spam
-        if c.get('anti_spam'):
+        # Exemption défensive : staff/admin/owner/rôles immune doivent pouvoir poster
+        # vite (annonces, modération) sans être avertis ni mutés. Le bot est déjà filtré
+        # en tête d'on_message. Cette garde est déjà après le return `user_immune`, on
+        # double la sécurité par is_fully_immune (couvre owner + admin + rôles/users immune).
+        if c.get('anti_spam') and not await is_fully_immune(msg.author):
             if await check_spam(msg, c.get('spam_max', 5), c.get('spam_interval', 5)):
-                await msg.delete()
+                # Tout fail-safe : un échec d'avertissement/strike/escalade ne doit JAMAIS
+                # empêcher la suppression+log, ni casser on_message.
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
                 await send_log(msg.guild, 'anti_spam', msg.author, msg, "Spam détecté", None)
-                dur = c.get('spam_mute_duration', 10)
-                await sanction(msg.author, c.get('spam_action', 'mute'), dur, "Spam", msg.guild)
+                # Strikes progressifs (rétention) : on AVERTIT gentiment d'abord.
+                strikes = 1
+                try:
+                    strikes = _register_protection_strike(msg.guild.id, msg.author.id, 'spam')
+                except Exception as _ex:
+                    print(f"[anti_spam strike] {_ex}")
+                await _warn_calm_down(
+                    msg.channel,
+                    f"⚠️ {msg.author.mention}, calme-toi un peu, tu envoies trop vite 🙏 "
+                    f"— ton message a été retiré.",
+                )
+                # 3e écart+ dans la fenêtre : sanction configurée + escalade staff.
+                if strikes >= _PROTECTION_STRIKE_ESCALATE:
+                    dur = c.get('spam_mute_duration', 10)
+                    await sanction(msg.author, c.get('spam_action', 'mute'), dur, "Spam répété", msg.guild)
+                    try:
+                        await ulogger2026.log_member_escalation(
+                            bot, msg.guild, msg.author, total_warns=strikes,
+                            palier="spam-mentions",
+                            reason="Spam de messages répété (envois trop rapides)",
+                            moderator=bot.user, severity="haute",
+                        )
+                    except Exception as _ex:
+                        print(f"[anti_spam escalation] {_ex}")
                 return
 
         # Anti-caps
@@ -47136,15 +47472,46 @@ async def on_message(msg):
                 return
 
         # Anti-mass-mention (détecte @everyone/@here et spam de mentions)
-        if c.get('anti_mass_mention'):
+        # Exemption défensive : un staff/admin/owner/rôle immune DOIT pouvoir faire une
+        # vraie annonce @everyone sans être averti ni sanctionné. Le bot est déjà filtré
+        # en tête d'on_message. (Garde déjà après le return `user_immune` ; on double via
+        # is_fully_immune qui couvre owner + admin + rôles/users immune.)
+        if c.get('anti_mass_mention') and not await is_fully_immune(msg.author):
             max_mentions = c.get('mention_limit', 5)
             if check_mass_mention(msg, max_mentions):
-                await msg.delete()
+                # Tout fail-safe : aucune sous-étape ne doit casser on_message.
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
                 mention_count = len(msg.mentions) + len(msg.role_mentions) + (1 if msg.mention_everyone else 0)
                 await send_log(msg.guild, 'anti_mass_mention', msg.author, msg,
                               "Spam de mentions détecté", f"`{mention_count}` mentions")
-                dur = c.get('mention_mute_duration', 10)
-                await sanction(msg.author, c.get('mention_action', 'mute'), dur, "Mass mention", msg.guild)
+                # Strikes progressifs (rétention) : on AVERTIT gentiment d'abord.
+                strikes = 1
+                try:
+                    strikes = _register_protection_strike(msg.guild.id, msg.author.id, 'mention')
+                except Exception as _ex:
+                    print(f"[anti_mass_mention strike] {_ex}")
+                await _warn_calm_down(
+                    msg.channel,
+                    f"⚠️ {msg.author.mention}, doucement avec les mentions / @everyone 🙏 "
+                    f"— ton message a été retiré.",
+                )
+                # 3e écart+ dans la fenêtre : sanction configurée + escalade staff.
+                if strikes >= _PROTECTION_STRIKE_ESCALATE:
+                    dur = c.get('mention_mute_duration', 10)
+                    await sanction(msg.author, c.get('mention_action', 'mute'), dur,
+                                   "Spam de mentions répété", msg.guild)
+                    try:
+                        await ulogger2026.log_member_escalation(
+                            bot, msg.guild, msg.author, total_warns=strikes,
+                            palier="spam-mentions",
+                            reason="Spam de mentions/@everyone répété",
+                            moderator=bot.user, severity="haute",
+                        )
+                    except Exception as _ex:
+                        print(f"[anti_mass_mention escalation] {_ex}")
                 return
 
         # Anti-QRCode (détection de scams par QR code) - Actif pour tous
