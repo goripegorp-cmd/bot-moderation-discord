@@ -410,6 +410,41 @@ SUPER_OWNER_ID = 781205382923288593  # GoRipe
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  🧯 LOG D'ERREUR CENTRAL — Phase 168.4 (câblage des chemins critiques)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _logerr(where: str, ex: Exception, *, context: Optional[dict] = None,
+            guild_id: int = 0) -> None:
+    """Helper FAIL-SAFE : trace une exception dans les logs Railway PUIS la
+    persiste via error_logger_module.log_error (DB + burst alert owner).
+
+    • Sync (appelable depuis n'importe quel `except`), ne lève JAMAIS.
+    • Le print reste la garantie minimale ; la persistance DB est best-effort
+      (si error_logger absent/non câblé ou hors boucle asyncio → juste le print).
+    """
+    try:
+        print(f"[{where}] {type(ex).__name__}: {ex}")
+    except Exception:
+        pass
+    try:
+        _el = globals().get("error_logger_module")
+        if _el is None:
+            return
+        # log_error est une coroutine → on la planifie sans bloquer ni attendre.
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None:
+            loop.create_task(
+                _el.log_error(where, ex, context=context, guild_id=guild_id)
+            )
+    except Exception:
+        # Un ajout d'observabilité ne doit JAMAIS casser le flux qu'il observe.
+        pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  🔍 KEYWORD FILTER — Phase 20 (filtre par mot-clé pour streams/vidéos)
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -4293,7 +4328,9 @@ async def sanction(m, action, dur, reason, g):
     except discord.HTTPException as ex:
         print(f"❌ [sanction] HTTPException sur '{action}' : {ex}")
     except Exception as ex:
-        print(f"❌ [sanction] erreur sur '{action}' : {ex}")
+        _logerr(f"sanction.{action}", ex,
+                context={"target": getattr(m, "id", None)},
+                guild_id=getattr(g, "id", 0))
     return False
 
 
@@ -5077,6 +5114,7 @@ async def create_ticket(i, pid, ans=None):
         await send_ticket_log(i.guild, 'create', i.user, {'id': tid, 'answers': ans or {}, 'panel_id': pid})
         return ch, None
     except Exception as ex:
+        _logerr("ticket.create", ex, guild_id=getattr(i.guild, "id", 0))
         if ch:
             try: await ch.delete()
             except: pass
@@ -5141,7 +5179,7 @@ class TicketCreateButton(Button):
         except Exception as ex:
             # Phase 263 : TOUJOURS accuser réception même si cfg/DB plante AVANT l'ack,
             # sinon « Échec de l'interaction » et le bouton paraît cassé.
-            print(f"[TicketCreateButton] {ex}")
+            _logerr("ticket.create_button", ex)
             try:
                 _msg = "❌ Erreur lors de la création du ticket. Réessaie dans un instant."
                 if not i.response.is_done():
@@ -5233,8 +5271,8 @@ class TicketCloseModal(Modal):
             async with get_db() as db:
                 await db.execute("UPDATE tickets SET status='closed' WHERE channel_id=?", (ch.id,))
                 await db.commit()
-        except Exception:
-            pass
+        except Exception as _e:
+            _logerr("ticket.close_db", _e)
         try:
             await ch.send(
                 f"🔒 **Ticket fermé** par {i.user.mention}\n**Raison :** {reason}\n"
@@ -5326,7 +5364,7 @@ class TicketControlView(View):
                 pass
             await send_ticket_log(i.guild, 'claim', tk['user'], tk, extra=i.user.id)
         except Exception as _tk_ex:
-            print(f"[ticket_btn] {type(_tk_ex).__name__}: {_tk_ex}")
+            _logerr("ticket.claim", _tk_ex)
             import traceback; traceback.print_exc()
             try:
                 if not i.response.is_done():
@@ -5364,7 +5402,7 @@ class TicketControlView(View):
             opts = [discord.SelectOption(label=f"@{m.display_name}"[:25], value=str(m.id)) for m in staffs]
             await i.response.send_message("👥 Choisir un staff:", view=AddStaffView(opts, i.channel.id), ephemeral=True)
         except Exception as _tk_ex:
-            print(f"[ticket_btn] {type(_tk_ex).__name__}: {_tk_ex}")
+            _logerr("ticket.add_staff_open", _tk_ex)
             import traceback; traceback.print_exc()
             try:
                 if not i.response.is_done():
@@ -5407,7 +5445,7 @@ class TicketControlView(View):
             opts = [discord.SelectOption(label=f"@{m.display_name}"[:25], value=str(m.id)) for m in staffs]
             await i.response.send_message("🔄 Transférer la prise en charge à :", view=TransferTicketView(opts, i.channel.id), ephemeral=True)
         except Exception as _tk_ex:
-            print(f"[ticket_btn] {type(_tk_ex).__name__}: {_tk_ex}")
+            _logerr("ticket.transfer_open", _tk_ex)
             import traceback; traceback.print_exc()
             try:
                 if not i.response.is_done():
@@ -5627,7 +5665,7 @@ class AddStaffSelect(Select):
                 if tk:
                     await send_ticket_log(i.guild, 'add_staff', tk['user'], tk, extra=st.id)
         except Exception as _tk_ex:
-            print(f"[ticket_btn] {type(_tk_ex).__name__}: {_tk_ex}")
+            _logerr("ticket.add_staff_apply", _tk_ex)
             import traceback; traceback.print_exc()
             try:
                 if not i.response.is_done():
@@ -5702,7 +5740,7 @@ class TransferTicketSelect(Select):
             # Log type 'claim' (mention « transféré de X à Y »).
             await send_ticket_log(i.guild, 'claim', tk['user'], tk, extra=new_staff.id)
         except Exception as _tk_ex:
-            print(f"[ticket_btn] {type(_tk_ex).__name__}: {_tk_ex}")
+            _logerr("ticket.transfer_apply", _tk_ex)
             import traceback; traceback.print_exc()
             try:
                 if not i.response.is_done():
@@ -13784,7 +13822,7 @@ async def _claim_personal_event(log_id: int) -> bool:
             await db.commit()
             return getattr(cur, "rowcount", 0) == 1
     except Exception as ex:
-        print(f"[_claim_personal_event] {ex}")
+        _logerr("economy.claim_personal_event", ex, context={"log_id": log_id})
         return False
 
 
@@ -15978,7 +16016,7 @@ async def _post_onboarding_welcome(member):
         except (discord.Forbidden, discord.HTTPException):
             pass
     except Exception as ex:
-        print(f"[_post_onboarding_welcome] {ex}")
+        _logerr("onboarding.post_welcome", ex, guild_id=getattr(getattr(member, "guild", None), "id", 0))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -16051,7 +16089,8 @@ class ComebackClaimView(View):
             try:
                 await add_coins(self.guild_id, self.user_id, int(bonus))
             except Exception as ex:
-                print(f"[ComebackClaimView add_coins] {ex}")
+                _logerr("economy.comeback_add_coins", ex,
+                        context={"user": self.user_id, "bonus": bonus}, guild_id=self.guild_id)
 
             # Désactiver le bouton
             for child in self.children:
@@ -16071,7 +16110,7 @@ class ComebackClaimView(View):
                 ephemeral=True,
             )
         except Exception as ex:
-            print(f"[ComebackClaimView _on_claim] {ex}")
+            _logerr("economy.comeback_claim", ex, guild_id=self.guild_id)
             try:
                 await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
             except Exception:
@@ -17197,7 +17236,7 @@ async def event_timeout_checker():
             except Exception as ex:
                 print(f"[event_timeout_checker row={event_id}] {ex}")
     except Exception as ex:
-        print(f"[event_timeout_checker] {ex}")
+        _logerr("task.event_timeout_checker", ex)
 
 
 # ─── Phase 109 : Auction Settler ─────────────────────────────────────────
@@ -18176,93 +18215,252 @@ async def _combat_channel_sweeper_wait():
 
 _supervisor_did_first_pass = False  # FIX logs : 1er tour = démarrage au boot → silencieux
 
+# Boucles des MODULES supervisées (alias *_module en tête de fichier → globals().get()).
+# Extrait en CONSTANTE module-level (Tâche C) pour devenir une SOURCE DE VÉRITÉ partagée
+# entre le superviseur ET health_check (avant : tuple inline, illisible côté health_check).
+_SUPERVISED_MODULE_LOOPS = (
+    ("mob_hunts_module", "spawn_task"),
+    ("daily_bosses_module", "daily_boss_task"),
+    ("event_notif_role_module", "event_role_task"),
+    ("conversation_starters_module", "conv_starter_task"),
+    ("hero_journey_module", "hero_journey_task"),
+    ("rift_events_module", "rift_spawn_task"),
+    ("rift_events_module", "rift_watchdog"),
+    ("caravan_events_module", "caravan_spawn_task"),
+    ("caravan_events_module", "caravan_watchdog"),
+    ("chain_events_module", "chain_spawn_task"),
+    ("chain_events_module", "chain_watchdog"),
+    ("solo_module", "solo_watchdog"),
+    # FIX fiabilité (Lot 3) : boucles de MODULES lancées au boot mais non supervisées →
+    # mortes à vie sur une exception. getattr(...,None) est fail-safe si un module n'a
+    # pas chargé.
+    ("db_backup_module", "backup_task"),
+    ("raid_recap_module", "weekly_recap_task"),
+    ("econ_events_module", "daily_announce_task"),
+    ("cmty_hub_module", "weekly_highlights_task"),
+    ("rblx_link_module", "roblox_updates_check_task"),
+    # auto_close_inactive_task NON supervisée : désactivée (no-op, plus lancée au boot) —
+    # le bot ne ferme jamais un ticket. Verrouillée aussi via _SUPERVISOR_DENY (balayage auto).
+    ("tix_module", "sla_reminder_task"),
+    ("obs_module", "daily_snapshot_task"),
+    ("obs_module", "anomaly_check_task"),
+    ("pubmet_module", "metrics_refresh_task"),
+    ("cleanup_module", "weekly_cleanup_task"),
+    ("dormant_module", "dormant_dispatch_task"),
+    ("health_module", "health_check_task"),
+    ("backup_module", "backup_daily_task"),
+    ("saga_module", "saga_lifecycle_task"),
+    ("dm_digest_module", "digest_dispatch_task"),
+    ("webhook_tracker_module", "weekly_scan_task"),
+    ("owner_digest_module", "owner_digest_task"),
+    ("daily_prompt_module", "daily_prompt_task"),
+    ("roblox_stats_module", "weekly_stats_task"),
+    ("roblox_raffle_module", "weekly_draw_task"),
+    ("stream_party_module", "cleanup_task"),
+    ("stream_schedule_module", "countdown_task"),
+    ("activity_heatmap_module", "weekly_owner_dispatch_task"),
+    ("status_rotator_module", "rotator_task"),
+    ("voice_autoclean_module", "check_task"),
+    ("error_logger_module", "burst_check_task"),
+    ("dungeon_module", "dungeon_timeout_task"),
+    ("activity_rewards_module", "weekly_reward_task"),
+    ("wandering_merchant_module", "spawn_merchant_task"),
+    ("world_invasion_module", "monthly_invasion_task"),
+    ("story_engine_module", "chronicle_task"),
+    ("weekly_council_module", "council_task"),
+    ("regional_state_module", "regional_task"),
+    ("mystery_investigation_module", "mystery_task"),
+    ("npc_letters_module", "weekly_letter_task"),
+    ("monthly_climax_module", "climax_task"),
+    ("community_goals_module", "weekly_goal_task"),
+    ("coin_economy_module", "monthly_festival_task"),
+    ("coin_economy_module", "luxury_tax_task"),
+    # FIX sécu P0 : expiration auto du lockdown anti-raid (sans elle, un faux-raid
+    # verrouillait le serveur À VIE).
+    ("raid_module", "lockdown_expiry_task"),
+    ("weekly_stats_module", "weekly_post_task"),
+)
+
+# DENY-LIST EXPLICITE (Tâche C) : boucles que le balayage AUTO ne doit JAMAIS démarrer ni
+# ressusciter, même si elles existent comme objet Loop. Source unique partagée
+# superviseur ↔ registre auto ↔ health_check. Clé = nom d'attribut nu de la Loop.
+#   • auto_close_inactive_task : directive owner ABSOLUE — le bot ne ferme JAMAIS un ticket
+#     (la loop est un no-op désactivé). Si le balayage auto la voyait .is_running() (jamais
+#     censé arriver) on ne la touche pas ; et on ne la « ressuscite » jamais.
+#   • task_supervisor / combat_channel_sweeper : se gèrent eux-mêmes (le superviseur ne se
+#     supervise pas lui-même ; combat_channel_sweeper est déjà dans _SUPERVISED_LOOP_NAMES).
+_SUPERVISOR_DENY = frozenset({
+    "auto_close_inactive_task",
+    "task_supervisor",
+})
+
+# Cause-de-mort déjà loguée (dédup, borné) — évite de spammer error_logger.log_error à
+# chaque tour de 5 min tant qu'une boucle reste morte/instable. {label: "ExcType: msg"}.
+_loop_death_seen: dict = {}
+
+
+def _capture_loop_death_cause(label: str, lo) -> None:
+    """FAIL-SAFE : avant de ressusciter une boucle morte, tente de RÉCUPÉRER et LOGUER la
+    cause du décès (l'exception non gérée qui l'a tuée) — sinon le bug est masqué en boucle
+    (la loop redémarre, recrashe, redémarre… silencieusement). discord.ext.tasks ne conserve
+    pas l'exception publiquement : on lit l'asyncio.Task sous-jacent (`_task`, privé → tout
+    sous getattr/try). Dédup via _loop_death_seen pour ne pas spammer. Ne lève JAMAIS."""
+    try:
+        task = getattr(lo, "_task", None)
+        if task is None or not task.done():
+            return
+        try:
+            if task.cancelled():
+                return  # annulation volontaire ≠ crash : rien à signaler
+            exc = task.exception()
+        except Exception:
+            exc = None
+        if exc is None:
+            return  # fin propre (pas d'exception) → pas une « mort » à signaler
+        sig = f"{type(exc).__name__}: {exc}"[:200]
+        if _loop_death_seen.get(label) == sig:
+            return  # déjà signalé, même cause → dédup
+        _loop_death_seen[label] = sig
+        # _logerr = print + persistance error_logger (DB + burst alert owner), fail-safe.
+        _logerr(f"loop_death.{label}", exc if isinstance(exc, Exception) else Exception(sig))
+    except Exception:
+        # Un ajout d'observabilité ne doit JAMAIS casser le flux qu'il observe.
+        pass
+
+
+def _iter_supervised_loops():
+    """SOURCE DE VÉRITÉ UNIQUE (Tâche C) des boucles à surveiller — lue par le superviseur
+    ET par health_check (mutualisation). Yield des tuples (label, loop_obj).
+
+    Trois sources fusionnées, dédupliquées par identité de l'objet Loop :
+      1. _SUPERVISED_LOOP_NAMES  → boucles définies dans bot.py (globals()).
+      2. _SUPERVISED_MODULE_LOOPS → boucles des modules (alias *_module).
+      3. BALAYAGE AUTO            → tout objet discord.ext.tasks.Loop trouvé dans les
+         globals de bot.py ET dans les modules *_module déjà importés, qui n'est pas déjà
+         couvert par 1/2 — attrape les boucles qu'on a OUBLIÉ d'inscrire (2/117 → exhaustif).
+    La DENY-LIST (_SUPERVISOR_DENY) exclut toujours, à toutes les sources. Fail-safe par
+    élément (un module cassé n'interrompt jamais l'itération)."""
+    seen_ids = set()
+
+    def _emit(label, lo):
+        if lo is None or not isinstance(lo, tasks.Loop):
+            return None
+        # Deny par nom d'attribut nu (dernier segment du label) OU nom complet.
+        bare = label.rsplit(".", 1)[-1]
+        if bare in _SUPERVISOR_DENY or label in _SUPERVISOR_DENY:
+            return None
+        if id(lo) in seen_ids:
+            return None
+        seen_ids.add(id(lo))
+        return (label, lo)
+
+    g = globals()
+    # 1) Boucles bot.py listées manuellement.
+    for name in _SUPERVISED_LOOP_NAMES:
+        try:
+            r = _emit(name, g.get(name))
+            if r:
+                yield r
+        except Exception:
+            continue
+    # 2) Boucles modules listées manuellement.
+    for mod_name, attr in _SUPERVISED_MODULE_LOOPS:
+        try:
+            mod = g.get(mod_name)
+            lo = getattr(mod, attr, None) if mod is not None else None
+            r = _emit(f"{mod_name}.{attr}", lo)
+            if r:
+                yield r
+        except Exception:
+            continue
+    # 3) BALAYAGE AUTO — récupère les Loop oubliées. Conservateur : ne yield qu'un Loop
+    #    DÉJÀ démarré (.is_running()) au moins une fois (évite de réveiller une loop
+    #    volontairement jamais lancée) OU déjà mort après l'avoir été. On s'appuie sur
+    #    _task : présent ssi la loop a été .start()-ée au moins une fois.
+    def _scan_namespace(ns_items, prefix):
+        for nm, val in ns_items:
+            try:
+                if not isinstance(val, tasks.Loop):
+                    continue
+                # N'auto-inscrire QUE les loops ayant déjà été lancées (sinon on
+                # démarrerait des boucles désactivées volontairement). _task != None ⇔ déjà
+                # .start()-ée au moins une fois dans cette session.
+                if getattr(val, "_task", None) is None:
+                    continue
+                label = nm if not prefix else f"{prefix}.{nm}"
+                r = _emit(label, val)
+                if r:
+                    yield r
+            except Exception:
+                continue
+    try:
+        # bot.py globals (snapshot → pas de "dict changed size" pendant l'itération).
+        for r in _scan_namespace(list(g.items()), ""):
+            yield r
+    except Exception:
+        pass
+    try:
+        for mod_alias, mod_obj in list(g.items()):
+            if not (isinstance(mod_alias, str) and mod_alias.endswith("_module")):
+                continue
+            # Duck-type « est-ce un module ? » sans importer `types` : un module a __dict__
+            # via vars() et un __name__. Évite d'ajouter un import top-level.
+            ns = None
+            try:
+                if hasattr(mod_obj, "__name__") and hasattr(mod_obj, "__dict__"):
+                    ns = vars(mod_obj)
+            except Exception:
+                ns = None
+            if not isinstance(ns, dict):
+                continue
+            try:
+                for r in _scan_namespace(list(ns.items()), mod_alias):
+                    yield r
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
+def supervised_loops_status():
+    """Snapshot (label, is_running) de TOUTES les boucles supervisées — API partagée lue par
+    health_check pour lister les loops mortes depuis le MÊME registre que le superviseur.
+    Fail-safe : ne lève jamais, renvoie [] en cas de pépin."""
+    out = []
+    try:
+        for label, lo in _iter_supervised_loops():
+            try:
+                out.append((label, bool(lo.is_running())))
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
 
 @tasks.loop(minutes=5)
 async def task_supervisor():
     """Phase 203 — Ressuscite les boucles critiques mortes (exception non gérée
-    → la loop s'arrête à vie). Garantit que le serveur reste vivant sans reboot."""
+    → la loop s'arrête à vie). Garantit que le serveur reste vivant sans reboot.
+
+    Tâche C : itère désormais la SOURCE DE VÉRITÉ partagée _iter_supervised_loops()
+    (listes manuelles + balayage auto + deny-list) et LOGUE la cause du décès AVANT
+    chaque résurrection (dédup) pour ne plus masquer un bug en boucle."""
     global _supervisor_did_first_pass
     restarted = []
-    # Boucles définies dans bot.py
-    for name in _SUPERVISED_LOOP_NAMES:
+    for label, lo in _iter_supervised_loops():
         try:
-            lo = globals().get(name)
-            if lo is not None and hasattr(lo, "is_running") and not lo.is_running():
+            if not lo.is_running():
+                # Capture la cause de mort AVANT de relancer (sinon _task est réinitialisé).
+                _capture_loop_death_cause(label, lo)
                 lo.start()
-                restarted.append(name)
+                restarted.append(label)
+            else:
+                # Loop vivante → on oublie sa dernière cause de mort (repart à neuf si elle
+                # remeurt avec une autre erreur, la dédup ne la masquera pas).
+                _loop_death_seen.pop(label, None)
         except Exception as ex:
-            print(f"[task_supervisor {name}] {ex}")
-    # Boucles des modules de combat (mob_hunts / daily_bosses)
-    for mod_name, attr in (("mob_hunts_module", "spawn_task"),
-                           ("daily_bosses_module", "daily_boss_task"),
-                           ("event_notif_role_module", "event_role_task"),
-                           ("conversation_starters_module", "conv_starter_task"),
-                           ("hero_journey_module", "hero_journey_task"),
-                           ("rift_events_module", "rift_spawn_task"),
-                           ("rift_events_module", "rift_watchdog"),
-                           ("caravan_events_module", "caravan_spawn_task"),
-                           ("caravan_events_module", "caravan_watchdog"),
-                           ("chain_events_module", "chain_spawn_task"),
-                           ("chain_events_module", "chain_watchdog"),
-                           ("solo_module", "solo_watchdog"),
-                           # FIX fiabilité (Lot 3) : boucles de MODULES lancées au boot
-                           # mais non supervisées → mortes à vie sur une exception. Tous
-                           # ces alias sont des globals (import ... as ..._module en tête
-                           # de fichier) donc globals().get() les résout ; getattr(...,None)
-                           # est fail-safe si un module n'a pas chargé.
-                           ("db_backup_module", "backup_task"),
-                           ("raid_recap_module", "weekly_recap_task"),
-                           ("econ_events_module", "daily_announce_task"),
-                           ("cmty_hub_module", "weekly_highlights_task"),
-                           ("rblx_link_module", "roblox_updates_check_task"),
-                           # auto_close_inactive_task NON supervisée : désactivée (no-op,
-                           # plus lancée au boot) — le bot ne ferme jamais un ticket.
-                           ("tix_module", "sla_reminder_task"),
-                           ("obs_module", "daily_snapshot_task"),
-                           ("obs_module", "anomaly_check_task"),
-                           ("pubmet_module", "metrics_refresh_task"),
-                           ("cleanup_module", "weekly_cleanup_task"),
-                           ("dormant_module", "dormant_dispatch_task"),
-                           ("health_module", "health_check_task"),
-                           ("backup_module", "backup_daily_task"),
-                           ("saga_module", "saga_lifecycle_task"),
-                           ("dm_digest_module", "digest_dispatch_task"),
-                           ("webhook_tracker_module", "weekly_scan_task"),
-                           ("owner_digest_module", "owner_digest_task"),
-                           ("daily_prompt_module", "daily_prompt_task"),
-                           ("roblox_stats_module", "weekly_stats_task"),
-                           ("roblox_raffle_module", "weekly_draw_task"),
-                           ("stream_party_module", "cleanup_task"),
-                           ("stream_schedule_module", "countdown_task"),
-                           ("activity_heatmap_module", "weekly_owner_dispatch_task"),
-                           ("status_rotator_module", "rotator_task"),
-                           ("voice_autoclean_module", "check_task"),
-                           ("error_logger_module", "burst_check_task"),
-                           ("dungeon_module", "dungeon_timeout_task"),
-                           ("activity_rewards_module", "weekly_reward_task"),
-                           ("wandering_merchant_module", "spawn_merchant_task"),
-                           ("world_invasion_module", "monthly_invasion_task"),
-                           ("story_engine_module", "chronicle_task"),
-                           ("weekly_council_module", "council_task"),
-                           ("regional_state_module", "regional_task"),
-                           ("mystery_investigation_module", "mystery_task"),
-                           ("npc_letters_module", "weekly_letter_task"),
-                           ("monthly_climax_module", "climax_task"),
-                           ("community_goals_module", "weekly_goal_task"),
-                           ("coin_economy_module", "monthly_festival_task"),
-                           ("coin_economy_module", "luxury_tax_task"),
-                           # FIX sécu P0 : expiration auto du lockdown anti-raid (sans
-                           # elle, un faux-raid verrouillait le serveur À VIE).
-                           ("raid_module", "lockdown_expiry_task"),
-                           ("weekly_stats_module", "weekly_post_task")):
-        try:
-            mod = globals().get(mod_name)
-            lo = getattr(mod, attr, None) if mod is not None else None
-            if lo is not None and hasattr(lo, "is_running") and not lo.is_running():
-                lo.start()
-                restarted.append(f"{mod_name}.{attr}")
-        except Exception as ex:
-            print(f"[task_supervisor {mod_name}.{attr}] {ex}")
+            _logerr(f"supervisor.restart.{label}", ex)
     # 1er passage = boot : toutes les boucles sont « non lancées », c'est NORMAL
     # (le superviseur les démarre) → on NE log PAS (ce n'est pas une mort). À partir
     # du 2e tour seulement, une résurrection = vraie tâche morte → à signaler.
@@ -18377,7 +18575,7 @@ async def event_auto_scheduler():
             except Exception as ex:
                 print(f"[event_auto_scheduler guild={guild.id}] {ex}")
     except Exception as ex:
-        print(f"[event_auto_scheduler] {ex}")
+        _logerr("task.event_auto_scheduler", ex)
 
 
 @event_timeout_checker.before_loop
@@ -42847,7 +43045,7 @@ async def on_ready():
         if not db_backup_module.backup_task.is_running():
             db_backup_module.backup_task.start()
     except Exception as ex:
-        print(f"[on_ready db_backup_task] {ex}")
+        _logerr("task.db_backup_start", ex)
     # Phase 126 : HTTP health endpoint pour Railway monitoring
     try:
         port = int(os.environ.get('PORT', '8000') or 8000)
@@ -43134,7 +43332,9 @@ async def on_ready():
 
         ratelimit_module.setup(bot)
 
-        health_module.setup(bot, get_db, db_get)
+        # Tâche C : on passe supervised_loops_status → health_check lit le MÊME registre
+        # de boucles que le task_supervisor (source de vérité mutualisée).
+        health_module.setup(bot, get_db, db_get, supervised_loops_status)
         await health_module.init_db()
         if not health_module.health_check_task.is_running():
             health_module.health_check_task.start()
@@ -45221,7 +45421,7 @@ async def voice_claim_cmd(i: discord.Interaction):
             )
         await i.response.send_message(view=view, ephemeral=True)
     except Exception as ex:
-        print(f"[voice_claim_cmd] {ex}")
+        _logerr("economy.voice_claim", ex, guild_id=getattr(i.guild, "id", 0))
         try:
             if not i.response.is_done():
                 await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
@@ -46238,7 +46438,7 @@ async def on_member_join(m):
                         and not role.managed and role < me.top_role and role not in m.roles):
                     await m.add_roles(role, reason="Auto-rôle d'arrivée (welcome)")
     except Exception as ex:
-        print(f"[on_member_join autorole] {ex}")
+        _logerr("on_member_join.autorole", ex, guild_id=getattr(m.guild, "id", 0))
 
     # ═══ Tracking stats journalières ═══
     try:
@@ -46250,7 +46450,8 @@ async def on_member_join(m):
                 ON CONFLICT(guild_id, date) DO UPDATE SET new_members = new_members + 1
             ''', (m.guild.id, today))
             await db.commit()
-    except: pass
+    except Exception as ex:
+        _logerr("on_member_join.daily_stats", ex, guild_id=getattr(m.guild, "id", 0))
 
     # ═══ Phase 147 : raid_detector smart (account-signature based) ═══
     # Ne déclenche QUE si plusieurs comptes suspects join en cluster.
@@ -46265,7 +46466,7 @@ async def on_member_join(m):
         try:
             await onboarding_module.start_for_member(m)
         except Exception as ex:
-            print(f"[on_member_join onboarding] {ex}")
+            _logerr("on_member_join.onboarding", ex, guild_id=getattr(m.guild, "id", 0))
 
     # ═══ Phase 256 : rôle « 📢 Tous les Événements » OPT-OUT ═══
     # Chaque nouveau membre est abonné PAR DÉFAUT au rôle de notification des
@@ -46281,7 +46482,7 @@ async def on_member_join(m):
                     await m.add_roles(
                         _ev_role, reason="Phase 256 : abonnement events par défaut (opt-out)")
         except Exception as ex:
-            print(f"[on_member_join events_role] {ex}")
+            _logerr("on_member_join.events_role", ex, guild_id=getattr(m.guild, "id", 0))
 
     # ═══ Phase 139 : Observabilité (join tracking pour retention) ═══
     try:
@@ -46593,10 +46794,11 @@ async def _handle_antiraid_join(member):
                             await guild.edit(verification_level=prev, reason="Anti-Raid lockdown terminé")
                             print(f"[ANTIRAID] guild={guild.id} lockdown restauré à {prev}")
                         except Exception as ex:
-                            print(f"[ANTIRAID restore] {ex}")
+                            # CRITIQUE : si la restauration échoue, le serveur reste verrouillé.
+                            _logerr("security.lockdown_restore", ex, guild_id=getattr(guild, "id", 0))
                     asyncio.create_task(_restore_lockdown(member.guild, previous_level))
-                except Exception:
-                    pass
+                except Exception as ex:
+                    _logerr("security.lockdown_set", ex, guild_id=getattr(member.guild, "id", 0))
                 # Pas d'action sur le membre individuellement en lockdown mode
                 break
             applied += 1
@@ -52742,7 +52944,9 @@ class _StaffSanctionModal(discord.ui.Modal):
                     infraction_id = cur.lastrowid
                     await db.commit()
             except Exception as ex:
-                print(f"[staff sanction] INSERT infraction error: {ex}")
+                _logerr("sanction.infraction_insert", ex,
+                        context={"target": getattr(target, "id", None), "type": inf_type},
+                        guild_id=getattr(guild, "id", 0))
 
             # (f) send_mod_log (route vers ulogger2026 + mod_log_channel ; gère kick/ban/mute).
             try:
@@ -52763,7 +52967,7 @@ class _StaffSanctionModal(discord.ui.Modal):
                 ephemeral=True,
             )
         except Exception as ex:
-            print(f"[staff sanction on_submit] {ex}")
+            _logerr("sanction.staff_submit", ex, guild_id=getattr(modal_i.guild, "id", 0))
             try:
                 await modal_i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
             except Exception:
@@ -52994,7 +53198,7 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
                             _StaffSanctionModal(_action, _target)
                         )
                     except Exception as _ex2:
-                        print(f"[infractions sanction btn {_action}] {_ex2}")
+                        _logerr(f"sanction.btn_{_action}", _ex2)
                         try:
                             if not inter.response.is_done():
                                 await inter.response.send_message(
@@ -53021,7 +53225,7 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
             btn_ban.callback = _make_sanction_cb('ban')
             view.add_item(discord.ui.ActionRow(btn_mute, btn_kick, btn_ban))
     except Exception as _ex:
-        print(f"[infractions sanction buttons build] {_ex}")
+        _logerr("sanction.buttons_build", _ex)
 
     # FIX audit : EPHEMERAL — la fiche contient les NOTES INTERNES staff
     # (« 🗒️ Notes internes ») qui ne doivent PAS être visibles publiquement.
@@ -60544,7 +60748,8 @@ async def _claim_completed_quests(guild_id: int, user_id: int) -> dict:
         try:
             await add_coins(guild_id, user_id, coins_total)
         except Exception as ex:
-            print(f"[claim quests add_coins] {ex}")
+            _logerr("economy.quest_claim_add_coins", ex,
+                    context={"user": user_id, "coins": coins_total}, guild_id=guild_id)
 
     # Tracking achievements
     await _incr_stat_p41(guild_id, user_id, 'quests_done', claimed_count)
@@ -64028,7 +64233,8 @@ async def _claim_combat_lock(guild_id: int, event_type: str = "?", event_id: int
             await db.commit()
             return getattr(cur, "rowcount", 0) == 1
     except Exception as ex:
-        print(f"[_claim_combat_lock] {ex}")
+        _logerr("economy.claim_combat_lock", ex,
+                context={"event_type": event_type, "event_id": event_id}, guild_id=guild_id)
         # FAIL-OPEN sur ERREUR INFRA (table absente / DB lockée) : on autorise le spawn
         # et on laisse le verrou-grâce _has_any_major_event_running sérialiser. Un
         # claim cassé ne doit JAMAIS figer TOUS les events (cauchemar Phase 174.1).
@@ -67999,7 +68205,7 @@ async def db_optimizer_task():
         if total_deleted:
             print(f"[DB OPTIMIZER] total deleted = {total_deleted}")
     except Exception as ex:
-        print(f"[db_optimizer_task] {ex}")
+        _logerr("task.db_optimizer", ex)
 
 
 @db_optimizer_task.before_loop
