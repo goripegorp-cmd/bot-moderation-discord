@@ -158,7 +158,6 @@ from ui_v2 import (
 # communautaires.
 import permissions as perms2026
 import vocabulary as vocab2026
-import help_system as help2026
 import engagement as engage2026
 import social_media as social2026
 # Phase 41 : moteur d'engagement quotidien (quests, achievements, pets, wheel, confessions)
@@ -40796,8 +40795,10 @@ class NewPanelModal(Modal, title="➕ Nouveau Panel"):
         panels = c.get('ticket_panels', {})
         panels[pid] = {'name': self.name.value, 'category': 0, 'questions': [], 'max': mxt}
         await db_set(self.g.id, 'ticket_panels', panels)
-        v = PanelEditView(self.u, self.g, pid)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        # FIX : ouvrir l'éditeur V2 (avant : PanelEditView legacy + embed posé sur un
+        # message LayoutView V2 → HTTP 400 « Échec de l'interaction » alors que le panel
+        # ÉTAIT créé en DB). render_to édite le message V2 proprement.
+        await PanelEditViewV2(self.u, self.g, pid).render_to(i, edit=True)
 
 class EditPanelSelectViewV2(LayoutView):
     """V2 wrapper pour la selection d'un panel de tickets a modifier."""
@@ -41298,9 +41299,9 @@ class PanelAppearanceModalSimple(Modal):
             panels[self.pid]['embed_links'] = (self.embed_links.value or '').strip()
             await db_set(self.g.id, 'ticket_panels', panels)
             
-            v = PanelEditView(self.u, self.g, self.pid)
-            await i.response.edit_message(embed=await v.embed(), view=v)
-            await i.followup.send("✅ Apparence mise à jour!", ephemeral=True)
+            # FIX : retour à l'éditeur V2 (avant : embed legacy sur message V2 → 400).
+            await PanelEditViewV2(self.u, self.g, self.pid).render_to(i, edit=True)
+            await i.followup.send("✅ Apparence mise à jour !", ephemeral=True)
         except Exception as ex:
             try: await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
             except: pass
@@ -41327,9 +41328,9 @@ class WelcomeMessageModalSimple(Modal):
             panels[self.pid]['welcome_message'] = (self.welcome_msg.value or '').strip()
             await db_set(self.g.id, 'ticket_panels', panels)
             
-            v = PanelEditView(self.u, self.g, self.pid)
-            await i.response.edit_message(embed=await v.embed(), view=v)
-            await i.followup.send("✅ Message d'accueil mis à jour!", ephemeral=True)
+            # FIX : retour à l'éditeur V2 (avant : embed legacy sur message V2 → 400).
+            await PanelEditViewV2(self.u, self.g, self.pid).render_to(i, edit=True)
+            await i.followup.send("✅ Message d'accueil mis à jour !", ephemeral=True)
         except Exception as ex:
             try: await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
             except: pass

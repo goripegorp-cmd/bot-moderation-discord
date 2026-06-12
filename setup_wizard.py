@@ -700,7 +700,7 @@ class WizardStep6(_WizardView):
                 ("💬 Features actives", feats_str),
             ]),
             _divider(),
-            _subtitle("Une sauvegarde automatique est créée avant l'application (restaurable via `/admin → Sauvegardes`)."),
+            _subtitle("Tu pourras tout réajuster à tout moment via `/configure`."),
             _divider(),
             ui.ActionRow(b_back, b_apply),
         ]
