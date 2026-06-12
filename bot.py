@@ -10133,9 +10133,15 @@ async def _start_boss_raid(guild, triggered_by_id: int, *, manual: bool = False)
                     (arena_channel.id, arena_msg.id, event_id),
                 )
                 await db.commit()
-            # Phase 40.1 : Note — pour le boss raid, pas d'echo nécessaire car
-            # tous les autres salons sont masqués → l'arène est LE seul salon
-            # visible, les actifs la voient forcément.
+            # Accroche 1-ligne dans le chat : le masquage des autres salons a été
+            # RETIRÉ (Phase 235.28), donc l'arène n'est plus le seul salon visible →
+            # sans accroche, le boss raid était invisible pour les non-abonnés.
+            # _post_event_echo = lien DISCRET (sans @mention, auto-supprimé ~30 min)
+            # dans les 2 salons les plus actifs, lié à l'arène (purgé à la fin).
+            try:
+                await _post_event_echo(guild, arena_channel, 'boss_raid')
+            except Exception as _ex_echo:
+                print(f"[boss_raid echo] {_ex_echo}")
         except Exception as ex:
             print(f"[event start send arena] {ex}")
             # Phase 258.8 : si le PANNEAU n'a jamais été envoyé, ne PAS laisser un
@@ -43795,6 +43801,7 @@ async def on_ready():
                 event_mention_fn=_get_event_mention,
                 pet_strike_fn=_pet_strike,
                 claim_lock_fn=_claim_combat_lock,
+                echo_fn=_post_event_echo,
             )
             await monthly_climax_module.init_db()
             monthly_climax_module.register_persistent_views(bot)
@@ -64621,6 +64628,13 @@ async def _start_world_boss(guild) -> dict:
                     (msg.id, wb_id),
                 )
                 await db.commit()
+            # Accroche 1-ligne dans le chat (le masquage des salons a été RETIRÉ
+            # Phase 235.28 → sans elle le world boss était invisible hors abonnés au
+            # rôle). Discret, sans @mention, auto-supprimé ~30 min, lié à l'arène.
+            try:
+                await _post_event_echo(guild, arena_ch, 'world_boss')
+            except Exception as _ex_echo:
+                print(f"[world_boss echo] {_ex_echo}")
         except Exception as ex:
             print(f"[_start_world_boss send arena] {ex}")
             return {'ok': False, 'error': f'erreur envoi : {ex}'}

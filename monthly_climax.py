@@ -295,12 +295,13 @@ def setup(
     story_module=None, npc_module=None, add_coins_fn=None,
     arena_create_fn=None, arena_delete_fn=None, event_busy_fn=None,
     report_fn=None, event_mention_fn=None, pet_strike_fn=None,
-    claim_lock_fn=None,
+    claim_lock_fn=None, echo_fn=None,
 ):
     global _bot, _get_db, _db_get, _v2, _story, _npc, _add_coins
     global _arena_create_fn, _arena_delete_fn, _event_busy_fn, _report_fn, _event_mention_fn
-    global _pet_strike_fn, _claim_lock_fn
+    global _pet_strike_fn, _claim_lock_fn, _echo_fn
     _bot = bot_instance
+    _echo_fn = echo_fn  # _post_event_echo (accroche 1-ligne chat, sans @, auto-supprimée)
     _get_db = get_db_fn
     _db_get = db_get_fn
     _v2 = v2_helpers
@@ -612,6 +613,15 @@ async def trigger_climax(guild_id: int) -> Optional[int]:
         _warmup_until[event_id] = _warm
         await _announce_climax_open(guild, boss, event_id, ends_at, channel=ch,
                                     warmup_ts=_warm)
+        # Accroche 1-ligne dans le chat (sans @mention, auto-supprimée) : sinon le boss
+        # climax mensuel était invisible hors abonnés au rôle 🔔 Climax. _echo_fn =
+        # _post_event_echo (bot.py). globals().get → zéro risque de NameError.
+        _echo = globals().get('_echo_fn')
+        if _echo is not None and ch is not None:
+            try:
+                await _echo(guild, ch, 'climax')
+            except Exception:
+                pass
         # Phase 235.24 : ping des rôles opt-in (/notify + 🔔 Climax). L'annonce est en
         # V2 (pas de content) → message de ping séparé, roles=True.
         if _event_mention_fn is not None and ch is not None:
