@@ -101,6 +101,7 @@ async def _collect_summary(guild: discord.Guild) -> dict:
         "inactive_webhooks": 0,
         "season_info": None,
         "saga_active": None,
+        "error_summary": None,
     }
     if _get_db is None:
         return out
@@ -232,6 +233,14 @@ async def _collect_summary(guild: discord.Guild) -> dict:
         except Exception:
             pass
 
+        # Stabilité (24h) — récap erreurs via error_logger (fail-safe)
+        try:
+            import error_logger as _err
+            if _err is not None and hasattr(_err, "get_error_summary"):
+                out["error_summary"] = await _err.get_error_summary(hours=24)
+        except Exception:
+            out["error_summary"] = None
+
     except Exception as ex:
         print(f"[owner_digest _collect_summary] {ex}")
 
@@ -331,6 +340,35 @@ def _build_digest_panel(summary: dict):
             f"🔧 **Maintenance :** {summary['inactive_webhooks']} webhooks "
             f"inactifs depuis 90+ jours détectés."
         ))
+
+    # Stabilité (24h) — récap erreurs (fail-safe, n'empêche jamais le digest)
+    try:
+        es = summary.get("error_summary")
+        items.append(v2_divider())
+        if not es or int(es.get("total", 0) or 0) <= 0:
+            items.append(v2_body("🩺 **Stabilité (24h)**"))
+            items.append(v2_body("✅ Aucune erreur remontée (24h)"))
+        else:
+            total_err = int(es.get("total", 0) or 0)
+            items.append(v2_body(
+                f"🩺 **Stabilité (24h)** — **{total_err}** erreur(s) capturée(s)"
+            ))
+            top_src = (es.get("by_source") or [])[:3]
+            if top_src:
+                src_line = " · ".join(
+                    f"`{s.get('source', '?')}` ({int(s.get('count', 0) or 0)})"
+                    for s in top_src
+                )
+                items.append(v2_body(f"• Sources : {src_line}"))
+            top_typ = (es.get("by_type") or [])[:3]
+            if top_typ:
+                typ_line = " · ".join(
+                    f"`{t.get('error_type', '?')}` ({int(t.get('count', 0) or 0)})"
+                    for t in top_typ
+                )
+                items.append(v2_body(f"• Types : {typ_line}"))
+    except Exception:
+        pass
 
     items.append(v2_divider())
     items.append(v2_body("-# Récap auto chaque jour à 9h FR"))

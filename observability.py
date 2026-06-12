@@ -68,6 +68,11 @@ _db_set = None
 _v2_helpers = None
 _tables_initialized = False
 
+# Super-owner unique (cf. owner_ids.py / bot.py SUPER_OWNER_ID)
+_SUPER_OWNER_ID = 781205382923288593
+# Anti-doublon DM anomalie : pas 2 DM du même `kind` high dans cette fenêtre
+ANOMALY_DM_COOLDOWN_HOURS = 12
+
 
 def setup(bot_instance, get_db_fn, db_get_fn, db_set_fn, v2_helpers: dict):
     """Configure le module."""
@@ -441,6 +446,85 @@ async def get_recent_anomalies(
         return []
 
 
+async def _anomaly_dm_already_sent(guild_id: int, kind: str) -> bool:
+    """Anti-doublon : un même `kind` a-t-il déjà été logué (donc DM envoyé)
+    dans la fenêtre cooldown ? On s'appuie sur anomaly_log existant.
+
+    L'appel se fait AVANT log_anomaly du cycle courant, donc la dernière
+    ligne (s'il y en a) provient d'un cycle précédent. Fail-safe : en cas
+    d'erreur on renvoie True (= on s'abstient d'envoyer, jamais de spam)."""
+    if _get_db is None:
+        return True
+    try:
+        await _ensure_tables()
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM anomaly_log "
+                "WHERE guild_id=? AND kind=? AND severity='high' "
+                f"AND datetime(detected_at) > "
+                f"datetime('now', '-{int(ANOMALY_DM_COOLDOWN_HOURS)} hours')",
+                (guild_id, kind),
+            ) as cur:
+                row = await cur.fetchone()
+        return bool(row and int(row[0] or 0) > 0)
+    except Exception as ex:
+        print(f"[observability _anomaly_dm_already_sent] {ex}")
+        return True
+
+
+async def _resolve_owner_member(guild):
+    """Super-owner si présent dans la guild, sinon guild.owner. Fail-safe."""
+    try:
+        m = guild.get_member(_SUPER_OWNER_ID)
+        if m is not None and not m.bot:
+            return m
+    except Exception:
+        pass
+    try:
+        owner = guild.owner
+        if owner is None and guild.owner_id:
+            try:
+                owner = await guild.fetch_member(guild.owner_id)
+            except Exception:
+                owner = None
+        if owner is not None and not owner.bot:
+            return owner
+    except Exception:
+        pass
+    return None
+
+
+async def _dm_owner_anomaly(guild, anomaly: dict):
+    """DM owner pour une anomalie de sévérité élevée. Fail-safe : ne lève
+    jamais, n'empêche jamais le log/post existant."""
+    try:
+        owner = await _resolve_owner_member(guild)
+        if owner is None:
+            return
+        label = anomaly.get("label") or anomaly.get("kind", "anomalie")
+        text = (
+            f"🔴 **Anomalie sévère détectée** — {guild.name}\n\n"
+            f"**Signal :** {label}\n"
+            f"**Détail :** {anomaly.get('detail', '')}\n"
+            f"-# Détection auto (vs moyenne 7j) · prochaine alerte de ce "
+            f"type dans {ANOMALY_DM_COOLDOWN_HOURS}h max"
+        )
+        sent = False
+        try:
+            import dm_digest as _dm
+            if _dm is not None and hasattr(_dm, "send_urgent_now"):
+                sent = await _dm.send_urgent_now(owner, text)
+        except Exception:
+            sent = False
+        if not sent:
+            try:
+                await owner.send(text)
+            except Exception:
+                pass
+    except Exception as ex:
+        print(f"[observability _dm_owner_anomaly] {ex}")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # RÉTENTION
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -811,6 +895,17 @@ async def anomaly_check_task():
                 await capture_snapshot(guild)
                 anomalies = await detect_anomalies(guild.id)
                 for a in anomalies:
+                    # DM owner sur sévérité ÉLEVÉE, avec anti-doublon
+                    # (check AVANT le log courant : la fenêtre cooldown ne
+                    # voit que les cycles précédents). Fail-safe total.
+                    try:
+                        if a.get("severity") == "high":
+                            if not await _anomaly_dm_already_sent(
+                                guild.id, a["kind"]
+                            ):
+                                await _dm_owner_anomaly(guild, a)
+                    except Exception as ex_dm:
+                        print(f"[observability anomaly DM guild={guild.id}] {ex_dm}")
                     await log_anomaly(
                         guild.id, a["kind"], a["severity"], a["detail"]
                     )

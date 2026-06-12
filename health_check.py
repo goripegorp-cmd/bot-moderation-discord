@@ -36,6 +36,10 @@ from discord.ext import tasks
 _bot = None
 _get_db = None
 _db_get = None
+# Tâche C : callback partagé fourni par bot.py → renvoie [(label, is_running)] pour TOUTES
+# les boucles supervisées (= MÊME registre que le task_supervisor). Optionnel/fail-safe :
+# si non câblé, on retombe sur l'ancien check 2-loops codé en dur.
+_loops_status_fn = None
 
 # Tables critiques à vérifier (présence + read OK)
 CRITICAL_TABLES = (
@@ -44,11 +48,14 @@ CRITICAL_TABLES = (
 )
 
 
-def setup(bot_instance, get_db_fn, db_get_fn):
-    global _bot, _get_db, _db_get
+def setup(bot_instance, get_db_fn, db_get_fn, loops_status_fn=None):
+    global _bot, _get_db, _db_get, _loops_status_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
+    # Rétro-compatible : appelable sans le 4e arg (ancienne signature).
+    if loops_status_fn is not None:
+        _loops_status_fn = loops_status_fn
 
 
 async def init_db():
@@ -98,31 +105,57 @@ async def _check_db() -> dict:
 
 
 async def _check_tasks() -> dict:
-    """Vérifie que les principales tasks loops sont vivantes."""
+    """Vérifie que les tasks loops supervisées sont vivantes.
+
+    Tâche C : lit la MÊME source de vérité que le task_supervisor (callback partagé
+    `_loops_status_fn` câblé par bot.py) au lieu des 2 loops codées en dur — couvre
+    désormais l'ENSEMBLE du registre (listes manuelles + balayage auto). Fail-safe :
+    si le callback est absent/casse, on retombe sur l'ancien check minimal."""
     out = {"ok": True, "issues": [], "alive": [], "dead": []}
-    # On essaie d'importer les modules pour leur task
-    try:
-        import dormant_wakeup as dm
-        if hasattr(dm, "dormant_dispatch_task"):
-            if dm.dormant_dispatch_task.is_running():
-                out["alive"].append("dormant_dispatch")
-            else:
-                out["dead"].append("dormant_dispatch")
-                out["ok"] = False
-    except Exception:
-        pass
-    try:
-        import data_cleanup as dc
-        if hasattr(dc, "weekly_cleanup_task"):
-            if dc.weekly_cleanup_task.is_running():
-                out["alive"].append("weekly_cleanup")
-            else:
-                out["dead"].append("weekly_cleanup")
-                out["ok"] = False
-    except Exception:
-        pass
+    used_registry = False
+    if _loops_status_fn is not None:
+        try:
+            statuses = _loops_status_fn() or []
+            for label, running in statuses:
+                if running:
+                    out["alive"].append(label)
+                else:
+                    out["dead"].append(label)
+            used_registry = True
+        except Exception as ex:
+            # Le callback a échoué → on bascule sur le fallback ci-dessous.
+            print(f"[health_check _check_tasks registry] {ex}")
+            used_registry = False
+
+    if not used_registry:
+        # Fallback historique (callback non câblé) : check minimal 2 loops.
+        try:
+            import dormant_wakeup as dm
+            if hasattr(dm, "dormant_dispatch_task"):
+                if dm.dormant_dispatch_task.is_running():
+                    out["alive"].append("dormant_dispatch")
+                else:
+                    out["dead"].append("dormant_dispatch")
+        except Exception:
+            pass
+        try:
+            import data_cleanup as dc
+            if hasattr(dc, "weekly_cleanup_task"):
+                if dc.weekly_cleanup_task.is_running():
+                    out["alive"].append("weekly_cleanup")
+                else:
+                    out["dead"].append("weekly_cleanup")
+        except Exception:
+            pass
+
     if out["dead"]:
-        out["issues"].append(f"Tasks mortes : {', '.join(out['dead'])}")
+        out["ok"] = False
+        # Borne l'affichage (le registre peut lister ~85 loops) pour ne pas exploser le DM.
+        dead = out["dead"]
+        shown = ", ".join(dead[:15])
+        if len(dead) > 15:
+            shown += f" (+{len(dead) - 15})"
+        out["issues"].append(f"Tasks mortes ({len(dead)}) : {shown}")
     return out
 
 
@@ -286,7 +319,68 @@ async def run_check_now(guild: Optional[discord.Guild] = None) -> dict:
         except Exception as ex:
             print(f"[health_check DM owner] {ex}")
 
+    # Tâche C : signaler au super-owner les BOUCLES MORTES persistantes (lues depuis le
+    # registre mutualisé). Le DM guild ci-dessus ne porte QUE les soucis per-guild ; les
+    # tasks mortes sont globales → on les remonte ici, en DIRECT au super-owner. Anti-spam :
+    # dédup sur l'ensemble des labels morts (pas de re-DM tant que le même set reste mort).
+    # Fail-safe total : ne lève jamais.
+    try:
+        await _maybe_dm_dead_loops(report.get("tasks", {}))
+    except Exception as ex:
+        print(f"[health_check dead-loops DM] {ex}")
+
     return report
+
+
+# État dédup pour le DM « boucles mortes » (anti-spam ; non persistant — reset au reboot,
+# acceptable car un reboot relance tout le filet de résurrection).
+_dead_loops_last_signature = None
+
+
+async def _maybe_dm_dead_loops(tasks_report: dict) -> None:
+    """DM le super-owner UNIQUEMENT si des boucles supervisées sont mortes, et seulement
+    quand l'ensemble change (dédup). Fail-safe : avale toute erreur."""
+    global _dead_loops_last_signature
+    if _bot is None:
+        return
+    dead = list(tasks_report.get("dead") or [])
+    if not dead:
+        _dead_loops_last_signature = None  # tout est revenu vivant → on réarme l'alerte
+        return
+    signature = ",".join(sorted(dead))
+    if signature == _dead_loops_last_signature:
+        return  # même set de morts qu'au dernier check → pas de re-spam
+    _dead_loops_last_signature = signature
+
+    try:
+        import owner_ids as _oids
+        owner_id_set = _oids.SUPER_OWNER_IDS
+    except Exception:
+        owner_id_set = {781205382923288593}  # super-owner unique (fallback fail-safe)
+
+    shown = dead[:15]
+    lines = [
+        "🩺 **Boucles de tâches mortes**",
+        "",
+        f"`{len(dead)}` boucle(s) supervisée(s) ne tournent pas au moment du health check :",
+        "",
+    ]
+    for i, name in enumerate(shown, 1):
+        lines.append(f"`{i}.` `{name}`")
+    if len(dead) > len(shown):
+        lines.append(f"_+ {len(dead) - len(shown)} autre(s)..._")
+    lines.append("")
+    lines.append("_Le superviseur tente de les relancer ; la cause du décès est journalisée._")
+    body = "\n".join(lines)
+
+    for uid in owner_id_set:
+        try:
+            user = _bot.get_user(int(uid)) or await _bot.fetch_user(int(uid))
+            if user is not None:
+                await user.send(body)
+        except Exception:
+            # anti-429 / DM fermés / user introuvable : on n'insiste pas, on ne lève pas.
+            continue
 
 
 # ─── Loop task ──────────────────────────────────────────────────────────────
