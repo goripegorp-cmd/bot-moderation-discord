@@ -879,6 +879,33 @@ LEET = {'a':['@','4'],'e':['3','€'],'i':['1','!'],'o':['0'],'s':['$','5'],'t':
 
 def now(): return datetime.now(timezone.utc)
 
+
+def _evict_if_big(d: dict, max_keys: int = 5000) -> None:
+    """Borne un dict global mutable keyé par (guild,user)/id pour éviter la fuite
+    mémoire / DoS sur longue uptime (un raid de comptes jetables faisait gonfler les
+    dicts de cooldown/état sans borne → OOM).
+
+    Calque l'esprit de l'éviction paresseuse de spam_tracker, mais GÉNÉRIQUE et
+    type-agnostique : quand le dict dépasse max_keys, on purge la MOITIÉ LA PLUS
+    ANCIENNE (les dicts préservent l'ordre d'insertion depuis Python 3.7 → les
+    premières clés sont les plus vieilles). Conservateur : on NE TOUCHE PAS la
+    logique par-clé (fenêtres glissantes, cooldowns), on borne juste la taille.
+
+    100% SYNC, ne lève JAMAIS (fail-safe absolu : borner la mémoire ne doit jamais
+    casser un flux). Appeler APRÈS l'insertion de la clé courante."""
+    try:
+        n = len(d)
+        if n <= max_keys:
+            return
+        # Purge la moitié la plus ancienne (ordre d'insertion = ordre d'âge).
+        # On garde la moitié la plus récente — la clé courante (insérée à l'instant)
+        # survit toujours.
+        for _k in list(d.keys())[: n // 2]:
+            d.pop(_k, None)
+    except Exception:
+        pass
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #                              🔒 SÉCURITÉ AVANCÉE
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -916,6 +943,8 @@ def check_rate_limit(guild_id, user_id, action='command'):
     
     # Ajouter cette action
     rate_limits[key].append(current)
+    # Borne mémoire : 1 entrée par (guild,user,action) → grossit avec le nb de joueurs.
+    _evict_if_big(rate_limits)
     return True
 
 def is_blacklisted(user_id):
@@ -933,6 +962,7 @@ def blacklist_user(user_id, duration_minutes, reason):
         'until': now() + timedelta(minutes=duration_minutes),
         'reason': reason
     }
+    _evict_if_big(security_blacklist)
 
 def sanitize_input(text, max_length=2000):
     """Nettoie et valide une entrée utilisateur"""
@@ -2877,6 +2907,15 @@ async def db_init():
         # ═══════════════════════════════════════════════════════════════════
 
         _idx_statements = [
+            # economy : leaderboards / classements (ORDER BY coins|level) sur la
+            # table la plus volumineuse. La PK (guild_id, user_id) ne couvre PAS
+            # ces tris → full scan + sort par guild. Index couvrants additifs.
+            #  - top par pièces : owner_export + /top + luxury tax (ORDER BY coins DESC)
+            "CREATE INDEX IF NOT EXISTS idx_economy_guild_coins "
+            "ON economy(guild_id, coins DESC)",
+            #  - top par niveau : owner_export (ORDER BY level DESC, xp DESC)
+            "CREATE INDEX IF NOT EXISTS idx_economy_guild_level "
+            "ON economy(guild_id, level DESC, xp DESC)",
             # activity_tracking : ORDER BY last_message DESC sur 200-500 rows
             "CREATE INDEX IF NOT EXISTS idx_activity_tracking_last "
             "ON activity_tracking(guild_id, last_message DESC)",
@@ -11205,6 +11244,7 @@ def _boss_atk_too_soon(i: discord.Interaction, scope: str) -> bool:
         if now - _boss_attack_cooldown.get(key, 0.0) < _BOSS_ATTACK_CD:
             return True
         _boss_attack_cooldown[key] = now
+        _evict_if_big(_boss_attack_cooldown)
     except Exception:
         pass
     return False
@@ -11605,6 +11645,7 @@ async def _handle_boss_attack(i: discord.Interaction, event_id: int):
                 new_php = cur_hp - dmg_taken
                 if new_php <= 0:
                     _player_respawn[key] = now_ts + RESPAWN_SEC
+                    _evict_if_big(_player_respawn)
                     inv['hp'] = int(inv.get('max_hp', 100) or 100)  # plein à la réapparition
                     retal_str = (
                         f"\n💀 **TU ES TOMBÉ !** Le boss t'inflige `{dmg_taken}` dégâts fatals. "
@@ -11909,6 +11950,7 @@ async def _handle_pet_assist(i: discord.Interaction, event_id: int):
             return await i.followup.send("⏰ Cet événement est déjà terminé.", ephemeral=True)
 
         _pet_assist_cooldown[key] = now_ts
+        _evict_if_big(_pet_assist_cooldown)
 
         lvl = int(pet.get('level', 1) or 1)
         # Phase 235.29 : PERKS MIXTES. Le 🐾 marche pour TOUS les familiers (avant,
@@ -12033,6 +12075,7 @@ async def _pet_strike(guild_id: int, user_id: int) -> dict:
                 f"🐾 **{pet_name}** reprend son souffle — encore `{remaining}s` "
                 f"avant de pouvoir réintervenir.")}
         _pet_assist_cooldown[key] = now_ts
+        _evict_if_big(_pet_assist_cooldown)
         lvl = int(pet.get('level', 1) or 1)
         try:
             pet_bonus = float(pet.get('bonus_value', 0.0) or 0.0)
@@ -26808,6 +26851,77 @@ def _api_warning_state_file_path():
         except Exception:
             pass
     return d / "state.json"
+
+
+# ─── tree.sync() conditionnel (gain quota Discord + boot plus rapide) ─────────
+# Le sync global Discord est lent et compte dans le quota. Si l'ensemble des
+# commandes (noms + descriptions + params) est INCHANGÉ depuis le dernier boot,
+# on SKIP le sync. On stocke un hash stable sur le volume persistant (même répertoire
+# que la DB). GARDE-FOUS : env FORCE_SYNC=1 force le sync ; en cas de DOUTE/erreur
+# de hash, on SYNC (comportement actuel préservé, jamais de régression).
+def _sync_hash_file_path():
+    """Chemin du fichier qui mémorise le hash des commandes (persistance Railway)."""
+    from pathlib import Path
+    if os.path.exists('/data'):
+        d = Path('/data/cmd_sync')
+    else:
+        d = Path('./data/cmd_sync')
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except (OSError, PermissionError):
+        d = Path('/tmp/cmd_sync')
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+    return d / "tree_hash.txt"
+
+
+def _compute_tree_hash(tree) -> str:
+    """Hash stable de l'ensemble des commandes globales.
+
+    On sérialise nom + description + paramètres (nom/type/required/description)
+    de CHAQUE commande — y compris les SOUS-commandes des groupes — trié pour
+    être déterministe indépendamment de l'ordre d'enregistrement. Tout est
+    défensif (getattr) : si une version de discord.py change une API, on lève →
+    l'appelant fera SYNC (fail-safe, jamais de régression).
+    """
+    import hashlib
+
+    def _one(cmd) -> str:
+        name = getattr(cmd, "qualified_name", None) or getattr(cmd, "name", "?")
+        desc = getattr(cmd, "description", "") or ""
+        params = []
+        # app_commands.Command expose .parameters ; les groupes n'en ont pas.
+        for p in (getattr(cmd, "parameters", None) or []):
+            ptype = getattr(getattr(p, "type", None), "value", getattr(p, "type", ""))
+            params.append(
+                f"{getattr(p, 'name', '')}:{ptype}:"
+                f"{int(bool(getattr(p, 'required', False)))}:"
+                f"{getattr(p, 'description', '') or ''}"
+            )
+        params.sort()
+        ctype = type(cmd).__name__  # distingue Command / Group / ContextMenu
+        return f"{ctype}|{name}|{desc}|{'§'.join(params)}"
+
+    parts = []
+    for cmd in tree.get_commands():
+        parts.append(_one(cmd))
+        # Groupes : descendre dans les sous-commandes (sinon un changement de
+        # description d'une sous-commande passerait inaperçu → sync skippé à tort).
+        walk = getattr(cmd, "walk_commands", None)
+        if callable(walk):
+            try:
+                for sub in walk():
+                    if sub is not cmd:
+                        parts.append(_one(sub))
+            except Exception:
+                # En cas de souci d'introspection, on ajoute un marqueur qui
+                # forcera une différence de hash → sync (fail-safe).
+                parts.append(f"WALKERR|{getattr(cmd, 'name', '?')}")
+    parts.sort()
+    blob = "\n".join(parts).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()
 
 
 _api_warning_cooldown_seconds = 24 * 3600  # 24h
@@ -42952,14 +43066,51 @@ async def on_ready():
             except: pass
     except: pass
     
-    # Sync global des commandes
+    # Sync global des commandes — CONDITIONNEL (Phase backup/sync)
+    # On ne re-sync QUE si l'ensemble des commandes a changé depuis le dernier
+    # boot (gain quota Discord + boot plus rapide). FORCE_SYNC=1 force le sync.
+    # FAIL-SAFE : tout doute/erreur de hash → on SYNC (comportement préservé).
     try:
-        synced = await bot.tree.sync()
-        print(f"✅ {len(synced)} commandes synchronisées:")
-        for cmd in synced:
-            print(f"   - /{cmd.name}")
+        _force_sync = os.getenv("FORCE_SYNC", "0").strip() == "1"
+        _new_hash = None
+        _old_hash = None
+        _hash_file = None
+        # Calcul du hash : défensif. Si ça échoue, _new_hash reste None → sync.
+        try:
+            _new_hash = _compute_tree_hash(bot.tree)
+            _hash_file = _sync_hash_file_path()
+            if _hash_file.exists():
+                _old_hash = _hash_file.read_text(encoding="utf-8").strip() or None
+        except Exception as _hex:
+            print(f"⚠️ sync hash indisponible (on sync par sécurité): {_hex}")
+            _new_hash = None
+
+        # SKIP uniquement si : pas de FORCE, hash calculé, et identique au précédent.
+        if (not _force_sync) and _new_hash is not None and _new_hash == _old_hash:
+            print("✅ Commandes inchangées (hash identique) — sync global SKIPPÉ")
+        else:
+            synced = await bot.tree.sync()
+            print(f"✅ {len(synced)} commandes synchronisées:")
+            for cmd in synced:
+                print(f"   - /{cmd.name}")
+            # MAJ du hash APRÈS un sync réussi (best-effort, non bloquant).
+            if _new_hash is not None:
+                try:
+                    if _hash_file is None:
+                        _hash_file = _sync_hash_file_path()
+                    _hash_file.write_text(_new_hash, encoding="utf-8")
+                except Exception as _wex:
+                    print(f"⚠️ écriture hash sync échouée (non bloquant): {_wex}")
     except Exception as ex:
+        # Dernier filet : on retombe sur le comportement historique = sync.
         print(f"❌ Erreur sync global: {ex}")
+        try:
+            synced = await bot.tree.sync()
+            print(f"✅ {len(synced)} commandes synchronisées (fallback):")
+            for cmd in synced:
+                print(f"   - /{cmd.name}")
+        except Exception as ex2:
+            print(f"❌ Erreur sync global (fallback): {ex2}")
     
     # ═══════════════ INITIALISER LE TRACKING VOCAL ═══════════════
     # Tracker tous les membres déjà en vocal au démarrage
@@ -47772,6 +47923,7 @@ async def security_check(i: discord.Interaction, command_name: str = "command"):
                 await log_security_event(guild_id, user_id, "RATE_LIMIT_BAN", f"Commande: {command_name}")
         else:
             security_attempts[user_id] = {'attempts': 1, 'last': now()}
+            _evict_if_big(security_attempts)
         return False, "⚠️ Trop de commandes ! Attendez un moment."
     
     return True, None
@@ -54716,6 +54868,7 @@ async def suggestion_cmd(i: discord.Interaction, titre: str, proposition: str):
     if not is_immune:
         cooldown_key = (i.guild.id, i.user.id)
         suggestion_cooldowns[cooldown_key] = now()
+        _evict_if_big(suggestion_cooldowns)
 
     # Tracking en base
     async with get_db() as db:
@@ -59025,7 +59178,8 @@ async def on_voice_state_update(member, before, after):
             
             # Enregistrer l'heure de connexion
             voice_join_tracker[key] = now()
-            
+            _evict_if_big(voice_join_tracker)
+
             # Mettre à jour last_vocal et redonner le rôle si configuré
             await track_member_vocal_join(member, after.channel)
             await update_realsy_activity(guild_id, user_id)
@@ -68078,22 +68232,33 @@ async def db_optimizer_task():
     - personal_events_log : 14 jours (si table existe)
     """
     try:
+        # ─── Seuils de rétention calculés en Python (format CURRENT_TIMESTAMP :
+        # "YYYY-MM-DD HH:MM:SS", UTC, identique à datetime('now')). Comparer la
+        # colonne BRUTE à ce seuil (au lieu de datetime(col) < datetime('now',…))
+        # permet à l'index de s'appliquer, à sémantique de rétention IDENTIQUE.
+        # ⚠ N'est valable QUE pour les colonnes écrites via CURRENT_TIMESTAMP /
+        # DEFAULT (espace). Les colonnes écrites en Python .isoformat() (ex.
+        # member_activity.created_at = 'YYYY-MM-DDTHH:MM:SS+00:00') gardent le
+        # wrapper datetime() pour rester correctes.
+        def _cut(days: int) -> str:
+            return (datetime.now(timezone.utc) - timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+        _c7, _c14, _c30, _c90 = _cut(7), _cut(14), _cut(30), _cut(90)
         cleanup_stmts = [
             ("member_activity",          "DELETE FROM member_activity WHERE datetime(created_at) < datetime('now', '-30 days')"),
             ("daily_quest_progress",     "DELETE FROM daily_quest_progress WHERE day < strftime('%Y-%m-%d', 'now', '-7 days')"),
             ("daily_quest_pushes",       "DELETE FROM daily_quest_pushes WHERE day < strftime('%Y-%m-%d', 'now', '-7 days')"),
-            ("voice_chaos_log",          "DELETE FROM voice_chaos_log WHERE datetime(applied_at) < datetime('now', '-7 days')"),
-            ("wakeup_log",               "DELETE FROM wakeup_log WHERE datetime(last_mentioned_at) < datetime('now', '-14 days')"),
-            ("flash_treasures_ended",    "DELETE FROM flash_treasures WHERE ended=1 AND datetime(spawned_at) < datetime('now', '-7 days')"),
+            ("voice_chaos_log",          "DELETE FROM voice_chaos_log WHERE applied_at < ?", (_c7,)),
+            ("wakeup_log",               "DELETE FROM wakeup_log WHERE last_mentioned_at < ?", (_c14,)),
+            ("flash_treasures_ended",    "DELETE FROM flash_treasures WHERE ended=1 AND spawned_at < ?", (_c7,)),
             ("daily_riddles_log",        "DELETE FROM daily_riddles_log WHERE day < strftime('%Y-%m-%d', 'now', '-30 days')"),
-            ("confessions",              "DELETE FROM confessions WHERE datetime(sent_at) < datetime('now', '-90 days')"),
+            ("confessions",              "DELETE FROM confessions WHERE sent_at < ?", (_c90,)),
             ("world_boss_attackers",     "DELETE FROM world_boss_attackers WHERE world_boss_id IN (SELECT id FROM world_bosses WHERE ended=1 AND datetime(started_at) < datetime('now', '-30 days'))"),
-            ("world_bosses_ended",       "DELETE FROM world_bosses WHERE ended=1 AND datetime(started_at) < datetime('now', '-30 days')"),
-            ("tag_royale_ended",         "DELETE FROM tag_royale WHERE ended=1 AND datetime(started_at) < datetime('now', '-30 days')"),
+            ("world_bosses_ended",       "DELETE FROM world_bosses WHERE ended=1 AND started_at < ?", (_c30,)),
+            ("tag_royale_ended",         "DELETE FROM tag_royale WHERE ended=1 AND started_at < ?", (_c30,)),
             ("evening_rituals_old",      "DELETE FROM evening_rituals WHERE day < strftime('%Y-%m-%d', 'now', '-30 days')"),
-            ("personal_events_log_old",  "DELETE FROM personal_events_log WHERE datetime(created_at) < datetime('now', '-14 days')"),
-            ("comeback_dms_old_claimed", "DELETE FROM comeback_dms WHERE claimed=1 AND datetime(claimed_at) < datetime('now', '-30 days')"),
-            ("comeback_dms_old_unclaimed", "DELETE FROM comeback_dms WHERE claimed=0 AND datetime(last_dm_at) < datetime('now', '-30 days')"),
+            ("personal_events_log_old",  "DELETE FROM personal_events_log WHERE created_at < ?", (_c14,)),
+            ("comeback_dms_old_claimed", "DELETE FROM comeback_dms WHERE claimed=1 AND claimed_at < ?", (_c30,)),
+            ("comeback_dms_old_unclaimed", "DELETE FROM comeback_dms WHERE claimed=0 AND last_dm_at < ?", (_c30,)),
             # Phase 164.1 : DB Janitor — nouvelles tables Phase 152-163
             ("behavior_profile_inactive",  "DELETE FROM behavior_profile WHERE datetime(last_message_at) < datetime('now', '-60 days')"),
             ("honeypot_hits_old",          "DELETE FROM honeypot_hits WHERE datetime(detected_at) < datetime('now', '-90 days')"),
@@ -68122,7 +68287,7 @@ async def db_optimizer_task():
             ("stream_schedule_past",       "DELETE FROM stream_schedule WHERE (cancelled=1 OR datetime(starts_at) < datetime('now', '-30 days'))"),
             ("activity_heatmap_dispatch_old", "DELETE FROM activity_heatmap_dispatch WHERE datetime(last_sent_at) < datetime('now', '-90 days')"),
             # Phase 168.4 + 169 : cleanup
-            ("error_log_old",              "DELETE FROM error_log WHERE datetime(occurred_at) < datetime('now', '-7 days')"),
+            ("error_log_old",              "DELETE FROM error_log WHERE occurred_at < ?", (_c7,)),
             ("error_burst_alerts_old",     "DELETE FROM error_burst_alerts WHERE datetime(last_alert_at) < datetime('now', '-30 days')"),
             ("mob_spawns_old",             "DELETE FROM mob_spawns WHERE status IN ('killed','despawned') AND datetime(spawned_at) < datetime('now', '-7 days')"),
             ("mob_attackers_orphan",       "DELETE FROM mob_attackers WHERE mob_id NOT IN (SELECT id FROM mob_spawns)"),
@@ -68156,10 +68321,18 @@ async def db_optimizer_task():
             # npc_letter_subscriptions = JAMAIS supprimé (consentement)
         ]
         total_deleted = 0
-        for name, stmt in cleanup_stmts:
+        for entry in cleanup_stmts:
+            # Chaque entrée = (name, stmt) ou (name, stmt, params). Les params
+            # permettent de passer un seuil ISO calculé en Python pour que
+            # l'index s'applique (au lieu d'envelopper la colonne dans datetime()).
+            if len(entry) == 3:
+                name, stmt, _params = entry
+            else:
+                name, stmt = entry
+                _params = ()
             try:
                 async with get_db() as db:
-                    cur = await db.execute(stmt)
+                    cur = await db.execute(stmt, _params)
                     await db.commit()
                     rc = cur.rowcount
                 if rc and rc > 0:
@@ -79763,6 +79936,7 @@ async def _track_voice_state(member, before, after):
         # Si on rejoint un vocal (before.channel = None ou autre, after.channel != None)
         if after.channel and (not before.channel or before.channel.id != after.channel.id):
             _voice_session_starts[key] = datetime.now(timezone.utc)
+            _evict_if_big(_voice_session_starts)
     except Exception as ex:
         print(f"[_track_voice_state] {ex}")
 
@@ -84686,6 +84860,8 @@ def _rate_limit(user_id: int, key: str, max_per_min: int = 5) -> bool:
         return True
     timestamps.append(now)
     _rate_limit_buckets[bucket] = timestamps
+    # Borne mémoire : 1 bucket par (user,key) → grossit avec le nb de joueurs.
+    _evict_if_big(_rate_limit_buckets)
     return False
 
 

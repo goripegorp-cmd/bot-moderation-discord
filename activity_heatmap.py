@@ -51,6 +51,21 @@ _v2 = None
 
 WEEKDAYS_FR = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
 
+# ─── Coalescence des écritures (anti 1-write-DB-par-message) ──────────────────
+# track_message est appelé sur CHAQUE message de CHAQUE joueur. Faire un
+# INSERT...ON CONFLICT + commit() à chaque fois = 1 transaction DB par message
+# (coûteux à grande échelle). On agrège plutôt les incréments en mémoire et on
+# flush en UNE transaction batch quand on dépasse un seuil (compteur OU délai).
+# Le bucket (guild, weekday, hour) est borné (168/guilde) → buffer minuscule.
+# AUCUNE donnée perdue : si le flush échoue, le buffer est conservé.
+import time as _time_hm
+
+_pending_buckets: dict = {}      # (guild_id, weekday, hour) -> count en attente
+_pending_total = 0               # somme des incréments en attente
+_last_flush_ts = 0.0             # time.monotonic() du dernier flush
+_FLUSH_EVERY_N = 40              # flush dès 40 messages cumulés…
+_FLUSH_EVERY_SEC = 30.0          # …ou au plus 30 s après le 1er message en attente
+
 # Caractères Unicode pour la densité (du moins dense au plus dense)
 DENSITY_CHARS = [
     "⬛",  # 0 = vide
@@ -96,8 +111,50 @@ async def init_db():
         print(f"[activity_heatmap init_db] {ex}")
 
 
+async def _flush_pending():
+    """Écrit en UNE transaction batch tous les incréments en attente.
+    En cas d'échec : on garde le buffer (réessai au prochain flush) → 0 perte.
+    Ne lève jamais."""
+    global _pending_buckets, _pending_total, _last_flush_ts
+    if not _pending_buckets or _get_db is None:
+        _last_flush_ts = _time_hm.monotonic()
+        return
+    # On détache le snapshot AVANT l'await pour ne pas perdre les incréments
+    # qui arriveraient pendant l'écriture.
+    snapshot = _pending_buckets
+    _pending_buckets = {}
+    _pending_total = 0
+    _last_flush_ts = _time_hm.monotonic()
+    try:
+        async with _get_db() as db:
+            for (gid, wd, h), cnt in snapshot.items():
+                await db.execute(
+                    "INSERT INTO activity_heatmap_buckets "
+                    "(guild_id, weekday, hour, msg_count, last_updated) "
+                    "VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                    "ON CONFLICT(guild_id, weekday, hour) DO UPDATE SET "
+                    "msg_count = msg_count + ?, "
+                    "last_updated = CURRENT_TIMESTAMP",
+                    (gid, wd, h, cnt, cnt),
+                )
+            await db.commit()
+    except Exception:
+        # Réinjecte le snapshot non écrit pour réessayer plus tard (0 perte).
+        try:
+            for k, cnt in snapshot.items():
+                _pending_buckets[k] = _pending_buckets.get(k, 0) + cnt
+                _pending_total += cnt
+        except Exception:
+            pass
+
+
 async def track_message(message: discord.Message):
-    """Incrémente le bucket (guild, weekday, hour) pour ce message."""
+    """Comptabilise le message dans le bucket (guild, weekday, hour).
+
+    COALESCÉ : on agrège en mémoire et on ne touche la DB qu'en batch tous les
+    _FLUSH_EVERY_N messages (ou _FLUSH_EVERY_SEC s) → 1 write DB pour N messages
+    au lieu de 1 par message. Données identiques, juste écrites par lots."""
+    global _pending_total, _last_flush_ts
     if not message.guild or message.author.bot or _get_db is None:
         return
     try:
@@ -106,19 +163,15 @@ async def track_message(message: discord.Message):
             now = datetime.now(_PARIS_TZ)
         else:
             now = datetime.now(timezone.utc)
-        wd = now.weekday()
-        h = now.hour
-        async with _get_db() as db:
-            await db.execute(
-                "INSERT INTO activity_heatmap_buckets "
-                "(guild_id, weekday, hour, msg_count, last_updated) "
-                "VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP) "
-                "ON CONFLICT(guild_id, weekday, hour) DO UPDATE SET "
-                "msg_count = msg_count + 1, "
-                "last_updated = CURRENT_TIMESTAMP",
-                (message.guild.id, wd, h),
-            )
-            await db.commit()
+        key = (message.guild.id, now.weekday(), now.hour)
+        _pending_buckets[key] = _pending_buckets.get(key, 0) + 1
+        _pending_total += 1
+        if _last_flush_ts == 0.0:
+            _last_flush_ts = _time_hm.monotonic()
+        # Flush si on a assez accumulé OU si le 1er incrément en attente date trop.
+        if (_pending_total >= _FLUSH_EVERY_N
+                or (_time_hm.monotonic() - _last_flush_ts) >= _FLUSH_EVERY_SEC):
+            await _flush_pending()
     except Exception:
         pass
 
@@ -280,6 +333,10 @@ async def weekly_owner_dispatch_task():
         if now.weekday() != 6 or now.hour != 18:
             return
 
+        # Vide les incréments coalescés en attente AVANT de lire la matrice
+        # (sinon le rapport hebdo raterait les ~derniers messages bufferisés).
+        await _flush_pending()
+
         for guild in _bot.guilds:
             try:
                 # Anti-doublon : check dernière envoi
@@ -380,6 +437,7 @@ __all__ = [
     "setup",
     "init_db",
     "track_message",
+    "_flush_pending",
     "get_heatmap_matrix",
     "get_best_hours",
     "build_heatmap_panel",
