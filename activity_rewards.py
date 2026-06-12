@@ -402,8 +402,12 @@ async def _find_announce_channel(guild: discord.Guild) -> Optional[discord.TextC
                     return ch
     except Exception:
         pass
-    # Fallback : premier salon écrivable non-restreint
-    avoid = ("ticket", "log", "annonce", "règl", "regl", "rule", "staff", "admin")
+    # Fallback : premier salon écrivable non-restreint. Liste alignée sur la liste
+    # canonique _BAD de daily_prompt (l'annonce VIP est PERSISTANTE → ne doit jamais
+    # atterrir dans un journal/combat/arène/accueil/lecture-seule et y rester à vie).
+    avoid = ("ticket", "log", "audit", "annonce", "announce", "règl", "regl",
+             "rule", "staff", "admin", "mod", "welcome", "bienvenue", "info",
+             "chronique", "combat", "arène", "arene", "vente", "shop", "boutique")
     try:
         me = guild.me
         for ch in guild.text_channels:
