@@ -73,6 +73,7 @@ class EventType(str, Enum):
     SEC_ALT = "sec.alt"
     SEC_QRCODE = "sec.qrcode"
     SEC_NSFW = "sec.nsfw"
+    SEC_ESCALATION = "sec.escalation"
 
     # Membres
     MEMBER_JOIN = "member.join"
@@ -139,6 +140,7 @@ EVENT_META: dict[EventType, dict] = {
     EventType.SEC_ALT:       {"icon": "👥", "color": 0xC0392B, "label": "Alt détecté",         "cat": "Sécurité"},
     EventType.SEC_QRCODE:    {"icon": "📱", "color": 0xC0392B, "label": "QR code détecté",     "cat": "Sécurité"},
     EventType.SEC_NSFW:      {"icon": "🔞", "color": 0xE67E22, "label": "NSFW détecté",        "cat": "Sécurité"},
+    EventType.SEC_ESCALATION:{"icon": "🚨", "color": 0xC0392B, "label": "Membre à surveiller",  "cat": "Sécurité"},
 
     # MEMBRES (vert / bleu)
     EventType.MEMBER_JOIN:   {"icon": "👋", "color": 0x2ECC71, "label": "Arrivée membre",      "cat": "Membres"},
@@ -719,6 +721,93 @@ async def log_security_event(bot, guild, event_type, target_user, *,
         user=target_user, channel=channel, reason=reason,
         content=content_preview,
     )
+
+
+# Anti double-alerte : (guild_id, member_id, total_warns) -> ts epoch. Borne mémoire.
+_ESCALATION_SEEN: dict = {}
+_ESCALATION_DEDUP_WINDOW = 120.0
+
+
+async def log_member_escalation(bot, guild, member, total_warns, palier,
+                                reason="", moderator=None, severity="haute"):
+    """ALERTE « membre à surveiller » poussée dans le salon de LOGS DE BASE.
+
+    Cœur de la demande owner : quand un membre franchit un palier critique
+    (avertissements répétés, sanction auto grave), le bot SIGNALE clairement QUI
+    pose problème dans les logs — et l'alerte n'est JAMAIS perdue : si la
+    catégorie Sécurité est désactivée ou si aucun salon de catégorie n'est routé,
+    on poste DIRECTEMENT dans le salon de logs de base (get_log_channel).
+    100% fail-soft : ne casse jamais la sanction qui l'a déclenchée.
+    """
+    try:
+        try:
+            mention = getattr(member, "mention", str(member))
+            mid = getattr(member, "id", "?")
+            dname = getattr(member, "display_name", None) or str(member)
+        except Exception:
+            mention, mid, dname = str(member), "?", str(member)
+
+        # Dédup : 1 seule alerte par (membre, compteur) dans une fenêtre courte
+        # (évite la double-alerte si warn manuel + filtre auto atteignent le même
+        # palier quasi simultanément).
+        try:
+            now_ts = datetime.now(timezone.utc).timestamp()
+            key = (getattr(guild, "id", 0), getattr(member, "id", 0), int(total_warns))
+            if now_ts - _ESCALATION_SEEN.get(key, 0) < _ESCALATION_DEDUP_WINDOW:
+                return None
+            _ESCALATION_SEEN[key] = now_ts
+            if len(_ESCALATION_SEEN) > 2000:
+                cutoff = now_ts - _ESCALATION_DEDUP_WINDOW
+                for k in [k for k, v in list(_ESCALATION_SEEN.items()) if v < cutoff]:
+                    _ESCALATION_SEEN.pop(k, None)
+        except Exception:
+            pass
+
+        desc = (
+            f"🚨 **{dname}** atteint un palier critique "
+            f"(**{total_warns}** avertissement(s) · palier {palier}). "
+            f"À surveiller — envisager une sanction."
+        )
+        fields = [
+            ("👤 Membre", f"{mention} `{mid}`", True),
+            ("📊 Compteur", f"{total_warns} warns · palier {palier}", True),
+            ("⚠️ Gravité", str(severity), True),
+            ("📝 Déclencheur", (reason or "—")[:1000], False),
+            ("🔎 Historique", "Voir /infractions pour la fiche complète", False),
+        ]
+
+        # 1) Voie normale : routage catégorie Sécurité (salon dédié) ou global.
+        msg = None
+        try:
+            msg = await log_event(
+                bot, guild, EventType.SEC_ESCALATION,
+                description=desc, fields=fields,
+                user=member, moderator=moderator, reason=reason,
+            )
+        except Exception:
+            msg = None
+        if msg is not None:
+            return msg
+
+        # 2) FALLBACK GARANTI : catégorie Sécurité OFF ou pas de salon routé →
+        #    on poste DIRECTEMENT dans le salon de logs de base. Zéro alerte perdue.
+        try:
+            cid = await get_log_channel(guild.id)
+            if cid:
+                target = bot.get_channel(int(cid))
+                if target is not None:
+                    embed = build_log_embed(
+                        EventType.SEC_ESCALATION,
+                        description=desc, fields=fields,
+                        user=member, moderator=moderator, reason=reason,
+                    )
+                    return await target.send(embed=embed)
+        except Exception as ex:
+            print(f"[log_member_escalation fallback] {ex}")
+        return None
+    except Exception as ex:
+        print(f"[log_member_escalation] {ex}")
+        return None
 
 
 async def log_member_join(bot, guild, member):
