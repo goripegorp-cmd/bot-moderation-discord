@@ -290,7 +290,7 @@ class PermissionsPanelV2(_OwnerView):
 
     async def _cb_commands(self, i: discord.Interaction):
         await i.response.send_message(
-            f"{S.INFO_ICON} Configuration par commande : utilise `/permissions cmd <command_id>` (à venir).",
+            f"{S.INFO_ICON} Configuration par commande : `/permissions allow` ou `/permissions deny` pour autoriser/refuser une commande à un rôle · `/permissions show` pour la vue d'ensemble.",
             ephemeral=True,
         )
 
@@ -568,7 +568,7 @@ class BypassPanel(_OwnerView):
             _kv(rows),
             _divider(),
             _body(
-                "_Pour ajouter un bypass : `/permissions bypass <system> <role>` (slash, à venir)._\n"
+                "_Pour exempter un rôle des systèmes automod : `/protection trust <role>` (rôle de confiance)._\n"
                 "Les bypass sont **par-système** et **cumulatifs**."
             ),
             _divider(),
@@ -1033,7 +1033,7 @@ class ProtectionThresholdsPanel(_OwnerView):
             _divider(),
             _body(
                 "Seuils plus hauts = bot plus prudent (moins de bans automatiques).\n"
-                "_Édition fine via `/protection threshold <event> <action> <value>` (à venir)._"
+                "_Le niveau global se règle via `/protection mode` (prudent · équilibré · strict)._"
             ),
             _divider(),
             ui.ActionRow(b_back),
