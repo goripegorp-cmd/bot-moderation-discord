@@ -6355,6 +6355,16 @@ class MainPanelV2(LayoutView):
         )
         sel.callback = self._module_select
 
+        # Bouton « Configuration guidée » → rend le wizard /setup DÉCOUVRABLE
+        # depuis /configure (sans nouveau slash command).
+        wizard_btn = Button(
+            label="Configuration guidée",
+            emoji="🧭",
+            style=discord.ButtonStyle.secondary,
+            custom_id="mpv2_wizard",
+        )
+        wizard_btn.callback = self._open_wizard
+
         # Bouton fermer (avec fix éphémère)
         close_btn = Button(
             label="Fermer",
@@ -6371,7 +6381,7 @@ class MainPanelV2(LayoutView):
             stats_block,
             v2_divider(),
             discord.ui.ActionRow(sel),
-            discord.ui.ActionRow(close_btn),
+            discord.ui.ActionRow(wizard_btn, close_btn),
             color=Palette.PRIMARY,
         ))
 
@@ -6406,6 +6416,22 @@ class MainPanelV2(LayoutView):
             # Si pour une raison le select retourne un truc inattendu, ack au minimum
             try:
                 await i.response.defer()
+            except Exception:
+                pass
+
+    async def _open_wizard(self, i):
+        # Ouvre le wizard /setup directement (le rend découvrable). render_to(edit=True)
+        # remplace le panneau de config par le wizard et fait office d'ACK de l'interaction.
+        try:
+            await wizard2026.WizardStep1(i.user, i.guild).render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[MainPanelV2 _open_wizard] {ex}")
+            try:
+                msg = "❌ Wizard indisponible pour le moment."
+                if not i.response.is_done():
+                    await i.response.send_message(msg, ephemeral=True)
+                else:
+                    await i.followup.send(msg, ephemeral=True)
             except Exception:
                 pass
 
