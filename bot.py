@@ -5301,6 +5301,49 @@ class TicketControlView(View):
             except Exception:
                 pass
     
+    @discord.ui.button(label="🔄 Transférer", style=discord.ButtonStyle.primary, custom_id="ticket_ctrl_transfer")
+    async def transfer(self, i, btn):
+        # POURQUOI : transfert de la PRISE EN CHARGE uniquement (réassigne claimed_by +
+        # recalcule les overwrites comme Claim). Jamais de fermeture, jamais d'argent/items.
+        # Réservé au claimant actuel ou à un admin/immunisé. custom_id stable (persistant).
+        try:
+            tk = await get_ticket(i.channel.id)
+            if not tk: return await i.response.send_message("❌ Ticket non trouvé", ephemeral=True)
+
+            # Garde : le ticket doit déjà être pris pour pouvoir être transféré.
+            if not tk['claimed']:
+                return await i.response.send_message("❌ Personne n'a encore pris ce ticket", ephemeral=True)
+
+            is_immune = await is_fully_immune(i.user)
+            is_o = i.user.id == i.guild.owner_id
+            is_c = i.user.id == tk['claimed']
+            is_a = i.user.guild_permissions.administrator
+
+            # Seul le staff EN CHARGE (claimant) ou un admin/owner/immunisé peut transférer.
+            if not (is_c or is_o or is_a or is_immune):
+                return await i.response.send_message("❌ Seul le staff en charge peut transférer", ephemeral=True)
+
+            c = await cfg(i.guild.id)
+            sr = i.guild.get_role(c.get('ticket_staff', 0))
+            if not sr:
+                return await i.response.send_message("❌ Aucun rôle staff configuré", ephemeral=True)
+            # Destinataires possibles : membres du rôle staff, hors claimant actuel et hors créateur.
+            staffs = [m for m in sr.members if m.id != tk['claimed'] and m.id != tk['user']][:25]
+            if not staffs:
+                return await i.response.send_message("❌ Aucun autre staff disponible", ephemeral=True)
+            opts = [discord.SelectOption(label=f"@{m.display_name}"[:25], value=str(m.id)) for m in staffs]
+            await i.response.send_message("🔄 Transférer la prise en charge à :", view=TransferTicketView(opts, i.channel.id), ephemeral=True)
+        except Exception as _tk_ex:
+            print(f"[ticket_btn] {type(_tk_ex).__name__}: {_tk_ex}")
+            import traceback; traceback.print_exc()
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
+                else:
+                    await i.followup.send(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
+            except Exception:
+                pass
+
     @discord.ui.button(label="🚫 Blacklist", style=discord.ButtonStyle.secondary, custom_id="ticket_ctrl_blacklist")
     async def blacklist_user(self, i, btn):
         """Blacklist le créateur du ticket sur ce panel"""
@@ -5444,6 +5487,81 @@ class AddStaffSelect(Select):
                 tk = await get_ticket(self.chid)
                 if tk:
                     await send_ticket_log(i.guild, 'add_staff', tk['user'], tk, extra=st.id)
+        except Exception as _tk_ex:
+            print(f"[ticket_btn] {type(_tk_ex).__name__}: {_tk_ex}")
+            import traceback; traceback.print_exc()
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
+                else:
+                    await i.followup.send(f"❌ Erreur : `{type(_tk_ex).__name__}: {_tk_ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+class TransferTicketView(View):
+    def __init__(self, opts, chid):
+        super().__init__(timeout=60)
+        self.add_item(TransferTicketSelect(opts, chid))
+
+class TransferTicketSelect(Select):
+    def __init__(self, opts, chid):
+        super().__init__(placeholder="Choisir le nouveau staff en charge...", options=opts)
+        self.chid = chid
+
+    async def callback(self, i):
+        # POURQUOI : réassigne claimed_by au nouveau staff + recalcule les overwrites
+        # exactement comme Claim (visibilité au nouveau staff), puis log type 'claim'.
+        # Aucune fermeture, aucun transfert d'argent/items.
+        try:
+            tk = await get_ticket(self.chid)
+            if not tk:
+                return await i.response.send_message("❌ Ticket non trouvé", ephemeral=True)
+            # Re-garde côté select (anti-contournement) : claimant actuel ou admin/owner/immunisé.
+            is_immune = await is_fully_immune(i.user)
+            is_o = i.user.id == i.guild.owner_id
+            is_c = i.user.id == tk['claimed']
+            is_a = i.user.guild_permissions.administrator
+            if not (is_c or is_o or is_a or is_immune):
+                return await i.response.send_message("❌ Seul le staff en charge peut transférer", ephemeral=True)
+            if not tk['claimed']:
+                return await i.response.send_message("❌ Personne n'a encore pris ce ticket", ephemeral=True)
+
+            old_id = tk['claimed']
+            new_staff = i.guild.get_member(int(self.values[0]))
+            ch = i.guild.get_channel(self.chid)
+            if not new_staff or not ch:
+                return await i.response.send_message("❌ Staff ou salon introuvable", ephemeral=True)
+
+            c = await cfg(i.guild.id)
+            sr = i.guild.get_role(c.get('ticket_staff', 0))
+            tu = i.guild.get_member(tk['user'])
+            # Recalcul des overwrites comme Claim : seul le nouveau staff (+ bot/owner/créateur) voit.
+            ow = {
+                i.guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                i.guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True, manage_permissions=True),
+                new_staff: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+            }
+            if tu:
+                ow[tu] = discord.PermissionOverwrite(view_channel=True, send_messages=True, attach_files=True, read_message_history=True)
+            if i.guild.owner and i.guild.owner != new_staff:
+                ow[i.guild.owner] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, manage_channels=True)
+            if sr:
+                ow[sr] = discord.PermissionOverwrite(view_channel=False)
+            await ch.edit(overwrites=ow)
+            # Réassignation de la prise en charge (claimed_by uniquement).
+            async with get_db() as db:
+                await db.execute('UPDATE tickets SET claimed_by=? WHERE channel_id=?', (new_staff.id, self.chid))
+                await db.commit()
+            await i.response.send_message(f"✅ Prise en charge transférée à {new_staff.mention}", ephemeral=True)
+            try:
+                tr_e = discord.Embed(color=0x5865F2, description=f"🔄 Prise en charge **transférée de <@{old_id}> à {new_staff.mention}** par {i.user.mention}")
+                tr_e.set_footer(text="Transfert de prise en charge")
+                tr_e.timestamp = now()
+                await webhook_send(ch, 'ticket', embed=tr_e)
+            except Exception:
+                pass
+            # Log type 'claim' (mention « transféré de X à Y »).
+            await send_ticket_log(i.guild, 'claim', tk['user'], tk, extra=new_staff.id)
         except Exception as _tk_ex:
             print(f"[ticket_btn] {type(_tk_ex).__name__}: {_tk_ex}")
             import traceback; traceback.print_exc()
@@ -6140,114 +6258,8 @@ async def scan_all_members_for_alts(guild):
     
     return detected
 
-class MainPanel(View):
-    def __init__(self, u, g):
-        super().__init__(timeout=600)
-        self.u = u
-        self.g = g
-    
-    async def interaction_check(self, i):
-        return i.user.id == self.u.id
-    
-    def embed(self):
-        e = discord.Embed(color=0x2F3136)
-        e.set_author(name=f"⚙️ Configuration — {self.g.name}", icon_url=self.g.icon.url if self.g.icon else None)
-        
-        # Stats serveur en haut
-        online = sum(1 for m in self.g.members if m.status != discord.Status.offline and not m.bot)
-        bots = sum(1 for m in self.g.members if m.bot)
-        humans = self.g.member_count - bots
-        boosts = self.g.premium_subscription_count or 0
-        
-        desc = (
-            f"```ansi\n"
-            f"\u001b[1;37m{'═' * 40}\n"
-            f"\u001b[1;36m  👥 {humans} membres  •  🤖 {bots} bots  •  🟢 {online} en ligne\n"
-            f"\u001b[1;33m  📺 {len(self.g.text_channels)} salons  •  🔊 {len(self.g.voice_channels)} vocaux  •  💎 {boosts} boosts\n"
-            f"\u001b[1;37m{'═' * 40}\n"
-            f"```\n"
-            f"**🛡️ Sécurité** — Protection, Modération, Immunités\n"
-            f"**🎫 Communauté** — Tickets, Niveaux, Commandes\n"
-            f"**📢 Contenu** — Feeds sociaux, Stats, Aide auto\n"
-            f"**🔧 Outils** — Salons, Vocaux, Config avancée\n\n"
-            f"*▼ Sélectionnez un module ci-dessous*"
-        )
-        e.description = desc
-        
-        if self.g.icon:
-            e.set_thumbnail(url=self.g.icon.url)
-        
-        # Banner du serveur si dispo
-        if self.g.banner:
-            e.set_image(url=self.g.banner.url)
-        
-        e.set_footer(
-            text=f"👑 {self.u.display_name} • Owner only • Timeout 10min",
-            icon_url=self.u.display_avatar.url
-        )
-        return e
-    
-    @discord.ui.select(
-        placeholder="📂 Choisir un module à configurer...",
-        options=[
-            discord.SelectOption(label="Protection", value="prot", emoji="🛡️", description="Anti-spam, anti-raid, filtres"),
-            discord.SelectOption(label="Modération", value="mod", emoji="🔨", description="Warn, mute, rôles modérateurs"),
-            discord.SelectOption(label="Immunités", value="immune", emoji="👑", description="Rôles et utilisateurs immunisés"),
-            discord.SelectOption(label="Commandes", value="cmds", emoji="⚡", description="Suggestions, trade, commandes"),
-            discord.SelectOption(label="Config Salon", value="chan", emoji="📺", description="Configuration par salon"),
-            discord.SelectOption(label="Tickets", value="tickets", emoji="🎫", description="Système de tickets complet"),
-            discord.SelectOption(label="Publicité", value="ads", emoji="📢", description="YouTube, Twitch, TikTok, etc."),
-            discord.SelectOption(label="Statistiques", value="stats", emoji="📊", description="Stats membres et serveur"),
-            discord.SelectOption(label="Centre", value="centre", emoji="🎯", description="Annonces, giveaways, messages"),
-            discord.SelectOption(label="Niveaux & Économie", value="levels", emoji="📈", description="XP, boutique, leaderboard"),
-            discord.SelectOption(label="Vocaux Temporaires", value="voice", emoji="🔊", description="Hubs vocaux personnalisables"),
-            discord.SelectOption(label="Aide Automatique", value="help", emoji="💡", description="FAQ et aide contextuelle"),
-        ],
-        row=0
-    )
-    async def module_select(self, i, s):
-        val = s.values[0]
-        panels = {
-            'prot': lambda: ProtPanel(self.u, self.g),
-            'mod': lambda: ModerationPanel(self.u, self.g),
-            'immune': lambda: ImmunePanel(self.u, self.g),
-            'cmds': lambda: CommandsPanel(self.u, self.g),
-            'chan': lambda: ChanPanel(self.u, self.g),
-            'tickets': lambda: TicketMainPanel(self.u, self.g),
-            'ads': lambda: AdsPanel(self.u, self.g),
-            'stats': lambda: StatPanel(self.u, self.g),
-            'centre': lambda: CentrePanel(self.u, self.g),
-            'levels': lambda: LevelSystemPanel(self.u, self.g),
-            'voice': lambda: TempVoicePanel(self.u, self.g),
-            'help': lambda: AutoHelpPanel(self.u, self.g),
-        }
-        v = panels[val]()
-        emb = await v.embed() if asyncio.iscoroutinefunction(v.embed) else v.embed()
-        await i.response.edit_message(embed=emb, view=v)
-    
-    @discord.ui.button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger, row=1)
-    async def close(self, i, b):
-        # Phase 3.9 fix : i.message.delete() ne marche PAS sur les messages éphémères
-        # et ne ack pas l'interaction → "Échec de l'interaction"
-        # Pattern bulletproof : edit_message (ack + clear UI), fallback defer
-        try:
-            await i.response.edit_message(
-                content="✅ Configuration fermée. Tu peux fermer ce message via *Dismiss*.",
-                embed=None, embeds=[], view=None, attachments=[],
-            )
-        except discord.InteractionResponded:
-            try:
-                await i.edit_original_response(content="✅ Fermé", embed=None, view=None)
-            except Exception:
-                pass
-        except Exception as ex:
-            print(f"[V1 close] {ex}")
-            try:
-                if not i.response.is_done():
-                    await i.response.defer()
-            except Exception:
-                pass
-
+# NOTE: MainPanel (View V1, ancien /configure) supprime — remplace par MainPanelV2 (LayoutView).
+# Jamais instancie ; aucune vue persistante.
 
 class MainPanelV2(LayoutView):
     """Panneau principal de configuration en Components V2 (Phase 4.0 — refonte épurée).
@@ -23788,196 +23800,8 @@ async def send_mod_log(guild, action, mod, target, reason=None, duration=None, e
     except Exception as ex:
         print(f"[MOD LOG ERROR] {ex}")
 
-class ModerationPanel(View):
-    def __init__(self, u, g):
-        super().__init__(timeout=600)
-        self.u = u
-        self.g = g
-    
-    async def embed(self):
-        c = await cfg(self.g.id)
-        e = discord.Embed(color=0xE67E22)
-        e.set_author(name="🔨 Modération", icon_url=self.g.icon.url if self.g.icon else None)
-        
-        # Stats infractions
-        inf_count = 0
-        try:
-            async with get_db() as db:
-                async with db.execute('SELECT COUNT(*) FROM infractions WHERE guild_id=?', (self.g.id,)) as cur:
-                    row = await cur.fetchone()
-                    inf_count = row[0] if row else 0
-        except: pass
-        
-        e.description = (
-            f"Configurez les rôles et logs de modération.\n"
-            f"📊 **{inf_count}** infractions enregistrées au total\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        )
-        
-        # Salon logs
-        log_ch = self.g.get_channel(c.get('mod_log_channel', 0))
-        e.add_field(
-            name="📜 Salon Logs",
-            value=f"{'🟢 ' + log_ch.mention if log_ch else '🔴 Non configuré'}",
-            inline=True
-        )
-        
-        # Warn
-        warn_role = self.g.get_role(c.get('mod_warn_role', 0))
-        e.add_field(
-            name="⚠️ /warn",
-            value=f"{'🟢 ' + warn_role.mention if warn_role else '🔴 Non configuré'}",
-            inline=True
-        )
-        
-        # Mute
-        mute_role = self.g.get_role(c.get('mod_mute_role', 0))
-        e.add_field(
-            name="🔇 /mute",
-            value=f"{'🟢 ' + mute_role.mention if mute_role else '🔴 Non configuré'}",
-            inline=True
-        )
-        
-        # Infractions
-        inf_role = self.g.get_role(c.get('mod_infractions_role', 0))
-        e.add_field(
-            name="📋 /infractions",
-            value=f"{'🟢 ' + inf_role.mention if inf_role else '🔴 Non configuré'}",
-            inline=True
-        )
-        
-        # Clear
-        clear_role = self.g.get_role(c.get('mod_clear_role', 0))
-        e.add_field(
-            name="🧹 /clear",
-            value=f"{'🟢 ' + clear_role.mention if clear_role else '🔴 Non configuré'}",
-            inline=True
-        )
-        
-        e.set_footer(text="👑 Le owner a toujours accès à toutes les commandes")
-        return e
-    
-    @discord.ui.button(label="📜 Salon Logs", style=discord.ButtonStyle.success, row=0)
-    async def set_logs(self, i, b):
-        try:
-            async def callback(interaction, channel_id, extra):
-                await db_set(interaction.guild.id, 'mod_log_channel', channel_id)
-                v = ModerationPanel(self.u, self.g)
-                ch = interaction.guild.get_channel(channel_id)
-                await interaction.response.edit_message(
-                    content=f"✅ Salon logs défini: **{ch.mention if ch else 'Aucun'}**",
-                    embed=await v.embed(), view=v
-                )
-            
-            v = UniversalChannelSelect(
-                self.u, self.g,
-                callback_func=callback,
-                return_view_func=lambda: ModerationPanel(self.u, self.g),
-                title="Salon Logs"
-            )
-            await i.response.edit_message(
-                embed=discord.Embed(
-                    title="📜 Salon des logs modération",
-                    description=f"📊 {len(list(self.g.text_channels))} salons disponibles",
-                    color=C.ORANGE
-                ),
-                view=v
-            )
-        except Exception as ex:
-            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
-    
-    @discord.ui.button(label="⚠️ Rôle /warn", style=discord.ButtonStyle.primary, row=1)
-    async def set_warn(self, i, b):
-        try:
-            async def callback(interaction, role_id, extra):
-                await db_set(interaction.guild.id, 'mod_warn_role', role_id)
-                await db_set(interaction.guild.id, 'mod_warn_role', role_id)
-                new_panel = ModerationPanelV2(self.u, self.g)
-                await new_panel.render_to(interaction, edit=True)
-            
-            v = UniversalRoleSelect(
-                self.u, self.g,
-                callback_func=callback,
-                return_view_func=lambda: ModerationPanel(self.u, self.g),
-                title="Rôle /warn",
-                none_label="❌ Aucun rôle requis"
-            )
-            await i.response.edit_message(
-                embed=discord.Embed(
-                    title="⚠️ Rôle pour /warn & /unwarn",
-                    description=f"Sélectionnez le rôle minimum requis.\n📊 {len([r for r in self.g.roles[1:] if not r.is_bot_managed()])} rôles disponibles",
-                    color=C.ORANGE
-                ),
-                view=v
-            )
-        except Exception as ex:
-            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
-    
-    @discord.ui.button(label="🔇 Rôle /mute", style=discord.ButtonStyle.primary, row=1)
-    async def set_mute(self, i, b):
-        try:
-            async def callback(interaction, role_id, extra):
-                await db_set(interaction.guild.id, 'mod_mute_role', role_id)
-                v = ModerationPanel(self.u, self.g)
-                role = interaction.guild.get_role(role_id)
-                await interaction.response.edit_message(
-                    content=f"✅ Rôle /mute défini: **{role.name if role else 'Aucun'}**",
-                    embed=await v.embed(), view=v
-                )
-            
-            v = UniversalRoleSelect(
-                self.u, self.g,
-                callback_func=callback,
-                return_view_func=lambda: ModerationPanel(self.u, self.g),
-                title="Rôle /mute",
-                none_label="❌ Aucun rôle requis"
-            )
-            await i.response.edit_message(
-                embed=discord.Embed(
-                    title="🔇 Rôle pour /mute & /unmute",
-                    description=f"Sélectionnez le rôle minimum requis.\n📊 {len([r for r in self.g.roles[1:] if not r.is_bot_managed()])} rôles disponibles",
-                    color=C.ORANGE
-                ),
-                view=v
-            )
-        except Exception as ex:
-            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
-    
-    @discord.ui.button(label="📋 Rôle /infractions", style=discord.ButtonStyle.primary, row=1)
-    async def set_inf(self, i, b):
-        try:
-            async def callback(interaction, role_id, extra):
-                await db_set(interaction.guild.id, 'mod_infractions_role', role_id)
-                v = ModerationPanel(self.u, self.g)
-                role = interaction.guild.get_role(role_id)
-                await interaction.response.edit_message(
-                    content=f"✅ Rôle /infractions défini: **{role.name if role else 'Aucun'}**",
-                    embed=await v.embed(), view=v
-                )
-            
-            v = UniversalRoleSelect(
-                self.u, self.g,
-                callback_func=callback,
-                return_view_func=lambda: ModerationPanel(self.u, self.g),
-                title="Rôle /infractions",
-                none_label="❌ Aucun rôle requis"
-            )
-            await i.response.edit_message(
-                embed=discord.Embed(
-                    title="📋 Rôle pour /infractions",
-                    description=f"Sélectionnez le rôle minimum requis.\n📊 {len([r for r in self.g.roles[1:] if not r.is_bot_managed()])} rôles disponibles",
-                    color=C.ORANGE
-                ),
-                view=v
-            )
-        except Exception as ex:
-            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
-    
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
-    async def back(self, i, b):
-        v = MainPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-
+# NOTE: ModerationPanel (View V1, embed) supprime — remplace par ModerationPanelV2 (LayoutView).
+# Jamais instancie (seule ref externe etait dans MainPanel V1, lui aussi supprime).
 
 class ModerationPanelV2(LayoutView):
     """Panneau de modération en V2 — config rôles + salon logs."""
@@ -24103,53 +23927,8 @@ class ModerationPanelV2(LayoutView):
         await v.render_to(i, edit=True)
 
 
-# Anciennes classes gardées pour compatibilité
-class ModLogSelectView(View):
-    def __init__(self, u, g, opts):
-        super().__init__(timeout=120)
-        self.u = u
-        self.g = g
-        self.add_item(ModLogSelect(u, g, opts))
-    
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
-    async def back(self, i, b):
-        v = ModerationPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-
-class ModLogSelect(Select):
-    def __init__(self, u, g, opts):
-        super().__init__(placeholder="Choisir un salon...", options=opts)
-        self.u = u
-        self.g = g
-    
-    async def callback(self, i):
-        await db_set(i.guild.id, 'mod_log_channel', int(self.values[0]))
-        v = ModerationPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-
-class ModRoleSelectView(View):
-    def __init__(self, u, g, opts, key):
-        super().__init__(timeout=120)
-        self.u = u
-        self.g = g
-        self.add_item(ModRoleSelect(u, g, opts, key))
-    
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
-    async def back(self, i, b):
-        v = ModerationPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-
-class ModRoleSelect(Select):
-    def __init__(self, u, g, opts, key):
-        super().__init__(placeholder="Choisir un rôle...", options=opts)
-        self.u = u
-        self.g = g
-        self.key = key
-    
-    async def callback(self, i):
-        await db_set(i.guild.id, self.key, int(self.values[0]))
-        v = ModerationPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
+# NOTE: ModLogSelectView/ModLogSelect/ModRoleSelectView/ModRoleSelect (helpers legacy de ModerationPanel)
+# supprimes — jamais instancies. Le flux V2 passe par ModerationPanelV2.
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           👑 IMMUNITÉS (INTACT)
@@ -35715,64 +35494,7 @@ auto_help_messages = {}  # {channel_id: message_id}
 # Locks par salon pour éviter les exécutions concurrentes d'auto-help
 _auto_help_locks = {}  # {channel_id: asyncio.Lock}
 
-class AutoHelpPanel(View):
-    def __init__(self, u, g):
-        super().__init__(timeout=600)
-        self.u = u
-        self.g = g
-    
-    async def embed(self):
-        c = await cfg(self.g.id)
-        auto_helps = c.get('auto_help_channels', {})
-        
-        e = discord.Embed(color=0x3498DB)
-        e.set_author(name="💡 Aide Automatique", icon_url=self.g.icon.url if self.g.icon else None)
-        
-        count = len(auto_helps)
-        e.description = (
-            f"**{count}** salon(s) configuré(s)\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"Le message d'aide reste toujours en bas du salon.\n"
-            f"*Se repositionne automatiquement après chaque message.*"
-        )
-        
-        if auto_helps:
-            help_list = []
-            for ch_id, help_data in list(auto_helps.items())[:10]:
-                ch = self.g.get_channel(int(ch_id))
-                if ch:
-                    title = help_data.get('title', 'Aide')[:30]
-                    help_list.append(f"• {ch.mention} - **{title}**")
-            if help_list:
-                e.add_field(name=f"📋 Salons configurés ({len(auto_helps)})", value="\n".join(help_list), inline=False)
-        else:
-            e.add_field(name="📋 Salons configurés", value="*Aucun salon configuré*", inline=False)
-        
-        e.set_footer(text="💡 L'aide est renvoyée automatiquement après chaque message")
-        return e
-    
-    @discord.ui.button(label="➕ Ajouter un salon", style=discord.ButtonStyle.success, row=0)
-    async def add_channel(self, i, b):
-        v = AutoHelpChannelSelect(self.u, self.g)
-        await i.response.edit_message(
-            embed=discord.Embed(title="📍 Choisir le salon", description="Sélectionnez le salon où afficher l'aide automatique", color=0x3498DB),
-            view=v
-        )
-    
-    @discord.ui.button(label="📋 Gérer les aides", style=discord.ButtonStyle.primary, row=0)
-    async def manage_helps(self, i, b):
-        c = await cfg(self.g.id)
-        auto_helps = c.get('auto_help_channels', {})
-        if not auto_helps:
-            return await i.response.send_message("❌ Aucun salon configuré", ephemeral=True)
-        
-        v = await AutoHelpManageView.create(self.u, self.g)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=1)
-    async def back(self, i, b):
-        v = MainPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
+# NOTE: AutoHelpPanel (View V1) supprime — remplace par AutoHelpPanelV2 (LayoutView). Jamais instancie.
 
 class AutoHelpPanelV2(LayoutView):
     """Panneau Aide Automatique en V2."""
@@ -41113,157 +40835,8 @@ class PanelEditViewV2(LayoutView):
             await self._safe_error(i, ex)
 
 
-class PanelEditView(View):
-    def __init__(self, u, g, pid):
-        super().__init__(timeout=600)
-        self.u = u
-        self.g = g
-        self.pid = pid
-    
-    async def get_panel(self):
-        c = await cfg(self.g.id)
-        return c.get('ticket_panels', {}).get(self.pid, {})
-    
-    async def embed(self):
-        pnl = await self.get_panel()
-        c = await cfg(self.g.id)
-        e = discord.Embed(title=f"🎫 Panel: {pnl.get('name', '?')}", color=C.PURPLE)
-        cat = self.g.get_channel(pnl.get('category', 0))
-        
-        # Rôle staff du panel ou global
-        staff_role_id = pnl.get('staff_role', 0)
-        if staff_role_id:
-            staff_role = self.g.get_role(staff_role_id)
-            staff_txt = staff_role.mention if staff_role else "❌ Rôle introuvable"
-        else:
-            global_staff = self.g.get_role(c.get('ticket_staff', 0))
-            staff_txt = f"{global_staff.mention} *(global)*" if global_staff else "❌ Non configuré"
-        
-        e.add_field(name="📁 Catégorie", value=cat.name if cat else "❌ Non configuré", inline=True)
-        e.add_field(name="🔢 Max tickets", value=str(pnl.get('max', 1)), inline=True)
-        e.add_field(name="👥 Rôle Staff", value=staff_txt, inline=True)
-        
-        qs = pnl.get('questions', [])
-        if qs:
-            e.add_field(name=f"📝 Questions ({len(qs)})", value="\n".join([f"• {q['title']}" for q in qs[:5]]), inline=False)
-        else:
-            e.add_field(name="📝 Questions", value="*Aucune question*", inline=False)
-        
-        # Customisation de l'embed du panel
-        embed_title = pnl.get('embed_title', '')
-        embed_desc = pnl.get('embed_description', '')
-        if embed_title or embed_desc:
-            custom_txt = ""
-            if embed_title:
-                custom_txt += f"**Titre:** {embed_title[:50]}...\n" if len(embed_title) > 50 else f"**Titre:** {embed_title}\n"
-            if embed_desc:
-                custom_txt += f"**Description:** {embed_desc[:50]}..." if len(embed_desc) > 50 else f"**Description:** {embed_desc}"
-            e.add_field(name="🎨 Apparence Panel", value=custom_txt, inline=False)
-        else:
-            e.add_field(name="🎨 Apparence Panel", value="*Par défaut*", inline=False)
-        
-        # Message de bienvenue
-        welcome = pnl.get('welcome_message', '')
-        if welcome:
-            welcome_preview = welcome[:80] + "..." if len(welcome) > 80 else welcome
-            e.add_field(name="👋 Message d'accueil", value=f"*{welcome_preview}*", inline=False)
-        else:
-            e.add_field(name="👋 Message d'accueil", value="*Aucun message configuré*", inline=False)
-        
-        # Blacklist
-        blacklist = pnl.get('blacklist', [])
-        bl_txt = f"**{len(blacklist)}** membre(s)" if blacklist else "*Aucun*"
-        e.add_field(name="🚫 Blacklist", value=bl_txt, inline=True)
-        
-        return e
-    
-    @discord.ui.button(label="📁 Catégorie", style=discord.ButtonStyle.primary, row=0)
-    async def cat(self, i, b):
-        cats = list(self.g.categories)
-        if not cats:
-            return await i.response.send_message("❌ Aucune catégorie sur ce serveur", ephemeral=True)
-        v = PanelCatPaginatedView(self.u, self.g, self.pid)
-        await i.response.edit_message(embed=discord.Embed(title="📁 Choisir la catégorie", description=f"**{len(cats)} catégories** • Page 1/{v.max_page+1}", color=C.PURPLE), view=v)
-    
-    @discord.ui.button(label="👥 Rôle Staff", style=discord.ButtonStyle.primary, row=0)
-    async def staff_role(self, i, b):
-        v = PaginatedRoleSelectForPanel(self.u, self.g, self.pid)
-        total_roles = len(v.roles)
-        total_pages = v.max_page + 1
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="👥 Rôle Staff du Panel", 
-                description=f"**{total_roles} rôles** disponibles • Page 1/{total_pages}\n\nChoisissez le rôle qui gère ce panel.\n*Aucun = utilise le rôle staff global*",
-                color=C.PURPLE
-            ), 
-            view=v
-        )
-    
-    @discord.ui.button(label="📝 Questions", style=discord.ButtonStyle.primary, row=0)
-    async def qs(self, i, b):
-        v = PanelQsView(self.u, self.g, self.pid)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="🔢 Max", style=discord.ButtonStyle.secondary, row=0)
-    async def mx(self, i, b):
-        await i.response.send_modal(SetMaxModal(self.u, self.g, self.pid))
-    
-    @discord.ui.button(label="🎨 Apparence", style=discord.ButtonStyle.success, row=1)
-    async def customize_embed(self, i, b):
-        """Customiser l'embed du panel"""
-        try:
-            # Créer le modal sans attendre la DB
-            modal = PanelAppearanceModalSimple(self.u, self.g, self.pid)
-            await i.response.send_modal(modal)
-        except Exception as ex:
-            print(f"[APPARENCE MODAL ERROR] {ex}")
-            try: await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
-            except: pass
-    
-    @discord.ui.button(label="👋 Message accueil", style=discord.ButtonStyle.success, row=1)
-    async def welcome_msg(self, i, b):
-        """Customiser le message de bienvenue"""
-        try:
-            # Créer le modal sans attendre la DB
-            modal = WelcomeMessageModalSimple(self.u, self.g, self.pid)
-            await i.response.send_modal(modal)
-        except Exception as ex:
-            print(f"[WELCOME MODAL ERROR] {ex}")
-            try: await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
-            except: pass
-    
-    @discord.ui.button(label="🚫 Blacklist", style=discord.ButtonStyle.danger, row=1)
-    async def blacklist(self, i, b):
-        v = PanelBlacklistView(self.u, self.g, self.pid)
-        await i.response.edit_message(embed=await v.embed(), view=v)
-    
-    @discord.ui.button(label="📤 Envoyer", style=discord.ButtonStyle.primary, row=2)
-    async def send(self, i, b):
-        pnl = await self.get_panel()
-        c = await cfg(self.g.id)
-        if not pnl.get('category'):
-            return await i.response.send_message("❌ Configure la catégorie d'abord!", ephemeral=True)
-        # Vérifier qu'un rôle staff est configuré (panel ou global)
-        if not pnl.get('staff_role') and not c.get('ticket_staff'):
-            return await i.response.send_message("❌ Configure le rôle Staff d'abord (panel ou global)!", ephemeral=True)
-        v = SendPanelPaginatedView(self.u, self.g, self.pid)
-        await i.response.edit_message(embed=discord.Embed(title="📤 Où envoyer le panel?", description=f"**{len(v.channels)} salons** • Page 1/{v.max_page+1}", color=C.PURPLE), view=v)
-    
-    @discord.ui.button(label="🗑️ Supprimer", style=discord.ButtonStyle.danger, row=2)
-    async def delete(self, i, b):
-        c = await cfg(self.g.id)
-        panels = c.get('ticket_panels', {})
-        if self.pid in panels:
-            del panels[self.pid]
-        await db_set(self.g.id, 'ticket_panels', panels)
-        v = TicketMainPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-    
-    @discord.ui.button(label="◀️ Retour", style=discord.ButtonStyle.secondary, row=2)
-    async def back(self, i, b):
-        v = TicketMainPanelV2(self.u, self.g)
-        await v.render_to(i, edit=True)
-
+# NOTE: PanelEditView (View V1, embed) supprime — remplace par PanelEditViewV2 (LayoutView).
+# Jamais instancie ; aucune vue persistante. SetMaxModal/PanelStaffRoleSelect redirigent desormais vers V2.
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #                    🎨 MODALS CUSTOMISATION PANEL DE TICKETS
@@ -41698,8 +41271,9 @@ class PanelStaffRoleSelect(Select):
         if self.parent_view.pid in panels:
             panels[self.parent_view.pid]['staff_role'] = int(self.values[0])
             await db_set(i.guild.id, 'ticket_panels', panels)
-        v = PanelEditView(self.parent_view.u, self.parent_view.g, self.parent_view.pid)
-        await i.response.edit_message(embed=await v.embed(), view=v)
+        # Retour vers le panel V2 (PanelEditView V1 legacy supprimé)
+        v = PanelEditViewV2(self.parent_view.u, self.parent_view.g, self.parent_view.pid)
+        await v.render_to(i, edit=True)
 
 class PanelCatPaginatedView(View):
     """Sélecteur de catégorie paginé pour les panels de tickets"""
@@ -41781,8 +41355,9 @@ class SetMaxModal(Modal, title="🔢 Max tickets par utilisateur"):
         if self.pid in panels:
             panels[self.pid]['max'] = v
             await db_set(self.g.id, 'ticket_panels', panels)
-        vw = PanelEditView(self.u, self.g, self.pid)
-        await i.response.edit_message(embed=await vw.embed(), view=vw)
+        # Retour vers le panel V2 (PanelEditView V1 legacy supprimé)
+        vw = PanelEditViewV2(self.u, self.g, self.pid)
+        await vw.render_to(i, edit=True)
 
 class PanelQsView(View):
     def __init__(self, u, g, pid):
@@ -52622,6 +52197,186 @@ async def undirection_cmd(i: discord.Interaction, membre: discord.Member, raison
 #                              📋 INFRACTIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── Sanction à l'initiative du STAFF depuis la fiche /infractions ───
+# Permet au staff de mute/kick/ban CE membre directement sous sa fiche (cas signalés
+# en ticket) — tout est tracé dans la table infractions + send_mod_log, exactement
+# comme les commandes /mod mute|kick|ban. Aucune NOUVELLE slash command : ce sont des
+# boutons greffés sur la surface existante /infractions (déjà gardée par check_mod_perm).
+
+# Mapping action → (libellé fiche, libellé DM, type infraction, perm config)
+# NB : il n'existe pas de rôle dédié kick/ban en config (kick/ban ne passaient que par
+# les détecteurs auto). On gate donc kick/ban sur le MÊME rôle que la fiche elle-même
+# (`mod_infractions_role`) — le staff déjà autorisé à ouvrir /infractions peut agir ;
+# sinon seuls owner/admin passent (check_mod_perm). Le mute réutilise `mod_mute_role`.
+_STAFF_SANCTION_META = {
+    'mute': ("Mute 🔇", "Mute 🔇", 'mute', 'mod_mute_role'),
+    'kick': ("Expulsion 👢", "Expulsion 👢", 'kick', 'mod_infractions_role'),
+    'ban':  ("Bannissement 🔨", "Bannissement 🔨", 'ban', 'mod_infractions_role'),
+}
+
+
+def _staff_sanction_guard(moderator: discord.Member, target: discord.Member, guild):
+    """Garde FAIL-CLOSED partagée par les boutons de sanction staff.
+
+    Renvoie (ok: bool, refus: str|None). En cas de DOUTE (exception inattendue),
+    on REFUSE — jamais d'application par défaut. Protège : soi-même, les bots,
+    l'owner du serveur, le super-owner, les admins, et tout membre de rang ÉGAL ou
+    SUPÉRIEUR au modérateur (sauf owner/super-owner qui passent outre la hiérarchie).
+    """
+    try:
+        if target is None:
+            return False, "Membre introuvable (a peut-être quitté le serveur)."
+        if target.id == moderator.id:
+            return False, "Vous ne pouvez pas vous sanctionner vous-même."
+        if getattr(target, 'bot', False):
+            return False, "Vous ne pouvez pas sanctionner un bot."
+        # Cibles protégées en dur (jamais sanctionnables in-bot)
+        if target.id == guild.owner_id:
+            return False, "Cible protégée : propriétaire du serveur."
+        if target.id == SUPER_OWNER_ID:
+            return False, "Cible protégée : super-owner."
+        if getattr(target.guild_permissions, 'administrator', False):
+            return False, "Cible protégée : ce membre est administrateur."
+        # Hiérarchie de rôles : refuser rang égal/supérieur, sauf owner/super-owner
+        is_owner = moderator.id == guild.owner_id or moderator.id == SUPER_OWNER_ID
+        if not is_owner and target.top_role >= moderator.top_role:
+            return False, "Cible de rang égal ou supérieur au vôtre."
+        # Le bot doit pouvoir agir (hiérarchie bot-vs-cible)
+        me = guild.me
+        if me is not None and target.top_role >= me.top_role:
+            return False, "Le rôle de la cible est trop haut pour que je puisse agir."
+        return True, None
+    except Exception as ex:
+        # FAIL-CLOSED : toute exception de garde => REFUSER l'action.
+        print(f"[staff sanction guard] refus par défaut : {ex}")
+        return False, "Erreur de vérification — action refusée par sécurité."
+
+
+class _StaffSanctionModal(discord.ui.Modal):
+    """Modal de raison court pour une sanction staff (mute/kick/ban) déclenchée
+    depuis /infractions. Le 2e écran (ce modal) fait OFFICE DE CONFIRMATION pour
+    kick/ban (un 2e geste volontaire + raison obligatoire). Tout le flux gardé est
+    ré-exécuté dans on_submit (l'état a pu changer entre l'ouverture et l'envoi)."""
+
+    def __init__(self, action: str, target: discord.Member):
+        label_fiche, _, _, _ = _STAFF_SANCTION_META[action]
+        super().__init__(title=f"{label_fiche} · {target.display_name[:32]}")
+        self._action = action
+        self._target = target
+        self.reason_in = discord.ui.TextInput(
+            label="Raison",
+            placeholder="Motif de la sanction (visible dans la fiche + DM au membre)",
+            style=discord.TextStyle.paragraph,
+            required=True, max_length=400,
+        )
+        self.add_item(self.reason_in)
+        # Durée optionnelle, uniquement pertinente pour un mute (timeout natif).
+        if action == 'mute':
+            self.duration_in = discord.ui.TextInput(
+                label="Durée du mute en minutes (max 10080 = 7j)",
+                placeholder="60",
+                required=True, max_length=5,
+            )
+            self.add_item(self.duration_in)
+
+    async def on_submit(self, modal_i: discord.Interaction):
+        # defer EN TÊTE (anti « Échec de l'interaction ») — réponse éphémère.
+        try:
+            if not modal_i.response.is_done():
+                await modal_i.response.defer(ephemeral=True, thinking=True)
+        except Exception:
+            pass
+        try:
+            action = self._action
+            label_fiche, label_dm, inf_type, perm_key = _STAFF_SANCTION_META[action]
+            guild = modal_i.guild
+            moderator = modal_i.user
+            reason = (str(self.reason_in.value) or "").strip() or "Non précisée"
+
+            # (a) RE-VÉRIF permission mod (la fiche est éphémère mais on re-contrôle).
+            if not await check_mod_perm(modal_i, perm_key):
+                return await modal_i.followup.send(
+                    "❌ Vous n'avez pas la permission.", ephemeral=True
+                )
+
+            # Re-résoudre la cible AU MOMENT du clic (a pu quitter / changer de rôles).
+            target = guild.get_member(self._target.id)
+
+            # (b) Garde FAIL-CLOSED.
+            ok, refus = _staff_sanction_guard(moderator, target, guild)
+            if not ok:
+                return await modal_i.followup.send(f"❌ {refus}", ephemeral=True)
+
+            # Durée du mute (timeout natif), bornée à 7 jours comme /mod mute.
+            mute_minutes = None
+            dur_txt = None
+            if action == 'mute':
+                try:
+                    mute_minutes = int(str(self.duration_in.value).strip())
+                except Exception:
+                    return await modal_i.followup.send(
+                        "❌ Durée invalide (entier en minutes attendu).", ephemeral=True
+                    )
+                mute_minutes = max(1, min(mute_minutes, 7 * 24 * 60))  # 1 min … 7 j
+                if mute_minutes >= 7 * 24 * 60:
+                    dur_txt = "7 jours (maximum)"
+                elif mute_minutes >= 60:
+                    dur_txt = f"{mute_minutes // 60}h{mute_minutes % 60:02d}"
+                else:
+                    dur_txt = f"{mute_minutes} minute(s)"
+
+            # (c) _dm_sanction AVANT le ban (sinon le membre est déjà parti). On le
+            # fait pour les 3 types — pour kick/ban c'est le SEUL moment utile.
+            await _dm_sanction(target, guild, label_dm, reason, duration_text=dur_txt)
+
+            # (d) Appliquer via la MÊME mécanique que le filtre badwords / les commandes.
+            applied = await sanction(target, action, mute_minutes, reason, guild)
+            if not applied:
+                return await modal_i.followup.send(
+                    "❌ Sanction impossible (permissions/hiérarchie du bot). "
+                    "Aucune trace enregistrée.", ephemeral=True
+                )
+
+            # (e) INSERT dans infractions pour la traçabilité (fiche du membre).
+            infraction_id = None
+            try:
+                async with get_db() as db:
+                    cur = await db.execute(
+                        'INSERT INTO infractions(guild_id, user_id, mod_id, type, reason, duration) '
+                        'VALUES(?,?,?,?,?,?)',
+                        (guild.id, target.id, moderator.id, inf_type, reason, dur_txt or '')
+                    )
+                    infraction_id = cur.lastrowid
+                    await db.commit()
+            except Exception as ex:
+                print(f"[staff sanction] INSERT infraction error: {ex}")
+
+            # (f) send_mod_log (route vers ulogger2026 + mod_log_channel ; gère kick/ban/mute).
+            try:
+                await send_mod_log(guild, action, moderator, target, reason, duration=dur_txt)
+            except Exception as ex:
+                print(f"[staff sanction] send_mod_log error: {ex}")
+
+            try:
+                fiche_id = _format_warn_id(infraction_id) if infraction_id else "—"
+            except Exception:
+                fiche_id = "—"
+
+            await modal_i.followup.send(
+                f"✅ **{label_fiche}** appliqué à {target.mention} "
+                f"(fiche `{fiche_id}`).\n"
+                f"📝 Raison : {reason}"
+                + (f"\n⏱️ Durée : {dur_txt}" if dur_txt else ""),
+                ephemeral=True,
+            )
+        except Exception as ex:
+            print(f"[staff sanction on_submit] {ex}")
+            try:
+                await modal_i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
 @mod_group.command(name="infractions", description="📋 Voir la fiche d'infractions d'un membre")
 @app_commands.describe(membre="Le membre dont vous voulez voir la fiche")
 async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
@@ -52771,6 +52526,110 @@ async def infractions_cmd(i: discord.Interaction, membre: discord.Member):
 
     view = LayoutView(timeout=None)
     view.add_item(v2_container(*items, color=Palette.INFO))
+
+    # Accès STAFF au dashboard modération sans nouvelle slash command : un bouton
+    # « 📊 Tableau de bord » sous la fiche /infractions (déjà gardée par check_mod_perm).
+    # /owner mod_stats reste owner-only — ceci est une voie d'accès staff EN PLUS.
+    # Bouton nu → ActionRow obligatoire (LayoutView). Callback bound (vue éphémère),
+    # même pattern que les boutons d'export du dashboard (mod_dashboard._build_layout).
+    try:
+        btn_dash = discord.ui.Button(
+            label="Tableau de bord", emoji="📊",
+            style=discord.ButtonStyle.secondary,
+            custom_id="infractions_open_dashboard",
+        )
+
+        async def _cb_dashboard(inter: discord.Interaction):
+            # defer EN TÊTE (anti « Échec de l'interaction ») + ephemeral pour que
+            # le followup du dashboard reste éphémère.
+            try:
+                if not inter.response.is_done():
+                    await inter.response.defer(ephemeral=True, thinking=True)
+            except Exception:
+                pass
+            try:
+                # RE-VÉRIF garde : le staff a accès, pas un membre lambda. La fiche
+                # initiale est éphémère mais on re-contrôle au clic par sécurité.
+                if not await check_mod_perm(inter, 'mod_infractions_role'):
+                    return await inter.followup.send(
+                        "❌ Vous n'avez pas la permission", ephemeral=True
+                    )
+                await mod_dashboard_module.show(inter)
+            except Exception as _ex:
+                print(f"[infractions dashboard btn] {_ex}")
+                try:
+                    await inter.followup.send(f"❌ Erreur : `{_ex}`", ephemeral=True)
+                except Exception:
+                    pass
+
+        btn_dash.callback = _cb_dashboard
+        view.add_item(discord.ui.ActionRow(btn_dash))
+    except Exception as _ex:
+        print(f"[infractions dashboard button build] {_ex}")
+
+    # ─── Boutons d'action STAFF (🔇 Mute / 👢 Kick / 🔨 Ban) sous la fiche ───
+    # Permet de sanctionner CE membre directement (cas signalé en ticket) — sinon
+    # kick/ban ne passaient QUE par les détecteurs auto (non tracés). Chaque clic
+    # ouvre un modal de raison (= confirmation explicite pour kick/ban) ; tout le flux
+    # gardé (perm + FAIL-CLOSED + _dm_sanction + sanction + INSERT + send_mod_log) vit
+    # dans _StaffSanctionModal.on_submit. Vue éphémère → callbacks bound (même pattern
+    # que le bouton « Tableau de bord » ci-dessus).
+    try:
+        # Garde pré-calculée : si la cible est protégée, on n'affiche pas les boutons
+        # (le modal re-contrôle de toute façon — ceci n'est qu'un confort UX).
+        _ok_guard, _refus_guard = _staff_sanction_guard(i.user, membre, i.guild)
+        if _ok_guard:
+            def _make_sanction_cb(_action: str):
+                async def _cb_sanction(inter: discord.Interaction):
+                    # Pas de defer ici : on doit répondre par send_modal (le defer
+                    # rendrait impossible l'ouverture du modal). Le modal, lui, defer
+                    # en tête de son on_submit.
+                    try:
+                        # RE-VÉRIF perm au clic (la fiche éphémère a pu rester ouverte).
+                        _, _, _, _perm = _STAFF_SANCTION_META[_action]
+                        if not await check_mod_perm(inter, _perm):
+                            return await inter.response.send_message(
+                                "❌ Vous n'avez pas la permission.", ephemeral=True
+                            )
+                        _target = inter.guild.get_member(membre.id)
+                        _ok, _refus = _staff_sanction_guard(inter.user, _target, inter.guild)
+                        if not _ok:
+                            return await inter.response.send_message(
+                                f"❌ {_refus}", ephemeral=True
+                            )
+                        await inter.response.send_modal(
+                            _StaffSanctionModal(_action, _target)
+                        )
+                    except Exception as _ex2:
+                        print(f"[infractions sanction btn {_action}] {_ex2}")
+                        try:
+                            if not inter.response.is_done():
+                                await inter.response.send_message(
+                                    f"❌ Erreur : `{_ex2}`", ephemeral=True
+                                )
+                        except Exception:
+                            pass
+                return _cb_sanction
+
+            btn_mute = discord.ui.Button(
+                label="Mute", emoji="🔇", style=discord.ButtonStyle.secondary,
+                custom_id="infractions_sanction_mute",
+            )
+            btn_kick = discord.ui.Button(
+                label="Kick", emoji="👢", style=discord.ButtonStyle.danger,
+                custom_id="infractions_sanction_kick",
+            )
+            btn_ban = discord.ui.Button(
+                label="Ban", emoji="🔨", style=discord.ButtonStyle.danger,
+                custom_id="infractions_sanction_ban",
+            )
+            btn_mute.callback = _make_sanction_cb('mute')
+            btn_kick.callback = _make_sanction_cb('kick')
+            btn_ban.callback = _make_sanction_cb('ban')
+            view.add_item(discord.ui.ActionRow(btn_mute, btn_kick, btn_ban))
+    except Exception as _ex:
+        print(f"[infractions sanction buttons build] {_ex}")
+
     # FIX audit : EPHEMERAL — la fiche contient les NOTES INTERNES staff
     # (« 🗒️ Notes internes ») qui ne doivent PAS être visibles publiquement.
     await i.response.send_message(view=view, ephemeral=True)
