@@ -52,6 +52,77 @@ _bot = None
 BACKUP_DIR = Path("backups")
 KEEP_DAYS = 7  # garde 7 jours max
 
+# ─── Copie hors-volume (DM owner) ────────────────────────────────────────────
+# Les .bak vivent sur le MÊME volume Railway que la DB : si le volume meurt, le
+# backup meurt avec. On envoie donc le backup quotidien compressé en DM au
+# super-owner → copie OFF-SITE gratuite. Fail-safe TOTAL : un échec d'envoi ne
+# casse JAMAIS le backup ni la loop quotidienne.
+_SUPER_OWNER_ID = 781205382923288593  # GoRipe (cf. SUPER_OWNER_ID dans bot.py)
+# Limite DM safe : 8 Mo (plancher Discord sans boost). Au-delà → on skip + log.
+_DM_MAX_BYTES = 8 * 1024 * 1024
+# Throttle : 1 DM/jour max (le backup est déjà quotidien). Garde la date du
+# dernier envoi réussi pour éviter tout double-envoi sur la même journée.
+_last_dm_date: Optional[str] = None
+
+
+async def _dm_backup_to_owner(file_path: str, size_bytes: int) -> None:
+    """Envoie le backup compressé en DM au super-owner (copie hors-volume).
+
+    Conditions :
+      • bot dispo (get_user / fetch_user)
+      • taille < _DM_MAX_BYTES (sinon skip + log)
+      • throttle 1×/jour (date du dernier envoi réussi)
+    FAIL-SAFE : toute exception est avalée — ne casse jamais l'appelant.
+    """
+    global _last_dm_date
+    try:
+        if _bot is None or not file_path:
+            return
+        # Throttle 1/jour : si déjà envoyé aujourd'hui, on skip silencieusement.
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if _last_dm_date == today:
+            return
+        # Garde-fou taille : un DM trop lourd serait rejeté par Discord.
+        if size_bytes <= 0 or size_bytes >= _DM_MAX_BYTES:
+            print(
+                f"[backup_lite] DM owner skip — taille {size_bytes} octets "
+                f">= limite {_DM_MAX_BYTES} (backup reste sur le volume)"
+            )
+            return
+
+        # Récupère l'owner (cache puis fetch réseau en fallback).
+        try:
+            import discord  # local : aligne le style du reste du module
+        except Exception:
+            return
+        owner = _bot.get_user(_SUPER_OWNER_ID)
+        if owner is None:
+            try:
+                owner = await _bot.fetch_user(_SUPER_OWNER_ID)
+            except Exception:
+                owner = None
+        if owner is None:
+            return
+
+        p = Path(file_path)
+        if not p.exists():
+            return
+        sz_mb = size_bytes / (1024 * 1024)
+        await owner.send(
+            content=(
+                f"🗄️ **Backup quotidien hors-volume** — copie de sécurité "
+                f"({sz_mb:.2f} Mo).\nGarde ce fichier : il survit à une perte du "
+                f"volume Railway."
+            ),
+            file=discord.File(str(p), filename=p.name),
+        )
+        # Marque la journée comme envoyée UNIQUEMENT après succès (throttle).
+        _last_dm_date = today
+        print(f"[backup_lite] DM owner OK — {p.name} ({sz_mb:.2f} Mo)")
+    except Exception as ex:
+        # Jamais fatal : on log et on continue.
+        print(f"[backup_lite] DM owner échec (non bloquant) : {ex}")
+
 # Tables critiques (whitelist)
 CRITICAL_TABLES = [
     "guild_config",
@@ -248,6 +319,12 @@ async def backup_daily_task():
                 f"[backup_lite] OK — {result['total_rows']:,} rows, "
                 f"{sz_mb:.2f} MB → {result['file']}"
             )
+            # Copie hors-volume : DM du backup à l'owner (fail-safe, ne peut
+            # jamais casser la loop — _dm_backup_to_owner avale ses erreurs).
+            try:
+                await _dm_backup_to_owner(result.get("file"), result.get("size_bytes", 0))
+            except Exception as ex:
+                print(f"[backup_lite] DM owner wrapper échec (non bloquant) : {ex}")
     except Exception as ex:
         print(f"[backup_daily_task] {ex}")
 
