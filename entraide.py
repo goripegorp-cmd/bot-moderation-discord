@@ -65,12 +65,24 @@ MAX_TEMP_VOICE_PER_GUILD = 10
 # si _add_coins est injecté. Volontairement petite (rétention #1, anti-inflation).
 HELP_REWARD_COINS = 50
 
+# COOLDOWN ENTRE DEUX DEMANDES d'un même utilisateur (anti-abus, anti-génération
+# multiple de salons). Même APRÈS avoir résolu/expiré sa demande, un user ne peut
+# pas en re-créer une avant ce délai (minutes). Empêche le spam de demandes qui
+# génère plein de vocaux. Vérifié DB-backed dans create_request (survit au reboot).
+REQUEST_COOLDOWN_MIN = 10
+
+# Plafond DUR du nombre de demandes OUVERTES simultanées par GUILDE (garde-fou
+# anti-flood global ; complète le « 1 demande open / user »). 0 = pas de cap.
+MAX_OPEN_REQUESTS_PER_GUILD = 30
+
 # Codes de retour de create_request (anti-spam) — l'appelant (bot.py) les traduit
 # en messages publics dans le salon (jamais en MP).
 CREATE_OK = "ok"
 CREATE_DUPLICATE = "duplicate"     # l'utilisateur a déjà une demande ouverte
 CREATE_UNKNOWN_GAME = "unknown_game"
 CREATE_DISABLED = "disabled"       # module non configuré / DB absente
+CREATE_COOLDOWN = "cooldown"       # l'utilisateur a créé une demande trop récemment
+CREATE_GUILD_FULL = "guild_full"   # trop de demandes ouvertes sur la guilde
 
 
 # ─── Cache mémoire du cooldown de ping (fail-open, non persisté) ───
@@ -359,11 +371,51 @@ def mark_helper_ping(guild_id, game_key) -> None:
 #  CYCLE DE VIE DES DEMANDES (tout FAIL-SAFE)
 # ═══════════════════════════════════════════════════════════════════════════
 
+async def request_cooldown_remaining_sec(guild_id, requester_id) -> int:
+    """Secondes restantes avant que `requester_id` puisse re-créer une demande
+    (anti-abus, DB-backed → survit au reboot). 0 si pas de cooldown actif / OFF.
+    Base : created_at de SA demande la plus récente (tout statut confondu).
+    FAIL-OPEN : 0 (au pire on autorise la création, le cap guilde reste un filet)."""
+    if _get_db is None or REQUEST_COOLDOWN_MIN <= 0:
+        return 0
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT created_at FROM entraide_requests "
+                "WHERE guild_id=? AND requester_id=? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (int(guild_id), int(requester_id)),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row or not row[0]:
+            return 0
+        # created_at est stocké en UTC (CURRENT_TIMESTAMP SQLite) sans tz → on parse
+        # défensivement et on traite comme UTC.
+        try:
+            last = datetime.fromisoformat(str(row[0]).replace("Z", "").strip())
+        except Exception:
+            try:
+                last = datetime.strptime(str(row[0])[:19], "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                return 0
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        elapsed = (datetime.now(timezone.utc) - last).total_seconds()
+        remaining = int(REQUEST_COOLDOWN_MIN * 60 - elapsed)
+        return remaining if remaining > 0 else 0
+    except Exception as ex:
+        print(f"[entraide request_cooldown_remaining_sec] {ex}")
+        return 0
+
+
 async def create_request(guild_id, requester_id, game_key, description) -> tuple:
     """Crée une demande d'aide OUVERTE. Renvoie (code, request_id|None).
 
     - code == CREATE_OK            : demande créée, request_id renseigné.
     - code == CREATE_DUPLICATE     : l'utilisateur a DÉJÀ une demande open (anti-spam).
+    - code == CREATE_COOLDOWN      : l'utilisateur a créé une demande trop récemment
+                                     (request_id porte les secondes restantes).
+    - code == CREATE_GUILD_FULL    : trop de demandes ouvertes sur la guilde (cap dur).
     - code == CREATE_UNKNOWN_GAME  : game_key absent du catalogue.
     - code == CREATE_DISABLED      : module non prêt / erreur DB.
     FAIL-SAFE : ne lève jamais."""
@@ -374,7 +426,15 @@ async def create_request(guild_id, requester_id, game_key, description) -> tuple
         game = await get_game(guild_id, game_key)
         if game is None:
             return (CREATE_UNKNOWN_GAME, None)
-        # Anti-spam : une seule demande OUVERTE par utilisateur à la fois.
+        # Anti-abus 1 : COOLDOWN entre demandes (même après résolution/expiration).
+        # Empêche le spam de demandes qui génère plein de salons vocaux.
+        try:
+            remaining = await request_cooldown_remaining_sec(guild_id, requester_id)
+        except Exception:
+            remaining = 0
+        if remaining > 0:
+            return (CREATE_COOLDOWN, int(remaining))
+        # Anti-abus 2 : une seule demande OUVERTE par utilisateur à la fois.
         async with _get_db() as db:
             async with db.execute(
                 "SELECT id FROM entraide_requests "
@@ -384,6 +444,16 @@ async def create_request(guild_id, requester_id, game_key, description) -> tuple
                 dup = await cur.fetchone()
             if dup is not None:
                 return (CREATE_DUPLICATE, int(dup[0]))
+            # Anti-abus 3 : cap DUR de demandes ouvertes par guilde (filet anti-flood).
+            if MAX_OPEN_REQUESTS_PER_GUILD > 0:
+                async with db.execute(
+                    "SELECT COUNT(*) FROM entraide_requests "
+                    "WHERE guild_id=? AND status='open'",
+                    (int(guild_id),),
+                ) as cur:
+                    crow = await cur.fetchone()
+                if crow and int(crow[0] or 0) >= MAX_OPEN_REQUESTS_PER_GUILD:
+                    return (CREATE_GUILD_FULL, None)
             cur2 = await db.execute(
                 "INSERT INTO entraide_requests "
                 "(guild_id, requester_id, game_key, description, status, created_at) "
@@ -420,7 +490,9 @@ async def get_request(request_id) -> Optional[dict]:
             "requester_id": int(row[2]), "game_key": row[3],
             "description": row[4] or "", "status": row[5] or "open",
             "request_channel_id": int(row[6] or 0), "message_id": int(row[7] or 0),
-            "voice_channel_id": int(row[8] or 0), "helper_id": int(row[9] or 0),
+            # Le sentinelle -1 (réservation de slot vocal en cours) ne doit JAMAIS
+            # être vu comme un vrai salon par l'UI → clamp à 0.
+            "voice_channel_id": max(0, int(row[8] or 0)), "helper_id": int(row[9] or 0),
             "created_at": row[10], "resolved_at": row[11],
         }
     except Exception as ex:
@@ -451,7 +523,7 @@ async def list_open_requests(guild_id, limit=20) -> list:
                 "requester_id": int(row[2]), "game_key": row[3],
                 "description": row[4] or "", "status": row[5] or "open",
                 "request_channel_id": int(row[6] or 0), "message_id": int(row[7] or 0),
-                "voice_channel_id": int(row[8] or 0), "helper_id": int(row[9] or 0),
+                "voice_channel_id": max(0, int(row[8] or 0)), "helper_id": int(row[9] or 0),
                 "created_at": row[10], "resolved_at": row[11],
             })
         return out
@@ -493,7 +565,7 @@ async def list_open_requests_for_game(guild_id, game_key, within_hours=6,
                 "requester_id": int(row[2]), "game_key": row[3],
                 "description": row[4] or "", "status": row[5] or "open",
                 "request_channel_id": int(row[6] or 0), "message_id": int(row[7] or 0),
-                "voice_channel_id": int(row[8] or 0), "helper_id": int(row[9] or 0),
+                "voice_channel_id": max(0, int(row[8] or 0)), "helper_id": int(row[9] or 0),
                 "created_at": row[10], "resolved_at": row[11],
             })
         return out
@@ -599,6 +671,113 @@ async def set_request_voice(request_id, vc_id) -> bool:
         return getattr(dc, "rowcount", 0) == 1
     except Exception as ex:
         print(f"[entraide set_request_voice] {ex}")
+        return False
+
+
+async def claim_request_voice_slot(request_id) -> bool:
+    """RÉSERVE ATOMIQUE du droit de créer LE vocal d'une demande (anti double-salon).
+    Pose un sentinelle voice_channel_id=-1 UNIQUEMENT si la demande n'a pas déjà un
+    vocal (voice_channel_id <= 0). rowcount==1 => CET appel gagne la course et doit
+    créer le vocal ; 0 => un autre clic l'a déjà réservé/créé → ne PAS recréer.
+    L'appelant DOIT ensuite poser le vrai id via set_request_voice(), ou remettre 0
+    via release_request_voice_slot() si la création échoue. FAIL-SAFE : False (au pire
+    on ne crée pas → pas de salon en trop, jamais 2)."""
+    if _get_db is None or not request_id:
+        return False
+    try:
+        async with _get_db() as db:
+            dc = await db.execute(
+                "UPDATE entraide_requests SET voice_channel_id=-1 "
+                "WHERE id=? AND (voice_channel_id IS NULL OR voice_channel_id<=0)",
+                (int(request_id),),
+            )
+            await db.commit()
+        return getattr(dc, "rowcount", 0) == 1
+    except Exception as ex:
+        print(f"[entraide claim_request_voice_slot] {ex}")
+        return False
+
+
+async def release_request_voice_slot(request_id) -> bool:
+    """Libère le sentinelle posé par claim_request_voice_slot (remet voice_channel_id
+    à 0) SI la création du vocal a échoué — uniquement si encore à -1 (ne pas écraser
+    un vrai id posé entre-temps). FAIL-SAFE : False."""
+    if _get_db is None or not request_id:
+        return False
+    try:
+        async with _get_db() as db:
+            dc = await db.execute(
+                "UPDATE entraide_requests SET voice_channel_id=0 "
+                "WHERE id=? AND voice_channel_id=-1",
+                (int(request_id),),
+            )
+            await db.commit()
+        return getattr(dc, "rowcount", 0) == 1
+    except Exception as ex:
+        print(f"[entraide release_request_voice_slot] {ex}")
+        return False
+
+
+async def list_dangling_requests(guild_id, limit=200) -> list:
+    """SURVIE REBOOT : demandes NON ouvertes (resolved/expired) qui portent ENCORE un
+    artefact à nettoyer — un message_id (post non supprimé) OU un voice_channel_id
+    valide (> 0, vocal temp non supprimé). Sert au balayage d'orphelins du cleanup
+    (un reboot en plein milieu ne doit RIEN laisser). -> [dict, …]. FAIL-OPEN : []."""
+    if _get_db is None:
+        return []
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT id, guild_id, requester_id, game_key, description, status, "
+                "request_channel_id, message_id, voice_channel_id, helper_id, "
+                "created_at, resolved_at "
+                "FROM entraide_requests "
+                "WHERE guild_id=? AND status NOT IN ('open') "
+                "AND (message_id > 0 OR voice_channel_id > 0) "
+                "ORDER BY resolved_at DESC LIMIT ?",
+                (int(guild_id), int(limit)),
+            ) as cur:
+                rows = await cur.fetchall()
+        out = []
+        for row in rows:
+            out.append({
+                "id": int(row[0]), "guild_id": int(row[1]),
+                "requester_id": int(row[2]), "game_key": row[3],
+                "description": row[4] or "", "status": row[5] or "",
+                "request_channel_id": int(row[6] or 0), "message_id": int(row[7] or 0),
+                "voice_channel_id": max(0, int(row[8] or 0)), "helper_id": int(row[9] or 0),
+                "created_at": row[10], "resolved_at": row[11],
+            })
+        return out
+    except Exception as ex:
+        print(f"[entraide list_dangling_requests] {ex}")
+        return []
+
+
+async def clear_request_artifacts(request_id, *, clear_message=False,
+                                   clear_voice=False) -> bool:
+    """Marque le(s) artefact(s) d'une demande comme NETTOYÉ(s) (message_id et/ou
+    voice_channel_id remis à 0) une fois la suppression réelle effectuée côté bot.py.
+    Évite que le balayage d'orphelins retente indéfiniment. FAIL-SAFE : False."""
+    if _get_db is None or not request_id:
+        return False
+    if not clear_message and not clear_voice:
+        return False
+    try:
+        sets = []
+        if clear_message:
+            sets.append("message_id=0")
+        if clear_voice:
+            sets.append("voice_channel_id=0")
+        async with _get_db() as db:
+            dc = await db.execute(
+                f"UPDATE entraide_requests SET {', '.join(sets)} WHERE id=?",
+                (int(request_id),),
+            )
+            await db.commit()
+        return getattr(dc, "rowcount", 0) == 1
+    except Exception as ex:
+        print(f"[entraide clear_request_artifacts] {ex}")
         return False
 
 
@@ -740,12 +919,17 @@ __all__ = [
     "mark_helper_ping",
     # cycle de vie
     "create_request",
+    "request_cooldown_remaining_sec",
     "get_request",
     "list_open_requests",
     "list_open_requests_for_game",
+    "list_dangling_requests",
     "claim_request",
     "resolve_request",
     "set_request_voice",
+    "claim_request_voice_slot",
+    "release_request_voice_slot",
+    "clear_request_artifacts",
     "set_request_message",
     "expire_open_requests",
     # réputation
@@ -758,8 +942,12 @@ __all__ = [
     "HELPER_PING_COOLDOWN_SEC",
     "MAX_TEMP_VOICE_PER_GUILD",
     "HELP_REWARD_COINS",
+    "REQUEST_COOLDOWN_MIN",
+    "MAX_OPEN_REQUESTS_PER_GUILD",
     "CREATE_OK",
     "CREATE_DUPLICATE",
     "CREATE_UNKNOWN_GAME",
     "CREATE_DISABLED",
+    "CREATE_COOLDOWN",
+    "CREATE_GUILD_FULL",
 ]
