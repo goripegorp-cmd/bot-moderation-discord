@@ -682,13 +682,18 @@ async def _is_major_event_active(guild_id: int) -> bool:
         return False
 
 
-async def spawn_mob(guild: discord.Guild, *, hp_factor: float = 1.0) -> bool:
+async def spawn_mob(guild: discord.Guild, *, hp_factor: float = 1.0,
+                    channel: "discord.TextChannel | None" = None) -> bool:
     """Spawn un mob aléatoire dans l'arène. Retourne True si succès.
 
     `hp_factor` (défaut 1.0 = comportement actuel inchangé) : facteur BORNÉ
     appliqué aux PV du mob, utilisé par l'invasion mensuelle pour adapter la
     difficulté à la foule (difficulté dynamique, FAIL-OPEN). Ne touche PAS la
-    logique de dégâts des joueurs."""
+    logique de dégâts des joueurs.
+
+    `channel` (défaut None) : FIX salons — salon CIBLE imposé. L'Invasion le
+    fournit (son salon dédié « 🚨-invasion ») pour que les mobs élite y soient
+    REGROUPÉS avec l'annonce, au lieu de créer chacun leur propre « 🐗-mob »."""
     if not guild or _get_db is None or _bot is None:
         return False
     # Phase 191 : interrupteur Hub Événements — Chasse aux mobs
@@ -762,12 +767,13 @@ async def spawn_mob(guild: discord.Guild, *, hp_factor: float = 1.0) -> bool:
         pass  # FAIL-OPEN : PV de base
     elite_prefix = "👑 " if is_elite else ""
 
-    # Phase 228 : CHAQUE mob a SON salon dédié (catégorie « ⚔️ {mob} » + texte +
-    # 1 vocal), créé maintenant et SUPPRIMÉ à sa mort/despawn → fini l'arène
-    # partagée qui restait vide à l'infini sans panneau. Le panneau d'attaque est
-    # dans CE salon. Fallback : arène partagée si la création dédiée échoue.
-    ch = None
-    if _arena_create_fn is not None:
+    # FIX salons : CHAQUE mob a SON salon TEXTE dédié « 🐗-mob » (nom spécifique),
+    # créé maintenant et SUPPRIMÉ à sa mort/despawn. Le panneau d'attaque y vit.
+    # EXCEPTION : si un salon CIBLE est imposé (Invasion → « 🚨-invasion »), on
+    # regroupe le mob DEDANS avec l'annonce. Fallback : arène partagée si la
+    # création dédiée échoue.
+    ch = channel  # invasion : salon imposé (regroupement)
+    if ch is None and _arena_create_fn is not None:
         try:
             ch = await _arena_create_fn(
                 guild, 'mob', f"{elite_prefix}{mob_def['name']}", voice_count=1)
