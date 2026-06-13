@@ -38,6 +38,18 @@ from discord.ext import tasks
 RETENTION_COUNT = 7   # Garde 7 derniers backups (1 semaine)
 BACKUP_INTERVAL_HOURS = 24
 
+# B2 : alerte intégrité. _do_backup_sync() tourne dans un thread (sqlite3 sync) →
+# il ne peut pas await un DM. On dépose donc le message ici ; la task async le
+# flushe via le canal owner déjà câblé dans backup_lite (super-owner uniquement,
+# jamais un membre). Fail-safe : si rien n'est dispo, on log et on n'insiste pas.
+_pending_integrity_alert: str | None = None
+
+
+def _alert_owner_integrity(integ_msg: str) -> None:
+    """(sync, thread) Mémorise une alerte intégrité à flusher par la task async."""
+    global _pending_integrity_alert
+    _pending_integrity_alert = integ_msg
+
 
 def _resolve_db_path() -> Path:
     """Retourne le chemin de la DB du bot (même logique que bot.py)."""
@@ -84,6 +96,22 @@ def _do_backup_sync() -> str | None:
         # Connexion source (read-only safe via backup API)
         src_conn = sqlite3.connect(str(src))
         try:
+            # ─── B2 : intégrité AVANT dump ───────────────────────────────────
+            # quick_check sur la source : si la DB est corrompue, on N'ÉCRIT PAS
+            # un .bak empoisonné — on aborte et on retourne None (l'historique de
+            # .bak sains précédents reste intact). Fail-safe : toute erreur du
+            # check est traitée comme corruption.
+            try:
+                cur = src_conn.execute("PRAGMA quick_check")
+                row = cur.fetchone()
+                integ = str(row[0]) if row else "no result"
+            except Exception as ex:
+                integ = f"quick_check error: {ex}"
+            if integ.lower() != "ok":
+                print(f"🛑 [db_backup] integrity KO ({integ}) — backup ABANDONNÉ")
+                _alert_owner_integrity(integ)
+                return None
+
             dst_conn = sqlite3.connect(str(tmp_path))
             try:
                 # Backup API : copie cohérente même si writes en cours
@@ -156,6 +184,21 @@ async def backup_task():
         path = await asyncio.to_thread(_do_backup_sync)
         if path:
             await asyncio.to_thread(_rotate_old_backups_sync)
+        # B2 : flush une éventuelle alerte intégrité posée par le thread sync.
+        # Fail-safe total : ne casse jamais la loop.
+        global _pending_integrity_alert
+        if _pending_integrity_alert:
+            msg = _pending_integrity_alert
+            _pending_integrity_alert = None
+            try:
+                import backup_lite
+                await backup_lite._alert_owner_backup_issue(
+                    "🛑 **Backup .db ANNULÉ — base corrompue**",
+                    f"`PRAGMA quick_check` a échoué (`{msg}`). Aucun `.bak` n'a "
+                    f"été écrit ; les backups sains précédents sont intacts.",
+                )
+            except Exception as ex2:
+                print(f"[db_backup task] alerte intégrité non envoyée : {ex2}")
     except Exception as ex:
         print(f"[db_backup task] {ex}")
 

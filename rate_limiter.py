@@ -148,23 +148,10 @@ async def check_and_record(
     if ok:
         return True
 
-    # On vient de locker. DM amical 1×.
-    sent_set = _dm_sent.setdefault(user_id, set())
-    if action not in sent_set:
-        sent_set.add(action)
-        try:
-            if user_member is not None and not user_member.bot:
-                await user_member.send(
-                    f"⚠️ **Ralentis un peu, {user_member.display_name} !**\n\n"
-                    f"Tu as cliqué/utilisé trop de **{action}s** en peu de "
-                    f"temps. Pour éviter les bugs Discord, je te mets en "
-                    f"pause **{LOCK_DURATION_SEC // 60} minutes**.\n\n"
-                    f"_Si ce n'est pas toi (compte piraté ?), change ton "
-                    f"mot de passe Discord immédiatement._"
-                )
-        except Exception:
-            pass
-
+    # RÈGLE OWNER — ZÉRO MP MEMBRE : on NE DM PLUS le membre rate-limité (le refus
+    # éphémère côté call site suffit comme feedback). On garde juste le bookkeeping
+    # `_dm_sent` inoffensif pour ne pas changer la structure. `user_member` est ignoré.
+    _dm_sent.setdefault(user_id, set()).add(action)
     return False
 
 
