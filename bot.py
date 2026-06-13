@@ -3519,6 +3519,7 @@ async def cfg(gid):
         'entraide_enabled': True,          # interrupteur maître (False = feature OFF même si salon réglé)
         'entraide_request_channel': 0,     # salon texte des demandes d'aide (0 = OFF)
         'entraide_voice_category': 0,      # catégorie où créer les vocaux temp (0 = pas de vocal)
+        'entraide_autodetect_enabled': True,  # détecte les appels à l'aide en chat (langage naturel) → nudge
     }
     for k, v in defaults.items():
         if k not in data: data[k] = v
@@ -44805,7 +44806,10 @@ async def on_ready():
                 entraide_cleanup_task.start()
             # Boutons persistants du POST de demande (re-captés au reboot).
             bot.add_dynamic_items(EntraideClaimButton, EntraideResolveButton)
-            print("[Entraide] entraide OK (multi-gaming : demandes + vocal temp + rôle aidant)")
+            # Bouton persistant du NUDGE auto (détection d'appel à l'aide en chat) :
+            # « 🆘 Trouver de l'aide » → ouvre le flux besoin-d'aide pré-rempli.
+            bot.add_dynamic_items(EntraideDetectButton)
+            print("[Entraide] entraide OK (multi-gaming : demandes + vocal temp + rôle aidant + détection chat)")
         except Exception as ex:
             print(f"[on_ready entraide] {ex}")
 
@@ -48323,6 +48327,16 @@ async def on_message(msg):
         await _check_auto_slow_mode(msg)
     except Exception as ex:
         print(f"[_check_auto_slow_mode] {ex}")
+
+    # ═══════════════ ENTRAIDE : détection d'appel à l'aide en chat ═══════════════
+    # Détecte « besoin d'aide / help me / quelqu'un peut m'aider… » en langage naturel
+    # et NUDGE l'auteur vers l'entraide (zéro MP, zéro ping aidant, auto-supprimé 5 min).
+    # Backgroundé (create_task) : CHEAP-FIRST en mémoire, ne bloque jamais on_message ;
+    # toutes les gardes (config/chatty/cooldown/DB) vivent dans le hook (fail-safe).
+    try:
+        asyncio.create_task(_entraide_autodetect_hook(msg))
+    except Exception as ex:
+        print(f"[on_message entraide_autodetect] {ex}")
 
     # ═══════════════ Phase 43 : Tag Royale chain progression ═══════════════
     try:
@@ -64556,6 +64570,7 @@ class EntraidePanelV2(LayoutView):
     async def render_to(self, interaction, *, edit: bool = True):
         c = await cfg(self.g.id)
         on = bool(c.get('entraide_enabled', True))
+        autodetect = bool(c.get('entraide_autodetect_enabled', True))
         req_ch = self.g.get_channel(int(c.get('entraide_request_channel', 0) or 0))
         voice_cat = self.g.get_channel(int(c.get('entraide_voice_category', 0) or 0))
         try:
@@ -64571,6 +64586,15 @@ class EntraidePanelV2(LayoutView):
             custom_id="entrcfg_tog",
         )
         b_tog.callback = self._toggle
+
+        # Détection auto des appels à l'aide en chat (n'a de sens que si l'entraide est ON).
+        b_detect = Button(
+            label=("🔎 Détection auto : ON" if autodetect else "🔎 Détection auto : OFF"),
+            style=(discord.ButtonStyle.success if autodetect else discord.ButtonStyle.secondary),
+            disabled=(not on),
+            custom_id="entrcfg_autodetect",
+        )
+        b_detect.callback = self._toggle_autodetect
 
         req_select = discord.ui.ChannelSelect(
             placeholder=f"📨 Salon des demandes : {(req_ch.name if req_ch else 'aucun')}",
@@ -64613,15 +64637,17 @@ class EntraidePanelV2(LayoutView):
             v2_divider(),
             v2_body(
                 f"**État :** {'🟢 activé' if on else '⚪ désactivé'}\n"
+                f"**🔎 Détection auto en chat :** {'🟢 activée' if (on and autodetect) else '⚪ désactivée'}\n"
                 f"**📨 Salon des demandes :** {req_ch.mention if req_ch else '_aucun (feature OFF)_'}\n"
                 f"**🔊 Catégorie vocale :** {voice_cat.name if voice_cat else '_aucune (pas de vocal temp)_'}"
             ),
+            v2_subtitle("La détection auto repère « besoin d'aide / help me… » en chat et propose l'entraide (sans MP, sans ping)"),
             v2_divider(),
             v2_body(f"**🎮 Catalogue de jeux ({len(games)}) :**\n{listing}"),
             v2_divider(),
             discord.ui.ActionRow(req_select),
             discord.ui.ActionRow(cat_select),
-            discord.ui.ActionRow(b_tog),
+            discord.ui.ActionRow(b_tog, b_detect),
             discord.ui.ActionRow(b_add, b_del, b_back),
         ]
         self.add_item(v2_container(*items, color=0xE67E22))
@@ -64638,6 +64664,15 @@ class EntraidePanelV2(LayoutView):
             await self.render_to(i, edit=True)
         except Exception as ex:
             print(f"[EntraidePanelV2 _toggle] {ex}")
+
+    async def _toggle_autodetect(self, i):
+        try:
+            c = await cfg(self.g.id)
+            await db_set(self.g.id, 'entraide_autodetect_enabled',
+                         not bool(c.get('entraide_autodetect_enabled', True)))
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[EntraidePanelV2 _toggle_autodetect] {ex}")
 
     async def _set_channel(self, i, key):
         try:
@@ -64803,6 +64838,185 @@ class _EntraideRemoveGamePanelV2(LayoutView):
             await EntraidePanelV2(self.u, self.g).render_to(i, edit=True)
         except Exception as ex:
             print(f"[_EntraideRemoveGamePanelV2 _cb_back] {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ENTRAIDE — DÉTECTION DES APPELS À L'AIDE EN LANGAGE NATUREL (cheap, mémoire pur)
+#
+#  Quelqu'un qui écrit « je galère sur X, quelqu'un peut m'aider ? » n'est PAS capté
+#  par le hub bouton. Ce moteur DÉTECTE ces appels (mots-clés + tournures, FR & EN)
+#  pour AIGUILLER vers l'entraide via un nudge discret (cf. _entraide_maybe_nudge).
+#
+#  PERFORMANCE : tourne à CHAQUE message → 1er passage 100% EN MÉMOIRE (lowercase +
+#  motifs PRÉCOMPILÉS une seule fois ci-dessous). AUCUNE requête DB ici. Renvoie
+#  False par défaut (conservateur, anti-faux-positifs).
+#
+#  Signaux FORTS  (déclenchent SEULS)  : « besoin d'aide », « quelqu'un peut m'aider »,
+#     « à l'aide », « help me », « i need help », « can someone help », « need help with »…
+#  Signaux FAIBLES (déclenchent COMBINÉS) : « comment », « how do i », « je suis bloqué »,
+#     « je galère », « stuck », « ? »… → il faut ≥2 signaux faibles, OU 1 faible + un jeu
+#     du catalogue cité, OU 1 faible + message assez long.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Longueur mini d'un message pour être candidat (anti messages ultra-courts/liens seuls).
+_ENTR_DETECT_MIN_LEN = 12
+# Longueur « suffisante » qui, combinée à UN signal faible, suffit à déclencher.
+_ENTR_DETECT_LONG_LEN = 60
+# Cooldown mémoire par (guild_id, user_id) entre deux nudges (anti-spam, non intrusif).
+_ENTR_DETECT_COOLDOWN_SEC = 1800  # 30 min
+# Dict borné mémoire { (guild_id, user_id): datetime dernier nudge }. Fail-open.
+_entr_detect_cooldown: dict = {}
+_ENTR_DETECT_COOLDOWN_CAP = 5000  # cap dur (éviction la plus ancienne au-delà)
+
+# Phrases FORTES (déclenchent seules) — recherche de sous-chaîne sur le texte lowercé
+# ET « déaccentué » (les apostrophes typographiques/espaces sont normalisés en amont).
+_ENTR_STRONG_NEEDLES = (
+    # FR
+    "besoin d aide", "besoin d'aide", "besoin daide",
+    "quelqu un peut m aider", "quelqu'un peut m'aider", "quelqu un peut maider",
+    "quelqu un pourrait m aider", "qq1 peut m aider", "qqn peut m aider",
+    "pouvez vous m aider", "pouvez vous maider", "tu peux m aider", "vous pouvez m aider",
+    "a l aide", "a l'aide", "au secours", "j ai besoin d aide", "jai besoin daide",
+    "qui peut m aider", "qui peut maider",
+    # EN
+    "help me", "i need help", "need help with", "can someone help",
+    "can anyone help", "could someone help", "could anyone help",
+    "anyone able to help", "someone help me", "need some help", "need assistance",
+    "pls help", "plz help", "please help",
+)
+
+# Signaux FAIBLES (déclenchent COMBINÉS uniquement). Mot/locution → motif.
+_ENTR_WEAK_NEEDLES = (
+    # FR
+    "comment je", "comment faire", "comment on", "comment je fais",
+    "je suis bloque", "je suis bloquee", "je bloque", "je galere", "je galère",
+    "je comprends pas", "je comprend pas", "je sais pas comment", "je n arrive pas",
+    "j arrive pas", "arrive pas a", "une aide", "un coup de main", "coup de main",
+    "des conseils", "un conseil",
+    # EN
+    "how do i", "how to", "how can i", "i can t", "i cant", "i'm stuck",
+    "im stuck", "stuck on", "stuck at", "any tips", "any advice", "any help",
+    "what do i do",
+)
+
+
+def _entr_normalize(text: str) -> str:
+    """Normalise un message pour la détection : lowercase + apostrophes/espaces
+    unifiés. Pas de regex coûteuse ici (appelé à chaque message). FAIL-OPEN."""
+    try:
+        s = (text or "").lower()
+        # Unifie apostrophes typographiques et divers espaces → ' ' / espace simple.
+        s = (s.replace("’", "'").replace("ʼ", "'").replace("`", "'")
+             .replace(" ", " "))
+        # « d'aide » → on garde aussi la version « d aide » : on remplace l'apostrophe
+        # par un espace pour que les needles « ... d aide » matchent les deux écritures.
+        s = s.replace("'", " ")
+        # Compacte les espaces multiples (cheap).
+        return " ".join(s.split())
+    except Exception:
+        return (text or "").lower()
+
+
+def _entr_detect_game(content_norm: str, guild_games_labels) -> Optional[str]:
+    """Cherche un jeu du catalogue cité dans le message (par label/alias). Reçoit la
+    liste pré-extraite [(game_key, label_norm), …] pour rester cheap. Renvoie le
+    game_key du 1er jeu trouvé, ou None. On ignore les labels trop courts (< 3) pour
+    éviter les faux positifs (« GO », « LoL » resteraient ambigus → on exige ≥3 car.)."""
+    try:
+        if not guild_games_labels:
+            return None
+        for gk, label_norm in guild_games_labels:
+            if not label_norm or len(label_norm) < 3:
+                continue
+            # Match « mot entier » léger : entouré d'espaces/bordures (cheap, pas de regex).
+            if label_norm in content_norm:
+                # Vérif bordure rudimentaire pour éviter les sous-chaînes accidentelles.
+                idx = content_norm.find(label_norm)
+                before = content_norm[idx - 1] if idx > 0 else " "
+                after_i = idx + len(label_norm)
+                after = content_norm[after_i] if after_i < len(content_norm) else " "
+                if not before.isalnum() and not after.isalnum():
+                    return gk
+        return None
+    except Exception:
+        return None
+
+
+# Cache mémoire des labels de jeux par guilde (pour la détection cheap, TTL court).
+# { guild_id: (timestamp, [(game_key, label_normalisé), …]) }. Évite un hit DB par message.
+_entr_games_labels_cache: dict = {}
+_ENTR_GAMES_LABELS_TTL = 300  # 5 min
+
+
+async def _entr_get_games_labels(guild_id: int):
+    """Renvoie [(game_key, label_normalisé), …] pour la détection de jeu, mis en cache
+    5 min (la détection tourne à chaque message → on ne refait pas list_games à chaque
+    fois). FAIL-OPEN : [] sur erreur. Le catalogue change rarement → TTL court suffit."""
+    try:
+        now_ts = datetime.now(timezone.utc).timestamp()
+    except Exception:
+        now_ts = 0
+    cached = _entr_games_labels_cache.get(guild_id)
+    if cached and now_ts and (now_ts - cached[0] < _ENTR_GAMES_LABELS_TTL):
+        return cached[1]
+    try:
+        games = await entraide_module.list_games(guild_id)
+        labels = []
+        for g in (games or []):
+            gk = g.get('game_key')
+            lab = _entr_normalize(g.get('label') or g.get('game_key') or '')
+            if gk and lab:
+                labels.append((gk, lab))
+        _entr_games_labels_cache[guild_id] = (now_ts, labels)
+        return labels
+    except Exception:
+        return []
+
+
+def _entraide_detect_help(content_lower: str, guild_games_labels=None):
+    """Moteur de détection d'appel à l'aide (cheap, mémoire pur). Renvoie un tuple
+    (match: bool, detected_game_key: str|None, confidence: float). CONSERVATEUR :
+    renvoie (False, None, 0.0) par défaut.
+
+    `content_lower` est le contenu DÉJÀ lowercé (on le re-normalise localement).
+    `guild_games_labels` = liste [(game_key, label_normalisé), …] pour la détection
+    de jeu (passée par l'appelant, qui la met en cache). Aucune DB ici."""
+    try:
+        if not content_lower:
+            return (False, None, 0.0)
+        norm = _entr_normalize(content_lower)
+        if len(norm) < _ENTR_DETECT_MIN_LEN:
+            return (False, None, 0.0)
+
+        detected_game = _entr_detect_game(norm, guild_games_labels)
+
+        # 1) Signal FORT → déclenche seul.
+        for needle in _ENTR_STRONG_NEEDLES:
+            if needle in norm:
+                return (True, detected_game, 0.95)
+
+        # 2) Signaux FAIBLES : compter (max 1 par needle, on s'arrête à 2).
+        weak_hits = 0
+        for needle in _ENTR_WEAK_NEEDLES:
+            if needle in norm:
+                weak_hits += 1
+                if weak_hits >= 2:
+                    break
+        has_question = "?" in norm  # le « ? » nu compte comme micro-signal faible
+
+        # 2a) ≥2 signaux faibles → déclenche.
+        if weak_hits >= 2:
+            return (True, detected_game, 0.7)
+        # 2b) 1 signal faible + jeu du catalogue cité → déclenche (intention claire).
+        if weak_hits >= 1 and detected_game:
+            return (True, detected_game, 0.7)
+        # 2c) 1 signal faible + (« ? » OU message long) → déclenche (tournure de question).
+        if weak_hits >= 1 and (has_question or len(norm) >= _ENTR_DETECT_LONG_LEN):
+            return (True, detected_game, 0.6)
+
+        return (False, detected_game, 0.0)
+    except Exception:
+        return (False, None, 0.0)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -65730,6 +65944,320 @@ async def _open_entraide_panel(i: discord.Interaction):
                 await i.response.send_message("❌ Petit souci, réessaie.", ephemeral=True)
             else:
                 await i.followup.send("❌ Petit souci, réessaie.", ephemeral=True)
+        except Exception:
+            pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ENTRAIDE — NUDGE auto sur appel à l'aide détecté en chat (non intrusif)
+#
+#  Quand _entraide_detect_help capte un appel à l'aide FORT dans un salon chatty,
+#  on poste un petit nudge EN REPLY au message de l'auteur (jamais de MP, zéro ping
+#  aidant/@everyone — au plus l'auteur). Le nudge s'AUTO-SUPPRIME ~5 min. Son bouton
+#  « 🆘 Trouver de l'aide » (DynamicItem entr_detect:<uid>) ouvre le flux « J'ai besoin
+#  d'aide » EXISTANT en éphémère, PRÉ-REMPLI avec le jeu détecté si on en a un.
+#
+#  Anti-spam : cooldown mémoire 30 min/utilisateur + on ne nudge JAMAIS si l'auteur a
+#  déjà une demande open. FAIL-SAFE : si l'entraide est OFF / autodetect OFF → rien.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Jeu détecté mémorisé par message-de-nudge (pour pré-remplir au clic). Borné.
+_entr_detect_game_by_msg: dict = {}  # nudge_message_id -> game_key
+_ENTR_DETECT_GAME_MAP_CAP = 2000
+
+NUDGE_AUTODELETE_SEC = 300  # ~5 min
+
+
+def _entr_detect_cooldown_ok(guild_id: int, user_id: int) -> bool:
+    """True si on PEUT nudger cet utilisateur (cooldown mémoire passé). Marque le
+    cooldown au passage (one-shot). Dict borné (éviction la plus ancienne). FAIL-OPEN."""
+    try:
+        key = (int(guild_id), int(user_id))
+        now = datetime.now(timezone.utc)
+        last = _entr_detect_cooldown.get(key)
+        if last is not None and (now - last).total_seconds() < _ENTR_DETECT_COOLDOWN_SEC:
+            return False
+        # Éviction si le dict explose (anti-fuite mémoire).
+        if len(_entr_detect_cooldown) >= _ENTR_DETECT_COOLDOWN_CAP:
+            try:
+                oldest = min(_entr_detect_cooldown, key=_entr_detect_cooldown.get)
+                _entr_detect_cooldown.pop(oldest, None)
+            except Exception:
+                _entr_detect_cooldown.clear()
+        _entr_detect_cooldown[key] = now
+        return True
+    except Exception:
+        return True  # fail-open : au pire un nudge, jamais une erreur
+
+
+def _entr_build_nudge_view(author_id: int):
+    """LayoutView du nudge : titre bilingue + bouton « 🆘 Trouver de l'aide ».
+    Le bouton est un Button NU dont le custom_id matche le DynamicItem
+    EntraideDetectButton (entr_detect:<uid>) → re-capté même après reboot."""
+    items = [
+        v2_title("👋 Tu cherches de l'aide ? · Looking for help?"),
+        v2_body(
+            "🇫🇷 On a un système d'**entraide** : clique pour décrire ton souci, "
+            "un joueur pourra t'aider (vocal possible).\n"
+            "🇬🇧 _We have a **help** system — click to describe your issue and "
+            "get matched with a helper._"
+        ),
+        discord.ui.ActionRow(
+            Button(label="🆘 Trouver de l'aide / Find help",
+                   style=discord.ButtonStyle.primary,
+                   custom_id=f"entr_detect:{int(author_id)}"),
+        ),
+    ]
+
+    class _EntraideNudgeLayout(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=None)
+            self.add_item(v2_container(*items, color=0xE67E22))
+
+    return _EntraideNudgeLayout()
+
+
+async def _entraide_autodetect_hook(msg):
+    """Point d'entrée appelé depuis on_message (backgroundé). Fait TOUTES les gardes
+    cheap AVANT d'engager quoi que ce soit, dans l'ordre du moins cher au plus cher :
+
+      1. Gardes mémoire instantanées : guild présent, pas un bot, contenu non vide/pas
+         une commande (préfixes), longueur mini.
+      2. Détection EN MÉMOIRE (motifs précompilés) — si False → STOP, zéro DB.
+      3. Seulement si match : config (cfg, cache court) entraide actif + autodetect ON.
+      4. Salon chatty + PAS le salon des demandes d'entraide lui-même.
+      5. _entraide_maybe_nudge (cooldown mémoire puis DB demande-open puis post).
+
+    FAIL-SAFE intégral : avale tout, ne casse JAMAIS on_message."""
+    try:
+        guild = getattr(msg, 'guild', None)
+        author = getattr(msg, 'author', None)
+        if guild is None or author is None or getattr(author, 'bot', False):
+            return
+        content = msg.content or ""
+        if not content:
+            return
+        # Ignore les commandes (préfixes courants) et les messages très courts.
+        stripped = content.lstrip()
+        if stripped[:1] in ('!', '/', '.', '?', '-', '+', '$', '>') and len(stripped) < 4:
+            return
+        if stripped.startswith(('!', '/', '.', '$', '>', '+', '-')):
+            # Préfixe de commande probable → on ignore (sauf si phrase longue contenant
+            # un appel d'aide ; on reste conservateur et on laisse passer les vraies
+            # phrases qui commencent par un mot, pas par un préfixe).
+            return
+        content_lower = content.lower()
+        if len(content_lower.strip()) < _ENTR_DETECT_MIN_LEN:
+            return
+
+        # 2) Détection EN MÉMOIRE d'abord (sans jeux) : si rien ne matche même les
+        #    signaux forts/faibles, on sort SANS toucher au catalogue ni à la config.
+        quick_match, _gk0, _conf0 = _entraide_detect_help(content_lower, None)
+        if not quick_match:
+            return
+
+        # 3) Config (cfg est caché) : entraide actif + autodetect ON ?
+        try:
+            c = await cfg(guild.id)
+        except Exception:
+            return
+        if not bool(c.get('entraide_enabled', True)):
+            return
+        if not bool(c.get('entraide_autodetect_enabled', True)):
+            return
+        req_ch_id = int(c.get('entraide_request_channel', 0) or 0)
+        if not req_ch_id:
+            return  # entraide non reliée à un salon → feature OFF
+        # 4) Pas dans le salon des demandes lui-même.
+        if msg.channel.id == req_ch_id:
+            return
+        # Salon « chatty » uniquement (refuse tickets/annonces/staff/RO…).
+        try:
+            if not await _is_chatty_channel(msg.channel):
+                return
+        except Exception:
+            return
+
+        # 5) Re-détection AVEC les labels de jeux (cache 5 min) pour pré-remplir, puis nudge.
+        labels = await _entr_get_games_labels(guild.id)
+        await _entraide_maybe_nudge(msg, content_lower, labels)
+    except Exception as ex:
+        print(f"[_entraide_autodetect_hook] {ex}")
+
+
+async def _entraide_maybe_nudge(msg, content_lower: str, guild_games_labels):
+    """Orchestre le nudge APRÈS un match du moteur. À n'appeler QUE quand l'entraide
+    est active + autodetect ON + salon chatty + hors salon des demandes (gardes faites
+    par l'appelant). Ordre CHEAP-FIRST déjà respecté : la détection (mémoire) a matché,
+    on fait seulement ici les vérifs un peu plus chères (cooldown mémoire, puis DB).
+    FAIL-SAFE : avale tout, ne casse jamais on_message."""
+    try:
+        guild = msg.guild
+        author = msg.author
+        if guild is None or author is None:
+            return
+        match, game_key, _conf = _entraide_detect_help(content_lower, guild_games_labels)
+        if not match:
+            return
+        # Cooldown mémoire (cheap) AVANT toute DB — ne re-nudge pas la même personne.
+        if not _entr_detect_cooldown_ok(guild.id, author.id):
+            return
+        # DB (seulement maintenant) : l'auteur a-t-il déjà une demande open ? Si oui, on
+        # ne nudge pas (il est déjà dans le flux). list_open_requests est borné + indexé.
+        try:
+            mine = await entraide_module.list_open_requests(guild.id, limit=100)
+            if any(int(r.get('requester_id', 0)) == author.id for r in (mine or [])):
+                return
+        except Exception:
+            pass  # fail-open : en cas d'erreur DB on continue (le bouton re-vérifie)
+        # Poste le nudge EN REPLY (jamais de MP). allowed_mentions limité à l'auteur :
+        # le reply mentionne l'auteur visuellement sans pinger rôles/@everyone.
+        view = _entr_build_nudge_view(author.id)
+        try:
+            nudge = await msg.reply(
+                view=view,
+                mention_author=False,
+                allowed_mentions=discord.AllowedMentions(
+                    everyone=False, roles=False, users=False,
+                ),
+            )
+        except discord.HTTPException:
+            return
+        except Exception as ex:
+            print(f"[_entraide_maybe_nudge reply] {ex}")
+            return
+        # Mémorise le jeu détecté pour pré-remplir au clic (borné).
+        try:
+            if game_key:
+                if len(_entr_detect_game_by_msg) >= _ENTR_DETECT_GAME_MAP_CAP:
+                    _entr_detect_game_by_msg.clear()
+                _entr_detect_game_by_msg[int(nudge.id)] = game_key
+        except Exception:
+            pass
+        # Auto-suppression ~5 min (le nudge ne doit pas encombrer le salon).
+        try:
+            await _register_for_cleanup(nudge, NUDGE_AUTODELETE_SEC, reason='entraide_nudge')
+        except Exception:
+            pass
+    except Exception as ex:
+        print(f"[_entraide_maybe_nudge] {ex}")
+
+
+class EntraideDetectButton(discord.ui.DynamicItem[Button],
+                           template=r"entr_detect:(?P<uid>\d+)"):
+    """« 🆘 Trouver de l'aide » du nudge auto. Vérifie que le cliqueur EST l'auteur,
+    puis OUVRE le flux « J'ai besoin d'aide » EN ÉPHÉMÈRE, pré-rempli avec le jeu
+    détecté si on l'a mémorisé. Persistant (re-capté au reboot). defer-first sauf
+    quand on ouvre un modal (qui doit être la 1re réponse de l'interaction)."""
+    def __init__(self, uid: int):
+        super().__init__(Button(label="🆘 Trouver de l'aide / Find help",
+                                style=discord.ButtonStyle.primary,
+                                custom_id=f"entr_detect:{int(uid)}"))
+        self.uid = int(uid)
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["uid"]))
+
+    async def callback(self, i: discord.Interaction):
+        await _entraide_on_detect_click(i, self.uid)
+
+
+async def _entraide_on_detect_click(i: discord.Interaction, author_id: int):
+    """Callback du bouton de nudge. Réservé à l'auteur du message d'origine. Ouvre
+    le flux besoin-d'aide existant (modal direct si jeu détecté + valide, sinon le
+    Select de jeux normal). FAIL-SAFE / anti Échec interaction."""
+    try:
+        # Cette aide est nominative : seul l'auteur détecté peut l'utiliser.
+        if i.user.id != int(author_id):
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(
+                        f"ℹ️ Cette aide est pour <@{int(author_id)}>. "
+                        "Si tu cherches aussi de l'aide, écris-le et le bot te proposera l'entraide. 🙂",
+                        ephemeral=True,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+            except Exception:
+                pass
+            return
+
+        if i.guild is None:
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message("❌ Serveur uniquement.", ephemeral=True)
+            except Exception:
+                pass
+            return
+
+        # Feature configurée ? (re-check, l'owner a pu désactiver depuis le post)
+        if await _entraide_request_channel(i.guild) is None:
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(
+                        "ℹ️ L'entraide n'est pas configurée pour l'instant.", ephemeral=True)
+            except Exception:
+                pass
+            return
+
+        games = await entraide_module.list_games(i.guild.id)
+        if not games:
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(
+                        "ℹ️ Aucun jeu n'est configuré pour l'entraide pour l'instant.",
+                        ephemeral=True)
+            except Exception:
+                pass
+            return
+
+        # Récupère le jeu détecté mémorisé pour ce nudge (s'il existe encore).
+        detected_key = None
+        try:
+            msg = getattr(i, 'message', None)
+            if msg is not None:
+                detected_key = _entr_detect_game_by_msg.get(int(msg.id))
+        except Exception:
+            detected_key = None
+        valid_keys = {g.get('game_key') for g in games}
+
+        # Si l'utilisateur a déjà une demande open → on le dit (pas de doublon).
+        try:
+            mine = await entraide_module.list_open_requests(i.guild.id, limit=100)
+            if any(int(r.get('requester_id', 0)) == i.user.id for r in (mine or [])):
+                if not i.response.is_done():
+                    await i.response.send_message(
+                        "ℹ️ Tu as **déjà une demande ouverte** — attends qu'elle soit prise "
+                        "ou marque-la résolue avant d'en créer une autre.",
+                        ephemeral=True)
+                return
+        except Exception:
+            pass
+
+        # Jeu détecté ET valide → on ouvre DIRECTEMENT le modal pré-rempli (modal =
+        # 1re réponse de l'interaction, donc PAS de defer avant).
+        if detected_key and detected_key in valid_keys:
+            try:
+                if not i.response.is_done():
+                    await i.response.send_modal(EntraideRequestModal(detected_key))
+                    return
+            except Exception as ex:
+                print(f"[_entraide_on_detect_click send_modal] {ex}")
+                # fall-through vers le Select de jeux
+
+        # Sinon : Select de jeux normal en éphémère (defer-first).
+        if not await _safe_defer(i, ephemeral=True):
+            return
+        view = _EntraideGamePickView(i.user.id, games)
+        await _safe_followup(i, view=view,
+                             content="🎮 Choisis le jeu sur lequel tu as besoin d'aide :")
+    except Exception as ex:
+        print(f"[_entraide_on_detect_click] {ex}")
+        try:
+            if i.response.is_done():
+                await i.followup.send("❌ Petit souci, réessaie.", ephemeral=True)
+            else:
+                await i.response.send_message("❌ Petit souci, réessaie.", ephemeral=True)
         except Exception:
             pass
 
