@@ -64912,11 +64912,14 @@ class _EntraideRemoveGamePanelV2(LayoutView):
 #  motifs PRÉCOMPILÉS une seule fois ci-dessous). AUCUNE requête DB ici. Renvoie
 #  False par défaut (conservateur, anti-faux-positifs).
 #
-#  Signaux FORTS  (déclenchent SEULS)  : « besoin d'aide », « quelqu'un peut m'aider »,
-#     « à l'aide », « help me », « i need help », « can someone help », « need help with »…
-#  Signaux FAIBLES (déclenchent COMBINÉS) : « comment », « how do i », « je suis bloqué »,
-#     « je galère », « stuck », « ? »… → il faut ≥2 signaux faibles, OU 1 faible + un jeu
-#     du catalogue cité, OU 1 faible + message assez long.
+#  RÈGLE (resserrée 2026-06-13, owner) : on ne déclenche QUE sur une VRAIE question —
+#  le « ? » est REQUIS. Un mot-clé d'aide NU (« besoin d'aide ») ou un message qui PARLE
+#  d'aide (annonce) ne déclenche PLUS. Il faut « ? » + une tournure d'aide/problème :
+#    - phrase d'aide explicite (1re pers.) : « besoin d'aide », « quelqu'un peut m'aider »,
+#      « au secours », « help me », « i need help »…  (_ENTR_STRONG_NEEDLES)
+#    - OU tournure how-to / « bloqué » : « comment battre … », « je galère », « pourquoi
+#      mon … », « ça marche pas », « how do i »…  (_ENTR_WEAK_NEEDLES)
+#  Un « ? » seul sans signal d'aide (question sociale « qui vient ce soir ? ») ne déclenche pas.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 # Longueur mini d'un message pour être candidat (anti messages ultra-courts/liens seuls).
@@ -64958,6 +64961,20 @@ _ENTR_WEAK_NEEDLES = (
     "how do i", "how to", "how can i", "i can t", "i cant", "i'm stuck",
     "im stuck", "stuck on", "stuck at", "any tips", "any advice", "any help",
     "what do i do",
+    # how-to gaming spécifiques (verbe d'action) — capte « comment battre/passer … ? »
+    "comment battre", "comment passer", "comment avoir", "comment obtenir",
+    "comment debloquer", "comment vaincre", "comment tuer", "comment finir",
+    "comment terminer", "comment gagner", "comment reussir", "comment monter",
+    "comment fabriquer", "comment trouver", "comment faire pour", "comment ca marche",
+    "comment ca fonctionne", "comment resoudre", "comment reparer", "comment installer",
+    "comment up", "comment craft",
+    # problème décrit (« ça marche pas », bug, « pourquoi mon … »)
+    "pourquoi je", "pourquoi mon", "pourquoi ma", "pourquoi mes", "pourquoi ca",
+    "ca marche pas", "ca veut pas", "ca bug", "ca plante", "marche pas", "y a un bug",
+    "j y arrive pas",
+    # EN how-to
+    "how to beat", "how to get", "how to do", "can t beat", "cant beat",
+    "where do i", "where can i", "what should i", "why is my", "why does my",
 )
 
 
@@ -65051,29 +65068,25 @@ def _entraide_detect_help(content_lower: str, guild_games_labels=None):
 
         detected_game = _entr_detect_game(norm, guild_games_labels)
 
-        # 1) Signal FORT → déclenche seul.
-        for needle in _ENTR_STRONG_NEEDLES:
-            if needle in norm:
-                return (True, detected_game, 0.95)
+        # PRÉCISION (owner 2026-06-13) : on ne déclenche QUE sur une VRAIE question
+        # spécifique. L'ANCRE = le point d'interrogation. Un mot-clé d'aide NU
+        # (« besoin d'aide ») ou un message qui PARLE d'aide (annonce, 2e personne)
+        # ne déclenche PLUS — c'était la cause des faux positifs.
+        if "?" not in norm:
+            return (False, detected_game, 0.0)
 
-        # 2) Signaux FAIBLES : compter (max 1 par needle, on s'arrête à 2).
-        weak_hits = 0
+        # Il y a un « ? ». Il faut EN PLUS une vraie tournure d'aide/problème :
+        #   - une phrase d'aide explicite (1re personne) : « besoin d'aide », « quelqu'un
+        #     peut m'aider », « au secours », « i need help »…
+        #   - OU une tournure how-to / « bloqué » : « comment battre … », « je galère »,
+        #     « pourquoi mon … », « ça marche pas », « how do i »…
+        # Un « ? » SEUL sans signal d'aide (question sociale « qui vient ce soir ? »)
+        # ne déclenche PAS.
+        if any(needle in norm for needle in _ENTR_STRONG_NEEDLES):
+            return (True, detected_game, 0.9)
         for needle in _ENTR_WEAK_NEEDLES:
             if needle in norm:
-                weak_hits += 1
-                if weak_hits >= 2:
-                    break
-        has_question = "?" in norm  # le « ? » nu compte comme micro-signal faible
-
-        # 2a) ≥2 signaux faibles → déclenche.
-        if weak_hits >= 2:
-            return (True, detected_game, 0.7)
-        # 2b) 1 signal faible + jeu du catalogue cité → déclenche (intention claire).
-        if weak_hits >= 1 and detected_game:
-            return (True, detected_game, 0.7)
-        # 2c) 1 signal faible + (« ? » OU message long) → déclenche (tournure de question).
-        if weak_hits >= 1 and (has_question or len(norm) >= _ENTR_DETECT_LONG_LEN):
-            return (True, detected_game, 0.6)
+                return (True, detected_game, 0.8)
 
         return (False, detected_game, 0.0)
     except Exception:
@@ -66530,15 +66543,18 @@ def _is_genuine_question(content: str) -> bool:
         words = norm.split()
         if len(words) < _UNANSWERED_MIN_WORDS:
             return False
-        # 1) « ? » explicite → question.
-        if "?" in norm:
-            return True
-        # 2) Mot interrogatif (on entoure d'espaces pour matcher en « mot entier » cheap).
+        # PRÉCISION (owner 2026-06-13) : l'ANCRE = le point d'interrogation. SANS « ? »,
+        # ce n'est PAS une question à surveiller (un mot-clé d'aide nu « besoin d'aide »
+        # ne compte plus → c'était la cause des faux positifs).
+        if "?" not in norm:
+            return False
+        # « ? » présent : exiger en plus une vraie tournure de question/aide (pas un « ? »
+        # social isolé). Mot interrogatif (comment/pourquoi/quel/how/why…) OU phrase
+        # d'aide/how-to détectée par `_entraide_detect_help` (qui exige aussi « ? »).
         padded = " " + norm + " "
         for qw in _UNANSWERED_QWORDS:
             if qw in padded:
                 return True
-        # 3) Phrase d'aide (réutilise le moteur entraide, sans catalogue = cheap).
         try:
             match, _gk, _conf = _entraide_detect_help(norm, None)
             if match:
