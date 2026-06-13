@@ -320,6 +320,7 @@ import seasonal_titles as seasonal_titles_module  # Phase 242 : champion d'activ
 import presence_chain as presence_chain_module  # Tâche A.2 : chaîne collective de présence quotidienne (compteur serveur)
 import cosmetics as cosmetics_module  # Phase 249 : sink éco — titres cosmétiques
 import referrals as referrals_module  # Tâche B.1 : parrainage récompensé (anti-alt, zéro DM)
+import entraide as entraide_module  # Entraide multi-gaming : relier demandeurs/aidants, vocal temp, rôle aidant opt-in
 import dm_notify as dm_notify_module  # Phase 235.31 : notifs d'event en MP (opt-in strict)
 # Phase 170.2-3 : NPCs vivants + rencontres quotidiennes
 import npc_personalities as npc_personalities_module
@@ -3511,6 +3512,13 @@ async def cfg(gid):
         'release_countdown_label': 'la sortie',   # libellé court affiché ("la sortie", "Abylumis", …)
         'release_announce_channel': 0,     # salon chatty où poster L'ANNONCE à l'échéance (0 = auto-pick)
         'release_announced': 0,            # anti-doublon : 1 = annonce déjà postée (ne pas reposter)
+        # Entraide multi-gaming : salon où sont postées les demandes d'aide + catégorie
+        # où créer les vocaux temporaires. 0 = NON CONFIGURÉ → la feature est OFF
+        # (fail-safe : rien ne se passe, aucun post, aucun vocal). Owner les règle
+        # plus tard via /configure ; le catalogue de jeux vit dans entraide_games.
+        'entraide_enabled': True,          # interrupteur maître (False = feature OFF même si salon réglé)
+        'entraide_request_channel': 0,     # salon texte des demandes d'aide (0 = OFF)
+        'entraide_voice_category': 0,      # catégorie où créer les vocaux temp (0 = pas de vocal)
     }
     for k, v in defaults.items():
         if k not in data: data[k] = v
@@ -6763,6 +6771,10 @@ class MainPanelV2(LayoutView):
                     label="Événements", value="events", emoji="🎪",
                     description="Boss Raids · combats communautaires · inventaire · loot · arène temporaire",
                 ),
+                discord.SelectOption(
+                    label="Entraide", value="entraide", emoji="🆘",
+                    description="Relier joueurs qui cherchent/donnent de l'aide · vocal temp · rôle aidant",
+                ),
             ],
             custom_id="mpv2_module",
         )
@@ -6821,6 +6833,7 @@ class MainPanelV2(LayoutView):
             'progression':  lambda: LevelSystemPanelV2(self.u, self.g),
             'permissions':  lambda: PermissionsHubPanelV2(self.u, self.g),
             'events':       lambda: EventsHubPanelV2(self.u, self.g),
+            'entraide':     lambda: EntraidePanelV2(self.u, self.g),
         }
         if val in v2_panels:
             v = v2_panels[val]()
@@ -18708,6 +18721,9 @@ _SUPERVISED_LOOP_NAMES = [
     # Tâche B.2 : annonce de sortie à l'échéance (countdown). Fail-open, no-op tant
     # que la date n'est pas configurée/atteinte.
     "release_countdown_task",
+    # Entraide : édite les posts des demandes expirées + supprime les vocaux temp
+    # orphelins (vides) de la catégorie configurée. Fail-open, no-op si non configuré.
+    "entraide_cleanup_task",
 ]
 
 
@@ -18805,6 +18821,8 @@ _SUPERVISED_MODULE_LOOPS = (
     ("presence_chain_module", "chain_daily_task"),
     # Tâche B.1 : crédit différé des parrainages éligibles (anti-alt, fail-open)
     ("referrals_module", "referral_reward_task"),
+    # Entraide : expire les demandes ouvertes trop vieilles (dégorge la file, fail-open)
+    ("entraide_module", "entraide_expiry_task"),
 )
 
 # DENY-LIST EXPLICITE (Tâche C) : boucles que le balayage AUTO ne doit JAMAIS démarrer ni
@@ -44762,6 +44780,35 @@ async def on_ready():
         except Exception as ex:
             print(f"[on_ready B.1 referrals] {ex}")
 
+        # Entraide multi-gaming : relier demandeurs/aidants, vocal temp, rôle aidant
+        # opt-in (catalogue de jeux configurable). MÊME patron que referrals/presence_chain :
+        # setup(deps injectées) + init_db + tâche d'expiration supervisée + DynamicItem
+        # persistants (claim/resolve) re-captés au reboot. FAIL-SAFE : OFF si non configuré.
+        try:
+            entraide_module.setup(
+                bot, get_db, cfg, db_set,
+                v2_helpers={
+                    'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
+                    'v2_divider': v2_divider, 'v2_container': v2_container,
+                    'LayoutView': LayoutView,
+                },
+                add_coins_fn=add_coins,                 # récompense MODESTE en pièces (atomique)
+                register_cleanup_fn=_register_for_cleanup,
+                chatty_fn=None,
+            )
+            await entraide_module.init_db()
+            if not entraide_module.entraide_expiry_task.is_running():
+                entraide_module.entraide_expiry_task.start()
+            # Tâche bot.py (supervisée) : édite les posts expirés + supprime les vocaux
+            # temp orphelins vides. Fail-open, no-op si l'entraide n'est pas configurée.
+            if not entraide_cleanup_task.is_running():
+                entraide_cleanup_task.start()
+            # Boutons persistants du POST de demande (re-captés au reboot).
+            bot.add_dynamic_items(EntraideClaimButton, EntraideResolveButton)
+            print("[Entraide] entraide OK (multi-gaming : demandes + vocal temp + rôle aidant)")
+        except Exception as ex:
+            print(f"[on_ready entraide] {ex}")
+
         # Phase 235.26 : 🥚 Œufs de familiers — acquisition par éclosion (le #1
         # reproche owner : « on ne savait pas comment en avoir »). Catalogue
         # étendu à ~50 familiers (engagement41.PETS, egg_only). Module backend.
@@ -60044,7 +60091,19 @@ async def on_voice_state_update(member, before, after):
                     
     except Exception as ex:
         print(f"Erreur temp voice: {ex}")
-    
+
+    # ═══════════════ VOCAL TEMP D'ENTRAIDE — auto-suppression si VIDE ═══════════════
+    # Quand quelqu'un quitte un salon, si c'est un vocal temporaire d'entraide (nom « 🆘 … »
+    # DANS la catégorie configurée) devenu VIDE, on le supprime. Double garde dans le helper :
+    # jamais un vocal occupé, jamais un vocal non-entraide (incident connu). FAIL-SAFE.
+    try:
+        if before.channel and (after.channel is None or before.channel.id != after.channel.id):
+            if (before.channel.name or '').startswith('🆘'):
+                await asyncio.sleep(1)  # anti-course : laisse Discord propager le départ
+                await _entraide_maybe_delete_empty_voice(member.guild, before.channel)
+    except Exception as ex:
+        print(f"[on_voice_state_update entraide] {ex}")
+
     # ═══════════════ TRACKING ACTIVITÉ VOCALE ═══════════════
     try:
         # Cas 1: L'utilisateur REJOINT un vocal (était pas en vocal ou change de salon)
@@ -64465,6 +64524,1216 @@ class PetBuySelectView(View):
             await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ENTRAIDE MULTI-GAMING — CONFIG owner (/configure → 🆘 Entraide)
+#
+#  Sous-panneau V2 de MainPanelV2 (owner/admin only, re-check perm). Permet :
+#    • activer/désactiver (cfg entraide_enabled)
+#    • salon des demandes (ChannelSelect texte → cfg entraide_request_channel)
+#    • catégorie vocale (ChannelSelect catégories → cfg entraide_voice_category)
+#    • catalogue de jeux : ajouter (Modal label+emoji, option création rôle Aidant),
+#      lister, retirer. Calque WelcomeGoodbyePanelV2 / _ReactionRolesDeletePanelV2.
+#  FAIL-SAFE : toute erreur est avalée, rien ne casse le panneau /configure.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class EntraidePanelV2(LayoutView):
+    """Hub de configuration Entraide (owner/admin). Calque WelcomeGoodbyePanelV2."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=600)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        # Re-check perm : seul un admin (manage_guild) configure l'entraide.
+        try:
+            if i.user.id != self.u.id:
+                return False
+            return bool(i.user.guild_permissions.manage_guild)
+        except Exception:
+            return False
+
+    async def render_to(self, interaction, *, edit: bool = True):
+        c = await cfg(self.g.id)
+        on = bool(c.get('entraide_enabled', True))
+        req_ch = self.g.get_channel(int(c.get('entraide_request_channel', 0) or 0))
+        voice_cat = self.g.get_channel(int(c.get('entraide_voice_category', 0) or 0))
+        try:
+            games = await entraide_module.list_games(self.g.id)
+        except Exception:
+            games = []
+
+        self.clear_items()
+
+        b_tog = Button(
+            label=("🔘 Désactiver l'entraide" if on else "⚪ Activer l'entraide"),
+            style=(discord.ButtonStyle.danger if on else discord.ButtonStyle.success),
+            custom_id="entrcfg_tog",
+        )
+        b_tog.callback = self._toggle
+
+        req_select = discord.ui.ChannelSelect(
+            placeholder=f"📨 Salon des demandes : {(req_ch.name if req_ch else 'aucun')}",
+            channel_types=[discord.ChannelType.text, discord.ChannelType.news],
+            min_values=0, max_values=1, custom_id="entrcfg_req_ch",
+        )
+        req_select.callback = lambda i: self._set_channel(i, 'entraide_request_channel')
+
+        cat_select = discord.ui.ChannelSelect(
+            placeholder=f"🔊 Catégorie vocale : {(voice_cat.name if voice_cat else 'aucune')}",
+            channel_types=[discord.ChannelType.category],
+            min_values=0, max_values=1, custom_id="entrcfg_voice_cat",
+        )
+        cat_select.callback = lambda i: self._set_channel(i, 'entraide_voice_category')
+
+        b_add = Button(label="➕ Ajouter un jeu", style=discord.ButtonStyle.success, custom_id="entrcfg_add")
+        b_add.callback = self._cb_add_game
+        b_del = Button(
+            label="🗑️ Retirer un jeu", style=discord.ButtonStyle.danger,
+            disabled=(not games), custom_id="entrcfg_del",
+        )
+        b_del.callback = self._cb_del_game
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="entrcfg_back")
+        b_back.callback = self._cb_back
+
+        # Listing du catalogue (avec rôle aidant éventuel).
+        if games:
+            lines = []
+            for g in games[:15]:
+                role = self.g.get_role(int(g.get('helper_role_id', 0) or 0))
+                role_txt = f" · aidant {role.mention}" if role else ""
+                lines.append(f"{_entraide_game_label(g)}{role_txt}")
+            listing = "\n".join(lines)
+        else:
+            listing = "_Aucun jeu — ajoute-en pour que les joueurs puissent demander de l'aide._"
+
+        items = [
+            v2_title("🆘 Entraide multi-gaming"),
+            v2_subtitle("Relie ceux qui cherchent de l'aide à ceux qui peuvent aider"),
+            v2_divider(),
+            v2_body(
+                f"**État :** {'🟢 activé' if on else '⚪ désactivé'}\n"
+                f"**📨 Salon des demandes :** {req_ch.mention if req_ch else '_aucun (feature OFF)_'}\n"
+                f"**🔊 Catégorie vocale :** {voice_cat.name if voice_cat else '_aucune (pas de vocal temp)_'}"
+            ),
+            v2_divider(),
+            v2_body(f"**🎮 Catalogue de jeux ({len(games)}) :**\n{listing}"),
+            v2_divider(),
+            discord.ui.ActionRow(req_select),
+            discord.ui.ActionRow(cat_select),
+            discord.ui.ActionRow(b_tog),
+            discord.ui.ActionRow(b_add, b_del, b_back),
+        ]
+        self.add_item(v2_container(*items, color=0xE67E22))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _toggle(self, i):
+        try:
+            c = await cfg(self.g.id)
+            await db_set(self.g.id, 'entraide_enabled', not bool(c.get('entraide_enabled', True)))
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[EntraidePanelV2 _toggle] {ex}")
+
+    async def _set_channel(self, i, key):
+        try:
+            vals = i.data.get('values', [])
+            ch_id = int(vals[0]) if vals else 0
+            await db_set(self.g.id, key, ch_id)
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[EntraidePanelV2 _set_channel {key}] {ex}")
+
+    async def _cb_add_game(self, i):
+        try:
+            await i.response.send_modal(_EntraideAddGameModal(self.g, self.u))
+        except Exception as ex:
+            print(f"[EntraidePanelV2 _cb_add_game] {ex}")
+
+    async def _cb_del_game(self, i):
+        try:
+            await _EntraideRemoveGamePanelV2(self.u, self.g).render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[EntraidePanelV2 _cb_del_game] {ex}")
+
+    async def _cb_back(self, i):
+        try:
+            await MainPanelV2(self.u, self.g).render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[EntraidePanelV2 _cb_back] {ex}")
+
+
+class _EntraideAddGameModal(Modal, title="🎮 Ajouter un jeu"):
+    name_in = TextInput(
+        label="Nom du jeu (ex : Adopt Me, Blox Fruits)",
+        max_length=60, required=True,
+    )
+    emoji_in = TextInput(
+        label="Emoji (optionnel, ex : 🎮)",
+        max_length=8, required=False,
+    )
+    role_in = TextInput(
+        label="Créer un rôle Aidant ? (oui / non)",
+        placeholder="oui = crée un rôle « Aidant {jeu} » opt-in",
+        max_length=4, required=False,
+    )
+
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+
+    async def on_submit(self, i):
+        # defer-first (anti « Échec interaction ») puis edit du panneau.
+        try:
+            label = (self.name_in.value or "").strip()
+            emoji = (self.emoji_in.value or "").strip()
+            want_role = (self.role_in.value or "").strip().lower() in ("oui", "o", "yes", "y", "1")
+            if not label:
+                try:
+                    await i.response.send_message("❌ Nom de jeu vide.", ephemeral=True)
+                except Exception:
+                    pass
+                return
+            game_key = await entraide_module.add_game(self.g.id, label, emoji=emoji)
+            if not game_key:
+                try:
+                    await i.response.send_message("❌ Impossible d'ajouter ce jeu.", ephemeral=True)
+                except Exception:
+                    pass
+                return
+            # Option : créer un rôle « Aidant {jeu} » opt-in + l'associer au jeu.
+            if want_role:
+                try:
+                    me = self.g.me
+                    if me is not None and me.guild_permissions.manage_roles:
+                        role = await self.g.create_role(
+                            name=f"Aidant {label}"[:100],
+                            mentionable=True,
+                            reason="Entraide : rôle aidant opt-in",
+                        )
+                        await entraide_module.set_game_helper_role(self.g.id, game_key, role.id)
+                except discord.Forbidden:
+                    pass  # pas la perm Manage Roles → jeu ajouté sans rôle (fail-safe)
+                except Exception as ex:
+                    print(f"[_EntraideAddGameModal create_role] {ex}")
+            await EntraidePanelV2(self.u, self.g).render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[_EntraideAddGameModal on_submit] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message("❌ Petit souci, réessaie.", ephemeral=True)
+            except Exception:
+                pass
+
+
+class _EntraideRemoveGamePanelV2(LayoutView):
+    """Sous-panneau : choisir un jeu du catalogue à retirer. Calque
+    _ReactionRolesDeletePanelV2 (Select des items + suppression)."""
+
+    def __init__(self, u, g):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+
+    async def interaction_check(self, i):
+        try:
+            return i.user.id == self.u.id and bool(i.user.guild_permissions.manage_guild)
+        except Exception:
+            return False
+
+    async def render_to(self, interaction, *, edit: bool = True):
+        try:
+            games = await entraide_module.list_games(self.g.id)
+        except Exception:
+            games = []
+
+        self.clear_items()
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary, custom_id="entrdel_back")
+        b_back.callback = self._cb_back
+
+        if not games:
+            items = [
+                v2_title("🗑️ Retirer un jeu"),
+                v2_body("_Aucun jeu dans le catalogue._"),
+                discord.ui.ActionRow(b_back),
+            ]
+        else:
+            opts = []
+            for g in games[:25]:
+                role = self.g.get_role(int(g.get('helper_role_id', 0) or 0))
+                opts.append(discord.SelectOption(
+                    label=(g.get('label') or g.get('game_key') or 'jeu')[:80],
+                    value=str(g.get('game_key')),
+                    emoji=(g.get('emoji') or None) or None,
+                    description=(f"rôle aidant : {role.name}" if role else "pas de rôle aidant")[:80],
+                ))
+            sel = Select(placeholder="Choisis un jeu à retirer…", options=opts, custom_id="entrdel_sel")
+            sel.callback = self._cb_pick
+            items = [
+                v2_title("🗑️ Retirer un jeu du catalogue"),
+                v2_subtitle("Le rôle aidant éventuel n'est PAS supprimé du serveur"),
+                v2_divider(),
+                discord.ui.ActionRow(sel),
+                discord.ui.ActionRow(b_back),
+            ]
+        self.add_item(v2_container(*items, color=Palette.DANGER))
+
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_pick(self, i):
+        try:
+            vals = i.data.get('values', [])
+            game_key = vals[0] if vals else None
+            if game_key:
+                await entraide_module.remove_game(self.g.id, game_key)
+            await EntraidePanelV2(self.u, self.g).render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[_EntraideRemoveGamePanelV2 _cb_pick] {ex}")
+
+    async def _cb_back(self, i):
+        try:
+            await EntraidePanelV2(self.u, self.g).render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[_EntraideRemoveGamePanelV2 _cb_back] {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  ENTRAIDE MULTI-GAMING — UI joueur (zéro slash command, tout en boutons)
+#
+#  Relie les joueurs qui ont besoin d'aide à ceux qui peuvent aider, les pousse
+#  EN VOCAL, crée des ZONES dédiées. Le SOCLE de données vit dans entraide.py
+#  (catalogue, cycle de vie des demandes, réputation). Ici = la couche UI :
+#    • EntraideHubV2          : panneau éphémère 3 boutons (besoin d'aide / je peux
+#                               aider / demandes en cours)
+#    • EntraideRequestModal   : description de la demande → create_request
+#    • Post de demande         : LayoutView FR/EN dans le salon configuré + DynamicItem
+#                               persistants « 🤝 J'aide ! » (claim) et « ✅ Résolu »
+#    • Vocal temporaire        : créé à la 1re prise en charge, auto-supprimé quand VIDE
+#                               (NE TOUCHE JAMAIS un vocal occupé par d'autres)
+#    • Ping rôle aidant opt-in : mention DANS le salon, allowed_mentions limité à CE rôle,
+#                               cooldown anti-spam par (guilde, jeu). JAMAIS @everyone.
+#  FAIL-SAFE intégral : si entraide_request_channel n'est pas configuré, la feature
+#  est OFF (rien ne se passe, aucune erreur).
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+async def _entraide_request_channel(guild):
+    """Salon texte configuré pour les demandes d'aide, ou None (feature OFF).
+    FAIL-SAFE : None sur tout problème → l'appelant n'envoie rien."""
+    try:
+        if guild is None:
+            return None
+        c = await cfg(guild.id)
+        # Interrupteur maître : si l'owner a désactivé l'entraide, la feature est OFF
+        # (aucun post, aucune action) même si un salon est encore réglé.
+        if not bool(c.get('entraide_enabled', True)):
+            return None
+        ch_id = int(c.get('entraide_request_channel', 0) or 0)
+        if not ch_id:
+            return None
+        ch = guild.get_channel(ch_id)
+        if ch is None or not isinstance(ch, discord.TextChannel):
+            return None
+        return ch
+    except Exception as ex:
+        print(f"[_entraide_request_channel] {ex}")
+        return None
+
+
+async def _entraide_voice_category(guild):
+    """Catégorie configurée pour les vocaux temporaires d'entraide, ou None.
+    FAIL-SAFE : None (pas de vocal créé, le reste fonctionne quand même)."""
+    try:
+        if guild is None:
+            return None
+        c = await cfg(guild.id)
+        cat_id = int(c.get('entraide_voice_category', 0) or 0)
+        if not cat_id:
+            return None
+        cat = guild.get_channel(cat_id)
+        if cat is None or not isinstance(cat, discord.CategoryChannel):
+            return None
+        return cat
+    except Exception as ex:
+        print(f"[_entraide_voice_category] {ex}")
+        return None
+
+
+def _entraide_game_label(game: dict) -> str:
+    """« {emoji} {label} » compact pour un jeu du catalogue."""
+    try:
+        emoji = (game.get('emoji') or '').strip()
+        label = (game.get('label') or game.get('game_key') or 'jeu')
+        return f"{emoji} {label}".strip()
+    except Exception:
+        return "jeu"
+
+
+async def _entraide_count_live_temp_voice(guild) -> int:
+    """Compte les vocaux temp d'entraide encore vivants. Source de vérité = les
+    salons réellement présents dans la catégorie configurée (nommés « 🆘 … »).
+    Sert au cap MAX_TEMP_VOICE_PER_GUILD. FAIL-OPEN : 0."""
+    try:
+        cat = await _entraide_voice_category(guild)
+        if cat is None:
+            return 0
+        return sum(1 for ch in cat.voice_channels
+                   if (ch.name or '').startswith('🆘'))
+    except Exception:
+        return 0
+
+
+async def _entraide_maybe_delete_empty_voice(guild, channel):
+    """Supprime un vocal temporaire d'entraide DEVENU VIDE. Double garde stricte :
+    (1) nom « 🆘 … » ET (2) parent == catégorie d'entraide configurée. Ne touche
+    JAMAIS un vocal occupé ou non-entraide (incident connu). FAIL-SAFE : avale tout.
+    Appelé depuis on_voice_state_update (quelqu'un vient de quitter) et depuis la
+    tâche périodique (balayage des orphelins)."""
+    try:
+        if guild is None or channel is None or not isinstance(channel, discord.VoiceChannel):
+            return
+        if not (channel.name or '').startswith('🆘'):
+            return  # garde 1 : pas un vocal d'entraide
+        cat = await _entraide_voice_category(guild)
+        # NB : si la catégorie n'est plus configurée, on ne supprime rien (fail-safe :
+        # on évite de toucher un vocal dont on n'est plus sûr de l'appartenance).
+        if cat is None or channel.category_id != cat.id:
+            return  # garde 2 : hors de la catégorie d'entraide → on ne touche pas
+        # Re-fetch frais (les .members peuvent être périmés) + petite latence anti-course.
+        fresh = guild.get_channel(channel.id)
+        if fresh is None or not isinstance(fresh, discord.VoiceChannel):
+            return
+        if len(fresh.members) != 0:
+            return  # OCCUPÉ → on ne supprime JAMAIS un vocal occupé
+        try:
+            await fresh.delete(reason="Vocal d'entraide temporaire vide")
+        except discord.NotFound:
+            pass
+        except discord.Forbidden:
+            pass  # pas la perm → fail-safe
+        except Exception as ex:
+            print(f"[_entraide_maybe_delete_empty_voice delete] {ex}")
+    except Exception as ex:
+        print(f"[_entraide_maybe_delete_empty_voice] {ex}")
+
+
+async def _entraide_create_temp_voice(guild, requester_id: int, game: dict):
+    """Crée un vocal temporaire « 🆘 {label} · {requester} » dans la catégorie
+    configurée. Respecte le cap MAX_TEMP_VOICE_PER_GUILD. NE TOUCHE PAS aux vocaux
+    existants. Renvoie le VoiceChannel créé, ou None (fail-safe : catégorie absente,
+    cap atteint, perms manquantes…). L'auto-suppression quand vide est gérée par
+    voice_autoclean / la tâche d'expiration côté bot (incident vocaux occupés)."""
+    try:
+        cat = await _entraide_voice_category(guild)
+        if cat is None:
+            return None  # pas de catégorie → pas de vocal (le post reste utile)
+        # Cap anti-abus.
+        try:
+            if await _entraide_count_live_temp_voice(guild) >= entraide_module.MAX_TEMP_VOICE_PER_GUILD:
+                return None
+        except Exception:
+            pass
+        requester = guild.get_member(int(requester_id))
+        rname = (requester.display_name if requester else f"#{requester_id}")
+        label = (game.get('label') or game.get('game_key') or 'Entraide')
+        name = f"🆘 {label} · {rname}"[:95]
+        try:
+            vc = await guild.create_voice_channel(
+                name=name,
+                category=cat,
+                reason=f"Vocal d'entraide temporaire ({label})",
+            )
+        except discord.Forbidden:
+            return None  # pas la perm de créer un vocal → fail-safe
+        except Exception:
+            return None
+        return vc
+    except Exception as ex:
+        print(f"[_entraide_create_temp_voice] {ex}")
+        return None
+
+
+async def _entraide_build_request_view(req: dict, game: dict):
+    """Construit la LayoutView du POST de demande (FR + 1 ligne EN compacte) avec les
+    2 boutons persistants DynamicItem (claim / resolve). req = dict de la demande."""
+    rid = int(req['id'])
+    requester_id = int(req['requester_id'])
+    desc_raw = (req.get('description') or '').strip()
+    desc = discord.utils.escape_markdown(desc_raw) if desc_raw else "_(pas de détails)_"
+    glabel = _entraide_game_label(game)
+    voice_id = int(req.get('voice_channel_id', 0) or 0)
+
+    items = []
+    items.append(v2_title(f"🆘 Besoin d'aide sur {glabel}"))
+    items.append(v2_subtitle(f"<@{requester_id}> cherche un coup de main"))
+    items.append(v2_divider())
+    items.append(v2_body(f"**Sa demande :**\n> {desc}"))
+    if voice_id:
+        items.append(v2_body(f"🔊 **Vocal d'entraide :** <#{voice_id}> — rejoignez-vous-y !"))
+    items.append(v2_divider())
+    # Bilingue compact (le côté international tient à l'owner).
+    items.append(v2_body(
+        "🇫🇷 Clique **🤝 J'aide !** pour prendre en charge · "
+        "**✅ Résolu** une fois aidé.\n"
+        "🇬🇧 _Click **🤝 J'aide!** to help · **✅ Résolu** once solved._"
+    ))
+
+    # 2 boutons NUS (custom_id stable) → captés au clic par les DynamicItem
+    # EntraideClaimButton / EntraideResolveButton enregistrés au boot (MÊME patron
+    # que citadelle.py : on rend des Button plats dont le custom_id matche le
+    # template du DynamicItem ; on ne place JAMAIS le DynamicItem lui-même dans un
+    # container LayoutView). Persistant → re-capté après reboot.
+    items.append(discord.ui.ActionRow(
+        Button(label="🤝 J'aide !", style=discord.ButtonStyle.success,
+               custom_id=f"entr_claim:{rid}"),
+        Button(label="✅ Résolu", style=discord.ButtonStyle.secondary,
+               custom_id=f"entr_resolve:{rid}"),
+    ))
+
+    class _EntraideRequestLayout(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=None)
+            self.add_item(v2_container(*items, color=0xE67E22))
+
+    return _EntraideRequestLayout()
+
+
+async def _entraide_maybe_ping_helpers(channel, guild, game: dict):
+    """Mentionne le rôle AIDANT du jeu DANS le salon, allowed_mentions limité à CE
+    rôle (jamais @everyone/@here, jamais users en masse), avec cooldown par
+    (guilde, jeu). FAIL-SAFE : si pas de rôle / cooldown actif / erreur → rien.
+    Renvoie True si un ping a effectivement été posté."""
+    try:
+        role_id = int(game.get('helper_role_id', 0) or 0)
+        if not role_id:
+            return False  # jeu sans rôle aidant déclaré → pas de ping
+        role = guild.get_role(role_id)
+        if role is None:
+            return False
+        game_key = game.get('game_key') or ''
+        if not entraide_module.can_ping_helpers(guild.id, game_key):
+            return False  # cooldown anti-spam encore actif (le post existe déjà)
+        glabel = _entraide_game_label(game)
+        msg = await channel.send(
+            f"{role.mention} — un joueur a besoin d'aide sur **{glabel}** ! "
+            f"_(notif réservée aux aidants {glabel}, jamais @everyone)_",
+            allowed_mentions=discord.AllowedMentions(
+                everyone=False, users=False, roles=[role],
+            ),
+        )
+        entraide_module.mark_helper_ping(guild.id, game_key)
+        # Le ping est éphémère visuellement : on l'auto-supprime (le post de demande
+        # reste, lui, persistant). 1h = laisse le temps aux aidants de le voir.
+        try:
+            await _register_for_cleanup(msg, 3600, reason='entraide_ping')
+        except Exception:
+            pass
+        return True
+    except discord.Forbidden:
+        return False
+    except Exception as ex:
+        print(f"[_entraide_maybe_ping_helpers] {ex}")
+        return False
+
+
+async def _entraide_post_request(guild, req: dict, game: dict):
+    """Poste le LayoutView de la demande dans le salon configuré, mémorise
+    (channel, message) via set_request_message, puis tente le ping rôle aidant
+    (opt-in + cooldown). FAIL-SAFE : si pas de salon → rien (feature OFF)."""
+    try:
+        channel = await _entraide_request_channel(guild)
+        if channel is None:
+            return None  # feature non configurée → OFF
+        view = await _entraide_build_request_view(req, game)
+        try:
+            msg = await channel.send(view=view)
+        except discord.Forbidden:
+            return None
+        except Exception as ex:
+            print(f"[_entraide_post_request send] {ex}")
+            return None
+        try:
+            await entraide_module.set_request_message(int(req['id']), channel.id, msg.id)
+        except Exception:
+            pass
+        # Ping rôle aidant opt-in (dans le salon, jamais @everyone, cooldown).
+        try:
+            await _entraide_maybe_ping_helpers(channel, guild, game)
+        except Exception:
+            pass
+        return msg
+    except Exception as ex:
+        print(f"[_entraide_post_request] {ex}")
+        return None
+
+
+async def _entraide_refresh_post(guild, req: dict, game: dict):
+    """Ré-édite le post de demande (après claim / ajout vocal) pour refléter l'état.
+    FAIL-SAFE : ignore silencieusement si le message a disparu."""
+    try:
+        ch_id = int(req.get('request_channel_id', 0) or 0)
+        msg_id = int(req.get('message_id', 0) or 0)
+        if not ch_id or not msg_id:
+            return
+        channel = guild.get_channel(ch_id)
+        if channel is None:
+            return
+        try:
+            msg = await channel.fetch_message(msg_id)
+        except Exception:
+            return
+        view = await _entraide_build_request_view(req, game)
+        await msg.edit(view=view)
+    except Exception as ex:
+        print(f"[_entraide_refresh_post] {ex}")
+
+
+async def _entraide_mark_post_expired(guild, req: dict):
+    """Édite le post d'une demande EXPIRÉE pour retirer les boutons et signaler
+    qu'elle n'est plus active (dégorge la file visuellement). FAIL-SAFE : ignore
+    si le message a disparu / pas de perm."""
+    try:
+        ch_id = int(req.get('request_channel_id', 0) or 0)
+        msg_id = int(req.get('message_id', 0) or 0)
+        if not ch_id or not msg_id:
+            return
+        channel = guild.get_channel(ch_id)
+        if channel is None:
+            return
+        try:
+            msg = await channel.fetch_message(msg_id)
+        except Exception:
+            return
+        game = await entraide_module.get_game(guild.id, req.get('game_key'))
+        if game is None:
+            game = {'game_key': req.get('game_key'), 'label': req.get('game_key'),
+                    'emoji': '', 'helper_role_id': 0}
+        glabel = _entraide_game_label(game)
+        expired_items = [
+            v2_title(f"⌛ Demande expirée — {glabel}"),
+            v2_subtitle(f"Demande de <@{int(req.get('requester_id', 0))}> (sans réponse)"),
+            v2_divider(),
+            v2_body("Personne n'a pu aider à temps. N'hésite pas à reposter ta demande !\n"
+                    "_No one could help in time — feel free to ask again!_"),
+        ]
+
+        class _ExpiredLayout(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=None)
+                self.add_item(v2_container(*expired_items, color=0x95A5A6))
+
+        try:
+            await msg.edit(view=_ExpiredLayout())
+        except Exception:
+            pass
+    except Exception as ex:
+        print(f"[_entraide_mark_post_expired] {ex}")
+
+
+@tasks.loop(minutes=15)
+async def entraide_cleanup_task():
+    """Entretien périodique de l'entraide (FAIL-OPEN, supervisée). Par guilde :
+      1. Expire les demandes ouvertes trop vieilles (module, idempotent) + édite leur
+         post pour retirer les boutons (dégorge la file visuellement).
+      2. Balaye la catégorie vocale configurée et supprime les vocaux temp ORPHELINS
+         VIDES (« 🆘 … » sans personne dedans). Ne touche JAMAIS un vocal occupé/non-entraide.
+    No-op si l'entraide n'est pas configurée. 15 min = réactif sans marteler l'API."""
+    try:
+        for guild in list(bot.guilds):
+            try:
+                # 1) Posts des demandes expirées (le module change le statut, on édite ici).
+                try:
+                    expired = await entraide_module.expire_open_requests(guild.id)
+                    for req in (expired or []):
+                        await _entraide_mark_post_expired(guild, req)
+                except Exception as ex:
+                    print(f"[entraide_cleanup_task expire {guild.id}] {ex}")
+                # 2) Vocaux temp orphelins vides dans la catégorie configurée.
+                try:
+                    cat = await _entraide_voice_category(guild)
+                    if cat is not None:
+                        for vc in list(cat.voice_channels):
+                            if (vc.name or '').startswith('🆘') and len(vc.members) == 0:
+                                await _entraide_maybe_delete_empty_voice(guild, vc)
+                except Exception as ex:
+                    print(f"[entraide_cleanup_task voice {guild.id}] {ex}")
+            except Exception as ex:
+                print(f"[entraide_cleanup_task guild {guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[entraide_cleanup_task] {ex}")
+
+
+@entraide_cleanup_task.before_loop
+async def _entraide_cleanup_task_wait():
+    await bot.wait_until_ready()
+
+
+# ─── DynamicItem persistants : « 🤝 J'aide ! » (claim) et « ✅ Résolu » ──────────
+
+class EntraideClaimButton(discord.ui.DynamicItem[Button],
+                          template=r"entr_claim:(?P<rid>\d+)"):
+    """« 🤝 J'aide ! » — premier arrivé prend la demande (claim atomique côté module).
+    À la réussite : crée/relie le vocal temp + invite les deux à s'y connecter.
+    Persistant (re-capté au reboot)."""
+    def __init__(self, rid: int):
+        super().__init__(Button(label="🤝 J'aide !",
+                                style=discord.ButtonStyle.success,
+                                custom_id=f"entr_claim:{int(rid)}"))
+        self.rid = int(rid)
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["rid"]))
+
+    async def callback(self, i: discord.Interaction):
+        await _entraide_on_claim(i, self.rid)
+
+
+class EntraideResolveButton(discord.ui.DynamicItem[Button],
+                            template=r"entr_resolve:(?P<rid>\d+)"):
+    """« ✅ Résolu » — réservé au demandeur / à l'aidant / au staff. Idempotent.
+    Persistant (re-capté au reboot)."""
+    def __init__(self, rid: int):
+        super().__init__(Button(label="✅ Résolu",
+                                style=discord.ButtonStyle.secondary,
+                                custom_id=f"entr_resolve:{int(rid)}"))
+        self.rid = int(rid)
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["rid"]))
+
+    async def callback(self, i: discord.Interaction):
+        await _entraide_on_resolve(i, self.rid)
+
+
+async def _entraide_on_claim(i: discord.Interaction, rid: int):
+    """Callback du bouton « 🤝 J'aide ! » — defer-first + try/except (anti Échec
+    interaction). Claim atomique, puis vocal temp + invitation, puis refresh du post."""
+    if not await _safe_defer(i, ephemeral=True):
+        return
+    try:
+        if i.guild is None:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        before = await entraide_module.get_request(rid)
+        if before is None:
+            return await _safe_followup(i, content="❌ Cette demande n'existe plus.")
+        if before.get('status') != 'open':
+            # Déjà prise/résolue/expirée.
+            if int(before.get('requester_id', 0)) == i.user.id:
+                return await _safe_followup(
+                    i, content="ℹ️ C'est ta propre demande — attends qu'un aidant la prenne.")
+            return await _safe_followup(
+                i, content="ℹ️ Cette demande est **déjà prise** ou clôturée. Merci quand même !")
+        if int(before.get('requester_id', 0)) == i.user.id:
+            return await _safe_followup(
+                i, content="❌ Tu ne peux pas prendre en charge ta propre demande 🙂")
+
+        matched = await entraide_module.claim_request(rid, i.user.id)
+        if matched is None:
+            return await _safe_followup(
+                i, content="⏳ Un autre aidant a été **plus rapide** — merci d'avoir voulu aider !")
+
+        game = await entraide_module.get_game(i.guild.id, matched['game_key'])
+        if game is None:
+            game = {'game_key': matched['game_key'], 'label': matched['game_key'], 'emoji': '', 'helper_role_id': 0}
+
+        # Crée le vocal temp (fail-safe si catégorie absente / cap / perms).
+        vc = await _entraide_create_temp_voice(i.guild, matched['requester_id'], game)
+        if vc is not None:
+            try:
+                await entraide_module.set_request_voice(rid, vc.id)
+            except Exception:
+                pass
+            matched = await entraide_module.get_request(rid) or matched
+
+        # Refresh du post pour afficher l'aidant + le vocal.
+        await _entraide_refresh_post(i.guild, matched, game)
+
+        # Invitation publique légère dans le salon de demande (pas de MP). On ne
+        # mentionne QUE le demandeur + l'aidant (jamais @everyone/@here/rôles).
+        try:
+            ch = i.guild.get_channel(int(matched.get('request_channel_id', 0) or 0))
+            if ch is not None and isinstance(ch, discord.TextChannel):
+                _helper_m = i.guild.get_member(i.user.id)
+                _req_m = i.guild.get_member(int(matched['requester_id']))
+                _allow_users = [m for m in (_helper_m, _req_m) if m is not None]
+                if vc is not None:
+                    note_text = (f"🤝 <@{i.user.id}> aide <@{matched['requester_id']}> — "
+                                 f"rejoignez le vocal <#{vc.id}> ! 🔊")
+                else:
+                    note_text = (f"🤝 <@{i.user.id}> prend en charge la demande de "
+                                 f"<@{matched['requester_id']}>.")
+                note = await ch.send(
+                    note_text,
+                    allowed_mentions=discord.AllowedMentions(
+                        everyone=False, roles=False, users=_allow_users,
+                    ),
+                )
+                try:
+                    await _register_for_cleanup(note, 3600, reason='entraide_match')
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        if vc is not None:
+            await _safe_followup(
+                i, content=f"✅ Tu prends en charge la demande ! Rejoins le vocal <#{vc.id}> 🔊")
+        else:
+            await _safe_followup(
+                i, content="✅ Tu prends en charge la demande ! Continue dans le salon avec le demandeur.")
+    except Exception as ex:
+        print(f"[_entraide_on_claim] {ex}")
+        await _safe_followup(i, content="❌ Petit souci, réessaie.")
+
+
+async def _entraide_on_resolve(i: discord.Interaction, rid: int):
+    """Callback du bouton « ✅ Résolu » — réservé au demandeur / à l'aidant / au staff.
+    Idempotent. defer-first + try/except."""
+    if not await _safe_defer(i, ephemeral=True):
+        return
+    try:
+        if i.guild is None:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        req = await entraide_module.get_request(rid)
+        if req is None:
+            return await _safe_followup(i, content="❌ Cette demande n'existe plus.")
+        # Autorisation : demandeur, aidant, ou staff (manage_messages).
+        is_staff = False
+        try:
+            is_staff = bool(i.user.guild_permissions.manage_messages)
+        except Exception:
+            is_staff = False
+        if (i.user.id != int(req.get('requester_id', 0))
+                and i.user.id != int(req.get('helper_id', 0))
+                and not is_staff):
+            return await _safe_followup(
+                i, content="❌ Seuls le demandeur, l'aidant ou le staff peuvent marquer résolu.")
+        if req.get('status') == 'resolved':
+            return await _safe_followup(i, content="ℹ️ Déjà marqué comme résolu. Merci !")
+
+        final = await entraide_module.resolve_request(rid, i.user.id)
+        if final is None:
+            return await _safe_followup(i, content="ℹ️ Déjà clôturé. Merci !")
+
+        game = await entraide_module.get_game(i.guild.id, final['game_key'])
+        if game is None:
+            game = {'game_key': final['game_key'], 'label': final['game_key'], 'emoji': '', 'helper_role_id': 0}
+
+        # Édite le post pour le marquer résolu (boutons retirés).
+        try:
+            ch_id = int(final.get('request_channel_id', 0) or 0)
+            msg_id = int(final.get('message_id', 0) or 0)
+            ch = i.guild.get_channel(ch_id) if ch_id else None
+            if ch is not None and msg_id:
+                msg = await ch.fetch_message(msg_id)
+                glabel = _entraide_game_label(game)
+                helper = int(final.get('helper_id', 0) or 0)
+                resolved_items = [
+                    v2_title(f"✅ Demande résolue — {glabel}"),
+                    v2_subtitle(f"Demande de <@{final['requester_id']}>"
+                                + (f" · aidé par <@{helper}>" if helper else "")),
+                    v2_divider(),
+                    v2_body("Merci à toutes celles et ceux qui aident la communauté ! 💛\n"
+                            "_Thanks to everyone helping out!_"),
+                ]
+
+                class _ResolvedLayout(LayoutView):
+                    def __init__(self):
+                        super().__init__(timeout=None)
+                        self.add_item(v2_container(*resolved_items, color=0x2ECC71))
+
+                await msg.edit(view=_ResolvedLayout())
+        except Exception:
+            pass
+
+        # Remerciement PUBLIC dans le salon (jamais en MP). Si un aidant distinct du
+        # demandeur a été crédité, on l'annonce + le bonus pièces (créditées atomiquement
+        # côté module dans resolve_request). On ne mentionne QUE l'aidant (jamais @everyone/
+        # @here/rôles/users en masse). Message éphémère visuellement (auto-nettoyé).
+        try:
+            helper = int(final.get('helper_id', 0) or 0)
+            requester = int(final.get('requester_id', 0) or 0)
+            ch_id = int(final.get('request_channel_id', 0) or 0)
+            ch = i.guild.get_channel(ch_id) if ch_id else None
+            if ch is not None and isinstance(ch, discord.TextChannel) and helper and helper != requester:
+                helper_m = i.guild.get_member(helper)
+                # Récompense créditée côté module (resolve_request) ssi add_coins est
+                # injecté (c'est le cas ici : add_coins_fn=add_coins au setup) ET coins > 0.
+                reward = int(getattr(entraide_module, 'HELP_REWARD_COINS', 0) or 0)
+                reward_txt = (f" et reçoit **{reward}** pièces 🪙" if reward > 0 else "")
+                note = await ch.send(
+                    f"💛 Merci <@{helper}> d'avoir aidé <@{requester}> sur l'entraide{reward_txt} !\n"
+                    f"_Thanks <@{helper}> for helping out!_",
+                    allowed_mentions=discord.AllowedMentions(
+                        everyone=False, roles=False,
+                        users=[helper_m] if helper_m is not None else False,
+                    ),
+                )
+                try:
+                    await _register_for_cleanup(note, 3600, reason='entraide_thanks')
+                except Exception:
+                    pass
+        except Exception as ex:
+            print(f"[_entraide_on_resolve thanks] {ex}")
+
+        # Le vocal temp est laissé tel quel : il s'auto-supprimera quand VIDE
+        # (cleanup vocal entraide). On NE supprime JAMAIS un vocal occupé (incident connu).
+        await _safe_followup(i, content="✅ Marqué comme résolu, merci ! 💛")
+    except Exception as ex:
+        print(f"[_entraide_on_resolve] {ex}")
+        await _safe_followup(i, content="❌ Petit souci, réessaie.")
+
+
+# ─── Panneau joueur ÉPHÉMÈRE : EntraideHubV2 (3 boutons) ─────────────────────────
+
+class EntraideHubV2(LayoutView):
+    """Panneau Entraide ouvert depuis le hub (éphémère, par-user). 3 actions :
+    besoin d'aide / je peux aider / demandes en cours. FAIL-SAFE."""
+
+    def __init__(self, user_id: int, guild_id: int = 0):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        self.guild_id = guild_id
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.user_id
+
+    def _build(self):
+        items = []
+        items.append(v2_title("🆘 Entraide multi-gaming"))
+        items.append(v2_subtitle("Besoin d'aide sur un jeu ? Ou envie d'aider ? Tout est ici."))
+        items.append(v2_divider())
+        items.append(v2_body(
+            "🇫🇷 Demande de l'aide, propose la tienne, ou parcours les demandes en cours.\n"
+            "🇬🇧 _Ask for help, offer yours, or browse open requests._"
+        ))
+        items.append(v2_divider())
+
+        b_need = Button(label="🙋 J'ai besoin d'aide", style=discord.ButtonStyle.primary,
+                        custom_id="entr_need")
+        b_need.callback = self._on_need
+        b_help = Button(label="🤝 Je peux aider", style=discord.ButtonStyle.success,
+                        custom_id="entr_help")
+        b_help.callback = self._on_help
+        b_list = Button(label="📋 Demandes en cours", style=discord.ButtonStyle.secondary,
+                        custom_id="entr_list")
+        b_list.callback = self._on_list
+        items.append(discord.ui.ActionRow(b_need, b_help, b_list))
+
+        items.append(v2_divider())
+        b_close = Button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger,
+                         custom_id="entr_close")
+        b_close.callback = self._on_close
+        items.append(discord.ui.ActionRow(b_close))
+
+        self.add_item(v2_container(*items, color=0xE67E22))
+
+    async def _on_need(self, i):
+        if not await _safe_defer(i, ephemeral=True):
+            return
+        try:
+            if i.guild is None:
+                return await _safe_followup(i, content="❌ Serveur uniquement.")
+            # Feature configurée ?
+            if await _entraide_request_channel(i.guild) is None:
+                return await _safe_followup(
+                    i, content="ℹ️ L'entraide n'est pas encore configurée — demande à un admin "
+                               "de définir le salon des demandes dans `/configure`.")
+            games = await entraide_module.list_games(i.guild.id)
+            if not games:
+                return await _safe_followup(
+                    i, content="ℹ️ Aucun jeu n'est configuré pour l'entraide — demande à un admin "
+                               "d'ajouter des jeux au catalogue dans `/configure`.")
+            # Déjà une demande ouverte ? (anti-spam, message clair)
+            mine = await entraide_module.list_open_requests(i.guild.id, limit=100)
+            if any(int(r.get('requester_id', 0)) == i.user.id for r in mine):
+                return await _safe_followup(
+                    i, content="ℹ️ Tu as **déjà une demande ouverte**. Attends qu'elle soit prise "
+                               "ou marque-la résolue avant d'en créer une autre.")
+            view = _EntraideGamePickView(i.user.id, games)
+            await _safe_followup(i, view=view)
+        except Exception as ex:
+            print(f"[EntraideHubV2._on_need] {ex}")
+            await _safe_followup(i, content="❌ Petit souci, réessaie.")
+
+    async def _on_help(self, i):
+        if not await _safe_defer(i, ephemeral=True):
+            return
+        try:
+            if i.guild is None:
+                return await _safe_followup(i, content="❌ Serveur uniquement.")
+            games = await entraide_module.list_games(i.guild.id)
+            games_with_role = [g for g in games if int(g.get('helper_role_id', 0) or 0)]
+            if not games_with_role:
+                return await _safe_followup(
+                    i, content="ℹ️ Aucun jeu n'a de **rôle aidant** configuré pour l'instant — "
+                               "demande à un admin d'en associer dans `/configure`.")
+            view = _EntraideHelperRoleView(i.user.id, games_with_role)
+            await _safe_followup(
+                i, view=view,
+                content="🤝 Choisis les jeux pour lesquels tu veux **recevoir les demandes d'aide** "
+                        "(opt-in pur — re-sélectionne pour retirer le rôle) :")
+        except Exception as ex:
+            print(f"[EntraideHubV2._on_help] {ex}")
+            await _safe_followup(i, content="❌ Petit souci, réessaie.")
+
+    async def _on_list(self, i):
+        if not await _safe_defer(i, ephemeral=True):
+            return
+        try:
+            if i.guild is None:
+                return await _safe_followup(i, content="❌ Serveur uniquement.")
+            reqs = await entraide_module.list_open_requests(i.guild.id, limit=15)
+            if not reqs:
+                return await _safe_followup(
+                    i, content="✨ Aucune demande d'aide en cours pour l'instant — reviens plus tard "
+                               "ou propose ton aide via « 🤝 Je peux aider ».")
+            # Map game_key -> label (1 lecture du catalogue).
+            games = {g['game_key']: g for g in await entraide_module.list_games(i.guild.id)}
+            lines = []
+            for r in reqs[:15]:
+                g = games.get(r.get('game_key'), {})
+                glabel = _entraide_game_label(g) if g else (r.get('game_key') or 'jeu')
+                desc = discord.utils.escape_markdown((r.get('description') or '').strip())[:80]
+                desc = desc or '_(pas de détails)_'
+                ch_id = int(r.get('request_channel_id', 0) or 0)
+                link = f" · <#{ch_id}>" if ch_id else ""
+                lines.append(f"• **{glabel}** — <@{int(r['requester_id'])}> : {desc}{link}")
+            body = "\n".join(lines)
+
+            items = [
+                v2_title("📋 Demandes d'aide en cours"),
+                v2_subtitle(f"{len(reqs)} demande(s) ouverte(s) — va dans le salon pour prendre en charge"),
+                v2_divider(),
+                v2_body(body[:3500]),
+            ]
+
+            class _OpenListLayout(LayoutView):
+                def __init__(self):
+                    super().__init__(timeout=300)
+                    self.add_item(v2_container(*items, color=0xE67E22))
+
+            await _safe_followup(i, view=_OpenListLayout())
+        except Exception as ex:
+            print(f"[EntraideHubV2._on_list] {ex}")
+            await _safe_followup(i, content="❌ Petit souci, réessaie.")
+
+    async def _on_close(self, i):
+        try:
+            await i.response.edit_message(content="✅ Fermé.", view=None, embed=None, embeds=[], attachments=[])
+        except discord.InteractionResponded:
+            try:
+                await i.edit_original_response(content="✅ Fermé", view=None, embed=None)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+
+class _EntraideGamePickView(View):
+    """Select des jeux du catalogue → ouvre le Modal de description. Éphémère."""
+    def __init__(self, user_id: int, games: list):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        options = []
+        for g in games[:25]:
+            emoji = (g.get('emoji') or '').strip() or None
+            try:
+                options.append(discord.SelectOption(
+                    label=(g.get('label') or g.get('game_key') or 'jeu')[:100],
+                    value=g.get('game_key', '')[:100],
+                    emoji=emoji,
+                ))
+            except Exception:
+                # emoji invalide → option sans emoji (fail-safe)
+                options.append(discord.SelectOption(
+                    label=(g.get('label') or g.get('game_key') or 'jeu')[:100],
+                    value=g.get('game_key', '')[:100],
+                ))
+        sel = Select(placeholder="🎮 Choisis le jeu…", options=options,
+                     min_values=1, max_values=1, custom_id="entr_game_pick")
+        sel.callback = self._on_pick
+        self.add_item(sel)
+
+    async def interaction_check(self, i):
+        return i.user.id == self.user_id
+
+    async def _on_pick(self, i: discord.Interaction):
+        try:
+            game_key = i.data.get('values', [None])[0] if i.data else None
+            if not game_key:
+                return await i.response.send_message("❌ Aucun jeu sélectionné.", ephemeral=True)
+            # On ouvre le Modal directement (PAS de defer avant un modal).
+            await i.response.send_modal(EntraideRequestModal(game_key))
+        except Exception as ex:
+            print(f"[_EntraideGamePickView._on_pick] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message("❌ Petit souci, réessaie.", ephemeral=True)
+            except Exception:
+                pass
+
+
+class EntraideRequestModal(Modal, title="🙋 Demande d'aide"):
+    """Modal : description de la demande → create_request + post dans le salon."""
+    def __init__(self, game_key: str):
+        super().__init__(timeout=300)
+        self.game_key = game_key
+        self.desc = TextInput(
+            label="Sur quoi as-tu besoin d'aide ?",
+            placeholder="Ex : je bloque sur le boss, comment monter X…",
+            style=discord.TextStyle.paragraph,
+            required=True,
+            max_length=400,
+        )
+        self.add_item(self.desc)
+
+    async def on_submit(self, i: discord.Interaction):
+        if not await _safe_defer(i, ephemeral=True):
+            return
+        try:
+            if i.guild is None:
+                return await _safe_followup(i, content="❌ Serveur uniquement.")
+            code, rid = await entraide_module.create_request(
+                i.guild.id, i.user.id, self.game_key, str(self.desc.value),
+            )
+            if code == entraide_module.CREATE_DUPLICATE:
+                return await _safe_followup(
+                    i, content="ℹ️ Tu as **déjà une demande ouverte** — attends qu'elle soit prise "
+                               "ou marque-la résolue avant d'en créer une autre.")
+            if code == entraide_module.CREATE_UNKNOWN_GAME:
+                return await _safe_followup(
+                    i, content="❌ Ce jeu n'est plus au catalogue. Réessaie depuis « 🙋 J'ai besoin d'aide ».")
+            if code != entraide_module.CREATE_OK or not rid:
+                return await _safe_followup(
+                    i, content="ℹ️ L'entraide n'est pas disponible pour l'instant — réessaie plus tard.")
+            # Poste la demande dans le salon configuré.
+            req = await entraide_module.get_request(rid)
+            game = await entraide_module.get_game(i.guild.id, self.game_key)
+            msg = await _entraide_post_request(i.guild, req, game) if (req and game) else None
+            if msg is None:
+                # create_request a réussi mais pas de salon configuré → on prévient.
+                return await _safe_followup(
+                    i, content="✅ Ta demande est enregistrée, mais l'entraide n'est pas encore reliée "
+                               "à un salon — préviens un admin.")
+            await _safe_followup(
+                i, content=f"✅ Ta demande est publiée dans <#{msg.channel.id}> ! "
+                           f"Un aidant peut maintenant la prendre en charge. 💛")
+        except Exception as ex:
+            print(f"[EntraideRequestModal.on_submit] {ex}")
+            await _safe_followup(i, content="❌ Petit souci, réessaie.")
+
+
+class _EntraideHelperRoleView(View):
+    """Select MULTI des jeux ayant un rôle aidant → toggle add/remove du rôle réel
+    (opt-in pur). FAIL-SAFE si Manage Roles manquant. Éphémère."""
+    def __init__(self, user_id: int, games: list):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        self.games = {g['game_key']: g for g in games}
+        options = []
+        for g in games[:25]:
+            emoji = (g.get('emoji') or '').strip() or None
+            try:
+                options.append(discord.SelectOption(
+                    label=(g.get('label') or g.get('game_key') or 'jeu')[:100],
+                    value=g.get('game_key', '')[:100],
+                    emoji=emoji,
+                ))
+            except Exception:
+                options.append(discord.SelectOption(
+                    label=(g.get('label') or g.get('game_key') or 'jeu')[:100],
+                    value=g.get('game_key', '')[:100],
+                ))
+        sel = Select(placeholder="🤝 Jeux où tu veux aider…", options=options,
+                     min_values=1, max_values=min(len(options), 25),
+                     custom_id="entr_helper_pick")
+        sel.callback = self._on_pick
+        self.add_item(sel)
+
+    async def interaction_check(self, i):
+        return i.user.id == self.user_id
+
+    async def _on_pick(self, i: discord.Interaction):
+        if not await _safe_defer(i, ephemeral=True):
+            return
+        try:
+            if i.guild is None:
+                return await _safe_followup(i, content="❌ Serveur uniquement.")
+            picked = i.data.get('values', []) if i.data else []
+            member = i.guild.get_member(i.user.id)
+            if member is None:
+                return await _safe_followup(i, content="❌ Membre introuvable.")
+            added, removed, skipped = [], [], []
+            for gk in picked:
+                g = self.games.get(gk)
+                if not g:
+                    continue
+                role_id = int(g.get('helper_role_id', 0) or 0)
+                role = i.guild.get_role(role_id) if role_id else None
+                if role is None:
+                    skipped.append(_entraide_game_label(g))
+                    continue
+                try:
+                    if role in member.roles:
+                        await member.remove_roles(role, reason="Entraide : opt-out aidant")
+                        removed.append(_entraide_game_label(g))
+                    else:
+                        await member.add_roles(role, reason="Entraide : opt-in aidant")
+                        added.append(_entraide_game_label(g))
+                except discord.Forbidden:
+                    skipped.append(_entraide_game_label(g))
+                except Exception:
+                    skipped.append(_entraide_game_label(g))
+            parts = []
+            if added:
+                parts.append("✅ Tu recevras les demandes pour : " + ", ".join(added))
+            if removed:
+                parts.append("➖ Retiré : " + ", ".join(removed))
+            if skipped:
+                parts.append("⚠️ Impossible (rôle/permission) : " + ", ".join(skipped)
+                             + "\n_(le bot a peut-être besoin de la permission **Gérer les rôles**, "
+                               "ou son rôle doit être au-dessus du rôle aidant)_")
+            if not parts:
+                parts.append("Rien à changer.")
+            await _safe_followup(i, content="\n".join(parts))
+        except Exception as ex:
+            print(f"[_EntraideHelperRoleView._on_pick] {ex}")
+            await _safe_followup(i, content="❌ Petit souci, réessaie.")
+
+
+async def _open_entraide_panel(i: discord.Interaction):
+    """Ouvre le panneau Entraide (éphémère). Point d'entrée depuis le hub.
+    defer-first + try/except (anti Échec interaction)."""
+    try:
+        gid = i.guild.id if i.guild else 0
+        view = EntraideHubV2(i.user.id, gid)
+        if not i.response.is_done():
+            await i.response.send_message(view=view, ephemeral=True)
+        else:
+            await i.followup.send(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[_open_entraide_panel] {ex}")
+        try:
+            if not i.response.is_done():
+                await i.response.send_message("❌ Petit souci, réessaie.", ephemeral=True)
+            else:
+                await i.followup.send("❌ Petit souci, réessaie.", ephemeral=True)
+        except Exception:
+            pass
+
+
 # ─── HUB D'ENGAGEMENT (5 boutons persistants, custom_ids stables) ─────────────
 
 
@@ -64784,6 +66053,10 @@ class EngagementHubView(View):
     async def _on_social(self, i: discord.Interaction):
         # Phase 52 : ouvre le sub-hub Social (Shoutouts / Mentorat)
         await _open_social_panel(i)
+
+    async def _on_entraide(self, i: discord.Interaction):
+        # Entraide multi-gaming : ouvre le panneau (besoin d'aide / je peux aider / file)
+        await _open_entraide_panel(i)
 
     async def _on_tools(self, i: discord.Interaction):
         # Phase 65 : ouvre le sub-hub Outils (regroupe tout ce qui était slash)
@@ -86089,6 +87362,8 @@ class HubCatSocialLayoutV2(_HubCategoryLayoutV2):
     _CAT_SUBTITLE = "Les liens entre membres + la vie du serveur"
     _CAT_COLOR = 0xFEE75C
     _CAT_FEATURES = [
+        ("🆘 Entraide", "Besoin d'aide sur un jeu ? Ou envie d'aider ? Vocal + rôle aidant",
+         "Ouvrir", discord.ButtonStyle.primary, "hubcat_entraide", "_on_entraide"),
         ("💝 Social", "Shoutouts · Mentorat",
          "Ouvrir", discord.ButtonStyle.success, "hubcat_social", "_on_social"),
         ("⭐ Réputation", "Ta réputation par faction",
