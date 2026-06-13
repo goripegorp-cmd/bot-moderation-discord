@@ -55,6 +55,18 @@ _bot = None
 _get_db = None
 _db_get = None
 _v2 = None
+# TASK C.1 : callback optionnel appelé quand un raid est détecté (cluster suspect).
+# bot.py y branche `mark_welcome_raid` pour suspendre les bienvenues individuelles
+# pendant la vague. Reste None tant que rien n'est branché. FAIL-SAFE.
+_on_raid_detected = None
+
+
+def set_raid_callback(fn) -> None:
+    """Enregistre un callback `fn(guild_id: int)` appelé à chaque détection de
+    raid (best-effort, jamais bloquant). bot.py l'utilise pour la garde anti-spam
+    des messages de bienvenue."""
+    global _on_raid_detected
+    _on_raid_detected = fn
 
 # Seuils de scoring (réglables)
 SCORE_RECENT_30D = 2     # compte créé < 30 jours
@@ -298,6 +310,14 @@ async def _has_recent_alert(guild_id: int, minutes: int) -> bool:
 
 async def _create_alert(guild: discord.Guild, suspicious: list[dict]):
     """Crée une alerte + DM owner + log."""
+    # TASK C.1 : prévient bot.py qu'une vague de raid est en cours pour que les
+    # bienvenues individuelles soient suspendues (récap groupé en fin de vague).
+    # Best-effort, jamais bloquant.
+    try:
+        if _on_raid_detected is not None:
+            _on_raid_detected(guild.id)
+    except Exception as ex:
+        print(f"[raid_detector on_raid_detected cb] {ex}")
     try:
         avg = sum(s.get("total_score", 0) for s in suspicious) / max(1, len(suspicious))
         members_payload = []
@@ -775,6 +795,7 @@ def build_alert_panel(guild: discord.Guild, alert_id: int):
 
 __all__ = [
     "setup",
+    "set_raid_callback",
     "init_db",
     "on_member_join",
     "run_lockdown",

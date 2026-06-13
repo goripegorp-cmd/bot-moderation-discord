@@ -2331,6 +2331,15 @@ async def db_init():
         except Exception:
             pass
 
+        # Tâche B.2 : paliers de membres célébrés (anti-doublon PERSISTANT).
+        # 1 ligne par palier atteint → on ne re-célèbre jamais le même cap.
+        await db.execute('''CREATE TABLE IF NOT EXISTS member_milestones (
+            guild_id INTEGER NOT NULL,
+            milestone INTEGER NOT NULL,
+            reached_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (guild_id, milestone)
+        )''')
+
         # Confess replies (réponses publiques avec identité)
         await db.execute('''CREATE TABLE IF NOT EXISTS confession_replies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -7771,6 +7780,132 @@ class PermissionsSanctionablePanelV2(LayoutView):
 
 # Cache des joins récents par guild (pour détection de raid)
 _recent_joins: dict[int, list[float]] = {}
+
+# ─── TASK C.1 : GARDE ANTI-RAID SUR LES BIENVENUES ────────────────────────────
+# Pendant une vague de raid détectée, on NE spamme PAS une bienvenue par arrivée :
+# on suspend les annonces individuelles et on poste ENSUITE un seul récap groupé
+# « +N membres arrivés pendant la vague ». État 100 % en mémoire, FAIL-SAFE :
+# si l'état raid n'est pas lisible, le comportement actuel reste inchangé.
+#  guild_id -> {"until": ts_fin_fenêtre, "count": nb_supprimés,
+#               "channel_id": salon où poster le récap, "first": ts_début, "flush": task?}
+_WELCOME_RAID_WINDOW_SEC = 600.0   # une vague tient la garde active ~10 min (glissant)
+_welcome_raid_state: dict[int, dict] = {}
+
+
+def mark_welcome_raid(guild_id: int) -> None:
+    """Marque (ou prolonge) une fenêtre de raid pour le guild : pendant cette
+    fenêtre, les bienvenues individuelles sont suspendues. Appelé par les DEUX
+    détecteurs de raid (anti-raid configurable + raid_detector). FAIL-SAFE."""
+    try:
+        now_ts = time.time()
+        st = _welcome_raid_state.get(int(guild_id))
+        if st is None:
+            st = {"until": 0.0, "count": 0, "channel_id": 0,
+                  "first": now_ts, "flush": None}
+            _welcome_raid_state[int(guild_id)] = st
+        # fenêtre glissante : chaque nouvelle détection repousse la fin
+        st["until"] = now_ts + _WELCOME_RAID_WINDOW_SEC
+    except Exception as ex:
+        print(f"[mark_welcome_raid] {ex}")
+
+
+def _welcome_raid_active(guild_id: int) -> bool:
+    """True si une vague de raid est en cours pour ce guild (fenêtre non expirée).
+    Lecture pure, FAIL-SAFE (toute erreur → False = comportement normal)."""
+    try:
+        st = _welcome_raid_state.get(int(guild_id))
+        return bool(st and st.get("until", 0.0) > time.time())
+    except Exception:
+        return False
+
+
+async def _flush_welcome_raid_recap(guild_id: int):
+    """Attend la fin de la fenêtre de raid puis poste UN SEUL récap groupé
+    « +N membres arrivés pendant la vague » dans le salon d'accueil. Tâche
+    one-shot lancée à la 1re suppression. FAIL-OPEN : toute erreur est avalée."""
+    try:
+        while True:
+            st = _welcome_raid_state.get(int(guild_id))
+            if not st:
+                return
+            remaining = st.get("until", 0.0) - time.time()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(remaining + 1.0, 60.0))
+        st = _welcome_raid_state.pop(int(guild_id), None)
+        if not st:
+            return
+        count = int(st.get("count", 0) or 0)
+        ch_id = int(st.get("channel_id", 0) or 0)
+        if count <= 0 or not ch_id:
+            return
+        guild = bot.get_guild(int(guild_id))
+        if guild is None:
+            return
+        ch = guild.get_channel(ch_id)
+        me = guild.me
+        if ch is None or me is None:
+            return
+        try:
+            if not ch.permissions_for(me).send_messages:
+                return
+        except Exception:
+            return
+        e = discord.Embed(
+            description=(
+                f"🌊 **+{count} membre{'s' if count > 1 else ''}** "
+                f"{'sont arrivés' if count > 1 else 'est arrivé'} pendant une vague "
+                f"d'arrivées.\nBienvenue à tou·te·s ! 👋"
+            ),
+            color=0x57F287,
+        )
+        e.set_author(name="👋 Vague de bienvenue")
+        try:
+            await ch.send(embed=e, allowed_mentions=discord.AllowedMentions.none())
+        except Exception as ex:
+            print(f"[welcome raid recap send] {ex}")
+    except Exception as ex:
+        print(f"[_flush_welcome_raid_recap] {ex}")
+
+
+def _defer_welcome_during_raid(guild_id: int, channel, member_id: int = 0) -> bool:
+    """Si une vague de raid est active, compte cette arrivée pour le récap groupé
+    (au lieu d'une bienvenue individuelle) et renvoie True (= NE PAS poster). Sinon
+    renvoie False (= poster normalement). FAIL-SAFE : toute erreur → False.
+
+    Dédoublonné par `member_id` : un même membre peut traverser deux handlers
+    d'accueil (_handle_welcome + _post_onboarding_welcome) ; on ne le compte qu'une
+    fois (set `seen`) pour que le récap affiche le bon total."""
+    try:
+        if not _welcome_raid_active(guild_id):
+            return False
+        st = _welcome_raid_state.get(int(guild_id))
+        if st is None:
+            return False
+        mid = int(member_id or 0)
+        if mid:
+            seen = st.get("seen")
+            if seen is None:
+                seen = set()
+                st["seen"] = seen
+            seen.add(mid)
+            st["count"] = len(seen)
+        else:
+            st["count"] = int(st.get("count", 0) or 0) + 1
+        # mémorise un salon pour le récap (le 1er salon d'accueil rencontré)
+        if not st.get("channel_id") and channel is not None:
+            st["channel_id"] = getattr(channel, "id", 0) or 0
+        # lance la tâche de flush une seule fois
+        if st.get("flush") is None or st["flush"].done():
+            try:
+                st["flush"] = asyncio.create_task(
+                    _flush_welcome_raid_recap(int(guild_id)))
+            except Exception:
+                st["flush"] = None
+        return True
+    except Exception as ex:
+        print(f"[_defer_welcome_during_raid] {ex}")
+        return False
 
 
 class AntiRaidPanelV2(LayoutView):
@@ -16138,6 +16273,11 @@ async def _post_onboarding_welcome(member):
         if ch is None:
             return
 
+        # TASK C.1 : pendant une vague de raid, on suspend l'accueil events individuel
+        # et on compte l'arrivée pour le récap groupé. FAIL-SAFE hors raid.
+        if _defer_welcome_during_raid(guild.id, ch, getattr(member, 'id', 0)):
+            return
+
         # Phase 268 (demande owner) : message d'accueil COMPACT — une seule ligne pour
         # ne pas noyer le chat lors des vagues d'arrivées. Le détail (principe d'activité,
         # events, hub) reste accessible via les boutons ci-dessous (Parcours/hub/notifs).
@@ -18338,7 +18478,7 @@ _SUPERVISED_LOOP_NAMES = [
     "personal_event_dispatcher", "light_events_dispatcher",
     "world_boss_scheduler", "world_boss_timeout_checker",
     "voice_chaos_dispatcher", "daily_riddle_dispatcher", "daily_agenda_dispatcher",
-    "weekly_herald_dispatcher",
+    "weekly_herald_dispatcher", "community_showcase_dispatcher",
     "flash_treasure_dispatcher", "evening_ritual_dispatcher",
     "tag_royale_starter", "tag_royale_timeout_checker", "server_anniversary_checker",
     "daily_quest_push_dispatcher", "channel_camouflage_dispatcher",
@@ -43042,6 +43182,12 @@ async def on_ready():
         bot.add_view(EngagementHubView())
     except Exception as ex:
         print(f"[on_ready add_view EngagementHubView] {ex}")
+    # Tâche B.1 — bouton « Devenir son mentor » PERSISTANT (DynamicItem) → les
+    # appels à parrainage postés dans les salons restent cliquables après un reboot.
+    try:
+        bot.add_dynamic_items(MentorVolunteerButton)
+    except Exception as ex:
+        print(f"[on_ready add_dynamic_items MentorVolunteerButton] {ex}")
     # TÂCHE B.2 — bouton « 🎮 Mon hub » persistant (custom_id open_my_hub) apposé
     # sous les récaps/annonces publics. 1 instance globale → dispatch sur tous les
     # messages (y compris ceux survivant à un reboot), rend HubLayoutV2 en éphémère.
@@ -43638,6 +43784,12 @@ async def on_ready():
         raid_module.setup(bot, get_db, db_get, _v2h)
         await raid_module.init_db()
         raid_module.register_persistent_views(bot)
+        # TASK C.1 : quand le raid_detector (scoring de comptes) repère une vague,
+        # suspendre les bienvenues individuelles → récap groupé en fin de vague.
+        try:
+            raid_module.set_raid_callback(mark_welcome_raid)
+        except Exception as ex:
+            print(f"[on_ready raid callback] {ex}")
         # FIX sécu P0 : démarrer l'expiration auto du lockdown anti-raid (1re passe =
         # récupération au boot : lève tout lockdown DÉJÀ expiré ; les actifs restent).
         try:
@@ -44697,6 +44849,9 @@ async def on_ready():
         daily_agenda_dispatcher.start()
     if not weekly_herald_dispatcher.is_running():
         weekly_herald_dispatcher.start()
+    # Vitrine communautaire hebdo (dimanche 19h, salon hub, zéro ping)
+    if not community_showcase_dispatcher.is_running():
+        community_showcase_dispatcher.start()
     # Phase 238 : récap hebdo en MP (opt-in strict)
     if not weekly_activity_recap_task.is_running():
         weekly_activity_recap_task.start()
@@ -46815,6 +46970,19 @@ async def on_member_join(m):
         except Exception as ex:
             _logerr("on_member_join.onboarding", ex, guild_id=getattr(m.guild, "id", 0))
 
+    # ═══ Tâche B.1 : appel à parrainage DANS UN SALON (throttlé, zéro DM) ═══
+    if not m.bot:
+        try:
+            asyncio.create_task(_maybe_post_mentor_call(m))
+        except Exception as ex:
+            _logerr("on_member_join.mentor_call", ex, guild_id=getattr(m.guild, "id", 0))
+
+    # ═══ Tâche B.2 : célébration des paliers de membres (anti-doublon DB) ═══
+    try:
+        asyncio.create_task(_maybe_celebrate_member_milestone(m.guild))
+    except Exception as ex:
+        _logerr("on_member_join.milestone", ex, guild_id=getattr(m.guild, "id", 0))
+
     # ═══ Phase 256 : rôle « 📢 Tous les Événements » OPT-OUT ═══
     # Chaque nouveau membre est abonné PAR DÉFAUT au rôle de notification des
     # events → les nouveaux arrivants comprennent tout de suite qu'il se passe
@@ -47057,8 +47225,9 @@ async def on_member_join(m):
         print(f"[_check_alt_account] {ex}")
 
     # ═══ Phase 49 : NPC greeting (proba 30% pour pas spammer) ═══
+    # TASK C.1 : muet pendant une vague de raid (en plus du throttle 6h existant).
     try:
-        if random.random() < 0.30:
+        if random.random() < 0.30 and not _welcome_raid_active(m.guild.id):
             c2 = await cfg(m.guild.id)
             hub_id2 = int(c2.get('hub_channel', 0) or 0)
             hub_ch2 = m.guild.get_channel(hub_id2) if hub_id2 else None
@@ -47111,6 +47280,10 @@ async def _handle_antiraid_join(member):
 
     # ── Raid détecté ──
     print(f"[ANTIRAID] guild={member.guild.id} {len(joins)} joins en {window}s → RAID")
+
+    # TASK C.1 : ouvre/prolonge la fenêtre de suppression des bienvenues
+    # individuelles → un seul récap groupé sera posté en fin de vague.
+    mark_welcome_raid(member.guild.id)
 
     # Récupérer les membres récents pour action
     recent_member_ids = [mid for (_, mid) in joins[-threshold:]]
@@ -47224,6 +47397,11 @@ async def _handle_welcome(member):
         return
     perms = ch.permissions_for(member.guild.me)
     if not (perms.send_messages and perms.embed_links):
+        return
+    # TASK C.1 : pendant une vague de raid détectée, on NE poste PAS une bienvenue
+    # par arrivée (anti-spam). On compte l'arrivée pour le récap groupé de fin de
+    # vague. FAIL-SAFE : hors raid → comportement normal.
+    if _defer_welcome_during_raid(member.guild.id, ch):
         return
     tpl = c.get('welcome_message', '') or ''
     try:
@@ -49362,20 +49540,33 @@ async def poll_cmd(
 
 @tasks.loop(hours=1)
 async def birthday_announcer():
-    """Vérifie chaque heure si on est entre 9h et 10h UTC : si oui, annonce."""
+    """Annonce les anniversaires du jour à 9h **heure FR** (Europe/Paris) et donne
+    le rôle du jour. TASK C.2 : l'annonce était calée sur 9h UTC → en été (CEST,
+    UTC+2) elle tombait à 11h FR, et le « jour » était calculé en UTC (décalé près
+    de minuit). On calcule désormais l'heure ET la date dans la TZ du serveur
+    (`event_timezone`, défaut Europe/Paris). FAIL-SAFE : si zoneinfo indispo, on
+    retombe sur l'ancien comportement UTC. Pas de DM (règle zéro MP membre)."""
     try:
-        now_dt = datetime.now(timezone.utc)
-        # On annonce une fois par jour, entre 9h et 10h UTC
-        if now_dt.hour != 9:
-            return
-
-        today_str = now_dt.strftime('%m-%d')
-
+        now_utc = datetime.now(timezone.utc)
         for guild in bot.guilds:
             try:
                 c = await cfg(guild.id)
                 if not c.get('birthday_enabled', False):
                     continue
+
+                # ── Heure + date en heure FR (par serveur, via event_timezone) ──
+                tz_name = c.get('event_timezone', 'Europe/Paris') or 'Europe/Paris'
+                if ZoneInfo is not None:
+                    try:
+                        now_local = now_utc.astimezone(ZoneInfo(tz_name))
+                    except Exception:
+                        now_local = now_utc  # TZ invalide → fallback UTC
+                else:
+                    now_local = now_utc      # zoneinfo indispo → fallback UTC
+                # On n'annonce qu'une fois par jour, dans la tranche 9h-10h locale.
+                if now_local.hour != 9:
+                    continue
+                today_str = now_local.strftime('%m-%d')
                 ch_id = int(c.get('birthday_channel', 0) or 0)
                 ch = guild.get_channel(ch_id) if ch_id else None
                 if not ch:
@@ -49423,7 +49614,7 @@ async def birthday_announcer():
                     e = discord.Embed(
                         description=text,
                         color=0xF1C40F,
-                        timestamp=now_dt,
+                        timestamp=now_utc,
                     )
                     e.set_author(name="🎂 Joyeux anniversaire !", icon_url=member.display_avatar.url)
                     e.set_thumbnail(url=member.display_avatar.url)
@@ -66747,6 +66938,241 @@ async def _daily_agenda_wait():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  VITRINE COMMUNAUTAIRE HEBDO — UN seul message/semaine qui célèbre la communauté
+#  (et non le combat, déjà couvert par le Héraut). Agrège, depuis les tables déjà
+#  alimentées : top shoutouts, paire mentor/apprenti active, meilleur spotlight,
+#  nouveaux membres bien intégrés, contributeur lore. Salon hub/chatty, ZÉRO ping
+#  (allowed_mentions=none → rien à opt-out), auto-purgé en fin de semaine. Anti-
+#  doublon par semaine ISO (marqueur cfg). Réutilise toute l'infra des recaps
+#  (salon via _find_event_recap_channel, cleanup via _register_for_cleanup).
+#  FAIL-OPEN : chaque section est isolée, une section vide est juste omise.
+# ═══════════════════════════════════════════════════════════════════════════════
+async def _gather_community_showcase(guild) -> list:
+    """Construit les sections de la vitrine (liste de (titre, corps)) depuis les
+    données de la semaine ISO en cours. Noms TOUJOURS échappés, jamais mentionnés.
+    Chaque section est dans son propre try/except → fail-safe section par section."""
+    gid = guild.id
+    sections = []
+    # Début de la fenêtre = 7 jours glissants (assez simple et robuste ; les tables
+    # stockent created_at en UTC ISO, comparable lexicographiquement).
+    since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+
+    def _name(uid):
+        m = guild.get_member(int(uid)) if uid else None
+        return discord.utils.escape_markdown(m.display_name) if m else f"Membre {uid}"
+
+    try:
+        async with get_db() as db:
+            # 1) Top shoutouts reçus cette semaine (les plus applaudis).
+            try:
+                async with db.execute(
+                    "SELECT to_user_id, COUNT(*) AS n FROM shoutouts "
+                    "WHERE guild_id=? AND created_at>=? "
+                    "GROUP BY to_user_id ORDER BY n DESC LIMIT 3",
+                    (gid, since),
+                ) as cur:
+                    rows = await cur.fetchall()
+                if rows:
+                    medals = ["🥇", "🥈", "🥉"]
+                    body = "\n".join(
+                        f"{medals[idx] if idx < 3 else '•'} {_name(r[0])} — **{int(r[1])}** shoutout"
+                        f"{'s' if int(r[1]) > 1 else ''}"
+                        for idx, r in enumerate(rows)
+                    )
+                    sections.append(("🎉 Les plus applaudis", body))
+            except Exception as ex:
+                print(f"[showcase shoutouts g={gid}] {ex}")
+
+            # 2) Paire mentor/apprenti la plus active (interactions_count).
+            try:
+                async with db.execute(
+                    "SELECT mentor_id, apprentice_id, interactions_count FROM mentorships "
+                    "WHERE guild_id=? AND status='active' "
+                    "ORDER BY interactions_count DESC, started_at DESC LIMIT 1",
+                    (gid,),
+                ) as cur:
+                    row = await cur.fetchone()
+                if row:
+                    inter = int(row[2] or 0)
+                    extra = f" · {inter} échanges" if inter > 0 else ""
+                    sections.append((
+                        "🤝 Duo mentor / apprenti",
+                        f"**{_name(row[0])}** guide **{_name(row[1])}**{extra}",
+                    ))
+            except Exception as ex:
+                print(f"[showcase mentor g={gid}] {ex}")
+
+            # 3) Meilleur spotlight de la semaine (message le plus étoilé).
+            try:
+                async with db.execute(
+                    "SELECT author_id, star_count FROM spotlighted_messages "
+                    "WHERE guild_id=? AND spotlight_at>=? "
+                    "ORDER BY star_count DESC LIMIT 1",
+                    (gid, since),
+                ) as cur:
+                    row = await cur.fetchone()
+                if row and int(row[1] or 0) > 0:
+                    sections.append((
+                        "⭐ Message de la semaine",
+                        f"**{_name(row[0])}** · **{int(row[1])}** ⭐",
+                    ))
+            except Exception as ex:
+                print(f"[showcase spotlight g={gid}] {ex}")
+
+            # 4) Nouveaux membres BIEN intégrés : arrivés cette semaine ET déjà actifs
+            #    (au moins un point d'activité). On compte + on cite quelques noms.
+            try:
+                async with db.execute(
+                    "SELECT DISTINCT ma.user_id FROM member_activity ma "
+                    "WHERE ma.guild_id=? AND ma.created_at>=? LIMIT 200",
+                    (gid, since),
+                ) as cur:
+                    active_uids = {int(r[0]) for r in await cur.fetchall()}
+                newbies = []
+                cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+                for uid in list(active_uids)[:200]:
+                    m = guild.get_member(uid)
+                    if not m or not m.joined_at:
+                        continue
+                    ja = m.joined_at
+                    if ja.tzinfo is None:
+                        ja = ja.replace(tzinfo=timezone.utc)
+                    if ja >= cutoff and not m.bot:
+                        newbies.append(m)
+                if newbies:
+                    shown = ", ".join(discord.utils.escape_markdown(m.display_name) for m in newbies[:5])
+                    more = f" et {len(newbies) - 5} autre·s" if len(newbies) > 5 else ""
+                    sections.append((
+                        "🌱 Bienvenue aux nouveaux",
+                        f"Déjà dans le bain cette semaine : {shown}{more}. Un accueil chaleureux !",
+                    ))
+            except Exception as ex:
+                print(f"[showcase newbies g={gid}] {ex}")
+
+            # 5) Contributeur lore : le plus de bulletins de vote narratif cette semaine.
+            try:
+                async with db.execute(
+                    "SELECT b.user_id, COUNT(*) AS n FROM narrative_vote_ballots b "
+                    "JOIN narrative_votes v ON v.id = b.narrative_vote_id "
+                    "WHERE v.guild_id=? AND b.placed_at>=? "
+                    "GROUP BY b.user_id ORDER BY n DESC LIMIT 1",
+                    (gid, since),
+                ) as cur:
+                    row = await cur.fetchone()
+                if row and int(row[1] or 0) > 0:
+                    sections.append((
+                        "📜 Plume de l'histoire",
+                        f"**{_name(row[0])}** a le plus pesé sur les choix narratifs cette semaine.",
+                    ))
+            except Exception as ex:
+                print(f"[showcase lore g={gid}] {ex}")
+    except Exception as ex:
+        print(f"[_gather_community_showcase g={gid}] {ex}")
+    return sections
+
+
+def _build_community_showcase_text(sections: list) -> str:
+    """Corps de la vitrine à partir des sections (titre, corps) déjà calculées."""
+    lines = ["La semaine côté communauté — celles et ceux qui font vivre le serveur. 💛", ""]
+    for title, body in sections:
+        lines.append(f"__{title}__")
+        lines.append(body)
+        lines.append("")
+    lines.append("_Merci à toutes et tous — continuez, on vous voit !_")
+    return "\n".join(lines)
+
+
+async def _post_community_showcase(guild) -> bool:
+    """Poste la vitrine communautaire (au plus une fois par semaine ISO). Mêmes
+    helpers que le Héraut (salon, cleanup, anti-doublon). Sans ping. FAIL-OPEN.
+    Si aucune section n'a de contenu, on NE poste rien (pas de message vide)."""
+    try:
+        c = await cfg(guild.id)
+        if not c.get('community_showcase_enabled', True):
+            return False
+        # Anti-doublon par semaine ISO (marqueur cfg distinct du Héraut).
+        wk = datetime.now(_TZ_P41).strftime('%G-W%V')
+        if str(c.get('community_showcase_last_week', '') or '') == wk:
+            return False
+        sections = await _gather_community_showcase(guild)
+        if not sections:
+            # Rien à célébrer cette semaine → on ne poste pas (et on ne marque pas,
+            # pour réessayer au prochain tour si de l'activité arrive plus tard).
+            return False
+        ch = await _find_event_recap_channel(guild)
+        if not ch:
+            try:
+                cat = await _ensure_events_category(guild)
+                me = guild.me
+                if cat:
+                    for cand in cat.text_channels:
+                        try:
+                            if me and cand.permissions_for(me).send_messages:
+                                ch = cand
+                                break
+                        except Exception:
+                            continue
+            except Exception:
+                pass
+        if not ch:
+            return False
+        body = _build_community_showcase_text(sections)
+        panel = v2_recap_view(
+            "💛 Vitrine de la Communauté",
+            body,
+            color=Palette.INFO,
+            footer="Vitrine hebdo · se supprime en fin de semaine",
+            hub_button=True,
+        )
+        try:
+            msg = await ch.send(view=panel, allowed_mentions=discord.AllowedMentions.none())
+            await _register_for_cleanup(msg, 6 * 24 * 3600, 'community_showcase')
+        except Exception as ex:
+            print(f"[_post_community_showcase send] {ex}")
+            return False
+        try:
+            await db_set(guild.id, 'community_showcase_last_week', wk)
+        except Exception as ex:
+            print(f"[_post_community_showcase mark] {ex}")
+        print(f"[COMMUNITY SHOWCASE] guild={guild.id} ch={ch.id} week={wk} sections={len(sections)}")
+        return True
+    except Exception as ex:
+        print(f"[_post_community_showcase] {ex}")
+        return False
+
+
+@tasks.loop(minutes=30)
+async def community_showcase_dispatcher():
+    """Poste la Vitrine communautaire le DIMANCHE 19h Europe/Paris (1h après le
+    Héraut combat à 18h → les deux recaps hebdo ne se chevauchent pas). Skip les
+    serveurs abandonnés. Try/except par guild : l'échec d'un guild ne casse jamais
+    le loop. Tâche supervisée (superviseur la relance si elle meurt)."""
+    try:
+        from zoneinfo import ZoneInfo as _ZI
+        tz = _ZI('Europe/Paris')
+    except Exception:
+        tz = timezone.utc
+    nowp = datetime.now(tz)
+    if nowp.weekday() != 6 or nowp.hour != 19:  # dimanche 19h
+        return
+    try:
+        for guild in bot.guilds:
+            try:
+                if not await _guild_recently_active(guild.id, minutes=4320, min_users=1):
+                    continue
+                await _post_community_showcase(guild)
+            except Exception as ex:
+                print(f"[community_showcase_dispatcher guild={guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[community_showcase_dispatcher] {ex}")
+
+
+@community_showcase_dispatcher.before_loop
+async def _community_showcase_wait():
+    await bot.wait_until_ready()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Phase 238 — RÉCAP HEBDO EN MP (strictement opt-in, réutilise « 📩 Notifs MP »)
 # ═══════════════════════════════════════════════════════════════════════════════
 async def _build_weekly_recap_dm_text(member) -> str:
@@ -78044,6 +78470,294 @@ async def _track_mentor_interaction(guild_id: int, user_id: int):
         print(f"[_track_mentor_interaction] {ex}")
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  Tâche B.1 — Appel à parrainage DANS UN SALON à l'arrivée (zéro DM membre)
+#  Quand un nouveau arrive, on poste un appel DISCRET dans le salon mentorat
+#  (ou accueil/hub) avec un bouton « Devenir son mentor ». La logique mentor
+#  existante (table mentorships + éligibilité) est réutilisée. Throttle strict :
+#  cooldown par guilde + skip si rafale d'arrivées (anti-spam). AUCUN DM.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Cooldown en mémoire : guild_id -> timestamp du dernier appel posté.
+_mentor_call_last_post: dict[int, datetime] = {}
+# Fenêtre d'arrivées récentes par guilde (anti-rafale) : guild_id -> [timestamps]
+_mentor_call_recent_joins: dict[int, list] = {}
+MENTOR_CALL_COOLDOWN_S = 3600          # max 1 appel / heure / guilde
+MENTOR_CALL_BURST_WINDOW_S = 60        # fenêtre de détection de rafale
+MENTOR_CALL_BURST_THRESHOLD = 3        # ≥3 arrivées / 60s → on skip (rafale)
+
+
+async def _mentor_volunteer_action(i: discord.Interaction, apprentice_id: int):
+    """Logique partagée : le cliqueur devient mentor de l'apprenti visé.
+    Réutilise la mécanique mentorships + éligibilité existante. Zéro DM."""
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        if i.user.id == apprentice_id:
+            return await _safe_followup(
+                i, content="❌ Tu ne peux pas être ton propre mentor.")
+        apprentice = i.guild.get_member(apprentice_id)
+        if not apprentice or apprentice.bot:
+            return await _safe_followup(
+                i, content="❌ Ce membre n'est plus disponible.")
+        mem = i.user if isinstance(i.user, discord.Member) \
+            else i.guild.get_member(i.user.id)
+        if not await _is_eligible_as_mentor(i.guild.id, i.user.id, mem):
+            return await _safe_followup(
+                i,
+                content=(
+                    f"❌ Pour parrainer : ≥{soc.MENTOR_MIN_DAYS}j sur le serveur "
+                    f"+ level ≥{soc.MENTOR_MIN_LEVEL} + aucun apprenti actuel."
+                ),
+            )
+        if not await _is_eligible_as_apprentice(
+                i.guild.id, apprentice_id, apprentice):
+            return await _safe_followup(
+                i,
+                content=(
+                    f"❌ {apprentice.display_name} a déjà un mentor "
+                    f"(ou n'est plus éligible)."
+                ),
+            )
+        # Création directe en 'active' : l'appel public + le clic = double
+        # consentement contextuel. Aucun DM membre (règle owner). L'index
+        # UNIQUE (guild_id, apprentice_id) WHERE status='active' garantit
+        # qu'un seul mentor peut être lié → anti-race.
+        try:
+            async with get_db() as db:
+                await db.execute(
+                    "INSERT INTO mentorships(guild_id, mentor_id, apprentice_id, status) "
+                    "VALUES(?, ?, ?, 'active')",
+                    (i.guild.id, i.user.id, apprentice_id),
+                )
+                await db.commit()
+        except Exception:
+            # Échec d'INSERT = un autre mentor a déjà pris l'apprenti (index unique).
+            return await _safe_followup(
+                i, content="❌ Trop tard — quelqu'un vient déjà de le parrainer.")
+        # Confirme à TOUS dans le salon (pas de DM). On retire les boutons de
+        # l'appel original pour éviter qu'un second mentor clique.
+        try:
+            await i.message.edit(view=None)
+        except Exception:
+            pass
+        try:
+            await i.channel.send(
+                content=(
+                    f"🤝 **{mem.display_name}** parraine désormais "
+                    f"**{apprentice.display_name}** ! Bienvenue dans le duo. "
+                    f"Discutez chaque jour pour gagner des bonus."
+                ),
+                allowed_mentions=discord.AllowedMentions.none(),
+            )
+        except Exception:
+            pass
+        await _safe_followup(
+            i,
+            content=(
+                f"✅ Tu es maintenant le mentor de {apprentice.display_name}. "
+                f"Bonus : +{soc.MENTOR_INTERACTION_BONUS_COINS} 🪙/j pour toi, "
+                f"+{soc.APPRENTICE_INTERACTION_BONUS_COINS} 🪙/j pour lui (interactions communes)."
+            ),
+        )
+    except Exception as ex:
+        print(f"[_mentor_volunteer_action] {ex}")
+        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
+
+
+class MentorVolunteerButton(
+    discord.ui.DynamicItem[Button],
+    template=r"mentor_volunteer:(?P<apprentice_id>\d+)",
+):
+    """Bouton PERSISTANT « Devenir son mentor » (DynamicItem → survit aux
+    reboots, aucun bouton mort). Capté par custom_id mentor_volunteer:<id>."""
+
+    def __init__(self, apprentice_id: int):
+        self.apprentice_id = apprentice_id
+        super().__init__(
+            Button(
+                label="🎓 Devenir son mentor",
+                style=discord.ButtonStyle.success,
+                custom_id=f"mentor_volunteer:{apprentice_id}",
+            )
+        )
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["apprentice_id"]))
+
+    async def callback(self, i: discord.Interaction):
+        await _mentor_volunteer_action(i, self.apprentice_id)
+
+
+class MentorVolunteerView(View):
+    """Conteneur du bouton « Devenir son mentor » pour l'envoi initial de
+    l'appel. Au reboot, c'est MentorVolunteerButton (DynamicItem) qui re-capte
+    le clic via le custom_id."""
+
+    def __init__(self, apprentice_id: int):
+        super().__init__(timeout=None)
+        self.add_item(MentorVolunteerButton(apprentice_id))
+
+
+async def _pick_mentor_call_channel(guild: discord.Guild):
+    """Salon où poster l'appel à parrainage : mentor_channel configuré →
+    welcome_channel → hub_channel → 1er salon chatty. Fail-safe → None."""
+    try:
+        c = await cfg(guild.id)
+    except Exception:
+        c = {}
+    for key in ("mentor_channel", "welcome_channel", "hub_channel"):
+        try:
+            cid = int(c.get(key, 0) or 0)
+        except Exception:
+            cid = 0
+        if cid:
+            ch = guild.get_channel(cid)
+            try:
+                if ch and isinstance(ch, discord.TextChannel) and guild.me \
+                        and ch.permissions_for(guild.me).send_messages:
+                    return ch
+            except Exception:
+                pass
+    # Dernier recours : 1er salon chatty.
+    try:
+        for ch in guild.text_channels:
+            if await _is_chatty_channel(ch):
+                return ch
+    except Exception:
+        pass
+    return None
+
+
+async def _maybe_post_mentor_call(member: discord.Member):
+    """Tâche B.1 : poste UN appel discret « Qui veut parrainer X ? » dans le
+    salon mentorat/accueil avec un bouton « Devenir son mentor ». Throttlé
+    (cooldown + anti-rafale). FAIL-SAFE et SANS DM."""
+    try:
+        if member.bot or not member.guild:
+            return
+        guild = member.guild
+        gid = guild.id
+        now_ts = now()
+
+        # Anti-rafale : on ignore les vagues d'arrivées (raids / lives streaming).
+        recent = [t for t in _mentor_call_recent_joins.get(gid, [])
+                  if (now_ts - t).total_seconds() < MENTOR_CALL_BURST_WINDOW_S]
+        recent.append(now_ts)
+        _mentor_call_recent_joins[gid] = recent[-20:]
+        if len(recent) >= MENTOR_CALL_BURST_THRESHOLD:
+            return  # rafale → pas d'appel (évite le spam de panneaux)
+
+        # Cooldown : 1 appel max / heure / guilde.
+        last = _mentor_call_last_post.get(gid)
+        if last and (now_ts - last).total_seconds() < MENTOR_CALL_COOLDOWN_S:
+            return
+
+        # Le nouveau doit être éligible comme apprenti (≤7j + pas de mentor).
+        if not await _is_eligible_as_apprentice(gid, member.id, member):
+            return
+
+        ch = await _pick_mentor_call_channel(guild)
+        if ch is None:
+            return
+
+        # Confirme qu'au moins 1 mentor potentiel existe (humain, non-bot, autre
+        # que le nouveau) — inutile de poster un appel que personne ne peut prendre.
+        # Heuristique légère : ≥2 membres humains hors le nouveau.
+        try:
+            humans = sum(1 for m in guild.members
+                         if not m.bot and m.id != member.id)
+        except Exception:
+            humans = 2
+        if humans < 1:
+            return
+
+        embed = discord.Embed(
+            title="🤝 Un parrain pour le nouveau ?",
+            description=(
+                f"{member.mention} vient d'arriver. Un ancien veut-il "
+                f"l'accompagner ?\n\n"
+                f"En tant que mentor : **+{soc.MENTOR_INTERACTION_BONUS_COINS} 🪙/j** "
+                f"pour toi, **+{soc.APPRENTICE_INTERACTION_BONUS_COINS} 🪙/j** pour lui "
+                f"(en discutant chaque jour).\n"
+                f"_Condition : ≥{soc.MENTOR_MIN_DAYS}j sur le serveur + level "
+                f"≥{soc.MENTOR_MIN_LEVEL}._"
+            ),
+            color=0x2ECC71,
+        )
+        await ch.send(
+            embed=embed,
+            view=MentorVolunteerView(member.id),
+            allowed_mentions=discord.AllowedMentions(
+                users=[member], roles=False, everyone=False),
+        )
+        _mentor_call_last_post[gid] = now_ts
+    except Exception as ex:
+        print(f"[_maybe_post_mentor_call] {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Tâche B.2 — Paliers de membres célébrés (100/250/500/1000…) DANS UN SALON
+#  Détecte le franchissement d'un cap de member_count et poste UNE annonce
+#  festive dans un salon chatty (allowed_mentions=none). Anti-doublon PERSISTANT
+#  (flag DB par palier) : ne re-célèbre jamais le même palier. FAIL-SAFE.
+# ═══════════════════════════════════════════════════════════════════════════
+
+MEMBER_MILESTONES = (50, 100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000)
+
+
+async def _maybe_celebrate_member_milestone(guild: discord.Guild):
+    """Tâche B.2 : célèbre UNE fois chaque palier de membres atteint."""
+    try:
+        if guild is None:
+            return
+        count = guild.member_count or 0
+        if count <= 0:
+            return
+        # Plus haut palier atteint par le compte actuel.
+        reached = [m for m in MEMBER_MILESTONES if count >= m]
+        if not reached:
+            return
+        milestone = max(reached)
+
+        # Anti-doublon persistant ATOMIQUE : on RÉSERVE le palier via un INSERT
+        # OR IGNORE et on n'annonce QUE si la ligne a réellement été insérée
+        # (rowcount=1). Deux arrivées simultanées → une seule gagne le claim, donc
+        # une seule annonce. Idempotent : si l'annonce échoue, le palier reste
+        # marqué (on ne re-spammera jamais).
+        async with get_db() as db:
+            cur = await db.execute(
+                "INSERT OR IGNORE INTO member_milestones (guild_id, milestone) "
+                "VALUES (?, ?)",
+                (guild.id, milestone),
+            )
+            await db.commit()
+            if cur.rowcount != 1:
+                return  # palier déjà célébré (ou pris par une autre arrivée)
+
+        ch = await _find_event_recap_channel(guild)
+        if ch is None:
+            return
+        embed = discord.Embed(
+            title=f"🎉 {milestone:,} membres !",
+            description=(
+                f"On vient de franchir la barre des **{milestone:,} membres** "
+                f"sur **{guild.name}** ! Merci à toutes et à tous d'être là. "
+                f"En route vers le prochain palier ! 🥳"
+            ),
+            color=0xF1C40F,
+        )
+        await ch.send(
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+    except Exception as ex:
+        print(f"[_maybe_celebrate_member_milestone] {ex}")
+
+
 async def _open_mentor_panel(i: discord.Interaction):
     if not await _safe_defer(i):
         return
@@ -79788,35 +80502,46 @@ async def hall_of_fame_cmd(i: discord.Interaction):
                 (i.guild.id,),
             ) as cur:
                 rows = await cur.fetchall()
-        if not rows:
+        # Records VIVANTS calculés à la volée depuis les tables du jeu (top damage,
+        # streak, braquage, coups de grâce, duels). Rend le panel vivant même sans
+        # exploit saisi à la main → c'était le manque qui le laissait vide.
+        live = await _compute_hof_live_records(i.guild)
+        live_lines = _render_hof_live_lines(i.guild, live)
+        manual_lines = []
+        for r in rows:
+            hid, cat, rec, uid, detail, achieved = r
+            m = i.guild.get_member(int(uid))
+            mname = discord.utils.escape_markdown(m.display_name) if m else f"User {uid}"
+            line = f"🏛️ `{cat}` — **{rec}**\n   par **{mname}**"
+            if detail:
+                line += f" · _{detail}_"
+            manual_lines.append(line)
+        if not live_lines and not manual_lines:
             return await _safe_followup(
                 i,
                 content="_Le Hall of Fame est vide pour l'instant. Les premiers exploits feront l'histoire._",
             )
-        lines = []
-        for r in rows:
-            hid, cat, rec, uid, detail, achieved = r
-            m = i.guild.get_member(int(uid))
-            mname = m.display_name if m else f"User {uid}"
-            line = f"🏛️ `{cat}` — **{rec}**\n   par **{mname}**"
-            if detail:
-                line += f" · _{detail}_"
-            lines.append(line)
 
         _guild_name = i.guild.name
-        _records_text = "\n\n".join(lines)
+        _live_text = "\n".join(live_lines)
+        _records_text = "\n\n".join(manual_lines)
 
         class _HallOfFameLayout(LayoutView):
             def __init__(self):
                 super().__init__(timeout=300)
                 items = []
                 items.append(v2_title(f"🏛️ Hall of Fame — {_guild_name}"))
-                items.append(v2_subtitle("Les exploits permanents du serveur, gravés dans la pierre."))
+                items.append(v2_subtitle("Les sommets du serveur — records vivants et exploits gravés dans la pierre."))
+                if _live_text:
+                    items.append(v2_divider())
+                    items.append(v2_body("### 🏅 RECORDS DU SERVEUR (live)"))
+                    items.append(v2_body(_live_text[:1800]))
+                if _records_text:
+                    items.append(v2_divider())
+                    items.append(v2_body("### 🏆 EXPLOITS LÉGENDAIRES"))
+                    items.append(v2_body(_records_text[:1800]))
                 items.append(v2_divider())
-                items.append(v2_body("### 🏆 RECORDS LÉGENDAIRES"))
-                items.append(v2_body(_records_text[:3500]))
-                items.append(v2_divider())
-                items.append(v2_body("_Records permanents · Phase 63_"))
+                items.append(v2_body("_Records vivants recalculés à chaque ouverture · exploits permanents_"))
                 self.add_item(v2_container(*items, color=0xFFD700))
 
         await _safe_followup(i, view=_HallOfFameLayout())
@@ -83877,6 +84602,132 @@ async def _open_capsule_panel(i: discord.Interaction):
 # ─── 🏛️ HALL OF FAME (read-only display) ────────────────────────────────────
 
 
+async def _compute_hof_live_records(guild) -> list:
+    """Records VIVANTS du Hall of Fame, calculés À LA VOLÉE depuis les tables déjà
+    alimentées par le jeu (aucune nouvelle table, aucune task : la table
+    hall_of_fame_records reste réservée aux exploits saisis manuellement par
+    l'owner via /owner hof_add). Chaque record = (emoji, libellé, user_id, detail).
+
+    Pourquoi à la volée : la table hall_of_fame_records restait vide faute
+    d'inserts automatiques → le panel n'affichait rien. Plutôt qu'une task
+    d'upsert (risque de doublons / records figés), on dérive les records des
+    sommets actuels au moment du rendu. Toujours frais, zéro maintenance.
+
+    FAIL-SAFE intégral : chaque requête est isolée dans son propre try/except ;
+    la moindre erreur (table absente, colonne manquante) saute juste CE record
+    sans casser le panel. Renvoie [] si tout échoue."""
+    gid = guild.id
+    out = []
+    try:
+        async with get_db() as db:
+            # Plus gros coup porté en un seul combat (boss raid / world boss) :
+            # on requête chaque source de dégâts puis on garde le max global.
+            best_dmg = None  # (user_id, damage)
+            try:
+                async with db.execute(
+                    "SELECT ep.user_id, MAX(ep.damage_dealt) FROM event_participants ep "
+                    "JOIN events e ON e.id = ep.event_id "
+                    "WHERE e.guild_id=? AND ep.damage_dealt>0",
+                    (gid,),
+                ) as cur:
+                    row = await cur.fetchone()
+                if row and row[0] is not None and row[1]:
+                    best_dmg = (int(row[0]), int(row[1]))
+            except Exception:
+                pass
+            try:
+                async with db.execute(
+                    "SELECT wba.user_id, MAX(wba.damage_dealt) FROM world_boss_attackers wba "
+                    "JOIN world_bosses wb ON wb.id = wba.world_boss_id "
+                    "WHERE wb.guild_id=? AND wba.damage_dealt>0",
+                    (gid,),
+                ) as cur:
+                    row = await cur.fetchone()
+                if row and row[0] is not None and row[1]:
+                    cand = (int(row[0]), int(row[1]))
+                    if best_dmg is None or cand[1] > best_dmg[1]:
+                        best_dmg = cand
+            except Exception:
+                pass
+            if best_dmg:
+                out.append(("⚔️", "Plus gros coup en combat", best_dmg[0],
+                            f"{best_dmg[1]:,} dégâts".replace(",", " ")))
+
+            # Plus longue série de quêtes quotidiennes (streak record).
+            try:
+                async with db.execute(
+                    "SELECT user_id, best_streak FROM user_streaks "
+                    "WHERE guild_id=? AND best_streak>0 ORDER BY best_streak DESC LIMIT 1",
+                    (gid,),
+                ) as cur:
+                    row = await cur.fetchone()
+                if row and row[1]:
+                    out.append(("🔥", "Plus longue série quotidienne", int(row[0]),
+                                f"{int(row[1])} jours d'affilée"))
+            except Exception:
+                pass
+
+            # Plus gros gain sur un braquage (heist payout record).
+            try:
+                async with db.execute(
+                    "SELECT hp.user_id, MAX(hp.payout) FROM heist_participants hp "
+                    "JOIN heists h ON h.id = hp.heist_id "
+                    "WHERE h.guild_id=? AND hp.payout>0",
+                    (gid,),
+                ) as cur:
+                    row = await cur.fetchone()
+                if row and row[0] is not None and row[1]:
+                    out.append(("💰", "Plus gros gain sur un braquage", int(row[0]),
+                                f"{int(row[1]):,} 🪙".replace(",", " ")))
+            except Exception:
+                pass
+
+            # Plus de coups de grâce sur des boss (final blows).
+            try:
+                async with db.execute(
+                    "SELECT user_id, final_blows FROM player_event_stats "
+                    "WHERE guild_id=? AND final_blows>0 ORDER BY final_blows DESC LIMIT 1",
+                    (gid,),
+                ) as cur:
+                    row = await cur.fetchone()
+                if row and row[1]:
+                    out.append(("🏹", "Roi des coups de grâce", int(row[0]),
+                                f"{int(row[1])} boss achevés"))
+            except Exception:
+                pass
+
+            # Plus de duels gagnés (PvP).
+            try:
+                async with db.execute(
+                    "SELECT user_id, duels_won FROM player_event_stats "
+                    "WHERE guild_id=? AND duels_won>0 ORDER BY duels_won DESC LIMIT 1",
+                    (gid,),
+                ) as cur:
+                    row = await cur.fetchone()
+                if row and row[1]:
+                    out.append(("🤺", "Champion des duels", int(row[0]),
+                                f"{int(row[1])} duels gagnés"))
+            except Exception:
+                pass
+    except Exception as ex:
+        print(f"[_compute_hof_live_records] {ex}")
+    return out
+
+
+def _render_hof_live_lines(guild, records: list) -> list:
+    """Transforme les records vivants en lignes d'affichage (mêmes codes visuels
+    que les exploits manuels). Noms échappés, jamais de mention/ping."""
+    lines = []
+    for emoji, label, uid, detail in records:
+        m = guild.get_member(int(uid)) if guild else None
+        mname = discord.utils.escape_markdown(m.display_name) if m else f"Membre {uid}"
+        line = f"{emoji} **{label}** — **{mname}**"
+        if detail:
+            line += f" · _{detail}_"
+        lines.append(line)
+    return lines
+
+
 async def _open_hof_panel(i: discord.Interaction):
     if not await _safe_defer(i):
         return
@@ -83890,26 +84741,35 @@ async def _open_hof_panel(i: discord.Interaction):
                 (i.guild.id,),
             ) as cur:
                 rows = await cur.fetchall()
-        if not rows:
+        # Records VIVANTS dérivés du jeu (top damage, streak, heist, etc.) — c'est
+        # ce qui rend le panel non-vide même sans exploit saisi à la main.
+        live = await _compute_hof_live_records(i.guild)
+        live_lines = _render_hof_live_lines(i.guild, live)
+        manual_lines = []
+        for r in rows:
+            hid, cat, rec, uid, detail, _ = r
+            m = i.guild.get_member(int(uid))
+            mname = discord.utils.escape_markdown(m.display_name) if m else f"User {uid}"
+            line = f"🏛️ `{cat}` — **{rec}**\n   par **{mname}**"
+            if detail:
+                line += f" · _{detail}_"
+            manual_lines.append(line)
+        if not live_lines and not manual_lines:
             return await _safe_followup(
                 i,
                 content="_Le Hall of Fame est vide pour l'instant. Les premiers exploits feront l'histoire._",
             )
-        lines = []
-        for r in rows:
-            hid, cat, rec, uid, detail, _ = r
-            m = i.guild.get_member(int(uid))
-            mname = m.display_name if m else f"User {uid}"
-            line = f"🏛️ `{cat}` — **{rec}**\n   par **{mname}**"
-            if detail:
-                line += f" · _{detail}_"
-            lines.append(line)
+        parts = []
+        if live_lines:
+            parts.append("**🏅 RECORDS DU SERVEUR (live)**\n" + "\n".join(live_lines))
+        if manual_lines:
+            parts.append("**🏛️ EXPLOITS LÉGENDAIRES**\n\n" + "\n\n".join(manual_lines))
         e = discord.Embed(
             title=f"🏛️ Hall of Fame — {i.guild.name}",
-            description="\n\n".join(lines),
+            description="\n\n".join(parts)[:4000],
             color=0xFFD700,
         )
-        e.set_footer(text="Records permanents · Indélébiles")
+        e.set_footer(text="Records vivants + exploits permanents")
         await _safe_followup(i, embed=e)
     except Exception as ex:
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
@@ -84422,6 +85282,50 @@ class HubCatProgressionLayoutV2(_HubCategoryLayoutV2):
     ]
 
 
+def _chronicle_progress_bar(pct: int, width: int = 12) -> str:
+    pct = max(0, min(100, int(pct)))
+    fill = int(width * pct / 100)
+    return "█" * fill + "░" * (width - fill)
+
+
+async def _build_chronicle_progress_tile(guild_id: int) -> list:
+    """Tâche B.3 : construit une petite tuile LECTURE SEULE de l'avancement
+    collectif du chapitre en cours de la Chronique. Retourne une liste d'items
+    V2 (ou [] si indisponible). Aucune action, aucun ping — juste un aperçu.
+    Le détail navigable reste accessible via le bouton « 📖 Chronique »."""
+    try:
+        state = await story_engine_module.get_state(guild_id)
+    except Exception:
+        state = None
+    if not state:
+        return []
+    try:
+        bar = _chronicle_progress_bar(state.get("progress_pct", 0))
+        kind_label = {
+            "mob_kills": "Monstres vaincus",
+            "quest_completes": "Quêtes complétées",
+            "boss_damage": "Dégâts boss",
+            "encounters": "Rencontres NPC",
+            "council_votes": "Votes au Conseil",
+            "regional_defenses": "Défenses régionales",
+            "mystery_combines": "Indices combinés",
+        }.get(state.get("kind", ""), state.get("kind", "Progression"))
+        return [
+            v2_body(
+                f"### 📖 Chronique d'Abylumis — avancement collectif\n"
+                f"**Acte {state['act']} · Chapitre {state['chapter_id']} — "
+                f"*{state['chapter_title']}***\n"
+                f"🎯 {kind_label} · `{bar}` "
+                f"`{state['current']:,}/{state['target']:,}` "
+                f"({state['progress_pct']} %)\n"
+                f"-# Lecture seule — ouvre « 📖 Chronique » pour le détail."
+            ),
+        ]
+    except Exception as ex:
+        print(f"[_build_chronicle_progress_tile] {ex}")
+        return []
+
+
 class HubCatOutilsLayoutV2(_HubCategoryLayoutV2):
     """Catégorie « Récit & Aide » — narration, mission, FAQ, préférences.
 
@@ -84430,6 +85334,49 @@ class HubCatOutilsLayoutV2(_HubCategoryLayoutV2):
     """
     _CAT_TITLE = "🧭 Récit & Aide"
     _CAT_SUBTITLE = "L'histoire du monde + tout comprendre + tes réglages"
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = False):
+        """Tâche B.3 : injecte une petite TUILE lecture-seule de l'avancement
+        collectif du chapitre en cours AVANT d'afficher les features. Zéro ping,
+        zéro action — c'est juste un aperçu. FAIL-SAFE (si la Chronique est
+        indisponible, on retombe sur le rendu standard sans tuile)."""
+        try:
+            tile_items = await _build_chronicle_progress_tile(self.guild_id)
+            if tile_items:
+                self._prepend_chronicle_tile(tile_items)
+        except Exception as ex:
+            print(f"[HubCatOutilsLayoutV2.render_to chronicle_tile] {ex}")
+        await super().render_to(interaction, edit=edit)
+
+    def _prepend_chronicle_tile(self, tile_items: list):
+        """Reconstruit le container de la catégorie en plaçant la tuile Chronique
+        (lecture seule) juste après le sous-titre."""
+        # Rebuild from scratch en réinsérant la tuile. On reprend la logique de
+        # _build() de la base mais en glissant la tuile après le subtitle.
+        self.clear_items()
+        items = [v2_title(self._CAT_TITLE)]
+        if self._CAT_SUBTITLE:
+            items.append(v2_subtitle(self._CAT_SUBTITLE))
+        items.append(v2_divider())
+        # ─── Tuile Chronique (lecture seule) ───
+        items.extend(tile_items)
+        items.append(v2_divider())
+        # ─── Features standard ───
+        for (title_str, subtitle_str, btn_label, style, cid, method) in self._CAT_FEATURES:
+            b = Button(label=btn_label, style=style, custom_id=cid)
+            b.callback = _hub_feature_delegate(method)
+            items.append(_section_with_button(title_str, subtitle_str, b))
+        items.append(v2_divider())
+        close_btn = Button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger,
+                           custom_id="hubcatv2_close")
+        close_btn.callback = self._on_close
+        items.append(discord.ui.ActionRow(
+            make_back_to_hub_button(self.user_id, self.guild_id, self.style_hint),
+            close_btn,
+        ))
+        color = self._CAT_COLOR if self._CAT_COLOR is not None else Palette.PRIMARY
+        self.add_item(v2_container(*items, color=color))
+
     _CAT_FEATURES = [
         ("📜 Saga", "L'état de la saga collective en cours",
          "Voir", discord.ButtonStyle.success, "hubcat_saga", "_on_saga"),

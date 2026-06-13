@@ -1675,6 +1675,17 @@ DOMAINE_TIERS = [
 _DOMAINE_GIVE = 50  # Éclats par contribution
 
 
+def _progress_bar(cur: int, lo: int, hi: int, width: int = 12) -> str:
+    """Petite barre de progression texte entre deux paliers (lo→hi). FAIL-SAFE."""
+    try:
+        span = max(1, hi - lo)
+        ratio = min(1.0, max(0.0, (cur - lo) / span))
+        filled = int(round(ratio * width))
+        return "🟩" * filled + "⬜" * (width - filled) + f"  {int(ratio*100)}%"
+    except Exception:
+        return ""
+
+
 async def get_domaine(gid: int) -> int:
     if _get_db is None:
         return 0
@@ -1725,14 +1736,22 @@ async def build_domaine_panel(i: discord.Interaction, status: str | None = None)
     items.append(v2_subtitle("Tout le monde contribue à un monument commun. Un objectif collectif qui grandit avec vous."))
     lines = [f"🏆 **Palier actuel : {cur_label}**", f"📊 **Contribution totale : `{pts:,}`** points"]
     if nxt:
+        # TASK C.3 : OBJECTIF ALLIANCE VISIBLE — barre de progression vers le
+        # prochain palier de construction débloquable.
+        lo = DOMAINE_TIERS[tier_idx - 1][0] if tier_idx > 0 else 0
+        bar = _progress_bar(pts, lo, nxt[0])
         lines.append(f"➡️ Prochain : **{nxt[1]}** à `{nxt[0]:,}` (`{nxt[0]-pts:,}` restants)")
+        if bar:
+            lines.append(bar)
     else:
         lines.append("🌟 **Merveille atteinte — le serveur est entré dans la légende !**")
     items.append(v2_body("\n".join(lines)))
     items.append(v2_body("\n".join(
         f"{'✅' if pts >= th else '🔒'} {lbl} _(≥{th:,})_" for th, lbl in DOMAINE_TIERS)))
     items.append(v2_divider())
-    items.append(v2_body(f"{ECLATS_EMOJI} **Tes Éclats :** `{eclats:,}`"))
+    items.append(v2_body(
+        f"{ECLATS_EMOJI} **Tes Éclats :** `{eclats:,}`\n"
+        f"-# 🌿 Pas assez d'Éclats ? Récolte ton **Jardin** chaque jour pour en gagner."))
     items.append(discord.ui.ActionRow(
         Button(label=f"🤝 Contribuer ({_DOMAINE_GIVE} ✨)", style=discord.ButtonStyle.success,
                custom_id="cite:domaine:give"),
