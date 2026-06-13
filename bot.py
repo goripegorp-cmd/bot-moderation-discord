@@ -149,6 +149,7 @@ from ui_v2 import (
     info_card as v2_info_card,
     recap_view as v2_recap_view,
     combat_recap_view as v2_combat_recap_view,
+    MY_HUB_BUTTON_CUSTOM_ID,
 )
 
 # ─── Modules redesign 2026 (Phase 0 + 1) ───
@@ -12573,6 +12574,7 @@ async def _end_active_event(guild, *, victory: bool, reason: str = "", event_id:
                 "⚔️", boss.get('name', 'Boss Raid'), _outcome, _podium,
                 others_count=_others, participants=len(rewards),
                 total_damage=_total_dmg,
+                hub_button=True,  # TÂCHE B.2 : bouton « 🎮 Mon hub » persistant
             )
             _rep = await _post_combat_report(
                 guild, recap_title, "",
@@ -15733,6 +15735,79 @@ async def _purge_event_echoes(channel) -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  TÂCHE B — ACCÈS & DÉCOUVRABILITÉ PASSIVE
+#  Helper unique pour ouvrir le hub épuré (HubLayoutV2) en ÉPHÉMÈRE depuis
+#  n'importe quelle interaction (DM onboarding, bouton « Mon hub » sous les récaps
+#  publics). Résout le guild_id (None en DM) + le style joueur, le tout FAIL-SAFE.
+# ═══════════════════════════════════════════════════════════════════════════════
+async def _open_hub_layout_ephemeral(i: discord.Interaction) -> bool:
+    """Ouvre HubLayoutV2 en éphémère pour i.user. Résout guild_id (DM = None →
+    1er guild partagé) + style joueur. defer-first + try/except, ne lève jamais.
+    Retourne True si un panneau a été envoyé."""
+    try:
+        # Résolution du guild : i.guild_id (None en DM) sinon 1er guild partagé.
+        gid = i.guild_id or 0
+        if not gid:
+            for g in bot.guilds:
+                try:
+                    if g.get_member(i.user.id):
+                        gid = g.id
+                        break
+                except Exception:
+                    continue
+        # Style joueur pour le sous-titre adaptatif (fail-safe → "balanced").
+        style_hint = "balanced"
+        if gid:
+            try:
+                style_hint = await profile_module.get_primary_style(gid, i.user.id)
+            except Exception:
+                pass
+        view = HubLayoutV2(i.user.id, gid, style_hint=style_hint)
+        if i.response.is_done():
+            await i.followup.send(view=view, ephemeral=True)
+        else:
+            await i.response.send_message(view=view, ephemeral=True)
+        return True
+    except Exception as ex:
+        print(f"[_open_hub_layout_ephemeral] {ex}")
+        return False
+
+
+class MyHubButtonView(View):
+    """Vue PERSISTANTE à un seul bouton « 🎮 Mon hub » (custom_id stable
+    open_my_hub). Apposée sous les récaps/annonces publics (récaps de combat,
+    Héraut, programme du jour…) via ui_v2.recap_view(hub_button=True) qui pose
+    le MÊME custom_id dans le LayoutView. Cette vue assure le DISPATCH : on en
+    enregistre une instance au boot via bot.add_view(MyHubButtonView()) → le clic
+    rend HubLayoutV2 en ÉPHÉMÈRE pour le cliqueur, même sur de vieux messages
+    survivant à un reboot. NE PAS renommer le custom_id (persistance)."""
+
+    def __init__(self):
+        super().__init__(timeout=None)  # persistant via custom_id stable
+        b = Button(
+            label="Mon hub",
+            emoji="🎮",
+            style=discord.ButtonStyle.secondary,
+            custom_id=MY_HUB_BUTTON_CUSTOM_ID,
+        )
+        b.callback = self._on_open_my_hub
+        self.add_item(b)
+
+    async def _on_open_my_hub(self, i: discord.Interaction):
+        # defer-first non requis : _open_hub_layout_ephemeral fait un send_message
+        # direct (réponse initiale) → le hub s'affiche sans flicker. Fail-safe.
+        try:
+            await _open_hub_layout_ephemeral(i)
+        except Exception as ex:
+            print(f"[MyHubButtonView _on_open_my_hub] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.defer(ephemeral=True)
+            except Exception:
+                pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  Phase 40 — ONBOARDING DM pour nouveaux membres
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -15808,9 +15883,17 @@ class OnboardingView(View):
             print(f"[OnboardingView _on_journey] {ex}")
 
     async def _on_open_hub(self, i: discord.Interaction):
-        """Ouvre le hub d'engagement depuis le DM onboarding."""
+        """Ouvre le hub d'engagement depuis le DM onboarding.
+
+        TÂCHE B.1 : on ouvre désormais le HUB ÉPURÉ HubLayoutV2 (6 catégories
+        cliquables, par-user) au lieu de l'ancien embed legacy + EngagementHubView
+        (25 boutons) — meilleure 1re impression. Fail-safe : si le rendu V2 échoue,
+        on retombe sur l'ancien embed + vue pour ne jamais laisser le clic sans
+        réponse."""
         try:
-            # Réutilise le panneau hub directement
+            if await _open_hub_layout_ephemeral(i):
+                return
+            # Filet legacy : le hub V2 n'a pas pu s'afficher → on garantit une réponse.
             if not i.response.is_done():
                 await i.response.defer(ephemeral=True)
             e = discord.Embed(
@@ -17695,6 +17778,23 @@ async def _collect_live_events(guild_id: int) -> list:
     return lines
 
 
+# TÂCHE B.3 — pool « Le savais-tu ? » : chaque entrée met en avant UNE feature
+# souvent ignorée des joueurs. Texte court, factuel, sans ping. Rotation stable
+# (jour + tranche de 6 h) côté HubLiveEventsLayoutV2 — pas de random au render.
+HUB_DID_YOU_KNOW_TIPS = (
+    "Le hub a un bouton **Ma Fortune** qui récolte d'un coup ta rente de la Cité, tes dépôts mûrs et tes œufs éclos.",
+    "Ton **compagnon** combat à tes côtés sur les boss — pense à l'assister via son bouton pendant les raids.",
+    "La **Forge** améliore et enchante ton stuff épique+ : plus d'effets élémentaires et de DoT à débloquer.",
+    "Tu peux régler tes notifications par **type d'event** : active seulement les boss, ou seulement les chasses.",
+    "Les **quêtes du jour** et la **Daily Wheel** se réinitialisent chaque jour — un passage rapide au hub suffit.",
+    "Le **Passe de Saison** est 100% gratuit : tu gagnes des paliers rien qu'en jouant aux events.",
+    "Les **donjons** se jouent en solo ou en groupe de 4 — ton propre salon de combat instancié.",
+    "La **Carte de Joueur** et l'**Atelier d'Emblèmes** personnalisent ton profil et le blason de ton alliance.",
+    "Les **métiers** (récolte, artisanat) progressent hors-combat et alimentent ton Sanctuaire personnel.",
+    "Le **Héraut de la Semaine** récapitule chaque dimanche tout ce qui t'attend — un seul message, zéro spam.",
+)
+
+
 class HubLiveEventsLayoutV2(LayoutView):
     """Phase 111 : panel Live Events, refreshable, posté juste après le hub.
 
@@ -17731,6 +17831,19 @@ class HubLiveEventsLayoutV2(LayoutView):
             "passe voir au **hub** (Ma Fortune · Mon compagnon · Revenus) — "
             "il y a peut-être déjà quelque chose à récupérer._"
         ))
+        # TÂCHE B.3 — ENCART « LE SAVAIS-TU » : met en avant UNE feature peu connue.
+        # Rotation STABLE basée sur le jour + tranche de 6 h (déduits du timestamp de
+        # refresh, déjà passé au constructeur) — JAMAIS de random au render, sinon
+        # la signature anti-spam du refresh task changerait à chaque tour et le
+        # message serait ré-édité en boucle (cf. _hub_live_events_sig_cache). Zéro
+        # bouton, zéro ping. Fail-safe (try/except → on omet juste l'encart).
+        try:
+            slot = (int(last_updated_ts) // 86400) * 4 + ((int(last_updated_ts) % 86400) // 21600)
+            tip = HUB_DID_YOU_KNOW_TIPS[slot % len(HUB_DID_YOU_KNOW_TIPS)]
+            items.append(v2_divider())
+            items.append(v2_body(f"### 💡 Le savais-tu ?\n_{tip}_"))
+        except Exception as ex:
+            print(f"[HubLiveEventsLayoutV2 did_you_know] {ex}")
         self.add_item(v2_container(*items, color=0xE74C3C if event_lines else 0x95A5A6))
 
 
@@ -42929,6 +43042,13 @@ async def on_ready():
         bot.add_view(EngagementHubView())
     except Exception as ex:
         print(f"[on_ready add_view EngagementHubView] {ex}")
+    # TÂCHE B.2 — bouton « 🎮 Mon hub » persistant (custom_id open_my_hub) apposé
+    # sous les récaps/annonces publics. 1 instance globale → dispatch sur tous les
+    # messages (y compris ceux survivant à un reboot), rend HubLayoutV2 en éphémère.
+    try:
+        bot.add_view(MyHubButtonView())
+    except Exception as ex:
+        print(f"[on_ready add_view MyHubButtonView] {ex}")
     # Phase 189 — Leaderboard à onglets PERSISTANT : survit aux redémarrages et
     # au timeout → fini les « Échec de l'interaction » sur un classement laissé
     # affiché (custom_ids stables lb_coins/lb_msgs/lb_voice + callbacks sans état).
@@ -63699,7 +63819,7 @@ class EngagementHubView(View):
         self.add_item(b1)
 
         b2 = Button(
-            label="🎰 Roue du jour",
+            label="🎰 Daily Wheel",
             style=discord.ButtonStyle.success,
             custom_id="hub_wheel",
             row=0,
@@ -65584,6 +65704,7 @@ async def _end_world_boss(guild, wb_id: int, victory: bool, reason: str = ""):
                 "🌍", boss['title'], outcome, podium,
                 others_count=others, participants=len(attackers),
                 total_damage=total_dmg,
+                hub_button=True,  # TÂCHE B.2 : bouton « 🎮 Mon hub » persistant
             )
             await _post_combat_report(
                 guild, head, "",
@@ -66575,6 +66696,7 @@ async def _post_weekly_herald(guild) -> bool:
             body,
             color=Palette.INFO,
             footer="Récap hebdo · se supprime en fin de semaine",
+            hub_button=True,  # TÂCHE B.2 : bouton « 🎮 Mon hub » persistant
         )
         try:
             msg = await ch.send(view=panel, allowed_mentions=discord.AllowedMentions.none())
@@ -82620,7 +82742,7 @@ async def faction_war_start_cmd(i: discord.Interaction, objective: str = "events
                             f"_{odef['description']}_\n\n"
                             f"Les scores se cumulent automatiquement. "
                             f"À la fin de la saison, la faction en tête remporte le prix.\n\n"
-                            f"Consulte le leaderboard dans le hub via 🏆 Compétitions → ⚔️ Faction War."
+                            f"Consulte le leaderboard dans le hub via 🥇 Compétitions → ⚔️ Faction War."
                         ),
                         color=0xE74C3C,
                     ),
@@ -84062,6 +84184,270 @@ def _v2_delegate_to(view_class, method_name: str):
     return _delegate
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Phase 272 — DÉCOUVRABILITÉ DU HUB ÉPHÉMÈRE : catégories + retour
+#
+#  Problème : HubLayoutV2 (éphémère /hub) ne surfaçait que 8 sections + sous-hub
+#  Outils. ~15 features (Saga, Chronique, Rencontre, Réputation, Loterie, Streams,
+#  Anniversaires, Récap 7j, Pulse, FAQ/Aide, Objectif collectif, DM, Confession,
+#  Histoire, Mission, Notifs) avaient un callback opérationnel sur EngagementHubView
+#  (le hub ÉPINGLÉ persistant 25/25) mais n'étaient JOIGNABLES nulle part depuis le
+#  /hub éphémère. La limite 25 boutons du panel persistant interdisait d'en ajouter.
+#
+#  Solution conservatrice : on réorganise UNIQUEMENT HubLayoutV2 (éphémère, par-user,
+#  NON persistant, NON ré-enregistré au boot) en ~5 boutons de CATÉGORIE qui ouvrent
+#  chacun un sous-panneau V2 (éphémère lui aussi). Chaque sous-panneau RÉUTILISE les
+#  callbacks EXISTANTS de EngagementHubView via _hub_feature_delegate — AUCUN callback
+#  réécrit, AUCUN custom_id persistant modifié, le dispatch global du hub épinglé est
+#  intact. Comme les vues catégorie sont éphémères (interaction_check par-user), leurs
+#  custom_id n'ont PAS besoin d'être persistants : rien n'est ajouté à bot.add_view,
+#  donc le boot ne casse pas.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _hub_feature_delegate(method_name: str):
+    """Retourne un callback qui invoque EngagementHubView.<method_name>(None, i).
+
+    Réutilise les callbacks EXISTANTS du hub épinglé (Saga, Réputation, Pulse…)
+    SANS les réécrire. Contrairement à _v2_delegate_to, on NE pré-défère PAS :
+    ces callbacks possèdent leur propre cycle de vie (certains font
+    i.response.defer() + i.followup, d'autres i.response.send_message direct).
+    Pré-déférer casserait ceux qui appellent send_message après. On laisse donc
+    chaque callback piloter sa réponse exactement comme sur le hub épinglé.
+
+    Les méthodes _on_xxx n'utilisent jamais `self` → on passe None (même contrat
+    que _v2_delegate_to, qui appelle déjà la méthode unbound avec self=None).
+    """
+    async def _delegate(i):
+        try:
+            method = getattr(EngagementHubView, method_name, None)
+            if method is None:
+                raise AttributeError(f"EngagementHubView.{method_name} introuvable")
+            await method(None, i)
+        except Exception as ex:
+            print(f"[hub_feature_delegate {method_name}] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+                else:
+                    await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+    return _delegate
+
+
+def make_back_to_hub_button(user_id: int, guild_id: int = 0, style_hint: str = ""):
+    """Helper unique : bouton « ⬅️ Retour au hub » qui re-render HubLayoutV2.
+
+    Fail-safe : edit_message sur l'interaction courante (le sous-panneau et le hub
+    sont tous deux éphémères → on réutilise le même message). En cas d'échec
+    (interaction expirée…), on tente un followup, sinon on avale silencieusement.
+    """
+    btn = Button(label="Retour au hub", emoji="⬅️", style=discord.ButtonStyle.secondary,
+                 custom_id="hubv2_back")
+
+    async def _back(i: discord.Interaction):
+        try:
+            view = HubLayoutV2(user_id, guild_id, style_hint=style_hint)
+            await view.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[hubv2_back] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.defer()
+            except Exception:
+                pass
+
+    btn.callback = _back
+    return btn
+
+
+class _HubCategoryLayoutV2(LayoutView):
+    """Base des sous-panneaux de CATÉGORIE du hub éphémère.
+
+    Éphémère + par-user (interaction_check). Construit à partir d'une liste de
+    sections (titre, sous-titre, libellé bouton, style, custom_id, method_name)
+    où method_name référence un callback EXISTANT de EngagementHubView.
+    Termine toujours par un bouton « Retour au hub » + « Fermer ».
+    """
+
+    # À surcharger par les sous-classes.
+    _CAT_TITLE = "📂 Catégorie"
+    _CAT_SUBTITLE = ""
+    _CAT_COLOR = None  # None → Palette.PRIMARY
+    _CAT_FEATURES: list = []  # tuples (title, subtitle, btn_label, style, custom_id, method)
+
+    def __init__(self, user_id: int, guild_id: int = 0, style_hint: str = ""):
+        super().__init__(timeout=600)
+        self.user_id = user_id
+        self.guild_id = guild_id
+        self.style_hint = style_hint
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.user_id
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = False):
+        if edit:
+            try:
+                await interaction.response.edit_message(
+                    content=None, view=self, embed=None, attachments=[],
+                )
+            except Exception:
+                pass
+        else:
+            try:
+                await interaction.response.send_message(view=self, ephemeral=True)
+            except Exception:
+                pass
+
+    def _build(self):
+        items = [v2_title(self._CAT_TITLE)]
+        if self._CAT_SUBTITLE:
+            items.append(v2_subtitle(self._CAT_SUBTITLE))
+        items.append(v2_divider())
+
+        for (title_str, subtitle_str, btn_label, style, cid, method) in self._CAT_FEATURES:
+            b = Button(label=btn_label, style=style, custom_id=cid)
+            b.callback = _hub_feature_delegate(method)
+            items.append(_section_with_button(title_str, subtitle_str, b))
+
+        items.append(v2_divider())
+        close_btn = Button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger,
+                           custom_id="hubcatv2_close")
+        close_btn.callback = self._on_close
+        items.append(discord.ui.ActionRow(
+            make_back_to_hub_button(self.user_id, self.guild_id, self.style_hint),
+            close_btn,
+        ))
+
+        color = self._CAT_COLOR if self._CAT_COLOR is not None else Palette.PRIMARY
+        self.add_item(v2_container(*items, color=color))
+
+    async def _on_close(self, i):
+        try:
+            await i.response.edit_message(
+                content="✅ Hub fermé.", view=None, embed=None, embeds=[], attachments=[],
+            )
+        except discord.InteractionResponded:
+            try:
+                await i.edit_original_response(content="✅ Hub fermé", view=None, embed=None)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+
+class HubCatJeuLayoutV2(_HubCategoryLayoutV2):
+    """Catégorie « Jeu & Quotidien » — boucle quotidienne + Roblox + narration."""
+    _CAT_TITLE = "🎮 Jeu & Quotidien"
+    _CAT_SUBTITLE = "Ta boucle de tous les jours + le pont Roblox"
+    _CAT_FEATURES = [
+        ("📜 Mes quêtes du jour", "3 défis quotidiens + streak bonus",
+         "Ouvrir", discord.ButtonStyle.primary, "hubcat_quests", "_on_quests"),
+        ("🎰 Daily Wheel", "1 spin gratuit/jour — jackpot mythique possible",
+         "Spin", discord.ButtonStyle.success, "hubcat_wheel", "_on_wheel"),
+        ("🌟 Rencontre du jour", "Rencontre quotidienne avec un NPC (5-10 min)",
+         "Ouvrir", discord.ButtonStyle.primary, "hubcat_encounter", "_on_encounter"),
+        ("🎮 Roblox", "Speedrun · Matchmaking · Studio Tips · Updates",
+         "Ouvrir", discord.ButtonStyle.primary, "hubcat_roblox", "_on_roblox"),
+    ]
+
+
+class HubCatCombatLayoutV2(_HubCategoryLayoutV2):
+    """Catégorie « Combat & Compétitions » — events compétitifs + solo."""
+    _CAT_TITLE = "⚔️ Combat & Compétitions"
+    _CAT_SUBTITLE = "Tous les défis compétitifs + les aventures solo"
+    _CAT_COLOR = 0xE91E63
+    _CAT_FEATURES = [
+        ("🥇 Compétitions", "Bingo mensuel · Prédictions · Faction Wars · Donjon · Solo",
+         "Ouvrir", discord.ButtonStyle.danger, "hubcat_comp", "_on_competitions"),
+    ]
+
+
+class HubCatEconomieLayoutV2(_HubCategoryLayoutV2):
+    """Catégorie « Économie & Inventaire » — outils éco + loterie."""
+    _CAT_TITLE = "💰 Économie & Inventaire"
+    _CAT_SUBTITLE = "Ta fortune, tes loots, ta banque, tes tickets"
+    _CAT_COLOR = 0x3498DB
+    _CAT_FEATURES = [
+        ("🧰 Outils & Récompenses", "Banque · Fortune · Loots · La Cité · Titres · PvP · Alliance…",
+         "Ouvrir", discord.ButtonStyle.secondary, "hubcat_tools", "_on_tools"),
+        ("🎟️ Loterie", "Tes tickets de loterie Roblox + tirages",
+         "Ouvrir", discord.ButtonStyle.primary, "hubcat_raffle", "_on_raffle"),
+    ]
+
+
+class HubCatSocialLayoutV2(_HubCategoryLayoutV2):
+    """Catégorie « Social & Communauté » — liens, réputation, vie du serveur."""
+    _CAT_TITLE = "🤝 Social & Communauté"
+    _CAT_SUBTITLE = "Les liens entre membres + la vie du serveur"
+    _CAT_COLOR = 0xFEE75C
+    _CAT_FEATURES = [
+        ("💝 Social", "Shoutouts · Mentorat",
+         "Ouvrir", discord.ButtonStyle.success, "hubcat_social", "_on_social"),
+        ("⭐ Réputation", "Ta réputation par faction",
+         "Voir", discord.ButtonStyle.secondary, "hubcat_reputation", "_on_reputation"),
+        ("📊 Objectif collectif", "L'objectif communautaire de la semaine",
+         "Voir", discord.ButtonStyle.success, "hubcat_goal", "_on_community_goal"),
+        ("📅 Streams", "Le calendrier des streams de la communauté",
+         "Voir", discord.ButtonStyle.primary, "hubcat_streams", "_on_stream_schedule"),
+        ("🎂 Anniversaires", "Qui a son anniversaire cette semaine ?",
+         "Voir", discord.ButtonStyle.secondary, "hubcat_bday", "_on_birthdays"),
+        ("🤫 Confession", "Poste une confession anonyme",
+         "Ouvrir", discord.ButtonStyle.secondary, "hubcat_confess", "_on_confess"),
+    ]
+
+
+class HubCatProgressionLayoutV2(_HubCategoryLayoutV2):
+    """Catégorie « Progression & Stats » — profil, compagnon, récaps, pulse.
+
+    Note : les items narratifs (Saga, Chronique, Histoire) vivent dans la catégorie
+    « Récit & Aide » pour garder ce panneau bien sous la limite Components V2 (40).
+    """
+    _CAT_TITLE = "📈 Progression & Stats"
+    _CAT_SUBTITLE = "Ton profil, ton compagnon, tes récaps et le pouls du serveur"
+    _CAT_COLOR = 0x9B59B6
+    _CAT_FEATURES = [
+        ("👤 Mon profil", "Level · prestige · saison · factions · stats",
+         "Ouvrir", discord.ButtonStyle.primary, "hubcat_profile", "_on_profile"),
+        ("🏆 Mes hauts faits", "50+ achievements à débloquer",
+         "Voir", discord.ButtonStyle.secondary, "hubcat_ach", "_on_achievements"),
+        ("🐾 Mon compagnon", "Adopter et faire évoluer ton pet",
+         "Voir", discord.ButtonStyle.secondary, "hubcat_pet", "_on_pet"),
+        ("📰 Récap 7 jours", "Ton récap perso de la semaine",
+         "Voir", discord.ButtonStyle.primary, "hubcat_recap", "_on_weekly_recap"),
+        ("📡 Pulse serveur", "Le dashboard live de l'activité du serveur",
+         "Voir", discord.ButtonStyle.success, "hubcat_pulse", "_on_server_pulse"),
+    ]
+
+
+class HubCatOutilsLayoutV2(_HubCategoryLayoutV2):
+    """Catégorie « Récit & Aide » — narration, mission, FAQ, préférences.
+
+    Regroupe le récit collectif (Saga, Chronique, Histoire) + la mission + les
+    réglages perso (FAQ, notifs, DM). 7 sections → ~36 composants, sous la limite.
+    """
+    _CAT_TITLE = "🧭 Récit & Aide"
+    _CAT_SUBTITLE = "L'histoire du monde + tout comprendre + tes réglages"
+    _CAT_FEATURES = [
+        ("📜 Saga", "L'état de la saga collective en cours",
+         "Voir", discord.ButtonStyle.success, "hubcat_saga", "_on_saga"),
+        ("📖 Chronique", "Le Codex narratif d'Abylumis (récit collectif)",
+         "Ouvrir", discord.ButtonStyle.success, "hubcat_chronicle", "_on_chronicle"),
+        ("📖 Histoire du serveur", "Le chapitre de lore actuel + le récap narratif",
+         "Voir", discord.ButtonStyle.secondary, "hubcat_lore", "_on_lore"),
+        ("🎯 Mission en cours", "La mission scénarisée active et sa progression",
+         "Voir", discord.ButtonStyle.success, "hubcat_mission", "_on_mission"),
+        ("❓ Aide / FAQ", "La FAQ navigable — aucune commande à mémoriser",
+         "Ouvrir", discord.ButtonStyle.primary, "hubcat_faq", "_on_faq"),
+        ("🔔 Mes notifs", "Réglages granulaires de notifications",
+         "Ouvrir", discord.ButtonStyle.secondary, "hubcat_notifs", "_on_notifs"),
+        ("✉️ Mes DMs", "Préférences du digest en message privé",
+         "Ouvrir", discord.ButtonStyle.secondary, "hubcat_dm", "_on_dm_prefs"),
+    ]
+
+
 class HubLayoutV2(LayoutView):
     """Hub principal en Components V2 — sections + boutons accessory.
 
@@ -84080,92 +84466,50 @@ class HubLayoutV2(LayoutView):
         return i.user.id == self.user_id
 
     def _build(self):
-        # HOTFIX Phase 141.1 : réduit de 13 à 8 sections pour rester < 40
-        # composants (limite Discord LayoutView). Suppression du bouton
-        # "💝 Social" (RULES.md : pas d'emoji cœur sur features serveur).
+        # Phase 272 : DÉCOUVRABILITÉ — au lieu de 8 sections plates (qui laissaient
+        # ~15 features orphelines hors d'atteinte), on présente 6 CATÉGORIES. Chaque
+        # catégorie ouvre un sous-panneau V2 (éphémère) qui re-surface toutes les
+        # features cachées via leurs callbacks EXISTANTS sur EngagementHubView.
         # Phase 152.A1 : subtitle adaptatif selon le style détecté du joueur.
         items = []
         items.append(v2_title("🎮 Ton Hub d'engagement"))
 
         # Subtitle adaptatif : si on a un style, on le met en avant
         STYLE_HINTS = {
-            "pvp": "⚔️ _Style **Combattant** détecté — tes events PvP sont en haut_",
-            "collector": "💎 _Style **Collectionneur** — focus drops & inventaire_",
-            "social": "🤝 _Style **Animateur** — focus alliances & voice_",
-            "solo": "🎯 _Style **Aventurier solo** — focus quêtes & wheel_",
+            "pvp": "⚔️ _Style **Combattant** détecté — va voir Combat & Compétitions_",
+            "collector": "💎 _Style **Collectionneur** — focus Économie & Inventaire_",
+            "social": "🤝 _Style **Animateur** — focus Social & Communauté_",
+            "solo": "🎯 _Style **Aventurier solo** — focus Jeu & Quotidien_",
             "balanced": "⚖️ _Joue encore pour qu'on découvre ton style_",
-            "opted_out": "_Tout en 1 clic — aucune commande à mémoriser_",
+            "opted_out": "_Choisis une catégorie — tout est en 1 clic_",
         }
         subtitle_text = STYLE_HINTS.get(
             self.style_hint or "opted_out",
-            "_Tout en 1 clic — aucune commande à mémoriser_",
+            "_Choisis une catégorie — tout est en 1 clic_",
         )
         items.append(v2_subtitle(subtitle_text))
         items.append(v2_divider())
 
-        # Section 1 : Quêtes
-        b_quests = Button(label="Ouvrir", style=discord.ButtonStyle.primary,
-                          custom_id="hubv2_quests")
-        b_quests.callback = self._on_quests
-        items.append(_section_with_button(
-            "📜 Mes quêtes du jour", "3 défis quotidiens + streak", b_quests,
-        ))
-
-        # Section 2 : Daily Wheel
-        b_wheel = Button(label="Spin", style=discord.ButtonStyle.success,
-                         custom_id="hubv2_wheel")
-        b_wheel.callback = self._on_wheel
-        items.append(_section_with_button(
-            "🎰 Daily Wheel", "1 spin gratuit/jour — jackpot mythique possible", b_wheel,
-        ))
-
-        # Section 3 : Hauts faits
-        b_ach = Button(label="Voir", style=discord.ButtonStyle.secondary,
-                       custom_id="hubv2_ach")
-        b_ach.callback = self._on_achievements
-        items.append(_section_with_button(
-            "🏆 Mes hauts faits", "50+ achievements à débloquer", b_ach,
-        ))
-
-        # Section 4 : Profil
-        b_prof = Button(label="Ouvrir", style=discord.ButtonStyle.primary,
-                        custom_id="hubv2_prof")
-        b_prof.callback = self._on_profile
-        items.append(_section_with_button(
-            "👤 Mon profil", "Level, prestige, saison, factions, stats", b_prof,
-        ))
-
-        # Section 5 : Compagnon
-        b_pet = Button(label="Voir", style=discord.ButtonStyle.secondary,
-                       custom_id="hubv2_pet")
-        b_pet.callback = self._on_pet
-        items.append(_section_with_button(
-            "🐾 Mon compagnon", "Adopter et faire évoluer ton pet", b_pet,
-        ))
-
-        # Section 6 : Roblox
-        b_rblx = Button(label="Ouvrir", style=discord.ButtonStyle.primary,
-                        custom_id="hubv2_roblox")
-        b_rblx.callback = self._on_roblox
-        items.append(_section_with_button(
-            "🎮 Roblox", "Speedrun · Matchmaking · Studio Tips · Updates", b_rblx,
-        ))
-
-        # Section 7 : Compétitions
-        b_comp = Button(label="Ouvrir", style=discord.ButtonStyle.danger,
-                        custom_id="hubv2_comp")
-        b_comp.callback = self._on_competitions
-        items.append(_section_with_button(
-            "🏆 Compétitions", "Bingo mensuel · Prédictions · Faction Wars", b_comp,
-        ))
-
-        # Section 8 : Outils
-        b_tools = Button(label="Ouvrir", style=discord.ButtonStyle.secondary,
-                         custom_id="hubv2_tools")
-        b_tools.callback = self._on_tools
-        items.append(_section_with_button(
-            "🧰 Outils", "Banque · Loots · PvP · Classe RP · Alliance · Hall of Fame", b_tools,
-        ))
+        # ─── 6 CATÉGORIES (chacune ouvre un sous-panneau éphémère) ──────────────
+        # tuples : (titre, sous-titre, libellé, style, custom_id, classe sous-panneau)
+        cats = [
+            ("🎮 Jeu & Quotidien", "Quêtes · Daily Wheel · Rencontre du jour · Roblox",
+             "Ouvrir", discord.ButtonStyle.primary, "hubv2_cat_jeu", HubCatJeuLayoutV2),
+            ("⚔️ Combat & Compétitions", "Bingo · Prédictions · Faction Wars · Donjon · Solo",
+             "Ouvrir", discord.ButtonStyle.danger, "hubv2_cat_combat", HubCatCombatLayoutV2),
+            ("💰 Économie & Inventaire", "Outils · Banque · Loots · La Cité · Loterie",
+             "Ouvrir", discord.ButtonStyle.success, "hubv2_cat_eco", HubCatEconomieLayoutV2),
+            ("🤝 Social & Communauté", "Shoutouts · Réputation · Objectif · Streams · Anniv · Confession",
+             "Ouvrir", discord.ButtonStyle.secondary, "hubv2_cat_social", HubCatSocialLayoutV2),
+            ("📈 Progression & Stats", "Profil · Hauts faits · Compagnon · Récap 7j · Pulse",
+             "Ouvrir", discord.ButtonStyle.primary, "hubv2_cat_prog", HubCatProgressionLayoutV2),
+            ("🧭 Récit & Aide", "Saga · Chronique · Histoire · Mission · FAQ · Notifs · DMs",
+             "Ouvrir", discord.ButtonStyle.secondary, "hubv2_cat_aide", HubCatOutilsLayoutV2),
+        ]
+        for (title_str, subtitle_str, label, style, cid, view_cls) in cats:
+            b = Button(label=label, style=style, custom_id=cid)
+            b.callback = self._make_open_category(view_cls)
+            items.append(_section_with_button(title_str, subtitle_str, b))
 
         items.append(v2_divider())
 
@@ -84177,6 +84521,22 @@ class HubLayoutV2(LayoutView):
         items.append(discord.ui.ActionRow(close_btn))
 
         self.add_item(v2_container(*items, color=Palette.PRIMARY))
+
+    def _make_open_category(self, view_cls):
+        """Retourne un callback qui ouvre le sous-panneau de catégorie (edit_message,
+        éphémère, même message). Fail-safe."""
+        async def _open(i: discord.Interaction):
+            try:
+                view = view_cls(self.user_id, self.guild_id, style_hint=self.style_hint)
+                await view.render_to(i, edit=True)
+            except Exception as ex:
+                print(f"[hubv2_open_category {getattr(view_cls, '__name__', '?')}] {ex}")
+                try:
+                    if not i.response.is_done():
+                        await i.response.defer()
+                except Exception:
+                    pass
+        return _open
 
     async def render_to(self, interaction: discord.Interaction, *, edit: bool = False):
         if edit:
@@ -84304,7 +84664,7 @@ class HubPinnedLayoutV2(LayoutView):
         b = Button(label="Ouvrir", style=discord.ButtonStyle.danger, custom_id="hub_competitions")
         b.callback = _v2_delegate_to(EngagementHubView, '_on_competitions')
         items.append(_section_with_button(
-            "🏆  Compétitions",
+            "🥇  Compétitions",
             "Bingo mensuel · Prédictions · Faction Wars saisonnières",
             b,
         ))
@@ -84516,7 +84876,7 @@ class CompetitionsLayoutV2(LayoutView):
 
     def _build(self):
         items = []
-        items.append(v2_title("🏆 Compétitions"))
+        items.append(v2_title("🥇 Compétitions"))
         items.append(v2_subtitle("Tous les défis compétitifs en 1 endroit"))
         items.append(v2_divider())
 
