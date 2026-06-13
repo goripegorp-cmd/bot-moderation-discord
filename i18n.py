@@ -465,6 +465,115 @@ CATALOG = {
         "fr": "Aide", "en": "Help", "es": "Ayuda",
         "de": "Hilfe", "it": "Aiuto", "pt": "Ajuda",
     },
+    # Hub V2 — titre/sous-titre du panneau d'engagement (haut-trafic /hub)
+    "hub.v2.title": {
+        "fr": "Ton Hub d'engagement", "en": "Your engagement Hub",
+        "es": "Tu Hub de participación", "de": "Dein Engagement-Hub",
+        "it": "Il tuo Hub di coinvolgimento", "pt": "Seu Hub de engajamento",
+    },
+    "hub.v2.subtitle_default": {
+        "fr": "Choisis une catégorie — tout est en 1 clic",
+        "en": "Pick a category — everything is one click away",
+        "es": "Elige una categoría — todo a un clic",
+        "de": "Wähle eine Kategorie — alles ist nur einen Klick entfernt",
+        "it": "Scegli una categoria — tutto a un clic",
+        "pt": "Escolha uma categoria — tudo a um clique",
+    },
+    # Hub V2 — les 6 catégories (titre + sous-titre court)
+    "hub.cat.jeu.title": {
+        "fr": "Jeu & Quotidien", "en": "Play & Daily",
+        "es": "Juego y Diario", "de": "Spiel & Alltag",
+        "it": "Gioco & Quotidiano", "pt": "Jogo & Diário",
+    },
+    "hub.cat.jeu.sub": {
+        "fr": "Quêtes · Daily Wheel · Rencontre du jour · Roblox",
+        "en": "Quests · Daily Wheel · Daily encounter · Roblox",
+        "es": "Misiones · Ruleta diaria · Encuentro del día · Roblox",
+        "de": "Quests · Daily Wheel · Begegnung des Tages · Roblox",
+        "it": "Missioni · Daily Wheel · Incontro del giorno · Roblox",
+        "pt": "Missões · Roleta diária · Encontro do dia · Roblox",
+    },
+    "hub.cat.combat.title": {
+        "fr": "Combat & Compétitions", "en": "Combat & Competitions",
+        "es": "Combate y Competiciones", "de": "Kampf & Wettbewerbe",
+        "it": "Combattimento & Competizioni", "pt": "Combate & Competições",
+    },
+    "hub.cat.combat.sub": {
+        "fr": "Bingo · Prédictions · Faction Wars · Donjon · Solo",
+        "en": "Bingo · Predictions · Faction Wars · Dungeon · Solo",
+        "es": "Bingo · Predicciones · Guerras de facción · Mazmorra · Solo",
+        "de": "Bingo · Vorhersagen · Faction Wars · Dungeon · Solo",
+        "it": "Bingo · Pronostici · Faction Wars · Dungeon · Solo",
+        "pt": "Bingo · Previsões · Guerras de facção · Masmorra · Solo",
+    },
+    "hub.cat.eco.title": {
+        "fr": "Économie & Inventaire", "en": "Economy & Inventory",
+        "es": "Economía e Inventario", "de": "Wirtschaft & Inventar",
+        "it": "Economia & Inventario", "pt": "Economia & Inventário",
+    },
+    "hub.cat.eco.sub": {
+        "fr": "Outils · Banque · Loots · La Cité · Loterie",
+        "en": "Tools · Bank · Loot · The City · Lottery",
+        "es": "Herramientas · Banco · Botín · La Ciudad · Lotería",
+        "de": "Werkzeuge · Bank · Loot · Die Stadt · Lotterie",
+        "it": "Strumenti · Banca · Loot · La Città · Lotteria",
+        "pt": "Ferramentas · Banco · Loot · A Cidade · Loteria",
+    },
+    "hub.cat.social.title": {
+        "fr": "Social & Communauté", "en": "Social & Community",
+        "es": "Social y Comunidad", "de": "Sozial & Community",
+        "it": "Social & Comunità", "pt": "Social & Comunidade",
+    },
+    "hub.cat.social.sub": {
+        "fr": "Shoutouts · Réputation · Objectif · Streams · Anniv · Confession",
+        "en": "Shoutouts · Reputation · Goal · Streams · Birthdays · Confession",
+        "es": "Menciones · Reputación · Objetivo · Streams · Cumpleaños · Confesión",
+        "de": "Shoutouts · Ruf · Ziel · Streams · Geburtstage · Beichte",
+        "it": "Shoutout · Reputazione · Obiettivo · Stream · Compleanni · Confessione",
+        "pt": "Shoutouts · Reputação · Objetivo · Streams · Aniversários · Confissão",
+    },
+    "hub.cat.prog.title": {
+        "fr": "Progression & Stats", "en": "Progress & Stats",
+        "es": "Progreso y Estadísticas", "de": "Fortschritt & Statistiken",
+        "it": "Progressi & Statistiche", "pt": "Progresso & Estatísticas",
+    },
+    "hub.cat.prog.sub": {
+        "fr": "Profil · Hauts faits · Compagnon · Récap 7j · Pulse",
+        "en": "Profile · Achievements · Companion · 7-day recap · Pulse",
+        "es": "Perfil · Logros · Compañero · Resumen 7 días · Pulse",
+        "de": "Profil · Erfolge · Begleiter · 7-Tage-Rückblick · Pulse",
+        "it": "Profilo · Imprese · Compagno · Riepilogo 7g · Pulse",
+        "pt": "Perfil · Conquistas · Companheiro · Resumo 7 dias · Pulse",
+    },
+    "hub.cat.aide.title": {
+        "fr": "Récit & Aide", "en": "Story & Help",
+        "es": "Relato y Ayuda", "de": "Story & Hilfe",
+        "it": "Storia & Aiuto", "pt": "História & Ajuda",
+    },
+    "hub.cat.aide.sub": {
+        "fr": "Saga · Chronique · Histoire · Mission · FAQ · Notifs · DMs",
+        "en": "Saga · Chronicle · Story · Mission · FAQ · Notifs · DMs",
+        "es": "Saga · Crónica · Historia · Misión · FAQ · Notifs · MD",
+        "de": "Saga · Chronik · Geschichte · Mission · FAQ · Infos · DMs",
+        "it": "Saga · Cronaca · Storia · Missione · FAQ · Notifiche · DM",
+        "pt": "Saga · Crônica · História · Missão · FAQ · Notifs · DMs",
+    },
+    # Verbe « Ouvrir » du bouton accessory de chaque catégorie
+    "hub.cat.open": {
+        "fr": "Ouvrir", "en": "Open", "es": "Abrir",
+        "de": "Öffnen", "it": "Apri", "pt": "Abrir",
+    },
+    # Bouton langue top-level (reste bilingue dans le libellé pour être universel)
+    "hub.btn.language": {
+        "fr": "Langue / Language", "en": "Language / Langue",
+        "es": "Idioma / Language", "de": "Sprache / Language",
+        "it": "Lingua / Language", "pt": "Idioma / Language",
+    },
+    "hub.btn.back": {
+        "fr": "Retour au hub", "en": "Back to hub",
+        "es": "Volver al hub", "de": "Zurück zum Hub",
+        "it": "Torna al hub", "pt": "Voltar ao hub",
+    },
 
     # ─── Entraide ───
     "entraide.title": {
@@ -491,6 +600,56 @@ CATALOG = {
         "fr": "Aidant", "en": "Helper", "es": "Ayudante",
         "de": "Helfer", "it": "Aiutante", "pt": "Ajudante",
     },
+    # Panneau Entraide V2 (éphémère, haut-trafic)
+    "entraide.v2.title": {
+        "fr": "Entraide multi-gaming", "en": "Multi-gaming mutual help",
+        "es": "Ayuda mutua multi-gaming", "de": "Multi-Gaming-Hilfe",
+        "it": "Aiuto reciproco multi-gaming", "pt": "Ajuda mútua multi-gaming",
+    },
+    "entraide.v2.subtitle": {
+        "fr": "Besoin d'aide sur un jeu ? Ou envie d'aider ? Tout est ici.",
+        "en": "Need help with a game? Or want to help? It's all here.",
+        "es": "¿Necesitas ayuda con un juego? ¿O quieres ayudar? Todo está aquí.",
+        "de": "Brauchst du Hilfe bei einem Spiel? Oder willst du helfen? Alles hier.",
+        "it": "Hai bisogno di aiuto in un gioco? O vuoi aiutare? È tutto qui.",
+        "pt": "Precisa de ajuda num jogo? Ou quer ajudar? Está tudo aqui.",
+    },
+    "entraide.v2.body": {
+        "fr": "Demande de l'aide, propose la tienne, ou parcours les demandes en cours.",
+        "en": "Ask for help, offer yours, or browse open requests.",
+        "es": "Pide ayuda, ofrece la tuya o explora las solicitudes abiertas.",
+        "de": "Bitte um Hilfe, biete deine an oder durchsuche offene Anfragen.",
+        "it": "Chiedi aiuto, offri il tuo o sfoglia le richieste in corso.",
+        "pt": "Peça ajuda, ofereça a sua ou veja os pedidos em aberto.",
+    },
+    "entraide.btn.need": {
+        "fr": "J'ai besoin d'aide", "en": "I need help",
+        "es": "Necesito ayuda", "de": "Ich brauche Hilfe",
+        "it": "Ho bisogno di aiuto", "pt": "Preciso de ajuda",
+    },
+    "entraide.btn.help": {
+        "fr": "Je peux aider", "en": "I can help",
+        "es": "Puedo ayudar", "de": "Ich kann helfen",
+        "it": "Posso aiutare", "pt": "Posso ajudar",
+    },
+    "entraide.btn.list": {
+        "fr": "Demandes en cours", "en": "Open requests",
+        "es": "Solicitudes abiertas", "de": "Offene Anfragen",
+        "it": "Richieste in corso", "pt": "Pedidos em aberto",
+    },
+    "entraide.btn.top": {
+        "fr": "Top aidants", "en": "Top helpers",
+        "es": "Mejores ayudantes", "de": "Top-Helfer",
+        "it": "Migliori aiutanti", "pt": "Melhores ajudantes",
+    },
+    "entraide.reputation": {
+        "fr": "Ta réputation : {count} aide(s) apportée(s) à la communauté. Merci ! 💛",
+        "en": "Your reputation: {count} help(s) given to the community. Thank you! 💛",
+        "es": "Tu reputación: {count} ayuda(s) aportada(s) a la comunidad. ¡Gracias! 💛",
+        "de": "Dein Ruf: {count} Hilfe(n) für die Community geleistet. Danke! 💛",
+        "it": "La tua reputazione: {count} aiuto(i) dato(i) alla comunità. Grazie! 💛",
+        "pt": "Sua reputação: {count} ajuda(s) dada(s) à comunidade. Obrigado! 💛",
+    },
 
     # ─── Accueil ───
     "welcome.greeting": {
@@ -505,6 +664,47 @@ CATALOG = {
         "de": "Wir sind jetzt {count} Mitglieder.",
         "it": "Ora siamo {count} membri.",
         "pt": "Agora somos {count} membros.",
+    },
+    # En-tête « 👋 Bienvenue » de l'embed d'accueil (author name)
+    "welcome.author": {
+        "fr": "Bienvenue", "en": "Welcome", "es": "Bienvenido",
+        "de": "Willkommen", "it": "Benvenuto", "pt": "Bem-vindo",
+    },
+    # Ligne par défaut (fallback) si l'owner n'a PAS configuré welcome_message.
+    # {user} = mention, {guild} = nom serveur, {count} = nb de membres.
+    "welcome.default_line": {
+        "fr": "Bienvenue {user} ! Nous sommes maintenant {count} membres sur {guild}. 🎉",
+        "en": "Welcome {user}! We are now {count} members on {guild}. 🎉",
+        "es": "¡Bienvenido {user}! Ahora somos {count} miembros en {guild}. 🎉",
+        "de": "Willkommen {user}! Wir sind jetzt {count} Mitglieder auf {guild}. 🎉",
+        "it": "Benvenuto {user}! Ora siamo {count} membri su {guild}. 🎉",
+        "pt": "Bem-vindo {user}! Agora somos {count} membros em {guild}. 🎉",
+    },
+    # Renvoi vers le salon d'entraide (ajouté sous l'accueil si configuré).
+    # {channel} = mention du salon (<#id>).
+    "welcome.entraide_hint": {
+        "fr": "🆘 Besoin d'aide sur un jeu ? → {channel}",
+        "en": "🆘 Need help with a game? → {channel}",
+        "es": "🆘 ¿Necesitas ayuda con un juego? → {channel}",
+        "de": "🆘 Brauchst du Hilfe bei einem Spiel? → {channel}",
+        "it": "🆘 Hai bisogno di aiuto in un gioco? → {channel}",
+        "pt": "🆘 Precisa de ajuda num jogo? → {channel}",
+    },
+    # Accueil onboarding events (poste quand welcome_message n'est PAS configuré).
+    # {user} = mention.
+    "welcome.onboarding_line": {
+        "fr": "👋 Bienvenue {user} ! Sois **actif** (chat ou vocal) pour débloquer les "
+              "**événements** et gagner loot & familiers — tout est dans `/hub`.",
+        "en": "👋 Welcome {user}! Be **active** (chat or voice) to unlock **events** "
+              "and earn loot & pets — everything is in `/hub`.",
+        "es": "👋 ¡Bienvenido {user}! Sé **activo** (chat o voz) para desbloquear "
+              "**eventos** y ganar botín y mascotas — todo está en `/hub`.",
+        "de": "👋 Willkommen {user}! Sei **aktiv** (Chat oder Voice), um **Events** "
+              "freizuschalten und Loot & Begleiter zu verdienen — alles in `/hub`.",
+        "it": "👋 Benvenuto {user}! Sii **attivo** (chat o vocale) per sbloccare gli "
+              "**eventi** e ottenere loot e familiari — tutto è in `/hub`.",
+        "pt": "👋 Bem-vindo {user}! Seja **ativo** (chat ou voz) para desbloquear "
+              "**eventos** e ganhar loot e mascotes — tudo está em `/hub`.",
     },
 
     # ─── Libellés génériques d'events ───
