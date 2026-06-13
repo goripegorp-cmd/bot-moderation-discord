@@ -362,6 +362,28 @@ def element_for_boss(name) -> Optional[str]:
         return None
 
 
+def boss_weakness_label(name) -> Optional[str]:
+    """A.3 — Libellé AFFICHABLE de la faiblesse élémentaire d'un boss (depuis son
+    nom). Renvoie p.ex. « ❄️ Givre » = l'élément d'arme qui inflige +25 % au boss,
+    ou None si le boss n'a pas de contre dédié (ou élément indéterminé).
+
+    PUREMENT ADDITIF & FAIL-SAFE : sert uniquement à l'affichage sur le panneau.
+    None → le panneau n'affiche simplement aucune ligne de faiblesse."""
+    try:
+        be = element_for_boss(name)
+        if not be:
+            return None
+        counter = ELEMENT_COUNTERS.get(be)
+        if not counter:
+            return None  # lightning : pas de contre dédié → pas d'affichage
+        meta = ELEMENTS.get(counter)
+        if not meta:
+            return None
+        return f"{meta['emoji']} {meta['name']}"
+    except Exception:
+        return None
+
+
 def elemental_advantage(weapon, boss_element) -> float:
     """Multiplicateur de dégâts si l'élément de l'arme CONTRE celui du boss.
     SÛR : 1.25 sur bon match, sinon 1.0 (jamais < 1.0 → ne peut pas réduire les dégâts)."""

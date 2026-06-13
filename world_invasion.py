@@ -61,6 +61,13 @@ INVASION_HOUR = 21  # 21h FR
 ALLIANCE_BONUS_MIN_MEMBERS = 3
 ALLIANCE_BONUS_MULT = 1.30
 
+# A.2 — OBJECTIF COLLECTIF : jauge de progression visible (mobs tués / total) +
+# prime de GROUPE MODESTE (rétention #1) versée UNE SEULE FOIS si l'objectif est
+# atteint (tous les mobs tués). Anti-doublon par colonne group_reward_claimed +
+# claim atomique (UPDATE … WHERE group_reward_claimed=0). Éclats jamais mêlés.
+GROUP_OBJECTIVE_BONUS_COINS = 250  # prime PAR participant si objectif atteint
+_GAUGE_SEGMENTS = 10               # largeur de la barre de progression collective
+
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=None,
           active_ping_fn=None, arena_ensure_fn=None, event_busy_fn=None,
@@ -110,6 +117,18 @@ async def init_db():
                     PRIMARY KEY (event_id, user_id)
                 )
             """)
+            # A.2 : jauge collective + récompense de groupe. Migration fail-open
+            # (ALTER ignoré si la colonne existe déjà — vieux schémas).
+            for _col, _ddl in (
+                ("progress_message_id",
+                 "ALTER TABLE invasion_events ADD COLUMN progress_message_id INTEGER DEFAULT 0"),
+                ("group_reward_claimed",
+                 "ALTER TABLE invasion_events ADD COLUMN group_reward_claimed INTEGER DEFAULT 0"),
+            ):
+                try:
+                    await db.execute(_ddl)
+                except Exception:
+                    pass  # colonne déjà présente → no-op
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_invasion_events_active "
                 "ON invasion_events(guild_id, status)"
@@ -321,6 +340,17 @@ async def trigger_invasion(guild: discord.Guild) -> bool:
         except Exception as ex:
             print(f"[world_invasion active_ping] {ex}")
 
+    # Difficulté dynamique (FAIL-OPEN strict, additif) : les mobs élite de
+    # l'invasion voient leurs PV adaptés à la foule (facteur BORNÉ [0.7..2.0]).
+    # La moindre erreur → facteur 1.0 (PV de base actuels, mobs inchangés).
+    _crowd_factor = 1.0
+    try:
+        import activity_system as _act
+        _crowd_factor = await _act.crowd_hp_factor(guild)
+    except Exception as ex:
+        print(f"[world_invasion crowd_hp] {ex}")
+        _crowd_factor = 1.0
+
     # Spawn 5 mobs via mob_hunts
     try:
         import mob_hunts as mh
@@ -331,7 +361,7 @@ async def trigger_invasion(guild: discord.Guild) -> bool:
             # Force élite et mark via DB que c'est un mob d'invasion
             # via une convention : on tagge avec un commentaire dans le name
             try:
-                await mh.spawn_mob(guild)
+                await mh.spawn_mob(guild, hp_factor=_crowd_factor)
                 spawned += 1
             except Exception:
                 pass
@@ -342,9 +372,138 @@ async def trigger_invasion(guild: discord.Guild) -> bool:
     except Exception as ex:
         print(f"[world_invasion spawn mobs] {ex}")
 
+    # A.2 — JAUGE COLLECTIVE : panneau de progression LIVE (LayoutView) dans
+    # l'arène, juste après l'annonce. Affiche « X / N mobs vaincus » + barre +
+    # objectif de groupe. Mis à jour à chaque kill via note_mob_killed(). Fail-safe :
+    # une erreur ici n'empêche JAMAIS l'invasion (le combat tourne sans la jauge).
+    try:
+        gauge_view = _build_invasion_progress_view(0, INVASION_MOBS_COUNT)
+        if gauge_view is not None:
+            pmsg = await ch.send(view=gauge_view)
+            if pmsg:
+                async with _get_db() as db:
+                    await db.execute(
+                        "UPDATE invasion_events SET progress_message_id=? WHERE id=?",
+                        (pmsg.id, event_id),
+                    )
+                    await db.commit()
+    except Exception as ex:
+        print(f"[world_invasion gauge post] {ex}")
+
     # Schedule resolve dans 30 min
     asyncio.create_task(_resolve_invasion_after(event_id, INVASION_DURATION_MIN * 60))
     return True
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  A.2 — Objectif collectif : jauge de progression + prime de groupe
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _progress_bar(done: int, total: int, *, segments: int = _GAUGE_SEGMENTS) -> str:
+    """Barre de progression collective (█/░). FAIL-SAFE : borne tout."""
+    try:
+        total = max(1, int(total))
+        done = max(0, min(int(done), total))
+        fill = int(round(segments * done / total))
+        fill = max(0, min(segments, fill))
+        return "█" * fill + "░" * (segments - fill)
+    except Exception:
+        return "░" * segments
+
+
+def _build_invasion_progress_view(killed: int, total: int):
+    """Construit le panneau LayoutView de progression collective de l'invasion.
+
+    Renvoie une StaticPanel (sans bouton → zéro « Échec interaction ») ou None
+    si la construction échoue (fail-safe : l'invasion tourne sans la jauge)."""
+    try:
+        killed = max(0, min(int(killed), int(total)))
+        total = max(1, int(total))
+        done = killed >= total
+        bar = _progress_bar(killed, total)
+        pct = int(round(100 * killed / total))
+        if done:
+            head = "🏆 Objectif collectif ATTEINT !"
+            tail = (
+                f"Les **{total} mobs élite** sont vaincus — le serveur tient bon.\n"
+                f"🎁 Prime de groupe : **+{GROUP_OBJECTIVE_BONUS_COINS}** 🪙 "
+                f"pour chaque participant."
+            )
+            color = ui_v2.Palette.SUCCESS
+        else:
+            head = "🛡️ Objectif collectif — repoussez l'invasion"
+            tail = (
+                f"Vainquez **les {total} mobs élite** ensemble avant la fin du "
+                f"chrono pour débloquer la prime de groupe "
+                f"(**+{GROUP_OBJECTIVE_BONUS_COINS}** 🪙 / participant)."
+            )
+            color = ui_v2.Palette.PRIMARY
+        body = (
+            f"### {head}\n"
+            f"`{bar}`  **{killed} / {total}** mobs vaincus · {pct} %\n\n"
+            f"{tail}"
+        )
+        return ui_v2.recap_view("👹 Invasion du serveur", body, color=color)
+    except Exception as ex:
+        print(f"[world_invasion build gauge] {ex}")
+        return None
+
+
+async def _count_invasion_kills(gid: int) -> int:
+    """Nombre de mobs tués dans la fenêtre d'invasion courante. FAIL-SAFE → 0."""
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM mob_spawns "
+                "WHERE guild_id=? AND status='killed' AND "
+                "datetime(killed_at) > datetime('now', ?) "
+                "AND datetime(spawned_at) > datetime('now', ?)",
+                (gid, f"-{INVASION_DURATION_MIN + 5} minutes",
+                 f"-{INVASION_DURATION_MIN + 5} minutes"),
+            ) as cur:
+                row = await cur.fetchone()
+        return int(row[0] or 0) if row else 0
+    except Exception:
+        return 0
+
+
+async def note_mob_killed(guild) -> None:
+    """Hook LIVE (fail-open) appelé par mob_hunts quand UN mob tombe : si une
+    invasion est active dans cette guild, rafraîchit la jauge collective.
+
+    Contrainte combat : ne JAMAIS lever — une erreur ici ne doit pas perturber la
+    résolution d'un kill de mob normal. Silencieux si pas d'invasion active."""
+    if guild is None or _get_db is None:
+        return
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT id, channel_id, progress_message_id FROM invasion_events "
+                "WHERE guild_id=? AND status='active' "
+                "ORDER BY id DESC LIMIT 1",
+                (int(guild.id),),
+            ) as cur:
+                row = await cur.fetchone()
+        if not row:
+            return  # pas d'invasion active → rien à faire
+        _eid, ch_id, pmsg_id = int(row[0]), int(row[1] or 0), int(row[2] or 0)
+        if not ch_id or not pmsg_id:
+            return
+        killed = await _count_invasion_kills(int(guild.id))
+        view = _build_invasion_progress_view(killed, INVASION_MOBS_COUNT)
+        if view is None:
+            return
+        ch = guild.get_channel(ch_id)
+        if ch is None:
+            return
+        # Édition via PartialMessage (PATCH seul, zéro GET) — anti-429.
+        try:
+            pm = ch.get_partial_message(pmsg_id)
+            await pm.edit(view=view)
+        except Exception:
+            pass
+    except Exception as ex:
+        print(f"[world_invasion note_mob_killed] {ex}")
 
 
 async def _resolve_invasion_after(event_id: int, seconds: int):
@@ -355,14 +514,14 @@ async def _resolve_invasion_after(event_id: int, seconds: int):
     try:
         async with _get_db() as db:
             async with db.execute(
-                "SELECT guild_id, channel_id, status, announce_message_id FROM invasion_events "
-                "WHERE id=?",
+                "SELECT guild_id, channel_id, status, announce_message_id, "
+                "progress_message_id FROM invasion_events WHERE id=?",
                 (event_id,),
             ) as cur:
                 row = await cur.fetchone()
         if not row or row[2] != "active":
             return
-        gid, ch_id, _, _announce_msg_id = row
+        gid, ch_id, _, _announce_msg_id, _progress_msg_id = row
         guild = _bot.get_guild(int(gid))
         if not guild:
             return
@@ -449,10 +608,40 @@ async def _resolve_invasion_after(event_id: int, seconds: int):
         except Exception:
             pass
 
+        # A.2 — PRIME DE GROUPE (objectif collectif atteint) : versée UNE SEULE
+        # FOIS, à CHAQUE participant, si tous les mobs sont tombés. Récompense
+        # MODESTE (rétention #1). Anti-doublon : CLAIM ATOMIQUE via la colonne
+        # group_reward_claimed (UPDATE … WHERE …=0 + rowcount==1) AVANT tout crédit
+        # → impossible de re-payer (résolution rejouée / reboot). Crédits via le
+        # helper existant add_coins uniquement (atomique). FAIL-SAFE.
+        group_bonus_paid = False
+        if all_killed and _add_coins is not None:
+            _claimed = False
+            try:
+                async with _get_db() as db:
+                    _gc = await db.execute(
+                        "UPDATE invasion_events SET group_reward_claimed=1 "
+                        "WHERE id=? AND group_reward_claimed=0",
+                        (event_id,),
+                    )
+                    await db.commit()
+                _claimed = getattr(_gc, "rowcount", 0) == 1
+            except Exception:
+                _claimed = False  # claim plante → on NE paie PAS (anti double-paie)
+            if _claimed:
+                for r in rewards:
+                    try:
+                        await _add_coins(gid, int(r["user_id"]), GROUP_OBJECTIVE_BONUS_COINS)
+                        r["coins"] = int(r.get("coins", 0) or 0) + GROUP_OBJECTIVE_BONUS_COINS
+                    except Exception:
+                        pass
+                group_bonus_paid = True
+
         # Post résolution
         ch = guild.get_channel(int(ch_id))
         if ch:
-            await _post_resolution(ch, all_killed, mobs_killed, rewards)
+            await _post_resolution(ch, all_killed, mobs_killed, rewards,
+                                   group_bonus_paid=group_bonus_paid)
             # Phase 235.15 : effacer le PANNEAU d'annonce live → le salon de combat
             # permanent se vide entre deux events (demande owner). Le récap persiste
             # dans « 📜 chroniques-combat » (via _post_resolution).
@@ -460,6 +649,13 @@ async def _resolve_invasion_after(event_id: int, seconds: int):
                 try:
                     _amsg = await ch.fetch_message(int(_announce_msg_id))
                     await _amsg.delete()
+                except Exception:
+                    pass
+            # A.2 : effacer aussi le panneau de jauge collective (le récap consolidé
+            # le remplace dans « 📜 chroniques-combat »). Fail-safe.
+            if _progress_msg_id:
+                try:
+                    await ch.get_partial_message(int(_progress_msg_id)).delete()
                 except Exception:
                     pass
         # Phase 233 (fix fuite C1) : supprimer l'arène d'invasion (catégorie + salons)
@@ -475,7 +671,7 @@ async def _resolve_invasion_after(event_id: int, seconds: int):
 
 async def _post_resolution(
     ch: discord.TextChannel, all_killed: bool, mobs_killed: int,
-    rewards: list[dict],
+    rewards: list[dict], *, group_bonus_paid: bool = False,
 ):
     """Poste le récap de fin d'invasion."""
     if not ch:
@@ -487,6 +683,12 @@ async def _post_resolution(
             f"Les {INVASION_MOBS_COUNT} mobs élite ont été vaincus à temps. "
             f"Le serveur est sauf !"
         )
+        # A.2 : objectif collectif atteint → prime de groupe versée à tous.
+        if group_bonus_paid:
+            subtitle += (
+                f"\n🎯 **Objectif collectif atteint** : prime de groupe "
+                f"**+{GROUP_OBJECTIVE_BONUS_COINS}** 🪙 pour chaque participant."
+            )
     else:
         title = "💀 **Invasion : échec partiel**"
         subtitle = (

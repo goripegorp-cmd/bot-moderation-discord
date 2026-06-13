@@ -566,7 +566,23 @@ async def trigger_climax(guild_id: int) -> Optional[int]:
     if not boss:
         return None
 
-    hp = int(boss["hp_base"])
+    # Difficulté dynamique (FAIL-OPEN strict, additif) : HP adaptés à la foule.
+    # facteur BORNÉ [0.7..2.0] selon le nb d'actifs du jour, plancher/plafond
+    # ABSOLUS relatifs au boss. La moindre erreur → facteur 1.0 (HP de base actuel).
+    hp_base = int(boss["hp_base"])
+    hp = hp_base
+    try:
+        import activity_system as _act
+        _g = _bot.get_guild(guild_id) if _bot else None
+        _f = await _act.crowd_hp_factor(_g)
+        hp = _act.apply_crowd_hp(
+            hp_base, _f,
+            floor=int(hp_base * _act.CROWD_HP_FACTOR_MIN),
+            cap=int(hp_base * _act.CROWD_HP_FACTOR_MAX),
+        )
+    except Exception as ex:
+        print(f"[trigger_climax crowd_hp] {ex}")
+        hp = hp_base  # FAIL-OPEN : HP de base
     ends_at = datetime.now(timezone.utc) + timedelta(hours=CLIMAX_DURATION_HOURS)
 
     try:
@@ -765,6 +781,34 @@ async def record_attack(
             damage = int(damage * _amult)
     except Exception:
         pass
+    # A.3 — AVANTAGE ÉLÉMENTAIRE (Climax) : si l'arme équipée CONTRE l'élément du
+    # boss (déduit de son nom), +25 % (borné par elemental_advantage : ×1.0..×1.25,
+    # ne peut JAMAIS réduire les dégâts). Lecture autonome du weapon_json (même DB
+    # que le gate). PUREMENT ADDITIF & FAIL-OPEN : la moindre erreur → aucun bonus.
+    elem_bonus = 0
+    try:
+        import events_engine as _eng
+        _bdef = get_climax_boss_by_id(active.get("boss_id"))
+        _belem = _eng.element_for_boss(_bdef.get("name") if _bdef else None)
+        if _belem:
+            import json as _json
+            _weapon = None
+            async with _get_db() as _wdb:
+                async with _wdb.execute(
+                    "SELECT weapon_json FROM player_inventory "
+                    "WHERE guild_id=? AND user_id=?",
+                    (guild_id, user_id),
+                ) as _wc:
+                    _wr = await _wc.fetchone()
+            if _wr and _wr[0]:
+                _weapon = _json.loads(_wr[0])
+            _adv = _eng.elemental_advantage(_weapon, _belem)
+            if _adv > 1.0:
+                _before = damage
+                damage = int(damage * _adv)
+                elem_bonus = max(0, damage - _before)
+    except Exception:
+        elem_bonus = 0  # FAIL-OPEN : combat normal
     # Capé pour ne pas overkill
     damage = min(damage, active["hp_current"])
 
@@ -810,6 +854,7 @@ async def record_attack(
             "boss_dead": True,
             "attack_count": attacks_done + 1,
             "voice_bonus": voice_bonus,
+            "elem_bonus": elem_bonus,
         }
 
     return {
@@ -822,6 +867,7 @@ async def record_attack(
         "max_attacks": MAX_ATTACKS_PER_USER,
         "boss_dead": updated["hp_current"] <= 0,
         "voice_bonus": voice_bonus,
+        "elem_bonus": elem_bonus,
     }
 
 
@@ -1152,6 +1198,18 @@ async def build_climax_panel(
             pass
 
     pct = int(active["hp_current"] * 100 / max(1, active["hp_max"]))
+    # A.3 — FAIBLESSE ÉLÉMENTAIRE affichée (déduite du nom du boss). Frapper avec
+    # une arme de cet élément donne +25 % (appliqué dans record_attack). FAIL-SAFE :
+    # pas de faiblesse lisible → aucune ligne (combat normal).
+    _weak_block = []
+    try:
+        import events_engine as _eng
+        _wl = _eng.boss_weakness_label(boss.get("name"))
+        if _wl:
+            _weak_block = [v2_body(
+                f"🎯 **Faiblesse** : {_wl} — une arme de cet élément inflige **+25 %** !")]
+    except Exception:
+        _weak_block = []
     items = [
         v2_title(f"⚔️ Boss Climax — {boss.get('emoji', '?')} {boss.get('name', '?')}"),
         v2_subtitle(
@@ -1165,6 +1223,7 @@ async def build_climax_panel(
             f"`{_hp_bar(active['hp_current'], active['hp_max'])}`\n"
             f"`{active['hp_current']:,} / {active['hp_max']:,}` ({pct}%)"
         ),
+        *_weak_block,
         v2_body(
             f"**⚔️ Ma contribution**\n"
             f"Dégâts : `{my_dmg:,}` · Attaques : `{my_attacks}/{MAX_ATTACKS_PER_USER}`"
@@ -1286,8 +1345,11 @@ class ClimaxAttackButton(
             view = await build_climax_panel(btn_i.guild.id, btn_i.user.id)
             _vb = int(result.get("voice_bonus", 0) or 0)
             _vn = (f" · 🔊 **Boost vocal** +`{_vb}`" if _vb > 0 else "")
+            # A.3 : avantage élémentaire (arme contre l'élément du boss).
+            _eb = int(result.get("elem_bonus", 0) or 0)
+            _en = (f" · 🎯 **Avantage élémentaire** +`{_eb}`" if _eb > 0 else "")
             msg = (
-                f"⚔️ **{result['damage']} dégâts** infligés !{_vn}\n"
+                f"⚔️ **{result['damage']} dégâts** infligés !{_vn}{_en}\n"
                 f"_Attaques : `{result['attack_count']}/{result.get('max_attacks', MAX_ATTACKS_PER_USER)}`._"
             )
             if result.get("boss_dead"):

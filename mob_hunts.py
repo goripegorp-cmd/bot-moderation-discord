@@ -682,8 +682,13 @@ async def _is_major_event_active(guild_id: int) -> bool:
         return False
 
 
-async def spawn_mob(guild: discord.Guild) -> bool:
-    """Spawn un mob aléatoire dans l'arène. Retourne True si succès."""
+async def spawn_mob(guild: discord.Guild, *, hp_factor: float = 1.0) -> bool:
+    """Spawn un mob aléatoire dans l'arène. Retourne True si succès.
+
+    `hp_factor` (défaut 1.0 = comportement actuel inchangé) : facteur BORNÉ
+    appliqué aux PV du mob, utilisé par l'invasion mensuelle pour adapter la
+    difficulté à la foule (difficulté dynamique, FAIL-OPEN). Ne touche PAS la
+    logique de dégâts des joueurs."""
     if not guild or _get_db is None or _bot is None:
         return False
     # Phase 191 : interrupteur Hub Événements — Chasse aux mobs
@@ -744,6 +749,17 @@ async def spawn_mob(guild: discord.Guild) -> bool:
     else:
         hp_mult = SOLO_HP_MULT_ELITE if is_elite else SOLO_HP_MULT
     hp_max = mob_def["hp_base"] * hp_mult
+    # Difficulté dynamique (invasion) : facteur foule BORNÉ appliqué aux PV, avec
+    # plancher/plafond ABSOLUS relatifs au mob. FAIL-OPEN : facteur illisible →
+    # hp_max inchangé. Le défaut 1.0 laisse les mobs normaux STRICTEMENT identiques.
+    try:
+        _f = float(hp_factor)
+        if _f != 1.0 and _f > 0 and _f == _f:  # garde NaN / valeur absurde
+            _floor = int(hp_max * 0.7)
+            _cap = int(hp_max * 2.0)
+            hp_max = max(_floor, min(_cap, int(round(hp_max * _f))))
+    except Exception:
+        pass  # FAIL-OPEN : PV de base
     elite_prefix = "👑 " if is_elite else ""
 
     # Phase 228 : CHAQUE mob a SON salon dédié (catégorie « ⚔️ {mob} » + texte +
@@ -1271,6 +1287,16 @@ async def _on_mob_killed(
             await db.commit()
         if getattr(_kc, "rowcount", 0) != 1:
             return
+    except Exception:
+        pass
+
+    # A.2 — JAUGE COLLECTIVE INVASION : si une invasion mensuelle est en cours,
+    # ce mob tué fait avancer l'objectif collectif → rafraîchit sa jauge. Hook
+    # fail-open STRICT (l'invasion sait ne rien faire s'il n'y en a pas), JAMAIS
+    # bloquant pour la distribution des drops du mob normal.
+    try:
+        import world_invasion as _wi
+        await _wi.note_mob_killed(guild)
     except Exception:
         pass
 

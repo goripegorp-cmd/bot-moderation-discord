@@ -89,6 +89,70 @@ async def recent_user_ids(guild_id, limit=50):
         return []
 
 
+async def get_hits(guild_id, user_id) -> int:
+    """Nombre de combats auxquels ce membre a participé sur la fenêtre courante
+    (compteur `hits` de la table de rappel — déjà incrémenté à chaque attaque).
+
+    Sert au BONUS D'ASSIDUITÉ (Tâche B.4) : récompenser discrètement les joueurs
+    qui reviennent régulièrement aux combats. LECTURE SEULE. FAIL-OPEN → 0 (donc
+    aucun bonus, jamais d'erreur ni de blocage du combat)."""
+    if _get_db is None:
+        return 0
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT hits FROM combat_recall WHERE guild_id=? AND user_id=?",
+                (int(guild_id), int(user_id)),
+            ) as cur:
+                row = await cur.fetchone()
+        return int(row[0]) if row and row[0] is not None else 0
+    except Exception as ex:
+        print(f"[combat_recall get_hits] {ex}")
+        return 0
+
+
+# Bonus d'assiduité (Tâche B.4) — MODESTE et BORNÉ (rétention #1, pas d'inflation).
+# Paliers sur le nombre de combats déjà disputés (compteur `hits`). Multiplicateur
+# de récompense appliqué SEULEMENT au gain de pièces de fin de combat, jamais aux
+# dégâts ni au combat lui-même.
+_ASSIDUITY_TIERS = (
+    (40, 1.15),   # vétéran : +15 %
+    (15, 1.10),   # habitué : +10 %
+    (5, 1.05),    # régulier : +5 %
+)
+ASSIDUITY_MAX_MULT = 1.15  # plafond ABSOLU du bonus
+
+
+async def assiduity_mult(guild_id, user_id) -> float:
+    """Multiplicateur de RÉCOMPENSE (pièces) selon l'assiduité aux combats.
+
+    Retourne un float dans [1.0 .. ASSIDUITY_MAX_MULT] : ne réduit JAMAIS un gain.
+    FAIL-OPEN STRICT → 1.0 (comportement actuel inchangé) en cas d'erreur."""
+    try:
+        h = await get_hits(guild_id, user_id)
+        for need, mult in _ASSIDUITY_TIERS:
+            if h >= need:
+                return min(ASSIDUITY_MAX_MULT, float(mult))
+        return 1.0
+    except Exception:
+        return 1.0
+
+
+def assiduity_label(hits: int) -> str:
+    """Petite étiquette d'assiduité pour affichage discret. '' si non assidu."""
+    try:
+        h = int(hits or 0)
+        if h >= 40:
+            return "🎖️ Vétéran de guerre"
+        if h >= 15:
+            return "⚔️ Habitué des combats"
+        if h >= 5:
+            return "🛡️ Combattant régulier"
+    except Exception:
+        pass
+    return ""
+
+
 async def cleanup_old():
     """Purge les participants inactifs depuis > 2× la fenêtre (table minuscule)."""
     if _get_db is None:
