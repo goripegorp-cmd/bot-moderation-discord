@@ -19015,6 +19015,9 @@ _SUPERVISED_LOOP_NAMES = [
     # Entraide : édite les posts des demandes expirées + supprime les vocaux temp
     # orphelins (vides) de la catégorie configurée. Fail-open, no-op si non configuré.
     "entraide_cleanup_task",
+    # C3 — Entraide : décerne le titre cosmétique « Pilier de l'entraide » aux meilleurs
+    # aidants (recalcul périodique). Fail-open, no-op si l'entraide est OFF.
+    "entraide_pillar_task",
     # Veilleur : poste un nudge discret si une VRAIE question reste sans réponse
     # ~10 min (serveur entier, salons chatty). Fail-open, no-op si pending vide / OFF.
     "unanswered_watch_task",
@@ -45343,6 +45346,10 @@ async def on_ready():
             # temp orphelins vides. Fail-open, no-op si l'entraide n'est pas configurée.
             if not entraide_cleanup_task.is_running():
                 entraide_cleanup_task.start()
+            # C3 : titre d'honneur « Pilier de l'entraide » aux meilleurs aidants
+            # (recalcul périodique, cosmétique, fail-open, no-op si entraide OFF).
+            if not entraide_pillar_task.is_running():
+                entraide_pillar_task.start()
             # Veilleur de questions sans réponse (serveur entier) : poste un nudge
             # discret après ~10 min sans réponse. Supervisé, fail-open, no-op si OFF.
             if not unanswered_watch_task.is_running():
@@ -48331,6 +48338,16 @@ async def _handle_welcome(member):
                     text = f"{text_en}\n-# {text}"
                 else:
                     text = f"{text}\n-# {text_en}"
+    # C4 : DÉCOUVRABILITÉ de l'entraide à l'accueil. Ligne FR+EN pointant vers le salon
+    # d'entraide — UNIQUEMENT si l'entraide est CONFIGURÉE (sinon rien). Salon public
+    # (zéro MP, aucune mention). _entraide_request_channel renvoie None si OFF/non réglé.
+    try:
+        _entr_ch = await _entraide_request_channel(member.guild)
+        if _entr_ch is not None:
+            text += (f"\n-# 🆘 Besoin d'aide sur un jeu ? Need help with a game? → "
+                     f"<#{_entr_ch.id}>")
+    except Exception:
+        pass
     # Phase 268 (demande owner) : embed COMPACT — pas de grande vignette d'avatar ni
     # de footer volumineux, pour ne pas occuper trop de place lors des vagues d'arrivées.
     e = discord.Embed(description=text, color=0x57F287)
@@ -66206,6 +66223,44 @@ async def entraide_cleanup_task():
     try:
         for guild in list(bot.guilds):
             try:
+                # 0) C2 — RELANCE : réveille UNE fois les demandes qui DORMENT (ouvertes,
+                #    sans aidant, jamais relancées, > RELANCE_AFTER_MIN). Re-ping du rôle
+                #    aidant DANS le salon (jamais @everyone, jamais MP), via le même
+                #    chemin que le ping initial (cooldown + cap anti-spam respectés). Le
+                #    flag relanced=1 est posé ATOMIQUEMENT avant le ping → jamais 2 fois.
+                try:
+                    # Respecte l'interrupteur maître : si l'entraide est OFF, AUCUNE relance
+                    # (comme tout le reste de l'entraide qui no-op quand désactivé).
+                    _ec = await cfg(guild.id)
+                    if not bool(_ec.get('entraide_enabled', True)):
+                        stale = []
+                    else:
+                        stale = await entraide_module.list_stale_unclaimed_requests(guild.id)
+                    for req in (stale or []):
+                        try:
+                            ch_id = int(req.get('request_channel_id', 0) or 0)
+                            ch = guild.get_channel(ch_id) if ch_id else None
+                            # Sans salon source connu OU salon disparu → on consomme quand
+                            # même le flag (anti-relance infinie), mais on ne ping pas.
+                            if ch is None or not isinstance(ch, discord.TextChannel):
+                                await entraide_module.mark_request_relanced(int(req['id']))
+                                continue
+                            game = await entraide_module.get_game(guild.id, req.get('game_key'))
+                            # Jeu retiré du catalogue / sans rôle aidant → pas de ping, on
+                            # consomme le flag pour ne pas reboucler sur cette demande.
+                            if game is None or not int(game.get('helper_role_id', 0) or 0):
+                                await entraide_module.mark_request_relanced(int(req['id']))
+                                continue
+                            # On RÉSERVE atomiquement le droit de relancer (anti double).
+                            if not await entraide_module.mark_request_relanced(int(req['id'])):
+                                continue  # une autre passe l'a déjà relancée
+                            # Re-ping (no-op si cooldown anti-spam encore actif — acceptable :
+                            # le flag est posé, on ne re-tentera pas cette demande).
+                            await _entraide_maybe_ping_helpers(ch, guild, game)
+                        except Exception as ex:
+                            print(f"[entraide_cleanup_task relance req {guild.id}] {ex}")
+                except Exception as ex:
+                    print(f"[entraide_cleanup_task relance {guild.id}] {ex}")
                 # 1) Posts + vocaux des demandes expirées (le module change le statut).
                 try:
                     expired = await entraide_module.expire_open_requests(guild.id)
@@ -66268,6 +66323,58 @@ async def entraide_cleanup_task():
 
 @entraide_cleanup_task.before_loop
 async def _entraide_cleanup_task_wait():
+    await bot.wait_until_ready()
+
+
+# C3 — TITRE D'HONNEUR « Pilier de l'entraide » : nombre de meilleurs aidants qui
+# reçoivent le titre cosmétique (recalculé périodiquement). Volontairement restreint
+# (rareté = valeur). Le titre est DÉCERNÉ (owned) mais JAMAIS auto-équipé → opt-out
+# naturel : le membre l'affiche dans /profile seulement s'il le choisit lui-même.
+ENTRAIDE_PILLAR_TOP_N = 3
+
+
+@tasks.loop(hours=12)
+async def entraide_pillar_task():
+    """C3 — Décerne le titre cosmétique « 🛡️ Pilier de l'entraide » aux meilleurs
+    aidants (top_helpers) de chaque guilde. 100 % COSMÉTIQUE, ZÉRO permission, ZÉRO
+    pièce/Éclat. grant() est IDEMPOTENT (anti-doublon) et N'ÉQUIPE PAS automatiquement
+    → opt-out naturel (le membre choisit de l'afficher ou non dans /profile). Recalcul
+    périodique : les nouveaux entrants du top finissent par l'obtenir, ceux qui sortent
+    le GARDENT (un titre gagné reste, comme « Champion d'activité »). FAIL-OPEN,
+    supervisée. No-op si l'entraide est désactivée par l'owner."""
+    try:
+        for guild in list(bot.guilds):
+            try:
+                # Respecte l'interrupteur maître de l'entraide (owner). Si OFF → on ne
+                # décerne rien (cohérent avec la feature désactivée).
+                try:
+                    c = await cfg(guild.id)
+                    if not bool(c.get('entraide_enabled', True)):
+                        continue
+                    # Opt-out dédié au titre (au cas où l'owner veut l'entraide ON mais
+                    # pas la distinction de titres). Défaut : ON.
+                    if not bool(c.get('entraide_pillar_enabled', True)):
+                        continue
+                except Exception:
+                    pass
+                top = await entraide_module.top_helpers(guild.id, limit=ENTRAIDE_PILLAR_TOP_N)
+                for uid, _cnt in (top or []):
+                    try:
+                        member = guild.get_member(int(uid))
+                        if member is None or member.bot:
+                            continue  # parti / bot → on ne décerne pas
+                        await cosmetics_module.grant(
+                            guild.id, int(uid), cosmetics_module.ENTRAIDE_PILLAR_KEY)
+                    except Exception as ex:
+                        print(f"[entraide_pillar_task grant {guild.id}] {ex}")
+            except Exception as ex:
+                print(f"[entraide_pillar_task guild {guild.id}] {ex}")
+    except Exception as ex:
+        print(f"[entraide_pillar_task] {ex}")
+
+
+@entraide_pillar_task.before_loop
+async def _entraide_pillar_task_wait():
     await bot.wait_until_ready()
 
 
@@ -66360,7 +66467,14 @@ async def _entraide_on_claim(i: discord.Interaction, rid: int):
         if vc is None:
             got_slot = await entraide_module.claim_request_voice_slot(rid)
             if got_slot:
-                vc = await _entraide_create_temp_voice(i.guild, matched['requester_id'], game)
+                # C5 — VOCAL AU MATCH : on POUSSE l'aidant ET le demandeur vers UN vocal
+                # commun. D'abord on tente de RÉUTILISER un vocal temp DÉJÀ ouvert pour le
+                # MÊME jeu (regroupement → tout le monde au même endroit) ; sinon on en
+                # crée un MAINTENANT. _entraide_create_temp_voice reste utilisé en repli
+                # (et gère lui-même le cap + la réutilisation quand plein).
+                vc = await _entraide_find_same_game_voice(i.guild, game)
+                if vc is None:
+                    vc = await _entraide_create_temp_voice(i.guild, matched['requester_id'], game)
                 if vc is not None:
                     try:
                         await entraide_module.set_request_voice(rid, vc.id)
@@ -66519,8 +66633,17 @@ async def _entraide_on_resolve(i: discord.Interaction, rid: int):
                 # injecté (c'est le cas ici : add_coins_fn=add_coins au setup) ET coins > 0.
                 reward = int(getattr(entraide_module, 'HELP_REWARD_COINS', 0) or 0)
                 reward_txt = (f" et reçoit **{reward}** pièces 🪙" if reward > 0 else "")
+                # C1 : réputation aidant visible dans le remerciement (« Xe aide ! »). Le
+                # compteur est déjà incrémenté côté module au CLAIM → reflète le total réel.
+                rep_txt = ""
+                try:
+                    _hc = await entraide_module.get_helper_count(i.guild.id, helper)
+                    if _hc > 0:
+                        rep_txt = f" — **{_hc}e aide** ! 🏅"
+                except Exception:
+                    rep_txt = ""
                 note = await ch.send(
-                    f"💛 Merci <@{helper}> d'avoir aidé <@{requester}> sur l'entraide{reward_txt} !\n"
+                    f"💛 Merci <@{helper}> d'avoir aidé <@{requester}> sur l'entraide{reward_txt} !{rep_txt}\n"
                     f"_Thanks <@{helper}> for helping out!_",
                     allowed_mentions=discord.AllowedMentions(
                         everyone=False, roles=False,
@@ -66548,10 +66671,13 @@ class EntraideHubV2(LayoutView):
     """Panneau Entraide ouvert depuis le hub (éphémère, par-user). 3 actions :
     besoin d'aide / je peux aider / demandes en cours. FAIL-SAFE."""
 
-    def __init__(self, user_id: int, guild_id: int = 0):
+    def __init__(self, user_id: int, guild_id: int = 0, helped_count: int = 0):
         super().__init__(timeout=300)
         self.user_id = user_id
         self.guild_id = guild_id
+        # C1 : compteur d'aides perso (réputation) — passé par le launcher (lecture
+        # async faite avant la construction synchrone). 0 si inconnu/non aidant.
+        self.helped_count = int(helped_count or 0)
         self._build()
 
     async def interaction_check(self, i):
@@ -66566,6 +66692,13 @@ class EntraideHubV2(LayoutView):
             "🇫🇷 Demande de l'aide, propose la tienne, ou parcours les demandes en cours.\n"
             "🇬🇧 _Ask for help, offer yours, or browse open requests._"
         ))
+        # C1 : réputation aidant perso — visible directement dans le panneau (lecture
+        # seule, zéro ping). N'affiche la ligne que si le membre a déjà aidé ≥ 1 fois.
+        if self.helped_count > 0:
+            items.append(v2_body(
+                f"🏅 **Ta réputation :** {self.helped_count} aide(s) apportée(s) à la communauté. "
+                f"Merci ! 💛"
+            ))
         items.append(v2_divider())
 
         b_need = Button(label="🙋 J'ai besoin d'aide", style=discord.ButtonStyle.primary,
@@ -66578,6 +66711,13 @@ class EntraideHubV2(LayoutView):
                         custom_id="entr_list")
         b_list.callback = self._on_list
         items.append(discord.ui.ActionRow(b_need, b_help, b_list))
+
+        # C1 : réputation aidant VISIBLE — bouton « 🏆 Top aidants » (lecture seule,
+        # zéro ping). Le compteur perso est ajouté dynamiquement à l'ouverture (build_async).
+        b_top = Button(label="🏆 Top aidants", style=discord.ButtonStyle.secondary,
+                       custom_id="entr_top")
+        b_top.callback = self._on_top
+        items.append(discord.ui.ActionRow(b_top))
 
         items.append(v2_divider())
         b_close = Button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger,
@@ -66675,6 +66815,49 @@ class EntraideHubV2(LayoutView):
             await _safe_followup(i, view=_OpenListLayout())
         except Exception as ex:
             print(f"[EntraideHubV2._on_list] {ex}")
+            await _safe_followup(i, content="❌ Petit souci, réessaie.")
+
+    async def _on_top(self, i):
+        """C1 : classement des aidants (top_helpers) — LECTURE SEULE, ZÉRO ping.
+        Noms échappés, aucune mention émise (allowed_mentions inutile car on n'envoie
+        que des libellés texte, pas de <@id>). FAIL-SAFE."""
+        if not await _safe_defer(i, ephemeral=True):
+            return
+        try:
+            if i.guild is None:
+                return await _safe_followup(i, content="❌ Serveur uniquement.")
+            top = await entraide_module.top_helpers(i.guild.id, limit=10)
+            mine = await entraide_module.get_helper_count(i.guild.id, i.user.id)
+            if not top:
+                return await _safe_followup(
+                    i, content="✨ Personne n'a encore aidé — sois le premier ! Active « 🤝 Je peux aider ».")
+            medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+            lines = []
+            for rank, (uid, cnt) in enumerate(top, start=1):
+                m = i.guild.get_member(int(uid))
+                # Nom ÉCHAPPÉ (jamais de mention <@id> → aucun ping) ; fallback id.
+                name = (discord.utils.escape_markdown(m.display_name) if m is not None
+                        else f"Membre #{int(uid)}")
+                prefix = medals.get(rank, f"`#{rank}`")
+                lines.append(f"{prefix} **{name}** — {int(cnt)} aide(s)")
+            body = "\n".join(lines)
+            if mine > 0:
+                body += f"\n\n🏅 _Toi : {int(mine)} aide(s) apportée(s)._"
+            items = [
+                v2_title("🏆 Top aidants"),
+                v2_subtitle("Les membres qui aident le plus la communauté — merci à eux ! 💛"),
+                v2_divider(),
+                v2_body(body[:3500]),
+            ]
+
+            class _TopHelpersLayout(LayoutView):
+                def __init__(self):
+                    super().__init__(timeout=300)
+                    self.add_item(v2_container(*items, color=0xF1C40F))
+
+            await _safe_followup(i, view=_TopHelpersLayout())
+        except Exception as ex:
+            print(f"[EntraideHubV2._on_top] {ex}")
             await _safe_followup(i, content="❌ Petit souci, réessaie.")
 
     async def _on_close(self, i):
@@ -66877,7 +67060,14 @@ async def _open_entraide_panel(i: discord.Interaction):
     defer-first + try/except (anti Échec interaction)."""
     try:
         gid = i.guild.id if i.guild else 0
-        view = EntraideHubV2(i.user.id, gid)
+        # C1 : on lit la réputation perso AVANT de construire le panneau (build sync).
+        _mine = 0
+        if gid:
+            try:
+                _mine = await entraide_module.get_helper_count(gid, i.user.id)
+            except Exception:
+                _mine = 0
+        view = EntraideHubV2(i.user.id, gid, helped_count=_mine)
         if not i.response.is_done():
             await i.response.send_message(view=view, ephemeral=True)
         else:
