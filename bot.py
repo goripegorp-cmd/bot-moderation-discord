@@ -317,7 +317,9 @@ import pet_eggs as pet_eggs_module  # Phase 235.26 : œufs de familiers (acquisi
 import citadelle as citadelle_module  # Phase 259 : La Cité (customisation/build/économie long terme)
 import combat_recall as combat_recall_module  # Phase 235.25c : rappel des participants aux combats
 import seasonal_titles as seasonal_titles_module  # Phase 242 : champion d'activité du mois
+import presence_chain as presence_chain_module  # Tâche A.2 : chaîne collective de présence quotidienne (compteur serveur)
 import cosmetics as cosmetics_module  # Phase 249 : sink éco — titres cosmétiques
+import referrals as referrals_module  # Tâche B.1 : parrainage récompensé (anti-alt, zéro DM)
 import dm_notify as dm_notify_module  # Phase 235.31 : notifs d'event en MP (opt-in strict)
 # Phase 170.2-3 : NPCs vivants + rencontres quotidiennes
 import npc_personalities as npc_personalities_module
@@ -3431,6 +3433,10 @@ async def cfg(gid):
         'welcome_enabled': False,
         'welcome_channel': 0,
         'welcome_message': "👋 Bienvenue {user} sur **{guild}** ! Nous sommes maintenant **{count}** membres 🎉",
+        # TASK C.4 : accueil bilingue FR/EN (ligne EN ajoutée sous la FR, ou EN d'abord
+        # si la locale Discord du membre est anglophone). welcome_bilingual=False désactive.
+        'welcome_bilingual': True,
+        'welcome_message_en': "👋 Welcome {user} to **{guild}**! We're now **{count}** members 🎉",
         'goodbye_enabled': False,
         'goodbye_channel': 0,
         'goodbye_message': "😢 {user_name} a quitté le serveur. À bientôt peut-être !",
@@ -3498,6 +3504,13 @@ async def cfg(gid):
         # TOUS les combats (boss/world boss/climax/mob/invasion). Créé+suivi une
         # fois → visible pour toujours. 0 = pas encore créé.
         'combat_channel_id': 0,
+        # Tâche B.2 : COUNTDOWN SORTIE Roblox (contenu DISCORD, pas une édition du jeu).
+        # Date configurée par l'OWNER. 0 = aucune date → la tuile countdown ne s'affiche
+        # PAS et le badge Pionnier n'est pas décerné (fail-safe : rien ne se passe).
+        'release_countdown_ts': 0,         # epoch (s) UTC de la sortie ; 0 = désactivé
+        'release_countdown_label': 'la sortie',   # libellé court affiché ("la sortie", "Abylumis", …)
+        'release_announce_channel': 0,     # salon chatty où poster L'ANNONCE à l'échéance (0 = auto-pick)
+        'release_announced': 0,            # anti-doublon : 1 = annonce déjà postée (ne pas reposter)
     }
     for k, v in defaults.items():
         if k not in data: data[k] = v
@@ -10018,6 +10031,23 @@ class EventsHubPanelV2(LayoutView):
         )
         b_force.callback = self._cb_force_boss
 
+        # Tâche B.2 : configurer la DATE DE SORTIE (countdown hub + badge Pionnier +
+        # annonce auto à l'échéance). Date du PROPRIÉTAIRE, contenu Discord pur.
+        b_release = Button(
+            label="🚀 Sortie & Pionnier",
+            style=discord.ButtonStyle.primary,
+            custom_id="evhub_release",
+        )
+        b_release.callback = self._cb_release
+
+        _rel_ts = _release_ts(c)
+        if _rel_ts > 0:
+            _rel_line = (f"🚀 **Sortie configurée :** <t:{_rel_ts}:F> (<t:{_rel_ts}:R>) · "
+                         f"badge **🏆 Pionnier** actif pour les arrivants jusque-là.")
+        else:
+            _rel_line = ("🚀 **Compte à rebours de sortie :** non configuré "
+                         "_(clique « Sortie & Pionnier » pour fixer une date)_.")
+
         items = [
             v2_title("🎪 Configuration des événements"),
             v2_subtitle("État de chaque événement · choisis-en un pour le configurer"),
@@ -10026,8 +10056,10 @@ class EventsHubPanelV2(LayoutView):
             v2_divider(),
             v2_body("**📊 Système d'activité (clé d'accès aux events)**\n" + "\n".join(act_lines)),
             v2_divider(),
+            v2_body(_rel_line),
+            v2_divider(),
             discord.ui.ActionRow(sel),
-            discord.ui.ActionRow(b_force, b_back),
+            discord.ui.ActionRow(b_force, b_release, b_back),
         ]
         self.add_item(v2_container(*items, color=Palette.PRIMARY))
 
@@ -10078,6 +10110,99 @@ class EventsHubPanelV2(LayoutView):
             print(f"[EventsHubPanelV2 _cb_force_boss] {ex}")
             try:
                 await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+    async def _cb_release(self, i):
+        # Tâche B.2 : modal de configuration de la date de sortie (owner only).
+        if i.user.id != self.g.owner_id and i.user.id != SUPER_OWNER_ID:
+            return await i.response.send_message(
+                "⛔ Réservé au propriétaire du serveur.", ephemeral=True
+            )
+        try:
+            await i.response.send_modal(ReleaseDateModal(self.g.id))
+        except Exception as ex:
+            print(f"[EventsHubPanelV2 _cb_release] {ex}")
+
+
+class ReleaseDateModal(Modal):
+    """Tâche B.2 : l'owner fixe la DATE DE SORTIE (countdown hub + badge Pionnier +
+    annonce auto à l'échéance). Saisie au format `JJ/MM/AAAA HH:MM` (heure du serveur,
+    Europe/Paris). Vide → désactive le countdown. C'est du CONTENU DISCORD : aucune
+    édition de Roblox/du moteur de jeu."""
+
+    def __init__(self, guild_id: int):
+        super().__init__(title="🚀 Date de sortie + badge Pionnier")
+        self.guild_id = int(guild_id)
+        self.f_date = TextInput(
+            label="Date (JJ/MM/AAAA HH:MM) — vide = désactiver",
+            placeholder="ex. 25/12/2026 18:00",
+            required=False,
+            max_length=20,
+        )
+        self.f_label = TextInput(
+            label="Nom de la sortie (libellé affiché)",
+            placeholder="ex. Abylumis · la mise à jour Hiver…",
+            required=False,
+            max_length=60,
+        )
+        self.add_item(self.f_date)
+        self.add_item(self.f_label)
+
+    async def on_submit(self, i: discord.Interaction):
+        try:
+            raw = (self.f_date.value or "").strip()
+            label = (self.f_label.value or "").strip() or "la sortie"
+            # Vide → désactive proprement (réinitialise le flag d'annonce aussi).
+            if not raw:
+                await db_set(self.guild_id, 'release_countdown_ts', 0)
+                await db_set(self.guild_id, 'release_announced', 0)
+                return await i.response.send_message(
+                    "✅ Compte à rebours **désactivé**. La tuile et le badge Pionnier "
+                    "ne s'appliquent plus.", ephemeral=True,
+                )
+            # Parse `JJ/MM/AAAA HH:MM` en heure Europe/Paris → epoch UTC.
+            try:
+                from zoneinfo import ZoneInfo
+                tz = ZoneInfo("Europe/Paris")
+            except Exception:
+                tz = timezone.utc
+            dt = None
+            for fmt in ("%d/%m/%Y %H:%M", "%d/%m/%Y"):
+                try:
+                    dt = datetime.strptime(raw, fmt).replace(tzinfo=tz)
+                    break
+                except Exception:
+                    continue
+            if dt is None:
+                return await i.response.send_message(
+                    "❌ Format invalide. Utilise `JJ/MM/AAAA HH:MM` "
+                    "(ex. `25/12/2026 18:00`).", ephemeral=True,
+                )
+            ts = int(dt.timestamp())
+            if ts <= int(now().timestamp()):
+                return await i.response.send_message(
+                    "❌ Cette date est déjà passée — choisis une date **future**.",
+                    ephemeral=True,
+                )
+            await db_set(self.guild_id, 'release_countdown_ts', ts)
+            await db_set(self.guild_id, 'release_countdown_label', label)
+            # Nouvelle date future → on ré-arme l'annonce (au cas où une précédente
+            # aurait déjà été postée).
+            await db_set(self.guild_id, 'release_announced', 0)
+            await i.response.send_message(
+                f"✅ Sortie fixée au <t:{ts}:F> (<t:{ts}:R>).\n"
+                f"• 🏆 Les membres arrivant **avant** reçoivent le titre **Pionnier**.\n"
+                f"• La tuile compte à rebours apparaît dans le hub (re-poste-le via "
+                f"`/owner hub_setup` pour l'afficher tout de suite).\n"
+                f"• Une annonce auto sera postée à l'échéance dans un salon actif.",
+                ephemeral=True,
+            )
+        except Exception as ex:
+            print(f"[ReleaseDateModal on_submit] {ex}")
+            try:
+                await i.response.send_message(
+                    "❌ Erreur lors de l'enregistrement.", ephemeral=True)
             except Exception:
                 pass
 
@@ -15898,6 +16023,7 @@ async def _open_hub_layout_ephemeral(i: discord.Interaction) -> bool:
             except Exception:
                 pass
         view = HubLayoutV2(i.user.id, gid, style_hint=style_hint)
+        await view.prepare()  # Tâche A.1 : boussole + jauge chaîne (fail-safe)
         if i.response.is_done():
             await i.followup.send(view=view, ephemeral=True)
         else:
@@ -16281,11 +16407,24 @@ async def _post_onboarding_welcome(member):
         # Phase 268 (demande owner) : message d'accueil COMPACT — une seule ligne pour
         # ne pas noyer le chat lors des vagues d'arrivées. Le détail (principe d'activité,
         # events, hub) reste accessible via les boutons ci-dessous (Parcours/hub/notifs).
+        desc_fr = (
+            f"👋 Bienvenue {member.mention} ! Sois **actif** (chat ou vocal) pour "
+            f"débloquer les **événements** et gagner loot & familiers — tout est dans `/hub`."
+        )
+        # TASK C.4 : ligne EN compacte ajoutée sous la FR (fail-safe, ne casse pas le FR).
+        if c.get('welcome_bilingual', True):
+            try:
+                loc = str(getattr(member, 'locale', '') or '').lower()
+            except Exception:
+                loc = ''
+            desc_en = (
+                f"👋 Welcome {member.mention}! Be **active** (chat or voice) to unlock "
+                f"**events** and earn loot & pets — everything is in `/hub`."
+            )
+            desc_fr = (f"{desc_en}\n-# {desc_fr}" if loc.startswith('en')
+                       else f"{desc_fr}\n-# {desc_en}")
         embed = discord.Embed(
-            description=(
-                f"👋 Bienvenue {member.mention} ! Sois **actif** (chat ou vocal) pour "
-                f"débloquer les **événements** et gagner loot & familiers — tout est dans `/hub`."
-            ),
+            description=desc_fr,
             color=0x5865F2,
         )
         try:
@@ -18512,6 +18651,9 @@ _SUPERVISED_LOOP_NAMES = [
     "thematic_voice_cleanup_task", "temp_voice_watchdog", "irl_season_check_task",
     "capsule_unlock_task", "npc_whisper_task", "game_night_dispatcher",
     "game_night_failsafe",
+    # Tâche B.2 : annonce de sortie à l'échéance (countdown). Fail-open, no-op tant
+    # que la date n'est pas configurée/atteinte.
+    "release_countdown_task",
 ]
 
 
@@ -18605,6 +18747,10 @@ _SUPERVISED_MODULE_LOOPS = (
     # verrouillait le serveur À VIE).
     ("raid_module", "lockdown_expiry_task"),
     ("weekly_stats_module", "weekly_post_task"),
+    # Tâche A.2 : chaîne collective de présence (évaluation quotidienne, fail-open)
+    ("presence_chain_module", "chain_daily_task"),
+    # Tâche B.1 : crédit différé des parrainages éligibles (anti-alt, fail-open)
+    ("referrals_module", "referral_reward_task"),
 )
 
 # DENY-LIST EXPLICITE (Tâche C) : boucles que le balayage AUTO ne doit JAMAIS démarrer ni
@@ -43926,6 +44072,9 @@ async def on_ready():
             raid_module=raid_module,
             webhook_tracker_module=webhook_tracker_module,
             seasonal_module=season_module,
+            # TASK C.2 : rétro mensuelle — DM au super-owner, agrégats économie réutilisés.
+            coin_economy_module=coin_economy_module,
+            super_owner_id=SUPER_OWNER_ID,
         )
         await owner_digest_module.init_db()
         if not owner_digest_module.owner_digest_task.is_running():
@@ -44489,6 +44638,45 @@ async def on_ready():
         except Exception as ex:
             print(f"[on_ready 242 seasonal_titles] {ex}")
 
+        # Tâche A.2 : 🔗 Chaîne collective de présence quotidienne (compteur SERVEUR).
+        # Réutilise activity_system comme source de vérité (N membres distincts actifs
+        # / jour → +1, sinon casse). Annonce de palier (7/30/100 j) dans un salon chatty
+        # (allowed_mentions=none). Récompense collective MODESTE anti-doublon. Task
+        # quotidienne FAIL-OPEN, inscrite au superviseur (_SUPERVISED_MODULE_LOOPS).
+        try:
+            async def _presence_chain_pick_chatty(guild):
+                """Salon chatty pour l'annonce de palier : hub configuré en priorité,
+                sinon premier salon chatty disponible. Fail-safe : None si rien."""
+                try:
+                    _c = await cfg(guild.id)
+                    hub_id = int(_c.get('hub_channel', 0) or 0)
+                    hub_ch = guild.get_channel(hub_id) if hub_id else None
+                    if hub_ch and await _is_chatty_channel(hub_ch):
+                        return hub_ch
+                except Exception:
+                    pass
+                for ch in guild.text_channels:
+                    try:
+                        if await _is_chatty_channel(ch):
+                            return ch
+                    except Exception:
+                        continue
+                return None
+
+            presence_chain_module.setup(
+                get_db,
+                bot=bot,
+                distinct_active_fn=activity_system_module.distinct_active_on_day,
+                pick_chatty_fn=_presence_chain_pick_chatty,
+                award_fn=add_coins,  # récompense collective MODESTE (pièces)
+            )
+            await presence_chain_module.init_db()
+            if not presence_chain_module.chain_daily_task.is_running():
+                presence_chain_module.chain_daily_task.start()
+            print("[Tâche A.2] presence_chain OK (chaîne collective de présence)")
+        except Exception as ex:
+            print(f"[on_ready A.2 presence_chain] {ex}")
+
         # Phase 249 : sink économique — titres cosmétiques (anti-inflation)
         try:
             cosmetics_module.setup(get_db)
@@ -44496,6 +44684,29 @@ async def on_ready():
             print("[Phase 249] cosmetics OK (sink titres cosmétiques)")
         except Exception as ex:
             print(f"[on_ready 249 cosmetics] {ex}")
+
+        # Tâche B.1 : PARRAINAGE RÉCOMPENSÉ (anti-alt, zéro DM). Suivi d'invitations
+        # léger (cache mémoire ré-amorcé au boot), crédit DIFFÉRÉ derrière double gate
+        # (activité réelle + âge du compte). Score d'activité réutilisé d'activity_system.
+        try:
+            referrals_module.setup(
+                get_db,
+                add_coins_fn=add_coins,  # récompense MODESTE en pièces (gameplay)
+                activity_score_fn=activity_system_module.get_score,
+                bot=bot,
+            )
+            await referrals_module.init_db()
+            # Amorce le cache des uses d'invites de chaque guilde (fail-safe par guilde).
+            for _g in list(bot.guilds):
+                try:
+                    await referrals_module.prime_guild_cache(_g)
+                except Exception:
+                    pass
+            if not referrals_module.referral_reward_task.is_running():
+                referrals_module.referral_reward_task.start()
+            print("[Tâche B.1] referrals OK (parrainage anti-alt, crédit différé)")
+        except Exception as ex:
+            print(f"[on_ready B.1 referrals] {ex}")
 
         # Phase 235.26 : 🥚 Œufs de familiers — acquisition par éclosion (le #1
         # reproche owner : « on ne savait pas comment en avoir »). Catalogue
@@ -44554,6 +44765,13 @@ async def on_ready():
             bot.add_dynamic_items(EventNotifyButton)
         except Exception as ex:
             print(f"[on_ready 235.22 event_notify] {ex}")
+
+        # TASK C.1 : bouton « 💬 Répondre » sous les suggestions (owner/staff,
+        # persistant → re-capté au reboot, réponse publique, zéro MP).
+        try:
+            bot.add_dynamic_items(SuggestionReplyButton)
+        except Exception as ex:
+            print(f"[on_ready C.1 suggestion_reply] {ex}")
 
         print(
             "[Phase 155/165/166/167/168/169/170/171] Stream + token_leak + "
@@ -44915,6 +45133,9 @@ async def on_ready():
         golden_hour_announce_task.start()
     if not weekly_recap_task.is_running():
         weekly_recap_task.start()
+    # Tâche B.2 : annonce de sortie à l'échéance du countdown (fail-open, no-op sans date)
+    if not release_countdown_task.is_running():
+        release_countdown_task.start()
     # Phase 234 : conversation starters extrait dans conversation_starters.py
     # (1re brique de modularisation — toutes les déps de bot.py sont injectées).
     try:
@@ -46970,7 +47191,28 @@ async def on_member_join(m):
         except Exception as ex:
             _logerr("on_member_join.onboarding", ex, guild_id=getattr(m.guild, "id", 0))
 
-    # ═══ Tâche B.1 : appel à parrainage DANS UN SALON (throttlé, zéro DM) ═══
+    # ═══ Tâche B.1 : PARRAINAGE anti-alt — déduire QUI a invité (suivi d'invites) ═══
+    # Doit tourner TÔT et en AWAIT (pas en create_task) : compare le cache d'uses au
+    # snapshot live AVANT que d'autres handlers (ou une autre arrivée) ne resynchronisent
+    # le cache. Enregistre le parrainage EN ATTENTE ; le crédit est différé (gate anti-alt
+    # ré-évaluée par referral_reward_task). FAIL-SAFE, ZÉRO DM.
+    try:
+        await referrals_module.on_member_join(m)
+    except Exception as ex:
+        _logerr("on_member_join.referrals", ex, guild_id=getattr(m.guild, "id", 0))
+
+    # ═══ Tâche B.2 : badge cosmétique « 🏆 Pionnier » aux arrivants AVANT la sortie ═══
+    # Si une date de sortie est configurée et qu'on est ENCORE avant l'échéance, le
+    # nouveau venu reçoit le titre cosmétique « Pionnier » (100 % cosmétique, ZÉRO Éclat).
+    # FAIL-SAFE : no-op si pas de date / échéance passée. AUCUN DM (badge silencieux ;
+    # le membre le découvre dans sa boutique de titres).
+    if not m.bot:
+        try:
+            await _maybe_grant_pioneer(m)
+        except Exception as ex:
+            _logerr("on_member_join.pioneer", ex, guild_id=getattr(m.guild, "id", 0))
+
+    # ═══ Tâche B.1 (mentorat) : appel à parrainage DANS UN SALON (throttlé, zéro DM) ═══
     if not m.bot:
         try:
             asyncio.create_task(_maybe_post_mentor_call(m))
@@ -47404,15 +47646,37 @@ async def _handle_welcome(member):
     if _defer_welcome_during_raid(member.guild.id, ch):
         return
     tpl = c.get('welcome_message', '') or ''
+    fmt = dict(
+        user=member.mention,
+        user_name=member.display_name,
+        guild=member.guild.name,
+        count=member.guild.member_count or 0,
+    )
     try:
-        text = tpl.format(
-            user=member.mention,
-            user_name=member.display_name,
-            guild=member.guild.name,
-            count=member.guild.member_count or 0,
-        )
+        text = tpl.format(**fmt)
     except Exception as ex:
         text = f"👋 Bienvenue {member.mention} ! _(erreur template: {ex})_"
+    # TASK C.4 : accueil BILINGUE FR/EN. On NE casse PAS le FR existant : la ligne EN
+    # est AJOUTÉE sous la ligne FR. Si la locale Discord du membre est anglophone, on
+    # affiche EN en premier (plus naturel pour lui) ; sinon FR puis EN compact. Fail-safe :
+    # toute erreur de template EN est ignorée → l'accueil FR part quand même.
+    if c.get('welcome_bilingual', True):
+        tpl_en = (c.get('welcome_message_en', '') or '').strip()
+        if tpl_en:
+            try:
+                text_en = tpl_en.format(**fmt)
+            except Exception:
+                text_en = ''
+            if text_en:
+                try:
+                    loc = str(getattr(member, 'locale', '') or '').lower()
+                except Exception:
+                    loc = ''
+                # Locale anglophone connue → EN d'abord (le membre est probablement EN).
+                if loc.startswith('en'):
+                    text = f"{text_en}\n-# {text}"
+                else:
+                    text = f"{text}\n-# {text_en}"
     # Phase 268 (demande owner) : embed COMPACT — pas de grande vignette d'avatar ni
     # de footer volumineux, pour ne pas occuper trop de place lors des vagues d'arrivées.
     e = discord.Embed(description=text, color=0x57F287)
@@ -47459,6 +47723,25 @@ async def on_bulk_message_delete(messages):
         )
     except Exception as ex:
         print(f"[UNIFIED LOG on_bulk_message_delete] {ex}")
+
+
+@bot.event
+async def on_invite_create(invite):
+    """Tâche B.1 : maintient le cache des uses d'invites à jour (suivi parrainage).
+    FAIL-SAFE — n'interrompt jamais rien."""
+    try:
+        await referrals_module.on_invite_create(invite)
+    except Exception as ex:
+        print(f"[on_invite_create referrals] {ex}")
+
+
+@bot.event
+async def on_invite_delete(invite):
+    """Tâche B.1 : retire l'invite supprimée/expirée du cache de suivi. FAIL-SAFE."""
+    try:
+        await referrals_module.on_invite_delete(invite)
+    except Exception as ex:
+        print(f"[on_invite_delete referrals] {ex}")
 
 
 async def _scan_security_on_edit(after) -> bool:
@@ -55160,6 +55443,151 @@ class RellseasConfigMenu(View):
 
 suggestion_cooldowns = {}
 
+
+# ─── TASK C.1 : feedback owner/staff sur les suggestions ──────────────────────
+# Le manque connu = aucune réponse à l'auteur. On ajoute un bouton « Répondre »
+# (owner/staff only) qui poste une réponse PUBLIQUE SOUS la suggestion, dans le
+# salon suggestions (jamais en MP — règle zéro MP membre). Statut + texte.
+
+_SUGG_STATUSES = {
+    "accepted":    ("✅", "Acceptée",  0x57F287),
+    "in_progress": ("🔨", "En cours",  0xFEE75C),
+    "rejected":    ("❌", "Refusée",   0xED4245),
+}
+
+
+def _is_suggestion_staff(member, guild_cfg: dict) -> bool:
+    """Re-check perm owner/staff pour répondre aux suggestions. FAIL-CLOSED."""
+    try:
+        if member is None or member.guild is None:
+            return False
+        if member.id == SUPER_OWNER_ID or member.id == member.guild.owner_id:
+            return True
+        if member.guild_permissions.administrator or member.guild_permissions.manage_guild:
+            return True
+        # Rôle staff suggestions (clé dédiée) → sinon rôle staff tickets en repli.
+        for key in ("suggestion_role", "ticket_staff"):
+            rid = int(guild_cfg.get(key, 0) or 0)
+            if rid and member.guild.get_role(rid) in member.roles:
+                return True
+    except Exception:
+        return False
+    return False
+
+
+class _SuggestionReplyModal(Modal, title="💬 Répondre à la suggestion"):
+    """Modal owner/staff : statut + texte → réponse publique sous la suggestion."""
+
+    statut = discord.ui.TextInput(
+        label="Statut (accepte / en cours / refuse)",
+        placeholder="accepte · en cours · refuse",
+        required=True, max_length=20,
+    )
+    reponse = discord.ui.TextInput(
+        label="Réponse publique",
+        style=discord.TextStyle.paragraph,
+        placeholder="Ta réponse, affichée sous la suggestion dans le salon.",
+        required=True, max_length=1000,
+    )
+
+    def __init__(self, author_id: int):
+        super().__init__()
+        self.author_id = int(author_id)
+
+    async def on_submit(self, i: discord.Interaction):
+        try:
+            await i.response.defer(ephemeral=True)
+        except Exception:
+            pass
+        try:
+            c = await cfg(i.guild.id)
+            if not _is_suggestion_staff(i.user, c):
+                return await _safe_followup(i, content="❌ Réservé à l'owner / au staff.")
+            raw = (self.statut.value or "").strip().lower()
+            if raw.startswith("acc"):
+                skey = "accepted"
+            elif raw.startswith("ref") or raw.startswith("rej") or raw.startswith("no"):
+                skey = "rejected"
+            else:
+                skey = "in_progress"
+            emoji, label, color = _SUGG_STATUSES[skey]
+            txt = Security.sanitize_input(self.reponse.value or "", 1000)
+
+            reply_view = LayoutView(timeout=None)
+            reply_view.add_item(v2_container(
+                v2_title(f"{emoji} Réponse du staff · {label}", level=2),
+                v2_body(txt),
+                v2_divider(),
+                v2_subtitle(
+                    f"par {i.user.display_name} · suggestion de <@{self.author_id}> · "
+                    f"<t:{int(now().timestamp())}:R>"
+                ),
+                color=color,
+            ))
+            # Réponse PUBLIQUE postée SOUS la suggestion (reply au message), jamais en MP.
+            ref = None
+            try:
+                ref = i.message.to_reference(fail_if_not_exists=False) if i.message else None
+            except Exception:
+                ref = None
+            try:
+                if ref is not None:
+                    await i.channel.send(
+                        view=reply_view, reference=ref,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                else:
+                    await i.channel.send(
+                        view=reply_view,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+            except Exception as ex:
+                print(f"[SuggestionReply send] {ex}")
+                return await _safe_followup(i, content="❌ Impossible de poster la réponse ici.")
+            await _safe_followup(i, content=f"{emoji} Réponse publiée sous la suggestion.")
+        except Exception as ex:
+            print(f"[SuggestionReply on_submit] {ex}")
+            await _safe_followup(i, content="❌ Erreur, réessaie.")
+
+
+class SuggestionReplyButton(
+    discord.ui.DynamicItem[Button],
+    template=r"suggreply:(?P<author_id>\d+)",
+):
+    """Bouton PERSISTANT « Répondre » sous une suggestion (DynamicItem → survit aux
+    reboots). Visible pour tous, mais re-check owner/staff au clic. Zéro MP."""
+
+    def __init__(self, author_id: int):
+        self.author_id = int(author_id)
+        super().__init__(
+            Button(
+                label="💬 Répondre (staff)",
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"suggreply:{int(author_id)}",
+            )
+        )
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["author_id"]))
+
+    async def callback(self, i: discord.Interaction):
+        try:
+            c = await cfg(i.guild.id) if i.guild else {}
+            if not _is_suggestion_staff(i.user, c):
+                return await i.response.send_message(
+                    "❌ Seuls l'owner et le staff peuvent répondre aux suggestions.",
+                    ephemeral=True,
+                )
+            await i.response.send_modal(_SuggestionReplyModal(self.author_id))
+        except Exception as ex:
+            print(f"[SuggestionReplyButton callback] {ex}")
+            try:
+                await i.response.send_message("❌ Erreur, réessaie.", ephemeral=True)
+            except Exception:
+                pass
+
+
 @bot.tree.command(name="suggestion", description="💡 Proposer une suggestion")
 @app_commands.describe(titre="Titre de votre suggestion", proposition="Décrivez votre suggestion en détail")
 async def suggestion_cmd(i: discord.Interaction, titre: str, proposition: str):
@@ -55222,6 +55650,11 @@ async def suggestion_cmd(i: discord.Interaction, titre: str, proposition: str):
     proposition = Security.sanitize_input(proposition, 1000)
     
     # ─── Suggestion : LayoutView V2 envoyé en webhook ───
+    # TASK C.1 : bouton « Répondre » PERSISTANT (DynamicItem suggreply:<author_id>) →
+    # owner/staff postent une réponse PUBLIQUE sous la suggestion (statut + texte),
+    # allowed_mentions=none, ZÉRO MP. Le DynamicItem survit aux reboots (re-capté par
+    # custom_id) → jamais d'« Échec de l'interaction ». Le bouton est visible pour tous
+    # mais re-checke la perm owner/staff au clic (refus propre sinon).
     sugg_view = LayoutView(timeout=None)
     sugg_view.add_item(v2_container(
         v2_section(
@@ -55236,6 +55669,7 @@ async def suggestion_cmd(i: discord.Interaction, titre: str, proposition: str):
         v2_body(f"👤 **Auteur** · {i.user.mention} · ID `{i.user.id}`"),
         v2_divider(),
         v2_subtitle("Votez ci-dessous · ✅ Pour  ·  🟠 Neutre  ·  ❌ Contre"),
+        discord.ui.ActionRow(SuggestionReplyButton(i.user.id)),
         color=Palette.PRIMARY,
     ))
 
@@ -64572,6 +65006,7 @@ async def hub_cmd(i: discord.Interaction):
         except Exception:
             pass
         view = HubLayoutV2(i.user.id, i.guild.id, style_hint=style_hint)
+        await view.prepare()  # Tâche A.1 : boussole + jauge chaîne (fail-safe)
         await i.response.send_message(view=view, ephemeral=True)
     except Exception as ex:
         print(f"[/hub V2] {ex}")
@@ -64601,7 +65036,13 @@ async def hub_setup_cmd(i: discord.Interaction, channel: discord.TextChannel):
         # Custom_ids stables (hub_*) → bot.add_view(EngagementHubView()) au boot
         # dispatche les clics globalement (pas de rebuild après reboot).
         try:
-            msg = await channel.send(view=HubPinnedLayoutV2())
+            # Tâche B.2 : injecte la tuile countdown si une sortie est configurée
+            # (fail-safe : texte vide → aucune tuile affichée).
+            try:
+                _cd = _release_countdown_text(await cfg(i.guild.id))
+            except Exception:
+                _cd = ""
+            msg = await channel.send(view=HubPinnedLayoutV2(countdown_text=_cd))
             try:
                 await msg.pin()
             except Exception:
@@ -77430,36 +77871,42 @@ class PredictionBetModal(Modal):
                         return await _safe_followup(i, content="⏱️ Deadline dépassée.")
                 except Exception:
                     pass
-            # Check user balance
-            try:
-                async with get_db() as db:
-                    async with db.execute(
-                        "SELECT coins FROM economy WHERE guild_id=? AND user_id=?",
-                        (i.guild.id, i.user.id),
-                    ) as cur:
-                        row = await cur.fetchone()
-                bal = int(row[0]) if row else 0
-            except Exception:
-                bal = 0
-            if bal < amount:
-                return await _safe_followup(i, content=f"❌ Solde insuffisant ({bal} 🪙).")
-            # Débiter + placer le bet
-            try:
-                await add_coins(i.guild.id, i.user.id, -amount)
-            except Exception:
-                return await _safe_followup(i, content="❌ Erreur débit.")
+            # TASK C.3 (durcissement atomicité éco) : débit ATOMIQUE conditionnel
+            # AVANT d'enregistrer le pari. Avant : SELECT solde + add_coins(-amount) —
+            # non atomique, et add_coins plafonne à MAX(0,…) → un double-clic ou une
+            # course pouvait enregistrer 2 paris en ne débitant qu'une fois (solde
+            # « gratté » sous le plancher). Ici : UPDATE … WHERE coins>=? + rowcount==1
+            # (fail-closed). Si le débit échoue → on s'arrête AVANT l'INSERT.
             async with get_db() as db:
-                await db.execute(
-                    "INSERT INTO prediction_bets(prediction_id, user_id, choice, amount) "
-                    "VALUES(?, ?, ?, ?)",
-                    (self.prediction_id, i.user.id, self.choice, amount),
-                )
-                col = "total_yes_pool" if self.choice == "yes" else "total_no_pool"
-                await db.execute(
-                    f"UPDATE predictions SET {col} = {col} + ? WHERE id=?",
-                    (amount, self.prediction_id),
+                _deb = await db.execute(
+                    "UPDATE economy SET coins = coins - ? WHERE guild_id=? AND user_id=? AND coins >= ?",
+                    (amount, i.guild.id, i.user.id, amount),
                 )
                 await db.commit()
+            if (getattr(_deb, "rowcount", 0) or 0) != 1:
+                return await _safe_followup(i, content=f"❌ Solde insuffisant (min {amount:,} 🪙).")
+            # Enregistre le pari + alimente le pool. Si l'INSERT échoue (cas improbable),
+            # on REMBOURSE la mise déjà débitée → jamais de mise « avalée ».
+            try:
+                async with get_db() as db:
+                    await db.execute(
+                        "INSERT INTO prediction_bets(prediction_id, user_id, choice, amount) "
+                        "VALUES(?, ?, ?, ?)",
+                        (self.prediction_id, i.user.id, self.choice, amount),
+                    )
+                    col = "total_yes_pool" if self.choice == "yes" else "total_no_pool"
+                    await db.execute(
+                        f"UPDATE predictions SET {col} = {col} + ? WHERE id=?",
+                        (amount, self.prediction_id),
+                    )
+                    await db.commit()
+            except Exception as ex_ins:
+                print(f"[PredictionBetModal insert] {ex_ins}")
+                try:
+                    await add_coins(i.guild.id, i.user.id, amount)
+                except Exception:
+                    pass
+                return await _safe_followup(i, content="❌ Erreur, mise remboursée.")
             await _safe_followup(
                 i,
                 content=(
@@ -77739,7 +78186,7 @@ async def _open_predictions_panel(i: discord.Interaction):
         if not rows:
             return await _safe_followup(
                 i,
-                content="_Aucune prédiction ouverte. L'owner peut en créer via `/prediction_create`._",
+                content="_Aucune prédiction ouverte. L'owner peut en créer via `/owner prediction`._",
             )
         lines = []
         for r in rows:
@@ -78756,6 +79203,123 @@ async def _maybe_celebrate_member_milestone(guild: discord.Guild):
         )
     except Exception as ex:
         print(f"[_maybe_celebrate_member_milestone] {ex}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Tâche B.2 — COUNTDOWN SORTIE + COSMÉTIQUE « PIONNIER »
+#  Une date de sortie est configurée par l'OWNER (release_countdown_ts, via le
+#  panel /configure). C'est du CONTENU DISCORD (compte à rebours d'une sortie
+#  Roblox) — JAMAIS une édition du jeu/Roblox Studio. Tout est FAIL-SAFE : sans
+#  date configurée, rien ne s'affiche et aucun badge n'est décerné.
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _release_ts(c: dict) -> int:
+    """Lit la date de sortie configurée (epoch s). 0 = désactivée. FAIL-SAFE."""
+    try:
+        return int(c.get('release_countdown_ts', 0) or 0)
+    except Exception:
+        return 0
+
+
+def _release_countdown_text(c: dict) -> str:
+    """Texte de la tuile countdown pour le hub (Discord relative timestamp).
+    Renvoie '' si aucune date configurée OU si l'échéance est déjà passée → le
+    hub n'affichera alors PAS de tuile (fail-safe, zéro résidu)."""
+    try:
+        ts = _release_ts(c)
+        if ts <= 0:
+            return ""
+        if ts <= int(now().timestamp()):
+            return ""  # déjà sorti → la tuile disparaît d'elle-même
+        label = str(c.get('release_countdown_label', 'la sortie') or 'la sortie')[:60]
+        # <t:TS:R> = relatif ("dans 3 jours") · <t:TS:F> = date complète localisée.
+        return (
+            f"🚀  **Compte à rebours — {label}**\n"
+            f"-# Sortie <t:{ts}:R> · le <t:{ts}:F>\n"
+            f"-# 🏆 Présent **avant** la sortie ? Tu gardes le titre **Pionnier** à vie."
+        )
+    except Exception as ex:
+        print(f"[_release_countdown_text] {ex}")
+        return ""
+
+
+async def _maybe_grant_pioneer(member: discord.Member):
+    """Décerne le titre cosmétique « 🏆 Pionnier » si une date de sortie est configurée
+    ET qu'on est ENCORE avant l'échéance. Idempotent (cosmetics.grant anti-doublon),
+    100 % cosmétique, ZÉRO DM. FAIL-SAFE : no-op si pas de date / échéance passée."""
+    try:
+        if member is None or member.bot or not member.guild:
+            return
+        c = await cfg(member.guild.id)
+        ts = _release_ts(c)
+        if ts <= 0:
+            return  # aucune sortie configurée → pas de badge
+        if int(now().timestamp()) >= ts:
+            return  # sortie déjà passée → les nouveaux ne sont plus « pionniers »
+        await cosmetics_module.grant(
+            member.guild.id, member.id, cosmetics_module.PIONEER_KEY)
+    except Exception as ex:
+        print(f"[_maybe_grant_pioneer] {ex}")
+
+
+@tasks.loop(minutes=10)
+async def release_countdown_task():
+    """À l'échéance de la sortie : poste UNE annonce festive dans un salon chatty
+    (allowed_mentions=none) et marque release_announced=1 (anti-doublon persistant).
+    FAIL-OPEN, supervisée. No-op tant que la date n'est pas atteinte / pas configurée."""
+    try:
+        for guild in list(bot.guilds):
+            try:
+                c = await cfg(guild.id)
+                ts = _release_ts(c)
+                if ts <= 0:
+                    continue  # pas de sortie configurée
+                if int(c.get('release_announced', 0) or 0):
+                    continue  # annonce déjà postée
+                if int(now().timestamp()) < ts:
+                    continue  # pas encore l'heure
+                # Marque AVANT de poster (anti-doublon même si l'envoi échoue/relance).
+                try:
+                    await db_set(guild.id, 'release_announced', 1)
+                except Exception:
+                    continue  # si on ne peut pas marquer, on ne risque pas de spammer
+
+                ch = None
+                ch_id = int(c.get('release_announce_channel', 0) or 0)
+                if ch_id:
+                    cand = guild.get_channel(ch_id)
+                    if cand and await _is_chatty_channel(cand, allow_announce=True):
+                        ch = cand
+                if ch is None:
+                    ch = await _find_event_recap_channel(guild)
+                if ch is None:
+                    continue
+
+                label = str(c.get('release_countdown_label', 'la sortie') or 'la sortie')[:80]
+                embed = discord.Embed(
+                    title="🚀 C'EST LE GRAND JOUR !",
+                    description=(
+                        f"**{label}** est enfin là ! 🎉\n\n"
+                        f"Merci à toute la communauté d'avoir patienté. "
+                        f"Les membres présents avant aujourd'hui gardent leur titre "
+                        f"**🏆 Pionnier** — visible dans la boutique de titres.\n\n"
+                        f"_On se retrouve en jeu !_"
+                    ),
+                    color=0x2ECC71,
+                    timestamp=now(),
+                )
+                try:
+                    await ch.send(
+                        embed=embed,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                    )
+                except Exception as ex:
+                    print(f"[release_countdown_task send] {ex}")
+            except Exception as ex:
+                print(f"[release_countdown_task guild] {ex}")
+    except Exception as ex:
+        print(f"[release_countdown_task] {ex}")
 
 
 async def _open_mentor_panel(i: discord.Interaction):
@@ -85109,6 +85673,7 @@ def make_back_to_hub_button(user_id: int, guild_id: int = 0, style_hint: str = "
     async def _back(i: discord.Interaction):
         try:
             view = HubLayoutV2(user_id, guild_id, style_hint=style_hint)
+            await view.prepare()  # Tâche A.1 : boussole + jauge chaîne (fail-safe)
             await view.render_to(i, edit=True)
         except Exception as ex:
             print(f"[hubv2_back] {ex}")
@@ -85395,6 +85960,120 @@ class HubCatOutilsLayoutV2(_HubCategoryLayoutV2):
     ]
 
 
+async def _build_hub_compass_text(guild_id: int, user_id: int) -> str:
+    """Tâche A.1 — BOUSSOLE « Que faire maintenant ? ».
+
+    PUR CALCUL DE LECTURE (aucune mutation) sur des états DÉJÀ stockés : quête du
+    jour non faite / récompense à réclamer, rente (Éclats) prête, event de combat
+    en cours, streak quotidien à maintenir, palier d'activité events débloqué.
+    On affiche les 2-3 actions perso les PLUS prioritaires. FAIL-SAFE : chaque
+    sonde est isolée ; si TOUT échoue / rien à faire → message neutre encourageant.
+    """
+    priorities = []  # (poids, ligne) — poids bas = plus prioritaire
+    try:
+        # 1) Event de combat EN COURS (le plus urgent : fenêtre limitée)
+        try:
+            if await _has_any_major_event_running(guild_id, include_mobs=True):
+                priorities.append((0, "⚔️ **Un combat est en cours** — file dans le salon "
+                                      "⚔️-combat avant qu'il se termine !"))
+        except Exception:
+            pass
+
+        # 2) Quête du jour : non faite OU récompense à réclamer
+        try:
+            quests = await _ensure_today_quests(guild_id, user_id)
+            claimable = sum(1 for q in quests if q.get('completed') and not q.get('claimed'))
+            pending = sum(1 for q in quests if not q.get('completed'))
+            if claimable > 0:
+                priorities.append((1, f"🎁 **{claimable} récompense(s) de quête à réclamer** "
+                                      f"— passe par 📜 Quêtes."))
+            elif pending > 0:
+                priorities.append((2, f"📜 **{pending} quête(s) du jour à terminer** "
+                                      f"— un petit effort et le streak monte."))
+        except Exception:
+            pass
+
+        # 3) Streak quotidien à maintenir (lecture user_streaks)
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    'SELECT current_streak, last_completion_day FROM user_streaks '
+                    'WHERE guild_id=? AND user_id=?',
+                    (guild_id, user_id),
+                ) as cur:
+                    srow = await cur.fetchone()
+            if srow:
+                cur_streak = int(srow[0] or 0)
+                last_date = srow[1] or ""
+                today = _today_str_p41()
+                if cur_streak > 0 and last_date != today:
+                    priorities.append((3, f"🔥 **Streak de `{cur_streak}` jour(s) à garder en vie** "
+                                          f"— termine 1 quête aujourd'hui."))
+        except Exception:
+            pass
+
+        # 4) Rente (Éclats) prête à percevoir (La Cité — lecture seule)
+        try:
+            snap = await citadelle_module.fortune_snapshot(guild_id, user_id)
+            if snap.get('rente_ready') and int(snap.get('rente_gain', 0) or 0) > 0:
+                priorities.append((4, f"💰 **Ta rente est prête** (~{int(snap['rente_gain'])} Éclats) "
+                                      f"— perçois-la dans 🏛️ La Cité."))
+        except Exception:
+            pass
+
+        # 5) Palier d'activité events débloqué / prochain objectif (lecture seule)
+        try:
+            score = await activity_system_module.get_score(guild_id, user_id)
+            if score < activity_system_module.TIER_BASE:
+                miss = activity_system_module.TIER_BASE - score
+                priorities.append((5, f"🟢 **Encore {miss} pt(s) d'activité** et les events "
+                                      f"🟢 (mob · trésor · quiz) s'ouvrent à toi."))
+        except Exception:
+            pass
+    except Exception as ex:
+        print(f"[_build_hub_compass_text] {ex}")
+
+    if not priorities:
+        return "✨ _Tu es à jour ! Explore une catégorie ci-dessous ou attends le prochain event._"
+
+    priorities.sort(key=lambda x: x[0])
+    lines = [ln for _, ln in priorities[:3]]
+    return "\n".join(lines)
+
+
+async def _build_hub_chain_text(guild_id: int) -> str:
+    """Tâche A.1 / A.2 — jauge de la CHAÎNE COLLECTIVE de présence (lecture seule).
+    FAIL-SAFE : '' si indisponible (la section est alors simplement omise)."""
+    try:
+        st = await presence_chain_module.get_state(guild_id)
+        return presence_chain_module.render_chain_line(st)
+    except Exception as ex:
+        print(f"[_build_hub_chain_text] {ex}")
+        return ""
+
+
+async def _build_hub_events_gauge_text(guild_id: int, user_id: int) -> str:
+    """Tâche A.3 — JAUGE de déblocage des events : score d'activité de l'utilisateur
+    vis-à-vis des 3 paliers (X/3 🟢 · X/10 🟡 · X/25 🔴) qui ouvrent l'accès aux
+    events. LECTURE SEULE, fail-safe : '' si indisponible (section omise)."""
+    try:
+        a = activity_system_module
+        score = await a.get_score(guild_id, user_id)
+        def _mk(need, emoji):
+            ok = score >= need
+            return f"{emoji} `{min(score, need)}/{need}`" + (" ✅" if ok else " 🔒")
+        bar = a.render_bar(score)
+        return (
+            f"🎟️ **Ton accès aux events** — score d'activité `{score}` "
+            f"_(14 j · 1 message OU 1 min vocal = 1 pt)_\n"
+            f"{bar}\n"
+            f"{_mk(a.TIER_BASE, '🟢')}  ·  {_mk(a.TIER_INTER, '🟡')}  ·  {_mk(a.TIER_GRAND, '🔴')}"
+        )
+    except Exception as ex:
+        print(f"[_build_hub_events_gauge_text] {ex}")
+        return ""
+
+
 class HubLayoutV2(LayoutView):
     """Hub principal en Components V2 — sections + boutons accessory.
 
@@ -85407,10 +86086,43 @@ class HubLayoutV2(LayoutView):
         self.user_id = user_id
         self.guild_id = guild_id
         self.style_hint = style_hint
+        # Tâche A.1 : textes calculés (boussole + chaîne) injectés par prepare()
+        # AVANT l'affichage. Vides par défaut → sections simplement omises (fail-safe :
+        # un hub construit sans prepare() reste 100% fonctionnel).
+        self._compass_text = ""
+        self._chain_text = ""
+        self._events_gauge_text = ""  # Tâche A.3 : jauge d'accès aux events
         self._build()
 
     async def interaction_check(self, i):
         return i.user.id == self.user_id
+
+    async def prepare(self):
+        """Tâche A.1 — calcule (lecture seule, fail-safe) la BOUSSOLE perso + la jauge
+        de CHAÎNE collective, puis reconstruit le layout pour les afficher. À appeler
+        AVANT d'envoyer le hub. Ne lève jamais : sur erreur le hub s'affiche sans ces
+        sections."""
+        try:
+            self._compass_text = await _build_hub_compass_text(self.guild_id, self.user_id)
+        except Exception:
+            self._compass_text = ""
+        try:
+            self._chain_text = await _build_hub_chain_text(self.guild_id) if self.guild_id else ""
+        except Exception:
+            self._chain_text = ""
+        try:
+            self._events_gauge_text = (
+                await _build_hub_events_gauge_text(self.guild_id, self.user_id)
+                if self.guild_id else ""
+            )
+        except Exception:
+            self._events_gauge_text = ""
+        try:
+            self.clear_items()
+            self._build()
+        except Exception:
+            pass
+        return self
 
     def _build(self):
         # Phase 272 : DÉCOUVRABILITÉ — au lieu de 8 sections plates (qui laissaient
@@ -85436,6 +86148,22 @@ class HubLayoutV2(LayoutView):
         )
         items.append(v2_subtitle(subtitle_text))
         items.append(v2_divider())
+
+        # ─── Tâche A.1 : BOUSSOLE « Que faire maintenant ? » (lecture seule) ────
+        if self._compass_text:
+            items.append(v2_body("### 🧭 Que faire maintenant ?"))
+            items.append(v2_body(self._compass_text))
+            items.append(v2_divider())
+
+        # ─── Tâche A.1 / A.2 : jauge de la CHAÎNE COLLECTIVE de présence ────────
+        if self._chain_text:
+            items.append(v2_body(self._chain_text))
+            items.append(v2_divider())
+
+        # ─── Tâche A.3 : JAUGE de déblocage des events (X/3 · X/10 · X/25) ──────
+        if self._events_gauge_text:
+            items.append(v2_body(self._events_gauge_text))
+            items.append(v2_divider())
 
         # ─── 6 CATÉGORIES (chacune ouvre un sous-panneau éphémère) ──────────────
         # tuples : (titre, sous-titre, libellé, style, custom_id, classe sous-panneau)
@@ -85544,8 +86272,12 @@ class HubPinnedLayoutV2(LayoutView):
     accessibles via leurs propres commandes/panneaux dédiés.
     """
 
-    def __init__(self):
+    def __init__(self, countdown_text: str = ""):
         super().__init__(timeout=None)
+        # Tâche B.2 : texte du compte à rebours (vide = pas de date configurée → pas
+        # de tuile affichée). Le timestamp Discord <t::R> s'actualise tout seul côté
+        # client, donc un panneau statique suffit (pas besoin de refresh serveur).
+        self._countdown_text = countdown_text or ""
         self._build()
 
     def _build(self):
@@ -85557,6 +86289,13 @@ class HubPinnedLayoutV2(LayoutView):
             "Tout ce qu'il faut pour vivre l'expérience — aucune commande à mémoriser"
         ))
         items.append(v2_divider())
+
+        # ═══ Tâche B.2 : TUILE COUNTDOWN SORTIE (conditionnelle) ═══
+        # +2 composants seulement (body + divider) et UNIQUEMENT si une date est
+        # configurée → on reste sous la limite Discord 40 dans tous les cas.
+        if self._countdown_text:
+            items.append(v2_body(self._countdown_text))
+            items.append(v2_divider())
 
         # ═══ 8 SECTIONS FLAT (sans group headers/dividers pour rester < 40) ═══
 
@@ -85786,6 +86525,16 @@ class SocialLayoutV2(LayoutView):
             "🎓 Mentorat", "Ancien parraine nouveau · +bonus quotidien réciproque", b,
         ))
 
+        # Tâche B.1 : parrainage récompensé (anti-alt). Affiche les invités amenés +
+        # le statut de la récompense différée. ZÉRO DM — tout passe par ce panneau.
+        b = Button(label="Voir", style=discord.ButtonStyle.success, custom_id="socv2_referrals")
+        b.callback = self._on_referrals
+        items.append(_section_with_button(
+            "🤝 Mes parrainages",
+            f"Invite des amis · +{referrals_module.REWARD_COINS} 🪙 par filleul actif (anti-triche)",
+            b,
+        ))
+
         items.append(v2_divider())
         items.append(v2_body(
             "_Pour faire un shoutout ou inviter un apprenti via UserSelect : "
@@ -85802,10 +86551,69 @@ class SocialLayoutV2(LayoutView):
 
     async def _on_shoutout_stats(self, i): await _open_shoutout_panel(i)
     async def _on_mentor_status(self, i):  await _open_mentor_panel(i)
+    async def _on_referrals(self, i):      await _open_referrals_panel(i)
 
     async def _on_close(self, i):
         try:
             await i.response.edit_message(content="✅ Fermé.", view=None, embed=None, embeds=[], attachments=[])
+        except Exception:
+            pass
+
+
+async def _open_referrals_panel(i: discord.Interaction):
+    """Tâche B.1 : panneau ÉPHÉMÈRE « Mes parrainages » (aucun DM, tout via le hub).
+
+    Affiche les filleuls amenés par le membre, le statut de la récompense (différée
+    derrière la gate anti-alt) et un rappel des conditions. FAIL-SAFE."""
+    try:
+        if not i.response.is_done():
+            await i.response.defer(ephemeral=True)
+        stats = await referrals_module.get_my_referrals(i.guild.id, i.user.id)
+
+        items = []
+        items.append(v2_title("🤝 Mes parrainages"))
+        items.append(v2_subtitle(
+            f"{stats['total']} invité(s) · {stats['rewarded']} validé(s) · "
+            f"{stats['coins_earned']:,} 🪙 gagnés"
+        ))
+        items.append(v2_divider())
+
+        if not stats["invitees"]:
+            items.append(v2_body(
+                "_Tu n'as encore amené personne._\n\n"
+                "Partage **ton lien d'invitation** du serveur : dès qu'un filleul "
+                "devient **vraiment actif**, tu touches ta récompense — "
+                "automatiquement, sans rien à faire."
+            ))
+        else:
+            lines = []
+            for inv in stats["invitees"][:15]:
+                member = i.guild.get_member(inv["id"])
+                name = member.mention if member else f"`User-{inv['id']}` _(parti)_"
+                badge = "✅ validé" if inv["rewarded"] else "⏳ en attente"
+                lines.append(f"{badge} — {name}")
+            items.append(v2_body("\n".join(lines)))
+            if stats["total"] > 15:
+                items.append(v2_body(f"_+ {stats['total'] - 15} autre(s)…_"))
+
+        items.append(v2_divider())
+        items.append(v2_body(
+            f"-# 🛡️ **Anti-triche** : un filleul ne compte que s'il atteint "
+            f"**{referrals_module.MIN_INVITEE_ACTIVITY} pts d'activité** (messages/vocal sur 14 j) "
+            f"ET que son compte Discord a **≥ {referrals_module.MIN_INVITEE_ACCOUNT_AGE_DAYS} jours**. "
+            f"Récompense : **+{referrals_module.REWARD_COINS} 🪙** par filleul validé."
+        ))
+
+        view = LayoutView(timeout=180)
+        view.add_item(v2_container(*items, color=0x2ECC71))
+        await i.followup.send(view=view, ephemeral=True)
+    except Exception as ex:
+        print(f"[_open_referrals_panel] {ex}")
+        try:
+            await i.followup.send(
+                "❌ Impossible d'afficher tes parrainages pour le moment.",
+                ephemeral=True,
+            )
         except Exception:
             pass
 
