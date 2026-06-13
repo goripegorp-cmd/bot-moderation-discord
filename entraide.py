@@ -460,6 +460,48 @@ async def list_open_requests(guild_id, limit=20) -> list:
         return []
 
 
+async def list_open_requests_for_game(guild_id, game_key, within_hours=6,
+                                      limit=10, exclude_request_id=0) -> list:
+    """Demandes OUVERTES du MÊME jeu (même game_key) sur les `within_hours` dernières
+    heures — sert au REGROUPEMENT « même besoin » (mentionner ceux qui cherchent de
+    l'aide sur le même jeu pour qu'ils s'entraident au même endroit / même vocal).
+    Les plus récentes d'abord (les voisins immédiats du demandeur). On peut exclure
+    une demande (ex. celle qu'on vient de créer) via `exclude_request_id`.
+    -> [dict, …]. FAIL-OPEN : []."""
+    if _get_db is None or not game_key:
+        return []
+    try:
+        cutoff = (datetime.now(timezone.utc)
+                  - timedelta(hours=int(within_hours))).strftime("%Y-%m-%d %H:%M:%S")
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT id, guild_id, requester_id, game_key, description, status, "
+                "request_channel_id, message_id, voice_channel_id, helper_id, "
+                "created_at, resolved_at "
+                "FROM entraide_requests "
+                "WHERE guild_id=? AND game_key=? AND status='open' "
+                "AND created_at >= ? AND id != ? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (int(guild_id), str(game_key), cutoff,
+                 int(exclude_request_id or 0), int(limit)),
+            ) as cur:
+                rows = await cur.fetchall()
+        out = []
+        for row in rows:
+            out.append({
+                "id": int(row[0]), "guild_id": int(row[1]),
+                "requester_id": int(row[2]), "game_key": row[3],
+                "description": row[4] or "", "status": row[5] or "open",
+                "request_channel_id": int(row[6] or 0), "message_id": int(row[7] or 0),
+                "voice_channel_id": int(row[8] or 0), "helper_id": int(row[9] or 0),
+                "created_at": row[10], "resolved_at": row[11],
+            })
+        return out
+    except Exception as ex:
+        print(f"[entraide list_open_requests_for_game] {ex}")
+        return []
+
+
 async def claim_request(request_id, helper_id) -> Optional[dict]:
     """Un aidant PREND une demande. ATOMIQUE : UPDATE … WHERE status='open' →
     rowcount==1 garantit qu'UN SEUL premier aidant gagne le claim (anti-course).
@@ -700,6 +742,7 @@ __all__ = [
     "create_request",
     "get_request",
     "list_open_requests",
+    "list_open_requests_for_game",
     "claim_request",
     "resolve_request",
     "set_request_voice",

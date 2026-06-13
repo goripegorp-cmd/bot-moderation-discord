@@ -471,7 +471,10 @@ async def _launch_dungeon(guild_id: int):
                                           position=0,  # catégorie propre TOUT EN HAUT
                                           reason="Donjon instancié")
         created.append(cat)
-        txt = await guild.create_text_channel(name="combat", category=cat, overwrites=ow,
+        # FIX salons : nom SPÉCIFIQUE « 🗡️-donjon » (au lieu du générique « combat »
+        # qui donnait l'impression que tout est du combat). Salon privé instancié,
+        # supprimé avec sa catégorie « 🏰 Donjon » à la fin du run (_delete_run_channels).
+        txt = await guild.create_text_channel(name="🗡️-donjon", category=cat, overwrites=ow,
                                               reason="Donjon instancié")
         created.append(txt)
         for enc in encounters:

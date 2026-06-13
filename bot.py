@@ -44523,9 +44523,12 @@ async def on_ready():
             wandering_merchant_module.spawn_merchant_task.start()
 
         # Phase 169.3 : World Invasion (1er samedi 21h FR)
+        # FIX salons : salon DÉDIÉ « 🚨-invasion » (annonce + mobs regroupés), supprimé
+        # à la résolution. Avant : arène partagée « ⚔️-combat » → l'invasion ressemblait
+        # à du « combat » générique.
         world_invasion_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
                                     active_ping_fn=_ping_active_members,
-                                    arena_ensure_fn=_ensure_combat_arena_channel,
+                                    arena_ensure_fn=_ensure_invasion_channel,
                                     event_busy_fn=_has_any_major_event_running,
                                     arena_delete_fn=_delete_combat_arena,
                                     report_fn=_post_combat_report)
@@ -65258,10 +65261,102 @@ async def _entraide_maybe_ping_helpers(channel, guild, game: dict):
         return False
 
 
+# Regroupement « même besoin » : fenêtre de recherche des autres demandeurs du
+# même jeu (heures) + plafond de mentions (anti-spam, jamais de masse).
+ENTRAIDE_SAME_NEED_WINDOW_H = 6
+ENTRAIDE_SAME_NEED_MENTION_CAP = 5
+
+
+async def _entraide_post_same_need_grouping(guild, channel, req: dict, game: dict):
+    """REGROUPEMENT « même besoin » (demande owner) : à la création d'une demande,
+    cherche les AUTRES demandeurs OUVERTS du MÊME jeu sur les dernières heures et,
+    s'il y en a, poste DANS LE SALON une section « 👥 Vous cherchez tous de l'aide
+    sur {jeu} » qui MENTIONNE ces joueurs (users uniquement, PLAFONNÉ à
+    ENTRAIDE_SAME_NEED_MENTION_CAP) pour les réunir au MÊME endroit / MÊME vocal.
+
+    Garanties (rappel contraintes) : JAMAIS @everyone, JAMAIS de rôle en masse,
+    JAMAIS de MP — uniquement des mentions d'utilisateurs ciblées, plafonnées, dans
+    le salon public. Si une demande active du même jeu a déjà un vocal temp, on
+    propose CE vocal (on n'en recrée pas un 2e pour le même jeu). FAIL-SAFE : ne
+    poste rien sur la moindre erreur / si personne d'autre. Renvoie True si posté."""
+    try:
+        if guild is None or channel is None:
+            return False
+        game_key = (game.get('game_key') or '') if game else ''
+        if not game_key:
+            return False
+        others = await entraide_module.list_open_requests_for_game(
+            guild.id, game_key,
+            within_hours=ENTRAIDE_SAME_NEED_WINDOW_H,
+            limit=20,
+            exclude_request_id=int(req.get('id', 0) or 0),
+        )
+        if not others:
+            return False  # personne d'autre ne cherche de l'aide sur ce jeu → rien
+
+        # Membres distincts encore présents (hors demandeur), plafonnés. On capte au
+        # passage un éventuel vocal temp déjà ouvert pour une demande active du jeu.
+        requester_id = int(req.get('requester_id', 0) or 0)
+        seen = set()
+        members = []
+        shared_voice_id = 0
+        for o in others:
+            uid = int(o.get('requester_id', 0) or 0)
+            if not shared_voice_id:
+                vc_id = int(o.get('voice_channel_id', 0) or 0)
+                if vc_id and guild.get_channel(vc_id) is not None:
+                    shared_voice_id = vc_id  # réutilise le vocal du même jeu
+            if uid and uid != requester_id and uid not in seen:
+                m = guild.get_member(uid)
+                if m is not None:
+                    seen.add(uid)
+                    members.append(m)
+            if len(members) >= ENTRAIDE_SAME_NEED_MENTION_CAP:
+                break
+        if not members:
+            return False  # que des demandeurs partis / le demandeur lui-même → rien
+
+        glabel = _entraide_game_label(game)
+        mention_str = " ".join(m.mention for m in members)
+        body = (
+            f"👥 **Vous cherchez tous de l'aide sur {glabel} !**\n"
+            f"{mention_str}\n"
+            f"<@{requester_id}> vient aussi de demander de l'aide. "
+            f"Regroupez-vous ici pour vous entraider entre vous."
+        )
+        if shared_voice_id:
+            body += f"\n🔊 Un vocal d'entraide **{glabel}** est déjà ouvert : <#{shared_voice_id}> — rejoignez-le !"
+        body += (
+            "\n_🇬🇧 You're all looking for help on the same game — team up here._"
+        )
+        try:
+            grp = await channel.send(
+                body,
+                allowed_mentions=discord.AllowedMentions(
+                    everyone=False, roles=False, users=members,
+                ),
+            )
+        except discord.Forbidden:
+            return False
+        except Exception as ex:
+            print(f"[_entraide_post_same_need_grouping send] {ex}")
+            return False
+        # Éphémère visuellement (le post de demande reste, lui, persistant).
+        try:
+            await _register_for_cleanup(grp, 3600, reason='entraide_same_need')
+        except Exception:
+            pass
+        return True
+    except Exception as ex:
+        print(f"[_entraide_post_same_need_grouping] {ex}")
+        return False
+
+
 async def _entraide_post_request(guild, req: dict, game: dict):
     """Poste le LayoutView de la demande dans le salon configuré, mémorise
     (channel, message) via set_request_message, puis tente le ping rôle aidant
-    (opt-in + cooldown). FAIL-SAFE : si pas de salon → rien (feature OFF)."""
+    (opt-in + cooldown) + le regroupement « même besoin ». FAIL-SAFE : si pas de
+    salon → rien (feature OFF)."""
     try:
         channel = await _entraide_request_channel(guild)
         if channel is None:
@@ -65281,6 +65376,12 @@ async def _entraide_post_request(guild, req: dict, game: dict):
         # Ping rôle aidant opt-in (dans le salon, jamais @everyone, cooldown).
         try:
             await _entraide_maybe_ping_helpers(channel, guild, game)
+        except Exception:
+            pass
+        # Regroupement « même besoin » : mentionne (plafonné, users-only) les autres
+        # demandeurs du même jeu pour qu'ils s'entraident au même endroit.
+        try:
+            await _entraide_post_same_need_grouping(guild, channel, req, game)
         except Exception:
             pass
         return msg
@@ -72159,17 +72260,17 @@ async def _ensure_permanent_combat_category(guild):
 
 
 async def _create_combat_arena(guild, kind: str, title: str, voice_count: int = 2):
-    """Phase 235.10 : PLUS d'arène éphémère. TOUS les combats (boss du jour, world
-    boss, climax, mob, invasion) s'affichent dans LE salon PERMANENT et VISIBLE
-    « ⚔️-combat » (_ensure_combat_channel) — créé/suivi une seule fois, visible pour
-    toujours (fini les salons masqués par l'onboarding qui coulaient en bas). On
-    enregistre une ligne combat_arenas avec category_id=0 (compat pour
-    _ensure_combat_arena_channel / _delete_combat_arena), mais le salon n'est JAMAIS
-    supprimé. Signature inchangée (voice_count ignoré → aucun changement côté modules
+    """FIX salons : chaque TYPE de combat (boss du jour, world boss, climax, mob,
+    faille, caravane, chaîne, invasion partagée) s'affiche dans SON salon TEXTE au
+    nom SPÉCIFIQUE (_ensure_combat_channel(kind)) — fini le salon « ⚔️-combat »
+    fourre-tout (plainte owner « tout est du combat »). Salon ÉPHÉMÈRE supprimé à la
+    fin de l'event (idle-sweeper / teardown). On enregistre une ligne combat_arenas
+    avec category_id=0 (compat _ensure_combat_arena_channel / _delete_combat_arena).
+    Signature inchangée (voice_count ignoré → aucun changement côté modules
     appelants). Retourne le salon ou None (fail-open)."""
     if guild is None:
         return None
-    ch = await _ensure_combat_channel(guild)
+    ch = await _ensure_combat_channel(guild, kind=kind)
     if ch is None:
         return None
     # Ligne combat_arenas avec category_id=0 → marque « salon permanent partagé ».
@@ -72341,25 +72442,82 @@ async def _ensure_combat_reports_channel(guild):
         return None
 
 
-async def _ensure_combat_channel(guild):
-    """Phase 235.10 : salon PERMANENT et VISIBLE « ⚔️-combat » où s'affichent TOUS
-    les combats (boss du jour, world boss, climax, mobs, invasions). Créé UNE fois,
-    « suivi » une fois par les membres → visible pour toujours (au lieu des arènes
-    éphémères masquées par l'onboarding qui coulaient en bas du serveur). Salon
-    AUTONOME (PAS dans une catégorie « ⚔️ … » → les nettoyages de boot, qui suppriment
-    les catégories « ⚔️ », ne le touchent JAMAIS). Lecture + écriture publiques,
-    bot complet. Mémorisé en cfg (combat_channel_id). Fail-open → None."""
+# FIX salons (2026-06) : chaque TYPE d'event de combat a désormais SON salon TEXTE
+# au nom SPÉCIFIQUE (fini le salon « ⚔️-combat » fourre-tout qui donnait l'impression
+# que « tout était du combat »). Un seul gros event de combat tourne à la fois
+# (sérialisé par _has_any_major_event_running), donc au plus UN de ces salons existe
+# simultanément. Chaque salon est SUPPRIMÉ dès que son event se termine / expire
+# (idle-sweeper + teardown), et son accroche/echo est purgée à la suppression du salon
+# (on_guild_channel_delete → _purge_event_echoes).
+#   • clé None / 'boss_raid' / 'shared' → « ⚔️-combat » (boss raid masquant + caisses
+#     légères trésor/mystère + arène partagée d'invasion : salon « combat » générique).
+#   • chaque autre kind → salon par-type au MOT SIMPLE SPÉCIFIQUE (deco emoji conservé).
+_COMBAT_KIND_CHANNELS = {
+    'daily_boss':     "👹-boss-du-jour",
+    'world_boss':     "🌍-world-boss",
+    'monthly_climax': "🔥-climax",
+    'mob':            "🐗-mob",
+    'rift':           "🌀-faille",
+    'caravan':        "🐫-caravane",
+    'chain':          "🔗-chaine",
+    'invasion':       "🚨-invasion",
+}
+# Nom du salon « combat » générique (boss raid + caisses légères + arène partagée).
+_COMBAT_GENERIC_CHANNEL = "⚔️-combat"
+# Tous les noms de salons de combat connus → utilisés par l'idle-sweeper pour balayer
+# fiablement TOUS les salons par-type devenus orphelins (reboot, fin ratée…).
+_ALL_COMBAT_CHANNEL_NAMES = frozenset(
+    {_COMBAT_GENERIC_CHANNEL} | set(_COMBAT_KIND_CHANNELS.values()))
+
+
+def _combat_channel_name_for_kind(kind) -> str:
+    """Nom du salon de combat pour ce `kind`. Renvoie le nom par-type (schéma de
+    nommage) si connu, sinon le salon générique « ⚔️-combat » (boss raid / caisses /
+    arène partagée). Centralisé → un seul endroit à faire évoluer."""
+    return _COMBAT_KIND_CHANNELS.get(str(kind or ''), _COMBAT_GENERIC_CHANNEL)
+
+
+# Map nom-de-salon → suffixe ASCII de clé cfg (stable, sans emoji → db_set safe).
+_COMBAT_NAME_TO_CFG_SUFFIX = {
+    v: k for k, v in _COMBAT_KIND_CHANNELS.items()
+}
+
+
+def _combat_channel_cfg_key(name: str) -> str:
+    """Clé cfg de cache d'id pour un salon de combat donné. Le salon générique garde
+    la clé HISTORIQUE 'combat_channel_id' (compat avec toutes les gardes existantes :
+    teardown, boot cleanup, voice-protect…) ; les salons par-type ont une clé dédiée
+    en ASCII pur (suffixe = kind → jamais d'emoji dans la clé db_set)."""
+    if name == _COMBAT_GENERIC_CHANNEL:
+        return 'combat_channel_id'
+    return 'combat_channel_id_' + _COMBAT_NAME_TO_CFG_SUFFIX.get(name, 'misc')
+
+
+async def _ensure_combat_channel(guild, kind=None):
+    """FIX salons : salon de combat VISIBLE et ÉPHÉMÈRE pour ce `kind`. Chaque TYPE a
+    SON salon au nom spécifique (cf. _COMBAT_KIND_CHANNELS) ; `kind` None/'boss_raid'/
+    'shared' → salon générique « ⚔️-combat » (boss raid masquant + caisses légères +
+    arène partagée d'invasion). Créé à la volée, « suivi » par les membres, SUPPRIMÉ
+    quand l'event se termine (idle-sweeper / teardown). Salon AUTONOME (PAS dans une
+    catégorie « ⚔️ … » → les nettoyages de boot qui suppriment ces catégories ne le
+    touchent JAMAIS). Lecture + écriture publiques, bot complet. Id mémorisé en cfg
+    (par-type). Fail-open → None.
+
+    Histo : avant, TOUS les combats partageaient « ⚔️-combat » (kind/title ignorés) →
+    plainte owner « tout est du combat ». Désormais le nom suit le type."""
     if guild is None:
         return None
     me = guild.me
+    name = _combat_channel_name_for_kind(kind)
+    cfg_key = _combat_channel_cfg_key(name)
     try:
         c = await cfg(guild.id)
-        ch_id = int(c.get('combat_channel_id', 0) or 0)
+        ch_id = int(c.get(cfg_key, 0) or 0)
         if ch_id:
             ch = guild.get_channel(ch_id)
             if isinstance(ch, discord.TextChannel):
                 return ch
-        ch = discord.utils.get(guild.text_channels, name="⚔️-combat")
+        ch = discord.utils.get(guild.text_channels, name=name)
         if ch is None:
             if not (me and me.guild_permissions.manage_channels):
                 return None
@@ -72371,14 +72529,14 @@ async def _ensure_combat_channel(guild):
                     manage_messages=True),
             }
             ch = await guild.create_text_channel(
-                name="⚔️-combat", overwrites=ow,
-                topic="⚔️ Tous les combats du serveur (boss, world boss, mobs…). "
-                      "Connecte-toi à un vocal pendant un combat → bonus de dégâts !",
-                reason="Phase 235.10 : salon de combat PERMANENT et visible")
-        await db_set(guild.id, 'combat_channel_id', ch.id)
+                name=name, overwrites=ow,
+                topic="⚔️ Combat en cours sur le serveur. "
+                      "Connecte-toi à un vocal pendant le combat → bonus de dégâts !",
+                reason="FIX salons : salon de combat par-type, éphémère")
+        await db_set(guild.id, cfg_key, ch.id)
         return ch
     except Exception as ex:
-        print(f"[_ensure_combat_channel] {ex}")
+        print(f"[_ensure_combat_channel kind={kind}] {ex}")
         return None
 
 
@@ -72412,13 +72570,14 @@ async def _has_active_light_crate(guild_id: int) -> bool:
 
 
 async def _maybe_delete_idle_combat_channel(guild, grace_seconds: int = 0):
-    """Phase 235.17 : salon « ⚔️-combat » ÉPHÉMÈRE (demande owner : il doit DISPARAÎTRE
-    quand aucun event ne tourne, pas juste se vider). On le supprime dès qu'AUCUN combat
-    n'est en cours (boss raid / world boss / boss du jour / climax / invasion / mob) ;
-    il est recréé à la volée par _ensure_combat_channel au prochain spawn. Le journal
-    « 📜-chroniques-combat » reste, lui, PERMANENT. Fail-open : au moindre doute on GARDE
-    le salon (JAMAIS de suppression pendant un combat). Le salon étant unique (réutilisé
-    via cfg), il ne s'accumule pas."""
+    """FIX salons : les salons de combat sont ÉPHÉMÈRES (demande owner : ils doivent
+    DISPARAÎTRE quand aucun event ne tourne, pas juste se vider). Dès qu'AUCUN combat
+    n'est en cours (boss raid / world boss / boss du jour / climax / invasion / mob /
+    faille / caravane / chaîne), on supprime TOUS les salons de combat par-type
+    (_ALL_COMBAT_CHANNEL_NAMES) — par id cfg ET par nom (filet reboot / fin ratée).
+    Recréés à la volée par _ensure_combat_channel au prochain spawn. Le journal
+    « 📜-chroniques-combat » reste, lui, PERMANENT. Fail-open : au moindre doute on
+    GARDE les salons (JAMAIS de suppression pendant un combat)."""
     if guild is None:
         return
     try:
@@ -72427,38 +72586,61 @@ async def _maybe_delete_idle_combat_channel(guild, grace_seconds: int = 0):
     except Exception:
         pass
     try:
-        # Un combat tourne encore (mob inclus) → on garde le salon.
+        # Un combat tourne encore (mob inclus) → on garde les salons.
         if await _has_any_major_event_running(guild.id, include_mobs=True):
             return
     except Exception:
         return  # fail-open : dans le doute, ne rien supprimer
-    # GARDE-VIE caisses légères : une caisse (trésor flash / boîte mystère) peut
-    # vivre dans ⚔️-combat SANS event de combat. Ne JAMAIS supprimer le salon sous
+    # GARDE-VIE caisses légères : une caisse (trésor flash / boîte mystère) vit dans
+    # « ⚔️-combat » SANS event de combat. Ne JAMAIS supprimer le salon générique sous
     # elle. On NE touche PAS _has_any_major_event_running (sinon une caisse bloquerait
     # les spawns de combat — non voulu) : check LOCAL et ciblé ici uniquement.
     try:
-        if await _has_active_light_crate(guild.id):
-            return  # une caisse est ouverte ici → on garde le salon
+        _light_crate_active = await _has_active_light_crate(guild.id)
     except Exception:
-        return  # fail-open : au moindre doute, on NE supprime pas
+        return  # fail-open : au moindre doute, on NE supprime rien
+    # Candidats : tous les salons de combat connus, retrouvés par id cfg PUIS par nom.
     try:
-        ch_id = int((await cfg(guild.id)).get('combat_channel_id', 0) or 0)
+        c = await cfg(guild.id)
     except Exception:
-        ch_id = 0
-    if not ch_id:
-        return
-    ch = guild.get_channel(ch_id)
-    try:
-        # Double garde : on ne supprime QUE le salon de combat (par son nom).
-        if ch is not None and getattr(ch, 'name', '') == "⚔️-combat":
-            await ch.delete(reason="Phase 235.17 : salon de combat éphémère — aucun event en cours")
-    except Exception as ex:
-        print(f"[_maybe_delete_idle_combat_channel] {ex}")
-    # Oublier l'id en cfg → le prochain event recrée un salon neuf.
-    try:
-        await db_set(guild.id, 'combat_channel_id', 0)
-    except Exception:
-        pass
+        c = {}
+    seen_ids = set()
+    candidates = []  # (channel, name, cfg_key)
+    for _name in _ALL_COMBAT_CHANNEL_NAMES:
+        _key = _combat_channel_cfg_key(_name)
+        _ch = None
+        try:
+            _cid = int((c or {}).get(_key, 0) or 0)
+        except Exception:
+            _cid = 0
+        if _cid:
+            _ch = guild.get_channel(_cid)
+        if _ch is None:
+            _ch = discord.utils.get(guild.text_channels, name=_name)
+        if _ch is not None and _ch.id not in seen_ids:
+            seen_ids.add(_ch.id)
+            candidates.append((_ch, _name, _key))
+        elif _ch is None and _cid:
+            # salon déjà disparu (fin normale) → on solde juste la clé cfg
+            try:
+                await db_set(guild.id, _key, 0)
+            except Exception:
+                pass
+    for _ch, _name, _key in candidates:
+        # Le salon générique « ⚔️-combat » est ÉPARGNÉ tant qu'une caisse légère y vit.
+        if _name == _COMBAT_GENERIC_CHANNEL and _light_crate_active:
+            continue
+        try:
+            # Double garde : on ne supprime QUE par nom de salon de combat connu.
+            if getattr(_ch, 'name', '') in _ALL_COMBAT_CHANNEL_NAMES:
+                await _ch.delete(reason="FIX salons : salon de combat éphémère — aucun event en cours")
+        except Exception as ex:
+            print(f"[_maybe_delete_idle_combat_channel del={_name}] {ex}")
+        # Oublier l'id en cfg → le prochain event recrée un salon neuf. Fail-open.
+        try:
+            await db_set(guild.id, _key, 0)
+        except Exception:
+            pass
 
 
 async def _hero_level(guild_id: int, user_id: int) -> int:
@@ -72543,11 +72725,11 @@ async def _post_combat_report(guild, title: str, body: str = "", color: int = 0x
 
 
 async def _ensure_combat_arena_channel(guild):
-    """Phase 232/233 : PLUS d'arène « ⚔️ Combat » permanente. Pour le fallback mob et
-    l'arène partagée d'invasion, on RÉUTILISE l'arène 'shared' éphémère si elle est
-    encore vivante (Phase 233 — sinon chaque appel en recréait une → multiplication),
-    sinon on en crée une via _create_combat_arena. Elle reste éphémère (nettoyée à la
-    fin de l'event qui s'en sert, ou au boot via combat_arenas). Fail-open → None."""
+    """Fallback mob : salon de combat partagé générique « ⚔️-combat » (kind 'shared').
+    Sert UNIQUEMENT de DERNIER recours quand la création du salon dédié « 🐗-mob » a
+    échoué. Réutilise une ligne 'shared' encore vivante (anti-multiplication), sinon en
+    crée une via _create_combat_arena. Éphémère (nettoyé par l'idle-sweeper / au boot
+    via combat_arenas). Fail-open → None."""
     if guild is None:
         return None
     # Réutiliser une arène 'shared' déjà vivante (évite la multiplication d'arènes)
@@ -72565,6 +72747,30 @@ async def _ensure_combat_arena_channel(guild):
     except Exception:
         pass
     return await _create_combat_arena(guild, 'shared', 'Combat')
+
+
+async def _ensure_invasion_channel(guild):
+    """FIX salons : salon DÉDIÉ « 🚨-invasion » pour l'Invasion mondiale (annonce + jauge
+    collective + les mobs élite y sont regroupés). Réutilise une ligne 'invasion' encore
+    vivante (anti-multiplication), sinon en crée une via _create_combat_arena. Éphémère
+    (supprimé à la résolution de l'invasion). Fail-open → None. Injecté comme
+    arena_ensure_fn du module world_invasion."""
+    if guild is None:
+        return None
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT text_channel_id FROM combat_arenas WHERE guild_id=? AND kind='invasion' "
+                "ORDER BY id DESC LIMIT 1",
+                (guild.id,)) as cur:
+                row = await cur.fetchone()
+        if row and row[0]:
+            ch = guild.get_channel(int(row[0]))
+            if isinstance(ch, discord.TextChannel):
+                return ch
+    except Exception:
+        pass
+    return await _create_combat_arena(guild, 'invasion', 'Invasion')
 
 
 async def _ensure_alliance_category(guild) -> Optional[discord.CategoryChannel]:

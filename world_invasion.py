@@ -360,8 +360,10 @@ async def trigger_invasion(guild: discord.Guild) -> bool:
         for _ in range(INVASION_MOBS_COUNT):
             # Force élite et mark via DB que c'est un mob d'invasion
             # via une convention : on tagge avec un commentaire dans le name
+            # FIX salons : on REGROUPE les mobs dans le salon dédié de l'invasion
+            # (« 🚨-invasion ») au lieu de laisser chaque mob créer son « 🐗-mob ».
             try:
-                await mh.spawn_mob(guild, hp_factor=_crowd_factor)
+                await mh.spawn_mob(guild, hp_factor=_crowd_factor, channel=ch)
                 spawned += 1
             except Exception:
                 pass
