@@ -10401,6 +10401,11 @@ class EventConfigPanelV2(LayoutView):
         in_active_window = _is_event_active_time(c)
         window_status = "🟢 en cours" if in_active_window else "🌙 nuit (events suspendus)"
 
+        # Task C.1 : cadence World Boss (jour + heure), fallback strict samedi 21h
+        _wb_days = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+        wb_weekday, wb_hour = _world_boss_schedule(c)
+        wb_day_label = _wb_days[wb_weekday] if 0 <= wb_weekday < 7 else "samedi"
+
         config_block = (
             f"🔌 **État système** · {'🟢 actif' if enabled else '⚪ désactivé'}\n"
             f"🌙 **Plage horaire** · `{active_start:02d}h-{active_end:02d}h` ({tz_name}) · {window_status}\n"
@@ -10409,6 +10414,7 @@ class EventConfigPanelV2(LayoutView):
             f"⏱️ **Durée d'un boss** · `{duration}` min\n"
             f"💰 **Multiplicateur coins** · `×{coin_mult:.1f}`\n"
             f"🏟️ **Nom de l'arène** · `{arena_name}`\n"
+            f"🌍 **World Boss hebdo** · {wb_day_label} `{wb_hour:02d}h` (Europe/Paris)\n"
             f"📜 **Salon récap** · {log_ch.mention if log_ch else '_aucun_'}\n"
             f"\n**Extensions :**\n"
             f"💥 **Combos communautaires** · {'🟢 actifs' if combo_on else '⚪ désactivés'}\n"
@@ -10461,6 +10467,14 @@ class EventConfigPanelV2(LayoutView):
         )
         b_hours.callback = self._cb_hours
 
+        # Task C.1 : cadence du World Boss (jour + heure)
+        b_wb_cadence = Button(
+            label="🌍 Cadence World Boss",
+            style=discord.ButtonStyle.primary,
+            custom_id="evt_wb_cadence",
+        )
+        b_wb_cadence.callback = self._cb_wb_cadence
+
         items = [
             v2_title("🎪 Événements communautaires"),
             v2_subtitle("Boss Raids · combos · rangs · badges · loot épique"),
@@ -10476,7 +10490,7 @@ class EventConfigPanelV2(LayoutView):
         items.append(discord.ui.ActionRow(log_select))
         items.append(discord.ui.ActionRow(b_toggle, b_settings, b_hours, b_stop))
         items.append(discord.ui.ActionRow(b_start, b_start_treasure, b_start_quiz))
-        items.append(discord.ui.ActionRow(b_combo, b_prog, b_tier))
+        items.append(discord.ui.ActionRow(b_combo, b_prog, b_tier, b_wb_cadence))
         items.append(discord.ui.ActionRow(b_back))
 
         self.add_item(v2_container(*items, color=Palette.DANGER))
@@ -10528,6 +10542,18 @@ class EventConfigPanelV2(LayoutView):
             await i.response.send_modal(modal)
         except Exception as ex:
             print(f"[EventConfigPanelV2 _cb_hours] {ex}")
+
+    async def _cb_wb_cadence(self, i):
+        # Task C.1 : éditeur jour + heure du World Boss (défaut samedi 21h)
+        try:
+            c = await cfg(self.g.id)
+            wb_weekday, wb_hour = _world_boss_schedule(c)
+            modal = _WorldBossCadenceModal(self.g, self.u)
+            modal.weekday.default = str(wb_weekday)
+            modal.hour.default = str(wb_hour)
+            await i.response.send_modal(modal)
+        except Exception as ex:
+            print(f"[EventConfigPanelV2 _cb_wb_cadence] {ex}")
 
     async def _cb_log_channel(self, i):
         try:
@@ -10670,6 +10696,34 @@ class _EventHoursModal(Modal, title="🌙 Plages horaires d'événements"):
             await db_set(self.g.id, 'event_active_hours_start', sh)
             await db_set(self.g.id, 'event_active_hours_end', eh)
             await db_set(self.g.id, 'event_timezone', tz_val)
+            await EventConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+        except Exception as ex:
+            try:
+                await i.response.send_message(f"❌ Valeurs invalides : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+
+class _WorldBossCadenceModal(Modal, title="🌍 Cadence du World Boss"):
+    """Task C.1 : JOUR + HEURE du World Boss hebdomadaire (défaut samedi 21h).
+
+    Persiste les clés cfg world_boss_weekday (0=lundi … 6=dimanche) et
+    world_boss_hour (0-23). Bornage strict ; valeurs hors bornes → défauts.
+    """
+    weekday = TextInput(label="Jour (0=lundi … 6=dimanche)", placeholder="5", max_length=1, required=True)
+    hour = TextInput(label="Heure (0-23, fuseau Europe/Paris)", placeholder="21", max_length=2, required=True)
+
+    def __init__(self, g, u):
+        super().__init__()
+        self.g = g
+        self.u = u
+
+    async def on_submit(self, i):
+        try:
+            wd = max(0, min(6, int(self.weekday.value.strip())))
+            hr = max(0, min(23, int(self.hour.value.strip())))
+            await db_set(self.g.id, 'world_boss_weekday', wd)
+            await db_set(self.g.id, 'world_boss_hour', hr)
             await EventConfigPanelV2(self.u, self.g).render_to(i, edit=True)
         except Exception as ex:
             try:
@@ -66414,13 +66468,46 @@ async def _end_world_boss(guild, wb_id: int, victory: bool, reason: str = ""):
         print(f"[_end_world_boss] {ex}")
 
 
+# Task C.1 : cadence du World Boss configurable (DÉFAUT = comportement actuel).
+_WORLD_BOSS_DEFAULT_WEEKDAY = 5   # samedi (datetime.weekday : lundi=0 … dimanche=6)
+_WORLD_BOSS_DEFAULT_HOUR = 21     # 21h heure locale (Europe/Paris)
+
+
+def _world_boss_schedule(c) -> tuple:
+    """Lit le JOUR + l'HEURE du World Boss depuis la config guilde.
+
+    Clés cfg (réglables par l'owner via db_set, pas de slash) :
+      - world_boss_weekday : 0..6 (lundi=0 … dimanche=6), défaut 5 (samedi)
+      - world_boss_hour    : 0..23, défaut 21
+
+    FALLBACK STRICT : toute valeur absente, illisible ou hors bornes retombe
+    sur (5, 21) = comportement actuel. Ne lève JAMAIS (fail-safe scheduler).
+    """
+    weekday = _WORLD_BOSS_DEFAULT_WEEKDAY
+    hour = _WORLD_BOSS_DEFAULT_HOUR
+    try:
+        wd = int(c.get('world_boss_weekday', _WORLD_BOSS_DEFAULT_WEEKDAY))
+        if 0 <= wd <= 6:
+            weekday = wd
+    except Exception:
+        weekday = _WORLD_BOSS_DEFAULT_WEEKDAY
+    try:
+        hr = int(c.get('world_boss_hour', _WORLD_BOSS_DEFAULT_HOUR))
+        if 0 <= hr <= 23:
+            hour = hr
+    except Exception:
+        hour = _WORLD_BOSS_DEFAULT_HOUR
+    return weekday, hour
+
+
 @tasks.loop(minutes=30)
 async def world_boss_scheduler():
-    """Phase 42 + Phase 95 AMPLIFY : World Boss samedi 21h FR avec pre-hype 30 min avant.
+    """Phase 42 + Phase 95 AMPLIFY : World Boss hebdomadaire avec pre-hype 30 min avant.
 
-    Tourne toutes les 30 min :
-    - 20h30 samedi → broadcast pre-hype "Le World Boss arrive dans 30 min !"
-    - 21h00 samedi → lance le World Boss
+    Tourne toutes les 30 min. Le JOUR + l'HEURE sont configurables par guilde
+    (Task C.1, cfg world_boss_weekday / world_boss_hour ; défaut = samedi 21h FR) :
+    - (heure-30min) le jour configuré → broadcast pre-hype "arrive dans 30 min !"
+    - (heure pile) le jour configuré → lance le World Boss
     """
     try:
         from zoneinfo import ZoneInfo as _ZI
@@ -66428,12 +66515,10 @@ async def world_boss_scheduler():
     except Exception:
         tz = timezone.utc
     now_local = datetime.now(tz)
-    # Samedi (weekday=5) uniquement
-    if now_local.weekday() != 5:
-        return
-    # Plage 20h-21h pour gérer hype + start
-    if now_local.hour not in (20, 21):
-        return
+    # Task C.1 : le JOUR + l'HEURE du World Boss sont configurables par guilde
+    # (cfg world_boss_weekday / world_boss_hour) → on lit ces valeurs DANS la
+    # boucle (par guilde), avec FALLBACK STRICT sur (5=samedi, 21h). Le gate
+    # jour/heure se fait donc par guilde ci-dessous ; ici on continue toujours.
     try:
         week_start = (now_local - timedelta(days=now_local.weekday())).strftime('%Y-%m-%d')
         for guild in bot.guilds:
@@ -66442,6 +66527,15 @@ async def world_boss_scheduler():
                 if not c.get('event_enabled', False):
                     continue
                 if not c.get('world_boss_enabled', True):
+                    continue
+                # Task C.1 : jour + heure configurés (fallback strict 5/21).
+                wb_weekday, wb_hour = _world_boss_schedule(c)
+                wb_hype_hour = (wb_hour - 1) % 24  # pré-hype à H-30min
+                # Jour configuré uniquement
+                if now_local.weekday() != wb_weekday:
+                    continue
+                # Plage (heure-1)..heure pour gérer pre-hype + start
+                if now_local.hour not in (wb_hype_hour, wb_hour):
                     continue
                 # Pas 2× la même semaine
                 async with get_db() as db:
@@ -66453,8 +66547,8 @@ async def world_boss_scheduler():
                 if already_started:
                     continue  # already done this week
 
-                # Phase 95 AMPLIFY : Pre-hype broadcast à 20h30
-                if now_local.hour == 20 and now_local.minute >= 30:
+                # Phase 95 AMPLIFY : Pre-hype broadcast à H-30min
+                if now_local.hour == wb_hype_hour and now_local.minute >= 30:
                     # Anti-doublon : cfg flag par semaine
                     last_hype = c.get('world_boss_last_hype_week', '')
                     if last_hype == week_start:
@@ -66467,8 +66561,8 @@ async def world_boss_scheduler():
                             # aucun ping. Le vrai ping @Événements a lieu au SPAWN (30 min
                             # plus tard) dans l'arène éphémère → zéro ghost ping dans le hub
                             # permanent, et le pré-hype ne consomme pas la cadence du spawn.
-                            # Calc target ts (21h ce soir)
-                            target_dt = now_local.replace(hour=21, minute=0, second=0, microsecond=0)
+                            # Calc target ts (heure configurée ce soir, défaut 21h)
+                            target_dt = now_local.replace(hour=wb_hour, minute=0, second=0, microsecond=0)
                             target_ts = int(target_dt.timestamp())
                             hype_msg = (
                                 f"🌍 ⚠️ **WORLD BOSS HEBDOMADAIRE — DANS 30 MINUTES** ⚠️\n"
@@ -66495,19 +66589,19 @@ async def world_boss_scheduler():
                                 print(f"[world_boss pre-hype send] {ex}")
                             # Marquer hype envoyé cette semaine
                             await db_set(guild.id, 'world_boss_last_hype_week', week_start)
-                            print(f"[world_boss_scheduler] guild={guild.id} pre-hype 20h30 envoyé")
+                            print(f"[world_boss_scheduler] guild={guild.id} pre-hype {wb_hype_hour:02d}h30 envoyé")
                     except Exception as ex:
                         print(f"[world_boss pre-hype] {ex}")
-                    continue  # skip start cycle for this 20h30 tick
+                    continue  # skip start cycle for this pre-hype tick
 
-                # 21h : start le World Boss
-                if now_local.hour == 21:
+                # Heure configurée (défaut 21h) : start le World Boss
+                if now_local.hour == wb_hour:
                     # Pas si un autre event majeur en cours
                     if await _has_any_major_event_running(guild.id):
                         continue
                     result = await _start_world_boss(guild)
                     if result.get('ok'):
-                        print(f"[world_boss_scheduler] guild={guild.id} lancé à 21h")
+                        print(f"[world_boss_scheduler] guild={guild.id} lancé à {wb_hour:02d}h")
             except Exception as ex:
                 print(f"[world_boss_scheduler guild={guild.id}] {ex}")
     except Exception as ex:
@@ -67276,15 +67370,20 @@ async def daily_agenda_dispatcher():
 #  Sans ping (allowed_mentions=none → rien à opt-out), auto-supprimé en fin de
 #  semaine. Réutilise toute l'infra du daily_agenda (salon/cleanup/anti-doublon).
 # ═══════════════════════════════════════════════════════════════════════════════
-def _build_weekly_herald_text(now, top_section: str) -> str:
+def _build_weekly_herald_text(now, top_section: str, combat_section: str = "") -> str:
     """Corps du Héraut hebdo. `now` = datetime Europe/Paris ; `top_section` = bloc
-    classement déjà rendu (peut être vide)."""
+    classement déjà rendu (peut être vide) ; `combat_section` = rétrospective des
+    combats de la semaine déjà rendue (peut être vide → aucune ligne)."""
     lines = []
     lines.append("Le tour d'horizon de la semaine — tout ce qui t'attend, en un seul message. 📯")
     lines.append("")
     if top_section:
         lines.append("__🔥 Top activité (14 derniers jours)__")
         lines.append(top_section)
+        lines.append("")
+    if combat_section:
+        lines.append("__⚔️ Combats de la semaine (7 derniers jours)__")
+        lines.append(combat_section)
         lines.append("")
     lines.append("__📅 La semaine qui vient__")
     lines.append("• ⚔️ **Boss du jour** chaque jour (9h, 12h, 17h, 21h, 1h)")
@@ -67303,6 +67402,154 @@ def _build_weekly_herald_text(now, top_section: str) -> str:
     lines.append("")
     lines.append("_Bonne semaine à toutes et à tous — on se retrouve en jeu !_")
     return "\n".join(lines)
+
+
+async def _weekly_combat_recap_section(guild) -> str:
+    """TÂCHE C.2 — Rétrospective « Combats de la semaine » du Héraut hebdo.
+
+    Dérive À LA VOLÉE, sur la fenêtre des 7 derniers jours, depuis les tables déjà
+    alimentées par le jeu (aucune nouvelle table, aucune écriture) :
+      • nb de grands boss vaincus (events.victory + world_bosses.victory)
+      • meilleur contributeur (top cumul de dégâts toutes sources confondues)
+      • plus gros coup (max d'un seul damage_dealt)
+
+    FAIL-SAFE INTÉGRAL : toute erreur → "" (donc AUCUNE ligne ajoutée au héraut,
+    jamais bloquant pour le post). Chaque ligne est OMISE si sa donnée n'est pas
+    fiablement requêtable (mieux vaut partiel correct que faux). Noms échappés,
+    zéro mention/ping.
+
+    Colonnes réellement utilisées :
+      events(guild_id, started_at, ended, victory)               + event_participants(event_id, user_id, damage_dealt)
+      world_bosses(guild_id, started_at, ended, victory)         + world_boss_attackers(world_boss_id, user_id, damage_dealt)
+    Fenêtre = datetime(started_at) > datetime('now','-7 days') (même convention que le reste du code)."""
+    try:
+        gid = guild.id
+        bosses_killed = 0
+        contrib = {}      # user_id -> cumul dégâts (7 j)
+        best_hit = None   # (user_id, damage) max d'un seul coup enregistré (7 j)
+
+        async with get_db() as db:
+            # ── Grands boss vaincus : Boss Raid / Climax / Invasion … (table events) ──
+            try:
+                async with db.execute(
+                    "SELECT COUNT(*) FROM events "
+                    "WHERE guild_id=? AND ended=1 AND victory=1 "
+                    "AND datetime(started_at) > datetime('now','-7 days')",
+                    (gid,),
+                ) as cur:
+                    row = await cur.fetchone()
+                if row and row[0]:
+                    bosses_killed += int(row[0])
+            except Exception:
+                pass
+            # ── World Boss vaincus (table world_bosses) ──
+            try:
+                async with db.execute(
+                    "SELECT COUNT(*) FROM world_bosses "
+                    "WHERE guild_id=? AND ended=1 AND victory=1 "
+                    "AND datetime(started_at) > datetime('now','-7 days')",
+                    (gid,),
+                ) as cur:
+                    row = await cur.fetchone()
+                if row and row[0]:
+                    bosses_killed += int(row[0])
+            except Exception:
+                pass
+
+            # ── Contributions (cumul dégâts) sur la fenêtre — table events ──
+            try:
+                async with db.execute(
+                    "SELECT ep.user_id, SUM(ep.damage_dealt) FROM event_participants ep "
+                    "JOIN events e ON e.id = ep.event_id "
+                    "WHERE e.guild_id=? AND ep.damage_dealt>0 "
+                    "AND datetime(e.started_at) > datetime('now','-7 days') "
+                    "GROUP BY ep.user_id",
+                    (gid,),
+                ) as cur:
+                    rows = await cur.fetchall()
+                for uid, dmg in (rows or []):
+                    if uid is not None and dmg:
+                        contrib[int(uid)] = contrib.get(int(uid), 0) + int(dmg)
+            except Exception:
+                pass
+            # ── Contributions (cumul dégâts) sur la fenêtre — table world_bosses ──
+            try:
+                async with db.execute(
+                    "SELECT wba.user_id, SUM(wba.damage_dealt) FROM world_boss_attackers wba "
+                    "JOIN world_bosses wb ON wb.id = wba.world_boss_id "
+                    "WHERE wb.guild_id=? AND wba.damage_dealt>0 "
+                    "AND datetime(wb.started_at) > datetime('now','-7 days') "
+                    "GROUP BY wba.user_id",
+                    (gid,),
+                ) as cur:
+                    rows = await cur.fetchall()
+                for uid, dmg in (rows or []):
+                    if uid is not None and dmg:
+                        contrib[int(uid)] = contrib.get(int(uid), 0) + int(dmg)
+            except Exception:
+                pass
+
+            # ── Plus gros coup (max d'un seul damage_dealt) — events ──
+            try:
+                async with db.execute(
+                    "SELECT ep.user_id, MAX(ep.damage_dealt) FROM event_participants ep "
+                    "JOIN events e ON e.id = ep.event_id "
+                    "WHERE e.guild_id=? AND ep.damage_dealt>0 "
+                    "AND datetime(e.started_at) > datetime('now','-7 days')",
+                    (gid,),
+                ) as cur:
+                    row = await cur.fetchone()
+                if row and row[0] is not None and row[1]:
+                    best_hit = (int(row[0]), int(row[1]))
+            except Exception:
+                pass
+            # ── Plus gros coup (max d'un seul damage_dealt) — world_bosses ──
+            try:
+                async with db.execute(
+                    "SELECT wba.user_id, MAX(wba.damage_dealt) FROM world_boss_attackers wba "
+                    "JOIN world_bosses wb ON wb.id = wba.world_boss_id "
+                    "WHERE wb.guild_id=? AND wba.damage_dealt>0 "
+                    "AND datetime(wb.started_at) > datetime('now','-7 days')",
+                    (gid,),
+                ) as cur:
+                    row = await cur.fetchone()
+                if row and row[0] is not None and row[1]:
+                    cand = (int(row[0]), int(row[1]))
+                    if best_hit is None or cand[1] > best_hit[1]:
+                        best_hit = cand
+            except Exception:
+                pass
+
+        def _nm(uid):
+            m = guild.get_member(int(uid))
+            return discord.utils.escape_markdown(m.display_name) if m else f"Membre {uid}"
+
+        def _fmt(n):
+            return f"{int(n):,}".replace(",", " ")
+
+        rows = []
+        # Boss vaincus : on n'affiche la ligne que si > 0 (sinon section vide muette).
+        if bosses_killed > 0:
+            mot = "grand boss vaincu" if bosses_killed == 1 else "grands boss vaincus"
+            rows.append(f"🐲 **{bosses_killed}** {mot} cette semaine")
+        # Meilleur contributeur : omis si aucune contribution requêtable.
+        if contrib:
+            try:
+                top_uid, top_dmg = max(contrib.items(), key=lambda kv: kv[1])
+                if top_dmg > 0:
+                    rows.append(f"🏆 Meilleur combattant : **{_nm(top_uid)}** — {_fmt(top_dmg)} dégâts")
+            except Exception:
+                pass
+        # Meilleur total sur un boss : omis si indisponible. (damage_dealt est
+        # cumulatif par (event, user) → c'est le plus gros total sur un seul boss,
+        # pas un coup unique : on libelle en conséquence.)
+        if best_hit and best_hit[1] > 0:
+            rows.append(f"💥 Meilleur total sur un boss : **{_nm(best_hit[0])}** — {_fmt(best_hit[1])} dégâts")
+
+        return "\n".join(rows) if rows else ""
+    except Exception as ex:
+        print(f"[_weekly_combat_recap_section] {ex}")
+        return ""
 
 
 async def _post_weekly_herald(guild) -> bool:
@@ -67348,8 +67595,14 @@ async def _post_weekly_herald(guild) -> bool:
                 top_section = "\n".join(rows)
         except Exception as ex:
             print(f"[weekly_herald top] {ex}")
+        # TÂCHE C.2 : rétrospective combats (fail-safe, "" si erreur → aucune ligne).
+        combat_section = ""
+        try:
+            combat_section = await _weekly_combat_recap_section(guild)
+        except Exception as ex:
+            print(f"[weekly_herald combat] {ex}")
         now = datetime.now(_TZ_P41)
-        body = _build_weekly_herald_text(now, top_section)
+        body = _build_weekly_herald_text(now, top_section, combat_section)
         panel = v2_recap_view(
             "📯 Héraut de la Semaine",
             body,
