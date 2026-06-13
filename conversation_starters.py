@@ -68,8 +68,8 @@ async def conv_starter_task():
                 cutoff_3h = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
                 async with _get_db() as db:
                     async with db.execute(
-                        "SELECT 1 FROM member_activity WHERE guild_id=? AND channel_id=? "
-                        "AND activity_type='message' AND created_at>? LIMIT 1",
+                        "SELECT 1 FROM member_activity_daily WHERE guild_id=? AND channel_id=? "
+                        "AND last_ts>? LIMIT 1",
                         (guild.id, hub_ch.id, cutoff_3h),
                     ) as cur:
                         if await cur.fetchone():
