@@ -31,24 +31,30 @@ _get_db = None          # async context manager : async with _get_db() as db
 _add_coins = None        # callback optionnel (non utilisé au socle)
 _v2 = {}                 # helpers Components V2 (title/subtitle/body/divider/container/LayoutView)
 _pet_rente_bonus_fn = None  # Phase 268 : async (gid, uid) -> (bonus:int, label:str|None)
+_is_frozen_fn = None     # TASK A5 : async (gid, uid) -> bool ; True si compte gelé (compromis)
 
 ECLATS_EMOJI = "✨"
 ECLATS_NAME = "Éclats de Création"
 
 
 def setup(get_db_fn, v2_helpers: dict | None = None, add_coins_fn=None,
-          pet_rente_bonus_fn=None):
+          pet_rente_bonus_fn=None, is_frozen_fn=None):
     """Injecte les dépendances. Appelé une fois dans on_ready (bot.py).
 
     Phase 268 : pet_rente_bonus_fn (optionnel) = async (gid, uid) -> (bonus, label)
     qui renvoie le petit bonus de rente (Éclats) du familier équipé. Décorrèle
     La Cité du système de familiers (vit dans bot.py/engagement41). Fail-safe :
-    absent ou en erreur → bonus 0 (la rente fonctionne normalement)."""
-    global _get_db, _v2, _add_coins, _pet_rente_bonus_fn
+    absent ou en erreur → bonus 0 (la rente fonctionne normalement).
+
+    TASK A5 : is_frozen_fn (optionnel) = async (gid, uid) -> bool. True si le compte
+    est gelé (compromis) → on REFUSE les dépenses d'Éclats. Fail-open : absent ou
+    en erreur → considéré non gelé (ne bloque pas un membre légitime)."""
+    global _get_db, _v2, _add_coins, _pet_rente_bonus_fn, _is_frozen_fn
     _get_db = get_db_fn
     _v2 = dict(v2_helpers or {})
     _add_coins = add_coins_fn
     _pet_rente_bonus_fn = pet_rente_bonus_fn
+    _is_frozen_fn = is_frozen_fn
 
 
 async def _pet_rente_extra(gid: int, uid: int) -> tuple:
@@ -222,9 +228,21 @@ async def grant_eclats(guild_id: int, user_id: int, amount: int) -> int:
 
 
 async def spend_eclats(guild_id: int, user_id: int, amount: int) -> bool:
-    """Débit ATOMIQUE conditionnel (FAIL-CLOSED) : True seulement si le solde suffisait."""
+    """Débit ATOMIQUE conditionnel (FAIL-CLOSED) : True seulement si le solde suffisait.
+
+    TASK A5 : si le compte est GELÉ (compromis), on REFUSE la dépense d'Éclats
+    (anti-drain de la 2e monnaie). Fail-open sur erreur du check (ne bloque pas un
+    membre légitime sur un hoquet)."""
     if _get_db is None or amount <= 0:
         return False
+    if _is_frozen_fn is not None:
+        try:
+            if await _is_frozen_fn(int(guild_id), int(user_id)):
+                print(f"[spend_eclats] DÉPENSE REFUSÉE (compte gelé) "
+                      f"guild={guild_id} user={user_id} amount={amount}")
+                return False
+        except Exception:
+            pass  # fail-open
     try:
         async with _get_db() as db:
             cur = await db.execute(

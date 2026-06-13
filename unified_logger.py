@@ -727,6 +727,56 @@ async def log_security_event(bot, guild, event_type, target_user, *,
 _ESCALATION_SEEN: dict = {}
 _ESCALATION_DEDUP_WINDOW = 120.0
 
+# TASK A8 : sévérités qui déclenchent une MENTION du fondateur (en plus de l'embed).
+_ESCALATION_PING_SEVERITIES = {"haute", "critique"}
+
+
+def _founder_ids() -> set:
+    """IDs des super-owners (fondateur). Source unique = owner_ids.py ; repli sur
+    EXTRA_OWNER_IDS / l'ID GoRipe connu si l'import échoue. Fail-safe."""
+    ids: set = set()
+    try:
+        import owner_ids as _oi
+        ids |= set(getattr(_oi, "SUPER_OWNER_IDS", set()) or set())
+    except Exception:
+        pass
+    if not ids:
+        import os
+        raw = os.getenv("EXTRA_OWNER_IDS", "") or ""
+        for tok in raw.replace(";", ",").split(","):
+            tok = tok.strip()
+            if tok.isdigit():
+                ids.add(int(tok))
+        ids.add(781205382923288593)  # GoRipe — super-owner confirmé (repli ultime)
+    return ids
+
+
+async def _ping_founder_in_channel(channel, member, severity, palier):
+    """TASK A8 : poste une MENTION du fondateur dans le MÊME salon que l'alerte
+    d'escalade, scoppée allowed_mentions au(x) seul(s) fondateur(s). JAMAIS
+    @everyone, JAMAIS de MP à un membre lambda. Fail-safe (ne casse rien)."""
+    try:
+        if channel is None:
+            return
+        ids = [i for i in _founder_ids() if i]
+        if not ids:
+            return
+        mentions = " ".join(f"<@{i}>" for i in ids)
+        try:
+            mname = getattr(member, "display_name", None) or str(member)
+        except Exception:
+            mname = str(member)
+        txt = (f"{mentions} ⚠️ Escalade **{severity}** — **{mname}** "
+               f"(palier {palier}). Décision requise.")
+        # allowed_mentions : UNIQUEMENT ces user-ids, jamais everyone/roles.
+        am = discord.AllowedMentions(
+            everyone=False, roles=False,
+            users=[discord.Object(id=i) for i in ids],
+        )
+        await channel.send(txt, allowed_mentions=am)
+    except Exception as ex:
+        print(f"[_ping_founder_in_channel] {ex}")
+
 
 async def log_member_escalation(bot, guild, member, total_warns, palier,
                                 reason="", moderator=None, severity="haute"):
@@ -787,6 +837,14 @@ async def log_member_escalation(bot, guild, member, total_warns, palier,
         except Exception:
             msg = None
         if msg is not None:
+            # TASK A8 : ping fondateur (haute/critique) dans le MÊME salon. La dédup
+            # en tête de fonction garantit l'anti-spam (1 alerte = 1 ping max).
+            try:
+                if str(severity).lower() in _ESCALATION_PING_SEVERITIES:
+                    await _ping_founder_in_channel(
+                        getattr(msg, "channel", None), member, severity, palier)
+            except Exception as ex_p:
+                print(f"[log_member_escalation ping] {ex_p}")
             return msg
 
         # 2) FALLBACK GARANTI : catégorie Sécurité OFF ou pas de salon routé →
@@ -801,7 +859,15 @@ async def log_member_escalation(bot, guild, member, total_warns, palier,
                         description=desc, fields=fields,
                         user=member, moderator=moderator, reason=reason,
                     )
-                    return await target.send(embed=embed)
+                    sent = await target.send(embed=embed)
+                    # TASK A8 : ping fondateur (haute/critique) dans ce même salon.
+                    try:
+                        if str(severity).lower() in _ESCALATION_PING_SEVERITIES:
+                            await _ping_founder_in_channel(
+                                target, member, severity, palier)
+                    except Exception as ex_p:
+                        print(f"[log_member_escalation ping fallback] {ex_p}")
+                    return sent
         except Exception as ex:
             print(f"[log_member_escalation fallback] {ex}")
         return None

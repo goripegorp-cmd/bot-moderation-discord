@@ -1106,6 +1106,9 @@ async def db_init():
         await db.execute('CREATE TABLE IF NOT EXISTS immune_roles(guild_id INTEGER, role_id INTEGER, PRIMARY KEY(guild_id, role_id))')
         await db.execute('CREATE TABLE IF NOT EXISTS immune_users(guild_id INTEGER, user_id INTEGER, PRIMARY KEY(guild_id, user_id))')
         await db.execute('CREATE TABLE IF NOT EXISTS immune_channels(guild_id INTEGER, channel_id INTEGER, PRIMARY KEY(guild_id, channel_id))')
+        # TASK A5 : gel économie d'un compte compromis/isolé (anti-drain). Léger,
+        # une ligne = un compte gelé. Le DÉGEL se fait par le fondateur (panel CAD).
+        await db.execute('CREATE TABLE IF NOT EXISTS account_freeze(guild_id INTEGER, user_id INTEGER, reason TEXT, frozen_at DATETIME DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(guild_id, user_id))')
         # Table pour les logs de sécurité
         # Phase 3.8 : ip_hash conservé pour compat schéma (les anciens dumps l'incluent)
         # mais jamais peuplé (aucun acces aux IP des utilisateurs Discord)
@@ -33521,16 +33524,58 @@ class CompromisedAccountActionView(View):
             print(f"[CompromisedAccountActionView ban] {ex}")
             await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
 
+    async def _do_unfreeze_and_lift(self, i) -> str:
+        """TASK A5 : DÉGÈLE le compte + lève l'isolement (quarantaine + timeout).
+        Appelé par « Faux positif » et « 🔓 Dégeler » (tous deux founder-only).
+        Renvoie un court résumé texte des actions. Fail-safe."""
+        parts = []
+        try:
+            if await unfreeze_account(i.guild.id, self.target_user_id):
+                parts.append("💸 économie dégelée")
+        except Exception as ex:
+            print(f"[CAD _do_unfreeze_and_lift unfreeze] {ex}")
+        try:
+            member = await self._get_member(i)
+            if member is not None:
+                if await lift_isolation(member):
+                    parts.append("🔓 isolement levé")
+        except Exception as ex:
+            print(f"[CAD _do_unfreeze_and_lift lift] {ex}")
+        return " · ".join(parts) if parts else "aucune action (déjà dégelé/parti)"
+
     @discord.ui.button(label="✅ Faux positif", style=discord.ButtonStyle.success, custom_id="cad_fp")
     async def false_positive_btn(self, i, b):
-        if not await self._check_owner(i):
+        # TASK A5 : un faux positif RESTAURE le compte (dégel + levée d'isolement) ;
+        # cette restauration est réservée au FONDATEUR (_check_founder).
+        if not await self._check_founder(i):
             return
         try:
             await i.response.defer(ephemeral=True)
-            await i.followup.send("✅ Alerte fermée comme faux positif.", ephemeral=True)
-            await self._update_dossier(i, action="✅ Faux positif", by=i.user)
+            summary = await self._do_unfreeze_and_lift(i)
+            await i.followup.send(
+                f"✅ Faux positif — compte restauré.\n_{summary}_", ephemeral=True)
+            await self._update_dossier(i, action="✅ Faux positif (restauré)", by=i.user)
         except Exception as ex:
             print(f"[CompromisedAccountActionView fp] {ex}")
+            try:
+                await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+            except Exception:
+                pass
+
+    @discord.ui.button(label="🔓 Dégeler", style=discord.ButtonStyle.primary, custom_id="cad_unfreeze")
+    async def unfreeze_btn(self, i, b):
+        # TASK A5 : dégel + levée d'isolement, FONDATEUR uniquement. Garde le compte
+        # dans le serveur (contrairement à un kick/ban) mais lui rend ses droits.
+        if not await self._check_founder(i):
+            return
+        try:
+            await i.response.defer(ephemeral=True)
+            summary = await self._do_unfreeze_and_lift(i)
+            await i.followup.send(
+                f"🔓 Compte dégelé.\n_{summary}_", ephemeral=True)
+            await self._update_dossier(i, action="🔓 Dégelé", by=i.user)
+        except Exception as ex:
+            print(f"[CompromisedAccountActionView unfreeze] {ex}")
             try:
                 await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
             except Exception:
@@ -37464,8 +37509,94 @@ async def update_user_economy(guild_id, user_id, **kwargs):
             )
             await db.commit()
 
+# ═════════════════════════════════════════════════════════════════════════════
+#  TASK A5 — GEL ÉCONOMIE d'un compte compromis / isolé (anti-drain)
+#  Puisqu'on ne bannit plus (règle founder-only), on gèle les MOUVEMENTS d'argent
+#  d'un compte signalé compromis (compromised_detector score≥60 / honeypot hit)
+#  pour empêcher un pirate de vider/transférer les avoirs pendant l'isolement.
+#  Le DÉGEL est réservé au FONDATEUR (panel CompromisedAccountActionView).
+#  - freeze_account / unfreeze_account : pose / lève le gel (idempotents, fail-safe).
+#  - is_account_frozen : FAIL-OPEN sur erreur infra (renvoie False → ne bloque pas
+#    un membre légitime sur un hoquet DB) ; un compte RÉELLEMENT gelé → True.
+# ═════════════════════════════════════════════════════════════════════════════
+
+# Message standard renvoyé (éphémère) quand un mouvement d'argent est refusé.
+FROZEN_ACCOUNT_MSG = ("🔒 Ton compte est temporairement gelé (sécurité) — "
+                      "contacte le fondateur")
+
+
+async def freeze_account(guild_id, user_id, reason="compte compromis"):
+    """Gèle l'économie d'un compte (idempotent). Fail-safe : log mais ne lève pas."""
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "INSERT INTO account_freeze(guild_id, user_id, reason) VALUES(?,?,?) "
+                "ON CONFLICT(guild_id, user_id) DO UPDATE SET reason=excluded.reason",
+                (int(guild_id), int(user_id), str(reason)[:500]),
+            )
+            await db.commit()
+        print(f"[freeze_account] guild={guild_id} user={user_id} reason={reason!r}")
+        return True
+    except Exception as ex:
+        print(f"[freeze_account] {ex}")
+        return False
+
+
+async def unfreeze_account(guild_id, user_id):
+    """Lève le gel d'un compte (idempotent). Fail-safe."""
+    try:
+        async with get_db() as db:
+            await db.execute(
+                "DELETE FROM account_freeze WHERE guild_id=? AND user_id=?",
+                (int(guild_id), int(user_id)),
+            )
+            await db.commit()
+        print(f"[unfreeze_account] guild={guild_id} user={user_id}")
+        return True
+    except Exception as ex:
+        print(f"[unfreeze_account] {ex}")
+        return False
+
+
+async def is_account_frozen(guild_id, user_id) -> bool:
+    """True si le compte est gelé. FAIL-OPEN sur erreur infra (renvoie False) :
+    un hoquet DB ne doit JAMAIS bloquer un membre légitime. Un compte réellement
+    présent dans account_freeze → True."""
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM account_freeze WHERE guild_id=? AND user_id=?",
+                (int(guild_id), int(user_id)),
+            ) as cur:
+                row = await cur.fetchone()
+        return row is not None
+    except Exception as ex:
+        print(f"[is_account_frozen] FAIL-OPEN sur erreur infra : {ex}")
+        return False
+
+
 async def add_coins(guild_id, user_id, amount):
-    """Ajoute des coins à un utilisateur de manière atomique"""
+    """Ajoute des coins à un utilisateur de manière atomique.
+
+    TASK A5 : si le montant est NÉGATIF (débit/sortie d'argent) et que le compte
+    est GELÉ (compromis), on REFUSE le mouvement et on renvoie le solde inchangé.
+    Les CRÉDITS (montant ≥ 0 : récompenses passives, remboursements) restent permis
+    — on cible le DRAIN. Le check vit juste avant l'opération atomique."""
+    if amount < 0:
+        try:
+            if await is_account_frozen(guild_id, user_id):
+                print(f"[add_coins] DÉBIT REFUSÉ (compte gelé) guild={guild_id} "
+                      f"user={user_id} amount={amount}")
+                # Renvoie le solde INCHANGÉ (aucun mouvement), comme le chemin normal.
+                async with get_db() as _db:
+                    async with _db.execute(
+                        'SELECT coins FROM economy WHERE guild_id=? AND user_id=?',
+                        (guild_id, user_id),
+                    ) as _cur:
+                        _row = await _cur.fetchone()
+                return _row[0] if _row else 0
+        except Exception:
+            pass  # fail-open : un hoquet du check ne doit pas bloquer
     async with get_db() as db:
         # S'assurer que l'utilisateur existe
         await db.execute(
@@ -37496,7 +37627,24 @@ async def add_bank(guild_id, user_id, amount):
     forge, ou tâche d'intérêts bancaires qui crédite au même instant). Ici on
     applique un delta relatif borné à 0 → jamais négatif, jamais de perte d'écriture.
     Renvoie le nouveau solde bancaire.
+
+    TASK A5 : un delta NÉGATIF (sortie de banque) sur un compte GELÉ est REFUSÉ
+    (anti-drain). Les crédits passent. Fail-open sur erreur du check.
     """
+    if amount < 0:
+        try:
+            if await is_account_frozen(guild_id, user_id):
+                print(f"[add_bank] DÉBIT REFUSÉ (compte gelé) guild={guild_id} "
+                      f"user={user_id} amount={amount}")
+                async with get_db() as _db:
+                    async with _db.execute(
+                        'SELECT bank FROM economy WHERE guild_id=? AND user_id=?',
+                        (guild_id, user_id),
+                    ) as _cur:
+                        _row = await _cur.fetchone()
+                return _row[0] if _row else 0
+        except Exception:
+            pass  # fail-open
     async with get_db() as db:
         await db.execute(
             'INSERT OR IGNORE INTO economy (guild_id, user_id, coins, bank, xp, level) VALUES (?, ?, 0, 0, 0, 1)',
@@ -44624,6 +44772,7 @@ async def on_ready():
         honeypot_module.setup(
             bot, get_db, db_get, _v2h,
             staff_sanction_module=staff_sanction_module,
+            freeze_fn=freeze_account,  # TASK A5 : gel économie sur hit honeypot
         )
         await honeypot_module.init_db()
         # Phase 158 : plus d'auto-create. Owner configure le salon via
@@ -45232,6 +45381,7 @@ async def on_ready():
                 },
                 add_coins_fn=add_coins,
                 pet_rente_bonus_fn=_pet_rente_bonus,  # Phase 268 : perk passif familier
+                is_frozen_fn=is_account_frozen,  # TASK A5 : gel Éclats si compte compromis
             )
             await citadelle_module.init_db()
             citadelle_module.register_persistent_views(bot)
@@ -48527,6 +48677,17 @@ async def _check_compromised_account(msg):
     if score < threshold:
         return  # pas assez confiant
 
+    # TASK A5 : GEL ÉCONOMIE immédiat (anti-drain) — placé AVANT les checks de salon/perms
+    # pour qu'un compte au score ≥ seuil soit gelé MÊME si l'alerte ne peut pas être postée
+    # (salon mal configuré). Fail-safe : ne casse jamais la suite. Dégel = fondateur.
+    try:
+        await freeze_account(
+            msg.guild.id, msg.author.id,
+            reason=f"compromised_detector score={score}",
+        )
+    except Exception as ex_fz:
+        print(f"[CAD] gel compte échoué (non bloquant) : {ex_fz}")
+
     # Récupérer le salon dédié
     alert_channel = msg.guild.get_channel(channel_id)
     if not alert_channel:
@@ -48541,6 +48702,7 @@ async def _check_compromised_account(msg):
 
     # Marquer cooldown AVANT l'envoi pour éviter doubles
     _compromised_alert_cooldown[key] = now_ts
+    # (Le gel économie A5 est désormais posé plus haut, dès score ≥ seuil.)
 
     # Construire le dossier
     try:
@@ -52243,6 +52405,12 @@ async def _place_bid(btn_i: discord.Interaction, ah_id: int, increment_pct: int)
                 ephemeral=True,
             )
 
+        # TASK A5 : gel compte compromis → enchère refusée AVANT toute écriture
+        # (sinon on enregistrerait un bid que le compte gelé ne peut pas payer,
+        # add_coins/add_bank refusant ensuite le débit → état d'enchère corrompu).
+        if await is_account_frozen(btn_i.guild.id, btn_i.user.id):
+            return await btn_i.response.send_message(FROZEN_ACCOUNT_MSG, ephemeral=True)
+
         new_bid = max(current_bid + 1, int(current_bid * (1 + increment_pct / 100)))
         # Vérifier que le bidder a les coins (main + banque)
         eco = await get_user_economy(btn_i.guild.id, btn_i.user.id)
@@ -52353,6 +52521,12 @@ async def _auction_create(i: discord.Interaction):
 
         async def on_submit(self, modal_i: discord.Interaction):
             try:
+                # TASK A5 : gel compte compromis → mise en vente refusée (sortie d'actif :
+                # l'item part en escrow, le pirate ne doit pas pouvoir liquider le stuff).
+                if await is_account_frozen(modal_i.guild.id, modal_i.user.id):
+                    return await modal_i.response.send_message(
+                        FROZEN_ACCOUNT_MSG, ephemeral=True
+                    )
                 try:
                     prix = max(1, min(10_000_000, int(self.prix.value.strip())))
                     duree_h = max(1, min(72, int(self.duree.value.strip())))
@@ -81300,6 +81474,9 @@ class PredictionBetModal(Modal):
                     raise ValueError
             except Exception:
                 return await _safe_followup(i, content="❌ Montant invalide (10-100000).")
+            # TASK A5 : gel compte compromis → pari refusé (mise = sortie d'argent).
+            if await is_account_frozen(i.guild.id, i.user.id):
+                return await _safe_followup(i, content=FROZEN_ACCOUNT_MSG)
             # Check status & deadline
             async with get_db() as db:
                 async with db.execute(
@@ -85725,6 +85902,9 @@ class HeistJoinView(View):
             target_id = await _heist_target_id(self.hid)
             target = _get_heist_target(target_id)
             stake = int(target['stake'])
+            # TASK A5 : gel compte compromis → participation refusée (mise = sortie d'argent).
+            if await is_account_frozen(i.guild.id, i.user.id):
+                return await _safe_followup(i, content=FROZEN_ACCOUNT_MSG)
             try:
                 async with get_db() as db:
                     async with db.execute(
@@ -86005,6 +86185,9 @@ async def bank_deposit_cmd(i: discord.Interaction, montant: int):
     try:
         if montant < 100:
             return await _safe_followup(i, content="❌ Dépôt min 100 🪙.")
+        # TASK A5 : gel compte compromis → aucun mouvement (dépôt = sortie des mains).
+        if await is_account_frozen(i.guild.id, i.user.id):
+            return await _safe_followup(i, content=FROZEN_ACCOUNT_MSG)
         try:
             async with get_db() as db:
                 async with db.execute(
@@ -86060,6 +86243,10 @@ async def bank_withdraw_cmd(i: discord.Interaction, deposit_id: int):
     if not await _safe_defer(i):
         return
     try:
+        # TASK A5 : gel compte compromis → on bloque AUSSI le retrait (le pirate
+        # ne doit pas pouvoir mobiliser les dépôts bancaires pendant l'isolement).
+        if await is_account_frozen(i.guild.id, i.user.id):
+            return await _safe_followup(i, content=FROZEN_ACCOUNT_MSG)
         async with get_db() as db:
             async with db.execute(
                 "SELECT user_id, amount, deposited_at, withdrawn FROM user_bank_deposits "
@@ -86440,6 +86627,18 @@ class DuelAcceptView(View):
             ch_id, cd_id, stake = int(row[0]), int(row[1]), int(row[2])
             if i.user.id != cd_id:
                 return await _safe_followup(i, content="🔒 Ce duel n'est pas pour toi.")
+            # A5 — GEL SÉCURITÉ : si l'un des deux comptes est gelé (compromis), on
+            # n'engage PAS le duel. Sinon le compte gelé ne perd rien (débit bloqué)
+            # mais la mise de l'adversaire non-gelé serait convertie en payout =
+            # extraction de valeur. Annulation propre.
+            try:
+                if await is_account_frozen(i.guild.id, ch_id) or await is_account_frozen(i.guild.id, cd_id):
+                    async with get_db() as db:
+                        await db.execute("UPDATE pvp_duels SET status='cancelled' WHERE id=?", (self.did,))
+                        await db.commit()
+                    return await _safe_followup(i, content=FROZEN_ACCOUNT_MSG)
+            except Exception:
+                pass
             # Vérifier que les 2 ont assez de coins
             try:
                 async with get_db() as db:
@@ -87600,6 +87799,9 @@ class BankDepositModal(Modal):
                     raise ValueError
             except Exception:
                 return await _safe_followup(i, content="❌ Montant invalide (min 100).")
+            # TASK A5 : gel compte compromis → dépôt refusé (sortie des mains).
+            if await is_account_frozen(i.guild.id, i.user.id):
+                return await _safe_followup(i, content=FROZEN_ACCOUNT_MSG)
             try:
                 async with get_db() as db:
                     async with db.execute(
@@ -88097,6 +88299,13 @@ class DuelMiseSelectView(View):
                     return await _safe_followup(i, content="❌ Cible introuvable.")
                 if target.bot or target.id == i.user.id:
                     return await _safe_followup(i, content="❌ Cible invalide.")
+                # A5 — gel sécurité : un compte gelé (compromis) ne peut pas lancer de duel misé.
+                if amount > 0:
+                    try:
+                        if await is_account_frozen(i.guild.id, i.user.id):
+                            return await _safe_followup(i, content=FROZEN_ACCOUNT_MSG)
+                    except Exception:
+                        pass
                 if amount > 0:
                     try:
                         async with get_db() as db:
@@ -90848,6 +91057,15 @@ async def _alliance_deposit_coins(guild_id: int, alliance_id: int,
     """Transfert user.coins → alliance_treasury.coins. Atomic-ish."""
     if amount <= 0:
         return False
+    # TASK A5 : gel compte compromis → transfert refusé (sortie d'argent du joueur).
+    # Fail-open sur erreur du check (ne bloque pas un membre légitime).
+    try:
+        if await is_account_frozen(guild_id, user_id):
+            print(f"[_alliance_deposit_coins] TRANSFERT REFUSÉ (compte gelé) "
+                  f"guild={guild_id} user={user_id} amount={amount}")
+            return False
+    except Exception:
+        pass
     try:
         # FIX sécu (débit atomique) : on retire les pièces du joueur de façon
         # CONDITIONNELLE (coins>=amount) + check rowcount AVANT de créditer le trésor.

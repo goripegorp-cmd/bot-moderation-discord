@@ -41,18 +41,20 @@ _get_db = None
 _db_get = None  # Fonction async pour lire la config (cfg de bot.py)
 _v2 = None
 _staff_sanction = None
+_freeze_fn = None  # TASK A5 : async (gid, uid, reason) -> bool ; gèle l'économie
 
 
 def setup(
     bot_instance, get_db_fn, db_get_fn, v2_helpers: dict,
-    staff_sanction_module=None,
+    staff_sanction_module=None, freeze_fn=None,
 ):
-    global _bot, _get_db, _db_get, _v2, _staff_sanction
+    global _bot, _get_db, _db_get, _v2, _staff_sanction, _freeze_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
     _v2 = v2_helpers
     _staff_sanction = staff_sanction_module
+    _freeze_fn = freeze_fn  # TASK A5
 
 
 async def get_honeypot_channel_id(guild_id: int) -> int:
@@ -199,6 +201,17 @@ async def _handle_hit(message: discord.Message):
             )
         except Exception:
             pass
+
+        # TASK A5 : GEL ÉCONOMIE (anti-drain) — un hit honeypot = compte ~99% piraté/self-bot.
+        # On gèle ses mouvements d'argent le temps que le fondateur tranche. Fail-safe.
+        if _freeze_fn is not None:
+            try:
+                await _freeze_fn(
+                    message.guild.id, message.author.id,
+                    "honeypot hit (compte piraté/self-bot)",
+                )
+            except Exception as ex_fz:
+                print(f"[honeypot _handle_hit gel] {ex_fz}")
 
         # DM author (peut être compte piraté légitime)
         try:
