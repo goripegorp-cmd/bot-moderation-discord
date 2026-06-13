@@ -231,6 +231,7 @@ import dormant_wakeup as dormant_module
 import event_followup as followup_module
 # Phase 147 : Sécurité moderne 2026 — anti-raid, anti-phishing, anti-impersonation
 import raid_detector as raid_module
+import owner_ids as owner_ids_module  # SOURCE UNIQUE du/des super-owner(s) (founder-only)
 import token_grabber as token_grabber_module
 import webhook_leak as webhook_leak_module
 import staff_sanction as staff_sanction_module
@@ -4391,11 +4392,236 @@ async def is_fully_immune(member):
     
     return False
 
-async def sanction(m, action, dur, reason, g):
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  🛡️ PRIMITIVE D'ISOLEMENT (founder-only security — TASK A1)
+# ─────────────────────────────────────────────────────────────────────────────
+#  RÈGLE DURE OWNER (2026-06-13) : AUCUN staff / AUCUN automatisme ne peut kick ni
+#  bannir un membre. La seule réponse autorisée à un compte phishé/compromis/raid
+#  côté bot est d'ISOLER (quarantaine) + ALERTER le fondateur. Le kick/ban réel
+#  reste l'exclusivité du fondateur (owner_ids.is_super_owner).
+#
+#  `isolate_member` GÉNÉRALISE le rôle « Vérification » déjà créé par
+#  raid_detector.run_lockdown : on l'ajoute au membre, on lui RETIRE ses rôles
+#  sensibles (perms d'écriture/élevées), et on pose un timeout natif Discord en
+#  filet. 100% FAIL-SAFE et IDEMPOTENT.
+# ═════════════════════════════════════════════════════════════════════════════
+
+# Noms reconnus comme rôle de quarantaine (alignés sur raid_detector).
+_QUARANTINE_ROLE_NAMES = ("vérification", "verification", "verify", "quarantaine")
+# Timeout natif posé en filet (max Discord = 28 jours).
+_ISOLATION_TIMEOUT_DAYS = 28
+
+
+def _is_sensitive_role(role) -> bool:
+    """True si le rôle confère des perms 'sensibles' (écriture/modération/élevées)
+    qu'on doit retirer en isolement. Fail-safe : en cas de doute => sensible (on
+    préfère sur-restreindre un membre isolé que laisser une perm dangereuse)."""
+    try:
+        if role.is_default():  # @everyone : jamais retirable
+            return False
+        if getattr(role, "managed", False):  # rôles gérés (bot/booster/intégration)
+            return False
+        p = role.permissions
+        return bool(
+            p.administrator or p.manage_guild or p.manage_channels or p.manage_roles
+            or p.manage_messages or p.kick_members or p.ban_members or p.moderate_members
+            or p.mention_everyone or p.send_messages or p.send_messages_in_threads
+            or p.create_public_threads or p.create_private_threads or p.add_reactions
+            or p.connect or p.speak or p.manage_webhooks
+        )
+    except Exception:
+        return True
+
+
+async def _ensure_quarantine_role(guild):
+    """Trouve (ou crée) le rôle de quarantaine — MÊME rôle que raid_detector. Pose
+    des overwrites send_messages=False sur les salons. Renvoie le rôle ou None."""
+    try:
+        for r in guild.roles:
+            if (r.name or "").lower() in _QUARANTINE_ROLE_NAMES:
+                return r
+    except Exception:
+        pass
+    # Création (nécessite Manage Roles côté bot).
+    try:
+        role = await guild.create_role(
+            name="Vérification",
+            reason="Isolement sécurité (quarantaine founder-only)",
+            color=discord.Color.dark_grey(),
+        )
+        for ch in guild.channels:
+            try:
+                await ch.set_permissions(
+                    role, send_messages=False, add_reactions=False, speak=False,
+                    reason="Isolement sécurité (quarantaine)",
+                )
+            except Exception:
+                pass
+        return role
+    except Exception as ex:
+        print(f"[isolate_member] création rôle quarantaine impossible : {ex}")
+        return None
+
+
+async def isolate_member(member, reason, *, actor=None):
+    """ISOLE un membre (quarantaine) au lieu de kick/ban — primitive centrale.
+
+    - Ajoute le rôle de quarantaine (réutilise celui de raid_detector).
+    - RETIRE les rôles sensibles (perms d'écriture/élevées).
+    - Pose un timeout natif Discord en filet (28 j max).
+    - LOG + alerte fondateur (via log_member_escalation severity haute).
+    FAIL-SAFE : si Manage Roles manque, on dégrade au timeout natif seul + alerte.
+    IDEMPOTENT : ré-appel sans effet de bord (le rôle déjà présent n'est pas redoublé).
+
+    Renvoie un dict {'isolated': bool, 'method': 'role+timeout'|'timeout'|'none',
+    'errors': [...]}.
+    """
+    out = {"isolated": False, "method": "none", "errors": []}
+    try:
+        if member is None or getattr(member, "bot", False):
+            out["errors"].append("cible invalide (None/bot)")
+            return out
+        guild = getattr(member, "guild", None)
+        if guild is None:
+            out["errors"].append("guild introuvable")
+            return out
+
+        me = guild.me
+        can_manage_roles = bool(me and me.guild_permissions.manage_roles)
+        role_applied = False
+
+        # 1) Rôle de quarantaine + retrait des rôles sensibles (si Manage Roles).
+        if can_manage_roles:
+            role = await _ensure_quarantine_role(guild)
+            if role is not None and (me is None or role < me.top_role):
+                try:
+                    if role not in member.roles:  # idempotent
+                        await member.add_roles(role, reason=f"Isolement : {reason}")
+                    # Retirer les rôles sensibles encore présents (hors quarantaine).
+                    to_strip = [
+                        r for r in member.roles
+                        if r.id != role.id and not r.is_default()
+                        and _is_sensitive_role(r) and (me is None or r < me.top_role)
+                    ]
+                    if to_strip:
+                        try:
+                            await member.remove_roles(
+                                *to_strip, reason=f"Isolement : retrait perms — {reason}")
+                        except Exception as ex:
+                            out["errors"].append(f"remove_roles: {ex}")
+                    role_applied = True
+                except Exception as ex:
+                    out["errors"].append(f"add_roles: {ex}")
+            elif role is not None:
+                out["errors"].append("rôle quarantaine au-dessus du bot (hiérarchie)")
+        else:
+            out["errors"].append("Manage Roles manquant — fallback timeout natif seul")
+
+        # 2) Timeout natif en filet (toujours tenté — c'est le filet si pas de rôle).
+        timeout_applied = False
+        try:
+            await member.timeout(
+                timedelta(days=_ISOLATION_TIMEOUT_DAYS),
+                reason=f"Isolement sécurité : {reason}",
+            )
+            timeout_applied = True
+        except Exception as ex:
+            out["errors"].append(f"timeout: {ex}")
+
+        out["isolated"] = bool(role_applied or timeout_applied)
+        out["method"] = (
+            "role+timeout" if (role_applied and timeout_applied)
+            else "timeout" if timeout_applied
+            else "role" if role_applied
+            else "none"
+        )
+
+        # 3) LOG + ALERTE FONDATEUR (jamais de MP membre — voie staff/sécurité).
+        try:
+            print(f"[isolate_member] guild={guild.id} target={member.id} "
+                  f"method={out['method']} actor={getattr(actor, 'id', actor)} "
+                  f"reason={reason!r} errors={out['errors']}")
+        except Exception:
+            pass
+        try:
+            await ulogger2026.log_member_escalation(
+                bot, guild, member, 0, "ISOLEMENT",
+                reason=f"🛡️ Membre ISOLÉ (quarantaine) au lieu de kick/ban — {reason} "
+                       f"· méthode : {out['method']}",
+                moderator=(actor or bot.user), severity="critique",
+            )
+        except Exception as ex:
+            out["errors"].append(f"alert: {ex}")
+    except Exception as ex:
+        _logerr("isolate_member", ex,
+                context={"target": getattr(member, "id", None)},
+                guild_id=getattr(getattr(member, "guild", None), "id", 0))
+        out["errors"].append(str(ex))
+    return out
+
+
+async def lift_isolation(member):
+    """Lève l'isolement : retire le rôle de quarantaine + le timeout natif.
+    FAIL-SAFE. Renvoie True si au moins une action a réussi."""
+    ok = False
+    try:
+        if member is None:
+            return False
+        guild = getattr(member, "guild", None)
+        if guild is None:
+            return False
+        # Retirer le rôle de quarantaine s'il est présent.
+        try:
+            q = next((r for r in member.roles
+                      if (r.name or "").lower() in _QUARANTINE_ROLE_NAMES), None)
+            if q is not None:
+                await member.remove_roles(q, reason="Levée d'isolement")
+                ok = True
+        except Exception as ex:
+            print(f"[lift_isolation] retrait rôle : {ex}")
+        # Retirer le timeout natif.
+        try:
+            await member.timeout(None, reason="Levée d'isolement")
+            ok = True
+        except Exception as ex:
+            print(f"[lift_isolation] retrait timeout : {ex}")
+    except Exception as ex:
+        _logerr("lift_isolation", ex,
+                context={"target": getattr(member, "id", None)},
+                guild_id=getattr(getattr(member, "guild", None), "id", 0))
+    return ok
+
+
+async def sanction(m, action, dur, reason, g, actor_id=None):
     # Phase 263 : ne plus AVALER silencieusement les échecs (perms/hiérarchie) — logguer
     # explicitement + renvoyer True/False. Les call sites qui ignorent le retour restent
     # inchangés ; ceux qui veulent réagir peuvent désormais détecter l'échec.
+    #
+    # VERROU FOUNDER-ONLY (TASK A2 — règle dure owner 2026-06-13) : kick/ban ne sont
+    # exécutés QUE si l'auteur est le FONDATEUR (owner_ids.is_super_owner). Tout
+    # automatisme (actor_id=None) ou tout staff (actor_id ≠ fondateur) est DÉGRADÉ en
+    # isolement (quarantaine) + alerte fondateur. FAIL-CLOSED : en cas de doute, on
+    # isole — JAMAIS on ne kick/ban. mute/delete passent inchangés.
     try:
+        if action in ('kick', 'ban'):
+            is_founder = False
+            try:
+                is_founder = (actor_id is not None
+                              and owner_ids_module.is_super_owner(actor_id))
+            except Exception:
+                is_founder = False  # fail-closed
+            if not is_founder:
+                # Dégradation : isoler au lieu de kick/ban + alerter le fondateur.
+                res = await isolate_member(
+                    m,
+                    f"Tentative '{action}' dégradée en isolement (règle founder-only) — {reason}",
+                    actor=g.get_member(actor_id) if (actor_id and g) else None,
+                )
+                # On renvoie True si l'isolement a abouti (le flux appelant considère
+                # « le membre a été traité »), False sinon (échec total = signalé).
+                return bool(res.get("isolated"))
+
         if action == 'delete':
             pass  # Message déjà supprimé, pas de sanction sur le membre
         elif action == 'mute': await m.timeout(timedelta(minutes=dur), reason=reason)
@@ -24032,28 +24258,39 @@ class ConfirmAltActionView(View):
         self.targets = targets
         self.action = action
     
+    async def interaction_check(self, i) -> bool:
+        # Garde : seul l'ouvrant peut confirmer (anti-clic d'un tiers sur ce message).
+        try:
+            if i.user.id != self.u.id:
+                await i.response.send_message("⛔ Ce panneau ne t'est pas destiné.", ephemeral=True)
+                return False
+        except Exception:
+            return False
+        return True
+
     @discord.ui.button(label="✅ Confirmer", style=discord.ButtonStyle.danger, row=0)
     async def confirm(self, i, b):
         await i.response.edit_message(content="⏳ Exécution en cours...", embed=None, view=None)
-        
+
         success = 0
         failed = 0
-        
+
         for item in self.targets:
             member = item['member']
             try:
-                if self.action == 'kick':
-                    await member.kick(reason=f"Compte secondaire détecté (confiance: {item['confidence']}%)")
-                elif self.action == 'ban':
-                    await member.ban(reason=f"Compte secondaire détecté (confiance: {item['confidence']}%)")
-                
-                await update_alt_status(self.g.id, member.id, 'actioned', self.action)
+                # RÈGLE FONDATEUR-ONLY (2026-06-13) : on ne kick/ban JAMAIS en masse →
+                # on ISOLE (réversible ; les alts sont souvent des faux positifs). Le
+                # fondateur reste seul à pouvoir bannir, au cas par cas.
+                if self.action in ('kick', 'ban'):
+                    await isolate_member(member, f"Compte secondaire (confiance: {item['confidence']}%)")
+                await update_alt_status(self.g.id, member.id, 'actioned', 'isolate')
                 success += 1
-            except:
+            except Exception:
                 failed += 1
-        
+
         await i.edit_original_response(
-            content=f"✅ **{success}** compte(s) {self.action}{'s' if success > 1 else ''}\n❌ **{failed}** échec(s)"
+            content=f"🔒 **{success}** compte(s) isolé(s) (quarantaine)\n❌ **{failed}** échec(s)\n"
+                    f"_Le bannissement éventuel reste au fondateur._"
         )
     
     @discord.ui.button(label="❌ Annuler", style=discord.ButtonStyle.secondary, row=0)
@@ -24682,26 +24919,39 @@ class ConfirmKickView(View):
         self.targets = targets
         self.kick_type = kick_type
     
+    async def interaction_check(self, i) -> bool:
+        # Garde : seul l'ouvrant peut confirmer (anti-clic d'un tiers).
+        try:
+            if i.user.id != self.u.id:
+                await i.response.send_message("⛔ Ce panneau ne t'est pas destiné.", ephemeral=True)
+                return False
+        except Exception:
+            return False
+        return True
+
     @discord.ui.button(label="✅ Confirmer", style=discord.ButtonStyle.danger)
     async def confirm(self, i, b):
         await i.response.defer()
-        
+
         kicked = 0
         failed = 0
-        
+
         for t in self.targets:
             member = t['member']
             try:
                 reason = f"Anti-Raid: {t.get('reason', 'Compte suspect')} (score: {t.get('score', 'N/A')})"
-                await member.kick(reason=reason)
+                # RÈGLE FONDATEUR-ONLY (2026-06-13) : pas de kick de masse → on ISOLE
+                # (réversible). Le fondateur reste seul à pouvoir bannir/kicker.
+                await isolate_member(member, reason)
                 kicked += 1
-            except:
+            except Exception:
                 failed += 1
-        
+
         await i.edit_original_response(
             embed=discord.Embed(
-                title="✅ Kick terminé",
-                description=f"**{kicked}** membre(s) kick\n**{failed}** échec(s)",
+                title="🔒 Isolement terminé",
+                description=f"**{kicked}** membre(s) isolé(s) en quarantaine\n**{failed}** échec(s)\n"
+                            f"_Le bannissement éventuel reste au fondateur._",
                 color=0x2ECC71 if failed == 0 else 0xE67E22
             ),
             view=None
@@ -33058,11 +33308,23 @@ class CompromisedAccountActionView(View):
 
     async def _check_owner(self, i: discord.Interaction) -> bool:
         """Seul le owner du serveur ou super-owner peut sanctionner."""
-        is_owner = (i.user.id == i.guild.owner_id) or (i.user.id == SUPER_OWNER_ID)
+        is_owner = (i.user.id == i.guild.owner_id) or owner_ids_module.is_super_owner(i.user.id)
         if not is_owner:
             await i.response.send_message(
                 "⛔ Seul le propriétaire du serveur peut décider sur les comptes suspects.\n"
                 "Les staff peuvent utiliser `/mute` ou `/warn` via les commandes normales.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def _check_founder(self, i: discord.Interaction) -> bool:
+        """RÈGLE DURE (2026-06-13) : KICK/BAN = FONDATEUR (super-owner) UNIQUEMENT —
+        même un compte phishé n'est banni que par le fondateur. Le mute reste owner."""
+        if not owner_ids_module.is_super_owner(i.user.id):
+            await i.response.send_message(
+                "🔒 Le **kick/ban est réservé au fondateur**. Tu peux Mute 24h le compte "
+                "(il reste isolé) en attendant la décision du fondateur.",
                 ephemeral=True,
             )
             return False
@@ -33094,7 +33356,7 @@ class CompromisedAccountActionView(View):
 
     @discord.ui.button(label="👢 Kick", style=discord.ButtonStyle.danger, custom_id="cad_kick")
     async def kick_btn(self, i, b):
-        if not await self._check_owner(i):
+        if not await self._check_founder(i):
             return
         try:
             await i.response.defer(ephemeral=True)
@@ -33112,7 +33374,7 @@ class CompromisedAccountActionView(View):
 
     @discord.ui.button(label="🔨 Ban", style=discord.ButtonStyle.danger, custom_id="cad_ban")
     async def ban_btn(self, i, b):
-        if not await self._check_owner(i):
+        if not await self._check_founder(i):
             return
         try:
             await i.response.defer(ephemeral=True)
@@ -47469,14 +47731,14 @@ async def on_member_join(m):
                 reason = f"Anti-Raid: {'Raid détecté' if is_raid else 'Compte suspect'} (âge: {account_age}j)"
                 
                 try:
-                    if action == 'ban':
-                        await m.ban(reason=reason)
-                    elif action == 'kick':
-                        await m.kick(reason=reason)
+                    if action in ('ban', 'kick'):
+                        # RÈGLE FONDATEUR-ONLY (2026-06-13) : on ne kick/ban JAMAIS en auto →
+                        # on ISOLE (quarantaine) + alerte fondateur. Lui seul bannit.
+                        await isolate_member(m, reason)
                     elif action == 'mute':
                         # Mute avec timeout
                         await m.timeout(timedelta(hours=24), reason=reason)
-                    
+
                     # Log l'action
                     await send_log(m.guild, 'anti_raid', m, None, reason, f"Action: {action.upper()}")
                 except:
@@ -47490,7 +47752,8 @@ async def on_member_join(m):
             age = (now() - m.created_at.replace(tzinfo=timezone.utc)).days
             if age < days:
                 await send_log(m.guild, 'anti_newaccount', m, None, "Compte trop récent", f"Âge: {age} jour(s)")
-                await m.kick(reason=f"Compte trop récent ({age} jours)")
+                # RÈGLE FONDATEUR-ONLY : pas de kick auto → on ISOLE (le fondateur tranche).
+                await isolate_member(m, f"Compte trop récent ({age} jours)")
                 return  # Ne pas continuer
         
         # ═══════════════ ANTI-ALT (Comptes Secondaires) ═══════════════
@@ -47528,13 +47791,12 @@ async def on_member_join(m):
                 if auto_action:
                     reason = f"Compte secondaire détecté (confiance: {confidence}%, principal: {main_id})"
                     try:
-                        if action == 'ban':
-                            await m.ban(reason=reason)
-                        elif action == 'kick':
-                            await m.kick(reason=reason)
+                        if action in ('ban', 'kick'):
+                            # RÈGLE FONDATEUR-ONLY : alt détecté → on ISOLE (jamais kick/ban auto).
+                            await isolate_member(m, reason)
                         elif action == 'mute':
                             await m.timeout(timedelta(hours=24), reason=reason)
-                        
+
                         await update_alt_status(m.guild.id, m.id, 'actioned', action)
                         await send_log(m.guild, 'anti_alt', m, None, "Compte secondaire", f"Confiance: {confidence}%, Action: {action.upper()}")
                     except Exception as ex:
@@ -47662,10 +47924,9 @@ async def _handle_antiraid_join(member):
     failed = 0
     for m in recent_members:
         try:
-            if action == 'kick':
-                await m.kick(reason=f"Anti-Raid auto : {len(joins)} joins en {window}s")
-            elif action == 'ban':
-                await m.ban(reason=f"Anti-Raid auto : {len(joins)} joins en {window}s", delete_message_seconds=0)
+            if action in ('kick', 'ban'):
+                # RÈGLE FONDATEUR-ONLY : raid → on ISOLE chaque compte (jamais kick/ban auto).
+                await isolate_member(m, f"Anti-Raid auto : {len(joins)} joins en {window}s")
             elif action == 'lockdown':
                 # Lockdown = élève verification level + auto-restore après 10 min
                 try:
@@ -53797,12 +54058,12 @@ def _staff_sanction_guard(moderator: discord.Member, target: discord.Member, gui
         # Cibles protégées en dur (jamais sanctionnables in-bot)
         if target.id == guild.owner_id:
             return False, "Cible protégée : propriétaire du serveur."
-        if target.id == SUPER_OWNER_ID:
+        if owner_ids_module.is_super_owner(target.id):
             return False, "Cible protégée : super-owner."
         if getattr(target.guild_permissions, 'administrator', False):
             return False, "Cible protégée : ce membre est administrateur."
         # Hiérarchie de rôles : refuser rang égal/supérieur, sauf owner/super-owner
-        is_owner = moderator.id == guild.owner_id or moderator.id == SUPER_OWNER_ID
+        is_owner = moderator.id == guild.owner_id or owner_ids_module.is_super_owner(moderator.id)
         if not is_owner and target.top_role >= moderator.top_role:
             return False, "Cible de rang égal ou supérieur au vôtre."
         # Le bot doit pouvoir agir (hiérarchie bot-vs-cible)
@@ -53894,11 +54155,25 @@ class _StaffSanctionModal(discord.ui.Modal):
             await _dm_sanction(target, guild, label_dm, reason, duration_text=dur_txt)
 
             # (d) Appliquer via la MÊME mécanique que le filtre badwords / les commandes.
-            applied = await sanction(target, action, mute_minutes, reason, guild)
+            #     actor_id = le modérateur : si action ∈ {kick,ban} et que ce n'est PAS
+            #     le fondateur, sanction() DÉGRADE en isolement (règle founder-only).
+            applied = await sanction(target, action, mute_minutes, reason, guild,
+                                     actor_id=moderator.id)
             if not applied:
                 return await modal_i.followup.send(
-                    "❌ Sanction impossible (permissions/hiérarchie du bot). "
+                    "❌ Action impossible (permissions/hiérarchie du bot). "
                     "Aucune trace enregistrée.", ephemeral=True
+                )
+            # Règle dure : seul le FONDATEUR peut kick/ban. Pour un staff non-fondateur,
+            # kick/ban est converti en ISOLEMENT (quarantaine) + alerte fondateur.
+            if action in ('kick', 'ban') and not owner_ids_module.is_super_owner(moderator.id):
+                return await modal_i.followup.send(
+                    "🛡️ **Membre isolé (quarantaine)** au lieu de "
+                    f"{'l’expulsion' if action == 'kick' else 'le bannissement'}.\n"
+                    "Seul le **fondateur** peut expulser/bannir ; le fondateur a été "
+                    "alerté pour trancher.\n"
+                    f"📝 Raison : {reason}",
+                    ephemeral=True,
                 )
 
             # (e) INSERT dans infractions pour la traçabilité (fiche du membre).

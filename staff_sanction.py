@@ -288,7 +288,9 @@ class SanctionView(View):
     def __init__(self, sanction_id: int):
         super().__init__(timeout=None)
         self.sanction_id = sanction_id
-        for action in ("mute_1h", "warn", "kick", "ban", "ignore"):
+        # RÈGLE FONDATEUR-ONLY (2026-06-13) : kick/ban RETIRÉS des boutons staff.
+        # Le staff ne dispose plus que de Mute 1h / Warn / Faux positif.
+        for action in ("mute_1h", "warn", "ignore"):
             self.add_item(SanctionDynamicButton(action, sanction_id))
 
 
@@ -349,6 +351,16 @@ async def _handle_sanction_click(
 
         await i.response.defer(ephemeral=True)
         target = i.guild.get_member(target_id)
+
+        # RÈGLE FONDATEUR-ONLY (2026-06-13) : le KICK/BAN est l'exclusivité du fondateur.
+        # Les boutons sont retirés de la vue ; ce gate couvre tout bouton persistant legacy.
+        # Un staff (non-fondateur) qui clique kick/ban est REFUSÉ (au pire Mute/Warn).
+        if action in ("kick", "ban") and not _owner_ids.is_super_owner(i.user.id):
+            return await i.followup.send(
+                "🔒 Le **kick/ban est réservé au fondateur**. Tu peux Mute/Warn ce membre, "
+                "ou alerter le fondateur s'il faut bannir.",
+                ephemeral=True,
+            )
 
         applied = "unknown"
         details = ""
