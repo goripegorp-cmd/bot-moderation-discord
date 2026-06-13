@@ -2590,6 +2590,14 @@ async def db_init():
             payout INTEGER DEFAULT 0,
             PRIMARY KEY (heist_id, user_id)
         )''')
+        # Phase 101 FIX persistance : le tier (small/medium/big) du braquage était gardé
+        # en mémoire (_heist_targets) → un reboot pendant le recrutement le perdait et le
+        # join/resolve retombait sur 'small' (mises payées au prix fort, payout du tier bas).
+        # On le persiste en DB. Migration idempotente (ALTER échoue si la colonne existe déjà).
+        try:
+            await db.execute("ALTER TABLE heists ADD COLUMN target_id TEXT DEFAULT 'small'")
+        except Exception:
+            pass
 
         # Banque avec intérêts
         await db.execute('''CREATE TABLE IF NOT EXISTS user_bank_deposits (
@@ -12361,7 +12369,16 @@ async def _end_active_event(guild, *, victory: bool, reason: str = "", event_id:
 
         # ─── Distribution des récompenses ───
         c = await cfg(guild.id)
-        coin_mult = float(c.get('event_coin_multiplier', 1.0) or 1.0)
+        _cfg_coin_mult = float(c.get('event_coin_multiplier', 1.0) or 1.0)
+        # Tâche C.1 : agrège saison×daily×weekend + bonus du jour + réglage serveur
+        # puis PLAFONNE au cap global (×3) → empêche l'empilement explosif des
+        # multiplicateurs. Fail-safe : retombe sur la config brute si le helper lève.
+        try:
+            coin_mult = econ_events_module.effective_coin_multiplier(
+                guild.id, event_coin_mult=_cfg_coin_mult,
+            )
+        except Exception:
+            coin_mult = econ_events_module.cap_coin_multiplier(_cfg_coin_mult)
         boss_max_hp = int(boss.get('max_hp', 1000))
 
         # Phase 39 : charger les inventaires actuels pour le soft cap
@@ -17701,6 +17718,19 @@ class HubLiveEventsLayoutV2(LayoutView):
                 "_Aucun event en cours pour le moment._\n"
                 "_Reste actif — un boss/chasse/quiz peut spawn à tout moment !_"
             ))
+        # Phase 268 — VITRINE PASSIVE « Prêt pour toi » : rappel générique (ZÉRO ping,
+        # ZÉRO MP, ZÉRO nouveau message — juste une section de plus sur le message déjà
+        # rafraîchi 1×/min). Le message épinglé est SERVEUR-WIDE → impossible de calculer
+        # le par-joueur ici ; la version par-utilisateur (rente · dépôt mature · œuf éclos
+        # calculés pour i.user) vit dans « Ma Fortune ». Ici, formulation générique qui
+        # crée le réflexe de retour quotidien sans bruit.
+        items.append(v2_divider())
+        items.append(v2_body(
+            "### 🎁 Prêt pour toi\n"
+            "_Rente de la Cité, dépôts arrivés à maturité, œufs éclos : "
+            "passe voir au **hub** (Ma Fortune · Mon compagnon · Revenus) — "
+            "il y a peut-être déjà quelque chose à récupérer._"
+        ))
         self.add_item(v2_container(*items, color=0xE74C3C if event_lines else 0x95A5A6))
 
 
@@ -36626,6 +36656,51 @@ async def add_bank(guild_id, user_id, amount):
             row = await cursor.fetchone()
             return row[0] if row else 0
 
+
+# ─── BANQUE : intérêts DÉGRESSIFS par palier de principal + CAP (Tâche C.2) ──
+# Avant : 1%/jour plat, capé à 30 j → +30% du principal sans limite absolue
+# (un dépôt de 10 M générait +3 M, inflationniste). Maintenant le taux est
+# MARGINAL et dégressif par TRANCHE de principal, avec un PLAFOND d'intérêt
+# total par dépôt. Les petits/moyens dépôts gardent ~1%/jour (tranche 1 pleine).
+# Tout est dérivé de `days` (calculé depuis deposited_at) → survit aux reboots,
+# rétro-compatible (aucune migration), aucune task.
+BANK_INTEREST_MAX_DAYS = 30          # maturité inchangée
+BANK_INTEREST_TOTAL_CAP = 50_000     # plafond d'intérêt absolu par dépôt (anti-whale)
+# Paliers (seuil_haut_de_tranche, taux/jour). La dernière tranche couvre l'infini.
+BANK_INTEREST_TIERS = (
+    (50_000,     0.010),   # 0 → 50k     : 1.0%/j   (petits/moyens : INCHANGÉ)
+    (250_000,    0.005),   # 50k → 250k  : 0.5%/j
+    (1_000_000,  0.0025),  # 250k → 1M   : 0.25%/j
+    (None,       0.001),   # > 1M        : 0.1%/j
+)
+
+
+def compute_bank_interest(principal, days: int) -> int:
+    """Intérêt dégressif par palier de principal, plafonné. Pure, fail-safe.
+
+    Rétro-compat : pour un principal <= 50 000, c'est exactement l'ancien
+    1%/jour (×days). Au-delà, seules les tranches supérieures sont ralenties.
+    """
+    try:
+        p = max(0, int(principal))
+        d = max(0, min(BANK_INTEREST_MAX_DAYS, int(days)))
+    except (TypeError, ValueError):
+        return 0
+    if p <= 0 or d <= 0:
+        return 0
+    interest = 0.0
+    lower = 0
+    for upper, rate in BANK_INTEREST_TIERS:
+        cap = p if upper is None else min(p, upper)
+        slice_amt = cap - lower
+        if slice_amt > 0:
+            interest += slice_amt * rate * d
+        if upper is not None and p <= upper:
+            break
+        lower = upper if upper is not None else lower
+    return min(BANK_INTEREST_TOTAL_CAP, int(interest))
+
+
 async def add_xp(guild_id, user_id, amount, channel=None):
     """Ajoute de l'XP et vérifie le level up"""
     eco = await get_user_economy(guild_id, user_id)
@@ -44174,6 +44249,7 @@ async def on_ready():
                     "container": v2_container,
                 },
                 add_coins_fn=add_coins,
+                pet_rente_bonus_fn=_pet_rente_bonus,  # Phase 268 : perk passif familier
             )
             await citadelle_module.init_db()
             citadelle_module.register_persistent_views(bot)
@@ -61205,6 +61281,29 @@ async def _apply_pet_bonus(guild_id: int, user_id: int, kind: str) -> float:
     return bonus
 
 
+async def _pet_rente_bonus(guild_id: int, user_id: int) -> tuple:
+    """Phase 268 — PERK PASSIF DOUX (non-combat) du familier équipé : petit bonus
+    de RENTE (en Éclats de la Cité), PLAFONNÉ selon la rareté. Centralisé via
+    engagement41.pet_rente_bonus (1 seule source de vérité). Fail-safe : pas de
+    pet → (0, None). Renvoie (bonus:int, label:str|None) où label décrit le pet.
+    Le bonus est en ÉCLATS (cosmétique) → équilibre SÉPARÉ des pièces de jeu :
+    n'impacte donc pas l'économie de gameplay (rétention #1 : modeste, additif)."""
+    try:
+        pet = await _get_active_pet(guild_id, user_id)
+        if not pet:
+            return (0, None)
+        bonus = int(eng41.pet_rente_bonus(pet))
+        if bonus <= 0:
+            return (0, None)
+        rl = eng41.RARITY_LABELS.get(pet.get('rarity') or 'common', '')
+        label = f"{pet.get('emoji', '🐾')} {pet.get('custom_name') or pet.get('name', 'Familier')}"
+        if rl:
+            label += f" ({rl})"
+        return (bonus, label)
+    except Exception:
+        return (0, None)
+
+
 async def _give_pet_xp(guild_id: int, user_id: int, amount: int):
     """Donne de l'XP au pet actif. Level-up automatique."""
     pet = await _get_active_pet(guild_id, user_id)
@@ -62200,6 +62299,8 @@ async def pet_cmd(
             hunger_bar = _make_progress_bar(pet['hunger'], 100)
             hunger_label = "Affamé 🚨" if pet['hunger'] < 30 else ("Faim 😋" if pet['hunger'] < 60 else "Repu 😊")
             _pet = pet
+            # Phase 268 : perk passif doux (non-combat) = bonus de rente selon la rareté.
+            _rente_bonus = eng41.pet_rente_bonus(pet)
 
             class _PetShowLayout(LayoutView):
                 def __init__(self):
@@ -62213,6 +62314,12 @@ async def pet_cmd(
                         f"⭐ **XP :** {bar} `{_pet['xp']}/{_pet['next_level_xp']}`\n"
                         f"🍖 **Faim :** {hunger_bar} `{_pet['hunger']}/100` — _{hunger_label}_"
                     ))
+                    # Phase 268 : perk passif doux (hors combat) — bonus de rente Cité.
+                    if _rente_bonus > 0:
+                        items.append(v2_body(
+                            f"💰 **Perk passif :** rente de La Cité **+{_rente_bonus}** ✨/jour "
+                            f"_(selon sa rareté · s'applique automatiquement quand tu perçois ta rente)_"
+                        ))
                     items.append(v2_body(
                         "⚠️ Faim < 30 → bonus **réduits de 50%**. Nourris-le : `/pet action:feed` (50 🪙)."
                     ))
@@ -80688,8 +80795,31 @@ def _get_heist_target(target_id: str) -> dict:
     return HEIST_TARGETS[0]
 
 
-# In-memory : heist_id → target_id (perdu au reboot, fallback small)
+# Cache mémoire : heist_id → target_id. Source de vérité = colonne heists.target_id (DB).
+# Le cache n'est qu'un raccourci ; après reboot il est vide → _heist_target_id relit la DB.
 _heist_targets: dict = {}
+
+
+async def _heist_target_id(hid: int) -> str:
+    """Tier (small/medium/big) d'un braquage, FAIL-SAFE.
+
+    Lit le cache mémoire en priorité ; sinon relit la colonne persistée heists.target_id
+    (survit aux reboots, cf. Phase 101 FIX). Défaut 'small' si introuvable/erreur.
+    """
+    cached = _heist_targets.get(hid)
+    if cached:
+        return cached
+    try:
+        async with get_db() as db:
+            async with db.execute(
+                "SELECT target_id FROM heists WHERE id=?", (hid,),
+            ) as cur:
+                row = await cur.fetchone()
+        tid = (row[0] if row and row[0] else None) or 'small'
+        _heist_targets[hid] = tid  # réamorce le cache
+        return tid
+    except Exception:
+        return 'small'
 
 
 class HeistJoinView(View):
@@ -80730,8 +80860,8 @@ class HeistJoinView(View):
             if not row or row[0] != 'recruiting':
                 return await _safe_followup(i, content="⏱️ Braquage déjà lancé / inexistant.")
             role_id = i.data["values"][0]
-            # Phase 101 : stake dépend du target tier
-            target_id = _heist_targets.get(self.hid, 'small')
+            # Phase 101 : stake dépend du target tier (relu en DB, survit aux reboots)
+            target_id = await _heist_target_id(self.hid)
             target = _get_heist_target(target_id)
             stake = int(target['stake'])
             try:
@@ -80831,8 +80961,8 @@ class HeistJoinView(View):
                 except Exception:
                     pass
                 return await _safe_followup(i, content=f"❌ Min 3 participants ({len(parts)} actuels).")
-            # Phase 101 : success rate + payout selon target tier
-            target_id_l = _heist_targets.get(self.hid, 'small')
+            # Phase 101 : success rate + payout selon target tier (relu en DB, survit aux reboots)
+            target_id_l = await _heist_target_id(self.hid)
             target_l = _get_heist_target(target_id_l)
             success_rate = min(
                 0.90,
@@ -80949,12 +81079,13 @@ async def heist_start_cmd(
 
         async with get_db() as db:
             cur = await db.execute(
-                "INSERT INTO heists(guild_id, channel_id) VALUES(?, ?)",
-                (i.guild.id, hub_ch.id),
+                "INSERT INTO heists(guild_id, channel_id, target_id) VALUES(?, ?, ?)",
+                (i.guild.id, hub_ch.id, target_id),
             )
             hid = cur.lastrowid
             await db.commit()
-        # Phase 101 : mémoriser le target tier (in-memory, perdu au reboot mais heists courts)
+        # Phase 101 FIX : tier persisté en DB (colonne target_id) → survit aux reboots.
+        # Le cache mémoire reste un raccourci ; _heist_target_id() relit la DB si absent.
         _heist_targets[hid] = target_id
 
         # Calcul des estimations affichées
@@ -81048,7 +81179,8 @@ async def bank_deposit_cmd(i: discord.Interaction, montant: int):
             i,
             content=(
                 f"✅ **Dépôt #{did}** : `{montant:,}` 🪙 placés à la banque.\n"
-                f"💰 Tu recevras **1% / jour** pendant 30 jours.\n"
+                f"💰 **1% / jour** pendant 30 jours "
+                f"_(taux dégressif au-delà de 50 000 🪙)_.\n"
                 f"_Retrait via `/bank_withdraw deposit_id:{did}` quand tu veux._"
             ),
         )
@@ -81090,7 +81222,7 @@ async def bank_withdraw_cmd(i: discord.Interaction, deposit_id: int):
             days = min(30, max(0, (datetime.now(timezone.utc) - dt).days))
         except Exception:
             days = 0
-        interest = int(amount * 0.01 * days)
+        interest = compute_bank_interest(amount, days)
         total = amount + interest
         # FIX audit : claim ATOMIQUE du retrait AVANT de créditer (anti double-spend).
         # `WHERE id=? AND withdrawn=0` → si une course a déjà retiré, rowcount=0 et on
@@ -81152,7 +81284,7 @@ async def bank_status_cmd(i: discord.Interaction):
                 days = min(30, max(0, (datetime.now(timezone.utc) - dt).days))
             except Exception:
                 days = 0
-            interest = int(int(amt) * 0.01 * days)
+            interest = compute_bank_interest(amt, days)
             total_principal += int(amt)
             total_interest += interest
             lines.append(f"`#{did}` `{int(amt):,}` 🪙 +`{interest:,}` 🪙 ({days}/30 jours)")
@@ -82522,6 +82654,9 @@ class ToolsSubHubView(View):
     def __init__(self):
         super().__init__(timeout=300)
         # Row 0 : Économie
+        b0 = Button(label="💰 Ma Fortune", style=discord.ButtonStyle.primary, row=0)
+        b0.callback = lambda i: _open_fortune_panel(i)
+        self.add_item(b0)
         b1 = Button(label="🏦 Banque", style=discord.ButtonStyle.success, row=0)
         b1.callback = lambda i: _open_bank_panel(i)
         self.add_item(b1)
@@ -82689,7 +82824,7 @@ class BankWithdrawSelectView(View):
                 days = min(30, max(0, (datetime.now(timezone.utc) - dt).days))
             except Exception:
                 days = 0
-            interest = int(amount * 0.01 * days)
+            interest = compute_bank_interest(amount, days)
             total = amount + interest
             # FIX audit : claim ATOMIQUE avant crédit (anti double-spend, cf. /bank_withdraw)
             async with get_db() as db:
@@ -82755,7 +82890,7 @@ class BankPanelView(View):
                     days = min(30, max(0, (datetime.now(timezone.utc) - dt).days))
                 except Exception:
                     days = 0
-                interest = int(int(r[1]) * 0.01 * days)
+                interest = compute_bank_interest(r[1], days)
                 deposits.append({
                     "id": int(r[0]), "amount": int(r[1]), "days": days,
                     "interest": interest, "total": int(r[1]) + interest,
@@ -82792,7 +82927,7 @@ async def _open_bank_panel(i: discord.Interaction):
                 days = min(30, max(0, (datetime.now(timezone.utc) - dt).days))
             except Exception:
                 days = 0
-            interest = int(int(amt) * 0.01 * days)
+            interest = compute_bank_interest(amt, days)
             deposits.append({
                 "id": int(did), "amount": int(amt), "days": days,
                 "interest": interest, "total": int(amt) + interest,
@@ -82811,6 +82946,227 @@ async def _open_bank_panel(i: discord.Interaction):
                 await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
             else:
                 await i.followup.send(f"❌ Erreur : `{ex}`", ephemeral=True)
+        except Exception:
+            pass
+
+
+# ─── 💰 MA FORTUNE (vue d'ensemble lecture seule, éphémère) ───────────────────
+#  Demande owner : 1 panneau V2 qui regroupe pièces (economy.coins) + banque
+#  (dépôts actifs + intérêts courants calculés à la volée, MÊME formule que le
+#  retrait : 1%/jour, cap 30 j) + Éclats (citadelle_wallet) + prochaines
+#  récompenses atteignables (dépôt mature, rente prête).
+#  100% LECTURE SEULE : aucun claim ici. Les actions restent dans Banque / La Cité.
+
+
+class MaFortuneLayoutV2(LayoutView):
+    """Panneau « Ma Fortune » en V2 — agrégat lecture seule de toute la richesse."""
+
+    def __init__(self, user_id: int, data: dict):
+        super().__init__(timeout=300)
+        self.user_id = user_id
+        self.data = data
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.user_id
+
+    def _build(self):
+        d = self.data
+        coins = d.get("coins", 0)
+        bank_p = d.get("bank_principal", 0)
+        bank_i = d.get("bank_interest", 0)
+        n_dep = d.get("bank_count", 0)
+        eclats = d.get("eclats", 0)
+        ready = d.get("ready", [])  # liste de str : récompenses dispo / atteignables
+
+        items = []
+        items.append(v2_title("💰 Ma Fortune"))
+        items.append(v2_subtitle("Toute ta richesse en un coup d'œil · lecture seule"))
+        items.append(v2_divider())
+
+        # Pièces (économie gameplay)
+        items.append(v2_body(
+            f"🪙 **Pièces** (en poche)\n`{coins:,}` 🪙"
+        ))
+        # Banque (principal + intérêts courants à la volée)
+        if n_dep:
+            items.append(v2_body(
+                f"🏦 **Banque** ({n_dep} dépôt{'s' if n_dep > 1 else ''} actif{'s' if n_dep > 1 else ''})\n"
+                f"Principal `{bank_p:,}` 🪙 · Intérêts courants `+{bank_i:,}` 🪙\n"
+                f"Valeur si tout retiré : `{bank_p + bank_i:,}` 🪙"
+            ))
+        else:
+            items.append(v2_body("🏦 **Banque**\n_Aucun dépôt actif._"))
+        # Éclats (monnaie cosmétique — équilibre SÉPARÉ des pièces)
+        items.append(v2_body(
+            f"✨ **Éclats de Création** (cosmétique)\n`{eclats:,}` ✨"
+        ))
+
+        # Patrimoine total en pièces (pièces + banque). Éclats à part (monnaie distincte).
+        items.append(v2_divider())
+        items.append(v2_body(
+            f"🏆 **Patrimoine en pièces :** `{coins + bank_p + bank_i:,}` 🪙\n"
+            f"_(poche + banque intérêts inclus · les Éclats sont une monnaie à part)_"
+        ))
+
+        # Multiplicateur de pièces effectif (toutes sources empilées, plafonné).
+        cm = d.get("coin_mult")
+        if cm:
+            try:
+                eff = float(cm.get("effective", 1.0))
+                if abs(eff - 1.0) > 0.001:
+                    srcs = cm.get("sources", {}) or {}
+                    src_txt = " · ".join(f"{k} ×{v:.2f}" for k, v in srcs.items())
+                    cap_note = (
+                        f" _(plafonné à ×{cm.get('cap', 3.0):g})_"
+                        if cm.get("capped") else ""
+                    )
+                    items.append(v2_body(
+                        f"⚡ **Bonus de pièces actif : ×{eff:.2f}**{cap_note}\n"
+                        + (f"-# {src_txt}" if src_txt else "")
+                    ))
+            except Exception:
+                pass
+
+        # Prochaines récompenses atteignables / en attente
+        items.append(v2_divider())
+        if ready:
+            items.append(v2_body("🎁 **À récupérer / bientôt**\n" + "\n".join(f"• {r}" for r in ready)))
+        else:
+            items.append(v2_body("🎁 **À récupérer / bientôt**\n_Rien de prêt pour l'instant. Reviens plus tard._"))
+
+        items.append(v2_divider())
+        b_close = Button(label="Fermer", emoji="✖️", style=discord.ButtonStyle.danger,
+                         custom_id="fortunev2_close")
+        b_close.callback = self._on_close
+        items.append(discord.ui.ActionRow(b_close))
+
+        self.add_item(v2_container(*items, color=Palette.PRIMARY))
+
+    async def _on_close(self, i):
+        try:
+            await i.response.edit_message(content="✅ Fermé.", view=None, embed=None, embeds=[], attachments=[])
+        except discord.InteractionResponded:
+            try:
+                await i.followup.send("✅ Fermé.", ephemeral=True)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+
+async def _open_fortune_panel(i: discord.Interaction):
+    """Ouvre « Ma Fortune » (lecture seule). defer-first + try/except, tout fail-safe."""
+    if not await _safe_defer(i):
+        return
+    try:
+        if not i.guild:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        gid, uid = i.guild.id, i.user.id
+
+        # 1) Pièces (economy.coins) — lecture seule
+        coins = 0
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT coins FROM economy WHERE guild_id=? AND user_id=?",
+                    (gid, uid),
+                ) as cur:
+                    row = await cur.fetchone()
+            coins = int(row[0]) if row and row[0] is not None else 0
+        except Exception:
+            coins = 0
+
+        # 2) Banque : dépôts actifs + intérêts courants (MÊME calcul que le retrait :
+        #    1%/jour, cap 30 j, calculé à la volée depuis deposited_at). + maturité.
+        bank_principal = 0
+        bank_interest = 0
+        bank_count = 0
+        matured = 0  # dépôts ayant atteint 30/30 jours (intérêts plafonnés → bons à retirer)
+        try:
+            async with get_db() as db:
+                async with db.execute(
+                    "SELECT amount, deposited_at FROM user_bank_deposits "
+                    "WHERE guild_id=? AND user_id=? AND withdrawn=0",
+                    (gid, uid),
+                ) as cur:
+                    rows = await cur.fetchall()
+            for amt, dep_at in rows:
+                try:
+                    dt = datetime.fromisoformat(str(dep_at).replace('Z', '+00:00')) \
+                        if 'T' in str(dep_at) \
+                        else datetime.strptime(str(dep_at), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+                    days = min(30, max(0, (datetime.now(timezone.utc) - dt).days))
+                except Exception:
+                    days = 0
+                interest = compute_bank_interest(amt, days)
+                bank_principal += int(amt)
+                bank_interest += interest
+                bank_count += 1
+                if days >= 30:
+                    matured += 1
+        except Exception:
+            pass
+
+        # 3) Éclats + rente (lecture seule via helper citadelle dédié, fail-safe)
+        eclats = 0
+        rente_ready = False
+        rente_gain = 0
+        try:
+            snap = await citadelle_module.fortune_snapshot(gid, uid)
+            eclats = int(snap.get("eclats", 0) or 0)
+            rente_ready = bool(snap.get("rente_ready", False))
+            rente_gain = int(snap.get("rente_gain", 0) or 0)
+        except Exception:
+            pass
+
+        # 4) Prochaines récompenses atteignables / en attente (uniquement le lisible)
+        ready_lines = []
+        if matured:
+            ready_lines.append(
+                f"🏦 {matured} dépôt{'s' if matured > 1 else ''} arrivé{'s' if matured > 1 else ''} "
+                f"à maturité (30/30 j) — retire-le{'s' if matured > 1 else ''} via Banque."
+            )
+        if rente_ready:
+            ready_lines.append(f"💰 Rente de la Cité prête : `+{rente_gain}` ✨ (bouton Revenus dans La Cité).")
+        # Phase 268 : œufs éclos prêts à ouvrir (par-joueur, fail-safe).
+        try:
+            eggs_ready = int(await pet_eggs_module.ready_count(gid, uid))
+            if eggs_ready > 0:
+                ready_lines.append(
+                    f"🥚 {eggs_ready} œuf{'s' if eggs_ready > 1 else ''} éclos — "
+                    f"ouvre-le{'s' if eggs_ready > 1 else ''} via Mon compagnon → collection."
+                )
+        except Exception:
+            pass
+
+        # Tâche C.1 : multiplicateur de pièces EFFECTIF (toutes sources, plafonné).
+        # Lecture seule, fail-safe : si le calcul lève, on n'affiche rien.
+        coin_mult_info = None
+        try:
+            c_fortune = await cfg(gid)
+            _cfg_cm = float(c_fortune.get('event_coin_multiplier', 1.0) or 1.0)
+            _prank = await _get_user_prestige(gid, uid)
+            coin_mult_info = econ_events_module.effective_coin_multiplier(
+                gid, uid, event_coin_mult=_cfg_cm, prestige_rank=_prank, detail=True,
+            )
+        except Exception:
+            coin_mult_info = None
+
+        data = {
+            "coins": coins,
+            "bank_principal": bank_principal,
+            "bank_interest": bank_interest,
+            "bank_count": bank_count,
+            "eclats": eclats,
+            "ready": ready_lines,
+            "coin_mult": coin_mult_info,
+        }
+        await _safe_followup(i, view=MaFortuneLayoutV2(uid, data))
+    except Exception as ex:
+        print(f"[_open_fortune_panel] {ex}")
+        try:
+            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
         except Exception:
             pass
 
@@ -84028,6 +84384,7 @@ class ToolsLayoutV2(LayoutView):
 
         items.append(v2_body("**💰 Économie**"))
         items.append(discord.ui.ActionRow(
+            _mk("💰 Ma Fortune", discord.ButtonStyle.primary, "toolv2_fortune", self._on_fortune),
             _mk("🏦 Banque", discord.ButtonStyle.success, "toolv2_bank", self._on_bank),
             _mk("💎 Mes loots", discord.ButtonStyle.primary, "toolv2_loots", self._on_loots),
             _mk("🤝 Alliance", discord.ButtonStyle.success, "toolv2_alli", self._on_alliance),
@@ -84066,6 +84423,7 @@ class ToolsLayoutV2(LayoutView):
 
         self.add_item(v2_container(*items, color=Palette.PRIMARY))
 
+    async def _on_fortune(self, i):  await _open_fortune_panel(i)
     async def _on_bank(self, i):     await _open_bank_panel(i)
     async def _on_loots(self, i):    await _open_loots_panel(i)
     async def _on_alliance(self, i): await _open_alliance_panel(i)

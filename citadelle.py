@@ -30,17 +30,40 @@ from discord.ui import Button
 _get_db = None          # async context manager : async with _get_db() as db
 _add_coins = None        # callback optionnel (non utilisé au socle)
 _v2 = {}                 # helpers Components V2 (title/subtitle/body/divider/container/LayoutView)
+_pet_rente_bonus_fn = None  # Phase 268 : async (gid, uid) -> (bonus:int, label:str|None)
 
 ECLATS_EMOJI = "✨"
 ECLATS_NAME = "Éclats de Création"
 
 
-def setup(get_db_fn, v2_helpers: dict | None = None, add_coins_fn=None):
-    """Injecte les dépendances. Appelé une fois dans on_ready (bot.py)."""
-    global _get_db, _v2, _add_coins
+def setup(get_db_fn, v2_helpers: dict | None = None, add_coins_fn=None,
+          pet_rente_bonus_fn=None):
+    """Injecte les dépendances. Appelé une fois dans on_ready (bot.py).
+
+    Phase 268 : pet_rente_bonus_fn (optionnel) = async (gid, uid) -> (bonus, label)
+    qui renvoie le petit bonus de rente (Éclats) du familier équipé. Décorrèle
+    La Cité du système de familiers (vit dans bot.py/engagement41). Fail-safe :
+    absent ou en erreur → bonus 0 (la rente fonctionne normalement)."""
+    global _get_db, _v2, _add_coins, _pet_rente_bonus_fn
     _get_db = get_db_fn
     _v2 = dict(v2_helpers or {})
     _add_coins = add_coins_fn
+    _pet_rente_bonus_fn = pet_rente_bonus_fn
+
+
+async def _pet_rente_extra(gid: int, uid: int) -> tuple:
+    """Renvoie (bonus:int, label:str|None) du familier équipé. Tout fail-safe."""
+    if _pet_rente_bonus_fn is None:
+        return (0, None)
+    try:
+        res = await _pet_rente_bonus_fn(int(gid), int(uid))
+        if not res:
+            return (0, None)
+        bonus, label = res
+        return (max(0, int(bonus or 0)), label)
+    except Exception as ex:
+        print(f"[citadelle _pet_rente_extra] {ex}")
+        return (0, None)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -352,6 +375,40 @@ async def award(guild_id: int, user_id: int, eclats: int = 0, materials: dict | 
             await grant_material(guild_id, user_id, mk, q)
     except Exception as ex:
         print(f"[citadelle award] {ex}")
+
+
+async def fortune_snapshot(guild_id: int, user_id: int) -> dict:
+    """Lecture seule (aucune mutation) pour le panneau « Ma Fortune » de bot.py.
+
+    Retourne {eclats, rente_gain, rente_ready, rente_remain_h}. Tout fail-safe :
+    chaque sous-lecture est isolée pour qu'une erreur n'efface pas le reste.
+    Ne perçoit RIEN : c'est un miroir du panneau Revenus passifs, pas un claim.
+    """
+    out = {"eclats": 0, "rente_gain": 0, "rente_ready": False, "rente_remain_h": 0}
+    try:
+        out["eclats"] = await get_eclats(guild_id, user_id)
+    except Exception:
+        pass
+    try:
+        sanctu = len(await owned_cosmetics(guild_id, user_id, "sanctuaire_module"))
+        titles = len(await owned_cosmetics(guild_id, user_id, "title"))
+        out["rente_gain"] = 15 + sanctu * 2 + titles * 5
+        now = datetime.now(timezone.utc).timestamp()
+        last = 0.0
+        if _get_db is not None:
+            async with _get_db() as db:
+                async with db.execute(
+                    "SELECT last FROM citadelle_rente WHERE guild_id=? AND user_id=?",
+                    (int(guild_id), int(user_id)),
+                ) as cur:
+                    row = await cur.fetchone()
+            last = float(row[0]) if row and row[0] is not None else 0.0
+        ready = (now - last) >= _RENTE_COOLDOWN
+        out["rente_ready"] = ready
+        out["rente_remain_h"] = 0 if ready else max(0, int((_RENTE_COOLDOWN - (now - last)) // 3600) + 1)
+    except Exception:
+        pass
+    return out
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1756,9 +1813,15 @@ async def _rente_collect(gid: int, uid: int) -> str:
         return "🌙 Rente déjà perçue aujourd'hui — reviens demain."
     sanctu = len(await owned_cosmetics(gid, uid, "sanctuaire_module"))
     titles = len(await owned_cosmetics(gid, uid, "title"))
-    gain = 15 + sanctu * 2 + titles * 5
+    base = 15 + sanctu * 2 + titles * 5
+    # Phase 268 : perk passif doux du familier équipé (additif, plafonné, Éclats).
+    pet_bonus, pet_label = await _pet_rente_extra(gid, uid)
+    gain = base + pet_bonus
     await award(gid, uid, eclats=gain)
-    return f"💰 Rente perçue : **+{gain} {ECLATS_EMOJI}** (sanctuaire {sanctu}, titres {titles})."
+    detail = f"sanctuaire {sanctu}, titres {titles}"
+    if pet_bonus:
+        detail += f", familier +{pet_bonus}"
+    return f"💰 Rente perçue : **+{gain} {ECLATS_EMOJI}** ({detail})."
 
 
 async def build_revenus_panel(i: discord.Interaction, status: str | None = None):
@@ -1771,7 +1834,10 @@ async def build_revenus_panel(i: discord.Interaction, status: str | None = None)
     now = datetime.now(timezone.utc).timestamp()
     sanctu = len(await owned_cosmetics(gid, uid, "sanctuaire_module"))
     titles = len(await owned_cosmetics(gid, uid, "title"))
-    gain = 15 + sanctu * 2 + titles * 5
+    base = 15 + sanctu * 2 + titles * 5
+    # Phase 268 : perk passif doux du familier équipé (additif, plafonné).
+    pet_bonus, pet_label = await _pet_rente_extra(gid, uid)
+    gain = base + pet_bonus
     ready = True
     try:
         async with _get_db() as db:
@@ -1788,9 +1854,14 @@ async def build_revenus_panel(i: discord.Interaction, status: str | None = None)
     items = [v2_title("💰  Revenus Passifs")]
     if status:
         items.append(v2_body(status))
-    items.append(v2_subtitle("Être fidèle paie : ta rente grandit avec ton Sanctuaire et tes titres."))
+    items.append(v2_subtitle("Être fidèle paie : ta rente grandit avec ton Sanctuaire, tes titres et ton familier."))
+    pet_line = (
+        f"\n🐾 Familier : {pet_label} (+{pet_bonus})" if pet_bonus and pet_label
+        else "\n🐾 Familier : _aucun bonus — équipe un familier (rareté = bonus)_"
+    )
     items.append(v2_body(
-        f"🏯 Sanctuaire : `{sanctu}` (+{sanctu*2})  ·  🏷️ Titres : `{titles}` (+{titles*5})\n"
+        f"🏯 Sanctuaire : `{sanctu}` (+{sanctu*2})  ·  🏷️ Titres : `{titles}` (+{titles*5})"
+        + pet_line + "\n"
         f"**💵 Rente du jour : `{gain}` {ECLATS_EMOJI}**\n"
         + ("✅ **Disponible !**" if ready else f"🌙 Prochaine dans ~`{remain_h}h`")
     ))
