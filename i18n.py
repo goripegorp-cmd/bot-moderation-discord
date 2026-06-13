@@ -729,6 +729,69 @@ CATALOG = {
         "fr": "Récompenses", "en": "Rewards", "es": "Recompensas",
         "de": "Belohnungen", "it": "Ricompense", "pt": "Recompensas",
     },
+
+    # ─── I4 — Entraide cross-langue (drapeau/langue du demandeur sur le post) ───
+    # {lang} = nom de la langue dans CETTE langue (ex. « espagnol »). Suffixé au post
+    # de demande : un aidant de la même langue sait qu'il peut aider. COMPACT.
+    "entraide.speaks": {
+        "fr": "parle {lang}", "en": "speaks {lang}", "es": "habla {lang}",
+        "de": "spricht {lang}", "it": "parla {lang}", "pt": "fala {lang}",
+    },
+    # Noms de langues fléchis pour « parle … » (génitif/accusatif simple selon langue).
+    "lang.name.fr": {
+        "fr": "français", "en": "French", "es": "francés",
+        "de": "Französisch", "it": "francese", "pt": "francês",
+    },
+    "lang.name.en": {
+        "fr": "anglais", "en": "English", "es": "inglés",
+        "de": "Englisch", "it": "inglese", "pt": "inglês",
+    },
+    "lang.name.es": {
+        "fr": "espagnol", "en": "Spanish", "es": "español",
+        "de": "Spanisch", "it": "spagnolo", "pt": "espanhol",
+    },
+    "lang.name.de": {
+        "fr": "allemand", "en": "German", "es": "alemán",
+        "de": "Deutsch", "it": "tedesco", "pt": "alemão",
+    },
+    "lang.name.it": {
+        "fr": "italien", "en": "Italian", "es": "italiano",
+        "de": "Italienisch", "it": "italiano", "pt": "italiano",
+    },
+    "lang.name.pt": {
+        "fr": "portugais", "en": "Portuguese", "es": "portugués",
+        "de": "Portugiesisch", "it": "portoghese", "pt": "português",
+    },
+
+    # ─── I3 — Posts publics multilingues (LIGNE D'ACCROCHE uniquement, compacte) ───
+    # Accroche de l'écho d'event en salon chatty (sous l'emoji+label déjà rendu).
+    # {channel} = mention du salon d'event (<#id>).
+    "echo.join_invite": {
+        "fr": "➡️ Rejoins-nous dans {channel} pour participer !",
+        "en": "➡️ Join us in {channel} to take part!",
+        "es": "➡️ ¡Únete a nosotros en {channel} para participar!",
+        "de": "➡️ Mach mit in {channel}!",
+        "it": "➡️ Unisciti a noi in {channel} per partecipare!",
+        "pt": "➡️ Junta-te a nós em {channel} para participar!",
+    },
+    # Accroche du « Programme du jour ».
+    "agenda.lead": {
+        "fr": "Voici les rendez-vous combat d'aujourd'hui — prépare ton stuff et sois là. 💪",
+        "en": "Here are today's combat events — gear up and be there. 💪",
+        "es": "Estos son los combates de hoy — prepárate y no faltes. 💪",
+        "de": "Das sind die heutigen Kämpfe — rüste dich und sei dabei. 💪",
+        "it": "Ecco i combattimenti di oggi — preparati e ci sei. 💪",
+        "pt": "Estes são os combates de hoje — prepara-te e marca presença. 💪",
+    },
+    # Accroche du « Héraut de la Semaine ».
+    "herald.lead": {
+        "fr": "Le tour d'horizon de la semaine — tout ce qui t'attend, en un seul message. 📯",
+        "en": "Your week at a glance — everything ahead, in one message. 📯",
+        "es": "Tu semana de un vistazo — todo lo que viene, en un solo mensaje. 📯",
+        "de": "Deine Woche im Überblick — alles, was kommt, in einer Nachricht. 📯",
+        "it": "La tua settimana in sintesi — tutto ciò che ti aspetta, in un solo messaggio. 📯",
+        "pt": "A tua semana num relance — tudo o que vem aí, numa só mensagem. 📯",
+    },
 }
 
 
