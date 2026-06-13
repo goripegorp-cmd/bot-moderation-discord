@@ -29,7 +29,20 @@ TITLES = [
     ("legende",  "🌟", "Légende",          250_000),
     ("mythe",    "👑", "Mythe vivant",   1_000_000),
 ]
+
+# Titres SPÉCIAUX, NON achetables (jamais affichés dans la boutique) : décernés par
+# le bot pour un fait particulier. Le « Pionnier » (Tâche B.2) récompense les membres
+# présents AVANT la sortie configurée par l'owner. 100 % COSMÉTIQUE, ZÉRO Éclat payant.
+SPECIAL_TITLES = {
+    "pionnier": ("🏆", "Pionnier"),
+}
+PIONEER_KEY = "pionnier"
+
+# Index combiné (achetables + spéciaux) — sert UNIQUEMENT à title_label()/price_of().
+# La boutique, elle, n'itère que sur TITLES (donc les spéciaux n'y apparaissent jamais).
 _BY_KEY = {t[0]: t for t in TITLES}
+for _k, (_emo, _lbl) in SPECIAL_TITLES.items():
+    _BY_KEY[_k] = (_k, _emo, _lbl, 0)
 
 
 def setup(get_db_fn):
@@ -166,3 +179,33 @@ async def set_active(guild_id, user_id, key):
     except Exception as ex:
         print(f"[cosmetics set_active] {ex}")
         return False, "Erreur."
+
+
+async def grant(guild_id, user_id, key) -> bool:
+    """Décerne un titre GRATUITEMENT (sans débit) — pour les titres spéciaux décernés
+    par le bot (ex. « Pionnier »). Idempotent : si déjà possédé, ne fait rien et renvoie
+    False. Renvoie True SEULEMENT si le titre vient d'être ajouté (utile pour annoncer/
+    compter une seule fois). FAIL-SAFE → False sur erreur.
+
+    N'équipe PAS automatiquement (le membre choisit dans sa boutique) — on ajoute juste
+    à la collection `owned`."""
+    if _get_db is None or not key:
+        return False
+    gid, uid = int(guild_id), int(user_id)
+    try:
+        async with _get_db() as db:
+            owned, active = await _read(db, gid, uid)
+            if key in owned:
+                return False  # déjà possédé → no-op (anti-doublon)
+            owned.append(key)
+            await db.execute(
+                "INSERT INTO user_cosmetics(guild_id, user_id, owned, active) "
+                "VALUES(?,?,?,?) ON CONFLICT(guild_id, user_id) DO UPDATE SET "
+                "owned=excluded.owned",
+                (gid, uid, json.dumps(owned), active),
+            )
+            await db.commit()
+        return True
+    except Exception as ex:
+        print(f"[cosmetics grant] {ex}")
+        return False

@@ -184,6 +184,30 @@ async def top_scores(guild_id, limit=10):
         return []
 
 
+async def distinct_active_on_day(guild_id, day: str) -> int:
+    """Nombre de membres DISTINCTS ayant gagné ≥ 1 point d'activité le jour `day`
+    (format 'YYYY-MM-DD' UTC, celui de la table activity_score).
+
+    Sert à la « Chaîne collective de présence » (presence_chain.py) : réutilise
+    le tracking d'activité existant comme SOURCE DE VÉRITÉ (1 message OU 1 min de
+    vocal = ce membre a été actif ce jour-là). FAIL-OPEN : 0 sur erreur (la chaîne
+    se contentera de ne pas progresser, jamais de casser à cause d'un bug)."""
+    if _get_db is None or not day:
+        return 0
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT COUNT(DISTINCT user_id) FROM activity_score "
+                "WHERE guild_id=? AND day=? AND points > 0",
+                (int(guild_id), day),
+            ) as cur:
+                row = await cur.fetchone()
+        return int(row[0] or 0) if row else 0
+    except Exception as ex:
+        print(f"[activity distinct_active_on_day] {ex}")
+        return 0
+
+
 def required_points(event_type) -> int:
     return EVENT_TIERS.get((event_type or "").lower(), TIER_BASE)
 
