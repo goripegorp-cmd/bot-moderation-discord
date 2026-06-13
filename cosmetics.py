@@ -35,8 +35,12 @@ TITLES = [
 # présents AVANT la sortie configurée par l'owner. 100 % COSMÉTIQUE, ZÉRO Éclat payant.
 SPECIAL_TITLES = {
     "pionnier": ("🏆", "Pionnier"),
+    # C3 — « Pilier de l'entraide » : décerné aux meilleurs aidants (entraide), recalculé
+    # périodiquement par le bot. 100 % COSMÉTIQUE, ZÉRO permission, ZÉRO pièce/Éclat.
+    "pilier_entraide": ("🛡️", "Pilier de l'entraide"),
 }
 PIONEER_KEY = "pionnier"
+ENTRAIDE_PILLAR_KEY = "pilier_entraide"
 
 # Index combiné (achetables + spéciaux) — sert UNIQUEMENT à title_label()/price_of().
 # La boutique, elle, n'itère que sur TITLES (donc les spéciaux n'y apparaissent jamais).

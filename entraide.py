@@ -51,6 +51,12 @@ _bot = None                    # instance bot (tâche périodique d'expiration)
 # on la marque expirée pour ne pas polluer la file et libérer l'anti-spam.
 EXPIRE_OPEN_MIN = 180
 
+# C2 — RELANCE : une demande OUVERTE et NON prise (aucun aidant) depuis ce délai
+# (minutes) est re-pingée UNE SEULE FOIS au rôle aidant du jeu (puis flag relanced=1).
+# Choisi entre l'arrivée (ping initial) et l'expiration (EXPIRE_OPEN_MIN) pour réveiller
+# une demande qui dort sans noyer le salon. Respecte le cooldown anti-spam du ping.
+RELANCE_AFTER_MIN = 35
+
 # Anti-spam du PING du rôle aidant (par jeu, par guilde) : on ne re-ping pas le
 # rôle aidant d'un même jeu plus d'une fois par fenêtre. Géré côté bot.py via
 # can_ping_helpers()/mark_helper_ping() ci-dessous (état mémoire, fail-open).
@@ -172,6 +178,9 @@ async def init_db():
             "ALTER TABLE entraide_requests ADD COLUMN request_channel_id INTEGER DEFAULT 0",
             "ALTER TABLE entraide_requests ADD COLUMN helper_id INTEGER DEFAULT 0",
             "ALTER TABLE entraide_requests ADD COLUMN resolved_at TIMESTAMP",
+            # C2 : flag « demande relancée UNE fois » (re-ping du rôle aidant si une
+            # demande dort sans réponse). 0 = jamais relancée, 1 = déjà relancée.
+            "ALTER TABLE entraide_requests ADD COLUMN relanced INTEGER DEFAULT 0",
         ):
             try:
                 async with _get_db() as db:
@@ -800,6 +809,67 @@ async def set_request_message(request_id, ch_id, msg_id) -> bool:
         return False
 
 
+async def list_stale_unclaimed_requests(guild_id, older_than_min=RELANCE_AFTER_MIN,
+                                        limit=20) -> list:
+    """C2 — Demandes OUVERTES qui DORMENT : status='open', AUCUN aidant (helper_id<=0),
+    JAMAIS relancées (relanced=0 / NULL) et plus vieilles que `older_than_min` minutes.
+    Sert à re-pinger UNE fois le rôle aidant du jeu (réveil). Les plus anciennes d'abord.
+    -> [dict, …]. FAIL-OPEN : []."""
+    if _get_db is None:
+        return []
+    try:
+        cutoff = (datetime.now(timezone.utc)
+                  - timedelta(minutes=int(older_than_min))).strftime("%Y-%m-%d %H:%M:%S")
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT id, guild_id, requester_id, game_key, description, status, "
+                "request_channel_id, message_id, voice_channel_id, helper_id, "
+                "created_at, resolved_at "
+                "FROM entraide_requests "
+                "WHERE guild_id=? AND status='open' "
+                "AND (helper_id IS NULL OR helper_id<=0) "
+                "AND (relanced IS NULL OR relanced=0) "
+                "AND created_at < ? "
+                "ORDER BY created_at ASC LIMIT ?",
+                (int(guild_id), cutoff, int(limit)),
+            ) as cur:
+                rows = await cur.fetchall()
+        out = []
+        for row in rows:
+            out.append({
+                "id": int(row[0]), "guild_id": int(row[1]),
+                "requester_id": int(row[2]), "game_key": row[3],
+                "description": row[4] or "", "status": row[5] or "open",
+                "request_channel_id": int(row[6] or 0), "message_id": int(row[7] or 0),
+                "voice_channel_id": max(0, int(row[8] or 0)), "helper_id": int(row[9] or 0),
+                "created_at": row[10], "resolved_at": row[11],
+            })
+        return out
+    except Exception as ex:
+        print(f"[entraide list_stale_unclaimed_requests] {ex}")
+        return []
+
+
+async def mark_request_relanced(request_id) -> bool:
+    """C2 — Pose ATOMIQUEMENT le flag relanced=1 sur une demande ENCORE ouverte et non
+    relancée. rowcount==1 => CET appel gagne le droit de re-pinger (anti double-relance
+    même en cas de relance concurrente / reboot en plein milieu). FAIL-SAFE : False."""
+    if _get_db is None or not request_id:
+        return False
+    try:
+        async with _get_db() as db:
+            dc = await db.execute(
+                "UPDATE entraide_requests SET relanced=1 "
+                "WHERE id=? AND status='open' AND (relanced IS NULL OR relanced=0)",
+                (int(request_id),),
+            )
+            await db.commit()
+        return getattr(dc, "rowcount", 0) == 1
+    except Exception as ex:
+        print(f"[entraide mark_request_relanced] {ex}")
+        return False
+
+
 async def expire_open_requests(guild_id, older_than_min=EXPIRE_OPEN_MIN) -> list:
     """Marque EXPIRÉES les demandes OUVERTES plus vieilles que `older_than_min`
     minutes (libère l'anti-spam, dégorge la file). Renvoie la liste des dicts
@@ -926,6 +996,8 @@ __all__ = [
     "list_dangling_requests",
     "claim_request",
     "resolve_request",
+    "list_stale_unclaimed_requests",
+    "mark_request_relanced",
     "set_request_voice",
     "claim_request_voice_slot",
     "release_request_voice_slot",
@@ -939,6 +1011,7 @@ __all__ = [
     "entraide_expiry_task",
     # constantes
     "EXPIRE_OPEN_MIN",
+    "RELANCE_AFTER_MIN",
     "HELPER_PING_COOLDOWN_SEC",
     "MAX_TEMP_VOICE_PER_GUILD",
     "HELP_REWARD_COINS",
