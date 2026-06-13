@@ -814,52 +814,79 @@ async def spawn_mob(guild: discord.Guild, *, hp_factor: float = 1.0,
     msg = await _post_mob_message(
         ch, mob_db_id, mob_def, hp_max, hp_max, is_elite, alive_count
     )
-    if msg:
+    # FIX salons (2026-06) : si le PANNEAU n'a pas pu être posté (ch.send a échoué),
+    # le salon « 🐗-mob » + les lignes DB (mob_spawns + combat_arenas) existent SANS
+    # panneau → salon mob VIDE + orphelin (plainte owner « salon mob créé mais sans
+    # l'event, et qui ne se supprime pas »). On annule proprement : on marque le mob
+    # mort en DB et on supprime IMMÉDIATEMENT son salon dédié (sauf salon imposé par
+    # l'invasion, qu'on ne touche jamais). Zéro orphelin, slot anti-doublon libéré.
+    if not msg:
+        print(f"[mob_hunts] panneau non posté → annulation spawn guild={guild.id} "
+              f"mob={mob_def['id']} (salon mob nettoyé)")
         try:
             async with _get_db() as db:
                 await db.execute(
-                    "UPDATE mob_spawns SET message_id=? WHERE id=?",
-                    (msg.id, mob_db_id),
+                    "UPDATE mob_spawns SET status='despawned' WHERE id=?",
+                    (mob_db_id,),
                 )
                 await db.commit()
         except Exception:
             pass
+        # Supprimer le salon dédié « 🐗-mob » fraîchement créé (jamais le salon imposé
+        # par l'invasion : channel != None signifie regroupement, on n'y touche pas).
+        if channel is None and _arena_delete_fn is not None:
+            try:
+                await _arena_delete_fn(guild, ch.id, grace_seconds=0)
+            except Exception:
+                pass
+        return False
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "UPDATE mob_spawns SET message_id=? WHERE id=?",
+                (msg.id, mob_db_id),
+            )
+            await db.commit()
+    except Exception:
+        pass
 
-        # Phase 214 : LE PING EST LA PRIORITÉ (sans lui personne ne vient).
-        #  • COLLECTIF → on appelle PLUSIEURS actifs (cap 5-8) car le mob a
-        #    énormément de PV : ping quasi systématique, sinon il rote sans
-        #    combattants (le despawn timer le nettoiera dans le pire cas).
-        #  • SOLO → on DÉFIE 1 seul actif (cap 1) ~70% du temps ; sinon mob
-        #    « ambiant » que les passants peuvent cliquer.
-        # Rotation + opt-out + auto-suppression du ping gérés par le helper.
-        if _active_ping_fn is not None:
-            emoji = mob_def.get("emoji", "🗡️")
-            do_ping = (combat_mode == 'group') or (random.random() < SOLO_PING_CHANCE)
-            if do_ping:
-                try:
-                    if combat_mode == 'group':
-                        # Phase 222 : cap plus DOUX (3-5 au lieu de 5-8) + cooldown 6h
-                        # → moins de mentions par event collectif, on évite le spam.
-                        ping_cap = random.randint(3, 5)
-                        ping_cooldown = 6
-                        ping_intro = (
-                            f"⚔️ **COMBAT COLLECTIF !** {emoji} {elite_prefix}"
-                            f"**{mob_def['name']}** débarque avec énormément de PV — "
-                            f"rassemblez-vous pour l'abattre")
-                    else:
-                        ping_cap = 1
-                        ping_cooldown = 2
-                        ping_intro = (
-                            f"🎯 {emoji} {elite_prefix}**{mob_def['name']}** te "
-                            f"défie en combat singulier —")
-                    await _active_ping_fn(
-                        guild, ch, cap=ping_cap, cooldown_hours=ping_cooldown,
-                        cleanup_seconds=900, intro=ping_intro, notif_key='mob')
-                except Exception as ex:
-                    print(f"[spawn_mob active_ping] {ex}")
+    # Phase 214 : LE PING EST LA PRIORITÉ (sans lui personne ne vient).
+    #  • COLLECTIF → on appelle PLUSIEURS actifs (cap 5-8) car le mob a
+    #    énormément de PV : ping quasi systématique, sinon il rote sans
+    #    combattants (le despawn timer le nettoiera dans le pire cas).
+    #  • SOLO → on DÉFIE 1 seul actif (cap 1) ~70% du temps ; sinon mob
+    #    « ambiant » que les passants peuvent cliquer.
+    # Rotation + opt-out + auto-suppression du ping gérés par le helper.
+    if _active_ping_fn is not None:
+        emoji = mob_def.get("emoji", "🗡️")
+        do_ping = (combat_mode == 'group') or (random.random() < SOLO_PING_CHANCE)
+        if do_ping:
+            try:
+                if combat_mode == 'group':
+                    # Phase 222 : cap plus DOUX (3-5 au lieu de 5-8) + cooldown 6h
+                    # → moins de mentions par event collectif, on évite le spam.
+                    ping_cap = random.randint(3, 5)
+                    ping_cooldown = 6
+                    ping_intro = (
+                        f"⚔️ **COMBAT COLLECTIF !** {emoji} {elite_prefix}"
+                        f"**{mob_def['name']}** débarque avec énormément de PV — "
+                        f"rassemblez-vous pour l'abattre")
+                else:
+                    ping_cap = 1
+                    ping_cooldown = 2
+                    ping_intro = (
+                        f"🎯 {emoji} {elite_prefix}**{mob_def['name']}** te "
+                        f"défie en combat singulier —")
+                await _active_ping_fn(
+                    guild, ch, cap=ping_cap, cooldown_hours=ping_cooldown,
+                    cleanup_seconds=900, intro=ping_intro, notif_key='mob')
+            except Exception as ex:
+                print(f"[spawn_mob active_ping] {ex}")
 
-        # Schedule despawn cleanup
-        asyncio.create_task(_despawn_after(mob_db_id, MOB_LIFETIME_MIN * 60))
+    # Schedule despawn cleanup — TOUJOURS programmé (msg garanti non-None ici grâce à
+    # la garde d'annulation ci-dessus) → un mob qui n'est pas tué finit TOUJOURS par
+    # despawn (message supprimé + salon « 🐗-mob » dédié supprimé). Plus d'orphelin.
+    asyncio.create_task(_despawn_after(mob_db_id, MOB_LIFETIME_MIN * 60))
 
     print(
         f"[mob_hunts] spawn guild={guild.id} mob={mob_def['id']} "
