@@ -40297,12 +40297,11 @@ class AfkKickConfirmView(View):
         success = 0
         failed = 0
         
+        # RÈGLE FONDATEUR-ONLY (2026-06-13) : plus AUCUN kick auto/staff, même pour
+        # l'inactivité. Les membres AFK ne sont plus expulsés (le fondateur peut le faire
+        # nativement s'il le souhaite). success reste 0 (rapport honnête).
         for member, _ in self.afk_members:
-            try:
-                await member.kick(reason=f"AFK - Inactif depuis trop longtemps")
-                success += 1
-            except:
-                failed += 1
+            pass
         
         # Log
         c = await cfg(self.g.id)
@@ -40914,12 +40913,8 @@ async def kick_afk_members(guild, days):
                 is_afk = la_utc < cutoff.replace(tzinfo=timezone.utc)
             
             if is_afk:
-                try:
-                    await member.kick(reason=f"Inactivité de plus de {days} jours")
-                    kicked += 1
-                    await asyncio.sleep(0.5)
-                except:
-                    failed += 1
+                # RÈGLE FONDATEUR-ONLY : kick d'inactivité désactivé (aucun kick auto/staff).
+                pass
         
         result = f"✅ **Expulsion terminée !**\n\n"
         result += f"👢 **{kicked}** membre(s) expulsé(s)\n"
@@ -41084,20 +41079,10 @@ async def execute_afk_actions(guild):
         if members_to_remove_role_7d:
             results['remove_role_7d'] = await remove_role_batch(members_to_remove_role_7d, "Inactivité 7 jours")
         
-        # ═══════════════ ÉTAPE 4: KICKS (séquentiels car plus sensible) ═══════════════
-        for member in members_to_kick_30d:
-            try:
-                await member.kick(reason="Inactivité 30 jours")
-                results['kick_30d'] += 1
-            except:
-                pass
-        
-        for member in members_to_kick_7d:
-            try:
-                await member.kick(reason="Inactivité 7 jours")
-                results['kick_7d'] += 1
-            except:
-                pass
+        # ═══════════════ ÉTAPE 4: KICKS — DÉSACTIVÉS (règle fondateur-only) ═══════════
+        # RÈGLE OWNER (2026-06-13) : aucun kick auto/staff, même pour l'inactivité.
+        # Le retrait des rôles d'inactivité ci-dessus reste actif ; plus de kick.
+        # (results['kick_30d']/['kick_7d'] restent à 0 — rapport honnête.)
         
         # ═══════════════ ÉTAPE 5: NOTIFICATIONS ═══════════════
         if notif_ch:
@@ -41411,14 +41396,7 @@ async def execute_afk_actions_auto(guild, stat_cfg):
                 role_removed_30d.append(member)
             except: pass
         
-        # Kick
-        if 'kick' in actions_30d:
-            try:
-                if member.top_role < guild.me.top_role:
-                    await member.kick(reason="Inactivité 30 jours (auto)")
-                    kicked_30d.append(member)
-                    await asyncio.sleep(0.3)
-            except: pass
+        # Kick — DÉSACTIVÉ (règle fondateur-only : aucun kick auto). Retrait de rôle conservé.
     
     # Notification 30j (seulement si ping ET pas kick)
     members_to_notify_30d = [m for m in afk_members_30d if m not in kicked_30d]
@@ -41438,14 +41416,7 @@ async def execute_afk_actions_auto(guild, stat_cfg):
                 role_removed_7d.append(member)
             except: pass
         
-        # Kick
-        if 'kick' in actions_7d:
-            try:
-                if member.top_role < guild.me.top_role:
-                    await member.kick(reason="Inactivité 7 jours (auto)")
-                    kicked_7d.append(member)
-                    await asyncio.sleep(0.3)
-            except: pass
+        # Kick — DÉSACTIVÉ (règle fondateur-only : aucun kick auto). Retrait de rôle conservé.
     
     # Notification 7j (seulement si ping ET pas kick)
     members_to_notify_7d = [m for m in afk_members_7d if m not in kicked_7d]
