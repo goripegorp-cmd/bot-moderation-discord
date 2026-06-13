@@ -33,6 +33,7 @@ TOP_STAFF_LIMIT = 5        # Top 5 staff
 TOP_OFFENDERS_LIMIT = 5    # Top 5 membres sanctionnés
 RECENT_ACTIVITY_HOURS = 24 # Activité dernière journée
 RECENT_ACTIONS_LIMIT = 8   # Journal "actions récentes" : N dernières sanctions du serveur
+STAFF_AUDIT_LIMIT = 10     # E1 : journal d'audit staff consolidé (N dernières actions)
 
 
 # Raison templates — usables comme app_commands.Choice futurement
@@ -183,6 +184,42 @@ async def _collect_stats(guild_id: int, days: int = WINDOW_DAYS) -> dict:
     return out
 
 
+async def _collect_staff_audit(guild_id: int, limit: int = STAFF_AUDIT_LIMIT) -> list:
+    """E1 — Lit les N dernières lignes du journal d'audit STAFF consolidé.
+
+    `staff_audit_log` agrège TOUTES les surfaces (slash /warn /mute /note,
+    isolement, clics sur panneaux de sanction, ban/kick/dégel fondateur) — ce que
+    la table `infractions` (section "Actions récentes") ne couvre PAS. Lecture seule.
+    FAIL-SAFE : si la table n'existe pas encore, on renvoie une liste vide.
+    """
+    out = []
+    if _get_db is None:
+        return out
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT actor_id, target_id, action, detail, surface, created_at "
+                "FROM staff_audit_log WHERE guild_id=? ORDER BY id DESC LIMIT ?",
+                (guild_id, limit),
+            ) as cur:
+                out = [
+                    {
+                        "actor_id": int(r[0]) if r[0] else None,
+                        "target_id": int(r[1]) if r[1] else None,
+                        "action": r[2] or "?",
+                        "detail": r[3] or "",
+                        "surface": r[4] or "",
+                        "created_at": r[5] or "",
+                    }
+                    for r in await cur.fetchall()
+                ]
+    except Exception as ex:
+        # Table absente sur de vieilles installs = pas grave (section omise).
+        if "no such table" not in str(ex).lower():
+            print(f"[mod_dashboard _collect_staff_audit guild={guild_id}] {ex}")
+    return out
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # RENDERING
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -300,6 +337,53 @@ def _build_layout(stats: dict, guild, tickets: dict | None = None) -> discord.ui
                     lines.append(f"{emo} **{typ}** {cible}{par}{when}{reason_txt}")
                 items.append(v2_body("\n".join(lines)))
 
+            # 🕑 Audit staff (E1) — journal CONSOLIDÉ toutes surfaces : QUI a fait QUOI.
+            # Contrairement à "Actions récentes" (table infractions = warn/mute slash),
+            # capture AUSSI les clics sur panneaux de sanction, l'isolement, et les
+            # actions fondateur (ban/kick/dégel). Lecture seule (aucun bouton ici).
+            audit = stats.get("staff_audit") or []
+            if audit:
+                audit_emojis = {
+                    "warn": "⚠️", "warned": "⚠️",
+                    "mute": "🔇", "muted_1h": "🔇",
+                    "note": "🗒️",
+                    "isolement": "🛡️",
+                    "kick": "👢", "kicked": "👢",
+                    "ban": "🔨", "banned": "🔨",
+                    "degel": "🔓",
+                    "ignored": "✅",
+                }
+                surface_labels = {
+                    "slash": "cmd", "panel_sanction": "panneau",
+                    "founder": "fondateur", "auto": "auto",
+                }
+                items.append(v2_divider())
+                items.append(v2_body("### 🕑 Audit staff"))
+                lines = []
+                for a in audit:
+                    act = a.get("action") or "?"
+                    emo = audit_emojis.get(act, "▫️")
+                    par = f"<@{a['actor_id']}>" if a.get("actor_id") else "système"
+                    cible = f" → <@{a['target_id']}>" if a.get("target_id") else ""
+                    surf = surface_labels.get(a.get("surface"), a.get("surface") or "")
+                    surf_txt = f" `{surf}`" if surf else ""
+                    when = ""
+                    raw = a.get("created_at") or ""
+                    if raw:
+                        try:
+                            dt = datetime.strptime(raw[:19], "%Y-%m-%d %H:%M:%S").replace(
+                                tzinfo=timezone.utc
+                            )
+                            when = f" · <t:{int(dt.timestamp())}:R>"
+                        except Exception:
+                            when = ""
+                    detail = (a.get("detail") or "").replace("\n", " ").strip()
+                    if len(detail) > 60:
+                        detail = detail[:57] + "…"
+                    detail_txt = f"\n  ↳ _{detail}_" if detail else ""
+                    lines.append(f"{emo} {par} **{act}**{cible}{surf_txt}{when}{detail_txt}")
+                items.append(v2_body("\n".join(lines)))
+
             # 🎫 Tickets (Lot 4 — "dashboard staff = tickets + sanctions")
             if tickets:
                 items.append(v2_divider())
@@ -390,6 +474,12 @@ async def show(interaction: discord.Interaction, days: int = WINDOW_DAYS) -> boo
 
     try:
         stats = await _collect_stats(interaction.guild.id, days=days)
+        # E1 : journal d'audit STAFF consolidé (toutes surfaces). Stashé dans `stats`
+        # pour ne pas changer la signature de _build_layout. Lecture seule.
+        try:
+            stats["staff_audit"] = await _collect_staff_audit(interaction.guild.id)
+        except Exception as _aex:
+            print(f"[mod_dashboard staff_audit] {_aex}")
         # Lot 4 : agrège AUSSI les tickets (réutilise tickets_enhance, déjà setup au boot).
         # Défensif : si le module/table manque, le dashboard s'affiche sans la section.
         tickets = None

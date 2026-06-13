@@ -146,11 +146,12 @@ async def compute_top_active(guild_id: int) -> dict:
         return out
     try:
         async with _get_db() as db:
-            # Top messages (7j)
+            # Top messages (7j) — D3 : agrégat member_activity_daily (hits) au lieu
+            # d'1 ligne/message. SUM(hits) ≡ COUNT(*) de l'ancienne table.
             async with db.execute(
-                "SELECT user_id, COUNT(*) as c FROM member_activity "
-                "WHERE guild_id=? AND activity_type='message' "
-                "AND datetime(created_at) > datetime('now', '-7 days') "
+                "SELECT user_id, SUM(hits) as c FROM member_activity_daily "
+                "WHERE guild_id=? "
+                "AND datetime(last_ts) > datetime('now', '-7 days') "
                 "GROUP BY user_id HAVING c >= ? "
                 "ORDER BY c DESC LIMIT ?",
                 (guild_id, MIN_MESSAGES, TOP_MESSAGES),

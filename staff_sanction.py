@@ -445,6 +445,29 @@ async def _handle_sanction_click(
             )
             await db.commit()
 
+        # E1 : journal d'audit STAFF consolidé — trace le clic sur le panneau
+        # (warn / mute / faux-positif) dans la MÊME table que /warn /mute /note.
+        # FAIL-SAFE : un souci d'audit ne casse jamais l'application de la sanction.
+        # Insert direct (module découplé de bot.py — réutilise _get_db, comme l'UPDATE).
+        try:
+            async with _get_db() as db:
+                await db.execute('''CREATE TABLE IF NOT EXISTS staff_audit_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER, actor_id INTEGER, target_id INTEGER,
+                    action TEXT, detail TEXT, surface TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )''')
+                await db.execute(
+                    "INSERT INTO staff_audit_log "
+                    "(guild_id, actor_id, target_id, action, detail, surface) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (i.guild.id, i.user.id, target_id, applied,
+                     str(reason or "")[:200], "panel_sanction"),
+                )
+                await db.commit()
+        except Exception as _aex:
+            print(f"[staff_sanction audit] {_aex}")
+
         # Confirme à l'user staff
         await i.followup.send(
             f"✅ Action `{applied}` appliquée à <@{target_id}>.\n"

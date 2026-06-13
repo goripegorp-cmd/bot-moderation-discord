@@ -1160,10 +1160,50 @@ async def db_init():
             reactions INTEGER DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )''')
-        
+        # D3 : agrégat journalier de l'activité MESSAGE (anti-gonflement).
+        # 1 ligne par (guild, user, channel, jour) au lieu d'1 ligne PAR message.
+        # Les lectures de ciblage de salon + les compteurs de stats messages lisent
+        # désormais cette table. member_activity ne garde QUE le vocal (granularité
+        # 'duration' requise). Les vrais consommateurs gate/difficulté lisent
+        # activity_score (table à part) — non touchés.
+        await db.execute('''CREATE TABLE IF NOT EXISTS member_activity_daily (
+            guild_id INTEGER,
+            user_id INTEGER,
+            channel_id INTEGER,
+            day TEXT,
+            hits INTEGER DEFAULT 0,
+            last_ts TEXT,
+            PRIMARY KEY(guild_id, user_id, channel_id, day)
+        )''')
+        # E1 : journal d'audit STAFF consolidé (traçabilité QUI a fait QUOI).
+        # Toutes surfaces (slash, panneaux de sanction, actions fondateur) écrivent
+        # ici via log_staff_action(). Lecture seule côté owner (dashboard).
+        await db.execute('''CREATE TABLE IF NOT EXISTS staff_audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER,
+            actor_id INTEGER,
+            target_id INTEGER,
+            action TEXT,
+            detail TEXT,
+            surface TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )''')
+
         # Index pour améliorer les performances des requêtes de stats
         try:
             await db.execute('CREATE INDEX IF NOT EXISTS idx_member_activity_guild_user ON member_activity(guild_id, user_id, activity_type, created_at)')
+        except:
+            pass
+        # D3 : index ciblage salon (actifs récents par salon) + stats user/jour.
+        try:
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_mad_guild_day ON member_activity_daily(guild_id, day)')
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_mad_guild_ch_day ON member_activity_daily(guild_id, channel_id, day)')
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_mad_guild_user_day ON member_activity_daily(guild_id, user_id, day)')
+        except:
+            pass
+        # E1 : index lecture audit owner (N dernières actions par guild).
+        try:
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_staff_audit_guild_id ON staff_audit_log(guild_id, id DESC)')
         except:
             pass
         
@@ -2972,11 +3012,19 @@ async def db_init():
             # activity_tracking : ORDER BY last_message DESC sur 200-500 rows
             "CREATE INDEX IF NOT EXISTS idx_activity_tracking_last "
             "ON activity_tracking(guild_id, last_message DESC)",
-            # member_activity : très hot (1 INSERT par message + SELECT par channel)
+            # member_activity : ne contient plus que le VOCAL (D3 — messages agrégés
+            # dans member_activity_daily). Index gardés pour les SELECT vocaux.
             "CREATE INDEX IF NOT EXISTS idx_member_activity_guild_created "
             "ON member_activity(guild_id, activity_type, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_member_activity_user_ch "
             "ON member_activity(guild_id, user_id, channel_id, created_at DESC)",
+            # member_activity_daily : agrégat messages — ciblage salon + stats user/jour.
+            "CREATE INDEX IF NOT EXISTS idx_mad_guild_day "
+            "ON member_activity_daily(guild_id, day)",
+            "CREATE INDEX IF NOT EXISTS idx_mad_guild_ch_day "
+            "ON member_activity_daily(guild_id, channel_id, day)",
+            "CREATE INDEX IF NOT EXISTS idx_mad_guild_user_day "
+            "ON member_activity_daily(guild_id, user_id, day)",
             # wakeup_log : SELECT par guild + cooldown 48h
             "CREATE INDEX IF NOT EXISTS idx_wakeup_log_guild "
             "ON wakeup_log(guild_id, last_mentioned_at)",
@@ -4580,6 +4628,13 @@ async def isolate_member(member, reason, *, actor=None):
                   f"reason={reason!r} errors={out['errors']}")
         except Exception:
             pass
+        # E1 : audit staff consolidé (QUI a isolé QUI ; actor=None → automatisme).
+        if out["isolated"]:
+            await log_staff_action(
+                guild.id, getattr(actor, "id", 0), getattr(member, "id", 0),
+                "isolement", detail=f"{out['method']} · {reason}",
+                surface="auto" if actor is None else "panel_sanction",
+            )
         try:
             await ulogger2026.log_member_escalation(
                 bot, guild, member, 0, "ISOLEMENT",
@@ -4663,6 +4718,14 @@ async def sanction(m, action, dur, reason, g, actor_id=None):
         elif action == 'mute': await m.timeout(timedelta(minutes=dur), reason=reason)
         elif action == 'kick': await m.kick(reason=reason)
         elif action == 'ban': await m.ban(reason=reason)
+        # E1 : audit staff consolidé. kick/ban n'arrivent ici QUE pour le fondateur
+        # (le gate founder-only ci-dessus dégrade tout le reste en isolement, déjà loggé).
+        if action in ('mute', 'kick', 'ban'):
+            await log_staff_action(
+                getattr(g, "id", 0), actor_id or 0, getattr(m, "id", 0),
+                action, detail=str(reason or "")[:200],
+                surface="founder" if action in ('kick', 'ban') else "auto",
+            )
         return True
     except discord.Forbidden:
         print(f"❌ [sanction] Forbidden : '{action}' impossible sur {getattr(m, 'id', '?')} "
@@ -4701,6 +4764,44 @@ async def _dm_sanction(member, guild, action_label, reason, duration_text=None):
         await member.send(embed=e)
     except Exception:
         pass
+
+
+async def log_staff_action(guild_id, actor_id, target_id, action, detail="", surface=""):
+    """E1 — Journal d'audit STAFF consolidé : trace QUI a fait QUOI sur QUI.
+
+    Une seule table `staff_audit_log` pour TOUTES les surfaces (slash /warn /mute,
+    notes, isolement, clics sur les panneaux de sanction, actions fondateur
+    ban/kick/dégel). Lecture seule côté owner (dashboard modération).
+
+    FAIL-SAFE : une erreur de log ne doit JAMAIS faire échouer une sanction. On
+    avale toute exception (table absente, DB indisponible, etc.). CREATE IF NOT
+    EXISTS défensif au cas où le boot ne l'aurait pas encore exécuté.
+    """
+    try:
+        async with get_db() as db:
+            await db.execute('''CREATE TABLE IF NOT EXISTS staff_audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER,
+                actor_id INTEGER,
+                target_id INTEGER,
+                action TEXT,
+                detail TEXT,
+                surface TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )''')
+            await db.execute(
+                "INSERT INTO staff_audit_log (guild_id, actor_id, target_id, action, detail, surface) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (int(guild_id) if guild_id else 0,
+                 int(actor_id) if actor_id else 0,
+                 int(target_id) if target_id else 0,
+                 str(action or "")[:64],
+                 str(detail or "")[:500],
+                 str(surface or "")[:32]),
+            )
+            await db.commit()
+    except Exception as ex:
+        print(f"[log_staff_action] {ex}")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -14905,9 +15006,9 @@ async def personal_event_dispatcher():
                     target_channel = None
                     async with get_db() as db:
                         async with db.execute(
-                            'SELECT DISTINCT channel_id FROM member_activity '
-                            'WHERE guild_id=? AND user_id=? AND activity_type=\'message\' '
-                            'ORDER BY created_at DESC LIMIT 10',
+                            'SELECT channel_id FROM member_activity_daily '
+                            'WHERE guild_id=? AND user_id=? '
+                            'GROUP BY channel_id ORDER BY MAX(last_ts) DESC LIMIT 10',
                             (guild.id, target.id),
                         ) as cur:
                             recent_rows = await cur.fetchall()
@@ -16204,8 +16305,8 @@ async def _get_top_active_channels(guild, limit: int = 3) -> list:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
         async with get_db() as db:
             async with db.execute(
-                "SELECT channel_id, COUNT(*) AS msgs FROM member_activity "
-                "WHERE guild_id=? AND activity_type='message' AND created_at > ? "
+                "SELECT channel_id, SUM(hits) AS msgs FROM member_activity_daily "
+                "WHERE guild_id=? AND last_ts > ? "
                 "GROUP BY channel_id ORDER BY msgs DESC LIMIT ?",
                 (guild.id, cutoff, limit * 5),  # marge généreuse pour filtrer
             ) as cur:
@@ -17754,9 +17855,9 @@ async def _drop_mystery_box(guild) -> bool:
         # fenêtre de 2h faisait que la box ne spawnait quasi jamais).
         async with get_db() as db:
             async with db.execute(
-                'SELECT channel_id, MAX(created_at) as last_active FROM member_activity '
-                'WHERE guild_id=? AND activity_type=\'message\' '
-                'AND datetime(created_at) > datetime("now", "-24 hours") '
+                'SELECT channel_id, MAX(last_ts) as last_active FROM member_activity_daily '
+                'WHERE guild_id=? '
+                'AND datetime(last_ts) > datetime("now", "-24 hours") '
                 'GROUP BY channel_id ORDER BY last_active DESC LIMIT 15',
                 (guild.id,),
             ) as cur:
@@ -33544,7 +33645,17 @@ class CompromisedAccountActionView(View):
                     parts.append("🔓 isolement levé")
         except Exception as ex:
             print(f"[CAD _do_unfreeze_and_lift lift] {ex}")
-        return " · ".join(parts) if parts else "aucune action (déjà dégelé/parti)"
+        summary = " · ".join(parts) if parts else "aucune action (déjà dégelé/parti)"
+        # E1 : audit staff consolidé — dégel = action fondateur (QUI a dégelé QUI).
+        if parts:
+            try:
+                await log_staff_action(
+                    i.guild.id, i.user.id, self.target_user_id, "degel",
+                    detail=summary[:200], surface="founder",
+                )
+            except Exception as _aex:
+                print(f"[CAD audit] {_aex}")
+        return summary
 
     @discord.ui.button(label="✅ Faux positif", style=discord.ButtonStyle.success, custom_id="cad_fp")
     async def false_positive_btn(self, i, b):
@@ -41129,7 +41240,8 @@ async def cleanup_old_db_data():
     try:
         deleted_total = 0
         async with get_db() as db:
-            # 1. member_activity > 30 jours
+            # 1. member_activity > 30 jours (D3 : ne contient plus que le VOCAL —
+            #    les messages sont agrégés dans member_activity_daily).
             try:
                 cur = await db.execute(
                     "DELETE FROM member_activity WHERE created_at < datetime('now', '-30 days')"
@@ -41138,6 +41250,18 @@ async def cleanup_old_db_data():
                 await db.commit()
             except Exception as ex:
                 print(f"[cleanup member_activity] {ex}")
+
+            # 1b. member_activity_daily : rétention courte (agrégat messages).
+            #    35 j = couvre la fenêtre mensuelle des compteurs de stats (objectifs
+            #    du mois, msgs_30d) tout en restant minuscule (1 ligne/salon/jour).
+            try:
+                cur = await db.execute(
+                    "DELETE FROM member_activity_daily WHERE day < strftime('%Y-%m-%d', 'now', '-35 days')"
+                )
+                deleted_total += cur.rowcount or 0
+                await db.commit()
+            except Exception as ex:
+                print(f"[cleanup member_activity_daily] {ex}")
 
             # 2. security_logs > 90 jours
             try:
@@ -44726,6 +44850,10 @@ async def on_ready():
                 ("idx_player_styles_user", "player_styles(guild_id, user_id)"),
                 ("idx_voice_log_guild", "voice_log(guild_id, joined_at)"),
                 ("idx_member_activity_recent", "member_activity(guild_id, user_id, created_at)"),
+                # D3 : agrégat messages (ciblage salon + stats user/jour).
+                ("idx_mad_guild_day", "member_activity_daily(guild_id, day)"),
+                ("idx_mad_guild_ch_day", "member_activity_daily(guild_id, channel_id, day)"),
+                ("idx_mad_guild_user_day", "member_activity_daily(guild_id, user_id, day)"),
             ]
             for idx_name, idx_def in critical_indexes:
                 try:
@@ -53959,6 +54087,10 @@ async def warn_cmd(i: discord.Interaction, membre: discord.Member, raison: str):
         extra=f"Fiche {warn_id_str} · Total warns: {warn_count}",
     )
 
+    # E1 : audit staff consolidé (QUI a warn QUI).
+    await log_staff_action(i.guild.id, i.user.id, membre.id, "warn",
+                           detail=f"Fiche {warn_id_str} · {raison}", surface="slash")
+
     # ALERTE escalade — si le membre franchit un palier critique (3/5/10 warns
     # EXACTEMENT), on le SIGNALE dans le salon de logs de base en nommant la
     # personne. Égalité exacte = 1 alerte par franchissement (anti-spam).
@@ -54116,9 +54248,13 @@ async def mute_cmd(i: discord.Interaction, membre: discord.Member, duree: int, u
     e.set_thumbnail(url=membre.display_avatar.url)
     
     await i.response.send_message(embed=e)
-    
+
     # Log
     await send_mod_log(i.guild, 'mute', i.user, membre, raison, duration=dur_txt)
+
+    # E1 : audit staff consolidé (QUI a mute QUI + durée).
+    await log_staff_action(i.guild.id, i.user.id, membre.id, "mute",
+                           detail=f"{dur_txt} · {raison}", surface="slash")
 
 @mod_group.command(name="unmute", description="🔊 Retirer le mute d'un membre")
 @app_commands.describe(membre="Le membre à unmute", raison="La raison du unmute (optionnel)")
@@ -54820,6 +54956,10 @@ async def mod_note_cmd(i: discord.Interaction, membre: discord.Member, texte: st
     except Exception as ex:
         print(f"[/mod note] {ex}")
         return await i.response.send_message(f"❌ Erreur : `{ex}`", ephemeral=True)
+
+    # E1 : audit staff consolidé (QUI a noté QUI).
+    await log_staff_action(i.guild.id, i.user.id, membre.id, "note",
+                           detail=texte[:200], surface="slash")
 
     e = discord.Embed(
         title="🗒️ Note interne ajoutée",
@@ -57371,25 +57511,25 @@ async def get_member_stats(guild, member, days):
         cutoff_str = cutoff.isoformat()
         
         async with get_db() as db:
-            # Récupérer les messages
+            # Récupérer les messages (D3 : agrégat journalier — 1 ligne/salon/jour
+            # avec hits). On reconstruit total/par-salon/par-jour à partir des hits.
             async with db.execute('''
-                SELECT channel_id, message_id, created_at FROM member_activity 
-                WHERE guild_id=? AND user_id=? AND activity_type='message' AND created_at >= ?
-                ORDER BY created_at ASC
+                SELECT channel_id, day, hits, last_ts FROM member_activity_daily
+                WHERE guild_id=? AND user_id=? AND last_ts >= ?
+                ORDER BY day ASC
             ''', (guild.id, member.id, cutoff_str)) as cursor:
                 async for row in cursor:
-                    ch_id, msg_id, created_at = row
-                    stats['total_messages'] += 1
-                    
+                    ch_id, day_key, hits, last_ts = row
+                    hits = int(hits or 0)
+                    stats['total_messages'] += hits
+
                     # Par salon
-                    stats['channels_messages'][ch_id] = stats['channels_messages'].get(ch_id, 0) + 1
-                    
+                    stats['channels_messages'][ch_id] = stats['channels_messages'].get(ch_id, 0) + hits
+
                     # Par jour
                     try:
-                        dt = datetime.fromisoformat(created_at)
-                        date_key = dt.strftime('%Y-%m-%d')
-                        stats['messages_per_day'][date_key] = stats['messages_per_day'].get(date_key, 0) + 1
-                        
+                        stats['messages_per_day'][day_key] = stats['messages_per_day'].get(day_key, 0) + hits
+                        dt = datetime.fromisoformat(last_ts)
                         if not stats['first_activity'] or dt < stats['first_activity']:
                             stats['first_activity'] = dt
                         if not stats['last_activity'] or dt > stats['last_activity']:
@@ -60818,11 +60958,16 @@ async def track_member_message(msg):
                         total_messages = total_messages + 1
                 ''', (msg.guild.id, msg.author.id))
             
-            # Enregistrer dans member_activity pour les stats détaillées
+            # D3 : agrégat journalier au lieu d'1 INSERT brut PAR message (anti-gonflement).
+            # UPSERT cheap : 1 ligne par (guild, user, channel, jour), hits += 1.
+            # Sert le ciblage de salon ET les compteurs de stats messages.
             await db.execute('''
-                INSERT INTO member_activity (guild_id, user_id, activity_type, channel_id, message_id, created_at)
-                VALUES (?, ?, 'message', ?, ?, ?)
-            ''', (msg.guild.id, msg.author.id, msg.channel.id, msg.id, now_str))
+                INSERT INTO member_activity_daily (guild_id, user_id, channel_id, day, hits, last_ts)
+                VALUES (?, ?, ?, ?, 1, ?)
+                ON CONFLICT(guild_id, user_id, channel_id, day) DO UPDATE SET
+                    hits = hits + 1,
+                    last_ts = ?
+            ''', (msg.guild.id, msg.author.id, msg.channel.id, today, now_str, now_str))
             
             # ═══ Stats journalières agrégées (pour graphiques tendances) ═══
             await db.execute('''
@@ -71151,8 +71296,8 @@ async def _gather_community_showcase(guild) -> list:
             #    (au moins un point d'activité). On compte + on cite quelques noms.
             try:
                 async with db.execute(
-                    "SELECT DISTINCT ma.user_id FROM member_activity ma "
-                    "WHERE ma.guild_id=? AND ma.created_at>=? LIMIT 200",
+                    "SELECT DISTINCT ma.user_id FROM member_activity_daily ma "
+                    "WHERE ma.guild_id=? AND ma.last_ts>=? LIMIT 200",
                     (gid, since),
                 ) as cur:
                     active_uids = {int(r[0]) for r in await cur.fetchall()}
@@ -71671,10 +71816,10 @@ async def _spawn_flash_treasure(guild) -> bool:
         # d'1h faisait que le trésor flash ne spawnait quasi jamais).
         async with get_db() as db:
             async with db.execute(
-                'SELECT channel_id, COUNT(*) FROM member_activity '
-                'WHERE guild_id=? AND activity_type=\'message\' '
-                'AND datetime(created_at) > datetime("now", "-24 hours") '
-                'GROUP BY channel_id ORDER BY COUNT(*) DESC LIMIT 10',
+                'SELECT channel_id, SUM(hits) FROM member_activity_daily '
+                'WHERE guild_id=? '
+                'AND datetime(last_ts) > datetime("now", "-24 hours") '
+                'GROUP BY channel_id ORDER BY SUM(hits) DESC LIMIT 10',
                 (guild.id,),
             ) as cur:
                 rows = await cur.fetchall()
@@ -73028,6 +73173,8 @@ async def db_optimizer_task():
         _c7, _c14, _c30, _c90 = _cut(7), _cut(14), _cut(30), _cut(90)
         cleanup_stmts = [
             ("member_activity",          "DELETE FROM member_activity WHERE datetime(created_at) < datetime('now', '-30 days')"),
+            # D3 : agrégat messages (1 ligne/salon/jour) — rétention 35 j (couvre fenêtre mensuelle).
+            ("member_activity_daily",    "DELETE FROM member_activity_daily WHERE day < strftime('%Y-%m-%d', 'now', '-35 days')"),
             ("daily_quest_progress",     "DELETE FROM daily_quest_progress WHERE day < strftime('%Y-%m-%d', 'now', '-7 days')"),
             ("daily_quest_pushes",       "DELETE FROM daily_quest_pushes WHERE day < strftime('%Y-%m-%d', 'now', '-7 days')"),
             ("voice_chaos_log",          "DELETE FROM voice_chaos_log WHERE applied_at < ?", (_c7,)),
@@ -73254,11 +73401,11 @@ async def _apply_camouflage(guild) -> bool:
         # Trouver un salon chatty avec activité récente
         async with get_db() as db:
             async with db.execute(
-                "SELECT channel_id, COUNT(*) FROM member_activity "
-                "WHERE guild_id=? AND activity_type='message' "
-                "AND datetime(created_at) > datetime('now', '-24 hours') "
-                "GROUP BY channel_id HAVING COUNT(*) > 5 "
-                "ORDER BY COUNT(*) DESC LIMIT 10",
+                "SELECT channel_id, SUM(hits) FROM member_activity_daily "
+                "WHERE guild_id=? "
+                "AND datetime(last_ts) > datetime('now', '-24 hours') "
+                "GROUP BY channel_id HAVING SUM(hits) > 5 "
+                "ORDER BY SUM(hits) DESC LIMIT 10",
                 (guild.id,),
             ) as cur:
                 rows = await cur.fetchall()
@@ -79316,8 +79463,8 @@ async def npc_chatter_task():
                     cutoff = (datetime.now(timezone.utc) - timedelta(hours=6)).isoformat()
                     async with get_db() as db:
                         async with db.execute(
-                            "SELECT 1 FROM member_activity WHERE guild_id=? AND channel_id=? "
-                            "AND activity_type='message' AND created_at>? LIMIT 1",
+                            "SELECT 1 FROM member_activity_daily WHERE guild_id=? AND channel_id=? "
+                            "AND last_ts>? LIMIT 1",
                             (guild.id, hub_ch.id, cutoff),
                         ) as cur:
                             row = await cur.fetchone()
@@ -81365,8 +81512,8 @@ async def _eval_bingo_cell(guild_id: int, user_id: int, challenge: dict) -> bool
             try:
                 async with get_db() as db:
                     async with db.execute(
-                        "SELECT COUNT(*) FROM member_activity WHERE guild_id=? AND user_id=? "
-                        "AND activity_type='message' AND created_at>?",
+                        "SELECT COALESCE(SUM(hits),0) FROM member_activity_daily WHERE guild_id=? AND user_id=? "
+                        "AND last_ts>?",
                         (guild_id, user_id, month_start),
                     ) as cur:
                         c = int((await cur.fetchone() or [0])[0])
@@ -81491,8 +81638,8 @@ async def _eval_bingo_cell(guild_id: int, user_id: int, challenge: dict) -> bool
             try:
                 async with get_db() as db:
                     async with db.execute(
-                        "SELECT COUNT(DISTINCT DATE(created_at)) FROM member_activity "
-                        "WHERE guild_id=? AND user_id=? AND created_at>?",
+                        "SELECT COUNT(DISTINCT day) FROM member_activity_daily "
+                        "WHERE guild_id=? AND user_id=? AND last_ts>?",
                         (guild_id, user_id, month_start),
                     ) as cur:
                         c = int((await cur.fetchone() or [0])[0])
@@ -82696,8 +82843,8 @@ async def _track_mentor_interaction(guild_id: int, user_id: int):
         today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
         async with get_db() as db:
             async with db.execute(
-                "SELECT DISTINCT user_id FROM member_activity WHERE guild_id=? "
-                "AND user_id IN (?, ?) AND activity_type='message' AND created_at>?",
+                "SELECT DISTINCT user_id FROM member_activity_daily WHERE guild_id=? "
+                "AND user_id IN (?, ?) AND last_ts>?",
                 (guild_id, m_id, a_id, today_start),
             ) as cur:
                 today_active = {int(r[0]) for r in await cur.fetchall()}
@@ -83442,8 +83589,8 @@ async def _build_user_recap_dm(guild_id: int, user_id: int) -> Optional[discord.
         # Messages
         async with get_db() as db:
             async with db.execute(
-                "SELECT COUNT(*) FROM member_activity WHERE guild_id=? AND user_id=? "
-                "AND activity_type='message' AND created_at>?",
+                "SELECT COALESCE(SUM(hits),0) FROM member_activity_daily WHERE guild_id=? AND user_id=? "
+                "AND last_ts>?",
                 (guild_id, user_id, week_start),
             ) as cur:
                 msgs = int((await cur.fetchone() or [0])[0])
@@ -83547,8 +83694,8 @@ async def weekly_recap_task():
                 cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
                 async with get_db() as db:
                     async with db.execute(
-                        "SELECT DISTINCT user_id FROM member_activity WHERE guild_id=? "
-                        "AND activity_type='message' AND created_at>?",
+                        "SELECT DISTINCT user_id FROM member_activity_daily WHERE guild_id=? "
+                        "AND last_ts>?",
                         (guild.id, cutoff),
                     ) as cur:
                         active_uids = [int(r[0]) for r in await cur.fetchall()]
@@ -83666,21 +83813,21 @@ async def _compute_health_metrics(guild) -> dict:
         try:
             async with get_db() as db:
                 async with db.execute(
-                    "SELECT COUNT(*) FROM member_activity WHERE guild_id=? "
-                    "AND activity_type='message' AND created_at>?",
+                    "SELECT COALESCE(SUM(hits),0) FROM member_activity_daily WHERE guild_id=? "
+                    "AND last_ts>?",
                     (gid, cutoff_7d),
                 ) as cur:
                     m["msgs_7d"] = int((await cur.fetchone() or [0])[0])
                 async with db.execute(
-                    "SELECT COUNT(*) FROM member_activity WHERE guild_id=? "
-                    "AND activity_type='message' AND created_at>?",
+                    "SELECT COALESCE(SUM(hits),0) FROM member_activity_daily WHERE guild_id=? "
+                    "AND last_ts>?",
                     (gid, cutoff_30d),
                 ) as cur:
                     m["msgs_30d"] = int((await cur.fetchone() or [0])[0])
                 # Top 5 actifs 7j
                 async with db.execute(
-                    "SELECT user_id, COUNT(*) AS c FROM member_activity WHERE guild_id=? "
-                    "AND activity_type='message' AND created_at>? "
+                    "SELECT user_id, SUM(hits) AS c FROM member_activity_daily WHERE guild_id=? "
+                    "AND last_ts>? "
                     "GROUP BY user_id ORDER BY c DESC LIMIT 5",
                     (gid, cutoff_7d),
                 ) as cur:
@@ -83688,8 +83835,8 @@ async def _compute_health_metrics(guild) -> dict:
                 # Users à risque : level >=5 mais aucun message en 7j
                 async with db.execute(
                     "SELECT e.user_id FROM economy e WHERE e.guild_id=? AND e.level>=5 "
-                    "AND e.user_id NOT IN (SELECT DISTINCT user_id FROM member_activity "
-                    "WHERE guild_id=? AND created_at>?) LIMIT 10",
+                    "AND e.user_id NOT IN (SELECT DISTINCT user_id FROM member_activity_daily "
+                    "WHERE guild_id=? AND last_ts>?) LIMIT 10",
                     (gid, gid, cutoff_7d),
                 ) as cur:
                     m["at_risk"] = [int(r[0]) for r in await cur.fetchall()]
@@ -83936,8 +84083,8 @@ async def owner_alerts_task():
                         cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
                         async with get_db() as db:
                             async with db.execute(
-                                "SELECT 1 FROM member_activity WHERE guild_id=? AND channel_id=? "
-                                "AND activity_type='message' AND created_at>? LIMIT 1",
+                                "SELECT 1 FROM member_activity_daily WHERE guild_id=? AND channel_id=? "
+                                "AND last_ts>? LIMIT 1",
                                 (guild.id, hub_ch.id, cutoff),
                             ) as cur:
                                 row = await cur.fetchone()
@@ -84592,20 +84739,20 @@ async def admin_journey_cmd(i: discord.Interaction, membre: discord.Member):
         # Joined date
         joined = membre.joined_at
         days_in = (datetime.now(timezone.utc) - joined).days if joined else 0
-        # First message
+        # First message (D3 : member_activity_daily — borné par la rétention agrégat ;
+        # "première activité dans la fenêtre conservée" plutôt que all-time exact).
         async with get_db() as db:
             async with db.execute(
-                "SELECT MIN(created_at) FROM member_activity WHERE guild_id=? AND user_id=? "
-                "AND activity_type='message'",
+                "SELECT MIN(day) FROM member_activity_daily WHERE guild_id=? AND user_id=?",
                 (gid, membre.id),
             ) as cur:
                 row = await cur.fetchone()
         first_msg = row[0] if row and row[0] else "_Jamais_"
-        # Total messages
+        # Total messages (D3 : compteur LIFETIME via activity_tracking — jamais purgé,
+        # incrémenté à chaque message ; member_activity_daily ne couvre que la fenêtre récente).
         async with get_db() as db:
             async with db.execute(
-                "SELECT COUNT(*) FROM member_activity WHERE guild_id=? AND user_id=? "
-                "AND activity_type='message'",
+                "SELECT COALESCE(total_messages,0) FROM activity_tracking WHERE guild_id=? AND user_id=?",
                 (gid, membre.id),
             ) as cur:
                 total_msgs = int((await cur.fetchone() or [0])[0])
@@ -85038,8 +85185,8 @@ async def server_anniversary_task():
                 year_start = today.replace(month=1, day=1, hour=0, minute=0, second=0).isoformat()
                 async with get_db() as db:
                     async with db.execute(
-                        "SELECT COUNT(DISTINCT user_id) FROM member_activity "
-                        "WHERE guild_id=? AND created_at>?",
+                        "SELECT COUNT(*) FROM activity_tracking "
+                        "WHERE guild_id=? AND last_message>?",
                         (guild.id, year_start),
                     ) as cur:
                         active_count = int((await cur.fetchone() or [0])[0])
@@ -85670,8 +85817,8 @@ async def daily_meta_task():
                 day_end = now_fr.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
                 async with get_db() as db:
                     async with db.execute(
-                        "SELECT COUNT(*) FROM member_activity WHERE guild_id=? "
-                        "AND activity_type='message' AND created_at>=? AND created_at<?",
+                        "SELECT COALESCE(SUM(hits),0) FROM member_activity_daily WHERE guild_id=? "
+                        "AND last_ts>=? AND last_ts<?",
                         (guild.id, day_start, day_end),
                     ) as cur:
                         msgs_yesterday = int((await cur.fetchone() or [0])[0])
