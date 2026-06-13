@@ -10,7 +10,9 @@ API publique :
 - get_upcoming_birthdays(guild, days_ahead=7) -> list[dict]
 - build_birthday_panel(guild) -> LayoutView
 
-Pas de DB table — lit directement guild_config.birthdays (dict).
+D4 : lit les anniversaires via le helper table-backed list_birthdays (table
+member_birthdays + REPLI blob), injecté par setup(). Fallback blob direct si
+le helper n'est pas fourni.
 """
 from __future__ import annotations
 
@@ -31,14 +33,18 @@ _bot = None
 _get_db = None
 _db_get = None
 _v2 = None
+# D4 : helper table-backed injecté (list_birthdays) — les anniversaires vivent
+# désormais dans la table member_birthdays (+REPLI blob), plus dans le blob.
+_list_birthdays = None
 
 
-def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict):
-    global _bot, _get_db, _db_get, _v2
+def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, list_birthdays_fn=None):
+    global _bot, _get_db, _db_get, _v2, _list_birthdays
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
     _v2 = v2_helpers
+    _list_birthdays = list_birthdays_fn
 
 
 async def get_upcoming_birthdays(
@@ -49,11 +55,18 @@ async def get_upcoming_birthdays(
     Chaque entry : {user_id, mm_dd, days_until, label}
     """
     out: list[dict] = []
-    if not guild or _db_get is None:
+    if not guild:
         return out
     try:
-        cfg_data = await _db_get(guild.id)
-        bdays = cfg_data.get("birthdays", {}) or {}
+        # D4 : lecture table-backed (member_birthdays) + REPLI blob. Fallback sur
+        # l'ancienne lecture blob directe si le helper n'a pas été injecté.
+        if _list_birthdays is not None:
+            bdays = await _list_birthdays(guild.id)
+        elif _db_get is not None:
+            cfg_data = await _db_get(guild.id)
+            bdays = cfg_data.get("birthdays", {}) or {}
+        else:
+            return out
         if not bdays:
             return out
 
