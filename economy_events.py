@@ -114,6 +114,15 @@ EVENTS = {
     },
 }
 
+# ─── CAP GLOBAL ANTI-INFLATION (Tâche C.1) ──────────────────────────────────
+# Toutes les sources de multiplicateur de pièces (saison × daily × weekend du
+# seasonal_engine, bonus du jour ici, config event par-guilde, prestige) se
+# cumulaient SANS plafond → empilement explosif possible (~×10 théorique).
+# On agrège tout dans effective_coin_multiplier() puis on PLAFONNE à ce cap.
+# Conservateur : on ne BAISSE pas les gains normaux, on coupe juste l'extrême.
+COIN_MULT_GLOBAL_CAP = 3.0
+COIN_MULT_FLOOR = 0.5  # garde-fou bas (une config owner < 0.5 ne casse rien)
+
 # Taux de taxe par défaut (anti-laundering sur /gift)
 DEFAULT_GIFT_TAX = 0.05  # 5%
 
@@ -203,6 +212,103 @@ def apply_coin_mult(amount: int) -> int:
         return int(round(int(amount) * coin_multiplier()))
     except (TypeError, ValueError):
         return int(amount or 0)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# MULTIPLICATEUR EFFECTIF CENTRAL + CAP GLOBAL (Tâche C.1)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def effective_coin_multiplier(
+    guild_id: int | None = None,
+    user_id: int | None = None,
+    *,
+    event_coin_mult: float = 1.0,
+    prestige_rank: int = 0,
+    detail: bool = False,
+):
+    """Agrège TOUTES les sources de multiplicateur de pièces et PLAFONNE.
+
+    Sources empilées (multiplicatif) :
+      • seasonal_engine.get_modifier("coin_mult")  — saison × daily × weekend
+      • coin_multiplier()                          — bonus hebdo du jour (ce module)
+      • event_coin_mult                            — config owner par-guilde (0.5..3.0)
+      • prestige : 1 + coins_bonus(rank)           — bonus permanent (additif → facteur)
+
+    Le produit est borné dans [COIN_MULT_FLOOR, COIN_MULT_GLOBAL_CAP].
+    FAIL-SAFE : toute source qui lève renvoie 1.0 pour cette couche.
+
+    Retourne float (le multiplicateur effectif borné), ou un dict si detail=True
+    pour l'affichage (Ma Fortune) : {raw, effective, capped, sources}.
+    """
+    sources: dict[str, float] = {}
+
+    # Couche 1 : seasonal_engine (saison × daily × weekend) — import paresseux
+    try:
+        import seasonal_engine as _season
+        s = float(_season.get_modifier("coin_mult", 1.0))
+        if s > 0:
+            sources["saison/daily/weekend"] = s
+    except Exception:
+        pass
+
+    # Couche 2 : bonus hebdo du jour (ce module)
+    try:
+        d = float(coin_multiplier())
+        if d != 1.0 and d > 0:
+            sources["bonus du jour"] = d
+    except Exception:
+        pass
+
+    # Couche 3 : config event par-guilde (déjà bornée 0.5..3.0 à la saisie)
+    try:
+        e = float(event_coin_mult or 1.0)
+        if e != 1.0 and e > 0:
+            sources["réglage serveur"] = e
+    except Exception:
+        pass
+
+    # Couche 4 : prestige (bonus permanent additif → on le convertit en facteur)
+    try:
+        if prestige_rank and prestige_rank > 0:
+            import engagement47 as _eng47
+            pb = float(_eng47.prestige_bonus_coins(int(prestige_rank)))
+            if pb > 0:
+                sources["prestige"] = 1.0 + pb
+    except Exception:
+        pass
+
+    raw = 1.0
+    for v in sources.values():
+        raw *= v
+
+    effective = max(COIN_MULT_FLOOR, min(COIN_MULT_GLOBAL_CAP, raw))
+    capped = raw > COIN_MULT_GLOBAL_CAP
+
+    if detail:
+        return {
+            "raw": round(raw, 3),
+            "effective": round(effective, 3),
+            "capped": capped,
+            "cap": COIN_MULT_GLOBAL_CAP,
+            "sources": sources,
+        }
+    return effective
+
+
+def cap_coin_multiplier(raw_mult: float) -> float:
+    """Plafonne un multiplicateur déjà combiné ailleurs (point d'application minimal).
+
+    À utiliser là où plusieurs multiplicateurs sont DÉJÀ combinés dans le code
+    existant : on borne juste le produit final dans [FLOOR, CAP], sans rien
+    recalculer. FAIL-SAFE : une valeur invalide retombe sur 1.0.
+    """
+    try:
+        m = float(raw_mult)
+    except (TypeError, ValueError):
+        return 1.0
+    if m <= 0:
+        return 1.0
+    return max(COIN_MULT_FLOOR, min(COIN_MULT_GLOBAL_CAP, m))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -426,6 +532,9 @@ __all__ = [
     "wheel_free",
     "gift_tax_rate",
     "apply_coin_mult",
+    "effective_coin_multiplier",
+    "cap_coin_multiplier",
+    "COIN_MULT_GLOBAL_CAP",
     # Rendering
     "build_layout",
     # Task

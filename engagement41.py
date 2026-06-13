@@ -449,6 +449,33 @@ def get_pet(pet_id: str) -> Optional[dict]:
     return None
 
 
+# =============================================================================
+# Phase 268 — PERK PASSIF DOUX (non-combat) : petit bonus de RENTE selon la
+# rareté du familier équipé. Volontairement MODESTE et PLAFONNÉ (rétention #1 :
+# n'écrase pas l'équilibre, ne punit personne). Le bonus est en ÉCLATS (monnaie
+# cosmétique de La Cité) → équilibre SÉPARÉ des pièces de gameplay. Centralisé
+# ici (1 seule source de vérité), lu par bot.py (helper _pet_rente_bonus) et
+# affiché dans le panneau du familier + Revenus/Ma Fortune.
+# Les pets achetables (sans clé 'rarity') sont traités comme 'common'.
+# =============================================================================
+PET_RENTE_BONUS_BY_RARITY = {
+    'common':    1,
+    'rare':      1,
+    'epic':      2,
+    'legendary': 3,
+    'mythic':    5,
+}
+
+
+def pet_rente_bonus(pet: Optional[dict]) -> int:
+    """Bonus de rente (en Éclats) du familier équipé, selon sa rareté.
+    Fail-safe : pas de pet → 0. Pet sans rareté (achetable) → 'common'."""
+    if not pet:
+        return 0
+    rarity = pet.get('rarity') or 'common'
+    return int(PET_RENTE_BONUS_BY_RARITY.get(rarity, 1))
+
+
 def pet_form_index(level: int) -> int:
     """Index de forme du pet selon son niveau (0..4)."""
     if level < 5:
@@ -550,6 +577,7 @@ __all__ = [
     'RARITY_COLORS', 'RARITY_LABELS',
     # Pets
     'PETS', 'get_pet', 'pet_form_index', 'pet_form_label', 'pet_xp_for_level',
+    'PET_RENTE_BONUS_BY_RARITY', 'pet_rente_bonus',
     # Wheel
     'WHEEL_REWARDS', 'spin_wheel',
     # Confessions
