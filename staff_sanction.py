@@ -53,6 +53,13 @@ _db_get = None
 _v2 = None
 
 import owner_ids as _owner_ids  # FIX sécu : source UNIQUE (incluait GoRipe non protégé avant)
+# B3 : rate-limiter partagé (owner/super-owner exempts, fail-open). Import gardé :
+# si indisponible, on dégrade proprement (les sanctions ne sont jamais bloquées par
+# un souci d'import du limiter).
+try:
+    import rate_limiter as _ratelimit
+except Exception:
+    _ratelimit = None
 STAFF_CHANNEL_NAME = "🚨-actions-staff"
 STAFF_CATEGORY_HINT = "🛡️ Modération"
 
@@ -304,6 +311,21 @@ async def _handle_sanction_click(
             return await i.response.send_message(
                 "🔒 Action serveur uniquement.", ephemeral=True
             )
+        # B3 : rate-limit AVANT exécution (bouton de sanction = action sensible).
+        # Owner/super-owner exempts côté limiter. Fail-open : un pépin du limiter
+        # n'empêche jamais une sanction légitime.
+        if _ratelimit is not None:
+            try:
+                ok_rate = await _ratelimit.check_and_record(
+                    i.user.id, "button",
+                    user_member=i.user if isinstance(i.user, discord.Member) else None,
+                )
+                if not ok_rate:
+                    return await i.response.send_message(
+                        "⏳ Trop d'actions — pause 5 min.", ephemeral=True
+                    )
+            except Exception:
+                pass
         # Permission check — FAIL-CLOSED : toute exception OU permission manquante => REFUS.
         # (Avant : un `except Exception: pass` avalait l'erreur et laissait l'exécution
         # appliquer la sanction = gate fail-open. Audit revue totale.)

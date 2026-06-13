@@ -40,6 +40,10 @@ _db_get = None
 # les boucles supervisées (= MÊME registre que le task_supervisor). Optionnel/fail-safe :
 # si non câblé, on retombe sur l'ancien check 2-loops codé en dur.
 _loops_status_fn = None
+# D2 : callback watchdog mémoire fourni par bot.py → renvoie un dict
+# {"asyncio_tasks": int, "dicts": {name: size}}. Optionnel/fail-open : si non
+# câblé ou cassé, le watchdog est simplement inactif (ne bloque jamais le check).
+_mem_stats_fn = None
 
 # Tables critiques à vérifier (présence + read OK)
 CRITICAL_TABLES = (
@@ -47,15 +51,21 @@ CRITICAL_TABLES = (
     "guild_config", "season_drops_log",
 )
 
+# D2 : seuils d'alerte mémoire (généreux → on alerte une fuite réelle, pas un pic).
+_MEM_TASKS_THRESHOLD = 1500     # nb de tâches asyncio vivantes
+_MEM_DICT_THRESHOLD = 50_000    # taille d'un seul gros dict mémoire
 
-def setup(bot_instance, get_db_fn, db_get_fn, loops_status_fn=None):
-    global _bot, _get_db, _db_get, _loops_status_fn
+
+def setup(bot_instance, get_db_fn, db_get_fn, loops_status_fn=None, mem_stats_fn=None):
+    global _bot, _get_db, _db_get, _loops_status_fn, _mem_stats_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
-    # Rétro-compatible : appelable sans le 4e arg (ancienne signature).
+    # Rétro-compatible : appelable sans le 4e/5e arg (ancienne signature).
     if loops_status_fn is not None:
         _loops_status_fn = loops_status_fn
+    if mem_stats_fn is not None:
+        _mem_stats_fn = mem_stats_fn
 
 
 async def init_db():
@@ -329,6 +339,12 @@ async def run_check_now(guild: Optional[discord.Guild] = None) -> dict:
     except Exception as ex:
         print(f"[health_check dead-loops DM] {ex}")
 
+    # D2 : watchdog mémoire (fail-open total ; n'altère pas le rapport per-guild).
+    try:
+        await _maybe_dm_memory_watchdog()
+    except Exception as ex:
+        print(f"[health_check mem-watchdog DM] {ex}")
+
     return report
 
 
@@ -380,6 +396,76 @@ async def _maybe_dm_dead_loops(tasks_report: dict) -> None:
                 await user.send(body)
         except Exception:
             # anti-429 / DM fermés / user introuvable : on n'insiste pas, on ne lève pas.
+            continue
+
+
+# ─── D2 : Watchdog mémoire ───────────────────────────────────────────────────
+# Dédup anti-spam (non persistant) : on ne re-DM pas tant que le même set de seuils
+# reste franchi. Reset au reboot (acceptable).
+_mem_watchdog_last_signature = None
+
+
+async def _maybe_dm_memory_watchdog() -> None:
+    """Mesure légère mémoire (tâches asyncio vivantes + tailles des gros dicts) et
+    alerte le super-owner si un seuil est franchi. But : repérer une FUITE avant
+    l'OOM-kill Railway. FAIL-OPEN : aucune erreur ne casse le health check, et si
+    le callback n'est pas câblé, le watchdog est simplement inactif."""
+    global _mem_watchdog_last_signature
+    if _bot is None or _mem_stats_fn is None:
+        return
+    try:
+        stats = _mem_stats_fn() or {}
+    except Exception as ex:
+        print(f"[health_check mem-watchdog stats] {ex}")
+        return
+
+    breaches = []
+    try:
+        ntasks = int(stats.get("asyncio_tasks", 0) or 0)
+        if ntasks >= _MEM_TASKS_THRESHOLD:
+            breaches.append(f"tâches asyncio = {ntasks} (seuil {_MEM_TASKS_THRESHOLD})")
+        for name, size in (stats.get("dicts") or {}).items():
+            try:
+                if int(size) >= _MEM_DICT_THRESHOLD:
+                    breaches.append(f"`{name}` = {size} (seuil {_MEM_DICT_THRESHOLD})")
+            except Exception:
+                continue
+    except Exception as ex:
+        print(f"[health_check mem-watchdog eval] {ex}")
+        return
+
+    if not breaches:
+        _mem_watchdog_last_signature = None  # tout est rentré dans l'ordre → réarme
+        return
+    signature = "|".join(sorted(breaches))
+    if signature == _mem_watchdog_last_signature:
+        return  # même franchissement qu'au dernier check → pas de re-spam
+    _mem_watchdog_last_signature = signature
+
+    try:
+        import owner_ids as _oids
+        owner_id_set = _oids.SUPER_OWNER_IDS
+    except Exception:
+        owner_id_set = {781205382923288593}
+
+    lines = [
+        "🧠 **Watchdog mémoire — seuil franchi**",
+        "",
+        "Une mesure mémoire dépasse le seuil (possible fuite avant OOM Railway) :",
+        "",
+    ]
+    for i, b in enumerate(breaches[:12], 1):
+        lines.append(f"`{i}.` {b}")
+    if len(breaches) > 12:
+        lines.append(f"_+ {len(breaches) - 12} autre(s)..._")
+    body = "\n".join(lines)
+
+    for uid in owner_id_set:
+        try:
+            user = _bot.get_user(int(uid)) or await _bot.fetch_user(int(uid))
+            if user is not None:
+                await user.send(body)
+        except Exception:
             continue
 
 

@@ -123,7 +123,53 @@ async def _dm_backup_to_owner(file_path: str, size_bytes: int) -> None:
         # Jamais fatal : on log et on continue.
         print(f"[backup_lite] DM owner échec (non bloquant) : {ex}")
 
+async def _alert_owner_backup_issue(title: str, detail: str) -> None:
+    """Alerte le super-owner d'un souci de backup (intégrité / taille).
+
+    Réutilise le canal DM super-owner déjà en place dans ce module (jamais un
+    membre lambda). Throttle absent volontairement : un souci de backup est rare
+    et critique → on veut le signal à chaque occurrence. FAIL-SAFE total."""
+    try:
+        if _bot is None:
+            print(f"[backup_lite] (bot indispo) {title} — {detail}")
+            return
+        owner = _bot.get_user(_SUPER_OWNER_ID)
+        if owner is None:
+            try:
+                owner = await _bot.fetch_user(_SUPER_OWNER_ID)
+            except Exception:
+                owner = None
+        if owner is None:
+            print(f"[backup_lite] (owner introuvable) {title} — {detail}")
+            return
+        await owner.send(f"{title}\n\n{detail}")
+    except Exception as ex:
+        # Jamais fatal : on log et on continue.
+        print(f"[backup_lite] alerte owner backup échec (non bloquant) : {ex}")
+
+
+def _latest_backup_size_bytes() -> int:
+    """Taille (octets) du backup .json.gz le plus récent, ou 0 si aucun.
+
+    Sert au garde-fou « backup anormalement petit » (B2). Fail-safe : 0 sur
+    toute erreur (→ pas d'alerte, on n'a juste rien à comparer)."""
+    try:
+        files = sorted(
+            BACKUP_DIR.glob("critical_*.json.gz"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if not files:
+            return 0
+        return int(files[0].stat().st_size)
+    except Exception:
+        return 0
+
+
 # Tables critiques (whitelist)
+# NB FAIL-SAFE : _dump_table() renvoie None pour toute table absente → elle est
+# simplement marquée "missing" et ignorée (aucun crash du dump). On peut donc
+# lister sans risque des noms qui n'existent pas sur tous les déploiements.
 CRITICAL_TABLES = [
     "guild_config",
     "infractions",
@@ -144,6 +190,49 @@ CRITICAL_TABLES = [
     "voice_protected_channels",
     "dormant_dm_log",
     "staff_signatures",
+    # ─── Progression VITALE oubliée (Phase durcissement B1) ──────────────────
+    # Anti data-loss : ces tables portent la progression réelle des joueurs et
+    # leur perte serait irrécupérable. Noms vérifiés sur les CREATE TABLE du repo.
+    # (Corrige aussi 3 entrées historiques qui ne correspondaient à AUCUNE table
+    #  réelle : `season_drops_log`→`seasonal_drops_log`, `bank_accounts`→
+    #  `user_bank_deposits`, `hall_of_fame_entries`→`hall_of_fame_records`,
+    #  `inventory_items`→`player_inventory`/`player_stash`. On AJOUTE les vrais
+    #  noms sans retirer les anciens, qui restent inoffensifs car ignorés.)
+    "economy",               # portefeuille de pièces (coins) — bot.py
+    "citadelle_wallet",      # Éclats (monnaie citadelle) — citadelle.py
+    "user_bank_deposits",    # banque (vrai nom) — bot.py
+    "activity_score",        # score d'activité (gates events) — activity_system.py
+    "seasonal_drops_log",    # drops saisonniers (vrai nom) — seasonal_engine.py
+    "hall_of_fame_records",  # hall of fame (vrai nom) — bot.py
+    "player_inventory",      # inventaire équipé (items + enchant/affixes JSON) — bot.py
+    "player_stash",          # coffre/stash (vrai nom) — bot.py
+    "user_cosmetics",        # cosmétiques possédés — cosmetics.py
+    "auctions",              # enchères (vrai nom) — bot.py
+    "user_pets",             # familiers — bot.py
+    "pet_eggs",              # œufs de familier — pet_eggs.py
+    "pet_evolution",         # évolution familier — pet_evolution.py
+    "player_classes",        # classe choisie — bot.py
+    "player_class_choice",   # choix de classe (table dédiée) — bot.py
+    "achievements_unlocked", # succès débloqués — bot.py
+    "user_prestige",         # prestige — bot.py
+    "season_progress",       # progression de saison — bot.py
+    "user_streaks",          # streaks quotidiens — bot.py
+    "faction_reputation",    # réputation de faction — bot.py
+    "reputation",            # réputation joueur — reputation.py
+    "referrals",             # parrainages — referrals.py
+    "milestone_claims",      # paliers réclamés — progression_milestones.py
+    "hero_journey",          # parcours héros — hero_journey.py
+    "roblox_account_links",  # liens compte Roblox (vital, non recréable) — roblox_link.py
+    # Citadelle : builds/cosmétiques/métiers (progression sans combat)
+    "citadelle_active",      # build actif — citadelle.py
+    "citadelle_cosmetics",   # cosmétiques citadelle — citadelle.py
+    "citadelle_materials",   # matériaux/récolte — citadelle.py
+    "citadelle_professions", # métiers à niveaux — citadelle.py
+    "citadelle_passe",       # passe citadelle — citadelle.py
+    "citadelle_garden",      # jardin — citadelle.py
+    "citadelle_domaine",     # domaine — citadelle.py
+    "citadelle_rente",       # rente — citadelle.py
+    "citadelle_mastery",     # maîtrise — citadelle.py
 ]
 
 # Limite par table : ne pas sauvegarder + de N rows par table (sécurité)
@@ -181,6 +270,21 @@ async def _dump_table(db, table_name: str) -> Optional[list]:
         return None
 
 
+async def _quick_check_ok(db) -> tuple[bool, str]:
+    """PRAGMA quick_check sur la connexion fournie. (ok, message).
+
+    quick_check est ~équivalent à integrity_check mais beaucoup plus rapide
+    (saute la vérif des index) — adapté à un check pré-dump. Fail-safe : toute
+    exception → considéré KO (on ne risque pas d'écraser un backup sain)."""
+    try:
+        async with db.execute("PRAGMA quick_check") as cur:
+            row = await cur.fetchone()
+        msg = str(row[0]) if row else "no result"
+        return (bool(row) and msg.lower() == "ok"), msg
+    except Exception as ex:
+        return False, f"quick_check error: {ex}"
+
+
 async def backup_now() -> dict:
     """Effectue un backup. Renvoie un dict avec stats."""
     BACKUP_DIR.mkdir(exist_ok=True)
@@ -191,6 +295,7 @@ async def backup_now() -> dict:
         "file": None,
         "size_bytes": 0,
         "error": None,
+        "integrity": None,
     }
     if _get_db is None:
         out["error"] = "DB not initialized"
@@ -198,6 +303,24 @@ async def backup_now() -> dict:
     try:
         payload = {}
         async with _get_db() as db:
+            # ─── B2 : intégrité AVANT dump ───────────────────────────────────
+            # Si la DB est corrompue, dumper produirait un backup empoisonné qui
+            # remplacerait le dernier backup sain. On ABORTE → on garde l'ancien
+            # backup intact + on alerte le fondateur. Fail-safe : l'helper avale
+            # ses propres erreurs et renvoie KO en cas de doute.
+            ok, integ_msg = await _quick_check_ok(db)
+            out["integrity"] = integ_msg
+            if not ok:
+                out["error"] = f"integrity check failed: {integ_msg}"
+                # Ne touche AUCUN fichier de backup (le dernier sain survit).
+                await _alert_owner_backup_issue(
+                    "🛑 **Backup ANNULÉ — base corrompue**",
+                    f"`PRAGMA quick_check` a échoué (`{integ_msg}`). Le backup "
+                    f"du jour a été ABANDONNÉ pour ne PAS écraser le dernier "
+                    f"backup sain. Intervention manuelle requise.",
+                )
+                out["finished_at"] = datetime.now(timezone.utc).isoformat()
+                return out
             for t in CRITICAL_TABLES:
                 rows = await _dump_table(db, t)
                 if rows is None:
@@ -212,6 +335,22 @@ async def backup_now() -> dict:
         filename = BACKUP_DIR / f"critical_{date_str}.json.gz"
         json_bytes = json.dumps(payload, default=str).encode("utf-8")
         compressed = gzip.compress(json_bytes, compresslevel=6)
+
+        # ─── B2 : garde-fou taille (anti backup tronqué) ─────────────────────
+        # Si le .json.gz du jour est anormalement petit vs le précédent (perte
+        # massive de données = bug/wipe silencieux), on alerte le fondateur AVANT
+        # d'écraser. On écrit quand même (le fichier du jour porte un nom daté
+        # distinct, il n'écrase pas l'historique récent), mais l'owner est prévenu.
+        prev_size = _latest_backup_size_bytes()
+        if prev_size > 0 and len(compressed) < int(prev_size * 0.5):
+            await _alert_owner_backup_issue(
+                "⚠️ **Backup anormalement petit**",
+                f"Le backup du jour fait `{len(compressed):,}` octets vs "
+                f"`{prev_size:,}` la dernière fois (< 50 %). Possible perte de "
+                f"données silencieuse — à vérifier. Le backup est tout de même "
+                f"conservé (fichier daté distinct).",
+            )
+
         filename.write_bytes(compressed)
         out["file"] = str(filename)
         out["size_bytes"] = len(compressed)

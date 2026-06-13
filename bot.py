@@ -603,6 +603,34 @@ class ConfigCache:
 # Instance globale du cache
 _config_cache = ConfigCache(max_size=200, ttl_seconds=30)
 
+# D1 : verrou PAR GUILDE pour db_set (anti lost-update). Le read-modify-write du
+# blob config (db_get → data[key]=val → write) n'était PAS atomique : deux écritures
+# concurrentes lisaient le même blob et la dernière écrasait la clé de l'autre.
+# Un asyncio.Lock par guilde sérialise ces write sans bloquer les autres guildes.
+# Dict borné (_CONFIG_LOCK_MAX) : on purge les plus vieux locks NON tenus si on
+# dépasse, pour éviter une fuite mémoire à très grand nombre de guildes.
+_config_locks: "dict[int, asyncio.Lock]" = {}
+_CONFIG_LOCK_MAX = 500
+
+
+def _get_config_lock(gid: int) -> asyncio.Lock:
+    """Renvoie (en le créant au besoin) le Lock dédié à cette guilde.
+
+    Synchronisé par la boucle d'event asyncio (mono-thread) : la création du Lock
+    ne nécessite pas elle-même de verrou. Borne le dict en purgeant des locks
+    libres si on dépasse le plafond (fail-safe : ne purge jamais un lock tenu)."""
+    lock = _config_locks.get(gid)
+    if lock is None:
+        if len(_config_locks) >= _CONFIG_LOCK_MAX:
+            # Purge les locks actuellement non verrouillés (sans état en cours).
+            for k in [k for k, v in _config_locks.items() if not v.locked()]:
+                _config_locks.pop(k, None)
+                if len(_config_locks) < _CONFIG_LOCK_MAX:
+                    break
+        lock = asyncio.Lock()
+        _config_locks[gid] = lock
+    return lock
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #                           ⚡ SYSTÈME D'INTERACTION OPTIMISÉ
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -3346,24 +3374,29 @@ async def db_set(gid, key, val):
         
         # Valider certaines valeurs numériques
         val = validate_config_value(key, val)
-        
-        data = await db_get(gid)
-        data[key] = val
-        
-        # Limiter la taille totale de la config
-        jd = json.dumps(data, ensure_ascii=False)
-        if len(jd) > 100000:  # 100KB max
-            print(f"[DB] Config trop grande pour guild {gid}")
-            return False
-        
-        async with get_db() as db:
-            await db.execute('INSERT INTO guild_config(guild_id, data) VALUES(?,?) ON CONFLICT(guild_id) DO UPDATE SET data=?', (gid, jd, jd))
-            await db.commit()
-        
-        # Invalider le cache après modification
-        # Phase 163.7 : invalide AUSSI la clé négative utilisée par db_get
-        _config_cache.invalidate(gid)
-        _config_cache.invalidate(-int(gid))
+
+        # D1 : verrou par guilde autour du read-modify-write COMPLET (db_get →
+        # data[key]=val → écriture). Sans ça, deux db_set() concurrents sur la
+        # même guilde se perdaient mutuellement une clé (lost-update). Le lock
+        # est local à la guilde → aucune contention inter-guildes.
+        async with _get_config_lock(gid):
+            data = await db_get(gid)
+            data[key] = val
+
+            # Limiter la taille totale de la config
+            jd = json.dumps(data, ensure_ascii=False)
+            if len(jd) > 100000:  # 100KB max
+                print(f"[DB] Config trop grande pour guild {gid}")
+                return False
+
+            async with get_db() as db:
+                await db.execute('INSERT INTO guild_config(guild_id, data) VALUES(?,?) ON CONFLICT(guild_id) DO UPDATE SET data=?', (gid, jd, jd))
+                await db.commit()
+
+            # Invalider le cache après modification
+            # Phase 163.7 : invalide AUSSI la clé négative utilisée par db_get
+            _config_cache.invalidate(gid)
+            _config_cache.invalidate(-int(gid))
         return True
     except Exception as ex:
         print(f"[DB SET ERROR] {ex}")
@@ -13439,6 +13472,20 @@ class TreasureClaimView(View):
             except Exception:
                 pass
 
+            # B3 : rate-limit AVANT tout effet (claim à fort enjeu : 🪙 + gear + œuf).
+            # Fail-open : un pépin du limiter n'empêche jamais le claim légitime.
+            try:
+                ok_rate = await ratelimit_module.check_and_record(
+                    i.user.id, "button",
+                    user_member=i.user if isinstance(i.user, discord.Member) else None,
+                )
+                if not ok_rate:
+                    return await i.followup.send(
+                        "⏳ Trop de clics — pause 5 min.", ephemeral=True
+                    )
+            except Exception:
+                pass
+
             pool = _treasure_pool.get(self.event_id, [])
             if self.treasure_idx >= len(pool):
                 return await i.followup.send("❌ Ce trésor n'existe plus.", ephemeral=True)
@@ -17452,6 +17499,19 @@ class MysteryBoxView(View):
         try:
             if not i.message:
                 return await i.followup.send("❌ Contexte invalide.", ephemeral=True)
+            # B3 : rate-limit AVANT tout effet (ouverture box à fort enjeu : 🪙 + gear).
+            # Fail-open : un pépin du limiter n'empêche jamais l'ouverture légitime.
+            try:
+                ok_rate = await ratelimit_module.check_and_record(
+                    i.user.id, "button",
+                    user_member=i.user if isinstance(i.user, discord.Member) else None,
+                )
+                if not ok_rate:
+                    return await i.followup.send(
+                        "⏳ Trop de clics — pause 5 min.", ephemeral=True
+                    )
+            except Exception:
+                pass
             # Phase 77 : lookup par i.message.id (custom_id stable)
             box = _mystery_boxes.get(i.message.id)
             if not box:
@@ -19210,6 +19270,66 @@ def supervised_loops_status():
                 continue
     except Exception:
         pass
+    return out
+
+
+def memory_stats():
+    """D2 — Watchdog mémoire (léger) : renvoie un snapshot pour détecter une fuite
+    AVANT l'OOM-kill Railway. Lu par health_check (callback partagé), jamais bloquant.
+
+    Mesure :
+      • asyncio_tasks : nombre de tâches asyncio vivantes (fuite de tasks = fuite mémoire).
+      • dicts : taille des gros dicts mémoire connus (in-process). Un dict qui gonfle
+        sans plafond = la signature classique d'une fuite.
+    Fail-safe TOTAL : toute erreur d'une sonde est ignorée (renvoie ce qu'on a pu lire)."""
+    out = {"asyncio_tasks": 0, "dicts": {}}
+    # Tâches asyncio vivantes (snapshot best-effort).
+    try:
+        out["asyncio_tasks"] = len(asyncio.all_tasks())
+    except Exception:
+        pass
+
+    def _safe_len(obj):
+        try:
+            return len(obj)
+        except Exception:
+            return None
+
+    # Gros dicts connus de bot.py.
+    probes = {
+        "_config_cache": globals().get("_config_cache", None),
+        "_config_locks": globals().get("_config_locks", None),
+        "_loop_death_seen": globals().get("_loop_death_seen", None),
+        "_entr_detect_cooldown": globals().get("_entr_detect_cooldown", None),
+        "_unanswered_pending": globals().get("_unanswered_pending", None),
+    }
+    for name, obj in probes.items():
+        if obj is None:
+            continue
+        # _config_cache est un objet wrapper → on tente .size()/._cache, sinon len().
+        n = None
+        try:
+            if name == "_config_cache":
+                inner = getattr(obj, "_cache", None)
+                n = _safe_len(inner) if inner is not None else None
+            else:
+                n = _safe_len(obj)
+        except Exception:
+            n = None
+        if n is not None:
+            out["dicts"][name] = n
+
+    # Dict mémoire connu vivant dans activity_system (best-effort, import déjà fait).
+    try:
+        import activity_system as _act
+        lmt = getattr(_act, "_last_msg_ts", None)
+        if lmt is not None:
+            v = _safe_len(lmt)
+            if v is not None:
+                out["dicts"]["activity._last_msg_ts"] = v
+    except Exception:
+        pass
+
     return out
 
 
@@ -44317,7 +44437,8 @@ async def on_ready():
 
         # Tâche C : on passe supervised_loops_status → health_check lit le MÊME registre
         # de boucles que le task_supervisor (source de vérité mutualisée).
-        health_module.setup(bot, get_db, db_get, supervised_loops_status)
+        # D2 : on passe AUSSI memory_stats → watchdog mémoire (fuite avant OOM Railway).
+        health_module.setup(bot, get_db, db_get, supervised_loops_status, memory_stats)
         await health_module.init_db()
         if not health_module.health_check_task.is_running():
             health_module.health_check_task.start()
@@ -77609,6 +77730,17 @@ class MarketplaceBuyView(View):
         try:
             if not i.message or not i.guild:
                 return await _safe_followup(i, content="❌ Erreur contexte.")
+            # B3 : rate-limit AVANT l'achat (trade P2P = transfert de 🪙 à fort enjeu).
+            # Fail-open : un pépin du limiter n'empêche jamais l'achat légitime.
+            try:
+                ok_rate = await ratelimit_module.check_and_record(
+                    i.user.id, "button",
+                    user_member=i.user if isinstance(i.user, discord.Member) else None,
+                )
+                if not ok_rate:
+                    return await _safe_followup(i, content="⏳ Trop d'actions — pause 5 min.")
+            except Exception:
+                pass
             # Récupérer le listing par message_id via le custom_id
             cid = next((c.custom_id for c in self.children if hasattr(c, 'custom_id') and c.custom_id), '')
             if not cid.startswith('mkt_buy_'):
@@ -81151,6 +81283,17 @@ class PredictionBetModal(Modal):
         if not await _safe_defer(i):
             return
         try:
+            # B3 : rate-limit AVANT le débit (pari = action économie à fort enjeu).
+            # Fail-open : un pépin du limiter n'empêche jamais le pari légitime.
+            try:
+                ok_rate = await ratelimit_module.check_and_record(
+                    i.user.id, "button",
+                    user_member=i.user if isinstance(i.user, discord.Member) else None,
+                )
+                if not ok_rate:
+                    return await _safe_followup(i, content="⏳ Trop d'actions — pause 5 min.")
+            except Exception:
+                pass
             try:
                 amount = int(self.amount_input.value.strip())
                 if amount < 10 or amount > 100000:
