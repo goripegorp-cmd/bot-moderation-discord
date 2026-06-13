@@ -222,6 +222,28 @@ class StaticPanel(ui.LayoutView):
             self.add_item(it)
 
 
+# custom_id stable du bouton « Mon hub » apposé sous les récaps/annonces publics.
+# Re-enregistré au boot via bot.add_view(MyHubButtonView()) côté bot.py → le clic
+# est dispatché même sur de vieux messages survivant à un reboot. NE PAS renommer.
+MY_HUB_BUTTON_CUSTOM_ID = "open_my_hub"
+
+
+def _my_hub_action_row() -> ui.ActionRow:
+    """ActionRow contenant le seul bouton « 🎮 Mon hub » (custom_id stable).
+
+    Le bouton n'a volontairement PAS de callback ici : le dispatch est assuré par
+    la vue persistante MyHubButtonView (même custom_id) enregistrée au boot dans
+    bot.py. Apposé sous un récap/annonce public, il ouvre le hub en éphémère pour
+    le cliqueur (découvrabilité passive)."""
+    btn = ui.Button(
+        label="Mon hub",
+        emoji="🎮",
+        style=discord.ButtonStyle.secondary,
+        custom_id=MY_HUB_BUTTON_CUSTOM_ID,
+    )
+    return ui.ActionRow(btn)
+
+
 def recap_view(
     title_text: str,
     description: str,
@@ -229,6 +251,7 @@ def recap_view(
     color: discord.Color = Palette.PRIMARY,
     footer: Optional[str] = None,
     icon_url: Optional[str] = None,
+    hub_button: bool = False,
 ) -> "StaticPanel":
     """Récap/annonce d'événement dans un bel ENCADRÉ Components V2 (au lieu de
     texte brut). Renvoie une LayoutView prête à envoyer :
@@ -240,11 +263,18 @@ def recap_view(
 
     Garde-fou : un TextDisplay VIDE est rejeté par Discord (400) → ferait
     échouer le récap. On garantit donc un titre + un corps non vides.
+
+    `hub_button=True` ajoute SOUS l'encadré un bouton « 🎮 Mon hub » persistant
+    (custom_id stable, dispatché par MyHubButtonView au boot) qui ouvre le hub en
+    éphémère pour le cliqueur — découvrabilité passive sur les annonces publiques.
     """
     safe_title = (title_text or "").strip() or "📢 Événement"
     safe_desc = (description or "").strip()[:4000] or "_—_"
-    return StaticPanel(info_card(
-        safe_title, safe_desc, icon_url=icon_url, color=color, footer=footer))
+    items = [info_card(
+        safe_title, safe_desc, icon_url=icon_url, color=color, footer=footer)]
+    if hub_button:
+        items.append(_my_hub_action_row())
+    return StaticPanel(*items)
 
 
 def combat_recap_view(
@@ -256,6 +286,7 @@ def combat_recap_view(
     others_count: int = 0,
     participants: Optional[int] = None,
     total_damage: Optional[int] = None,
+    hub_button: bool = False,
 ) -> "StaticPanel":
     """Récap de fin d'événement de COMBAT — format UNIQUE, compact et BORNÉ,
     identique pour TOUS les events (boss raid, world boss, boss du jour, mob,
@@ -304,7 +335,7 @@ def combat_recap_view(
                 continue
         if others_count and others_count > 0:
             lines.append(f"🔸 _+{int(others_count)} autres récompensés_")
-    return recap_view(title, "\n".join(lines), color=color)
+    return recap_view(title, "\n".join(lines), color=color, hub_button=hub_button)
 
 
 __all__ = [
@@ -326,4 +357,5 @@ __all__ = [
     "StaticPanel",
     "recap_view",
     "combat_recap_view",
+    "MY_HUB_BUTTON_CUSTOM_ID",
 ]
