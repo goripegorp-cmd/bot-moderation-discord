@@ -3520,6 +3520,7 @@ async def cfg(gid):
         'entraide_request_channel': 0,     # salon texte des demandes d'aide (0 = OFF)
         'entraide_voice_category': 0,      # catégorie où créer les vocaux temp (0 = pas de vocal)
         'entraide_autodetect_enabled': True,  # détecte les appels à l'aide en chat (langage naturel) → nudge
+        'entraide_unanswered_watch_enabled': True,  # veilleur : nudge si une vraie question reste sans réponse ~10 min
     }
     for k, v in defaults.items():
         if k not in data: data[k] = v
@@ -18725,6 +18726,9 @@ _SUPERVISED_LOOP_NAMES = [
     # Entraide : édite les posts des demandes expirées + supprime les vocaux temp
     # orphelins (vides) de la catégorie configurée. Fail-open, no-op si non configuré.
     "entraide_cleanup_task",
+    # Veilleur : poste un nudge discret si une VRAIE question reste sans réponse
+    # ~10 min (serveur entier, salons chatty). Fail-open, no-op si pending vide / OFF.
+    "unanswered_watch_task",
 ]
 
 
@@ -44807,6 +44811,10 @@ async def on_ready():
             # temp orphelins vides. Fail-open, no-op si l'entraide n'est pas configurée.
             if not entraide_cleanup_task.is_running():
                 entraide_cleanup_task.start()
+            # Veilleur de questions sans réponse (serveur entier) : poste un nudge
+            # discret après ~10 min sans réponse. Supervisé, fail-open, no-op si OFF.
+            if not unanswered_watch_task.is_running():
+                unanswered_watch_task.start()
             # Boutons persistants du POST de demande (re-captés au reboot).
             bot.add_dynamic_items(EntraideClaimButton, EntraideResolveButton)
             # Bouton persistant du NUDGE auto (détection d'appel à l'aide en chat) :
@@ -47011,6 +47019,12 @@ async def on_member_ban(guild, user):
 
 @bot.event
 async def on_member_remove(m):
+    # VEILLEUR questions sans réponse : l'auteur quitte → on ne suit plus ses questions.
+    try:
+        _unanswered_clear_for_author(m.guild.id, m.id)
+    except Exception:
+        pass
+
     # ═══ Tracking stats journalières ═══
     try:
         today = now().strftime('%Y-%m-%d')
@@ -47806,6 +47820,11 @@ async def _handle_welcome(member):
 @bot.event
 async def on_message_delete(message):
     """Log la suppression d'un message (sauf bots et DMs)."""
+    # VEILLEUR questions sans réponse : message supprimé → on arrête de le suivre.
+    try:
+        _unanswered_clear(getattr(message, 'id', 0))
+    except Exception:
+        pass
     try:
         if message.author is None or message.author.bot or message.guild is None:
             return
@@ -48340,6 +48359,16 @@ async def on_message(msg):
         asyncio.create_task(_entraide_autodetect_hook(msg))
     except Exception as ex:
         print(f"[on_message entraide_autodetect] {ex}")
+
+    # ═══════════════ VEILLEUR : questions sans réponse (serveur entier) ═══════════════
+    # Suit les VRAIES questions (filtre mémoire pur) et nudge après ~10 min si personne
+    # n'a aidé. Coordonne aussi les signaux de réponse (reply/mention) en mémoire pure.
+    # Backgroundé (create_task) : CHEAP-FIRST, ne bloque jamais on_message ; toutes les
+    # gardes (config/chatty/cooldown/DB) vivent dans le hook (fail-safe).
+    try:
+        asyncio.create_task(_unanswered_on_message(msg))
+    except Exception as ex:
+        print(f"[on_message unanswered_watch] {ex}")
 
     # ═══════════════ Phase 43 : Tag Royale chain progression ═══════════════
     try:
@@ -57157,6 +57186,13 @@ async def on_raw_reaction_add(payload):
     except Exception as ex:
         print(f"[_check_game_night_sync_react] {ex}")
 
+    # VEILLEUR questions sans réponse : une réaction d'un AUTRE membre sur une question
+    # suivie compte comme « quelqu'un a interagi » → clear (test O(1), mémoire pur).
+    try:
+        _unanswered_on_reaction(payload)
+    except Exception as ex:
+        print(f"[_unanswered_on_reaction] {ex}")
+
 @bot.event
 async def on_raw_reaction_remove(payload):
     if payload.user_id == bot.user.id:
@@ -64574,6 +64610,7 @@ class EntraidePanelV2(LayoutView):
         c = await cfg(self.g.id)
         on = bool(c.get('entraide_enabled', True))
         autodetect = bool(c.get('entraide_autodetect_enabled', True))
+        watch = bool(c.get('entraide_unanswered_watch_enabled', True))
         req_ch = self.g.get_channel(int(c.get('entraide_request_channel', 0) or 0))
         voice_cat = self.g.get_channel(int(c.get('entraide_voice_category', 0) or 0))
         try:
@@ -64598,6 +64635,17 @@ class EntraidePanelV2(LayoutView):
             custom_id="entrcfg_autodetect",
         )
         b_detect.callback = self._toggle_autodetect
+
+        # Veilleur de questions sans réponse (serveur entier) : nudge discret si une
+        # VRAIE question reste sans réponse ~10 min. Indépendant de la détection auto
+        # (toujours utile, même sans bouton si l'entraide n'est pas reliée à un salon).
+        b_watch = Button(
+            label=("👀 Veilleur questions : ON" if watch else "👀 Veilleur questions : OFF"),
+            style=(discord.ButtonStyle.success if watch else discord.ButtonStyle.secondary),
+            disabled=(not on),
+            custom_id="entrcfg_watch",
+        )
+        b_watch.callback = self._toggle_watch
 
         req_select = discord.ui.ChannelSelect(
             placeholder=f"📨 Salon des demandes : {(req_ch.name if req_ch else 'aucun')}",
@@ -64641,16 +64689,17 @@ class EntraidePanelV2(LayoutView):
             v2_body(
                 f"**État :** {'🟢 activé' if on else '⚪ désactivé'}\n"
                 f"**🔎 Détection auto en chat :** {'🟢 activée' if (on and autodetect) else '⚪ désactivée'}\n"
+                f"**👀 Veilleur questions sans réponse :** {'🟢 activé' if (on and watch) else '⚪ désactivé'}\n"
                 f"**📨 Salon des demandes :** {req_ch.mention if req_ch else '_aucun (feature OFF)_'}\n"
                 f"**🔊 Catégorie vocale :** {voice_cat.name if voice_cat else '_aucune (pas de vocal temp)_'}"
             ),
-            v2_subtitle("La détection auto repère « besoin d'aide / help me… » en chat et propose l'entraide (sans MP, sans ping)"),
+            v2_subtitle("Détection auto = repère « besoin d'aide / help me… » dès l'envoi · Veilleur = relance ~10 min après une vraie question restée sans réponse (sans MP, sans ping de masse)"),
             v2_divider(),
             v2_body(f"**🎮 Catalogue de jeux ({len(games)}) :**\n{listing}"),
             v2_divider(),
             discord.ui.ActionRow(req_select),
             discord.ui.ActionRow(cat_select),
-            discord.ui.ActionRow(b_tog, b_detect),
+            discord.ui.ActionRow(b_tog, b_detect, b_watch),
             discord.ui.ActionRow(b_add, b_del, b_back),
         ]
         self.add_item(v2_container(*items, color=0xE67E22))
@@ -64676,6 +64725,15 @@ class EntraidePanelV2(LayoutView):
             await self.render_to(i, edit=True)
         except Exception as ex:
             print(f"[EntraidePanelV2 _toggle_autodetect] {ex}")
+
+    async def _toggle_watch(self, i):
+        try:
+            c = await cfg(self.g.id)
+            await db_set(self.g.id, 'entraide_unanswered_watch_enabled',
+                         not bool(c.get('entraide_unanswered_watch_enabled', True)))
+            await self.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[EntraidePanelV2 _toggle_watch] {ex}")
 
     async def _set_channel(self, i, key):
         try:
@@ -66361,6 +66419,474 @@ async def _entraide_on_detect_click(i: discord.Interaction, author_id: int):
                 await i.response.send_message("❌ Petit souci, réessaie.", ephemeral=True)
         except Exception:
             pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  VEILLEUR DE QUESTIONS SANS RÉPONSE (serveur entier) — anti « personne ne m'a aidé »
+#
+#  OBJECTIF : ne laisser AUCUN joueur sans la moindre réponse pendant ~10 min après
+#  une VRAIE question, SAUF si c'est banal (affirmation, remerciement, message court…).
+#  Choix owner validés : portée = TOUT le serveur (salons chatty) · délai ~10 min ·
+#  action = nudge DISCRET dans le salon (+ bouton entraide pré-rempli si configuré) ·
+#  JAMAIS @everyone/@here/rôle, JAMAIS de MP, au plus une mention NORMALE de l'auteur.
+#
+#  PERFORMANCE (tourne à CHAQUE message / reaction) :
+#    • on_message  : 1er passage 100% MÉMOIRE (_is_genuine_question, motifs réutilisés).
+#                    AUCUNE DB tant qu'il n'y a pas de match « vraie question ».
+#    • on_raw_reaction_add : test d'appartenance O(1) au dict pending → return immédiat
+#                    si le message réagi n'est pas suivi (chemin chaud = 1 dict.get).
+#  Le suivi vit dans un dict mémoire BORNÉ `_unanswered_pending` (cap + éviction FIFO).
+#  Le SWEEP périodique (supervisé, fail-open) poste les nudges après ~10 min.
+#  Tout en try/except : ne casse JAMAIS on_message / on_raw_reaction_add.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Délai avant de considérer une question « sans réponse » et de nudger (~10 min).
+_UNANSWERED_DELAY_SEC = 600
+# Cap dur du dict de suivi (anti-fuite mémoire ; éviction des plus vieux au-delà).
+_UNANSWERED_PENDING_CAP = 3000
+# Longueur/mots mini pour qu'un message soit une question « assez spécifique ».
+_UNANSWERED_MIN_LEN = 15
+_UNANSWERED_MIN_WORDS = 4
+# Auto-suppression du nudge (~10 min) — surface la question sans encombrer le salon.
+_UNANSWERED_NUDGE_AUTODELETE_SEC = 600
+# Nb max de nudges postés par tick de sweep (borne l'API au réveil après downtime).
+_UNANSWERED_MAX_NUDGES_PER_TICK = 8
+
+# Suivi mémoire BORNÉ des questions en attente de réponse :
+#   message_id -> {guild_id, channel_id, author_id, ts (datetime), game_key (str|None)}
+_unanswered_pending: dict = {}
+
+# Mots interrogatifs (FR + EN) — recherche de sous-chaîne sur le texte normalisé via
+# _entr_normalize (lowercase + apostrophes/espaces unifiés). Conservateur : on borde
+# la plupart par un espace pour éviter les sous-chaînes accidentelles.
+_UNANSWERED_QWORDS = (
+    # FR
+    " comment ", " pourquoi ", " ou est", " ou sont", " ou se", " ou je", " ou on",
+    " quand ", " quel ", " quelle ", " quels ", " quelles ", " combien ", " lequel ",
+    " laquelle ", "est ce que", "est ce qu", " c est quoi", "qu est ce", " qui peut",
+    " a quoi ", " comment on", " comment je",
+    # EN
+    " how ", " why ", " where ", " what ", " which ", " when ", " who ", " whom ",
+    " can i ", " can you", " could i", " could you", " does ", " do i ", " is there",
+    " are there", " should i", " how do", " how can", " what s ",
+)
+
+# Banalités / accusés de réception : si le message normalisé RÉDUIT à ça (ou très court),
+# on IGNORE (jamais une vraie question). Comparaison sur le texte normalisé compacté.
+_UNANSWERED_TRIVIAL_EXACT = {
+    "ok", "oki", "okay", "dac", "dacc", "d accord", "daccord", "ack", "merci",
+    "merci beaucoup", "mrc", "thanks", "thank you", "thx", "ty", "oui", "non",
+    "ouais", "ouai", "yep", "nope", "yes", "no", "lol", "mdr", "ptdr", "ptdrr",
+    "xd", "gg", "wp", "ggwp", "+1", "ce", "voila", "voilà", "bah oui", "bah non",
+    "exact", "carrement", "grave", "ah ok", "ah oui", "ah daccord", "nice", "cool",
+    "parfait", "top", "super", "bien", "ok merci", "bonjour", "bonsoir", "salut",
+    "hello", "hi", "yo", "coucou", "re", "wsh", "wesh",
+}
+
+
+def _unanswered_is_reply_or_mention_lead(msg) -> bool:
+    """True si le message est manifestement une RÉPONSE adressée à quelqu'un (et non
+    une question lancée à la cantonade) : il référence un autre message, OU il commence
+    par une mention (« @x ... »). On ne suit JAMAIS ce genre de message. FAIL-OPEN
+    (en cas de doute → True = on ignore, conservateur)."""
+    try:
+        if getattr(msg, 'reference', None) is not None:
+            return True
+        raw = (msg.content or "").lstrip()
+        if raw.startswith("<@"):
+            return True
+        return False
+    except Exception:
+        return True
+
+
+def _is_genuine_question(content: str) -> bool:
+    """FILTRE « vraie question » 100% MÉMOIRE (aucune DB/réseau). CONSERVATEUR :
+    mieux vaut rater une question que harceler sur du banal → renvoie False par défaut.
+
+    DÉCLENCHE si (longueur >= ~15 car. ET >= ~4 mots) ET (
+        contient « ? »
+        OU un mot interrogatif (comment/pourquoi/où/quand/quel(le)/combien/est-ce que/
+           c'est quoi/how/why/where/what/which/can/does/is there…)
+        OU une phrase d'aide détectée par `_entraide_detect_help` (réutilisé)
+    ).
+    IGNORE (banal) : affirmations/accusés de réception (ok, merci, oui, non, lol, gg,
+    +1, voilà…), messages très courts, liens seuls. (Les autres filtres « réponse à
+    quelqu'un / commande / bot / salon » sont faits par l'appelant.)"""
+    try:
+        if not content:
+            return False
+        norm = _entr_normalize(content)  # lowercase + apostrophes/espaces unifiés
+        if not norm:
+            return False
+        # Lien seul (commence par http et ~pas d'espace) → on ignore.
+        if norm.startswith(("http://", "https://", "www.")) and " " not in norm.strip():
+            return False
+        # Banalité exacte (accusé de réception, remerciement, interjection…).
+        if norm in _UNANSWERED_TRIVIAL_EXACT:
+            return False
+        if len(norm) < _UNANSWERED_MIN_LEN:
+            return False
+        words = norm.split()
+        if len(words) < _UNANSWERED_MIN_WORDS:
+            return False
+        # 1) « ? » explicite → question.
+        if "?" in norm:
+            return True
+        # 2) Mot interrogatif (on entoure d'espaces pour matcher en « mot entier » cheap).
+        padded = " " + norm + " "
+        for qw in _UNANSWERED_QWORDS:
+            if qw in padded:
+                return True
+        # 3) Phrase d'aide (réutilise le moteur entraide, sans catalogue = cheap).
+        try:
+            match, _gk, _conf = _entraide_detect_help(norm, None)
+            if match:
+                return True
+        except Exception:
+            pass
+        return False
+    except Exception:
+        return False
+
+
+def _unanswered_track(msg, game_key=None):
+    """Enregistre une question genuine dans le dict pending (mémoire, borné). Évince
+    en FIFO (les plus vieux) si le cap est dépassé. FAIL-SAFE : avale tout."""
+    try:
+        guild = getattr(msg, 'guild', None)
+        author = getattr(msg, 'author', None)
+        if guild is None or author is None:
+            return
+        # Éviction FIFO si le dict explose (anti-fuite mémoire). dict garde l'ordre
+        # d'insertion → les 1res clés sont les plus vieilles.
+        while len(_unanswered_pending) >= _UNANSWERED_PENDING_CAP:
+            try:
+                oldest_key = next(iter(_unanswered_pending))
+                _unanswered_pending.pop(oldest_key, None)
+            except Exception:
+                _unanswered_pending.clear()
+                break
+        _unanswered_pending[int(msg.id)] = {
+            'guild_id': int(guild.id),
+            'channel_id': int(msg.channel.id),
+            'author_id': int(author.id),
+            'ts': now(),
+            'game_key': game_key,
+        }
+    except Exception as ex:
+        print(f"[_unanswered_track] {ex}")
+
+
+def _unanswered_clear(message_id) -> None:
+    """Retire une entrée du pending (cheap, idempotent). FAIL-SAFE."""
+    try:
+        _unanswered_pending.pop(int(message_id), None)
+    except Exception:
+        pass
+
+
+async def _unanswered_on_message(msg):
+    """Point d'entrée appelé depuis on_message (backgroundé). Fait TOUTES les gardes
+    CHEAP-FIRST (mémoire pur) avant toute DB. Enregistre la question dans le pending.
+    Coordonne aussi les SIGNAUX DE RÉPONSE évènementiels (cheap) : si CE message
+    référence/mentionne une question suivie d'un AUTRE membre → on la clear.
+    FAIL-SAFE intégral : ne casse JAMAIS on_message."""
+    try:
+        guild = getattr(msg, 'guild', None)
+        author = getattr(msg, 'author', None)
+        if guild is None or author is None or getattr(author, 'bot', False):
+            return
+
+        # ── Signal de RÉPONSE (cheap, mémoire) AVANT le filtre question : si CE
+        #    message répond à / mentionne une question suivie d'un AUTRE membre, on
+        #    la retire du pending (quelqu'un s'en occupe). Pur dict, pas de DB.
+        try:
+            if _unanswered_pending:  # rien à clear si vide → on saute tout
+                ref = getattr(msg, 'reference', None)
+                ref_id = getattr(ref, 'message_id', None) if ref is not None else None
+                if ref_id is not None:
+                    ent = _unanswered_pending.get(int(ref_id))
+                    if ent is not None and int(ent.get('author_id', 0)) != int(author.id):
+                        _unanswered_clear(ref_id)
+                # (b) mention d'un auteur de question suivie (par un AUTRE membre).
+                if getattr(msg, 'mentions', None):
+                    mentioned_ids = {int(m.id) for m in msg.mentions}
+                    if mentioned_ids:
+                        for mid, e in list(_unanswered_pending.items()):
+                            try:
+                                if (int(e.get('author_id', 0)) in mentioned_ids
+                                        and int(e.get('author_id', 0)) != int(author.id)):
+                                    _unanswered_pending.pop(mid, None)
+                            except Exception:
+                                continue
+        except Exception:
+            pass
+
+        # ── Suivi d'une NOUVELLE question (toggle ON requis) ──────────────────
+        content = msg.content or ""
+        if not content:
+            return
+        # Ignore les commandes (préfixes courants) — calque _entraide_autodetect_hook.
+        stripped = content.lstrip()
+        if stripped[:1] in ('!', '/', '.', '$', '>', '+', '-', '='):
+            return
+        # Message = réponse adressée (référence / commence par une mention) → pas suivi.
+        if _unanswered_is_reply_or_mention_lead(msg):
+            return
+        # Filtre « vraie question » EN MÉMOIRE — si False → STOP, zéro DB.
+        if not _is_genuine_question(content):
+            return
+
+        # Config (cfg caché) : veilleur ON + entraide reliée à un salon ?
+        try:
+            c = await cfg(guild.id)
+        except Exception:
+            return
+        if not bool(c.get('entraide_unanswered_watch_enabled', True)):
+            return
+        req_ch_id = int(c.get('entraide_request_channel', 0) or 0)
+        # Salon des demandes d'entraide lui-même → jamais suivi.
+        if req_ch_id and msg.channel.id == req_ch_id:
+            return
+        # Salon « chatty » uniquement (refuse tickets/annonces/staff/RO…).
+        try:
+            if not await _is_chatty_channel(msg.channel):
+                return
+        except Exception:
+            return
+        # Coordination avec le nudge IMMÉDIAT d'entraide : si l'auteur vient d'être
+        # nudgé (cooldown mémoire encore actif), on NE re-suit PAS (anti-cumul). NB :
+        # _entr_detect_cooldown_ok POSE le cooldown au passage → on regarde l'état SANS
+        # le réarmer pour ne pas voler le nudge immédiat ; lecture directe du dict.
+        try:
+            last = _entr_detect_cooldown.get((int(guild.id), int(author.id)))
+            if last is not None and (now() - last).total_seconds() < _ENTR_DETECT_COOLDOWN_SEC:
+                return
+        except Exception:
+            pass
+        # DB (seulement maintenant) : l'auteur a-t-il déjà une demande open ? Si oui, il
+        # est déjà dans le flux → on ne suit pas (pas de doublon avec l'entraide).
+        try:
+            mine = await entraide_module.list_open_requests(guild.id, limit=100)
+            if any(int(r.get('requester_id', 0)) == author.id for r in (mine or [])):
+                return
+        except Exception:
+            pass  # fail-open : on continue (le sweep re-vérifiera avant de nudger)
+        # Détecte le jeu (cache 5 min) pour pré-remplir le bouton entraide plus tard.
+        game_key = None
+        try:
+            labels = await _entr_get_games_labels(guild.id)
+            _m, game_key, _c = _entraide_detect_help(content.lower(), labels)
+        except Exception:
+            game_key = None
+        _unanswered_track(msg, game_key=game_key)
+    except Exception as ex:
+        print(f"[_unanswered_on_message] {ex}")
+
+
+def _unanswered_on_reaction(payload):
+    """Hook appelé depuis on_raw_reaction_add. CHEMIN CHAUD : test O(1) au dict pending.
+    Si le message réagi n'est pas suivi → return immédiat (zéro travail). Si une réaction
+    est posée sur une question suivie par un AUTRE membre que l'auteur → on la clear
+    (quelqu'un a interagi). FAIL-SAFE."""
+    try:
+        if not _unanswered_pending:
+            return
+        mid = int(getattr(payload, 'message_id', 0) or 0)
+        ent = _unanswered_pending.get(mid)
+        if ent is None:
+            return  # pas suivi → return immédiat (chemin chaud)
+        reactor_id = int(getattr(payload, 'user_id', 0) or 0)
+        if reactor_id and reactor_id != int(ent.get('author_id', 0)):
+            _unanswered_clear(mid)
+    except Exception:
+        pass
+
+
+def _unanswered_clear_for_author(guild_id: int, author_id: int) -> None:
+    """Retire toutes les questions suivies d'un auteur (départ du serveur). FAIL-SAFE."""
+    try:
+        gid, aid = int(guild_id), int(author_id)
+        for mid, e in list(_unanswered_pending.items()):
+            try:
+                if int(e.get('guild_id', 0)) == gid and int(e.get('author_id', 0)) == aid:
+                    _unanswered_pending.pop(mid, None)
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+
+def _unanswered_build_nudge_view(author_id: int, *, with_button: bool):
+    """LayoutView du nudge « personne n'a aidé ». Texte FR+EN compact. Si l'entraide
+    est configurée (with_button=True), ajoute le bouton EntraideDetectButton (DynamicItem
+    entr_detect:<uid>) pré-rempli → l'auteur ouvre une vraie demande. Sinon : texte seul
+    (toujours utile : surface la question), SANS bouton."""
+    items = [
+        v2_body(
+            f"👀 Personne n'a encore aidé <@{int(author_id)}> sur sa question — "
+            "quelqu'un peut jeter un œil ?\n"
+            "_No one has helped yet — anyone able to take a look?_"
+        ),
+    ]
+    if with_button:
+        items.append(discord.ui.ActionRow(
+            Button(label="🆘 Trouver de l'aide / Find help",
+                   style=discord.ButtonStyle.primary,
+                   custom_id=f"entr_detect:{int(author_id)}"),
+        ))
+
+    class _UnansweredNudgeLayout(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=None)
+            self.add_item(v2_container(*items, color=0x5865F2))
+
+    return _UnansweredNudgeLayout()
+
+
+async def _unanswered_post_nudge(guild, message_id: int, entry: dict) -> bool:
+    """Poste le nudge DISCRET en REPLY au message d'origine (jamais de MP). Mentionne
+    l'auteur de façon NORMALE (users=[auteur]) mais JAMAIS @everyone/@here/rôles, et
+    mention_author=False (le reply ne re-ping pas non plus). Auto-supprimé ~10 min.
+    Renvoie True si un nudge a effectivement été posté. FAIL-SAFE."""
+    try:
+        channel = guild.get_channel(int(entry.get('channel_id', 0) or 0))
+        if channel is None or not isinstance(channel, discord.TextChannel):
+            return False
+        author_id = int(entry.get('author_id', 0) or 0)
+        # Le bouton entraide n'a de sens que si l'entraide est reliée à un salon.
+        with_button = False
+        try:
+            with_button = (await _entraide_request_channel(guild)) is not None
+        except Exception:
+            with_button = False
+        view = _unanswered_build_nudge_view(author_id, with_button=with_button)
+        author_obj = guild.get_member(author_id)
+        allowed = discord.AllowedMentions(
+            everyone=False, roles=False,
+            users=([author_obj] if author_obj is not None else False),
+        )
+        # On tente d'attacher le reply au message d'origine (message_id = la question)
+        # via un PartialMessage (pas de fetch réseau pour construire la référence).
+        orig_msg = None
+        try:
+            orig_msg = channel.get_partial_message(int(message_id))
+        except Exception:
+            orig_msg = None
+        nudge = None
+        try:
+            if orig_msg is not None:
+                nudge = await orig_msg.reply(
+                    view=view, mention_author=False, allowed_mentions=allowed)
+            else:
+                nudge = await channel.send(view=view, allowed_mentions=allowed)
+        except discord.HTTPException:
+            # Le message d'origine a peut-être disparu → fallback envoi simple.
+            try:
+                nudge = await channel.send(view=view, allowed_mentions=allowed)
+            except Exception:
+                return False
+        except Exception as ex:
+            print(f"[_unanswered_post_nudge send] {ex}")
+            return False
+        # Mémorise le jeu détecté pour pré-remplir le bouton entraide (borné, réutilise
+        # la map du nudge d'entraide existante).
+        try:
+            gk = entry.get('game_key')
+            if gk and nudge is not None:
+                if len(_entr_detect_game_by_msg) >= _ENTR_DETECT_GAME_MAP_CAP:
+                    _entr_detect_game_by_msg.clear()
+                _entr_detect_game_by_msg[int(nudge.id)] = gk
+        except Exception:
+            pass
+        # Auto-suppression ~10 min (le nudge ne doit pas encombrer le salon).
+        try:
+            if nudge is not None:
+                await _register_for_cleanup(
+                    nudge, _UNANSWERED_NUDGE_AUTODELETE_SEC, reason='unanswered_watch')
+        except Exception:
+            pass
+        return nudge is not None
+    except Exception as ex:
+        print(f"[_unanswered_post_nudge] {ex}")
+        return False
+
+
+@tasks.loop(minutes=3)
+async def unanswered_watch_task():
+    """VEILLEUR de questions sans réponse (supervisé, FAIL-OPEN). Toutes les ~3 min :
+    pour chaque question suivie d'âge >= ~10 min ENCORE présente dans le pending, fait
+    une dernière vérif (toggle ON, salon/auteur encore là, pas de demande entraide open)
+    PUIS poste le nudge discret PUIS retire du pending et POSE un cooldown anti-répétition
+    par auteur (réutilise `_entr_detect_cooldown`). Borne le nb de nudges par tick.
+    No-op si le veilleur est OFF / l'auteur a déjà été nudgé."""
+    try:
+        if not _unanswered_pending:
+            return
+        cutoff = now() - timedelta(seconds=_UNANSWERED_DELAY_SEC)
+        posted = 0
+        # Snapshot (on mute le dict pendant l'itération).
+        for mid, entry in list(_unanswered_pending.items()):
+            if posted >= _UNANSWERED_MAX_NUDGES_PER_TICK:
+                break
+            try:
+                ts = entry.get('ts')
+                if ts is None or ts > cutoff:
+                    continue  # pas encore assez vieux
+                guild = bot.get_guild(int(entry.get('guild_id', 0) or 0))
+                if guild is None:
+                    _unanswered_pending.pop(mid, None)
+                    continue
+                author_id = int(entry.get('author_id', 0) or 0)
+                # Auteur encore présent ?
+                if guild.get_member(author_id) is None:
+                    _unanswered_pending.pop(mid, None)
+                    continue
+                # Toggle encore ON ?
+                try:
+                    c = await cfg(guild.id)
+                except Exception:
+                    c = {}
+                if not bool(c.get('entraide_unanswered_watch_enabled', True)):
+                    _unanswered_pending.pop(mid, None)
+                    continue
+                # Anti-répétition : si l'auteur a un cooldown nudge actif, on n'insiste pas.
+                try:
+                    last = _entr_detect_cooldown.get((int(guild.id), author_id))
+                    if last is not None and (now() - last).total_seconds() < _ENTR_DETECT_COOLDOWN_SEC:
+                        _unanswered_pending.pop(mid, None)
+                        continue
+                except Exception:
+                    pass
+                # Dernière vérif DB : pas de demande entraide open entre-temps.
+                try:
+                    mine = await entraide_module.list_open_requests(guild.id, limit=100)
+                    if any(int(r.get('requester_id', 0)) == author_id for r in (mine or [])):
+                        _unanswered_pending.pop(mid, None)
+                        continue
+                except Exception:
+                    pass  # fail-open
+                ok = await _unanswered_post_nudge(guild, int(mid), entry)
+                # Retire du pending QUOI QU'IL ARRIVE (one-shot, pas de re-tentative) +
+                # pose le cooldown anti-répétition par auteur (réutilise le dict entraide).
+                _unanswered_pending.pop(mid, None)
+                if ok:
+                    posted += 1
+                    try:
+                        _entr_detect_cooldown[(int(guild.id), author_id)] = now()
+                    except Exception:
+                        pass
+            except Exception as ex:
+                print(f"[unanswered_watch_task entry] {ex}")
+                _unanswered_pending.pop(mid, None)
+    except Exception as ex:
+        print(f"[unanswered_watch_task] {ex}")
+
+
+@unanswered_watch_task.before_loop
+async def _unanswered_watch_task_wait():
+    await bot.wait_until_ready()
 
 
 # ─── HUB D'ENGAGEMENT (5 boutons persistants, custom_ids stables) ─────────────
