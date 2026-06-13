@@ -65213,22 +65213,68 @@ async def _entraide_maybe_delete_empty_voice(guild, channel):
         print(f"[_entraide_maybe_delete_empty_voice] {ex}")
 
 
+async def _entraide_find_same_game_voice(guild, game: dict):
+    """Cherche un vocal temp d'entraide DÉJÀ ouvert pour le MÊME jeu (anti
+    double-salon quand le cap est atteint). Source de vérité = DB : demandes
+    actives (open/matched) du même game_key portant un voice_channel_id dont le
+    salon existe encore. Renvoie le VoiceChannel réutilisable, ou None. FAIL-SAFE."""
+    try:
+        if guild is None or not game:
+            return None
+        game_key = (game.get('game_key') or '')
+        if not game_key:
+            return None
+        # On balaie les demandes récentes du même jeu encore actives (open) +
+        # toute demande matched récente (la fonction est bornée + indexée).
+        candidates = await entraide_module.list_open_requests_for_game(
+            guild.id, game_key, within_hours=12, limit=30, exclude_request_id=0,
+        )
+        cat = await _entraide_voice_category(guild)
+        for o in (candidates or []):
+            vc_id = int(o.get('voice_channel_id', 0) or 0)
+            if vc_id <= 0:
+                continue
+            ch = guild.get_channel(vc_id)
+            if (ch is not None and isinstance(ch, discord.VoiceChannel)
+                    and (ch.name or '').startswith('🆘')
+                    and (cat is None or ch.category_id == cat.id)):
+                return ch
+        return None
+    except Exception:
+        return None
+
+
 async def _entraide_create_temp_voice(guild, requester_id: int, game: dict):
     """Crée un vocal temporaire « 🆘 {label} · {requester} » dans la catégorie
     configurée. Respecte le cap MAX_TEMP_VOICE_PER_GUILD. NE TOUCHE PAS aux vocaux
-    existants. Renvoie le VoiceChannel créé, ou None (fail-safe : catégorie absente,
-    cap atteint, perms manquantes…). L'auto-suppression quand vide est gérée par
-    voice_autoclean / la tâche d'expiration côté bot (incident vocaux occupés)."""
+    existants. Renvoie le VoiceChannel créé OU réutilisé, ou None (fail-safe :
+    catégorie absente, cap atteint sans réutilisation possible, perms manquantes…).
+    L'auto-suppression quand vide est gérée par voice_autoclean / la tâche
+    d'expiration côté bot (incident vocaux occupés).
+
+    ANTI-ABUS (cap) : si le plafond MAX_TEMP_VOICE_PER_GUILD est atteint, on NE crée
+    PAS un nouveau salon — on réutilise un vocal déjà ouvert pour le MÊME jeu s'il
+    existe (regroupement), sinon on renvoie None (l'appelant affiche « trop de
+    sessions en cours »)."""
     try:
         cat = await _entraide_voice_category(guild)
         if cat is None:
             return None  # pas de catégorie → pas de vocal (le post reste utile)
-        # Cap anti-abus.
+        # Cap anti-abus : compte fiable des salons d'entraide vivants.
         try:
-            if await _entraide_count_live_temp_voice(guild) >= entraide_module.MAX_TEMP_VOICE_PER_GUILD:
-                return None
+            cap = int(getattr(entraide_module, 'MAX_TEMP_VOICE_PER_GUILD', 0) or 0)
         except Exception:
-            pass
+            cap = 0
+        if cap > 0:
+            try:
+                live = await _entraide_count_live_temp_voice(guild)
+            except Exception:
+                live = 0
+            if live >= cap:
+                # Cap atteint → on tente de réutiliser le vocal du même jeu plutôt
+                # que d'en générer un de plus (évite la multiplication de salons).
+                reuse = await _entraide_find_same_game_voice(guild, game)
+                return reuse  # VoiceChannel réutilisable, ou None (= refus propre)
         requester = guild.get_member(int(requester_id))
         rname = (requester.display_name if requester else f"#{requester_id}")
         label = (game.get('label') or game.get('game_key') or 'Entraide')
@@ -65518,31 +65564,124 @@ async def _entraide_mark_post_expired(guild, req: dict):
 
         try:
             await msg.edit(view=_ExpiredLayout())
+            # NETTOYAGE GARANTI : le post « expiré » s'auto-supprime peu après (DB-backed
+            # via _register_for_cleanup → survit au reboot). On marque l'artefact côté DB.
+            try:
+                await _register_for_cleanup(msg, 60, reason='entraide_expired')
+            except Exception:
+                pass
+            try:
+                await entraide_module.clear_request_artifacts(
+                    int(req.get('id', 0) or 0), clear_message=True)
+            except Exception:
+                pass
         except Exception:
             pass
     except Exception as ex:
         print(f"[_entraide_mark_post_expired] {ex}")
 
 
+async def _entraide_finalize_voice(guild, req: dict):
+    """NETTOYAGE GARANTI du vocal temp lié à une demande TERMINÉE (résolue/expirée).
+    - Si le vocal est VIDE → on le supprime tout de suite (via la garde stricte).
+    - S'il est encore OCCUPÉ → on NE casse PAS la discussion ; il sera supprimé dès
+      qu'il se videra (on_voice_state_update + entraide_cleanup_task le retirent), donc
+      on laisse l'id en DB pour que le balayage d'orphelins le reprenne.
+    Marque l'artefact nettoyé en DB UNIQUEMENT si le salon n'existe plus / a été
+    supprimé (sinon on garde la trace pour le balayage). FAIL-SAFE."""
+    try:
+        if guild is None or req is None:
+            return
+        vc_id = int(req.get('voice_channel_id', 0) or 0)
+        if vc_id <= 0:
+            return
+        ch = guild.get_channel(vc_id)
+        if ch is None or not isinstance(ch, discord.VoiceChannel):
+            # Salon déjà disparu → on purge la trace DB pour ne pas reboucler.
+            try:
+                await entraide_module.clear_request_artifacts(
+                    int(req.get('id', 0) or 0), clear_voice=True)
+            except Exception:
+                pass
+            return
+        if len(ch.members) == 0:
+            # Vide → suppression immédiate (la garde stricte revérifie nom+catégorie+vide).
+            await _entraide_maybe_delete_empty_voice(guild, ch)
+            # Si la suppression a réussi le salon n'existe plus → purge la trace DB.
+            if guild.get_channel(vc_id) is None:
+                try:
+                    await entraide_module.clear_request_artifacts(
+                        int(req.get('id', 0) or 0), clear_voice=True)
+                except Exception:
+                    pass
+        # Occupé → on laisse tel quel (jamais casser une discussion en cours). La trace
+        # DB reste → entraide_cleanup_task le supprimera dès qu'il sera vide.
+    except Exception as ex:
+        print(f"[_entraide_finalize_voice] {ex}")
+
+
 @tasks.loop(minutes=15)
 async def entraide_cleanup_task():
     """Entretien périodique de l'entraide (FAIL-OPEN, supervisée). Par guilde :
       1. Expire les demandes ouvertes trop vieilles (module, idempotent) + édite leur
-         post pour retirer les boutons (dégorge la file visuellement).
-      2. Balaye la catégorie vocale configurée et supprime les vocaux temp ORPHELINS
+         post (« expiré », boutons retirés) puis le programme en suppression (~60 s) +
+         finalise leur vocal temp (supprime si vide, laisse si occupé).
+      2. SURVIE REBOOT : balaye les demandes NON ouvertes (résolues/expirées) qui
+         portent ENCORE un post (message_id) ou un vocal (voice_channel_id) — un reboot
+         en plein milieu ne doit laisser AUCUN orphelin. Supprime le post, finalise le
+         vocal, marque l'artefact nettoyé en DB.
+      3. Balaye la catégorie vocale configurée et supprime les vocaux temp ORPHELINS
          VIDES (« 🆘 … » sans personne dedans). Ne touche JAMAIS un vocal occupé/non-entraide.
     No-op si l'entraide n'est pas configurée. 15 min = réactif sans marteler l'API."""
     try:
         for guild in list(bot.guilds):
             try:
-                # 1) Posts des demandes expirées (le module change le statut, on édite ici).
+                # 1) Posts + vocaux des demandes expirées (le module change le statut).
                 try:
                     expired = await entraide_module.expire_open_requests(guild.id)
                     for req in (expired or []):
                         await _entraide_mark_post_expired(guild, req)
+                        await _entraide_finalize_voice(guild, req)
                 except Exception as ex:
                     print(f"[entraide_cleanup_task expire {guild.id}] {ex}")
-                # 2) Vocaux temp orphelins vides dans la catégorie configurée.
+                # 2) SURVIE REBOOT : orphelins DB des demandes déjà terminées (resolved/
+                #    expired) qui portent encore un post ou un vocal → on nettoie.
+                try:
+                    dangling = await entraide_module.list_dangling_requests(guild.id)
+                    for req in (dangling or []):
+                        # 2a) Post encore présent → on le supprime (fail-safe).
+                        msg_id = int(req.get('message_id', 0) or 0)
+                        ch_id = int(req.get('request_channel_id', 0) or 0)
+                        if msg_id and ch_id:
+                            ch = guild.get_channel(ch_id)
+                            if ch is not None:
+                                try:
+                                    pm = ch.get_partial_message(msg_id)
+                                    await pm.delete()
+                                except discord.NotFound:
+                                    pass
+                                except discord.Forbidden:
+                                    pass
+                                except Exception:
+                                    pass
+                            try:
+                                await entraide_module.clear_request_artifacts(
+                                    int(req.get('id', 0) or 0), clear_message=True)
+                            except Exception:
+                                pass
+                        elif msg_id and not ch_id:
+                            # Pas de salon connu → on purge juste la trace.
+                            try:
+                                await entraide_module.clear_request_artifacts(
+                                    int(req.get('id', 0) or 0), clear_message=True)
+                            except Exception:
+                                pass
+                        # 2b) Vocal encore lié → finalise (supprime si vide, sinon laisse).
+                        if int(req.get('voice_channel_id', 0) or 0) > 0:
+                            await _entraide_finalize_voice(guild, req)
+                except Exception as ex:
+                    print(f"[entraide_cleanup_task dangling {guild.id}] {ex}")
+                # 3) Vocaux temp orphelins vides dans la catégorie configurée.
                 try:
                     cat = await _entraide_voice_category(guild)
                     if cat is not None:
@@ -65632,13 +65771,47 @@ async def _entraide_on_claim(i: discord.Interaction, rid: int):
         if game is None:
             game = {'game_key': matched['game_key'], 'label': matched['game_key'], 'emoji': '', 'helper_role_id': 0}
 
-        # Crée le vocal temp (fail-safe si catégorie absente / cap / perms).
-        vc = await _entraide_create_temp_voice(i.guild, matched['requester_id'], game)
-        if vc is not None:
-            try:
-                await entraide_module.set_request_voice(rid, vc.id)
-            except Exception:
-                pass
+        # ── Vocal temp : IDEMPOTENT + anti-course (jamais 2 salons pour 1 demande) ──
+        # 1) Si la demande a DÉJÀ un vocal valide → on le réutilise (double-clic, reboot).
+        vc = None
+        existing_vc_id = int(matched.get('voice_channel_id', 0) or 0)
+        if existing_vc_id > 0:
+            ch_existing = i.guild.get_channel(existing_vc_id)
+            if ch_existing is not None and isinstance(ch_existing, discord.VoiceChannel):
+                vc = ch_existing
+            else:
+                # Référence morte (salon supprimé) → on libère pour pouvoir recréer.
+                try:
+                    await entraide_module.clear_request_artifacts(rid, clear_voice=True)
+                except Exception:
+                    pass
+                matched = await entraide_module.get_request(rid) or matched
+        # 2) Pas de vocal encore : on RÉSERVE atomiquement le droit d'en créer un seul.
+        if vc is None:
+            got_slot = await entraide_module.claim_request_voice_slot(rid)
+            if got_slot:
+                vc = await _entraide_create_temp_voice(i.guild, matched['requester_id'], game)
+                if vc is not None:
+                    try:
+                        await entraide_module.set_request_voice(rid, vc.id)
+                    except Exception:
+                        pass
+                else:
+                    # Création refusée (cap sans réutilisation / perms) → on relâche le
+                    # sentinelle pour ne pas bloquer une future tentative.
+                    try:
+                        await entraide_module.release_request_voice_slot(rid)
+                    except Exception:
+                        pass
+            else:
+                # Un autre clic a gagné la course : on relit l'id réel posé entre-temps
+                # (petite tolérance — la valeur peut être encore -1 le temps d'un battement).
+                refreshed = await entraide_module.get_request(rid) or matched
+                rvid = int(refreshed.get('voice_channel_id', 0) or 0)
+                if rvid > 0:
+                    ch_r = i.guild.get_channel(rvid)
+                    if ch_r is not None and isinstance(ch_r, discord.VoiceChannel):
+                        vc = ch_r
             matched = await entraide_module.get_request(rid) or matched
 
         # Refresh du post pour afficher l'aidant + le vocal.
@@ -65739,6 +65912,25 @@ async def _entraide_on_resolve(i: discord.Interaction, rid: int):
                         self.add_item(v2_container(*resolved_items, color=0x2ECC71))
 
                 await msg.edit(view=_ResolvedLayout())
+                # NETTOYAGE GARANTI du POST : on l'affiche « résolu » un court instant
+                # puis il s'auto-supprime (DB-backed → survit au reboot). On marque
+                # l'artefact côté DB pour que le balayage d'orphelins n'y revienne pas.
+                try:
+                    await _register_for_cleanup(msg, 30, reason='entraide_resolved')
+                except Exception:
+                    pass
+                try:
+                    await entraide_module.clear_request_artifacts(rid, clear_message=True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # NETTOYAGE GARANTI du VOCAL : vide → supprimé tout de suite ; occupé → laissé
+        # (jamais casser une discussion), il partira dès qu'il se videra (cleanup vocal +
+        # tâche périodique). FAIL-SAFE.
+        try:
+            await _entraide_finalize_voice(i.guild, final)
         except Exception:
             pass
 
@@ -65998,6 +66190,17 @@ class EntraideRequestModal(Modal, title="🙋 Demande d'aide"):
                 return await _safe_followup(
                     i, content="ℹ️ Tu as **déjà une demande ouverte** — attends qu'elle soit prise "
                                "ou marque-la résolue avant d'en créer une autre.")
+            if code == entraide_module.CREATE_COOLDOWN:
+                # `rid` porte ici les secondes restantes (anti-abus : pas de re-spam).
+                secs = int(rid or 0)
+                mins = max(1, (secs + 59) // 60)
+                return await _safe_followup(
+                    i, content=f"⏳ Tu viens de faire une demande — patiente encore **~{mins} min** "
+                               f"avant d'en créer une nouvelle (anti-spam). Merci !")
+            if code == entraide_module.CREATE_GUILD_FULL:
+                return await _safe_followup(
+                    i, content="🚧 Il y a **trop de demandes d'aide en cours** sur le serveur pour "
+                               "l'instant — réessaie dans quelques minutes.")
             if code == entraide_module.CREATE_UNKNOWN_GAME:
                 return await _safe_followup(
                     i, content="❌ Ce jeu n'est plus au catalogue. Réessaie depuis « 🙋 J'ai besoin d'aide ».")
