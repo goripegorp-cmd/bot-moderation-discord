@@ -100,6 +100,72 @@ _PANEL_REFRESH_MIN_INTERVAL = 4.0
 _last_user_attack: dict[tuple, float] = {}
 _ATTACK_COOLDOWN = 2.0
 
+# ─── Tâche B.1 — PHASES DE BOSS + ENRAGE (additif, fail-open) ──────────────────
+# À mesure que le boss perd ses HP, il franchit des PHASES (66 % / 33 %) : message
+# d'ambiance + LÉGER buff de dégâts (du boss → exprimé ici comme un buff de dégâts
+# SORTANTS des joueurs, car le boss du jour ne riposte pas : on rend le combat plus
+# "épique" sans pénaliser, c.-à-d. les coups portent plus fort en phase haute). En
+# FIN DE TIMER, le boss ENRAGE : s'il est tué pendant l'enrage → bonus de pièces.
+#
+# TOUT est BORNÉ et FAIL-OPEN : l'état vit en mémoire ; un reboot le remet à zéro
+# (le boss redevient "phase 0", aucun crash). Une erreur de calcul → phase 0 / pas
+# d'enrage / multiplicateur 1.0 (comportement ACTUEL inchangé).
+_PHASE_THRESHOLDS = (
+    # (seuil_pct_HP, clé, multiplicateur_dégâts_sortants, message_d'ambiance)
+    (33, "p33", 1.15, "🔥 **{name} entre en FUREUR !** Ses HP fondent — frappez plus fort, le combat s'intensifie !"),
+    (66, "p66", 1.07, "⚡ **{name} se réveille pour de bon.** L'arène gronde — vos coups portent davantage !"),
+)
+_PHASE_MAX_MULT = 1.15        # plafond ABSOLU du buff de phase
+_ENRAGE_LAST_MINUTES = 5      # le boss enrage dans les N dernières minutes du timer
+_ENRAGE_REWARD_BONUS = 250    # pièces MODESTES de bonus si tué pendant l'enrage (par top-3 / fatal)
+# État en mémoire : { event_id: set(clés_de_phase_déjà_franchies) } (anti-spam des
+# annonces) et { event_id: bool } pour l'enrage déjà annoncé.
+_phase_reached: dict[int, set] = {}
+_enrage_announced: dict[int, bool] = {}
+# Tâche B.2 — COUP FATAL : { event_id: (user_id, enraged) }. Posé par
+# record_boss_attack au moment du kill, LU UNE seule fois par resolve_daily_boss
+# (anti-doublon : un seul coup fatal récompensé). Vidé après lecture.
+_fatal_blow: dict[int, tuple] = {}
+
+
+def _phase_for_pct(pct: int) -> Optional[tuple]:
+    """Phase courante (la plus basse franchie) pour un % de HP, ou None. Fail-safe."""
+    try:
+        for seuil, key, mult, msg in _PHASE_THRESHOLDS:  # ordre croissant de sévérité (33 d'abord)
+            if pct <= seuil:
+                return (seuil, key, mult, msg)
+    except Exception:
+        pass
+    return None
+
+
+def _phase_damage_mult(event_id: int, hp_cur: int, hp_max: int) -> float:
+    """Multiplicateur de dégâts SORTANTS lié à la phase actuelle (>= 1.0, borné).
+    FAIL-OPEN STRICT → 1.0 (aucun changement de dégâts)."""
+    try:
+        if hp_max <= 0:
+            return 1.0
+        pct = int(hp_cur * 100 / hp_max)
+        ph = _phase_for_pct(pct)
+        if ph:
+            return min(_PHASE_MAX_MULT, float(ph[2]))
+    except Exception:
+        pass
+    return 1.0
+
+
+def _is_enraged(expires_ts: Optional[int]) -> bool:
+    """True si on est dans la fenêtre d'enrage (N dernières minutes avant la fin).
+    FAIL-SAFE → False (pas d'enrage = comportement actuel)."""
+    try:
+        if not expires_ts:
+            return False
+        remaining = int(expires_ts) - int(datetime.now(timezone.utc).timestamp())
+        return 0 < remaining <= _ENRAGE_LAST_MINUTES * 60
+    except Exception:
+        return False
+
+
 # Phase 196 : mention intelligente rotative — paramètres anti-spam.
 PING_MAX_USERS = 8          # cap dur de mentions par spawn (TOS Discord)
 PING_COOLDOWN_HOURS = 8     # un même membre n'est ping qu'une fois / ~8h
@@ -640,6 +706,25 @@ async def get_active_boss(guild_id: int) -> Optional[dict]:
         return None
 
 
+async def _live_participant_count(event_id: int) -> int:
+    """Tâche B.5 : nombre de COMBATTANTS distincts ayant déjà frappé ce boss
+    (compteur de présence live affiché sur le panneau). LECTURE SEULE.
+    FAIL-SAFE → 0 (aucune ligne affichée), jamais bloquant."""
+    if _get_db is None:
+        return 0
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM daily_boss_attackers "
+                "WHERE event_id=? AND damage_dealt > 0",
+                (event_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        return int(row[0] or 0) if row else 0
+    except Exception:
+        return 0
+
+
 async def _user_attack_count(event_id: int, user_id: int) -> int:
     if _get_db is None:
         return 0
@@ -777,7 +862,22 @@ async def trigger_daily_boss(
         print(f"[daily_boss] pas de salon dispo, spawn annulé guild={guild.id}")
         return None
 
-    hp = int(boss["hp_base"])
+    # Difficulté dynamique (FAIL-OPEN strict, additif) : HP adaptés à la foule.
+    # facteur BORNÉ [0.7..2.0] selon le nb d'actifs du jour, plancher/plafond
+    # ABSOLUS relatifs au boss. La moindre erreur → facteur 1.0 (HP de base actuel).
+    hp_base = int(boss["hp_base"])
+    hp = hp_base
+    try:
+        import activity_system as _act
+        _f = await _act.crowd_hp_factor(guild)
+        hp = _act.apply_crowd_hp(
+            hp_base, _f,
+            floor=int(hp_base * _act.CROWD_HP_FACTOR_MIN),
+            cap=int(hp_base * _act.CROWD_HP_FACTOR_MAX),
+        )
+    except Exception as ex:
+        print(f"[trigger_daily_boss crowd_hp] {ex}")
+        hp = hp_base  # FAIL-OPEN : HP de base
     expires = datetime.now(timezone.utc) + timedelta(minutes=int(boss["lifetime_min"]))
 
     try:
@@ -899,7 +999,8 @@ def _parse_ts(val) -> Optional[int]:
 def _build_boss_layout(
     boss: dict, hp_cur: int, hp_max: int, damage_total: int, event_id: int,
     *, expires_ts: Optional[int] = None, warmup_ts: Optional[float] = None,
-    alive: bool = True,
+    alive: bool = True, guild_id: Optional[int] = None,
+    live_count: Optional[int] = None,
 ):
     """Phase 235.16 : construit le panneau V2 COMPLET du boss du jour (lore + HP +
     infos/butin + how-to-play + bouton). UTILISÉ par le post initial ET le refresh
@@ -923,6 +1024,49 @@ def _build_boss_layout(
     )
     if damage_total:
         hp_block += f"\n⚔️ Dégâts totaux infligés : `{int(damage_total):,}`"
+    # Tâche B.5 : COMPTEUR DE PRÉSENCE LIVE — nb de combattants distincts. FAIL-SAFE :
+    # aucune ligne si la valeur n'a pas pu être lue (None) ou est nulle.
+    try:
+        if live_count and int(live_count) > 0:
+            _lc = int(live_count)
+            hp_block += f"\n👥 **{_lc} combattant{'s' if _lc != 1 else ''}** en lice"
+    except Exception:
+        pass
+
+    # Tâche B.1 : ÉTAT DE PHASE / ENRAGE affiché (lecture seule, in-memory, fail-safe).
+    _phase_line = ""
+    try:
+        if alive:
+            if _is_enraged(expires_ts):
+                _phase_line = ("\n💢 **BOSS ENRAGÉ !** Achevez-le avant la fin du "
+                               "timer pour un **bonus de pièces** !")
+            else:
+                _ph = _phase_for_pct(pct)
+                if _ph:
+                    _bonus_pct = int((float(_ph[2]) - 1.0) * 100)
+                    _phase_line = (f"\n🔥 **Phase de fureur** — vos coups infligent "
+                                   f"**+{_bonus_pct} %** de dégâts !")
+    except Exception:
+        _phase_line = ""
+
+    # Tâche B.3 : JAUGE DU BUFF « 📣 Crier » (lecture seule via combat_actions). FAIL-SAFE.
+    _shout_line = ""
+    try:
+        import combat_actions as _ca
+        _shout_line = "\n" + _ca.shout_line(guild_id or 0, event_id)
+    except Exception:
+        _shout_line = ""
+
+    # A.3 — FAIBLESSE ÉLÉMENTAIRE affichée : déduite du nom du boss. Frapper avec
+    # une arme de cet élément donne +25 % (mécanique déjà appliquée à l'attaque,
+    # cf. elemental_advantage). FAIL-SAFE : pas de faiblesse lisible → aucune ligne.
+    _weak_line = ""
+    try:
+        _wl = _ev.boss_weakness_label(boss.get('name'))
+        if _wl:
+            _weak_line = f"\n🎯 **Faiblesse** : {_wl} — une arme de cet élément inflige **+25 %** !"
+    except Exception:
+        _weak_line = ""
 
     items = [
         v2_title(f"{boss['emoji']} Boss du jour — {boss['name']}"),
@@ -935,6 +1079,7 @@ def _build_boss_layout(
             f"{when_line}\n"
             f"🤝 HP élevé → **impossible en solo**, combattez ensemble !\n"
             f"🏅 Top 3 dégâts = bonus `{TOP3_BONUS_COINS}` 🪙"
+            f"{_weak_line}{_phase_line}{_shout_line}"
         ),
         v2_divider(),
         v2_body(_ev.how_to_play('daily_boss')),
@@ -1030,18 +1175,72 @@ async def _refresh_boss_panel(guild: discord.Guild, event_id: int, *,
         return
     if _v2 is None:
         return
+    # Tâche B.5 : compteur de présence live (lecture seule, fail-safe → None = pas
+    # de ligne). Pas de requête réseau Discord supplémentaire (juste une lecture DB).
+    _lc = None
+    try:
+        _lc = await _live_participant_count(event_id)
+    except Exception:
+        _lc = None
     layout = _build_boss_layout(
         boss, active["hp_current"], active["hp_max"],
         active.get("damage_total", 0), event_id,
         expires_ts=_parse_ts(active.get("expires_at")),
         warmup_ts=_warmup_until.get(event_id),
-        alive=active["hp_current"] > 0)
+        alive=active["hp_current"] > 0,
+        guild_id=guild.id, live_count=_lc)
     try:
         # PartialMessage : édite SANS fetch (PATCH seul, plus de GET = moitié des 429
         # en moins). Le panneau est un message du BOT → éditable ainsi.
         await ch.get_partial_message(int(active["message_id"])).edit(view=layout)
     except Exception:
         pass
+
+
+async def _maybe_announce_phase(guild_id: int, event_id: int,
+                                hp_cur: int, hp_max: int) -> None:
+    """Tâche B.1 : si l'attaque vient de FAIRE FRANCHIR un seuil de phase (66 %/33 %),
+    poste UNE fois le message d'ambiance correspondant dans le salon du boss. Anti-spam
+    via _phase_reached. 100 % FAIL-SOFT : toute erreur est avalée (jamais bloquant pour
+    le combat ; un échec d'annonce ne doit RIEN casser)."""
+    try:
+        if hp_max <= 0:
+            return
+        pct = int(hp_cur * 100 / hp_max)
+        ph = _phase_for_pct(pct)
+        if not ph:
+            return
+        _seuil, key, _mult, msg_tpl = ph
+        reached = _phase_reached.setdefault(event_id, set())
+        if key in reached:
+            return
+        reached.add(key)
+        # Récupère le salon du boss (réutilise l'event actif).
+        active = await get_active_boss(guild_id)
+        if not active or active["event_id"] != event_id or not active.get("channel_id"):
+            return
+        guild = _bot.get_guild(int(guild_id)) if _bot is not None else None
+        if guild is None:
+            return
+        ch = guild.get_channel(int(active["channel_id"]))
+        if ch is None:
+            return
+        boss = get_boss_def(active["boss_id"])
+        name = boss["name"] if boss else "Le boss"
+        try:
+            await ch.send(
+                msg_tpl.format(name=name),
+                allowed_mentions=discord.AllowedMentions.none(),
+                delete_after=45)
+        except Exception:
+            pass
+        # Rafraîchit le panneau pour refléter la phase (force = annonce ponctuelle).
+        try:
+            await _refresh_boss_panel(guild, event_id, force=True)
+        except Exception:
+            pass
+    except Exception as ex:
+        print(f"[_maybe_announce_phase] {ex}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1166,6 +1365,15 @@ async def record_boss_attack(guild_id: int, user_id: int) -> dict:
             damage = int(damage * _amult)
     except Exception:
         pass
+    # Tâche B.1 : buff de PHASE — en phase basse (66 %/33 %) les coups portent un peu
+    # plus fort (combat plus épique). Multiplicateur >= 1.0, BORNÉ, fail-open.
+    phase_mult = 1.0
+    try:
+        phase_mult = _phase_damage_mult(event_id, active["hp_current"], active["hp_max"])
+        if phase_mult != 1.0:
+            damage = int(damage * phase_mult)
+    except Exception:
+        phase_mult = 1.0
     damage = min(damage, active["hp_current"])
 
     try:
@@ -1207,11 +1415,34 @@ async def record_boss_attack(guild_id: int, user_id: int) -> dict:
 
     updated = await get_active_boss(guild_id)
     boss_dead = (updated is None) or (updated["hp_current"] <= 0)
+
+    # Tâche B.1 : détection de FRANCHISSEMENT DE PHASE (66 %/33 %) → message
+    # d'ambiance UNE seule fois par phase (anti-spam via _phase_reached). Sépare le
+    # calcul (toujours fail-open) de l'annonce (fire-and-forget). Tâche B.2 : on note
+    # qui porte le COUP FATAL pour le bonus (passé à resolve via le set partagé).
+    enraged = False
+    try:
+        enraged = _is_enraged(_parse_ts(active.get("expires_at")))
+    except Exception:
+        enraged = False
     if boss_dead:
+        # Coup fatal : mémorise le tueur AVANT de résoudre (anti-doublon dans resolve).
+        try:
+            _fatal_blow[event_id] = (int(user_id), bool(enraged))
+        except Exception:
+            pass
         await resolve_daily_boss(event_id)
         return {"success": True, "damage": damage, "boss_dead": True,
                 "attack_count": attacks_done + 1, "elem": elem_proc,
-                "voice_bonus": voice_bonus, "elem_adv": elem_adv}
+                "voice_bonus": voice_bonus, "elem_adv": elem_adv,
+                "fatal_blow": True, "enraged": enraged, "phase_mult": phase_mult}
+    else:
+        # Annonce d'ambiance de phase (fire-and-forget, fail-soft, jamais bloquant).
+        try:
+            await _maybe_announce_phase(guild_id, event_id,
+                                        updated["hp_current"], updated["hp_max"])
+        except Exception:
+            pass
 
     return {
         "success": True,
@@ -1224,6 +1455,8 @@ async def record_boss_attack(guild_id: int, user_id: int) -> dict:
         "elem": elem_proc,
         "voice_bonus": voice_bonus,
         "elem_adv": elem_adv,
+        "phase_mult": phase_mult,
+        "enraged": enraged,
     }
 
 
@@ -1286,6 +1519,19 @@ async def resolve_daily_boss(event_id: int) -> Optional[dict]:
     except Exception:
         attackers = []
 
+    # Tâche B.2 : récupère (et CONSOMME) l'info du coup fatal — anti-doublon : un seul
+    # tueur récompensé, même si resolve est appelé 2× (coup fatal + watchdog). Fail-safe.
+    fatal_uid = None
+    fatal_enraged = False
+    try:
+        _fb = _fatal_blow.pop(event_id, None)
+        if _fb:
+            fatal_uid = int(_fb[0])
+            fatal_enraged = bool(_fb[1])
+    except Exception:
+        fatal_uid, fatal_enraged = None, False
+    killer_info = None  # passé au récap (nom + bonus du tueur)
+
     rewards = []
     for i, (uid, dmg) in enumerate(attackers):
         coins = int(dmg * COIN_PER_DAMAGE)
@@ -1293,6 +1539,27 @@ async def resolve_daily_boss(event_id: int) -> Optional[dict]:
             coins += PARTICIPATION_BONUS_COINS
             if i < 3:
                 coins += TOP3_BONUS_COINS
+        # Tâche B.4 : BONUS D'ASSIDUITÉ — petit multiplicateur BORNÉ (≤ +15 %) pour
+        # les joueurs qui reviennent régulièrement aux combats. N'augmente QUE les
+        # pièces, jamais les dégâts. FAIL-OPEN : ×1.0 (aucun changement) sur erreur.
+        try:
+            import combat_recall as _cr
+            _amult = await _cr.assiduity_mult(guild_id, uid)
+            if _amult and _amult > 1.0:
+                coins = int(coins * _amult)
+        except Exception:
+            pass
+        # Tâche B.2 : BONUS DU COUP FATAL (seulement si le boss est bien tué) — petit
+        # extra MODESTE au porteur du coup tuant. + Tâche B.1 : si le boss était ENRAGÉ
+        # au moment du kill, bonus supplémentaire (récompense d'avoir fini avant la fin).
+        fatal_bonus = 0
+        if killed and fatal_uid is not None and uid == fatal_uid:
+            fatal_bonus = PARTICIPATION_BONUS_COINS  # MODESTE (= bonus de participation)
+            if fatal_enraged:
+                fatal_bonus += _ENRAGE_REWARD_BONUS
+            coins += fatal_bonus
+            killer_info = {"user_id": uid, "bonus": fatal_bonus,
+                           "enraged": fatal_enraged}
         try:
             if _add_coins:
                 await _add_coins(guild_id, uid, coins)
@@ -1324,12 +1591,22 @@ async def resolve_daily_boss(event_id: int) -> Optional[dict]:
     except Exception:
         pass
 
+    # Tâche B.1/B.2 : libère l'état en mémoire de cet event (phases franchies,
+    # enrage annoncé, coup fatal). Fail-safe — purge best-effort.
+    try:
+        _phase_reached.pop(event_id, None)
+        _enrage_announced.pop(event_id, None)
+        _fatal_blow.pop(event_id, None)
+    except Exception:
+        pass
+
     guild = _bot.get_guild(int(guild_id))
     if guild and channel_id:
         ch = guild.get_channel(int(channel_id))
         if ch:
             await _announce_resolution(
                 ch, boss, killed, int(dmg_total), int(hp_max), rewards,
+                killer_info=killer_info,
             )
 
     # Phase 205 : le boss est terminé → supprimer son panneau (le récap le
@@ -1372,7 +1649,7 @@ async def resolve_daily_boss(event_id: int) -> Optional[dict]:
 
 async def _announce_resolution(
     ch, boss: Optional[dict], killed: bool, dmg_total: int, hp_max: int,
-    rewards: list,
+    rewards: list, killer_info: Optional[dict] = None,
 ) -> None:
     name = boss["name"] if boss else "Le boss"
     emoji = boss["emoji"] if boss else "⚔️"
@@ -1402,6 +1679,21 @@ async def _announce_resolution(
         _lines.append(f"{_medals[_i]} **{nm}** · `{coins:,}` 🪙")
     if others_count:
         _lines.append(f"🔸 _+{others_count} autres récompensés_")
+    # Tâche B.2 : ligne « coup fatal » — le porteur du coup tuant + son petit bonus
+    # (+ mention de l'enrage si le boss était enragé). FAIL-SAFE : aucune ligne si
+    # killer_info manque ou est illisible.
+    try:
+        if killed and killer_info and killer_info.get("user_id"):
+            _km = ch.guild.get_member(int(killer_info["user_id"])) if ch.guild else None
+            _knm = _km.display_name if _km else f"User {killer_info['user_id']}"
+            _kbonus = int(killer_info.get("bonus", 0) or 0)
+            _enr = " ⚡ _(boss enragé !)_" if killer_info.get("enraged") else ""
+            _lines.append(
+                f"🗡️ **Coup fatal : {_knm}**"
+                + (f" · +`{_kbonus:,}` 🪙 bonus" if _kbonus else "")
+                + _enr)
+    except Exception:
+        pass
     body = "\n".join(_lines)
 
     try:
@@ -1575,6 +1867,13 @@ async def record_pet_assist(guild_id: int, user_id: int) -> dict:
     if dead:
         try:
             await resolve_daily_boss(event_id)
+        except Exception:
+            pass
+    else:
+        # Tâche B.1 : un assist de familier peut aussi faire franchir une phase.
+        try:
+            await _maybe_announce_phase(guild_id, event_id,
+                                        updated["hp_current"], updated["hp_max"])
         except Exception:
             pass
     text = f"🐾 **{strike.get('label', 'Familier')}** bondit et inflige `{dmg}` dégâts au boss !"

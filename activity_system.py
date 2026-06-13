@@ -208,6 +208,94 @@ async def distinct_active_on_day(guild_id, day: str) -> int:
         return 0
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+#  DIFFICULTÉ DYNAMIQUE — facteur PV adapté à la foule (helper unique partagé)
+# ═══════════════════════════════════════════════════════════════════════════
+# Les 4 grands boss (boss du jour / world boss / climax / invasion) multiplient
+# leurs HP de base par ce facteur BORNÉ : plus il y a de monde, plus le boss tient.
+# SOURCE DE VÉRITÉ : nb de membres DISTINCTS actifs aujourd'hui (réutilise le
+# tracking d'activité existant — 1 message OU 1 min vocal = actif). Fallback :
+# membres en ligne (présence) si l'activité du jour est illisible.
+#
+# FAIL-OPEN STRICT (contrainte combat) : la moindre erreur → facteur 1.0 (HP de
+# base, comportement ACTUEL). Le boss n'est JAMAIS rendu injouable ni trivial :
+# le facteur est borné [CROWD_HP_FACTOR_MIN .. CROWD_HP_FACTOR_MAX].
+CROWD_HP_FACTOR_MIN = 0.7    # peu de monde → boss un peu plus léger (jouable à peu)
+CROWD_HP_FACTOR_MAX = 2.0    # grosse foule → boss bien plus costaud (collab obligatoire)
+# Échelle : nb d'actifs qui correspond au facteur 1.0 (= HP de base actuels). En
+# dessous → < 1.0 (allégé), au dessus → > 1.0 (renforcé), le tout borné.
+_CROWD_PIVOT_ACTIVE = 5      # ~5 actifs/jour = difficulté de référence (facteur 1.0)
+_CROWD_PER_ACTIVE = 0.18     # chaque actif au dessus/dessous du pivot = +/-0.18
+
+
+async def _crowd_count(guild) -> int:
+    """Nombre de joueurs « de la foule » servant à calibrer la difficulté.
+
+    Priorité : actifs DISTINCTS aujourd'hui (table activity_score, déjà la source
+    de vérité du gate d'accès). Fallback : membres en ligne (présence) si l'info
+    d'activité est illisible (0 / pas de DB). FAIL-OPEN : 0 → le facteur retombe
+    sur 1.0 chez l'appelant."""
+    n = 0
+    try:
+        n = int(await distinct_active_on_day(guild.id, _today()))
+    except Exception:
+        n = 0
+    if n > 0:
+        return n
+    # Fallback présence : membres en ligne (hors offline / hors bots). Nécessite
+    # l'intent Presences ; si indispo, members peut être vide → on renvoie 0.
+    try:
+        import discord as _dc
+        online = 0
+        for m in getattr(guild, "members", []) or []:
+            if getattr(m, "bot", False):
+                continue
+            if getattr(m, "status", _dc.Status.offline) != _dc.Status.offline:
+                online += 1
+        return int(online)
+    except Exception:
+        return 0
+
+
+async def crowd_hp_factor(guild) -> float:
+    """Facteur multiplicatif BORNÉ pour les HP d'un grand boss, selon la foule.
+
+    Retourne un float dans [CROWD_HP_FACTOR_MIN .. CROWD_HP_FACTOR_MAX].
+    FAIL-OPEN STRICT : toute erreur, guild absente, ou foule illisible → 1.0
+    (HP de base, comportement actuel inchangé)."""
+    try:
+        if guild is None:
+            return 1.0
+        n = await _crowd_count(guild)
+        if n <= 0:
+            return 1.0  # foule illisible → difficulté de référence
+        factor = 1.0 + (n - _CROWD_PIVOT_ACTIVE) * _CROWD_PER_ACTIVE
+        # Borne dure : jamais injouable, jamais trivial.
+        return max(CROWD_HP_FACTOR_MIN, min(CROWD_HP_FACTOR_MAX, float(factor)))
+    except Exception:
+        return 1.0
+
+
+def apply_crowd_hp(hp_base: int, factor: float, *, floor: int, cap: int) -> int:
+    """Applique `factor` à `hp_base` avec PLANCHER/PLAFOND ABSOLUS (HP entiers).
+
+    FAIL-OPEN : si quoi que ce soit cloche (types, NaN…), on retombe sur hp_base
+    borné [floor..cap]. Garantit qu'un boss n'est JAMAIS injouable ni trivial,
+    indépendamment du facteur."""
+    try:
+        base = int(hp_base)
+    except Exception:
+        return max(int(floor), min(int(cap), int(hp_base) if isinstance(hp_base, int) else int(floor)))
+    try:
+        f = float(factor)
+        if f <= 0 or f != f:  # garde NaN / valeur absurde
+            f = 1.0
+        scaled = int(round(base * f))
+    except Exception:
+        scaled = base
+    return max(int(floor), min(int(cap), scaled))
+
+
 def required_points(event_type) -> int:
     return EVENT_TIERS.get((event_type or "").lower(), TIER_BASE)
 

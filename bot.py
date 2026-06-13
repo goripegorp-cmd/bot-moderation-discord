@@ -65793,6 +65793,18 @@ class WorldBossArenaLayoutV2(LayoutView):
         if info_line:
             items.append(v2_body(info_line))
 
+        # A.3 — FAIBLESSE ÉLÉMENTAIRE affichée (déduite du nom du boss). Frapper
+        # avec une arme de cet élément donne +25 % (déjà appliqué à l'attaque,
+        # cf. elemental_advantage). FAIL-SAFE : pas de faiblesse lisible → rien.
+        if hp > 0:
+            try:
+                _wbw = events2026.boss_weakness_label(boss.get('title') or boss.get('id'))
+                if _wbw:
+                    items.append(v2_body(
+                        f"🎯 **Faiblesse** : {_wbw} — une arme de cet élément inflige **+25 %** !"))
+            except Exception:
+                pass
+
         items.append(v2_divider())
 
         # Top 3 attackers
@@ -66060,12 +66072,27 @@ async def _start_world_boss(guild) -> dict:
                 return {'ok': False, 'error': f'erreur création salon : {ex}'}
 
         ends_at = datetime.now(timezone.utc) + timedelta(minutes=90)
+        # Difficulté dynamique (FAIL-OPEN strict, additif) : HP du World Boss
+        # adaptés à la foule. facteur BORNÉ [0.7..2.0] selon le nb d'actifs du
+        # jour, plancher/plafond ABSOLUS relatifs au boss. Erreur → HP de base.
+        _wb_base_hp = int(boss['max_hp'])
+        _wb_hp = _wb_base_hp
+        try:
+            _wb_factor = await activity_system_module.crowd_hp_factor(guild)
+            _wb_hp = activity_system_module.apply_crowd_hp(
+                _wb_base_hp, _wb_factor,
+                floor=int(_wb_base_hp * activity_system_module.CROWD_HP_FACTOR_MIN),
+                cap=int(_wb_base_hp * activity_system_module.CROWD_HP_FACTOR_MAX),
+            )
+        except Exception as _wb_ex:
+            print(f"[world_boss crowd_hp] {_wb_ex}")
+            _wb_hp = _wb_base_hp  # FAIL-OPEN : HP de base
         # Insérer en DB
         async with get_db() as db:
             cur = await db.execute(
                 'INSERT INTO world_bosses(guild_id, boss_id, hp, max_hp, arena_channel_id, ends_at) '
                 'VALUES(?,?,?,?,?,?)',
-                (guild.id, boss['id'], boss['max_hp'], boss['max_hp'], arena_ch.id, ends_at.isoformat()),
+                (guild.id, boss['id'], _wb_hp, _wb_hp, arena_ch.id, ends_at.isoformat()),
             )
             wb_id = cur.lastrowid
             await db.commit()

@@ -94,6 +94,44 @@ def shout_mult(guild_id, scope_id) -> float:
     return 1.0
 
 
+def shout_status(guild_id, scope_id) -> dict:
+    """État du buff d'équipe 📣 Crier pour AFFICHAGE (Tâche B.3) — LECTURE SEULE,
+    ne consomme rien, ne touche à aucun cooldown.
+
+    Retourne {active, remaining, pct_bonus, ttl} : `active` True si le buff court
+    encore, `remaining` secondes restantes (int >= 0), `pct_bonus` le bonus en %,
+    `ttl` la durée nominale du buff. FAIL-SAFE : toute erreur → buff inactif."""
+    try:
+        k = (int(guild_id), int(scope_id))
+        exp = _shout.get(k, 0.0)
+        now = _now()
+        if exp and now < exp:
+            return {
+                "active": True,
+                "remaining": max(0, int(exp - now)),
+                "pct_bonus": int((_SHOUT_MULT - 1) * 100),
+                "ttl": int(_SHOUT_TTL),
+            }
+    except Exception:
+        pass
+    return {"active": False, "remaining": 0,
+            "pct_bonus": int((_SHOUT_MULT - 1) * 100), "ttl": int(_SHOUT_TTL)}
+
+
+def shout_line(guild_id, scope_id) -> str:
+    """Ligne prête à coller dans un panneau de combat décrivant l'état du Cri
+    d'équipe (Tâche B.3). FAIL-SAFE : '' si rien à montrer."""
+    try:
+        st = shout_status(guild_id, scope_id)
+        if st.get("active"):
+            return (f"📣 **Cri de guerre actif** — +{st['pct_bonus']} % de dégâts "
+                    f"pour toute l'équipe (encore ~{st['remaining']} s) !")
+        return (f"📣 **Crier** rallie l'équipe : +{st['pct_bonus']} % de dégâts "
+                f"pour tous pendant {st['ttl']} s.")
+    except Exception:
+        return ""
+
+
 def defend_mult(guild_id, user_id) -> float:
     """Multiplicateur de dégâts SUBIS (riposte) : <1.0 si la garde est active, sinon
     1.0. Ne consomme pas (la posture protège pendant _DEFEND_TTL s). À appliquer dans
@@ -308,6 +346,7 @@ def register_persistent_views(bot_instance):
 
 __all__ = [
     "setup", "register_persistent_views", "consume_charge_mult", "shout_mult",
+    "shout_status", "shout_line",
     "defend_mult", "do_charge", "do_shout", "do_defend",
     "CombatChargeButton", "CombatShoutButton", "CombatDefendButton",
 ]
