@@ -904,9 +904,11 @@ async def trigger_daily_boss(
                                  warmup_ts=_warm)
     # FIX salons (anti-salon-vide) : si le panneau n'a pas pu être posté, ne PAS
     # laisser un boss « fantôme » (status='alive', expires futur) bloquer
-    # _has_any_major_event_running ET un salon « 👹-boss-du-jour » VIDE traîner jusqu'à
-    # l'expiration. On clôt l'event (status='expired') et on supprime son salon dédié.
-    # Symétrique du flux mob / boss raid. Fail-open.
+    # _has_any_major_event_running ET son salon de combat VIDE traîner jusqu'à
+    # l'expiration. On clôt l'event (status='expired') et on demande la suppression
+    # idle-safe du salon `ch` (= salon par-type « 👹-boss-du-jour » via _create_combat_arena,
+    # ou « ⚔️-combat » partagé en fallback ; _delete_combat_arena ne le supprime QUE s'il
+    # est devenu idle). Symétrique du flux mob / boss raid. Fail-open.
     if not msg:
         print(f"[daily_bosses] panneau non posté → annulation guild={guild.id} "
               f"boss={boss['id']} (salon nettoyé)")
