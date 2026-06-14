@@ -417,6 +417,26 @@ async def request_cooldown_remaining_sec(guild_id, requester_id) -> int:
         return 0
 
 
+async def count_requests_since(guild_id, requester_id, hours: int = 24) -> int:
+    """#6 (quota/jour) : nombre de demandes créées par `requester_id` sur les `hours`
+    dernières heures (tout statut). FAIL-OPEN → 0 (au pire on autorise)."""
+    if _get_db is None:
+        return 0
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT COUNT(*) FROM entraide_requests "
+                "WHERE guild_id=? AND requester_id=? "
+                "AND created_at > datetime('now', ?)",
+                (int(guild_id), int(requester_id), f"-{int(hours)} hours"),
+            ) as cur:
+                row = await cur.fetchone()
+        return int(row[0]) if row else 0
+    except Exception as ex:
+        print(f"[entraide count_requests_since] {ex}")
+        return 0
+
+
 async def create_request(guild_id, requester_id, game_key, description) -> tuple:
     """Crée une demande d'aide OUVERTE. Renvoie (code, request_id|None).
 
