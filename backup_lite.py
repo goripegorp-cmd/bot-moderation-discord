@@ -60,27 +60,51 @@ KEEP_DAYS = 7  # garde 7 jours max
 _SUPER_OWNER_ID = 781205382923288593  # GoRipe (cf. SUPER_OWNER_ID dans bot.py)
 # Limite DM safe : 8 Mo (plancher Discord sans boost). Au-delà → on skip + log.
 _DM_MAX_BYTES = 8 * 1024 * 1024
-# Throttle : 1 DM/jour max (le backup est déjà quotidien). Garde la date du
-# dernier envoi réussi pour éviter tout double-envoi sur la même journée.
-_last_dm_date: Optional[str] = None
+# ENVOI AUTO OFF PAR DÉFAUT (owner 2026-06-14 : « ne me l'envoie pas à chaque déploiement,
+# c'est super relou »). Le backup est TOUJOURS écrit sur disque (backups/) ; le DM hors-volume
+# n'a lieu QUE si l'env BACKUP_OFFSITE_DM=1 est posé, et alors au plus 1×/SEMAINE. La date du
+# dernier envoi est PERSISTÉE sur disque : c'est son reset EN MÉMOIRE à chaque reboot qui
+# causait un DM à CHAQUE déploiement (la loop quotidienne tourne au boot). Persister = fiable.
+_DM_MIN_INTERVAL_DAYS = 7
+_DM_STATE_FILE = BACKUP_DIR / ".last_backup_dm"
+
+
+def _offsite_dm_enabled() -> bool:
+    """True seulement si l'owner a explicitement activé l'envoi hors-volume (env)."""
+    return os.getenv("BACKUP_OFFSITE_DM", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _read_last_dm_ts() -> float:
+    try:
+        return float(_DM_STATE_FILE.read_text().strip())
+    except Exception:
+        return 0.0
+
+
+def _write_last_dm_ts(ts: float) -> None:
+    try:
+        BACKUP_DIR.mkdir(exist_ok=True)
+        _DM_STATE_FILE.write_text(str(ts))
+    except Exception:
+        pass
 
 
 async def _dm_backup_to_owner(file_path: str, size_bytes: int) -> None:
-    """Envoie le backup compressé en DM au super-owner (copie hors-volume).
+    """Copie hors-volume du backup en DM au super-owner — DÉSACTIVÉE par défaut.
 
-    Conditions :
-      • bot dispo (get_user / fetch_user)
-      • taille < _DM_MAX_BYTES (sinon skip + log)
-      • throttle 1×/jour (date du dernier envoi réussi)
-    FAIL-SAFE : toute exception est avalée — ne casse jamais l'appelant.
+    N'envoie QUE si BACKUP_OFFSITE_DM=1, et au plus 1×/SEMAINE (throttle PERSISTÉ sur disque
+    pour survivre aux reboots → fini les DM à chaque déploiement). Le backup reste de toute
+    façon écrit sur disque. FAIL-SAFE : toute exception est avalée — ne casse jamais l'appelant.
     """
-    global _last_dm_date
     try:
+        if not _offsite_dm_enabled():
+            return  # OFF par défaut : backup conservé sur disque, aucun DM (anti-spam owner)
         if _bot is None or not file_path:
             return
-        # Throttle 1/jour : si déjà envoyé aujourd'hui, on skip silencieusement.
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        if _last_dm_date == today:
+        # Throttle PERSISTANT (survit aux reboots) : au plus 1 envoi / _DM_MIN_INTERVAL_DAYS.
+        now = time.time()
+        last = _read_last_dm_ts()
+        if last and (now - last) < _DM_MIN_INTERVAL_DAYS * 86400:
             return
         # Garde-fou taille : un DM trop lourd serait rejeté par Discord.
         if size_bytes <= 0 or size_bytes >= _DM_MAX_BYTES:
@@ -110,15 +134,15 @@ async def _dm_backup_to_owner(file_path: str, size_bytes: int) -> None:
         sz_mb = size_bytes / (1024 * 1024)
         await owner.send(
             content=(
-                f"🗄️ **Backup quotidien hors-volume** — copie de sécurité "
+                f"🗄️ **Backup hebdomadaire hors-volume** — copie de sécurité "
                 f"({sz_mb:.2f} Mo).\nGarde ce fichier : il survit à une perte du "
                 f"volume Railway."
             ),
             file=discord.File(str(p), filename=p.name),
         )
-        # Marque la journée comme envoyée UNIQUEMENT après succès (throttle).
-        _last_dm_date = today
-        print(f"[backup_lite] DM owner OK — {p.name} ({sz_mb:.2f} Mo)")
+        # Persiste la date APRÈS succès → throttle fiable malgré les reboots.
+        _write_last_dm_ts(now)
+        print(f"[backup_lite] DM owner OK (hebdo) — {p.name} ({sz_mb:.2f} Mo)")
     except Exception as ex:
         # Jamais fatal : on log et on continue.
         print(f"[backup_lite] DM owner échec (non bloquant) : {ex}")
