@@ -902,6 +902,30 @@ async def trigger_daily_boss(
     # Poste le panel public + bouton
     msg = await _post_boss_panel(ch, event_id, boss, hp, hp, int(boss["lifetime_min"]),
                                  warmup_ts=_warm)
+    # FIX salons (anti-salon-vide) : si le panneau n'a pas pu être posté, ne PAS
+    # laisser un boss « fantôme » (status='alive', expires futur) bloquer
+    # _has_any_major_event_running ET un salon « 👹-boss-du-jour » VIDE traîner jusqu'à
+    # l'expiration. On clôt l'event (status='expired') et on supprime son salon dédié.
+    # Symétrique du flux mob / boss raid. Fail-open.
+    if not msg:
+        print(f"[daily_bosses] panneau non posté → annulation guild={guild.id} "
+              f"boss={boss['id']} (salon nettoyé)")
+        try:
+            async with _get_db() as db:
+                await db.execute(
+                    "UPDATE daily_boss_events SET status='expired', "
+                    "ended_at=CURRENT_TIMESTAMP WHERE id=? AND status='alive'",
+                    (event_id,),
+                )
+                await db.commit()
+        except Exception:
+            pass
+        if _arena_delete_fn is not None:
+            try:
+                await _arena_delete_fn(guild, ch.id, grace_seconds=0)
+            except Exception:
+                pass
+        return None
     if msg:
         try:
             async with _get_db() as db:
