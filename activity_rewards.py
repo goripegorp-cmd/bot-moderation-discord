@@ -54,9 +54,12 @@ REWARD_WEEKDAY = 0  # lundi
 REWARD_HOUR = 11
 # Durée du rôle VIP (2 semaines)
 VIP_DURATION_DAYS = 14
-# Combien de membres récompensés par catégorie
-TOP_MESSAGES = 3
-TOP_VOICE = 3
+# Combien de membres récompensés par catégorie — PLUSIEURS gagnants = bien plus motivant
+# (directive owner) : on n'est plus limité à un seul élu, viser le rôle devient fun pour tous.
+TOP_MESSAGES = 5
+TOP_VOICE = 5
+# VIP+ : PLUSIEURS gagnants aussi (les N plus actifs TOUTES catégories), pas juste le n°1.
+TOP_OVERALL = 3
 # Seuils minimaux pour qualifier (anti "semaine morte")
 MIN_MESSAGES = 30
 MIN_VOICE_MINUTES = 30
@@ -138,10 +141,10 @@ async def compute_top_active(guild_id: int) -> dict:
     Retourne {
         "messages": [(user_id, msg_count), ...],   # triés desc
         "voice":    [(user_id, voice_minutes), ...],
-        "overall":  user_id | None,                # plus actif combiné
+        "overall":  [user_id, ...],                # plusieurs plus actifs combinés (VIP+)
     }
     """
-    out = {"messages": [], "voice": [], "overall": None}
+    out = {"messages": [], "voice": [], "overall": []}
     if _get_db is None:
         return out
     try:
@@ -175,7 +178,9 @@ async def compute_top_active(guild_id: int) -> dict:
         for uid, m in out["voice"]:
             score[uid] = score.get(uid, 0) + (m / 2.0)
         if score:
-            out["overall"] = max(score.items(), key=lambda kv: kv[1])[0]
+            # VIP+ aux TOP_OVERALL plus actifs combinés (PLUSIEURS gagnants), pas juste le n°1.
+            ranked = sorted(score.items(), key=lambda kv: kv[1], reverse=True)
+            out["overall"] = [uid for uid, _ in ranked[:TOP_OVERALL]]
     except Exception as ex:
         print(f"[compute_top_active] {ex}")
     return out
@@ -342,25 +347,24 @@ async def run_weekly_rewards(guild: discord.Guild) -> dict:
     vip_role, vip_plus_role = await _ensure_vip_roles(guild)
 
     granted_vip: list[tuple[int, str]] = []  # (user_id, reason)
-    vip_plus_granted: Optional[int] = None
+    vip_plus_granted: list[int] = []  # PLUSIEURS gagnants VIP+ possibles (owner)
 
-    # VIP+ pour le plus actif global
-    if overall and vip_plus_role:
-        m = guild.get_member(overall)
-        if m and not m.bot:
-            if await _grant(guild, m, vip_plus_role, "vip_plus", VIP_DURATION_DAYS):
-                vip_plus_granted = overall
+    # VIP+ pour les plus actifs globaux — PLUSIEURS gagnants (plus motivant qu'un seul élu).
+    if vip_plus_role:
+        for ouid in (overall or []):
+            m = guild.get_member(ouid)
+            if m and not m.bot:
+                if await _grant(guild, m, vip_plus_role, "vip_plus", VIP_DURATION_DAYS):
+                    vip_plus_granted.append(ouid)
 
-    # VIP pour les autres tops (messages + vocal), sauf le VIP+
+    # VIP pour les autres tops (messages + vocal), sauf ceux qui ont déjà VIP+
     union_ids = []
     for uid, _ in msg_leaders:
         union_ids.append((uid, "messages"))
     for uid, _ in voice_leaders:
         union_ids.append((uid, "vocal"))
 
-    seen = set()
-    if vip_plus_granted:
-        seen.add(vip_plus_granted)  # le VIP+ ne reçoit pas aussi VIP
+    seen = set(vip_plus_granted)  # les VIP+ ne reçoivent pas aussi VIP
     for uid, reason in union_ids:
         if uid in seen:
             continue
@@ -423,7 +427,7 @@ async def _find_announce_channel(guild: discord.Guild) -> Optional[discord.TextC
 
 
 async def _announce_rewards(
-    guild: discord.Guild, granted_vip: list, vip_plus_id: Optional[int],
+    guild: discord.Guild, granted_vip: list, vip_plus_ids: list,
     leaders: dict,
 ) -> None:
     ch = await _find_announce_channel(guild)
@@ -440,11 +444,14 @@ async def _announce_rewards(
         "",
     ]
 
-    if vip_plus_id:
-        m = guild.get_member(vip_plus_id)
-        nm = m.mention if m else f"<@{vip_plus_id}>"
-        lines.append(f"💎 **VIP+ — Membre le plus actif** : {nm}")
-        lines.append("_Le plus présent toutes catégories confondues. Chapeau !_")
+    if vip_plus_ids:
+        names = []
+        for vpid in vip_plus_ids:
+            m = guild.get_member(vpid)
+            names.append(m.mention if m else f"<@{vpid}>")
+        label = "Membres les plus actifs" if len(names) > 1 else "Membre le plus actif"
+        lines.append(f"💎 **VIP+ — {label}** : " + " · ".join(names))
+        lines.append("_Les plus présent·es toutes catégories confondues. Chapeau à tou·tes !_")
         lines.append("")
 
     if granted_vip:
@@ -465,8 +472,9 @@ async def _announce_rewards(
     # Les noms au-delà des 3 premiers s'affichent quand même (rendu mention)
     # mais ne déclenchent PAS de notification.
     ordered_ids: list[int] = []
-    if vip_plus_id:
-        ordered_ids.append(vip_plus_id)
+    for vpid in (vip_plus_ids or []):
+        if vpid not in ordered_ids:
+            ordered_ids.append(vpid)
     for uid, _ in granted_vip:
         if uid not in ordered_ids:
             ordered_ids.append(uid)
