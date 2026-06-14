@@ -168,8 +168,8 @@ DELETE_SUBJECT = {
     "alt_accounts": ["main_account_id", "alt_account_id"],
     "alt_detection_log": ["new_user_id", "similar_to_user_id"],
     "alliance_invites": ["invited_user_id", "invited_by"],
-    # cross-plateforme (PII sensible Discord↔Roblox) → suppression complète
-    "roblox_game_library": ["user_id"],
+    # NB : roblox_account_links / roblox_link_pending (PII Discord↔Roblox) sont plus haut.
+    # roblox_game_library est une donnée GUILDE (PK guild_id/universe_id) → voir ANONYMIZE.
 }
 
 # Tables SANS guild_id (préférences globales) : purge par user_id seul, toutes guildes.
@@ -219,7 +219,6 @@ ANONYMIZE = {
     "game_updates": {"ids": ["posted_by"], "redact": []},
     "predictions": {"ids": ["created_by"], "redact": []},
     "shoutouts": {"ids": ["from_user_id", "to_user_id"], "redact": ["reason"]},
-    "narrative_votes": {"ids": ["created_by"], "redact": []},
     "update_votes": {"ids": ["created_by"], "redact": []},
     "tournaments": {"ids": ["winner_id", "created_by"], "redact": []},
     "thematic_voices": {"ids": ["host_id"], "redact": []},
@@ -237,8 +236,12 @@ ANONYMIZE = {
     "spotlighted_messages": {"ids": ["author_id"], "redact": []},
     "ticket_response_templates": {"ids": ["added_by"], "redact": []},
     "webhook_registry": {"ids": ["owner_id"], "redact": []},
-    # transferts P2P : on neutralise le côté du partant, le contrepartie garde son relevé
-    "economy_events": {"ids": ["sender_id", "receiver_id"], "redact": []},
+    # transferts P2P (TABLE RÉELLE = gift_log) : on neutralise le côté du partant, la
+    # contrepartie garde son relevé.
+    "gift_log": {"ids": ["sender_id", "receiver_id"], "redact": []},
+    # roblox_game_library = donnée GUILDE (bibliothèque de jeux) ; on neutralise juste
+    # l'identifiant de l'ajouteur (added_by), on ne supprime pas la ligne de la guilde.
+    "roblox_game_library": {"ids": ["added_by"], "redact": []},
 }
 
 # Colonnes HMAC (pas un user_id brut) : agies seulement si l'appelant fournit hmac_user.
@@ -294,7 +297,7 @@ RETENTION = {
     "security_logs": ("timestamp", 180),
     "behavior_alerts": ("created_at", 90),
     "alt_detection_log": ("detected_at", 90),
-    "error_log": ("created_at", 30),
+    "error_log": ("occurred_at", 30),
 }
 
 
