@@ -303,6 +303,24 @@ async def spawn_chain(guild: discord.Guild) -> bool:
         return True
     except Exception as ex:
         print(f"[chain spawn] {ex}")
+        # FIX salons (anti-salon-vide) : panneau non posté → clore la chaîne (sinon
+        # ended=0 + ends_at futur bloque _has_any_major_event_running et le sweeper) +
+        # supprimer le salon « 🔗 » désormais vide. Réutilise les helpers de _end_chain.
+        # Fail-open.
+        try:
+            if 'chain_id' in locals() and chain_id:
+                async with _get_db() as db:
+                    await db.execute(
+                        "UPDATE chain_events SET ended=1 WHERE id=? AND ended=0",
+                        (chain_id,))
+                    await db.commit()
+        except Exception:
+            pass
+        if _arena_delete_fn is not None:
+            try:
+                await _arena_delete_fn(guild, ch.id)
+            except Exception:
+                pass
         return False
 
 

@@ -627,8 +627,32 @@ async def trigger_climax(guild_id: int) -> Optional[int]:
         # Phase 235.16 : warm-up — invulnérable les premières secondes (sas de prép.).
         _warm = datetime.now(timezone.utc).timestamp() + _CLIMAX_WARMUP_SECONDS
         _warmup_until[event_id] = _warm
-        await _announce_climax_open(guild, boss, event_id, ends_at, channel=ch,
-                                    warmup_ts=_warm)
+        try:
+            await _announce_climax_open(guild, boss, event_id, ends_at, channel=ch,
+                                        warmup_ts=_warm)
+        except Exception as _ann_ex:
+            print(f"[trigger_climax announce] {_ann_ex}")
+            # FIX salons (anti-salon-vide) : l'annonce n'est pas partie → ne PAS laisser
+            # un climax « fantôme » (status='active', ends_at = +CLIMAX_DURATION_HOURS)
+            # bloquer _has_any_major_event_running NI un salon par-type VIDE traîner des
+            # heures. On clôt l'event (status='expired') + supprime le salon dédié créé.
+            # Fail-open.
+            try:
+                async with _get_db() as db:
+                    await db.execute(
+                        "UPDATE climax_events SET status='expired', "
+                        "ended_at=CURRENT_TIMESTAMP WHERE id=? AND status='active'",
+                        (event_id,),
+                    )
+                    await db.commit()
+            except Exception:
+                pass
+            if ch is not None and _arena_delete_fn is not None:
+                try:
+                    await _arena_delete_fn(guild, ch.id)
+                except Exception:
+                    pass
+            return None
         # Accroche 1-ligne dans le chat (sans @mention, auto-supprimée) : sinon le boss
         # climax mensuel était invisible hors abonnés au rôle 🔔 Climax. _echo_fn =
         # _post_event_echo (bot.py). globals().get → zéro risque de NameError.

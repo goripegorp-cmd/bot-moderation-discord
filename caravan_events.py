@@ -340,6 +340,24 @@ async def spawn_caravan(guild: discord.Guild) -> bool:
         return True
     except Exception as ex:
         print(f"[caravan spawn] {ex}")
+        # FIX salons (anti-salon-vide) : panneau non posté → clore la caravane (sinon
+        # ended=0 + ends_at futur bloque _has_any_major_event_running et le sweeper) +
+        # supprimer le salon « 🐫 » désormais vide. Réutilise les helpers de _end_caravan.
+        # Fail-open.
+        try:
+            if 'cid' in locals() and cid:
+                async with _get_db() as db:
+                    await db.execute(
+                        "UPDATE caravan_events SET ended=1 WHERE id=? AND ended=0",
+                        (cid,))
+                    await db.commit()
+        except Exception:
+            pass
+        if _arena_delete_fn is not None:
+            try:
+                await _arena_delete_fn(guild, ch.id)
+            except Exception:
+                pass
         return False
 
 
