@@ -56,6 +56,21 @@ AUTO_CLOSE_CHECK_HOURS = 24
 # déclenche UN rappel staff (un seul, jamais de spam). Vérification toutes les 2 h.
 SLA_UNCLAIMED_HOURS = 24
 
+# ── TAGS internes (owner 2026-06-15, Lot 2) : classification PAR SUJET (orthogonale aux
+#    priorités qui gèrent la RÉACTIVITÉ). Liste fixe → pas de prolifération. Réassignables.
+PRESET_TAGS = {
+    "bug": "🐞 Bug",
+    "acces": "🔑 Accès / compte",
+    "suggestion": "💡 Suggestion",
+    "question": "❓ Question",
+    "partenariat": "🤝 Partenariat",
+    "signalement": "🚨 Signalement",
+    "autre": "📌 Autre",
+}
+MAX_TAGS_PER_TICKET = 5
+# Nb max d'entrées d'audit affichées dans le panneau (anti-message géant).
+AUDIT_DISPLAY_MAX = 12
+
 
 # Références injectées
 _bot = None
@@ -117,6 +132,33 @@ async def _ensure_tables():
                 channel_id INTEGER PRIMARY KEY,
                 reminded_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )''')
+            # Lot 2 (owner 2026-06-15) : tags internes (classification par sujet).
+            await db.execute('''CREATE TABLE IF NOT EXISTS ticket_tags (
+                channel_id INTEGER,
+                guild_id INTEGER,
+                tag TEXT,
+                added_by INTEGER,
+                added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (channel_id, tag)
+            )''')
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ticket_tags_guild "
+                "ON ticket_tags(guild_id, tag)"
+            )
+            # Lot 2 : audit-trail (journal d'actions REQUÊTABLE, distinct des logs-embed).
+            await db.execute('''CREATE TABLE IF NOT EXISTS ticket_audit (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER,
+                channel_id INTEGER,
+                actor_id INTEGER,
+                action TEXT,
+                detail TEXT,
+                at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )''')
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ticket_audit_ch "
+                "ON ticket_audit(channel_id, id)"
+            )
             await db.commit()
         _tables_initialized = True
     except Exception as ex:
@@ -184,6 +226,182 @@ async def update_channel_name_for_priority(
     except (discord.Forbidden, discord.HTTPException) as ex:
         print(f"[tickets_enhance update_channel_name] {ex}")
         return False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAGS internes + AUDIT-TRAIL (Lot 2, owner 2026-06-15)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+_AUDIT_ACTION_LABELS = {
+    "claim": "🙋 Pris en charge", "close": "🔒 Fermé", "tags": "🏷️ Tags",
+    "priority": "⚡ Priorité", "note": "📝 Note", "transfer": "🔄 Transfert",
+    "add_staff": "➕ Staff ajouté", "reopen": "🔓 Rouvert",
+}
+
+
+async def list_tags(channel_id: int) -> list:
+    """Tags (clés) du ticket, dans l'ordre d'ajout. FAIL-OPEN → []."""
+    if _get_db is None:
+        return []
+    await _ensure_tables()
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT tag FROM ticket_tags WHERE channel_id=? ORDER BY added_at, tag",
+                (int(channel_id),),
+            ) as cur:
+                return [r[0] for r in await cur.fetchall() if r and r[0] in PRESET_TAGS]
+    except Exception:
+        return []
+
+
+async def set_tags(channel_id: int, guild_id: int, tags: list, actor_id: int) -> list:
+    """Remplace l'ensemble des tags du ticket (clés PRESET_TAGS valides, plafond
+    MAX_TAGS_PER_TICKET). Journalise tout changement. Renvoie la nouvelle liste.
+    FAIL-OPEN (renvoie l'état courant en cas d'erreur)."""
+    if _get_db is None:
+        return await list_tags(channel_id)
+    await _ensure_tables()
+    valid = [t for t in dict.fromkeys(tags or []) if t in PRESET_TAGS][:MAX_TAGS_PER_TICKET]
+    try:
+        before = set(await list_tags(channel_id))
+        async with _get_db() as db:
+            await db.execute("DELETE FROM ticket_tags WHERE channel_id=?", (int(channel_id),))
+            for t in valid:
+                await db.execute(
+                    "INSERT OR IGNORE INTO ticket_tags(channel_id, guild_id, tag, added_by) "
+                    "VALUES(?,?,?,?)", (int(channel_id), int(guild_id), t, int(actor_id)))
+            await db.commit()
+        after = set(valid)
+        if before != after:
+            added = ", ".join(sorted(after - before)) or "—"
+            removed = ", ".join(sorted(before - after)) or "—"
+            await log_action(guild_id, channel_id, actor_id, "tags", f"+[{added}] -[{removed}]")
+        return valid
+    except Exception as ex:
+        print(f"[tickets_enhance set_tags] {ex}")
+        return await list_tags(channel_id)
+
+
+async def tag_stats(guild_id: int) -> list:
+    """[(tag, count)] des tickets par tag. FAIL-OPEN → []."""
+    if _get_db is None:
+        return []
+    await _ensure_tables()
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT tag, COUNT(*) c FROM ticket_tags WHERE guild_id=? "
+                "GROUP BY tag ORDER BY c DESC", (int(guild_id),),
+            ) as cur:
+                return [(r[0], int(r[1])) for r in await cur.fetchall() if r[0] in PRESET_TAGS]
+    except Exception:
+        return []
+
+
+async def log_action(guild_id, channel_id, actor_id, action: str, detail: str = ""):
+    """Ajoute une entrée d'AUDIT (claim/priority/tags/note/transfert/close…). FAIL-SAFE :
+    n'interrompt JAMAIS l'action métier appelante (les exceptions sont avalées)."""
+    if _get_db is None:
+        return
+    try:
+        await _ensure_tables()
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT INTO ticket_audit(guild_id, channel_id, actor_id, action, detail) "
+                "VALUES(?,?,?,?,?)",
+                (int(guild_id or 0), int(channel_id or 0), int(actor_id or 0),
+                 str(action or "")[:40], str(detail or "")[:300]))
+            await db.commit()
+    except Exception as ex:
+        print(f"[tickets_enhance log_action] {ex}")
+
+
+async def get_audit(channel_id: int, limit: int = AUDIT_DISPLAY_MAX) -> list:
+    """Dernières entrées d'audit (récent d'abord) : [(actor_id, action, detail, at), …]."""
+    if _get_db is None:
+        return []
+    await _ensure_tables()
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT actor_id, action, detail, at FROM ticket_audit WHERE channel_id=? "
+                "ORDER BY id DESC LIMIT ?", (int(channel_id), int(limit)),
+            ) as cur:
+                return [(int(r[0] or 0), r[1] or "", r[2] or "", r[3])
+                        for r in await cur.fetchall()]
+    except Exception:
+        return []
+
+
+def build_ticket_manage_panel(channel_id: int, guild_id: int):
+    """Panneau ÉPHÉMÈRE staff : tags du ticket (Select multi pour (re)classer) + audit
+    récent. Renvoie une COROUTINE (à await — lit la DB). FAIL-SAFE."""
+    h = _v2_helpers or {}
+    LayoutView = h.get('LayoutView') or getattr(discord.ui, 'LayoutView', None)
+    v2_container = h.get('v2_container')
+    v2_body = h.get('v2_body')
+    v2_title = h.get('v2_title')
+
+    async def _build():
+        current = await list_tags(channel_id)
+        audit = await get_audit(channel_id)
+        cur_set = set(current)
+        tag_line = ("  ".join(PRESET_TAGS[t] for t in current) if current else "_aucun_")
+        if audit:
+            def _fmt(a):
+                aid, action, detail, _at = a
+                lbl = _AUDIT_ACTION_LABELS.get(action, action)
+                who = f"<@{aid}>" if aid else "?"
+                extra = f" · {detail}" if detail else ""
+                return f"• {lbl} — {who}{extra}"[:200]
+            audit_txt = "\n".join(_fmt(a) for a in audit)
+        else:
+            audit_txt = "_aucune action enregistrée_"
+        body = (f"### 🏷️ Tags (classer ce ticket)\n{tag_line}\n\n"
+                f"### 📜 Historique récent\n{audit_txt}")
+        options = [discord.SelectOption(label=PRESET_TAGS[k], value=k, default=(k in cur_set))
+                   for k in PRESET_TAGS]
+        sel = discord.ui.Select(
+            placeholder="Classer ce ticket (tags)…", min_values=0,
+            max_values=min(MAX_TAGS_PER_TICKET, len(options)), options=options)
+
+        async def _cb(i: discord.Interaction):
+            try:
+                if not bool(getattr(i.user.guild_permissions, 'manage_channels', False)):
+                    if not i.response.is_done():
+                        await i.response.send_message("❌ Réservé au staff.", ephemeral=True)
+                    return
+                if not i.response.is_done():
+                    await i.response.defer()  # defer la mise à jour (component)
+                await set_tags(channel_id, guild_id, sel.values, i.user.id)
+                newview = await build_ticket_manage_panel(channel_id, guild_id)
+                await i.edit_original_response(view=newview)
+            except Exception as ex:
+                print(f"[tickets_enhance manage cb] {ex}")
+                try:
+                    await i.followup.send("✅ Pris en compte.", ephemeral=True)
+                except Exception:
+                    pass
+
+        sel.callback = _cb
+        if v2_container and v2_body and v2_title:
+            class _ManageView(LayoutView):
+                def __init__(self):
+                    super().__init__(timeout=300)
+                    self.add_item(v2_container(
+                        v2_title("🎫 Gestion du ticket"), v2_body(body),
+                        discord.ui.ActionRow(sel), color=0x5865F2))
+            return _ManageView()
+
+        class _ManageViewFb(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=300)
+                self.add_item(discord.ui.TextDisplay("### 🎫 Gestion du ticket\n" + body))
+                self.add_item(discord.ui.ActionRow(sel))
+        return _ManageViewFb()
+
+    return _build()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
