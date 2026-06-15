@@ -566,6 +566,7 @@ async def weekly_reward_task():
             for guild in _bot.guilds:
                 try:
                     await run_weekly_rewards(guild)
+                    await asyncio.sleep(0.5)  # throttle anti-429 (espace la distribution entre guildes)
                 except Exception as ex:
                     print(f"[weekly_reward_task run g={guild.id}] {ex}")
 
