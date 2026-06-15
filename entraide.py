@@ -970,6 +970,40 @@ async def top_helpers(guild_id, limit=10) -> list:
         return []
 
 
+async def dashboard_stats(guild_id, stale_minutes: int = 35) -> dict:
+    """KPI entraide pour le DASHBOARD STAFF (Lot 4) : compteurs par statut sur 7j +
+    demandes OUVERTES actuelles + demandes ouvertes ANCIENNES non prises (stale =
+    sans réponse depuis > stale_minutes). FAIL-OPEN → dict à zéros."""
+    out = {"open_now": 0, "stale_now": 0,
+           "by_status_7d": {"open": 0, "matched": 0, "resolved": 0, "expired": 0}}
+    if _get_db is None:
+        return out
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT status, COUNT(*) FROM entraide_requests WHERE guild_id=? "
+                "AND datetime(created_at) > datetime('now','-7 days') GROUP BY status",
+                (int(guild_id),)) as cur:
+                for st, c in await cur.fetchall():
+                    if st in out["by_status_7d"]:
+                        out["by_status_7d"][st] = int(c or 0)
+            async with db.execute(
+                "SELECT COUNT(*) FROM entraide_requests WHERE guild_id=? AND status='open'",
+                (int(guild_id),)) as cur:
+                row = await cur.fetchone()
+            out["open_now"] = int(row[0] or 0) if row else 0
+            async with db.execute(
+                "SELECT COUNT(*) FROM entraide_requests WHERE guild_id=? AND status='open' "
+                "AND (helper_id IS NULL OR helper_id=0) "
+                "AND datetime(created_at) < datetime('now', ?)",
+                (int(guild_id), f"-{int(stale_minutes)} minutes")) as cur:
+                row = await cur.fetchone()
+            out["stale_now"] = int(row[0] or 0) if row else 0
+    except Exception as ex:
+        print(f"[entraide dashboard_stats] {ex}")
+    return out
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  TÂCHE PÉRIODIQUE (supervisée par bot.py — _SUPERVISED_MODULE_LOOPS)
 # ═══════════════════════════════════════════════════════════════════════════
