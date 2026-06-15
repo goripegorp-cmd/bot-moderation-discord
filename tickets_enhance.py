@@ -55,6 +55,10 @@ AUTO_CLOSE_CHECK_HOURS = 24
 # Phase 245 : rappel SLA — un ticket OUVERT et NON PRIS EN CHARGE depuis ce délai
 # déclenche UN rappel staff (un seul, jamais de spam). Vérification toutes les 2 h.
 SLA_UNCLAIMED_HOURS = 24
+# Escalade (2e palier, owner 2026-06-15) : ticket TOUJOURS non pris après ce délai →
+# on PING l'owner du serveur UNE fois (force la résolution des goulots). Configurable
+# par guilde via la clé 'ticket_sla_escalate_hours' (fallback sur cette constante).
+SLA_ESCALATE_HOURS = 48
 
 # ── TAGS internes (owner 2026-06-15, Lot 2) : classification PAR SUJET (orthogonale aux
 #    priorités qui gèrent la RÉACTIVITÉ). Liste fixe → pas de prolifération. Réassignables.
@@ -131,6 +135,11 @@ async def _ensure_tables():
             await db.execute('''CREATE TABLE IF NOT EXISTS ticket_sla_reminded (
                 channel_id INTEGER PRIMARY KEY,
                 reminded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )''')
+            # Lot 2 (2/2) : escalade 2e palier (1 ping owner max par ticket).
+            await db.execute('''CREATE TABLE IF NOT EXISTS ticket_sla_escalated (
+                channel_id INTEGER PRIMARY KEY,
+                escalated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )''')
             # Lot 2 (owner 2026-06-15) : tags internes (classification par sujet).
             await db.execute('''CREATE TABLE IF NOT EXISTS ticket_tags (
@@ -639,6 +648,7 @@ async def collect_ticket_stats(guild_id: int) -> dict:
         "closed": 0,
         "unclaimed": 0,
         "by_priority": {},
+        "by_tag": [],
         "top_staff": [],
         "avg_resolution_hours": 0,
         "recent_7d": 0,
@@ -717,6 +727,11 @@ async def collect_ticket_stats(guild_id: int) -> dict:
                 pass
     except Exception as ex:
         print(f"[tickets_enhance collect_ticket_stats] {ex}")
+    # Lot 2 : répartition par TAG (hors bloc DB ci-dessus → pas de connexion imbriquée).
+    try:
+        out["by_tag"] = await tag_stats(guild_id)
+    except Exception:
+        out["by_tag"] = []
     return out
 
 
@@ -807,6 +822,13 @@ def build_stats_panel(stats: dict, guild_name: str = ""):
                     emoji, label = PRIORITY_LEVELS.get(prio, ("⚪", prio.upper()))
                     lines.append(f"{emoji} **{label}** `{cnt}`")
                 items.append(v2_body(" · ".join(lines)))
+
+            # Par SUJET (tags — Lot 2) : permet de voir les tendances (ex. « 70 % bugs »)
+            if stats.get("by_tag"):
+                items.append(v2_divider())
+                items.append(v2_body("### 🏷️ Par sujet"))
+                items.append(v2_body(" · ".join(
+                    f"{PRESET_TAGS.get(t, t)} `{c}`" for t, c in stats["by_tag"][:8])))
 
             # Avg resolution
             if stats["avg_resolution_hours"] > 0:
@@ -911,6 +933,22 @@ async def _mark_sla_reminded(channel_id: int):
         pass
 
 
+async def _mark_sla_escalated(channel_id: int):
+    """Marque un ticket comme « escaladé à l'owner » (1 seule fois → jamais de spam)."""
+    if _get_db is None:
+        return
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT INTO ticket_sla_escalated(channel_id, escalated_at) "
+                "VALUES(?, CURRENT_TIMESTAMP) ON CONFLICT(channel_id) DO NOTHING",
+                (int(channel_id),),
+            )
+            await db.commit()
+    except Exception:
+        pass
+
+
 @tasks.loop(hours=2)
 async def sla_reminder_task():
     """Toutes les 2 h : poste UN rappel dans les tickets OUVERTS et NON PRIS EN
@@ -971,6 +1009,56 @@ async def sla_reminder_task():
                     await _mark_sla_reminded(int(ch_id))
             except Exception as ex:
                 print(f"[tickets_enhance sla guild={guild.id}] {ex}")
+
+        # ── ESCALADE 2e palier (owner 2026-06-15) : ticket TOUJOURS non pris après
+        #    `ticket_sla_escalate_hours` (défaut SLA_ESCALATE_HOURS) → PING l'OWNER du
+        #    serveur UNE fois (in-channel, jamais en MP). Tracké à part. Boucle séparée
+        #    pour ne pas toucher la logique du 1er palier. FAIL-OPEN par guilde. ──
+        for guild in list(_bot.guilds):
+            try:
+                _eh = SLA_ESCALATE_HOURS
+                try:
+                    if _db_get is not None:
+                        _eh = int((await _db_get(guild.id) or {}).get(
+                            'ticket_sla_escalate_hours', SLA_ESCALATE_HOURS) or SLA_ESCALATE_HOURS)
+                except Exception:
+                    _eh = SLA_ESCALATE_HOURS
+                if _eh <= 0:
+                    continue  # escalade désactivée pour cette guilde
+                g_cutoff = (datetime.now(timezone.utc)
+                            - timedelta(hours=max(1, _eh))).strftime('%Y-%m-%d %H:%M:%S')
+                async with _get_db() as db:
+                    async with db.execute(
+                        "SELECT t.channel_id FROM tickets t "
+                        "LEFT JOIN ticket_sla_escalated e ON e.channel_id = t.channel_id "
+                        "WHERE t.guild_id=? AND t.status='open' "
+                        "AND (t.claimed_by IS NULL OR t.claimed_by=0) "
+                        "AND t.created_at < ? AND e.channel_id IS NULL LIMIT 25",
+                        (guild.id, g_cutoff),
+                    ) as cur:
+                        erows = await cur.fetchall()
+                if not erows:
+                    continue
+                owner_mention = f"<@{int(guild.owner_id)}> " if guild.owner_id else ""
+                for (ch_id,) in erows:
+                    ch = _bot.get_channel(int(ch_id))
+                    if not isinstance(ch, discord.TextChannel):
+                        await _mark_sla_escalated(int(ch_id))  # salon disparu → on marque
+                        continue
+                    try:
+                        await ch.send(
+                            f"🚨 {owner_mention}**Escalade** — ce ticket est ouvert depuis plus "
+                            f"de `{_eh}h` **sans aucune prise en charge**. Merci d'y jeter un œil "
+                            f"ou de relancer le staff. 🙏",
+                            allowed_mentions=discord.AllowedMentions(
+                                users=([guild.owner] if guild.owner else False),
+                                roles=False, everyone=False),
+                        )
+                    except Exception:
+                        pass
+                    await _mark_sla_escalated(int(ch_id))
+            except Exception as ex:
+                print(f"[tickets_enhance sla escalate guild={guild.id}] {ex}")
     except Exception as ex:
         print(f"[tickets_enhance sla_reminder_task] {ex}")
 
