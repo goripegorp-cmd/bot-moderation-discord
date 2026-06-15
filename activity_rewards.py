@@ -31,6 +31,7 @@ DB :
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -532,6 +533,7 @@ async def remove_expired(guild_id: int) -> int:
                 try:
                     if role in member.roles:
                         await member.remove_roles(role, reason="Récompense VIP expirée")
+                        await asyncio.sleep(0.5)  # throttle anti-429 (remove_roles par membre)
                 except Exception:
                     pass
             try:
