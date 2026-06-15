@@ -427,6 +427,18 @@ async def _find_announce_channel(guild: discord.Guild) -> Optional[discord.TextC
     return None
 
 
+def _fmt_voice_duration(minutes: int) -> str:
+    """Minutes → « 4h12 » / « 3h » / « 45 min » : plus parlant et plus valorisant
+    que des minutes brutes pour célébrer le temps passé en vocal."""
+    minutes = max(0, int(minutes or 0))
+    h, m = divmod(minutes, 60)
+    if h and m:
+        return f"{h}h{m:02d}"
+    if h:
+        return f"{h}h"
+    return f"{m} min"
+
+
 async def _announce_rewards(
     guild: discord.Guild, granted_vip: list, vip_plus_ids: list,
     leaders: dict,
@@ -453,6 +465,28 @@ async def _announce_rewards(
         label = "Membres les plus actifs" if len(names) > 1 else "Membre le plus actif"
         lines.append(f"💎 **VIP+ — {label}** : " + " · ".join(names))
         lines.append("_Les plus présent·es toutes catégories confondues. Chapeau à tou·tes !_")
+        lines.append("")
+
+    # 🎙️ BLOC VOCAL DÉDIÉ (owner 2026-06-15) : le vocal était noyé dans une puce
+    # anonyme — on le SORT À PART, NOMMÉ, avec les HEURES, pour le valoriser À
+    # ÉGALITÉ avec le texte. Réutilise leaders["voice"] déjà calculé (aucune requête
+    # en plus). Gated par 'vocal_recognition_enabled' (défaut ON). Cap 5 noms affichés
+    # (longueur message) ; les pings RÉELS restent plafonnés à 3 plus bas (TOS Discord).
+    voice_leaders = (leaders or {}).get("voice") or []
+    show_voice = True
+    try:
+        if _db_get is not None:
+            _vc = await _db_get(guild.id)
+            show_voice = bool(_vc.get("vocal_recognition_enabled", True))
+    except Exception:
+        show_voice = True
+    if show_voice and voice_leaders:
+        lines.append("🎙️ **ROIS & REINES DU VOCAL** 🎙️")
+        lines.append("_Souvent dans l'ombre, jamais oublié·es — merci d'animer nos vocaux ❤️_")
+        for vuid, vmin in voice_leaders[:5]:
+            vm = guild.get_member(vuid)
+            vnm = vm.mention if vm else f"<@{vuid}>"
+            lines.append(f"• {vnm} — **{_fmt_voice_duration(vmin)}** en vocal cette semaine")
         lines.append("")
 
     if granted_vip:

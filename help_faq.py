@@ -142,6 +142,23 @@ FAQ_QA = {
             ),
             "opener": "open_my_drops_panel",
         },
+        {
+            "q": "C'est quoi les titres « Champion » et « Voix du serveur » ?",
+            "a": (
+                "Le serveur récompense celles et ceux qui le font vivre — "
+                "**sans aucun MP, sans spam** :\n"
+                "• **🥇 Champion d'activité** — le top 3 d'activité (messages + "
+                "vocal) du mois gagne un titre **qui reste**, visible dans "
+                "`/profile`.\n"
+                "• **🎙️ Voix du serveur** — le top 3 du **temps en vocal** du "
+                "mois gagne son propre titre permanent : le vocal est valorisé "
+                "**à égalité** avec le texte.\n"
+                "• Chaque **lundi**, l'annonce des plus actifs met les **Rois & "
+                "Reines du Vocal** en avant avec leurs heures de présence.\n\n"
+                "_Rejoins un salon vocal et écris : chaque minute et chaque "
+                "message comptent pour grimper._"
+            ),
+        },
     ],
     "drops": [
         {
