@@ -2039,6 +2039,7 @@ async def daily_boss_task():
                             "UPDATE daily_boss_events SET message_id=0 WHERE id=?",
                             (ev_id,))
                         await db.commit()
+                    await asyncio.sleep(0.3)  # throttle anti-429 (DELETE messages en boucle)
                 except Exception as ex:
                     print(f"[daily_boss_task backlog ev={ev_id}] {ex}")
         except Exception as ex:

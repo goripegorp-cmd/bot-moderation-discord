@@ -26,6 +26,7 @@ DB :
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -174,6 +175,8 @@ async def check_task():
                                             await db.commit()
                                     except Exception:
                                         pass
+                                    # throttle anti-429 (DELETE de vocaux en boucle, multi-guildes)
+                                    await asyncio.sleep(0.3)
                             except Exception:
                                 pass
                         else:

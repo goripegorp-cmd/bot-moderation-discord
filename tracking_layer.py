@@ -358,6 +358,7 @@ async def prune_to_max(
                     pass  # message peut-être déjà supprimé manuellement
             tp.deleted = True
             deleted_count += 1
+            await asyncio.sleep(0.3)  # throttle anti-429 (DELETE messages même salon)
         except Exception as ex:
             print(f"[tracking_layer prune_to_max] {tp.key}: {ex}")
 
@@ -457,6 +458,7 @@ async def cleanup_deleted_sources(
 
             tp.deleted = True
             report["deleted"] += 1
+            await asyncio.sleep(0.3)  # throttle anti-429 (DELETE messages même salon)
         except Exception as ex:
             report["errors"].append(f"{tp.key}: delete failed ({ex})")
 

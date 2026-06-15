@@ -1010,6 +1010,7 @@ async def _delete_run_channels(*channels):
                 await ch.delete(reason="Donjon terminé — cleanup")
         except Exception:
             pass
+        await asyncio.sleep(0.2)  # throttle anti-429 (DELETE salons en boucle)
 
 
 async def _close_run(run_id: int):
@@ -1088,6 +1089,7 @@ async def boot_cleanup():
             except Exception:
                 pass
             done.append(int(gid))
+            await asyncio.sleep(0.3)  # throttle anti-429 (DELETE messages en boucle)
         if done:
             async with _get_db() as db:
                 await db.executemany(
