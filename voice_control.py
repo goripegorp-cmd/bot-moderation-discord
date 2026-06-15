@@ -702,10 +702,90 @@ async def _active_temp_rooms(guild):
     return out[:STAFF_LIST_MAX]
 
 
+async def _voice_stats_7d(guild_id: int) -> dict:
+    """Stats vocales des 7 derniers jours (voice_activity_log) pour le récap staff (Lot 3).
+    FAIL-OPEN → dict à zéros."""
+    out = {"sessions": 0, "minutes": 0, "users": 0, "top": [], "peak_hours": []}
+    if _get_db is None:
+        return out
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT COUNT(*), COALESCE(SUM(duration_seconds),0)/60, COUNT(DISTINCT user_id) "
+                "FROM voice_activity_log WHERE guild_id=? "
+                "AND datetime(joined_at) > datetime('now','-7 days')",
+                (int(guild_id),)) as cur:
+                row = await cur.fetchone()
+            if row:
+                out["sessions"] = int(row[0] or 0)
+                out["minutes"] = int(row[1] or 0)
+                out["users"] = int(row[2] or 0)
+            async with db.execute(
+                "SELECT user_id, COALESCE(SUM(duration_seconds),0)/60 AS m FROM voice_activity_log "
+                "WHERE guild_id=? AND datetime(joined_at) > datetime('now','-7 days') "
+                "GROUP BY user_id HAVING m > 0 ORDER BY m DESC LIMIT 10",
+                (int(guild_id),)) as cur:
+                out["top"] = [(int(r[0]), int(r[1] or 0)) for r in await cur.fetchall()]
+            async with db.execute(
+                "SELECT strftime('%H', joined_at) AS h, COUNT(*) AS c FROM voice_activity_log "
+                "WHERE guild_id=? AND datetime(joined_at) > datetime('now','-7 days') "
+                "GROUP BY h ORDER BY c DESC LIMIT 3",
+                (int(guild_id),)) as cur:
+                out["peak_hours"] = [(r[0], int(r[1])) for r in await cur.fetchall()
+                                     if r and r[0] is not None]
+    except Exception as ex:
+        print(f"[voice_control _voice_stats_7d] {ex}")
+    return out
+
+
+def _fmt_hm(minutes: int) -> str:
+    minutes = max(0, int(minutes or 0))
+    return f"{minutes // 60}h{minutes % 60:02d}" if minutes >= 60 else f"{minutes} min"
+
+
+def build_voice_stats_recap(guild):
+    """Récap ÉPHÉMÈRE de l'activité vocale du serveur (7j) pour le STAFF : volume global,
+    top vocal, heures de pointe. Lecture seule (voice_activity_log). Comble le seul manque
+    réel du Lot 3 Logs (routage/filtres/exclusions/dashboard/export existent déjà). Renvoie
+    une COROUTINE (à await). FAIL-SAFE."""
+    h = _v2 or {}
+    LayoutView = h.get('LayoutView') or getattr(discord.ui, 'LayoutView', None)
+    v2_container = h.get('v2_container')
+    v2_body = h.get('v2_body')
+    v2_title = h.get('v2_title')
+
+    async def _build():
+        s = await _voice_stats_7d(guild.id)
+        total = s["minutes"]
+        top_lines = "\n".join(f"• <@{uid}> — **{_fmt_hm(m)}**" for uid, m in s["top"]) or "_aucune activité_"
+        peak = " · ".join(f"`{hh}h` ({c})" for hh, c in s["peak_hours"]) or "—"
+        body = (f"**7 derniers jours**\n"
+                f"🎙️ Sessions : `{s['sessions']}`  ·  ⏱️ Total : `{total // 60}h{total % 60:02d}`  ·  "
+                f"👥 Membres : `{s['users']}`\n"
+                f"🔝 Heures de pointe : {peak}\n\n"
+                f"### Top vocal (7j)\n{top_lines}")
+        if v2_container and v2_body and v2_title:
+            class _RecapView(LayoutView):
+                def __init__(self):
+                    super().__init__(timeout=300)
+                    self.add_item(v2_container(
+                        v2_title("📊 Activité vocale du serveur"),
+                        v2_body(body), color=0x5865F2))
+            return _RecapView()
+
+        class _RecapViewFb(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=300)
+                self.add_item(discord.ui.TextDisplay("### 📊 Activité vocale du serveur\n" + body))
+        return _RecapViewFb()
+
+    return _build()
+
+
 def build_staff_voice_panel(guild):
-    """Panneau STAFF (éphémère) : liste des vocaux temp actifs + geler/dégeler tout.
-    Renvoie une coroutine-builder (à await) car il lit la DB. À câbler depuis un dashboard
-    staff. NOMINATIF côté appelant (vérifier manage_channels avant d'afficher)."""
+    """Panneau STAFF (éphémère) : liste des vocaux temp actifs + geler/dégeler tout +
+    récap d'activité vocale (Lot 3). Renvoie une coroutine-builder (à await) car il lit la
+    DB. À câbler depuis un dashboard staff. NOMINATIF côté appelant (manage_channels)."""
     LayoutView = _v2.get('LayoutView') or getattr(discord.ui, 'LayoutView', None)
     v2_container = _v2.get('v2_container')
     v2_body = _v2.get('v2_body')
@@ -746,7 +826,25 @@ def build_staff_voice_panel(guild):
         b_unfreeze = discord.ui.Button(label="Dégeler tout", style=discord.ButtonStyle.success, emoji="☀️")
         b_freeze.callback = lambda i: _freeze_all(i, True)
         b_unfreeze.callback = lambda i: _freeze_all(i, False)
-        row = discord.ui.ActionRow(b_freeze, b_unfreeze)
+
+        async def _show_stats(i: discord.Interaction):
+            try:
+                if not bool(getattr(i.user.guild_permissions, 'manage_channels', False)):
+                    if not i.response.is_done():
+                        await i.response.send_message("❌ Réservé au staff.", ephemeral=True)
+                    return
+                # defer-first : le récap fait plusieurs requêtes d'agrégat (potentiellement
+                # lentes sur une grosse table) → on défère AVANT pour ne jamais timeouter.
+                if not i.response.is_done():
+                    await i.response.defer(ephemeral=True)
+                recap = await build_voice_stats_recap(guild)
+                await i.followup.send(view=recap, ephemeral=True)
+            except Exception as ex:
+                print(f"[voice_control staff stats] {ex}")
+        b_stats = discord.ui.Button(label="Activité vocale (7j)",
+                                    style=discord.ButtonStyle.primary, emoji="📊")
+        b_stats.callback = _show_stats
+        row = discord.ui.ActionRow(b_freeze, b_unfreeze, b_stats)
         if v2_container and v2_body and v2_title:
             class _StaffView(LayoutView):
                 def __init__(self):
@@ -768,6 +866,6 @@ def build_staff_voice_panel(guild):
 
 __all__ = [
     "setup", "init_db", "register_persistent", "post_control_panel",
-    "unlock_expired_task", "build_staff_voice_panel", "VoiceControlButton",
-    "LOCK_AUTO_RELEASE_HOURS",
+    "unlock_expired_task", "build_staff_voice_panel", "build_voice_stats_recap",
+    "VoiceControlButton", "LOCK_AUTO_RELEASE_HOURS",
 ]
