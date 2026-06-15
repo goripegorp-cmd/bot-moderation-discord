@@ -30,6 +30,7 @@ Config (lu via cfg() de bot.py) :
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -138,6 +139,7 @@ async def apply_honeypot_perms(
                 )
             except Exception as ex_r:
                 out["errors"].append(f"role {role.name}: {ex_r}")
+            await asyncio.sleep(0.5)  # throttle anti-429 (set_permissions = endpoint lourd)
         out["success"] = True
         return out
     except Exception as ex:

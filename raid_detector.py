@@ -39,6 +39,7 @@ bouton "Lockdown 30min" ou "Faux positif (ignore)".
 """
 from __future__ import annotations
 
+import asyncio
 import re
 import json
 from datetime import datetime, timedelta, timezone
@@ -428,6 +429,7 @@ async def run_lockdown(guild: discord.Guild, duration_min: int = 30) -> dict:
                     out["invites_disabled"] += 1
                 except Exception:
                     pass
+                await asyncio.sleep(0.3)  # throttle anti-429 (DELETE invites en rafale)
         except Exception as ex:
             out["errors"].append(f"invites: {ex}")
 
@@ -457,6 +459,7 @@ async def run_lockdown(guild: discord.Guild, duration_min: int = 30) -> dict:
                         )
                     except Exception:
                         pass
+                    await asyncio.sleep(0.5)  # throttle anti-429 (set_permissions = endpoint lourd)
             except Exception as ex:
                 out["errors"].append(f"role: {ex}")
 
