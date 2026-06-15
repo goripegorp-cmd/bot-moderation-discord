@@ -334,9 +334,11 @@ async def get_audit(channel_id: int, limit: int = AUDIT_DISPLAY_MAX) -> list:
         return []
 
 
-def build_ticket_manage_panel(channel_id: int, guild_id: int):
+def build_ticket_manage_panel(channel_id: int, guild_id: int, staff_role_id: int = 0):
     """Panneau ÉPHÉMÈRE staff : tags du ticket (Select multi pour (re)classer) + audit
-    récent. Renvoie une COROUTINE (à await — lit la DB). FAIL-SAFE."""
+    récent. Renvoie une COROUTINE (à await — lit la DB). FAIL-SAFE. `staff_role_id` =
+    rôle staff configuré, pour que le re-check du Select soit COHÉRENT avec le bouton
+    qui ouvre le panneau (admin / owner / rôle staff), pas juste manage_channels."""
     h = _v2_helpers or {}
     LayoutView = h.get('LayoutView') or getattr(discord.ui, 'LayoutView', None)
     v2_container = h.get('v2_container')
@@ -368,14 +370,22 @@ def build_ticket_manage_panel(channel_id: int, guild_id: int):
 
         async def _cb(i: discord.Interaction):
             try:
-                if not bool(getattr(i.user.guild_permissions, 'manage_channels', False)):
+                # Re-check COHÉRENT avec le bouton d'ouverture : admin / owner / rôle staff
+                # configuré (et non « manage_channels » seul). Défense en profondeur — le
+                # panneau est déjà éphémère et ne s'ouvre qu'après le check du bouton.
+                _gp = getattr(i.user, 'guild_permissions', None)
+                _is_a = bool(getattr(_gp, 'administrator', False))
+                _is_o = bool(i.guild and i.user.id == i.guild.owner_id)
+                _is_s = bool(staff_role_id and i.guild
+                             and i.guild.get_role(int(staff_role_id)) in getattr(i.user, 'roles', []))
+                if not (_is_a or _is_o or _is_s):
                     if not i.response.is_done():
                         await i.response.send_message("❌ Réservé au staff.", ephemeral=True)
                     return
                 if not i.response.is_done():
                     await i.response.defer()  # defer la mise à jour (component)
                 await set_tags(channel_id, guild_id, sel.values, i.user.id)
-                newview = await build_ticket_manage_panel(channel_id, guild_id)
+                newview = await build_ticket_manage_panel(channel_id, guild_id, staff_role_id)
                 await i.edit_original_response(view=newview)
             except Exception as ex:
                 print(f"[tickets_enhance manage cb] {ex}")
