@@ -264,17 +264,15 @@ async def post_control_panel(channel, owner_id: int):
 
 
 async def _refresh_panel(interaction: discord.Interaction, channel_id: int, owner_id: int):
-    """Réaffiche le panneau à jour APRÈS une action, en éditant le message du panneau si
-    le clic vient de lui ; sinon poste un éphémère de confirmation. Anti double-ack."""
+    """Réaffiche le panneau à jour APRÈS un defer() de mise à jour (component) : édite le
+    message du panneau EN PLACE via edit_original_response. FAIL-SAFE (followup en repli)."""
     locked = await _is_locked(channel_id)
     view = _build_panel(channel_id, owner_id, locked)
     try:
-        if not interaction.response.is_done():
-            await interaction.response.edit_message(view=view)
+        await interaction.edit_original_response(view=view)
     except Exception:
         try:
-            if not interaction.response.is_done():
-                await interaction.response.send_message("✅ C'est fait.", ephemeral=True)
+            await interaction.followup.send("✅ C'est fait.", ephemeral=True)
         except Exception:
             pass
 
@@ -294,6 +292,8 @@ class _RenameModal(discord.ui.Modal, title="🔤 Renommer le vocal"):
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)  # defer-first (ch.edit = API)
             ch = interaction.guild.get_channel(self.channel_id) if interaction.guild else None
             new = (self.name.value or "").strip()[:95]
             if ch is not None and new:
@@ -301,12 +301,14 @@ class _RenameModal(discord.ui.Modal, title="🔤 Renommer le vocal"):
                     await ch.edit(name=new, reason=f"Renommage par {interaction.user}")
                 except Exception:
                     pass
-            await _refresh_panel(interaction, self.channel_id, self.owner_id)
+            try:
+                await interaction.followup.send(f"✅ Vocal renommé en **{new}**.", ephemeral=True)
+            except Exception:
+                pass
         except Exception as ex:
             print(f"[voice_control rename submit] {ex}")
             try:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("✅ Pris en compte.", ephemeral=True)
+                await interaction.followup.send("✅ Pris en compte.", ephemeral=True)
             except Exception:
                 pass
 
@@ -323,6 +325,8 @@ class _LimitModal(discord.ui.Modal, title="👥 Limite de places"):
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)  # defer-first (ch.edit = API)
             raw = (self.limit.value or "0").strip()
             try:
                 n = int(re.sub(r"[^0-9]", "", raw) or "0")
@@ -335,12 +339,15 @@ class _LimitModal(discord.ui.Modal, title="👥 Limite de places"):
                     await ch.edit(user_limit=n, reason=f"Limite par {interaction.user}")
                 except Exception:
                     pass
-            await _refresh_panel(interaction, self.channel_id, self.owner_id)
+            try:
+                await interaction.followup.send(
+                    f"✅ Limite réglée sur **{'illimitée' if n == 0 else n}**.", ephemeral=True)
+            except Exception:
+                pass
         except Exception as ex:
             print(f"[voice_control limit submit] {ex}")
             try:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("✅ Pris en compte.", ephemeral=True)
+                await interaction.followup.send("✅ Pris en compte.", ephemeral=True)
             except Exception:
                 pass
 
@@ -394,13 +401,15 @@ def _build_member_select_view(channel_id: int, owner_id: int, members, action: s
 
 async def _on_member_select(interaction, channel_id, owner_id, action, values):
     try:
+        # Defer-first : move_to / set_permissions sont des appels API → on défère AVANT.
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
         target_id = int(values[0]) if values else 0
         guild = interaction.guild
         ch = guild.get_channel(int(channel_id)) if guild else None
         target = guild.get_member(target_id) if guild else None
         if ch is None or target is None:
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌ Membre/salon introuvable.", ephemeral=True)
+            await interaction.followup.send("❌ Membre/salon introuvable.", ephemeral=True)
             return
         if action == "kick":
             # Expulser = déconnecter du vocal (move_to None). Pas un kick serveur.
@@ -414,29 +423,25 @@ async def _on_member_select(interaction, channel_id, owner_id, action, values):
                 msg = "❌ Je n'ai pas la permission « Déplacer des membres »."
             except Exception:
                 msg = "❌ Action impossible."
-            if not interaction.response.is_done():
-                await interaction.response.send_message(
-                    msg, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+            await interaction.followup.send(
+                msg, ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
         else:  # xfer
             ok = await _set_owner(channel_id, target_id)
             if ok:
                 # Bascule les overwrites élevés vers le nouveau proprio (best-effort).
                 await _swap_owner_overwrites(ch, owner_id, target_id, interaction.user)
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(
-                        f"👑 Propriété transférée à {target.mention}.", ephemeral=True,
-                        allowed_mentions=discord.AllowedMentions.none())
+                await interaction.followup.send(
+                    f"👑 Propriété transférée à {target.mention}.", ephemeral=True,
+                    allowed_mentions=discord.AllowedMentions.none())
                 # Met à jour le panneau in-room (nouveau proprio affiché).
                 await _repost_or_log(ch, target_id)
             else:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(
-                        "❌ Transfert impossible (vocal non temporaire ?).", ephemeral=True)
+                await interaction.followup.send(
+                    "❌ Transfert impossible (vocal non temporaire ?).", ephemeral=True)
     except Exception as ex:
         print(f"[voice_control _on_member_select] {ex}")
         try:
-            if not interaction.response.is_done():
-                await interaction.response.send_message("✅ Pris en compte.", ephemeral=True)
+            await interaction.followup.send("✅ Pris en compte.", ephemeral=True)
         except Exception:
             pass
 
@@ -578,6 +583,10 @@ async def _on_control_click(interaction: discord.Interaction, action: str, chann
             if not interaction.response.is_done():
                 await interaction.response.send_modal(_LimitModal(channel_id, owner_id))
         elif action == "lock":
+            # Defer-first : _apply_lock fait un set_permissions (API) → on défère la mise à
+            # jour du panneau AVANT, pour ne jamais dépasser la fenêtre 3 s (Échec d'interaction).
+            if not interaction.response.is_done():
+                await interaction.response.defer()  # DEFERRED_UPDATE_MESSAGE (component)
             currently = await _is_locked(channel_id)
             await _apply_lock(ch, not currently, actor=interaction.user)
             await _refresh_panel(interaction, channel_id, owner_id)
@@ -620,6 +629,7 @@ def register_persistent(bot_instance):
     """Enregistre le DynamicItem au boot (à appeler dans on_ready). FAIL-SAFE."""
     try:
         bot_instance.add_dynamic_items(VoiceControlButton)
+        print("[voice_control] VoiceControlButton enregistré (boutons in-room persistants)")
     except Exception as ex:
         print(f"[voice_control register_persistent] {ex}")
 
