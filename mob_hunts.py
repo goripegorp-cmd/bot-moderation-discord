@@ -68,6 +68,15 @@ _arena_delete_fn = None  # Phase 228 : supprime l'arène éphémère du mob à l
 _event_busy_fn = None  # Phase 230 : async (guild_id) -> True si un AUTRE event de combat tourne (injecté)
 _claim_lock_fn = None  # Phase 262 : async (guild_id, type) -> True si claim de spawn acquis (injecté)
 
+# ANTI-429 (owner 2026-06-16) : THROTTLE du refresh du panneau mob. Sous le feu (mob
+# collectif frappé par plusieurs joueurs en rafale), CHAQUE clic éditait le message → tempête
+# de 429 PATCH sur le MÊME message (daily_bosses, lui, throttle depuis la Phase 251.3). On
+# coalesce : au plus 1 édition du panneau / _MOB_PANEL_REFRESH_MIN s par mob. ⚠️ La MORT
+# (HP<=0) part AVANT cet edit (via _on_mob_killed) → l'état final s'affiche TOUJOURS, et le
+# feedback de dégâts reste un éphémère par-joueur (jamais throttlé).
+_MOB_PANEL_REFRESH_MIN = 4.0
+_mob_panel_last_refresh: dict = {}  # mob_id -> _time.monotonic() du dernier refresh du panneau
+
 # Spawn interval (random entre min et max minutes)
 # Phase 173.1 : plus fréquent (18-30 min au lieu de 30-45) → bien plus de
 # combat dans la journée.
@@ -1171,24 +1180,39 @@ async def _process_attack(btn_i: discord.Interaction, mob_id: int):
             return
 
         # Edit le message pour refléter new HP
-        # Phase 251.3 — ANTI-429 : édition via PartialMessage (PATCH seul, ZÉRO GET
-        # fetch_message) → plus de tempête de `GET .../messages` 429 sous le feu.
+        # Phase 251.3 — ANTI-429 : édition via PartialMessage (PATCH seul, ZÉRO GET).
+        # + THROTTLE (owner 2026-06-16) : au plus 1 refresh / _MOB_PANEL_REFRESH_MIN s par
+        #   mob → un mob collectif frappé en rafale n'édite plus le message 12×/20s (429).
+        #   Le HP affiché peut avoir ~4 s de retard ; la mort, elle, est gérée plus haut.
         try:
-            guild = btn_i.guild
-            ch = guild.get_channel(int(ch_id))
-            if ch and msg_id:
-                try:
-                    new_layout = await _build_updated_layout(
-                        mob_def, new_hp, int(hp_max), bool(is_elite), mob_id
-                    )
-                    if new_layout:
-                        await ch.get_partial_message(int(msg_id)).edit(view=new_layout)
-                except discord.NotFound:
-                    pass
-                except Exception as ex:
-                    print(f"[mob_attack edit msg] {ex}")
+            _now_r = _time.monotonic()
+            _skip_refresh = (_now_r - _mob_panel_last_refresh.get(mob_id, 0.0)
+                             < _MOB_PANEL_REFRESH_MIN)
         except Exception:
-            pass
+            _skip_refresh = False
+        if not _skip_refresh:
+            try:
+                if len(_mob_panel_last_refresh) > 500:  # anti-fuite mémoire (bornage)
+                    _mob_panel_last_refresh.clear()
+                _mob_panel_last_refresh[mob_id] = _time.monotonic()
+            except Exception:
+                pass
+            try:
+                guild = btn_i.guild
+                ch = guild.get_channel(int(ch_id))
+                if ch and msg_id:
+                    try:
+                        new_layout = await _build_updated_layout(
+                            mob_def, new_hp, int(hp_max), bool(is_elite), mob_id
+                        )
+                        if new_layout:
+                            await ch.get_partial_message(int(msg_id)).edit(view=new_layout)
+                    except discord.NotFound:
+                        pass
+                    except Exception as ex:
+                        print(f"[mob_attack edit msg] {ex}")
+            except Exception:
+                pass
 
         # Feedback ephemeral
         try:
@@ -1679,17 +1703,29 @@ async def _mob_pet_assist(btn_i: discord.Interaction, mob_id: int):
                 ephemeral=True,
             )
             return
-        # Rafraîchit le panneau (PATCH seul, anti-429).
+        # Rafraîchit le panneau (PATCH seul) + THROTTLE PARTAGÉ par mob_id (owner 2026-06-16) :
+        # le pet-assist et les attaques éditent le MÊME message → même cooldown (anti-429).
         try:
-            guild = btn_i.guild
-            ch = guild.get_channel(int(ch_id)) if ch_id else None
-            if ch and msg_id:
-                new_layout = await _build_updated_layout(
-                    mob_def, new_hp, int(hp_max), bool(is_elite), mob_id)
-                if new_layout:
-                    await ch.get_partial_message(int(msg_id)).edit(view=new_layout)
+            _now_r = _time.monotonic()
+            _skip_refresh = (_now_r - _mob_panel_last_refresh.get(mob_id, 0.0)
+                             < _MOB_PANEL_REFRESH_MIN)
         except Exception:
-            pass
+            _skip_refresh = False
+        if not _skip_refresh:
+            try:
+                _mob_panel_last_refresh[mob_id] = _time.monotonic()
+            except Exception:
+                pass
+            try:
+                guild = btn_i.guild
+                ch = guild.get_channel(int(ch_id)) if ch_id else None
+                if ch and msg_id:
+                    new_layout = await _build_updated_layout(
+                        mob_def, new_hp, int(hp_max), bool(is_elite), mob_id)
+                    if new_layout:
+                        await ch.get_partial_message(int(msg_id)).edit(view=new_layout)
+            except Exception:
+                pass
         await btn_i.followup.send(
             f"🐾 **{label}** inflige `{dmg}` dégâts à "
             f"{mob_def['emoji']} **{mob_def['name']}** ({new_hp}/{hp_max} HP)."
