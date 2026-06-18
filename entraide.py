@@ -563,9 +563,17 @@ async def list_open_requests(guild_id, limit=20) -> list:
 
 async def list_open_requests_for_game(guild_id, game_key, within_hours=6,
                                       limit=10, exclude_request_id=0) -> list:
-    """Demandes OUVERTES du MÊME jeu (même game_key) sur les `within_hours` dernières
+    """Demandes ACTIVES du MÊME jeu (même game_key) sur les `within_hours` dernières
     heures — sert au REGROUPEMENT « même besoin » (mentionner ceux qui cherchent de
-    l'aide sur le même jeu pour qu'ils s'entraident au même endroit / même vocal).
+    l'aide sur le même jeu pour qu'ils s'entraident au même endroit / même vocal) ET à
+    la RÉUTILISATION du vocal d'une demande déjà prise en charge.
+
+    ⚠️ owner 2026-06-18 : « actives » = status IN ('open','matched') — PAS seulement
+    'open'. Une demande devient 'matched' dès qu'un aidant la réclame, et c'est ELLE qui
+    porte le `voice_channel_id` à réutiliser. En filtrant 'open' seul, on cachait ces
+    vocaux → on en recréait des DOUBLONS au lieu de regrouper tout le monde au même
+    endroit (les 2 appelants — réutilisation de vocal + grouping même-jeu — veulent les
+    deux statuts ; vérifié : aucun appelant ne veut 'open' seul).
     Les plus récentes d'abord (les voisins immédiats du demandeur). On peut exclure
     une demande (ex. celle qu'on vient de créer) via `exclude_request_id`.
     -> [dict, …]. FAIL-OPEN : []."""
@@ -580,7 +588,7 @@ async def list_open_requests_for_game(guild_id, game_key, within_hours=6,
                 "request_channel_id, message_id, voice_channel_id, helper_id, "
                 "created_at, resolved_at "
                 "FROM entraide_requests "
-                "WHERE guild_id=? AND game_key=? AND status='open' "
+                "WHERE guild_id=? AND game_key=? AND status IN ('open','matched') "
                 "AND created_at >= ? AND id != ? "
                 "ORDER BY created_at DESC LIMIT ?",
                 (int(guild_id), str(game_key), cutoff,
