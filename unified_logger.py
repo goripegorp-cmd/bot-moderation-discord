@@ -727,6 +727,16 @@ async def log_security_event(bot, guild, event_type, target_user, *,
 _ESCALATION_SEEN: dict = {}
 _ESCALATION_DEDUP_WINDOW = 120.0
 
+# COUPE-CIRCUIT GLOBAL (owner 2026-06-18) : le dedup ci-dessus est PAR (membre, compteur)
+# → il n'empêche PAS un flood d'alertes sur des membres DIFFÉRENTS (raid, module bugué).
+# Au-delà de _ESCALATION_GLOBAL_MAX escalades / guilde / heure, on SUPPRIME les suivantes
+# (l'owner DÉTESTE être spammé) et on poste UNE seule note « N alertes regroupées ». État
+# mémoire (reset au reboot), fail-open. {guild_id: [ts...]} + {guild_id: ts_derniere_note}.
+_ESCALATION_GLOBAL: dict = {}
+_ESCALATION_FLOOD_NOTED: dict = {}
+_ESCALATION_GLOBAL_MAX = 12
+_ESCALATION_GLOBAL_WINDOW = 3600.0
+
 # TASK A8 : sévérités qui déclenchent une MENTION du fondateur (en plus de l'embed).
 _ESCALATION_PING_SEVERITIES = {"haute", "critique"}
 
@@ -810,6 +820,39 @@ async def log_member_escalation(bot, guild, member, total_warns, palier,
                 cutoff = now_ts - _ESCALATION_DEDUP_WINDOW
                 for k in [k for k, v in list(_ESCALATION_SEEN.items()) if v < cutoff]:
                     _ESCALATION_SEEN.pop(k, None)
+        except Exception:
+            pass
+
+        # COUPE-CIRCUIT GLOBAL (anti-flood owner) : au-delà de _ESCALATION_GLOBAL_MAX
+        # escalades sur CETTE guilde dans la fenêtre, on suppresse les suivantes et on
+        # poste UNE seule note de regroupement par fenêtre. Fail-open (toute erreur →
+        # on laisse passer l'alerte normalement). Cf. constantes _ESCALATION_GLOBAL_*.
+        try:
+            _gid = int(getattr(guild, "id", 0) or 0)
+            _now = datetime.now(timezone.utc).timestamp()
+            _buf = [t for t in _ESCALATION_GLOBAL.get(_gid, [])
+                    if _now - t < _ESCALATION_GLOBAL_WINDOW]
+            _buf.append(_now)
+            _ESCALATION_GLOBAL[_gid] = _buf
+            if len(_ESCALATION_GLOBAL) > 500:  # borne mémoire : purge guildes inactives
+                for _g in [g for g, ts in list(_ESCALATION_GLOBAL.items())
+                           if not ts or _now - ts[-1] > _ESCALATION_GLOBAL_WINDOW]:
+                    _ESCALATION_GLOBAL.pop(_g, None)
+                    _ESCALATION_FLOOD_NOTED.pop(_g, None)
+            if len(_buf) > _ESCALATION_GLOBAL_MAX:
+                if _now - _ESCALATION_FLOOD_NOTED.get(_gid, 0) > _ESCALATION_GLOBAL_WINDOW:
+                    _ESCALATION_FLOOD_NOTED[_gid] = _now
+                    try:
+                        await log_event(
+                            bot, guild, EventType.SEC_ESCALATION,
+                            description=(
+                                f"⚠️ **Trop d'alertes d'escalade** ({len(_buf)} en 1 h) — "
+                                f"les suivantes sont **regroupées en silence** pour éviter "
+                                f"le flood. Voir /infractions pour le détail."),
+                        )
+                    except Exception:
+                        pass
+                return None  # flood → alerte suivante supprimée
         except Exception:
             pass
 

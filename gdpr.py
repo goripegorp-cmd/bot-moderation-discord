@@ -304,8 +304,28 @@ RETENTION = {
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
+# Caractères autorisés dans un identifiant SQL (table/colonne). Durcissement owner
+# 2026-06-18 : les noms interpolés ici viennent TOUS de dicts INTERNES (jamais d'un
+# membre) → non exploitable, mais on refuse par PRINCIPE tout identifiant non conforme
+# (défense en profondeur). Comme CHAQUE ouvrière (purge_user, run_retention, _filter_blob)
+# appelle `_columns(db, table)` en premier et abandonne si le set est vide, valider ICI
+# couvre TOUT le module en un seul point, fail-safe (table malformée → sautée partout).
+_IDENT_OK = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
+
+
+def _safe_ident(name) -> bool:
+    """True si `name` est un identifiant SQL sûr (ASCII lettres/chiffres/_, pas de chiffre
+    en tête). Tout le reste → False (la table sera sautée)."""
+    return (isinstance(name, str) and bool(name) and name[0] not in "0123456789"
+            and all(c in _IDENT_OK for c in name))
+
+
 async def _columns(db, table):
-    """Colonnes réelles d'une table (set), ou set() si la table n'existe pas. Ne lève jamais."""
+    """Colonnes réelles d'une table (set), ou set() si la table n'existe pas / nom non
+    conforme. Ne lève jamais."""
+    if not _safe_ident(table):
+        return set()  # garde-fou défense-en-profondeur (cf. _safe_ident) → table sautée
     try:
         async with db.execute("PRAGMA table_info(%s)" % table) as cur:
             rows = await cur.fetchall()
