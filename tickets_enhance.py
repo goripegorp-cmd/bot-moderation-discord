@@ -652,6 +652,8 @@ async def collect_ticket_stats(guild_id: int) -> dict:
         "top_staff": [],
         "avg_resolution_hours": 0,
         "recent_7d": 0,
+        "by_close_reason": [],
+        "unclaimed_list": [],
     }
     if _get_db is None:
         return out
@@ -732,7 +734,104 @@ async def collect_ticket_stats(guild_id: int) -> dict:
         out["by_tag"] = await tag_stats(guild_id)
     except Exception:
         out["by_tag"] = []
+    # owner 2026-06-18 : motifs de fermeture (tendances) + file des non-pris (passif).
+    try:
+        out["by_close_reason"] = await close_reason_stats(guild_id)
+    except Exception:
+        out["by_close_reason"] = []
+    try:
+        out["unclaimed_list"] = await list_unclaimed_tickets(guild_id)
+    except Exception:
+        out["unclaimed_list"] = []
     return out
+
+
+# Buckets de motifs de fermeture — classés par MOTS-CLÉS depuis le motif libre saisi à la
+# fermeture (log_action action='close', detail=raison) → AUCUNE migration. Sert à dégager
+# les tendances (ex. « 35 % résolu · 20 % doublon · 15 % sans réponse »).
+_CLOSE_REASON_BUCKETS = (
+    ("Résolu", ("résolu", "resolu", "resolved", "réglé", "regle", "fixé", "fixe", "réparé")),
+    ("Doublon", ("doublon", "duplicate", "dupli")),
+    ("Sans réponse", ("pas de réponse", "sans réponse", "pas reponse", "sans reponse",
+                      "no response", "no reply", "inactif", "silence", "ghost", "abandon")),
+    ("Hors-sujet", ("hors-sujet", "hors sujet", "off-topic", "off topic", "spam", "troll")),
+)
+
+
+def _classify_close_reason(detail: str) -> str:
+    d = (detail or "").strip().lower()
+    if not d or d == "aucune raison précisée":
+        return "Non précisé"
+    for label, kws in _CLOSE_REASON_BUCKETS:
+        if any(k in d for k in kws):
+            return label
+    return "Autre"
+
+
+async def close_reason_stats(guild_id: int) -> list:
+    """Répartition des MOTIFS de fermeture (lecture ticket_audit action='close', classés
+    par mots-clés). Renvoie [(label, count), …] décroissant. FAIL-OPEN → []."""
+    if _get_db is None:
+        return []
+    await _ensure_tables()
+    try:
+        from collections import Counter
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT detail FROM ticket_audit WHERE guild_id=? AND action='close'",
+                (int(guild_id),)) as cur:
+                rows = await cur.fetchall()
+        return Counter(_classify_close_reason(r[0]) for r in rows).most_common()
+    except Exception:
+        return []
+
+
+async def list_unclaimed_tickets(guild_id: int, limit: int = 15) -> list:
+    """Tickets OUVERTS et NON réclamés, triés URGENTS d'abord puis plus ANCIENS (file de
+    travail staff, 100 % passive — zéro ping). [{channel_id, priority, created_at}, …].
+    FAIL-OPEN → []."""
+    if _get_db is None:
+        return []
+    await _ensure_tables()
+    _rank = {"urgent": 0, "high": 1, "normal": 2, "low": 3}
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT t.channel_id, COALESCE(te.priority,'normal'), t.created_at "
+                "FROM tickets t LEFT JOIN ticket_extras te ON te.channel_id=t.channel_id "
+                "WHERE t.guild_id=? AND t.status='open' "
+                "AND (t.claimed_by IS NULL OR t.claimed_by=0) "
+                "ORDER BY t.created_at ASC LIMIT 60",
+                (int(guild_id),)) as cur:
+                rows = await cur.fetchall()
+        items = [{"channel_id": int(r[0]), "priority": r[1] or "normal", "created_at": r[2]}
+                 for r in rows]
+        items.sort(key=lambda x: _rank.get(x["priority"], 2))  # stable → âge préservé
+        return items[:limit]
+    except Exception:
+        return []
+
+
+def _ticket_age_short(created_at) -> str:
+    """Âge réel HONNÊTE d'un ticket (min/h/j) pour l'affichage de la file. ⚠️ NE PAS
+    utiliser _format_ticket_age ici : son garde-fou plafonne sous 24 h (hérité du rappel
+    SLA supprimé) → il afficherait « plus de 24h » pour un ticket de 2 h."""
+    try:
+        if not created_at:
+            return "récemment"
+        s = str(created_at).replace('T', ' ').split('.')[0].split('+')[0].strip()
+        dt = datetime.strptime(s, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+        mins = (datetime.now(timezone.utc) - dt).total_seconds() / 60.0
+        if mins < 1:
+            return "à l'instant"
+        if mins < 60:
+            return f"il y a {int(mins)} min"
+        hours = mins / 60.0
+        if hours < 24:
+            return f"il y a ~{int(round(hours))} h"
+        return f"il y a ~{int(round(hours / 24))} j"
+    except Exception:
+        return "récemment"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -855,6 +954,25 @@ def build_stats_panel(stats: dict, guild_name: str = ""):
                         f"{medal} <@{s['user_id']}> · `{s['count']}` claim(s)"
                     )
                 items.append(v2_body("\n".join(lines)))
+
+            # Motifs de fermeture — tendances (owner 2026-06-18, depuis l'audit-trail)
+            if stats.get("by_close_reason"):
+                items.append(v2_divider())
+                items.append(v2_body("### 🔒 Motifs de fermeture"))
+                items.append(v2_body(" · ".join(
+                    f"**{lbl}** `{c}`" for lbl, c in stats["by_close_reason"][:6])))
+
+            # File des tickets à prendre en charge — passive, urgents d'abord (owner 2026-06-18)
+            if stats.get("unclaimed_list"):
+                items.append(v2_divider())
+                items.append(v2_body(
+                    f"### ⏳ À prendre en charge ({len(stats['unclaimed_list'])})"))
+                _ulines = []
+                for u in stats["unclaimed_list"][:10]:
+                    emoji, _lbl = PRIORITY_LEVELS.get(u.get("priority"), ("⚪", ""))
+                    _ulines.append(
+                        f"{emoji} <#{u['channel_id']}> · ouvert {_ticket_age_short(u.get('created_at'))}")
+                items.append(v2_body("\n".join(_ulines)))
 
             self.add_item(v2_container(*items, color=0x9B59B6))
 
