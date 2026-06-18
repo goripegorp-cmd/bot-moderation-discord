@@ -555,6 +555,13 @@ class VoiceControlButton(discord.ui.DynamicItem[discord.ui.Button],
         await _on_control_click(interaction, self.action, self.chid)
 
 
+# Anti-429 (owner 2026-06-18) : cooldown par salon sur le bouton verrou → un clic répété
+# ne déclenche pas un set_permissions à chaque fois. Sous le cooldown, on rafraîchit juste
+# le panneau (zéro appel API). Mémoire (horloge de la loop), fail-open. {channel_id: ts}.
+_lock_toggle_cd: dict = {}
+_LOCK_TOGGLE_CD = 4.0
+
+
 async def _on_control_click(interaction: discord.Interaction, action: str, channel_id: int):
     """Dispatch des actions du panneau. NOMINATIF (proprio ou staff). FAIL-SAFE."""
     try:
@@ -587,6 +594,19 @@ async def _on_control_click(interaction: discord.Interaction, action: str, chann
             # jour du panneau AVANT, pour ne jamais dépasser la fenêtre 3 s (Échec d'interaction).
             if not interaction.response.is_done():
                 await interaction.response.defer()  # DEFERRED_UPDATE_MESSAGE (component)
+            # Anti-429 : sous le cooldown, on ne refait PAS le set_permissions (juste le panneau).
+            try:
+                _now = asyncio.get_running_loop().time()
+            except Exception:
+                _now = 0.0
+            if _now and _now - _lock_toggle_cd.get(int(channel_id), 0) < _LOCK_TOGGLE_CD:
+                await _refresh_panel(interaction, channel_id, owner_id)
+                return
+            if _now:
+                _lock_toggle_cd[int(channel_id)] = _now
+                if len(_lock_toggle_cd) > 2000:  # borne mémoire
+                    for _k in [k for k, v in list(_lock_toggle_cd.items()) if _now - v > 60]:
+                        _lock_toggle_cd.pop(_k, None)
             currently = await _is_locked(channel_id)
             await _apply_lock(ch, not currently, actor=interaction.user)
             await _refresh_panel(interaction, channel_id, owner_id)
