@@ -999,149 +999,17 @@ def _format_ticket_age(created_at) -> str:
 
 @tasks.loop(hours=2)
 async def sla_reminder_task():
-    """Toutes les 2 h : poste UN rappel dans les tickets OUVERTS et NON TRAITÉS depuis
-    plus de SLA_UNCLAIMED_HOURS. « Non traité » = ni réclamé (claimed_by vide) NI
-    répondu (aucun humain autre que le créateur n'a écrit). Ping le rôle staff
-    (ticket_staff) s'il est configuré. 1 rappel max par ticket, JAMAIS de re-ping.
+    """DÉSACTIVÉ COMPLÈTEMENT (directive owner 2026-06-18) : le bot ne PING PLUS JAMAIS
+    le staff (ni l'owner) au sujet d'un ticket. Plus aucun rappel « Ticket en attente »,
+    plus aucune escalade « sans prise en charge », plus aucun message « pas de réponse ».
+    Le système de mention de tickets était jugé inutile + affichait une date fausse (un
+    vieux ticket resté au défaut `2020-01-01` → « ~2361 jours »).
 
-    ⚠️ owner 2026-06-17 : un ticket où le staff a DÉJÀ répondu (même sans clic
-    « Réclamer ») et qu'on a volontairement mis de côté ne doit PLUS JAMAIS être
-    rappelé/escaladé — c'était la plainte n°1. On affiche aussi l'âge RÉEL (plus de
-    « 24h » fixe trompeur). FAIL-OPEN : une erreur par guild/ticket ne casse jamais
-    le loop."""
-    if _bot is None or _get_db is None:
-        return
-    try:
-        await _ensure_tables()
-        # owner 2026-06-17 : salons rappelés DANS CE cycle → l'escalade ne doit PAS
-        # re-pinguer le même ticket dans la foulée (sinon double ping staff+owner sur
-        # un ticket vieux découvert pour la 1re fois, ex. après un redéploiement). Elle
-        # s'escaladera au cycle suivant (palier gradué 24h puis 48h préservé).
-        reminded_this_cycle = set()
-        # FIX audit : format ALIGNÉ sur SQLite CURRENT_TIMESTAMP (cf. auto_close)
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(hours=SLA_UNCLAIMED_HOURS)
-        ).strftime('%Y-%m-%d %H:%M:%S')
-        for guild in list(_bot.guilds):
-            try:
-                async with _get_db() as db:
-                    async with db.execute(
-                        "SELECT t.channel_id, t.user_id, t.created_at FROM tickets t "
-                        "LEFT JOIN ticket_sla_reminded r ON r.channel_id = t.channel_id "
-                        "WHERE t.guild_id=? AND t.status='open' "
-                        "AND (t.claimed_by IS NULL OR t.claimed_by=0) "
-                        "AND t.created_at < ? AND r.channel_id IS NULL "
-                        "ORDER BY t.created_at ASC LIMIT 25",
-                        (guild.id, cutoff),
-                    ) as cur:
-                        rows = await cur.fetchall()
-                if not rows:
-                    continue
-                # Rôle staff à mentionner (best-effort ; sans ping si non configuré).
-                staff_mention = ""
-                try:
-                    if _db_get is not None:
-                        # FIX audit : db_get prend 1 SEUL arg et renvoie le dict de
-                        # config (db_set en prend 3, pas db_get) → l'appel 3-args
-                        # levait un TypeError silencieux et le staff n'était JAMAIS ping.
-                        rid = (await _db_get(guild.id) or {}).get('ticket_staff', 0)
-                        role = guild.get_role(int(rid)) if rid else None
-                        if role:
-                            staff_mention = role.mention + " "
-                except Exception:
-                    staff_mention = ""
-                for (ch_id, creator_id, created_at) in rows:
-                    ch = _bot.get_channel(int(ch_id))
-                    if not isinstance(ch, discord.TextChannel):
-                        # Salon disparu → on marque quand même pour ne pas reboucler.
-                        await _mark_sla_reminded(int(ch_id))
-                        continue
-                    # owner 2026-06-17 : si le staff a DÉJÀ répondu (même sans « Réclamer »),
-                    # le ticket est traité → suppression DÉFINITIVE du rappel, aucun ping.
-                    handled = await _staff_has_replied(ch, creator_id)
-                    if handled is None:
-                        continue  # lecture impossible : on réessaiera dans 2 h (ni ping ni marque)
-                    if handled:
-                        await _mark_sla_reminded(int(ch_id))
-                        continue
-                    try:
-                        await ch.send(
-                            f"⏰ {staff_mention}**Ticket en attente** — ouvert "
-                            f"**{_format_ticket_age(created_at)}** sans prise en charge. Un membre "
-                            f"du staff peut le **réclamer** pour s'en occuper. 🙏",
-                            allowed_mentions=discord.AllowedMentions(roles=True),
-                        )
-                    except Exception:
-                        pass
-                    await _mark_sla_reminded(int(ch_id))
-                    # gradué : ce ticket vient d'être rappelé → pas d'escalade ce cycle-ci.
-                    reminded_this_cycle.add(int(ch_id))
-            except Exception as ex:
-                print(f"[tickets_enhance sla guild={guild.id}] {ex}")
-
-        # ── ESCALADE 2e palier (owner 2026-06-15) : ticket TOUJOURS non pris après
-        #    `ticket_sla_escalate_hours` (défaut SLA_ESCALATE_HOURS) → PING l'OWNER du
-        #    serveur UNE fois (in-channel, jamais en MP). Tracké à part. Boucle séparée
-        #    pour ne pas toucher la logique du 1er palier. FAIL-OPEN par guilde. ──
-        for guild in list(_bot.guilds):
-            try:
-                _eh = SLA_ESCALATE_HOURS
-                try:
-                    if _db_get is not None:
-                        _eh = int((await _db_get(guild.id) or {}).get(
-                            'ticket_sla_escalate_hours', SLA_ESCALATE_HOURS) or SLA_ESCALATE_HOURS)
-                except Exception:
-                    _eh = SLA_ESCALATE_HOURS
-                if _eh <= 0:
-                    continue  # escalade désactivée pour cette guilde
-                g_cutoff = (datetime.now(timezone.utc)
-                            - timedelta(hours=max(1, _eh))).strftime('%Y-%m-%d %H:%M:%S')
-                async with _get_db() as db:
-                    async with db.execute(
-                        "SELECT t.channel_id, t.user_id FROM tickets t "
-                        "LEFT JOIN ticket_sla_escalated e ON e.channel_id = t.channel_id "
-                        "WHERE t.guild_id=? AND t.status='open' "
-                        "AND (t.claimed_by IS NULL OR t.claimed_by=0) "
-                        "AND t.created_at < ? AND e.channel_id IS NULL "
-                        "ORDER BY t.created_at ASC LIMIT 25",
-                        (guild.id, g_cutoff),
-                    ) as cur:
-                        erows = await cur.fetchall()
-                if not erows:
-                    continue
-                owner_mention = f"<@{int(guild.owner_id)}> " if guild.owner_id else ""
-                for (ch_id, creator_id) in erows:
-                    if int(ch_id) in reminded_this_cycle:
-                        continue  # rappelé à l'instant → escalade au prochain cycle (anti double-ping)
-                    ch = _bot.get_channel(int(ch_id))
-                    if not isinstance(ch, discord.TextChannel):
-                        await _mark_sla_escalated(int(ch_id))  # salon disparu → on marque
-                        continue
-                    # owner 2026-06-17 : un ticket déjà répondu (staff a écrit, sans clic
-                    # « Réclamer ») ne s'escalade PLUS → l'escalade ne vise que les tickets
-                    # que PERSONNE n'a touchés (vrai filet « pas clean »).
-                    handled = await _staff_has_replied(ch, creator_id)
-                    if handled is None:
-                        continue  # lecture impossible : on réessaiera dans 2 h
-                    if handled:
-                        await _mark_sla_escalated(int(ch_id))
-                        continue
-                    try:
-                        await ch.send(
-                            f"🚨 {owner_mention}**Escalade** — ce ticket est ouvert depuis plus "
-                            f"de `{_eh}h` **sans aucune prise en charge**. Merci d'y jeter un œil "
-                            f"ou de relancer le staff. 🙏",
-                            allowed_mentions=discord.AllowedMentions(
-                                users=([guild.owner] if guild.owner else False),
-                                roles=False, everyone=False),
-                        )
-                    except Exception:
-                        pass
-                    await _mark_sla_escalated(int(ch_id))
-            except Exception as ex:
-                print(f"[tickets_enhance sla escalate guild={guild.id}] {ex}")
-    except Exception as ex:
-        print(f"[tickets_enhance sla_reminder_task] {ex}")
+    Boucle conservée en NO-OP (références boot/historique préservées, zéro NameError) ;
+    elle n'est même plus lancée au boot ni supervisée (cf. bot.py). La gestion des tickets
+    reste 100 % MANUELLE : création + prise en charge + fermeture par le staff, sans aucun
+    automatisme de relance. NE PAS réactiver sans demande explicite de l'owner."""
+    return
 
 
 @sla_reminder_task.before_loop
