@@ -1012,6 +1012,10 @@ async def _post_mob_message(
     try:
         msg = await ch.send(view=layout)
         return msg
+    except discord.NotFound:
+        # Salon disparu entre le spawn et le post (race / nettoyage) → rien à poster.
+        # Bénin (le sweeper soldera la ligne mob) : on ne bruite pas les logs Railway.
+        return None
     except Exception as ex:
         print(f"[mob_hunts post_message] {ex}")
         return None

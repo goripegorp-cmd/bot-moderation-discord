@@ -366,6 +366,16 @@ async def _on_vote_click(
     → robuste APRÈS un reboot (le DynamicItem ne connaît que prompt_id + index)."""
     if _get_db is None:
         return
+    # Anti double-ack (owner 2026-06-18) : le bouton de vote est capté À LA FOIS par le
+    # DynamicItem persistant ET par le callback local de _build_vote_view (même custom_id
+    # `prompt_vote_*`). Les deux handlers s'enchaînent sur LA MÊME interaction → le 2e
+    # `send_message` levait « 400 40060 Interaction has already been acknowledged ». Si
+    # l'interaction est déjà acquittée, on sort proprement (le 1er handler a tout fait).
+    try:
+        if i.response.is_done():
+            return
+    except Exception:
+        pass
     try:
         async with _get_db() as db:
             async with db.execute(
