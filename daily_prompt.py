@@ -359,6 +359,10 @@ def _build_vote_view(prompt_id: int, q_data: dict):
     return _VoteView()
 
 
+# Dédup d'interactions de vote déjà traitées (anti double-ack 40060). Borné en mémoire.
+_vote_click_seen: set = set()
+
+
 async def _on_vote_click(
     i: discord.Interaction, prompt_id: int, choice_idx: int,
 ):
@@ -366,14 +370,20 @@ async def _on_vote_click(
     → robuste APRÈS un reboot (le DynamicItem ne connaît que prompt_id + index)."""
     if _get_db is None:
         return
-    # Anti double-ack (owner 2026-06-18) : le bouton de vote est capté À LA FOIS par le
-    # DynamicItem persistant ET par le callback local de _build_vote_view (même custom_id
-    # `prompt_vote_*`). Les deux handlers s'enchaînent sur LA MÊME interaction → le 2e
-    # `send_message` levait « 400 40060 Interaction has already been acknowledged ». Si
-    # l'interaction est déjà acquittée, on sort proprement (le 1er handler a tout fait).
+    # Anti double-ack (owner 2026-06-21, DURCI) : le bouton de vote est capté À LA FOIS par
+    # le DynamicItem persistant ET par le callback local de _build_vote_view (même custom_id
+    # `prompt_vote_*`) → les DEUX handlers tournent sur LA MÊME interaction. Le `is_done()`
+    # ne suffisait PAS : ils passent tous deux le test AVANT que l'un acquitte (course async),
+    # d'où le « 400 40060 » persistant. On dé-duplique sur l'ID d'interaction : le check+add
+    # est SYNCHRONE (aucun await entre les deux), donc le 2e handler sort à coup sûr.
     try:
-        if i.response.is_done():
-            return
+        _iid = int(getattr(i, 'id', 0) or 0)
+        if _iid:
+            if _iid in _vote_click_seen:
+                return
+            _vote_click_seen.add(_iid)
+            if len(_vote_click_seen) > 2000:  # borne mémoire
+                _vote_click_seen.clear()
     except Exception:
         pass
     try:
