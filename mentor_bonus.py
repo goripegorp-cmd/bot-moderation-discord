@@ -189,50 +189,65 @@ async def check_milestones(
 
         # Milestone 7d : 7+ jours actifs + 3+ events
         if not m7 and days_elapsed >= 7 and events_count >= 3:
-            out["milestone_7d"] = True
-            out["badge"] = DUO_7D_BADGE
-            if _add_coins is not None:
-                for uid in (mentor_id, apprenti_id):
-                    try:
-                        await _add_coins(guild_id, uid, DUO_7D_BONUS)
-                    except Exception:
-                        pass
-            out["bonus_awarded"] = DUO_7D_BONUS
+            # CLAIM ATOMIQUE D'ABORD (anti double-paiement TOCTOU, audit 2026-06-21) :
+            # le pool = 20 connexions → deux events quasi-simultanés du même duo pouvaient
+            # tous deux lire milestone_7d_reached=0 et payer le bonus DEUX fois. On pose
+            # le flag via UPDATE…WHERE…=0 : SEUL le 1er appelant obtient rowcount==1 et
+            # attribue le bonus ; les autres voient 0 et ne créditent RIEN. Même patron
+            # que wandering_merchant.py / citadelle.py.
+            claimed_7d = False
             async with _get_db() as db:
-                await db.execute(
+                _claim = await db.execute(
                     "UPDATE mentor_bonus_track SET milestone_7d_reached=1 "
-                    "WHERE guild_id=? AND mentor_id=? AND apprenti_id=?",
+                    "WHERE guild_id=? AND mentor_id=? AND apprenti_id=? "
+                    "AND milestone_7d_reached=0",
                     (guild_id, mentor_id, apprenti_id),
                 )
                 await db.commit()
+                claimed_7d = (getattr(_claim, "rowcount", 0) or 0) == 1
+            if claimed_7d:
+                out["milestone_7d"] = True
+                out["badge"] = DUO_7D_BADGE
+                if _add_coins is not None:
+                    for uid in (mentor_id, apprenti_id):
+                        try:
+                            await _add_coins(guild_id, uid, DUO_7D_BONUS)
+                        except Exception:
+                            pass
+                out["bonus_awarded"] = DUO_7D_BONUS
 
         # Milestone 30d : 30+ jours + 10+ events
         if not m30 and days_elapsed >= 30 and events_count >= 10:
-            out["milestone_30d"] = True
-            out["badge"] = DUO_30D_BADGE
-            if _add_coins is not None:
-                for uid in (mentor_id, apprenti_id):
-                    try:
-                        await _add_coins(guild_id, uid, DUO_30D_BONUS)
-                    except Exception:
-                        pass
-            out["bonus_awarded"] = DUO_30D_BONUS
-            # Reputation aussi !
-            if _reputation is not None:
-                for uid in (mentor_id, apprenti_id):
-                    try:
-                        await _reputation.add_points(
-                            guild_id, uid, "alliance_milestone", 10,
-                        )
-                    except Exception:
-                        pass
+            # CLAIM ATOMIQUE D'ABORD (idem 7d : anti double-paiement TOCTOU).
+            claimed_30d = False
             async with _get_db() as db:
-                await db.execute(
+                _claim = await db.execute(
                     "UPDATE mentor_bonus_track SET milestone_30d_reached=1 "
-                    "WHERE guild_id=? AND mentor_id=? AND apprenti_id=?",
+                    "WHERE guild_id=? AND mentor_id=? AND apprenti_id=? "
+                    "AND milestone_30d_reached=0",
                     (guild_id, mentor_id, apprenti_id),
                 )
                 await db.commit()
+                claimed_30d = (getattr(_claim, "rowcount", 0) or 0) == 1
+            if claimed_30d:
+                out["milestone_30d"] = True
+                out["badge"] = DUO_30D_BADGE
+                if _add_coins is not None:
+                    for uid in (mentor_id, apprenti_id):
+                        try:
+                            await _add_coins(guild_id, uid, DUO_30D_BONUS)
+                        except Exception:
+                            pass
+                out["bonus_awarded"] = DUO_30D_BONUS
+                # Reputation aussi !
+                if _reputation is not None:
+                    for uid in (mentor_id, apprenti_id):
+                        try:
+                            await _reputation.add_points(
+                                guild_id, uid, "alliance_milestone", 10,
+                            )
+                        except Exception:
+                            pass
 
         return out
     except Exception as ex:
