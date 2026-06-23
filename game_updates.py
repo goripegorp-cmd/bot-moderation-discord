@@ -522,8 +522,14 @@ async def _fetch_discourse(session: aiohttp.ClientSession, url: str, max_count: 
     items = []
     try:
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json',
+            # UA navigateur COMPLET (owner 2026-06-21) : le UA tronqué provoquait des HTTP 202
+            # de Cloudflare/Discourse sur le devforum Roblox → fetch des news vide. Aligné sur
+            # _fetch_rss (UA complet Chrome/Safari) + Accept-Language pour passer pour un vrai
+            # navigateur. FAIL-SAFE : si ça reste non-200, on loggue et on renvoie vide.
+            'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                           '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'),
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
         }
         async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
             if resp.status != 200:
