@@ -22,6 +22,33 @@ from datetime import datetime, timezone
 
 # (guild_id, user_id) -> nb de messages (accélérateur de confiance, borné).
 _msg_counts: dict = {}
+# (guild_id, user_id) -> epoch jusqu'auquel la confiance est GELÉE (le membre a fait une
+# bêtise → il doit re-mériter l'accès). owner 2026-06-21 : « s'ils font pas de bêtises ».
+_frozen: dict = {}
+
+
+def _now() -> float:
+    return datetime.now(timezone.utc).timestamp()
+
+
+def freeze(gid, uid, hours: float = 24.0):
+    """Gèle la confiance d'un membre pour `hours` (appelé quand il est sanctionné) → il
+    repasse en accès limité (texte seulement) et doit re-mériter. Borné, FAIL-SAFE."""
+    try:
+        _frozen[(int(gid), int(uid))] = _now() + max(0.0, float(hours)) * 3600.0
+        if len(_frozen) > 20000:
+            n = _now()
+            for k in [k for k, t in list(_frozen.items()) if t < n]:
+                _frozen.pop(k, None)
+    except Exception:
+        pass
+
+
+def is_frozen(gid, uid) -> bool:
+    try:
+        return _frozen.get((int(gid), int(uid)), 0) > _now()
+    except Exception:
+        return False
 
 _URL_RE = re.compile(r'https?://\S+', re.IGNORECASE)
 _INVITE_RE = re.compile(r'(?:discord\.gg/|discord(?:app)?\.com/invite/|discord\.gg\s*/)\s*[\w-]+', re.IGNORECASE)
@@ -53,14 +80,28 @@ def msg_count(gid, uid) -> int:
         return 0
 
 
-def is_trusted(member, *, age_hours: int = 24, fast_hours: int = 2, fast_msgs: int = 12) -> bool:
+def is_trusted(member, *, age_hours: int = 24, fast_hours: int = 2, fast_msgs: int = 12,
+               min_account_days: int = 7) -> bool:
     """Le membre peut-il poster images/GIFs ? (owner/staff/immunisés déjà exemptés par
-    l'appelant). FAIL-OPEN : ancienneté illisible → True (on ne bloque pas)."""
+    l'appelant). RELIABILITÉ = (pas de bêtise récente) ET (compte Discord pas trop jeune) ET
+    (assez de temps/activité sur le serveur). FAIL-OPEN : données illisibles → True."""
     try:
+        # 1) Bêtise récente → confiance GELÉE : il doit re-mériter l'accès (texte seulement).
+        if is_frozen(getattr(member.guild, 'id', 0), getattr(member, 'id', 0)):
+            return False
+        now = datetime.now(timezone.utc)
+        # 2) FIABILITÉ DU COMPTE : un compte Discord TRÈS JEUNE reste limité tant que le COMPTE
+        #    lui-même n'a pas atteint min_account_days (owner 2026-06-21 : « est-ce que le
+        #    compte est super jeune »). Les comptes anciens passent direct à l'étape 3.
+        created = getattr(member, 'created_at', None)
+        if created is not None and int(min_account_days) > 0:
+            if (now - created).days < int(min_account_days):
+                return False
+        # 3) TEMPS sur le serveur / ACTIVITÉ.
         joined = getattr(member, 'joined_at', None)
         if joined is None:
             return True
-        age = (datetime.now(timezone.utc) - joined).total_seconds()
+        age = (now - joined).total_seconds()
         if age >= age_hours * 3600:
             return True
         if age >= fast_hours * 3600 and msg_count(member.guild.id, member.id) >= fast_msgs:
