@@ -44,6 +44,37 @@ _LEET = str.maketrans({
 # Plages CJK (kana, CJK unifié, hangul) : pas d'espaces → match en sous-chaîne, pas en frontière.
 _CJK_RE = re.compile(r'[぀-ヿ㐀-鿿가-힯]')
 
+# ── Niveau 4 : INCITATION AU SUICIDE / À LA MORT dirigée vers AUTRUI (owner 2026-06-21) ──
+# UNIQUEMENT les formes DIRIGÉES (kill yourSELF, va te pendre…) = une ATTAQUE. On n'inclut
+# JAMAIS les formes à la 1re personne (« kms », « je veux mourir », « i wanna die ») :
+# exprimer SA PROPRE détresse n'est pas une attaque et ne doit pas être sanctionné (au
+# contraire). L'appelant applique l'action la plus forte (suppression + exclusion + alerte).
+_SELFHARM_TERMS = frozenset({
+    "kys", "kys urself", "kys yourself", "kill yourself", "kill urself", "kill ur self",
+    "kill your self", "go kill yourself", "you should kill yourself", "you should kys",
+    "you need to kill yourself", "neck yourself", "neck urself", "rope yourself",
+    "hang yourself", "off yourself", "end yourself", "unalive yourself",
+    "you should die", "you deserve to die", "an hero", "kys now",
+    "va te pendre", "pends toi", "pends-toi", "suicide toi", "suicide-toi", "tue toi",
+    "tue-toi", "va te tuer", "va te suicider", "va te foutre en l'air", "va te flinguer",
+    "tu devrais mourir", "tu devrais te tuer", "tu devrais te suicider",
+    "matate", "mátate", "suicidate", "suicídate", "bring dich um", "ammazzati",
+})
+_RE_SH = (None, None)
+
+# ── Harcèlement / manque de respect CIBLÉ moderne (phrases dirigées, owner 2026-06-21) ──
+# Traitées au NIVEAU 2 → supprimées seulement quand ça VISE quelqu'un (elles contiennent
+# de toute façon une 2e personne). Le banter (ratio, L, skill issue, ez…) reste LIBRE.
+_HARASS_TERMS = frozenset({
+    "personne t'aime", "personne ne t'aime", "t'as pas d'amis", "tu as pas d'amis",
+    "tu sers a rien", "tu sers à rien", "tu vaux rien", "tu fais pitié", "tu es pathétique",
+    "tu es un raté", "t'es un raté", "personne va te regretter", "personne te calcule",
+    "le monde se porterait mieux sans toi", "nobody likes you", "no one likes you",
+    "you have no friends", "u have no friends", "you have no life", "you're worthless",
+    "youre worthless", "you are worthless", "you're a waste", "you are nothing",
+    "you're nothing", "everyone hates you", "nobody wants you here",
+})
+
 
 def _fold(s: str) -> str:
     try:
@@ -91,7 +122,7 @@ def _compile_pair(terms):
 
 
 def _load():
-    global _TIER3, _TIER2, _TIER1, _RE3, _RE2, _RE1
+    global _TIER3, _TIER2, _TIER1, _RE3, _RE2, _RE1, _RE_SH
     try:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "insult_lexicon.json")
         with open(path, "r", encoding="utf-8") as f:
@@ -102,10 +133,14 @@ def _load():
     except Exception as ex:
         print(f"[insult_filter] lexique non chargé : {ex}")
         _TIER3 = _TIER2 = _TIER1 = frozenset()
+    # Le harcèlement ciblé moderne rejoint le niveau 2 (gated par le ciblage côté appelant).
+    _TIER2 = frozenset(_TIER2 | _HARASS_TERMS)
+    _RE_SH = _compile_pair(_SELFHARM_TERMS)
     _RE3 = _compile_pair(_TIER3)
     _RE2 = _compile_pair(_TIER2)
     _RE1 = _compile_pair(_TIER1)
-    n = {"tier3": len(_TIER3), "tier2": len(_TIER2), "tier1": len(_TIER1)}
+    n = {"selfharm": len(_SELFHARM_TERMS), "tier3": len(_TIER3),
+         "tier2": len(_TIER2), "tier1": len(_TIER1)}
     print(f"[insult_filter] lexique chargé : {n}")
     return n
 
@@ -148,6 +183,9 @@ def scan(raw: str, normalized: str | None = None):
     for v in variants:
         if not v:
             continue
+        h = _hit(_RE_SH, v)
+        if h:
+            return 4, h                    # incitation au suicide/mort = priorité absolue
         h = _hit(_RE3, v)
         if h:
             return 3, h                    # haine = max → court-circuit immédiat
