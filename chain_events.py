@@ -211,6 +211,8 @@ async def _refresh_panel(guild, chain_id: int, force: bool = False):
             if now - _last_refresh.get(chain_id, 0.0) < _REFRESH_MIN:
                 return
             _last_refresh[chain_id] = now
+            if len(_last_refresh) > 5000:      # audit perf 2026-06-21 : bornage anti-fuite
+                _last_refresh.clear()
         chain = await _get_chain(chain_id)
         if not chain or not chain.get("channel_id") or not chain.get("message_id"):
             return
@@ -340,6 +342,8 @@ async def _handle_link(i: discord.Interaction, chain_id: int):
         if nowf - _last_click.get(key, 0.0) < _CLICK_CD:
             return
         _last_click[key] = nowf
+        if len(_last_click) > 5000:        # audit perf 2026-06-21 : bornage anti-fuite
+            _last_click.clear()
     except Exception:
         pass
     try:
@@ -417,6 +421,8 @@ async def _handle_pet(i: discord.Interaction, chain_id: int):
         if nowf - _last_pet_click.get(key, 0.0) < _PET_CLICK_CD:
             return
         _last_pet_click[key] = nowf
+        if len(_last_pet_click) > 5000:    # audit perf 2026-06-21 : bornage anti-fuite
+            _last_pet_click.clear()
     except Exception:
         pass
     try:

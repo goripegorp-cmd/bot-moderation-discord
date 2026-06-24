@@ -246,6 +246,8 @@ async def _refresh_panel(guild, carav_id: int, force: bool = False):
             if now - _last_refresh.get(carav_id, 0.0) < _REFRESH_MIN:
                 return
             _last_refresh[carav_id] = now
+            if len(_last_refresh) > 5000:      # audit perf 2026-06-21 : bornage anti-fuite
+                _last_refresh.clear()
         carav = await _get_carav(carav_id)
         if not carav or not carav.get("channel_id") or not carav.get("message_id"):
             return
@@ -379,6 +381,8 @@ async def _handle_role(i: discord.Interaction, carav_id: int, role: str):
         if nowf - _last_click.get(key, 0.0) < _CLICK_CD:
             return
         _last_click[key] = nowf
+        if len(_last_click) > 5000:        # audit perf 2026-06-21 : bornage anti-fuite
+            _last_click.clear()
     except Exception:
         pass
     try:
@@ -481,6 +485,8 @@ async def _handle_pet(i: discord.Interaction, carav_id: int):
         if nowf - _last_pet_click.get(key, 0.0) < _PET_CLICK_CD:
             return
         _last_pet_click[key] = nowf
+        if len(_last_pet_click) > 5000:    # audit perf 2026-06-21 : bornage anti-fuite
+            _last_pet_click.clear()
     except Exception:
         pass
     try:

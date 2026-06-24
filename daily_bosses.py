@@ -1623,6 +1623,8 @@ async def resolve_daily_boss(event_id: int) -> Optional[dict]:
         _phase_reached.pop(event_id, None)
         _enrage_announced.pop(event_id, None)
         _fatal_blow.pop(event_id, None)
+        _warmup_until.pop(event_id, None)          # audit perf 2026-06-21 : étaient oubliés ici
+        _last_panel_refresh.pop(event_id, None)    # → fuite mémoire lente (clé par event_id) corrigée
     except Exception:
         pass
 
@@ -1939,6 +1941,8 @@ class DailyBossPetButton(
             if _now - _last_pet_click.get(_key, 0.0) < _ATTACK_COOLDOWN:
                 return
             _last_pet_click[_key] = _now
+            if len(_last_pet_click) > 5000:        # audit perf 2026-06-21 : bornage anti-fuite
+                _last_pet_click.clear()
         except Exception:
             pass
         if btn_i.guild is None:

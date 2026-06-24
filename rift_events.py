@@ -247,6 +247,8 @@ async def _refresh_panel(guild, rift_id: int, force: bool = False):
             if now - _last_refresh.get(rift_id, 0.0) < _REFRESH_MIN:
                 return
             _last_refresh[rift_id] = now
+            if len(_last_refresh) > 5000:      # audit perf 2026-06-21 : bornage anti-fuite
+                _last_refresh.clear()
         rift = await _get_rift(rift_id)
         if not rift or not rift.get("channel_id") or not rift.get("message_id"):
             return
@@ -380,6 +382,8 @@ async def _handle_channel(i: discord.Interaction, rift_id: int):
         if now - _last_click.get(key, 0.0) < _CLICK_CD:
             return
         _last_click[key] = now
+        if len(_last_click) > 5000:        # audit perf 2026-06-21 : bornage anti-fuite
+            _last_click.clear()
     except Exception:
         pass
     try:
@@ -468,6 +472,8 @@ async def _handle_pet(i: discord.Interaction, rift_id: int):
         if now - _last_pet_click.get(key, 0.0) < _PET_CLICK_CD:
             return
         _last_pet_click[key] = now
+        if len(_last_pet_click) > 5000:    # audit perf 2026-06-21 : bornage anti-fuite
+            _last_pet_click.clear()
     except Exception:
         pass
     try:
