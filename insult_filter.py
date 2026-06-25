@@ -75,6 +75,34 @@ _HARASS_TERMS = frozenset({
     "you're nothing", "everyone hates you", "nobody wants you here",
 })
 
+# ── Insultes/aggressions CIBLÉES FR courantes (owner 2026-06-21 : « TG / ta gueule = une
+# vraie insulte qui mérite un warn »). NIVEAU 2 — ces tournures sont INTRINSÈQUEMENT dirigées
+# (on les DIT à quelqu'un) → l'appelant les traite comme ciblées (« tg »/« ta gueule » sont
+# aussi dans _INSULT_TARGET_RE) → suppression + warn → mute en cas de récidive.
+_TIER2_EXTRA = frozenset({
+    "ta gueule", "tagueule", "ta geule", "ta gueule sale", "ferme ta gueule",
+    "ferme ta grande gueule", "ferme ta bouche", "ferme-la", "ferme la", "ferme sa gueule",
+    "vos gueules", "fermez vos gueules", "ferme ta gueule toi", "nique ta race",
+    "ta gueule connard", "grosse merde toi",
+})
+# Abréviations de 2 lettres SANS ambiguïté (échappent au plancher de 3 lettres). « tg » =
+# « ta gueule » dans le chat FR. Matching FRONTIÈRE DE MOT strict → ne touche jamais un mot.
+_TIER2_ABBR = frozenset({"tg"})
+_RE2_ABBR = None
+
+
+def _compile_abbr(terms):
+    """Compile des termes COURTS (≥2) en frontière de mot stricte (pour « tg » & co.)."""
+    terms = sorted({(t or "").lower().strip() for t in terms if t and len((t or "").strip()) >= 2},
+                   key=len, reverse=True)
+    if not terms:
+        return None
+    try:
+        return re.compile(r'(?<!\w)(?:' + '|'.join(re.escape(t) for t in terms) + r')(?!\w)',
+                          re.IGNORECASE | re.UNICODE)
+    except Exception:
+        return None
+
 
 def _fold(s: str) -> str:
     try:
@@ -122,7 +150,7 @@ def _compile_pair(terms):
 
 
 def _load():
-    global _TIER3, _TIER2, _TIER1, _RE3, _RE2, _RE1, _RE_SH
+    global _TIER3, _TIER2, _TIER1, _RE3, _RE2, _RE1, _RE_SH, _RE2_ABBR
     try:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "insult_lexicon.json")
         with open(path, "r", encoding="utf-8") as f:
@@ -133,9 +161,11 @@ def _load():
     except Exception as ex:
         print(f"[insult_filter] lexique non chargé : {ex}")
         _TIER3 = _TIER2 = _TIER1 = frozenset()
-    # Le harcèlement ciblé moderne rejoint le niveau 2 (gated par le ciblage côté appelant).
-    _TIER2 = frozenset(_TIER2 | _HARASS_TERMS)
+    # Le harcèlement ciblé moderne + les aggressions FR (ta gueule…) rejoignent le niveau 2
+    # (gated par le ciblage côté appelant).
+    _TIER2 = frozenset(_TIER2 | _HARASS_TERMS | _TIER2_EXTRA)
     _RE_SH = _compile_pair(_SELFHARM_TERMS)
+    _RE2_ABBR = _compile_abbr(_TIER2_ABBR)
     _RE3 = _compile_pair(_TIER3)
     _RE2 = _compile_pair(_TIER2)
     _RE1 = _compile_pair(_TIER1)
@@ -193,6 +223,13 @@ def scan(raw: str, normalized: str | None = None):
             h = _hit(_RE2, v)
             if h:
                 best, term = 2, h
+            elif _RE2_ABBR is not None:                # abréviations courtes (« tg »…)
+                try:
+                    m = _RE2_ABBR.search(v)
+                    if m:
+                        best, term = 2, m.group(0)
+                except Exception:
+                    pass
         if best < 1:
             h = _hit(_RE1, v)
             if h:
