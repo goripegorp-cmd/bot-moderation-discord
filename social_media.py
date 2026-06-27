@@ -172,6 +172,11 @@ class Subscription:
         if post.post_type == PostType.SHORT:
             return self.track_shorts
         if post.post_type == PostType.POST:
+            # Twitter/TikTok/Instagram sont des plateformes « post » : leur SEUL contenu, ce
+            # sont des posts → on les tracke d'office (sinon une souscription créée avec le
+            # défaut track_posts=False ne ferait jamais rien). owner 2026-06-27.
+            if self.platform in (Platform.TWITTER, Platform.TIKTOK, Platform.INSTAGRAM):
+                return True
             return self.track_posts
         return False
 
@@ -586,6 +591,159 @@ class YouTubeAdapter(PlatformAdapter):
         status = items[0].get("status", {})
         privacy = status.get("privacyStatus")
         return privacy in ("public", "unlisted")
+
+
+# =============================================================================
+# RSSHUB ADAPTER (Twitter/X, TikTok, Instagram... via flux RSS - owner 2026-06-27)
+# =============================================================================
+# Les API officielles de X/TikTok/Instagram sont fermees/payantes et le scraping
+# direct est bloque (Cloudflare/login). La methode qui MARCHE = un convertisseur
+# RSS (RSSHub, open-source/gratuit/auto-hebergeable). Cet adapter prend le @pseudo
+# tape par l'owner et le TRANSFORME tout seul en URL de flux RSSHub, puis recupere
+# les derniers posts. L'owner ne touche JAMAIS a un lien. 100% FAIL-SAFE.
+
+# Routes RSSHub par plateforme (le :user est remplace par le pseudo nettoye).
+RSSHUB_ROUTES: dict[Platform, str] = {
+    Platform.TWITTER:   "twitter/user/{user}",
+    Platform.TIKTOK:    "tiktok/user/@{user}",
+    Platform.INSTAGRAM: "instagram/user/{user}",
+}
+# Instance RSSHub par defaut (publique). Surcharge conseillee : variable d'env
+# RSSHUB_BASE_URL pointant vers TA propre instance (1 clic sur Railway) = fiable+illimitee.
+DEFAULT_RSSHUB_BASE = "https://rsshub.app"
+
+
+def _clean_handle(handle: str) -> str:
+    """@CaribBros / https://x.com/CaribBros / 'caribbros ' -> 'caribbros'."""
+    h = (handle or "").strip()
+    if "/" in h:                       # si on a colle une URL, on prend le dernier segment
+        h = h.rstrip("/").split("/")[-1]
+    h = h.lstrip("@").strip()
+    return h
+
+
+class RSSHubAdapter(PlatformAdapter):
+    """Recupere les posts d'un compte (Twitter/TikTok/Insta) via un flux RSSHub.
+
+    Le `handle` est un simple @pseudo ; l'adapter construit lui-meme l'URL du flux.
+    Anti-flood : au TOUT PREMIER passage pour un pseudo, on prend l'etat courant comme
+    REFERENCE (zero dump d'historique) et on n'annonce QUE les posts suivants.
+    """
+
+    _UA = {
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
+        "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
+    }
+    MAX_NEW_PER_POLL = 3               # anti-flood : au plus N nouveaux posts par passage
+
+    def __init__(self, platform: Platform, base_url: Optional[str] = None):
+        self.platform = platform
+        self.base_url = (base_url or os.environ.get("RSSHUB_BASE_URL")
+                         or DEFAULT_RSSHUB_BASE).rstrip("/")
+        self.route = RSSHUB_ROUTES.get(platform, "")
+        self._session = None  # type: Any
+        self._seen: dict[str, set] = {}      # handle -> set des guid deja vus (baseline en memoire)
+
+    @property
+    def configured(self) -> bool:
+        # "configured" = capable de requetes reelles (≠ manuel) → True si on a une route + une base.
+        return bool(self.route and self.base_url)
+
+    async def setup(self, session=None) -> None:
+        if session is not None:
+            self._session = session
+        else:
+            import aiohttp
+            self._session = aiohttp.ClientSession()
+
+    def feed_url(self, handle: str) -> str:
+        return f"{self.base_url}/{self.route.format(user=_clean_handle(handle))}"
+
+    async def _fetch_items(self, handle: str) -> list[SocialPost]:
+        """Telecharge + parse le flux RSS/Atom -> liste de SocialPost (du + recent au + ancien)."""
+        import xml.etree.ElementTree as ET
+        if self._session is None:
+            import aiohttp
+            self._session = aiohttp.ClientSession()
+        url = self.feed_url(handle)
+        try:
+            async with self._session.get(url, headers=self._UA, timeout=15) as resp:
+                if resp.status != 200:
+                    return []
+                text = await resp.text()
+            root = ET.fromstring(text)
+        except Exception:
+            return []
+        out: list[SocialPost] = []
+        try:
+            nodes = root.findall(".//item")
+            if nodes:
+                for it in nodes[:10]:
+                    link = (it.findtext("link") or "").strip()
+                    guid = (it.findtext("guid") or link or "").strip()
+                    title = (it.findtext("title") or "").strip()
+                    desc = it.findtext("description") or ""
+                    img = ""
+                    enc = it.find("enclosure")
+                    if enc is not None and enc.get("url"):
+                        img = enc.get("url")
+                    if not img and desc:
+                        import re as _re
+                        m = _re.search(r'<img[^>]+src=["\']([^"\']+)', desc)
+                        if m:
+                            img = m.group(1)
+                    pid = guid or title
+                    if not pid:
+                        continue
+                    out.append(SocialPost(
+                        platform=self.platform, handle=handle, post_id=pid,
+                        post_type=PostType.POST, title=title[:280] or "Nouveau post",
+                        url=link or url, thumbnail_url=img or None,
+                        posted_at=(it.findtext("pubDate") or None),
+                    ))
+            else:                          # Atom (fallback)
+                ns = {"a": "http://www.w3.org/2005/Atom"}
+                for e in root.findall(".//a:entry", ns)[:10]:
+                    le = e.find("a:link", ns)
+                    link = le.get("href") if le is not None else ""
+                    guid = (e.findtext("a:id", namespaces=ns) or link or "").strip()
+                    title = (e.findtext("a:title", namespaces=ns) or "").strip()
+                    pid = guid or title
+                    if not pid:
+                        continue
+                    out.append(SocialPost(
+                        platform=self.platform, handle=handle, post_id=pid,
+                        post_type=PostType.POST, title=title[:280] or "Nouveau post",
+                        url=link or url))
+        except Exception:
+            return []
+        return out
+
+    async def fetch_posts(self, handle: str) -> list[SocialPost]:
+        if not self.configured:
+            return []
+        items = await self._fetch_items(handle)
+        if not items:
+            return []
+        key = _clean_handle(handle).lower()
+        seen = self._seen.get(key)
+        ids = [p.post_id for p in items]
+        if seen is None:                    # 1er passage = REFERENCE (pas de dump d'historique)
+            self._seen[key] = set(ids)
+            return []
+        fresh = [p for p in items if p.post_id not in seen]
+        for pid in ids:
+            seen.add(pid)
+        if len(seen) > 200:                 # borne memoire
+            self._seen[key] = set(ids)
+        # du + ancien au + recent, plafonne (anti-flood)
+        return list(reversed(fresh[:self.MAX_NEW_PER_POLL]))
+
+    async def is_post_active(self, post: SocialPost) -> bool:
+        # Un post/tweet ne "disparait" pas comme un live qui se termine : on NE supprime
+        # jamais l'annonce juste parce que le post a defile hors du flux. → toujours actif.
+        return True
 
 
 # =============================================================================
@@ -1022,6 +1180,7 @@ __all__ = [
     "ManualAdapter",
     "TwitchAdapter",
     "YouTubeAdapter",
+    "RSSHubAdapter",
     "SocialMediaManager",
     "default_template",
     "render_template",
