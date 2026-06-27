@@ -74,6 +74,9 @@ HOMOGLYPHS = {
 }
 
 SIMILARITY_THRESHOLD = 0.7  # ratio Levenshtein normalisé
+# owner 2026-06-27 : action conservatrice — réinitialiser le PSEUDO sur usurpation de staff à très
+# haute similarité (≥ 0.92). Réversible, pas de ban. Mettre à False pour revenir à « alerte seule ».
+_AUTO_RESET_NICK = True
 
 
 def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict):
@@ -360,6 +363,24 @@ async def _log_and_alert(member: discord.Member, alert: dict):
             )
             await db.commit()
 
+        # owner 2026-06-27 : ACTION conservatrice & RÉVERSIBLE — sur une usurpation de PSEUDO à
+        # TRÈS haute similarité (≥ 0.92), on RÉINITIALISE le pseudo (pas de ban) → la tentative
+        # « je suis un staff » est neutralisée immédiatement. L'alerte owner est conservée.
+        nick_reset = False
+        try:
+            if _AUTO_RESET_NICK and alert.get("match_type") == "name_similarity" \
+                    and float(alert.get("score", 0.0)) >= 0.92:
+                me = member.guild.me
+                if me is not None and me.guild_permissions.manage_nicknames \
+                        and member.id != member.guild.owner_id \
+                        and member.top_role < me.top_role:
+                    await member.edit(
+                        nick=None,
+                        reason="Anti-impersonation : pseudo imitant un staff réinitialisé")
+                    nick_reset = True
+        except Exception:
+            pass
+
         # DM owner
         guild = member.guild
         owner = guild.owner or await guild.fetch_member(guild.owner_id)
@@ -380,8 +401,10 @@ async def _log_and_alert(member: discord.Member, alert: dict):
                 f"**Valeur suspecte :** `{alert.get('suspect_value', '')}`\n"
                 f"**Imite :** {target_str}\n"
                 f"**Score similarité :** `{alert.get('score', 0):.2f}`\n\n"
-                f"_Aucune sanction auto. Va voir le profil ou ouvre le "
-                f"salon staff sanctions pour décider._"
+                + ("✅ _Pseudo usurpateur **réinitialisé** automatiquement (réversible). Si c'est un "
+                   "compte malveillant/de retour, bannis-le._"
+                   if nick_reset else
+                   "_Va voir le profil ou ouvre le salon staff sanctions pour décider._")
             )
             try:
                 await owner.send(msg)
