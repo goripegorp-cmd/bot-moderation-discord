@@ -89,6 +89,15 @@ _BELITTLE_TERMS = frozenset({
     "you're a loser", "you are a loser", "ur a loser", "you're trash", "you are trash", "ur trash",
     "you're garbage", "you suck", "you're a failure", "you're a nobody", "you're pathetic",
     "you're so bad", "you are useless", "ur useless",
+    # « merde » CIBLÉE (owner 2026-06-27 : « merde » seul reste LIBRE — N1 — mais « t'es une merde »,
+    # « sale merde »… qui VISENT une personne = bloqué). Ces formes contiennent toutes un marqueur
+    # de ciblage (t'es / sale / espèce de / you) → l'appelant les traite comme dirigées.
+    "t'es une merde", "tes une merde", "t es une merde", "tu es une merde", "t'es qu'une merde",
+    "tu n'es qu'une merde", "t'es une grosse merde", "t'es une sous merde", "t'es un étron",
+    "sale merde", "sale petite merde", "sale grosse merde", "sale grosse merde toi",
+    "espèce de merde", "espece de merde", "espèce de grosse merde", "espèce de sous merde",
+    "you piece of shit", "you're a piece of shit", "ur a piece of shit", "you little shit",
+    "you're shit", "you are shit",
 })
 
 # ── Insultes/aggressions CIBLÉES FR courantes (owner 2026-06-21 : « TG / ta gueule = une
