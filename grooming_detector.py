@@ -72,8 +72,11 @@ _CATS = {
         r"\b(dm|mp)\s+me\b",
         r"\bmessage\s+me\s+(privately|on)\b",
         r"\blet'?s\s+(talk|chat|continue)\s+(in\s+)?(private|dms?|elsewhere)\b",
-        r"\b(snap|snapchat|telegram|insta|instagram|whats\s?app|kik|discord\s+priv[eé]|tiktok)\b.{0,20}\b(toi|you|priv|dm|ajoute|add)\b",
-        r"\bton\s+(snap|snapchat|telegram|insta|kik|tel|num[eé]ro)\b",
+        # plateforme + INTENTION d'ajout/contact (pas juste « toi » : « vu sur insta, toi aussi »
+        # ne doit PAS matcher). Ordre dans les deux sens.
+        r"\b(ajoute|add|rejoins?|contacte|[eé]cris)[- ]?(moi|me)\b.{0,18}\b(snap|snapchat|telegram|insta|instagram|whats\s?app|kik|tiktok)\b",
+        r"\b(snap|snapchat|telegram|insta|instagram|whats\s?app|kik|tiktok)\b.{0,18}\b(ajoute|add|dm|mp|priv[eé]|[eé]cris|contacte)\b",
+        r"\bton\s+(snap|snapchat|telegram|insta|kik|t[eé]l|num[eé]ro)\b",
     ),
     # Demande de photo / vidéo de la personne.
     'photo': _rx(
