@@ -3,7 +3,9 @@
 # déterministe sur l'image Debian de nixpacks (≠ deviner l'attribut Nix). `tesseract-ocr` inclut
 # la langue « eng » (ces arnaques sont en anglais). Si absent, l'OCR se désactive seul (fail-safe).
 nixPkgs = ["python311"]
-aptPkgs = ["tesseract-ocr"]
+# tesseract-ocr = OCR ; libzbar0 = décodage des QR codes (anti-scam, owner 2026-06-27). Tous deux
+# via APT (déterministe). Si l'un manque, la feature correspondante se désactive seule (fail-safe).
+aptPkgs = ["tesseract-ocr", "libzbar0"]
 
 [phases.install]
 cmds = ["pip install -r requirements.txt --no-cache-dir"]

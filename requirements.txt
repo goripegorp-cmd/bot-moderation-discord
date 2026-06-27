@@ -7,3 +7,4 @@ matplotlib==3.8.2
 pytesseract==0.3.13
 Pillow>=10.0.0
 nudenet==3.4.2
+pyzbar==0.1.9

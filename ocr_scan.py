@@ -83,6 +83,25 @@ _SIGNALS = [
 ]
 
 
+def qr_payloads(image_bytes: bytes):
+    """Décode les QR codes présents dans une image → liste des chaînes encodées (souvent des
+    URLs). Un QR = destination MASQUÉE → vecteur d'arnaque (faux Nitro, token grabber…).
+    Nécessite pyzbar + la lib système libzbar0 ; FAIL-SAFE → [] si absent."""
+    try:
+        from pyzbar.pyzbar import decode
+        from PIL import Image
+        im = Image.open(io.BytesIO(image_bytes))
+        out = []
+        for d in decode(im):
+            try:
+                out.append((d.data or b"").decode("utf-8", "replace").strip())
+            except Exception:
+                continue
+        return [p for p in out if p]
+    except Exception:
+        return []
+
+
 def scan_scam(text: str, threshold: int = 5):
     """(is_scam, reason, score). HAUTE PRÉCISION : score ≥ threshold ET ≥2 signaux distincts."""
     try:
