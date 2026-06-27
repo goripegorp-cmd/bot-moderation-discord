@@ -75,6 +75,22 @@ _HARASS_TERMS = frozenset({
     "you're nothing", "everyone hates you", "nobody wants you here",
 })
 
+# ── RABAISSEMENT / dévalorisation CIBLÉE (owner 2026-06-27 : « t nul » = juger qqn de nul,
+# c'est rabaisser/discriminer). NIVEAU 2 — phrases INTRINSÈQUEMENT dirigées (2e personne) →
+# l'appelant les traite comme ciblées (les formes SMS « t nul » sont ajoutées à _INSULT_TARGET_RE
+# côté bot.py). On NE met PAS « nul » nu (« c'est nul » = expression, jamais une insulte à qqn).
+_BELITTLE_TERMS = frozenset({
+    "t'es nul", "tes nul", "t es nul", "tu es nul", "t nul", "t'es nuls", "vous etes nuls",
+    "vous êtes nuls", "t'es trop nul", "t'es qu'un nul", "tu n'es qu'un nul", "t'es naze",
+    "t'es nase", "t'es un naze", "t'es un boulet", "t'es un loser", "t'es minable", "tu es minable",
+    "t'es un minable", "t'es bon à rien", "t'es bon a rien", "tu es bon à rien", "t'es un moins que rien",
+    "t'es un déchet", "t'es un dechet", "tu es un déchet", "t'es insignifiant", "t'es une sous merde",
+    "t'es un sous homme", "t'es un raté", "t'es une raté", "t'es vraiment nul", "t'es trop mauvais",
+    "you're a loser", "you are a loser", "ur a loser", "you're trash", "you are trash", "ur trash",
+    "you're garbage", "you suck", "you're a failure", "you're a nobody", "you're pathetic",
+    "you're so bad", "you are useless", "ur useless",
+})
+
 # ── Insultes/aggressions CIBLÉES FR courantes (owner 2026-06-21 : « TG / ta gueule = une
 # vraie insulte qui mérite un warn »). NIVEAU 2 — ces tournures sont INTRINSÈQUEMENT dirigées
 # (on les DIT à quelqu'un) → l'appelant les traite comme ciblées (« tg »/« ta gueule » sont
@@ -89,6 +105,26 @@ _TIER2_EXTRA = frozenset({
 # « ta gueule » dans le chat FR. Matching FRONTIÈRE DE MOT strict → ne touche jamais un mot.
 _TIER2_ABBR = frozenset({"tg"})
 _RE2_ABBR = None
+
+# ── VALIDISME / condition utilisée comme insulte (owner 2026-06-27) ──────────────────────
+# « autiste », « mongol », « trisomique »… utilisés pour rabaisser/juger. BLOQUÉ MÊME en
+# AUTO-RÉFÉRENCE (« je suis autiste ») : owner « ça porte à confusion aujourd'hui, bloque-le
+# quand même ». Action GRADUÉE côté bot (suppression + escalade cumulative, pas un mute brutal
+# au 1er écart). Frontière de mot stricte → « Mongolie », « autisme » (le nom clinique),
+# « download », « en retard » NE matchent PAS. Slurs à ~zéro usage innocent sur un serveur
+# gaming/chill. FR + EN + ES. Owner peut élargir/retirer via badwords_whitelist (court-circuit).
+_ABLEIST_TERMS = frozenset({
+    # FR
+    "autiste", "autistes", "autisto", "trisomique", "trisomiques", "triso", "trisos",
+    "mongolien", "mongoliens", "mongolienne", "mongoliennes", "mongol", "mongols", "mongolo",
+    "mongole", "mongoloïde", "mongoloide", "handicapé mental", "handicapée mentale",
+    "handicapé du cerveau", "déficient mental", "débile mental", "attardé mental",
+    # EN
+    "autistic", "retarded", "mongoloid", "downie", "window licker", "sped kid",
+    # ES
+    "subnormal", "mongólico", "mongolico", "retrasado", "retrasada",
+})
+_RE_ABLEIST = (None, None)
 
 
 def _compile_abbr(terms):
@@ -150,7 +186,7 @@ def _compile_pair(terms):
 
 
 def _load():
-    global _TIER3, _TIER2, _TIER1, _RE3, _RE2, _RE1, _RE_SH, _RE2_ABBR
+    global _TIER3, _TIER2, _TIER1, _RE3, _RE2, _RE1, _RE_SH, _RE2_ABBR, _RE_ABLEIST
     try:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "insult_lexicon.json")
         with open(path, "r", encoding="utf-8") as f:
@@ -161,16 +197,17 @@ def _load():
     except Exception as ex:
         print(f"[insult_filter] lexique non chargé : {ex}")
         _TIER3 = _TIER2 = _TIER1 = frozenset()
-    # Le harcèlement ciblé moderne + les aggressions FR (ta gueule…) rejoignent le niveau 2
-    # (gated par le ciblage côté appelant).
-    _TIER2 = frozenset(_TIER2 | _HARASS_TERMS | _TIER2_EXTRA)
+    # Le harcèlement ciblé moderne + les aggressions FR (ta gueule…) + le rabaissement ciblé
+    # (« t'es nul »…) rejoignent le niveau 2 (gated par le ciblage côté appelant).
+    _TIER2 = frozenset(_TIER2 | _HARASS_TERMS | _TIER2_EXTRA | _BELITTLE_TERMS)
     _RE_SH = _compile_pair(_SELFHARM_TERMS)
     _RE2_ABBR = _compile_abbr(_TIER2_ABBR)
     _RE3 = _compile_pair(_TIER3)
     _RE2 = _compile_pair(_TIER2)
     _RE1 = _compile_pair(_TIER1)
+    _RE_ABLEIST = _compile_pair(_ABLEIST_TERMS)   # validisme : toujours bloqué (même auto-réf.)
     n = {"selfharm": len(_SELFHARM_TERMS), "tier3": len(_TIER3),
-         "tier2": len(_TIER2), "tier1": len(_TIER1)}
+         "tier2": len(_TIER2), "tier1": len(_TIER1), "ableist": len(_ABLEIST_TERMS)}
     print(f"[insult_filter] lexique chargé : {n}")
     return n
 
@@ -235,6 +272,33 @@ def scan(raw: str, normalized: str | None = None):
             if h:
                 best, term = 1, h
     return best, term
+
+
+def ableist_hit(raw: str, normalized: str | None = None):
+    """Renvoie le terme de VALIDISME trouvé (« autiste », « mongol », « trisomique »…), ou None.
+    À bloquer MÊME en auto-référence (owner 2026-06-27). Scan brut + plié + normalisé, frontière
+    de mot. FAIL-SAFE → None."""
+    try:
+        if not raw:
+            return None
+        variants = [raw]
+        fr = _fold(raw)
+        if fr != raw:
+            variants.append(fr)
+        if normalized and normalized != raw:
+            variants.append(normalized)
+            fn = _fold(normalized)
+            if fn != normalized:
+                variants.append(fn)
+        for v in variants:
+            if not v:
+                continue
+            h = _hit(_RE_ABLEIST, v)
+            if h:
+                return h
+    except Exception:
+        return None
+    return None
 
 
 # Chargé à l'import (le module est importé une fois au boot).
