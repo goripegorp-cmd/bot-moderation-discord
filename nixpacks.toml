@@ -1,5 +1,8 @@
 [phases.setup]
-nixPkgs = ["python311"]
+# tesseract = moteur OCR (anti-scam image, owner 2026-06-27). Le binaire arrive sur le PATH ;
+# pytesseract l'appelle. Si jamais le build échouait sur ce paquet, l'OCR se désactive tout seul
+# côté bot (fail-safe). Données langue « eng » incluses (ces arnaques sont en anglais).
+nixPkgs = ["python311", "tesseract"]
 
 [phases.install]
 cmds = ["pip install -r requirements.txt --no-cache-dir"]
