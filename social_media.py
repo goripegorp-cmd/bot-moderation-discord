@@ -747,6 +747,119 @@ class RSSHubAdapter(PlatformAdapter):
 
 
 # =============================================================================
+# TWITTER / X ADAPTER DIRECT (syndication - owner 2026-06-27)
+# =============================================================================
+# LA solution Twitter qui marche GRATUITEMENT en 2026, SANS API, SANS instance a heberger,
+# SANS jeton : le point d'entree "syndication" de Twitter (celui qui sert a afficher les
+# tweets embarques sur les sites web) renvoie les derniers tweets d'un compte en JSON, sans
+# authentification. L'owner met juste le @pseudo dans le panneau -> le bot va chercher les
+# tweets tout seul et les poste. 100% FAIL-SAFE. (Endpoint non officiel : si X le coupe un
+# jour, on bascule sur RSSHub ; le code reste, il suffit de rebrancher l'adapter.)
+
+class TwitterSyndicationAdapter(PlatformAdapter):
+    """Recupere les derniers tweets d'un compte via syndication.twitter.com (sans cle)."""
+
+    platform = Platform.TWITTER
+    _URL = "https://syndication.twitter.com/srv/timeline-profile/screen-name/{user}"
+    _UA = {
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+    MAX_NEW_PER_POLL = 3
+
+    def __init__(self):
+        self.platform = Platform.TWITTER
+        self._session = None  # type: Any
+        self._seen: dict[str, set] = {}
+
+    @property
+    def configured(self) -> bool:
+        return True
+
+    async def setup(self, session=None) -> None:
+        if session is not None:
+            self._session = session
+        else:
+            import aiohttp
+            self._session = aiohttp.ClientSession()
+
+    async def _fetch_tweets(self, handle: str) -> list[SocialPost]:
+        import re as _re
+        h = _clean_handle(handle)
+        if not h:
+            return []
+        if self._session is None:
+            import aiohttp
+            self._session = aiohttp.ClientSession()
+        try:
+            async with self._session.get(self._URL.format(user=h), headers=self._UA,
+                                         timeout=20) as resp:
+                if resp.status != 200:
+                    return []
+                html = await resp.text()
+        except Exception:
+            return []
+        m = _re.search(
+            r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', html, _re.S)
+        if not m:
+            return []
+        try:
+            data = json.loads(m.group(1))
+            entries = ((((data.get("props") or {}).get("pageProps") or {})
+                        .get("timeline") or {}).get("entries") or [])
+        except Exception:
+            return []
+        tweets = []
+        for e in entries:
+            t = (e.get("content") or {}).get("tweet") if isinstance(e, dict) else None
+            if isinstance(t, dict) and t.get("id_str"):
+                tweets.append(t)
+        # Tri par ID (snowflake = ordre chronologique) decroissant : le + recent d'abord.
+        def _idnum(t):
+            try:
+                return int(t.get("id_str") or 0)
+            except Exception:
+                return 0
+        tweets.sort(key=_idnum, reverse=True)
+        out: list[SocialPost] = []
+        for t in tweets[:15]:
+            sn = ((t.get("user") or {}).get("screen_name")) or h
+            tid = t["id_str"]
+            txt = (t.get("full_text") or t.get("text") or "").strip()
+            img = ""
+            media = (t.get("entities") or {}).get("media") or []
+            if isinstance(media, list) and media:
+                img = media[0].get("media_url_https") or ""
+            out.append(SocialPost(
+                platform=Platform.TWITTER, handle=handle, post_id=str(tid),
+                post_type=PostType.POST, title=(txt[:280] or "Nouveau tweet"),
+                url=f"https://twitter.com/{sn}/status/{tid}",
+                thumbnail_url=img or None, posted_at=t.get("created_at")))
+        return out
+
+    async def fetch_posts(self, handle: str) -> list[SocialPost]:
+        items = await self._fetch_tweets(handle)        # plus recent d'abord
+        if not items:
+            return []
+        key = _clean_handle(handle).lower()
+        seen = self._seen.get(key)
+        ids = [p.post_id for p in items]
+        if seen is None:                                 # 1er passage = REFERENCE (pas de dump)
+            self._seen[key] = set(ids)
+            return []
+        fresh = [p for p in items if p.post_id not in seen]
+        for pid in ids:
+            seen.add(pid)
+        if len(seen) > 300:
+            self._seen[key] = set(ids)
+        return list(reversed(fresh[:self.MAX_NEW_PER_POLL]))   # du + ancien au + recent
+
+    async def is_post_active(self, post: SocialPost) -> bool:
+        return True
+
+
+# =============================================================================
 # PERSISTANCE
 # =============================================================================
 
@@ -1181,6 +1294,7 @@ __all__ = [
     "TwitchAdapter",
     "YouTubeAdapter",
     "RSSHubAdapter",
+    "TwitterSyndicationAdapter",
     "SocialMediaManager",
     "default_template",
     "render_template",
