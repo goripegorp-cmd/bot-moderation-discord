@@ -141,30 +141,37 @@ _RE_ABLEIST = (None, None)
 # gonna kill you » = normal en jeu). On ne garde QUE l'IRL sans ambiguïté : localisation
 # (« je sais où t'habites »), violence physique réelle (« casser la gueule », « te poignarder »),
 # intimidation directe (« tu vas le regretter »). Phrases dirigées → action forte + alerte owner.
+# MENACES DURES — ZÉRO interprétation gaming (localisation/dox/arme blanche/mutilation). Toujours
+# action forte, peu importe le contexte.
 _THREAT_TERMS = frozenset({
-    # FR — localisation / "je viens te trouver"
     "je sais où tu habites", "je sais ou tu habites", "je sais où t'habites", "je sais ou t'habites",
     "je connais ton adresse", "je connais ta ville", "je vais te retrouver", "on va te retrouver",
     "je te retrouverai", "je vais débarquer chez toi", "je débarque chez toi", "je viens chez toi",
     "je vais venir chez toi", "je vais venir te voir", "je sais qui tu es vraiment",
     "je sais où tu vis", "je sais ou tu vis", "j'ai ton ip", "je vais te dox", "je vais te doxx",
-    # FR — violence physique RÉELLE (pas du jargon de jeu)
-    "je vais te tabasser", "je vais te casser la gueule", "je vais te péter la gueule",
-    "je vais te peter la gueule", "je vais te défoncer la gueule", "je vais te faire la peau",
-    "je vais te planter", "je vais te poignarder", "je vais te fracasser", "je vais te frapper",
-    "je vais te tirer dessus", "balle dans la tête", "je vais te faire du mal",
-    "je vais te briser les jambes", "je vais te crever les yeux",
-    # FR — intimidation
-    "tu vas le regretter", "tu vas le payer", "tu vas voir ce qui va t'arriver", "fais gaffe à toi",
-    "ça va mal finir pour toi", "tu ferais mieux de faire gaffe", "tu vas morfler",
-    # EN
+    "je vais te poignarder", "je vais te planter", "je vais te crever les yeux",
+    "je vais te briser les jambes",
     "i know where you live", "i'll find you", "i will find you", "i'm coming for you",
     "im coming for you", "i know your address", "i'll come to your house", "i'll hunt you down",
-    "watch your back", "you better watch your back", "i'll beat you up", "i'll beat the shit out of you",
-    "you're gonna pay", "youre gonna pay", "you'll regret this", "i'll hurt you", "i know who you are",
-    "i have your ip", "i'll dox you", "ill dox you",
+    "i know who you are", "i have your ip", "i'll dox you", "ill dox you",
+})
+# MENACES DOUCES — violence physique « bagarre »/armes à feu/intimidation, qui PEUVENT exister en
+# banter gaming (« casser la gueule au boss », « te tirer dessus » dans un FPS, « tu vas le
+# regretter au prochain round »). N'agissent QUE si AUCUN contexte gaming dans le message (gate
+# côté bot.py). Sinon, on ne sanctionne pas.
+_THREAT_SOFT_TERMS = frozenset({
+    "je vais te tabasser", "je vais te casser la gueule", "je vais te péter la gueule",
+    "je vais te peter la gueule", "je vais te défoncer la gueule", "je vais te faire la peau",
+    "je vais te fracasser", "je vais te frapper", "je vais te faire du mal",
+    "je vais te tirer dessus", "balle dans la tête",
+    "tu vas le regretter", "tu vas le payer", "tu vas voir ce qui va t'arriver", "fais gaffe à toi",
+    "ça va mal finir pour toi", "tu ferais mieux de faire gaffe", "tu vas morfler",
+    "watch your back", "you better watch your back", "i'll beat you up",
+    "i'll beat the shit out of you", "you're gonna pay", "youre gonna pay", "you'll regret this",
+    "i'll hurt you",
 })
 _RE_THREAT = (None, None)
+_RE_THREAT_SOFT = (None, None)
 
 
 def _compile_abbr(terms):
@@ -226,7 +233,8 @@ def _compile_pair(terms):
 
 
 def _load():
-    global _TIER3, _TIER2, _TIER1, _RE3, _RE2, _RE1, _RE_SH, _RE2_ABBR, _RE_ABLEIST, _RE_THREAT
+    global _TIER3, _TIER2, _TIER1, _RE3, _RE2, _RE1, _RE_SH, _RE2_ABBR, _RE_ABLEIST
+    global _RE_THREAT, _RE_THREAT_SOFT
     try:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "insult_lexicon.json")
         with open(path, "r", encoding="utf-8") as f:
@@ -246,9 +254,11 @@ def _load():
     _RE2 = _compile_pair(_TIER2)
     _RE1 = _compile_pair(_TIER1)
     _RE_ABLEIST = _compile_pair(_ABLEIST_TERMS)   # validisme : toujours bloqué (même auto-réf.)
-    _RE_THREAT = _compile_pair(_THREAT_TERMS)     # menaces IRL : action forte
+    _RE_THREAT = _compile_pair(_THREAT_TERMS)         # menaces DURES : action forte toujours
+    _RE_THREAT_SOFT = _compile_pair(_THREAT_SOFT_TERMS)  # menaces DOUCES : exclues si contexte gaming
     n = {"selfharm": len(_SELFHARM_TERMS), "tier3": len(_TIER3), "tier2": len(_TIER2),
-         "tier1": len(_TIER1), "ableist": len(_ABLEIST_TERMS), "threat": len(_THREAT_TERMS)}
+         "tier1": len(_TIER1), "ableist": len(_ABLEIST_TERMS),
+         "threat": len(_THREAT_TERMS), "threat_soft": len(_THREAT_SOFT_TERMS)}
     print(f"[insult_filter] lexique chargé : {n}")
     return n
 
@@ -361,6 +371,32 @@ def threat_hit(raw: str, normalized: str | None = None):
             if not v:
                 continue
             h = _hit(_RE_THREAT, v)
+            if h:
+                return h
+    except Exception:
+        return None
+    return None
+
+
+def threat_soft_hit(raw: str, normalized: str | None = None):
+    """Menace DOUCE (bagarre/intimidation, ambiguë avec le gaming) — l'appelant ne doit appeler
+    cette fonction QUE s'il n'y a PAS de contexte gaming dans le message. FAIL-SAFE → None."""
+    try:
+        if not raw:
+            return None
+        variants = [raw]
+        fr = _fold(raw)
+        if fr != raw:
+            variants.append(fr)
+        if normalized and normalized != raw:
+            variants.append(normalized)
+            fn = _fold(normalized)
+            if fn != normalized:
+                variants.append(fn)
+        for v in variants:
+            if not v:
+                continue
+            h = _hit(_RE_THREAT_SOFT, v)
             if h:
                 return h
     except Exception:
