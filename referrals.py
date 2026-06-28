@@ -62,6 +62,10 @@ MIN_INVITEE_ACCOUNT_AGE_DAYS = 30
 
 # Cache mémoire des uses d'invites : { guild_id: { invite_code: uses } }.
 _invite_uses_cache: dict = {}
+# Liens PERSONNELS créés par le bot (owner 2026-06-27, kit de promo) : { (guild_id, code): owner_id }.
+# Un membre obtient son propre lien via /parrainage → on attribue ses filleuls même si l'invite a
+# été techniquement créée par le bot (inv.inviter = bot). Primé au boot depuis la table.
+_link_owner: dict = {}
 
 
 def setup(get_db_fn, *, add_coins_fn=None, activity_score_fn=None, bot=None):
@@ -96,9 +100,67 @@ async def init_db():
                 "CREATE INDEX IF NOT EXISTS idx_referrals_pending "
                 "ON referrals(guild_id, rewarded)"
             )
+            await db.execute(
+                "CREATE TABLE IF NOT EXISTS referral_links ("
+                "guild_id INTEGER NOT NULL, code TEXT NOT NULL, owner_id INTEGER NOT NULL, "
+                "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+                "PRIMARY KEY (guild_id, code))"
+            )
             await db.commit()
+            # Prime le cache des liens personnels (tous guilds).
+            async with db.execute("SELECT guild_id, code, owner_id FROM referral_links") as cur:
+                async for row in cur:
+                    _link_owner[(int(row[0]), str(row[1]))] = int(row[2])
     except Exception as ex:
         print(f"[referrals init_db] {ex}")
+
+
+async def register_link(guild_id: int, code: str, owner_id: int) -> None:
+    """Enregistre un lien d'invitation PERSONNEL (créé par le bot pour `owner_id`). FAIL-SAFE."""
+    if _get_db is None or not code:
+        return
+    try:
+        _link_owner[(int(guild_id), str(code))] = int(owner_id)
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT OR REPLACE INTO referral_links(guild_id, code, owner_id) VALUES(?,?,?)",
+                (int(guild_id), str(code), int(owner_id)))
+            await db.commit()
+    except Exception as ex:
+        print(f"[referrals register_link] {ex}")
+
+
+async def get_my_link(guild_id: int, owner_id: int):
+    """Code du dernier lien personnel d'un membre, ou None. FAIL-SAFE."""
+    if _get_db is None:
+        return None
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT code FROM referral_links WHERE guild_id=? AND owner_id=? "
+                "ORDER BY created_at DESC LIMIT 1", (int(guild_id), int(owner_id))) as cur:
+                r = await cur.fetchone()
+                return str(r[0]) if r else None
+    except Exception:
+        return None
+
+
+async def get_leaderboard(guild_id: int, limit: int = 10):
+    """Top parrains par nb de filleuls VALIDÉS. Renvoie [{'inviter_id', 'rewarded'}]. FAIL-SAFE."""
+    out = []
+    if _get_db is None:
+        return out
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT inviter_id, COUNT(*) n FROM referrals WHERE guild_id=? AND rewarded=1 "
+                "GROUP BY inviter_id ORDER BY n DESC, MIN(joined_at) ASC LIMIT ?",
+                (int(guild_id), int(limit))) as cur:
+                async for row in cur:
+                    out.append({"inviter_id": int(row[0]), "rewarded": int(row[1])})
+    except Exception:
+        pass
+    return out
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -187,9 +249,13 @@ async def _match_inviter(guild: discord.Guild) -> Optional[int]:
             new_snapshot[code] = uses
             prev = old.get(code) if old else None
             if prev is not None and uses == prev + 1:
-                inviter = getattr(inv, "inviter", None)
-                if inviter is not None and not getattr(inviter, "bot", False):
-                    increased.append((code, int(inviter.id)))
+                owner = _link_owner.get((guild.id, code))   # lien PERSONNEL (créé par le bot)
+                if owner is not None:
+                    increased.append((code, int(owner)))
+                else:
+                    inviter = getattr(inv, "inviter", None)
+                    if inviter is not None and not getattr(inviter, "bot", False):
+                        increased.append((code, int(inviter.id)))
         # Vanity URL : on rafraîchit le compteur mais on n'attribue PAS de parrain
         # (impossible de savoir QUI a partagé le vanity → jamais de fausse attribution).
         try:
