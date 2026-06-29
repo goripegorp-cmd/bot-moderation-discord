@@ -518,47 +518,86 @@ async def _fetch_rss(session: aiohttp.ClientSession, url: str, max_count: int = 
 
 
 async def _fetch_discourse(session: aiohttp.ClientSession, url: str, max_count: int = 15, filter_kw: Optional[list[str]] = None) -> list[dict]:
-    """Parse une catégorie Discourse (devforum Roblox)."""
-    items = []
-    try:
-        headers = {
-            # UA navigateur COMPLET (owner 2026-06-21) : le UA tronqué provoquait des HTTP 202
-            # de Cloudflare/Discourse sur le devforum Roblox → fetch des news vide. Aligné sur
-            # _fetch_rss (UA complet Chrome/Safari) + Accept-Language pour passer pour un vrai
-            # navigateur. FAIL-SAFE : si ça reste non-200, on loggue et on renvoie vide.
-            'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
-                           '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'),
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'en-US,en;q=0.9',
-        }
-        async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-            if resp.status != 200:
-                print(f"[game_updates _fetch_discourse {url}] HTTP {resp.status}")
-                return items
-            data = await resp.json()
-        topics = data.get('topic_list', {}).get('topics', [])
+    """Parse une catégorie Discourse (devforum Roblox).
+
+    Le devforum renvoie souvent un HTTP 202 depuis une IP datacenter (Railway) : c'est le
+    CACHE ANONYME de Discourse qui se régénère en arrière-plan (« accepté, réessaie »), pas une
+    vraie erreur. Le seul UA navigateur (correctif owner 2026-06-21) ne suffit plus → stratégie
+    robuste vérifiée empiriquement le 2026-06-29 :
+      1) requête .json (aiohttp suit le 301 → /…/36.json) ;
+      2) sur 202, on RÉESSAIE quelques fois (le cache se réchauffe) ;
+      3) si ça persiste (ou autre non-200), REPLI sur le flux .rss — servi en 200 même quand le
+         JSON anonyme est challengé — avec le guid NORMALISÉ sur l'ID numérique du topic pour
+         rester compatible avec la dédup (tracking_layer indexe sur update_id).
+    FAIL-SAFE : à la fin, on loggue et on renvoie une liste vide (jamais de crash / de doublon).
+    """
+    headers = {
+        'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                       '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'),
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+    }
+
+    def _parse_topics(data) -> list[dict]:
+        out = []
+        topics = (data.get('topic_list', {}) or {}).get('topics', []) or []
         for t in topics[:max_count]:
-            title = t.get('title', '').strip()
+            title = (t.get('title') or '').strip()
             if not title:
                 continue
             if filter_kw:
                 tl = title.lower()
                 if not any(kw.lower() in tl for kw in filter_kw):
                     continue
-            slug = t.get('slug', '')
             topic_id = t.get('id', 0)
-            link = f"https://devforum.roblox.com/t/{slug}/{topic_id}"
-            items.append({
+            out.append({
                 'title': title,
-                'link': link,
+                'link': f"https://devforum.roblox.com/t/{t.get('slug', '')}/{topic_id}",
                 'guid': str(topic_id),
                 'summary': (t.get('excerpt') or '')[:300].strip(),
                 'image': t.get('image_url') or '',
                 'pub_date': t.get('created_at', ''),
             })
+        return out
+
+    # 1+2) .json avec RETRY sur 202 (cache anonyme Discourse en régénération)
+    last_status = None
+    for attempt in range(3):
+        try:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                last_status = resp.status
+                if resp.status == 200:
+                    return _parse_topics(await resp.json())
+                if resp.status == 202 and attempt < 2:
+                    await asyncio.sleep(1.5 * (attempt + 1))  # laisse le cache se réchauffer
+                    continue
+            break
+        except Exception as ex:
+            print(f"[game_updates _fetch_discourse {url}] {ex}")
+            break
+
+    # 3) REPLI sur le flux .rss (plus tolérant aux lecteurs automatisés)
+    try:
+        rss_url = re.sub(r'\.json(\?.*)?$', '.rss', url)
+        if rss_url != url:
+            raw = await _fetch_rss(session, rss_url, max_count=max_count)
+            if raw:  # le .rss a répondu → on s'appuie dessus (succès, même si filtré à vide)
+                items = []
+                for r in raw:
+                    if filter_kw and not any(kw.lower() in r['title'].lower() for kw in filter_kw):
+                        continue
+                    # guid = ID numérique du topic (= chemin JSON) pour ne PAS reposter d'anciens
+                    m = re.search(r'/t/[^/]+/(\d+)', r.get('link', ''))
+                    if m:
+                        r['guid'] = m.group(1)
+                    items.append(r)
+                print(f"[game_updates _fetch_discourse {url}] HTTP {last_status} → repli .rss OK ({len(items)}/{len(raw)})")
+                return items
     except Exception as ex:
-        print(f"[game_updates _fetch_discourse {url}] {ex}")
-    return items
+        print(f"[game_updates _fetch_discourse {url} repli-rss] {ex}")
+
+    print(f"[game_updates _fetch_discourse {url}] HTTP {last_status} — .json ET .rss indisponibles")
+    return []
 
 
 # =============================================================================
