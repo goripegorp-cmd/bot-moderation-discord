@@ -84,6 +84,27 @@ def _gc_bucket(buf: deque, window: int, now_ts: float):
         buf.popleft()
 
 
+# Borne mémoire (owner 2026-06-29, audit) : _buckets est alimenté par CHAQUE user à CHAQUE
+# clic et n'était JAMAIS purgé → croissance RAM sans fin sur longue uptime / raid de comptes.
+_MAX_TRACKED_USERS = 5000
+
+
+def _evict_buckets():
+    """Purge les entrées de users INACTIFS (tous les compteurs vides) quand _buckets dépasse
+    la borne ; en dernier recours, coupe la moitié la plus ancienne. Ne touche jamais un user
+    en lock. Inoffensif (au pire un très vieux user repart de zéro)."""
+    if len(_buckets) <= _MAX_TRACKED_USERS:
+        return
+    for uid in list(_buckets.keys()):
+        ub = _buckets.get(uid)
+        if not ub or (all(len(b) == 0 for b in ub.values()) and uid not in _locked):
+            _buckets.pop(uid, None)
+    if len(_buckets) > _MAX_TRACKED_USERS:
+        for uid in list(_buckets.keys())[: len(_buckets) // 2]:
+            if uid not in _locked:
+                _buckets.pop(uid, None)
+
+
 def is_locked(user_id: int) -> bool:
     """True si le user est en soft-lock."""
     if _is_exempt(user_id):
@@ -119,6 +140,7 @@ def record(user_id: int, action: str) -> bool:
     max_count, window = limit
     now_ts = time.time()
 
+    _evict_buckets()  # borne mémoire avant d'insérer un éventuel nouvel user
     user_buckets = _buckets.setdefault(user_id, {})
     buf = user_buckets.setdefault(action, deque())
     _gc_bucket(buf, window, now_ts)

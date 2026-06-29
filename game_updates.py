@@ -279,7 +279,7 @@ GAME_SOURCES = {
     # ════ JEUX BLIZZARD SANS STEAM (via blizzardwatch.com community filtré) ════
 
     "wow": {
-        "name": "World of Warcraft",
+        "name": "World of Warcraft (BlizzardWatch · communauté)",
         "emoji": "⚔️",
         "color": 0x2E6BA8,
         "source_type": "rss_filtered",

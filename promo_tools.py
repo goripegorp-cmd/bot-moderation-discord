@@ -35,7 +35,7 @@ PROMO_DIRECTORIES = [
     {"key": "serveurdiscord_fr", "label": "Serveur-Discord 🇫🇷", "url": "https://serveur-discord.com/",      "needs_bot": False, "note": "annuaire FR par catégories · fiche web · 0 bot"},
     {"key": "discordme",         "label": "Discord.me",         "url": "https://discord.me/",               "needs_bot": False, "note": "SFW-friendly · fiche web · 0 bot"},
     {"key": "topgg",             "label": "Top.gg",             "url": "https://top.gg/",                   "needs_bot": False, "note": "gros trafic · fiche web + votes · 0 bot"},
-    {"key": "disforge",          "label": "Disforge",           "url": "https://disforge.com/",             "needs_bot": False, "note": "fiche web · bump /3h sur leur site · 0 bot"},
+    {"key": "discordservers",    "label": "DiscordServers.io",  "url": "https://discordservers.io/",        "needs_bot": False, "note": "fiche web · 0 bot (ex-Disforge, redirige ici)"},
 ]
 
 _DIR_BY_KEY = {d["key"]: d for d in PROMO_DIRECTORIES}
