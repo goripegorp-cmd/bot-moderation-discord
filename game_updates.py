@@ -96,6 +96,9 @@ _UPDATE_POSITIVE_KEYWORDS = [
     'dev blog', 'devblog', 'devnotes',
     # Bug fixes
     'bug fix', 'bug fixes', 'fixes', 'bugfix',
+    # Changements de jeu (équilibrage / refonte / contenu) — owner 2026-06-29 (« map, amélioration »)
+    'rework', 'reworked', 'rebalance', 'rebalanced', 'balance change', 'balance update',
+    'nerf', 'buff', 'gameplay update', 'new map', 'map update', 'map change',
     # Roblox specifics
     'release notes', 'weekly recap',
     # Season / content updates
@@ -172,6 +175,50 @@ def _is_real_update(title: str, summary: str = "") -> bool:
     return False
 
 
+# ─── Filtre CRÉATEUR (Roblox) — INCLUSIF (owner 2026-06-29) ────────────────────
+# Les catégories DevForum « Announcements » + « Release Notes » sont CURÉES par Roblox :
+# tout y est une vraie update plateforme/créateur (Studio, moteur, rendu/VFX, 3D/mesh/material,
+# API, physique, perfs, bêtas, nouvelles features dev). On ACCEPTE par défaut et on rejette
+# UNIQUEMENT les events / concours / conférences / sondages (« les events on s'en fout »).
+_ROBLOX_REJECT = [
+    'rdc', 'developer conference', 'developers conference',
+    'game jam', 'hackathon', 'creator challenge', 'innovation award',
+    'contest', 'sweepstake', 'giveaway', 'raffle',
+    'registration is open', 'register now', 'apply now', 'applications are open',
+    'applications open', 'sign-ups', 'sign ups', 'signups',
+    'meetup', 'meet-up', 'community event', 'celebrate', 'celebrating', 'anniversary',
+    'creator awards', 'the bloxys', 'bloxy award',
+    'survey', 'fill out', 'we want your feedback', 'feedback wanted',
+]
+
+
+def _is_roblox_update(title: str, summary: str = "") -> bool:
+    """Filtre créateur INCLUSIF : accepte toute update plateforme/créateur, rejette les events."""
+    text = f"{title} {summary}".lower().strip()
+    if not text:
+        return False
+    for neg in _ROBLOX_REJECT:
+        if neg in text:
+            return False
+    return True
+
+
+def _parse_ts(s: str) -> float:
+    """Convertit une date (ISO 8601 DevForum JSON, ou RFC822 RSS) en epoch. 0.0 si échec."""
+    if not s:
+        return 0.0
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(s.strip().replace('Z', '+00:00')).timestamp()
+    except Exception:
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+        return parsedate_to_datetime(s).timestamp()
+    except Exception:
+        return 0.0
+
+
 # =============================================================================
 # CONFIGURATION DES SOURCES (UNIQUEMENT CELLES VÉRIFIÉES FONCTIONNELLES)
 # =============================================================================
@@ -189,12 +236,20 @@ GAME_SOURCES = {
     # ════ PLATEFORMES ════
 
     "roblox": {
-        "name": "Roblox (plateforme)",
+        "name": "Roblox (plateforme & créateurs)",
         "emoji": "🟢",
         "color": 0x00A2FF,
         "source_type": "discourse",
-        "source_url": "https://devforum.roblox.com/c/updates/announcements.json",
-        "filter_keywords": ["update", "release notes", "patch", "improvement", "fix", "weekly recap"],
+        # owner 2026-06-29 : DEUX catégories DevForum pour couvrir plateforme ET créateurs —
+        # Announcements (features créateurs/dev, Studio, 3D, VFX, API…) + Release Notes (notes de
+        # version moteur/Studio). Pas de pré-filtre de titre : le filtre créateur inclusif
+        # (_is_roblox_update) gère l'acceptation (accepte tout sauf events/concours).
+        "source_urls": [
+            "https://devforum.roblox.com/c/updates/announcements.json",
+            "https://devforum.roblox.com/c/updates/release-notes.json",
+        ],
+        "filter_keywords": None,
+        "creator_mode": True,
     },
     "steam_client": {
         "name": "Steam Client (plateforme)",
@@ -621,18 +676,37 @@ async def fetch_updates(session: aiohttp.ClientSession, game_key: str, max_count
         return await _fetch_steam_news(session, spec['appid'], max_count=max_count)
 
     elif source_type == 'discourse':
-        # Fetch large + filtre par keywords source + filtre _is_real_update
-        raw = await _fetch_discourse(
-            session,
-            spec['source_url'],
-            max_count=max_count * 4,  # large pour avoir de la marge
-            filter_kw=spec.get('filter_keywords'),
-        )
+        # owner 2026-06-29 : supporte PLUSIEURS catégories (Roblox = Announcements + Release Notes).
+        urls = spec.get('source_urls') or ([spec['source_url']] if spec.get('source_url') else [])
+        creator_mode = spec.get('creator_mode', False)
+        raw_all = []
+        seen_guids = set()
+        for u in urls:
+            try:
+                raw = await _fetch_discourse(
+                    session, u, max_count=max_count * 4, filter_kw=spec.get('filter_keywords'),
+                )
+            except Exception:
+                raw = []
+            for r in raw:
+                g = r.get('guid')
+                if g and g in seen_guids:
+                    continue
+                if g:
+                    seen_guids.add(g)
+                raw_all.append(r)
+        # Tri par date décroissante → on poste les updates les PLUS RÉCENTES en premier,
+        # toutes catégories confondues (sinon une catégorie pourrait affamer l'autre).
+        raw_all.sort(key=lambda r: _parse_ts(r.get('pub_date', '')), reverse=True)
         out = []
-        for r in raw:
-            # Phase 17.2 : double filtre — keywords source + filtre update strict
-            if not _is_real_update(r['title'], r['summary']):
+        for r in raw_all:
+            # Roblox = filtre CRÉATEUR inclusif (Studio/dev/3D/VFX… sauf events) ; autres = strict.
+            ok = _is_roblox_update(r['title'], r['summary']) if creator_mode \
+                else _is_real_update(r['title'], r['summary'])
+            if not ok:
                 continue
+            tl = (r['title'] or '').lower()
+            utype = "patch" if ('release note' in tl) else "dev_update"
             out.append(GameUpdate(
                 game_key=game_key,
                 update_id=r['guid'],
@@ -640,7 +714,7 @@ async def fetch_updates(session: aiohttp.ClientSession, game_key: str, max_count
                 url=r['link'],
                 summary=r['summary'],
                 image_url=r['image'],
-                update_type="dev_update",
+                update_type=utype,
             ))
             if len(out) >= max_count:
                 break
