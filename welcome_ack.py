@@ -85,6 +85,13 @@ async def on_message_hook(message: discord.Message) -> bool:
                 (message.guild.id, message.author.id),
             )
             await db.commit()
+        # owner 2026-06-29 : 👋 UNIQUEMENT dans un salon où @everyone peut écrire (jamais
+        # annonce/ticket/staff). Garde minimale sans dépendance externe. FAIL-SAFE.
+        try:
+            if not message.channel.permissions_for(message.guild.default_role).send_messages:
+                return False
+        except Exception:
+            return False
         # Réaction 👋 — silencieuse, pas de ping, fail-open
         try:
             await message.add_reaction("👋")
