@@ -615,6 +615,7 @@ async def post_highlights_for_guild(guild) -> bool:
 @tasks.loop(minutes=30)
 async def weekly_highlights_task():
     """Post auto chaque dimanche 22h00-22h30 FR."""
+    return  # ⛔ DÉSACTIVÉ (owner 2026-06-29) : fusionné dans le Récap dominical UNIQUE (Héraut 18h)
     try:
         if _bot is None or _db_get is None or _db_set is None:
             return

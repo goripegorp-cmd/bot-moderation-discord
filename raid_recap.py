@@ -255,6 +255,7 @@ async def post_recap_for_guild(guild) -> bool:
 @tasks.loop(minutes=30)
 async def weekly_recap_task():
     """Tourne toutes les 30 min, déclenche le recap UNIQUEMENT dimanche 21h FR."""
+    return  # ⛔ DÉSACTIVÉ (owner 2026-06-29) : fusionné dans le Récap dominical UNIQUE (Héraut 18h)
     try:
         try:
             from zoneinfo import ZoneInfo
