@@ -412,24 +412,22 @@ def build_leaderboard_panel(guild: discord.Guild):
             items.append(v2_divider())
 
             medals = ["🥇", "🥈", "🥉", "4.", "5."]
+            # owner 2026-06-29 : chaque métrique = UN SEUL composant (bloc multi-lignes) au lieu
+            # d'1 composant/ligne → on passe de ~35 à ~7 composants (large marge sous les 40/msg,
+            # plus aucun risque de dépasser la limite Discord même si le serveur grossit).
             for metric_key, label, unit in METRICS:
                 top = await get_top_n(guild.id, metric_key, 5)
-                items.append(v2_body(f"**{label}**"))
                 if not top:
-                    items.append(v2_body(
-                        "_Aucune donnée cette semaine_"
-                    ))
+                    items.append(v2_body(f"**{label}**\n_Aucune donnée cette semaine_"))
                 else:
+                    _rows = []
                     for i, u in enumerate(top):
                         m = guild.get_member(u["user_id"])
                         name = m.display_name if m else f"User-{u['user_id']}"
-                        medal = (
-                            medals[i] if i < 3 else f"`{i + 1}.`"
-                        )
-                        items.append(v2_body(
-                            f"{medal} **{name}** — `{u['value']:,}` {unit}"
-                        ))
-                items.append(v2_divider())
+                        medal = medals[i] if i < 3 else f"`{i + 1}.`"
+                        _rows.append(f"{medal} **{name}** — `{u['value']:,}` {unit}")
+                    items.append(v2_body(f"**{label}**\n" + "\n".join(_rows)))
+            items.append(v2_divider())
 
             items.append(v2_body(
                 "_Reset chaque lundi 9h FR. Continue à jouer pour grimper !_"

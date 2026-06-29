@@ -447,31 +447,10 @@ async def _announce_rewards(
     if not ch:
         return
 
-    lines = [
-        "🌟 **MERCI À NOS MEMBRES LES PLUS ACTIFS !** 🌟",
-        "",
-        "_Chaque semaine, le serveur récompense celles et ceux qui le font "
-        "vivre — par leurs messages et leur présence en vocal. Voici les "
-        "héros de la semaine, qui gagnent un rôle spécial pendant "
-        f"**{VIP_DURATION_DAYS} jours** :_",
-        "",
-    ]
-
-    if vip_plus_ids:
-        names = []
-        for vpid in vip_plus_ids:
-            m = guild.get_member(vpid)
-            names.append(m.mention if m else f"<@{vpid}>")
-        label = "Membres les plus actifs" if len(names) > 1 else "Membre le plus actif"
-        lines.append(f"💎 **VIP+ — {label}** : " + " · ".join(names))
-        lines.append("_Les plus présent·es toutes catégories confondues. Chapeau à tou·tes !_")
-        lines.append("")
-
-    # 🎙️ BLOC VOCAL DÉDIÉ (owner 2026-06-15) : le vocal était noyé dans une puce
-    # anonyme — on le SORT À PART, NOMMÉ, avec les HEURES, pour le valoriser À
-    # ÉGALITÉ avec le texte. Réutilise leaders["voice"] déjà calculé (aucune requête
-    # en plus). Gated par 'vocal_recognition_enabled' (défaut ON). Cap 5 noms affichés
-    # (longueur message) ; les pings RÉELS restent plafonnés à 3 plus bas (TOS Discord).
+    # owner 2026-06-29 : on ne veut PLUS un message texte brut mais une BELLE CARTE encadrée
+    # (médailles + chiffres d'activité + classement). On réutilise les helpers V2 déjà injectés.
+    overall = (leaders or {}).get("overall") or []
+    _score_by_id = {int(u): int(s) for u, s in overall}
     voice_leaders = (leaders or {}).get("voice") or []
     show_voice = True
     try:
@@ -480,32 +459,40 @@ async def _announce_rewards(
             show_voice = bool(_vc.get("vocal_recognition_enabled", True))
     except Exception:
         show_voice = True
+    _medals = ["🥇", "🥈", "🥉"]
+
+    def _nm(uid):
+        m = guild.get_member(uid)
+        return m.mention if m else f"<@{uid}>"
+
+    sections = []
+    if vip_plus_ids:
+        _vp = []
+        for i, vpid in enumerate(vip_plus_ids):
+            rk = _medals[i] if i < 3 else "▫️"
+            sc = _score_by_id.get(int(vpid))
+            _vp.append(f"{rk} {_nm(vpid)}" + (f" — `{sc:,} pts`" if sc else ""))
+        sections.append("### 💎 VIP+ · les plus actifs (toutes catégories)\n" + "\n".join(_vp))
     if show_voice and voice_leaders:
-        lines.append("🎙️ **ROIS & REINES DU VOCAL** 🎙️")
-        lines.append("_Souvent dans l'ombre, jamais oublié·es — merci d'animer nos vocaux ❤️_")
-        for vuid, vmin in voice_leaders[:5]:
-            vm = guild.get_member(vuid)
-            vnm = vm.mention if vm else f"<@{vuid}>"
-            lines.append(f"• {vnm} — **{_fmt_voice_duration(vmin)}** en vocal cette semaine")
-        lines.append("")
-
+        _vl = []
+        for i, (vuid, vmin) in enumerate(voice_leaders[:5]):
+            rk = _medals[i] if i < 3 else "▫️"
+            _vl.append(f"{rk} {_nm(vuid)} — **{_fmt_voice_duration(vmin)}** en vocal")
+        sections.append("### 🎙️ Rois & Reines du Vocal\n" + "\n".join(_vl))
     if granted_vip:
-        lines.append("🌟 **VIP de la semaine** :")
-        for uid, reason in granted_vip:
-            m = guild.get_member(uid)
-            nm = m.mention if m else f"<@{uid}>"
+        _gv = []
+        for uid, reason in granted_vip[:10]:
             tag = "💬 messages" if reason == "messages" else "🎙️ vocal"
-            lines.append(f"• {nm} _(top {tag})_")
-        lines.append("")
+            _gv.append(f"• {_nm(uid)} _(top {tag})_")
+        if len(granted_vip) > 10:
+            _gv.append(f"• _… +{len(granted_vip) - 10} autre(s)_")
+        sections.append("### 🌟 VIP de la semaine\n" + "\n".join(_gv))
 
-    lines.append(
-        "_Merci pour votre énergie 💪 — vos rôles vous donnent des accès "
-        "spéciaux pendant 2 semaines. Continuez comme ça !_"
-    )
+    if not sections:
+        return  # rien à célébrer cette semaine
 
-    # RULES.md : max 3 mentions RÉELLES (pings) par message (TOS Discord).
-    # Les noms au-delà des 3 premiers s'affichent quand même (rendu mention)
-    # mais ne déclenchent PAS de notification.
+    # RULES.md / TOS : max 3 mentions RÉELLES (pings). Les autres noms s'affichent (rendu mention)
+    # sans notification.
     ordered_ids: list[int] = []
     for vpid in (vip_plus_ids or []):
         if vpid not in ordered_ids:
@@ -513,13 +500,43 @@ async def _announce_rewards(
     for uid, _ in granted_vip:
         if uid not in ordered_ids:
             ordered_ids.append(uid)
-    ping_objs = [discord.Object(id=u) for u in ordered_ids[:3]]
+    allowed = discord.AllowedMentions(
+        users=[discord.Object(id=u) for u in ordered_ids[:3]], roles=False, everyone=False)
 
+    # ─── Rendu : CARTE V2 encadrée (repli texte si helpers absents) ───
+    h = _v2 or {}
+    LayoutView = h.get("LayoutView")
+    v2_container = h.get("v2_container")
+    v2_title = h.get("v2_title")
+    v2_subtitle = h.get("v2_subtitle")
+    v2_body = h.get("v2_body")
+    v2_divider = h.get("v2_divider")
+    if LayoutView and v2_container and v2_title and v2_body:
+        items = [v2_title("🌟 Héros de la semaine")]
+        _sub = f"Merci à nos membres les plus actifs — rôle spécial pendant {VIP_DURATION_DAYS} jours"
+        items.append(v2_subtitle(_sub) if v2_subtitle else v2_body(f"_{_sub}_"))
+        for s in sections:
+            if v2_divider:
+                items.append(v2_divider())
+            items.append(v2_body(s))
+        if v2_divider:
+            items.append(v2_divider())
+        items.append(v2_body("-# Continuez comme ça 💪 — vos rôles donnent des accès spéciaux 2 semaines."))
+
+        class _HeroesCard(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=None)
+                self.add_item(v2_container(*items, color=VIP_PLUS_COLOR))
+        try:
+            await ch.send(view=_HeroesCard(), allowed_mentions=allowed)
+            return
+        except Exception:
+            pass
+
+    # Repli texte (si V2 indisponible)
     try:
-        allowed = discord.AllowedMentions(
-            users=ping_objs, roles=False, everyone=False,
-        )
-        await ch.send("\n".join(lines), allowed_mentions=allowed)
+        txt = "🌟 **MERCI À NOS MEMBRES LES PLUS ACTIFS !** 🌟\n\n" + "\n\n".join(sections)
+        await ch.send(txt[:1900], allowed_mentions=allowed)
     except Exception:
         pass
 
