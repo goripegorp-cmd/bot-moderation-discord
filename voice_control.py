@@ -212,10 +212,14 @@ def _build_panel(channel_id: int, owner_id: int, locked: bool):
     v2_title = _v2.get('v2_title')
     lock_label = "🔓 Déverrouiller" if locked else "🔒 Verrouiller"
     lock_style = discord.ButtonStyle.success if locked else discord.ButtonStyle.secondary
-    head = (f"### 🎛️ Contrôle de ton vocal\n"
-            f"Propriétaire : <@{int(owner_id)}>"
-            + ("  ·  🔒 **verrouillé** (personne de nouveau ne peut entrer)" if locked else "")
-            + "\n_Seul le propriétaire (ou le staff) peut utiliser ces boutons._")
+    head = (f"### 🎛️ Personnalise ton salon vocal\n"
+            f"Bienvenue <@{int(owner_id)}> — **c'est TON salon !** Configure-le à distance, d'ici, "
+            f"en 1 clic :\n"
+            f"🔤 **Renommer**  ·  👥 **Nombre de places**  ·  🔒 **Verrouiller**  ·  "
+            f"👢 **Expulser**  ·  👑 **Transférer**"
+            + ("\n🔒 **Salon verrouillé** — personne de nouveau ne peut entrer." if locked else "")
+            + "\n-# Seul toi (ou le staff) peux utiliser ces boutons. Le salon se **supprime tout "
+            f"seul** quand il se vide.")
     row1 = discord.ui.ActionRow(
         _b("Renommer", "rename", channel_id, emoji="🔤"),
         _b("Limite", "limit", channel_id, emoji="👥"),
@@ -491,6 +495,151 @@ async def _repost_or_log(channel, new_owner_id: int):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+#  Menus de CHOIX (owner 2026-06-29) : places + noms rapides = « menu pro ultra-simple »
+#  (remplace la saisie de nombre/texte par un vrai Select ; « ✏️ Personnalisé » garde le modal)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# 0 = illimité. Choix volontairement courts et lisibles.
+_LIMIT_CHOICES = [
+    ("2 personnes", 2), ("3 personnes", 3), ("4 personnes", 4), ("5 personnes", 5),
+    ("6 personnes", 6), ("8 personnes", 8), ("10 personnes", 10), ("12 personnes", 12),
+    ("15 personnes", 15), ("20 personnes", 20), ("Illimité", 0),
+]
+
+# (label de choix, nom réellement appliqué au salon)
+_NAME_PRESETS = [
+    ("🎮 Gaming", "🎮 Gaming"), ("💬 Discussion", "💬 Discussion"),
+    ("😎 Chill", "😎 Chill"), ("🎵 Musique", "🎵 Musique"),
+    ("🏆 Compétition", "🏆 Compétition"), ("🎲 Soirée Jeux", "🎲 Soirée Jeux"),
+    ("🗣️ Papote", "🗣️ Papote"), ("🔒 Privé", "🔒 Privé"),
+]
+
+
+def _wrap_select_view(body_txt: str, *rows, timeout: int = 180):
+    """Petite vue éphémère V2 (titre + lignes de composants). Repli non-V2 si helpers absents."""
+    LayoutView = _v2.get('LayoutView') or getattr(discord.ui, 'LayoutView', None)
+    v2_container = _v2.get('v2_container')
+    v2_body = _v2.get('v2_body')
+    if v2_container and v2_body:
+        class _V(LayoutView):
+            def __init__(self):
+                super().__init__(timeout=timeout)
+                self.add_item(v2_container(v2_body(body_txt), *rows, color=0x5865F2))
+        return _V()
+
+    class _Vfb(LayoutView):
+        def __init__(self):
+            super().__init__(timeout=timeout)
+            self.add_item(discord.ui.TextDisplay(body_txt))
+            for r in rows:
+                self.add_item(r)
+    return _Vfb()
+
+
+def _build_limit_select_view(channel_id: int, owner_id: int):
+    """Vue éphémère : un Select pour choisir le nombre de places (au lieu de taper un nombre)."""
+    options = [discord.SelectOption(label=lbl, value=str(n),
+                                    emoji=("♾️" if n == 0 else "👥")) for lbl, n in _LIMIT_CHOICES]
+    sel = discord.ui.Select(placeholder="👥 Combien de places dans ton salon ?",
+                            min_values=1, max_values=1, options=options)
+
+    async def _cb(i: discord.Interaction):
+        await _on_limit_select(i, channel_id, owner_id, sel.values)
+
+    sel.callback = _cb
+    return _wrap_select_view(
+        "### 👥 Nombre de places\nChoisis combien de personnes peuvent rejoindre ton salon :",
+        discord.ui.ActionRow(sel))
+
+
+def _build_rename_select_view(channel_id: int, owner_id: int):
+    """Vue éphémère : Select de noms rapides + bouton « ✏️ Nom personnalisé » (modal)."""
+    options = [discord.SelectOption(label=lbl[:100], value=str(idx))
+               for idx, (lbl, _nm) in enumerate(_NAME_PRESETS)]
+    sel = discord.ui.Select(placeholder="🔤 Choisis un nom rapide…",
+                            min_values=1, max_values=1, options=options)
+
+    async def _cb(i: discord.Interaction):
+        await _on_rename_select(i, channel_id, owner_id, sel.values)
+
+    sel.callback = _cb
+    b_custom = discord.ui.Button(label="✏️ Nom personnalisé", style=discord.ButtonStyle.primary)
+
+    async def _custom(i: discord.Interaction):
+        try:
+            if not i.response.is_done():
+                await i.response.send_modal(_RenameModal(channel_id, owner_id))
+        except Exception as ex:
+            print(f"[voice_control rename custom] {ex}")
+
+    b_custom.callback = _custom
+    return _wrap_select_view(
+        "### 🔤 Renommer ton salon\nChoisis un nom rapide, ou clique **✏️ Nom personnalisé** :",
+        discord.ui.ActionRow(sel), discord.ui.ActionRow(b_custom))
+
+
+async def _on_limit_select(interaction, channel_id, owner_id, values):
+    """Applique la limite de places choisie. NOMINATIF (re-check). FAIL-SAFE."""
+    try:
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)  # defer-first (ch.edit = API)
+        ok, _own = await _can_manage(interaction, channel_id)
+        if not ok:
+            await interaction.followup.send(
+                "ℹ️ Réservé au **propriétaire** (ou au staff).", ephemeral=True)
+            return
+        try:
+            n = int(values[0]) if values else 0
+        except Exception:
+            n = 0
+        n = max(0, min(99, n))
+        ch = interaction.guild.get_channel(int(channel_id)) if interaction.guild else None
+        if ch is not None:
+            try:
+                await ch.edit(user_limit=n, reason=f"Limite par {interaction.user}")
+            except Exception:
+                pass
+        await interaction.followup.send(
+            f"✅ Limite réglée sur **{'illimitée ♾️' if n == 0 else f'{n} places'}**.", ephemeral=True)
+    except Exception as ex:
+        print(f"[voice_control _on_limit_select] {ex}")
+        try:
+            await interaction.followup.send("✅ Pris en compte.", ephemeral=True)
+        except Exception:
+            pass
+
+
+async def _on_rename_select(interaction, channel_id, owner_id, values):
+    """Applique un nom rapide choisi. NOMINATIF (re-check). FAIL-SAFE."""
+    try:
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)  # defer-first (ch.edit = API)
+        ok, _own = await _can_manage(interaction, channel_id)
+        if not ok:
+            await interaction.followup.send(
+                "ℹ️ Réservé au **propriétaire** (ou au staff).", ephemeral=True)
+            return
+        try:
+            idx = int(values[0]) if values else -1
+        except Exception:
+            idx = -1
+        name = _NAME_PRESETS[idx][1] if 0 <= idx < len(_NAME_PRESETS) else ""
+        ch = interaction.guild.get_channel(int(channel_id)) if interaction.guild else None
+        if ch is not None and name:
+            try:
+                await ch.edit(name=name[:95], reason=f"Renommage par {interaction.user}")
+            except Exception:
+                pass
+        await interaction.followup.send(f"✅ Salon renommé en **{name}**.", ephemeral=True)
+    except Exception as ex:
+        print(f"[voice_control _on_rename_select] {ex}")
+        try:
+            await interaction.followup.send("✅ Pris en compte.", ephemeral=True)
+        except Exception:
+            pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  Verrou (lock / unlock)
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -584,11 +733,15 @@ async def _on_control_click(interaction: discord.Interaction, action: str, chann
             return
 
         if action == "rename":
+            # Menu de CHOIX (noms rapides) + « ✏️ Personnalisé » → modal. Ephemère.
             if not interaction.response.is_done():
-                await interaction.response.send_modal(_RenameModal(channel_id, owner_id))
+                await interaction.response.send_message(
+                    view=_build_rename_select_view(channel_id, owner_id), ephemeral=True)
         elif action == "limit":
+            # Menu de CHOIX des places (au lieu de taper un nombre). Ephemère.
             if not interaction.response.is_done():
-                await interaction.response.send_modal(_LimitModal(channel_id, owner_id))
+                await interaction.response.send_message(
+                    view=_build_limit_select_view(channel_id, owner_id), ephemeral=True)
         elif action == "lock":
             # Defer-first : _apply_lock fait un set_permissions (API) → on défère la mise à
             # jour du panneau AVANT, pour ne jamais dépasser la fenêtre 3 s (Échec d'interaction).
