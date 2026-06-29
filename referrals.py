@@ -46,9 +46,12 @@ _activity_score = None       # async get_score(guild_id, user_id) -> int
 _bot = None
 
 # ─── Réglages (MODESTES — rétention #1, anti-inflation) ───────────────────────
-# Récompense pièces du PARRAIN une fois l'invité validé. Volontairement petite :
-# le parrainage est un bonus d'ambiance, pas une source de farm.
-REWARD_COINS = 150
+# owner 2026-06-29 — CONFORMITÉ ToS Discord : la politique anti-manipulation range les
+# « invite rewards » (payer/inciter pour des invitations) dans l'inflation artificielle
+# INTERDITE, même si les membres sont réels. On NE PAIE donc PLUS le parrain. REWARD_COINS=0 :
+# le parrainage devient de la RECONNAISSANCE (classement Ambassadeurs), pas une récompense.
+# Les 🪙 d'un membre viennent de SON activité (activity_system), jamais de l'acte d'inviter.
+REWARD_COINS = 0
 
 # GATE anti-alt n°1 : activité réelle de l'invité (points activity_system sur 14 j).
 # 25 pts = ~25 messages OU ~25 min de vocal → exclut tout alt « ouvert puis fermé ».
@@ -388,9 +391,11 @@ async def try_award_pending(guild: discord.Guild) -> int:
                     continue  # déjà réclamé par une autre exécution
             except Exception:
                 continue
-            # Crédit MODESTE du parrain (pièces). Si add_coins échoue, le claim reste
-            # marqué (idempotent) : on ne re-tente pas en boucle, on n'over-crédite pas.
-            if _add_coins is not None:
+            # owner 2026-06-29 — PLUS DE PAIEMENT du parrain (conformité ToS « invite rewards »,
+            # cf. REWARD_COINS). Le claim marque juste le filleul comme INTÉGRÉ (il est devenu
+            # réellement actif) → ça nourrit la RECONNAISSANCE (classement Ambassadeurs), zéro
+            # pièce. On garde le crédit optionnel UNIQUEMENT si REWARD_COINS > 0 (réversible).
+            if _add_coins is not None and REWARD_COINS > 0:
                 try:
                     await _add_coins(guild.id, inviter_id, REWARD_COINS)
                 except Exception:
