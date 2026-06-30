@@ -349,6 +349,50 @@ async def boot_cleanup():
                   f"{len(stale)} salon(s) résiduel(s) nettoyé(s)")
     except Exception as ex:
         print(f"[social_zones boot_cleanup] {ex}")
+    # Filet anti-fantôme : balaie les salons orphelins (reboot en pleine création où
+    # channel_id n'a pas pu être persisté → la ligne ne les référence pas).
+    await _boot_reconcile_orphans()
+
+
+async def _boot_reconcile_orphans():
+    """Supprime tout salon résiduel sous nos catégories portant notre préfixe et NON référencé
+    par une ligne active (orphelin d'un reboot mid-création). Sans danger : skippe les salons
+    d'une zone active (course rare avec une création concurrente au boot)."""
+    if _bot is None:
+        return
+    prefixes = tuple(p for p in (_PREFIX.get(k) for k in _KINDS) if p)
+    cat_names = set(_CATEGORY.values())
+    active_ids = set()
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT channel_id FROM social_zones WHERE status='active' AND channel_id != 0") as cur:
+                active_ids = {int(r[0]) for r in await cur.fetchall()}
+    except Exception:
+        active_ids = set()
+    removed = 0
+    try:
+        for g in list(_bot.guilds):
+            try:
+                for cat in list(getattr(g, "categories", []) or []):
+                    if cat.name not in cat_names:
+                        continue
+                    for ch in list(getattr(cat, "channels", []) or []):
+                        nm = getattr(ch, "name", "") or ""
+                        if int(getattr(ch, "id", 0)) in active_ids:
+                            continue
+                        if any(nm.startswith(p) for p in prefixes):
+                            try:
+                                await ch.delete(reason="Zone sociale orpheline (reboot)")
+                                removed += 1
+                            except Exception:
+                                pass
+            except Exception:
+                continue
+        if removed:
+            print(f"[social_zones reconcile] {removed} salon(s) orphelin(s) supprimé(s)")
+    except Exception as ex:
+        print(f"[social_zones reconcile] {ex}")
 
 
 @tasks.loop(minutes=5)
@@ -556,6 +600,19 @@ async def create_zone(i: discord.Interaction, kind: str, author_id: int, partner
                 await db.commit()
         except Exception as ex:
             print(f"[social_zones create persist] {ex}")
+            # channel_id n'a pas pu être mémorisé → tout chemin de suppression raterait ce
+            # salon (channel_id resté 0) = FANTÔME permanent. On nettoie immédiatement.
+            try:
+                await ch.delete(reason="échec persistance zone sociale")
+            except Exception:
+                pass
+            try:
+                async with _get_db() as db:
+                    await db.execute("DELETE FROM social_zones WHERE id=?", (zone_id,))
+                    await db.commit()
+            except Exception:
+                pass
+            return await _safe_followup(i, content="❌ Erreur à la création, réessaie.")
         _zone_channels.add(int(ch.id))
 
         # 4) Poste le panneau dans le salon (mentionne les participants — c'est LEUR salon privé).
@@ -643,23 +700,45 @@ async def join_zone(i: discord.Interaction, zone_id: int):
             # Salon disparu → ferme la ligne pour cohérence.
             await close_zone(zone_id, linger=False)
             return await _safe_followup(i, content="⌛ Cette zone n'est plus disponible.")
-        if await _is_member(zone_id, member.id):
-            return await _safe_followup(i, content=f"✅ Tu es déjà dans : {ch.mention}")
-        if (await _member_count(zone_id)) >= _MAX_MEMBERS.get(z["kind"], 2):
-            return await _safe_followup(
-                i, content="🚪 Cette zone est **complète**.")
-        # Ajoute l'accès au salon + enregistre le membre.
+        # Claim ATOMIQUE du slot AVANT d'accorder l'accès (anti-dépassement de cap sur clics
+        # concurrents — sinon 2 « Rejoindre » simultanés ouvrent un trade « privé à 2 » à 3).
+        # INSERT … SELECT … WHERE count<cap AND NOT déjà-membre : SQLite sérialise les writers,
+        # un seul gagne la dernière place (rowcount==1).
+        max_m = _MAX_MEMBERS.get(z["kind"], 2)
+        try:
+            async with _get_db() as db:
+                cur = await db.execute(
+                    "INSERT INTO social_zone_members(zone_id, user_id) "
+                    "SELECT ?, ? WHERE "
+                    "(SELECT COUNT(*) FROM social_zone_members WHERE zone_id=?) < ? "
+                    "AND NOT EXISTS(SELECT 1 FROM social_zone_members WHERE zone_id=? AND user_id=?)",
+                    (zone_id, member.id, zone_id, max_m, zone_id, member.id))
+                claimed = getattr(cur, "rowcount", 0) == 1
+                await db.commit()
+        except Exception as ex:
+            print(f"[social_zones join claim] {ex}")
+            return await _safe_followup(i, content="❌ Erreur, réessaie.")
+        if not claimed:
+            if await _is_member(zone_id, member.id):
+                return await _safe_followup(i, content=f"✅ Tu es déjà dans : {ch.mention}")
+            return await _safe_followup(i, content="🚪 Cette zone est **complète**.")
+        # Slot gagné → accorde l'accès. Si l'octroi échoue, on REND le slot (anti-place fantôme).
         try:
             await ch.set_permissions(member, overwrite=_member_overwrite(),
                                      reason="Rejoint la zone sociale")
         except Exception as ex:
             print(f"[social_zones join set_permissions] {ex}")
+            try:
+                async with _get_db() as db:
+                    await db.execute(
+                        "DELETE FROM social_zone_members WHERE zone_id=? AND user_id=?",
+                        (zone_id, member.id))
+                    await db.commit()
+            except Exception:
+                pass
             return await _safe_followup(i, content="❌ Impossible de t'ajouter, réessaie.")
         try:
             async with _get_db() as db:
-                await db.execute(
-                    "INSERT OR IGNORE INTO social_zone_members(zone_id, user_id) VALUES(?,?)",
-                    (zone_id, member.id))
                 await db.execute(
                     "UPDATE social_zones SET last_activity=CURRENT_TIMESTAMP WHERE id=?",
                     (zone_id,))
