@@ -67,6 +67,34 @@ def _season_end_ts() -> int:
     return int(nxt.timestamp())
 
 
+def _next_boss_ts() -> int:
+    """Timestamp unix du prochain Boss du jour (créneaux daily_bosses.BOSS_HOURS, Europe/Paris).
+    Synchronisé avec la cadence réelle. FAIL-OPEN → 0 (la ligne est alors masquée)."""
+    try:
+        from datetime import timedelta
+        try:
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo('Europe/Paris')
+        except Exception:
+            tz = timezone.utc
+        try:
+            import daily_bosses
+            hours = sorted(int(h) for h in daily_bosses.BOSS_HOURS)
+        except Exception:
+            hours = [12, 21]
+        if not hours:
+            return 0
+        now = datetime.now(tz)
+        for h in hours:
+            cand = now.replace(hour=h, minute=0, second=0, microsecond=0)
+            if cand > now:
+                return int(cand.timestamp())
+        cand = (now + timedelta(days=1)).replace(hour=hours[0], minute=0, second=0, microsecond=0)
+        return int(cand.timestamp())
+    except Exception:
+        return 0
+
+
 def _season_meta() -> tuple[str, str]:
     """(emoji, nom) de la saison courante via eng47. FAIL-OPEN."""
     try:
@@ -197,6 +225,11 @@ async def _build_board_embed(guild) -> discord.Embed:
             badge = medals[idx] if idx < 3 else f"`#{idx + 1}`"
             lines.append(f"{badge} **{name}** — `{pts:,}` pts".replace(",", " "))
         e.add_field(name="🏆 Top 10 de la saison", value="\n".join(lines), inline=False)
+    nb = _next_boss_ts()
+    if nb:
+        e.add_field(name="⏰ Prochain rendez-vous",
+                    value=f"**Boss du jour <t:{nb}:R>** (puis <t:{nb}:t>) — sois là pour marquer des points.",
+                    inline=False)
     e.set_footer(text="📊 Ma position = ton rang en direct · 🔄 Actualiser pour rafraîchir")
     return e
 

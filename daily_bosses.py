@@ -76,6 +76,7 @@ _event_mention_fn = None  # Phase 235.24 : async (guild, type) -> mention rôles
 _echo_fn = None  # Phase 257.1 : async (guild, channel, kind) -> écho silencieux salons actifs
 _alliance_points_fn = None  # Phase 253 : async (guild_id, user_id, damage) -> crédite l'alliance
 _meta_award_fn = None  # owner 2026-06-30 : async (guild_id, user_id, base_pts, top) -> Season Pass + XP
+_goal_record_fn = None  # owner 2026-06-30 : async (guild_id, user_id, kind, count) -> objectif collectif
 _pet_strike_fn = None  # Phase 261 : async (guild_id, user_id) -> dict assist familier (injecté)
 _last_pet_click = {}  # Phase 261 : (guild_id, user_id) -> ts (anti-429 du bouton 🐾)
 
@@ -396,11 +397,11 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
           cleanup_register_fn=None, arena_create_fn=None, arena_delete_fn=None,
           report_fn=None, event_busy_fn=None, event_mention_fn=None,
           alliance_points_fn=None, echo_fn=None, pet_strike_fn=None,
-          claim_lock_fn=None, meta_award_fn=None):
+          claim_lock_fn=None, meta_award_fn=None, goal_record_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _inventory_fn
     global _events_channel_fn, _notif_check_fn, _cleanup_register_fn
     global _arena_create_fn, _arena_delete_fn, _report_fn, _event_busy_fn, _event_mention_fn
-    global _alliance_points_fn, _echo_fn, _pet_strike_fn, _claim_lock_fn, _meta_award_fn
+    global _alliance_points_fn, _echo_fn, _pet_strike_fn, _claim_lock_fn, _meta_award_fn, _goal_record_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -426,6 +427,7 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
     _pet_strike_fn = pet_strike_fn  # Phase 261 : assist familier (cœur partagé bot.py)
     _claim_lock_fn = claim_lock_fn  # Phase 262 : claim atomique de spawn (anti-course TOCTOU)
     _meta_award_fn = meta_award_fn  # owner 2026-06-30 : crédit Season Pass + XP (jouer fait avancer)
+    _goal_record_fn = goal_record_fn  # owner 2026-06-30 : objectif collectif « vaincre N boss »
 
 
 async def init_db():
@@ -1616,6 +1618,16 @@ async def resolve_daily_boss(event_id: int) -> Optional[dict]:
                 pass
         rewards.append({"user_id": uid, "damage": dmg, "coins": coins,
                         "rank": i + 1})
+
+    # owner 2026-06-30 : compter le Boss du jour dans l'objectif collectif « vaincre N boss
+    # ensemble » (1 kill = +1, attribué au tueur sinon au top dégâts). FAIL-SAFE.
+    if killed and _goal_record_fn:
+        try:
+            _credit_uid = fatal_uid if fatal_uid is not None else (attackers[0][0] if attackers else None)
+            if _credit_uid is not None:
+                await _goal_record_fn(guild_id, int(_credit_uid), "boss_kill", 1)
+        except Exception:
+            pass
 
     try:
         async with _get_db() as db:
