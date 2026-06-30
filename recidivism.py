@@ -233,8 +233,9 @@ async def _ensure_role(guild) -> Optional[discord.Role]:
 def _lock_for(key):
     lk = _locks.get(key)
     if lk is None:
-        if len(_locks) > 4000:        # garde-fou mémoire (rare : peu de membres restreints)
-            _locks.clear()
+        if len(_locks) > 4000:        # garde-fou mémoire : purge UNIQUEMENT les verrous LIBRES
+            for _k in [k for k, v in list(_locks.items()) if not v.locked()]:
+                _locks.pop(_k, None)   # ne JAMAIS détruire un verrou détenu (casserait la sérialisation)
         lk = _locks[key] = asyncio.Lock()
     return lk
 
@@ -359,11 +360,20 @@ async def enforce_on_message(msg, content: str) -> bool:
         # qu'à la prochaine infraction / toutes les 12 h → on revérifie ICI à chaque message et on
         # purge le cache immédiatement. Fail-safe : au moindre doute → on NE restreint PAS.
         try:
+            _now_immune = False
             if _is_super_owner_fn and _is_super_owner_fn(uid):
-                _restricted.pop((gid, uid), None)
-                return False
-            if _is_immune_fn and msg.author is not None and await _is_immune_fn(msg.author):
-                _restricted.pop((gid, uid), None)   # deescalate_task retirera rôle + ligne DB
+                _now_immune = True
+            elif _is_immune_fn and msg.author is not None and await _is_immune_fn(msg.author):
+                _now_immune = True
+            if _now_immune:
+                # recompute (verrouillé) détecte l'immunité → palier 0 → RETIRE le rôle + la ligne
+                # DB (pas seulement le cache) → cicatrisation COMPLÈTE, sans attendre 12 h. On ne
+                # censure pas le message courant (return False) ; le rôle résiduel sur un admin est
+                # de toute façon sans effet (la perm administrator passe outre les overwrites).
+                try:
+                    asyncio.create_task(recompute(msg.guild, msg.author))
+                except Exception:
+                    pass
                 return False
         except Exception:
             return False
@@ -437,7 +447,9 @@ async def forget(guild_id: int, user_id: int):
         _restricted.pop(key, None)
         _last_msg.pop(key, None)
         _notice_cd.pop(key, None)
-        _locks.pop(key, None)
+        _lk = _locks.get(key)
+        if _lk is not None and not _lk.locked():
+            _locks.pop(key, None)   # ne pas retirer un verrou détenu par un recompute en cours
         if _get_db is not None:
             try:
                 async with _get_db() as db:
