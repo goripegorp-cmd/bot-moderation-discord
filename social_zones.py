@@ -57,6 +57,7 @@ _COLOR = {"group": 0x5865F2, "trade": 0x2ECC71}
 
 # ─── État mémoire (reconstruit au boot) ────────────────────────────────────────
 _zone_channels: set = set()    # {channel_id} des salons sociaux ACTIFS (lookup O(1) on_message)
+_boot_done = False             # garde anti-reconnexion : ne détruit les zones qu'au 1er boot
 _last_click: dict = {}         # {uid: epoch} anti-429
 _activity_writes: dict = {}    # {channel_id: epoch} throttle des écritures last_activity
 _pending_closes: set = set()   # réf. aux tâches de fermeture différée (anti-GC)
@@ -328,9 +329,18 @@ async def close_zone(zone_id: int, linger: bool = False) -> bool:
 
 async def boot_cleanup():
     """Au boot : ferme toutes les zones 'active' (salons orphelins après reboot Railway)
-    + balaie les 'ended' dont le salon traîne encore. Le set mémoire repart vide."""
+    + balaie les 'ended' dont le salon traîne encore. Le set mémoire repart vide.
+
+    GARDE anti-reconnexion : on_ready se redéclenche à CHAQUE reconnexion gateway ; sans
+    cette garde, une simple reconnexion détruirait les zones EN COURS d'utilisation. On ne
+    nettoie donc qu'au TOUT PREMIER boot du process (les vrais orphelins viennent du process
+    précédent ; les zones créées dans CE process restent vivantes sur reconnexion)."""
+    global _boot_done
     if _get_db is None:
         return
+    if _boot_done:
+        return
+    _boot_done = True
     _zone_channels.clear()
     try:
         async with _get_db() as db:
@@ -381,7 +391,7 @@ async def _boot_reconcile_orphans():
                         nm = getattr(ch, "name", "") or ""
                         if int(getattr(ch, "id", 0)) in active_ids:
                             continue
-                        if any(nm.startswith(p) for p in prefixes):
+                        if any(nm.startswith(p + "-") for p in prefixes):
                             try:
                                 await ch.delete(reason="Zone sociale orpheline (reboot)")
                                 removed += 1
