@@ -45,6 +45,7 @@ _notice_fn = None              # async (channel, text) -> avertissement doux aut
 _restricted: dict = {}         # (gid, uid) -> tier (1..3) — lookup O(1) en on_message
 _last_msg: dict = {}           # (gid, uid) -> ts du dernier message autorisé (cooldown)
 _notice_cd: dict = {}          # (gid, uid) -> ts du dernier avertissement (anti-spam)
+_locks: dict = {}              # (gid, uid) -> asyncio.Lock — sérialise les recompute concurrents
 
 _SELF_TYPES = ('mute', 'unmute', 'ban', 'kick')   # byproducts de l'escalade → jamais comptés
 _ROLE_NAME = "🔇 Restreint (auto)"
@@ -126,20 +127,34 @@ async def _conf(guild_id: int) -> dict:
                     out[k] = c[k]
     except Exception:
         pass
+    # GARDE-FOU anti-faux-positif : seuils MONOTONES + t1 >= 1, quoi que règle l'owner.
+    # (sinon un seuil <= 0 mal réglé restreindrait un INNOCENT à score 0.)
+    try:
+        out['recidivism_t1'] = max(1, int(out['recidivism_t1']))
+        out['recidivism_t2'] = max(out['recidivism_t1'], int(out['recidivism_t2']))
+        out['recidivism_t3'] = max(out['recidivism_t2'], int(out['recidivism_t3']))
+    except Exception:
+        out['recidivism_t1'], out['recidivism_t2'], out['recidivism_t3'] = 3, 6, 10
     return out
 
 
 async def _score(guild_id: int, user_id: int) -> float:
-    """Score de toxicité = somme pondérée par la récence des infractions AUTOMATIQUES
-    (mod_id = bot) sur 90 jours, hors byproducts (mute/ban/kick). FAIL-OPEN → 0."""
+    """Score de toxicité = nombre de JOURS DISTINCTS avec ≥1 infraction AUTOMATIQUE (mod_id=bot,
+    hors byproducts mute/ban/kick), chaque jour pondéré par sa RÉCENCE (1.0 frais → 0 à 90 j).
+    Compter par JOUR (et non par message) cible le CHRONIQUE « X par jour sur PLUSIEURS jours »
+    (la vraie cible owner) et neutralise une rafale d'un seul mauvais jour = 1 seul point
+    (anti-faux-positif : un membre filtré 3× dans la même minute ne franchit pas le palier 1).
+    FAIL-OPEN → 0."""
     if _get_db is None or _bot is None or _bot.user is None:
         return 0.0
     try:
         async with _get_db() as db:
             async with db.execute(
-                "SELECT COALESCE(SUM(MAX(0.0, 1.0 - (julianday('now')-julianday(created_at))/90.0)), 0) "
-                "FROM infractions WHERE guild_id=? AND user_id=? AND mod_id=? "
-                "AND type NOT IN ('mute','unmute','ban','kick')",
+                "SELECT COALESCE(SUM(w), 0) FROM ("
+                "  SELECT MAX(0.0, 1.0 - (julianday('now')-julianday(MIN(created_at)))/90.0) AS w"
+                "  FROM infractions WHERE guild_id=? AND user_id=? AND mod_id=?"
+                "  AND type NOT IN ('mute','unmute','ban','kick')"
+                "  GROUP BY date(created_at))",
                 (guild_id, user_id, _bot.user.id),
             ) as cur:
                 row = await cur.fetchone()
@@ -215,10 +230,28 @@ async def _ensure_role(guild) -> Optional[discord.Role]:
 
 
 # ─── Recalcul + application du palier ──────────────────────────────────────
+def _lock_for(key):
+    lk = _locks.get(key)
+    if lk is None:
+        if len(_locks) > 4000:        # garde-fou mémoire (rare : peu de membres restreints)
+            _locks.clear()
+        lk = _locks[key] = asyncio.Lock()
+    return lk
+
+
 async def recompute(guild, member):
-    """Recalcule le palier d'un membre et applique/retire la restriction. FAIL-SAFE."""
+    """Recalcule le palier d'un membre et applique/retire la restriction. SÉRIALISÉ par membre
+    (verrou) → pas de double add_roles / double alerte sur infractions rapprochées. FAIL-SAFE."""
     if guild is None or member is None or getattr(member, 'bot', False):
         return
+    try:
+        async with _lock_for((guild.id, member.id)):
+            await _recompute_locked(guild, member)
+    except Exception as ex:
+        print(f"[recidivism recompute] {ex}")
+
+
+async def _recompute_locked(guild, member):
     try:
         gid, uid = guild.id, member.id
         conf = await _conf(gid)
@@ -321,14 +354,25 @@ async def enforce_on_message(msg, content: str) -> bool:
         tier = _restricted.get((gid, uid), 0)
         if not tier:
             return False
-        # garde-fou immunité (ne devrait jamais arriver : un immunisé n'est pas restreint)
-        if _is_super_owner_fn and _is_super_owner_fn(uid):
+        # GARDE-FOU IMMUNITÉ (auto-cicatrisant) : un membre restreint PUIS promu admin / ajouté
+        # aux immunisés ne doit plus JAMAIS être censuré. recompute (qui libère) ne re-tourne
+        # qu'à la prochaine infraction / toutes les 12 h → on revérifie ICI à chaque message et on
+        # purge le cache immédiatement. Fail-safe : au moindre doute → on NE restreint PAS.
+        try:
+            if _is_super_owner_fn and _is_super_owner_fn(uid):
+                _restricted.pop((gid, uid), None)
+                return False
+            if _is_immune_fn and msg.author is not None and await _is_immune_fn(msg.author):
+                _restricted.pop((gid, uid), None)   # deescalate_task retirera rôle + ligne DB
+                return False
+        except Exception:
             return False
         conf = await _conf(gid)
         if not conf.get('recidivism_enabled', 1):
             return False
         now = time.time()
-        # (1) COOLDOWN de messages imposé par le bot (Discord n'a pas de slowmode par-personne).
+        import trust_system
+        # (1) COOLDOWN imposé par le bot (Discord n'a pas de slowmode par-personne).
         cd = _cooldown_for(tier, conf)
         if cd > 0:
             last = _last_msg.get((gid, uid), 0)
@@ -341,10 +385,8 @@ async def enforce_on_message(msg, content: str) -> bool:
                                     f"⏳ {msg.author.mention}, tu es en **mode ralenti** (récidives) — "
                                     f"attends **{cd}s** entre tes messages.")
                 return True
-            _last_msg[(gid, uid)] = now
         # (2) Contenu interdit selon le palier (images dès le palier 1, liens dès le palier 2).
         try:
-            import trust_system
             if trust_system.has_media(msg, content or ''):
                 try:
                     await msg.delete()
@@ -365,6 +407,9 @@ async def enforce_on_message(msg, content: str) -> bool:
                 return True
         except Exception:
             pass
+        # Message réellement AUTORISÉ → c'est SEULEMENT maintenant qu'il consomme la fenêtre de
+        # cooldown (un message supprimé pour cause d'image/lien ne réinitialise pas le timer).
+        _last_msg[(gid, uid)] = now
         return False
     except Exception:
         return False
@@ -379,6 +424,29 @@ async def _maybe_notice(msg, gid, uid, text):
         _notice_cd[(gid, uid)] = now
         if _notice_fn:
             await _notice_fn(msg.channel, text)
+    except Exception:
+        pass
+
+
+async def forget(guild_id: int, user_id: int):
+    """Purge TOUT l'état d'un membre (à appeler à son DÉPART du serveur) : cache RAM (3 dicts +
+    verrou) + ligne DB. Sans ça, une entrée fantôme dans `_restricted` re-censurerait le membre
+    BOT-SIDE s'il revient (rejoin sans rôle ni recompute). FAIL-SAFE."""
+    try:
+        key = (int(guild_id), int(user_id))
+        _restricted.pop(key, None)
+        _last_msg.pop(key, None)
+        _notice_cd.pop(key, None)
+        _locks.pop(key, None)
+        if _get_db is not None:
+            try:
+                async with _get_db() as db:
+                    await db.execute(
+                        "DELETE FROM member_restrictions WHERE guild_id=? AND user_id=?",
+                        (int(guild_id), int(user_id)))
+                    await db.commit()
+            except Exception:
+                pass
     except Exception:
         pass
 
@@ -399,7 +467,9 @@ async def deescalate_task():
                 continue
             member = guild.get_member(uid)
             if member is None:
-                # parti / non caché → on nettoie le cache (le rôle, s'il revient, sera réévalué)
+                # Non caché : NE PAS purger ici à l'aveugle (au boot, get_member peut être None
+                # alors que le membre est présent). La purge fiable se fait à `on_member_remove`
+                # → `forget()`. Ici on saute simplement ce cycle.
                 continue
             await recompute(guild, member)
             await asyncio.sleep(1)   # jitter anti-429
@@ -415,5 +485,5 @@ async def _before():
 
 __all__ = [
     "setup", "init_db", "load_cache", "tier_of", "recompute", "on_infraction",
-    "enforce_on_message", "deescalate_task",
+    "enforce_on_message", "deescalate_task", "forget",
 ]
