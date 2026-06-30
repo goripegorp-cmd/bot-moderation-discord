@@ -75,6 +75,7 @@ _claim_lock_fn = None  # Phase 262 : async (guild_id, type) -> True si claim de 
 _event_mention_fn = None  # Phase 235.24 : async (guild, type) -> mention rôles opt-in (/notify + 🔔)
 _echo_fn = None  # Phase 257.1 : async (guild, channel, kind) -> écho silencieux salons actifs
 _alliance_points_fn = None  # Phase 253 : async (guild_id, user_id, damage) -> crédite l'alliance
+_meta_award_fn = None  # owner 2026-06-30 : async (guild_id, user_id, base_pts, top) -> Season Pass + XP
 _pet_strike_fn = None  # Phase 261 : async (guild_id, user_id) -> dict assist familier (injecté)
 _last_pet_click = {}  # Phase 261 : (guild_id, user_id) -> ts (anti-429 du bouton 🐾)
 
@@ -175,10 +176,12 @@ PING_CLEANUP_SECONDS = 30 * 60  # la ligne de ping s'auto-supprime après 30 min
 RESOLUTION_CLEANUP_SECONDS = 15 * 60  # Phase 205 : le récap de fin disparaît après 15 min
 
 # Phase 193 : 5 créneaux fixes FR — MATIN (9h), midi, après-midi, soir, NUIT.
-# Le créneau matin garantit un combat dès le réveil (vision owner : faire vivre
-# la journée matin / midi / soir, pas juste le soir). _pick_boss_for_slot()
-# utilise len(BOSS_HOURS) + .index(now.hour) → ajouter un créneau est sûr.
-BOSS_HOURS = [9, 12, 17, 21, 1]
+# owner 2026-06-30 : ANTI-LASSITUDE — moins-mais-mieux. On passe de 5 créneaux
+# interchangeables (9/12/17/21/1h, qui banalisaient le combat et spawnaient « dans le
+# vide » la nuit/le matin) à 2 RENDEZ-VOUS lisibles : MIDI (accessible à tous) + SOIR
+# (« le Boss du Soir », le temps fort). _pick_boss_for_slot() utilise len(BOSS_HOURS) +
+# .index(now.hour) → réduire la liste est sûr. Les créneaux 1h/9h sont supprimés.
+BOSS_HOURS = [12, 21]
 # Cap anti-spam : nb max d'attaques par membre par boss
 MAX_ATTACKS_PER_USER = 30
 # Dégâts par clic (avant bonus)
@@ -393,11 +396,11 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
           cleanup_register_fn=None, arena_create_fn=None, arena_delete_fn=None,
           report_fn=None, event_busy_fn=None, event_mention_fn=None,
           alliance_points_fn=None, echo_fn=None, pet_strike_fn=None,
-          claim_lock_fn=None):
+          claim_lock_fn=None, meta_award_fn=None):
     global _bot, _get_db, _db_get, _v2, _add_coins, _inventory_fn
     global _events_channel_fn, _notif_check_fn, _cleanup_register_fn
     global _arena_create_fn, _arena_delete_fn, _report_fn, _event_busy_fn, _event_mention_fn
-    global _alliance_points_fn, _echo_fn, _pet_strike_fn, _claim_lock_fn
+    global _alliance_points_fn, _echo_fn, _pet_strike_fn, _claim_lock_fn, _meta_award_fn
     _bot = bot_instance
     _get_db = get_db_fn
     _db_get = db_get_fn
@@ -422,6 +425,7 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers: dict, add_coins_fn=Non
     _echo_fn = echo_fn
     _pet_strike_fn = pet_strike_fn  # Phase 261 : assist familier (cœur partagé bot.py)
     _claim_lock_fn = claim_lock_fn  # Phase 262 : claim atomique de spawn (anti-course TOCTOU)
+    _meta_award_fn = meta_award_fn  # owner 2026-06-30 : crédit Season Pass + XP (jouer fait avancer)
 
 
 async def init_db():
@@ -748,7 +752,7 @@ async def _user_attack_count(event_id: int, user_id: int) -> int:
 # Phase 193c : créneaux « accessibles » — un boss BAS NIVEAU pour que tout le
 # monde (même les nouveaux) puisse lancer la journée. Le matin (9h) en fait
 # partie : faire vivre la matinée sans exclure les petits niveaux.
-MORNING_ACCESSIBLE_HOURS = {9}
+MORNING_ACCESSIBLE_HOURS = {12}   # owner 2026-06-30 : le boss de MIDI reste accessible à tous (petits niveaux) ; le SOIR (21h) = temps fort
 
 
 def _pick_boss_for_slot() -> dict:
@@ -1589,6 +1593,13 @@ async def resolve_daily_boss(event_id: int) -> Optional[dict]:
         try:
             if _add_coins:
                 await _add_coins(guild_id, uid, coins)
+        except Exception:
+            pass
+        # owner 2026-06-30 : JOUER FAIT AVANCER — crédite Season Pass + XP (plafonné/jour côté
+        # bot.py). base 10 ; bonus podium seulement si le boss a été tué. FAIL-SAFE.
+        try:
+            if _meta_award_fn:
+                await _meta_award_fn(guild_id, uid, 10, killed and i < 3)
         except Exception:
             pass
         # Phase 248c : œuf de familier sur kill du boss du jour (top 3 = meilleur
