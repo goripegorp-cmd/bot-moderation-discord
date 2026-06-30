@@ -250,12 +250,56 @@ def _build_panel(channel_id: int, owner_id: int, locked: bool):
     return _PanelFallback()
 
 
+async def _lock_text_chat(channel, owner_id: int):
+    """owner 2026-06-30 : verrouille le CHAT TEXTE du vocal créé.
+    - Le PROPRIÉTAIRE est le SEUL à VOIR le chat (le panneau), mais NE PEUT PAS écrire — il
+      interagit UNIQUEMENT avec les boutons du bot (les clics marchent sans `send_messages`).
+    - @everyone : aucune écriture ; et si on a pu donner l'accès lecture au proprio, le chat est
+      MASQUÉ aux autres (lecture seule pour le proprio uniquement).
+    On NE touche PAS `connect`/`speak`/`view_channel` de @everyone → le vocal reste JOIGNABLE pour
+    parler. FAIL-SAFE (best-effort, perm manquante → on n'empêche rien). 2 appels API max (anti-429)."""
+    try:
+        guild = getattr(channel, 'guild', None)
+        if guild is None:
+            return
+        me = getattr(guild, 'me', None)
+        if not (me and channel.permissions_for(me).manage_permissions):
+            return  # pas la perm → on laisse tel quel (fail-open)
+        owner = guild.get_member(int(owner_id or 0)) if owner_id else None
+        # 1) Le proprio EN PREMIER (ne JAMAIS le verrouiller hors de son propre panneau) :
+        #    voit le chat (read), mais n'écrit pas (boutons only).
+        if owner is not None:
+            try:
+                await channel.set_permissions(
+                    owner, view_channel=True, read_message_history=True, send_messages=False,
+                    reason="Vocal créé : le proprio voit le panneau mais n'écrit pas")
+            except Exception:
+                pass
+        # 2) @everyone : pas d'écriture (toujours) ; lecture du chat masquée SEULEMENT si le proprio
+        #    a bien reçu l'accès lecture ci-dessus (sinon on ne masque pas → on ne verrouille personne).
+        ev = dict(send_messages=False, send_messages_in_threads=False,
+                  create_public_threads=False, create_private_threads=False)
+        if owner is not None:
+            ev['read_message_history'] = False
+        try:
+            await channel.set_permissions(
+                guild.default_role,
+                reason="Vocal créé : chat texte verrouillé (privé au proprio, lecture seule)", **ev)
+        except Exception:
+            pass
+    except Exception as ex:
+        print(f"[voice_control _lock_text_chat] {ex}")
+
+
 async def post_control_panel(channel, owner_id: int):
     """Poste le panneau de contrôle DANS le chat texte du vocal temp. Appelé à la
     création (depuis bot.py, après move_to). FAIL-SAFE : aucun crash si l'envoi échoue."""
     try:
         if channel is None:
             return
+        # owner 2026-06-30 : verrouille le chat texte AVANT de poster (privé au proprio + lecture
+        # seule + écriture interdite à tous ; le vocal reste joignable). Best-effort, fail-safe.
+        await _lock_text_chat(channel, owner_id)
         locked = await _is_locked(channel.id)
         view = _build_panel(channel.id, int(owner_id or 0), locked)
         # Le chat texte des vocaux accepte .send() ; les clics de boutons marchent même
