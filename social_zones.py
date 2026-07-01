@@ -537,7 +537,8 @@ async def create_zone(i: discord.Interaction, kind: str, author_id: int, partner
     if not await _safe_defer(i):
         return
     if _click_too_soon(i.user.id):
-        return
+        # défer déjà envoyé → résout l'éphémère (sinon spinner « thinking… » figé côté client)
+        return await _safe_followup(i, content="⏳ Un instant… réessaie dans une seconde.")
     try:
         if i.guild is None:
             return await _safe_followup(i, content="❌ Serveur uniquement.")
@@ -694,7 +695,8 @@ async def join_zone(i: discord.Interaction, zone_id: int):
     if not await _safe_defer(i):
         return
     if _click_too_soon(i.user.id):
-        return
+        # défer déjà envoyé → résout l'éphémère (sinon spinner « thinking… » figé côté client)
+        return await _safe_followup(i, content="⏳ Un instant… réessaie dans une seconde.")
     try:
         if i.guild is None:
             return await _safe_followup(i, content="❌ Serveur uniquement.")
@@ -784,7 +786,8 @@ async def close_zone_click(i: discord.Interaction, zone_id: int):
     if not await _safe_defer(i):
         return
     if _click_too_soon(i.user.id):
-        return
+        # défer déjà envoyé → résout l'éphémère (sinon spinner « thinking… » figé côté client)
+        return await _safe_followup(i, content="⏳ Un instant… réessaie dans une seconde.")
     try:
         z = await _get_zone(zone_id)
         if not z or z["status"] != "active":

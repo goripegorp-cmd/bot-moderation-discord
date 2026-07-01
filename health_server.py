@@ -94,6 +94,37 @@ async def _stats_handler(request):
         return web.json_response({"status": "error", "error": str(ex)}, status=500)
 
 
+async def _transcript_handler(request):
+    """GET /t/<token> → sert la PAGE HTML rendue du transcript de ticket (Phase 281).
+    Rendu inline (text/html) → le navigateur affiche la vraie page, pas du code brut."""
+    token = request.match_info.get('token', '')
+    try:
+        import transcript_store
+        p = transcript_store.transcript_path(token)
+        if not p or not os.path.isfile(p):
+            return web.Response(
+                text="Transcript introuvable ou expiré.", status=404, content_type="text/plain")
+        return web.FileResponse(p, headers={"Cache-Control": "private, max-age=3600"})
+    except Exception as ex:
+        print(f"[health_server transcript] {ex}")
+        return web.Response(text="Erreur.", status=500, content_type="text/plain")
+
+
+async def _asset_handler(request):
+    """GET /ta/<token>/<idx> → sert un asset ré-hébergé (image/GIF) d'un transcript."""
+    token = request.match_info.get('token', '')
+    idx = request.match_info.get('idx', '')
+    try:
+        import transcript_store
+        p = transcript_store.asset_file(token, idx)
+        if not p or not os.path.isfile(p):
+            return web.Response(status=404, text="404")
+        return web.FileResponse(p, headers={"Cache-Control": "private, max-age=86400"})
+    except Exception as ex:
+        print(f"[health_server asset] {ex}")
+        return web.Response(status=500, text="err")
+
+
 async def start(bot_instance, port: int = 8000) -> bool:
     """Démarre le serveur HTTP en background.
 
@@ -113,6 +144,8 @@ async def start(bot_instance, port: int = 8000) -> bool:
         app.router.add_get('/', _root_handler)
         app.router.add_get('/health', _health_handler)
         app.router.add_get('/stats', _stats_handler)
+        app.router.add_get('/t/{token}', _transcript_handler)       # Phase 281 : page transcript
+        app.router.add_get('/ta/{token}/{idx}', _asset_handler)      # assets ré-hébergés
 
         runner = web.AppRunner(app)
         await runner.setup()
