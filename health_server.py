@@ -104,7 +104,15 @@ async def _transcript_handler(request):
         if not p or not os.path.isfile(p):
             return web.Response(
                 text="Transcript introuvable ou expiré.", status=404, content_type="text/plain")
-        return web.FileResponse(p, headers={"Cache-Control": "private, max-age=3600"})
+        return web.FileResponse(p, headers={
+            "Cache-Control": "private, max-age=3600",
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+            # défense en profondeur : autorise images + CSS inline, bloque TOUT script/objet.
+            "Content-Security-Policy": (
+                "default-src 'none'; img-src * data:; style-src 'unsafe-inline'; "
+                "base-uri 'none'; form-action 'none'"),
+        })
     except Exception as ex:
         print(f"[health_server transcript] {ex}")
         return web.Response(text="Erreur.", status=500, content_type="text/plain")
@@ -119,7 +127,12 @@ async def _asset_handler(request):
         p = transcript_store.asset_file(token, idx)
         if not p or not os.path.isfile(p):
             return web.Response(status=404, text="404")
-        return web.FileResponse(p, headers={"Cache-Control": "private, max-age=86400"})
+        return web.FileResponse(p, headers={
+            "Cache-Control": "private, max-age=86400",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": "inline",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+        })
     except Exception as ex:
         print(f"[health_server asset] {ex}")
         return web.Response(status=500, text="err")

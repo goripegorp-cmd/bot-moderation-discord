@@ -33,9 +33,13 @@ try:
 except Exception:
     _RETENTION_DAYS = 120
 
-# Bornes anti-abus (un ticket ne doit pas pouvoir remplir le disque).
+# Bornes anti-abus (un ticket ne doit pas pouvoir remplir le disque partagé /data).
 _MAX_ASSETS = 60
-_MAX_ASSET_BYTES = 12 * 1024 * 1024   # 12 Mo/asset ré-hébergé (au-delà → lien CDN)
+_MAX_ASSET_BYTES = 12 * 1024 * 1024        # 12 Mo/asset ré-hébergé (au-delà → lien CDN)
+_MAX_TICKET_BYTES = 64 * 1024 * 1024       # 64 Mo TOTAL ré-hébergé par ticket
+_MIN_FREE_BYTES = 300 * 1024 * 1024        # plancher d'espace libre : en-dessous → pas de ré-héberg.
+# SÉCURITÉ : on ne ré-héberge QUE des images matricielles (jamais de SVG → XSS same-origin).
+_ALLOWED_EXTS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 
 def base_dir() -> str:
@@ -113,8 +117,19 @@ def save_asset(token: str, idx: int, data: bytes, ext: str):
         return None
     if len(data) > _MAX_ASSET_BYTES:
         return None
+    # SÉCURITÉ : extension matricielle uniquement (SVG/HTML exclus → pas d'XSS same-origin).
+    safe_ext = re.sub(r'[^a-z0-9]', '', (ext or '').lower())[:5]
+    if safe_ext == 'jpe':
+        safe_ext = 'jpg'
+    if safe_ext not in _ALLOWED_EXTS:
+        return None
+    # Garde-fou disque : ne pas saturer le volume partagé (DB/backups vivent sur /data).
+    try:
+        if shutil.disk_usage(_BASE_DIR if os.path.isdir(_BASE_DIR) else '.').free < _MIN_FREE_BYTES:
+            return None
+    except Exception:
+        pass
     _ensure(d)
-    safe_ext = re.sub(r'[^a-z0-9]', '', (ext or 'bin').lower())[:5] or 'bin'
     try:
         i = int(idx)
     except Exception:
