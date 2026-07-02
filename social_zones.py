@@ -808,44 +808,31 @@ async def note_message(msg):
 # ═══════════════════════════════════════════════════════════════════════════════
 def _zone_intro_embed(kind: str, creator: discord.Member, members: list,
                       topic: str = "", rep_lines: str = "") -> discord.Embed:
+    # owner 2026-07-02 : textes COURTS (« pas trop longs ni relous »). L'essentiel + auto-fermeture.
     if kind == "trade":
-        title = "🤝 Salon d'échange privé"
-        desc = (
-            "Voici **votre salon d'échange privé**, rien que pour vous deux.\n\n"
-            "• Mettez-vous d'accord ici, à l'abri des regards.\n"
-            "• **✅ Échange réussi** (les 2) → +1 **confiance** 🛡️ chacun (badge public).\n"
-            "• **🚨 Signaler une arnaque** prévient le staff · **⚖️ Médiateur** pour les gros trades.\n"
-            "• Cliquez sur **🔒 Fermer le trade** une fois terminé (fermeture auto sinon).")
+        title = "🤝 Échange privé"
+        desc = ("Votre salon rien qu'à vous deux. Le **créateur** gère (boutons ci-dessous) :\n"
+                "**✅ Réussi** (+confiance 🛡️) · **🚨 Signaler** · **⚖️ Médiateur** · **🔊 Vocal** · **🔒 Fermer**.\n"
+                "-# Inactif un moment → le salon se **ferme tout seul**.")
     else:
-        title = "👥 Zone de groupe"
-        desc = (
-            f"Groupe de {creator.mention if creator else 'joueur'} — réunissez-vous ici !\n\n"
-            "• Organisez votre boss / raid / donjon dans ce salon dédié.\n"
-            "• **➕ Ajouter un membre** · **🔊 Créer un vocal** · **👢 Expulser** (créateur/staff).\n"
-            "• Cliquez sur **🔒 Fermer** quand c'est terminé.\n"
-            "• La zone se **ferme toute seule** après un moment sans activité.")
+        title = "👥 Groupe privé"
+        desc = (f"Groupe de {creator.mention if creator else 'joueur'} — à vous ! Le **créateur** gère :\n"
+                "**➕ Ajouter** · **🔊 Vocal** (nom + taille réglables) · **👢 Expulser** · **🔒 Fermer**.\n"
+                "-# Inactif un moment → le salon se **ferme tout seul**.")
     e = discord.Embed(title=title, description=desc, color=_COLOR.get(kind, 0x5865F2))
     if kind == "trade":
         t = (topic or "").strip()
         if t:
-            e.add_field(name="📦 Échange proposé", value=f"_{t[:400]}_", inline=False)
+            e.add_field(name="📦 Échange", value=f"_{t[:300]}_", inline=False)
         if rep_lines:
-            e.add_field(name="🛡️ Confiance des traders", value=rep_lines[:1024], inline=False)
-        # AVERTISSEMENT ANTI-ARNAQUE (owner 2026-07-02) : très visible, à chaque salon d'échange.
+            e.add_field(name="🛡️ Confiance", value=rep_lines[:1024], inline=False)
+        # Anti-arnaque : COURT mais visible (owner : c'est important, mais pas de pavé).
         e.add_field(
-            name="⚠️ Méfiance — anti-arnaque",
-            value=("• **Jamais** de « cross-trade » ou de paiement/échange **en premier** sur "
-                   "confiance : faites l'échange **en même temps**.\n"
-                   "• Méfiez-vous des offres **trop belles**, des liens, et de quelqu'un qui "
-                   "**presse**.\n"
-                   "• Un **screenshot** ne prouve rien. En cas de doute → **staff** + bouton 🔒.\n"
-                   "• Le bot surveille ce salon, mais **restez prudents** : une arnaque validée "
-                   "par vous n'est **pas** remboursable."),
+            name="⚠️ Anti-arnaque",
+            value=("Échangez **en même temps** — jamais son objet **en premier** « sur confiance ». "
+                   "Méfiez-vous des offres trop belles / de qui vous presse. Doute → **🚨** + **staff**. "
+                   "_Une arnaque validée par vous n'est pas remboursable._"),
             inline=False)
-    if len(members) > 1:
-        e.add_field(name="Participants",
-                    value=", ".join(m.mention for m in members if m is not None) or "—",
-                    inline=False)
     return e
 
 
@@ -861,7 +848,7 @@ def _panel_view(zone_id: int, kind: str):
             label="➕ Ajouter un membre", style=discord.ButtonStyle.success,
             custom_id=f"szone_add:{zid}"))
         v.add_item(discord.ui.Button(
-            label="🔊 Créer un vocal", style=discord.ButtonStyle.primary,
+            label="🔊 Vocal", style=discord.ButtonStyle.primary,
             custom_id=f"szone_voice:{zid}"))
         v.add_item(discord.ui.Button(
             label="👢 Expulser", style=discord.ButtonStyle.secondary,
@@ -869,18 +856,21 @@ def _panel_view(zone_id: int, kind: str):
         v.add_item(discord.ui.Button(
             label="🔒 Fermer la zone", style=discord.ButtonStyle.danger,
             custom_id=f"szone_close:{zid}"))
-    else:  # trade — boutons de CONFIANCE (anti-arnaque)
+    else:  # trade — confiance (anti-arnaque) + vocal
         v.add_item(discord.ui.Button(
             label="✅ Échange réussi", style=discord.ButtonStyle.success,
             custom_id=f"szone_trade_done:{zid}"))
         v.add_item(discord.ui.Button(
-            label="🚨 Signaler une arnaque", style=discord.ButtonStyle.danger,
+            label="🚨 Signaler", style=discord.ButtonStyle.danger,
             custom_id=f"szone_trade_scam:{zid}"))
         v.add_item(discord.ui.Button(
             label="⚖️ Médiateur", style=discord.ButtonStyle.secondary,
             custom_id=f"szone_trade_med:{zid}"))
         v.add_item(discord.ui.Button(
-            label="🔒 Fermer le trade", style=discord.ButtonStyle.secondary,
+            label="🔊 Vocal", style=discord.ButtonStyle.primary,
+            custom_id=f"szone_voice:{zid}"))
+        v.add_item(discord.ui.Button(
+            label="🔒 Fermer", style=discord.ButtonStyle.secondary,
             custom_id=f"szone_close:{zid}"))
     return v
 
@@ -2197,46 +2187,95 @@ async def _do_add_member(i: discord.Interaction, zone_id: int, user):
         await _safe_followup(i, content="❌ Erreur, réessaie.")
 
 
-# ─── 🔊 CRÉER UN VOCAL (groupe uniquement) ─────────────────────────────────────
+# ─── 🔊 VOCAL — créer / régler la taille & le nom (groupe ET trade) ─────────────
+class _VoiceModal(discord.ui.Modal):
+    """Modal du créateur : nom + taille du vocal. Sert à créer OU à régler l'existant."""
+    def __init__(self, zone_id: int, cur_name: str = "", cur_limit: int = 0):
+        super().__init__(title="🔊 Salon vocal")
+        self.zone_id = int(zone_id)
+        self.f_name = discord.ui.TextInput(
+            label="Nom (optionnel)", required=False, max_length=90, default=(cur_name or ""))
+        self.f_size = discord.ui.TextInput(
+            label="Taille max (0 = illimité)", required=False, max_length=3,
+            default=str(int(cur_limit or 0)))
+        self.add_item(self.f_name)
+        self.add_item(self.f_size)
+
+    async def on_submit(self, i: discord.Interaction):
+        name = (str(self.f_name.value) or "").strip()
+        try:
+            limit = max(0, min(99, int((str(self.f_size.value) or "0").strip() or 0)))
+        except Exception:
+            limit = 0
+        await voice_apply(i, self.zone_id, name, limit)
+
+
 async def voice_click(i: discord.Interaction, zone_id: int):
-    if not await _safe_defer(i):
-        return
-    if _click_too_soon(i.user.id):
-        return await _safe_followup(i, content="⏳ Un instant… réessaie dans une seconde.")
+    """Bouton 🔊 : ouvre le modal (nom + taille). Créateur/staff, groupe ET trade. Pas de defer
+    (un modal doit être la 1re réponse) → on répond directement en cas de refus."""
     try:
         z = await _get_zone(zone_id)
-        if not z or z["status"] != "active" or not z["channel_id"]:
-            return await _safe_followup(i, content="⌛ Cette zone n'est plus disponible.")
-        if z["kind"] != "group":
-            return await _safe_followup(
-                i, content="🔊 Le vocal n'est disponible que pour les **groupes**.")
+        if not z or z["status"] != "active" or not z["channel_id"] or z["kind"] not in ("group", "trade"):
+            return await i.response.send_message("⌛ Zone indisponible.", ephemeral=True)
         if not _can_manage(i, z):
-            return await _safe_followup(
-                i, content="🔒 Seuls le **créateur** du groupe ou le **staff** peuvent créer le vocal.")
+            return await i.response.send_message(
+                "🔒 Seul le **créateur** (ou le staff) peut gérer le vocal.", ephemeral=True)
+        if not (i.guild and i.guild.me.guild_permissions.manage_channels):
+            return await i.response.send_message("❌ Il me manque « Gérer les salons ».", ephemeral=True)
+        cur_name, cur_limit = "", 0
+        vid = await _zone_voice_id(zone_id)
+        if vid and vid > 0:
+            vc = i.guild.get_channel(vid)
+            if vc is not None:
+                cur_name = (vc.name or "").replace("🔊", "").strip()
+                cur_limit = int(getattr(vc, "user_limit", 0) or 0)
+        await i.response.send_modal(_VoiceModal(zone_id, cur_name, cur_limit))
+    except Exception as ex:
+        print(f"[social_zones voice_click] {ex}")
+        try:
+            await i.response.send_message("❌ Erreur, réessaie.", ephemeral=True)
+        except Exception:
+            pass
+
+
+async def voice_apply(i: discord.Interaction, zone_id: int, name: str, limit: int):
+    """Crée le vocal (réservation atomique anti-double) OU règle l'existant (nom + taille)."""
+    if not await _safe_defer(i):
+        return
+    try:
+        z = await _get_zone(zone_id)
+        if not z or z["status"] != "active" or not z["channel_id"] or z["kind"] not in ("group", "trade"):
+            return await _safe_followup(i, content="⌛ Zone indisponible.")
+        if not _can_manage(i, z):
+            return await _safe_followup(i, content="🔒 Réservé au créateur (ou staff).")
         guild = i.guild
         if guild is None:
             return await _safe_followup(i, content="❌ Serveur uniquement.")
-        # État courant du slot vocal : 0 = aucun, -1 = réservé (création en cours), >0 = existe.
+        ch = guild.get_channel(int(z["channel_id"]))
+        vc_name = f"🔊 {name}"[:95] if name else None
         existing = await _zone_voice_id(zone_id)
         if existing == -1:
-            return await _safe_followup(
-                i, content="🔊 Le vocal est **en cours de création**, un petit instant…")
-        if existing > 0:
+            return await _safe_followup(i, content="🔊 Vocal en cours de création — réessaie.")
+        # ── RÉGLER un vocal existant (renommer / retailler) ──
+        if existing and existing > 0:
             vc = guild.get_channel(existing)
             if vc is not None:
-                return await _safe_followup(
-                    i, content=f"🔊 Le vocal existe déjà : **{vc.name}** "
-                               "(rejoins-le depuis la barre de gauche).")
-            # existing > 0 mais salon disparu (supprimé à la main) → on recrée en réservant
-            # DEPUIS cette valeur exacte (anti-course : un seul passe de `existing` à -1).
-        if not guild.me.guild_permissions.manage_channels:
-            return await _safe_followup(
-                i, content="❌ Le bot n'a pas la permission « Gérer les salons ».")
-        # ── RÉSERVATION ATOMIQUE (exactly-once) ────────────────────────────────────────
-        # _click_too_soon ne bloque que le MÊME user : 2 gestionnaires différents (créateur +
-        # staff) peuvent cliquer en même temps. Sans réservation, chacun crée un vocal → 1 devient
-        # orphelin. On passe voice_channel_id de {0 | valeur stale lue} → -1 : SQLite sérialise,
-        # un SEUL gagne (rowcount==1). Le perdant est renvoyé sans rien créer.
+                try:
+                    await vc.edit(name=(vc_name or vc.name), user_limit=int(limit),
+                                  reason="Réglage du vocal (créateur/staff)")
+                except Exception as ex:
+                    print(f"[voice edit] {ex}")
+                    return await _safe_followup(i, content="❌ Impossible de régler le vocal.")
+                if ch is not None:
+                    try:
+                        await ch.send(f"🔊 Vocal réglé : **{vc.name}** ·"
+                                      + (f" max {limit}" if limit else " illimité"),
+                                      allowed_mentions=discord.AllowedMentions.none())
+                    except Exception:
+                        pass
+                return await _safe_followup(i, content="✅ Vocal mis à jour.")
+            # salon disparu → on recrée depuis `existing`
+        # ── CRÉER (réservation atomique exactly-once : {0|stale} → -1, un seul gagne) ──
         try:
             async with _get_db() as db:
                 cur = await db.execute(
@@ -2249,12 +2288,10 @@ async def voice_click(i: discord.Interaction, zone_id: int):
             print(f"[social_zones voice reserve] {ex}")
             return await _safe_followup(i, content="❌ Erreur, réessaie.")
         if not reserved:
-            return await _safe_followup(
-                i, content="🔊 Le vocal vient d'être créé (ou est en cours) — regarde la barre de gauche.")
-        ch = guild.get_channel(int(z["channel_id"]))
+            return await _safe_followup(i, content="🔊 Vocal déjà créé (ou en cours).")
         cat = getattr(ch, "category", None) if ch is not None else None
         if cat is None:
-            cat = await _get_category(guild, "group")
+            cat = await _get_category(guild, z["kind"])
         me = guild.me
         ow = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False, connect=False),
@@ -2271,25 +2308,23 @@ async def voice_click(i: discord.Interaction, zone_id: int):
             if m is not None:
                 ow[m] = _voice_member_overwrite()
                 members.append(m)
-        base = (getattr(ch, "name", "") or "groupe").replace(_PREFIX.get("group", ""), "").strip("-")
-        vc_name = f"🔊 {base or 'groupe'}"[:95]
+        base = (getattr(ch, "name", "") or "zone").replace(_PREFIX.get(z["kind"], ""), "").strip("-")
+        final_name = vc_name or f"🔊 {base or 'zone'}"[:95]
         try:
             vc = await guild.create_voice_channel(
-                name=vc_name, category=cat, overwrites=ow, reason="Vocal de zone sociale")
+                name=final_name, category=cat, overwrites=ow, user_limit=int(limit),
+                reason="Vocal de zone sociale")
         except Exception as ex:
             print(f"[social_zones create voice] {ex}")
-            # LIBÈRE la réservation (−1 → 0) pour permettre une nouvelle tentative.
             try:
                 async with _get_db() as db:
-                    await db.execute(
-                        "UPDATE social_zones SET voice_channel_id=0 "
-                        "WHERE id=? AND voice_channel_id=-1", (zone_id,))
+                    await db.execute("UPDATE social_zones SET voice_channel_id=0 "
+                                     "WHERE id=? AND voice_channel_id=-1", (zone_id,))
                     await db.commit()
             except Exception:
                 pass
             return await _safe_followup(i, content="❌ Impossible de créer le vocal, réessaie.")
-        # Persiste l'id RÉEL — SEULEMENT si la réservation est toujours à -1 (sinon la zone a été
-        # fermée/réinitialisée entre-temps → on supprime le vocal pour ne pas laisser de fantôme).
+        # Persiste l'id réel SI la réservation est toujours -1 (sinon zone fermée → delete = 0 fantôme).
         try:
             async with _get_db() as db:
                 cur = await db.execute(
@@ -2302,29 +2337,22 @@ async def voice_click(i: discord.Interaction, zone_id: int):
             persisted = False
         if not persisted:
             try:
-                await vc.delete(reason="zone fermée/réinitialisée pendant la création du vocal")
+                await vc.delete(reason="zone fermée pendant la création du vocal")
             except Exception:
                 pass
-            # Si la réservation traîne encore (cas erreur DB, pas fermeture), on la libère.
             try:
                 async with _get_db() as db:
-                    await db.execute(
-                        "UPDATE social_zones SET voice_channel_id=0 "
-                        "WHERE id=? AND voice_channel_id=-1", (zone_id,))
+                    await db.execute("UPDATE social_zones SET voice_channel_id=0 "
+                                     "WHERE id=? AND voice_channel_id=-1", (zone_id,))
                     await db.commit()
             except Exception:
                 pass
-            return await _safe_followup(
-                i, content="⌛ La zone a été fermée entre-temps — vocal annulé.")
-        # Le chat texte du vocal fait partie de la zone → modéré, sans nudge, et son activité
-        # garde la zone vivante (lookup O(1) mémoire, comme le salon texte).
+            return await _safe_followup(i, content="⌛ Zone fermée entre-temps — vocal annulé.")
         try:
             _zone_channels.add(int(vc.id))
         except Exception:
             pass
-        # Filet : un membre qui a rejoint PENDANT la création (entre le snapshot et le persist)
-        # n'a pas eu son overwrite vocal via join_zone (voice_channel_id valait -1). On re-scanne
-        # et on complète les accès manquants (course rare, best-effort).
+        # Membres arrivés pendant la création (voice_channel_id valait -1) : complète leurs accès.
         try:
             have = {int(m.id) for m in members}
             for uid in await _zone_member_ids(zone_id):
@@ -2339,20 +2367,17 @@ async def voice_click(i: discord.Interaction, zone_id: int):
                         pass
         except Exception:
             pass
-        # Annonce DANS le salon + MENTIONNE tous les membres (qu'ils sachent que c'est pour eux).
         if ch is not None:
             try:
-                await ch.send(
-                    f"🔊 **Vocal du groupe créé** par {i.user.mention} → **{vc.name}**.\n"
-                    "Rejoignez-le depuis la barre de gauche pour parler ensemble ! 🎧\n"
-                    + (" ".join(m.mention for m in members) if members else ""),
-                    allowed_mentions=discord.AllowedMentions(
-                        everyone=False, roles=False, users=members))
+                await ch.send(f"🔊 Vocal **{vc.name}** créé — rejoignez-le pour discuter ! 🎧 "
+                              + (" ".join(m.mention for m in members) if members else ""),
+                              allowed_mentions=discord.AllowedMentions(
+                                  everyone=False, roles=False, users=members))
             except Exception:
                 pass
-        await _safe_followup(i, content=f"✅ Vocal **{vc.name}** créé pour le groupe.")
+        await _safe_followup(i, content=f"✅ Vocal **{vc.name}** prêt.")
     except Exception as ex:
-        print(f"[social_zones voice_click] {ex}")
+        print(f"[social_zones voice_apply] {ex}")
         await _safe_followup(i, content="❌ Erreur, réessaie.")
 
 
