@@ -53,6 +53,8 @@ try:
 except Exception:
     _TRADE_SCAM_THRESHOLD = 3
 _PRUDENCE_ROLE_NAME = "⚠️ Prudence"
+# Anti-farm alt : une même PAIRE de traders ne crédite la confiance qu'une fois par fenêtre (72 h).
+_TRADE_PAIR_WINDOW_SEC = 72 * 3600
 
 # ─── Dépendances injectées (setup) ─────────────────────────────────────────────
 _bot = None
@@ -212,6 +214,16 @@ async def init_db():
             """)
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_trade_log_guild ON trade_log(guild_id, created_at)")
+            # trade_pair_credit : anti-farm alt — 1 crédit de confiance par PAIRE / fenêtre (a<b).
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS trade_pair_credit (
+                    guild_id INTEGER NOT NULL,
+                    a INTEGER NOT NULL,
+                    b INTEGER NOT NULL,
+                    last_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (guild_id, a, b)
+                )
+            """)
             # owner 2026-07-02 : vocal dédié optionnel d'une zone de groupe (créé par le créateur,
             # supprimé avec la zone). ALTER best-effort (colonne peut déjà exister).
             try:
@@ -1180,8 +1192,8 @@ async def _materialize_zone(zone_id: int, joiner) -> "tuple":
                      (creator.id if creator else 0), (joiner.id if joiner else 0),
                      (z.get("topic") or "")[:300]))
                 await db.commit()
-        except Exception:
-            pass
+        except Exception as ex:
+            print(f"[social_zones trade_log insert] {ex}")   # non bloquant : le crédit n'en dépend plus
         try:
             _bl = []
             for m in members:
@@ -1445,38 +1457,69 @@ async def trade_done_click(i: discord.Interaction, zone_id: int):
         except Exception:
             n = 0
         parts = await _trade_participants(zone_id)
-        needed = min(2, max(2, len(parts)))  # échange = 2 → il faut les 2 confirmations
-        if n < needed:
+        if n < 2:
             return await _safe_followup(
                 i, content="✅ Ta confirmation est prise. En attente de **l'autre participant**…")
-        # Les 2 ont confirmé → +1 confiance chacun (idempotent : on ne crédite qu'UNE fois via un
-        # claim sur trade_log outcome!='success').
-        credited = False
+        # Les 2 ont confirmé. RÈGLEMENT EXACTLY-ONCE via un claim sur la ligne social_zones (TOUJOURS
+        # présente, contrairement à trade_log) : UPDATE status='ended' WHERE status='active' → un seul
+        # gagne, crédite, ferme. (Le crédit lui-même est DÉ-DUPLIQUÉ par paire → anti-farm alt.)
+        settled = False
         try:
             async with _get_db() as db:
                 cur = await db.execute(
-                    "UPDATE trade_log SET outcome='success' WHERE zone_id=? AND outcome!='success'",
-                    (zone_id,))
-                credited = getattr(cur, "rowcount", 0) >= 1
+                    "UPDATE social_zones SET status='ended' WHERE id=? AND status='active'", (zone_id,))
+                settled = getattr(cur, "rowcount", 0) == 1
                 await db.commit()
         except Exception:
-            credited = False
-        if credited:
-            for uid in parts:
-                await _bump_rep(gid, uid, "successful", 1)
-            if ch is not None:
-                try:
-                    await ch.send(
-                        "🎉 **Échange confirmé par les deux !** +1 **confiance** 🛡️ pour chacun. "
-                        "Merci d'être des traders réglos ! Le salon se fermera bientôt.",
-                        allowed_mentions=discord.AllowedMentions.none())
-                except Exception:
-                    pass
-            await close_zone(zone_id, linger=True)
+            settled = False
+        if not settled:
+            return await _safe_followup(i, content="✅ Échange déjà confirmé — merci !")
+        await _log_trade_outcome(zone_id, "success")
+        # Crédit +1 confiance à chacun, SAUF si cette paire a déjà été créditée récemment (anti-alt).
+        credited = await _credit_pair_if_fresh(gid, parts)
+        if ch is not None:
+            try:
+                tail = ("+1 **confiance** 🛡️ pour chacun. Merci d'être des traders réglos !"
+                        if credited else
+                        "_(confiance déjà créditée récemment pour cette paire — anti-abus.)_")
+                await ch.send(f"🎉 **Échange confirmé par les deux !** {tail} Le salon va se fermer.",
+                              allowed_mentions=discord.AllowedMentions.none())
+            except Exception:
+                pass
+        # Suppression du salon (le status est déjà 'ended' → close_zone programme juste le delete).
+        await close_zone(zone_id, linger=True)
         await _safe_followup(i, content="✅ Échange confirmé — merci !")
     except Exception as ex:
         print(f"[social_zones trade_done_click] {ex}")
         await _safe_followup(i, content="❌ Erreur, réessaie.")
+
+
+async def _credit_pair_if_fresh(gid: int, parts) -> bool:
+    """+1 confiance à chaque participant SAUF si cette PAIRE a déjà été créditée dans la fenêtre
+    (_TRADE_PAIR_WINDOW_SEC) → un main+alt ne peut pas farmer en boucle. Retourne True si crédité."""
+    ids = sorted({int(u) for u in parts})
+    if len(ids) < 2:
+        return False
+    a, b = ids[0], ids[1]
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM trade_pair_credit WHERE guild_id=? AND a=? AND b=? "
+                "AND datetime(last_at) > datetime('now', ?)",
+                (gid, a, b, f'-{_TRADE_PAIR_WINDOW_SEC} seconds')) as cur:
+                if await cur.fetchone():
+                    return False   # paire créditée trop récemment → pas de nouveau crédit
+            await db.execute(
+                "INSERT INTO trade_pair_credit(guild_id, a, b, last_at) "
+                "VALUES(?,?,?,CURRENT_TIMESTAMP) "
+                "ON CONFLICT(guild_id, a, b) DO UPDATE SET last_at=CURRENT_TIMESTAMP",
+                (gid, a, b))
+            await db.commit()
+    except Exception:
+        return False
+    for uid in (a, b):
+        await _bump_rep(gid, uid, "successful", 1)
+    return True
 
 
 async def trade_scam_click(i: discord.Interaction, zone_id: int):
