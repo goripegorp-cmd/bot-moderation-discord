@@ -42,6 +42,18 @@ try:
 except Exception:
     _ZONE_STAFF_ROLE_ID = 0
 
+# owner 2026-07-02 — CONFIANCE des échanges : rôle médiateur (0 = repli sur le staff), seuil de
+# signalements avant le rôle « ⚠️ Prudence », nom du rôle Prudence (auto-créé). Surchargeables env.
+try:
+    _TRADE_MEDIATOR_ROLE_ID = int(os.environ.get("TRADE_MEDIATOR_ROLE_ID", "0") or 0)
+except Exception:
+    _TRADE_MEDIATOR_ROLE_ID = 0
+try:
+    _TRADE_SCAM_THRESHOLD = max(2, int(os.environ.get("TRADE_SCAM_THRESHOLD", "3") or 3))
+except Exception:
+    _TRADE_SCAM_THRESHOLD = 3
+_PRUDENCE_ROLE_NAME = "⚠️ Prudence"
+
 # ─── Dépendances injectées (setup) ─────────────────────────────────────────────
 _bot = None
 _get_db = None
@@ -158,6 +170,48 @@ async def init_db():
                     PRIMARY KEY (zone_id, user_id)
                 )
             """)
+            # owner 2026-07-02 — CONFIANCE des échanges (anti-arnaque) :
+            # trade_reputation : compteur « échanges réussis » (badge) + signalements reçus.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS trade_reputation (
+                    guild_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    successful INTEGER DEFAULT 0,
+                    reported INTEGER DEFAULT 0,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (guild_id, user_id)
+                )
+            """)
+            # trade_confirm : qui a cliqué « ✅ Échange réussi » (les 2 requis → +1 confiance chacun).
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS trade_confirm (
+                    zone_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    PRIMARY KEY (zone_id, user_id)
+                )
+            """)
+            # trade_scam_report : 1 signalement / rapporteur / échange (anti-spam).
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS trade_scam_report (
+                    zone_id INTEGER NOT NULL,
+                    reporter_id INTEGER NOT NULL,
+                    PRIMARY KEY (zone_id, reporter_id)
+                )
+            """)
+            # trade_log : historique (staff : enquêter sur un signalement — qui/quoi/issue).
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS trade_log (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id INTEGER NOT NULL,
+                    zone_id INTEGER,
+                    a_id INTEGER, b_id INTEGER,
+                    item TEXT DEFAULT '',
+                    outcome TEXT DEFAULT 'open',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_trade_log_guild ON trade_log(guild_id, created_at)")
             # owner 2026-07-02 : vocal dédié optionnel d'une zone de groupe (créé par le créateur,
             # supprimé avec la zone). ALTER best-effort (colonne peut déjà exister).
             try:
@@ -730,14 +784,15 @@ async def note_message(msg):
 #  CRÉATION DE ZONE (bouton « Créer un groupe » / « Ouvrir un trade »)
 # ═══════════════════════════════════════════════════════════════════════════════
 def _zone_intro_embed(kind: str, creator: discord.Member, members: list,
-                      topic: str = "") -> discord.Embed:
+                      topic: str = "", rep_lines: str = "") -> discord.Embed:
     if kind == "trade":
         title = "🤝 Salon d'échange privé"
         desc = (
             "Voici **votre salon d'échange privé**, rien que pour vous deux.\n\n"
             "• Mettez-vous d'accord ici, à l'abri des regards.\n"
-            "• Cliquez sur **🔒 Fermer le trade** une fois l'échange terminé.\n"
-            "• Le salon se **ferme tout seul** après un moment sans message.")
+            "• **✅ Échange réussi** (les 2) → +1 **confiance** 🛡️ chacun (badge public).\n"
+            "• **🚨 Signaler une arnaque** prévient le staff · **⚖️ Médiateur** pour les gros trades.\n"
+            "• Cliquez sur **🔒 Fermer le trade** une fois terminé (fermeture auto sinon).")
     else:
         title = "👥 Zone de groupe"
         desc = (
@@ -751,6 +806,8 @@ def _zone_intro_embed(kind: str, creator: discord.Member, members: list,
         t = (topic or "").strip()
         if t:
             e.add_field(name="📦 Échange proposé", value=f"_{t[:400]}_", inline=False)
+        if rep_lines:
+            e.add_field(name="🛡️ Confiance des traders", value=rep_lines[:1024], inline=False)
         # AVERTISSEMENT ANTI-ARNAQUE (owner 2026-07-02) : très visible, à chaque salon d'échange.
         e.add_field(
             name="⚠️ Méfiance — anti-arnaque",
@@ -771,8 +828,8 @@ def _zone_intro_embed(kind: str, creator: discord.Member, members: list,
 
 def _panel_view(zone_id: int, kind: str):
     """Panneau de GESTION persistant, posté dans le salon de la zone (owner 2026-07-02).
-    GROUPE : ➕ Ajouter un membre · 🔊 Créer un vocal · 👢 Expulser · 🔒 Fermer.
-    TRADE (2 pers., NON extensible) : 👢 Expulser (staff) · 🔒 Fermer.
+    GROUPE : ➕ Ajouter · 🔊 Vocal · 👢 Expulser · 🔒 Fermer.
+    TRADE : ✅ Échange réussi · 🚨 Signaler · ⚖️ Médiateur · 🔒 Fermer (confiance/anti-arnaque).
     Tous les boutons sont des DynamicItems → re-câblés au boot, survivent aux redéploiements."""
     v = discord.ui.View(timeout=None)
     zid = int(zone_id)
@@ -783,13 +840,25 @@ def _panel_view(zone_id: int, kind: str):
         v.add_item(discord.ui.Button(
             label="🔊 Créer un vocal", style=discord.ButtonStyle.primary,
             custom_id=f"szone_voice:{zid}"))
-    v.add_item(discord.ui.Button(
-        label="👢 Expulser", style=discord.ButtonStyle.secondary,
-        custom_id=f"szone_expel:{zid}"))
-    label = "🔒 Fermer le trade" if kind == "trade" else "🔒 Fermer la zone"
-    v.add_item(discord.ui.Button(
-        label=label, style=discord.ButtonStyle.danger,
-        custom_id=f"szone_close:{zid}"))
+        v.add_item(discord.ui.Button(
+            label="👢 Expulser", style=discord.ButtonStyle.secondary,
+            custom_id=f"szone_expel:{zid}"))
+        v.add_item(discord.ui.Button(
+            label="🔒 Fermer la zone", style=discord.ButtonStyle.danger,
+            custom_id=f"szone_close:{zid}"))
+    else:  # trade — boutons de CONFIANCE (anti-arnaque)
+        v.add_item(discord.ui.Button(
+            label="✅ Échange réussi", style=discord.ButtonStyle.success,
+            custom_id=f"szone_trade_done:{zid}"))
+        v.add_item(discord.ui.Button(
+            label="🚨 Signaler une arnaque", style=discord.ButtonStyle.danger,
+            custom_id=f"szone_trade_scam:{zid}"))
+        v.add_item(discord.ui.Button(
+            label="⚖️ Médiateur", style=discord.ButtonStyle.secondary,
+            custom_id=f"szone_trade_med:{zid}"))
+        v.add_item(discord.ui.Button(
+            label="🔒 Fermer le trade", style=discord.ButtonStyle.secondary,
+            custom_id=f"szone_close:{zid}"))
     return v
 
 
@@ -942,9 +1011,13 @@ async def _post_trade_consent(i, zone_id: int, creator, partner, topic: str):
         label="❌ Refuser", style=discord.ButtonStyle.secondary,
         custom_id=f"szone_trade_no:{int(zone_id)}"))
     try:
+        badge = await _trade_badge(i.guild.id, creator.id) if i.guild else ""
+    except Exception:
+        badge = ""
+    try:
         await msg.edit(
             content=(f"🤝 {creator.mention} propose un **échange** à {partner.mention}."
-                     f"{_topic_line(topic)}\n{partner.mention}, tu acceptes ? "
+                     f"{_topic_line(topic)}\n{badge}\n{partner.mention}, tu acceptes ? "
                      "_(le salon privé s'ouvrira seulement si tu acceptes)_"),
             embed=None, view=v,
             allowed_mentions=discord.AllowedMentions(
@@ -964,9 +1037,13 @@ async def _post_trade_open(i, zone_id: int, creator, topic: str):
         label="🤝 Faire l'échange", style=discord.ButtonStyle.success,
         custom_id=f"szone_trade_ok:{int(zone_id)}"))
     try:
+        badge = await _trade_badge(i.guild.id, creator.id) if i.guild else ""
+    except Exception:
+        badge = ""
+    try:
         await msg.edit(
             content=(f"🤝 **{creator.display_name}** cherche à **échanger**.{_topic_line(topic)}\n"
-                     "Clique **Faire l'échange** pour ouvrir un salon privé avec lui/elle."),
+                     f"{badge}\nClique **Faire l'échange** pour ouvrir un salon privé avec lui/elle."),
             embed=None, view=v, allowed_mentions=discord.AllowedMentions.none())
     except Exception:
         pass
@@ -1091,11 +1168,33 @@ async def _materialize_zone(zone_id: int, joiner) -> "tuple":
     except Exception:
         pass
     _zone_channels.add(int(ch.id))
+    # ÉCHANGE : journal (staff/enquête) + badges de confiance des 2 traders dans l'intro.
+    rep_lines = ""
+    if kind == "trade":
+        try:
+            async with _get_db() as db:
+                await db.execute(
+                    "INSERT INTO trade_log(guild_id, zone_id, a_id, b_id, item, outcome) "
+                    "VALUES(?,?,?,?,?, 'open')",
+                    (guild.id, zone_id,
+                     (creator.id if creator else 0), (joiner.id if joiner else 0),
+                     (z.get("topic") or "")[:300]))
+                await db.commit()
+        except Exception:
+            pass
+        try:
+            _bl = []
+            for m in members:
+                _bl.append(f"• {m.mention} — {await _trade_badge(guild.id, m.id)}")
+            rep_lines = "\n".join(_bl)
+        except Exception:
+            rep_lines = ""
     # Panneau + intro dans le salon (mentionne les participants — c'est LEUR salon privé).
     try:
         await ch.send(
             content=" ".join(m.mention for m in members),
-            embed=_zone_intro_embed(kind, creator, members, topic=z.get("topic", "")),
+            embed=_zone_intro_embed(kind, creator, members, topic=z.get("topic", ""),
+                                    rep_lines=rep_lines),
             view=_panel_view(zone_id, kind),
             allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=members))
     except Exception as ex:
@@ -1203,6 +1302,266 @@ async def trade_consent_click(i: discord.Interaction, zone_id: int, accept: bool
         return await _safe_followup(i, content=f"✅ Échange accepté — votre salon : {ch2.mention}")
     except Exception as ex:
         print(f"[social_zones trade_consent_click] {ex}")
+        await _safe_followup(i, content="❌ Erreur, réessaie.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  CONFIANCE DES ÉCHANGES (owner 2026-07-02) — anti-arnaque : compteur d'échanges
+#  réussis (badge), signalement au staff, médiateur, rôle « ⚠️ Prudence » sur récidive.
+# ═══════════════════════════════════════════════════════════════════════════════
+async def get_trade_rep(guild_id: int, user_id: int):
+    """(successful, reported) pour ce membre. (0,0) si aucune ligne / erreur."""
+    if _get_db is None:
+        return (0, 0)
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT successful, reported FROM trade_reputation WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id)) as cur:
+                r = await cur.fetchone()
+        if r:
+            return (int(r[0] or 0), int(r[1] or 0))
+    except Exception:
+        pass
+    return (0, 0)
+
+
+async def _trade_badge(guild_id: int, user_id: int) -> str:
+    """Badge de confiance affiché à côté d'un trader (nudge). Neuf = averti gentiment."""
+    s, rep = await get_trade_rep(guild_id, user_id)
+    if s <= 0 and rep <= 0:
+        return "🆕 _(nouveau trader — 0 échange vérifié, prudence)_"
+    txt = f"🛡️ **{s}** échange(s) réussi(s)"
+    if rep > 0:
+        txt += f" · ⚠️ **{rep}** signalement(s)"
+    return txt
+
+
+async def _bump_rep(guild_id: int, user_id: int, field: str, delta: int = 1) -> int:
+    """Incrémente successful/reported ; retourne la nouvelle valeur (ou 0)."""
+    if _get_db is None or field not in ("successful", "reported"):
+        return 0
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                f"INSERT INTO trade_reputation(guild_id, user_id, {field}, updated_at) "
+                f"VALUES(?,?,?,CURRENT_TIMESTAMP) "
+                f"ON CONFLICT(guild_id, user_id) DO UPDATE SET {field}={field}+?, "
+                f"updated_at=CURRENT_TIMESTAMP",
+                (guild_id, user_id, delta, delta))
+            await db.commit()
+            async with db.execute(
+                f"SELECT {field} FROM trade_reputation WHERE guild_id=? AND user_id=?",
+                (guild_id, user_id)) as cur:
+                r = await cur.fetchone()
+        return int(r[0] or 0) if r else 0
+    except Exception as ex:
+        print(f"[social_zones _bump_rep] {ex}")
+        return 0
+
+
+def _mediator_role(guild):
+    """Rôle médiateur configuré (env), sinon repli sur le rôle staff."""
+    try:
+        if _TRADE_MEDIATOR_ROLE_ID:
+            r = guild.get_role(_TRADE_MEDIATOR_ROLE_ID)
+            if r is not None:
+                return r
+    except Exception:
+        pass
+    return _staff_role(guild)
+
+
+async def _ensure_prudence_role(guild):
+    """Rôle « ⚠️ Prudence » (auto-créé, non-mentionnable, non-hoisté) — simple marqueur visible
+    d'un trader signalé plusieurs fois. Fail-soft None si pas manage_roles."""
+    try:
+        r = discord.utils.get(guild.roles, name=_PRUDENCE_ROLE_NAME)
+        if r is not None:
+            return r
+        if not (guild.me and guild.me.guild_permissions.manage_roles):
+            return None
+        return await guild.create_role(
+            name=_PRUDENCE_ROLE_NAME, colour=discord.Colour(0xE67E22),
+            hoist=False, mentionable=False, reason="Trader signalé plusieurs fois (anti-arnaque)")
+    except Exception as ex:
+        print(f"[social_zones _ensure_prudence_role] {ex}")
+        return None
+
+
+async def _trade_participants(zone_id: int):
+    """IDs des participants de l'échange (membres de la zone)."""
+    return await _zone_member_ids(zone_id)
+
+
+async def _log_trade_outcome(zone_id: int, outcome: str):
+    try:
+        async with _get_db() as db:
+            await db.execute("UPDATE trade_log SET outcome=? WHERE zone_id=?", (outcome, zone_id))
+            await db.commit()
+    except Exception:
+        pass
+
+
+async def _trade_guard(i, zone_id):
+    """Garde commune aux boutons de confiance : defer + cooldown + zone trade active + clicker
+    participant. Retourne (zone|None, channel|None, member|None) ; None-tuple si refusé (déjà répondu)."""
+    if not await _safe_defer(i):
+        return None, None, None
+    if _click_too_soon(i.user.id):
+        await _safe_followup(i, content="⏳ Un instant… réessaie dans une seconde.")
+        return None, None, None
+    if i.guild is None:
+        await _safe_followup(i, content="❌ Serveur uniquement.")
+        return None, None, None
+    z = await _get_zone(zone_id)
+    if not z or z["kind"] != "trade" or z["status"] != "active" or not z["channel_id"]:
+        await _safe_followup(i, content="⌛ Cet échange n'est plus disponible.")
+        return None, None, None
+    if not await _is_member(zone_id, i.user.id):
+        await _safe_followup(i, content="ℹ️ Seuls les **2 participants** de l'échange peuvent agir ici.")
+        return None, None, None
+    ch = i.guild.get_channel(int(z["channel_id"]))
+    member = i.user if isinstance(i.user, discord.Member) else i.guild.get_member(i.user.id)
+    return z, ch, member
+
+
+async def trade_done_click(i: discord.Interaction, zone_id: int):
+    z, ch, member = await _trade_guard(i, zone_id)
+    if z is None:
+        return
+    try:
+        gid = int(z["guild_id"])
+        # Enregistre la confirmation du clicker.
+        try:
+            async with _get_db() as db:
+                await db.execute(
+                    "INSERT OR IGNORE INTO trade_confirm(zone_id, user_id) VALUES(?,?)",
+                    (zone_id, i.user.id))
+                await db.commit()
+                async with db.execute(
+                    "SELECT COUNT(*) FROM trade_confirm WHERE zone_id=?", (zone_id,)) as cur:
+                    n = int((await cur.fetchone())[0] or 0)
+        except Exception:
+            n = 0
+        parts = await _trade_participants(zone_id)
+        needed = min(2, max(2, len(parts)))  # échange = 2 → il faut les 2 confirmations
+        if n < needed:
+            return await _safe_followup(
+                i, content="✅ Ta confirmation est prise. En attente de **l'autre participant**…")
+        # Les 2 ont confirmé → +1 confiance chacun (idempotent : on ne crédite qu'UNE fois via un
+        # claim sur trade_log outcome!='success').
+        credited = False
+        try:
+            async with _get_db() as db:
+                cur = await db.execute(
+                    "UPDATE trade_log SET outcome='success' WHERE zone_id=? AND outcome!='success'",
+                    (zone_id,))
+                credited = getattr(cur, "rowcount", 0) >= 1
+                await db.commit()
+        except Exception:
+            credited = False
+        if credited:
+            for uid in parts:
+                await _bump_rep(gid, uid, "successful", 1)
+            if ch is not None:
+                try:
+                    await ch.send(
+                        "🎉 **Échange confirmé par les deux !** +1 **confiance** 🛡️ pour chacun. "
+                        "Merci d'être des traders réglos ! Le salon se fermera bientôt.",
+                        allowed_mentions=discord.AllowedMentions.none())
+                except Exception:
+                    pass
+            await close_zone(zone_id, linger=True)
+        await _safe_followup(i, content="✅ Échange confirmé — merci !")
+    except Exception as ex:
+        print(f"[social_zones trade_done_click] {ex}")
+        await _safe_followup(i, content="❌ Erreur, réessaie.")
+
+
+async def trade_scam_click(i: discord.Interaction, zone_id: int):
+    z, ch, member = await _trade_guard(i, zone_id)
+    if z is None:
+        return
+    try:
+        gid = int(z["guild_id"])
+        # 1 signalement / rapporteur / échange.
+        try:
+            async with _get_db() as db:
+                cur = await db.execute(
+                    "INSERT OR IGNORE INTO trade_scam_report(zone_id, reporter_id) VALUES(?,?)",
+                    (zone_id, i.user.id))
+                first = getattr(cur, "rowcount", 0) == 1
+                await db.commit()
+        except Exception:
+            first = True
+        if not first:
+            return await _safe_followup(i, content="✅ Tu as déjà signalé cet échange. Le staff est prévenu.")
+        # Incrémente `reported` pour l'AUTRE participant (jamais soi-même).
+        others = [uid for uid in await _trade_participants(zone_id) if uid != i.user.id]
+        flagged = []
+        for uid in others:
+            newv = await _bump_rep(gid, uid, "reported", 1)
+            if newv >= _TRADE_SCAM_THRESHOLD:
+                flagged.append(uid)
+        await _log_trade_outcome(zone_id, "reported")
+        # Rôle « ⚠️ Prudence » sur récidive (marqueur visible).
+        if flagged and i.guild is not None:
+            role = await _ensure_prudence_role(i.guild)
+            if role is not None:
+                for uid in flagged:
+                    m = i.guild.get_member(uid)
+                    if m is not None and role not in m.roles:
+                        try:
+                            await m.add_roles(role, reason="Trader signalé plusieurs fois (anti-arnaque)")
+                        except Exception:
+                            pass
+        # Alerte STAFF DANS le salon (le staff y a accès via l'overwrite anti-triche).
+        if ch is not None:
+            st = _staff_role(i.guild)
+            names = " ".join(f"<@{uid}>" for uid in await _trade_participants(zone_id))
+            topic = (z.get("topic") or "").strip()
+            head = st.mention if st is not None else "**@staff**"
+            try:
+                await ch.send(
+                    f"🚨 {head} — {i.user.mention} **signale une arnaque** dans cet échange.\n"
+                    f"Participants : {names}" + (f"\n📦 Échange annoncé : _{topic[:200]}_" if topic else "")
+                    + "\n_Merci de vérifier l'historique ci-dessus._",
+                    allowed_mentions=discord.AllowedMentions(
+                        everyone=False, users=False,
+                        roles=[st] if st is not None else False))
+            except Exception:
+                pass
+        await _safe_followup(
+            i, content="🚨 Signalement envoyé au **staff**. Reste prudent : ne donne jamais ton "
+                       "objet en premier « sur confiance ».")
+    except Exception as ex:
+        print(f"[social_zones trade_scam_click] {ex}")
+        await _safe_followup(i, content="❌ Erreur, réessaie.")
+
+
+async def trade_mediator_click(i: discord.Interaction, zone_id: int):
+    z, ch, member = await _trade_guard(i, zone_id)
+    if z is None:
+        return
+    try:
+        if ch is None:
+            return await _safe_followup(i, content="❌ Salon introuvable.")
+        role = _mediator_role(i.guild)
+        if role is None:
+            return await _safe_followup(
+                i, content="ℹ️ Aucun rôle médiateur configuré. Préviens le staff directement.")
+        try:
+            await ch.send(
+                f"⚖️ {role.mention} — {i.user.mention} demande un **médiateur** pour sécuriser cet "
+                "échange. Merci de superviser la transaction. 🛡️",
+                allowed_mentions=discord.AllowedMentions(
+                    everyone=False, users=False, roles=[role]))
+        except Exception:
+            pass
+        await _safe_followup(i, content="⚖️ Un médiateur a été appelé — attends sa supervision.")
+    except Exception as ex:
+        print(f"[social_zones trade_mediator_click] {ex}")
         await _safe_followup(i, content="❌ Erreur, réessaie.")
 
 
@@ -2000,6 +2359,54 @@ class ZoneTradeNoButton(discord.ui.DynamicItem[discord.ui.Button],
         await trade_consent_click(i, self.zid, accept=False)
 
 
+class ZoneTradeDoneButton(discord.ui.DynamicItem[discord.ui.Button],
+                          template=r"szone_trade_done:(?P<zid>\d+)"):
+    def __init__(self, zid: int):
+        super().__init__(discord.ui.Button(
+            label="✅ Échange réussi", style=discord.ButtonStyle.success,
+            custom_id=f"szone_trade_done:{int(zid)}"))
+        self.zid = int(zid)
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["zid"]))
+
+    async def callback(self, i: discord.Interaction):
+        await trade_done_click(i, self.zid)
+
+
+class ZoneTradeScamButton(discord.ui.DynamicItem[discord.ui.Button],
+                          template=r"szone_trade_scam:(?P<zid>\d+)"):
+    def __init__(self, zid: int):
+        super().__init__(discord.ui.Button(
+            label="🚨 Signaler une arnaque", style=discord.ButtonStyle.danger,
+            custom_id=f"szone_trade_scam:{int(zid)}"))
+        self.zid = int(zid)
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["zid"]))
+
+    async def callback(self, i: discord.Interaction):
+        await trade_scam_click(i, self.zid)
+
+
+class ZoneTradeMediatorButton(discord.ui.DynamicItem[discord.ui.Button],
+                              template=r"szone_trade_med:(?P<zid>\d+)"):
+    def __init__(self, zid: int):
+        super().__init__(discord.ui.Button(
+            label="⚖️ Médiateur", style=discord.ButtonStyle.secondary,
+            custom_id=f"szone_trade_med:{int(zid)}"))
+        self.zid = int(zid)
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["zid"]))
+
+    async def callback(self, i: discord.Interaction):
+        await trade_mediator_click(i, self.zid)
+
+
 def register_persistent_views(bot_instance):
     if bot_instance is None:
         return
@@ -2007,6 +2414,7 @@ def register_persistent_views(bot_instance):
         bot_instance.add_dynamic_items(
             ZoneCreateButton, ZoneJoinButton, ZoneCloseButton,
             ZoneAddButton, ZoneVoiceButton, ZoneExpelButton,
-            ZoneTradeOkButton, ZoneTradeNoButton)
+            ZoneTradeOkButton, ZoneTradeNoButton,
+            ZoneTradeDoneButton, ZoneTradeScamButton, ZoneTradeMediatorButton)
     except Exception as ex:
         print(f"[social_zones register] {ex}")
