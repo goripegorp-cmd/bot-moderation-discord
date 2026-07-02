@@ -215,10 +215,12 @@ async def _aggregate_activity(guild_id: int, window_days: int):
 
 
 async def _history_window_full(guild_id: int, window_days: int) -> bool:
-    """True si le serveur a ≥ window_days jours d'historique d'activité (sinon grâce de
-    démarrage : on n'avertit ni ne retire). FAIL-SAFE True (au doute, ne bride pas)."""
+    """True si le serveur a ≥ window_days jours d'historique d'activité. Sert de GRÂCE DE
+    DÉMARRAGE : False → on n'avertit ni ne retire (grant seulement). FAIL-SAFE **False** : au
+    moindre doute (erreur DB), on SUPPRIME les retraits ce tour-ci (jamais retirer sur un bug ;
+    ça ne fait que différer un éventuel retrait de 30 min). Cohérent avec le fail-closed global."""
     if _get_db is None:
-        return True
+        return False
     try:
         async with _get_db() as db:
             async with db.execute(
@@ -229,7 +231,7 @@ async def _history_window_full(guild_id: int, window_days: int) -> bool:
         first = datetime.strptime(row[0], "%Y-%m-%d").replace(tzinfo=timezone.utc)
         return (datetime.now(timezone.utc) - first).days >= (max(1, int(window_days)) - 1)
     except Exception:
-        return True
+        return False
 
 
 def _classify(score: int, days: int, s: dict) -> str:
@@ -498,21 +500,33 @@ async def _evaluate_guild_locked(guild: discord.Guild, s: dict, res: dict) -> di
     now = datetime.now(timezone.utc)
     grace = timedelta(days=s["vip_grace_days"])
 
-    async def _add_role(member, role):
+    async def _add_role(member, role) -> bool:
+        """True si le membre POSSÈDE le rôle au retour (ajouté OU déjà présent). False sur échec."""
+        if role is None:
+            return False
         try:
-            if role is not None and role not in member.roles:
-                await member.add_roles(role, reason="VIP continu (activité régulière)")
-                await asyncio.sleep(_ROLE_EDIT_SLEEP)
+            if role in member.roles:
+                return True
+            await member.add_roles(role, reason="VIP continu (activité régulière)")
+            await asyncio.sleep(_ROLE_EDIT_SLEEP)
+            return True
         except Exception as ex:
             print(f"[activity_vip add_role] {ex}")
+            return False
 
-    async def _rm_role(member, role):
+    async def _rm_role(member, role) -> bool:
+        """True si le membre N'A PLUS le rôle au retour (retiré OU déjà absent). False sur échec."""
+        if role is None:
+            return True
         try:
-            if role is not None and role in member.roles:
-                await member.remove_roles(role, reason="VIP retiré (activité en baisse)")
-                await asyncio.sleep(_ROLE_EDIT_SLEEP)
+            if role not in member.roles:
+                return True
+            await member.remove_roles(role, reason="VIP retiré (activité en baisse)")
+            await asyncio.sleep(_ROLE_EDIT_SLEEP)
+            return True
         except Exception as ex:
             print(f"[activity_vip rm_role] {ex}")
+            return False
 
     for uid in universe:
         try:
@@ -545,7 +559,8 @@ async def _evaluate_guild_locked(guild: discord.Guild, s: dict, res: dict) -> di
                 new_role = _role_for(target, vip_role, vip_plus_role)
                 if new_role is None:
                     continue  # ce palier n'a pas de rôle dispo → skip
-                await _add_role(member, new_role)
+                if not await _add_role(member, new_role):
+                    continue  # l'ajout a échoué → on n'enregistre ni annonce (pas de grant fantôme)
                 # Promotion VIP→VIP+ : retire l'ancien rôle VIP (évite double-hoist).
                 if target == "vip_plus" and held == "vip" and vip_role is not None:
                     await _rm_role(member, vip_role)
@@ -572,11 +587,12 @@ async def _evaluate_guild_locked(guild: discord.Guild, s: dict, res: dict) -> di
                 if not window_full:
                     continue
                 if s["vip_warn_enabled"] and cur_status != "warned":
-                    # 1er passage sous le seuil → AVERTISSEMENT (on GARDE le rôle).
+                    # 1er passage sous le seuil → AVERTISSEMENT (on GARDE le rôle). Le message dépend
+                    # de ce qui l'attend : perte TOTALE (target none) vs simple rétrogradation VIP+→VIP.
                     await _upsert_status(guild.id, uid, tier=held, status="warned",
                                          warned_at=now, score=score, days=days)
                     await _audit(guild.id, uid, "warn", held, score, days)
-                    res["warned"].append((uid, held, score, days,
+                    res["warned"].append((uid, held, target, score, days,
                                           _needed_text(held, score, days, s)))
                     continue
                 # Déjà averti (ou avertissements désactivés) : la grâce a-t-elle expiré ?
@@ -593,9 +609,12 @@ async def _evaluate_guild_locked(guild: discord.Guild, s: dict, res: dict) -> di
                     await _audit(guild.id, uid, "remove", held, score, days)
                     res["removed"].append((uid, held, score, days))
                 else:
-                    # Rétrograde VIP+ → VIP (garde une base VIP, plus doux).
+                    # Rétrograde VIP+ → VIP (garde une base VIP, plus doux). SÉCURITÉ (miroir de la
+                    # montée) : on ne retire l'ancien rôle QUE si le nouveau a bien été appliqué —
+                    # sinon on garderait le membre SANS aucun rôle tout en le croyant VIP (fantôme).
                     new_role = _role_for(target, vip_role, vip_plus_role)
-                    await _add_role(member, new_role)
+                    if new_role is None or not await _add_role(member, new_role):
+                        continue  # rôle cible indisponible/échec → on GARDE VIP+, on réessaiera
                     if vip_plus_role is not None:
                         await _rm_role(member, vip_plus_role)
                     await _upsert_status(guild.id, uid, tier=target, status="active",
@@ -671,13 +690,19 @@ async def _announce(guild: discord.Guild, res: dict):
         warned = res.get("warned") or []
         if warned:
             if len(warned) <= _WARN_INDIVIDUAL_CAP:
-                for (uid, tier, score, days, need) in warned:
+                for (uid, held, target, score, days, need) in warned:
                     m = guild.get_member(uid)
                     if m is None:
                         continue
-                    txt = (f"⏳ {m.mention}, ton activité a **baissé** — tu risques de perdre ton "
-                           f"rôle {_label(tier)} (et les accès aux salons). Il te manque {need}. "
-                           f"Reviens participer et tu le **gardes automatiquement** ! 💪")
+                    if target == "none":
+                        risk = (f"tu risques de **perdre** ton rôle {_label(held)} "
+                                "(et les accès aux salons)")
+                    else:
+                        # VIP+ qui redescend : il garde une base VIP → on ne dit PAS « perte totale ».
+                        risk = (f"tu risques de **repasser {_label(target)}** "
+                                f"(tu perdrais les salons réservés {_label(held)})")
+                    txt = (f"⏳ {m.mention}, ton activité a **baissé** — {risk}. Il te manque {need} "
+                           f"cette semaine. Reviens participer et tu **gardes tout automatiquement** ! 💪")
                     allowed = discord.AllowedMentions(users=[m], roles=False, everyone=False)
                     if not await _safe_send(ch, txt, allowed):
                         break

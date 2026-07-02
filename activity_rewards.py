@@ -654,9 +654,22 @@ async def remove_expired(guild_id: int) -> int:
     if not guild:
         return 0
     # owner « Option A » : si le VIP continu est actif, il est SEUL maître des rôles → l'hebdo ne
-    # doit RIEN retirer (sinon il arracherait un rôle que le continu veut garder). No-op.
+    # doit RIEN retirer (sinon il arracherait un rôle que le continu veut garder). No-op sur les
+    # rôles MAIS on garde le registre legacy propre : on marque « traités » les grants legacy
+    # EXPIRÉS (sans toucher aux rôles). Ainsi, si l'owner redésactive le continu plus tard,
+    # remove_expired ne strip pas d'un coup des rôles encore actifs détenus via le continu.
     try:
         if await _continuous_on(guild_id):
+            try:
+                async with _get_db() as db:
+                    await db.execute(
+                        "UPDATE activity_vip_grants SET removed=1 "
+                        "WHERE guild_id=? AND removed=0 AND tier!='spotlight' "
+                        "AND datetime(expires_at) <= datetime('now')",
+                        (guild_id,))
+                    await db.commit()
+            except Exception:
+                pass
             return 0
     except Exception:
         pass
