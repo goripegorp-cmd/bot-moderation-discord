@@ -139,7 +139,8 @@ async def init_db():
                 pass
             await db.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_social_one_active "
-                "ON social_zones(guild_id, creator_id, kind) WHERE status IN ('active','pending')")
+                "ON social_zones(guild_id, creator_id, kind) "
+                "WHERE status IN ('active','pending','materializing')")
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS social_zone_members (
                     zone_id INTEGER NOT NULL,
@@ -476,6 +477,10 @@ async def boot_cleanup():
             await close_zone(zid, linger=False)
         for zid in stale:
             await _delete_zone_channel(zid)
+        for zid in pend:
+            # Un 'materializing' crashé peut avoir CRÉÉ un salon (channel_id persisté en phase 1) :
+            # on le supprime via _delete_zone_channel (no-op si channel_id=0) AVANT de purger la ligne.
+            await _delete_zone_channel(zid)
         if pend:
             try:
                 async with _get_db() as db:
@@ -551,6 +556,26 @@ async def _boot_reconcile_orphans():
                                 removed += 1
                             except Exception:
                                 pass
+                # Filet DÉFENSE-EN-PROFONDEUR (owner 2026-07-02) : un crash entre la création du
+                # salon et la persistance de channel_id, AVEC une catégorie indisponible, laisse un
+                # salon à la RACINE (sans catégorie) que la boucle par-catégorie ci-dessus ne voit
+                # pas. On balaie donc aussi les salons racine portant notre préfixe, non référencés.
+                try:
+                    for ch in list(getattr(g, "text_channels", []) or []):
+                        if getattr(ch, "category", None) is not None:
+                            continue
+                        nm = getattr(ch, "name", "") or ""
+                        cid = int(getattr(ch, "id", 0))
+                        if cid in active_ids:
+                            continue
+                        if any(nm.startswith(p + "-") for p in prefixes):
+                            try:
+                                await ch.delete(reason="Zone sociale orpheline racine (reboot)")
+                                removed += 1
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
             except Exception:
                 continue
         if removed:
@@ -589,6 +614,8 @@ async def zone_watchdog():
                 pend = [int(r[0]) for r in await cur.fetchall()]
         for zid in pend:
             await _mark_nudge_dead(zid, "⌛ Invitation expirée — personne n'a rejoint/accepté.")
+            # 'materializing' resté coincé (crash) peut avoir un salon → on le supprime d'abord.
+            await _delete_zone_channel(zid)
             try:
                 async with _get_db() as db:
                     await db.execute(
@@ -1008,37 +1035,61 @@ async def _materialize_zone(zone_id: int, joiner) -> "tuple":
     members = [m for m in (creator, joiner) if m is not None]
     ch = await _create_zone_channel(guild, kind, members, (creator.display_name if creator else "zone"))
     if ch is None:
-        # échec création → on REND la ligne à 'pending' (réessayable) ou on l'annule.
+        # échec création → on REND la ligne à 'pending' (réessayable), gardé sur 'materializing'.
         try:
             async with _get_db() as db:
-                await db.execute("UPDATE social_zones SET status='pending' WHERE id=?", (zone_id,))
+                await db.execute(
+                    "UPDATE social_zones SET status='pending' WHERE id=? AND status='materializing'",
+                    (zone_id,))
                 await db.commit()
         except Exception:
             pass
         return None, "channel"
+    # PHASE 1 — persiste channel_id AVANT le flip 'active', gardé sur status='materializing'. Ainsi,
+    # un crash APRÈS cette écriture laisse channel_id != 0 → boot_cleanup route le nettoyage par
+    # _delete_zone_channel (plus de salon fantôme). rowcount==0 → la ligne a disparu (refus
+    # concurrent) → on supprime le salon fraîchement créé (anti-fantôme) au lieu de le garder.
+    persisted = False
     try:
         async with _get_db() as db:
-            await db.execute(
-                "UPDATE social_zones SET channel_id=?, status='active', "
-                "last_activity=CURRENT_TIMESTAMP WHERE id=?", (ch.id, zone_id))
-            for m in members:
-                await db.execute(
-                    "INSERT OR IGNORE INTO social_zone_members(zone_id, user_id) VALUES(?,?)",
-                    (zone_id, m.id))
+            cur = await db.execute(
+                "UPDATE social_zones SET channel_id=?, last_activity=CURRENT_TIMESTAMP "
+                "WHERE id=? AND status='materializing'", (ch.id, zone_id))
+            persisted = getattr(cur, "rowcount", 0) == 1
+            if persisted:
+                for m in members:
+                    await db.execute(
+                        "INSERT OR IGNORE INTO social_zone_members(zone_id, user_id) VALUES(?,?)",
+                        (zone_id, m.id))
             await db.commit()
     except Exception as ex:
-        print(f"[social_zones materialize persist] {ex}")
+        print(f"[social_zones materialize persist1] {ex}")
+        persisted = False
+    if not persisted:
+        # Course perdue / erreur DB → on ne laisse PAS de salon orphelin.
         try:
-            await ch.delete(reason="échec persistance zone sociale")
+            await ch.delete(reason="zone annulée/perdue pendant la création")
         except Exception:
             pass
+        # Si la ligne existe encore en 'materializing' (cas erreur DB, pas refus), on la rend.
         try:
             async with _get_db() as db:
-                await db.execute("UPDATE social_zones SET status='pending', channel_id=0 WHERE id=?", (zone_id,))
+                await db.execute(
+                    "UPDATE social_zones SET status='pending', channel_id=0 "
+                    "WHERE id=? AND status='materializing'", (zone_id,))
                 await db.commit()
         except Exception:
             pass
-        return None, "persist"
+        return None, "gone"
+    # PHASE 2 — flip 'active' (channel_id déjà écrit → aucune fenêtre de fantôme).
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "UPDATE social_zones SET status='active' WHERE id=? AND status='materializing'",
+                (zone_id,))
+            await db.commit()
+    except Exception:
+        pass
     _zone_channels.add(int(ch.id))
     # Panneau + intro dans le salon (mentionne les participants — c'est LEUR salon privé).
     try:
@@ -1112,13 +1163,29 @@ async def trade_consent_click(i: discord.Interaction, zone_id: int, accept: bool
         if await _is_zone_banned(zone_id, clicker.id):
             return await _safe_followup(i, content="🚫 Tu ne peux pas rejoindre cette zone.")
         if not accept:
-            # REFUS → on marque le nudge AVANT de supprimer la ligne (sinon plus de refs nudge).
+            # REFUS : claim ATOMIQUE 'pending'→'refused'. On ne touche JAMAIS 'materializing' (état
+            # possédé par une acceptation EN COURS → sinon on supprimerait la ligne sous un salon en
+            # création = fantôme). Si on ne gagne pas, c'est que l'autre a déjà accepté/est en cours.
+            try:
+                async with _get_db() as db:
+                    cur = await db.execute(
+                        "UPDATE social_zones SET status='refused' WHERE id=? AND status='pending'",
+                        (zone_id,))
+                    refused = getattr(cur, "rowcount", 0) == 1
+                    await db.commit()
+            except Exception:
+                refused = False
+            if not refused:
+                z2 = await _get_zone(zone_id)
+                if z2 and z2["status"] in ("materializing", "active"):
+                    return await _safe_followup(
+                        i, content="⏳ Trop tard — l'échange est en train de s'ouvrir.")
+                return await _safe_followup(i, content="⌛ Cette demande n'est plus disponible.")
             await _mark_nudge_dead(zone_id, "❌ Échange refusé.")
             try:
                 async with _get_db() as db:
                     await db.execute(
-                        "DELETE FROM social_zones WHERE id=? AND status IN ('pending','materializing')",
-                        (zone_id,))
+                        "DELETE FROM social_zones WHERE id=? AND status='refused'", (zone_id,))
                     await db.execute("DELETE FROM social_zone_members WHERE zone_id=?", (zone_id,))
                     await db.commit()
             except Exception:
