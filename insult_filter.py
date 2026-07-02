@@ -125,8 +125,11 @@ _RE2_ABBR = None
 _ABLEIST_TERMS = frozenset({
     # FR
     "autiste", "autistes", "autisto", "trisomique", "trisomiques", "triso", "trisos",
-    "mongolien", "mongoliens", "mongolienne", "mongoliennes", "mongol", "mongols", "mongolo",
-    "mongole", "mongoloïde", "mongoloide", "handicapé mental", "handicapée mentale",
+    # NB (audit 2026-07-02) : « mongol/mongols/mongole » RETIRÉS — c'est le démonyme (nationalité,
+    # jeux d'histoire type AoE « les Mongols ») → faux positif. Les formes insultantes
+    # « mongolo/mongoloïde/mongolien(ne) » RESTENT bloquées.
+    "mongolien", "mongoliens", "mongolienne", "mongoliennes", "mongolo",
+    "mongoloïde", "mongoloide", "handicapé mental", "handicapée mentale",
     "handicapé du cerveau", "déficient mental", "débile mental", "attardé mental",
     # EN
     "autistic", "retarded", "mongoloid", "downie", "window licker", "sped kid",
@@ -164,8 +167,11 @@ _THREAT_SOFT_TERMS = frozenset({
     "je vais te peter la gueule", "je vais te défoncer la gueule", "je vais te faire la peau",
     "je vais te fracasser", "je vais te frapper", "je vais te faire du mal",
     "je vais te tirer dessus", "balle dans la tête",
-    "tu vas le regretter", "tu vas le payer", "tu vas voir ce qui va t'arriver", "fais gaffe à toi",
-    "ça va mal finir pour toi", "tu ferais mieux de faire gaffe", "tu vas morfler",
+    "tu vas le regretter", "tu vas le payer", "tu vas voir ce qui va t'arriver",
+    # NB (audit 2026-07-02) : « fais gaffe à toi » / « tu ferais mieux de faire gaffe » RETIRÉS —
+    # ce sont des formules d'AFFECTION/prudence (« prends soin de toi ») indiscernables d'une
+    # menace sans 2e signal → faux positif. Les menaces de violence explicite restent.
+    "ça va mal finir pour toi", "tu vas morfler",
     "watch your back", "you better watch your back", "i'll beat you up",
     "i'll beat the shit out of you", "you're gonna pay", "youre gonna pay", "you'll regret this",
     "i'll hurt you",
