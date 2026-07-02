@@ -28,11 +28,19 @@ Le module est AUTONOME : AUCUNE commande slash (entrée 100% par boutons de dét
 from __future__ import annotations
 
 import asyncio
+import os
 import sqlite3
 from datetime import datetime, timezone
 
 import discord
 from discord.ext import tasks
+
+# Rôle STAFF autorisé à VOIR toutes les zones (anti-triche) + expulser/fermer (owner 2026-07-02,
+# ID 1465411944205914275). Surchargable par env SOCIAL_STAFF_ROLE_ID.
+try:
+    _ZONE_STAFF_ROLE_ID = int(os.environ.get("SOCIAL_STAFF_ROLE_ID", "1465411944205914275") or 0)
+except Exception:
+    _ZONE_STAFF_ROLE_ID = 0
 
 # ─── Dépendances injectées (setup) ─────────────────────────────────────────────
 _bot = None
@@ -72,6 +80,32 @@ def setup(bot_instance, get_db_fn, db_get_fn, add_log_fn=None, is_staff_fn=None)
     _is_staff = is_staff_fn
 
 
+def _staff_role(guild):
+    """Le rôle staff configuré (ou None)."""
+    try:
+        return guild.get_role(_ZONE_STAFF_ROLE_ID) if (guild and _ZONE_STAFF_ROLE_ID) else None
+    except Exception:
+        return None
+
+
+def _is_zone_staff(member) -> bool:
+    """Staff = rôle staff configuré OU is_staff_fn injecté (admin/mod). FAIL-SAFE False."""
+    try:
+        if member is None:
+            return False
+        if _ZONE_STAFF_ROLE_ID and any(
+                getattr(r, "id", 0) == _ZONE_STAFF_ROLE_ID for r in getattr(member, "roles", []) or []):
+            return True
+        if _is_staff is not None:
+            try:
+                return bool(_is_staff(member))
+            except Exception:
+                return False
+    except Exception:
+        return False
+    return False
+
+
 async def init_db():
     if _get_db is None:
         return
@@ -105,6 +139,22 @@ async def init_db():
                     PRIMARY KEY (zone_id, user_id)
                 )
             """)
+            # owner 2026-07-02 : liste de bannissement PAR ZONE. Un membre EXPULSÉ ne peut plus
+            # re-rejoindre la MÊME zone via le bouton « Rejoindre » (sinon l'expulsion ne sert à
+            # rien). Un gestionnaire peut le ré-inviter explicitement (l'ajout lève le ban).
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS social_zone_bans (
+                    zone_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL,
+                    PRIMARY KEY (zone_id, user_id)
+                )
+            """)
+            # owner 2026-07-02 : vocal dédié optionnel d'une zone de groupe (créé par le créateur,
+            # supprimé avec la zone). ALTER best-effort (colonne peut déjà exister).
+            try:
+                await db.execute("ALTER TABLE social_zones ADD COLUMN voice_channel_id INTEGER DEFAULT 0")
+            except Exception:
+                pass
             await db.commit()
     except Exception as ex:
         print(f"[social_zones init_db] {ex}")
@@ -206,6 +256,19 @@ async def _is_member(zone_id: int, user_id: int) -> bool:
         return False
 
 
+async def _is_zone_banned(zone_id: int, user_id: int) -> bool:
+    """True si l'utilisateur a été EXPULSÉ de cette zone (bloque le re-join self-service).
+    FAIL-OPEN (au doute, on laisse rejoindre — dispo > blocage, ce n'est pas un ban sécu)."""
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT 1 FROM social_zone_bans WHERE zone_id=? AND user_id=? LIMIT 1",
+                (zone_id, user_id)) as cur:
+                return (await cur.fetchone()) is not None
+    except Exception:
+        return False
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Salon privé : catégorie + création + overwrites
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -247,6 +310,12 @@ async def _create_zone_channel(guild: discord.Guild, kind: str,
     for m in members:
         if m is not None:
             ow[m] = _member_overwrite()
+    # STAFF (owner 2026-07-02) : le rôle staff VOIT toutes les zones (anti-triche) et peut y
+    # intervenir/expulser/fermer. Vue + historique + écriture (pour avertir en cas de triche).
+    st = _staff_role(guild)
+    if st is not None:
+        ow[st] = discord.PermissionOverwrite(
+            view_channel=True, read_message_history=True, send_messages=True)
     name = f"{_PREFIX.get(kind, 'zone')}-{slug_name}"[:95]
     try:
         return await guild.create_text_channel(
@@ -275,30 +344,54 @@ async def _claim_close(zone_id: int) -> bool:
 
 
 async def _delete_zone_channel(zone_id: int):
-    """Supprime le salon (idempotent) + channel_id=0 + retire du set mémoire."""
+    """Supprime le(s) salon(s) texte + vocal (idempotent), PUIS met channel_id/voice_channel_id
+    à 0 — mais SEULEMENT si la/les suppression(s) Discord ont réussi. Ainsi, sur échec transitoire
+    (429/5xx), la ligne garde ses ids != 0 et le watchdog (qui balaie les zones 'ended' avec
+    channel_id != 0) réessaiera au tour suivant → ZÉRO salon fantôme, sans attendre un reboot."""
     try:
         async with _get_db() as db:
             async with db.execute(
-                "SELECT guild_id, channel_id FROM social_zones WHERE id=?", (zone_id,)) as c:
+                "SELECT guild_id, channel_id, voice_channel_id FROM social_zones WHERE id=?",
+                (zone_id,)) as c:
                 row = await c.fetchone()
-            if not row:
-                return
-            gid, ch_id = int(row[0]), int(row[1] or 0)
-            if ch_id:
-                await db.execute("UPDATE social_zones SET channel_id=0 WHERE id=?", (zone_id,))
-                await db.commit()
-        _zone_channels.discard(ch_id)
-        _activity_writes.pop(ch_id, None)
-        if ch_id == 0:
+        if not row:
             return
+        gid = int(row[0])
+        ch_id = int(row[1] or 0)
+        vc_id = int((row[2] if len(row) > 2 else 0) or 0)
+        _zone_channels.discard(ch_id)
+        _zone_channels.discard(vc_id)
+        _activity_writes.pop(ch_id, None)
+        _activity_writes.pop(vc_id, None)
+        all_gone = True
         g = _bot.get_guild(gid) if _bot else None
         if g:
-            ch = g.get_channel(ch_id)
-            if ch is not None:
-                try:
-                    await ch.delete(reason="Zone sociale fermée")
-                except Exception:
-                    pass
+            for _cid in (ch_id, vc_id):   # salon texte + vocal dédié éventuel
+                if _cid <= 0:             # 0 = néant, -1 = réservation vocale (pas encore de salon)
+                    continue
+                ch = g.get_channel(_cid)
+                if ch is not None:
+                    try:
+                        await ch.delete(reason="Zone sociale fermée")
+                    except Exception as ex:
+                        # Échec transitoire → on GARDE la référence pour retry par le watchdog.
+                        print(f"[social_zones delete channel {_cid}] {ex}")
+                        all_gone = False
+        elif ch_id > 0 or vc_id > 0:
+            # Guilde indisponible (reconnexion) → on ne peut pas confirmer la suppression :
+            # ne pas zéroter, laisser le watchdog/boot réessayer.
+            all_gone = False
+        try:
+            async with _get_db() as db:
+                if all_gone and (ch_id or vc_id):
+                    await db.execute(
+                        "UPDATE social_zones SET channel_id=0, voice_channel_id=0 WHERE id=?",
+                        (zone_id,))
+                # Nettoie la liste de bannissement de la zone (rowid mort après fermeture).
+                await db.execute("DELETE FROM social_zone_bans WHERE zone_id=?", (zone_id,))
+                await db.commit()
+        except Exception:
+            pass
     except Exception as ex:
         print(f"[social_zones _delete_zone_channel] {ex}")
 
@@ -373,11 +466,20 @@ async def _boot_reconcile_orphans():
     prefixes = tuple(p for p in (_PREFIX.get(k) for k in _KINDS) if p)
     cat_names = set(_CATEGORY.values())
     active_ids = set()
+    active_vc_ids = set()
     try:
         async with _get_db() as db:
             async with db.execute(
                 "SELECT channel_id FROM social_zones WHERE status='active' AND channel_id != 0") as cur:
                 active_ids = {int(r[0]) for r in await cur.fetchall()}
+            # Vocaux référencés par une zone active → à NE PAS supprimer.
+            try:
+                async with db.execute(
+                    "SELECT voice_channel_id FROM social_zones "
+                    "WHERE status='active' AND voice_channel_id != 0") as cur:
+                    active_vc_ids = {int(r[0]) for r in await cur.fetchall()}
+            except Exception:
+                active_vc_ids = set()
     except Exception:
         active_ids = set()
     removed = 0
@@ -389,7 +491,21 @@ async def _boot_reconcile_orphans():
                         continue
                     for ch in list(getattr(cat, "channels", []) or []):
                         nm = getattr(ch, "name", "") or ""
-                        if int(getattr(ch, "id", 0)) in active_ids:
+                        cid = int(getattr(ch, "id", 0))
+                        is_voice = isinstance(ch, discord.VoiceChannel)
+                        if is_voice:
+                            # Vocal orphelin d'un reboot : sous notre catégorie, préfixe 🔊,
+                            # non référencé par une zone active.
+                            if cid in active_vc_ids:
+                                continue
+                            if nm.startswith("🔊 "):
+                                try:
+                                    await ch.delete(reason="Vocal de zone sociale orphelin (reboot)")
+                                    removed += 1
+                                except Exception:
+                                    pass
+                            continue
+                        if cid in active_ids:
                             continue
                         if any(nm.startswith(p + "-") for p in prefixes):
                             try:
@@ -426,6 +542,11 @@ async def zone_watchdog():
                 "datetime(started_at) < datetime('now', '-60 seconds')") as cur:
                 ended = [int(r[0]) for r in await cur.fetchall()]
         for zid in stale_ids:
+            # Ne ferme PAS un groupe dont le vocal est OCCUPÉ (des gens parlent sans taper) :
+            # on rafraîchit son activité pour qu'il survive au tour suivant.
+            if await _voice_is_active(zid):
+                await _touch_activity(zid)
+                continue
             # message d'adieu best-effort puis fermeture
             await _farewell(zid)
             await close_zone(zid, linger=False)
@@ -439,6 +560,36 @@ async def zone_watchdog():
 async def _zw_wait():
     if _bot is not None:
         await _bot.wait_until_ready()
+
+
+async def _voice_is_active(zone_id: int) -> bool:
+    """True si la zone possède un vocal dédié où ≥1 membre (non-bot) est connecté.
+    → empêche le watchdog de fermer un groupe pendant que des gens parlent en vocal."""
+    try:
+        vc_id = await _zone_voice_id(zone_id)
+        if not vc_id or _bot is None:
+            return False
+        z = await _get_zone(zone_id)
+        if not z:
+            return False
+        g = _bot.get_guild(int(z["guild_id"]))
+        vc = g.get_channel(vc_id) if g else None
+        if vc is None:
+            return False
+        return any(not getattr(m, "bot", False) for m in getattr(vc, "members", []) or [])
+    except Exception:
+        return False
+
+
+async def _touch_activity(zone_id: int):
+    """Rafraîchit last_activity (best-effort) — garde une zone vivante."""
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "UPDATE social_zones SET last_activity=CURRENT_TIMESTAMP WHERE id=?", (zone_id,))
+            await db.commit()
+    except Exception:
+        pass
 
 
 async def _farewell(zone_id: int):
@@ -482,9 +633,10 @@ async def note_message(msg):
             _activity_writes.clear()
             _activity_writes[ch_id] = now
         async with _get_db() as db:
+            # ch_id peut être le salon TEXTE (channel_id) ou le chat du VOCAL (voice_channel_id).
             await db.execute(
                 "UPDATE social_zones SET last_activity=CURRENT_TIMESTAMP "
-                "WHERE channel_id=? AND status='active'", (ch_id,))
+                "WHERE status='active' AND (channel_id=? OR voice_channel_id=?)", (ch_id, ch_id))
             await db.commit()
     except Exception:
         pass
@@ -509,6 +661,9 @@ def _zone_intro_embed(kind: str, creator: discord.Member, members: list) -> disc
             f"Zone créée par {creator.mention} ! Réunissez-vous ici pour vous coordonner.\n\n"
             "• Organisez votre boss / raid / donjon dans ce salon dédié.\n"
             "• D'autres joueurs peuvent **rejoindre** via le bouton sous le message d'origine.\n"
+            "• **➕ Ajouter un membre** : le créateur invite directement quelqu'un du serveur.\n"
+            "• **🔊 Créer un vocal** : ouvre un salon vocal privé rien que pour le groupe.\n"
+            "• **👢 Expulser** : le créateur (ou le staff) retire un membre.\n"
             "• Cliquez sur **🔒 Fermer** quand c'est terminé.\n"
             "• La zone se **ferme toute seule** après un moment sans activité.")
     e = discord.Embed(title=title, description=desc, color=_COLOR.get(kind, 0x5865F2))
@@ -520,11 +675,26 @@ def _zone_intro_embed(kind: str, creator: discord.Member, members: list) -> disc
 
 
 def _panel_view(zone_id: int, kind: str):
-    """Vue persistante du panneau dans le salon : bouton 🔒 Fermer (DynamicItem)."""
+    """Panneau de GESTION persistant, posté dans le salon de la zone (owner 2026-07-02).
+    GROUPE : ➕ Ajouter un membre · 🔊 Créer un vocal · 👢 Expulser · 🔒 Fermer.
+    TRADE (2 pers., NON extensible) : 👢 Expulser (staff) · 🔒 Fermer.
+    Tous les boutons sont des DynamicItems → re-câblés au boot, survivent aux redéploiements."""
     v = discord.ui.View(timeout=None)
+    zid = int(zone_id)
+    if kind == "group":
+        v.add_item(discord.ui.Button(
+            label="➕ Ajouter un membre", style=discord.ButtonStyle.success,
+            custom_id=f"szone_add:{zid}"))
+        v.add_item(discord.ui.Button(
+            label="🔊 Créer un vocal", style=discord.ButtonStyle.primary,
+            custom_id=f"szone_voice:{zid}"))
+    v.add_item(discord.ui.Button(
+        label="👢 Expulser", style=discord.ButtonStyle.secondary,
+        custom_id=f"szone_expel:{zid}"))
     label = "🔒 Fermer le trade" if kind == "trade" else "🔒 Fermer la zone"
-    v.add_item(discord.ui.Button(label=label, style=discord.ButtonStyle.danger,
-                                 custom_id=f"szone_close:{int(zone_id)}"))
+    v.add_item(discord.ui.Button(
+        label=label, style=discord.ButtonStyle.danger,
+        custom_id=f"szone_close:{zid}"))
     return v
 
 
@@ -712,6 +882,11 @@ async def join_zone(i: discord.Interaction, zone_id: int):
             # Salon disparu → ferme la ligne pour cohérence.
             await close_zone(zone_id, linger=False)
             return await _safe_followup(i, content="⌛ Cette zone n'est plus disponible.")
+        # Expulsé de CETTE zone → ne peut pas re-rejoindre en self-service (un gestionnaire
+        # peut le ré-inviter explicitement via ➕ Ajouter, ce qui lève le ban).
+        if await _is_zone_banned(zone_id, member.id):
+            return await _safe_followup(
+                i, content="🚫 Un gestionnaire t'a retiré de cette zone — tu ne peux pas la rejoindre.")
         # Claim ATOMIQUE du slot AVANT d'accorder l'accès (anti-dépassement de cap sur clics
         # concurrents — sinon 2 « Rejoindre » simultanés ouvrent un trade « privé à 2 » à 3).
         # INSERT … SELECT … WHERE count<cap AND NOT déjà-membre : SQLite sérialise les writers,
@@ -738,6 +913,16 @@ async def join_zone(i: discord.Interaction, zone_id: int):
         try:
             await ch.set_permissions(member, overwrite=_member_overwrite(),
                                      reason="Rejoint la zone sociale")
+            # Si un vocal de groupe existe déjà, ouvre-lui aussi l'accès (best-effort).
+            _vc_id = await _zone_voice_id(zone_id)
+            if _vc_id:
+                _vc = guild.get_channel(_vc_id)
+                if _vc is not None:
+                    try:
+                        await _vc.set_permissions(member, overwrite=_voice_member_overwrite(),
+                                                  reason="Rejoint la zone sociale")
+                    except Exception:
+                        pass
         except Exception as ex:
             print(f"[social_zones join set_permissions] {ex}")
             try:
@@ -820,6 +1005,497 @@ async def close_zone_click(i: discord.Interaction, zone_id: int):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  GESTION DU SALON (owner 2026-07-02) — le CRÉATEUR a une vraie gestion + le STAFF
+#  peut intervenir. Tout en boutons/menus (« les commandes, ils ne savent pas faire »).
+#     ➕ Ajouter un membre (groupe)   🔊 Créer un vocal (groupe)   👢 Expulser   🔒 Fermer
+# ═══════════════════════════════════════════════════════════════════════════════
+def _can_manage(i: discord.Interaction, zone) -> bool:
+    """Peut gérer la zone = son CRÉATEUR ou un STAFF (rôle configuré/admin). FAIL-SAFE False."""
+    try:
+        if not zone:
+            return False
+        if int(i.user.id) == int(zone["creator_id"]):
+            return True
+        member = i.user if isinstance(i.user, discord.Member) else (
+            i.guild.get_member(i.user.id) if i.guild else None)
+        return _is_zone_staff(member)
+    except Exception:
+        return False
+
+
+def _voice_member_overwrite() -> discord.PermissionOverwrite:
+    return discord.PermissionOverwrite(
+        view_channel=True, connect=True, speak=True, stream=True, use_voice_activation=True)
+
+
+async def _zone_member_ids(zone_id: int) -> list:
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT user_id FROM social_zone_members WHERE zone_id=?", (zone_id,)) as cur:
+                return [int(r[0]) for r in await cur.fetchall()]
+    except Exception:
+        return []
+
+
+async def _zone_voice_id(zone_id: int) -> int:
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT voice_channel_id FROM social_zones WHERE id=?", (zone_id,)) as cur:
+                r = await cur.fetchone()
+        return int((r[0] if r else 0) or 0)
+    except Exception:
+        return 0
+
+
+# ─── ➕ AJOUTER UN MEMBRE (groupe uniquement) ──────────────────────────────────
+async def add_member_click(i: discord.Interaction, zone_id: int):
+    if not await _safe_defer(i):
+        return
+    if _click_too_soon(i.user.id):
+        return await _safe_followup(i, content="⏳ Un instant… réessaie dans une seconde.")
+    try:
+        z = await _get_zone(zone_id)
+        if not z or z["status"] != "active" or not z["channel_id"]:
+            return await _safe_followup(i, content="⌛ Cette zone n'est plus disponible.")
+        if z["kind"] != "group":
+            return await _safe_followup(
+                i, content="🤝 Un salon d'échange est **strictement à 2 personnes** — on n'y "
+                           "ajoute pas de membre.")
+        if not _can_manage(i, z):
+            return await _safe_followup(
+                i, content="🔒 Seuls le **créateur** du groupe ou le **staff** peuvent ajouter "
+                           "des membres.")
+        if (await _member_count(zone_id)) >= _MAX_MEMBERS.get("group", 6):
+            return await _safe_followup(i, content="👥 Ce groupe est déjà **complet**.")
+        return await _safe_followup(
+            i, content="Choisis la personne à ajouter au groupe :",
+            view=_AddMemberSelectView(zone_id))
+    except Exception as ex:
+        print(f"[social_zones add_member_click] {ex}")
+        await _safe_followup(i, content="❌ Erreur, réessaie.")
+
+
+class _AddMemberSelectView(discord.ui.View):
+    """Menu éphémère (transitoire) : sélectionne un membre du serveur à ajouter au groupe."""
+    def __init__(self, zone_id: int):
+        super().__init__(timeout=120)
+        self.zone_id = int(zone_id)
+        sel = discord.ui.UserSelect(
+            placeholder="Sélectionne un membre à ajouter…", min_values=1, max_values=1)
+        sel.callback = self._on_select
+        self.add_item(sel)
+        self._sel = sel
+
+    async def _on_select(self, i: discord.Interaction):
+        try:
+            user = self._sel.values[0] if self._sel.values else None
+        except Exception:
+            user = None
+        await _do_add_member(i, self.zone_id, user)
+
+
+async def _do_add_member(i: discord.Interaction, zone_id: int, user):
+    if not await _safe_defer(i):
+        return
+    try:
+        if user is None:
+            return await _safe_followup(i, content="❌ Aucun membre sélectionné.")
+        z = await _get_zone(zone_id)
+        if not z or z["status"] != "active" or not z["channel_id"]:
+            return await _safe_followup(i, content="⌛ Cette zone n'est plus disponible.")
+        if z["kind"] != "group":
+            return await _safe_followup(i, content="🤝 Un trade reste à 2 personnes.")
+        if not _can_manage(i, z):
+            return await _safe_followup(i, content="🔒 Réservé au créateur ou au staff.")
+        guild = i.guild
+        if guild is None:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        member = guild.get_member(int(getattr(user, "id", 0))) or (
+            user if isinstance(user, discord.Member) else None)
+        if member is None or getattr(member, "bot", False):
+            return await _safe_followup(i, content="❌ Membre invalide (ou bot).")
+        ch = guild.get_channel(int(z["channel_id"]))
+        if ch is None:
+            await close_zone(zone_id, linger=False)
+            return await _safe_followup(i, content="⌛ Cette zone n'est plus disponible.")
+        if await _is_member(zone_id, member.id):
+            return await _safe_followup(
+                i, content=f"ℹ️ {member.display_name} est déjà dans le groupe.")
+        # Claim ATOMIQUE du slot (anti-dépassement de cap sur ajouts concurrents).
+        max_m = _MAX_MEMBERS.get("group", 6)
+        try:
+            async with _get_db() as db:
+                cur = await db.execute(
+                    "INSERT INTO social_zone_members(zone_id, user_id) "
+                    "SELECT ?, ? WHERE "
+                    "(SELECT COUNT(*) FROM social_zone_members WHERE zone_id=?) < ? "
+                    "AND NOT EXISTS(SELECT 1 FROM social_zone_members WHERE zone_id=? AND user_id=?)",
+                    (zone_id, member.id, zone_id, max_m, zone_id, member.id))
+                claimed = getattr(cur, "rowcount", 0) == 1
+                await db.commit()
+        except Exception as ex:
+            print(f"[social_zones add claim] {ex}")
+            return await _safe_followup(i, content="❌ Erreur, réessaie.")
+        if not claimed:
+            return await _safe_followup(i, content="👥 Le groupe est **complet**.")
+        # Accorde l'accès texte (+ vocal si présent). Échec → rollback du slot (anti-fantôme).
+        try:
+            await ch.set_permissions(member, overwrite=_member_overwrite(),
+                                     reason="Ajouté à la zone par le créateur/staff")
+            vc_id = await _zone_voice_id(zone_id)
+            if vc_id:
+                vc = guild.get_channel(vc_id)
+                if vc is not None:
+                    try:
+                        await vc.set_permissions(member, overwrite=_voice_member_overwrite(),
+                                                 reason="Ajouté à la zone")
+                    except Exception:
+                        pass
+        except Exception as ex:
+            print(f"[social_zones add set_permissions] {ex}")
+            try:
+                async with _get_db() as db:
+                    await db.execute(
+                        "DELETE FROM social_zone_members WHERE zone_id=? AND user_id=?",
+                        (zone_id, member.id))
+                    await db.commit()
+            except Exception:
+                pass
+            return await _safe_followup(i, content="❌ Impossible de l'ajouter, réessaie.")
+        try:
+            async with _get_db() as db:
+                await db.execute(
+                    "UPDATE social_zones SET last_activity=CURRENT_TIMESTAMP WHERE id=?", (zone_id,))
+                # Ajout explicite par un gestionnaire → lève un éventuel ban (ré-invitation voulue).
+                await db.execute(
+                    "DELETE FROM social_zone_bans WHERE zone_id=? AND user_id=?",
+                    (zone_id, member.id))
+                await db.commit()
+        except Exception:
+            pass
+        # Salue + MENTIONNE le nouvel arrivant DANS le salon (il reçoit une notif → il trouve la zone).
+        try:
+            await ch.send(
+                f"👋 {member.mention}, tu as été **ajouté à ce groupe** par {i.user.mention} ! "
+                "Bienvenue — c'est ici que ça se passe. 🎯",
+                allowed_mentions=discord.AllowedMentions(
+                    everyone=False, roles=False, users=[member]))
+        except Exception:
+            pass
+        await _safe_followup(i, content=f"✅ {member.display_name} a été ajouté à {ch.mention}.")
+    except Exception as ex:
+        print(f"[social_zones _do_add_member] {ex}")
+        await _safe_followup(i, content="❌ Erreur, réessaie.")
+
+
+# ─── 🔊 CRÉER UN VOCAL (groupe uniquement) ─────────────────────────────────────
+async def voice_click(i: discord.Interaction, zone_id: int):
+    if not await _safe_defer(i):
+        return
+    if _click_too_soon(i.user.id):
+        return await _safe_followup(i, content="⏳ Un instant… réessaie dans une seconde.")
+    try:
+        z = await _get_zone(zone_id)
+        if not z or z["status"] != "active" or not z["channel_id"]:
+            return await _safe_followup(i, content="⌛ Cette zone n'est plus disponible.")
+        if z["kind"] != "group":
+            return await _safe_followup(
+                i, content="🔊 Le vocal n'est disponible que pour les **groupes**.")
+        if not _can_manage(i, z):
+            return await _safe_followup(
+                i, content="🔒 Seuls le **créateur** du groupe ou le **staff** peuvent créer le vocal.")
+        guild = i.guild
+        if guild is None:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        # État courant du slot vocal : 0 = aucun, -1 = réservé (création en cours), >0 = existe.
+        existing = await _zone_voice_id(zone_id)
+        if existing == -1:
+            return await _safe_followup(
+                i, content="🔊 Le vocal est **en cours de création**, un petit instant…")
+        if existing > 0:
+            vc = guild.get_channel(existing)
+            if vc is not None:
+                return await _safe_followup(
+                    i, content=f"🔊 Le vocal existe déjà : **{vc.name}** "
+                               "(rejoins-le depuis la barre de gauche).")
+            # existing > 0 mais salon disparu (supprimé à la main) → on recrée en réservant
+            # DEPUIS cette valeur exacte (anti-course : un seul passe de `existing` à -1).
+        if not guild.me.guild_permissions.manage_channels:
+            return await _safe_followup(
+                i, content="❌ Le bot n'a pas la permission « Gérer les salons ».")
+        # ── RÉSERVATION ATOMIQUE (exactly-once) ────────────────────────────────────────
+        # _click_too_soon ne bloque que le MÊME user : 2 gestionnaires différents (créateur +
+        # staff) peuvent cliquer en même temps. Sans réservation, chacun crée un vocal → 1 devient
+        # orphelin. On passe voice_channel_id de {0 | valeur stale lue} → -1 : SQLite sérialise,
+        # un SEUL gagne (rowcount==1). Le perdant est renvoyé sans rien créer.
+        try:
+            async with _get_db() as db:
+                cur = await db.execute(
+                    "UPDATE social_zones SET voice_channel_id=-1 "
+                    "WHERE id=? AND status='active' AND voice_channel_id=?",
+                    (zone_id, int(existing)))
+                reserved = getattr(cur, "rowcount", 0) == 1
+                await db.commit()
+        except Exception as ex:
+            print(f"[social_zones voice reserve] {ex}")
+            return await _safe_followup(i, content="❌ Erreur, réessaie.")
+        if not reserved:
+            return await _safe_followup(
+                i, content="🔊 Le vocal vient d'être créé (ou est en cours) — regarde la barre de gauche.")
+        ch = guild.get_channel(int(z["channel_id"]))
+        cat = getattr(ch, "category", None) if ch is not None else None
+        if cat is None:
+            cat = await _get_category(guild, "group")
+        me = guild.me
+        ow = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False, connect=False),
+            me: discord.PermissionOverwrite(
+                view_channel=True, connect=True, speak=True, manage_channels=True,
+                manage_permissions=True, move_members=True),
+        }
+        st = _staff_role(guild)
+        if st is not None:
+            ow[st] = discord.PermissionOverwrite(view_channel=True, connect=True, speak=True)
+        members = []
+        for uid in await _zone_member_ids(zone_id):
+            m = guild.get_member(uid)
+            if m is not None:
+                ow[m] = _voice_member_overwrite()
+                members.append(m)
+        base = (getattr(ch, "name", "") or "groupe").replace(_PREFIX.get("group", ""), "").strip("-")
+        vc_name = f"🔊 {base or 'groupe'}"[:95]
+        try:
+            vc = await guild.create_voice_channel(
+                name=vc_name, category=cat, overwrites=ow, reason="Vocal de zone sociale")
+        except Exception as ex:
+            print(f"[social_zones create voice] {ex}")
+            # LIBÈRE la réservation (−1 → 0) pour permettre une nouvelle tentative.
+            try:
+                async with _get_db() as db:
+                    await db.execute(
+                        "UPDATE social_zones SET voice_channel_id=0 "
+                        "WHERE id=? AND voice_channel_id=-1", (zone_id,))
+                    await db.commit()
+            except Exception:
+                pass
+            return await _safe_followup(i, content="❌ Impossible de créer le vocal, réessaie.")
+        # Persiste l'id RÉEL — SEULEMENT si la réservation est toujours à -1 (sinon la zone a été
+        # fermée/réinitialisée entre-temps → on supprime le vocal pour ne pas laisser de fantôme).
+        try:
+            async with _get_db() as db:
+                cur = await db.execute(
+                    "UPDATE social_zones SET voice_channel_id=?, last_activity=CURRENT_TIMESTAMP "
+                    "WHERE id=? AND voice_channel_id=-1", (vc.id, zone_id))
+                persisted = getattr(cur, "rowcount", 0) == 1
+                await db.commit()
+        except Exception as ex:
+            print(f"[social_zones persist voice] {ex}")
+            persisted = False
+        if not persisted:
+            try:
+                await vc.delete(reason="zone fermée/réinitialisée pendant la création du vocal")
+            except Exception:
+                pass
+            # Si la réservation traîne encore (cas erreur DB, pas fermeture), on la libère.
+            try:
+                async with _get_db() as db:
+                    await db.execute(
+                        "UPDATE social_zones SET voice_channel_id=0 "
+                        "WHERE id=? AND voice_channel_id=-1", (zone_id,))
+                    await db.commit()
+            except Exception:
+                pass
+            return await _safe_followup(
+                i, content="⌛ La zone a été fermée entre-temps — vocal annulé.")
+        # Le chat texte du vocal fait partie de la zone → modéré, sans nudge, et son activité
+        # garde la zone vivante (lookup O(1) mémoire, comme le salon texte).
+        try:
+            _zone_channels.add(int(vc.id))
+        except Exception:
+            pass
+        # Filet : un membre qui a rejoint PENDANT la création (entre le snapshot et le persist)
+        # n'a pas eu son overwrite vocal via join_zone (voice_channel_id valait -1). On re-scanne
+        # et on complète les accès manquants (course rare, best-effort).
+        try:
+            have = {int(m.id) for m in members}
+            for uid in await _zone_member_ids(zone_id):
+                if uid in have:
+                    continue
+                m2 = guild.get_member(uid)
+                if m2 is not None:
+                    try:
+                        await vc.set_permissions(m2, overwrite=_voice_member_overwrite(),
+                                                 reason="Vocal de zone (membre tardif)")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # Annonce DANS le salon + MENTIONNE tous les membres (qu'ils sachent que c'est pour eux).
+        if ch is not None:
+            try:
+                await ch.send(
+                    f"🔊 **Vocal du groupe créé** par {i.user.mention} → **{vc.name}**.\n"
+                    "Rejoignez-le depuis la barre de gauche pour parler ensemble ! 🎧\n"
+                    + (" ".join(m.mention for m in members) if members else ""),
+                    allowed_mentions=discord.AllowedMentions(
+                        everyone=False, roles=False, users=members))
+            except Exception:
+                pass
+        await _safe_followup(i, content=f"✅ Vocal **{vc.name}** créé pour le groupe.")
+    except Exception as ex:
+        print(f"[social_zones voice_click] {ex}")
+        await _safe_followup(i, content="❌ Erreur, réessaie.")
+
+
+# ─── 👢 EXPULSER (créateur ou staff) ───────────────────────────────────────────
+async def expel_click(i: discord.Interaction, zone_id: int):
+    if not await _safe_defer(i):
+        return
+    if _click_too_soon(i.user.id):
+        return await _safe_followup(i, content="⏳ Un instant… réessaie dans une seconde.")
+    try:
+        z = await _get_zone(zone_id)
+        if not z or z["status"] != "active" or not z["channel_id"]:
+            return await _safe_followup(i, content="⌛ Cette zone n'est plus disponible.")
+        if not _can_manage(i, z):
+            return await _safe_followup(
+                i, content="🔒 Seuls le **créateur** ou le **staff** peuvent expulser des membres.")
+        guild = i.guild
+        if guild is None:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        creator_id = int(z["creator_id"])
+        options = []
+        for uid in await _zone_member_ids(zone_id):
+            if uid == creator_id:
+                continue  # on ne s'expulse pas soi-même → pour fermer, bouton 🔒
+            m = guild.get_member(uid)
+            label = (m.display_name if m is not None else str(uid))[:80] or str(uid)
+            options.append(discord.SelectOption(label=label, value=str(uid)))
+        if not options:
+            return await _safe_followup(
+                i, content="👥 Personne à expulser (il n'y a que le créateur). "
+                           "Pour fermer, utilise **🔒 Fermer**.")
+        return await _safe_followup(
+            i, content="Choisis le membre à expulser :",
+            view=_ExpelSelectView(zone_id, options))
+    except Exception as ex:
+        print(f"[social_zones expel_click] {ex}")
+        await _safe_followup(i, content="❌ Erreur, réessaie.")
+
+
+class _ExpelSelectView(discord.ui.View):
+    """Menu éphémère (transitoire) : sélectionne le membre de la zone à expulser."""
+    def __init__(self, zone_id: int, options: list):
+        super().__init__(timeout=120)
+        self.zone_id = int(zone_id)
+        sel = discord.ui.Select(
+            placeholder="Sélectionne un membre à expulser…",
+            min_values=1, max_values=1, options=options[:25])
+        sel.callback = self._on_select
+        self.add_item(sel)
+        self._sel = sel
+
+    async def _on_select(self, i: discord.Interaction):
+        try:
+            uid = int(self._sel.values[0]) if self._sel.values else 0
+        except Exception:
+            uid = 0
+        await _do_expel(i, self.zone_id, uid)
+
+
+async def _do_expel(i: discord.Interaction, zone_id: int, user_id: int):
+    if not await _safe_defer(i):
+        return
+    try:
+        if not user_id:
+            return await _safe_followup(i, content="❌ Aucun membre sélectionné.")
+        z = await _get_zone(zone_id)
+        if not z or z["status"] != "active":
+            return await _safe_followup(i, content="✅ Zone déjà fermée.")
+        if not _can_manage(i, z):
+            return await _safe_followup(i, content="🔒 Réservé au créateur ou au staff.")
+        if int(user_id) == int(z["creator_id"]):
+            return await _safe_followup(
+                i, content="🚫 On n'expulse pas le créateur. Pour fermer la zone, utilise **🔒 Fermer**.")
+        guild = i.guild
+        if guild is None:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        # ORDRE FAIL-CLOSED (expulsion = action de SÉCURITÉ) : on RETIRE d'abord l'accès, et on ne
+        # supprime la ligne (+ ban) QUE si la révocation a réussi. Sinon on GARDE tout et on signale
+        # l'échec — jamais de « ✅ expulsé » alors que la personne garde l'accès.
+        # Membre présent → set_permissions(overwrite=None). Membre PARTI du serveur (pas dans le
+        # cache) → il n'a plus accès de toute façon ; on retire l'overwrite résiduel en best-effort
+        # (API bas niveau) SANS bloquer l'expulsion (sinon un départ figerait la liste).
+        member = guild.get_member(int(user_id))
+        ch = guild.get_channel(int(z["channel_id"])) if z["channel_id"] else None
+        vc_id = await _zone_voice_id(zone_id)
+        vc = guild.get_channel(vc_id) if (vc_id and vc_id > 0) else None
+
+        async def _revoke(channel) -> bool:
+            """Retire l'accès du membre à ce salon. True = accès effectivement retiré (ou déjà
+            absent). Pour un membre PARTI, best-effort → toujours True (pas d'accès résiduel réel)."""
+            if channel is None:
+                return True
+            if member is not None:
+                try:
+                    await channel.set_permissions(member, overwrite=None, reason="Expulsé de la zone")
+                    return True
+                except Exception as ex:
+                    print(f"[social_zones expel revoke {getattr(channel,'id',0)}] {ex}")
+                    return False
+            # Membre hors cache/parti : retire l'overwrite résiduel via l'API bas niveau.
+            try:
+                await channel._state.http.delete_channel_permissions(
+                    channel.id, int(user_id), reason="Expulsé (membre parti)")
+            except Exception:
+                pass
+            return True
+
+        revoke_ok = await _revoke(ch)
+        if not await _revoke(vc):
+            revoke_ok = False
+        # Déconnecte du vocal si connecté (best-effort, n'affecte pas revoke_ok).
+        if vc is not None and member is not None:
+            try:
+                mv = getattr(member, "voice", None)
+                if mv and mv.channel and int(mv.channel.id) == int(vc.id):
+                    await member.move_to(None, reason="Expulsé de la zone")
+            except Exception:
+                pass
+        if not revoke_ok:
+            # On n'a PAS pu retirer l'accès → on ne touche pas la DB (le membre reste listé,
+            # donc ré-essayable) et on dit la vérité au gestionnaire.
+            return await _safe_followup(
+                i, content="❌ Impossible de retirer les permissions (vérifie les droits du bot). "
+                           "Le membre est **toujours dans la liste** — réessaie.")
+        # Révocation confirmée → retire la ligne + BAN (anti re-join) de façon atomique.
+        try:
+            async with _get_db() as db:
+                await db.execute(
+                    "DELETE FROM social_zone_members WHERE zone_id=? AND user_id=?",
+                    (zone_id, int(user_id)))
+                await db.execute(
+                    "INSERT OR IGNORE INTO social_zone_bans(zone_id, user_id) VALUES(?,?)",
+                    (zone_id, int(user_id)))
+                await db.commit()
+        except Exception:
+            pass
+        name = member.display_name if member is not None else str(user_id)
+        if ch is not None:
+            try:
+                await ch.send(f"👢 **{name}** a été retiré de la zone par {i.user.mention}.",
+                              allowed_mentions=discord.AllowedMentions.none())
+            except Exception:
+                pass
+        await _safe_followup(i, content=f"✅ {name} a été expulsé.")
+    except Exception as ex:
+        print(f"[social_zones _do_expel] {ex}")
+        await _safe_followup(i, content="❌ Erreur, réessaie.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  DynamicItems persistants (re-enregistrés au boot)
 # ═══════════════════════════════════════════════════════════════════════════════
 class ZoneCreateButton(discord.ui.DynamicItem[discord.ui.Button],
@@ -873,10 +1549,60 @@ class ZoneCloseButton(discord.ui.DynamicItem[discord.ui.Button],
         await close_zone_click(i, self.zid)
 
 
+class ZoneAddButton(discord.ui.DynamicItem[discord.ui.Button],
+                    template=r"szone_add:(?P<zid>\d+)"):
+    def __init__(self, zid: int):
+        super().__init__(discord.ui.Button(
+            label="➕ Ajouter un membre", style=discord.ButtonStyle.success,
+            custom_id=f"szone_add:{int(zid)}"))
+        self.zid = int(zid)
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["zid"]))
+
+    async def callback(self, i: discord.Interaction):
+        await add_member_click(i, self.zid)
+
+
+class ZoneVoiceButton(discord.ui.DynamicItem[discord.ui.Button],
+                      template=r"szone_voice:(?P<zid>\d+)"):
+    def __init__(self, zid: int):
+        super().__init__(discord.ui.Button(
+            label="🔊 Créer un vocal", style=discord.ButtonStyle.primary,
+            custom_id=f"szone_voice:{int(zid)}"))
+        self.zid = int(zid)
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["zid"]))
+
+    async def callback(self, i: discord.Interaction):
+        await voice_click(i, self.zid)
+
+
+class ZoneExpelButton(discord.ui.DynamicItem[discord.ui.Button],
+                      template=r"szone_expel:(?P<zid>\d+)"):
+    def __init__(self, zid: int):
+        super().__init__(discord.ui.Button(
+            label="👢 Expulser", style=discord.ButtonStyle.secondary,
+            custom_id=f"szone_expel:{int(zid)}"))
+        self.zid = int(zid)
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["zid"]))
+
+    async def callback(self, i: discord.Interaction):
+        await expel_click(i, self.zid)
+
+
 def register_persistent_views(bot_instance):
     if bot_instance is None:
         return
     try:
-        bot_instance.add_dynamic_items(ZoneCreateButton, ZoneJoinButton, ZoneCloseButton)
+        bot_instance.add_dynamic_items(
+            ZoneCreateButton, ZoneJoinButton, ZoneCloseButton,
+            ZoneAddButton, ZoneVoiceButton, ZoneExpelButton)
     except Exception as ex:
         print(f"[social_zones register] {ex}")
