@@ -55,6 +55,7 @@ _CATEGORY = {"group": "👥 Groupes", "trade": "🤝 Échanges"}
 _PREFIX = {"group": "👥-groupe", "trade": "🤝-trade"}
 _MAX_MEMBERS = {"group": 6, "trade": 2}        # trade = créateur + 1 partenaire
 _TTL_SEC = {"group": 1800, "trade": 1500}      # inactivité avant fermeture auto (30 / 25 min)
+_PENDING_TTL_SEC = 900                          # invitation/consentement en attente : purge à 15 min
 _MAX_ACTIVE_ZONES = 30                          # plafond de salons sociaux par guilde
 _CLICK_CD = 1.5                                 # anti-spam par utilisateur (s)
 _ACTIVITY_THROTTLE_SEC = 45                     # n'écrit last_activity au + qu'1×/45 s/salon
@@ -127,11 +128,18 @@ async def init_db():
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_social_active "
                 "ON social_zones(guild_id, status)")
-            # Anti-double-salon ATOMIQUE : 1 seule zone active par (guilde, créateur, type).
-            # Un 2e INSERT (double-clic) lève IntegrityError → géré proprement.
+            # Anti-double-salon ATOMIQUE : 1 seule zone active OU EN ATTENTE par (guilde, créateur,
+            # type). Un 2e INSERT (double-clic, ou 2e demande alors qu'une 1re est pending) lève
+            # IntegrityError → géré proprement. owner 2026-07-02 : couvre désormais 'pending'
+            # (groupe/trade en attente d'un 2e participant, salon pas encore créé) → DROP+CREATE
+            # pour appliquer la nouvelle condition WHERE même si l'index existait déjà.
+            try:
+                await db.execute("DROP INDEX IF EXISTS idx_social_one_active")
+            except Exception:
+                pass
             await db.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_social_one_active "
-                "ON social_zones(guild_id, creator_id, kind) WHERE status='active'")
+                "ON social_zones(guild_id, creator_id, kind) WHERE status IN ('active','pending')")
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS social_zone_members (
                     zone_id INTEGER NOT NULL,
@@ -153,6 +161,20 @@ async def init_db():
             # supprimé avec la zone). ALTER best-effort (colonne peut déjà exister).
             try:
                 await db.execute("ALTER TABLE social_zones ADD COLUMN voice_channel_id INTEGER DEFAULT 0")
+            except Exception:
+                pass
+            # owner 2026-07-02 : partenaire d'un TRADE en attente de consentement mutuel + id du
+            # message d'invitation/consentement (pour l'éditer en « expiré »/« créé »). ALTER best-effort.
+            try:
+                await db.execute("ALTER TABLE social_zones ADD COLUMN partner_id INTEGER DEFAULT 0")
+            except Exception:
+                pass
+            try:
+                await db.execute("ALTER TABLE social_zones ADD COLUMN nudge_channel_id INTEGER DEFAULT 0")
+            except Exception:
+                pass
+            try:
+                await db.execute("ALTER TABLE social_zones ADD COLUMN nudge_message_id INTEGER DEFAULT 0")
             except Exception:
                 pass
             await db.commit()
@@ -222,13 +244,14 @@ async def _get_zone(zone_id: int):
     try:
         async with _get_db() as db:
             async with db.execute(
-                "SELECT id, guild_id, kind, creator_id, channel_id, status, topic "
+                "SELECT id, guild_id, kind, creator_id, channel_id, status, topic, partner_id "
                 "FROM social_zones WHERE id=?", (zone_id,)) as cur:
                 r = await cur.fetchone()
         if not r:
             return None
         return {"id": r[0], "guild_id": r[1], "kind": r[2], "creator_id": r[3],
-                "channel_id": r[4], "status": r[5], "topic": r[6] or ""}
+                "channel_id": r[4], "status": r[5], "topic": r[6] or "",
+                "partner_id": int((r[7] if len(r) > 7 else 0) or 0)}
     except Exception:
         return None
 
@@ -443,13 +466,28 @@ async def boot_cleanup():
             async with db.execute(
                 "SELECT id FROM social_zones WHERE status='ended' AND channel_id != 0") as cur:
                 stale = [int(r[0]) for r in await cur.fetchall()]
+            # PENDING/MATERIALIZING d'avant le reboot = invitations mortes (le nudge RAM a disparu) :
+            # on purge les lignes (pas de salon à supprimer, channel_id=0). Le nudge Discord traînant
+            # sera balayé par son delete_after natif ou restera inerte (bouton → « plus disponible »).
+            async with db.execute(
+                "SELECT id FROM social_zones WHERE status IN ('pending','materializing')") as cur:
+                pend = [int(r[0]) for r in await cur.fetchall()]
         for zid in ids:
             await close_zone(zid, linger=False)
         for zid in stale:
             await _delete_zone_channel(zid)
-        if ids or stale:
+        if pend:
+            try:
+                async with _get_db() as db:
+                    await db.execute("DELETE FROM social_zones WHERE status IN ('pending','materializing')")
+                    for zid in pend:
+                        await db.execute("DELETE FROM social_zone_members WHERE zone_id=?", (zid,))
+                    await db.commit()
+            except Exception:
+                pass
+        if ids or stale or pend:
             print(f"[social_zones boot_cleanup] {len(ids)} active(s) + "
-                  f"{len(stale)} salon(s) résiduel(s) nettoyé(s)")
+                  f"{len(stale)} salon(s) résiduel(s) + {len(pend)} en attente nettoyé(s)")
     except Exception as ex:
         print(f"[social_zones boot_cleanup] {ex}")
     # Filet anti-fantôme : balaie les salons orphelins (reboot en pleine création où
@@ -541,6 +579,25 @@ async def zone_watchdog():
                 "SELECT id FROM social_zones WHERE status='ended' AND channel_id != 0 AND "
                 "datetime(started_at) < datetime('now', '-60 seconds')") as cur:
                 ended = [int(r[0]) for r in await cur.fetchall()]
+            # owner 2026-07-02 : PENDING périmé (groupe sans 2e joueur / trade non accepté) →
+            # rien ne s'est créé, on purge la ligne + on éteint le nudge (« expiré »). Couvre aussi
+            # un 'materializing' resté coincé (crash en pleine création). Basé sur started_at.
+            async with db.execute(
+                "SELECT id FROM social_zones WHERE status IN ('pending','materializing') AND "
+                "datetime(started_at) < datetime('now', ?)",
+                (f'-{_PENDING_TTL_SEC} seconds',)) as cur:
+                pend = [int(r[0]) for r in await cur.fetchall()]
+        for zid in pend:
+            await _mark_nudge_dead(zid, "⌛ Invitation expirée — personne n'a rejoint/accepté.")
+            try:
+                async with _get_db() as db:
+                    await db.execute(
+                        "DELETE FROM social_zones WHERE id=? AND status IN ('pending','materializing')",
+                        (zid,))
+                    await db.execute("DELETE FROM social_zone_members WHERE zone_id=?", (zid,))
+                    await db.commit()
+            except Exception:
+                pass
         for zid in stale_ids:
             # Ne ferme PAS un groupe dont le vocal est OCCUPÉ (des gens parlent sans taper) :
             # on rafraîchit son activité pour qu'il survive au tour suivant.
@@ -645,28 +702,39 @@ async def note_message(msg):
 # ═══════════════════════════════════════════════════════════════════════════════
 #  CRÉATION DE ZONE (bouton « Créer un groupe » / « Ouvrir un trade »)
 # ═══════════════════════════════════════════════════════════════════════════════
-def _zone_intro_embed(kind: str, creator: discord.Member, members: list) -> discord.Embed:
+def _zone_intro_embed(kind: str, creator: discord.Member, members: list,
+                      topic: str = "") -> discord.Embed:
     if kind == "trade":
         title = "🤝 Salon d'échange privé"
         desc = (
-            f"Bienvenue {creator.mention} ! Voici **votre salon d'échange privé**.\n\n"
-            "• Discutez de votre échange ici, à l'abri des regards.\n"
-            "• ⚠️ Le bot **surveille** ce salon contre les arnaques — méfiez-vous quand même "
-            "des liens et des offres trop belles.\n"
+            "Voici **votre salon d'échange privé**, rien que pour vous deux.\n\n"
+            "• Mettez-vous d'accord ici, à l'abri des regards.\n"
             "• Cliquez sur **🔒 Fermer le trade** une fois l'échange terminé.\n"
             "• Le salon se **ferme tout seul** après un moment sans message.")
     else:
         title = "👥 Zone de groupe"
         desc = (
-            f"Zone créée par {creator.mention} ! Réunissez-vous ici pour vous coordonner.\n\n"
+            f"Groupe de {creator.mention if creator else 'joueur'} — réunissez-vous ici !\n\n"
             "• Organisez votre boss / raid / donjon dans ce salon dédié.\n"
-            "• D'autres joueurs peuvent **rejoindre** via le bouton sous le message d'origine.\n"
-            "• **➕ Ajouter un membre** : le créateur invite directement quelqu'un du serveur.\n"
-            "• **🔊 Créer un vocal** : ouvre un salon vocal privé rien que pour le groupe.\n"
-            "• **👢 Expulser** : le créateur (ou le staff) retire un membre.\n"
+            "• **➕ Ajouter un membre** · **🔊 Créer un vocal** · **👢 Expulser** (créateur/staff).\n"
             "• Cliquez sur **🔒 Fermer** quand c'est terminé.\n"
             "• La zone se **ferme toute seule** après un moment sans activité.")
     e = discord.Embed(title=title, description=desc, color=_COLOR.get(kind, 0x5865F2))
+    if kind == "trade":
+        t = (topic or "").strip()
+        if t:
+            e.add_field(name="📦 Échange proposé", value=f"_{t[:400]}_", inline=False)
+        # AVERTISSEMENT ANTI-ARNAQUE (owner 2026-07-02) : très visible, à chaque salon d'échange.
+        e.add_field(
+            name="⚠️ Méfiance — anti-arnaque",
+            value=("• **Jamais** de « cross-trade » ou de paiement/échange **en premier** sur "
+                   "confiance : faites l'échange **en même temps**.\n"
+                   "• Méfiez-vous des offres **trop belles**, des liens, et de quelqu'un qui "
+                   "**presse**.\n"
+                   "• Un **screenshot** ne prouve rien. En cas de doute → **staff** + bouton 🔒.\n"
+                   "• Le bot surveille ce salon, mais **restez prudents** : une arnaque validée "
+                   "par vous n'est **pas** remboursable."),
+            inline=False)
     if len(members) > 1:
         e.add_field(name="Participants",
                     value=", ".join(m.mention for m in members if m is not None) or "—",
@@ -698,21 +766,41 @@ def _panel_view(zone_id: int, kind: str):
     return v
 
 
+# Mémoire courte : résumé d'échange capturé AU MOMENT du nudge (le custom_id d'un bouton ne peut
+# pas transporter de texte). Clé = id du message nudge ; lu par create_zone. Borné (anti-fuite).
+_zone_topic_mem: dict = {}
+
+
+def remember_zone_topic(msg_id: int, text: str):
+    """Appelé par bot.py quand il poste le nudge d'un échange : mémorise le résumé (« je vends X
+    contre Y ») pour le réafficher dans le salon d'échange. FAIL-SAFE."""
+    try:
+        if not text:
+            return
+        _zone_topic_mem[int(msg_id)] = str(text).strip()[:300]
+        if len(_zone_topic_mem) > 500:
+            for k in list(_zone_topic_mem.keys())[:250]:
+                _zone_topic_mem.pop(k, None)
+    except Exception:
+        pass
+
+
 async def create_zone(i: discord.Interaction, kind: str, author_id: int, partner_id: int = 0):
-    """Crée la zone privée. Réservé à l'AUTEUR du message d'origine (nominatif).
-    Pour le trade, ajoute le partenaire mentionné s'il y en a un. Retourne après avoir
-    édité le nudge d'origine (ajoute le bouton « Rejoindre » si pertinent)."""
+    """owner 2026-07-02 — LANCEMENT en 2 temps (plus de salon créé « à vide ») :
+    • GROUPE : on ne crée PAS le salon tout de suite. On poste une INVITATION dans le chat ;
+      le salon naît au 1er « Rejoindre » (si personne, rien n'est créé — le watchdog purge).
+    • TRADE : consentement MUTUEL. On envoie une demande au partenaire (ou une proposition
+      ouverte) ; le salon d'échange naît quand l'autre ACCEPTE (résumé + avertissement anti-arnaque).
+    Réservé à l'AUTEUR détecté (nominatif)."""
     if kind not in _KINDS:
         return
     if not await _safe_defer(i):
         return
     if _click_too_soon(i.user.id):
-        # défer déjà envoyé → résout l'éphémère (sinon spinner « thinking… » figé côté client)
         return await _safe_followup(i, content="⏳ Un instant… réessaie dans une seconde.")
     try:
         if i.guild is None:
             return await _safe_followup(i, content="❌ Serveur uniquement.")
-        # Nominatif : seul l'auteur détecté peut ouvrir SA zone.
         if i.user.id != int(author_id):
             return await _safe_followup(
                 i, content=f"ℹ️ Ce bouton est pour <@{int(author_id)}>. Si tu veux aussi "
@@ -729,133 +817,326 @@ async def create_zone(i: discord.Interaction, kind: str, author_id: int, partner
             return await _safe_followup(
                 i, content="⏳ Trop de zones ouvertes en ce moment — réessaie dans un instant.")
 
+        # Résumé d'échange capturé au nudge (trade uniquement).
+        topic = ""
+        nudge = getattr(i, "message", None)
+        try:
+            if nudge is not None:
+                topic = _zone_topic_mem.pop(int(nudge.id), "") or ""
+        except Exception:
+            topic = ""
+        n_ch_id = int(getattr(getattr(nudge, "channel", None), "id", 0) or 0)
+        n_msg_id = int(getattr(nudge, "id", 0) or 0)
+
         partner = None
         if kind == "trade" and partner_id:
             partner = guild.get_member(int(partner_id))
             if partner is not None and (partner.bot or partner.id == creator.id):
                 partner = None
 
-        # 1) Claim ATOMIQUE : réserve la ligne. Double-clic / déjà-une-zone → IntegrityError.
+        # Claim ATOMIQUE d'une ligne PENDING (statut 'pending' : PAS de salon encore). L'index
+        # unique (active|pending) empêche 2 demandes simultanées du même créateur/type.
         try:
             async with _get_db() as db:
                 cur = await db.execute(
-                    "INSERT INTO social_zones(guild_id, kind, creator_id, channel_id, status) "
-                    "VALUES(?,?,?,0,'active')",
-                    (guild.id, kind, creator.id))
+                    "INSERT INTO social_zones(guild_id, kind, creator_id, channel_id, status, "
+                    "topic, partner_id, nudge_channel_id, nudge_message_id) "
+                    "VALUES(?,?,?,0,'pending',?,?,?,?)",
+                    (guild.id, kind, creator.id, topic, (partner.id if partner else 0),
+                     n_ch_id, n_msg_id))
                 zone_id = cur.lastrowid
+                # Le créateur est déjà « membre » de la zone en attente.
+                await db.execute(
+                    "INSERT OR IGNORE INTO social_zone_members(zone_id, user_id) VALUES(?,?)",
+                    (zone_id, creator.id))
                 await db.commit()
         except sqlite3.IntegrityError:
             verb = "trade" if kind == "trade" else "groupe"
             return await _safe_followup(
-                i, content=f"⚠️ Tu as déjà un {verb} en cours — ferme-le d'abord "
-                           "(bouton 🔒 dans ton salon) avant d'en ouvrir un autre.")
+                i, content=f"⚠️ Tu as déjà un {verb} en cours — termine-le d'abord avant d'en "
+                           "relancer un autre.")
         except Exception as ex:
             print(f"[social_zones create INSERT] {ex}")
             return await _safe_followup(i, content="❌ Erreur au lancement, réessaie.")
 
-        # 2) Crée le salon. Échec → rollback de la ligne réservée (sinon zone fantôme bloquante).
-        members = [creator] + ([partner] if partner is not None else [])
-        ch = await _create_zone_channel(guild, kind, members, creator.display_name)
-        if ch is None:
-            try:
-                async with _get_db() as db:
-                    await db.execute("DELETE FROM social_zones WHERE id=?", (zone_id,))
-                    await db.commit()
-            except Exception:
-                pass
-            return await _safe_followup(i, content="❌ Impossible de créer le salon, réessaie.")
-
-        # 3) Persiste channel_id + membres + marque le salon comme actif (set mémoire).
-        try:
-            async with _get_db() as db:
-                await db.execute(
-                    "UPDATE social_zones SET channel_id=?, last_activity=CURRENT_TIMESTAMP "
-                    "WHERE id=?", (ch.id, zone_id))
-                await db.execute(
-                    "INSERT OR IGNORE INTO social_zone_members(zone_id, user_id) VALUES(?,?)",
-                    (zone_id, creator.id))
-                if partner is not None:
-                    await db.execute(
-                        "INSERT OR IGNORE INTO social_zone_members(zone_id, user_id) VALUES(?,?)",
-                        (zone_id, partner.id))
-                await db.commit()
-        except Exception as ex:
-            print(f"[social_zones create persist] {ex}")
-            # channel_id n'a pas pu être mémorisé → tout chemin de suppression raterait ce
-            # salon (channel_id resté 0) = FANTÔME permanent. On nettoie immédiatement.
-            try:
-                await ch.delete(reason="échec persistance zone sociale")
-            except Exception:
-                pass
-            try:
-                async with _get_db() as db:
-                    await db.execute("DELETE FROM social_zones WHERE id=?", (zone_id,))
-                    await db.commit()
-            except Exception:
-                pass
-            return await _safe_followup(i, content="❌ Erreur à la création, réessaie.")
-        _zone_channels.add(int(ch.id))
-
-        # 4) Poste le panneau dans le salon (mentionne les participants — c'est LEUR salon privé).
-        try:
-            mention_txt = " ".join(m.mention for m in members if m is not None)
-            await ch.send(
-                content=mention_txt,
-                embed=_zone_intro_embed(kind, creator, members),
-                view=_panel_view(zone_id, kind),
-                allowed_mentions=discord.AllowedMentions(
-                    everyone=False, roles=False,
-                    users=[m for m in members if m is not None]))
-        except Exception as ex:
-            print(f"[social_zones create panel] {ex}")
-
-        # 5) Édite le nudge d'origine : remplace « Créer/Ouvrir » par « Rejoindre » (sauf trade
-        #    déjà complet à 2). Best-effort.
-        try:
-            full = (await _member_count(zone_id)) >= _MAX_MEMBERS.get(kind, 2)
-            await _edit_nudge_after_create(i, kind, zone_id, ch, creator, full)
-        except Exception:
-            pass
-
-        # 6) Log discret (optionnel).
-        if _add_log is not None:
-            try:
-                await _add_log(
-                    guild,
-                    f"🧩 Zone {_LABEL.get(kind, kind)} ouverte par {creator.mention} → {ch.mention}",
-                    "info", category="social_zones")
-            except Exception:
-                pass
-
-        await _safe_followup(i, content=f"✅ Ton salon est prêt : {ch.mention}")
+        if kind == "group":
+            await _post_group_invite(i, zone_id, creator)
+            return await _safe_followup(
+                i, content="✅ Invitation lancée dans le chat ! Le salon du groupe se **créera dès "
+                           "qu'un joueur rejoint**. S'il n'y a personne, rien n'est créé. 👍")
+        # ── TRADE : consentement mutuel ──
+        if partner is not None:
+            await _post_trade_consent(i, zone_id, creator, partner, topic)
+            return await _safe_followup(
+                i, content=f"✅ Demande d'échange envoyée à **{partner.display_name}**. Le salon "
+                           "s'ouvrira **s'il/elle accepte**.")
+        await _post_trade_open(i, zone_id, creator, topic)
+        return await _safe_followup(
+            i, content="✅ Ta proposition d'échange est postée. Le salon s'ouvrira **dès que "
+                       "quelqu'un accepte** l'échange.")
     except Exception as ex:
         print(f"[social_zones create_zone] {ex}")
         await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
-async def _edit_nudge_after_create(i, kind, zone_id, channel, creator, full):
-    """Transforme le nudge d'origine en invitation à REJOINDRE (ou en simple info si complet)."""
+def _topic_line(topic: str) -> str:
+    t = (topic or "").strip()
+    return f"\n> 💬 _« {t[:200]} »_" if t else ""
+
+
+async def _post_group_invite(i, zone_id: int, creator):
+    """Édite le nudge d'origine en INVITATION à rejoindre le futur groupe (salon pas encore créé)."""
     msg = getattr(i, "message", None)
     if msg is None:
         return
-    if kind == "trade":
-        head = f"🤝 Trade ouvert par {creator.display_name} → {channel.mention}"
-        join_label = "🤝 Rejoindre le trade"
-    else:
-        head = f"👥 Groupe ouvert par {creator.display_name} → {channel.mention}"
-        join_label = "➕ Rejoindre le groupe"
+    v = discord.ui.View(timeout=None)
+    v.add_item(discord.ui.Button(
+        label="➕ Rejoindre le groupe", style=discord.ButtonStyle.success,
+        custom_id=f"szone_join:{int(zone_id)}"))
+    try:
+        await msg.edit(
+            content=f"👥 **{creator.display_name}** cherche des joueurs — clique pour **rejoindre** ! "
+                    "Le salon privé s'ouvre au 1er qui rejoint.",
+            embed=None, view=v, allowed_mentions=discord.AllowedMentions.none())
+    except Exception:
+        pass
+
+
+async def _post_trade_consent(i, zone_id: int, creator, partner, topic: str):
+    """Édite le nudge en DEMANDE DE CONSENTEMENT au partenaire mentionné (mentionne les 2)."""
+    msg = getattr(i, "message", None)
+    if msg is None:
+        return
+    v = discord.ui.View(timeout=None)
+    v.add_item(discord.ui.Button(
+        label="✅ Accepter l'échange", style=discord.ButtonStyle.success,
+        custom_id=f"szone_trade_ok:{int(zone_id)}"))
+    v.add_item(discord.ui.Button(
+        label="❌ Refuser", style=discord.ButtonStyle.secondary,
+        custom_id=f"szone_trade_no:{int(zone_id)}"))
+    try:
+        await msg.edit(
+            content=(f"🤝 {creator.mention} propose un **échange** à {partner.mention}."
+                     f"{_topic_line(topic)}\n{partner.mention}, tu acceptes ? "
+                     "_(le salon privé s'ouvrira seulement si tu acceptes)_"),
+            embed=None, view=v,
+            allowed_mentions=discord.AllowedMentions(
+                everyone=False, roles=False, users=[creator, partner]))
+    except Exception:
+        pass
+
+
+async def _post_trade_open(i, zone_id: int, creator, topic: str):
+    """Édite le nudge en PROPOSITION OUVERTE (pas de partenaire nommé) : le 1er qui accepte ouvre
+    le salon d'échange avec le créateur."""
+    msg = getattr(i, "message", None)
+    if msg is None:
+        return
+    v = discord.ui.View(timeout=None)
+    v.add_item(discord.ui.Button(
+        label="🤝 Faire l'échange", style=discord.ButtonStyle.success,
+        custom_id=f"szone_trade_ok:{int(zone_id)}"))
+    try:
+        await msg.edit(
+            content=(f"🤝 **{creator.display_name}** cherche à **échanger**.{_topic_line(topic)}\n"
+                     "Clique **Faire l'échange** pour ouvrir un salon privé avec lui/elle."),
+            embed=None, view=v, allowed_mentions=discord.AllowedMentions.none())
+    except Exception:
+        pass
+
+
+async def _mark_nudge_dead(zone_id: int, text: str):
+    """Édite le nudge d'une zone PENDING annulée/expirée (best-effort, retire les boutons)."""
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT nudge_channel_id, nudge_message_id FROM social_zones WHERE id=?",
+                (zone_id,)) as cur:
+                r = await cur.fetchone()
+        if not r:
+            return
+        ch = _bot.get_channel(int(r[0] or 0)) if (_bot and r[0]) else None
+        if ch is None or not r[1]:
+            return
+        try:
+            msg = await ch.fetch_message(int(r[1]))
+        except Exception:
+            return
+        await msg.edit(content=text, embed=None, view=None,
+                       allowed_mentions=discord.AllowedMentions.none())
+    except Exception:
+        pass
+
+
+async def _materialize_zone(zone_id: int, joiner) -> "tuple":
+    """Crée RÉELLEMENT le salon d'une zone 'pending' (au 1er join d'un groupe / à l'acceptation
+    d'un trade) et la passe 'active'. Claim ATOMIQUE pending→active (rowcount==1) → un seul
+    matérialise (anti-double-salon sur clics concurrents). Retourne (channel|None, error_str|None)."""
+    z = await _get_zone(zone_id)
+    if not z:
+        return None, "gone"
+    if z["status"] == "active" and z["channel_id"] and _bot:
+        # déjà matérialisée (course gagnée par un autre) → renvoie le salon existant
+        g = _bot.get_guild(int(z["guild_id"]))
+        return (g.get_channel(int(z["channel_id"])) if g else None), None
+    if z["status"] == "materializing":
+        return None, "race"   # matérialisation en cours par un autre clic → réessaie
+    if z["status"] != "pending":
+        return None, "gone"
+    guild = _bot.get_guild(int(z["guild_id"])) if _bot else None
+    if guild is None:
+        return None, "gone"
+    creator = guild.get_member(int(z["creator_id"]))
+    kind = z["kind"]
+    # Réserve la matérialisation : pending→'materializing' (un seul gagne).
+    try:
+        async with _get_db() as db:
+            cur = await db.execute(
+                "UPDATE social_zones SET status='materializing' WHERE id=? AND status='pending'",
+                (zone_id,))
+            won = getattr(cur, "rowcount", 0) == 1
+            await db.commit()
+    except Exception as ex:
+        print(f"[social_zones materialize claim] {ex}")
+        return None, "error"
+    if not won:
+        # quelqu'un d'autre matérialise → renvoie le salon dès qu'il existe (best-effort)
+        z2 = await _get_zone(zone_id)
+        if z2 and z2["channel_id"] and guild:
+            return guild.get_channel(int(z2["channel_id"])), None
+        return None, "race"
+    members = [m for m in (creator, joiner) if m is not None]
+    ch = await _create_zone_channel(guild, kind, members, (creator.display_name if creator else "zone"))
+    if ch is None:
+        # échec création → on REND la ligne à 'pending' (réessayable) ou on l'annule.
+        try:
+            async with _get_db() as db:
+                await db.execute("UPDATE social_zones SET status='pending' WHERE id=?", (zone_id,))
+                await db.commit()
+        except Exception:
+            pass
+        return None, "channel"
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "UPDATE social_zones SET channel_id=?, status='active', "
+                "last_activity=CURRENT_TIMESTAMP WHERE id=?", (ch.id, zone_id))
+            for m in members:
+                await db.execute(
+                    "INSERT OR IGNORE INTO social_zone_members(zone_id, user_id) VALUES(?,?)",
+                    (zone_id, m.id))
+            await db.commit()
+    except Exception as ex:
+        print(f"[social_zones materialize persist] {ex}")
+        try:
+            await ch.delete(reason="échec persistance zone sociale")
+        except Exception:
+            pass
+        try:
+            async with _get_db() as db:
+                await db.execute("UPDATE social_zones SET status='pending', channel_id=0 WHERE id=?", (zone_id,))
+                await db.commit()
+        except Exception:
+            pass
+        return None, "persist"
+    _zone_channels.add(int(ch.id))
+    # Panneau + intro dans le salon (mentionne les participants — c'est LEUR salon privé).
+    try:
+        await ch.send(
+            content=" ".join(m.mention for m in members),
+            embed=_zone_intro_embed(kind, creator, members, topic=z.get("topic", "")),
+            view=_panel_view(zone_id, kind),
+            allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=members))
+    except Exception as ex:
+        print(f"[social_zones materialize panel] {ex}")
+    if _add_log is not None:
+        try:
+            await _add_log(guild, f"🧩 Zone {_LABEL.get(kind, kind)} créée ({creator.mention if creator else '?'} "
+                                  f"+ {joiner.mention if joiner else '?'}) → {ch.mention}", "info",
+                           category="social_zones")
+        except Exception:
+            pass
+    return ch, None
+
+
+async def _edit_group_nudge_live(i, zone_id: int, ch, full: bool):
+    """Après matérialisation d'un groupe : édite l'invitation cliquée → pointe vers le salon (garde
+    le bouton « Rejoindre » tant qu'il reste de la place)."""
+    msg = getattr(i, "message", None)
+    if msg is None:
+        return
     v = discord.ui.View(timeout=None)
     if not full:
         v.add_item(discord.ui.Button(
-            label=join_label, style=discord.ButtonStyle.success,
+            label="➕ Rejoindre le groupe", style=discord.ButtonStyle.success,
             custom_id=f"szone_join:{int(zone_id)}"))
+    head = (f"👥 Groupe en cours → {ch.mention}"
+            + ("  ·  _complet_" if full else " — clique pour rejoindre !"))
     try:
-        await msg.edit(
-            content=head + ("" if not full else "  ·  _complet_"),
-            embed=None, view=(v if not full else None),
-            allowed_mentions=discord.AllowedMentions.none())
+        await msg.edit(content=head, embed=None, view=(v if not full else None),
+                       allowed_mentions=discord.AllowedMentions.none())
     except Exception:
         pass
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  TRADE : consentement mutuel (✅ Accepter / ❌ Refuser) → matérialise le salon
+# ═══════════════════════════════════════════════════════════════════════════════
+async def trade_consent_click(i: discord.Interaction, zone_id: int, accept: bool):
+    if not await _safe_defer(i):
+        return
+    if _click_too_soon(i.user.id):
+        return await _safe_followup(i, content="⏳ Un instant… réessaie dans une seconde.")
+    try:
+        if i.guild is None:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        z = await _get_zone(zone_id)
+        if not z or z["kind"] != "trade":
+            return await _safe_followup(i, content="⌛ Cette demande n'est plus disponible.")
+        if z["status"] not in ("pending", "materializing"):
+            if z["status"] == "active" and z["channel_id"]:
+                _c = i.guild.get_channel(int(z["channel_id"]))
+                if _c is not None:
+                    return await _safe_followup(
+                        i, content=f"✅ L'échange a déjà son salon : {_c.mention}")
+            return await _safe_followup(i, content="⌛ Cette demande n'est plus disponible.")
+        creator_id = int(z["creator_id"])
+        partner_id = int(z.get("partner_id") or 0)
+        clicker = i.user
+        if clicker.id == creator_id:
+            return await _safe_followup(
+                i, content="⏳ C'est ta demande — c'est à **l'autre** d'accepter l'échange. 🙂")
+        if partner_id and clicker.id != partner_id:
+            return await _safe_followup(
+                i, content=f"ℹ️ Cette demande d'échange est adressée à <@{partner_id}>.")
+        if await _is_zone_banned(zone_id, clicker.id):
+            return await _safe_followup(i, content="🚫 Tu ne peux pas rejoindre cette zone.")
+        if not accept:
+            # REFUS → on marque le nudge AVANT de supprimer la ligne (sinon plus de refs nudge).
+            await _mark_nudge_dead(zone_id, "❌ Échange refusé.")
+            try:
+                async with _get_db() as db:
+                    await db.execute(
+                        "DELETE FROM social_zones WHERE id=? AND status IN ('pending','materializing')",
+                        (zone_id,))
+                    await db.execute("DELETE FROM social_zone_members WHERE zone_id=?", (zone_id,))
+                    await db.commit()
+            except Exception:
+                pass
+            return await _safe_followup(i, content="👍 Échange refusé — la demande est annulée.")
+        # ACCEPTE → matérialise le salon d'échange (créateur + partenaire).
+        member = clicker if isinstance(clicker, discord.Member) else i.guild.get_member(clicker.id)
+        ch2, err = await _materialize_zone(zone_id, member)
+        if ch2 is None:
+            if err == "race":
+                return await _safe_followup(
+                    i, content="⏳ Le salon se crée à l'instant… réessaie dans 2 s.")
+            return await _safe_followup(i, content="⌛ Cette demande n'est plus disponible.")
+        await _mark_nudge_dead(zone_id, "✅ Échange accepté — salon privé ouvert.")
+        return await _safe_followup(i, content=f"✅ Échange accepté — votre salon : {ch2.mention}")
+    except Exception as ex:
+        print(f"[social_zones trade_consent_click] {ex}")
+        await _safe_followup(i, content="❌ Erreur, réessaie.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -871,12 +1152,35 @@ async def join_zone(i: discord.Interaction, zone_id: int):
         if i.guild is None:
             return await _safe_followup(i, content="❌ Serveur uniquement.")
         z = await _get_zone(zone_id)
-        if not z or z["status"] != "active" or not z["channel_id"]:
+        if not z:
             return await _safe_followup(i, content="⌛ Cette zone n'est plus disponible.")
         guild = i.guild
         member = i.user if isinstance(i.user, discord.Member) else guild.get_member(i.user.id)
         if member is None:
             return await _safe_followup(i, content="❌ Membre introuvable.")
+        # ── GROUPE EN ATTENTE (lazy) : le 1er « Rejoindre » d'un AUTRE joueur CRÉE le salon ──
+        if z["status"] in ("pending", "materializing") and z["kind"] == "group":
+            if member.id == int(z["creator_id"]):
+                return await _safe_followup(
+                    i, content="⏳ C'est ton invitation — le salon se créera quand **un autre "
+                               "joueur** rejoint. 🙂")
+            if await _is_zone_banned(zone_id, member.id):
+                return await _safe_followup(
+                    i, content="🚫 Un gestionnaire t'a retiré de cette zone.")
+            ch2, err = await _materialize_zone(zone_id, member)
+            if ch2 is None:
+                if err == "race":
+                    return await _safe_followup(
+                        i, content="⏳ Le salon se crée à l'instant… réessaie dans 2 s.")
+                return await _safe_followup(i, content="⌛ Cette invitation n'est plus disponible.")
+            try:
+                full = (await _member_count(zone_id)) >= _MAX_MEMBERS.get("group", 6)
+                await _edit_group_nudge_live(i, zone_id, ch2, full)
+            except Exception:
+                pass
+            return await _safe_followup(i, content=f"✅ Groupe créé — tu as rejoint : {ch2.mention}")
+        if z["status"] != "active" or not z["channel_id"]:
+            return await _safe_followup(i, content="⌛ Cette zone n'est plus disponible.")
         ch = guild.get_channel(int(z["channel_id"]))
         if ch is None:
             # Salon disparu → ferme la ligne pour cohérence.
@@ -1597,12 +1901,45 @@ class ZoneExpelButton(discord.ui.DynamicItem[discord.ui.Button],
         await expel_click(i, self.zid)
 
 
+class ZoneTradeOkButton(discord.ui.DynamicItem[discord.ui.Button],
+                        template=r"szone_trade_ok:(?P<zid>\d+)"):
+    def __init__(self, zid: int):
+        super().__init__(discord.ui.Button(
+            label="✅ Accepter l'échange", style=discord.ButtonStyle.success,
+            custom_id=f"szone_trade_ok:{int(zid)}"))
+        self.zid = int(zid)
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["zid"]))
+
+    async def callback(self, i: discord.Interaction):
+        await trade_consent_click(i, self.zid, accept=True)
+
+
+class ZoneTradeNoButton(discord.ui.DynamicItem[discord.ui.Button],
+                        template=r"szone_trade_no:(?P<zid>\d+)"):
+    def __init__(self, zid: int):
+        super().__init__(discord.ui.Button(
+            label="❌ Refuser", style=discord.ButtonStyle.secondary,
+            custom_id=f"szone_trade_no:{int(zid)}"))
+        self.zid = int(zid)
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["zid"]))
+
+    async def callback(self, i: discord.Interaction):
+        await trade_consent_click(i, self.zid, accept=False)
+
+
 def register_persistent_views(bot_instance):
     if bot_instance is None:
         return
     try:
         bot_instance.add_dynamic_items(
             ZoneCreateButton, ZoneJoinButton, ZoneCloseButton,
-            ZoneAddButton, ZoneVoiceButton, ZoneExpelButton)
+            ZoneAddButton, ZoneVoiceButton, ZoneExpelButton,
+            ZoneTradeOkButton, ZoneTradeNoButton)
     except Exception as ex:
         print(f"[social_zones register] {ex}")
