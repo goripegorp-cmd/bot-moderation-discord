@@ -77,6 +77,17 @@ _GENERIC = frozenset({
     "guilde", "guildes", "guild", "guilds", "clan", "clans", "alliance", "alliances", "team",
     "serveur", "serveurs", "server", "servers", "discord", "salon", "salons", "channel",
     "daide", "svpl", "siouplait", "veux", "voudrais", "aimerais", "cherchons", "besoins",
+    # ── multilingue trade/coordination (owner 2026-07-02 : serveur international) — EN + ES/PT ──
+    "selling", "buying", "trading", "sells", "buys", "trades", "offer", "offering", "offers",
+    "looking", "swap", "swaps", "swapping", "sale", "sales", "worth", "paying", "giving", "taking",
+    "anything", "anyone", "someone", "player", "players", "people", "friend", "friends", "helping",
+    "wanna", "gonna", "lemme", "gimme", "trade", "buyer", "seller", "cheap", "offering",
+    "vendo", "compro", "cambio", "vender", "comprar", "cambiar", "busco", "cambios", "troca",
+    "trocar", "vendendo", "comprando", "quiero", "necesito", "ayuda", "ayudar", "grupo", "partida",
+    "hilfe", "suche", "verkaufe", "tausch", "handel", "gruppe", "helfen", "brauche",
+    # noms VAGUES (« un truc/objet/des affaires ») — génériques, ne doivent jamais apparier
+    "items", "item", "something", "somethin", "things", "thing", "objet", "objets", "objeto",
+    "objetos", "cosas", "cosa", "affaires", "affaire", "matos", "stuffs", "gears", "trucs",
 })
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -122,7 +133,9 @@ def note(guild_id, author_id, msg_id, channel_id, kind: str, text: str):
         toks = tokens(text)
         lst = _prune(_INDEX.get(gid, []))
         match = None
-        if kind in ("group", "help") and toks:
+        # owner 2026-07-02 : 'trade' apparié aussi par SIMILARITÉ (2 messages d'échange qui partagent
+        # le même objet), pas seulement par réponse directe (cf. trade_reply_match).
+        if kind in ("group", "help", "trade") and toks:
             # message récent d'un AUTRE auteur, MÊME type, partageant un token spécifique (le + récent).
             for r in reversed(lst):
                 if r["author_id"] == aid or r["kind"] != kind:
