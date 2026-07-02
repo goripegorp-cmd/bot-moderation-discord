@@ -244,6 +244,12 @@ async def init_db():
                 await db.execute("ALTER TABLE social_zones ADD COLUMN nudge_message_id INTEGER DEFAULT 0")
             except Exception:
                 pass
+            # owner 2026-07-02 (Lot B) : id du message de ce groupe dans le TABLEAU LFG (« 🔍 Recherche
+            # de groupe ») → permet de le mettre à jour (compteur) / le retirer à la fermeture.
+            try:
+                await db.execute("ALTER TABLE social_zones ADD COLUMN lfg_message_id INTEGER DEFAULT 0")
+            except Exception:
+                pass
             await db.commit()
     except Exception as ex:
         print(f"[social_zones init_db] {ex}")
@@ -438,6 +444,11 @@ async def _delete_zone_channel(zone_id: int):
     à 0 — mais SEULEMENT si la/les suppression(s) Discord ont réussi. Ainsi, sur échec transitoire
     (429/5xx), la ligne garde ses ids != 0 et le watchdog (qui balaie les zones 'ended' avec
     channel_id != 0) réessaiera au tour suivant → ZÉRO salon fantôme, sans attendre un reboot."""
+    # Lot B : retire l'entrée du tableau LFG (best-effort, avant de purger le salon).
+    try:
+        await _lfg_remove(zone_id)
+    except Exception:
+        pass
     try:
         async with _get_db() as db:
             async with db.execute(
@@ -1218,6 +1229,13 @@ async def _materialize_zone(zone_id: int, joiner) -> "tuple":
                            category="social_zones")
         except Exception:
             pass
+    # Lot B : un GROUPE nouvellement matérialisé s'affiche dans le tableau LFG + ping opt-in.
+    if kind == "group":
+        try:
+            await _lfg_upsert(zone_id)
+            await _lfg_maybe_ping(zone_id)
+        except Exception:
+            pass
     return ch, None
 
 
@@ -1609,6 +1627,205 @@ async def trade_mediator_click(i: discord.Interaction, zone_id: int):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  TABLEAU LFG (owner 2026-07-02, Lot B) — « 🔍 Recherche de groupe » : liste les GROUPES
+#  ouverts (browsables + Rejoindre) même après l'expiration du nudge chat + rôle LFG opt-in.
+# ═══════════════════════════════════════════════════════════════════════════════
+_lfg_ping_cd: dict = {}     # {guild_id: epoch} — cooldown du ping de rôle LFG
+_LFG_PING_GAP = 600         # 10 min entre 2 pings LFG
+
+
+async def _lfg_board_channel(guild):
+    """Salon du tableau LFG (config 'lfg_board_channel'), ou None si non configuré (feature OFF)."""
+    if _db_get is None or guild is None:
+        return None
+    try:
+        c = await _db_get(guild.id) or {}
+        cid = int(c.get("lfg_board_channel", 0) or 0)
+        if cid:
+            ch = guild.get_channel(cid)
+            if isinstance(ch, discord.TextChannel):
+                return ch
+    except Exception:
+        pass
+    return None
+
+
+def _lfg_view(zone_id: int):
+    v = discord.ui.View(timeout=None)
+    v.add_item(discord.ui.Button(
+        label="➕ Rejoindre", style=discord.ButtonStyle.success,
+        custom_id=f"szone_join:{int(zone_id)}"))
+    return v
+
+
+def _lfg_header_view():
+    v = discord.ui.View(timeout=None)
+    v.add_item(discord.ui.Button(
+        label="🔔 Alertes groupes (on/off)", style=discord.ButtonStyle.primary,
+        custom_id="szone_lfg_optin"))
+    return v
+
+
+async def post_lfg_header(guild) -> bool:
+    """Poste l'en-tête du tableau LFG (explication + bouton d'opt-in). Appelé par bot.py quand
+    l'owner configure le salon LFG. FAIL-SAFE."""
+    board = await _lfg_board_channel(guild)
+    if board is None:
+        return False
+    try:
+        await board.send(
+            "🔍 **Recherche de groupe** — les groupes ouverts s'affichent ici : clique **➕ Rejoindre** "
+            "pour entrer (même si le message du chat a disparu). Active le bouton ci-dessous pour être "
+            "**alerté** quand un nouveau groupe s'ouvre.",
+            view=_lfg_header_view(), allowed_mentions=discord.AllowedMentions.none())
+        return True
+    except Exception:
+        return False
+
+
+async def _lfg_upsert(zone_id: int):
+    """Poste/actualise l'entrée d'un GROUPE actif dans le tableau LFG (compteur N/cap). Retire
+    l'entrée si le groupe est COMPLET. No-op si le tableau n'est pas configuré. FAIL-SAFE."""
+    try:
+        if _bot is None:
+            return
+        z = await _get_zone(zone_id)
+        if not z or z["kind"] != "group" or z["status"] != "active":
+            return
+        guild = _bot.get_guild(int(z["guild_id"]))
+        if guild is None:
+            return
+        board = await _lfg_board_channel(guild)
+        if board is None:
+            return
+        cnt = await _member_count(zone_id)
+        cap = _MAX_MEMBERS.get("group", 6)
+        if cnt >= cap:
+            await _lfg_remove(zone_id)   # complet → plus dans la liste
+            return
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT lfg_message_id FROM social_zones WHERE id=?", (zone_id,)) as cur:
+                r = await cur.fetchone()
+        board_mid = int((r[0] if r else 0) or 0)
+        creator = guild.get_member(int(z["creator_id"]))
+        topic = (z.get("topic") or "").strip()
+        content = (f"👥 **Groupe** de {creator.display_name if creator else 'un joueur'} — "
+                   f"**{cnt}/{cap}**" + (f" · _{topic[:120]}_" if topic else "")
+                   + "\nClique **➕ Rejoindre** pour entrer !")
+        view = _lfg_view(zone_id)
+        if board_mid:
+            try:
+                msg = await board.fetch_message(board_mid)
+                await msg.edit(content=content, view=view,
+                               allowed_mentions=discord.AllowedMentions.none())
+                return
+            except Exception:
+                pass  # message disparu → on repost
+        try:
+            msg = await board.send(content=content, view=view,
+                                   allowed_mentions=discord.AllowedMentions.none())
+            async with _get_db() as db:
+                await db.execute("UPDATE social_zones SET lfg_message_id=? WHERE id=?",
+                                 (msg.id, zone_id))
+                await db.commit()
+        except Exception:
+            pass
+    except Exception as ex:
+        print(f"[social_zones _lfg_upsert] {ex}")
+
+
+async def _lfg_remove(zone_id: int):
+    """Retire l'entrée LFG d'un groupe (fermé/complet). FAIL-SAFE."""
+    try:
+        if _bot is None:
+            return
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT guild_id, lfg_message_id FROM social_zones WHERE id=?", (zone_id,)) as cur:
+                r = await cur.fetchone()
+        if not r or not r[1]:
+            return
+        guild = _bot.get_guild(int(r[0]))
+        board = await _lfg_board_channel(guild) if guild else None
+        if board is not None:
+            try:
+                msg = await board.fetch_message(int(r[1]))
+                await msg.delete()
+            except Exception:
+                pass
+        async with _get_db() as db:
+            await db.execute("UPDATE social_zones SET lfg_message_id=0 WHERE id=?", (zone_id,))
+            await db.commit()
+    except Exception:
+        pass
+
+
+async def _lfg_maybe_ping(zone_id: int):
+    """Ping le rôle LFG (opt-in) dans le tableau quand un nouveau groupe s'ouvre (cooldown/guilde)."""
+    try:
+        if _bot is None or _db_get is None:
+            return
+        z = await _get_zone(zone_id)
+        if not z or z["kind"] != "group":
+            return
+        guild = _bot.get_guild(int(z["guild_id"]))
+        if guild is None:
+            return
+        board = await _lfg_board_channel(guild)
+        if board is None:
+            return
+        c = await _db_get(guild.id) or {}
+        rid = int(c.get("lfg_role_id", 0) or 0)
+        role = guild.get_role(rid) if rid else None
+        if role is None:
+            return
+        now = datetime.now(timezone.utc).timestamp()
+        if now - _lfg_ping_cd.get(guild.id, 0) < _LFG_PING_GAP:
+            return
+        _lfg_ping_cd[guild.id] = now
+        try:
+            await board.send(
+                f"{role.mention} un nouveau **groupe** cherche des joueurs — voir ci-dessus ! 👀",
+                allowed_mentions=discord.AllowedMentions(roles=[role], everyone=False, users=False))
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+async def lfg_optin_click(i: discord.Interaction):
+    """Bascule le rôle LFG (opt-in aux alertes de groupes)."""
+    if not await _safe_defer(i):
+        return
+    try:
+        guild = i.guild
+        if guild is None or _db_get is None:
+            return await _safe_followup(i, content="❌ Serveur uniquement.")
+        c = await _db_get(guild.id) or {}
+        rid = int(c.get("lfg_role_id", 0) or 0)
+        role = guild.get_role(rid) if rid else None
+        if role is None:
+            return await _safe_followup(
+                i, content="ℹ️ Le rôle d'alertes LFG n'est pas encore configuré par le staff.")
+        member = i.user if isinstance(i.user, discord.Member) else guild.get_member(i.user.id)
+        if member is None:
+            return await _safe_followup(i, content="❌ Membre introuvable.")
+        try:
+            if role in member.roles:
+                await member.remove_roles(role, reason="Opt-out alertes LFG")
+                return await _safe_followup(i, content="🔕 Tu ne recevras **plus** les alertes de groupes.")
+            await member.add_roles(role, reason="Opt-in alertes LFG")
+            return await _safe_followup(i, content="🔔 Tu seras **alerté** quand un groupe s'ouvre !")
+        except Exception:
+            return await _safe_followup(
+                i, content="❌ Impossible de modifier ton rôle (le rôle est peut-être au-dessus du bot).")
+    except Exception as ex:
+        print(f"[social_zones lfg_optin_click] {ex}")
+        await _safe_followup(i, content="❌ Erreur, réessaie.")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  REJOINDRE UNE ZONE (bouton « Rejoindre »)
 # ═══════════════════════════════════════════════════════════════════════════════
 async def join_zone(i: discord.Interaction, zone_id: int):
@@ -1731,6 +1948,12 @@ async def join_zone(i: discord.Interaction, zone_id: int):
                                    allowed_mentions=discord.AllowedMentions.none())
         except Exception:
             pass
+        # Lot B : actualise l'entrée LFG (compteur ; retirée si désormais complet).
+        if z["kind"] == "group":
+            try:
+                await _lfg_upsert(zone_id)
+            except Exception:
+                pass
         await _safe_followup(i, content=f"✅ Tu as rejoint : {ch.mention}")
     except Exception as ex:
         print(f"[social_zones join_zone] {ex}")
@@ -1955,6 +2178,10 @@ async def _do_add_member(i: discord.Interaction, zone_id: int, user):
                 "Bienvenue — c'est ici que ça se passe. 🎯",
                 allowed_mentions=discord.AllowedMentions(
                     everyone=False, roles=False, users=[member]))
+        except Exception:
+            pass
+        try:
+            await _lfg_upsert(zone_id)   # Lot B : maj compteur LFG (retiré si complet)
         except Exception:
             pass
         await _safe_followup(i, content=f"✅ {member.display_name} a été ajouté à {ch.mention}.")
@@ -2262,6 +2489,10 @@ async def _do_expel(i: discord.Interaction, zone_id: int, user_id: int):
                               allowed_mentions=discord.AllowedMentions.none())
             except Exception:
                 pass
+        try:
+            await _lfg_upsert(zone_id)   # Lot B : effectif en baisse → ré-affiche si c'était complet
+        except Exception:
+            pass
         await _safe_followup(i, content=f"✅ {name} a été expulsé.")
     except Exception as ex:
         print(f"[social_zones _do_expel] {ex}")
@@ -2450,6 +2681,21 @@ class ZoneTradeMediatorButton(discord.ui.DynamicItem[discord.ui.Button],
         await trade_mediator_click(i, self.zid)
 
 
+class ZoneLfgOptinButton(discord.ui.DynamicItem[discord.ui.Button],
+                         template=r"szone_lfg_optin"):
+    def __init__(self):
+        super().__init__(discord.ui.Button(
+            label="🔔 Alertes groupes (on/off)", style=discord.ButtonStyle.primary,
+            custom_id="szone_lfg_optin"))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls()
+
+    async def callback(self, i: discord.Interaction):
+        await lfg_optin_click(i)
+
+
 def register_persistent_views(bot_instance):
     if bot_instance is None:
         return
@@ -2458,6 +2704,7 @@ def register_persistent_views(bot_instance):
             ZoneCreateButton, ZoneJoinButton, ZoneCloseButton,
             ZoneAddButton, ZoneVoiceButton, ZoneExpelButton,
             ZoneTradeOkButton, ZoneTradeNoButton,
-            ZoneTradeDoneButton, ZoneTradeScamButton, ZoneTradeMediatorButton)
+            ZoneTradeDoneButton, ZoneTradeScamButton, ZoneTradeMediatorButton,
+            ZoneLfgOptinButton)
     except Exception as ex:
         print(f"[social_zones register] {ex}")
