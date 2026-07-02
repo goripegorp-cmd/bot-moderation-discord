@@ -1610,15 +1610,63 @@ async def _despawn_after(mob_id: int, seconds: int):
 
 # ─── Spawn task ────────────────────────────────────────────────────────────
 
+async def _sweep_phantom_mobs(guild):
+    """Nettoie les mobs FANTÔMES : ligne 'alive' dont le PANNEAU n'a jamais été posté
+    (message_id NULL/0) depuis > 3 min → despawn + suppression du salon 🐗-mob VIDE.
+    owner 2026-07-02 : sans ça, un échec de post (ex. contention DB au boot) laissait un
+    salon mob VIDE ~20 min ET bloquait le prochain spawn (le cooldown regarde le dernier
+    spawn, fantôme inclus). Best-effort / fail-safe."""
+    if _get_db is None:
+        return
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT id, channel_id FROM mob_spawns WHERE guild_id=? AND status='alive' "
+                "AND (message_id IS NULL OR message_id=0) "
+                "AND datetime(spawned_at) < datetime('now', '-3 minutes')",
+                (guild.id,),
+            ) as cur:
+                rows = await cur.fetchall()
+        for mob_id, ch_id in rows:
+            try:
+                async with _get_db() as db:
+                    await db.execute(
+                        "UPDATE mob_spawns SET status='despawned' WHERE id=?", (mob_id,))
+                    await db.commit()
+            except Exception:
+                pass
+            if ch_id and _arena_delete_fn is not None:
+                try:
+                    await _arena_delete_fn(guild, int(ch_id), grace_seconds=0)
+                except Exception:
+                    pass
+        if rows:
+            print(f"[mob_hunts] {len(rows)} mob(s) fantôme(s) nettoyé(s) guild={guild.id}")
+    except Exception as ex:
+        print(f"[mob_hunts _sweep_phantom_mobs] {ex}")
+
+
+_spawn_task_first_tick = True  # audit 2026-07-02 : saute le 1er tick (boot) — anti-contention
+
+
 @tasks.loop(minutes=1)
 async def spawn_task():
-    """Task qui décide quand spawn un mob (random 30-45 min entre 2)."""
+    """Task qui décide quand spawn un mob (random 18-30 min entre 2) + nettoie les fantômes."""
+    global _spawn_task_first_tick
     if _bot is None or _get_db is None:
         return
+    _first = _spawn_task_first_tick
+    _spawn_task_first_tick = False
     try:
         for guild in _bot.guilds:
             try:
-                # Vérifie le dernier spawn — si > random(30-45) min, on spawn
+                # Nettoyage des mobs fantômes AVANT tout (libère salon vide + slot de spawn).
+                await _sweep_phantom_mobs(guild)
+                # Au 1er tick (juste après un boot), on NE spawn PAS (fenêtre de contention DB) —
+                # on se contente de nettoyer les fantômes. 1er vrai spawn au tick suivant.
+                if _first:
+                    continue
+                # Vérifie le dernier spawn — si > random(18-30) min, on spawn
                 async with _get_db() as db:
                     async with db.execute(
                         "SELECT spawned_at FROM mob_spawns "
