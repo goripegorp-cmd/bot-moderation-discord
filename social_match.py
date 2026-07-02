@@ -62,6 +62,21 @@ _GENERIC = frozenset({
     "moins", "tres", "trop", "bien", "aussi", "encore", "juste", "meme", "tout", "tous", "toute",
     "toutes", "rien", "quand", "parce", "puis", "here", "there", "want", "need", "some", "have",
     "does", "with", "that", "this", "your", "mine", "please", "anyone", "someone",
+    # interpellations / familier / salutations (source majeure de FP — revue 2026-07-02)
+    "gars", "mecs", "amis", "potes", "poto", "potos", "guys", "folks", "salut", "coucou", "hello",
+    "bonjour", "bonsoir", "wesh", "hola", "yolo", "frere", "freros", "reuf", "boug", "bougs",
+    "merci", "thanks", "truc", "trucs", "machin", "chose", "choses", "chaud", "chaude", "chauds",
+    "jouer", "jouez", "jouons", "joue", "jouent", "play", "playing", "finir", "finish", "fini",
+    "perso", "persos", "ensemble", "together", "venez", "viens", "viennent", "vient", "allez",
+    "allons", "nouvelle", "nouveau", "nouveaux", "monte", "monter", "rejoins", "rejoint",
+    "genre", "style", "grave", "carrement", "direct", "tranquille", "tranquil", "motive",
+    "motives", "chill", "voila", "ouais", "faut", "faudrait", "capable", "capables",
+    # économie / communauté (aussi génériques que « boss »/« raid » → à exclure)
+    "kamas", "gold", "golds", "mesos", "zeny", "berry", "berrys", "robux", "credit", "credits",
+    "gemme", "gemmes", "gems", "monnaie", "argent", "money", "coins", "piece", "pieces",
+    "guilde", "guildes", "guild", "guilds", "clan", "clans", "alliance", "alliances", "team",
+    "serveur", "serveurs", "server", "servers", "discord", "salon", "salons", "channel",
+    "daide", "svpl", "siouplait", "veux", "voudrais", "aimerais", "cherchons", "besoins",
 })
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -78,12 +93,14 @@ def _normalize(text: str) -> str:
 
 
 def tokens(text: str) -> set:
-    """Mots SPÉCIFIQUES d'un message (>= 4 lettres, hors génériques/temporels/stopwords, non numériques).
-    C'est sur l'INTERSECTION de ces tokens que repose l'appariement → très peu de faux positifs."""
+    """Mots SPÉCIFIQUES d'un message : >= 5 lettres, AUCUN chiffre (rejette « lvl50 »/« 500k »),
+    hors génériques/temporels/familiers/économie/stopwords. C'est sur l'INTERSECTION de ces tokens
+    que repose l'appariement → RÈGLE N°1 : un mot filler partagé ne suffit JAMAIS à apparier 2 gens.
+    (Seuil 5 : élimine d'office les fillers de 4 lettres — gars/amis/guys/mecs/avec/pour…)"""
     out = set()
     try:
         for w in _TOKEN_RE.findall(_normalize(text)):
-            if len(w) >= 4 and not w.isdigit() and w not in _GENERIC:
+            if len(w) >= 5 and not any(c.isdigit() for c in w) and w not in _GENERIC:
                 out.add(w)
     except Exception:
         pass
