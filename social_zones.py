@@ -1668,10 +1668,17 @@ def _lfg_header_view():
 
 async def post_lfg_header(guild) -> bool:
     """Poste l'en-tête du tableau LFG (explication + bouton d'opt-in). Appelé par bot.py quand
-    l'owner configure le salon LFG. FAIL-SAFE."""
+    l'owner configure le salon LFG. IDEMPOTENT (ne re-poste pas si l'entête existe déjà). FAIL-SAFE."""
     board = await _lfg_board_channel(guild)
     if board is None:
         return False
+    try:
+        me_id = guild.me.id if guild.me else 0
+        async for m in board.history(limit=30):
+            if int(getattr(m.author, "id", 0)) == me_id and "Recherche de groupe" in (m.content or ""):
+                return True   # entête déjà présente → ne pas dupliquer
+    except Exception:
+        pass
     try:
         await board.send(
             "🔍 **Recherche de groupe** — les groupes ouverts s'affichent ici : clique **➕ Rejoindre** "
@@ -1783,11 +1790,11 @@ async def _lfg_maybe_ping(zone_id: int):
         now = datetime.now(timezone.utc).timestamp()
         if now - _lfg_ping_cd.get(guild.id, 0) < _LFG_PING_GAP:
             return
-        _lfg_ping_cd[guild.id] = now
         try:
             await board.send(
                 f"{role.mention} un nouveau **groupe** cherche des joueurs — voir ci-dessus ! 👀",
                 allowed_mentions=discord.AllowedMentions(roles=[role], everyone=False, users=False))
+            _lfg_ping_cd[guild.id] = now   # cooldown consommé SEULEMENT si le ping est parti
         except Exception:
             pass
     except Exception:
