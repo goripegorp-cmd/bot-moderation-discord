@@ -308,6 +308,37 @@ async def _grant(
 #  Run weekly rewards
 # ═══════════════════════════════════════════════════════════════════════════
 
+async def _continuous_on(guild_id: int) -> bool:
+    """True si le VIP CONTINU (activity_vip.py) est activé pour cette guilde. Dans ce cas,
+    l'hebdo NE DONNE PLUS de rôle (owner « Option A » 2026-07-02) : il devient une simple
+    vitrine « Top actifs de la semaine » (célébration), et le VIP continu est le seul
+    propriétaire des rôles 🌟VIP/💎VIP+. FAIL-SAFE False (→ comportement hebdo legacy)."""
+    if _db_get is None:
+        return False
+    try:
+        c = await _db_get(guild_id) or {}
+        return bool(c.get("vip_enabled", False))
+    except Exception:
+        return False
+
+
+async def _mark_spotlight_ran(guild_id: int) -> None:
+    """Sentinelle anti-doublon pour la vitrine (removed=1 → remove_expired l'ignore ;
+    _already_ran_this_week la compte → 1 seule vitrine par semaine)."""
+    if _get_db is None:
+        return
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT INTO activity_vip_grants "
+                "(guild_id, user_id, role_id, tier, expires_at, removed) "
+                "VALUES (?, 0, 0, 'spotlight', ?, 1)",
+                (guild_id, datetime.now(timezone.utc).isoformat()))
+            await db.commit()
+    except Exception:
+        pass
+
+
 async def _already_ran_this_week(guild_id: int) -> bool:
     """Anti-doublon : a-t-on déjà distribué cette semaine ?"""
     if _get_db is None:
@@ -343,6 +374,14 @@ async def run_weekly_rewards(guild: discord.Guild) -> dict:
 
     if not msg_leaders and not voice_leaders:
         result["skipped"] = True
+        return result
+
+    # owner « Option A » 2026-07-02 : si le VIP CONTINU est actif, l'hebdo ne DONNE PLUS de rôle
+    # (le module activity_vip est seul maître des rôles) → simple vitrine de célébration.
+    if await _continuous_on(guild.id):
+        await _announce_spotlight(guild, leaders)
+        await _mark_spotlight_ran(guild.id)
+        result["spotlight"] = True
         return result
 
     vip_role, vip_plus_role = await _ensure_vip_roles(guild)
@@ -450,7 +489,11 @@ async def _announce_rewards(
     # owner 2026-06-29 : on ne veut PLUS un message texte brut mais une BELLE CARTE encadrée
     # (médailles + chiffres d'activité + classement). On réutilise les helpers V2 déjà injectés.
     overall = (leaders or {}).get("overall") or []
-    _score_by_id = {int(u): int(s) for u, s in overall}
+    # FIX : compute_top_active renvoie overall = LISTE d'user_ids (pas de tuples (uid,score)).
+    # L'ancien `{int(u): int(s) for u, s in overall}` levait TypeError (unpack d'un int) → la
+    # carte de remerciement ne s'affichait JAMAIS quand il y avait des gagnants. Pas de score
+    # par id ici (overall ne les porte pas) → dict vide, la ligne VIP+ s'affiche sans « pts ».
+    _score_by_id = {}
     voice_leaders = (leaders or {}).get("voice") or []
     show_voice = True
     try:
@@ -541,6 +584,64 @@ async def _announce_rewards(
         pass
 
 
+async def _announce_spotlight(guild: discord.Guild, leaders: dict) -> None:
+    """Vitrine « Top actifs de la semaine » — célébration PURE, AUCUN rôle donné (le VIP continu
+    gère les rôles, owner « Option A »). Rappelle que le VIP se gagne/garde en restant actif."""
+    ch = await _find_announce_channel(guild)
+    if not ch:
+        return
+    overall = (leaders or {}).get("overall") or []          # liste d'user_ids
+    voice_leaders = (leaders or {}).get("voice") or []       # (uid, minutes)
+    msg_leaders = (leaders or {}).get("messages") or []      # (uid, count)
+    show_voice = True
+    try:
+        if _db_get is not None:
+            _vc = await _db_get(guild.id)
+            show_voice = bool(_vc.get("vocal_recognition_enabled", True))
+    except Exception:
+        show_voice = True
+    medals = ["🥇", "🥈", "🥉"]
+
+    def _nm(uid):
+        m = guild.get_member(int(uid))
+        return m.mention if m else f"<@{int(uid)}>"
+
+    sections = []
+    if overall:
+        _o = []
+        for i, uid in enumerate(overall[:5]):
+            rk = medals[i] if i < 3 else "▫️"
+            _o.append(f"{rk} {_nm(uid)}")
+        sections.append("### 🔥 Les plus actifs (toutes catégories)\n" + "\n".join(_o))
+    if show_voice and voice_leaders:
+        _v = []
+        for i, (vuid, vmin) in enumerate(voice_leaders[:5]):
+            rk = medals[i] if i < 3 else "▫️"
+            _v.append(f"{rk} {_nm(vuid)} — **{_fmt_voice_duration(vmin)}** en vocal")
+        sections.append("### 🎙️ Rois & Reines du Vocal\n" + "\n".join(_v))
+    if msg_leaders:
+        _m = []
+        for i, (muid, mc) in enumerate(msg_leaders[:5]):
+            rk = medals[i] if i < 3 else "▫️"
+            _m.append(f"{rk} {_nm(muid)} — **{mc}** messages")
+        sections.append("### 💬 Rois & Reines du Chat\n" + "\n".join(_m))
+    if not sections:
+        return
+
+    # Pings réels plafonnés à 3 (ToS/RULES) : le podium overall.
+    ping_ids = [int(u) for u in overall[:3]]
+    allowed = discord.AllowedMentions(
+        users=[discord.Object(id=u) for u in ping_ids], roles=False, everyone=False)
+    header = "🏆 **TOP ACTIFS DE LA SEMAINE — bravo à vous !** 🏆\n"
+    footer = ("\n-# 💡 Le rôle **VIP** se gagne (et se garde) en restant actif régulièrement — "
+              "tout le monde peut l'avoir, pas seulement le podium !")
+    try:
+        await ch.send((header + "\n" + "\n\n".join(sections) + footer)[:1950],
+                      allowed_mentions=allowed)
+    except Exception as ex:
+        print(f"[activity_rewards spotlight] {ex}")
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  Expiry
 # ═══════════════════════════════════════════════════════════════════════════
@@ -552,6 +653,13 @@ async def remove_expired(guild_id: int) -> int:
     guild = _bot.get_guild(guild_id)
     if not guild:
         return 0
+    # owner « Option A » : si le VIP continu est actif, il est SEUL maître des rôles → l'hebdo ne
+    # doit RIEN retirer (sinon il arracherait un rôle que le continu veut garder). No-op.
+    try:
+        if await _continuous_on(guild_id):
+            return 0
+    except Exception:
+        pass
     removed = 0
     try:
         async with _get_db() as db:
