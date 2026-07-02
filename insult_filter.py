@@ -133,8 +133,10 @@ _ABLEIST_TERMS = frozenset({
     "handicapé du cerveau", "déficient mental", "débile mental", "attardé mental",
     # EN
     "autistic", "retarded", "mongoloid", "downie", "window licker", "sped kid",
-    # ES
-    "subnormal", "mongólico", "mongolico", "retrasado", "retrasada",
+    # ES — audit 2026-07-02 : « retrasado/retrasada » RETIRÉS (= « en retard/à la traîne » en
+    # espagnol, ex. « el tren venía retrasado ») et « subnormal » RETIRÉ (terme technique
+    # IEEE-754 « float subnormal »). L'insulte claire « retrasado mental » reste en tier3.
+    "mongólico", "mongolico",
 })
 _RE_ABLEIST = (None, None)
 
