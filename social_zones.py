@@ -2017,8 +2017,13 @@ def _can_manage(i: discord.Interaction, zone) -> bool:
 
 
 def _voice_member_overwrite() -> discord.PermissionOverwrite:
+    # owner 2026-07-02 : dans un salon vocal, TOUT le monde VOIT le chat mais PERSONNE n'écrit
+    # (send_messages=False) — la seule interaction passe par le panneau de boutons (musique/vote),
+    # jamais par des commandes ni du texte libre. On peut parler en VOIX (connect/speak) et cliquer
+    # les boutons (non affectés par send_messages) ; on lit l'historique.
     return discord.PermissionOverwrite(
-        view_channel=True, connect=True, speak=True, stream=True, use_voice_activation=True)
+        view_channel=True, connect=True, speak=True, stream=True, use_voice_activation=True,
+        read_message_history=True, send_messages=False, add_reactions=False)
 
 
 async def _zone_member_ids(zone_id: int) -> list:
@@ -2296,12 +2301,15 @@ async def voice_apply(i: discord.Interaction, zone_id: int, name: str, limit: in
         ow = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False, connect=False),
             me: discord.PermissionOverwrite(
-                view_channel=True, connect=True, speak=True, manage_channels=True,
-                manage_permissions=True, move_members=True),
+                view_channel=True, connect=True, speak=True, send_messages=True,
+                manage_channels=True, manage_permissions=True, move_members=True),
         }
         st = _staff_role(guild)
         if st is not None:
-            ow[st] = discord.PermissionOverwrite(view_channel=True, connect=True, speak=True)
+            # Staff voit/entend/modère mais n'écrit pas non plus dans le chat vocal (owner : « personne »).
+            # (Un rôle Administrateur contourne les overwrites côté Discord — c'est attendu.)
+            ow[st] = discord.PermissionOverwrite(
+                view_channel=True, connect=True, speak=True, send_messages=False)
         members = []
         for uid in await _zone_member_ids(zone_id):
             m = guild.get_member(uid)
