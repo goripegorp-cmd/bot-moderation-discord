@@ -458,6 +458,11 @@ async def on_message_activity(message):
         if last is not None and (now - last).total_seconds() < _MSG_DEBOUNCE_SECONDS:
             return
         _last_msg_ts[key] = now
+        # audit 2026-07-03 : borne mémoire (1 clé/(guild,user), sur le hot-path on_message → fuite
+        # à l'échelle sinon). Évince la moitié la plus ancienne au-delà de 5000 (dict = ordre d'insert).
+        if len(_last_msg_ts) > 5000:
+            for _k in list(_last_msg_ts)[:len(_last_msg_ts) // 2]:
+                _last_msg_ts.pop(_k, None)
         await _add_points(message.guild.id, author.id, 1)
     except Exception as ex:
         print(f"[activity on_message] {ex}")
