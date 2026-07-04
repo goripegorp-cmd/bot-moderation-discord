@@ -65,6 +65,9 @@ _is_staff = None         # (member) -> bool                                     
 
 # ─── Réglages ──────────────────────────────────────────────────────────────────
 _KINDS = ("group", "trade")
+# Lot 2 : callback d'engagement (bot.py le règle après import) — appelé quand un membre CLIQUE l'action
+# d'un nudge (créer groupe / ouvrir échange) → réinitialise le « repli » côté bot. None = no-op.
+nudge_engaged_cb = None
 _CATEGORY = {"group": "👥 Groupes", "trade": "🤝 Échanges"}
 _PREFIX = {"group": "👥-groupe", "trade": "🤝-trade"}
 _MAX_MEMBERS = {"group": 6, "trade": 2}        # trade = créateur + 1 partenaire
@@ -903,6 +906,13 @@ async def create_zone(i: discord.Interaction, kind: str, author_id: int, partner
     Réservé à l'AUTEUR détecté (nominatif)."""
     if kind not in _KINDS:
         return
+    # Lot 2 (owner 2026-07-03) : l'utilisateur CLIQUE l'action d'un nudge (créer groupe/ouvrir échange)
+    # → engagement → bot.py réinitialise le « repli » (streak) de ce membre. Hook optionnel, fail-safe.
+    try:
+        if nudge_engaged_cb is not None and i.guild is not None:
+            nudge_engaged_cb(i.guild.id, i.user.id, kind)
+    except Exception:
+        pass
     if not await _safe_defer(i):
         return
     if _click_too_soon(i.user.id):
