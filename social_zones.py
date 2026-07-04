@@ -68,6 +68,10 @@ _KINDS = ("group", "trade")
 # Lot 2 : callback d'engagement (bot.py le règle après import) — appelé quand un membre CLIQUE l'action
 # d'un nudge (créer groupe / ouvrir échange) → réinitialise le « repli » côté bot. None = no-op.
 nudge_engaged_cb = None
+# Pont musique (owner 2026-07-03) : bot.py règle ces 2 après import. music_panel_cb(vc_channel) poste le
+# panneau musique dans le vocal de zone ; music_bot_user_id = id du bot musique (accès au vocal privé).
+music_panel_cb = None
+music_bot_user_id = 0
 _CATEGORY = {"group": "👥 Groupes", "trade": "🤝 Échanges"}
 _PREFIX = {"group": "👥-groupe", "trade": "🤝-trade"}
 _MAX_MEMBERS = {"group": 6, "trade": 2}        # trade = créateur + 1 partenaire
@@ -2370,6 +2374,21 @@ async def voice_apply(i: discord.Interaction, zone_id: int, name: str, limit: in
             _zone_channels.add(int(vc.id))
         except Exception:
             pass
+        # Pont musique (owner 2026-07-03, pt 12) : donne au bot musique l'accès à CE vocal privé +
+        # poste le panneau « 🎵 Ajouter une musique » dans son chat. DORMANT si non configuré.
+        try:
+            if music_bot_user_id:
+                _mb = guild.get_member(int(music_bot_user_id))
+                if _mb is not None:
+                    await vc.set_permissions(_mb, view_channel=True, connect=True, speak=True,
+                                             reason="Accès du bot musique au vocal de zone")
+        except Exception as ex:
+            print(f"[social_zones grant music bot] {ex}")
+        try:
+            if music_panel_cb is not None:
+                await music_panel_cb(vc)
+        except Exception as ex:
+            print(f"[social_zones music panel] {ex}")
         # Membres arrivés pendant la création (voice_channel_id valait -1) : complète leurs accès.
         try:
             have = {int(m.id) for m in members}
