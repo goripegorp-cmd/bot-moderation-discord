@@ -192,11 +192,29 @@ _ROBLOX_REJECT = [
 ]
 
 
+# owner 2026-07-04 : TERMES À SUIVRE SCRUPULEUSEMENT (liens DevForum fournis). Un post qui contient
+# l'un d'eux passe TOUJOURS le filtre, MÊME s'il croiserait le reject list (ex. « innovation award »,
+# que l'owner veut désormais suivre). Priorité sur _ROBLOX_REJECT.
+_ROBLOX_ALLOW = [
+    'release notes', 'weekly recap',
+    'marketplace', 'ugc', 'avatar item', 'item publishing',
+    'guibutton', 'secondaryactivated',
+    'observability', 'microprofiler', 'performance profiling',
+    'ugc validation', 'studio beta',
+    'innovation award', 'nominate your favorite',
+]
+
+
 def _is_roblox_update(title: str, summary: str = "") -> bool:
-    """Filtre créateur INCLUSIF : accepte toute update plateforme/créateur, rejette les events."""
+    """Filtre créateur INCLUSIF : accepte toute update plateforme/créateur, rejette les events.
+    owner 2026-07-04 : l'ALLOW-LIST (_ROBLOX_ALLOW) est PRIORITAIRE — les termes suivis scrupuleusement
+    (release notes, weekly recap, marketplace, UGC, GuiButton, observability, microprofiler, studio
+    beta, innovation award…) passent toujours, même contre le reject list."""
     text = f"{title} {summary}".lower().strip()
     if not text:
         return False
+    if any(a in text for a in _ROBLOX_ALLOW):
+        return True
     for neg in _ROBLOX_REJECT:
         if neg in text:
             return False
@@ -247,6 +265,14 @@ GAME_SOURCES = {
         "source_urls": [
             "https://devforum.roblox.com/c/updates/announcements.json",
             "https://devforum.roblox.com/c/updates/release-notes.json",
+            # owner 2026-07-04 : Community & Events (cat 90) — catégorie BRUYANTE (RDC/Inspire/jobs/
+            # challenges/year-in-review). On la surveille UNIQUEMENT en filtre STRICT (allow-list de
+            # titres) → on capte « Innovation Awards » / marketplace… SANS le reste. Voir strict_allow_urls.
+            "https://devforum.roblox.com/c/community-events/90.json",
+        ],
+        # URLs à filtrer STRICTEMENT par titre (allow-list _ROBLOX_ALLOW) au lieu du filtre inclusif.
+        "strict_allow_urls": [
+            "https://devforum.roblox.com/c/community-events/90.json",
         ],
         "filter_keywords": None,
         "creator_mode": True,
@@ -679,12 +705,16 @@ async def fetch_updates(session: aiohttp.ClientSession, game_key: str, max_count
         # owner 2026-06-29 : supporte PLUSIEURS catégories (Roblox = Announcements + Release Notes).
         urls = spec.get('source_urls') or ([spec['source_url']] if spec.get('source_url') else [])
         creator_mode = spec.get('creator_mode', False)
+        strict_urls = set(spec.get('strict_allow_urls') or [])
         raw_all = []
         seen_guids = set()
         for u in urls:
+            # owner 2026-07-04 : catégorie BRUYANTE (Community & Events) → filtre STRICT par TITRE
+            # (allow-list des termes suivis) ; sinon filtre inclusif habituel (spec.filter_keywords).
+            _fkw = list(_ROBLOX_ALLOW) if u in strict_urls else spec.get('filter_keywords')
             try:
                 raw = await _fetch_discourse(
-                    session, u, max_count=max_count * 4, filter_kw=spec.get('filter_keywords'),
+                    session, u, max_count=max_count * 4, filter_kw=_fkw,
                 )
             except Exception:
                 raw = []
