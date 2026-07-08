@@ -67,7 +67,7 @@
 | `event_notif_role.py` | 237 | 0 | 12 |
 | `events42.py` | 671 | 0 | 6 |
 | `events_engine.py` | 2906 | 0 | 66 |
-| `game_updates.py` | 803 | 1 | 9 |
+| `game_updates.py` | 833 | 1 | 9 |
 | `gdpr.py` | 637 | 0 | 10 |
 | `generate_index.py` | 229 | 0 | 6 |
 | `grooming_detector.py` | 201 | 0 | 3 |
@@ -184,7 +184,7 @@
 | `weekly_stats.py` | 494 | 0 | 9 |
 | `welcome_ack.py` | 111 | 0 | 3 |
 | `world_invasion.py` | 785 | 0 | 13 |
-| **TOTAL (177 files)** | **192774** | **704** | **3385** |
+| **TOTAL (177 files)** | **192804** | **704** | **3385** |
 
 ## Alphabetical lookup (6782 symbols)
 
@@ -1906,10 +1906,10 @@
 - `_failsafe_wait` — `bot.py`:86616  (async def)
 - `_farewell` — `social_zones.py`:763  (async def)
 - `_fetch` — `rss_feeds.py`:69  (async def)
-- `_fetch_discourse` — `game_updates.py`:575  (async def)
+- `_fetch_discourse` — `game_updates.py`:601  (async def)
 - `RSSHubAdapter._fetch_items` — `social_media.py`:663  (method)
-- `_fetch_rss` — `game_updates.py`:521  (async def)
-- `_fetch_steam_news` — `game_updates.py`:446  (async def)
+- `_fetch_rss` — `game_updates.py`:547  (async def)
+- `_fetch_steam_news` — `game_updates.py`:472  (async def)
 - `LeaderboardTabsView._fetch_top` — `bot.py`:71902  (method)
 - `TwitterSyndicationAdapter._fetch_tweets` — `social_media.py`:787  (method)
 - `_fight_dispersion` — `dungeon_instances.py`:777  (async def)
@@ -2187,7 +2187,7 @@
 - `_is_real_update` — `game_updates.py`:139  (def)
 - `_is_recent_iso` — `bot.py`:67120  (def)
 - `_is_reward_window` — `activity_rewards.py`:125  (def)
-- `_is_roblox_update` — `game_updates.py`:195  (def)
+- `_is_roblox_update` — `game_updates.py`:208  (def)
 - `_is_send_window` — `npc_letters.py`:585  (def)
 - `_is_sensitive_role` — `bot.py`:5207  (def)
 - `_is_staff_member` — `impersonation_detector.py`:187  (def)
@@ -2718,7 +2718,7 @@
 - `_parse_scope` — `combat_actions.py`:188  (def)
 - `_parse_ts` — `activity_vip.py`:386  (def)
 - `_parse_ts` — `daily_bosses.py`:1014  (def)
-- `_parse_ts` — `game_updates.py`:206  (def)
+- `_parse_ts` — `game_updates.py`:224  (def)
 - `_parse_ts` — `voice_control.py`:170  (def)
 - `_passe` — `citadelle.py`:1250  (async def)
 - `_passe_claim` — `citadelle.py`:1166  (async def)
@@ -4368,7 +4368,7 @@
 - `fetch_roblox_bio` — `roblox_link.py`:190  (async def)
 - `fetch_roblox_userinfo` — `roblox_link.py`:155  (async def)
 - `fetch_universe_from_place` — `roblox_game_stats.py`:118  (async def)
-- `fetch_updates` — `game_updates.py`:662  (async def)
+- `fetch_updates` — `game_updates.py`:688  (async def)
 - `_StubCursor.fetchall` — `tests/conftest.py`:31  (method)
 - `_StubCursor.fetchone` — `tests/conftest.py`:28  (method)
 - `find_line` — `_migrate_helppanel.py`:8  (def)
@@ -4551,7 +4551,7 @@
 - `get_gallery_msg_id` — `social_gallery.py`:94  (def)
 - `get_gallery_posts` — `social_gallery.py`:102  (def)
 - `get_game` — `entraide.py`:239  (async def)
-- `get_game_meta` — `game_updates.py`:771  (def)
+- `get_game_meta` — `game_updates.py`:801  (def)
 - `get_gif_type` — `bot.py`:7270  (def)
 - `get_group_by_name` — `publish_metrics.py`:440  (async def)
 - `get_group_targets` — `publish_metrics.py`:463  (async def)
@@ -5098,7 +5098,7 @@
 - `AfkRolePanel.list_afk` — `bot.py`:45170  (method)
 - `SocialMediaManager.list_announcements` — `social_media.py`:1078  (method)
 - `list_announcements` — `tracking_layer.py`:231  (async def)
-- `list_available_games` — `game_updates.py`:781  (def)
+- `list_available_games` — `game_updates.py`:811  (def)
 - `list_backups` — `db_backup.py`:221  (def)
 - `list_birthdays` — `bot.py`:3577  (async def)
 - `list_boss_ids` — `daily_bosses.py`:387  (def)
@@ -12171,14 +12171,14 @@
 ### `game_updates.py`
 
 - L139  `def _is_real_update(title, summary)`
-- L195  `def _is_roblox_update(title, summary)`
-- L206  `def _parse_ts(s)`
-- L446  `async def _fetch_steam_news(session, appid, max_count)`
-- L521  `async def _fetch_rss(session, url, max_count)`
-- L575  `async def _fetch_discourse(session, url, max_count, filter_kw)`
-- L662  `async def fetch_updates(session, game_key, max_count)`
-- L771  `def get_game_meta(game_key)`
-- L781  `def list_available_games()`
+- L208  `def _is_roblox_update(title, summary)`
+- L224  `def _parse_ts(s)`
+- L472  `async def _fetch_steam_news(session, appid, max_count)`
+- L547  `async def _fetch_rss(session, url, max_count)`
+- L601  `async def _fetch_discourse(session, url, max_count, filter_kw)`
+- L688  `async def fetch_updates(session, game_key, max_count)`
+- L801  `def get_game_meta(game_key)`
+- L811  `def list_available_games()`
 - L64  `class GameUpdate` @dataclass
 
 ### `gdpr.py`
