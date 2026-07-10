@@ -606,7 +606,9 @@ class YouTubeAdapter(PlatformAdapter):
 RSSHUB_ROUTES: dict[Platform, str] = {
     Platform.TWITTER:   "twitter/user/{user}",
     Platform.TIKTOK:    "tiktok/user/@{user}",
-    Platform.INSTAGRAM: "instagram/user/{user}",
+    # Instagram : on utilise la route web-api "/instagram/2/user/" (par COOKIE IG_COOKIE)
+    # et PAS "/instagram/user/" (private-api login/mdp) qui est cassee en 2026.
+    Platform.INSTAGRAM: "instagram/2/user/{user}",
 }
 # Instance RSSHub par defaut (publique). Surcharge conseillee : variable d'env
 # RSSHUB_BASE_URL pointant vers TA propre instance (1 clic sur Railway) = fiable+illimitee.
