@@ -2294,6 +2294,16 @@ async def voice_apply(i: discord.Interaction, zone_id: int, name: str, limit: in
                         pass
                 return await _safe_followup(i, content="✅ Vocal mis à jour.")
             # salon disparu → on recrée depuis `existing`
+        # owner 2026-07-10 : si le salon TEXTE de la zone a disparu (et pas de vocal existant à
+        # régler), la zone est orpheline → on la ferme proprement au lieu de créer un vocal fantôme
+        # rattaché à une zone morte (cohérent avec add_member ; sinon salon+API gaspillés jusqu'au
+        # watchdog). Ne bloque PAS le réglage d'un vocal EXISTANT (géré au-dessus).
+        if ch is None:
+            try:
+                await close_zone(zone_id, linger=False)
+            except Exception:
+                pass
+            return await _safe_followup(i, content="⌛ Zone indisponible (salon disparu).")
         # ── CRÉER (réservation atomique exactly-once : {0|stale} → -1, un seul gagne) ──
         try:
             async with _get_db() as db:

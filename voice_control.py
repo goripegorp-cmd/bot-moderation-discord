@@ -266,25 +266,40 @@ async def _lock_text_chat(channel, owner_id: int):
         if not (me and channel.permissions_for(me).manage_permissions):
             return  # pas la perm → on laisse tel quel (fail-open)
         owner = guild.get_member(int(owner_id or 0)) if owner_id else None
+        # ⚠️ MERGE obligatoire (owner 2026-07-10) : set_permissions(**kwargs) REMPLACE l'overwrite
+        # entier → il EFFACERAIT le connect/speak posé à la création (les gens ne pourraient plus
+        # PARLER). On part donc de l'overwrite EXISTANT (overwrites_for) et on ne modifie QUE les
+        # champs de CHAT, en laissant connect/speak/view_channel intacts.
         # 1) Le proprio EN PREMIER (ne JAMAIS le verrouiller hors de son propre panneau) :
         #    voit le chat (read), mais n'écrit pas (boutons only).
         if owner is not None:
             try:
+                ow = channel.overwrites_for(owner)
+                ow.view_channel = True
+                ow.read_message_history = True
+                ow.send_messages = False
+                ow.send_messages_in_threads = False
+                ow.create_public_threads = False
+                ow.create_private_threads = False
                 await channel.set_permissions(
-                    owner, view_channel=True, read_message_history=True, send_messages=False,
+                    owner, overwrite=ow,
                     reason="Vocal créé : le proprio voit le panneau mais n'écrit pas")
             except Exception:
                 pass
         # 2) @everyone : pas d'écriture (toujours) ; lecture du chat masquée SEULEMENT si le proprio
         #    a bien reçu l'accès lecture ci-dessus (sinon on ne masque pas → on ne verrouille personne).
-        ev = dict(send_messages=False, send_messages_in_threads=False,
-                  create_public_threads=False, create_private_threads=False)
-        if owner is not None:
-            ev['read_message_history'] = False
+        #    On NE TOUCHE PAS connect/speak/view_channel → le vocal reste JOIGNABLE et on PARLE.
         try:
+            ow = channel.overwrites_for(guild.default_role)
+            ow.send_messages = False
+            ow.send_messages_in_threads = False
+            ow.create_public_threads = False
+            ow.create_private_threads = False
+            if owner is not None:
+                ow.read_message_history = False
             await channel.set_permissions(
-                guild.default_role,
-                reason="Vocal créé : chat texte verrouillé (privé au proprio, lecture seule)", **ev)
+                guild.default_role, overwrite=ow,
+                reason="Vocal créé : chat texte verrouillé (privé au proprio, lecture seule)")
         except Exception:
             pass
     except Exception as ex:
