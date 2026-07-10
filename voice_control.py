@@ -219,7 +219,9 @@ def _build_panel(channel_id: int, owner_id: int, locked: bool):
             f"👢 **Expulser**  ·  👑 **Transférer**"
             + ("\n🔒 **Salon verrouillé** — personne de nouveau ne peut entrer." if locked else "")
             + "\n-# Seul toi (ou le staff) peux utiliser ces boutons. Le salon se **supprime tout "
-            f"seul** quand il se vide.")
+            f"seul** quand il se vide."
+            + "\n-# 🔇 Un souci en vocal (bruit, insultes au micro) ? **Tout le monde** peut faire "
+            f"`/signaler-vocal` — discret, le staff écoute et décide.")
     row1 = discord.ui.ActionRow(
         _b("Renommer", "rename", channel_id, emoji="🔤"),
         _b("Limite", "limit", channel_id, emoji="👥"),

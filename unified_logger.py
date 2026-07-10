@@ -90,6 +90,8 @@ class EventType(str, Enum):
     VOICE_JOIN = "voice.join"
     VOICE_LEAVE = "voice.leave"
     VOICE_MOVE = "voice.move"
+    VOICE_MUTE = "voice.mute"
+    VOICE_STREAM = "voice.stream"
 
     # Channels / Roles
     CHAN_CREATE = "chan.create"
@@ -157,6 +159,8 @@ EVENT_META: dict[EventType, dict] = {
     EventType.VOICE_JOIN:    {"icon": "🎤", "color": 0x1ABC9C, "label": "Connexion vocal",     "cat": "Vocal"},
     EventType.VOICE_LEAVE:   {"icon": "🚪", "color": 0x95A5A6, "label": "Déconnexion vocal",   "cat": "Vocal"},
     EventType.VOICE_MOVE:    {"icon": "↔️", "color": 0x1ABC9C, "label": "Déplacement vocal",   "cat": "Vocal"},
+    EventType.VOICE_MUTE:    {"icon": "🔇", "color": 0xE67E22, "label": "Server-mute / deaf",  "cat": "Vocal"},
+    EventType.VOICE_STREAM:  {"icon": "📺", "color": 0x9B59B6, "label": "Stream / caméra",     "cat": "Vocal"},
 
     # SERVEUR (bleu)
     EventType.CHAN_CREATE:   {"icon": "➕", "color": 0x2ECC71, "label": "Salon créé",          "cat": "Serveur"},
