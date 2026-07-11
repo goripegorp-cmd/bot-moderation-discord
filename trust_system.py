@@ -52,10 +52,14 @@ def is_frozen(gid, uid) -> bool:
 
 _URL_RE = re.compile(r'https?://\S+', re.IGNORECASE)
 _INVITE_RE = re.compile(r'(?:discord\.gg/|discord(?:app)?\.com/invite/|discord\.gg\s*/)\s*[\w-]+', re.IGNORECASE)
-# Hôtes d'images/GIF autorisés (le GIF Tenor/Giphy reste permis).
+# Hôtes d'images/GIF autorisés (le GIF « pour rigoler » reste permis). Liste ÉLARGIE
+# (owner 2026-07-11 : des GIFs légitimes étaient censurés car leur hôte manquait ici).
+# NB : match par SOUS-CHAÎNE → « tenor.com » couvre aussi media.tenor.com, c.tenor.com, etc.
 _MEDIA_HOST_RE = re.compile(
-    r'(?:tenor\.com|giphy\.com|gfycat\.com|gifyourgame\.|cdn\.discordapp\.com|'
-    r'media\.discordapp\.net|images-ext-\d+\.discordapp\.net|imgur\.com|i\.redd\.it)',
+    r'(?:tenor\.com|tenor\.co|giphy\.com|gph\.is|gfycat\.com|redgifs\.com|gifyourgame\.|'
+    r'imgflip\.com|imgur\.com|i\.redd\.it|v\.redd\.it|preview\.redd\.it|gyazo\.com|'
+    r'prnt\.sc|ibb\.co|postimg\.(?:cc|org)|pbs\.twimg\.com|media\.tumblr\.com|'
+    r'cdn\.discordapp\.com|media\.discordapp\.net|images-ext-\d+\.discordapp\.net)',
     re.IGNORECASE)
 _MEDIA_EXT_RE = re.compile(r'\.(?:gif|gifv|png|jpe?g|webp|bmp|apng)(?:[?#]\S*)?', re.IGNORECASE)
 
