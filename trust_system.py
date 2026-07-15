@@ -57,7 +57,7 @@ _INVITE_RE = re.compile(r'(?:discord\.gg/|discord(?:app)?\.com/invite/|discord\.
 # NB : match par SOUS-CHAÎNE → « tenor.com » couvre aussi media.tenor.com, c.tenor.com, etc.
 _MEDIA_HOST_RE = re.compile(
     r'(?:tenor\.com|tenor\.co|giphy\.com|gph\.is|gfycat\.com|redgifs\.com|gifyourgame\.|'
-    r'imgflip\.com|imgur\.com|i\.redd\.it|v\.redd\.it|preview\.redd\.it|gyazo\.com|'
+    r'klipy\.com|imgflip\.com|imgur\.com|i\.redd\.it|v\.redd\.it|preview\.redd\.it|gyazo\.com|'
     r'prnt\.sc|ibb\.co|postimg\.(?:cc|org)|pbs\.twimg\.com|media\.tumblr\.com|'
     r'cdn\.discordapp\.com|media\.discordapp\.net|images-ext-\d+\.discordapp\.net)',
     re.IGNORECASE)
@@ -144,6 +144,18 @@ def has_non_media_link(text: str, whitelist=None) -> bool:
     except Exception:
         return False
     return False
+
+
+def is_media_url(u) -> bool:
+    """True si l'URL est une image/GIF : hôte média (tenor/giphy/klipy/…), extension média
+    (.gif/.png/…), OU « gif » dans l'URL. Point d'entrée UNIQUE pour EXEMPTER les GIFs de TOUS
+    les filtres de liens (trust + anti_link classique). owner 2026-07-12 : « autoriser TOUS les
+    GIFs » — Discord source les GIFs depuis plein de fournisseurs (klipy, tenor, giphy…)."""
+    try:
+        ul = str(u or '').lower()
+        return bool(_MEDIA_HOST_RE.search(ul) or _MEDIA_EXT_RE.search(ul) or _GIF_HINT_RE.search(ul))
+    except Exception:
+        return False
 
 
 def has_media(msg, text: str) -> bool:
