@@ -62,6 +62,10 @@ _MEDIA_HOST_RE = re.compile(
     r'cdn\.discordapp\.com|media\.discordapp\.net|images-ext-\d+\.discordapp\.net)',
     re.IGNORECASE)
 _MEDIA_EXT_RE = re.compile(r'\.(?:gif|gifv|png|jpe?g|webp|bmp|apng)(?:[?#]\S*)?', re.IGNORECASE)
+# Indice « c'est un GIF » DANS l'URL (au-delà de l'hôte/extension) : tenor /view/…-gif-123,
+# giphy /gifs/… , …/name.gif … Le « gif » doit être BORNÉ par des séparateurs d'URL → évite
+# le faux positif « gift-card » (owner 2026-07-12 : autoriser TOUT type de GIF, quel que soit le site).
+_GIF_HINT_RE = re.compile(r'[/\-_.=]gifs?(?:[/\-_.=?&]|$)', re.IGNORECASE)
 
 
 def bump(gid, uid) -> int:
@@ -122,16 +126,20 @@ def has_invite(text: str) -> bool:
         return False
 
 
-def has_non_media_link(text: str) -> bool:
-    """True s'il y a un lien qui N'est PAS une image/GIF (les invitations sont gérées à
-    part). Un lien Tenor/Giphy/cdn ou se terminant par .gif/.png… est AUTORISÉ."""
+def has_non_media_link(text: str, whitelist=None) -> bool:
+    """True s'il y a un lien qui N'est PAS une image/GIF (les invitations sont gérées à part).
+    AUTORISÉ : hôte média (tenor/giphy/cdn…), extension média (.gif/.png…), « gif » dans l'URL
+    (tout site), OU un domaine présent dans la whitelist owner (`link_whitelist`)."""
     try:
+        _wl = [str(w).lower() for w in (whitelist or []) if w]
         for u in _URL_RE.findall(text or ''):
             ul = u.lower()
             if _INVITE_RE.search(ul):
                 continue                              # invitation → traitée séparément
-            if _MEDIA_HOST_RE.search(ul) or _MEDIA_EXT_RE.search(ul):
-                continue                              # lien image/GIF → autorisé
+            if _MEDIA_HOST_RE.search(ul) or _MEDIA_EXT_RE.search(ul) or _GIF_HINT_RE.search(ul):
+                continue                              # image/GIF (hôte, extension, ou 'gif' dans l'URL) → OK
+            if _wl and any(w in ul for w in _wl):
+                continue                              # domaine autorisé par l'owner → permis
             return True
     except Exception:
         return False
