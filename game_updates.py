@@ -677,7 +677,33 @@ async def _fetch_discourse(session: aiohttp.ClientSession, url: str, max_count: 
     except Exception as ex:
         print(f"[game_updates _fetch_discourse {url} repli-rss] {ex}")
 
-    print(f"[game_updates _fetch_discourse {url}] HTTP {last_status} — .json ET .rss indisponibles")
+    # 4) DERNIER REPLI (owner 2026-07-12) : LECTEUR-PROXY public. Roblox/Cloudflare challenge
+    #    désormais les IP DATACENTER (Railway) sur .json ET .rss (202 PERSISTANT, le repli .rss de
+    #    juin ne suffit plus), alors que le MÊME contenu est servi en 200 depuis une IP « normale »
+    #    (vérifié empiriquement le 2026-07-12). On passe donc par r.jina.ai : il va chercher la page
+    #    depuis SES serveurs et nous renvoie le corps. Données 100% PUBLIQUES (forum ouvert) → aucun
+    #    secret ne transite. FAIL-SAFE : au moindre souci → liste vide, jamais de crash.
+    #    Retirable tel quel si Roblox ré-autorise un jour les IP datacenter.
+    try:
+        async with session.get(
+                f"https://r.jina.ai/{url}",
+                headers={'Accept': 'text/plain, application/json, */*',
+                         'User-Agent': headers.get('User-Agent', 'Mozilla/5.0')},
+                timeout=aiohttp.ClientTimeout(total=25)) as resp:
+            if resp.status == 200:
+                _txt = await resp.text()
+                _a, _b = _txt.find('{'), _txt.rfind('}')   # isole le JSON d'un éventuel préambule
+                if _a != -1 and _b > _a:
+                    _items = _parse_topics(json.loads(_txt[_a:_b + 1]))
+                    print(f"[game_updates _fetch_discourse {url}] HTTP {last_status} → "
+                          f"repli PROXY OK ({len(_items)})")
+                    return _items
+            else:
+                print(f"[game_updates _fetch_discourse {url} repli-proxy] HTTP {resp.status}")
+    except Exception as ex:
+        print(f"[game_updates _fetch_discourse {url} repli-proxy] {ex}")
+
+    print(f"[game_updates _fetch_discourse {url}] HTTP {last_status} — .json, .rss ET proxy indisponibles")
     return []
 
 
