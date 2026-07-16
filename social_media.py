@@ -641,11 +641,20 @@ class RSSHubAdapter(PlatformAdapter):
 
     def __init__(self, platform: Platform, base_url: Optional[str] = None):
         self.platform = platform
-        self.base_url = (base_url or os.environ.get("RSSHUB_BASE_URL")
-                         or DEFAULT_RSSHUB_BASE).rstrip("/")
+        # owner 2026-07-12 : base_url est une PROPRIETE lue A CHAUD (env RSSHUB_BASE_URL, posable
+        # via /social depuis Discord sans toucher a Railway) → une MAJ s'applique SANS redemarrage.
+        self._base_override = ((base_url or "").strip().rstrip("/")) or None
         self.route = RSSHUB_ROUTES.get(platform, "")
         self._session = None  # type: Any
         self._seen: dict[str, set] = {}      # handle -> set des guid deja vus (baseline en memoire)
+
+    @property
+    def base_url(self) -> str:
+        """Lu DYNAMIQUEMENT → changer RSSHUB_BASE_URL (env OU /social) prend effet TOUT DE SUITE,
+        sans reconstruire les adapters ni redemarrer le bot."""
+        if self._base_override:
+            return self._base_override
+        return (os.environ.get("RSSHUB_BASE_URL") or DEFAULT_RSSHUB_BASE).rstrip("/")
 
     @property
     def configured(self) -> bool:
