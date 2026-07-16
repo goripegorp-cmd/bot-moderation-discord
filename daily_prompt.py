@@ -386,6 +386,23 @@ async def _on_vote_click(
                 _vote_click_seen.clear()
     except Exception:
         pass
+    # DEFER-FIRST (owner 2026-07-12, « GoRp n'a pas répondu à temps » sur ce bouton) : on ACQUITTE
+    # AVANT toute I/O. Le SELECT ci-dessous peut attendre une connexion du pool DB (contention) →
+    # on dépassait la fenêtre de 3 s de Discord = échec d'interaction. Après le defer, on répond en
+    # followup (fenêtre de 15 min). Le dé-doublonnage par ID d'interaction ci-dessus reste SYNCHRONE
+    # et passe avant → un seul des deux handlers arrive ici.
+    try:
+        if not i.response.is_done():
+            await i.response.defer(ephemeral=True)
+    except Exception:
+        pass
+
+    async def _say(txt: str):
+        try:
+            await i.followup.send(txt, ephemeral=True)
+        except Exception:
+            pass
+
     try:
         async with _get_db() as db:
             async with db.execute(
@@ -395,29 +412,20 @@ async def _on_vote_click(
             ) as cur:
                 row = await cur.fetchone()
         if not row:
-            return await i.response.send_message(
-                "❌ Vote introuvable.", ephemeral=True
-            )
+            return await _say("❌ Vote introuvable.")
         if row[1] != "open":
-            return await i.response.send_message(
-                "🔒 Le vote est terminé.", ephemeral=True
-            )
+            return await _say("🔒 Le vote est terminé.")
         try:
             opts = json.loads(row[2] or "[]")
         except Exception:
             opts = []
         if not (0 <= choice_idx < len(opts)):
-            return await i.response.send_message(
-                "❌ Choix invalide.", ephemeral=True
-            )
+            return await _say("❌ Choix invalide.")
         choice_text = opts[choice_idx]
         votes = json.loads(row[0] or "{}")
         uid = str(i.user.id)
         if uid in votes:
-            return await i.response.send_message(
-                f"ℹ️ Tu as déjà voté **{votes[uid]}**. 1 vote/jour max.",
-                ephemeral=True,
-            )
+            return await _say(f"ℹ️ Tu as déjà voté **{votes[uid]}**. 1 vote/jour max.")
         votes[uid] = choice_text
         async with _get_db() as db:
             await db.execute(
@@ -425,11 +433,7 @@ async def _on_vote_click(
                 (json.dumps(votes), prompt_id),
             )
             await db.commit()
-        await i.response.send_message(
-            f"✅ Vote enregistré : **{choice_text}**. "
-            f"Résultats demain à 18h !",
-            ephemeral=True,
-        )
+        await _say(f"✅ Vote enregistré : **{choice_text}**. Résultats demain à 18h !")
     except Exception as ex:
         print(f"[_on_vote_click] {ex}")
 
