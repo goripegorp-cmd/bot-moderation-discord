@@ -344,6 +344,139 @@ async def lang_of(user_id=None, interaction=None, guild_id=None) -> str:
 # Toute clé manquante → t() renvoie la clé ; toute langue manquante → repli FR.
 # Les placeholders {x} sont communs aux 6 langues (str.format tolérant côté t()).
 CATALOG = {
+    # ═══ SANCTIONS — le MP envoyé au membre (owner 2026-07-17) ═══
+    # C'est LE message le plus important à traduire : c'est souvent le SEUL que le bot envoie en
+    # privé, il annonce une sanction, et un membre qui ne le comprend pas ne peut pas se corriger.
+    # 🔒 Aucune clé ne nomme le modérateur : la sanction est prononcée AU NOM DU SERVEUR (seuls
+    # les autres staffs voient qui a sanctionné). Ne JAMAIS ajouter de placeholder {mod} ici.
+    "sanction.dm.title": {
+        "fr": "🔔 Sanction reçue", "en": "🔔 You have been sanctioned",
+        "es": "🔔 Has recibido una sanción", "de": "🔔 Du wurdest sanktioniert",
+        "it": "🔔 Hai ricevuto una sanzione", "pt": "🔔 Você recebeu uma sanção",
+    },
+    "sanction.dm.intro": {
+        "fr": "Tu as reçu une sanction sur **{guild}**.",
+        "en": "You have received a sanction on **{guild}**.",
+        "es": "Has recibido una sanción en **{guild}**.",
+        "de": "Du hast auf **{guild}** eine Sanktion erhalten.",
+        "it": "Hai ricevuto una sanzione su **{guild}**.",
+        "pt": "Você recebeu uma sanção em **{guild}**.",
+    },
+    "sanction.dm.by_server": {
+        "fr": "Elle est prononcée **au nom du serveur**, en application du règlement.",
+        "en": "It is issued **on behalf of the server**, under its rules.",
+        "es": "Se dicta **en nombre del servidor**, conforme a su reglamento.",
+        "de": "Sie ergeht **im Namen des Servers**, gemäß den Regeln.",
+        "it": "È emessa **a nome del server**, in applicazione del regolamento.",
+        "pt": "É aplicada **em nome do servidor**, conforme o regulamento.",
+    },
+    "sanction.dm.type": {
+        "fr": "Type", "en": "Type", "es": "Tipo", "de": "Art", "it": "Tipo", "pt": "Tipo",
+    },
+    "sanction.dm.duration": {
+        "fr": "Durée", "en": "Duration", "es": "Duración", "de": "Dauer",
+        "it": "Durata", "pt": "Duração",
+    },
+    "sanction.dm.reason": {
+        "fr": "Motif", "en": "Reason", "es": "Motivo", "de": "Grund",
+        "it": "Motivo", "pt": "Motivo",
+    },
+    "sanction.dm.history_header": {
+        "fr": "**📋 Voici TOUT ce qui est enregistré à ton nom ({total} fait(s)) :**",
+        "en": "**📋 Here is EVERYTHING on record under your name ({total} item(s)):**",
+        "es": "**📋 Esto es TODO lo registrado a tu nombre ({total} hecho(s)):**",
+        "de": "**📋 Das ist ALLES, was zu dir erfasst ist ({total} Vorfall/Vorfälle):**",
+        "it": "**📋 Ecco TUTTO ciò che risulta a tuo nome ({total} fatto/i):**",
+        "pt": "**📋 Isto é TUDO o que está registado no teu nome ({total} facto(s)):**",
+    },
+    "sanction.dm.history_more": {
+        "fr": "… et {n} autre(s) fait(s) plus ancien(s).",
+        "en": "… and {n} more, older item(s).",
+        "es": "… y {n} hecho(s) más antiguo(s).",
+        "de": "… und {n} weitere, ältere Vorfälle.",
+        "it": "… e altri {n} fatto/i più vecchio/i.",
+        "pt": "… e mais {n} facto(s) mais antigo(s).",
+    },
+    "sanction.dm.not_isolated": {
+        "fr": "Ce n'est pas un incident isolé : c'est l'accumulation ci-dessus qui a mené à cette sanction.",
+        "en": "This is not an isolated incident: the record above is what led to this sanction.",
+        "es": "No es un incidente aislado: es la acumulación anterior la que ha llevado a esta sanción.",
+        "de": "Das ist kein Einzelfall: Die obige Häufung hat zu dieser Sanktion geführt.",
+        "it": "Non è un episodio isolato: è l'accumulo qui sopra che ha portato a questa sanzione.",
+        "pt": "Não é um incidente isolado: foi a acumulação acima que levou a esta sanção.",
+    },
+    "sanction.dm.appeal": {
+        "fr": "_Tu penses que c'est une erreur ? Ouvre un **ticket** sur le serveur pour en parler au staff._",
+        "en": "_Think this is a mistake? Open a **ticket** on the server to talk it through with the staff._",
+        "es": "_¿Crees que es un error? Abre un **ticket** en el servidor para hablarlo con el staff._",
+        "de": "_Du hältst das für einen Fehler? Öffne ein **Ticket** auf dem Server und sprich mit dem Team._",
+        "it": "_Pensi sia un errore? Apri un **ticket** sul server per parlarne con lo staff._",
+        "pt": "_Achas que é um erro? Abre um **ticket** no servidor para falar com o staff._",
+    },
+
+    # ═══ TYPES D'INFRACTION — libellés lisibles du récap (owner 2026-07-17) ═══
+    # La table `infractions` stocke des codes techniques ('protection', 'incitation'…). Sans ces
+    # libellés, le membre lirait un code interne. Clés = `infraction.type.<code>` : les codes sont
+    # ceux réellement écrits par _record_infraction + les commandes staff (vérifié dans le code).
+    # Une clé absente → t() renvoie la clé → bot.py retombe sur son libellé FR par défaut.
+    "infraction.type.warn": {
+        "fr": "⚠️ Avertissement du staff", "en": "⚠️ Staff warning",
+        "es": "⚠️ Aviso del staff", "de": "⚠️ Verwarnung durch das Team",
+        "it": "⚠️ Avvertimento dello staff", "pt": "⚠️ Aviso do staff",
+    },
+    "infraction.type.mute": {
+        "fr": "🔇 Mute", "en": "🔇 Mute", "es": "🔇 Silencio", "de": "🔇 Stummschaltung",
+        "it": "🔇 Silenziamento", "pt": "🔇 Silenciamento",
+    },
+    "infraction.type.kick": {
+        "fr": "👢 Exclusion", "en": "👢 Kick", "es": "👢 Expulsión", "de": "👢 Rauswurf",
+        "it": "👢 Espulsione", "pt": "👢 Expulsão",
+    },
+    "infraction.type.ban": {
+        "fr": "⛔ Bannissement", "en": "⛔ Ban", "es": "⛔ Baneo", "de": "⛔ Bann",
+        "it": "⛔ Ban", "pt": "⛔ Banimento",
+    },
+    "infraction.type.insulte": {
+        "fr": "🤬 Insulte", "en": "🤬 Insult", "es": "🤬 Insulto", "de": "🤬 Beleidigung",
+        "it": "🤬 Insulto", "pt": "🤬 Insulto",
+    },
+    "infraction.type.haine": {
+        "fr": "🚫 Propos haineux", "en": "🚫 Hate speech", "es": "🚫 Discurso de odio",
+        "de": "🚫 Hassrede", "it": "🚫 Incitamento all'odio", "pt": "🚫 Discurso de ódio",
+    },
+    "infraction.type.menace": {
+        "fr": "⚔️ Menace", "en": "⚔️ Threat", "es": "⚔️ Amenaza", "de": "⚔️ Drohung",
+        "it": "⚔️ Minaccia", "pt": "⚔️ Ameaça",
+    },
+    "infraction.type.incitation": {
+        "fr": "📢 Incitation interdite", "en": "📢 Prohibited incitement",
+        "es": "📢 Incitación prohibida", "de": "📢 Verbotene Aufstachelung",
+        "it": "📢 Istigazione vietata", "pt": "📢 Incitação proibida",
+    },
+    "infraction.type.discrimination": {
+        "fr": "🚫 Propos discriminatoires", "en": "🚫 Discriminatory remarks",
+        "es": "🚫 Comentarios discriminatorios", "de": "🚫 Diskriminierende Äußerungen",
+        "it": "🚫 Frasi discriminatorie", "pt": "🚫 Comentários discriminatórios",
+    },
+    "infraction.type.harcelement": {
+        "fr": "🎯 Harcèlement d'un membre", "en": "🎯 Harassment of a member",
+        "es": "🎯 Acoso a un miembro", "de": "🎯 Belästigung eines Mitglieds",
+        "it": "🎯 Molestie verso un membro", "pt": "🎯 Assédio a um membro",
+    },
+    "infraction.type.grooming": {
+        "fr": "🛑 Comportement inapproprié envers un mineur",
+        "en": "🛑 Inappropriate behaviour towards a minor",
+        "es": "🛑 Comportamiento inapropiado hacia un menor",
+        "de": "🛑 Unangemessenes Verhalten gegenüber einer minderjährigen Person",
+        "it": "🛑 Comportamento inappropriato verso un minore",
+        "pt": "🛑 Comportamento inadequado com um menor",
+    },
+    "infraction.type.protection": {
+        "fr": "🛡️ Règle du serveur enfreinte", "en": "🛡️ Server rule broken",
+        "es": "🛡️ Regla del servidor incumplida", "de": "🛡️ Serverregel verletzt",
+        "it": "🛡️ Regola del server infranta", "pt": "🛡️ Regra do servidor violada",
+    },
+
     # ─── Boutons communs ───
     "btn.close": {
         "fr": "Fermer", "en": "Close", "es": "Cerrar",
