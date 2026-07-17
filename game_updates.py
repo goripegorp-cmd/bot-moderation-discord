@@ -136,6 +136,21 @@ _UPDATE_NEGATIVE_KEYWORDS = [
 ]
 
 
+# ── Regex précompilées (owner 2026-07-12) : frontière de mot \b = fin des faux rejets ──────────
+# `'esports' in "…Esports 2025 Team Capsule"` jetait un patch note officiel ; `'sale'` jetait
+# « wholesale changes » ; `'contest'` jetait « contested objectives ». Avec \b, ces mots ne
+# matchent QUE lorsqu'ils sont de vrais mots isolés (« IEM Katowice », « 50% off », « contest »).
+_UPDATE_NEGATIVE_RE = [re.compile(r'\b' + re.escape(k.strip()) + r'\b', re.IGNORECASE)
+                       for k in _UPDATE_NEGATIVE_KEYWORDS if k and k.strip()]
+_WEEKLY_NEG_RE = [re.compile(r'\b' + re.escape(k) + r'\b', re.IGNORECASE)
+                  for k in ('tournament', 'esports', 'sale', 'giveaway', 'contest')]
+# Un TITRE qui annonce explicitement un patch note = update, quoi qu'il y ait dans le corps.
+# (Même mécanisme d'allow prioritaire que `_ROBLOX_ALLOW`, déjà éprouvé côté Roblox.)
+_TITLE_STRONG_RE = re.compile(
+    r'\b(release notes?|patch notes?|hotfix(?:es)?|changelog|dev(?:eloper)? update|'
+    r'bug fixes?|update \d|patch \d)\b', re.IGNORECASE)
+
+
 def _is_real_update(title: str, summary: str = "") -> bool:
     """Filtre strict : retourne True UNIQUEMENT si c'est une vraie mise à jour.
 
@@ -152,21 +167,35 @@ def _is_real_update(title: str, summary: str = "") -> bool:
     text = f"{title} {summary}".lower().strip()
     if not text:
         return False
+    _t = (title or "").strip()
+
+    # ⚠️ owner 2026-07-12 — 3 correctifs de FAUX REJETS (plainte « les updates CS2/WoW ne sont
+    # pas postées »). Les négatifs étaient testés en SOUS-CHAÎNE NUE sur titre **+ résumé**, or
+    # le résumé Steam = les 300 premiers caractères du CORPS du patch. Prouvé en rejouant les
+    # vraies listes :
+    #   • « Release Notes for 6/3 » (corps « …Esports 2025 Team Capsule ») → rejeté par 'esports'
+    #   • « Release Notes for 7/15 » (corps « Fixed an issue where contested… ») → 'contest'
+    #   • 'sale' ⊂ « whole-SALE changes to loot table » → rejeté
+    # → le patch note officiel était jeté à cause de ce qu'il DOCUMENTE.
+    # (0) ALLOW PRIORITAIRE : un TITRE qui annonce explicitement un patch note passe AVANT tout
+    #     négatif (même mécanisme que _ROBLOX_ALLOW, déjà validé côté Roblox).
+    if _TITLE_STRONG_RE.search(_t):
+        return True
 
     # Exception : Roblox "Weekly Recap" = update officielle plateforme
     if 'weekly recap' in text:
-        # Vérifie qu'il n'y a pas un keyword négatif fort
-        for neg in ['tournament', 'esports', 'sale', 'giveaway', 'contest']:
-            if neg in text:
+        # Vérifie qu'il n'y a pas un keyword négatif fort (TITRE seul + frontière de mot)
+        for _rx in _WEEKLY_NEG_RE:
+            if _rx.search(_t):
                 return False
         return True
 
-    # 1. Reject si keyword négatif (priorité)
-    for neg in _UPDATE_NEGATIVE_KEYWORDS:
-        if neg in text:
+    # 1. Reject si keyword négatif (priorité) — TITRE SEUL + frontière de mot
+    for _rx in _UPDATE_NEGATIVE_RE:
+        if _rx.search(_t):
             return False
 
-    # 2. Accept si keyword positif
+    # 2. Accept si keyword positif (titre + résumé : un indice de patch où qu'il soit)
     for pos in _UPDATE_POSITIVE_KEYWORDS:
         if pos in text:
             return True
@@ -205,6 +234,21 @@ _ROBLOX_ALLOW = [
 ]
 
 
+# ⚠️ REJET par FRONTIÈRE DE MOT (owner 2026-07-12) — corrige un BUG MAJEUR de faux rejets.
+# AVANT : `if neg in text` = sous-chaîne NUE, testée sur titre **+ résumé**. Conséquences PROUVÉES
+# en rejouant les vraies listes :
+#   • « Hardcore mode support »            → rejeté car ha-**RDC**-ore contient 'rdc'
+#   • « New Lighting API » (« no longer hardcoded ») → rejeté car ha-**RDC**-oded
+#   • « Release Notes… » (« contested objectives »)  → rejeté car con-**TEST**-ed contient 'contest'
+# → les patch notes OFFICIELS étaient jetés à cause du contenu qu'ils documentent. C'est le piège
+#   des mots courts que le repo documente déjà ailleurs (cf. lexique insultes : pv/mana/buff retirés).
+# MAINTENANT : (1) regex à frontière de mot `\bmot\b` → « rdc » ne matche plus « hardcore » mais
+# matche toujours « RDC 2026 » ; (2) les REJETS ne sont testés que sur le **TITRE** (le résumé est
+# le corps de l'article : il PARLE des events sans en être un). L'ALLOW reste sur titre+résumé.
+_ROBLOX_REJECT_RE = [re.compile(r'\b' + re.escape(k.strip()) + r'\b', re.IGNORECASE)
+                     for k in _ROBLOX_REJECT if k and k.strip()]
+
+
 def _is_roblox_update(title: str, summary: str = "") -> bool:
     """Filtre créateur INCLUSIF : accepte toute update plateforme/créateur, rejette les events.
     owner 2026-07-04 : l'ALLOW-LIST (_ROBLOX_ALLOW) est PRIORITAIRE — les termes suivis scrupuleusement
@@ -215,8 +259,10 @@ def _is_roblox_update(title: str, summary: str = "") -> bool:
         return False
     if any(a in text for a in _ROBLOX_ALLOW):
         return True
-    for neg in _ROBLOX_REJECT:
-        if neg in text:
+    # REJET sur le TITRE SEUL + frontière de mot (voir le bloc ci-dessus).
+    _t = (title or "").strip()
+    for _rx in _ROBLOX_REJECT_RE:
+        if _rx.search(_t):
             return False
     return True
 
