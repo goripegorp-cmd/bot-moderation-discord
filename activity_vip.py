@@ -67,14 +67,23 @@ VIP_COLOR = 0x3498DB
 VIP_PLUS_COLOR = 0x9B59B6
 
 # ─── Défauts de configuration (tous surchargeables via guild_config) ─────────
+# SEUILS ABAISSÉS (owner 2026-07-17 : « fais en sorte que BEAUCOUP PLUS de personnes puissent
+# gagner le VIP et le VIP+ »). Ce que valaient les anciens seuils, sur la fenêtre de 7 jours :
+#   VIP  = 120 pts →  120 messages/semaine (18/jour)  OU  2 h de vocal/semaine
+#   VIP+ = 600 pts →  600 messages/semaine (86/jour)  OU 10 h de vocal/semaine  ← hors d'atteinte
+# Nouveaux (moitié), l'ordre est préservé — VIP+ reste ×5 le VIP, donc toujours réservé aux PLUS
+# actifs, exactement comme demandé :
+#   VIP  =  60 pts →   60 messages/semaine (9/jour)   OU  1 h de vocal/semaine
+#   VIP+ = 300 pts →  300 messages/semaine (43/jour)  OU  5 h de vocal/semaine
+# Rappel : 1 message = 1 pt ET 1 min de vocal = 1 pt → le vocal SEUL suffit à devenir VIP.
 _DEFAULTS = {
     "vip_enabled": False,
     "vip_warn_enabled": True,
     "vip_window_days": 7,
-    "vip_score_min": 120,
-    "vip_active_days_min": 3,
-    "vip_plus_score_min": 600,
-    "vip_plus_active_days_min": 5,
+    "vip_score_min": 60,
+    "vip_active_days_min": 2,
+    "vip_plus_score_min": 300,
+    "vip_plus_active_days_min": 4,
     "vip_grace_days": 3,
 }
 # Bornes de sécurité (anti-config absurde saisie au modal).
@@ -316,7 +325,66 @@ async def _ensure_roles(guild: discord.Guild):
 
     await _save_role_ids(guild.id, vip_role.id if vip_role else 0,
                          vip_plus_role.id if vip_plus_role else 0)
+    await _fix_role_tree(guild, vip_role, vip_plus_role)
     return vip_role, vip_plus_role
+
+
+async def _fix_role_tree(guild: discord.Guild, vip_role, vip_plus_role) -> None:
+    """Répare l'arborescence : 💎 VIP+ AU-DESSUS de 🌟 VIP, et les deux JAMAIS mentionnables.
+
+    owner 2026-07-17 : « dans l'ordre des rôles, fais en sorte que le VIP+ soit affiché au-dessus
+    du VIP » + « vérifie qu'on ne puisse pas mentionner ces rôles ».
+
+    Pourquoi ça n'existait pas : `mentionable=False` n'était posé qu'à la CRÉATION — si quelqu'un
+    repassait le rôle mentionnable à la main, plus rien ne le refermait. Et la POSITION n'était
+    jamais gérée : Discord crée les rôles tout en bas, donc VIP+ pouvait finir SOUS VIP.
+    🔒 Le re-verrouillage suit le patron déjà éprouvé d'`update_ping_role.ensure_role` (incident
+    2026-06-27 : un rôle laissé mentionnable a permis de ping tout le serveur avec une arnaque).
+
+    IDEMPOTENT : n'appelle l'API QUE si quelque chose diffère → aucun coût, aucun 429 en régime
+    normal (cette fonction passe à chaque évaluation, toutes les 30 min).
+    FAIL-SOFT : sans « Gérer les rôles », ou si le rôle du bot est trop bas, on ne fait rien —
+    jamais d'exception (le VIP doit continuer de fonctionner).
+    """
+    try:
+        me = guild.me
+        if not (me and me.guild_permissions.manage_roles):
+            return
+        # ── 1. Re-verrouillage : non-mentionnable + affiché à part (hoist) ──
+        for _r in (vip_role, vip_plus_role):
+            if _r is None or _r >= me.top_role:      # rôle au-dessus du bot → intouchable
+                continue
+            if _r.mentionable or not _r.hoist:
+                try:
+                    await _r.edit(mentionable=False, hoist=True,
+                                  reason="VIP : jamais mentionnable, toujours affiché à part")
+                    await asyncio.sleep(_ROLE_EDIT_SLEEP)
+                except Exception as ex:
+                    print(f"[activity_vip relock {_r.name}] {ex}")
+        # ── 2. VIP+ strictement AU-DESSUS de VIP ──
+        if vip_role is None or vip_plus_role is None:
+            return
+        if vip_plus_role.position > vip_role.position:
+            return                                   # déjà bon → zéro appel API
+        # Le bot ne peut déplacer un rôle QUE strictement sous son propre rôle le plus haut.
+        _target = min(vip_role.position + 1, me.top_role.position - 1)
+        if _target <= vip_role.position:
+            print(f"[activity_vip] Impossible de remonter {VIP_PLUS_ROLE_NAME} au-dessus de "
+                  f"{VIP_ROLE_NAME} : mon rôle est trop bas dans la liste. "
+                  f"Remonte le rôle du bot au-dessus des rôles VIP.")
+            return
+        try:
+            await guild.edit_role_positions(
+                positions={vip_plus_role: _target},
+                reason="VIP+ doit apparaître au-dessus de VIP")
+            await asyncio.sleep(_ROLE_EDIT_SLEEP)
+        except discord.Forbidden:
+            print(f"[activity_vip] Forbidden en remontant {VIP_PLUS_ROLE_NAME} — "
+                  f"le rôle du bot doit être AU-DESSUS des rôles VIP.")
+        except Exception as ex:
+            print(f"[activity_vip role positions] {ex}")
+    except Exception as ex:
+        print(f"[activity_vip _fix_role_tree] {ex}")
 
 
 def _role_for(tier: str, vip_role, vip_plus_role):
@@ -803,6 +871,57 @@ async def evaluate_now(guild: discord.Guild):
     except Exception as ex:
         print(f"[activity_vip evaluate_now] {ex}")
         return None
+
+
+async def reset_member_stats(guild: discord.Guild, user_id: int) -> bool:
+    """Remet à ZÉRO les statistiques d'ACTIVITÉ d'un membre → il repart de 0 pour le VIP.
+
+    owner 2026-07-17 (sanction du spam TOXIQUE persistant) : « au 3e rappel ignoré, tu lui
+    supprimes toutes les statistiques qu'il a dans le serveur → il repart de zéro et doit tout
+    recommencer (VIP, VIP+, Hyper). »
+
+    PÉRIMÈTRE STRICT (vérifié : c'est TOUT ce que le calcul VIP lit, et RIEN d'autre) :
+      • `activity_score`  → les points d'activité (1 msg = 1 pt, 1 min vocal = 1 pt). C'est
+        l'UNIQUE source du VIP (`_aggregate_activity` ne lit QUE cette table) → l'effacer remet
+        vraiment le compteur à zéro.
+      • `vip_status`      → l'état VIP mémorisé (palier, avertissements). On l'efface pour repartir
+        propre, sinon la ligne « removed » subsisterait.
+      • retrait des rôles 🌟 VIP / 💎 VIP+ Discord (via le chemin normal `_rm_role`).
+    ⚠️ ON NE TOUCHE À RIEN D'AUTRE : ni coins/banque, ni inventaire, ni succès, ni niveaux, ni
+    réputation, ni historique d'infractions. Une sanction de spam ne doit PAS détruire son
+    économie — ce serait disproportionné et hors demande.
+
+    FAIL-SAFE : renvoie True si l'effacement DB a réussi (le retrait de rôle est best-effort).
+    Idempotent : ré-appelable sans dommage (un casier déjà vide reste vide).
+    """
+    try:
+        gid = int(getattr(guild, 'id', 0))
+        uid = int(user_id)
+        if not gid or not uid or _get_db is None:
+            return False
+        # ── 1. Effacer les points + l'état VIP (transaction unique) ──
+        async with _get_db() as db:
+            await db.execute("DELETE FROM activity_score WHERE guild_id=? AND user_id=?", (gid, uid))
+            await db.execute("DELETE FROM vip_status WHERE guild_id=? AND user_id=?", (gid, uid))
+            await db.commit()
+        # ── 2. Retirer les rôles VIP Discord (best-effort, n'annule pas le reset DB) ──
+        try:
+            member = guild.get_member(uid)
+            if member is not None:
+                vip_id, vip_plus_id = await _get_role_ids(gid)
+                for _rid in (vip_id, vip_plus_id):
+                    _r = guild.get_role(_rid) if _rid else None
+                    if _r is not None and _r in member.roles:
+                        await member.remove_roles(_r, reason="Stats remises à zéro (spam toxique)")
+                        await asyncio.sleep(_ROLE_EDIT_SLEEP)
+        except Exception as ex:
+            print(f"[activity_vip reset roles] {ex}")
+        await _audit(gid, uid, "reset_stats", "none", 0, 0)
+        return True
+    except Exception as ex:
+        import sys as _sys
+        print(f"[activity_vip reset_member_stats] {ex}", file=_sys.stderr, flush=True)
+        return False
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
