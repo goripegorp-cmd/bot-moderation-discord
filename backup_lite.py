@@ -357,8 +357,17 @@ async def backup_now() -> dict:
         # Compresse + écrit
         date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         filename = BACKUP_DIR / f"critical_{date_str}.json.gz"
-        json_bytes = json.dumps(payload, default=str).encode("utf-8")
-        compressed = gzip.compress(json_bytes, compresslevel=6)
+        # ⚠️ CORRECTIF GEL (owner 2026-07-12) : `json.dumps` + `gzip.compress(level=6)` sur
+        # PLUSIEURS Mo tournaient DIRECTEMENT sur la boucle asyncio → plusieurs SECONDES de CPU
+        # bloquant → heartbeat gateway raté (« Can't keep up, websocket is 41.3s behind ») → aucun
+        # ACK en 3 s → TOUTES les interactions du serveur échouaient pendant le backup.
+        # (Ce fichier n'avait AUCUN `to_thread`, alors que db_backup.py fait le même travail
+        # correctement en thread.) Désormais : un SEUL aller-retour en thread. Bonus : `zlib`
+        # RELÂCHE le GIL, donc la compression devient réellement parallèle à la boucle.
+        def _serialize_and_compress() -> bytes:
+            return gzip.compress(json.dumps(payload, default=str).encode("utf-8"), compresslevel=6)
+
+        compressed = await asyncio.to_thread(_serialize_and_compress)
 
         # ─── B2 : garde-fou taille (anti backup tronqué) ─────────────────────
         # Si le .json.gz du jour est anormalement petit vs le précédent (perte
@@ -375,7 +384,9 @@ async def backup_now() -> dict:
                 f"conservé (fichier daté distinct).",
             )
 
-        filename.write_bytes(compressed)
+        # Écriture en THREAD elle aussi : /data est un volume RÉSEAU Railway (latence ≫ SSD) →
+        # un write_bytes de plusieurs Mo sur la boucle la bloquait aussi.
+        await asyncio.to_thread(filename.write_bytes, compressed)
         out["file"] = str(filename)
         out["size_bytes"] = len(compressed)
 
