@@ -916,14 +916,15 @@ class YouTubeRSSAdapter(RSSHubAdapter):
             if len(self._cid_fail) > 500:        # borne memoire (idem `_cid`)
                 self._cid_fail.clear()
             self._cid_fail[_h] = _t.monotonic()  # → le warning ci-dessous sort 1×/h, pas 1×/5 min
-            # stderr : `_QuietStdout` masque les « [tag] … » sur stdout (piege connu du repo).
-            import sys as _s
-            print(f"[social] ⚠️ YouTube : impossible de resoudre la chaine « {handle} » "
-                  f"(mur de consentement UE ou nom inexact). SOLUTION SURE : mets l'ID de la "
-                  f"chaine (UC...) ou l'URL complete youtube.com/channel/UC... a la place du "
-                  f"pseudo — ca marche a coup sur, sans resolution. Nouvelle tentative dans "
-                  f"1 h max (ou au prochain redemarrage si tu corriges le pseudo).",
-                  file=_s.stderr, flush=True)
+            # DIAG : « pourquoi cette chaine YouTube ne poste rien ? » → visible sur Railway.
+            try:
+                import diag
+                diag.warn("social", "youtube_resolve",
+                          f"@{handle} irresolvable (mur consentement UE ou pseudo inexact) → "
+                          f"mets l'ID de chaine UC... ou l'URL youtube.com/channel/UC... "
+                          f"Nouvel essai dans 1 h max.")
+            except Exception:
+                pass
             return []
         return await super()._fetch_items(handle)
 
@@ -1303,10 +1304,22 @@ class SocialMediaManager:
         """Poll une souscription. Retourne le nombre d'annonces creees."""
         adapter = self._adapters.get(sub.platform)
         if not adapter:
+            try:
+                import diag
+                diag.warn("social", "poll", f"aucun adapter pour {getattr(sub.platform, 'value', '?')}")
+            except Exception:
+                pass
             return 0
         try:
             posts = await adapter.fetch_posts(sub.handle)
-        except Exception:
+        except Exception as _ex:
+            # 🎯 Avant : erreur avalee → « pourquoi rien ne remonte de cette chaine ? » invisible.
+            try:
+                import diag
+                diag.error("social", f"{getattr(sub.platform, 'value', '?')}_fetch",
+                           f"@{getattr(sub, 'handle', '?')} : echec de recuperation", exc=_ex)
+            except Exception:
+                pass
             return 0
 
         created = 0

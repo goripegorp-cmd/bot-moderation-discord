@@ -877,10 +877,27 @@ async def _refresh_atrisk_table(guild: discord.Guild, ch):
         try:
             me = ch.guild.me if ch.guild else None
             if me is not None and not ch.permissions_for(me).send_messages:
+                try:
+                    import diag
+                    diag.warn("vip", "atrisk_table",
+                              f"pas la permission d'écrire dans #{getattr(ch, 'name', '?')}")
+                except Exception:
+                    pass
                 return
             msg = await ch.send("\n".join(lines)[:2000], allowed_mentions=allowed)
             await _save_atrisk_msg(guild.id, ch.id, getattr(msg, 'id', 0) or 0, today)
+            try:
+                import diag
+                diag.event("vip", "atrisk_table",
+                           f"{_total} membre(s) à risque pingé(s) → #{getattr(ch, 'name', '?')}")
+            except Exception:
+                pass
         except Exception as ex:
+            try:
+                import diag
+                diag.error("vip", "atrisk_table", "échec de publication du tableau", exc=ex)
+            except Exception:
+                pass
             print(f"[activity_vip atrisk send] {ex}")
     except Exception as ex:
         print(f"[activity_vip _refresh_atrisk_table] {ex}")

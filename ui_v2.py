@@ -55,6 +55,13 @@ class _SafeErrorView:
     async def on_error(self, interaction, error, item=None, /) -> None:
         try:
             _who = getattr(item, 'custom_id', None) or getattr(item, 'label', None) or '?'
+            # DIAG : un bouton/menu qui plante apparaît dans le flux [DIAG] filtrable sur Railway.
+            try:
+                import diag
+                diag.error("ui", f"{type(self).__name__}/{_who}",
+                           "exception dans un callback d'interaction", exc=error)
+            except Exception:
+                pass
             print(f"[view on_error] {type(self).__name__}/{_who} : "
                   f"{type(error).__name__}: {error}", file=_sys.stderr, flush=True)
             _traceback.print_exception(type(error), error, error.__traceback__,
