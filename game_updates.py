@@ -248,6 +248,12 @@ _ROBLOX_ALLOW = [
 _ROBLOX_REJECT_RE = [re.compile(r'\b' + re.escape(k.strip()) + r'\b', re.IGNORECASE)
                      for k in _ROBLOX_REJECT if k and k.strip()]
 
+# owner 2026-07-17 : Roblox publie EN RAFALE (parfois 3+/jour — Studio, moteur, créateurs). Un cap
+# de 5 par passage tronquait les plus ANCIENNES de la rafale AVANT que l'appelant ne les voie →
+# jamais postées (« ça cible pas tout »). On récupère désormais bien plus profond ; cette borne
+# d'âge évite seulement de DÉVERSER un backlog géant au 1er run / après une longue coupure.
+_ROBLOX_MAX_AGE_DAYS = 21
+
 
 def _is_roblox_update(title: str, summary: str = "") -> bool:
     """Filtre créateur INCLUSIF : accepte toute update plateforme/créateur, rejette les events.
@@ -800,6 +806,8 @@ async def fetch_updates(session: aiohttp.ClientSession, game_key: str, max_count
         # Tri par date décroissante → on poste les updates les PLUS RÉCENTES en premier,
         # toutes catégories confondues (sinon une catégorie pourrait affamer l'autre).
         raw_all.sort(key=lambda r: _parse_ts(r.get('pub_date', '')), reverse=True)
+        from datetime import datetime as _dt, timezone as _tz
+        _now_ts = _dt.now(_tz.utc).timestamp()
         out = []
         for r in raw_all:
             # Roblox = filtre CRÉATEUR inclusif (Studio/dev/3D/VFX… sauf events) ; autres = strict.
@@ -807,6 +815,13 @@ async def fetch_updates(session: aiohttp.ClientSession, game_key: str, max_count
                 else _is_real_update(r['title'], r['summary'])
             if not ok:
                 continue
+            # Anti-backlog (creator_mode) : ne pas déverser des updates trop VIEILLES au 1er run.
+            # Les updates récentes d'une RAFALE restent TOUTES candidates (plus de troncature à 5)
+            # → le dedup persistant de l'appelant décide lesquelles sont réellement nouvelles.
+            if creator_mode:
+                _ts = _parse_ts(r.get('pub_date', ''))
+                if _ts and (_now_ts - _ts) > _ROBLOX_MAX_AGE_DAYS * 86400:
+                    continue
             tl = (r['title'] or '').lower()
             utype = "patch" if ('release note' in tl) else "dev_update"
             out.append(GameUpdate(
