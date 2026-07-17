@@ -52,20 +52,85 @@ def is_frozen(gid, uid) -> bool:
 
 _URL_RE = re.compile(r'https?://\S+', re.IGNORECASE)
 _INVITE_RE = re.compile(r'(?:discord\.gg/|discord(?:app)?\.com/invite/|discord\.gg\s*/)\s*[\w-]+', re.IGNORECASE)
-# Hôtes d'images/GIF autorisés (le GIF « pour rigoler » reste permis). Liste ÉLARGIE
-# (owner 2026-07-11 : des GIFs légitimes étaient censurés car leur hôte manquait ici).
-# NB : match par SOUS-CHAÎNE → « tenor.com » couvre aussi media.tenor.com, c.tenor.com, etc.
-_MEDIA_HOST_RE = re.compile(
-    r'(?:tenor\.com|tenor\.co|giphy\.com|gph\.is|gfycat\.com|redgifs\.com|gifyourgame\.|'
-    r'klipy\.com|imgflip\.com|imgur\.com|i\.redd\.it|v\.redd\.it|preview\.redd\.it|gyazo\.com|'
-    r'prnt\.sc|ibb\.co|postimg\.(?:cc|org)|pbs\.twimg\.com|media\.tumblr\.com|'
-    r'cdn\.discordapp\.com|media\.discordapp\.net|images-ext-\d+\.discordapp\.net)',
-    re.IGNORECASE)
-_MEDIA_EXT_RE = re.compile(r'\.(?:gif|gifv|png|jpe?g|webp|bmp|apng)(?:[?#]\S*)?', re.IGNORECASE)
-# Indice « c'est un GIF » DANS l'URL (au-delà de l'hôte/extension) : tenor /view/…-gif-123,
-# giphy /gifs/… , …/name.gif … Le « gif » doit être BORNÉ par des séparateurs d'URL → évite
-# le faux positif « gift-card » (owner 2026-07-12 : autoriser TOUT type de GIF, quel que soit le site).
-_GIF_HINT_RE = re.compile(r'[/\-_.=]gifs?(?:[/\-_.=?&]|$)', re.IGNORECASE)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  🔗 ANALYSE D'URL — on raisonne sur l'HÔTE et le CHEMIN, jamais sur la chaîne brute
+# ═══════════════════════════════════════════════════════════════════════════════
+# FAILLE CORRIGÉE (revue 2026-07-17, feu vert owner) : ces tests étaient des `search` sur
+# l'URL COMPLÈTE (hôte + chemin + query). Deux contournements triviaux en découlaient :
+#   • `https://evil.tld/steam-login?redirect=logo.png` → le « .png » de la QUERY exemptait tout ;
+#   • `https://tenor.com.evil.tld/vol-de-token`        → « tenor.com » matchait en SOUS-CHAÎNE.
+# Coût pour l'attaquant : ajouter `?x=.png` à son lien. On parse donc l'URL et on teste
+# l'extension sur le CHEMIN SEUL et les hôtes en SUFFIXE EXACT.
+# ⚠️ La LARGEUR reste voulue (décision owner 2026-07-12 « autoriser TOUS les GIFs, on modère à
+# la main ») : un chemin contenant « gif » sur N'IMPORTE quel site passe toujours — c'est la
+# décision, pas la faille. Le filtre anti-phishing/anti-scam, lui, n'a jamais été concerné.
+from urllib.parse import urlsplit
+
+# Hôtes d'images/GIF autorisés — testés en SUFFIXE EXACT sur l'hôte (« tenor.com » couvre
+# media.tenor.com / c.tenor.com, mais PAS tenor.com.evil.tld).
+_MEDIA_HOSTS = (
+    'tenor.com', 'tenor.co', 'giphy.com', 'gph.is', 'gfycat.com', 'redgifs.com',
+    'gifyourgame.com', 'gifyourgame.gg', 'klipy.com', 'imgflip.com', 'imgur.com', 'redd.it',
+    'gyazo.com', 'prnt.sc', 'ibb.co', 'postimg.cc', 'postimg.org', 'twimg.com',
+    'tumblr.com', 'discordapp.com', 'discordapp.net',
+)
+_MEDIA_EXTS = ('.gif', '.gifv', '.png', '.jpg', '.jpeg', '.webp', '.bmp', '.apng')
+# Indice « c'est un GIF » dans le CHEMIN (jamais la query) : tenor /view/…-gif-123, giphy
+# /gifs/… Le « gif » est BORNÉ par des séparateurs → pas de faux positif sur « gift-card ».
+_GIF_PATH_RE = re.compile(r'(?:^|[/\-_.])gifs?(?:[/\-_.]|$)', re.IGNORECASE)
+
+
+def _split_url(u) -> tuple:
+    """(hôte, chemin) en minuscules — ('','') si illisible.
+
+    ⚠️ Tolère une URL SANS schéma : `check_link` (bot.py) passe le GROUPE CAPTURÉ
+    (« domaine/chemin?query »), alors que `has_non_media_link` passe l'URL complète.
+    Les deux formats DOIVENT marcher.
+    """
+    try:
+        s = str(u or '').strip().lower()
+        if not s:
+            return '', ''
+        if not s.startswith(('http://', 'https://')):
+            s = 'http://' + s
+        sp = urlsplit(s)
+        return (sp.hostname or ''), (sp.path or '')
+    except Exception:
+        return '', ''
+
+
+def _host_in(host: str, domains) -> bool:
+    """Suffixe EXACT. « tenor.com » couvre media.tenor.com — jamais tenor.com.evil.tld."""
+    return bool(host) and any(host == d or host.endswith('.' + d) for d in domains)
+
+
+def _host_allowed(host: str, entries) -> bool:
+    """Whitelist OWNER (`link_whitelist`) : le domaine et ses sous-domaines, RIEN d'autre.
+
+    Corrige le même piège côté config : c'était `any(w in url)`, donc whitelister « youtube.com »
+    autorisait aussi `https://evil.tld/?ref=youtube.com`. L'owner croit autoriser un domaine —
+    il autorisait une sous-chaîne. Tolère une entrée sans TLD (« youtube ») en la comparant au
+    domaine de 2e niveau, pour ne pas casser les configs existantes.
+    """
+    if not host:
+        return False
+    labels = host.split('.')
+    for d in entries:
+        d = re.sub(r'^https?://', '', str(d or '').strip().lower()).split('/')[0].strip('/. ')
+        if not d:
+            continue
+        if host == d or host.endswith('.' + d):
+            return True
+        if '.' not in d and len(labels) >= 2 and labels[-2] == d:
+            return True
+    return False
+
+
+def _media_host_or_ext(u) -> bool:
+    """Hôte média OU extension média sur le CHEMIN (sans l'indice « gif » du chemin)."""
+    host, path = _split_url(u)
+    return _host_in(host, _MEDIA_HOSTS) or path.endswith(_MEDIA_EXTS)
 
 
 def bump(gid, uid) -> int:
@@ -131,14 +196,14 @@ def has_non_media_link(text: str, whitelist=None) -> bool:
     AUTORISÉ : hôte média (tenor/giphy/cdn…), extension média (.gif/.png…), « gif » dans l'URL
     (tout site), OU un domaine présent dans la whitelist owner (`link_whitelist`)."""
     try:
-        _wl = [str(w).lower() for w in (whitelist or []) if w]
+        _wl = [w for w in (whitelist or []) if w]
         for u in _URL_RE.findall(text or ''):
             ul = u.lower()
             if _INVITE_RE.search(ul):
                 continue                              # invitation → traitée séparément
-            if _MEDIA_HOST_RE.search(ul) or _MEDIA_EXT_RE.search(ul) or _GIF_HINT_RE.search(ul):
-                continue                              # image/GIF (hôte, extension, ou 'gif' dans l'URL) → OK
-            if _wl and any(w in ul for w in _wl):
+            if is_media_url(ul):
+                continue                              # image/GIF → OK (décision owner)
+            if _wl and _host_allowed(_split_url(ul)[0], _wl):
                 continue                              # domaine autorisé par l'owner → permis
             return True
     except Exception:
@@ -148,12 +213,22 @@ def has_non_media_link(text: str, whitelist=None) -> bool:
 
 def is_media_url(u) -> bool:
     """True si l'URL est une image/GIF : hôte média (tenor/giphy/klipy/…), extension média
-    (.gif/.png/…), OU « gif » dans l'URL. Point d'entrée UNIQUE pour EXEMPTER les GIFs de TOUS
-    les filtres de liens (trust + anti_link classique). owner 2026-07-12 : « autoriser TOUS les
-    GIFs » — Discord source les GIFs depuis plein de fournisseurs (klipy, tenor, giphy…)."""
+    (.gif/.png/…) sur le CHEMIN, OU « gif » dans le CHEMIN. Point d'entrée UNIQUE pour EXEMPTER
+    les GIFs de TOUS les filtres de liens (trust + anti_link classique). owner 2026-07-12 :
+    « autoriser TOUS les GIFs » — Discord source les GIFs depuis plein de fournisseurs
+    (klipy, tenor, giphy…).
+
+    ⚠️ Ce qui est testé sur le CHEMIN ne l'est JAMAIS sur la query : sinon `?x=.png` suffirait à
+    exempter n'importe quel lien de phishing (faille corrigée le 2026-07-17). Les hôtes sont
+    testés en suffixe exact → `tenor.com.evil.tld` ne passe pas.
+    """
     try:
-        ul = str(u or '').lower()
-        return bool(_MEDIA_HOST_RE.search(ul) or _MEDIA_EXT_RE.search(ul) or _GIF_HINT_RE.search(ul))
+        host, path = _split_url(u)
+        if not host:
+            return False
+        if _host_in(host, _MEDIA_HOSTS) or path.endswith(_MEDIA_EXTS):
+            return True
+        return bool(_GIF_PATH_RE.search(path))
     except Exception:
         return False
 
@@ -165,8 +240,7 @@ def has_media(msg, text: str) -> bool:
         if getattr(msg, 'attachments', None):
             return True
         for u in _URL_RE.findall(text or ''):
-            ul = u.lower()
-            if _MEDIA_HOST_RE.search(ul) or _MEDIA_EXT_RE.search(ul):
+            if _media_host_or_ext(u.lower()):
                 return True
         for e in (getattr(msg, 'embeds', None) or []):
             if getattr(e, 'type', '') in ('image', 'gifv', 'video'):
