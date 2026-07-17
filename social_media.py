@@ -780,9 +780,16 @@ class RSSHubAdapter(PlatformAdapter):
         key = _clean_handle(handle).lower()
         seen = self._seen.get(key)
         ids = [p.post_id for p in items]
-        if seen is None:                    # 1er passage = REFERENCE (pas de dump d'historique)
+        if seen is None:
+            # 🎯 BUG CORRIGE (owner 2026-07-17) : la baseline EN MEMOIRE (self._seen) se
+            # reinitialisait a CHAQUE redemarrage Railway → au 1er passage on renvoyait [] et les
+            # DERNIERES videos/tweets etaient avales, JAMAIS postes (« aucune se poste »). Or le
+            # vrai dedup est PERSISTANT cote manager (has_announcement / _anns sur /data, survit au
+            # reboot). On renvoie donc les N DERNIERS posts (le manager filtre ceux deja annonces
+            # → aucun re-post) au lieu de []. Au 1er ajout d'une chaine = on poste les N derniers
+            # (borne a MAX_NEW_PER_POLL, voulu : « poster les dernieres videos »), pas 15.
             self._seen[key] = set(ids)
-            return []
+            return list(reversed(items[:self.MAX_NEW_PER_POLL]))
         fresh = [p for p in items if p.post_id not in seen]
         for pid in ids:
             seen.add(pid)
@@ -1020,9 +1027,12 @@ class TwitterSyndicationAdapter(PlatformAdapter):
         key = _clean_handle(handle).lower()
         seen = self._seen.get(key)
         ids = [p.post_id for p in items]
-        if seen is None:                                 # 1er passage = REFERENCE (pas de dump)
+        if seen is None:
+            # Idem RSSHubAdapter (bug corrige 2026-07-17) : la baseline memoire se reinitialisait a
+            # chaque reboot → derniers tweets avales. Dedup persistant cote manager → on renvoie les
+            # N derniers au lieu de [].
             self._seen[key] = set(ids)
-            return []
+            return list(reversed(items[:self.MAX_NEW_PER_POLL]))
         fresh = [p for p in items if p.post_id not in seen]
         for pid in ids:
             seen.add(pid)
