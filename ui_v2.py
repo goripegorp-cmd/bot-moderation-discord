@@ -23,8 +23,61 @@ Exemple minimal :
 """
 from __future__ import annotations
 from typing import Optional, Sequence, Union
+import sys as _sys
+import traceback as _traceback
 import discord
 from discord import ui
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  🛟 FILET GLOBAL — un bouton ne doit JAMAIS rester muet
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# PROBLÈME (revue 2026-07-17) : aucun panneau du bot ne définissait `on_error`.
+# discord.py appelle `BaseView.on_error(interaction, error, item)` dès qu'un callback
+# d'item lève (view.py:568, appelé view.py:600) ; son implémentation par défaut se
+# contente d'un `_log.error(...)`. Résultat : le moindre hoquet transitoire (pool
+# SQLite affamé, gateway en retard, 429) laissait l'interaction SANS RÉPONSE →
+# le membre voyait « L'application ne répond plus » et l'owner ne voyait RIEN.
+#
+# On hérite `View`/`LayoutView` d'un mixin qui, sur exception :
+#   1. écrit la stack sur **stderr** (obligatoire : `_QuietStdout` masque stdout) ;
+#   2. répond quelque chose au membre au lieu de le laisser devant un bouton mort.
+#
+# Une classe qui définit son propre `on_error` garde le sien (MRO) — rien n'est écrasé.
+# Le mixin est inerte vis-à-vis de `__init_subclass__` de discord.py (il n'y cherche que
+# des `Item` et des `__discord_ui_model_type__`, view.py:749-759 et 855-867).
+# `Modal` n'est PAS couvert : sa signature diffère (`on_error(interaction, error)`).
+
+class _SafeErrorView:
+    """Mixin : une exception dans un callback ne laisse jamais l'interaction muette."""
+
+    async def on_error(self, interaction, error, item=None, /) -> None:
+        try:
+            _who = getattr(item, 'custom_id', None) or getattr(item, 'label', None) or '?'
+            print(f"[view on_error] {type(self).__name__}/{_who} : "
+                  f"{type(error).__name__}: {error}", file=_sys.stderr, flush=True)
+            _traceback.print_exception(type(error), error, error.__traceback__,
+                                       file=_sys.stderr)
+        except Exception:
+            pass
+        try:
+            _msg = ("⚠️ Un souci est survenu pendant cette action — réessaie dans quelques "
+                    "secondes.\n-# Si ça continue, préviens un admin.")
+            if interaction.response.is_done():
+                await interaction.followup.send(_msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(_msg, ephemeral=True)
+        except Exception:
+            pass
+
+
+class View(_SafeErrorView, ui.View):
+    """`discord.ui.View` + filet d'erreur. À importer d'ici, pas de `discord.ui`."""
+
+
+class LayoutView(_SafeErrorView, ui.LayoutView):
+    """`discord.ui.LayoutView` (Components V2) + filet d'erreur."""
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -130,7 +183,7 @@ def container(*items: ui.Item, color: discord.Color = Palette.PRIMARY) -> ui.Con
 #  🏗️ VIEW DE BASE — owner-check + timeout standard
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class BasePanel(ui.LayoutView):
+class BasePanel(LayoutView):
     """LayoutView avec restriction owner + timeout 10 minutes par défaut.
 
     Usage :
@@ -208,7 +261,7 @@ def info_card(
     return ui.Container(*items, accent_color=color)
 
 
-class StaticPanel(ui.LayoutView):
+class StaticPanel(LayoutView):
     """LayoutView statique pour une ANNONCE / un RÉCAP public (sans boutons).
 
     Pas d'interaction → pas de risque d'« Échec de l'interaction », pas besoin

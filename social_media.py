@@ -616,12 +616,52 @@ DEFAULT_RSSHUB_BASE = "https://rsshub.app"
 
 
 def _clean_handle(handle: str) -> str:
-    """@CaribBros / https://x.com/CaribBros / 'caribbros ' -> 'caribbros'."""
+    """@CaribBros / https://x.com/CaribBros / 'caribbros ' -> 'caribbros'.
+
+    GENERIQUE (Twitter/TikTok/Instagram). YouTube a le sien : `_clean_yt_handle` — ses URL ont
+    des ONGLETS (/videos, /featured…) qu'il faut retirer, alors qu'ici un compte peut
+    legitimement s'appeler « videos ».
+    """
     h = (handle or "").strip()
+    h = h.split("?")[0].split("#")[0]  # query/fragment : « x.com/Nom?s=20 » collé du navigateur
     if "/" in h:                       # si on a colle une URL, on prend le dernier segment
         h = h.rstrip("/").split("/")[-1]
     h = h.lstrip("@").strip()
     return h
+
+
+# Onglets de chaine YouTube : ce sont des SUFFIXES d'URL, jamais le nom de la chaine.
+_YT_TABS = {"videos", "featured", "streams", "shorts", "about", "playlists",
+            "community", "live", "podcasts", "releases", "channels", "store"}
+
+
+def _clean_yt_handle(handle: str) -> str:
+    """Extrait l'identifiant d'une chaine YouTube (channel_id UC..., @pseudo ou nom legacy).
+
+    Corrige un bug reel (revue 2026-07-17) : l'ancien nettoyage generique gardait le DERNIER
+    segment de l'URL, or l'URL qu'on copie depuis son navigateur finit par un ONGLET —
+    « youtube.com/@RellGames/videos » donnait « videos », et on tentait de resoudre la chaine
+    « @videos ». Pire, le message d'aide conseillait lui-meme de coller
+    « youtube.com/channel/UC... » : avec /videos au bout, ce chemin echouait AUSSI. Le pire cas
+    n'est pas le silence — si une chaine homonyme existe, on publie les videos de QUELQU'UN D'AUTRE.
+    """
+    h = (handle or "").strip()
+    h = h.split("?")[0].split("#")[0]
+    if "/" not in h:
+        return h.lstrip("@").strip()
+    import re as _re
+    # 1) un channel_id explicite. On EXIGE le segment « /channel/ » : chercher « UC[\w-]{20,} »
+    # n'importe ou prendrait un pseudo legitime tel que « @UCsomethingverylongname » pour un
+    # channel_id, et on irait poller le flux de personne.
+    m = _re.search(r"/channel/(UC[\w-]{20,})", h)
+    if m:
+        return m.group(1)
+    segs = [s for s in h.rstrip("/").split("/") if s]
+    for s in reversed(segs):                       # 2) un @pseudo, ou qu'il soit
+        if s.startswith("@"):
+            return s.lstrip("@").strip()
+    segs = [s for s in segs if s.lower() not in _YT_TABS]   # 3) sinon : nom legacy (/c/, /user/)
+    return (segs[-1] if segs else "").lstrip("@").strip()
 
 
 class RSSHubAdapter(PlatformAdapter):
@@ -781,18 +821,21 @@ class YouTubeRSSAdapter(RSSHubAdapter):
 
     platform = Platform.YOUTUBE
 
+    _CID_FAIL_TTL = 3600.0                       # 1 h avant de retenter un pseudo irresolvable
+
     def __init__(self):
         super().__init__(Platform.YOUTUBE)
         # `configured` du parent exige une route non vide ; ici l'URL est fixe → marqueur.
         self.route = "_youtube_rss_"
         self._cid: dict[str, str] = {}          # pseudo nettoye -> channel_id (UC...)
+        self._cid_fail: dict[str, float] = {}   # pseudo nettoye -> instant du dernier echec
 
     @property
     def configured(self) -> bool:
         return True                              # RSS officiel : toujours disponible, sans cle
 
     def feed_url(self, handle: str) -> str:
-        h = _clean_handle(handle)
+        h = _clean_yt_handle(handle)
         return ("https://www.youtube.com/feeds/videos.xml?channel_id="
                 + self._cid.get(h.lower(), h))
 
@@ -809,7 +852,7 @@ class YouTubeRSSAdapter(RSSHubAdapter):
 
     async def _resolve_channel_id(self, handle: str) -> Optional[str]:
         """@pseudo / nom / URL -> channel_id UC... (lu sur la page publique, puis cache)."""
-        h = _clean_handle(handle)
+        h = _clean_yt_handle(handle)
         if h.startswith("UC") and len(h) > 20:   # deja un channel_id
             return h
         hit = self._cid.get(h.lower())
@@ -845,15 +888,29 @@ class YouTubeRSSAdapter(RSSHubAdapter):
         return None
 
     async def _fetch_items(self, handle: str) -> list:
+        # CACHE NEGATIF (revue 2026-07-17). Un pseudo irresolvable l'est DURABLEMENT (faute de
+        # frappe, chaine renommee, mur de consentement) : c'est le cas NOMINAL, pas un cas rare.
+        # Sans ce garde, on relancait 3 GET vers youtube.com + un pave de warning A CHAQUE
+        # passage — soit ~864 requetes/jour pour UN seul pseudo casse (poll = 300 s par defaut),
+        # avec un risque de rate-limit sur le chemin qui souffre deja du mur de consentement.
+        import time as _t
+        _h = _clean_yt_handle(handle).lower()
+        if _t.monotonic() - self._cid_fail.get(_h, 0.0) < self._CID_FAIL_TTL:
+            return []                            # echec recent : ni requete, ni log
         # Resout le channel_id AVANT que le parent ne construise l'URL (feed_url lit le cache).
         cid = await self._resolve_channel_id(handle)
         if not cid:
+            if len(self._cid_fail) > 500:        # borne memoire (idem `_cid`)
+                self._cid_fail.clear()
+            self._cid_fail[_h] = _t.monotonic()  # → le warning ci-dessous sort 1×/h, pas 1×/5 min
             # stderr : `_QuietStdout` masque les « [tag] … » sur stdout (piege connu du repo).
             import sys as _s
             print(f"[social] ⚠️ YouTube : impossible de resoudre la chaine « {handle} » "
                   f"(mur de consentement UE ou nom inexact). SOLUTION SURE : mets l'ID de la "
                   f"chaine (UC...) ou l'URL complete youtube.com/channel/UC... a la place du "
-                  f"pseudo — ca marche a coup sur, sans resolution.", file=_s.stderr, flush=True)
+                  f"pseudo — ca marche a coup sur, sans resolution. Nouvelle tentative dans "
+                  f"1 h max (ou au prochain redemarrage si tu corriges le pseudo).",
+                  file=_s.stderr, flush=True)
             return []
         return await super()._fetch_items(handle)
 
