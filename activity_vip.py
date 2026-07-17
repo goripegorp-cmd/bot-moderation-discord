@@ -161,6 +161,16 @@ async def init_db():
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_vip_audit_lookup "
                 "ON vip_audit(guild_id, user_id, at)")
+            # owner 2026-07-17 : mémorise LE tableau « à risque » du jour (1/jour, remplace la
+            # veille → salon propre). 1 seule ligne par guilde.
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS vip_atrisk_msg (
+                    guild_id   INTEGER PRIMARY KEY,
+                    channel_id INTEGER,
+                    message_id INTEGER,
+                    day        TEXT
+                )
+            """)
             await db.commit()
     except Exception as ex:
         print(f"[activity_vip init_db] {ex}")
@@ -748,6 +758,134 @@ def _label(tier: str) -> str:
     return VIP_PLUS_ROLE_NAME if tier == "vip_plus" else VIP_ROLE_NAME
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Tableau « À RISQUE » — UN SEUL message/jour qui remplace celui de la veille
+# ═══════════════════════════════════════════════════════════════════════════════
+# owner 2026-07-17 : avant, chaque membre en baisse recevait SON message pinguant → salon moche
+# et répétitif. Désormais UN SEUL tableau récapitulatif liste TOUS les membres à risque, les pingue
+# tous, est posté 1×/jour, et le tableau de la veille est SUPPRIMÉ (salon propre).
+
+async def _load_atrisk_msg(guild_id):
+    if _get_db is None:
+        return None
+    try:
+        async with _get_db() as db:
+            async with db.execute(
+                "SELECT channel_id, message_id, day FROM vip_atrisk_msg WHERE guild_id=?",
+                (int(guild_id),)) as cur:
+                return await cur.fetchone()
+    except Exception:
+        return None
+
+
+async def _save_atrisk_msg(guild_id, channel_id, message_id, day):
+    if _get_db is None:
+        return
+    try:
+        async with _get_db() as db:
+            await db.execute(
+                "INSERT INTO vip_atrisk_msg(guild_id, channel_id, message_id, day) VALUES(?,?,?,?) "
+                "ON CONFLICT(guild_id) DO UPDATE SET channel_id=excluded.channel_id, "
+                "message_id=excluded.message_id, day=excluded.day",
+                (int(guild_id), int(channel_id), int(message_id), str(day)))
+            await db.commit()
+    except Exception as ex:
+        print(f"[activity_vip save_atrisk] {ex}")
+
+
+async def _delete_old_atrisk(guild, row):
+    """Supprime le tableau précédent (row = (channel_id, message_id, day)). Fail-soft."""
+    if not row:
+        return
+    try:
+        _ch = guild.get_channel(int(row[0] or 0))
+        if _ch is not None:
+            _m = await _ch.fetch_message(int(row[1] or 0))
+            await _m.delete()
+    except Exception:
+        pass  # déjà supprimé / introuvable → on nettoie l'état quand même
+
+
+async def _refresh_atrisk_table(guild: discord.Guild, ch):
+    """Poste/renouvelle LE tableau des membres à risque (1×/jour). Remplace 1-message-par-membre."""
+    try:
+        s = await settings(guild.id)
+        warned = []
+        if _get_db is not None:
+            async with _get_db() as db:
+                async with db.execute(
+                    "SELECT user_id, tier, last_score, last_active_days FROM vip_status "
+                    "WHERE guild_id=? AND status='warned'", (int(guild.id),)) as cur:
+                    for r in await cur.fetchall():
+                        warned.append((int(r[0]), r[1] or "vip", int(r[2] or 0), int(r[3] or 0)))
+        old = await _load_atrisk_msg(guild.id)
+        today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+
+        # Plus personne à risque → on nettoie l'ancien tableau (salon propre) et on s'arrête.
+        if not warned:
+            if old and int(old[1] or 0):
+                await _delete_old_atrisk(guild, old)
+                if _get_db is not None:
+                    async with _get_db() as db:
+                        await db.execute("DELETE FROM vip_atrisk_msg WHERE guild_id=?", (int(guild.id),))
+                        await db.commit()
+            return
+
+        # Déjà posté AUJOURD'HUI → on ne re-poste pas (1×/jour, remplacement au prochain jour).
+        if old and str(old[2] or "") == today and int(old[1] or 0):
+            return
+
+        # Nouveau jour (ou 1er post) → construit le tableau.
+        _plus, _base = [], []
+        for (uid, tier, sc, dd) in warned:
+            m = guild.get_member(uid)
+            mention = m.mention if m else f"<@{uid}>"
+            line = f"• {mention} — il manque {_needed_text(tier, sc, dd, s)}"
+            (_plus if tier == "vip_plus" else _base).append((uid, line))
+
+        lines = ["⏳ **Membres à risque de perdre leur rôle** — un petit effort cette semaine !", "",
+                 "Ces membres ont vu leur activité **baisser**. Sans un peu d'activité "
+                 "(💬 chat ou 🔊 vocal) d'ici quelques jours, leur rôle **et les accès aux salons** "
+                 "seront retirés :", ""]
+        # Cap 20 : les pings DOIVENT être dans le contenu (2000 car. max — un embed ne ping pas).
+        # 20 lignes courtes + en-têtes ≈ 1800 car. → jamais de débordement, jamais de mention coupée.
+        _CAP = 20
+        shown_ids = []
+        if _plus:
+            lines.append(f"💎 **{VIP_PLUS_ROLE_NAME} en danger** :")
+            for _uid, _l in _plus[:_CAP]:
+                lines.append(_l)
+                shown_ids.append(_uid)
+        if _base and len(shown_ids) < _CAP:
+            lines.append(f"🌟 **{VIP_ROLE_NAME} en danger** :")
+            for _uid, _l in _base[:_CAP - len(shown_ids)]:
+                lines.append(_l)
+                shown_ids.append(_uid)
+        _total = len(_plus) + len(_base)
+        if _total > len(shown_ids):
+            lines.append(f"_… et {_total - len(shown_ids)} autre(s)._")
+        lines.append("")
+        lines.append("💪 **Reviens participer et tu gardes tout automatiquement !**")
+
+        # Pingue EXACTEMENT les membres affichés (ceux dont le ping tient dans le message).
+        allowed = discord.AllowedMentions(
+            users=[discord.Object(id=u) for u in shown_ids], roles=False, everyone=False)
+
+        # Remplacement propre : on supprime la veille AVANT de poster le nouveau.
+        if old and int(old[1] or 0):
+            await _delete_old_atrisk(guild, old)
+        try:
+            me = ch.guild.me if ch.guild else None
+            if me is not None and not ch.permissions_for(me).send_messages:
+                return
+            msg = await ch.send("\n".join(lines)[:2000], allowed_mentions=allowed)
+            await _save_atrisk_msg(guild.id, ch.id, getattr(msg, 'id', 0) or 0, today)
+        except Exception as ex:
+            print(f"[activity_vip atrisk send] {ex}")
+    except Exception as ex:
+        print(f"[activity_vip _refresh_atrisk_table] {ex}")
+
+
 async def _announce(guild: discord.Guild, res: dict):
     try:
         ch = await _announce_channel(guild)
@@ -779,35 +917,9 @@ async def _announce(guild: discord.Guild, res: dict):
                 users=[discord.Object(id=u) for u in ping_ids], roles=False, everyone=False)
             await _safe_send(ch, "\n".join(lines)[:1900], allowed)
 
-        # ── Avertissements : 1 message PERSONNEL pinguant chaque membre (le rappel clé) ──
-        warned = res.get("warned") or []
-        if warned:
-            if len(warned) <= _WARN_INDIVIDUAL_CAP:
-                for (uid, held, target, score, days, need) in warned:
-                    m = guild.get_member(uid)
-                    if m is None:
-                        continue
-                    if target == "none":
-                        risk = (f"tu risques de **perdre** ton rôle {_label(held)} "
-                                "(et les accès aux salons)")
-                    else:
-                        # VIP+ qui redescend : il garde une base VIP → on ne dit PAS « perte totale ».
-                        risk = (f"tu risques de **repasser {_label(target)}** "
-                                f"(tu perdrais les salons réservés {_label(held)})")
-                    txt = (f"⏳ {m.mention}, ton activité a **baissé** — {risk}. Il te manque {need} "
-                           f"cette semaine. Reviens participer et tu **gardes tout automatiquement** ! 💪")
-                    allowed = discord.AllowedMentions(users=[m], roles=False, everyone=False)
-                    if not await _safe_send(ch, txt, allowed):
-                        break
-                    await asyncio.sleep(_ROLE_EDIT_SLEEP)
-            else:
-                # Rare (grosse vague) : on résume au lieu de pinguer des dizaines de membres.
-                sample = ", ".join(_nm(u) for (u, *_r) in warned[:10])
-                await _safe_send(
-                    ch, f"⏳ **{len(warned)} membres** voient leur activité baisser et risquent de "
-                        f"perdre leur rôle VIP — un petit effort pour le garder ! {sample}"
-                        + (" …" if len(warned) > 10 else ""),
-                    discord.AllowedMentions.none())
+        # ── Membres à risque : UN SEUL tableau récapitulatif, 1×/jour, qui REMPLACE celui de la
+        # veille (owner 2026-07-17). Remplace l'ancien envoi 1-message-pinguant-par-membre (moche).
+        await _refresh_atrisk_table(guild, ch)
 
         # ── Retraits / rétrogradations : message doux (jamais culpabilisant) ──
         removed = res.get("removed") or []
