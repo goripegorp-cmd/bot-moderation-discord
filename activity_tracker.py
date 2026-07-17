@@ -91,9 +91,17 @@ _buffer_dirty: set[tuple[int, str]] = set()
 _buffer_loaded: set[tuple[int, str]] = set()
 
 
+_dirs_ready: set = set()      # guild_id dont le dossier est deja cree (evite un syscall par appel)
+
+
 def _guild_dir(guild_id: int) -> Path:
     p = DATA_DIR / str(guild_id)
-    p.mkdir(parents=True, exist_ok=True)
+    # owner 2026-07-12 (chasse au gel de la boucle) : ce mkdir tournait a CHAQUE appel — donc a
+    # chaque save ET chaque load — soit un SYSCALL sur le volume RESEAU Railway (latence bien pire
+    # qu'un SSD), execute sur la boucle asyncio. On ne le fait plus qu'UNE fois par guilde.
+    if guild_id not in _dirs_ready:
+        p.mkdir(parents=True, exist_ok=True)
+        _dirs_ready.add(guild_id)
     return p
 
 
@@ -133,8 +141,11 @@ def _load_day(guild_id: int, day: datetime) -> dict:
 
 
 def _save_day(guild_id: int, day: datetime, data: dict) -> None:
+    """SYNCHRONE : a n'appeler QUE via asyncio.to_thread (I/O sur volume RESEAU Railway).
+    owner 2026-07-12 : `indent=2` RETIRE — il doublait la taille du fichier (donc le temps
+    d'ecriture reseau) pour un fichier que personne ne lit a la main."""
     path = _day_path(guild_id, day)
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
 
 # =============================================================================
@@ -243,7 +254,10 @@ async def flush_buffer() -> int:
                 continue
             try:
                 day = datetime.strptime(day_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                _save_day(guild_id, day, data)
+                # owner 2026-07-12 : l'ecriture partait DANS la boucle asyncio, sur un volume
+                # RESEAU → elle la BLOQUAIT (c'est la classe de cause qui produit le
+                # « gateway 41.3s behind »). Desormais en thread : la boucle reste libre.
+                await asyncio.to_thread(_save_day, guild_id, day, data)
                 written += 1
             except Exception:
                 # Si l'ecriture echoue, on remet en dirty pour reessayer plus tard
