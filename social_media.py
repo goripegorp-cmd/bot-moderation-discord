@@ -796,6 +796,17 @@ class YouTubeRSSAdapter(RSSHubAdapter):
         return ("https://www.youtube.com/feeds/videos.xml?channel_id="
                 + self._cid.get(h.lower(), h))
 
+    # ⚠️ COOKIE DE CONSENTEMENT (owner 2026-07-12) — sinon RIEN ne marche depuis l'Europe.
+    # Verifie en direct : https://www.youtube.com/@RellGames renvoie un **302 vers
+    # consent.youtube.com** (mur cookies UE, impose par l'IP du serveur — Railway est en UE ;
+    # forcer ?hl=en&gl=US NE change RIEN, la redirection persiste avec gl=FR). Sans cookie, on
+    # recupere la page de CONSENTEMENT au lieu de la chaine → aucun channelId → **zero video**.
+    # Ces cookies sont exactement ce que la page de consentement poserait ; c'est la parade
+    # standard (utilisee par yt-dlp & co). NB : le FLUX RSS lui-meme n'est PAS soumis au mur —
+    # seule la resolution @pseudo -> channel_id l'etait.
+    _CONSENT = {"Cookie": "SOCS=CAI; CONSENT=YES+cb.20210328-17-p0.en+FX+123",
+                "Accept-Language": "en-US,en;q=0.9"}
+
     async def _resolve_channel_id(self, handle: str) -> Optional[str]:
         """@pseudo / nom / URL -> channel_id UC... (lu sur la page publique, puis cache)."""
         h = _clean_handle(handle)
@@ -808,18 +819,23 @@ class YouTubeRSSAdapter(RSSHubAdapter):
             import aiohttp
             self._session = aiohttp.ClientSession()
         import re as _re
+        _hdr = {**self._UA, **self._CONSENT}
         for _u in (f"https://www.youtube.com/@{h}",
                    f"https://www.youtube.com/c/{h}",
                    f"https://www.youtube.com/user/{h}"):
             try:
-                async with self._session.get(_u, headers=self._UA, timeout=15) as r:
+                async with self._session.get(_u, headers=_hdr, timeout=15,
+                                             allow_redirects=True) as r:
                     if r.status != 200:
                         continue
                     html = await r.text()
             except Exception:
                 continue
+            if "consent.youtube.com" in html[:5000] and "channelId" not in html[:20000]:
+                continue                          # mur de consentement → tentative suivante
             m = (_re.search(r'"channelId"\s*:\s*"(UC[\w-]{20,})"', html)
-                 or _re.search(r'/channel/(UC[\w-]{20,})', html))
+                 or _re.search(r'/channel/(UC[\w-]{20,})', html)
+                 or _re.search(r'"externalId"\s*:\s*"(UC[\w-]{20,})"', html))
             if m:
                 self._cid[h.lower()] = m.group(1)
                 if len(self._cid) > 500:         # borne memoire
@@ -832,8 +848,12 @@ class YouTubeRSSAdapter(RSSHubAdapter):
         # Resout le channel_id AVANT que le parent ne construise l'URL (feed_url lit le cache).
         cid = await self._resolve_channel_id(handle)
         if not cid:
-            print(f"[social] YouTube : chaine introuvable pour « {handle} » "
-                  f"(mets le @pseudo exact, l'URL de la chaine, ou son ID UC...)")
+            # stderr : `_QuietStdout` masque les « [tag] … » sur stdout (piege connu du repo).
+            import sys as _s
+            print(f"[social] ⚠️ YouTube : impossible de resoudre la chaine « {handle} » "
+                  f"(mur de consentement UE ou nom inexact). SOLUTION SURE : mets l'ID de la "
+                  f"chaine (UC...) ou l'URL complete youtube.com/channel/UC... a la place du "
+                  f"pseudo — ca marche a coup sur, sans resolution.", file=_s.stderr, flush=True)
             return []
         return await super()._fetch_items(handle)
 
