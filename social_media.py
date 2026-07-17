@@ -895,7 +895,13 @@ class YouTubeRSSAdapter(RSSHubAdapter):
         # avec un risque de rate-limit sur le chemin qui souffre deja du mur de consentement.
         import time as _t
         _h = _clean_yt_handle(handle).lower()
-        if _t.monotonic() - self._cid_fail.get(_h, 0.0) < self._CID_FAIL_TTL:
+        # ⚠️ Tester l'APPARTENANCE au dict AVANT l'arithmetique (corrige un bug d'audit
+        # 2026-07-17) : le sentinel `.get(_h, 0.0)` confondait « jamais tombe en echec » et
+        # « echoue a l'instant 0.0 ». Or `time.monotonic()` part du boot systeme ; pendant la 1re
+        # heure d'uptime, `monotonic() - 0.0 < 3600` est VRAI → un pseudo JAMAIS resolu retournait
+        # [] sans meme essayer. On ne saute QUE les pseudos reellement enregistres en echec.
+        _last_fail = self._cid_fail.get(_h)
+        if _last_fail is not None and _t.monotonic() - _last_fail < self._CID_FAIL_TTL:
             return []                            # echec recent : ni requete, ni log
         # Resout le channel_id AVANT que le parent ne construise l'URL (feed_url lit le cache).
         cid = await self._resolve_channel_id(handle)
