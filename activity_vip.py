@@ -47,6 +47,13 @@ from typing import Optional
 import discord
 from discord.ext import tasks
 
+# owner 2026-07-12 : privation VIP des fauteurs de trouble. Import SOUPLE — si le module manque,
+# _vip_exclusion=None et le VIP fonctionne exactement comme avant (aucune privation). Fail-open.
+try:
+    import vip_exclusion as _vip_exclusion
+except Exception:
+    _vip_exclusion = None
+
 # ─── Dépendances injectées ───────────────────────────────────────────────────
 _bot = None
 _get_db = None
@@ -500,6 +507,21 @@ async def _evaluate_guild_locked(guild: discord.Guild, s: dict, res: dict) -> di
     now = datetime.now(timezone.utc)
     grace = timedelta(days=s["vip_grace_days"])
 
+    # ── PRIVATION VIP (owner 2026-07-12) ──────────────────────────────────────────────────
+    # Un membre sanctionné (mute/kick/ban auto, ou warn d'un staff) est privé des récompenses
+    # gagnées par son ACTIVITÉ : 1 mois, puis 2, 4, 8, jusqu'à 1 an s'il recommence. Objectif
+    # owner : spammer pour farmer le VIP ne doit plus rien rapporter.
+    # On charge la liste une SEULE fois par passage (pas par membre) puis on force la cible à
+    # « none » → le reste de la boucle retire le rôle par le chemin NORMAL (aucune duplication).
+    # FAIL-OPEN : erreur de lecture → ensemble vide, on ne prive personne à tort (règle n°1).
+    _excluded = set()
+    try:
+        if _vip_exclusion is not None:
+            _excluded = await _vip_exclusion.excluded_ids(guild.id)
+    except Exception as ex:
+        print(f"[activity_vip exclusions] {ex}")
+        _excluded = set()
+
     async def _add_role(member, role) -> bool:
         """True si le membre POSSÈDE le rôle au retour (ajouté OU déjà présent). False sur échec."""
         if role is None:
@@ -533,6 +555,9 @@ async def _evaluate_guild_locked(guild: discord.Guild, s: dict, res: dict) -> di
             member = guild.get_member(uid)
             score, days = agg.get(uid, (0, 0))
             target = _classify(score, days, s)
+            # Privé de récompenses d'activité → AUCUN rôle, quelle que soit son activité.
+            if uid in _excluded:
+                target = "none"
             st = status_rows.get(uid)
 
             if member is None:
