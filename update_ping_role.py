@@ -216,9 +216,16 @@ class UpdatePingButton(discord.ui.DynamicItem[discord.ui.Button],
             except Exception:
                 pass
         except Exception as ex:
-            print(f"[update_ping_role callback] {ex}")
+            # ⚠️ NE JAMAIS répondre « ✅ Pris en compte » ici (bug corrigé le 2026-07-17) : le rôle
+            # n'a PAS été basculé. Le membre croyait s'être inscrit, n'était jamais pingé, et ne
+            # recliquait jamais puisqu'on lui avait confirmé le succès. Le bouton est un toggle
+            # idempotent → l'inviter à recliquer est sans risque.
+            import sys as _sys
+            print(f"[update_ping_role callback] {ex}", file=_sys.stderr, flush=True)
             try:
-                await interaction.followup.send("✅ Pris en compte.", ephemeral=True)
+                await interaction.followup.send(
+                    "❌ Ça n'a pas marché — reclique dans un instant.\n"
+                    "-# Si ça persiste, préviens un admin.", ephemeral=True)
             except Exception:
                 pass
 

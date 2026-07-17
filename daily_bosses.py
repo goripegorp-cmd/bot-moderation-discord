@@ -1815,6 +1815,17 @@ class DailyBossAttackButton(
             if _now - _last_user_attack.get(_key, 0.0) < _ATTACK_COOLDOWN:
                 return
             _last_user_attack[_key] = _now
+            # Bornage anti-fuite (revue 2026-07-17) : une entrée par joueur ayant jamais attaqué
+            # un boss, gardée à VIE. Le voisin `_last_pet_click` a sa borne depuis l'audit
+            # 2026-06-21 (l.1967) — le bouton d'ATTAQUE, chemin principal de tout combat, avait
+            # été oublié. On purge les entrées EXPIRÉES plutôt que de tout vider comme le voisin :
+            # aucun cooldown ENCORE ACTIF n'est perdu (donc aucune fenêtre de 429 rouverte).
+            if len(_last_user_attack) > 5000:
+                for _k in [k for k, v in _last_user_attack.items()
+                           if _now - v > _ATTACK_COOLDOWN]:
+                    _last_user_attack.pop(_k, None)
+                if len(_last_user_attack) > 5000:   # 5000 cooldowns actifs → dernier recours
+                    _last_user_attack.clear()
         except Exception:
             pass
 

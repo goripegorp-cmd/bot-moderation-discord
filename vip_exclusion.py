@@ -20,6 +20,7 @@ Module PUR : aucune dépendance à bot.py (pas d'import circulaire). `get_db` es
 """
 from __future__ import annotations
 
+import sys as _sys
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -71,7 +72,7 @@ async def init_db() -> None:
             """)
             await db.commit()
     except Exception as ex:
-        print(f"[vip_exclusion init_db] {ex}")
+        print(f"[vip_exclusion init_db] {ex}", file=_sys.stderr, flush=True)
 
 
 def days_for(strikes: int) -> int:
@@ -93,30 +94,45 @@ def human(days: int) -> str:
     return f"{days} jours"
 
 
+async def _read(guild_id: int, user_id: int) -> Optional[dict]:
+    """Lecture BRUTE — LÈVE si la DB est indisponible. `None` = aucun antécédent (cas légitime).
+
+    Exister séparément de `status()` est le cœur du correctif : `status()` renvoie None
+    aussi bien pour « ce membre est irréprochable » que pour « je n'ai pas pu lire ». Confondre
+    les deux fait REDESCENDRE un récidiviste à 30 jours (cf. `punish`).
+    """
+    async with _get_db() as db:
+        async with db.execute(
+            "SELECT until_ts, strikes, reason FROM vip_exclusions WHERE guild_id=? AND user_id=?",
+            (int(guild_id), int(user_id)),
+        ) as cur:
+            row = await cur.fetchone()
+    if not row:
+        return None
+    until = _parse(row[0])
+    if until is None:
+        return None
+    return {
+        'until': until,
+        'strikes': int(row[1] or 0),
+        'reason': str(row[2] or ''),
+        'active': until > _now(),
+    }
+
+
 async def status(guild_id: int, user_id: int) -> Optional[dict]:
-    """État courant : {'until': dt, 'strikes': int, 'reason': str, 'active': bool} ou None."""
+    """État courant : {'until': dt, 'strikes': int, 'reason': str, 'active': bool} ou None.
+
+    FAIL-OPEN assumé : None aussi en cas d'erreur DB (dans le doute, on n'accuse personne).
+    ⚠️ NE PAS utiliser pour décider d'une AGGRAVATION : il faut alors distinguer « aucun
+    antécédent » d'« erreur de lecture » → passer par `_read()`.
+    """
     if _get_db is None:
         return None
     try:
-        async with _get_db() as db:
-            async with db.execute(
-                "SELECT until_ts, strikes, reason FROM vip_exclusions WHERE guild_id=? AND user_id=?",
-                (int(guild_id), int(user_id)),
-            ) as cur:
-                row = await cur.fetchone()
-        if not row:
-            return None
-        until = _parse(row[0])
-        if until is None:
-            return None
-        return {
-            'until': until,
-            'strikes': int(row[1] or 0),
-            'reason': str(row[2] or ''),
-            'active': until > _now(),
-        }
+        return await _read(guild_id, user_id)
     except Exception as ex:
-        print(f"[vip_exclusion status] {ex}")
+        print(f"[vip_exclusion status] {ex}", file=_sys.stderr, flush=True)
         return None
 
 
@@ -139,24 +155,52 @@ async def punish(guild_id: int, user_id: int, reason: str = "") -> Optional[dict
     if _get_db is None:
         return None
     try:
-        prev = await status(guild_id, user_id)
+        # ── 1. Lire les antécédents. Une ERREUR de lecture ne doit PAS passer pour « casier
+        # vierge » : on croirait à une première bêtise, on écrirait strikes=1 / 30 jours, et un
+        # récidiviste sous privation d'un an verrait sa peine EFFACÉE par un simple hoquet DB.
+        # Le vrai fail-open promis en tête de fichier, c'est de ne RIEN écrire.
+        try:
+            prev = await _read(guild_id, user_id)
+        except Exception as ex:
+            print(f"[vip_exclusion punish] lecture impossible → on n'écrit RIEN "
+                  f"(guild={guild_id} user={user_id}) : {ex}", file=_sys.stderr, flush=True)
+            return None
+
+        # ── 2. Calculer le palier.
         strikes = 1
+        fresh_start = False
         if prev:
             # Oubli après une année PROPRE (privation finie depuis > 365 j) → on repart à zéro.
             if (not prev['active']) and (_now() - prev['until']).days > _CLEAN_RESET_DAYS:
-                strikes = 1
+                fresh_start = True
             else:
                 strikes = int(prev['strikes']) + 1
         days = days_for(strikes)
         until = _now() + timedelta(days=days)
-        if prev and prev['until'] > until:
+        if prev and not fresh_start and prev['until'] > until:
             until = prev['until']          # jamais de remise de peine
+
+        # ── 3. Écrire de façon MONOTONE : la peine ne peut que monter.
         async with _get_db() as db:
+            if fresh_start:
+                # Le MAX() ci-dessous interdit toute décroissance — l'oubli après une année
+                # propre est la SEULE baisse autorisée, donc il passe par un effacement explicite.
+                await db.execute(
+                    "DELETE FROM vip_exclusions WHERE guild_id=? AND user_id=?",
+                    (int(guild_id), int(user_id)),
+                )
             await db.execute(
+                # MAX() côté SQL : même si l'état lu était périmé, on ne peut jamais écraser une
+                # peine plus lourde par une plus légère. Les timestamps sont des ISO-8601 tous en
+                # UTC → l'ordre lexicographique EST l'ordre chronologique.
+                # NB : ceci empêche la RÉGRESSION, pas le lost-update (deux punish simultanés
+                # comptent +1 au lieu de +2). Conséquence mineure et assumée : un strike
+                # sous-compté, jamais un compteur remis à zéro.
                 "INSERT INTO vip_exclusions(guild_id, user_id, until_ts, strikes, reason, updated_at) "
                 "VALUES(?,?,?,?,?,?) "
                 "ON CONFLICT(guild_id, user_id) DO UPDATE SET "
-                "until_ts=excluded.until_ts, strikes=excluded.strikes, "
+                "until_ts=MAX(vip_exclusions.until_ts, excluded.until_ts), "
+                "strikes=MAX(vip_exclusions.strikes, excluded.strikes), "
                 "reason=excluded.reason, updated_at=excluded.updated_at",
                 (int(guild_id), int(user_id), until.isoformat(), int(strikes),
                  str(reason or '')[:200], _now().isoformat()),
@@ -169,7 +213,7 @@ async def punish(guild_id: int, user_id: int, reason: str = "") -> Optional[dict
             'text': human(days),
         }
     except Exception as ex:
-        print(f"[vip_exclusion punish] {ex}")
+        print(f"[vip_exclusion punish] {ex}", file=_sys.stderr, flush=True)
         return None
 
 
@@ -186,7 +230,7 @@ async def pardon(guild_id: int, user_id: int) -> bool:
             await db.commit()
             return getattr(cur, "rowcount", 0) > 0
     except Exception as ex:
-        print(f"[vip_exclusion pardon] {ex}")
+        print(f"[vip_exclusion pardon] {ex}", file=_sys.stderr, flush=True)
         return False
 
 
@@ -209,5 +253,5 @@ async def excluded_ids(guild_id: int) -> set:
                 out.add(int(uid))
         return out
     except Exception as ex:
-        print(f"[vip_exclusion excluded_ids] {ex}")
+        print(f"[vip_exclusion excluded_ids] {ex}", file=_sys.stderr, flush=True)
         return set()
