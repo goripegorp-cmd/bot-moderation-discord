@@ -414,6 +414,55 @@ CATALOG = {
         "pt": "_Achas que é um erro? Abre um **ticket** no servidor para falar com o staff._",
     },
 
+    # ═══ RÉVOCATION — le MP quand le staff LÈVE une sanction (owner 2026-07-17) ═══
+    # 🔒 Anonyme comme le MP de sanction : ne dit JAMAIS QUI a révoqué. Dit ce que le membre
+    # REGAGNE (VIP, droit de parler…) + un rappel de respecter le règlement.
+    "revoke.dm.title": {
+        "fr": "🔓 Une sanction a été levée", "en": "🔓 A sanction has been lifted",
+        "es": "🔓 Se ha levantado una sanción", "de": "🔓 Eine Sanktion wurde aufgehoben",
+        "it": "🔓 Una sanzione è stata revocata", "pt": "🔓 Uma sanção foi levantada",
+    },
+    "revoke.dm.intro": {
+        "fr": "Une sanction te concernant a été **révoquée** sur **{guild}**.",
+        "en": "A sanction against you has been **revoked** on **{guild}**.",
+        "es": "Una sanción que te afectaba ha sido **revocada** en **{guild}**.",
+        "de": "Eine Sanktion gegen dich wurde auf **{guild}** **aufgehoben**.",
+        "it": "Una sanzione a tuo carico è stata **revocata** su **{guild}**.",
+        "pt": "Uma sanção contra ti foi **revogada** em **{guild}**.",
+    },
+    "revoke.dm.vip": {
+        "fr": "Tu peux de nouveau **gagner le rôle VIP** grâce à ton activité.",
+        "en": "You can now **earn the VIP role** again through your activity.",
+        "es": "Ahora puedes volver a **ganar el rol VIP** con tu actividad.",
+        "de": "Du kannst die **VIP-Rolle** durch deine Aktivität wieder **erhalten**.",
+        "it": "Puoi di nuovo **ottenere il ruolo VIP** grazie alla tua attività.",
+        "pt": "Podes voltar a **ganhar o cargo VIP** através da tua atividade.",
+    },
+    "revoke.dm.unmute": {
+        "fr": "Tu peux de nouveau **parler** — ton mute a été levé.",
+        "en": "You can **speak** again — your mute has been lifted.",
+        "es": "Puedes volver a **hablar** — se ha levantado tu silencio.",
+        "de": "Du kannst wieder **sprechen** — deine Stummschaltung wurde aufgehoben.",
+        "it": "Puoi di nuovo **parlare** — il tuo silenziamento è stato revocato.",
+        "pt": "Podes voltar a **falar** — o teu silenciamento foi levantado.",
+    },
+    "revoke.dm.cleaned": {
+        "fr": "Une infraction a été retirée de ton dossier.",
+        "en": "An infraction has been removed from your record.",
+        "es": "Se ha eliminado una infracción de tu expediente.",
+        "de": "Ein Verstoß wurde aus deiner Akte entfernt.",
+        "it": "Un'infrazione è stata rimossa dal tuo fascicolo.",
+        "pt": "Uma infração foi removida do teu registo.",
+    },
+    "revoke.dm.respect": {
+        "fr": "Merci de continuer à **respecter le règlement** du serveur. 💚",
+        "en": "Please keep **respecting the server rules**. 💚",
+        "es": "Por favor, sigue **respetando las reglas** del servidor. 💚",
+        "de": "Bitte **halte dich weiter an die Serverregeln**. 💚",
+        "it": "Per favore continua a **rispettare il regolamento** del server. 💚",
+        "pt": "Por favor, continua a **respeitar as regras** do servidor. 💚",
+    },
+
     # ═══ TYPES D'INFRACTION — libellés lisibles du récap (owner 2026-07-17) ═══
     # La table `infractions` stocke des codes techniques ('protection', 'incitation'…). Sans ces
     # libellés, le membre lirait un code interne. Clés = `infraction.type.<code>` : les codes sont
