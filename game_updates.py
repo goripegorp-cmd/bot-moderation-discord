@@ -374,6 +374,16 @@ GAME_SOURCES = {
         "source_type": "steam_news",
         "appid": 730,
     },
+    # owner 2026-07-17 : Trove (MMO voxel, Gamigo/Trion). Steam news APPID 304050 VÉRIFIÉ en direct
+    # (le flux renvoie bien des posts « Trove »). Le filtre _is_real_update écarte events/promos
+    # (Trove Cup, sales…) → on ne garde QUE les updates + corrections de bug, comme demandé.
+    "trove": {
+        "name": "Trove",
+        "emoji": "🧊",
+        "color": 0x9B59B6,
+        "source_type": "steam_news",
+        "appid": 304050,
+    },
     "subnautica_2": {
         "name": "Subnautica 2",
         "emoji": "🐟",
