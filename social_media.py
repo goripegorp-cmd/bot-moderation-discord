@@ -758,6 +758,87 @@ class RSSHubAdapter(PlatformAdapter):
 
 
 # =============================================================================
+# YOUTUBE via RSS OFFICIEL — SANS CLE (owner 2026-07-12)
+# =============================================================================
+# 🎯 BUG CORRIGE : le panneau « Reseaux sociaux » enregistrait bien les pseudos YouTube, mais
+# bot.py ne branchait `YouTubeAdapter` QUE si `YOUTUBE_API_KEY` existait (sa propriete
+# `configured` = bool(api_key)). Sans cle → YOUTUBE tombait sur `ManualAdapter`, qui renvoie
+# une liste VIDE A VIE → **aucune video n'a JAMAIS ete publiee** depuis ce panneau. Pire : le
+# statut au boot affichait « YouTube : RSS auto ✅ (sans cle) » — vrai du POLLER LEGACY, faux de
+# ce chemin-la → la panne etait masquee.
+# SOLUTION : YouTube expose un flux RSS **officiel, gratuit, sans cle** :
+#   https://www.youtube.com/feeds/videos.xml?channel_id=UC...
+# C'est de l'**Atom**, que `RSSHubAdapter._fetch_items` sait DEJA parser (branche Atom) — et son
+# anti-flood (1er passage = reference, plafond par passage) est deja eprouve. On herite donc de
+# lui et on ne surcharge que l'URL + la resolution du pseudo → un minimum de code neuf.
+
+class YouTubeRSSAdapter(RSSHubAdapter):
+    """YouTube via son flux RSS OFFICIEL (Atom). Aucune cle, aucun quota, aucun hebergement.
+
+    Accepte un `channel_id` (UC...), un @pseudo, une URL de chaine, ou un nom legacy :
+    le channel_id est resolu UNE fois (puis cache) en lisant la page publique de la chaine.
+    """
+
+    platform = Platform.YOUTUBE
+
+    def __init__(self):
+        super().__init__(Platform.YOUTUBE)
+        # `configured` du parent exige une route non vide ; ici l'URL est fixe → marqueur.
+        self.route = "_youtube_rss_"
+        self._cid: dict[str, str] = {}          # pseudo nettoye -> channel_id (UC...)
+
+    @property
+    def configured(self) -> bool:
+        return True                              # RSS officiel : toujours disponible, sans cle
+
+    def feed_url(self, handle: str) -> str:
+        h = _clean_handle(handle)
+        return ("https://www.youtube.com/feeds/videos.xml?channel_id="
+                + self._cid.get(h.lower(), h))
+
+    async def _resolve_channel_id(self, handle: str) -> Optional[str]:
+        """@pseudo / nom / URL -> channel_id UC... (lu sur la page publique, puis cache)."""
+        h = _clean_handle(handle)
+        if h.startswith("UC") and len(h) > 20:   # deja un channel_id
+            return h
+        hit = self._cid.get(h.lower())
+        if hit:
+            return hit
+        if self._session is None:
+            import aiohttp
+            self._session = aiohttp.ClientSession()
+        import re as _re
+        for _u in (f"https://www.youtube.com/@{h}",
+                   f"https://www.youtube.com/c/{h}",
+                   f"https://www.youtube.com/user/{h}"):
+            try:
+                async with self._session.get(_u, headers=self._UA, timeout=15) as r:
+                    if r.status != 200:
+                        continue
+                    html = await r.text()
+            except Exception:
+                continue
+            m = (_re.search(r'"channelId"\s*:\s*"(UC[\w-]{20,})"', html)
+                 or _re.search(r'/channel/(UC[\w-]{20,})', html))
+            if m:
+                self._cid[h.lower()] = m.group(1)
+                if len(self._cid) > 500:         # borne memoire
+                    self._cid.clear()
+                    self._cid[h.lower()] = m.group(1)
+                return m.group(1)
+        return None
+
+    async def _fetch_items(self, handle: str) -> list:
+        # Resout le channel_id AVANT que le parent ne construise l'URL (feed_url lit le cache).
+        cid = await self._resolve_channel_id(handle)
+        if not cid:
+            print(f"[social] YouTube : chaine introuvable pour « {handle} » "
+                  f"(mets le @pseudo exact, l'URL de la chaine, ou son ID UC...)")
+            return []
+        return await super()._fetch_items(handle)
+
+
+# =============================================================================
 # TWITTER / X ADAPTER DIRECT (syndication - owner 2026-06-27)
 # =============================================================================
 # LA solution Twitter qui marche GRATUITEMENT en 2026, SANS API, SANS instance a heberger,
