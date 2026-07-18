@@ -1,4 +1,4 @@
-"""Phase 173.2 : tests pour daily_bosses (boss 4×/jour, gating niveau)."""
+"""Phase 173.2 : tests pour daily_bosses (2 créneaux/jour MIDI+SOIR, gating niveau)."""
 import pytest
 
 import daily_bosses
@@ -44,14 +44,17 @@ def test_boss_hp_forces_collaboration():
 
 
 def test_boss_slots():
-    """Plusieurs créneaux/jour : matin, midi, après-midi, soir, nuit (Phase 193)."""
-    assert len(daily_bosses.BOSS_HOURS) >= 4
+    """owner 2026-06-30 (ANTI-LASSITUDE) : 2 rendez-vous lisibles — MIDI + SOIR.
+    Les anciens créneaux matin (9h) et nuit (1h) ont été SUPPRIMÉS à dessein
+    (ils banalisaient le combat et spawnaient « dans le vide »). MAJ du test
+    Phase 193 (qui exigeait ≥4 créneaux + matin + nuit) → design 5→2."""
+    assert len(daily_bosses.BOSS_HOURS) >= 2
     for h in daily_bosses.BOSS_HOURS:
         assert 0 <= h <= 23
-    # Inclut un créneau nocturne (heure < 6 ou >= 22)
-    assert any(h < 6 or h >= 22 for h in daily_bosses.BOSS_HOURS)
-    # Phase 193 : inclut un créneau MATIN (faire vivre la journée dès le réveil)
-    assert any(7 <= h <= 11 for h in daily_bosses.BOSS_HOURS)
+    # Un créneau de journée (midi, accessible à tous)
+    assert any(11 <= h <= 14 for h in daily_bosses.BOSS_HOURS)
+    # Un temps fort en soirée (« le Boss du Soir »)
+    assert any(18 <= h <= 23 for h in daily_bosses.BOSS_HOURS)
 
 
 def test_boss_lifetime_reasonable():
