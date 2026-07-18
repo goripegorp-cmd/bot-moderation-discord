@@ -891,7 +891,21 @@ class YouTubeRSSAdapter(RSSHubAdapter):
                 if len(self._cid) > 500:         # borne memoire
                     self._cid.clear()
                     self._cid[h.lower()] = m.group(1)
+                try:
+                    import diag
+                    diag.event("social", "youtube_resolve", f"@{h} → {m.group(1)} (via {_u})")
+                except Exception:
+                    pass
                 return m.group(1)
+        # Échec de résolution — visible dans [DIAG] (le mur de consentement UE bloque le @pseudo ;
+        # la voie SÛRE = l'URL youtube.com/channel/UC... ou une clé YOUTUBE_API_KEY).
+        try:
+            import diag
+            diag.warn("social", "youtube_resolve",
+                      f"@{h} NON résolu (mur de consentement UE) → colle l'URL "
+                      f"youtube.com/channel/UC... ou pose YOUTUBE_API_KEY")
+        except Exception:
+            pass
         return None
 
     async def _fetch_items(self, handle: str) -> list:
