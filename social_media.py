@@ -487,29 +487,50 @@ class YouTubeAdapter(PlatformAdapter):
             return self._channel_id_cache[handle]
         if not self._session:
             return None
-        # Recherche par handle
-        url = "https://www.googleapis.com/youtube/v3/search"
-        params = {
-            "part": "snippet",
-            "type": "channel",
-            "q": handle.lstrip("@"),
-            "maxResults": 1,
-            "key": self.api_key,
-        }
+        h = handle.lstrip("@").strip()
+        _chan = "https://www.googleapis.com/youtube/v3/channels"
+        _srch = "https://www.googleapis.com/youtube/v3/search"
+        # Ordre de resolution (du plus PRECIS + moins cher au plus large) :
+        #  1) forHandle=@pseudo  → resout PILE la bonne chaine, 1 unite de quota.
+        #  2) forUsername=pseudo → ancien pseudo « legacy » (chaines historiques).
+        #  3) search q=nom       → nom libre, 100 unites de quota → dernier recours.
+        # C'est ce qui fait « juste marcher » aussi bien le @pseudo que le NOM officiel.
+        attempts = [
+            (_chan, {"part": "id", "forHandle": "@" + h}),
+            (_chan, {"part": "id", "forUsername": h}),
+            (_srch, {"part": "snippet", "type": "channel", "q": h, "maxResults": 1}),
+        ]
+        for url, params in attempts:
+            q = {**params, "key": self.api_key}
+            try:
+                async with self._session.get(url, params=q, timeout=10) as resp:
+                    if resp.status != 200:
+                        continue
+                    data = await resp.json()
+            except Exception:
+                continue
+            items = data.get("items", [])
+            if not items:
+                continue
+            _id = items[0].get("id")
+            channel_id = (_id if isinstance(_id, str) else None) \
+                or items[0].get("snippet", {}).get("channelId") \
+                or (items[0].get("id", {}) or {}).get("channelId")
+            if channel_id and str(channel_id).startswith("UC"):
+                self._channel_id_cache[handle] = channel_id
+                try:
+                    import diag
+                    diag.event("social", "youtube_api_resolve", f"@{h} → {channel_id}")
+                except Exception:
+                    pass
+                return channel_id
         try:
-            async with self._session.get(url, params=params, timeout=10) as resp:
-                if resp.status != 200:
-                    return None
-                data = await resp.json()
+            import diag
+            diag.warn("social", "youtube_api_resolve",
+                      f"@{h} introuvable via l'API (clé posée mais 0 résultat sur forHandle/forUsername/search)")
         except Exception:
-            return None
-        items = data.get("items", [])
-        if not items:
-            return None
-        channel_id = items[0].get("snippet", {}).get("channelId") or items[0].get("id", {}).get("channelId")
-        if channel_id:
-            self._channel_id_cache[handle] = channel_id
-        return channel_id
+            pass
+        return None
 
     async def fetch_posts(self, handle: str) -> list[SocialPost]:
         if not self.configured or not self._session:
