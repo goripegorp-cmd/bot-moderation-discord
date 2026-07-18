@@ -177,6 +177,13 @@ class Subscription:
             # défaut track_posts=False ne ferait jamais rien). owner 2026-06-27.
             if self.platform in (Platform.TWITTER, Platform.TIKTOK, Platform.INSTAGRAM):
                 return True
+            # 🐛 BUG CORRIGÉ (owner 2026-07-18) : le chemin RSS YouTube (YouTubeRSSAdapter, câblé
+            # par défaut SANS clé) émet des SocialPost typés PostType.POST — jamais VIDEO (VIDEO
+            # n'existe que dans l'adapter API, inactif sans YOUTUBE_API_KEY). Résultat : chaque
+            # vidéo tombait ici sur `return self.track_posts` = False par défaut → JETÉE en
+            # silence. Une vidéo YouTube = une vidéo → on respecte track_videos (défaut True).
+            if self.platform == Platform.YOUTUBE:
+                return self.track_videos
             return self.track_posts
         return False
 
@@ -742,10 +749,26 @@ class RSSHubAdapter(PlatformAdapter):
         try:
             async with self._session.get(url, headers=self._UA, timeout=15) as resp:
                 if resp.status != 200:
+                    # owner 2026-07-18 : ne plus avaler en silence. rsshub.app public = 302/403,
+                    # instance perso = 403/5xx si cookie mort → désormais VISIBLE dans [DIAG].
+                    try:
+                        import diag
+                        diag.warn("social", "rss_fetch",
+                                  f"{getattr(self.platform, 'value', '?')} @{handle} : "
+                                  f"flux HTTP {resp.status} ({url})")
+                    except Exception:
+                        pass
                     return []
                 text = await resp.text()
             root = ET.fromstring(text)
-        except Exception:
+        except Exception as _ex:
+            try:
+                import diag
+                diag.warn("social", "rss_fetch",
+                          f"{getattr(self.platform, 'value', '?')} @{handle} : "
+                          f"échec réseau/parse ({type(_ex).__name__}) — {url}")
+            except Exception:
+                pass
             return []
         out: list[SocialPost] = []
         try:
@@ -788,8 +811,17 @@ class RSSHubAdapter(PlatformAdapter):
                         platform=self.platform, handle=handle, post_id=pid,
                         post_type=PostType.POST, title=title[:280] or "Nouveau post",
                         url=link or url))
-        except Exception:
-            return []
+        except Exception as _ex:
+            # owner 2026-07-18 : renvoyer ce qui a DÉJÀ été parsé (avant : `return []` jetait
+            # tous les items déjà lus si une SEULE entrée était malformée) + trace visible.
+            try:
+                import diag
+                diag.warn("social", "rss_parse",
+                          f"{getattr(self.platform, 'value', '?')} @{handle} : "
+                          f"parse partiel ({type(_ex).__name__}), {len(out)} item(s) gardé(s)")
+            except Exception:
+                pass
+            return out
         return out
 
     async def fetch_posts(self, handle: str) -> list[SocialPost]:
@@ -1372,7 +1404,17 @@ class SocialMediaManager:
                 continue
             try:
                 msg_id = await self._post_callback(sub, post)
-            except Exception:
+            except Exception as _ex:
+                # owner 2026-07-18 : un échec d'envoi Discord (perms, 429, salon supprimé)
+                # faisait disparaître le post SANS trace → désormais visible dans [DIAG].
+                try:
+                    import diag
+                    diag.error("social", "post_callback",
+                               f"{getattr(sub.platform, 'value', '?')} @{getattr(sub, 'handle', '?')}"
+                               f" → salon {getattr(sub, 'target_channel_id', '?')} : échec d'envoi",
+                               exc=_ex)
+                except Exception:
+                    pass
                 continue
             if msg_id is None:
                 continue
@@ -1383,11 +1425,23 @@ class SocialMediaManager:
     async def poll_all(self) -> dict[int, int]:
         """Poll toutes les souscriptions de tous les guilds charges."""
         results: dict[int, int] = {}
+        _total_subs = 0
         for guild_id, subs in list(self._subs.items()):
             count = 0
             for sub in subs.values():
+                _total_subs += 1
                 count += await self.poll_subscription(sub)
             results[guild_id] = count
+        # owner 2026-07-18 : battement de cycle (visible dans [DIAG]) — PROUVE que le poller du
+        # manager tourne. En usage « panneau seul » ce total reste 0 (le manager ne sert que
+        # /social add) → confirme empiriquement quel système gère les pseudos de l'owner.
+        try:
+            import diag
+            _posted = sum(results.values())
+            diag.trace("social", "manager_cycle",
+                       f"{_total_subs} souscription(s) /social add · {_posted} publiée(s)")
+        except Exception:
+            pass
         return results
 
     # ---- cleanup loop -----------------------------------------------------
@@ -1443,8 +1497,13 @@ class SocialMediaManager:
         while not self._stop_event.is_set():
             try:
                 await self.poll_all()
-            except Exception:
-                pass
+            except Exception as _ex:
+                # owner 2026-07-18 : avant `except: pass` → un cycle qui plante était INVISIBLE.
+                try:
+                    import diag
+                    diag.error("social", "poll_loop", "cycle de poll en échec", exc=_ex)
+                except Exception:
+                    pass
             try:
                 await asyncio.wait_for(
                     self._stop_event.wait(), timeout=self.poll_interval_seconds
