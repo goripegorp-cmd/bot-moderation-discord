@@ -18,13 +18,16 @@ patch notes / changelogs / dev updates officiels.
    Endpoint : devforum.roblox.com/c/updates/announcements.json
    Filtre : keywords (update, release notes, patch, fix, improvement)
 
-✅ BlizzardWatch — community RSS pour les jeux Blizzard sans RSS officiel
-   (WoW, Hearthstone)
-   Endpoint : blizzardwatch.com/feed/
+✅ World of Warcraft — page news OFFICIELLE Blizzard (owner 2026-07-18)
+   Endpoint : worldofwarcraft.blizzard.com/en-us/news → scrape du blob JSON `blogList`
+   Filtre : keywords Blizzard « Update Notes » / « Hotfixes » / « Patch Notes »
+   (auteur = Blizzard Entertainment) → patch notes OFFICIELS uniquement.
+   NB : remplace l'ancien repli COMMUNAUTAIRE blizzardwatch.com (le RSS officiel
+   Blizzard est mort — cf. ci-dessous — et WoW n'est pas sur Steam).
 
 ═══ SOURCES SUPPRIMÉES (cassées en mai 2026) ═══
 
-❌ news.blizzard.com/en-us/rss → 404 (pas d'API officielle Blizzard)
+❌ news.blizzard.com/en-us/rss → 404 (pas d'API officielle Blizzard → scrape officiel WoW à la place)
 ❌ store.epicgames.com/en-US/blog.rss → 403 (Cloudflare)
 ❌ genshin.hoyoverse.com/en/news.rss → 404 (HoYoverse n'expose pas de RSS)
 ❌ hsr.hoyoverse.com/en/news.rss → 404
@@ -293,13 +296,8 @@ def _parse_ts(s: str) -> float:
 # CONFIGURATION DES SOURCES (UNIQUEMENT CELLES VÉRIFIÉES FONCTIONNELLES)
 # =============================================================================
 
-# Filter pour BlizzardWatch : on garde uniquement si le titre/contenu contient
-# un keyword associé au jeu (sinon on récupère tout le mélange)
-_BLIZZ_FILTERS = {
-    'wow': ['wow', 'world of warcraft', 'azeroth', 'mythic', 'raid', 'patch 11', 'patch 12',
-            'expansion', 'dragonflight', 'war within'],
-    'hearthstone': ['hearthstone', 'card', 'meta', 'deck'],
-}
+# (owner 2026-07-18) _BLIZZ_FILTERS retiré : servait UNIQUEMENT à filtrer le flux communautaire
+# blizzardwatch.com, remplacé par la source WoW OFFICIELLE (source_type 'wow_official').
 
 
 GAME_SOURCES = {
@@ -354,15 +352,16 @@ GAME_SOURCES = {
         "appid": 2357570,
     },
 
-    # ════ JEUX BLIZZARD SANS STEAM (via blizzardwatch.com community filtré) ════
-
+    # ════ WOW : SOURCE OFFICIELLE (owner 2026-07-18) ════
+    # AVANT : repli communautaire blizzardwatch.com. MAINTENANT : page news OFFICIELLE Blizzard
+    # (worldofwarcraft.blizzard.com), scrape du blob JSON `blogList` → patch notes officiels
+    # uniquement (cf. _fetch_wow_official). Le RSS officiel Blizzard est mort (404) et WoW n'est
+    # pas sur Steam → le scrape officiel est ce qu'il y a de plus proche de la source Blizzard.
     "wow": {
-        "name": "World of Warcraft (BlizzardWatch · communauté)",
+        "name": "World of Warcraft",
         "emoji": "⚔️",
         "color": 0x2E6BA8,
-        "source_type": "rss_filtered",
-        "source_url": "https://blizzardwatch.com/feed/",
-        "filter_keywords": _BLIZZ_FILTERS['wow'],
+        "source_type": "wow_official",
     },
 
     # ════ JEUX STEAM POPULAIRES (vérifiés via API officielle) ════
@@ -660,6 +659,101 @@ async def _fetch_rss(session: aiohttp.ClientSession, url: str, max_count: int = 
     return items
 
 
+# ═══════════════ WORLD OF WARCRAFT — SOURCE OFFICIELLE (owner 2026-07-18) ═══════════════
+# La règle owner = patch notes OFFICIELS uniquement. Or le RSS officiel Blizzard
+# (news.blizzard.com/en-us/rss) renvoie 404 (vérifié en direct) et WoW n'est pas sur Steam.
+# On remplace donc l'ancien repli COMMUNAUTAIRE (blizzardwatch.com) par un scrape de la page news
+# OFFICIELLE worldofwarcraft.blizzard.com, qui embarque un blob JSON `blogList` propre (auteur =
+# « Blizzard Entertainment »). Validé en direct : 20 blogs parsés, keywords Blizzard fiables
+# (« Update Notes »/« Hotfixes ») → on isole PILE les patch notes, tout le reste (promos, WoW
+# Weekly, short stories, Trading Post, holidays…) est écarté.
+_WOW_OFFICIAL_NEWS = "https://worldofwarcraft.blizzard.com/en-us/news"
+_WOW_OFFICIAL_BASE = "https://worldofwarcraft.blizzard.com"
+_WOW_PATCH_MARKERS = ('update note', 'hotfix', 'patch note')
+
+
+def _extract_balanced_json_array(s: str, open_idx: int) -> str:
+    """À partir de l'index du '[' ouvrant, renvoie le tableau JSON ÉQUILIBRÉ (guillemets et
+    échappements respectés → robuste aux '[' / ']' à l'intérieur des chaînes). '' si non équilibré.
+    Sert à extraire un blob JSON embarqué dans du HTML (état de page Blizzard)."""
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(open_idx, len(s)):
+        c = s[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == '\\':
+                esc = True
+            elif c == '"':
+                in_str = False
+        else:
+            if c == '"':
+                in_str = True
+            elif c == '[':
+                depth += 1
+            elif c == ']':
+                depth -= 1
+                if depth == 0:
+                    return s[open_idx:i + 1]
+    return ""
+
+
+async def _fetch_wow_official(session: aiohttp.ClientSession, max_count: int = 5) -> list[dict]:
+    """Scrape la page news OFFICIELLE Blizzard via le blob JSON `blogList`. Renvoie des items façon
+    _fetch_rss, + 'keywords' (pour ne garder que les patch notes). FAIL-SAFE : [] en cas de souci."""
+    import json as _json
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+    }
+    try:
+        async with session.get(_WOW_OFFICIAL_NEWS, headers=headers,
+                               timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status != 200:
+                print(f"[game_updates _fetch_wow_official] HTTP {resp.status}")
+                return []
+            html = await resp.text()
+    except Exception as ex:
+        print(f"[game_updates _fetch_wow_official] {ex}")
+        return []
+    # L'état de page contient  "blogList":{"blogs":[ … ]}  → on extrait le tableau équilibré.
+    mi = html.find('"blogList"')
+    bi = html.find('"blogs":', mi) if mi >= 0 else -1
+    ai = html.find('[', bi) if bi >= 0 else -1
+    if ai < 0:
+        return []
+    arr = _extract_balanced_json_array(html, ai)
+    if not arr:
+        return []
+    try:
+        blogs = _json.loads(arr)
+    except Exception as ex:
+        print(f"[game_updates _fetch_wow_official] JSON: {ex}")
+        return []
+    out = []
+    for b in blogs[:max_count * 6]:
+        if not isinstance(b, dict) or b.get('draft'):
+            continue
+        title = (b.get('title') or '').strip()
+        url = str(b.get('url') or '')
+        bid = b.get('id')
+        if not title or not url or bid is None:
+            continue
+        summary = re.sub(r'<[^>]+>', '', str(b.get('description') or '')).strip()
+        out.append({
+            'title': title,
+            'link': (_WOW_OFFICIAL_BASE + url) if url.startswith('/') else url,
+            'guid': f"wow-{bid}",
+            'summary': summary[:300],
+            'image': '',
+            'pub_date': '',
+            'keywords': [str(k) for k in (b.get('keywords') or [])],
+        })
+    return out
+
+
 async def _fetch_discourse(session: aiohttp.ClientSession, url: str, max_count: int = 15, filter_kw: Optional[list[str]] = None) -> list[dict]:
     """Parse une catégorie Discourse (devforum Roblox).
 
@@ -887,6 +981,32 @@ async def fetch_updates(session: aiohttp.ClientSession, game_key: str, max_count
                 summary=r['summary'],
                 image_url=r['image'],
                 update_type="update",
+            ))
+            if len(out) >= max_count:
+                break
+        return out
+
+    elif source_type == 'wow_official':
+        # Page news OFFICIELLE Blizzard (blob JSON). owner : patch notes OFFICIELS uniquement →
+        # on garde SEULEMENT si les keywords Blizzard marquent une update/hotfix, OU si le titre
+        # l'annonce explicitement. Tout le reste (promos, WoW Weekly, short stories…) écarté.
+        raw = await _fetch_wow_official(session, max_count=max_count)
+        out = []
+        for r in raw:
+            kws = ' '.join(r.get('keywords') or []).lower()
+            title_l = (r['title'] or '').lower()
+            is_patch = (any(k in kws for k in _WOW_PATCH_MARKERS)
+                        or any(k in title_l for k in _WOW_PATCH_MARKERS))
+            if not is_patch:
+                continue
+            out.append(GameUpdate(
+                game_key=game_key,
+                update_id=r['guid'],
+                title=r['title'][:200],
+                url=r['link'],
+                summary=r['summary'],
+                image_url=r['image'],
+                update_type="patch",
             ))
             if len(out) >= max_count:
                 break
