@@ -1,0 +1,10 @@
+# Hygiène de build — n'exclut QUE ce qui est inutile au runtime (jamais un module/lexique du bot).
+.git
+.github
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+*.log
