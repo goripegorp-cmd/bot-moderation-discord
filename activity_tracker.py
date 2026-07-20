@@ -125,6 +125,8 @@ def _load_day(guild_id: int, day: datetime) -> dict:
             "messages": {},
             "voice_minutes": {},
             "helpful_reactions": {},
+            "reactions": {},        # owner 2026-07-20 : réactions DONNÉES (réacteur) — activité clan
+            "voice_joins": {},      # owner 2026-07-20 : connexions vocales (le join, pas les minutes)
             "first_message_at": {},
             "last_message_at": {},
         }
@@ -135,6 +137,8 @@ def _load_day(guild_id: int, day: datetime) -> dict:
             "messages": {},
             "voice_minutes": {},
             "helpful_reactions": {},
+            "reactions": {},        # owner 2026-07-20 : réactions DONNÉES (réacteur) — activité clan
+            "voice_joins": {},      # owner 2026-07-20 : connexions vocales (le join, pas les minutes)
             "first_message_at": {},
             "last_message_at": {},
         }
@@ -198,6 +202,32 @@ async def track_voice_join(
     """Marque l'entree en vocal d'un membre (RAM only)."""
     dt = dt or datetime.now(timezone.utc)
     _voice_active[(guild_id, user_id)] = dt
+    # owner 2026-07-20 : compter le JOIN lui-meme (activite clan) — voice_minutes ne se remplit
+    # qu'a la deconnexion (et se perd sur un reboot pendant la session). Le join, lui, est capte
+    # tout de suite → une simple connexion vocale = actif.
+    try:
+        data = _ensure_buffered(guild_id, dt)
+        vj = data.setdefault("voice_joins", {})
+        vj[str(user_id)] = vj.get(str(user_id), 0) + 1
+        _mark_dirty(guild_id, dt)
+    except Exception:
+        pass
+
+
+async def track_reaction(
+    guild_id: int, user_id: int, dt: Optional[datetime] = None
+) -> None:
+    """owner 2026-07-20 : enregistre qu'un membre a DONNE une reaction (n'importe quel emoji, sur
+    n'importe quel message/annonce) = activite. ≠ track_helpful_reaction (qui compte les reactions
+    RECUES par l'auteur). RAM only, flush async. Ne jamais faire planter on_raw_reaction_add."""
+    dt = dt or datetime.now(timezone.utc)
+    try:
+        data = _ensure_buffered(guild_id, dt)
+        rr = data.setdefault("reactions", {})
+        rr[str(user_id)] = rr.get(str(user_id), 0) + 1
+        _mark_dirty(guild_id, dt)
+    except Exception:
+        pass
 
 
 async def track_voice_leave(
@@ -280,6 +310,8 @@ async def _aggregate_window(guild_id: int, days: int) -> dict:
         "messages": defaultdict(lambda: defaultdict(int)),  # user -> channel -> count
         "voice_minutes": defaultdict(int),
         "helpful_reactions": defaultdict(int),
+        "reactions": defaultdict(int),      # réactions DONNÉES (réacteur)
+        "voice_joins": defaultdict(int),    # connexions vocales
         "first_message_at": {},
         "last_message_at": {},
     }
@@ -300,6 +332,10 @@ async def _aggregate_window(guild_id: int, days: int) -> dict:
                 aggregated["voice_minutes"][uid] += mins
             for uid, count in data.get("helpful_reactions", {}).items():
                 aggregated["helpful_reactions"][uid] += count
+            for uid, count in data.get("reactions", {}).items():
+                aggregated["reactions"][uid] += count
+            for uid, count in data.get("voice_joins", {}).items():
+                aggregated["voice_joins"][uid] += count
             for uid, ts in data.get("first_message_at", {}).items():
                 cur = aggregated["first_message_at"].get(uid)
                 if cur is None or ts < cur:
@@ -326,6 +362,49 @@ async def get_user_stats(guild_id: int, user_id: int, days: int = 7) -> UserStat
         first_message_at=agg["first_message_at"].get(uid),
         last_message_at=agg["last_message_at"].get(uid),
     )
+
+
+async def get_active_user_ids(guild_id: int, days: int = 7) -> set[int]:
+    """owner 2026-07-20 : IDs des membres AVEC au moins une activité sur les N derniers jours —
+    message OU vocal (minutes OU connexion) OU réaction (donnée OU reçue). Sert au clan (Realsy)
+    à savoir qui est actif SANS dépendre de l'obtention d'un rôle. UNE seule agrégation."""
+    agg = await _aggregate_window(guild_id, days)
+    ids: set[int] = set()
+
+    def _add(d):
+        for uid, val in d.items():
+            try:
+                if val and (val if not isinstance(val, dict) else sum(val.values())) > 0:
+                    ids.add(int(uid))
+            except Exception:
+                continue
+
+    _add(agg.get("messages", {}))
+    _add(agg.get("voice_minutes", {}))
+    _add(agg.get("voice_joins", {}))
+    _add(agg.get("reactions", {}))
+    _add(agg.get("helpful_reactions", {}))
+    return ids
+
+
+async def days_since_active(guild_id: int, user_id: int, max_days: int = 60) -> Optional[int]:
+    """owner 2026-07-20 : nb de jours depuis la DERNIÈRE activité (message/vocal/réaction) en
+    scannant les fichiers-jour. 0 = actif aujourd'hui. None = aucune activité sur max_days."""
+    now = datetime.now(timezone.utc)
+    uid = str(user_id)
+    async with _io_lock:
+        for offset in range(max_days):
+            day = now - timedelta(days=offset)
+            day_str = day.strftime("%Y-%m-%d")
+            data = _buffer.get((guild_id, day_str)) or _load_day(guild_id, day)
+            msgs = data.get("messages", {}).get(uid, {})
+            if ((sum(msgs.values()) if isinstance(msgs, dict) else 0) > 0
+                    or data.get("voice_minutes", {}).get(uid, 0) > 0
+                    or data.get("voice_joins", {}).get(uid, 0) > 0
+                    or data.get("reactions", {}).get(uid, 0) > 0
+                    or data.get("helpful_reactions", {}).get(uid, 0) > 0):
+                return offset
+    return None
 
 
 async def get_top_contributors(
