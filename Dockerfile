@@ -7,9 +7,11 @@
 # MrBeast » passaient. Un Dockerfile = contrôle TOTAL des binaires système, 100 %
 # reproductible sur Railway (qui priorise le Dockerfile sur nixpacks).
 #
-# Python 3.11 (= version nixpacks précédente → parité des dépendances) sur Debian bookworm.
+# Python 3.13 = version RÉELLE du runtime nixpacks (Railway affichait python@3.13.14 ; nixpacks
+# ignorait le nixPkgs=python311, d'où aussi le tesseract jamais installé). `audioop-lts` exige
+# Python >=3.13 → un Dockerfile en 3.11 échouait à `pip install` (No matching distribution).
 # ─────────────────────────────────────────────────────────────────────────────
-FROM python:3.11-slim-bookworm
+FROM python:3.13-slim-bookworm
 
 # Binaires / libs système requis (aucun n'est installable via pip) :
 #   • tesseract-ocr + tesseract-ocr-eng : moteur OCR + langue anglaise (anti-scam image)
