@@ -13,27 +13,70 @@ un thread (`loop.run_in_executor`) pour ne pas geler la boucle asyncio.
 from __future__ import annotations
 
 import io
+import os
 import re
 
 _PYTESS = None          # module pytesseract (chargé paresseusement)
 _AVAILABLE = None       # cache: True / False (évite de re-tester le binaire à chaque image)
+_LOAD_ERR = ""          # dernière raison d'indisponibilité (exposée pour le diagnostic Railway)
+
+
+def _find_tesseract_binary() -> str:
+    """Localise le binaire tesseract SANS se fier au seul PATH de pytesseract (owner 2026-07-19 :
+    sur Railway, `security/scanners` a révélé « tesseract absent » alors que le paquet apt est
+    déclaré — soit PATH runtime différent, soit binaire ailleurs). On cherche : PATH (which),
+    chemins Debian courants, puis le Nix store (au cas où il serait posé en nixPkgs). '' si rien."""
+    try:
+        import shutil
+        cmd = shutil.which("tesseract")
+        if cmd:
+            return cmd
+        cands = ["/usr/bin/tesseract", "/usr/local/bin/tesseract", "/bin/tesseract"]
+        try:
+            import glob as _glob
+            cands += sorted(_glob.glob("/nix/store/*/bin/tesseract"))
+        except Exception:
+            pass
+        for c in cands:
+            try:
+                if os.path.exists(c):
+                    return c
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return ""
 
 
 def _load() -> bool:
-    global _PYTESS, _AVAILABLE
+    global _PYTESS, _AVAILABLE, _LOAD_ERR
     if _AVAILABLE is not None:
         return _AVAILABLE
     try:
         import pytesseract
         from PIL import Image  # noqa: F401  (utilisé dans image_text)
-        _ = pytesseract.get_tesseract_version()   # lève si le binaire tesseract est absent
+        # Pose explicitement le chemin du binaire s'il est trouvé (robuste au PATH runtime).
+        _bin = _find_tesseract_binary()
+        if _bin:
+            try:
+                pytesseract.pytesseract.tesseract_cmd = _bin
+            except Exception:
+                pass
+        _ver = pytesseract.get_tesseract_version()   # lève si le binaire tesseract est absent
         _PYTESS = pytesseract
         _AVAILABLE = True
-        print(f"[ocr_scan] OCR prêt (tesseract {_})")
+        _LOAD_ERR = ""
+        print(f"[ocr_scan] OCR prêt (tesseract {_ver} @ {_bin or 'PATH'})")
     except Exception as ex:
         _AVAILABLE = False
+        _LOAD_ERR = f"{type(ex).__name__}: {ex}"
         print(f"[ocr_scan] OCR indisponible ({ex}) — scan d'image OCR désactivé (fail-safe)")
     return _AVAILABLE
+
+
+def load_error() -> str:
+    """Dernière raison d'indisponibilité OCR (pour le diagnostic Railway). '' si dispo/non testé."""
+    return _LOAD_ERR
 
 
 def available() -> bool:

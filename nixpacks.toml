@@ -1,11 +1,18 @@
 [phases.setup]
-# python311 via Nix. tesseract (OCR anti-scam image, owner 2026-06-27) installé via APT =
-# déterministe sur l'image Debian de nixpacks (≠ deviner l'attribut Nix). `tesseract-ocr` inclut
-# la langue « eng » (ces arnaques sont en anglais). Si absent, l'OCR se désactive seul (fail-safe).
-nixPkgs = ["python311"]
-# tesseract-ocr = OCR ; libzbar0 = décodage des QR codes (anti-scam, owner 2026-06-27). Tous deux
-# via APT (déterministe). Si l'un manque, la feature correspondante se désactive seule (fail-safe).
-aptPkgs = ["tesseract-ocr", "libzbar0"]
+# owner 2026-07-19 — le [DIAG] security/scanners a révélé « tesseract absent » alors que le
+# paquet apt était déclaré depuis des semaines : sur ce build nixpacks, les aptPkgs ne
+# s'appliquaient PAS de façon fiable. On bascule sur la voie NIX-NATIVE (la plus déterministe
+# sur nixpacks) ET on garde apt en ceinture-bretelles :
+#   • tesseract (nixpkgs) = binaire OCR + tessdata eng/osd bundlés (wrapper qui pose
+#     TESSDATA_PREFIX tout seul → pas de « lang absente »). Le binaire atterrit dans
+#     /nix/store/*/bin/tesseract → _find_tesseract_binary() (ocr_scan.py) le localise.
+#   • zbar (nixpkgs) = libzbar pour pyzbar (décodage QR anti-scam) via LD_LIBRARY_PATH.
+# Si TOUT échoue, la feature se désactive seule (fail-safe) et [DIAG] security/scanners le dit
+# avec la raison exacte (ocr_scan.load_error()).
+nixPkgs = ["python311", "tesseract", "zbar"]
+# Ceinture-bretelles APT (au cas où le runtime Debian les exposerait sous /usr/bin) :
+# tesseract-ocr = moteur ; tesseract-ocr-eng = langue anglaise ; libzbar0 = QR codes.
+aptPkgs = ["tesseract-ocr", "tesseract-ocr-eng", "libzbar0"]
 
 [phases.install]
 cmds = ["pip install -r requirements.txt --no-cache-dir"]
