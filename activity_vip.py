@@ -112,6 +112,32 @@ def setup(bot_instance, get_db_fn, db_get_fn, v2_helpers=None):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  EXEMPTION D'ACTIVITÉ — COFONDATEURS (owner 2026-07-23)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Ces membres ne doivent JAMAIS recevoir de rappel « tu vas perdre ton rôle / sois plus actif »
+# ni subir de décroissance/retrait VIP (« ils ont autre chose à faire »). L'ID peut être un ID de
+# COMPTE **ou** un ID de RÔLE (on teste les deux) → « épargnés de tout ça ». Partagé avec le clan
+# (bot.py appelle is_activity_exempt). Éditer cette liste pour ajouter/retirer un exempté.
+EXEMPT_ACTIVITY_IDS = {320921250681847808, 827633340797681714}
+
+
+def is_activity_exempt(member) -> bool:
+    """True si le membre (par son ID de compte) OU un de ses rôles est dans EXEMPT_ACTIVITY_IDS.
+    → aucun rappel d'inactivité, aucune décroissance/retrait automatique. FAIL-SAFE (False)."""
+    try:
+        if member is None:
+            return False
+        if int(getattr(member, "id", 0)) in EXEMPT_ACTIVITY_IDS:
+            return True
+        for r in getattr(member, "roles", []) or []:
+            if int(getattr(r, "id", 0)) in EXEMPT_ACTIVITY_IDS:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  DB
 # ═══════════════════════════════════════════════════════════════════════════════
 async def init_db():
@@ -657,6 +683,18 @@ async def _evaluate_guild_locked(guild: discord.Guild, s: dict, res: dict) -> di
             cur_status = (st or {}).get("status", "active")
             warned_at = (st or {}).get("warned_at")
 
+            # ── COFONDATEURS exemptés (owner 2026-07-23) : jamais de warn/décroissance/retrait.
+            # On efface un éventuel état « warned » résiduel (pour qu'ils sortent du tableau « à
+            # risque ») puis on saute TOUTE action. Leurs rôles sont gérés MANUELLEMENT.
+            if is_activity_exempt(member):
+                if cur_status == "warned":
+                    try:
+                        await _upsert_status(guild.id, uid, tier=held, status="active",
+                                             warned_at=None, score=score, days=days)
+                    except Exception:
+                        pass
+                continue
+
             # ── MONTÉE / NOUVEAU (target strictement au-dessus du rôle porté) ──
             if target_rank > held_rank:
                 new_role = _role_for(target, vip_role, vip_plus_role)
@@ -818,6 +856,10 @@ async def _refresh_atrisk_table(guild: discord.Guild, ch):
                     "WHERE guild_id=? AND status='warned'", (int(guild.id),)) as cur:
                     for r in await cur.fetchall():
                         warned.append((int(r[0]), r[1] or "vip", int(r[2] or 0), int(r[3] or 0)))
+        # owner 2026-07-23 : les COFONDATEURS exemptés ne figurent JAMAIS dans le tableau à risque
+        # (ceinture-bretelles — evaluate_guild efface déjà leur état « warned »).
+        if warned:
+            warned = [w for w in warned if not is_activity_exempt(guild.get_member(w[0]))]
         old = await _load_atrisk_msg(guild.id)
         today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
 
