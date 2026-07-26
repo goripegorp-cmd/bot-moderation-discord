@@ -431,8 +431,11 @@ import matplotlib.dates as mdates
 # un UserWarning « Glyph … missing from current font » À CHAQUE rendu = bruit dans les logs
 # (cosmétique seulement : l'emoji manquant s'affiche en carré vide, le graphe reste correct).
 # On fait taire CE warning précis (sans masquer les vraies erreurs).
+# ⚠️ owner 2026-07-26 : matplotlib ≥3.9 (bump du build Docker) a CHANGÉ le texte en
+# « Glyph … missing from font(s) DejaVu Sans » → l'ancien filtre (« from current font ») ne
+# matchait plus et le bruit est revenu dans les Deploy Logs. Préfixe commun aux 2 variantes.
 import warnings as _warnings
-_warnings.filterwarnings("ignore", message="Glyph .* missing from current font")
+_warnings.filterwarnings("ignore", message="Glyph .* missing from")
 # Phase 172 : lock global pour le rendu matplotlib. pyplot N'EST PAS
 # thread-safe : on serialise les rendus + on les sort de la boucle asyncio
 # via asyncio.to_thread. Sinon un plt.savefig (dpi 100-120) gèle la boucle
