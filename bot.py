@@ -478,6 +478,7 @@ async def _loop_heartbeat():
 def _stall_watchdog():
     """Thread SÉPARÉ (donc jamais bloqué par la boucle) : détecte le gel et dumpe la stack."""
     import faulthandler
+    import traceback as _tb_mod
     while True:
         _time_mod.sleep(0.5)
         try:
@@ -489,10 +490,28 @@ def _stall_watchdog():
                 # ⚠️ stderr OBLIGATOIRE (owner 2026-07-12) : `_QuietStdout` (l.125) MASQUE toute
                 # ligne « [TAG EN MAJUSCULES] … » sur stdout → nos diagnostics étaient INVISIBLES
                 # dans les logs Railway. stderr n'est PAS filtré.
-                print(f"[STALL] ⚠️ boucle asyncio bloquée depuis {_late:.1f}s — "
-                      f"stack du thread principal (= le coupable) :",
-                      file=_sys.stderr, flush=True)
-                faulthandler.dump_traceback()     # stderr → visible dans les logs Railway
+                # ⚠️ owner 2026-07-28 (1er [STALL] réel capturé) : faulthandler.dump_traceback()
+                # dumpe TOUS les threads, le principal EN DERNIER → dans les logs Railway le
+                # coupable était NOYÉ/TRONQUÉ (on ne voyait que les threads inactifs aiosqlite/
+                # gateway, entremêlés). Désormais : stack du THREAD PRINCIPAL UNIQUEMENT (le seul
+                # qui bloque la boucle), 10 frames les plus profondes, en UN SEUL print (pas
+                # d'entrelacement). Le dump complet ne sort qu'en DIAG_VERBOSE=1.
+                _lines = [f"[STALL] ⚠️ boucle asyncio bloquée depuis {_late:.1f}s — stack du "
+                          f"thread PRINCIPAL (le coupable) ; appel le plus profond EN BAS :"]
+                try:
+                    _mt = _threading_mod.main_thread().ident
+                    _frm = _sys._current_frames().get(_mt)
+                    if _frm is not None:
+                        for _l in _tb_mod.format_stack(_frm)[-10:]:
+                            _lines.append(_l.rstrip())
+                    else:
+                        _lines.append("  (stack du thread principal introuvable)")
+                    _lines.append(f"[STALL] fin — {_threading_mod.active_count()} threads actifs")
+                except Exception as _se:
+                    _lines.append(f"  (extraction de la stack échouée : {_se})")
+                print("\n".join(_lines), file=_sys.stderr, flush=True)
+                if os.getenv("DIAG_VERBOSE", "0") == "1":
+                    faulthandler.dump_traceback()     # dump complet (tous threads) sur demande
                 _time_mod.sleep(_STALL_COOLDOWN)  # anti-spam
         except Exception:
             pass
