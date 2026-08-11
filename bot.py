@@ -167,7 +167,6 @@ from ui_v2 import (
 # communautaires.
 import permissions as perms2026
 import vocabulary as vocab2026
-import engagement as engage2026
 import social_media as social2026
 # Phase 41 : moteur d'engagement quotidien (quests, achievements, pets, wheel, confessions)
 import engagement41 as eng41
@@ -214,17 +213,14 @@ import owner_export as owner_export_module
 import economy_events as econ_events_module
 # Phase 132 : paliers de progression (streak / veteran / prestige)
 # Phase 134 : wiki + roadmap + weekly highlights
-import community_hub as cmty_hub_module
 # Phase 135 : coffre d'alliance + stats de gestion
 # Phase 136 : Roblox link verify + game library
-import roblox_link as rblx_link_module
 # Phase 137 : Voice Lounges + paliers vocaux
 # Phase 138 : Tickets enhancements (priority + templates + auto-close)
 import tickets_enhance as tix_module
 # Phase 139 : Observabilité (daily report + anomalies + retention)
 import observability as obs_module
 # Phase 140 : Publish metrics + cross-poster
-import publish_metrics as pubmet_module
 # Phase 141 : UX final — theme switcher + tutorial
 import ux_polish as ux_module
 # Phase 143 : DB cleanup hebdo (purge tables qui grossissent indéfiniment)
@@ -255,7 +251,6 @@ import help_faq as faq_module
 # Phase 152 : UX/Owner — DM digest, owner digest, webhook tracker
 import dm_digest as dm_digest_module
 import webhook_tracker as webhook_tracker_module
-import owner_digest as owner_digest_module
 # Phase 153 : Engagement long terme — reputation, pet evo, daily prompt,
 # onboarding journey, mentor bonus
 import reputation as reputation_module
@@ -289,21 +284,17 @@ import welcome_ack as welcome_ack_module
 # Phase 166.4 : Spotlight qualité (⭐ → highlights)
 import spotlight_quality as spotlight_quality_module
 # Phase 167.1 : Status rotator (bot status dynamique)
-import status_rotator as status_rotator_module
 # Phase 167.2 : Voice autoclean (vocaux temp vides)
-import voice_autoclean as voice_autoclean_module
 # Phase 167.3 : Member risk review
 import member_risk as member_risk_module
 # Phase 168.4 : Central error logger + burst alert
 import error_logger as error_logger_module
 # Phase 169.1 : Mob Hunts (combat fréquent multi-user)
-import mob_hunts as mob_hunts_module
 # Phase 256 Lot 3 : events COLLABORATIFS (Faille 🟡 / Caravane 🟢)
 # Phase 173.2 : Boss du jour, 4×/jour, gating de niveau
 import daily_bosses as daily_bosses_module
 import recidivism as recidivism_module
 import combat_actions as combat_actions_module  # Phase 269 : actions de combat universelles (⚡/📣)
-import activity_rewards as activity_rewards_module
 import activity_vip as activity_vip_module  # owner 2026-07-02 : VIP CONTINU par seuil + décroissance + rappels
 import vip_exclusion as vip_exclusion_module  # owner 2026-07-12 : privation VIP/activité (1→2→4→8 mois→1 an)
 import update_ping_role as upd_ping_module  # owner 2026-07-12 : bouton « 🔔 Me ping » sous les updates
@@ -315,10 +306,7 @@ import social_zones as social_zones_module  # Phase 280 : groupes + trades priv�
 import social_match as social_match_module  # owner 2026-07-02 : appariement croisé (2 personnes qui se répondent/se ressemblent)
 import transcript_store  # Phase 281 : stockage + service web des transcripts de tickets
 # Phase 169.2 : Marchand itinérant quotidien
-import wandering_merchant as wandering_merchant_module
 # Phase 169.3 : World Invasion mensuelle
-import world_invasion as world_invasion_module
-import conversation_starters as conversation_starters_module  # Phase 234 : 1re extraction du monolithe
 # Phase 170.1 : La Chronique d'Abylumis — récit narratif persistant 9 mois
 import story_engine as story_engine_module
 import codex_chronicle as codex_chronicle_module
@@ -328,7 +316,6 @@ import pet_eggs as pet_eggs_module  # Phase 235.26 : œufs de familiers (acquisi
 import citadelle as citadelle_module  # Phase 259 : La Cité (customisation/build/économie long terme)
 import combat_recall as combat_recall_module  # Phase 235.25c : rappel des participants aux combats
 import seasonal_titles as seasonal_titles_module  # Phase 242 : champion d'activité du mois
-import vocal_voice_title as vocal_voice_title_module  # Voix du serveur : titre mensuel vocal (owner 2026-06-15)
 import voice_control as voice_control_module  # Panneau de contrôle des vocaux temp (owner 2026-06-15)
 import sticky_messages as sticky_messages_module  # « Dernier message » sticky en bas de salon (owner 2026-06-16)
 import presence_chain as presence_chain_module  # Tâche A.2 : chaîne collective de présence quotidienne (compteur serveur)

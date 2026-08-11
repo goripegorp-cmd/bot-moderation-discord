@@ -10,7 +10,6 @@ import pytest
 PHASE_163_MODULES = [
     "dm_digest",
     "webhook_tracker",
-    "owner_digest",
     "reputation",
     "pet_evolution",
     "onboarding_journey",
@@ -32,19 +31,13 @@ PHASE_163_MODULES = [
     "welcome_ack",
     "spotlight_quality",
     # Phase 167 — status rotator, voice autoclean, member risk
-    "status_rotator",
-    "voice_autoclean",
     "member_risk",
     # Phase 168 — error logger
     "error_logger",
     # Phase 169 — mob hunts, marchand, invasion
-    "mob_hunts",
-    "wandering_merchant",
-    "world_invasion",
     # Phase 173.2 — Boss du jour (4×/jour, gating niveau)
     "daily_bosses",
     # Phase 174.2 — Récompenses VIP des plus actifs (messages + vocal)
-    "activity_rewards",
     # Phase 184 — Donjons instanciés (lobby groupe + salons dédiés)
     "dungeon_instances",
     # Phase 170 — Chronique d'Abylumis (récit collectif persistant)
@@ -80,7 +73,6 @@ def test_module_has_setup(mod_name):
 INIT_DB_MODULES = [
     "dm_digest",
     "webhook_tracker",
-    "owner_digest",
     "reputation",
     "pet_evolution",
     "onboarding_journey",
@@ -99,14 +91,10 @@ INIT_DB_MODULES = [
     "welcome_ack",
     "spotlight_quality",
     # Phase 167 (status_rotator n'a pas d'init_db, pas de table)
-    "voice_autoclean",
     "member_risk",
     # Phase 168 — error_logger
     "error_logger",
     # Phase 169 — mob_hunts, merchant, invasion
-    "mob_hunts",
-    "wandering_merchant",
-    "world_invasion",
     # Phase 170 — story_engine (codex_chronicle n'a pas d'init_db, lit DB
     # de story_engine)
     "story_engine",
@@ -118,7 +106,6 @@ INIT_DB_MODULES = [
     # Phase 170.7 : letters subscriptions + sent log
     # Phase 170.8 : climax events + attackers + titles
     # Phase 174.2 : VIP grants + role IDs
-    "activity_rewards",
     # Phase 184 : dungeon_runs + dungeon_members
     "dungeon_instances",
 ]
