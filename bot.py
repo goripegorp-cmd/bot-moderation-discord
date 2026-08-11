@@ -25493,27 +25493,13 @@ _supervisor_did_first_pass = False  # FIX logs : 1er tour = démarrage au boot �
 # Extrait en CONSTANTE module-level (Tâche C) pour devenir une SOURCE DE VÉRITÉ partagée
 # entre le superviseur ET health_check (avant : tuple inline, illisible côté health_check).
 _SUPERVISED_MODULE_LOOPS = (
-    ("mob_hunts_module", "spawn_task"),
-    ("daily_bosses_module", "daily_boss_task"),
-    ("season_race_module", "season_race_task"),
     ("recidivism_module", "deescalate_task"),
-    ("event_notif_role_module", "event_role_task"),
     ("conversation_starters_module", "conv_starter_task"),
-    ("hero_journey_module", "hero_journey_task"),
-    ("rift_events_module", "rift_spawn_task"),
-    ("rift_events_module", "rift_watchdog"),
-    ("caravan_events_module", "caravan_spawn_task"),
-    ("caravan_events_module", "caravan_watchdog"),
-    ("chain_events_module", "chain_spawn_task"),
-    ("chain_events_module", "chain_watchdog"),
-    ("solo_module", "solo_watchdog"),
     ("social_zones_module", "zone_watchdog"),
     # FIX fiabilité (Lot 3) : boucles de MODULES lancées au boot mais non supervisées →
     # mortes à vie sur une exception. getattr(...,None) est fail-safe si un module n'a
     # pas chargé.
     ("db_backup_module", "backup_task"),
-    ("raid_recap_module", "weekly_recap_task"),
-    ("econ_events_module", "daily_announce_task"),
     ("cmty_hub_module", "weekly_highlights_task"),
     ("rblx_link_module", "roblox_updates_check_task"),
     # auto_close_inactive_task NON supervisée : désactivée (no-op, plus lancée au boot) —
@@ -25524,39 +25510,23 @@ _SUPERVISED_MODULE_LOOPS = (
     ("obs_module", "anomaly_check_task"),
     ("pubmet_module", "metrics_refresh_task"),
     ("cleanup_module", "weekly_cleanup_task"),
-    ("dormant_module", "dormant_dispatch_task"),
     ("health_module", "health_check_task"),
     # ("backup_module", "backup_daily_task") RETIRÉE (owner 2026-07-12) : backup_lite faisait
     # exploser la RAM à ~5 Go (60 tables SELECT * → JSON → bytes → gzip = 4 copies) → OOM →
     # boucle de crash. db_backup.py assure le backup 24 h proprement (API SQLite native, page
     # par page, zéro pic RAM). Ne PAS re-superviser une boucle volontairement désactivée.
-    ("saga_module", "saga_lifecycle_task"),
     ("dm_digest_module", "digest_dispatch_task"),
     ("webhook_tracker_module", "weekly_scan_task"),
     ("owner_digest_module", "owner_digest_task"),
-    ("daily_prompt_module", "daily_prompt_task"),
     ("roblox_stats_module", "weekly_stats_task"),
-    ("roblox_raffle_module", "weekly_draw_task"),
     ("stream_party_module", "cleanup_task"),
     ("stream_schedule_module", "countdown_task"),
     ("activity_heatmap_module", "weekly_owner_dispatch_task"),
     ("status_rotator_module", "rotator_task"),
     ("voice_autoclean_module", "check_task"),
     ("error_logger_module", "burst_check_task"),
-    ("dungeon_module", "dungeon_timeout_task"),
     ("activity_rewards_module", "weekly_reward_task"),
     ("activity_vip_module", "vip_eval_task"),
-    ("wandering_merchant_module", "spawn_merchant_task"),
-    ("world_invasion_module", "monthly_invasion_task"),
-    ("story_engine_module", "chronicle_task"),
-    ("weekly_council_module", "council_task"),
-    ("regional_state_module", "regional_task"),
-    ("mystery_investigation_module", "mystery_task"),
-    ("npc_letters_module", "weekly_letter_task"),
-    ("monthly_climax_module", "climax_task"),
-    ("community_goals_module", "weekly_goal_task"),
-    ("coin_economy_module", "monthly_festival_task"),
-    ("coin_economy_module", "luxury_tax_task"),
     # FIX sécu P0 : expiration auto du lockdown anti-raid (sans elle, un faux-raid
     # verrouillait le serveur À VIE).
     ("raid_module", "lockdown_expiry_task"),
@@ -51477,22 +51447,6 @@ async def on_ready():
             print(f"[transcript_store] {_purged} transcript(s) expiré(s) purgé(s)")
     except Exception as ex:
         print(f"[on_ready transcript purge] {ex}")
-    # Phase 129 : Récap hebdomadaire des Boss Raids (dimanche 21h FR)
-    try:
-        raid_recap_module.setup(
-            bot,
-            get_db,
-            db_get,
-            {
-                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
-                'v2_divider': v2_divider, 'v2_container': v2_container,
-                'LayoutView': LayoutView,
-            },
-        )
-        if not raid_recap_module.weekly_recap_task.is_running():
-            raid_recap_module.weekly_recap_task.start()
-    except Exception as ex:
-        print(f"[on_ready raid_recap setup] {ex}")
     # Phase 130 : Dashboard staff modération (helpers V2 injectés une fois)
     try:
         mod_dashboard_module.setup(
@@ -51507,35 +51461,6 @@ async def on_ready():
         owner_export_module.setup(get_db, SUPER_OWNER_ID)
     except Exception as ex:
         print(f"[on_ready mod_dashboard setup] {ex}")
-    # Phase 131 : Événements économiques cycliques (annonce quotidienne 9h FR)
-    try:
-        econ_events_module.setup(
-            bot,
-            get_db,
-            db_get,
-            db_set,
-            {
-                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
-                'v2_divider': v2_divider, 'v2_container': v2_container,
-                'LayoutView': LayoutView,
-            },
-        )
-        if not econ_events_module.daily_announce_task.is_running():
-            econ_events_module.daily_announce_task.start()
-    except Exception as ex:
-        print(f"[on_ready econ_events setup] {ex}")
-    # Phase 132 : Paliers de progression (streak / vétéran / prestige)
-    try:
-        prog_module.setup(
-            get_db,
-            {
-                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
-                'v2_divider': v2_divider, 'v2_container': v2_container,
-                'LayoutView': LayoutView,
-            },
-        )
-    except Exception as ex:
-        print(f"[on_ready prog_module setup] {ex}")
     # Phase 134 : Communauté — wiki + roadmap + weekly highlights
     try:
         cmty_hub_module.setup(
@@ -51553,18 +51478,6 @@ async def on_ready():
             cmty_hub_module.weekly_highlights_task.start()
     except Exception as ex:
         print(f"[on_ready cmty_hub setup] {ex}")
-    # Phase 135 : Coffre d'alliance + stats de gestion
-    try:
-        av_module.setup(
-            get_db,
-            {
-                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
-                'v2_divider': v2_divider, 'v2_container': v2_container,
-                'LayoutView': LayoutView,
-            },
-        )
-    except Exception as ex:
-        print(f"[on_ready av_module setup] {ex}")
     # Phase 136 + 142 : Roblox link verify + game library + auto-updates
     try:
         rblx_link_module.setup(
@@ -51582,18 +51495,6 @@ async def on_ready():
             rblx_link_module.roblox_updates_check_task.start()
     except Exception as ex:
         print(f"[on_ready rblx_link setup] {ex}")
-    # Phase 137 : Voice Lounges + paliers vocaux
-    try:
-        vlounge_module.setup(
-            get_db,
-            {
-                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
-                'v2_divider': v2_divider, 'v2_container': v2_container,
-                'LayoutView': LayoutView,
-            },
-        )
-    except Exception as ex:
-        print(f"[on_ready vlounge setup] {ex}")
     # Phase 138 : Tickets enhancements (priority + templates + auto-close)
     try:
         tix_module.setup(
@@ -51670,36 +51571,6 @@ async def on_ready():
             cleanup_module.weekly_cleanup_task.start()
     except Exception as ex:
         print(f"[on_ready cleanup_module setup] {ex}")
-    # Phase 144 : Moteur saisonnier — 8 saisons qui transforment les events
-    try:
-        season_module.setup(
-            get_db,
-            {
-                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
-                'v2_divider': v2_divider, 'v2_container': v2_container,
-                'LayoutView': LayoutView,
-            },
-        )
-    except Exception as ex:
-        print(f"[on_ready season_module setup] {ex}")
-    # Phase 145 : Réveil dormants (DM personnalisé + reward comeback)
-    try:
-        dormant_module.setup(
-            bot,
-            get_db,
-            db_get,
-            {
-                'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
-                'v2_divider': v2_divider, 'v2_container': v2_container,
-                'LayoutView': LayoutView,
-            },
-            seasonal_module=season_module,
-            add_coins_fn=add_coins,
-        )
-        if not dormant_module.dormant_dispatch_task.is_running():
-            dormant_module.dormant_dispatch_task.start()
-    except Exception as ex:
-        print(f"[on_ready dormant_module setup] {ex}")
     # Phase 147 : Sécurité moderne 2026 — staff_sanction (panel central),
     # raid_detector, token_grabber, webhook_leak, impersonation_detector.
     # IMPORTANT : staff_sanction est setup en premier car les autres modules
@@ -51928,36 +51799,6 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready Phase 152.D2 indexes] {ex}")
 
-    # Phase 153 : Engagement long terme (reputation, pet evo, daily prompt,
-    # onboarding journey, mentor bonus)
-    try:
-        reputation_module.setup(get_db, db_get, _v2h)
-        await reputation_module.init_db()
-
-        pet_evo_module.setup(get_db, db_get, _v2h)
-        await pet_evo_module.init_db()
-
-        daily_prompt_module.setup(
-            bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
-        )
-        await daily_prompt_module.init_db()
-        if not daily_prompt_module.daily_prompt_task.is_running():
-            daily_prompt_module.daily_prompt_task.start()
-
-        onboarding_module.setup(
-            bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
-        )
-        await onboarding_module.init_db()
-
-        mentor_bonus_module.setup(
-            get_db, db_get, _v2h, add_coins_fn=add_coins,
-            reputation_module=reputation_module,
-        )
-        await mentor_bonus_module.init_db()
-
-        print("[Phase 153] Engagement actif : reputation + pet evo + daily prompt + onboarding + mentor")
-    except Exception as ex:
-        print(f"[on_ready Phase 153 engagement] {ex}")
 
     # Phase 154 : Sécurité 2026++ — honeypot + behavior anomaly
     try:
@@ -52061,44 +51902,7 @@ async def on_ready():
         if not mob_hunts_module.spawn_task.is_running():
             mob_hunts_module.spawn_task.start()
 
-        # Phase 173.2 : Boss du jour (4×/jour : 12h/17h/21h/1h FR, gating niveau)
-        try:
-            daily_bosses_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
-                                      inventory_fn=_get_or_create_inventory,
-                                      events_channel_fn=_ensure_daily_boss_channel,
-                                      notif_check_fn=_member_wants_notif,
-                                      cleanup_register_fn=_register_for_cleanup,
-                                      arena_create_fn=_create_combat_arena,
-                                      arena_delete_fn=_delete_combat_arena,
-                                      report_fn=_post_combat_report,
-                                      event_busy_fn=_has_any_major_event_running,
-                                      event_mention_fn=_get_event_mention,
-                                      alliance_points_fn=_award_alliance_combat_points,
-                                      echo_fn=_post_event_echo,
-                                      pet_strike_fn=_pet_strike,
-                                      claim_lock_fn=_claim_combat_lock,
-                                      meta_award_fn=_award_event_meta,
-                                      goal_record_fn=community_goals_module.record_action)
-            await daily_bosses_module.init_db()
-            daily_bosses_module.register_persistent_views(bot)
-            if not daily_bosses_module.daily_boss_task.is_running():
-                daily_bosses_module.daily_boss_task.start()
-        except Exception as ex:
-            print(f"[on_ready 173.2 daily_bosses] {ex}")
 
-        # owner 2026-06-30 : Board « Course de Saison » — classement LIVE dans le hub
-        # (preuve concrète que jouer fait avancer). Boutons persistants + boucle 60 min.
-        try:
-            season_race_module.setup(
-                bot, get_db, db_get, _current_season_id_now, _get_season_progress,
-                event_meta_cap=_EVENT_META_DAILY_CAP)
-            season_race_module.register_persistent_views(bot)
-            if not season_race_module.season_race_task.is_running():
-                season_race_module.season_race_task.start()
-            for _g in list(bot.guilds):
-                asyncio.create_task(season_race_module.render_board(_g))
-        except Exception as ex:
-            print(f"[on_ready season_race] {ex}")
 
         # owner 2026-06-30 : DÉGRADATION CRESCENDO des récidivistes (restriction persistante,
         # score 90j, dé-escalade auto). Jamais owner/super-owner/staff/immunisés. FAIL-OPEN.
@@ -52120,88 +51924,10 @@ async def on_ready():
         except Exception as ex:
             print(f"[on_ready welcome_cleanup] {ex}")
 
-        # Phase 269 : actions de combat universelles (⚡ Charger / 📣 Crier) — boutons
-        # persistants partagés (DynamicItem match du custom_id). 1er module câblé : boss
-        # du jour. Extension aux autres events de combat dans les phases suivantes.
-        try:
-            combat_actions_module.register_persistent_views(bot)
-        except Exception as ex:
-            print(f"[on_ready 269 combat_actions] {ex}")
 
-        # Phase 254 : Tournoi PvP Alliance vs Alliance (module isolé, fail-open).
-        try:
-            alliance_war_module.setup(
-                bot, get_db, _v2h, add_coins_fn=add_coins,
-                alliance_by_id_fn=_get_alliance_by_id,
-                user_alliance_id_fn=_get_user_alliance_id,
-                inventory_fn=_get_or_create_inventory,
-                gear_stats_fn=events2026.inventory_total_stats)
-            await alliance_war_module.init_db()
-            alliance_war_module.register_persistent_views(bot)
-            await alliance_war_module.boot_cleanup()
-        except Exception as ex:
-            print(f"[on_ready 254 alliance_war] {ex}")
 
-        # Phase 256 Lot 3 : event COLLABORATIF « La Faille Convergente » (gate 🟡,
-        # ≥4 scelleurs distincts requis → impossible en solo). Module isolé, fail-open.
-        try:
-            rift_events_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
-                                     inventory_fn=_get_or_create_inventory,
-                                     active_ping_fn=_ping_active_members,
-                                     arena_create_fn=_create_combat_arena,
-                                     arena_delete_fn=_delete_combat_arena,
-                                     report_fn=_post_combat_report,
-                                     event_busy_fn=_has_any_major_event_running,
-                                     pet_strike_fn=_pet_strike)
-            rift_events_module.register_persistent_views(bot)  # Phase 263 : AVANT init_db (vues OK même si init_db lève)
-            await rift_events_module.init_db()
-            await rift_events_module.boot_cleanup()
-            if not rift_events_module.rift_spawn_task.is_running():
-                rift_events_module.rift_spawn_task.start()
-            if not rift_events_module.rift_watchdog.is_running():
-                rift_events_module.rift_watchdog.start()
-        except Exception as ex:
-            print(f"[on_ready 256 rift_events] {ex}")
 
-        # Phase 256 Lot 3 : event COLLABORATIF « La Caravane des Trois Sceaux »
-        # (3 sceaux tenus simultanément par 3 joueurs distincts ; gate 🟢). Fail-open.
-        try:
-            caravan_events_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
-                                        active_ping_fn=_ping_active_members,
-                                        arena_create_fn=_create_combat_arena,
-                                        arena_delete_fn=_delete_combat_arena,
-                                        report_fn=_post_combat_report,
-                                        event_busy_fn=_has_any_major_event_running,
-                                        pet_strike_fn=_pet_strike)
-            caravan_events_module.register_persistent_views(bot)  # Phase 263 : AVANT init_db (vues OK même si init_db lève)
-            await caravan_events_module.init_db()
-            await caravan_events_module.boot_cleanup()
-            if not caravan_events_module.caravan_spawn_task.is_running():
-                caravan_events_module.caravan_spawn_task.start()
-            if not caravan_events_module.caravan_watchdog.is_running():
-                caravan_events_module.caravan_watchdog.start()
-        except Exception as ex:
-            print(f"[on_ready 256 caravan_events] {ex}")
 
-        # Phase 256 Lot 3 : event COLLABORATIF « La Chaîne d'Invocation » (relais de
-        # joueurs distincts ; gate 🟡). Module isolé, fail-open.
-        try:
-            chain_events_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
-                                      active_ping_fn=_ping_active_members,
-                                      arena_create_fn=_create_combat_arena,
-                                      arena_delete_fn=_delete_combat_arena,
-                                      report_fn=_post_combat_report,
-                                      event_busy_fn=_has_any_major_event_running,
-                                      pet_strike_fn=_pet_strike)
-            chain_events_module.register_persistent_views(bot)  # Phase 263 : AVANT init_db (vues OK même si init_db lève)
-            await chain_events_module.init_db()
-            await chain_events_module.boot_cleanup()
-            if not chain_events_module.chain_spawn_task.is_running():
-                chain_events_module.chain_spawn_task.start()
-            if not chain_events_module.chain_watchdog.is_running():
-                chain_events_module.chain_watchdog.start()
-        except Exception as ex:
-            print(f"[on_ready 256 chain_events] {ex}")
 
         # Phase 256 : SYSTÈME DE MENTION PRO — abonne TOUS les membres existants
         # au rôle « 📢 Tous les Événements » (opt-out) une fois par serveur, pour
@@ -52226,49 +51952,7 @@ async def on_ready():
         except Exception as ex:
             print(f"[on_ready ugc_fans_backfill] {ex}")
 
-        # Phase 184 : Donjons instanciés (lobby groupe → salons dédiés → vagues)
-        try:
-            dungeon_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
-                                 inventory_fn=_get_or_create_inventory)
-            await dungeon_module.init_db()
-            await dungeon_module.boot_cleanup()  # nettoie les runs orphelins (reboot)
-            dungeon_module.register_persistent_views(bot)
-            if not dungeon_module.dungeon_timeout_task.is_running():
-                dungeon_module.dungeon_timeout_task.start()
-        except Exception as ex:
-            print(f"[on_ready 184 dungeon] {ex}")
 
-        # Phase 264 : EVENTS SOLO PARALLELES (Donjon de l'Ombre) — instances perso, 1
-        # salon par joueur, tournent EN PARALLELE sans toucher le verrou global. Cleanup
-        # triple couche (fin de run + watchdog 5 min + boot_cleanup). Entree : sous-hub
-        # « Compétitions » → 🌑 Aventures Solo.
-        try:
-            async def _solo_player_power(_gid, _uid):
-                try:
-                    _inv = await _get_or_create_inventory(_gid, _uid)
-                    _st = events2026.inventory_total_stats(_inv)
-                    return {"atk": int(_st.get('atk', 0) or 0), "deff": int(_st.get('def', 0) or 0)}
-                except Exception:
-                    return {"atk": 0, "deff": 0}
-
-            async def _solo_grant_egg(_gid, _uid):
-                try:
-                    return await pet_eggs_module.grant_egg(_gid, _uid, source="solo_dungeon")
-                except Exception:
-                    return None
-
-            solo_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
-                              player_power_fn=_solo_player_power, grant_egg_fn=_solo_grant_egg,
-                              active_pet_fn=_get_active_pet, give_pet_xp_fn=_give_pet_xp,
-                              list_eggs_fn=pet_eggs_module.list_eggs,
-                              hatch_now_fn=pet_eggs_module.hatch_now)
-            await solo_module.init_db()
-            await solo_module.boot_cleanup()  # ferme les runs/salons solo orphelins (reboot)
-            solo_module.register_persistent_views(bot)
-            if not solo_module.solo_watchdog.is_running():
-                solo_module.solo_watchdog.start()
-        except Exception as ex:
-            print(f"[on_ready 264 solo] {ex}")
 
         # Phase 280 : Zones sociales (groupes d'entraide + trades privés) 100% boutons.
         try:
@@ -52339,16 +52023,6 @@ async def on_ready():
         except Exception as ex:
             print(f"[on_ready ui_usage] {ex}")
 
-        # Phase 216 : rôle « 🔔 Événements » auto-attribué aux ACTIFS (en cachette) ;
-        # opt-out via /notifs (catégorie « events ») → retire le rôle + coupe les pings.
-        try:
-            event_notif_role_module.setup(bot, get_db, db_get,
-                                          wants_notif_fn=_member_wants_notif)
-            await event_notif_role_module.init_db()
-            if not event_notif_role_module.event_role_task.is_running():
-                event_notif_role_module.event_role_task.start()
-        except Exception as ex:
-            print(f"[on_ready 216 event_notif_role] {ex}")
 
         # Phase 169.2 : Marchand itinérant quotidien
         wandering_merchant_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins)
@@ -52378,145 +52052,15 @@ async def on_ready():
         # ne tombe pas pour 1 module défaillant.
         # ════════════════════════════════════════════════════════════════
 
-        # Phase 170.1 : La Chronique d'Abylumis — récit collectif persistant
-        try:
-            story_engine_module.setup(bot, get_db, db_get, _v2h)
-            await story_engine_module.init_db()
-            if not story_engine_module.chronicle_task.is_running():
-                story_engine_module.chronicle_task.start()
-        except Exception as ex:
-            print(f"[on_ready 170.1 story_engine] {ex}")
 
-        # Phase 170.2 : NPCs vivants
-        try:
-            npc_personalities_module.setup(bot, get_db, db_get, _v2h)
-            await npc_personalities_module.init_db()
-        except Exception as ex:
-            print(f"[on_ready 170.2 npc_personalities] {ex}")
 
-        # Phase 170.3 : Daily encounters
-        try:
-            daily_encounters_module.setup(
-                bot, get_db, db_get, _v2h,
-                npc_module=npc_personalities_module,
-                story_module=story_engine_module,
-                add_coins_fn=add_coins,
-            )
-            await daily_encounters_module.init_db()
-            daily_encounters_module.register_persistent_views(bot)
-        except Exception as ex:
-            print(f"[on_ready 170.3 daily_encounters] {ex}")
 
-        # Phase 170.4 : Conseil des Anciens hebdomadaire
-        try:
-            weekly_council_module.setup(
-                bot, get_db, db_get, _v2h,
-                story_module=story_engine_module,
-                npc_module=npc_personalities_module,
-            )
-            await weekly_council_module.init_db()
-            weekly_council_module.register_persistent_views(bot)
-            if not weekly_council_module.council_task.is_running():
-                weekly_council_module.council_task.start()
-        except Exception as ex:
-            print(f"[on_ready 170.4 weekly_council] {ex}")
 
-        # Phase 170.5 : 5 régions du monde + patrouilles
-        try:
-            regional_state_module.setup(
-                bot, get_db, db_get, _v2h,
-                story_module=story_engine_module,
-                npc_module=npc_personalities_module,
-            )
-            await regional_state_module.init_db()
-            regional_state_module.register_persistent_views(bot)
-            if not regional_state_module.regional_task.is_running():
-                regional_state_module.regional_task.start()
-        except Exception as ex:
-            print(f"[on_ready 170.5 regional_state] {ex}")
 
-        # Phase 170.6 : Indices fragmentés
-        try:
-            mystery_investigation_module.setup(
-                bot, get_db, db_get, _v2h,
-                story_module=story_engine_module,
-                npc_module=npc_personalities_module,
-                add_coins_fn=add_coins,
-            )
-            await mystery_investigation_module.init_db()
-            mystery_investigation_module.register_persistent_views(bot)
-            if not mystery_investigation_module.mystery_task.is_running():
-                mystery_investigation_module.mystery_task.start()
-        except Exception as ex:
-            print(f"[on_ready 170.6 mystery_investigation] {ex}")
 
-        # Phase 170.7 : Lettres NPC hebdo en DM (opt-in)
-        try:
-            npc_letters_module.setup(
-                bot, get_db, db_get, _v2h,
-                story_module=story_engine_module,
-                npc_module=npc_personalities_module,
-            )
-            await npc_letters_module.init_db()
-            npc_letters_module.register_persistent_views(bot)
-            if not npc_letters_module.weekly_letter_task.is_running():
-                npc_letters_module.weekly_letter_task.start()
-        except Exception as ex:
-            print(f"[on_ready 170.7 npc_letters] {ex}")
 
-        # Phase 170.8 : Boss Climax mensuel
-        try:
-            monthly_climax_module.setup(
-                bot, get_db, db_get, _v2h,
-                story_module=story_engine_module,
-                npc_module=npc_personalities_module,
-                add_coins_fn=add_coins,
-                arena_create_fn=_create_combat_arena,
-                arena_delete_fn=_delete_combat_arena,
-                event_busy_fn=_has_any_major_event_running,
-                report_fn=_post_combat_report,
-                event_mention_fn=_get_event_mention,
-                pet_strike_fn=_pet_strike,
-                claim_lock_fn=_claim_combat_lock,
-                echo_fn=_post_event_echo,
-            )
-            await monthly_climax_module.init_db()
-            monthly_climax_module.register_persistent_views(bot)
-            if not monthly_climax_module.climax_task.is_running():
-                monthly_climax_module.climax_task.start()
-        except Exception as ex:
-            print(f"[on_ready 170.8 monthly_climax] {ex}")
 
-        # Codex setup APRÈS tous les modules pour injection refs complète
-        try:
-            codex_chronicle_module.setup(
-                bot, get_db, db_get, _v2h, story_engine_module,
-                council_module=weekly_council_module,
-                regional_module=regional_state_module,
-                mystery_module=mystery_investigation_module,
-                letters_module=npc_letters_module,
-                climax_module=monthly_climax_module,
-            )
-            codex_chronicle_module.register_persistent_views(bot)
-        except Exception as ex:
-            print(f"[on_ready 170 codex_chronicle] {ex}")
 
-        # Phase 235.19 : 🧭 Parcours de l'Aventurier — onboarding crescendo per-player
-        try:
-            hero_journey_module.setup(
-                bot, get_db, _v2h,
-                add_coins_fn=add_coins,
-                get_level_fn=_hero_level,
-                grant_item_fn=_stash_add,
-                check_fn=_hero_check,
-                notify_check_fn=None,
-            )
-            await hero_journey_module.init_db()
-            hero_journey_module.register_persistent_views(bot)
-            if not hero_journey_module.hero_journey_task.is_running():
-                hero_journey_module.hero_journey_task.start()
-        except Exception as ex:
-            print(f"[on_ready 235.19 hero_journey] {ex}")
 
         # Phase 235.25 : 📊 Système d'ACTIVITÉ — clé d'accès aux events.
         # Score glissant 7 j : 1 message = 1 pt · 1 min vocal = 1 pt. Paliers
@@ -52598,13 +52142,6 @@ async def on_ready():
         except Exception as ex:
             print(f"[on_ready A.2 presence_chain] {ex}")
 
-        # Phase 249 : sink économique — titres cosmétiques (anti-inflation)
-        try:
-            cosmetics_module.setup(get_db)
-            await cosmetics_module.init_db()
-            print("[Phase 249] cosmetics OK (sink titres cosmétiques)")
-        except Exception as ex:
-            print(f"[on_ready 249 cosmetics] {ex}")
 
         # Tâche B.1 : PARRAINAGE RÉCOMPENSÉ (anti-alt, zéro DM). Suivi d'invitations
         # léger (cache mémoire ré-amorcé au boot), crédit DIFFÉRÉ derrière double gate
@@ -52732,58 +52269,9 @@ async def on_ready():
         except Exception as ex:
             print(f"[on_ready translate] {ex}")
 
-        # Phase 235.26 : 🥚 Œufs de familiers — acquisition par éclosion (le #1
-        # reproche owner : « on ne savait pas comment en avoir »). Catalogue
-        # étendu à ~50 familiers (engagement41.PETS, egg_only). Module backend.
-        try:
-            pet_eggs_module.setup(get_db, add_coins_fn=add_coins)
-            await pet_eggs_module.init_db()
-            print("[Phase 235.26] pet_eggs OK (œufs de familiers)")
-        except Exception as ex:
-            print(f"[on_ready 235.26 pet_eggs] {ex}")
 
-        # Phase 259 : 🏛️ La Cité — socle customisation / build / économie long terme.
-        # Tout en boutons (menu cite:*), un DynamicItem persistant, monnaie cosmétique.
-        try:
-            citadelle_module.setup(
-                get_db,
-                v2_helpers={
-                    "LayoutView": LayoutView,
-                    "title": v2_title,
-                    "subtitle": v2_subtitle,
-                    "body": v2_body,
-                    "divider": v2_divider,
-                    "container": v2_container,
-                },
-                add_coins_fn=add_coins,
-                pet_rente_bonus_fn=_pet_rente_bonus,  # Phase 268 : perk passif familier
-                is_frozen_fn=is_account_frozen,  # TASK A5 : gel Éclats si compte compromis
-            )
-            await citadelle_module.init_db()
-            citadelle_module.register_persistent_views(bot)
-            print("[Phase 259] citadelle OK (La Cité)")
-        except Exception as ex:
-            print(f"[on_ready 259 citadelle] {ex}")
 
-        # Phase 235.25c : 🔁 Rappel des participants aux combats (rétention) —
-        # mémorise qui combat → re-ping au prochain event du même genre, via
-        # _ping_active_members (qui respecte l'opt-out 🔔 / /notify).
-        try:
-            combat_recall_module.setup(get_db)
-            await combat_recall_module.init_db()
-            await combat_recall_module.cleanup_old()
-            print("[Phase 235.25c] combat_recall OK (rappel participants)")
-        except Exception as ex:
-            print(f"[on_ready 235.25c combat_recall] {ex}")
 
-        # Phase 235.31 : 📩 Notifs d'event en MP (OPT-IN STRICT, anti-mass-DM).
-        try:
-            dm_notify_module.setup(get_db)
-            await dm_notify_module.init_db()
-            bot.add_dynamic_items(DMNotifyButton)
-            print("[Phase 235.31] dm_notify OK (MP opt-in)")
-        except Exception as ex:
-            print(f"[on_ready 235.31 dm_notify] {ex}")
 
         # Phase 235.22 : bouton « 🔔 Me notifier » par type (opt-in, persistant).
         try:
@@ -52808,27 +52296,6 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready Phase 155/165 roblox/stream] {ex}")
 
-    # Phase 157 : Community goals + Coin economy
-    try:
-        community_goals_module.setup(
-            bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
-        )
-        await community_goals_module.init_db()
-        if not community_goals_module.weekly_goal_task.is_running():
-            community_goals_module.weekly_goal_task.start()
-
-        coin_economy_module.setup(
-            bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
-        )
-        await coin_economy_module.init_db()
-        if not coin_economy_module.monthly_festival_task.is_running():
-            coin_economy_module.monthly_festival_task.start()
-        if not coin_economy_module.luxury_tax_task.is_running():
-            coin_economy_module.luxury_tax_task.start()
-
-        print("[Phase 157] Community goals + Coin economy actifs")
-    except Exception as ex:
-        print(f"[on_ready Phase 157 community/economy] {ex}")
 
     # Phase 161 : Weekly stats (récap perso + leaderboards auto)
     try:
@@ -52850,211 +52317,6 @@ async def on_ready():
     except Exception as ex:
         print(f"[on_ready Phase 162 server_pulse] {ex}")
 
-    # Phase 146 : Event followup buttons (zéro commande à mémoriser)
-    try:
-        followup_module.setup({
-            'v2_title': v2_title, 'v2_subtitle': v2_subtitle, 'v2_body': v2_body,
-            'v2_divider': v2_divider, 'v2_container': v2_container,
-            'LayoutView': LayoutView,
-        })
-        # Handlers : pour chaque event_kind, on enregistre les boutons à afficher.
-        # Chaque callback ouvre un panel existant (réutilise les modules custom).
-
-        # Helper : ouvre le panel /season info
-        async def _open_season_panel(i):
-            view = season_module.build_season_panel(
-                i.guild.name if i.guild else ""
-            )
-            if view:
-                await i.response.send_message(view=view, ephemeral=True)
-
-        # Helper : ouvre le panel /season my_drops
-        async def _open_season_drops(i):
-            if not i.guild or not isinstance(i.user, discord.Member):
-                return
-            drops = await season_module.get_user_seasonal_drops(
-                i.guild.id, i.user.id
-            )
-            view = season_module.build_my_drops_panel(i.user, drops, i.guild.name)
-            if view:
-                await i.response.send_message(view=view, ephemeral=True)
-
-        # Helper : ouvre milestones (paliers streak/vétéran/prestige)
-        async def _open_milestones(i):
-            try:
-                await prog_module.show(i, add_coins_fn=add_coins)
-            except Exception as ex:
-                print(f"[followup milestones] {ex}")
-
-        # Helper : ouvre /bonus du jour
-        async def _open_bonus(i):
-            try:
-                view = econ_events_module.build_layout(
-                    i.guild if i.guild else None
-                )
-                if view:
-                    await i.response.send_message(view=view, ephemeral=True)
-            except Exception as ex:
-                print(f"[followup bonus] {ex}")
-
-        # Helper : ouvre quêtes du jour
-        async def _open_quests(i):
-            try:
-                await _p41_open_daily(i)
-            except Exception as ex:
-                print(f"[followup quests] {ex}")
-
-        # Helper : ouvre wheel
-        async def _open_wheel(i):
-            try:
-                await _wheel_spin_command(i)
-            except Exception as ex:
-                print(f"[followup wheel] {ex}")
-
-        # Helper : ouvre /inventory
-        async def _open_inventory(i):
-            try:
-                # Inventory cmd existante
-                await inventory_cmd.callback(i)
-            except Exception as ex:
-                print(f"[followup inventory] {ex}")
-
-        # Helper : ouvre achievements
-        async def _open_achievements(i):
-            try:
-                await _p41_open_achievements(i)
-            except Exception as ex:
-                print(f"[followup achievements] {ex}")
-
-        # Helper : ouvre /vault show
-        async def _open_vault(i):
-            if not i.guild or not isinstance(i.user, discord.Member):
-                return
-            try:
-                alliance = await av_module.get_user_alliance(
-                    i.guild.id, i.user.id
-                )
-                if not alliance:
-                    await i.response.send_message(
-                        "ℹ️ Tu n'es membre d'aucune alliance.", ephemeral=True
-                    )
-                    return
-                view = await av_module.build_vault_panel(alliance)
-                if view:
-                    await i.response.send_message(view=view, ephemeral=True)
-            except Exception as ex:
-                print(f"[followup vault] {ex}")
-
-        # ENREGISTREMENT des handlers pour chaque type d'event
-        BTN_PRIM = discord.ButtonStyle.primary
-        BTN_SUCC = discord.ButtonStyle.success
-        BTN_SEC = discord.ButtonStyle.secondary
-
-        # 🐲 Boss raid victoire
-        followup_module.register_handler(
-            "boss_raid", "Drops saison", "🌸",
-            _open_season_drops, BTN_PRIM,
-        )
-        followup_module.register_handler(
-            "boss_raid", "Mes paliers", "🏅",
-            _open_milestones, BTN_SEC,
-        )
-        followup_module.register_handler(
-            "boss_raid", "Mon inventaire", "🎒",
-            _open_inventory, BTN_SEC,
-        )
-
-        # 🌍 World boss
-        followup_module.register_handler(
-            "world_boss", "Drops saison", "🌸",
-            _open_season_drops, BTN_PRIM,
-        )
-        followup_module.register_handler(
-            "world_boss", "Mes hauts faits", "🏆",
-            _open_achievements, BTN_SEC,
-        )
-        followup_module.register_handler(
-            "world_boss", "Saison active", "🍂",
-            _open_season_panel, BTN_SEC,
-        )
-
-        # 🎁 Daily reward / wheel
-        followup_module.register_handler(
-            "daily", "Bonus du jour", "✨",
-            _open_bonus, BTN_PRIM,
-        )
-        followup_module.register_handler(
-            "daily", "Mes quêtes", "🎯",
-            _open_quests, BTN_SEC,
-        )
-        followup_module.register_handler(
-            "daily", "Spin wheel", "🎰",
-            _open_wheel, BTN_SUCC,
-        )
-
-        # 💎 Treasure / mystery box
-        followup_module.register_handler(
-            "treasure", "Drops saison", "🌸",
-            _open_season_drops, BTN_PRIM,
-        )
-        followup_module.register_handler(
-            "treasure", "Mon inventaire", "🎒",
-            _open_inventory, BTN_SEC,
-        )
-        followup_module.register_handler(
-            "treasure", "Saison active", "🍂",
-            _open_season_panel, BTN_SEC,
-        )
-
-        # ⚔️ Duel win
-        followup_module.register_handler(
-            "duel_win", "Mes hauts faits", "🏆",
-            _open_achievements, BTN_PRIM,
-        )
-        followup_module.register_handler(
-            "duel_win", "Mes paliers", "🏅",
-            _open_milestones, BTN_SEC,
-        )
-        followup_module.register_handler(
-            "duel_win", "Mon inventaire", "🎒",
-            _open_inventory, BTN_SEC,
-        )
-
-        # 🧠 Quiz / Riddle
-        followup_module.register_handler(
-            "quiz_win", "Mes quêtes", "🎯",
-            _open_quests, BTN_PRIM,
-        )
-        followup_module.register_handler(
-            "quiz_win", "Drops saison", "🌸",
-            _open_season_drops, BTN_SEC,
-        )
-
-        # 🌐 Generic (fallback pour tout autre event)
-        followup_module.register_handler(
-            "generic", "Saison active", "🍂",
-            _open_season_panel, BTN_PRIM,
-        )
-        followup_module.register_handler(
-            "generic", "Mes quêtes", "🎯",
-            _open_quests, BTN_SEC,
-        )
-        followup_module.register_handler(
-            "generic", "Bonus du jour", "✨",
-            _open_bonus, BTN_SEC,
-        )
-
-        # 🏰 Alliance reward
-        followup_module.register_handler(
-            "alliance", "Coffre alliance", "🏰",
-            _open_vault, BTN_PRIM,
-        )
-        followup_module.register_handler(
-            "alliance", "Mes paliers", "🏅",
-            _open_milestones, BTN_SEC,
-        )
-    except Exception as ex:
-        print(f"[on_ready followup_module setup] {ex}")
     # Phase 33 : événements personnels aléatoires
     if not personal_event_dispatcher.is_running():
         personal_event_dispatcher.start()
@@ -96469,36 +95731,6 @@ async def _open_lore_panel(i: discord.Interaction):
     """Affiche le chapitre actuel + résumé des précédents."""
     if not await _safe_defer(i):
         return
-    try:
-        if not i.guild:
-            return await _safe_followup(i, content="❌ Serveur uniquement.")
-        state = await _get_lore_state(i.guild.id)
-        chapter = state["chapter"]
-        # Construire un mini-récap des chapitres précédents
-        prev_lines = []
-        for c in lore.LORE_CHAPTERS:
-            if c["order"] < chapter["order"]:
-                prev_lines.append(f"~~{c['emoji']} **{c['title']}**~~ _(passé)_")
-            elif c["order"] == chapter["order"]:
-                prev_lines.append(f"📍 {c['emoji']} **{c['title']}** _(en cours)_")
-            else:
-                prev_lines.append(f"❓ {c['emoji']} ??? _(à venir)_")
-        e = discord.Embed(
-            title=f"📖 L'Histoire de la Guilde",
-            description=(
-                f"**Chapitre actuel :** {chapter['emoji']} **{chapter['title']}**\n"
-                f"_{chapter['subtitle']}_\n\n"
-                f"{chapter['intro']}\n\n"
-                f"**Tous les chapitres :**\n" + "\n".join(prev_lines)
-            ),
-            color=chapter.get("color", 0x9B59B6),
-            timestamp=datetime.now(timezone.utc),
-        )
-        e.set_footer(text=f"Chapitre {chapter['order']}/{len(lore.LORE_CHAPTERS)} · L'histoire avance après chaque World Boss vaincu")
-        await _safe_followup(i, embed=e)
-    except Exception as ex:
-        print(f"[_open_lore_panel] {ex}")
-        await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
 
 class MissionLayoutV2(LayoutView):
@@ -96713,45 +95945,6 @@ async def _recently_posted_tip_ids(guild_id: int, days: int = 60) -> list:
 async def _post_studio_tip(channel) -> bool:
     """Poste un tip aléatoire (non-dup sur 60j)."""
     if not channel or not channel.guild:
-        return False
-    try:
-        exclude = await _recently_posted_tip_ids(channel.guild.id, days=60)
-        tip = rblx.pick_random_tip(exclude_ids=exclude)
-        if not tip:
-            return False
-        LIFETIME = 22 * 3600
-        e = discord.Embed(
-            title=f"💡 Tip Roblox Studio — {tip['title']}",
-            description=tip["content"],
-            color=0x00A2FF,
-            timestamp=datetime.now(timezone.utc),
-        )
-        e.set_footer(text=f"Catégorie : {tip.get('category', '?')}  ·  Tip #{tip['id']}/{len(rblx.STUDIO_TIPS)}")
-        try:
-            msg = await channel.send(
-                embed=e,
-                allowed_mentions=discord.AllowedMentions.none(),
-                delete_after=LIFETIME,
-            )
-            try:
-                await _register_for_cleanup(msg, LIFETIME, 'studio_tip')
-            except Exception:
-                pass
-        except Exception as ex:
-            print(f"[_post_studio_tip send] {ex}")
-            return False
-        try:
-            async with get_db() as db:
-                await db.execute(
-                    "INSERT INTO studio_tip_posts_log(guild_id, tip_id) VALUES(?,?)",
-                    (channel.guild.id, int(tip["id"])),
-                )
-                await db.commit()
-        except Exception:
-            pass
-        return True
-    except Exception as ex:
-        print(f"[_post_studio_tip] {ex}")
         return False
 
 
@@ -97535,17 +96728,6 @@ class RobloxSubHubView(View):
     async def _on_tip(self, i: discord.Interaction):
         if not await _safe_defer(i):
             return
-        try:
-            tip = rblx.pick_random_tip()
-            e = discord.Embed(
-                title=f"💡 {tip['title']}",
-                description=tip["content"],
-                color=0x00A2FF,
-            )
-            e.set_footer(text=f"Catégorie : {tip.get('category', '?')}  ·  Tip #{tip['id']}/{len(rblx.STUDIO_TIPS)}")
-            await _safe_followup(i, embed=e)
-        except Exception as ex:
-            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
     async def _on_updates(self, i: discord.Interaction):
         if not await _safe_defer(i):
@@ -107144,17 +106326,6 @@ class RobloxLayoutV2(LayoutView):
     async def _on_tip(self, i):
         if not await _safe_defer(i):
             return
-        try:
-            tip = rblx.pick_random_tip()
-            e = discord.Embed(
-                title=f"💡 {tip['title']}",
-                description=tip["content"],
-                color=0x00A2FF,
-            )
-            e.set_footer(text=f"Catégorie : {tip.get('category', '?')}  ·  Tip #{tip['id']}/{len(rblx.STUDIO_TIPS)}")
-            await _safe_followup(i, embed=e)
-        except Exception as ex:
-            await _safe_followup(i, content=f"❌ Erreur : `{ex}`")
 
     async def _on_updates(self, i):
         if not await _safe_defer(i):
