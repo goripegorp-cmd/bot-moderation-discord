@@ -28262,21 +28262,28 @@ class ProtDetailV2(LayoutView):
         await v.render_to(i, edit=True)
 
     async def _cb_log(self, i):
+        # UI.md §2 : ChannelSelect natif via V2GenericChannelPicker. L'ancien
+        # LogSelectView paginait les salons 23 par 23 (limite des 25 options d'un
+        # Select classique) et renvoyait un Embed depuis un panneau V2.
         try:
-            total_channels = len(list(self.g.text_channels))
-            v = LogSelectView(self.u, self.g, self.key, self.prot)
-            await i.response.edit_message(
-                embed=discord.Embed(
-                    title="📜 Choisir le salon de log",
-                    description=f"Pour la protection **{self.prot[2]}**\n\n📊 {total_channels} salons disponibles",
-                    color=0x9B59B6,
-                ),
-                view=v,
-                attachments=[],
+            v = V2GenericChannelPicker(
+                self.u, self.g,
+                config_key=f'log_{self.key}',
+                return_panel_factory=lambda: ProtDetailV2(self.u, self.g, self.prot),
+                title="📜 Salon de log",
+                description=f"Où envoyer les alertes de **{self.prot[2]}**.",
+                color=0x9B59B6,
             )
+            await v.render_to(i, edit=True)
         except Exception as ex:
-            print(f"[LOG SELECT V2 ERROR] {ex}")
-            await i.response.send_message(f"❌ Erreur: {ex}", ephemeral=True)
+            print(f"[ProtDetailV2 _cb_log] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
+                else:
+                    await i.followup.send(f"❌ Erreur : {ex}", ephemeral=True)
+            except Exception:
+                pass
 
     async def _cb_back(self, i):
         v = ProtPanelV2(self.u, self.g)
@@ -29052,16 +29059,37 @@ class LinkConfigPanelV2(LayoutView):
         await LinkConfigPanelV2(self.u, self.g).render_to(i, edit=True)
 
     async def _cb_add_ch(self, i):
-        v = PaginatedLinkChanSelectView(self.u, self.g)
-        await i.response.edit_message(
-            embed=discord.Embed(
-                title="📍 Choisir un salon à autoriser",
-                description=f"📊 {len(list(self.g.text_channels))} salons disponibles",
+        # UI.md §2 : ChannelSelect natif. `link_allowed_channels` est une LISTE,
+        # donc on passe par save_fn plutôt que par l'écriture simple du picker.
+        async def _ajouter(guild_id, channel_id):
+            c = await cfg(guild_id)
+            salons = list(c.get('link_allowed_channels', []) or [])
+            if channel_id and channel_id not in salons:
+                salons.append(channel_id)
+            elif not channel_id:
+                # Le bouton « Aucun (reset) » du picker envoie 0 : on vide la liste.
+                salons = []
+            await db_set(guild_id, 'link_allowed_channels', salons)
+
+        try:
+            v = V2GenericChannelPicker(
+                self.u, self.g,
+                return_panel_factory=lambda: LinkConfigPanelV2(self.u, self.g),
+                title="📍 Autoriser un salon",
+                description="Les liens resteront permis dans ce salon.",
                 color=0x9B59B6,
-            ),
-            view=v,
-            attachments=[],
-        )
+                save_fn=_ajouter,
+            )
+            await v.render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[LinkConfigPanelV2 _cb_add_ch] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
+                else:
+                    await i.followup.send(f"❌ Erreur : {ex}", ephemeral=True)
+            except Exception:
+                pass
 
     async def _cb_clear_ch(self, i):
         await db_set(self.g.id, 'link_allowed_channels', [])
@@ -29704,12 +29732,19 @@ class AntiRaidConfigPanelV2(LayoutView):
         await AntiRaidConfigPanelV2(self.u, self.g).render_to(i, edit=True)
 
     async def _cb_action(self, i):
-        v = RaidActionSelect(self.u, self.g)
-        await i.response.edit_message(
-            embed=discord.Embed(title="⚡ Choisir l'action anti-raid", color=0xE74C3C),
-            view=v,
-            attachments=[],
-        )
+        # UI.md §4 : l'ancien RaidActionSelect renvoyait vers AntiRaidConfigPanel V1
+        # (un Embed) — une fuite qui ressuscitait le panneau legacy à chaque clic.
+        try:
+            await RaidActionPanelV2(self.u, self.g).render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[AntiRaidConfigPanelV2 _cb_action] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.send_message(f"❌ Erreur : {ex}", ephemeral=True)
+                else:
+                    await i.followup.send(f"❌ Erreur : {ex}", ephemeral=True)
+            except Exception:
+                pass
 
     async def _cb_toggle_invites(self, i):
         c = await cfg(self.g.id)
@@ -29746,6 +29781,120 @@ class AntiRaidConfigPanelV2(LayoutView):
         prot = next(p for p in PROTS if p[0] == "anti_raid")
         v = ProtDetailV2(self.u, self.g, prot)
         await v.render_to(i, edit=True)
+
+
+class RaidActionPanelV2(LayoutView):
+    """Riposte appliquée quand l'anti-raid se déclenche (clé `raid_config.action`).
+
+    Ouvert par AntiRaidConfigPanelV2 · « ⚡ Riposte ». Remplace RaidActionSelect,
+    qui retombait sur le panneau V1 en Embed (UI.md §1 et §4).
+    """
+
+    #  (valeur stockée, emoji, libellé, ce que ça fait concrètement)
+    ACTIONS = [
+        ("kick", "👢", "Expulser", "Le membre est expulsé, il peut revenir avec une invitation."),
+        ("ban", "🔨", "Bannir", "Le membre est banni, il ne peut plus revenir."),
+        ("mute", "🔇", "Rendre muet", "Le membre reste, mais ne peut plus écrire ni parler."),
+    ]
+
+    def __init__(self, u, g):
+        super().__init__(timeout=300)
+        self.u = u
+        self.g = g
+        self._build()
+
+    async def interaction_check(self, i):
+        return i.user.id == self.u.id
+
+    def _build(self, actuelle: str | None = None):
+        self.clear_items()
+        items: list = [
+            v2_title("⚡ Riposte anti-raid"),
+            v2_subtitle("Ce que le bot fait aux comptes d'une vague détectée"),
+            v2_divider(),
+        ]
+
+        if actuelle is not None:
+            libelle = next(
+                (f"{e} **{lib}**" for v, e, lib, _ in self.ACTIONS if v == actuelle),
+                "⚪ _aucune_",
+            )
+            items.append(v2_body(f"Riposte actuelle · {libelle}"))
+            items.append(v2_divider())
+
+        items.append(v2_body("\n".join(
+            f"{emoji} **{libelle}** — {aide}" for _, emoji, libelle, aide in self.ACTIONS
+        )))
+        items.append(v2_divider())
+
+        # UI.md §3 : le bouton de l'action ACTIVE est en `success` et désactivé —
+        # l'état se lit sur le bouton, pas dans une case cochée en texte.
+        ligne = []
+        for valeur, emoji, libelle, _ in self.ACTIONS:
+            actif = (valeur == actuelle)
+            b = Button(
+                label=libelle,
+                emoji=emoji,
+                style=discord.ButtonStyle.success if actif else discord.ButtonStyle.secondary,
+                disabled=actif,
+                custom_id=f"raidact_{valeur}",
+            )
+            b.callback = self._faire_callback(valeur)
+            ligne.append(b)
+
+        b_back = Button(
+            label="Retour", emoji="◀️",
+            style=discord.ButtonStyle.secondary, custom_id="raidact_back",
+        )
+        b_back.callback = self._cb_back
+
+        items.append(discord.ui.ActionRow(*ligne))
+        items.append(discord.ui.ActionRow(b_back))
+
+        self.add_item(v2_container(*items, color=Palette.DANGER))
+
+    def _faire_callback(self, valeur: str):
+        async def _cb(i):
+            try:
+                c = await cfg(self.g.id)
+                raid_cfg = dict(c.get('raid_config', {}) or {})
+                raid_cfg['action'] = valeur
+                await db_set(self.g.id, 'raid_config', raid_cfg)
+                await self.render_to(i, edit=True)
+            except Exception as ex:
+                print(f"[RaidActionPanelV2 _cb {valeur}] {ex}")
+                try:
+                    if not i.response.is_done():
+                        await i.response.defer()
+                except Exception:
+                    pass
+        return _cb
+
+    async def render_to(self, interaction: discord.Interaction, *, edit: bool = True):
+        # Disponibilité = fail-open : si la config est illisible, on affiche quand
+        # même le panneau, simplement sans marquer la riposte active.
+        try:
+            c = await cfg(self.g.id)
+            actuelle = (c.get('raid_config', {}) or {}).get('action')
+        except Exception as ex:
+            print(f"[RaidActionPanelV2 render_to cfg] {ex}")
+            actuelle = None
+        self._build(actuelle)
+        if edit:
+            await interaction.response.edit_message(content=None, view=self, embed=None, attachments=[])
+        else:
+            await interaction.response.send_message(view=self, ephemeral=True)
+
+    async def _cb_back(self, i):
+        try:
+            await AntiRaidConfigPanelV2(self.u, self.g).render_to(i, edit=True)
+        except Exception as ex:
+            print(f"[RaidActionPanelV2 _cb_back] {ex}")
+            try:
+                if not i.response.is_done():
+                    await i.response.defer()
+            except Exception:
+                pass
 
 
 class AntiRaidConfigPanel(View):
@@ -37046,7 +37195,7 @@ class V2GenericChannelPicker(LayoutView):
                     pass
         b_none.callback = _none
 
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.danger)
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary)
         async def _back(i):
             try:
                 await self._return_to_parent(i)
@@ -37279,7 +37428,7 @@ class V2GenericRolePicker(LayoutView):
                     pass
         b_none.callback = _none
 
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.danger)
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary)
         async def _back(i):
             try:
                 await self._return_to_parent(i)
@@ -37398,7 +37547,7 @@ class V2AdsChannelPicker(LayoutView):
         b_none.callback = _none
 
         # Bouton retour
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.danger)
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary)
         async def _back(i):
             try:
                 v = self._get_return_panel()
@@ -47949,7 +48098,7 @@ class _ChanPickerV2(LayoutView):
                     pass
         sel.callback = _on_select
 
-        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.danger)
+        b_back = Button(label="◀️ Retour", style=discord.ButtonStyle.secondary)
         async def _back(i):
             try:
                 v = ChanPanelV2(self.u, self.g)
