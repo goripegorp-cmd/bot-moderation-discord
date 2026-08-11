@@ -193,6 +193,7 @@ import activite as activite_module
 import activite_escalade as activite_esc
 import activite_recompenses as activite_rec
 import activite_passage as activite_pass
+import activite_panneau as activite_ui
 import diag  # owner 2026-07-17 : journal de DIAGNOSTIC structuré sur stderr (visible Railway)
 import delegations as delegations2026
 import compromised_detector as compromised2026
@@ -10510,6 +10511,7 @@ _CONFIG_SECTIONS = [
     ("tickets",     "🎫", "Tickets",           "Panneaux d'ouverture · rôle staff · logs · blacklist"),
     ("logs",        "📋", "Logs & Audit",      "Un salon · toutes les catégories d'événements"),
     ("afk",         "💤", "Rôle AFK",          "Rôle automatique pour les membres inactifs"),
+    ("activite",    "📊", "Activité",          "Présence exigée · rappels · retrait de rôle · expulsion"),
     ("rgpd",        "🔒", "Données & RGPD",    "Droit à l'effacement (art. 17) · rétention"),
 ]
 
@@ -10689,6 +10691,7 @@ class MainPanelV2(LayoutView):
             'tickets':     lambda: TicketMainPanelV2(self.u, self.g),
             'logs':        lambda: LogsPanelV2(self.u, self.g),
             'afk':         lambda: AfkRolePanelV2(self.u, self.g),
+            'activite':    lambda: activite_ui.ActivitePanelV2(self.u, self.g),
             'rgpd':        lambda: RgpdPanelV2(self.u, self.g),
         }
         fabrique = panneaux.get(valeur)
@@ -26769,6 +26772,16 @@ async def _activite_boot():
     activite_esc.setup(log=print)
     activite_rec.setup(log=print)
     activite_pass.setup(log=print)
+    activite_ui.setup(db_set=db_set, log=print)
+
+    #  Le bouton « Retour » du panneau d'activité doit rouvrir /configure. On
+    #  l'injecte plutôt que de laisser le module importer MainPanelV2 : ça
+    #  créerait un import circulaire (bot.py → panneau → bot.py).
+    async def _retour_vers_configure(u, g, inter):
+        await MainPanelV2(u, g).render_to(inter, edit=True)
+
+    activite_ui.set_retour(_retour_vers_configure)
+
     await activite_module.init_db()
     await activite_rec.init_db()
 

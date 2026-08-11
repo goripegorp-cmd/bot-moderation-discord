@@ -149,3 +149,51 @@ def test_systeme_desactive_par_defaut():
 def test_les_trois_sources_existent():
     assert set(activite.SOURCES) == {
         activite.SOURCE_MESSAGE, activite.SOURCE_VOCAL, activite.SOURCE_REACTION}
+
+
+# ─── récompenses : la courbe de niveaux ─────────────────────────────────────
+
+import activite_recompenses as rec
+
+
+def test_niveau_zero_si_jamais_actif():
+    """0, pas 1 : un membre jamais vu n'est pas « niveau 1 par défaut »."""
+    assert rec.niveau_pour(0) == 0
+    assert rec.niveau_pour(-5) == 0
+
+
+def test_niveau_croit_avec_les_jours():
+    precedent = -1
+    for j in (1, 3, 7, 14, 21, 30, 45, 60, 90, 120, 150, 180, 240, 300, 365):
+        n = rec.niveau_pour(j)
+        assert n > precedent, f"{j} jours devrait dépasser le palier précédent"
+        precedent = n
+
+
+def test_niveau_et_jours_sont_reciproques():
+    for n in range(1, 20):
+        j = rec.jours_pour_niveau(n)
+        assert rec.niveau_pour(j) == n, f"niveau {n} <-> {j} jours"
+
+
+def test_niveau_continue_au_dela_du_dernier_palier():
+    base = rec.niveau_pour(rec.PALIERS[-1])
+    assert rec.niveau_pour(rec.PALIERS[-1] + rec.JOURS_PAR_NIVEAU_AU_DELA) == base + 1
+
+
+def test_progression_bornee():
+    for j in (0, 1, 37, 200, 1000):
+        p = rec.progression(j)
+        assert 0 <= p["pourcent"] <= 100
+        assert p["reste"] >= 0
+        assert p["prochain_a"] > j or j == 0
+
+
+def test_recompenses_desactivees_par_defaut():
+    assert rec.CLES_DEFAUT["activite_recompenses_enabled"] is False
+    assert rec.CLES_DEFAUT["activite_vip_role"] == 0
+
+
+def test_vip_par_defaut_demande_un_mois():
+    """Le VIP doit se mériter : le défaut vise ~30 jours de présence."""
+    assert rec.jours_pour_niveau(rec.CLES_DEFAUT["activite_vip_niveau"]) >= 30

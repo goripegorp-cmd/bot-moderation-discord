@@ -8,6 +8,8 @@ import pytest
 
 
 PHASE_163_MODULES = [
+    "activite",
+    "activite_recompenses",
     "dm_digest",
     "webhook_tracker",
     "reputation",
