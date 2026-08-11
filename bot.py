@@ -51260,44 +51260,7 @@ async def on_ready():
 
     # Phase 149 : Events MMO — sagas + profil joueur + FAQ
     try:
-        saga_module.setup(
-            bot, get_db, db_get, _v2h,
-            seasonal_module=season_module,
-            add_coins_fn=add_coins,
-        )
-        await saga_module.init_db()
-        if not saga_module.saga_lifecycle_task.is_running():
-            saga_module.saga_lifecycle_task.start()
-
-        profile_module.setup(get_db, db_get, _v2h)
-        await profile_module.init_db()
-
         faq_module.setup(_v2h)
-        # Enregistre les openers (callbacks qui ouvrent les panels existants)
-        async def _open_season_p(i):
-            try:
-                v = season_module.build_season_panel(
-                    i.guild.name if i.guild else ""
-                )
-                if v:
-                    await i.response.send_message(view=v, ephemeral=True)
-            except Exception as ex:
-                print(f"[faq opener season] {ex}")
-
-        async def _open_my_drops_p(i):
-            try:
-                if not i.guild or not isinstance(i.user, discord.Member):
-                    return
-                v = await season_module.build_my_drops_panel(
-                    i.guild.id, i.user
-                )
-                if v:
-                    await i.response.send_message(view=v, ephemeral=True)
-            except Exception as ex:
-                print(f"[faq opener drops] {ex}")
-
-        faq_module.register_panel_opener("open_season_panel", _open_season_p)
-        faq_module.register_panel_opener("open_my_drops_panel", _open_my_drops_p)
 
         # Phase 150.3 : openers vers les sub-hubs existants
         async def _open_hub_root(i):
@@ -51429,13 +51392,6 @@ async def on_ready():
         if not roblox_stats_module.weekly_stats_task.is_running():
             roblox_stats_module.weekly_stats_task.start()
 
-        roblox_raffle_module.setup(
-            bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
-        )
-        await roblox_raffle_module.init_db()
-        if not roblox_raffle_module.weekly_draw_task.is_running():
-            roblox_raffle_module.weekly_draw_task.start()
-
         stream_party_module.setup(bot, get_db, db_get, _v2h)
         await stream_party_module.init_db()
         if not stream_party_module.cleanup_task.is_running():
@@ -51487,20 +51443,6 @@ async def on_ready():
         if not error_logger_module.burst_check_task.is_running():
             error_logger_module.burst_check_task.start()
 
-        # Phase 169.1 : Mob Hunts (combat fréquent multi-user, drops alliance)
-        mob_hunts_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
-                               inventory_fn=_get_or_create_inventory,
-                               active_ping_fn=_ping_active_members,
-                               arena_ensure_fn=_ensure_combat_arena_channel,
-                               report_fn=_post_combat_report,
-                               arena_create_fn=_create_combat_arena,
-                               arena_delete_fn=_delete_combat_arena,
-                               event_busy_fn=_has_any_major_event_running,
-                               pet_strike_fn=_pet_strike)
-        await mob_hunts_module.init_db()
-        mob_hunts_module.register_persistent_views(bot)
-        if not mob_hunts_module.spawn_task.is_running():
-            mob_hunts_module.spawn_task.start()
 
 
 
@@ -51624,26 +51566,6 @@ async def on_ready():
             print(f"[on_ready ui_usage] {ex}")
 
 
-        # Phase 169.2 : Marchand itinérant quotidien
-        wandering_merchant_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins)
-        await wandering_merchant_module.init_db()
-        wandering_merchant_module.register_persistent_views(bot)
-        if not wandering_merchant_module.spawn_merchant_task.is_running():
-            wandering_merchant_module.spawn_merchant_task.start()
-
-        # Phase 169.3 : World Invasion (1er samedi 21h FR)
-        # FIX salons : salon DÉDIÉ « 🚨-invasion » (annonce + mobs regroupés), supprimé
-        # à la résolution. Avant : arène partagée « ⚔️-combat » → l'invasion ressemblait
-        # à du « combat » générique.
-        world_invasion_module.setup(bot, get_db, db_get, _v2h, add_coins_fn=add_coins,
-                                    active_ping_fn=_ping_active_members,
-                                    arena_ensure_fn=_ensure_invasion_channel,
-                                    event_busy_fn=_has_any_major_event_running,
-                                    arena_delete_fn=_delete_combat_arena,
-                                    report_fn=_post_combat_report)
-        await world_invasion_module.init_db()
-        if not world_invasion_module.monthly_invasion_task.is_running():
-            world_invasion_module.monthly_invasion_task.start()
 
         # ════════════════════════════════════════════════════════════════
         # Phase 170 + 171 — Chronique d'Abylumis
@@ -74879,196 +74801,6 @@ async def _register_for_cleanup(message, delay_seconds: int, reason: str = 'even
     return False
 
 
-async def _ping_active_members(guild, channel, *, notif_key='boss_raid',
-                               cap=8, cooldown_hours=8, active_hours=72,
-                               cleanup_seconds=1800, intro=None):
-    """Phase 206 — Mentionne des MEMBRES ACTIFS récents (activity_tracking) pour
-    qu'un événement de COMBAT soit VU (sinon il spawn dans le vide et personne
-    ne vient). Générique : boss / mob / world boss / invasion.
-
-    Anti-spam : rotation via combat_ping_log (un même membre max 1×/cooldown),
-    opt-out respecté via _member_wants_notif, cap dur de mentions, et le message
-    de ping s'AUTO-SUPPRIME. FAIL-OPEN : toute erreur → 0 (ne casse jamais le
-    spawn). Retourne le nombre de membres effectivement pingés."""
-    if guild is None or channel is None:
-        return 0
-    # Phase 222 : PLANCHER anti-sur-mention. Quel que soit le type d'event, une
-    # même personne n'est jamais pingée plus d'une fois toutes les 4 h pour le
-    # combat (le log combat_ping_log est commun à tous les events). Évite que les
-    # gens reçoivent trop de mentions, surtout pour les gros events fréquents.
-    try:
-        cooldown_hours = max(int(cooldown_hours or 0), 4)
-    except Exception:
-        cooldown_hours = 4
-    try:
-        # Phase 257.1 : ÉCHO SILENCIEUX (zéro ping) dans les salons actifs → les
-        # PRÉSENTS voient l'event même si le ping de masse est coupé (mentions
-        # restreintes Phase 257). Couvre tous les events passant par ce helper
-        # (mob / invasion / rift / caravan / chain). Auto-supprimé 30 min. Fail-open.
-        try:
-            await _post_event_echo(guild, channel, (notif_key or '').lower())
-        except Exception:
-            pass
-        # #1 MODE NUIT (owner) : la nuit (heure FR), on NE ping AUCUN membre — l'écho
-        # silencieux ci-dessus reste (l'event est visible sans déranger). Fail-open.
-        try:
-            if _is_night_now(await cfg(guild.id)):
-                return 0
-        except Exception:
-            pass
-        chosen = []
-        # Phase 235.25c : RAPPEL des participants passés EN PRIORITÉ (directive
-        # rétention owner) — d'abord ceux qui ont DÉJÀ combattu (combat_recall),
-        # puis les actifs récents (activity_tracking). L'opt-out + le cooldown +
-        # le filtre en-ligne s'appliquent PAREIL à tout le monde ci-dessous.
-        recalled_ids = []
-        try:
-            recalled_ids = await combat_recall_module.recent_user_ids(guild.id, limit=50)
-        except Exception:
-            recalled_ids = []
-        cd_map = {}    # user_id -> last_pinged (cooldown vérifié en Python)
-        active_ids = []
-        async with get_db() as db:
-            try:
-                async with db.execute(
-                    "SELECT user_id, last_pinged FROM combat_ping_log WHERE guild_id=?",
-                    (guild.id,),
-                ) as cur:
-                    for cr in await cur.fetchall():
-                        cd_map[int(cr[0])] = cr[1]
-            except Exception:
-                pass
-            async with db.execute(
-                "SELECT t.user_id FROM activity_tracking t "
-                "WHERE t.guild_id = ? AND t.last_message IS NOT NULL "
-                "  AND datetime(t.last_message) >= datetime('now', ?) "
-                "ORDER BY datetime(t.last_message) DESC "
-                "LIMIT 50",
-                (guild.id, f"-{int(active_hours)} hours"),
-            ) as cur:
-                active_ids = [int(r[0]) for r in await cur.fetchall()]
-        _cd_cut = datetime.now(timezone.utc) - timedelta(hours=int(cooldown_hours))
-        _seen = set()
-        # Phase 257 : mentions INDIVIDUELLES DÉSACTIVÉES (directive owner — « les
-        # mentions sont très relou »). `chosen` reste vide → la notification passe
-        # UNIQUEMENT par le rôle (gros events @Tous plafonné, sinon 🔔 par-type).
-        for uid in ():
-            if len(chosen) >= cap:
-                break
-            if uid in _seen:
-                continue
-            _seen.add(uid)
-            # Cooldown commun : pas re-pingé plus d'1×/cooldown_hours (plancher 4 h)
-            _lp = cd_map.get(uid)
-            if _lp:
-                try:
-                    _lpd = datetime.fromisoformat(str(_lp))
-                    if _lpd.tzinfo is None:
-                        _lpd = _lpd.replace(tzinfo=timezone.utc)
-                    if _lpd > _cd_cut:
-                        continue
-                except Exception:
-                    pass
-            m = guild.get_member(uid)
-            if m is None or m.bot:
-                continue
-            # Phase 229 : l'owner veut cibler les membres EN LIGNE (présents pour
-            # combattre). On saute les hors-ligne ET les « ne pas déranger » (dnd) ;
-            # on garde en ligne + inactif. Intents.all() → status fiable. Fail-open :
-            # si le statut est indéterminé, on n'exclut pas (mieux vaut pinger).
-            try:
-                if m.status in (discord.Status.offline, discord.Status.dnd):
-                    continue
-            except Exception:
-                pass
-            try:
-                if not await _member_wants_notif(guild.id, uid, notif_key):
-                    continue
-                # Phase 216 : interrupteur MAÎTRE « events » (= rôle 🔔 Événements).
-                # Couper les pings d'événements via /notifs → plus jamais pingé,
-                # quel que soit le type d'event.
-                if not await _member_wants_notif(guild.id, uid, 'events'):
-                    continue
-            except Exception:
-                continue
-            # Phase 235.32 : RESPECTER les abonnements PAR TYPE (🔔). Si le membre
-            # a choisi des types précis (ex. « 🔔 Boss » seulement), on ne le ping
-            # PAS pour les autres types (mob/trésor…) même s'il est actif/rappelé.
-            try:
-                _cat = _EVENT_TYPE_TO_NOTIFY.get((notif_key or "").lower())
-                if _cat and await _member_blocks_category(m, _cat):
-                    continue
-            except Exception:
-                pass
-            chosen.append(uid)
-        # Phase 256 : PLUS AUCUN MP d'événement (directive owner — les messages
-        # privés sont trop intrusifs et relous). La notification passe UNIQUEMENT
-        # par la mention du rôle « 📢 Tous les Événements » ci-dessous, qui est
-        # désormais OPT-OUT (auto-attribué à l'arrivée + backfill de tous les
-        # membres) → un seul ping propre qui atteint TOUT LE MONDE : actifs,
-        # inactifs, hors-ligne ET nouveaux arrivants. Opt-out : /notify niveau:🔕.
-        # Phase 235.24 : on ping AUSSI les rôles opt-in (/notify + 🔔 par-type) de CE
-        # type d'event → même si AUCUN actif n'est choisi, les abonnés sont prévenus.
-        role_mention = ""
-        try:
-            # Phase 256 : garantir que le rôle events opt-out EXISTE (créé au besoin)
-            # pour que CHAQUE event mentionne bien tout le monde, dès le 1er spawn.
-            await _ensure_notify_role(guild, 'all')
-            role_mention = await _get_event_mention(guild, notif_key)
-        except Exception:
-            role_mention = ""
-        if not chosen and not role_mention:
-            return 0
-        now_iso = datetime.now(timezone.utc).isoformat()
-        if chosen:
-            try:
-                async with get_db() as db:
-                    for uid in chosen:
-                        await db.execute(
-                            "INSERT INTO combat_ping_log (guild_id, user_id, last_pinged) "
-                            "VALUES (?, ?, ?) ON CONFLICT(guild_id, user_id) DO UPDATE SET "
-                            "last_pinged = excluded.last_pinged",
-                            (guild.id, uid, now_iso),
-                        )
-                    await db.commit()
-            except Exception as ex:
-                print(f"[_ping_active_members log] {ex}")
-        parts = []
-        if role_mention:
-            parts.append(role_mention)
-        if chosen:
-            mentions = " ".join(f"<@{u}>" for u in chosen)
-            parts.append(
-                f"{intro or '🔔 Un combat vient de commencer —'} {mentions} "
-                f"venez tenter votre chance !")
-        line = "\n".join(parts)
-        try:
-            # Phase 256 : plus de bouton « 📩 opt-in MP » (on ne fait PLUS de MP
-            # d'événement). Phase 258 : bouton 🔕 « ne plus me notifier » sous le ping
-            # (1 clic = opt-out propre, sans commande).
-            msg = await channel.send(
-                line,
-                view=EventsOptOutView(notif_key),
-                allowed_mentions=discord.AllowedMentions(
-                    users=True, everyone=False, roles=True),
-            )
-            if msg:
-                try:
-                    await _register_for_cleanup(msg, cleanup_seconds, 'combat_ping')
-                except Exception:
-                    pass
-        except (discord.NotFound, discord.Forbidden):
-            # Salon éphémère supprimé entre-temps / pas de droits → le ping est
-            # inutile : on n'affiche RIEN (logs « que les erreurs » propres). C'est
-            # le 404 Unknown Channel (10003) qui polluait les logs Railway.
-            pass
-        except Exception as ex:
-            print(f"[_ping_active_members send] {ex}")
-            return 0
-        return len(chosen)
-    except Exception as ex:
-        print(f"[_ping_active_members] {ex}")
-        return 0
 
 
 async def _send_and_register(channel, delay_seconds: int, reason: str = 'event', **send_kwargs):
